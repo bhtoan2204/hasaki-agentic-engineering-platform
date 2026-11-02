@@ -1,0 +1,25 @@
+{
+  "name": "claude-task-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hasaki task -> Claude Code agent -> Bitbucket PR, with a web UI for questions and review",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.292",
+    "pg": "^8.23.1",
+    "playwright-core": "^1.49.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}

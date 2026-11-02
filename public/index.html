@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Task Platform</title>
+<style>
+  :root { --bg:#f6f7f9; --panel:#fff; --text:#1d2330; --muted:#6b7385; --line:#e3e6ec; --accent:#2f6fed;
+          --warn:#c77700; --ok:#1f8a4c; --err:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161b; --panel:#1c1f26; --text:#e6e8ee; --muted:#9097a6;
+          --line:#2c313b; --accent:#6b9bff; --warn:#f0a43a; --ok:#4cc27e; --err:#ff6b6b; } }
+  * { box-sizing:border-box }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text) }
+  .app { display:grid; grid-template-columns:320px 1fr; height:100vh }
+  aside { border-right:1px solid var(--line); background:var(--panel); overflow:auto; display:flex; flex-direction:column }
+  main { overflow:auto; padding:20px 28px }
+  h1 { font-size:15px; margin:0; padding:14px 16px; border-bottom:1px solid var(--line) }
+  h2 { font-size:18px; margin:0 0 4px } h3 { font-size:14px; margin:22px 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em }
+  .task { padding:10px 16px; border-bottom:1px solid var(--line); cursor:pointer }
+  .task:hover, .task.active { background:color-mix(in srgb, var(--accent) 10%, transparent) }
+  .task .code { font-family:ui-monospace, monospace; font-size:12px; color:var(--muted) }
+  .badge { display:inline-block; font-size:11px; padding:1px 8px; border-radius:10px; border:1px solid currentColor; margin-left:6px }
+  .s-running,.s-queued { color:var(--accent) } .s-waiting_answer { color:var(--warn) } .s-review { color:var(--ok) }
+  .s-failed { color:var(--err) } .s-idle { color:var(--muted) }
+  textarea, input { width:100%; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px }
+  button { font:inherit; border:0; border-radius:6px; padding:7px 14px; background:var(--accent); color:#fff; cursor:pointer }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line) }
+  .import { padding:12px 16px; border-bottom:1px solid var(--line) }
+  .inbox-row { padding:8px 16px; border-bottom:1px solid var(--line); display:flex; gap:8px; align-items:center; font-size:13px }
+  .inbox-row div { flex:1; min-width:0 } .inbox-row button { padding:4px 10px; font-size:12px }
+  .sec { padding:8px 16px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid var(--line) }
+  .import textarea { height:70px; font-family:ui-monospace, monospace; font-size:12px }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:10px }
+  .q.open { border-left:3px solid var(--warn) }
+  .ctx { color:var(--muted); white-space:pre-wrap; font-size:13px; margin:4px 0 8px }
+  .opt { font-size:12px; margin:0 6px 6px 0; padding:3px 10px }
+  .ev { display:grid; grid-template-columns:70px 60px 1fr; gap:8px; padding:5px 0; border-bottom:1px dashed var(--line); font-size:13px }
+  .ev time { color:var(--muted); font-size:12px } .ev .k { color:var(--muted); font-size:12px }
+  .ev .c { white-space:pre-wrap; word-break:break-word } .ev.tool .c { color:var(--muted); font-family:ui-monospace, monospace; font-size:12px }
+  .ev.user .c { color:var(--accent) }
+  .row { display:flex; gap:8px; align-items:center; margin-top:8px }
+  a { color:var(--accent) } .muted { color:var(--muted) } .empty { color:var(--muted); padding:40px; text-align:center }
+  @media (max-width:760px) { .app { grid-template-columns:1fr; height:auto } aside { max-height:45vh } main { padding:16px } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Claude Task Platform</h1>
+    <div class="import" id="work"></div>
+    <div id="inbox"></div>
+    <div class="import">
+      <textarea id="importBox" placeholder="Dán JSON task (response API) vào đây…"></textarea>
+      <div class="row"><button onclick="importTask()">Nhận task</button><span id="importMsg" class="muted"></span></div>
+    </div>
+    <div class="sec">Task trên platform</div>
+    <div id="list"></div>
+  </aside>
+  <main id="detail"><div class="empty">Chọn một task</div></main>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const STATUS = { queued:"Đang chờ", running:"Đang chạy", waiting_answer:"Chờ trả lời", review:"Chờ review", idle:"Dừng", failed:"Lỗi" };
+let current = location.hash.slice(1) || null;
+const drafts = {}; // keep typed answers across re-renders
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) } : {});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
+}
+
+async function importTask() {
+  try {
+    const j = await api("/api/tasks", JSON.parse($("#importBox").value));
+    $("#importMsg").textContent = j.started ? "Đã nhận " + j.code : "Đã cập nhật " + j.code;
+    $("#importBox").value = ""; select(j.code);
+  } catch (e) { $("#importMsg").textContent = e.message; }
+}
+
+async function loadList() {
+  const list = await api("/api/tasks");
+  $("#list").innerHTML = list.map((t) => `
+    <div class="task ${t.code === current ? "active" : ""}" onclick="select('${t.code}')">
+      <div class="code">${esc(t.code)} · ${esc(t.project)} <span class="badge s-${t.status}">${STATUS[t.status] || t.status}</span></div>
+      <div>${esc(t.name)}</div>
+    </div>`).join("") || '<div class="empty">Chưa có task</div>';
+}
+
+async function loadWork() {
+  const st = await api("/api/work/status");
+  const exp = st.expiresAt ? " · hết hạn " + new Date(st.expiresAt).toLocaleString("vi-VN") : "";
+  if ($("#work").contains(document.activeElement)) return;
+  $("#work").innerHTML = st.loggedIn
+    ? `<div><b>Hasaki Work</b> <span class="badge s-review">Đã đăng nhập</span><span class="muted">${exp}</span></div>
+       <div class="row"><button onclick="refreshInbox()">Lấy task</button><span id="workMsg" class="muted"></span></div>`
+    : `<div><b>Hasaki Work</b> <span class="badge s-failed">Chưa đăng nhập</span></div>
+       <div class="row">${st.windowOpen
+         ? `<span class="muted">Đăng nhập trong cửa sổ Chromium vừa mở…</span>`
+         : `<button onclick="openLogin()">Mở trình duyệt đăng nhập</button>`}</div>
+       <div class="row"><input id="tokenBox" placeholder="hoặc dán token (Bearer eyJ…)"><button onclick="saveToken()">Lưu</button></div>
+       <div id="workMsg" class="muted"></div>`;
+}
+async function openLogin() { try { await api("/api/work/login-window", {}); loadWork(); } catch (e) { $("#workMsg").textContent = e.message; } }
+async function saveToken() { try { await api("/api/work/token", { token: $("#tokenBox").value }); document.activeElement?.blur(); loadWork(); } catch (e) { $("#workMsg").textContent = e.message; } }
+async function refreshInbox() {
+  $("#workMsg").textContent = "Đang lấy…";
+  try { const r = await api("/api/work/refresh", {}); $("#workMsg").textContent = r.count + " task"; loadInbox(); }
+  catch (e) { $("#workMsg").textContent = e.message; loadWork(); }
+}
+async function loadInbox() {
+  const rows = await api("/api/work/inbox");
+  $("#inbox").innerHTML = rows.length ? `<div class="sec">Inbox Hasaki Work</div>` + rows.map((r) => `
+    <div class="inbox-row"><div><div class="code muted">${esc(r.code)} · ${esc(r.project)}</div>${esc(r.name)}</div>
+      ${r.status ? `<span class="badge s-${r.status}" onclick="select('${r.code}')" style="cursor:pointer">${STATUS[r.status] || r.status}</span>`
+                 : `<button onclick="pick(${r.work_id}, this)">Execute</button>`}</div>`).join("") : "";
+}
+async function pick(id, btn) {
+  btn.disabled = true; btn.textContent = "…";
+  try { const r = await api("/api/work/pick/" + id, {}); loadInbox(); select(r.code); } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = "Execute"; }
+}
+
+function select(code) { current = code; location.hash = code; loadList(); loadDetail(); }
+
+async function loadDetail() {
+  if (!current) return;
+  const active = document.activeElement;
+  if (active && active.closest && active.closest("#detail") && active.tagName === "TEXTAREA") return; // don't clobber typing
+  const t = await api("/api/tasks/" + encodeURIComponent(current));
+  const open = t.questions.filter((q) => !q.answer);
+  $("#detail").innerHTML = `
+    <h2>${esc(t.name)}</h2>
+    <div class="muted">${esc(t.code)} · ${esc(t.project)} <span class="badge s-${t.status}">${STATUS[t.status] || t.status}</span>
+      ${t.error ? ' · <span class="s-failed">' + esc(t.error) + "</span>" : ""}</div>
+    <div class="row">
+      ${t.running ? `<button class="ghost" onclick="cancelTask()">Dừng agent</button>` : ""}
+    </div>
+
+    ${open.length ? `<h3>Câu hỏi cần trả lời (${open.length})</h3>` + open.map((q) => `
+      <div class="card q open">
+        <div><b>${esc(q.question)}</b></div>
+        ${q.context ? `<div class="ctx">${esc(q.context)}</div>` : ""}
+        <div>${q.options.map((o) => `<button class="ghost opt" onclick="pickOption(${q.id}, this.dataset.v)" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
+        <textarea id="ans-${q.id}" rows="2" oninput="drafts[${q.id}]=this.value">${esc(drafts[q.id] || "")}</textarea>
+      </div>`).join("") + `<button onclick="sendAnswers()">Gửi trả lời</button>` : ""}
+
+    ${t.prs.length ? "<h3>Pull request</h3>" + t.prs.map((p) => `
+      <div class="card">
+        <div><b>${esc(p.repo)}</b> · <a href="${esc(p.url)}" target="_blank">${esc(p.title)}</a></div>
+        <div class="ctx">${esc(p.summary)}</div>
+        ${p.decisions.length ? "<b>Quyết định cần review</b><ul>" + p.decisions.map((d) => `<li><b>${esc(d.title)}</b>: ${esc(d.detail)}</li>`).join("") + "</ul>" : ""}
+      </div>`).join("") : ""}
+
+    <h3>Nhắn cho agent (feedback review, chỉ dẫn thêm…)</h3>
+    <textarea id="msg" rows="3" oninput="drafts.msg=this.value">${esc(drafts.msg || "")}</textarea>
+    <div class="row"><button onclick="sendMessage()">Gửi</button></div>
+
+    ${t.questions.some((q) => q.answer) ? "<h3>Đã hỏi – đáp</h3>" + t.questions.filter((q) => q.answer).map((q) => `
+      <div class="card q"><b>${esc(q.question)}</b><div class="ctx">→ ${esc(q.answer)}</div></div>`).join("") : ""}
+
+    <h3>Timeline</h3>
+    ${t.events.slice().reverse().map((e) => `
+      <div class="ev ${e.kind}"><time>${esc(new Date(e.created_at).toLocaleTimeString("vi-VN", { hour:"2-digit", minute:"2-digit" }))}</time><span class="k">${esc(e.kind)}</span><span class="c">${esc(e.content)}</span></div>`).join("")}
+  `;
+}
+
+function pickOption(id, v) { drafts[id] = v; $("#ans-" + id).value = v; }
+async function sendAnswers() {
+  const answers = {}; document.querySelectorAll("[id^=ans-]").forEach((el) => answers[el.id.slice(4)] = el.value);
+  try { await api(`/api/tasks/${current}/answers`, { answers }); for (const k in answers) delete drafts[k]; document.activeElement?.blur(); loadDetail(); loadList(); }
+  catch (e) { alert(e.message); }
+}
+async function sendMessage() {
+  try { await api(`/api/tasks/${current}/messages`, { message: $("#msg").value }); drafts.msg = ""; document.activeElement?.blur(); loadDetail(); loadList(); }
+  catch (e) { alert(e.message); }
+}
+async function cancelTask() { await api(`/api/tasks/${current}/cancel`, {}); loadDetail(); loadList(); }
+
+loadWork(); loadInbox(); loadList(); loadDetail();
+setInterval(() => { loadWork(); loadList(); loadDetail(); }, 3000);
+</script>
+</body>
+</html>

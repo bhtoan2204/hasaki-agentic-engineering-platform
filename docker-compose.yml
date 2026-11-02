@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    container_name: claude-task-platform-db
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: platform
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - platform-pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  platform-pg:

@@ -1,0 +1,15 @@
+{
+  "port": 4545,
+  "reposRoot": "/home/bhtoan/src",
+  "baseBranch": "release/prod",
+  "projects": {
+    "OMS": ["oms-api", "oms-background", "oms-frontend", "oms-gateway", "oms-export", "oms-invoice", "oms-open-gateway"],
+    "Payment": ["payment-src"]
+  },
+  "fileBaseUrl": "",
+  "bitbucket": { "workspace": "hasaki-tech", "user": "", "token": "", "reviewers": [] },
+  "notifyWebhook": "",
+  "model": "",
+  "maxConcurrent": 1,
+  "maxTurns": 300
+}
