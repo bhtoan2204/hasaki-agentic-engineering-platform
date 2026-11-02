@@ -8,7 +8,36 @@ import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
 import { assertRunTransition, assertStepTransition, deriveRunStatus, DONE, RETRYABLE } from "./stateMachine.ts";
 import { buildStepInput, resolveContext, type ResolvedContext, type StepInput } from "./context.ts";
-import type { AttemptRow, ExecResult, JobRow, QuestionInput, RunRow, RunStatus, StepRow, StepStatus } from "./types.ts";
+import type { AttemptRow, ExecResult, JobRow, QuestionInput, RunRow, RunStatus, StepRow, StepStatus, WorkflowSpec } from "./types.ts";
+import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
+
+export const REPORT_STEP_KEY = "task_result_report";
+
+/**
+ * Append the optional final Task Result Report step to a run's resolved graph (never to the published definition).
+ * Depends on every terminal step, so it runs only after all work (tests, review, PR) is done. Idempotent: a graph that
+ * already has a report step (custom workflow, or injected before) is returned unchanged.
+ */
+export function withReportStep(spec: WorkflowSpec, ai: ReportSpec | null): WorkflowSpec {
+  if (!ai || spec.steps.some((s) => s.key === REPORT_STEP_KEY || s.type === "task_result_report")) return spec;
+  const terminals = spec.steps.filter((s) => !spec.steps.some((o) => o.depends_on.includes(s.key))).map((s) => s.key);
+  return {
+    ...spec,
+    steps: [
+      ...spec.steps,
+      {
+        key: REPORT_STEP_KEY,
+        type: "task_result_report",
+        name: "Task Result Report",
+        depends_on: terminals,
+        config: { ai_suggest: ai, injected: true },
+        requires_approval: false,
+        max_attempts: 2,
+        retry_backoff_seconds: 5,
+      },
+    ],
+  };
+}
 
 /**
  * WorkflowExecutionService. Invariants:
@@ -173,8 +202,11 @@ export async function startRun(input: StartRunInput) {
        VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10)`,
       [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(dv.spec), allowed, requested, branch],
     );
-    const order = topoOrder(dv.spec.steps);
-    for (const s of dv.spec.steps) {
+    // Resolved graph for this run: the published spec, plus the report step when the work item asks for a report.
+    const graph = withReportStep(dv.spec, wi ? parseAiSuggest(wi.payload) : null);
+    if (graph !== dv.spec) await q(c, "UPDATE workflow_runs SET graph = $2 WHERE id = $1", [id, json(graph)]);
+    const order = topoOrder(graph.steps);
+    for (const s of graph.steps) {
       const requiresApproval = s.requires_approval || (s.type === "git_pull_request" && s.config.mode === "approval");
       await q(
         c,
@@ -183,7 +215,7 @@ export async function startRun(input: StartRunInput) {
         [id, s.key, s.type, s.name ?? s.key, order.indexOf(s.key), s.depends_on, json(s.config), json(s.run_if ?? null), requiresApproval, s.max_attempts, s.retry_backoff_seconds],
       );
     }
-    await runEvents.add(c, id, "system", `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""}`);
+    await runEvents.add(c, id, "system", `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""}${graph !== dv.spec ? " · Task Result Report step added (ai_suggest.report)" : ""}`);
     if (wi) await q(c, "UPDATE work_items SET status = 'in_progress', updated_at = now() WHERE id = $1 AND status = 'open'", [wi.id]);
     const run = (await one<RunRow>(c, "SELECT * FROM workflow_runs WHERE id = $1", [id]))!;
     if (input.start !== false) {
@@ -443,13 +475,13 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
   return { answered, resumed, stillOpen };
 }
 
-export async function approveStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; repositories?: string[] } = {}) {
+export async function approveStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; repositories?: string[]; data?: unknown } = {}) {
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
     if (s.status !== "WAITING_APPROVAL") throw new EngineError(`step "${stepKey}" is ${s.status}, not WAITING_APPROVAL`);
-    const decision = { granted: true, generation: s.generation, comment: opts.comment ?? "", by: opts.by ?? "", at: new Date() };
+    const decision = { granted: true, generation: s.generation, comment: opts.comment ?? "", by: opts.by ?? "", at: new Date(), ...(opts.data !== undefined ? { data: opts.data } : {}) };
     if (s.approval?.gate || s.type !== "human_approval") {
       // Gate before execution (requires_approval) or an executor asking for a go-ahead: run the step now.
       await setStepStatus(c, s, "READY", { approval: { ...(s.approval ?? {}), ...decision }, ready_at: new Date() }, "approved");

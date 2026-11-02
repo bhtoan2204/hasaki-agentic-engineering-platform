@@ -43,6 +43,9 @@ import { knowledge } from "../src/knowledge/service.ts";
 import { workItems } from "../src/workitems/service.ts";
 import { importHasakiTask } from "../src/work.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
+import { setReportReasoner, taskResultReportExecutor } from "../src/report/executor.ts";
+import { withReportStep, REPORT_STEP_KEY } from "../src/workflow/engine.ts";
+import { addEvidence } from "../src/report/evidenceStore.ts";
 
 // ---------------------------------------------------------------- fakes
 
@@ -98,7 +101,13 @@ before(async () => {
   registerExecutor("command", commandExecutor);
   registerExecutor("integration", integrationExecutor);
   registerExecutor("git_pull_request", pullRequestExecutor);
+  registerExecutor("task_result_report", taskResultReportExecutor);
   setAiRepositoryRanker(null);
+  // Over-eager fake reasoner: claims everything VERIFIED and cites every id (+ a fabricated one); rules must correct it.
+  setReportReasoner(async (_ctx, spec, ev) => ({
+    summary: "Đã sửa lỗi mapping ZIP.",
+    requirements: spec.sections.flatMap((s) => s.requirements).map((r) => ({ id: r.id, status: "VERIFIED" as const, evidence_ids: [...ev.map((e) => e.id), "E999"], explanation: "fake" })),
+  }));
   await repositories.upsert("oms-api", { projects: ["OMS"], services: ["shipment", "order"], description: "order management gRPC api" });
   await repositories.upsert("oms-background", { projects: ["OMS"], services: ["outbox", "consumer"], description: "kafka consumers" });
   await repositories.upsert("payment-src", { projects: ["Payment"], services: ["payment", "refund"] });
@@ -645,4 +654,172 @@ test("context snapshot records the prompt plan; big upstream outputs are summari
   assert.equal((await runMetrics(run.id)).totals.cost_usd, 0.42);
   const summary = await metricsSummary(1);
   assert.ok(summary.tools.some((t: any) => t.tool === "Read"));
+});
+
+// ---------------------------------------------------------------- Task Result Report
+const AI = {
+  suggest_id: "855580c2",
+  has_report_constraints: false,
+  report: {
+    "Kết quả test đơn hàng": ["Ảnh chụp thông tin đơn hàng sau khi fix hiển thị đầy đủ postal_code trong customer_info"],
+    "Kiểm tra luồng mapping ZIP Code": ["Ảnh chụp code hoặc log thể hiện việc sửa lỗi mapping trường postal_code từ Ecom sang OMS"],
+  },
+  reasoning: "Staff cần báo cáo bằng chứng.",
+  task_readiness: 0.2,
+  object: "Mã đơn hàng",
+  object_value: "261030US91TZ",
+};
+let reportSeq = 0;
+async function reportItem(ai: unknown = AI) {
+  const code = `RPT-${++reportSeq}`;
+  return (await importHasakiTask({ data: { id: 9000 + reportSeq, code, name: "ZIP mapping", project: { name: "OMS" }, task_ai: { ai_verify: null, ai_suggest: ai } } })).item;
+}
+const branchy = () =>
+  customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "test", type: "command", depends_on: ["implement"], config: { command: "echo ok" } },
+    { key: "review", type: "agent", depends_on: ["implement"] },
+  ]);
+
+test("report step: appended to the run graph only, last, depending on every terminal step; definition untouched", async () => {
+  const key = await branchy();
+  const wi = await reportItem();
+  const run = await startRun({ definitionKey: key, workItemId: wi.id });
+  const st = run.steps.find((s) => s.key === REPORT_STEP_KEY)!;
+  assert.equal(st.type, "task_result_report");
+  assert.deepEqual([...st.depends_on].sort(), ["review", "test"], "all terminal steps");
+  assert.equal(st.position, Math.max(...run.steps.map((s) => s.position)), "last node");
+  assert.equal(run.graph.steps.at(-1)!.key, REPORT_STEP_KEY);
+  const def = (await definitions.get(key))!;
+  assert.ok(!def.versions[0].spec.steps.some((s: any) => s.key === REPORT_STEP_KEY), "published definition is not mutated");
+  assert.equal(def.latest_version, 1);
+  await cancelRun(run.id);
+});
+
+test("report step: not added without ai_suggest, with null suggest, or an empty report; existing workflows unaffected", async () => {
+  const key = await branchy();
+  for (const ai of [null, { report: {} }, { report: { A: [] } }]) {
+    const wi = await reportItem(ai);
+    const run = await startRun({ definitionKey: key, workItemId: wi.id });
+    assert.ok(!run.steps.some((s) => s.key === REPORT_STEP_KEY), JSON.stringify(ai));
+    await cancelRun(run.id);
+  }
+  const noItem = await startRun({ definitionKey: key });
+  assert.ok(!noItem.steps.some((s) => s.key === REPORT_STEP_KEY));
+  await cancelRun(noItem.id);
+});
+
+test("report step: never inserted twice (idempotent; custom workflow that already has one)", async () => {
+  const { parseAiSuggest } = await import("../src/report/aiSuggest.ts");
+  const ai = parseAiSuggest({ task_ai: { ai_suggest: AI } });
+  const spec: any = { name: "x", steps: [{ key: "a", type: "agent", depends_on: [], config: {} }] };
+  const once = withReportStep(spec, ai);
+  assert.equal(withReportStep(once, ai), once);
+  assert.equal(once.steps.filter((s) => s.key === REPORT_STEP_KEY).length, 1);
+  const key = await customWorkflow([{ key: "a", type: "agent" }, { key: "my_report", type: "task_result_report", depends_on: ["a"] }]);
+  const run = await startRun({ definitionKey: key, workItemId: (await reportItem()).id });
+  assert.equal(run.steps.filter((s) => s.type === "task_result_report").length, 1);
+  await cancelRun(run.id);
+});
+
+test("report flow: draft waits for review (run not COMPLETED), evidence upload + regenerate, approve with limitations", async () => {
+  const key = await branchy();
+  scripts.implement = codingDone;
+  const wi = await reportItem();
+  const run = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-api"] });
+  await drain();
+  let rep = await stepOf(run.id, REPORT_STEP_KEY);
+  assert.equal(rep.status, "WAITING_APPROVAL");
+  assert.equal((await getRun(run.id)).status, "WAITING", "run is not COMPLETED while the report awaits review");
+  let draft = rep.approval.request.report;
+  const reqs = draft.sections.flatMap((s: any) => s.requirements);
+  const shot = reqs.find((r: any) => r.text.startsWith("Ảnh chụp thông tin"));
+  const code = reqs.find((r: any) => r.text.startsWith("Ảnh chụp code"));
+  assert.equal(shot.status, "MISSING", "fake reasoner said VERIFIED, rules say no screenshot");
+  assert.equal(code.status, "VERIFIED");
+  assert.ok(!code.evidence.some((e: any) => e.id === "E999"));
+  assert.ok(rep.approval.request.markdown.includes("❌ **THIẾU**"));
+  const drafts1 = await q(pool, "SELECT id FROM workflow_artifacts WHERE step_id = $1 AND kind = 'report'", [rep.id]);
+  assert.equal(drafts1.length, 1, "draft persisted as an artifact");
+
+  // user attaches the missing screenshot to that requirement, then regenerates
+  const png = Buffer.from("89504e470d0a1a0a", "hex").toString("base64");
+  await addEvidence(run.id, REPORT_STEP_KEY, { requirement_id: shot.id, name: "order.png", mime: "image/png", data_base64: png });
+  await assert.rejects(addEvidence(run.id, REPORT_STEP_KEY, { name: "x.exe", mime: "application/x-msdownload", data_base64: png }), /unsupported/);
+  await reexecuteStep(run.id, REPORT_STEP_KEY, { feedback: "regenerate" });
+  await drain();
+  rep = await stepOf(run.id, REPORT_STEP_KEY);
+  draft = rep.approval.request.report;
+  assert.equal(draft.sections.flatMap((s: any) => s.requirements).find((r: any) => r.id === shot.id).status, "VERIFIED");
+  assert.equal((await q(pool, "SELECT id FROM workflow_artifacts WHERE step_id = $1 AND kind = 'report'", [rep.id])).length, 2, "previous draft kept");
+
+  // approve with an edited markdown
+  await approveStep(run.id, REPORT_STEP_KEY, { comment: "ok", by: "toan", data: { markdown: "# Báo cáo (đã sửa)\n" } });
+  await drain();
+  rep = await stepOf(run.id, REPORT_STEP_KEY);
+  assert.equal(rep.status, "COMPLETED");
+  assert.equal(rep.output.final, true);
+  assert.equal(rep.output.markdown, "# Báo cáo (đã sửa)\n");
+  assert.equal(rep.output.report.approval.by, "toan");
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+});
+
+test("report: approving with missing evidence records limitations instead of claiming verification", async () => {
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  scripts.implement = codingDone;
+  const run = await startRun({ definitionKey: key, workItemId: (await reportItem()).id, repositories: ["oms-api"] });
+  await drain();
+  await approveStep(run.id, REPORT_STEP_KEY, {});
+  await drain();
+  const rep = await stepOf(run.id, REPORT_STEP_KEY);
+  assert.equal(rep.output.report.approval.with_unverified_requirements, 1);
+  assert.ok(rep.output.limitations.some((l: string) => /chưa xác minh/.test(l)));
+  assert.match(rep.output.markdown, /THIẾU/);
+  assert.match(rep.output.markdown, /## Phê duyệt/);
+});
+
+test("report: re-executing an upstream step invalidates the report; the new draft uses the latest evidence", async () => {
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  let version = 1;
+  scripts.implement = async (ctx, n) => {
+    await codingDone(ctx, n);
+    return { kind: "completed", output: { summary: `implementation v${version}`, pull_requests: {} } };
+  };
+  const run = await startRun({ definitionKey: key, workItemId: (await reportItem()).id, repositories: ["oms-api"] });
+  await drain();
+  const first = await stepOf(run.id, REPORT_STEP_KEY);
+  assert.ok(first.approval.request.evidence.some((e: any) => e.detail.includes("implementation v1")));
+  version = 2;
+  await reexecuteStep(run.id, "implement", { feedback: "again" });
+  const mid = await stepOf(run.id, REPORT_STEP_KEY);
+  assert.equal(mid.status, "PENDING");
+  assert.equal(mid.generation, first.generation + 1);
+  await drain();
+  const second = await stepOf(run.id, REPORT_STEP_KEY);
+  const ev = second.approval.request.evidence;
+  assert.ok(ev.some((e: any) => e.detail.includes("implementation v2")) && !ev.some((e: any) => e.detail.includes("implementation v1")));
+  // approving now finalizes from the CURRENT generation's draft, not the invalidated one
+  await approveStep(run.id, REPORT_STEP_KEY, {});
+  await drain();
+  assert.match((await stepOf(run.id, REPORT_STEP_KEY)).output.report.summary, /Đã sửa/);
+});
+
+test("report: a worker crash while generating is recovered from PostgreSQL (lease reaped, retried, draft persisted)", async () => {
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  scripts.implement = codingDone;
+  const run = await startRun({ definitionKey: key, workItemId: (await reportItem()).id, repositories: ["oms-api"] });
+  await drain(); // implement done; report generated
+  await reexecuteStep(run.id, REPORT_STEP_KEY);
+  const job = (await claimJob("w-report-crash", 30))!;
+  const begun = (await beginAttempt(job, "w-report-crash"))!;
+  assert.equal(begun.step.key, REPORT_STEP_KEY);
+  await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
+  await reapExpiredLeases();
+  assert.equal((await stepOf(run.id, REPORT_STEP_KEY)).status, "RETRYING");
+  await pool.query("UPDATE workflow_jobs SET available_at = now() WHERE run_id = $1 AND status = 'queued'", [run.id]); // skip the 5s backoff
+  await drain();
+  const rep = await stepOf(run.id, REPORT_STEP_KEY);
+  assert.equal(rep.status, "WAITING_APPROVAL");
+  const persisted = await q(pool, "SELECT a.status FROM workflow_step_attempts a WHERE a.step_id = $1 ORDER BY a.number", [rep.id]);
+  assert.deepEqual(persisted.map((a) => a.status), ["WAITING_APPROVAL", "FAILED", "WAITING_APPROVAL"], "history kept: first draft, crashed attempt, new draft");
 });

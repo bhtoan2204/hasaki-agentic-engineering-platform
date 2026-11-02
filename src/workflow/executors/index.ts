@@ -10,6 +10,7 @@ import {
 } from "./builtin.ts";
 import { registerExecutor } from "./registry.ts";
 import { registerBuiltinTools } from "../../agent/toolRegistry.ts";
+import { claudeReportReasoner, setReportReasoner, taskResultReportExecutor } from "../../report/executor.ts";
 
 /** StepExecutorRegistry defaults. Tests replace individual entries with registerExecutor(). */
 export function registerDefaultExecutors() {
@@ -23,4 +24,6 @@ export function registerDefaultExecutors() {
   registerExecutor("git_pull_request", pullRequestExecutor);
   setAiRepositoryRanker(rankRepositoriesWithClaude);
   registerBuiltinTools();
+  registerExecutor("task_result_report", taskResultReportExecutor);
+  setReportReasoner(claudeReportReasoner);
 }

@@ -87,3 +87,33 @@ the agent was shown and what it did.
 | `inlineKnowledgeTokens` | 8000 | budget for inline knowledge |
 | `knowledgeIndexSize` | 12 | on-demand items listed in the prompt |
 | `upstreamTokens` | 12000 | budget for upstream outputs |
+
+## Task Result Report (optional final step)
+
+Driven by Hasaki Work `task_ai.ai_suggest`. Code: `src/report/` (parser, evidence, build, executor, evidence store),
+`withReportStep` in `src/workflow/engine.ts`, UI `web/src/pages/Report.tsx`.
+
+* **When.** `startRun` parses the work item payload (`parseAiSuggest`). If `report` has at least one section with a
+  non-blank item, a `task_result_report` step (type of the same name, migration 008) is appended to the run's **resolved
+  graph** — never to the published definition — depending on every terminal step, so it runs after implementation,
+  tests, review and PR. Idempotent: not added when the graph already has a report step (custom workflows may declare
+  one explicitly; it then reads `ai_suggest` from the work item at run time). `task_readiness` is ignored; `reasoning`
+  is context only. JSONB does not preserve object key order, so sections keep their names but not necessarily the
+  original order.
+* **Evidence (deterministic).** `collectEvidence` builds a catalogue with stable ids from PostgreSQL: implementation
+  summaries, analysis and review outputs, command/test results (baseline-aware), logs, commits and changed files of the
+  run's worktrees, PRs, human answers, evidence uploaded to the report step, and task attachments (flagged pre-fix).
+* **Reasoning (main Claude agent, no tools).** Proposes per requirement `VERIFIED | PARTIAL | MISSING`, cited evidence
+  ids and an explanation, plus a summary — in Vietnamese when the suggestion is Vietnamese.
+* **Validation (rules cap the proposal).** Unknown/irrelevant ids are dropped; failed tests, stale uploads and pre-fix
+  attachments never verify; a screenshot-only requirement is VERIFIED only by an image the user attached to that
+  requirement, PARTIAL if an unattached image is cited, otherwise MISSING; an outcome requirement backed only by code
+  stays PARTIAL; without the reasoner nothing is auto-verified except human evidence.
+* **Human review.** The draft (JSON + Markdown artifacts, also in the attempt output) waits in `WAITING_APPROVAL`
+  without holding a worker. Users attach files/notes per requirement (`POST /api/runs/:id/steps/task_result_report/evidence`,
+  stored as `evidence` artifacts on the step), regenerate (re-execute → new attempt, previous drafts kept), edit the
+  Markdown and approve. Approval finalizes from the persisted draft of the current generation (no new LLM call) and
+  records the approver and every unverified requirement as a limitation.
+* **Lifecycle.** The run is not COMPLETED until the report is approved. Re-executing any upstream step invalidates the
+  report (generation bump) and the next draft uses the latest evidence. Crash/restart: leases are reaped and the step
+  retried; drafts and uploads live in PostgreSQL. Nothing is posted to Hasaki Work, no task is closed, nothing merged.

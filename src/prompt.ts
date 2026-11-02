@@ -31,7 +31,7 @@ export function buildTaskPrompt(d: any, repos: string[], files: string[]) {
     files.length ? "## Attachments (read them with the Read tool — screenshots often hold the actual error)\n" + files.map((f) => `- ${f}`).join("\n") : "",
     ai
       ? [
-          "## Task-system AI hints (may be wrong)",
+          "## Task-system AI hints (may be wrong; reporting guidance — never a reason to change what you implement)",
           ai.object ? `- Object: ${ai.object} = ${ai.object_value}` : "",
           ai.readiness_reasoning ? `- ${ai.readiness_reasoning}` : "",
         ].join("\n")

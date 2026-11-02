@@ -3,9 +3,10 @@ import { api, useApi } from "../api.ts";
 import { act, Badge, Copy, Empty, ErrorBox, JsonBlock, Loading, Markdown, Tabs, time, navigate } from "../ui.tsx";
 import { STEP_ICONS } from "../graph.tsx";
 import { Transcript } from "./Transcript.tsx";
+import { ReportPanel } from "./Report.tsx";
 
 const AGENT_TYPES = ["agent", "coding_agent"];
-type Tab = "overview" | "execution" | "input" | "output" | "knowledge" | "qa" | "artifacts" | "history";
+type Tab = "report" | "overview" | "execution" | "input" | "output" | "knowledge" | "qa" | "artifacts" | "history";
 
 const CATEGORY_LABEL: Record<string, string> = {
   business_rule: "Business rules",
@@ -126,7 +127,7 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
 
 export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; stepKey: string; tick: number; onChanged: () => void }) {
   const { data, error, loading, reload } = useApi<any>(`/api/runs/${run.id}/steps/${stepKey}`);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
   const [attemptId, setAttemptId] = useState<number | null>(null);
   const [feedback, setFeedback] = useState("");
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -153,6 +154,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const canSkip = runActive && ["PENDING", "READY", "FAILED", "WAITING_INPUT", "WAITING_APPROVAL"].includes(step.status);
 
   const tabs: Array<[Tab, React.ReactNode]> = [
+    ...(step.type === "task_result_report" ? ([["report", "📋 Report"]] as Array<[Tab, React.ReactNode]>) : []),
     ["overview", "Overview"],
     ...(isAgent ? ([["execution", <>Claude {live && <span className="spinner" />}</>]] as Array<[Tab, React.ReactNode]>) : []),
     ...(step.type === "command" ? ([["execution", <>Live output {live && <span className="spinner" />}</>]] as Array<[Tab, React.ReactNode]>) : []),
@@ -193,7 +195,10 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
         )}
       </div>
       {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} />}
-      {step.status === "WAITING_APPROVAL" && <ApprovalPanel run={run} step={step} onDone={refresh} />}
+      {step.status === "WAITING_APPROVAL" && step.type !== "task_result_report" && <ApprovalPanel run={run} step={step} onDone={refresh} />}
+      {step.type === "task_result_report" && step.status === "WAITING_APPROVAL" && tab !== "report" && (
+        <div className="card" style={{ borderColor: "var(--warn)" }}>✋ Báo cáo đang chờ bạn xem lại — <a style={{ cursor: "pointer" }} onClick={() => setTab("report")}>mở tab Report</a></div>
+      )}
       {step.error && (
         <div className="errorbox">
           <div className="row tight"><b className="grow">Error</b><Copy text={step.error} /></div>
@@ -202,6 +207,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       )}
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
+      {tab === "report" && <ReportPanel run={run} step={step} artifacts={artifacts} attempts={attempts} onChanged={refresh} />}
       {tab === "overview" && (
         <div>
           {step.type === "command" && <BaselineSummary results={(attempt?.output ?? attempt?.error?.details)?.results} />}

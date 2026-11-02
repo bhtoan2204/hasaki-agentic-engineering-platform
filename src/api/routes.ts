@@ -37,6 +37,7 @@ import {
 import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
 import { runChanges } from "../git/changes.ts";
+import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
 import { metricsSummary, runMetrics } from "./metrics.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
@@ -160,7 +161,10 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/feedback$/, ({ p, body }) => sendFeedback(num(p[0]), String(body.message ?? "").trim() || fail("empty message"))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/retry$/, ({ p, body }) => retryStep(num(p[0]), p[1], body.input)],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/, ({ p, body }) => reexecuteStep(num(p[0]), p[1], { feedback: body.feedback, input: body.input })],
-  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/approve$/, ({ p, body }) => approveStep(num(p[0]), p[1], { comment: body.comment, by: body.by, repositories: body.repositories })],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/approve$/, ({ p, body }) => approveStep(num(p[0]), p[1], { comment: body.comment, by: body.by, repositories: body.repositories, data: body.data })],
+  // Evidence for the Task Result Report: a file (base64) or a note, optionally tied to one requirement id (e.g. "S1.R2").
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/evidence$/, ({ p, body }) => addEvidence(num(p[0]), p[1], body)],
+  ["POST", /^\/api\/artifacts\/(\d+)\/delete-evidence$/, ({ p }) => removeEvidence(num(p[0]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reject$/, ({ p, body }) => rejectStep(num(p[0]), p[1], { comment: body.comment, by: body.by, reexecute: body.reexecute })],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/skip$/, ({ p, body }) => skipStep(num(p[0]), p[1], body.reason || "skipped by user")],
   ["GET", /^\/api\/attempts\/(\d+)\/transcript$/, ({ p, url }) => runEvents.transcript(num(p[0]), Number(url.searchParams.get("after") ?? 0))],

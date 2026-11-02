@@ -51,9 +51,11 @@ export interface TaskReport {
 export function ruleCap(req: Requirement, usable: Evidence[]): { cap: Status; rule: string } {
   const humanForReq = usable.filter((e) => e.requirement_id === req.id && (e.kind === "screenshot" || e.kind === "attachment" || e.kind === "note"));
   if (req.needs.screenshotOnly) {
-    const img = usable.filter((e) => e.image && !e.stale);
-    if (!img.length) return { cap: "MISSING", rule: "screenshot requested; no screenshot available" };
-    return { cap: "VERIFIED", rule: "screenshot available" };
+    // The model cannot see image content: only a screenshot the user attached to THIS requirement verifies it.
+    const linked = usable.filter((e) => e.image && !e.stale && e.requirement_id === req.id);
+    if (linked.length) return { cap: "VERIFIED", rule: "screenshot attached to this requirement" };
+    if (usable.some((e) => e.image)) return { cap: "PARTIAL", rule: "a screenshot exists but is not attached to this requirement" };
+    return { cap: "MISSING", rule: "screenshot requested; no screenshot available" };
   }
   if (!usable.length) return { cap: "MISSING", rule: "no supporting evidence" };
   const codeOnly = usable.every((e) => ["commit", "file_change", "implementation_summary", "pr", "analysis"].includes(e.kind));

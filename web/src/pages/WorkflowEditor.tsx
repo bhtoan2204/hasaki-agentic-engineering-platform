@@ -29,7 +29,7 @@ type Step = {
 };
 type Spec = { name: string; description?: string; feedback_step?: string; inputs?: Record<string, any>; knowledge?: string[]; skills?: string[]; steps: Step[] };
 
-const STEP_TYPES = ["agent", "coding_agent", "human_input", "human_approval", "integration", "command", "condition", "git_pull_request"];
+const STEP_TYPES = ["agent", "coding_agent", "human_input", "human_approval", "integration", "command", "condition", "git_pull_request", "task_result_report"];
 const TYPE_LABEL: Record<string, string> = {
   agent: "AI agent (read-only)",
   coding_agent: "Coding agent",
@@ -39,6 +39,7 @@ const TYPE_LABEL: Record<string, string> = {
   command: "Command",
   condition: "Condition",
   git_pull_request: "Pull request",
+  task_result_report: "Task Result Report",
 };
 const DEFAULT_CONFIG: Record<string, Record<string, any>> = {
   agent: { instructions: "", output_contract: "{ summary }" },
@@ -49,6 +50,7 @@ const DEFAULT_CONFIG: Record<string, Record<string, any>> = {
   command: { command: "echo ok", timeout_seconds: 600 },
   condition: { path: "upstream.step.output.field", op: "eq", value: true },
   git_pull_request: { mode: "approval", content_from: "" },
+  task_result_report: {},
 };
 
 function ancestors(steps: Step[], key: string) {

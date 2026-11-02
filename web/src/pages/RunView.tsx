@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import { api, useApi, useLive } from "../api.ts";
-import { act, Badge, ErrorBox, Loading, navigate, time } from "../ui.tsx";
+import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
 import { Changes } from "./Changes.tsx";
@@ -131,6 +131,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span>Finished</span><span>{time(run.finished_at)}</span>
                 {run.error && <><span>Error</span><span className="err">{run.error}</span></>}
               </div>
+              <ReportCard run={run} />
               <RunTotals runId={id} tick={tick} />
               {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
               <p className="muted small">Bấm vào một node để xem cấu hình, input/output, knowledge, hội thoại Claude, câu hỏi và lịch sử attempt.</p>
@@ -182,6 +183,30 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
         </a>
       ))}
       <span className="muted small">— tăng scheduler.workers trong config.json để chạy song song.</span>
+    </div>
+  );
+}
+
+/** Shortcut to the Task Result Report (when this run has one). */
+function ReportCard({ run }: { run: any }) {
+  const s = run.steps.find((x: any) => x.type === "task_result_report");
+  if (!s) return null;
+  const report = s.output?.report ?? s.approval?.request?.report;
+  const md = s.output?.markdown ?? s.approval?.request?.markdown;
+  return (
+    <div className="card" style={{ marginTop: 10, padding: 10, borderColor: s.status === "WAITING_APPROVAL" ? "var(--warn)" : undefined }}>
+      <div className="row tight">
+        <b className="grow">📋 Task Result Report</b> <Badge s={s.status} />
+      </div>
+      {report ? (
+        <div className="small" style={{ marginTop: 4 }}>✅ {report.counts.VERIFIED} · 🟡 {report.counts.PARTIAL} · ❌ {report.counts.MISSING} {s.status === "COMPLETED" ? "· đã duyệt" : s.status === "WAITING_APPROVAL" ? "· chờ bạn xem lại" : ""}</div>
+      ) : (
+        <div className="muted small">Được tạo sau khi các bước của task hoàn tất.</div>
+      )}
+      <div className="row">
+        <button className="sm ghost" onClick={() => navigate(`/runs/${run.id}/${s.key}`)}>Mở báo cáo</button>
+        {md && <Copy text={md} label="Copy Markdown" />}
+      </div>
     </div>
   );
 }

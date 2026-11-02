@@ -12,6 +12,7 @@ export const STEP_ICONS: Record<string, string> = {
   git_pull_request: "🔀",
 };
 STEP_ICONS.git_pull_request = "⤴️";
+STEP_ICONS.task_result_report = "📋";
 
 export interface StepLike {
   key: string;

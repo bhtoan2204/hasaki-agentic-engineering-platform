@@ -13,6 +13,7 @@ import { seedKnowledge } from "./knowledge/service.ts";
 import { errorStatus, HttpError, routes } from "./api/routes.ts";
 import { handleStream, startEventStream } from "./api/stream.ts";
 import { childGroups } from "./workflow/local.ts";
+import { pool } from "./db/pool.ts";
 
 // The React app (web/, built by `npm run build`, which `npm start` runs first) is served from web/dist.
 // The previous vanilla UI stays available at /classic while it is phased out.
@@ -62,6 +63,15 @@ async function readJson(req: IncomingMessage): Promise<any> {
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   if (req.method === "GET" && url.pathname === "/api/stream") return handleStream(req, res, url);
+  // Raw evidence files (images/PDF) for preview/download.
+  const raw = req.method === "GET" && url.pathname.match(/^\/api\/artifacts\/(\d+)\/raw$/);
+  if (raw) {
+    const a = (await pool.query("SELECT name, content, data FROM workflow_artifacts WHERE id = $1", [Number(raw[1])])).rows[0];
+    if (!a) return res.writeHead(404).end();
+    const bin = a.data?.encoding === "base64";
+    res.writeHead(200, { "Content-Type": bin ? a.data.mime : "text/plain; charset=utf-8", "Content-Disposition": `inline; filename="${String(a.name).replace(/"/g, "")}"`, "X-Content-Type-Options": "nosniff" });
+    return res.end(bin ? Buffer.from(a.content, "base64") : a.content);
+  }
   if (req.method === "GET" && serveStatic(url, res)) return;
   for (const [method, pattern, handler] of routes) {
     const m = url.pathname.match(pattern);
