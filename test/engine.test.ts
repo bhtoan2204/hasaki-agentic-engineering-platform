@@ -564,3 +564,42 @@ test("command output streams while running; Stop kills the whole process tree an
   const all = (await q(pool, "SELECT content FROM workflow_events WHERE run_id = $1 AND kind = 'log'", [run.id])).map((e) => e.content).join("");
   assert.ok(!all.includes("finished") && !all.includes("child-done"));
 });
+
+test("regression test step compares Go failures with the base branch (real go + git)", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { writeFileSync, mkdirSync } = await import("node:fs");
+  const dir = mkdtempSync(join(process.env.TEST_ROOT!, "gomod-"));
+  const sh = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { stdio: "pipe" });
+  writeFileSync(join(dir, "go.mod"), "module example.com/m\n\ngo 1.21\n");
+  mkdirSync(join(dir, "calc"));
+  writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a + b }\n");
+  // pre-existing failure on base (like the integration test needing an unreachable DB)
+  writeFileSync(join(dir, "calc/old_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestNeedsDB(t *testing.T) { t.Fatal("dial tcp 172.16.200.135:3306: timeout") }\n');
+  sh("init", "-q", "-b", "main"); sh("config", "user.email", "t@t"); sh("config", "user.name", "t");
+  sh("add", "."); sh("commit", "-qm", "base"); sh("update-ref", "refs/remotes/origin/release/prod", "HEAD");
+  sh("checkout", "-qb", "TASK-1");
+  writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a + b }\n\nfunc Sub(a, b int) int { return a - b }\n");
+  writeFileSync(join(dir, "calc/sub_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestSub(t *testing.T) { if Sub(3, 1) != 2 { t.Fatal("bad") } }\n');
+  sh("add", "."); sh("commit", "-qm", "add Sub");
+
+  const key = await customWorkflow([{ key: "test", type: "command", config: { command: "go test ./...", baseline_compare: "go", timeout_seconds: 300 } }]);
+  const run = await startRun({ definitionKey: key, start: false });
+  await recordWorkspace(run.id, { repo: "calc", branch: "TASK-1", path: dir, created_from: "test" });
+  await startPendingRun(run.id);
+  await drain();
+  let st = await stepOf(run.id, "test");
+  assert.equal(st.status, "COMPLETED", st.error ?? "");
+  assert.deepEqual(st.output.results[0].baseline.pre_existing[0].tests, ["TestNeedsDB"]);
+  assert.equal(st.output.results[0].baseline.regressions.length, 0);
+
+  // now introduce a real regression on the branch
+  writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a - b }\n\nfunc Sub(a, b int) int { return a - b }\n");
+  writeFileSync(join(dir, "calc/add_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) { if Add(1, 1) != 2 { t.Fatal("bad") } }\n');
+  await reexecuteStep(run.id, "test");
+  await drain();
+  st = await stepOf(run.id, "test");
+  assert.equal(st.status, "FAILED");
+  assert.match(st.error!, /1 regression/);
+  assert.match(st.error!, /TestAdd/);
+  assert.doesNotMatch(st.error!, /TestNeedsDB/);
+});

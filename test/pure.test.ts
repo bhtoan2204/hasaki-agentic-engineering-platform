@@ -7,6 +7,7 @@ import { resolveKnowledge, type KnowledgeCandidate, type ResolutionContext } fro
 import { decide, decideBash, type PolicyContext } from "../src/agent/toolPolicy.ts";
 import { isAmbiguous, rankRepositories, type RepositoryRow } from "../src/repos/service.ts";
 import { evaluateCondition } from "../src/workflow/executors/builtin.ts";
+import { classify, parseGoTest } from "../src/workflow/executors/baseline.ts";
 import { adfToText, normalizeJiraIssue } from "../src/integrations/jira.ts";
 import { buildSystemAppend, buildUserPrompt } from "../src/agent/stepPrompt.ts";
 
@@ -232,4 +233,47 @@ test("prompts keep untrusted content out of the system prompt", () => {
   const user = buildUserPrompt(input, []);
   assert.ok(!sys.includes("IGNORE ALL RULES"));
   assert.ok(user.includes("<untrusted_input") && !user.includes("IGNORE ALL RULES </untrusted_input>"));
+});
+
+// ---------------------------------------------------------------- baseline comparison
+const BRANCH_OUT = `?   \tbitbucket.org/x/omsb/app/dto\t[no test files]
+# bitbucket.org/x/omsb/app/usecases [bitbucket.org/x/omsb/app/usecases.test]
+app/usecases/order_address_test.go:122:30: cannot use addr (variable of type *repos.MockAddress) as repos.Address value in struct literal: *repos.MockAddress does not implement repos.Address (missing method ResolveWardByPxCode)
+app/usecases/order_address_test.go:226:26: undefined: fakeLock
+\x1b[31m[error] \x1b[0mfailed to initialize database, got error dial tcp 172.16.200.135:3306: connect: connection timed out
+--- FAIL: TestGetExchangeRatesByDate (133.92s)
+panic: runtime error: invalid memory address or nil pointer dereference [recovered, repanicked]
+FAIL\tbitbucket.org/x/omsb/app/repos\t133.981s
+FAIL\tbitbucket.org/x/omsb/app/usecases [build failed]
+--- FAIL: TestZip (0.00s)
+    --- FAIL: TestZip/zip_plus_4 (0.00s)
+FAIL\tbitbucket.org/x/omsb/pkg/utils\t0.01s
+ok  \tbitbucket.org/x/omsb/models\t(cached)
+FAIL`;
+const BASE_OUT = `# bitbucket.org/x/omsb/app/usecases [bitbucket.org/x/omsb/app/usecases.test]
+app/usecases/order_address_test.go:230:26: undefined: fakeLock
+--- FAIL: TestGetExchangeRatesByDate (131.65s)
+FAIL\tbitbucket.org/x/omsb/app/repos\t131.7s
+FAIL\tbitbucket.org/x/omsb/app/usecases [build failed]
+ok  \tbitbucket.org/x/omsb/pkg/utils\t0.01s`;
+
+test("go test output parsing: failed tests, subtests, compile errors per package", () => {
+  const r = parseGoTest(BRANCH_OUT);
+  assert.deepEqual(r["bitbucket.org/x/omsb/app/repos"].tests, ["TestGetExchangeRatesByDate"]);
+  assert.deepEqual(r["bitbucket.org/x/omsb/pkg/utils"].tests, ["TestZip", "TestZip/zip_plus_4"]);
+  assert.equal(r["bitbucket.org/x/omsb/app/usecases"].buildErrors.length, 2);
+  assert.ok(r["bitbucket.org/x/omsb/app/usecases"].buildErrors.includes("app/usecases/order_address_test.go: undefined: fakeLock"), "line numbers are ignored");
+  assert.equal(r["bitbucket.org/x/omsb/models"].status, "ok");
+});
+
+test("baseline classification: old failures are pre-existing, new tests/compile errors are regressions", () => {
+  const c = classify(parseGoTest(BRANCH_OUT), parseGoTest(BASE_OUT));
+  const reg = Object.fromEntries(c.regressions.map((x) => [x.package.split("/").pop(), x]));
+  const pre = Object.fromEntries(c.pre_existing.map((x) => [x.package.split("/").pop(), x]));
+  assert.deepEqual(pre.repos.tests, ["TestGetExchangeRatesByDate"], "integration test failing on base too");
+  assert.equal(reg.repos, undefined);
+  assert.deepEqual(pre.usecases.build_errors, ["app/usecases/order_address_test.go: undefined: fakeLock"]);
+  assert.equal(reg.usecases.build_errors.length, 1, "the mock regression is still caught in a package with an old error");
+  assert.match(reg.usecases.build_errors[0], /ResolveWardByPxCode/);
+  assert.deepEqual(reg.utils.tests, ["TestZip", "TestZip/zip_plus_4"], "base passed: new test failures");
 });
