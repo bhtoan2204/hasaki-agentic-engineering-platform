@@ -90,6 +90,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           ))}
         </div>
       )}
+      <QueueBanner run={run} tick={tick} />
       {run.status === "PAUSED" && (
         <div style={{ background: "var(--panel2)", padding: "6px 16px", fontSize: 12.5, borderBottom: "1px solid var(--line)" }} className="muted">
           Run đang tạm dừng (step mode): chọn một bước <b>READY</b> rồi bấm “▶ Run this step”, hoặc Resume để chạy tự động.
@@ -154,6 +155,33 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         </aside>
       </div>
     </>
+  );
+}
+
+/** READY steps that no worker has picked up yet: say who is holding the workers and for how long. */
+function QueueBanner({ run, tick }: { run: any; tick: number }) {
+  const waiting = run.steps.filter((s: any) => s.status === "READY" || s.status === "RETRYING");
+  const { data, reload } = useApi<any>(waiting.length && !["PAUSED", "CANCELED"].includes(run.status) ? "/api/scheduler" : null);
+  useEffect(() => void reload(), [tick, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [, force] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => force((x) => x + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+  if (!waiting.length || !data) return null;
+  const others = data.running.filter((j: any) => j.run_id !== run.id);
+  if (!others.length) return null;
+  const fmt = (s: number) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? `${s % 60}s` : ""}`);
+  return (
+    <div style={{ background: "color-mix(in srgb, var(--accent) 10%, transparent)", padding: "6px 16px", fontSize: 13, borderBottom: "1px solid var(--line)" }}>
+      ⏳ <b>{waiting.map((s: any) => s.name).join(", ")}</b> đang chờ worker ({data.workers} worker chung + {data.light_workers} worker cho bước nhẹ). Đang bận:{" "}
+      {others.map((j: any) => (
+        <a key={j.job_id} href={`#/runs/${j.run_id}/${j.step_key}`} style={{ marginRight: 10 }}>
+          run #{j.run_id} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
+        </a>
+      ))}
+      <span className="muted small">— tăng scheduler.workers trong config.json để chạy song song.</span>
+    </div>
   );
 }
 

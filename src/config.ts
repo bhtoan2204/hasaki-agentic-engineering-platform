@@ -52,6 +52,8 @@ export interface Config {
   scheduler: {
     /** Worker loops in this process (concurrent step executions). Defaults to maxConcurrent. */
     workers: number;
+    /** Workers reserved for short steps (approval, discovery, condition, PR). Default 1. */
+    lightWorkers: number;
     leaseSeconds: number;
     heartbeatSeconds: number;
     pollMs: number;
@@ -99,7 +101,7 @@ const defaults: Config = {
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
   organization: "hasaki",
-  scheduler: { workers: 0, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
+  scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
 };
 

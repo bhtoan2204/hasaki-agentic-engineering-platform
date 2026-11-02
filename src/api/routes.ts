@@ -36,6 +36,7 @@ import {
 import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
 import { runChanges } from "../git/changes.ts";
+import { schedulerStatus } from "../workflow/scheduler.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -123,6 +124,7 @@ export const routes: Route[] = [
   ["POST", /^\/api\/workflows\/([a-z0-9_-]+)\/archive$/, async ({ p }) => (await definitions.archive(p[0]), { ok: true })],
 
   // ------------------------------------------------------------ runs
+  ["GET", /^\/api\/scheduler$/, () => schedulerStatus()],
   ["GET", /^\/api\/runs$/, ({ url }) => listRuns({ status: url.searchParams.get("status") ?? undefined, workItemId: url.searchParams.get("work_item_id") ? Number(url.searchParams.get("work_item_id")) : undefined })],
   [
     "POST",

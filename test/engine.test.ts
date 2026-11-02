@@ -25,7 +25,7 @@ import {
   sendFeedback,
   startRun,
 } from "../src/workflow/engine.ts";
-import { claimJob, drain } from "../src/workflow/scheduler.ts";
+import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -519,4 +519,24 @@ test("step mode: a paused run executes one chosen step at a time; inspector API 
   await new Promise((r) => setTimeout(r, 100));
   listen.release();
   assert.ok(notes.some((n) => JSON.parse(n).run_id === run.id), "events are announced for SSE");
+});
+
+test("light lane: short steps are claimable while a long agent/command step holds the general worker", async () => {
+  const heavy = await customWorkflow([{ key: "long", type: "agent" }]);
+  const light = await customWorkflow([{ key: "noop", type: "integration", config: { action: "noop" } }]);
+  const r1 = await startRun({ definitionKey: heavy });
+  const r2 = await startRun({ definitionKey: light });
+  const busy = (await claimJob("general", 30))!; // the general worker takes the oldest job: the long agent step
+  const begun = (await beginAttempt(busy, "general"))!;
+  assert.equal(begun.step.key, "long");
+  const st = await schedulerStatus();
+  assert.ok(st.running.some((j: any) => j.run_id === r1.id && j.step_key === "long"));
+  assert.ok(st.queued.some((j: any) => j.run_id === r2.id));
+  assert.equal(await claimJob("light", 30, ["human_approval"]), undefined, "type filter is respected");
+  const lj = (await claimJob("light", 30, LIGHT_STEP_TYPES))!;
+  assert.equal(lj.run_id, r2.id);
+  await finishAttempt(busy.id, busy.fencing_token, begun.attempt.id, { kind: "completed", output: {} });
+  await pool.query("UPDATE workflow_jobs SET status = 'queued', lease_owner = NULL WHERE id = $1", [lj.id]);
+  await drain();
+  assert.equal((await getRun(r2.id)).status, "COMPLETED");
 });

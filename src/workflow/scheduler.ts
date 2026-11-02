@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { config } from "../config.ts";
-import { pool, one } from "../db/pool.ts";
+import { pool, one, q } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
@@ -15,6 +15,8 @@ import type { ExecResult, JobRow } from "./types.ts";
 
 export interface SchedulerOptions {
   workers: number;
+  /** Extra workers that only take short step types, so a long test/agent run never blocks approvals or discovery. */
+  lightWorkers?: number;
   leaseSeconds: number;
   heartbeatSeconds: number;
   pollMs: number;
@@ -22,21 +24,45 @@ export interface SchedulerOptions {
 
 const processId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
-export async function claimJob(workerId: string, leaseSeconds: number): Promise<JobRow | undefined> {
+/** Step types that finish in seconds (no long agent session or command). */
+export const LIGHT_STEP_TYPES = ["human_input", "human_approval", "condition", "integration", "git_pull_request"];
+
+/** `onlyTypes`: restrict the claim to these step types (light lane). */
+export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes?: string[]): Promise<JobRow | undefined> {
   return one<JobRow>(
     pool,
     `UPDATE workflow_jobs j
         SET status = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
             fencing_token = j.fencing_token + 1, claims = j.claims + 1, updated_at = now()
       WHERE j.id = (
-        SELECT j2.id FROM workflow_jobs j2 JOIN workflow_runs r ON r.id = j2.run_id
+        SELECT j2.id FROM workflow_jobs j2 JOIN workflow_runs r ON r.id = j2.run_id JOIN workflow_steps s ON s.id = j2.step_id
          WHERE j2.status = 'queued' AND j2.available_at <= now()
            AND (r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') OR (r.status = 'PAUSED' AND j2.force))
+           AND ($3::text[] IS NULL OR s.type = ANY($3))
          ORDER BY j2.available_at, j2.id
          FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
       RETURNING j.*`,
-    [workerId, leaseSeconds],
+    [workerId, leaseSeconds, onlyTypes ?? null],
   );
+}
+
+/** What the workers are doing right now (for "why is my step waiting?" in the UI). */
+export async function schedulerStatus() {
+  const running = await q(
+    pool,
+    `SELECT j.id AS job_id, j.run_id, r.title AS run_title, s.key AS step_key, s.name AS step_name, s.type AS step_type, j.lease_owner,
+            a.started_at, extract(epoch FROM now() - a.started_at)::int AS running_seconds
+       FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
+       LEFT JOIN workflow_step_attempts a ON a.job_id = j.id AND a.status = 'RUNNING'
+      WHERE j.status = 'running' ORDER BY j.id`,
+  );
+  const queued = await q(
+    pool,
+    `SELECT j.id AS job_id, j.run_id, s.key AS step_key, s.type AS step_type, j.available_at
+       FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
+      WHERE j.status = 'queued' AND r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') ORDER BY j.available_at, j.id`,
+  );
+  return { workers: config.scheduler.workers, light_workers: config.scheduler.lightWorkers ?? 1, light_step_types: LIGHT_STEP_TYPES, running, queued };
 }
 
 /** Execute one claimed job end to end. */
@@ -86,13 +112,17 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   let stopped = false;
   const loops: Promise<void>[] = [];
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  for (let i = 0; i < opts.workers; i++) {
-    const workerId = `${processId}:w${i}`;
+  const lanes = [
+    ...Array.from({ length: opts.workers }, (_, i) => ({ id: `${processId}:w${i}`, types: undefined as string[] | undefined })),
+    ...Array.from({ length: opts.lightWorkers ?? 1 }, (_, i) => ({ id: `${processId}:light${i}`, types: LIGHT_STEP_TYPES })),
+  ];
+  for (const lane of lanes) {
+    const workerId = lane.id;
     loops.push(
       (async () => {
         while (!stopped) {
           try {
-            const job = await claimJob(workerId, opts.leaseSeconds);
+            const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
             if (job) await processJob(job, workerId, opts);
             else await sleep(opts.pollMs);
           } catch (e) {
@@ -105,7 +135,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   }
   const reaper = setInterval(() => reapExpiredLeases().catch((e) => console.error("reaper:", e.message)), Math.max(5, opts.leaseSeconds / 2) * 1000);
   void reapExpiredLeases().catch(() => {});
-  console.log(`scheduler: ${opts.workers} worker(s) as ${processId}`);
+  console.log(`scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`);
   return {
     async stop() {
       stopped = true;
