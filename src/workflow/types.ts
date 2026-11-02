@@ -84,6 +84,8 @@ export interface RunRow {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  profile?: "FAST" | "STANDARD" | "DEEP";
+  profile_decision?: unknown;
 }
 
 export interface StepRow {

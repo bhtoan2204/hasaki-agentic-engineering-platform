@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, useApi, useLive } from "../api.ts";
 import { act, ago, Badge, Empty, ErrorBox, Field, JsonBlock, Loading, Markdown, navigate, time } from "../ui.tsx";
 import { RunsTable } from "./Runs.tsx";
+import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 
 function HasakiPanel({ onImported }: { onImported: () => void }) {
   const { data: st, reload: reloadSt } = useApi<any>("/api/work/status");
@@ -125,10 +126,11 @@ export function WorkItemDetail({ id }: { id: number }) {
   const { data: wfs } = useApi<any[]>("/api/workflows");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
   const [wf, setWf] = useState("feature-implementation");
+  const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const start = async (mode: "start" | "step" | "pending") => {
-    const r = await act(() => api<any>(`/api/work-items/${id}/runs`, { workflow: wf, start: mode === "start" }));
+    const r = await act(() => api<any>(`/api/work-items/${id}/runs`, { workflow: wf, start: mode === "start", profile }));
     if (!r) return;
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
@@ -151,6 +153,7 @@ export function WorkItemDetail({ id }: { id: number }) {
               {(wfs ?? []).filter((x) => x.latest_version > 0).map((x) => <option key={x.key} value={x.key}>{x.name} (v{x.latest_version}) — {x.description?.slice(0, 60)}</option>)}
             </select>
           </Field>
+          <ProfilePreview workflow={wf} workItemId={id} value={profile} onChange={setProfile} />
           <div className="row">
             <button onClick={() => start("start")}>▶ Start</button>
             <button className="ghost" onClick={() => start("step")} title="Run steps one at a time">⏯ Step mode</button>

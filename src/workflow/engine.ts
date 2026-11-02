@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify } from "../notify.ts";
-import { repositories } from "../repos/service.ts";
+import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
 import { definitions } from "./definitions.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
@@ -10,6 +10,7 @@ import { assertRunTransition, assertStepTransition, deriveRunStatus, DONE, RETRY
 import { buildStepInput, resolveContext, type ResolvedContext, type StepInput } from "./context.ts";
 import type { AttemptRow, ExecResult, JobRow, QuestionInput, RunRow, RunStatus, StepRow, StepStatus, WorkflowSpec } from "./types.ts";
 import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
+import { applyProfile, classifyProfile, ProfileNotApplicable, type ProfileChange, type ProfileChoice, type ProfileDecision } from "./profiles.ts";
 
 export const REPORT_STEP_KEY = "task_result_report";
 
@@ -178,33 +179,110 @@ export interface StartRunInput {
   repositories?: string[];
   /** false = create the run in PENDING without scheduling anything (configure first, start later). */
   start?: boolean;
+  /** Execution profile: AUTO (default, deterministic classification) or a manual override. */
+  profile?: ProfileChoice;
+}
+
+export interface ResolvedRunGraph {
+  dv: { id: number; key: string; version: number; spec: WorkflowSpec };
+  wi: any | null;
+  inputs: Record<string, unknown>;
+  allowed: string[];
+  selected: string[];
+  reusedRepositories: boolean;
+  decision: ProfileDecision;
+  changes: ProfileChange[];
+  graph: WorkflowSpec;
+  reportAdded: boolean;
+}
+
+/**
+ * Everything decided at run creation, without writing: allowed/selected repositories (reusing the ones confirmed in an
+ * earlier run of the same work item), the execution profile and the resolved graph (profile + report step). Used by
+ * startRun and by the preview API, so what the user previews is exactly what runs.
+ */
+export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<ResolvedRunGraph> {
+  const dv = await definitions.version(input.definitionKey, input.version, c);
+  if (!dv) throw new EngineError(`workflow "${input.definitionKey}"${input.version ? ` v${input.version}` : ""} has no published version`, 404);
+  const wi = input.workItemId ? await one(c, "SELECT * FROM work_items WHERE id = $1", [input.workItemId]) : null;
+  if (input.workItemId && !wi) throw new EngineError(`work item ${input.workItemId} not found`, 404);
+  const inputs = input.inputs ?? {};
+  const project = wi?.project || String(inputs.project ?? "");
+  const allowed = await repositories.allowedFor(project, "read", c);
+  let selected = input.repositories ?? (Array.isArray(inputs.repositories) ? (inputs.repositories as string[]) : []);
+  const outside = selected.filter((r) => !allowed.includes(r));
+  if (outside.length) throw new EngineError(`repositories not allowed for this run: ${outside.join(", ")} (allowed: ${allowed.join(", ") || "none"})`, 400);
+  // Reuse repositories already confirmed for this work item (skips rediscovery); never outside the allowed set.
+  let reusedRepositories = false;
+  if (!selected.length && wi) {
+    const prev = await one<{ selected_repositories: string[] }>(
+      c,
+      "SELECT selected_repositories FROM workflow_runs WHERE work_item_id = $1 AND cardinality(selected_repositories) > 0 ORDER BY id DESC LIMIT 1",
+      [wi.id],
+    );
+    if (prev && prev.selected_repositories.every((r) => allowed.includes(r))) {
+      selected = prev.selected_repositories;
+      reusedRepositories = true;
+    }
+  }
+  // Deterministic discovery signal for profile selection (no LLM).
+  const text = [wi?.title, wi?.description, input.title, JSON.stringify(inputs)].filter(Boolean).join("\n");
+  const ranked = rankRepositories((await repositories.list(c)).filter((r) => allowed.includes(r.name)), { text, project });
+  const positive = ranked.filter((r) => r.score > 0 && !r.reasons.every((x) => x.startsWith("mapped to project")));
+  const decision0 = classifyProfile(
+    {
+      title: wi?.title ?? input.title ?? "",
+      description: wi?.description ?? String(inputs.description ?? ""),
+      project,
+      repositories: selected,
+      knownRepository: positive.length && !isAmbiguous(positive) ? positive[0].repo : null,
+      matchingRepositories: positive.length,
+      declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
+    },
+    input.profile ?? "AUTO",
+  );
+  let decision = { ...decision0, signals: { ...decision0.signals, reused_repositories: reusedRepositories } };
+  let resolved: { spec: WorkflowSpec; changes: ProfileChange[] };
+  try {
+    resolved = applyProfile(dv.spec, decision.profile);
+  } catch (e) {
+    if (!(e instanceof ProfileNotApplicable)) throw e;
+    decision = { ...decision, profile: "STANDARD", reasons: [...decision.reasons, `FAST not applicable: ${e.message} → STANDARD`] };
+    resolved = { spec: dv.spec, changes: [] };
+  }
+  const graph = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
+  return { dv, wi, inputs, allowed, selected, reusedRepositories, decision, changes: resolved.changes, graph, reportAdded: graph !== resolved.spec };
+}
+
+export async function previewRun(input: StartRunInput) {
+  const r = await resolveRunGraph(pool, input);
+  return {
+    definition: { key: r.dv.key, version: r.dv.version },
+    profile: r.decision,
+    changes: r.changes,
+    report_step: r.reportAdded,
+    selected_repositories: r.selected,
+    reused_repositories: r.reusedRepositories,
+    published_steps: r.dv.spec.steps.length,
+    graph: r.graph,
+  };
 }
 
 export async function startRun(input: StartRunInput) {
   return withTx(async (c, afterCommit) => {
-    const dv = await definitions.version(input.definitionKey, input.version, c);
-    if (!dv) throw new EngineError(`workflow "${input.definitionKey}"${input.version ? ` v${input.version}` : ""} has no published version`, 404);
-    const wi = input.workItemId ? await one(c, "SELECT * FROM work_items WHERE id = $1", [input.workItemId]) : null;
-    if (input.workItemId && !wi) throw new EngineError(`work item ${input.workItemId} not found`, 404);
-    const inputs = input.inputs ?? {};
-    const project = wi?.project || String(inputs.project ?? "");
-    const allowed = await repositories.allowedFor(project, "read", c);
-    const requested = input.repositories ?? (Array.isArray(inputs.repositories) ? (inputs.repositories as string[]) : []);
-    const outside = requested.filter((r) => !allowed.includes(r));
-    if (outside.length) throw new EngineError(`repositories not allowed for this run: ${outside.join(", ")} (allowed: ${allowed.join(", ") || "none"})`, 400);
+    const r = await resolveRunGraph(c, input);
+    const { dv, wi, inputs, allowed, selected, graph } = r;
     const { id } = (await one<{ id: number }>(c, "SELECT nextval('workflow_runs_id_seq')::bigint AS id"))!;
     const branch = wi?.code ?? `wf/run-${id}`;
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
+    const resolvedGraph = { ...graph, profile: r.decision.profile, profile_changes: r.changes };
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10)`,
-      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(dv.spec), allowed, requested, branch],
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12)`,
+      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision)],
     );
-    // Resolved graph for this run: the published spec, plus the report step when the work item asks for a report.
-    const graph = withReportStep(dv.spec, wi ? parseAiSuggest(wi.payload) : null);
-    if (graph !== dv.spec) await q(c, "UPDATE workflow_runs SET graph = $2 WHERE id = $1", [id, json(graph)]);
     const order = topoOrder(graph.steps);
     for (const s of graph.steps) {
       const requiresApproval = s.requires_approval || (s.type === "git_pull_request" && s.config.mode === "approval");
@@ -215,7 +293,15 @@ export async function startRun(input: StartRunInput) {
         [id, s.key, s.type, s.name ?? s.key, order.indexOf(s.key), s.depends_on, json(s.config), json(s.run_if ?? null), requiresApproval, s.max_attempts, s.retry_backoff_seconds],
       );
     }
-    await runEvents.add(c, id, "system", `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""}${graph !== dv.spec ? " · Task Result Report step added (ai_suggest.report)" : ""}`);
+    await runEvents.add(
+      c,
+      id,
+      "system",
+      `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""} · profile ${r.decision.profile} (${r.decision.reasons.join("; ")})` +
+        (r.changes.length ? ` · ${r.changes.length} graph change(s)` : "") +
+        (r.reportAdded ? " · Task Result Report step added (ai_suggest.report)" : "") +
+        (r.reusedRepositories ? ` · reused repositories ${selected.join(", ")}` : ""),
+    );
     if (wi) await q(c, "UPDATE work_items SET status = 'in_progress', updated_at = now() WHERE id = $1 AND status = 'open'", [wi.id]);
     const run = (await one<RunRow>(c, "SELECT * FROM workflow_runs WHERE id = $1", [id]))!;
     if (input.start !== false) {
@@ -226,7 +312,6 @@ export async function startRun(input: StartRunInput) {
   });
 }
 
-/** `stepMode`: start PAUSED, then run steps one at a time with runStepNow(). */
 export async function startPendingRun(runId: number, repositoriesOverride?: string[], stepMode = false) {
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);

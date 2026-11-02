@@ -15,7 +15,8 @@
     "build": "vite build --config web/vite.config.ts",
     "serve": "node --disable-warning=ExperimentalWarning src/server.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "knowledge:import": "node --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts"
+    "knowledge:import": "node --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts",
+    "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",

@@ -10,7 +10,8 @@ if [ -f go.mod ]; then
   echo "== go build ./..."
   go build ./...
   # -short lets integration tests that honour testing.Short() skip; the timeout bounds tests that hang on remote DB/ES.
-  if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m $pkgs"; go test -short -timeout 5m $pkgs; else echo "no Go packages changed"; fi
+  # GO_TEST_SKIP (set by the platform): tests already known to fail on the same base commit — not re-run.
+  if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m \${GO_TEST_SKIP:+-skip $GO_TEST_SKIP} $pkgs"; go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} $pkgs; else echo "no Go packages changed"; fi
 elif [ -f package.json ]; then
   npm test --if-present
 else

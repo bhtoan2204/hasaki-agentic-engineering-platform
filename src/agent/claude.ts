@@ -323,7 +323,7 @@ export const claudeExecutor: StepExecutor = {
 
     const resume = await resumableSession(ctx, cwd);
     const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload) : [];
-    const freshPrompt = () => buildUserPrompt(ctx.input, files, [], ctx.context.upstream);
+    const freshPrompt = () => buildUserPrompt(ctx.input, files, [], ctx.context.upstream, ctx.context.fileRefs);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode);
 
     const preToolUse: HookCallback = async (input: any) => {
@@ -415,10 +415,10 @@ export const claudeExecutor: StepExecutor = {
         // Session missing or not resumable: rebuild from durable artifacts instead.
         await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
         await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
-        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream));
+        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs));
       }
     } else {
-      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream) : freshPrompt());
+      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs) : freshPrompt());
     }
     } finally {
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});

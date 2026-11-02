@@ -44,7 +44,7 @@ import { workItems } from "../src/workitems/service.ts";
 import { importHasakiTask } from "../src/work.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
 import { setReportReasoner, taskResultReportExecutor } from "../src/report/executor.ts";
-import { withReportStep, REPORT_STEP_KEY } from "../src/workflow/engine.ts";
+import { withReportStep, REPORT_STEP_KEY, previewRun } from "../src/workflow/engine.ts";
 import { addEvidence } from "../src/report/evidenceStore.ts";
 
 // ---------------------------------------------------------------- fakes
@@ -591,7 +591,7 @@ test("regression test step compares Go failures with the base branch (real go + 
   writeFileSync(join(dir, "calc/sub_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestSub(t *testing.T) { if Sub(3, 1) != 2 { t.Fatal("bad") } }\n');
   sh("add", "."); sh("commit", "-qm", "add Sub");
 
-  const key = await customWorkflow([{ key: "test", type: "command", config: { command: "go test ./...", baseline_compare: "go", timeout_seconds: 300 } }]);
+  const key = await customWorkflow([{ key: "test", type: "command", config: { command: 'go test ${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} ./...', baseline_compare: "go", timeout_seconds: 300 } }]);
   const run = await startRun({ definitionKey: key, start: false });
   await recordWorkspace(run.id, { repo: "calc", branch: "TASK-1", path: dir, created_from: "test" });
   await startPendingRun(run.id);
@@ -611,6 +611,13 @@ test("regression test step compares Go failures with the base branch (real go + 
   assert.match(st.error!, /1 regression/);
   assert.match(st.error!, /TestAdd/);
   assert.doesNotMatch(st.error!, /TestNeedsDB/);
+  // the pre-existing failure was persisted for this base SHA and is skipped on the next run (no re-run, no baseline pass)
+  assert.ok((await q(pool, "SELECT 1 FROM test_baselines WHERE report->'tests' ? 'TestNeedsDB'")).length >= 1);
+  await reexecuteStep(run.id, "test");
+  await drain();
+  st = await stepOf(run.id, "test");
+  const r0 = (st.output ?? (await attemptsOf(run.id, "test")).at(-1)!.error.details).results[0];
+  assert.deepEqual(r0.skipped_known_failures, ["TestNeedsDB"]);
 });
 
 test("server shutdown kills detached command process groups (no orphaned go test)", async () => {
@@ -822,4 +829,125 @@ test("report: a worker crash while generating is recovered from PostgreSQL (leas
   assert.equal(rep.status, "WAITING_APPROVAL");
   const persisted = await q(pool, "SELECT a.status FROM workflow_step_attempts a WHERE a.step_id = $1 ORDER BY a.number", [rep.id]);
   assert.deepEqual(persisted.map((a) => a.status), ["WAITING_APPROVAL", "FAILED", "WAITING_APPROVAL"], "history kept: first draft, crashed attempt, new draft");
+});
+
+// ---------------------------------------------------------------- execution profiles & reuse
+async function zipItem(extra: Record<string, unknown> = {}) {
+  const code = `PERF-${++reportSeq}`;
+  return (await importHasakiTask({ data: { id: 9500 + reportSeq, code, name: "[Bug] Thiếu ZIP Code đơn Ecom US", note: "postal_code mapping bị mất", project: { name: "OMS" }, ...extra } })).item;
+}
+
+test("AUTO profile: small known-repo bug runs FAST (one Claude step instead of four), graph persisted, preview matches", async () => {
+  const wi = await zipItem();
+  const prev = await previewRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-api"] });
+  assert.equal(prev.profile.profile, "FAST");
+  const run = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-api"] });
+  assert.equal(run.profile, "FAST");
+  assert.deepEqual(run.steps.map((s) => s.key), prev.graph.steps.map((s: any) => s.key));
+  assert.equal(run.steps.filter((s) => s.type === "agent" || s.type === "coding_agent").length, 1);
+  assert.equal((run.graph as any).profile, "FAST");
+  assert.ok((run.graph as any).profile_changes.length >= 4);
+  scripts.implement = codingDone;
+  await drain();
+  // confirm_repos auto-approved (repository known), PR gate still waits for a human
+  assert.equal((await stepOf(run.id, "confirm_repos")).status, "COMPLETED");
+  assert.equal((await stepOf(run.id, "pr")).status, "WAITING_APPROVAL");
+  const implCtx = seen.implement.find((c) => c.run.id === run.id)!;
+  assert.match(String(implCtx.step.config.instructions), /FAST profile/);
+  assert.equal(calls.analyze ?? 0, 0, "no separate analysis session");
+  await approveStep(run.id, "pr");
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+});
+
+test("profiles: manual override and high-risk fallback; FAST keeps the Task Result Report", async () => {
+  const wi = await zipItem();
+  const std = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-api"], profile: "STANDARD", start: false });
+  assert.equal(std.profile, "STANDARD");
+  assert.equal(std.steps.length, 9);
+  const pay = (await importHasakiTask({ data: { id: 9800 + ++reportSeq, code: `PAY-${reportSeq}`, name: "[Bug] Refund field mapping sai", project: { name: "OMS" } } })).item;
+  const p = await startRun({ definitionKey: "bug-investigation", workItemId: pay.id, repositories: ["oms-api"], start: false });
+  assert.equal(p.profile, "STANDARD");
+  const rep = await zipItem({ task_ai: { ai_suggest: AI } });
+  const fast = await startRun({ definitionKey: "feature-implementation", workItemId: rep.id, repositories: ["oms-api"], start: false });
+  assert.equal(fast.profile, "FAST");
+  const r = fast.steps.find((s) => s.key === REPORT_STEP_KEY)!;
+  assert.deepEqual(r.depends_on, ["pr"], "report depends on the FAST graph's terminal step");
+  assert.equal(fast.steps.filter((s) => s.key === REPORT_STEP_KEY).length, 1);
+  const cr = await startRun({ definitionKey: "code-review", repositories: ["oms-api"], profile: "FAST", start: false });
+  assert.equal(cr.profile, "STANDARD", "FAST not applicable → STANDARD");
+  assert.match(JSON.stringify(cr.profile_decision), /not applicable/);
+  for (const id of [std.id, p.id, fast.id, cr.id]) await cancelRun(id);
+});
+
+test("FAST is resumable: a question inside the merged step pauses and resumes the same step", async () => {
+  const wi = await zipItem();
+  scripts.implement = async (ctx, n) => {
+    if (n === 1) {
+      await ctx.ask([{ question: "ZIP+4: cắt 5 số đầu?", options: ["Có", "Không"] }]);
+      return { kind: "waiting_input", checkpoint: { session_id: "s-fast" } };
+    }
+    return codingDone(ctx, n);
+  };
+  const run = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-api"] });
+  await drain();
+  assert.equal((await stepOf(run.id, "implement")).status, "WAITING_INPUT");
+  const [qq] = await q(pool, "SELECT id FROM workflow_questions WHERE run_id = $1", [run.id]);
+  await answerQuestions({ [qq.id]: "Có" });
+  await drain();
+  assert.equal((await stepOf(run.id, "implement")).status, "COMPLETED");
+  assert.equal(seen.implement.filter((c) => c.run.id === run.id)[1].input.pending.resume.checkpoint.session_id, "s-fast");
+  await cancelRun(run.id);
+});
+
+test("reuse: a second run of the same work item reuses confirmed repositories and skips re-ranking", async () => {
+  const wi = await zipItem();
+  const r1 = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-background"], profile: "STANDARD" });
+  await cancelRun(r1.id);
+  const prev = await previewRun({ definitionKey: "bug-investigation", workItemId: wi.id, profile: "STANDARD" });
+  assert.equal(prev.reused_repositories, true);
+  assert.deepEqual(prev.selected_repositories, ["oms-background"]);
+  const r2 = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, profile: "STANDARD" });
+  await drain();
+  const disc = await stepOf(r2.id, "discover");
+  assert.equal(disc.output.method, "reused");
+  assert.deepEqual(disc.output.recommended, ["oms-background"]);
+  await cancelRun(r2.id);
+});
+
+test("context reuse: file references flow from upstream attempts; invalidated attempts are not reused", async () => {
+  const key = await customWorkflow([{ key: "analyze", type: "agent" }, { key: "implement", type: "coding_agent", depends_on: ["analyze"] }]);
+  let target = "app/repos/address_repo.go";
+  scripts.analyze = async (ctx) => {
+    await ctx.log("tool", `Read ${target}`, { id: `t-${target}`, name: "Read", input: { file_path: `/w/${target}` } });
+    return { kind: "completed", output: { summary: "found", files: ["pkg/utils/string.go:42"] } };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  const refs1 = seen.implement.find((c) => c.run.id === run.id)!.context.fileRefs.map((f) => f.path);
+  assert.ok(refs1.includes("/w/app/repos/address_repo.go") && refs1.includes("pkg/utils/string.go:42"));
+  target = "app/usecases/order.go";
+  await reexecuteStep(run.id, "analyze");
+  await drain();
+  const refs2 = seen.implement.filter((c) => c.run.id === run.id)[1].context.fileRefs.map((f) => f.path);
+  assert.ok(refs2.includes("/w/app/usecases/order.go"));
+  assert.ok(!refs2.includes("/w/app/repos/address_repo.go"), "refs from the invalidated attempt are not handed on");
+  const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [seen.implement.filter((c) => c.run.id === run.id)[1].context.snapshot_id]);
+  assert.ok(snap.content.prompt_plan.file_refs.length >= 1, "recorded in the snapshot");
+});
+
+test("report: deterministic generation (no Claude call) when no requirement needs semantic judgement", async () => {
+  let reasonerCalls = 0;
+  setReportReasoner(async () => (reasonerCalls++, { requirements: [] }));
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  scripts.implement = codingDone;
+  const onlyShots = { report: { "Kết quả": ["Ảnh chụp màn hình đơn hàng sau khi fix"] } };
+  const run = await startRun({ definitionKey: key, workItemId: (await reportItem(onlyShots)).id, repositories: ["oms-api"] });
+  await drain();
+  assert.equal((await stepOf(run.id, REPORT_STEP_KEY)).status, "WAITING_APPROVAL");
+  assert.equal(reasonerCalls, 0);
+  const run2 = await startRun({ definitionKey: key, workItemId: (await reportItem()).id, repositories: ["oms-api"] });
+  await drain();
+  assert.equal(reasonerCalls, 1, "code/log requirement with evidence → semantic judgement");
+  for (const id of [run.id, run2.id]) await cancelRun(id);
 });

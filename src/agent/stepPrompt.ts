@@ -33,6 +33,7 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
     `- Do NOT run git push. Pull requests are opened by a later workflow step.`,
     `- If business behaviour is genuinely ambiguous and cannot be settled by reading code, call mcp__platform__ask_user with ALL open questions at once (each with the context you found and your recommended option first), then END YOUR TURN. Answers arrive as the next message.`,
     `- Use mcp__platform__post_update for short progress notes at milestones.`,
+    `- Be economical with tools: start from the code locations listed in the prompt, use Grep with a path/glob and Read with offset/limit instead of scanning whole repositories, run independent reads in parallel, and do not re-read files whose content you already have.`,
     `- When done, call mcp__platform__submit_result exactly once with the step output object, then end your turn.`,
     "",
     "## Step instructions",
@@ -98,6 +99,7 @@ export function buildUserPrompt(
   files: string[],
   notes: string[] = [],
   upstream?: { plan: Record<string, { mode: string; full_tokens: number }>; text: Record<string, string> },
+  fileRefs: Array<{ path: string; refs: number; from: string[] }> = [],
 ): string {
   const parts = [`Execute this workflow step now. Run inputs: ${JSON.stringify(input.run.inputs ?? {})}`];
   parts.push("## Engineering request", untrusted("work_item", renderWorkItem(input, files)));
@@ -111,6 +113,11 @@ export function buildUserPrompt(
       parts.push(untrusted(`step:${k}#attempt-${u.attempt_id}`, body + note));
     }
   }
+  if (fileRefs.length)
+    parts.push(
+      "## Code locations already identified by earlier steps (start here; avoid broad re-scans)",
+      fileRefs.map((f) => `- ${f.path} (${f.from.join(", ")}${f.refs > 1 ? `, ×${f.refs}` : ""})`).join("\n"),
+    );
   if (input.answers.length)
     parts.push("## Developer answers to earlier questions in this step", input.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n"));
   if (input.pending?.feedback) parts.push("## Reviewer feedback to address", untrusted("reviewer", String(input.pending.feedback)));

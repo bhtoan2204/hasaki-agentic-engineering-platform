@@ -14,6 +14,7 @@ import {
 import { api, useApi } from "../api.ts";
 import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
 import { autoLayout, nodeTypes, STEP_ICONS, toEdges, type StepNodeData } from "../graph.tsx";
+import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 
 type Step = {
   key: string;
@@ -559,6 +560,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   const [sel, setSel] = useState<string[]>([]);
   const [wi, setWi] = useState("");
   const [inputs, setInputs] = useState("{}");
+  const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   const start = async (mode: "start" | "step" | "pending") => {
     let parsed;
     try {
@@ -566,7 +568,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
     } catch {
       return toast("Inputs không phải JSON hợp lệ");
     }
-    const r = await act(() => api<any>("/api/runs", { workflow: wfKey, work_item_id: wi ? Number(wi) : null, repositories: sel, inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) }, start: mode === "start" }));
+    const r = await act(() => api<any>("/api/runs", { workflow: wfKey, work_item_id: wi ? Number(wi) : null, repositories: sel, inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) }, start: mode === "start", profile }));
     if (!r) return;
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
@@ -585,7 +587,8 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
           <label key={r.name} style={{ marginRight: 10, fontSize: 13 }}><input type="checkbox" checked={sel.includes(r.name)} onChange={(e) => setSel(e.target.checked ? [...sel, r.name] : sel.filter((x) => x !== r.name))} /> {r.name}</label>
         ))}</div>
       </Field>
-      <Field label="Inputs (JSON)" hint='vd {"project":"OMS","focus":"refund","branch":"TASK-1"}'><textarea className="code" rows={3} value={inputs} onChange={(e) => setInputs(e.target.value)} /></Field>
+      <Field label="Inputs (JSON)" hint='vd {"project":"OMS","focus":"refund","branch":"TASK-1","risk":"low"}'><textarea className="code" rows={3} value={inputs} onChange={(e) => setInputs(e.target.value)} /></Field>
+      <ProfilePreview workflow={wfKey} workItemId={wi ? Number(wi) : null} repositories={sel} inputs={(() => { try { return JSON.parse(inputs || "{}"); } catch { return {}; } })()} value={profile} onChange={setProfile} />
       <div className="row">
         <button onClick={() => start("start")}>▶ Start</button>
         <button className="ghost" onClick={() => start("step")}>⏯ Step mode</button>

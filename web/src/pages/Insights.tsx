@@ -29,6 +29,8 @@ export function InsightsPage() {
         </select>
       </div>
       <div className="muted">Chi phí, token, thời gian, lỗi và mức dùng tool/skill — lấy từ metrics của từng attempt trong PostgreSQL.</div>
+      <h3>So sánh theo profile</h3>
+      <Table rows={data.by_profile} cols={[["profile", "Profile"], ["runs", "Runs"], ["completed", "Completed"], ["avg_wall_min", "Avg wall (min)"], ["claude_attempts_per_run", "Claude steps/run"], ["turns_per_run", "Turns/run"], ["cost_per_run", "≈ Cost/run ($)"]]} />
       <h3>Theo workflow</h3>
       <Table rows={data.by_workflow} cols={[["definition_key", "Workflow"], ["runs", "Runs"], ["completed", "Completed"], ["failed", "Failed"], ["cost_usd", "Cost ($)"], ["tokens", "Tokens (in+out)"]]} />
       <h3>Theo loại bước</h3>

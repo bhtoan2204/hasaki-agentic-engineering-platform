@@ -90,7 +90,13 @@ export const taskResultReportExecutor: StepExecutor = {
     const evidence = await collectEvidence(ctx.run.id, ctx.step.id);
     await ctx.log("system", `report: ${spec.sections.reduce((n, s) => n + s.requirements.length, 0)} requirement(s), ${evidence.length} evidence item(s)`, { evidence: evidence.map((e) => `${e.id}:${e.kind}`) });
     let proposal: Proposal | null = null;
-    if (reasoner) {
+    // Semantic synthesis is only needed when a requirement can be satisfied by non-screenshot evidence that exists;
+    // screenshot-only requirements and "nothing to judge" cases are decided by the rules alone (no Claude call).
+    const mode = String(ctx.step.config.reasoning ?? "auto");
+    const judgeable = spec.sections.flatMap((s) => s.requirements).some((r) => !r.needs.screenshotOnly && evidence.some((e) => r.accepts.includes(e.kind) && !e.before_fix && e.passed !== false));
+    const useReasoner = mode === "always" || (mode === "auto" && judgeable);
+    if (!useReasoner) await ctx.log("system", `report: deterministic generation (${mode === "never" ? "reasoning disabled" : "no requirement needs semantic judgement"})`);
+    if (reasoner && useReasoner) {
       try {
         proposal = await reasoner(ctx, spec, evidence);
       } catch (e) {

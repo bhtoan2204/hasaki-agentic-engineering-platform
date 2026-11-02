@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../../config.ts";
+import { pool, q, json } from "../../db/pool.ts";
 
 const exec = promisify(execFile);
 
@@ -124,8 +125,11 @@ export async function goBaseline(
   const report: GoTestReport = {};
   const cached: string[] = [];
   const todo: string[] = [];
+  const persisted = new Map(
+    (await q<{ package: string; report: GoPackageResult }>(pool, "SELECT package, report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2 AND package = ANY($3)", [repoKey, sha, packages])).map((r) => [r.package, r.report]),
+  );
   for (const p of packages) {
-    const hit = baselineCache.get(`${repoKey}@${sha}:${p}`);
+    const hit = baselineCache.get(`${repoKey}@${sha}:${p}`) ?? (persisted.has(p) ? { [p]: persisted.get(p)! } : undefined);
     if (hit) Object.assign(report, hit), cached.push(p);
     else todo.push(p);
   }
@@ -147,6 +151,7 @@ export async function goBaseline(
         if (res) {
           report[p] = res;
           baselineCache.set(`${repoKey}@${sha}:${p}`, { [p]: res });
+          await q(pool, "INSERT INTO test_baselines (repo_key, base_sha, package, report) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING", [repoKey, sha, p, json(res)]);
         }
       }
     } finally {
@@ -154,4 +159,22 @@ export async function goBaseline(
     }
   }
   return { sha, report, cached };
+}
+
+/**
+ * Tests known to fail on the CURRENT base commit of this repository (from the persisted baseline cache). Exported as
+ * GO_TEST_SKIP so the branch run does not wait again for failures that are already established as pre-existing
+ * (e.g. integration tests timing out on an unreachable DB). A new base commit has no entries, so nothing stale is skipped.
+ */
+export async function knownBaseFailures(workspace: string): Promise<{ sha: string; tests: string[]; skipRegex: string | null }> {
+  try {
+    const sha = await git(workspace, "rev-parse", `origin/${config.baseBranch}`);
+    const repoKey = await git(workspace, "rev-parse", "--git-common-dir");
+    const rows = await q<{ report: GoPackageResult }>(pool, "SELECT report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2", [repoKey, sha]);
+    const tests = [...new Set(rows.flatMap((r) => (r.report.status === "fail" && !r.report.buildErrors.length ? r.report.tests : [])).map((t) => t.split("/")[0]))].sort();
+    const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return { sha, tests, skipRegex: tests.length ? `^(${tests.map(esc).join("|")})$` : null };
+  } catch {
+    return { sha: "", tests: [], skipRegex: null };
+  }
 }

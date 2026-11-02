@@ -4,6 +4,7 @@ import { api, useApi, useLive } from "../api.ts";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
+import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
 
 /** Live execution graph of one run + inspector. Route: #/runs/:id[/:stepKey | /~changes]. */
@@ -63,6 +64,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         <b>Run #{run.id}</b>
         <span className="muted" style={{ maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{run.title}</span>
         <Badge s={run.status} />
+        <ProfileBadge profile={run.profile} title={(run.profile_decision?.reasons ?? []).join("\n")} />
         <span className="muted small">
           <a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a> v{run.definition_version} · <span className="mono">{run.branch}</span>
           {run.work_item && <> · <a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a></>}
@@ -132,6 +134,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 {run.error && <><span>Error</span><span className="err">{run.error}</span></>}
               </div>
               <ReportCard run={run} />
+              <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
               {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
               <p className="muted small">Bấm vào một node để xem cấu hình, input/output, knowledge, hội thoại Claude, câu hỏi và lịch sử attempt.</p>
@@ -211,18 +214,59 @@ function ReportCard({ run }: { run: any }) {
   );
 }
 
+function ProfileCard({ run }: { run: any }) {
+  const d = run.profile_decision;
+  const changes: any[] = run.graph?.profile_changes ?? [];
+  if (!d) return null;
+  return (
+    <div className="card" style={{ marginTop: 10, padding: 10 }}>
+      <div className="row tight"><b className="grow">Execution profile</b><ProfileBadge profile={run.profile} /></div>
+      <div className="small muted">{d.requested === "AUTO" ? `tự chọn (${d.confidence} confidence)` : "chọn thủ công"}</div>
+      <ul className="small" style={{ margin: "4px 0", paddingLeft: 18 }}>{(d.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
+      {(d.warnings ?? []).map((w: string) => <div key={w} className="small" style={{ color: "var(--warn)" }}>⚠ {w}</div>)}
+      {changes.length > 0 && (
+        <details>
+          <summary>{changes.length} thay đổi so với definition</summary>
+          {changes.map((c) => <div key={c.step + c.action} className="small">{c.action === "merged_into" ? "⊕" : c.action === "removed" ? "⊘" : "✎"} <span className="mono">{c.step}</span> {c.action === "merged_into" ? `→ ${c.into}` : c.action} — <span className="muted">{c.detail}</span></div>)}
+        </details>
+      )}
+    </div>
+  );
+}
+
+const fmtS = (ms: number) => (ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`);
+
+/** Latency breakdown: measured queue / machine / human time per step (+ Claude, tools, commands), cost as an estimate. */
 function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const { data, reload } = useApi<any>(`/api/metrics/runs/${runId}`);
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) return null;
   const t = data.totals;
+  const steps = Object.entries<any>(data.per_step);
+  const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
   return (
     <div className="card" style={{ marginTop: 10, padding: 10 }}>
-      <div className="kv">
-        <span>Chi phí Claude</span><span>${t.cost_usd.toFixed(3)} · {t.turns} turns</span>
+      <b>⏱ Latency</b> <span className="muted small">(đo từ PostgreSQL; chi phí là ước tính của SDK)</span>
+      <div className="kv" style={{ marginTop: 6 }}>
+        <span>Tổng (wall)</span><span><b>{fmtS(data.wall_ms)}</b> · máy {fmtS(t.exec_ms)} · chờ queue {fmtS(t.queue_ms)} · chờ người {fmtS(t.human_ms)}</span>
+        <span>Claude</span><span>{t.claude_sessions} session · {fmtS(t.claude_ms)} · {t.turns} turns · ≈${t.cost_usd.toFixed(3)} (ước tính)</span>
         <span>Tokens</span><span>in {t.input_tokens.toLocaleString()} · out {t.output_tokens.toLocaleString()} · cache {t.cache_read_tokens.toLocaleString()}</span>
-        <span>Thời gian (wall)</span><span>{Math.round(t.wall_ms / 1000)}s qua {t.attempts} attempt ({t.failed} lỗi)</span>
-        <span>Tool / integration</span><span>{t.tool_calls} tool calls · {t.integration_calls} integration · {t.skills_loaded} skill nạp · {t.subagents} subagent · {t.denied} bị chặn</span>
+        <span>Tools</span><span>{t.tool_calls} calls · {fmtS(t.tool_ms)} · command/test {fmtS(t.command_ms)} · {t.integration_calls} integration · {t.skills_loaded} skill</span>
+        <span>Retry / lỗi</span><span>{t.retries} retry · {t.failed} attempt lỗi{data.bottleneck && <> · chậm nhất: <b className="mono">{data.bottleneck}</b></>}</span>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        {steps.map(([k, s]) => (
+          <div key={k} className="small" style={{ display: "grid", gridTemplateColumns: "120px 1fr 64px", gap: 6, alignItems: "center", margin: "2px 0" }}>
+            <span className="mono" title={`${s.type} · ${s.attempts} attempt`} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k}</span>
+            <span style={{ display: "flex", height: 10, background: "var(--code)", borderRadius: 3, overflow: "hidden" }} title={`queue ${fmtS(s.queue_ms)} · exec ${fmtS(s.exec_ms)} · human ${fmtS(s.human_ms)}${s.claude_ms ? ` · claude ${fmtS(s.claude_ms)} / ${s.turns} turns` : ""}`}>
+              <span style={{ width: `${(s.queue_ms / max) * 100}%`, background: "var(--muted)" }} />
+              <span style={{ width: `${(s.exec_ms / max) * 100}%`, background: s.type === "command" ? "var(--warn)" : s.claude_ms ? "var(--accent)" : "var(--ok)" }} />
+              <span style={{ width: `${(s.human_ms / max) * 100}%`, background: "color-mix(in srgb, var(--warn) 45%, transparent)" }} />
+            </span>
+            <span className="mono muted" style={{ textAlign: "right" }}>{fmtS(s.queue_ms + s.exec_ms + s.human_ms)}</span>
+          </div>
+        ))}
+        <div className="muted small" style={{ marginTop: 4 }}>▮ xám = chờ queue · ▮ xanh dương = Claude · ▮ cam = command/test · ▮ xanh lá = bước khác · ▮ cam nhạt = chờ người</div>
       </div>
     </div>
   );

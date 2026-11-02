@@ -33,6 +33,45 @@ export interface ResolvedContext {
   upstream: { plan: Record<string, UpstreamPlanEntry>; text: Record<string, string> };
   /** Text used for relevance ranking (request + step instructions + upstream keywords). */
   requestText: string;
+  /** Code locations already identified by upstream steps (current attempts only), most referenced first. */
+  fileRefs: Array<{ path: string; refs: number; from: string[] }>;
+}
+
+const CODE_REF = /(?:^|[\s`'"(\[])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
+
+/**
+ * Deterministic handoff of source locations: files read/edited/grepped by the CURRENT attempt of each ancestor step
+ * (invalidated attempts are excluded, so stale exploration is never handed on) plus path[:line] references in their
+ * outputs. Saves the next agent from rediscovering where the relevant code is.
+ */
+export async function collectFileRefs(c: Db, upstream: StepInput["upstream"]) {
+  const byPath = new Map<string, { refs: number; from: Set<string> }>();
+  const add = (path: string, from: string) => {
+    const p = path.replace(/^\.\//, "");
+    if (!p || p.length > 300) return;
+    const e = byPath.get(p) ?? byPath.set(p, { refs: 0, from: new Set() }).get(p)!;
+    e.refs++;
+    e.from.add(from);
+  };
+  const attemptIds = Object.values(upstream).map((u) => u.attempt_id).filter((x): x is number => !!x);
+  if (attemptIds.length) {
+    const rows = await q<{ key: string; name: string; path: string }>(
+      c,
+      `SELECT s.key, e.data->>'name' AS name, COALESCE(e.data->'input'->>'file_path', e.data->'input'->>'path') AS path
+         FROM workflow_events e JOIN workflow_steps s ON s.id = e.step_id
+        WHERE e.attempt_id = ANY($1) AND e.kind = 'tool' AND e.data->>'name' IN ('Read', 'Edit', 'Write', 'MultiEdit', 'Grep')`,
+      [attemptIds],
+    );
+    for (const r of rows) if (r.path && /\.[a-z]{1,5}$/i.test(r.path)) add(r.path, r.key);
+  }
+  for (const [key, u] of Object.entries(upstream)) {
+    if (u.status !== "COMPLETED" || !u.output) continue;
+    for (const m of JSON.stringify(u.output).replace(/\\n/g, " ").matchAll(CODE_REF)) add(m[2] ? `${m[1]}:${m[2]}` : m[1], key);
+  }
+  return [...byPath.entries()]
+    .map(([path, v]) => ({ path, refs: v.refs, from: [...v.from] }))
+    .sort((a, b) => b.refs - a.refs || a.path.localeCompare(b.path))
+    .slice(0, 30);
 }
 
 export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise<StepInput> {
@@ -114,12 +153,14 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   });
   const completed = Object.fromEntries(Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED"));
   const upstream = planUpstream(completed, step.depends_on, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens));
+  const fileRefs = step.type === "agent" || step.type === "coding_agent" ? await collectFileRefs(c, input.upstream) : [];
   const content = {
     step: { key: step.key, type: step.type, generation: step.generation },
     // How the prompt was shaped — enough to reproduce/audit what the agent was shown.
     prompt_plan: {
       knowledge: disclosure,
       upstream: upstream.plan,
+      file_refs: fileRefs,
       budgets: { inline_knowledge_tokens: config.agent.inlineKnowledgeTokens, index_size: config.agent.knowledgeIndexSize, upstream_tokens: config.agent.upstreamTokens },
       setting_sources: config.agent.settingSources,
       delegation: cfg.delegation?.enabled === true,
@@ -150,5 +191,5 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     hash,
     json(content),
   ]);
-  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText };
+  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs };
 }

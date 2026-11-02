@@ -4,7 +4,7 @@ import { pool, q } from "../../db/pool.ts";
 import { gitProvider, workspacesOf } from "../../git/provider.ts";
 import { isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
-import { classify, goBaseline, parseGoTest } from "./baseline.ts";
+import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
@@ -137,17 +137,19 @@ export const commandExecutor: StepExecutor = {
     for (const t of targets) {
       await ctx.log("system", `▶ ${t.repo}: running command in ${t.path}`);
       const started = Date.now();
+      const known = cfg.baseline_compare === "go" && cfg.skip_known_base_failures !== false ? await knownBaseFailures(t.path) : null;
+      if (known?.skipRegex) await ctx.log("system", `skipping ${known.tests.length} test(s) known to fail on ${config.baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`, { skipped_known_failures: known.tests });
       const r = await runCommand(
         String(cfg.command),
         t.path,
-        { BASE_BRANCH: config.baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...((cfg.env as Record<string, string>) ?? {}) },
+        { BASE_BRANCH: config.baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}), ...((cfg.env as Record<string, string>) ?? {}) },
         timeoutMs,
         ctx.signal,
         (chunk) => void ctx.log("log", chunk, { repo: t.repo }),
       );
       await ctx.log("system", `■ ${t.repo}: exit ${r.timedOut ? "timeout" : r.code} after ${Math.round((Date.now() - started) / 1000)}s`, { repo: t.repo, exit_code: r.code, timed_out: r.timedOut });
       const artifactId = await ctx.artifact("log", `${ctx.step.key}-${t.repo}.log`, r.output, { exit_code: r.code, timed_out: r.timedOut });
-      const entry: (typeof results)[number] = { repo: t.repo, exit_code: r.code, timed_out: r.timedOut, artifact_id: artifactId, passed: r.code === 0 };
+      const entry: (typeof results)[number] & { skipped_known_failures?: string[] } = { repo: t.repo, exit_code: r.code, timed_out: r.timedOut, artifact_id: artifactId, passed: r.code === 0, ...(known?.tests.length ? { skipped_known_failures: known.tests } : {}) };
       if (r.code !== 0 && !r.timedOut && cfg.baseline_compare === "go") entry.baseline = await compareWithBaseline(ctx, t, r.output, timeoutMs);
       if (entry.baseline?.regressions && !entry.baseline.regressions.length) entry.passed = true;
       results.push(entry);
@@ -208,7 +210,13 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");
   let ranked = rankRepositories(rows, { text, keywords, project: ctx.context.project });
   let method = "deterministic";
-  if (cfg.use_ai && aiRepositoryRanker) {
+  // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
+  if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false) {
+    await ctx.log("system", `repository discovery: reusing ${ctx.run.selected_repositories.join(", ")} (no re-ranking)`);
+    return { kind: "completed", output: { candidates: ranked.slice(0, Number(cfg.max_candidates ?? 5)), recommended: ctx.run.selected_repositories, ambiguous: false, method: "reused", reused: true } };
+  }
+  // Claude is only consulted when the deterministic ranking cannot decide.
+  if (cfg.use_ai && aiRepositoryRanker && isAmbiguous(ranked.slice(0, Number(cfg.max_candidates ?? 5)))) {
     try {
       const ai = await aiRepositoryRanker(ctx, ranked, rows);
       // Never let the model introduce repositories outside the allowed set.

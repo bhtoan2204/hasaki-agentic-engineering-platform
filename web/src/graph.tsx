@@ -99,6 +99,7 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
       <div className="flags">
         {step.requires_approval && <span className="flag">approval gate</span>}
         {!!step.run_if && <span className="flag">conditional</span>}
+        {Array.isArray((step as any).config?.merged_from) && (step as any).config.merged_from.length > 0 && <span className="flag" title="FAST profile: analysis steps folded into this session">⊕ {(step as any).config.merged_from.join(" + ")}</span>}
       </div>
       <Handle type="source" position={Position.Right} />
     </div>

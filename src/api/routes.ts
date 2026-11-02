@@ -20,6 +20,7 @@ import {
   listRuns,
   openQuestions,
   pauseRun,
+  previewRun,
   rejectStep,
   reexecuteStep,
   resumeRun,
@@ -103,7 +104,7 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/work-items\/(\d+)\/runs$/,
     ({ p, body }) =>
-      startRun({ definitionKey: String(body.workflow ?? ""), version: body.version, workItemId: num(p[0]), inputs: body.inputs, repositories: body.repositories, title: body.title, start: body.start }),
+      startRun({ definitionKey: String(body.workflow ?? ""), version: body.version, workItemId: num(p[0]), inputs: body.inputs, repositories: body.repositories, title: body.title, start: body.start, profile: body.profile }),
   ],
   // "Analyze Work Item": a read-only workflow (analysis + repository recommendation), no code changes.
   ["POST", /^\/api\/work-items\/(\d+)\/analyze$/, ({ p }) => startRun({ definitionKey: "work-item-analysis", workItemId: num(p[0]) })],
@@ -145,7 +146,15 @@ export const routes: Route[] = [
         repositories: body.repositories,
         title: body.title,
         start: body.start,
+        profile: body.profile,
       }),
+  ],
+  // What would run: profile decision, graph changes and the resolved DAG (nothing is created).
+  [
+    "POST",
+    /^\/api\/runs\/preview$/,
+    ({ body }) =>
+      previewRun({ definitionKey: String(body.workflow ?? ""), version: body.version, workItemId: body.work_item_id ?? null, inputs: body.inputs, repositories: body.repositories?.length ? body.repositories : undefined, profile: body.profile }),
   ],
   ["GET", /^\/api\/runs\/(\d+)$/, ({ p }) => runDetail(num(p[0]))],
   ["GET", /^\/api\/runs\/(\d+)\/events$/, ({ p, url }) => runEvents.list(num(p[0]), Number(url.searchParams.get("after") ?? 0))],
