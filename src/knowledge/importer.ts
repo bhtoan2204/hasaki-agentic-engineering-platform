@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, relative } from "node:path";
+import { config } from "../config.ts";
 import { repositories, repoPath, type RepositoryRow } from "../repos/service.ts";
 import { knowledge, type KnowledgeInput } from "./service.ts";
 import { hashOf } from "../workflow/definitions.ts";
@@ -24,6 +26,8 @@ const SECRET_RE = [
   /\b[\w-]*(password|passwd|secret|api[_-]?key|token|client[_-]?secret)[\w-]*\s*[:=]\s*["']?(?!<|\$\{|\{\{|xxx|\.\.\.|your|example|changeme)[A-Za-z0-9/+_\-.]{12,}/i,
 ];
 const SKIP_PATH = [/env-production/i, /\.env/i, /secret/i, /superpowers\/(plans|specs)\//, /\/node_modules\//, /\/vendor\//];
+/** Interactive/meta skills from ~/.claude that would act autonomously in an unattended step. Imported disabled. */
+export const USER_SKILLS_DISABLED = ["execute", "define", "pr", "address", "rebase-clean", "qa-review", "feedback", "codex-advisor", "skill-creator", "synced", "agent-browser", "upstream", "ask", "decision-analysis", "fact-check"];
 const WIKI_SKIP = [/changelog/i, /build-docs/i, /reference\/links/i, /frontend-demo/i, /authoring\.md$/i];
 
 export interface ImportCandidate extends KnowledgeInput {
@@ -70,7 +74,7 @@ function firstParagraph(text: string) {
       .replace(/^---[\s\S]*?---/, "")
       .split(/\n\s*\n/)
       .map((p) => p.trim())
-      .find((p) => p && !p.startsWith("#") && !p.startsWith("```")) ?? ""
+      .find((p) => p && !p.startsWith("#") && !p.startsWith("```") && !/^this file provides guidance to claude/i.test(p)) ?? ""
   )
     .replace(/\s+/g, " ")
     .slice(0, 300);
@@ -204,6 +208,43 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
     }
   }
 
+  // User-level skills (~/.claude/skills): previously auto-loaded by Claude Code; now imported once into the registry
+  // (agent steps no longer load Claude Code settings layers). Copies of repository skills are skipped; workflow/meta
+  // skills that act on their own (push, open PRs, delegate to other tools) are imported disabled.
+  const repoSkillHashes = new Set([...skills.values()].map((s) => sha(s.text)));
+  const userSkillHashes = new Set<string>();
+  const userDir = process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude", "skills");
+  if (existsSync(userDir)) {
+    for (const name of readdirSync(userDir)) {
+      const file = join(userDir, name, "SKILL.md");
+      if (!existsSync(file) || !statSync(file).isFile()) continue;
+      const text = readFileSync(file, "utf8");
+      // Same content as a repository skill: keep the repository item, but it was available everywhere via ~/.claude,
+      // so it must not shrink to the repositories that happen to contain a copy (widened below).
+      if (repoSkillHashes.has(sha(text))) {
+        userSkillHashes.add(sha(text));
+        continue;
+      }
+      if (looksSecret(text)) {
+        skipped.push({ path: `~/.claude/skills/${name}/SKILL.md`, reason: "looks like it contains credentials" });
+        continue;
+      }
+      const { fields, body } = frontmatter(text);
+      const unattendedUnsafe = USER_SKILLS_DISABLED.includes(name);
+      out.push({
+        key: slug(`user.skill.${name}`),
+        category: "agent_skill",
+        scope_type: "ORGANIZATION",
+        scope_ref: config.organization,
+        title: `Skill: ${fields.name || name}`,
+        content: body.trim().slice(0, MAX_CHARS),
+        enabled: !unattendedUnsafe,
+        metadata: { load: "on_demand", description: (fields.description || firstParagraph(body)).slice(0, 600), origin: "user", ...(unattendedUnsafe ? { disabled_reason: "interactive/workflow skill: acts on its own (push, PR, delegation) — enable deliberately" } : {}) },
+        source: [{ repo: "~/.claude", path: `skills/${name}/SKILL.md`, sha256: sha(text) }],
+      });
+    }
+  }
+
   // Skills: identical copies across repositories → one item for all of them.
   const byName = new Map<string, number>();
   for (const s of skills.values()) byName.set(s.name, (byName.get(s.name) ?? 0) + 1);
@@ -211,13 +252,15 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
     const { fields, body } = frontmatter(s.text);
     const variants = byName.get(s.name)!;
     const repoNames = s.repos.map((r) => r.name);
+    const orgWide = userSkillHashes.has(sha(s.text));
     out.push({
       key: slug(variants > 1 ? `skill.${s.name}.${repoNames[0]}` : `skill.${s.name}`),
       category: "agent_skill",
-      scope_type: "GLOBAL",
+      scope_type: orgWide ? "ORGANIZATION" : "GLOBAL",
+      ...(orgWide ? { scope_ref: config.organization } : {}),
       title: `Skill: ${fields.name || s.name}${variants > 1 ? ` (${repoNames.join(", ")})` : ""}`,
       content: body.trim(),
-      applicability: { repos: repoNames },
+      applicability: orgWide ? {} : { repos: repoNames },
       metadata: { load: "on_demand", description: (fields.description || firstParagraph(body)).slice(0, 600) },
       source: s.repos.map((r, i) => ({ repo: r.name, path: s.paths[i].slice(r.name.length + 1), sha256: sha(s.text) })),
     });
@@ -229,6 +272,13 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
 export async function importFromRepositories(opts: { dryRun?: boolean } = {}): Promise<ImportReport> {
   const { candidates, skipped } = await scanRepositories();
   const report: ImportReport = { candidates: [], skipped, created: 0, updated: 0, unchanged: 0 };
+  // Repositories without a description get the opening paragraph of their CLAUDE.md (improves discovery ranking).
+  if (!opts.dryRun)
+    for (const c of candidates.filter((x) => x.category === "repository_convention" && x.scope_type === "REPOSITORY" && /\.claude$/.test(x.key))) {
+      const repo = await repositories.get(c.scope_ref!);
+      const desc = String((c.metadata as any)?.description ?? "").slice(0, 400);
+      if (repo && !repo.description && desc) await repositories.upsert(repo.name, { description: desc });
+    }
   for (const c of candidates) {
     const { source, ...item } = c;
     const metadata = { ...(item.metadata ?? {}), source, imported_from_repository: true };
@@ -237,14 +287,28 @@ export async function importFromRepositories(opts: { dryRun?: boolean } = {}): P
     if (existing) {
       const v = existing.versions[0];
       // JSONB reorders keys, so compare canonical hashes rather than JSON strings.
-      const same = v.content === c.content && hashOf(v.applicability ?? {}) === hashOf(c.applicability ?? {}) && hashOf(v.metadata?.source ?? null) === hashOf(source);
+      const same =
+        v.content === c.content &&
+        hashOf(v.applicability ?? {}) === hashOf(c.applicability ?? {}) &&
+        hashOf(v.metadata?.source ?? null) === hashOf(source) &&
+        existing.scope_type === c.scope_type &&
+        existing.scope_ref === (c.scope_ref ?? "");
       action = same ? "unchanged" : "update";
     }
     report.candidates.push({ key: c.key, title: c.title, category: c.category, scope: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""}`, repos: [...new Set(source.map((s) => s.repo))], chars: c.content.length, action });
     report[action === "create" ? "created" : action === "update" ? "updated" : "unchanged"]++;
     if (opts.dryRun || action === "unchanged") continue;
     if (action === "create") await knowledge.create({ ...item, metadata, created_by: "repository import", change_note: `imported from ${source.map((s) => `${s.repo}/${s.path}`).join(", ")}` });
-    else await knowledge.update(c.key, { content: c.content, applicability: c.applicability ?? {}, metadata, change_note: "re-imported: source file changed", created_by: "repository import" });
+    else
+      await knowledge.update(c.key, {
+        content: c.content,
+        applicability: c.applicability ?? {},
+        metadata,
+        scope_type: c.scope_type,
+        scope_ref: c.scope_ref ?? "",
+        change_note: "re-imported: source file changed",
+        created_by: "repository import",
+      });
   }
   return report;
 }

@@ -205,6 +205,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       {tab === "overview" && (
         <div>
           {step.type === "command" && <BaselineSummary results={(attempt?.output ?? attempt?.error?.details)?.results} />}
+          {attempt?.metrics && <AttemptMetrics m={attempt.metrics} />}
           <div className="kv">
             <span>Status</span><span><Badge s={step.status} /></span>
             <span>Depends on</span><span className="mono">{step.depends_on.join(", ") || "—"}</span>
@@ -359,9 +360,31 @@ function CommandLog({ attemptId, live, tick, startedAt }: { attemptId: number; l
   );
 }
 
+function AttemptMetrics({ m }: { m: any }) {
+  const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="card" style={{ padding: 10 }}>
+      <h4>Metrics attempt</h4>
+      <div className="kv">
+        <span>Model</span><span className="mono">{m.model}</span>
+        <span>Cost / turns</span><span>${Number(m.cost_usd ?? 0).toFixed(4)} · {m.turns} turns · {Math.round((m.duration_ms ?? 0) / 1000)}s · {m.sessions} session</span>
+        <span>Tokens</span><span>in {m.tokens?.input} · out {m.tokens?.output} · cache read {m.tokens?.cache_read} · cache write {m.tokens?.cache_creation}</span>
+        <span>Disclosure</span><span>{m.disclosure?.inline} inline · {m.disclosure?.index} index · {m.disclosure?.search} search-only · upstream {m.upstream?.full} full / {m.upstream?.summary} tóm tắt</span>
+        <span>Tools</span><span className="small">{tools.map(([k, v]) => `${k.replace("mcp__platform__", "platform·")}×${v}`).join(", ") || "—"}{m.tool_errors ? ` · ${m.tool_errors} lỗi` : ""}</span>
+        <span>Skills nạp</span><span className="small">{(m.skills_loaded ?? []).join(", ") || "—"}{m.knowledge_searches?.length ? ` · tìm: ${m.knowledge_searches.map((q: string) => `"${q}"`).join(", ")}` : ""}</span>
+        <span>Integration</span><span className="small">{(m.integration_calls ?? []).map((c: any) => `${c.name} ${c.ok ? "✓" : "✗"} ${c.ms}ms`).join(", ") || "—"}</span>
+        <span>Subagents</span><span className="small">{(m.subagents ?? []).map((s: any) => s.type).join(", ") || "—"}</span>
+        {m.denied?.length > 0 && <><span>Bị chặn</span><span className="small err">{m.denied.map((d: any) => `${d.tool}${d.subagent ? ` (${d.subagent})` : ""}: ${d.reason}`).join(" · ")}</span></>}
+      </div>
+    </div>
+  );
+}
+
 function KnowledgeApplied({ snapshot }: { snapshot: any }) {
   if (!snapshot) return <Empty>Chưa có context snapshot (bước chưa chạy).</Empty>;
   const c = snapshot.content;
+  const plan = new Map<string, any>((c.prompt_plan?.knowledge ?? []).map((d: any) => [d.key, d]));
+  const TIER: Record<string, string> = { inline: "COMPLETED", index: "READY", search: "PENDING" };
   const groups: Record<string, any[]> = {};
   for (const k of c.knowledge) (groups[k.category] ??= []).push(k);
   return (
@@ -376,7 +399,9 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
           {items.map((k) => (
             <details key={k.key} className="card" style={{ padding: "6px 10px", marginBottom: 6 }}>
               <summary style={{ color: "var(--text)" }}>
-                <b>{k.title}</b> <span className="mono muted">{k.key} v{k.version}</span> <span className="muted small">· {k.reason}</span>
+                <b>{k.title}</b> <span className="mono muted">{k.key} v{k.version}</span> <span className="muted small">· {k.reason}</span>{" "}
+                {plan.get(k.key) && <Badge s={TIER[plan.get(k.key).disclosure]}>{plan.get(k.key).disclosure} · {plan.get(k.key).score}</Badge>}
+                {plan.get(k.key) && <div className="muted small" style={{ marginLeft: 16 }}>{plan.get(k.key).why}</div>}
               </summary>
               <Markdown text={k.content} />
               <div className="row tight"><a href={`#/knowledge/${k.key}`} className="small">Mở trong Knowledge →</a></div>
@@ -384,6 +409,14 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
           ))}
         </div>
       ))}
+      {c.prompt_plan?.upstream && Object.keys(c.prompt_plan.upstream).length > 0 && (
+        <>
+          <h3>Upstream trong prompt</h3>
+          {Object.entries<any>(c.prompt_plan.upstream).map(([k, u]) => (
+            <div key={k} className="small"><b>{k}</b> {u.direct && <span className="muted">(trực tiếp)</span>} — {u.mode === "full" ? "đầy đủ" : <span style={{ color: "var(--warn)" }}>tóm tắt</span>} ~{u.tokens} / {u.full_tokens} tokens</div>
+          ))}
+        </>
+      )}
       {c.overridden?.length > 0 && (
         <>
           <h3>Overridden</h3>

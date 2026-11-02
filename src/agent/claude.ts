@@ -10,7 +10,68 @@ import type { ExecResult } from "../workflow/types.ts";
 import type { RankedRepository, RepositoryRow } from "../repos/service.ts";
 import { downloadAttachments } from "./attachments.ts";
 import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "./stepPrompt.ts";
-import { decide, toolsFor, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
+import { decide, toolsFor, SUBAGENT_PLATFORM_TOOLS, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
+import { scoreKnowledge } from "../context/plan.ts";
+import { callTool, capResult, describeTool, integrationTools, listTools } from "./toolRegistry.ts";
+
+/** Per-attempt observability, accumulated across the SDK message stream (and across a resume fallback). */
+export interface AgentMetrics {
+  model: string;
+  sessions: number;
+  turns: number;
+  duration_ms: number;
+  cost_usd: number;
+  tokens: { input: number; output: number; cache_read: number; cache_creation: number };
+  tool_calls: Record<string, number>;
+  tool_errors: number;
+  denied: Array<{ tool: string; reason: string; subagent?: string }>;
+  skills_loaded: string[];
+  knowledge_searches: string[];
+  integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }>;
+  subagents: Array<{ type: string; id: string; started_at: string; ended_at?: string }>;
+  disclosure: { inline: number; index: number; search: number };
+  upstream: { full: number; summary: number };
+}
+
+export function newMetrics(model: string): AgentMetrics {
+  return { model, sessions: 0, turns: 0, duration_ms: 0, cost_usd: 0, tokens: { input: 0, output: 0, cache_read: 0, cache_creation: 0 }, tool_calls: {}, tool_errors: 0, denied: [], skills_loaded: [], knowledge_searches: [], integration_calls: [], subagents: [], disclosure: { inline: 0, index: 0, search: 0 }, upstream: { full: 0, summary: 0 } };
+}
+
+/** Fold one SDK message into the metrics (pure; unit-tested). */
+export function accumulateMetrics(m: AgentMetrics, msg: any) {
+  if (msg.type === "system" && msg.subtype === "init") m.sessions++;
+  else if (msg.type === "assistant") {
+    for (const b of msg.message?.content ?? []) if (b.type === "tool_use") m.tool_calls[b.name] = (m.tool_calls[b.name] ?? 0) + 1;
+  } else if (msg.type === "user" && Array.isArray(msg.message?.content)) {
+    for (const b of msg.message.content) if (b.type === "tool_result" && b.is_error) m.tool_errors++;
+  } else if (msg.type === "result") {
+    m.turns += msg.num_turns ?? 0;
+    m.duration_ms += msg.duration_ms ?? 0;
+    m.cost_usd = Math.round((m.cost_usd + (msg.total_cost_usd ?? 0)) * 1e6) / 1e6;
+    const u = msg.usage ?? {};
+    m.tokens.input += u.input_tokens ?? 0;
+    m.tokens.output += u.output_tokens ?? 0;
+    m.tokens.cache_read += u.cache_read_input_tokens ?? 0;
+    m.tokens.cache_creation += u.cache_creation_input_tokens ?? 0;
+  }
+}
+
+/** Optional subagents for independent, parallel, read-only work. Never registered unless the step opts in. */
+const SUBAGENTS: Record<string, { description: string; prompt: string }> = {
+  explorer: {
+    description: "Read-only codebase exploration: locate implementations, trace call paths, gather file:line evidence. Use for independent searches that can run in parallel.",
+    prompt:
+      "You are a read-only exploration subagent of an engineering workflow step. Investigate exactly what you were asked, " +
+      "report concise findings with file:line evidence, and state what you could not verify. Never modify files, never run " +
+      "commands that change state. Load platform knowledge with mcp__platform__read_knowledge / search_knowledge when useful.",
+  },
+  reviewer: {
+    description: "Read-only review of a diff or set of files against conventions, business rules and security policies. Use for an independent second look.",
+    prompt:
+      "You are a read-only review subagent. Review what you were asked against the conventions and rules available through " +
+      "mcp__platform__search_knowledge / read_knowledge. Report findings as severity, file:line, issue, suggestion. Never modify files.",
+  },
+};
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
@@ -66,7 +127,7 @@ async function recordTranscript(ctx: ExecutionContext, msg: any, cwd: string) {
  * Platform MCP tools, bound to one attempt (run + step + attempt), so every question, note, branch and
  * result lands on the right execution record.
  */
-function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyContext, onSubmit: (o: Record<string, unknown>) => void) {
+function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyContext, onSubmit: (o: Record<string, unknown>) => void, metrics: AgentMetrics) {
   const editable = ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories;
   const tools: SdkMcpToolDefinition<any>[] = [
     tool(
@@ -114,18 +175,69 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
       { key: z.string() },
       async ({ key }) => {
         const k = ctx.context.knowledge.find((x) => x.key === key);
-        if (!k) return text(`"${key}" is not available to this step. Available: ${ctx.context.knowledge.map((x) => x.key).join(", ")}`);
-        await ctx.log("system", `loaded knowledge ${key} v${k.version}`);
+        if (!k) return text(`"${key}" is not available to this step. Use search_knowledge to find applicable items.`);
+        await ctx.log("system", `loaded knowledge ${key} v${k.version}`, { knowledge: key, version: k.version });
+        if (!metrics.skills_loaded.includes(key)) metrics.skills_loaded.push(key);
         return text(`# ${k.title} (${k.key} v${k.version})\n\n${k.content}`);
       },
     ),
     tool(
+      "search_knowledge",
+      "Search the skills, business rules and reference docs that apply to this step (including ones not listed in the prompt). Returns keys to load with read_knowledge.",
+      { query: z.string().min(2), limit: z.number().int().min(1).max(20).optional() },
+      async ({ query, limit }) => {
+        metrics.knowledge_searches.push(query);
+        const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
+        const hits = ctx.context.knowledge
+          .map((k) => ({ k, ...scoreKnowledge(k as any, query, ctx.step.type) }))
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit ?? 8)
+          .map((x) => ({ key: x.k.key, title: x.k.title, category: x.k.category, description: String((x.k.metadata as any)?.description ?? "").slice(0, 300), score: x.score, already_in_prompt: tier.get(x.k.key) === "inline" }));
+        await ctx.log("system", `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`, { query, hits: hits.map((h) => h.key) });
+        return text(hits.length ? JSON.stringify(hits, null, 2) : "No applicable knowledge matches. Try other words.");
+      },
+    ),
+    tool(
       "read_step_output",
-      "Read the full output of an earlier (completed) step of this run.",
-      { step_key: z.string() },
-      async ({ step_key }) => {
+      "Read the FULL output of an earlier step of this run (the prompt may only contain a summary). `attempt` = attempt number for a historical/invalidated output.",
+      { step_key: z.string(), attempt: z.number().int().positive().optional() },
+      async ({ step_key, attempt }) => {
+        if (attempt) {
+          const row = await one(pool, "SELECT a.number, a.generation, a.status, a.output, a.invalidated_at FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.key = $2 AND a.number = $3", [ctx.run.id, step_key, attempt]);
+          return text(row ? capResult(row) : `No attempt #${attempt} of "${step_key}".`);
+        }
         const u = ctx.input.upstream[step_key];
-        return text(u ? JSON.stringify(u.output, null, 2) : `No completed upstream step "${step_key}". Available: ${Object.keys(ctx.input.upstream).join(", ")}`);
+        return text(u ? capResult(u.output) : `No completed upstream step "${step_key}". Available: ${Object.keys(ctx.input.upstream).join(", ")}`);
+      },
+    ),
+    tool(
+      "list_tools",
+      "Discover domain integration tools (Hasaki Work, Jira, Bitbucket, repository registry, this run's history/changes). Optional query ranks by relevance.",
+      { query: z.string().optional() },
+      async ({ query }) => text(JSON.stringify(listTools(query, { mode }), null, 2)),
+    ),
+    tool(
+      "describe_tool",
+      "Full description and input schema of an integration tool (load before the first call).",
+      { name: z.string() },
+      async ({ name }) => {
+        try {
+          return text(JSON.stringify(describeTool(name), null, 2));
+        } catch (e) {
+          return text((e as Error).message);
+        }
+      },
+    ),
+    tool(
+      "call_tool",
+      "Call an integration tool by name with arguments matching its schema (see describe_tool).",
+      { name: z.string(), arguments: z.record(z.string(), z.any()).optional() },
+      async ({ name, arguments: args }) => {
+        const r = await callTool(name, args ?? {}, { runId: ctx.run.id, allowedRepositories: ctx.run.allowed_repositories, mode });
+        metrics.integration_calls.push({ name, ok: r.ok, ms: r.ms, ...(r.error ? { error: r.error.slice(0, 200) } : {}) });
+        await ctx.log("system", `integration ${name} ${r.ok ? "ok" : "failed"} (${r.ms}ms)${r.error ? `: ${r.error}` : ""}`, { integration: name, ok: r.ok, ms: r.ms });
+        return text(r.ok ? capResult(r.result) : `ERROR: ${r.error}`);
       },
     ),
   ];
@@ -184,20 +296,53 @@ export const claudeExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const ws = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
-    const policy: PolicyContext = { mode, workspaces: ws.map((w) => w.path), baseBranch: config.baseBranch, protectedRoots: [config.reposRoot] };
+    const delegationCfg = ctx.step.config.delegation as { enabled?: boolean; agents?: string[] } | undefined;
+    const delegation = delegationCfg?.enabled === true;
+    const policy: PolicyContext = {
+      mode,
+      workspaces: ws.map((w) => w.path),
+      baseBranch: config.baseBranch,
+      protectedRoots: [config.reposRoot],
+      delegation,
+      isReadOnlyIntegration: (name) => integrationTools().find((t) => t.name === name)?.readOnly === true,
+    };
+    const settingSources = config.agent.settingSources;
+    const nativeTools = toolsFor(mode, { delegation, claudeSkills: settingSources.length > 0 });
+    const agents = delegation
+      ? Object.fromEntries(
+          (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
+            .filter((n) => SUBAGENTS[n])
+            .map((n) => [n, { ...SUBAGENTS[n], tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
+        )
+      : undefined;
+    const metrics = newMetrics((ctx.step.config.model as string) || config.model || "default");
+    for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
+    for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
     const cwd = taskDir(workspaceKey(ctx.run.branch));
     let submitted: Record<string, unknown> | undefined;
 
     const resume = await resumableSession(ctx, cwd);
     const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload) : [];
-    const freshPrompt = () => buildUserPrompt(ctx.input, files, []);
+    const freshPrompt = () => buildUserPrompt(ctx.input, files, [], ctx.context.upstream);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode);
 
     const preToolUse: HookCallback = async (input: any) => {
-      const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy, input.cwd);
+      const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy, input.cwd, input.agent_id);
       if (d.allow) return {};
-      await ctx.log("tool", `denied ${input.tool_name}: ${d.reason}`);
+      metrics.denied.push({ tool: input.tool_name, reason: d.reason, ...(input.agent_id ? { subagent: input.agent_type ?? input.agent_id } : {}) });
+      await ctx.log("tool", `denied ${input.tool_name}${input.agent_id ? ` (subagent ${input.agent_type ?? ""})` : ""}: ${d.reason}`);
       return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: d.reason } };
+    };
+    const subagentStart: HookCallback = async (input: any) => {
+      metrics.subagents.push({ type: input.agent_type, id: input.agent_id, started_at: new Date().toISOString() });
+      await ctx.log("system", `subagent ${input.agent_type} started`, { subagent: input.agent_type, agent_id: input.agent_id });
+      return {};
+    };
+    const subagentStop: HookCallback = async (input: any) => {
+      const s = metrics.subagents.find((x) => x.id === input.agent_id);
+      if (s) s.ended_at = new Date().toISOString();
+      await ctx.log("system", `subagent ${input.agent_type} finished`, { subagent: input.agent_type, agent_id: input.agent_id });
+      return {};
     };
     const canUseTool: CanUseTool = async (name, input) => {
       const d = decide(name, input, policy);
@@ -224,16 +369,19 @@ export const claudeExecutor: StepExecutor = {
             model: (ctx.step.config.model as string) || config.model || undefined,
             maxTurns: Number(ctx.step.config.max_turns ?? config.maxTurns),
             systemPrompt: { type: "preset", preset: "claude_code", append: systemAppend },
-            settingSources: ["user"], // ~/.claude skills (oms-*, commit, ...) and user CLAUDE.md
-            mcpServers: { platform: platformServer(ctx, mode, policy, (o) => (submitted = o)) },
-            tools: toolsFor(mode),
+            // Skills come from the platform registry (read_knowledge); Claude Code settings layers only if configured.
+            settingSources,
+            mcpServers: { platform: platformServer(ctx, mode, policy, (o) => (submitted = o), metrics) },
+            tools: nativeTools,
+            ...(agents ? { agents } : {}),
             permissionMode: "default",
             canUseTool,
-            hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
+            hooks: { PreToolUse: [{ hooks: [preToolUse] }], SubagentStart: [{ hooks: [subagentStart] }], SubagentStop: [{ hooks: [subagentStop] }] },
             disallowedTools: ["AskUserQuestion"],
           },
         })) {
           await recordTranscript(ctx, msg, cwd);
+          accumulateMetrics(metrics, msg);
           if (msg.type === "assistant") result.assistantTurns++;
           else if (msg.type === "result") {
             result.isError = msg.is_error;
@@ -246,8 +394,15 @@ export const claudeExecutor: StepExecutor = {
       return result;
     };
 
-    await ctx.log("system_prompt", systemAppend, { mode, tools: toolsFor(mode), knowledge: ctx.context.knowledge.map((k) => `${k.key}@${k.version}`) });
+    await ctx.log("system_prompt", systemAppend, {
+      mode,
+      tools: nativeTools,
+      setting_sources: settingSources,
+      subagents: agents ? Object.keys(agents) : [],
+      knowledge: ctx.context.disclosure.map((d) => `${d.key}:${d.disclosure}`),
+    });
     let result;
+    try {
     if (resume && existsSync(cwd)) {
       await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
       try {
@@ -260,10 +415,13 @@ export const claudeExecutor: StepExecutor = {
         // Session missing or not resumable: rebuild from durable artifacts instead.
         await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
         await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
-        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt)));
+        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream));
       }
     } else {
-      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt)) : freshPrompt());
+      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream) : freshPrompt());
+    }
+    } finally {
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
     }
 
     if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: true };

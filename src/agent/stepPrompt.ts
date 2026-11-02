@@ -39,10 +39,14 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
     String(cfg.instructions ?? `Perform the "${step.name}" step.`),
   ];
   if (cfg.output_contract) lines.push("", "## Output contract (submit_result.output must match)", String(cfg.output_contract));
-  // Large reference material (imported skills, wiki pages, scoped cursor rules) is listed with a description only;
-  // the agent loads the full text with mcp__platform__read_knowledge when it is relevant. Explicit assignments are inlined.
-  const onDemand = ctx.knowledge.filter((k) => (k.metadata as any)?.load === "on_demand" && k.reason !== "assigned to step");
-  const inline = ctx.knowledge.filter((k) => !onDemand.includes(k));
+  // Progressive disclosure (planned and recorded in the context snapshot): inline → full text; index → one line, body
+  // via read_knowledge; search → not shown, reachable with search_knowledge. Without a plan, fall back to load hints.
+  const tier = new Map((ctx.disclosure ?? []).map((d) => [d.key, d.disclosure]));
+  const tierOf = (k: (typeof ctx.knowledge)[number]) =>
+    tier.get(k.key) ?? ((k.metadata as any)?.load === "on_demand" && k.reason !== "assigned to step" ? "index" : "inline");
+  const inline = ctx.knowledge.filter((k) => tierOf(k) === "inline");
+  const onDemand = ctx.knowledge.filter((k) => tierOf(k) === "index");
+  const hidden = ctx.knowledge.filter((k) => tierOf(k) === "search").length;
   if (inline.length) {
     lines.push("", "## Applicable knowledge (platform-curated, trusted)");
     for (const k of inline) {
@@ -59,6 +63,20 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
     );
     for (const k of onDemand) lines.push(`- \`${k.key}\` [${k.category}] ${k.title}: ${String((k.metadata as any)?.description ?? "").replace(/\s+/g, " ").slice(0, 400)}`);
   }
+  if (hidden) lines.push("", `${hidden} more applicable skills/docs are not listed: find them with mcp__platform__search_knowledge("<what you need>").`);
+  lines.push(
+    "",
+    "## Integration tools",
+    "Domain integrations (Hasaki Work, Jira, Bitbucket, repository registry, this run's history/changes) are not loaded up front:",
+    "mcp__platform__list_tools to discover them, mcp__platform__describe_tool for the full contract, mcp__platform__call_tool to use one.",
+  );
+  if (step.config?.delegation?.enabled)
+    lines.push(
+      "",
+      "## Delegation (optional)",
+      "You MAY hand independent, read-only exploration or review tasks to the `explorer` / `reviewer` subagents (Task tool) to run them in parallel.",
+      "Do not delegate by default, never delegate edits, and do the final reasoning and submit_result yourself. Subagents run with read-only permissions.",
+    );
   return lines.join("\n");
 }
 
@@ -75,13 +93,23 @@ export function renderWorkItem(input: StepInput, files: string[]) {
   return [`# ${wi.code}: ${wi.title}`, `- Source: ${wi.source}`, `- Project: ${wi.project || "?"}`, "", "## Description", wi.description || "(empty)"].join("\n");
 }
 
-export function buildUserPrompt(input: StepInput, files: string[], notes: string[] = []): string {
+export function buildUserPrompt(
+  input: StepInput,
+  files: string[],
+  notes: string[] = [],
+  upstream?: { plan: Record<string, { mode: string; full_tokens: number }>; text: Record<string, string> },
+): string {
   const parts = [`Execute this workflow step now. Run inputs: ${JSON.stringify(input.run.inputs ?? {})}`];
   parts.push("## Engineering request", untrusted("work_item", renderWorkItem(input, files)));
   const up = Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED");
   if (up.length) {
     parts.push("## Outputs of earlier steps");
-    for (const [k, u] of up) parts.push(untrusted(`step:${k}#attempt-${u.attempt_id}`, stringifyCapped(u.output)));
+    for (const [k, u] of up) {
+      const p = upstream?.plan[k];
+      const body = upstream?.text[k] ?? stringifyCapped(u.output);
+      const note = p?.mode === "summary" ? `\n(summarized from ~${p.full_tokens} tokens to fit the context budget — call mcp__platform__read_step_output("${k}") for the full output)` : "";
+      parts.push(untrusted(`step:${k}#attempt-${u.attempt_id}`, body + note));
+    }
   }
   if (input.answers.length)
     parts.push("## Developer answers to earlier questions in this step", input.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n"));

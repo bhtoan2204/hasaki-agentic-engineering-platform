@@ -8,6 +8,7 @@ import { WorkflowsPage } from "./pages/Workflows.tsx";
 import { WorkflowEditor } from "./pages/WorkflowEditor.tsx";
 import { KnowledgePage } from "./pages/Knowledge.tsx";
 import { RepositoriesPage } from "./pages/Repositories.tsx";
+import { InsightsPage } from "./pages/Insights.tsx";
 
 function useHash() {
   const [hash, setHash] = useState(location.hash.slice(1) || "/runs");
@@ -26,6 +27,7 @@ const NAV: Array<[string, string]> = [
   ["workflows", "Workflows"],
   ["knowledge", "Knowledge"],
   ["repositories", "Repositories"],
+  ["insights", "Insights"],
 ];
 
 export function App() {
@@ -72,6 +74,9 @@ export function App() {
       break;
     case "repositories":
       page = <RepositoriesPage name={parts[1]} />;
+      break;
+    case "insights":
+      page = <InsightsPage />;
       break;
     default:
       page = <RunsPage />;

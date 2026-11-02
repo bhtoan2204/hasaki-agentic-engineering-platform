@@ -58,3 +58,25 @@ test("repository knowledge import: CLAUDE.md, shared skills, secrets skipped, re
   assert.ok(!looksSecret("set API_KEY=<your key> in .env"));
   assert.equal(frontmatter("---\nname: x\n---\nbody").fields.name, "x");
 });
+
+test("user-level ~/.claude skills: imported once (copies of repo skills skipped), autonomous workflow skills disabled", async () => {
+  const dir = join(config.reposRoot, "..", "user-skills");
+  for (const [n, body] of [["solid", "---\nname: solid\ndescription: apply SOLID\n---\n# SOLID\nSRP first.\n"], ["tdd", "---\nname: tdd\ndescription: red green refactor\n---\n# TDD\n"], ["pr", "---\nname: pr\ndescription: push and open a PR\n---\n# PR\n"]] as const) {
+    mkdirSync(join(dir, n), { recursive: true });
+    writeFileSync(join(dir, n, "SKILL.md"), body);
+  }
+  process.env.CLAUDE_USER_SKILLS_DIR = dir;
+  const r = await importFromRepositories();
+  const keys = r.candidates.map((c) => c.key);
+  assert.ok(!keys.includes("user.skill.solid"), "identical to the repository copy of solid");
+  const solidItem = (await knowledge.get("skill.solid"))!;
+  assert.equal(solidItem.scope_type, "ORGANIZATION", "was available everywhere via ~/.claude: widened, not limited to the repos holding a copy");
+  assert.deepEqual(solidItem.versions[0].applicability, {});
+  assert.ok(keys.includes("user.skill.tdd"));
+  const tdd = (await knowledge.get("user.skill.tdd"))!;
+  assert.equal(tdd.scope_type, "ORGANIZATION");
+  assert.equal(tdd.enabled, true);
+  assert.equal((await knowledge.get("user.skill.pr"))!.enabled, false, "pushes/opens PRs on its own: imported disabled");
+  process.env.CLAUDE_USER_SKILLS_DIR = join(config.reposRoot, "..", "empty-user-skills");
+  assert.ok((await repositories.get("oms-api"))!.description.includes("Money fields"), "repo description filled from CLAUDE.md");
+});

@@ -9,8 +9,20 @@ import { resolve, sep } from "node:path";
  */
 export type ToolMode = "analysis" | "coding";
 
-const BASE_TOOLS = ["Read", "Grep", "Glob", "Bash", "Skill", "TodoWrite", "WebFetch", "WebSearch", "Task"];
-export const toolsFor = (mode: ToolMode) => (mode === "coding" ? [...BASE_TOOLS, "Edit", "Write", "NotebookEdit"] : BASE_TOOLS);
+const BASE_TOOLS = ["Read", "Grep", "Glob", "Bash", "TodoWrite", "WebFetch", "WebSearch"];
+/**
+ * Native tools per step. `Task`/`Agent` (subagents) only when the step opts into delegation; `Skill` only when Claude
+ * Code settings layers are loaded (otherwise skills come exclusively from the platform registry via read_knowledge).
+ */
+export const toolsFor = (mode: ToolMode, opts: { delegation?: boolean; claudeSkills?: boolean } = {}) => [
+  ...BASE_TOOLS,
+  ...(opts.claudeSkills ? ["Skill"] : []),
+  ...(opts.delegation ? ["Task", "Agent"] : []),
+  ...(mode === "coding" ? ["Edit", "Write", "NotebookEdit"] : []),
+];
+
+/** Platform tools a subagent may use: read-only ones. */
+export const SUBAGENT_PLATFORM_TOOLS = ["read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool"].map((t) => `mcp__platform__${t}`);
 
 export interface PolicyContext {
   mode: ToolMode;
@@ -19,6 +31,10 @@ export interface PolicyContext {
   baseBranch: string;
   /** Primary checkouts (reposRoot): readable, never modifiable — neither by Edit/Write nor by shell commands. */
   protectedRoots?: string[];
+  /** The step allows subagent delegation (Task/Agent). */
+  delegation?: boolean;
+  /** For call_tool from subagents: is the named integration tool read-only? */
+  isReadOnlyIntegration?: (name: string) => boolean;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -105,9 +121,26 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
   return v ? deny(`analysis steps may only run read-only commands; ${v}`) : allow;
 }
 
-export function decide(tool: string, input: Record<string, unknown>, ctx: PolicyContext, cwd?: string): Decision {
+/**
+ * `agentId` is set by the PreToolUse hook when a subagent makes the call. Subagents inherit the step's restrictions and
+ * are additionally read-only: analysis policy, read-only platform tools, no nested delegation.
+ */
+export function decide(tool: string, input: Record<string, unknown>, ctx: PolicyContext, cwd?: string, agentId?: string): Decision {
+  if (agentId) {
+    if (tool.startsWith("mcp__platform__")) {
+      if (!SUBAGENT_PLATFORM_TOOLS.includes(tool)) return deny(`subagents are read-only: ${tool.replace("mcp__platform__", "")} is reserved for the main agent`);
+      if (tool === "mcp__platform__call_tool" && !(ctx.isReadOnlyIntegration?.(String(input.name ?? "")) ?? false))
+        return deny("subagents may only call read-only integration tools");
+      return allow;
+    }
+    if (tool === "Task" || tool === "Agent") return deny("subagents cannot delegate further");
+    return decide(tool, input, { ...ctx, mode: "analysis", delegation: false }, cwd);
+  }
   if (tool.startsWith("mcp__platform__")) return allow;
   switch (tool) {
+    case "Task":
+    case "Agent":
+      return ctx.delegation ? allow : deny("delegation is not enabled for this step (step config delegation.enabled)");
     case "Read":
     case "Grep":
     case "Glob":
@@ -116,8 +149,6 @@ export function decide(tool: string, input: Record<string, unknown>, ctx: Policy
     case "WebFetch":
     case "WebSearch":
     case "Skill":
-    case "Task":
-    case "Agent":
       return allow;
     case "Edit":
     case "Write":

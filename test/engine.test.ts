@@ -619,3 +619,30 @@ test("server shutdown kills detached command process groups (no orphaned go test
   await worker;
   assert.equal(alive(), "0", "no orphaned process left");
 });
+
+test("context snapshot records the prompt plan; big upstream outputs are summarized; metrics are persisted", async () => {
+  const key = await customWorkflow([
+    { key: "investigate", type: "agent" },
+    { key: "fix", type: "agent", depends_on: ["investigate"], config: { upstream_tokens: 800, instructions: "fix the refund" } },
+  ]);
+  scripts.investigate = () => ({ kind: "completed", output: { summary: "cause", evidence: Array.from({ length: 400 }, (_, i) => `a.go:${i} ${"x".repeat(60)}`) } });
+  scripts.fix = async (ctx) => {
+    await ctx.recordMetrics({ cost_usd: 0.42, turns: 7, tool_calls: { Read: 3 } });
+    return { kind: "completed", output: { ok: true } };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  const fixCtx = seen.fix.find((c) => c.run.id === run.id)!;
+  assert.equal(fixCtx.context.upstream.plan.investigate.mode, "summary");
+  assert.ok(fixCtx.context.upstream.plan.investigate.tokens <= 800);
+  const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [fixCtx.context.snapshot_id]);
+  assert.equal(snap.content.prompt_plan.upstream.investigate.mode, "summary");
+  assert.ok(Array.isArray(snap.content.prompt_plan.knowledge));
+  assert.deepEqual(snap.content.prompt_plan.setting_sources, []);
+  const a = (await attemptsOf(run.id, "fix"))[0];
+  assert.equal(a.metrics.cost_usd, 0.42);
+  const { runMetrics, metricsSummary } = await import("../src/api/metrics.ts");
+  assert.equal((await runMetrics(run.id)).totals.cost_usd, 0.42);
+  const summary = await metricsSummary(1);
+  assert.ok(summary.tools.some((t: any) => t.tool === "Read"));
+});

@@ -17,6 +17,8 @@ export interface ExecutionContext {
   /** Persist questions against this attempt immediately (used by the ask_user MCP tool). */
   ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;
   recordSession(sessionId: string, cwd: string, model?: string): Promise<void>;
+  /** Observability: tokens, cost, tool usage, skills loaded, integration calls, subagents (merged into attempt.metrics). */
+  recordMetrics(metrics: Record<string, unknown>): Promise<void>;
 }
 
 export interface StepExecutor {
@@ -35,7 +37,7 @@ export function getExecutor(type: StepType): StepExecutor {
   return e;
 }
 
-export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "ask" | "recordSession">): ExecutionContext {
+export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "ask" | "recordSession" | "recordMetrics">): ExecutionContext {
   const { run, step, attempt } = base;
   return {
     ...base,
@@ -64,6 +66,9 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
           x.options?.[0] ?? null,
         ]);
       return questions.length;
+    },
+    async recordMetrics(m) {
+      await q(pool, "UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || $2::jsonb WHERE id = $1", [attempt.id, json(m)]);
     },
     async recordSession(sessionId, cwd, model = "") {
       await q(pool, "UPDATE workflow_step_attempts SET agent_session_id = $2 WHERE id = $1", [attempt.id, sessionId]);

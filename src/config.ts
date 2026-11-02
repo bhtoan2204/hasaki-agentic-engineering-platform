@@ -58,6 +58,20 @@ export interface Config {
     heartbeatSeconds: number;
     pollMs: number;
   };
+  /** Agent context and capability shaping (single agent + skills + tools). */
+  agent: {
+    /**
+     * Claude Code settings layers loaded by agent steps. Default [] so skills come from ONE place, the platform
+     * knowledge registry (imported from repos and ~/.claude/skills), instead of also being auto-loaded by Claude Code.
+     */
+    settingSources: Array<"user" | "project" | "local">;
+    /** Token budget for knowledge inlined in the system prompt (explicit + mandatory items always included). */
+    inlineKnowledgeTokens: number;
+    /** How many on-demand skills/docs are listed in the prompt index; the rest are reachable via search_knowledge. */
+    knowledgeIndexSize: number;
+    /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
+    upstreamTokens: number;
+  };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
     baseUrl: string;
@@ -103,6 +117,7 @@ const defaults: Config = {
   organization: "hasaki",
   scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
+  agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
 
 function load(): Config {
@@ -115,6 +130,7 @@ function load(): Config {
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
     jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
+    agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
   };
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;

@@ -429,6 +429,9 @@ function StepForm({ step, spec, knowledge, updateStep, renameStep, removeStep }:
           <Field label="Output contract"><textarea className="code" rows={2} value={cfg.output_contract ?? ""} onChange={(e) => setCfg("output_contract", e.target.value)} /></Field>
           <Field label="Skills"><MultiPick value={cfg.skills ?? []} options={knowledgeOptions(knowledge, true)} placeholder="+ gán skill" onChange={(v) => setCfg("skills", v.length ? v : undefined)} /></Field>
           <Field label="Business rules / guidelines"><MultiPick value={cfg.knowledge ?? []} options={knowledgeOptions(knowledge, false)} placeholder="+ gán knowledge" onChange={(v) => setCfg("knowledge", v.length ? v : undefined)} /></Field>
+          <label className="small" title="Optional: the agent may hand independent read-only exploration/review to explorer/reviewer subagents running in parallel. Off by default.">
+            <input type="checkbox" checked={!!cfg.delegation?.enabled} onChange={(e) => setCfg("delegation", e.target.checked ? { enabled: true, agents: ["explorer", "reviewer"] } : undefined)} /> Cho phép delegate cho subagent read-only (explorer / reviewer) để chạy song song
+          </label>
           <div className="grid2">
             <Field label="Model (trống = mặc định)"><input value={cfg.model ?? ""} onChange={(e) => setCfg("model", e.target.value)} /></Field>
             <Field label="Max turns"><input type="number" value={cfg.max_turns ?? ""} onChange={(e) => setCfg("max_turns", e.target.value ? Number(e.target.value) : undefined)} /></Field>

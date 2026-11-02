@@ -131,6 +131,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span>Finished</span><span>{time(run.finished_at)}</span>
                 {run.error && <><span>Error</span><span className="err">{run.error}</span></>}
               </div>
+              <RunTotals runId={id} tick={tick} />
               {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
               <p className="muted small">Bấm vào một node để xem cấu hình, input/output, knowledge, hội thoại Claude, câu hỏi và lịch sử attempt.</p>
               {run.pull_requests.length > 0 && (
@@ -181,6 +182,23 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
         </a>
       ))}
       <span className="muted small">— tăng scheduler.workers trong config.json để chạy song song.</span>
+    </div>
+  );
+}
+
+function RunTotals({ runId, tick }: { runId: number; tick: number }) {
+  const { data, reload } = useApi<any>(`/api/metrics/runs/${runId}`);
+  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!data) return null;
+  const t = data.totals;
+  return (
+    <div className="card" style={{ marginTop: 10, padding: 10 }}>
+      <div className="kv">
+        <span>Chi phí Claude</span><span>${t.cost_usd.toFixed(3)} · {t.turns} turns</span>
+        <span>Tokens</span><span>in {t.input_tokens.toLocaleString()} · out {t.output_tokens.toLocaleString()} · cache {t.cache_read_tokens.toLocaleString()}</span>
+        <span>Thời gian (wall)</span><span>{Math.round(t.wall_ms / 1000)}s qua {t.attempts} attempt ({t.failed} lỗi)</span>
+        <span>Tool / integration</span><span>{t.tool_calls} tool calls · {t.integration_calls} integration · {t.skills_loaded} skill nạp · {t.subagents} subagent · {t.denied} bị chặn</span>
+      </div>
     </div>
   );
 }

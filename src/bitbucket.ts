@@ -49,3 +49,20 @@ export async function openPullRequest(repo: string, branch: string, title: strin
   const pr = await call(`/repositories/${ws}/${repo}/pullrequests`, { method: "POST", body });
   return { url: pr.links.html.href as string, created: true, note: "PR created." };
 }
+
+/** Read-only: pull requests of a repository (optionally filtered by source branch / state). */
+export async function listPullRequests(repo: string, opts: { branch?: string; state?: string } = {}) {
+  if (!config.bitbucket.user || !config.bitbucket.token) throw new Error("Bitbucket credentials not configured (BITBUCKET_USER / BITBUCKET_TOKEN)");
+  const filters = [`state="${(opts.state ?? "OPEN").toUpperCase()}"`, ...(opts.branch ? [`source.branch.name="${opts.branch.replace(/"/g, "")}"`] : [])];
+  const body = await call(`/repositories/${config.bitbucket.workspace}/${repo}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
+  return (body.values ?? []).map((p: any) => ({
+    id: p.id,
+    title: p.title,
+    state: p.state,
+    source: p.source?.branch?.name,
+    destination: p.destination?.branch?.name,
+    author: p.author?.display_name,
+    url: p.links?.html?.href,
+    updated_on: p.updated_on,
+  }));
+}

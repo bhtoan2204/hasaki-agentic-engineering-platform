@@ -35,3 +35,5 @@ process.env.DATABASE_URL = u.toString();
 process.env.PLATFORM_CONFIG = cfgPath;
 delete process.env.NOTIFY_WEBHOOK;
 process.env.TEST_ROOT = root;
+mkdirSync(join(root, "empty-user-skills"));
+process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never read the developer's real ~/.claude

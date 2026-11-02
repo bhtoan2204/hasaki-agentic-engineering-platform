@@ -2,6 +2,7 @@ import { config } from "../config.ts";
 import { q, one, json, type Db } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
+import { planKnowledge, planUpstream, type DisclosureEntry, type UpstreamPlanEntry } from "../context/plan.ts";
 import { hashOf } from "./definitions.ts";
 import { ancestors } from "./graph.ts";
 import type { RunRow, StepRow } from "./types.ts";
@@ -26,6 +27,12 @@ export interface ResolvedContext {
   repositories: string[];
   knowledge: Resolution["applied"];
   overridden: Resolution["overridden"];
+  /** Progressive disclosure per knowledge key (inline / index / search) with relevance score. */
+  disclosure: DisclosureEntry[];
+  /** Upstream outputs as they go into the prompt (full or summarized within the budget). */
+  upstream: { plan: Record<string, UpstreamPlanEntry>; text: Record<string, string> };
+  /** Text used for relevance ranking (request + step instructions + upstream keywords). */
+  requestText: string;
 }
 
 export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise<StepInput> {
@@ -98,8 +105,25 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     text: requestText(input),
     explicit,
   });
+  const rankText = [requestText(input), step.name, String(cfg.instructions ?? "")].join("\n");
+  const disclosure = planKnowledge(res.applied, {
+    requestText: rankText,
+    stepType: step.type,
+    inlineTokens: config.agent.inlineKnowledgeTokens,
+    indexSize: Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
+  });
+  const completed = Object.fromEntries(Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED"));
+  const upstream = planUpstream(completed, step.depends_on, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens));
   const content = {
     step: { key: step.key, type: step.type, generation: step.generation },
+    // How the prompt was shaped — enough to reproduce/audit what the agent was shown.
+    prompt_plan: {
+      knowledge: disclosure,
+      upstream: upstream.plan,
+      budgets: { inline_knowledge_tokens: config.agent.inlineKnowledgeTokens, index_size: config.agent.knowledgeIndexSize, upstream_tokens: config.agent.upstreamTokens },
+      setting_sources: config.agent.settingSources,
+      delegation: cfg.delegation?.enabled === true,
+    },
     project,
     repositories,
     upstream: Object.fromEntries(Object.entries(input.upstream).map(([k, v]) => [k, v.attempt_id])),
@@ -126,5 +150,5 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     hash,
     json(content),
   ]);
-  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden };
+  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText };
 }

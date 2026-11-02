@@ -118,6 +118,9 @@ implementation is retried) keep their COMPLETED output and are reused.
 
 ## Claude execution and permissions
 
+> The single-agent + skills + tools design (progressive disclosure, integration tool registry, context budgets,
+> optional read-only subagents, metrics) is described in [`agent-architecture.md`](agent-architecture.md).
+
 `ClaudeAgentExecutor` replaces `bypassPermissions` with:
 * `tools`: explicit per step type (analysis steps: `Read, Grep, Glob, Bash`; coding steps add `Edit, Write`).
 * `permissionMode: "default"` + `canUseTool` policy: Edit/Write only inside the run's workspaces; Bash

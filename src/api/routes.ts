@@ -38,6 +38,8 @@ import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
 import { runChanges } from "../git/changes.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
+import { metricsSummary, runMetrics } from "./metrics.ts";
+import { describeTool, listTools } from "../agent/toolRegistry.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -126,6 +128,9 @@ export const routes: Route[] = [
 
   // ------------------------------------------------------------ runs
   ["GET", /^\/api\/scheduler$/, () => schedulerStatus()],
+  ["GET", /^\/api\/metrics\/summary$/, ({ url }) => metricsSummary(Number(url.searchParams.get("days") ?? 30))],
+  ["GET", /^\/api\/metrics\/runs\/(\d+)$/, ({ p }) => runMetrics(num(p[0]))],
+  ["GET", /^\/api\/tools$/, ({ url }) => listTools(url.searchParams.get("q") ?? undefined, { mode: "coding" }).map((t) => ({ ...t, ...describeTool(t.name) }))],
   ["GET", /^\/api\/runs$/, ({ url }) => listRuns({ status: url.searchParams.get("status") ?? undefined, workItemId: url.searchParams.get("work_item_id") ? Number(url.searchParams.get("work_item_id")) : undefined })],
   [
     "POST",

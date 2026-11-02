@@ -9,6 +9,7 @@ export const STEP_TYPES = [
   "command",
   "condition",
   "git_pull_request",
+  "task_result_report",
 ] as const;
 export type StepType = (typeof STEP_TYPES)[number];
 
