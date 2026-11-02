@@ -22,10 +22,11 @@ import {
   runStepNow,
   startPendingRun,
   stepDetail,
+  stopStep,
   sendFeedback,
   startRun,
 } from "../src/workflow/engine.ts";
-import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus } from "../src/workflow/scheduler.ts";
+import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus, runOnce } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -539,4 +540,27 @@ test("light lane: short steps are claimable while a long agent/command step hold
   await pool.query("UPDATE workflow_jobs SET status = 'queued', lease_owner = NULL WHERE id = $1", [lj.id]);
   await drain();
   assert.equal((await getRun(r2.id)).status, "COMPLETED");
+});
+
+test("command output streams while running; Stop kills the whole process tree and fails the step", async () => {
+  const cwd = mkdtempSync(join(process.env.TEST_ROOT!, "cmd-"));
+  const key = await customWorkflow([{ key: "slow", type: "command", config: { cwd, command: "echo started; (sleep 30; echo child-done) & sleep 30; echo finished" } }]);
+  const run = await startRun({ definitionKey: key });
+  const t0 = Date.now();
+  const worker = runOnce("w-cmd", { leaseSeconds: 30, heartbeatSeconds: 1 });
+  let logs: any[] = [];
+  for (let i = 0; i < 50 && !logs.some((e) => e.content.includes("started")); i++) {
+    await new Promise((r) => setTimeout(r, 200));
+    logs = await q(pool, "SELECT kind, content FROM workflow_events WHERE run_id = $1 AND kind = 'log'", [run.id]);
+  }
+  assert.ok(logs.some((e) => e.content.includes("started")), "output is visible before the command finishes");
+  await stopStep(run.id, "slow");
+  await worker;
+  assert.ok(Date.now() - t0 < 15000, "stop does not wait for sleep 30");
+  const st = await stepOf(run.id, "slow");
+  assert.equal(st.status, "FAILED");
+  assert.match(st.error!, /stopped/);
+  assert.equal((await attemptsOf(run.id, "slow"))[0].status, "CANCELED");
+  const all = (await q(pool, "SELECT content FROM workflow_events WHERE run_id = $1 AND kind = 'log'", [run.id])).map((e) => e.content).join("");
+  assert.ok(!all.includes("finished") && !all.includes("child-done"));
 });

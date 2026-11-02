@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, useApi } from "../api.ts";
 import { act, Badge, Copy, Empty, ErrorBox, JsonBlock, Loading, Markdown, Tabs, time, navigate } from "../ui.tsx";
 import { STEP_ICONS } from "../graph.tsx";
@@ -155,6 +155,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const tabs: Array<[Tab, React.ReactNode]> = [
     ["overview", "Overview"],
     ...(isAgent ? ([["execution", <>Claude {live && <span className="spinner" />}</>]] as Array<[Tab, React.ReactNode]>) : []),
+    ...(step.type === "command" ? ([["execution", <>Live output {live && <span className="spinner" />}</>]] as Array<[Tab, React.ReactNode]>) : []),
     ["input", "Input"],
     ["output", "Output"],
     ["knowledge", `Knowledge${snapshot ? ` (${snapshot.content.knowledge.length})` : ""}`],
@@ -175,7 +176,14 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       <div className="row">
         {canRun && <button className="sm" onClick={() => action("run", {}, "Step queued")}>▶ Run this step</button>}
         {canRetry && <button className="sm warn" onClick={() => action("retry", {}, "Retrying")}>↻ Retry</button>}
+        {canRetry && step.type === "command" && step.config?.baseline_compare !== "go" && (
+          <button className="sm ghost" title="Re-run; Go test failures that also fail on the base branch are reported as pre-existing instead of failing the step"
+            onClick={() => action("retry", { input: { config_overrides: { baseline_compare: "go" } } }, "Retrying with baseline comparison")}>↻ Retry với so baseline (Go)</button>
+        )}
         {canSkip && <button className="sm ghost" onClick={() => confirm("Skip this step?") && action("skip")}>⤼ Skip</button>}
+        {["RUNNING", "RETRYING"].includes(step.status) && (
+          <button className="sm danger" onClick={() => confirm("Dừng bước đang chạy? Process (Claude / command) bị kill, bước chuyển FAILED và có thể Retry hoặc Skip.") && action("stop", {}, "Stopped")}>■ Stop</button>
+        )}
         {attempts.length > 1 && (
           <select style={{ width: "auto" }} value={attempt?.id} onChange={(e) => setAttemptId(Number(e.target.value))}>
             {attempts.map((a: any) => (
@@ -196,6 +204,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
 
       {tab === "overview" && (
         <div>
+          {step.type === "command" && <BaselineSummary results={(attempt?.output ?? attempt?.error?.details)?.results} />}
           <div className="kv">
             <span>Status</span><span><Badge s={step.status} /></span>
             <span>Depends on</span><span className="mono">{step.depends_on.join(", ") || "—"}</span>
@@ -231,7 +240,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
           )}
         </div>
       )}
-      {tab === "execution" && (attempt ? <Transcript attemptId={attempt.id} live={live} tick={tick} /> : <Empty>Bước chưa chạy.</Empty>)}
+      {tab === "execution" && (!attempt ? <Empty>Bước chưa chạy.</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
       {tab === "input" && (attempt ? <JsonBlock value={attempt.input} title={`Resolved input · attempt #${attempt.number}`} /> : <Empty>Bước chưa chạy — input được tính lúc bắt đầu attempt.</Empty>)}
       {tab === "output" && (
         <div>
@@ -274,6 +283,78 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Branch-vs-base classification of Go test failures for each repo of a command step. */
+function BaselineSummary({ results }: { results?: any[] }) {
+  const withBase = (results ?? []).filter((r) => r.baseline);
+  if (!withBase.length) return null;
+  const Item = ({ x }: { x: any }) => (
+    <div className="small" style={{ margin: "2px 0 6px 12px" }}>
+      <span className="mono">{x.package}</span>
+      {x.tests.map((t: string) => <div key={t} className="mono" style={{ marginLeft: 12 }}>✗ {t}</div>)}
+      {x.build_errors.map((e: string) => <div key={e} className="mono" style={{ marginLeft: 12 }}>⚙ {e}</div>)}
+    </div>
+  );
+  return (
+    <div className="card" style={{ padding: 10 }}>
+      <h4>So với baseline</h4>
+      {withBase.map((r) => (
+        <div key={r.repo}>
+          <b>{r.repo}</b> {r.baseline.note ? <span className="muted small">— {r.baseline.note}</span> : <span className="muted small mono">base {String(r.baseline.base_sha).slice(0, 9)}</span>}{" "}
+          {r.baseline.regressions && (r.baseline.regressions.length ? <Badge s="FAILED">{r.baseline.regressions.length} regression</Badge> : <Badge s="COMPLETED">không có regression</Badge>)}
+          {r.baseline.regressions?.length > 0 && <div className="err small" style={{ marginTop: 4 }}>Lỗi mới do thay đổi của run:</div>}
+          {r.baseline.regressions?.map((x: any) => <Item key={x.package} x={x} />)}
+          {r.baseline.pre_existing?.length > 0 && <div className="muted small" style={{ marginTop: 4 }}>Lỗi có sẵn trên base (không chặn):</div>}
+          {r.baseline.pre_existing?.map((x: any) => <Item key={"p" + x.package} x={x} />)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Live stdout/stderr of a command step, streamed as "log" events while it runs. */
+function CommandLog({ attemptId, live, tick, startedAt }: { attemptId: number; live: boolean; tick: number; startedAt: string }) {
+  const [events, setEvents] = useState<any[]>([]);
+  const last = useRef(0);
+  const box = useRef<HTMLPreElement>(null);
+  const [follow, setFollow] = useState(true);
+  const [, force] = useState(0);
+  useEffect(() => {
+    setEvents([]);
+    last.current = 0;
+  }, [attemptId]);
+  useEffect(() => {
+    api<any[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
+      if (!rows.length) return;
+      last.current = rows[rows.length - 1].id;
+      setEvents((p) => [...p, ...rows]);
+    });
+  }, [attemptId, tick]);
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => force((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+  useEffect(() => {
+    if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [events, follow]);
+  const text = events.map((e) => (e.kind === "log" ? e.content : `\n${e.content}\n`)).join("");
+  const lastAt = events.length ? events[events.length - 1].created_at : startedAt;
+  const quiet = live ? Math.round((Date.now() - new Date(lastAt).getTime()) / 1000) : 0;
+  return (
+    <div>
+      <div className="row tight">
+        <span className="small muted grow">
+          {live ? <><span className="spinner" /> đang chạy {Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)}s · output cuối {quiet}s trước</> : "đã xong"}
+          {live && quiet > 60 && <span style={{ color: "var(--warn)" }}> — không có output hơn 1 phút: có thể test đang chờ mạng/DB; dùng ■ Stop nếu cần</span>}
+        </span>
+        <label className="small muted"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
+        <Copy text={text} />
+      </div>
+      <pre ref={box} style={{ maxHeight: "62vh" }}>{text || "(chưa có output)"}</pre>
     </div>
   );
 }

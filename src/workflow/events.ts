@@ -1,7 +1,7 @@
 import { pool, q, json, type Db } from "../db/pool.ts";
 
 /** Event kinds that make up an agent conversation; the run timeline hides the verbose ones. */
-export const TRANSCRIPT_ONLY = ["system_prompt", "prompt", "thinking", "tool_result", "result"];
+export const TRANSCRIPT_ONLY = ["system_prompt", "prompt", "thinking", "tool_result", "result", "log"];
 
 export const runEvents = {
   async add(db: Db, runId: number, kind: string, content: string, stepId: number | null = null, attemptId: number | null = null, data: unknown = null) {

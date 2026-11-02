@@ -12,7 +12,7 @@ export interface ExecutionContext {
   context: ResolvedContext;
   signal: AbortSignal;
   /** Timeline / transcript entry for this attempt. `data` holds structured details (tool input, cost...). */
-  log(kind: "agent" | "tool" | "system" | "system_prompt" | "prompt" | "thinking" | "tool_result" | "result", content: string, data?: unknown): Promise<void>;
+  log(kind: "agent" | "tool" | "system" | "system_prompt" | "prompt" | "thinking" | "tool_result" | "result" | "log", content: string, data?: unknown): Promise<void>;
   artifact(kind: string, name: string, content: string, data?: unknown): Promise<number>;
   /** Persist questions against this attempt immediately (used by the ask_user MCP tool). */
   ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;

@@ -354,6 +354,23 @@ export async function runStepNow(runId: number, stepKey: string) {
   });
 }
 
+/** Stop a RUNNING step now: its attempt is canceled, the worker is fenced out and aborted; the step becomes FAILED. */
+export async function stopStep(runId: number, stepKey: string, reason = "stopped by user") {
+  return withTx(async (c, afterCommit) => {
+    await lockRun(c, runId);
+    const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
+    if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
+    if (s.status !== "RUNNING" && s.status !== "RETRYING") throw new EngineError(`step "${stepKey}" is ${s.status}, not running`);
+    const aborted = await cancelStepJobs(c, s.id, reason);
+    await q(c, "UPDATE workflow_step_attempts SET status = 'CANCELED', finished_at = now(), error = $2 WHERE step_id = $1 AND status = 'RUNNING'", [s.id, json({ message: reason })]);
+    await setStepStatus(c, s, "FAILED", { error: reason, finished_at: new Date() }, reason);
+    await runEvents.add(c, runId, "user", `${reason}: ${stepKey}`, s.id);
+    afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
+    await advance(c, runId, afterCommit);
+    return getRun(runId, c);
+  });
+}
+
 export async function skipStep(runId: number, stepKey: string, reason = "skipped by user") {
   return withTx(async (c, afterCommit) => {
     await lockRun(c, runId);

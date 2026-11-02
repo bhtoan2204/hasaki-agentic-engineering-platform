@@ -4,6 +4,7 @@ import { pool, q } from "../../db/pool.ts";
 import { gitProvider, workspacesOf } from "../../git/provider.ts";
 import { isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
+import { classify, goBaseline, parseGoTest } from "./baseline.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -71,26 +72,43 @@ export const conditionExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- command
 
-function runCommand(command: string, cwd: string, env: Record<string, string>, timeoutMs: number, signal: AbortSignal) {
+function runCommand(command: string, cwd: string, env: Record<string, string>, timeoutMs: number, signal: AbortSignal, onChunk?: (text: string) => void) {
   return new Promise<{ code: number | null; output: string; timedOut: boolean }>((resolve) => {
-    const child = spawn("bash", ["-lc", command], { cwd, env: { ...process.env, ...env }, signal });
+    const child = spawn("bash", ["-lc", command], { cwd, env: { ...process.env, ...env }, signal, detached: true });
+    // Kill the whole process group (bash + go test + test binaries) on abort/timeout, not only bash.
+    const killTree = () => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {}
+    };
+    signal.addEventListener("abort", killTree, { once: true });
     let output = "";
     const cap = 512 * 1024;
+    let pending = "";
+    const flush = () => {
+      if (pending && onChunk) onChunk(pending);
+      pending = "";
+    };
+    const ticker = setInterval(flush, 1500);
     const add = (b: Buffer) => {
-      if (output.length < cap) output += b.toString("utf8");
+      const s = b.toString("utf8");
+      if (output.length < cap) output += s;
+      if (pending.length < 64 * 1024) pending += s;
     };
     child.stdout.on("data", add);
     child.stderr.on("data", add);
     let timedOut = false;
     const t = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killTree();
     }, timeoutMs);
     child.on("error", (e) => {
       output += `\n[spawn error] ${e.message}`;
     });
     child.on("close", (code) => {
       clearTimeout(t);
+      clearInterval(ticker);
+      flush();
       resolve({ code, output: output.length >= cap ? output + "\n[output truncated]" : output, timedOut });
     });
   });
@@ -102,7 +120,8 @@ function runCommand(command: string, cwd: string, env: Record<string, string>, t
  */
 export const commandExecutor: StepExecutor = {
   async execute(ctx) {
-    const cfg = ctx.step.config;
+    // Per-attempt overrides (e.g. "retry with baseline comparison") arrive through pending input.
+    const cfg = { ...ctx.step.config, ...(ctx.input.pending?.config_overrides ?? {}) };
     const timeoutMs = Number(cfg.timeout_seconds ?? 600) * 1000;
     const targets = cfg.cwd ? [{ repo: "(cwd)", path: String(cfg.cwd), branch: ctx.run.branch }] : await workspacesOf(ctx.run.id);
     if (!targets.length) {
@@ -111,31 +130,63 @@ export const commandExecutor: StepExecutor = {
       await ctx.log("system", "skipped: this run has no worktree (no code was changed), so there is nothing to run the command in");
       return { kind: "completed", output: { skipped: true, passed: true, reason: "no code changes in this run (no worktree)", results: [] } };
     }
-    const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number }> = [];
+    const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number; baseline?: any; passed?: boolean }> = [];
     for (const t of targets) {
-      await ctx.log("system", `$ ${String(cfg.command).split("\n")[0]}… in ${t.repo}`);
+      await ctx.log("system", `▶ ${t.repo}: running command in ${t.path}`);
+      const started = Date.now();
       const r = await runCommand(
         String(cfg.command),
         t.path,
         { BASE_BRANCH: config.baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...((cfg.env as Record<string, string>) ?? {}) },
         timeoutMs,
         ctx.signal,
+        (chunk) => void ctx.log("log", chunk, { repo: t.repo }),
       );
+      await ctx.log("system", `■ ${t.repo}: exit ${r.timedOut ? "timeout" : r.code} after ${Math.round((Date.now() - started) / 1000)}s`, { repo: t.repo, exit_code: r.code, timed_out: r.timedOut });
       const artifactId = await ctx.artifact("log", `${ctx.step.key}-${t.repo}.log`, r.output, { exit_code: r.code, timed_out: r.timedOut });
-      results.push({ repo: t.repo, exit_code: r.code, timed_out: r.timedOut, artifact_id: artifactId });
+      const entry: (typeof results)[number] = { repo: t.repo, exit_code: r.code, timed_out: r.timedOut, artifact_id: artifactId, passed: r.code === 0 };
+      if (r.code !== 0 && !r.timedOut && cfg.baseline_compare === "go") entry.baseline = await compareWithBaseline(ctx, t, r.output, timeoutMs);
+      if (entry.baseline?.regressions && !entry.baseline.regressions.length) entry.passed = true;
+      results.push(entry);
     }
-    const failed = results.filter((r) => r.exit_code !== 0);
+    const failed = results.filter((r) => !r.passed);
     const output = { results, passed: failed.length === 0 };
-    if (failed.length && !cfg.allow_failure)
-      return {
-        kind: "failed",
-        error: `command failed in ${failed.map((f) => `${f.repo} (exit ${f.timed_out ? "timeout" : f.exit_code})`).join(", ")}`,
-        retryable: false,
-        details: output,
+    if (failed.length && !cfg.allow_failure) {
+      const why = (f: (typeof results)[number]) => {
+        const reg = f.baseline?.regressions;
+        if (reg?.length) return `${f.repo}: ${reg.length} regression(s) vs ${config.baseBranch} — ${reg.map((x: any) => [x.package.split("/").slice(-2).join("/"), ...x.tests, ...x.build_errors].slice(0, 4).join(" ")).join("; ")}`;
+        return `${f.repo} (exit ${f.timed_out ? "timeout" : f.exit_code}${f.baseline?.note ? `, ${f.baseline.note}` : ""})`;
       };
+      return { kind: "failed", error: `command failed in ${failed.map(why).join(" | ")}`, retryable: false, details: output };
+    }
     return { kind: "completed", output };
   },
 };
+
+/** Re-run the failing Go packages on origin/<base>; failures present there too are pre-existing, not regressions. */
+async function compareWithBaseline(ctx: ExecutionContext, t: { repo: string; path: string }, output: string, timeoutMs: number) {
+  const branch = parseGoTest(output);
+  const failing = Object.entries(branch).filter(([, p]) => p.status === "fail").map(([k]) => k);
+  if (!failing.length) {
+    await ctx.log("system", `baseline: no parseable go test failure in ${t.repo} (e.g. go build failed); not comparing`);
+    return { note: "no go test failure to compare (build or script error)" };
+  }
+  await ctx.log("system", `◆ ${t.repo}: comparing ${failing.length} failing package(s) with origin/${config.baseBranch}…`);
+  try {
+    const base = await goBaseline(t.path, failing, (command, cwd) => runCommand(command, cwd, { BASE_BRANCH: config.baseBranch, REPO: t.repo }, timeoutMs, ctx.signal, (chunk) => void ctx.log("log", chunk, { repo: t.repo, baseline: true })));
+    const c = classify(branch, base.report);
+    await ctx.log(
+      "system",
+      `◆ ${t.repo}: baseline ${base.sha.slice(0, 9)} → ${c.regressions.length} regression(s), ${c.pre_existing.length} package(s) with pre-existing failures` +
+        (base.cached.length ? ` (cached: ${base.cached.length})` : ""),
+      { repo: t.repo, ...c },
+    );
+    return { base_sha: base.sha, ...c };
+  } catch (e) {
+    await ctx.log("system", `baseline comparison failed for ${t.repo}: ${(e as Error).message}`);
+    return { note: `baseline comparison failed: ${(e as Error).message.split("\n")[0]}` };
+  }
+}
 
 // ---------------------------------------------------------------- integration
 

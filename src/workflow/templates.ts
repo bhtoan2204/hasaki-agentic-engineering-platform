@@ -7,8 +7,10 @@
 const TEST_COMMAND = `set -e
 if [ -f go.mod ]; then
   pkgs=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" -- '*.go' | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
+  echo "== go build ./..."
   go build ./...
-  if [ -n "$pkgs" ]; then go test $pkgs; else echo "no Go packages changed"; fi
+  # -short lets integration tests that honour testing.Short() skip; the timeout bounds tests that hang on remote DB/ES.
+  if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m $pkgs"; go test -short -timeout 5m $pkgs; else echo "no Go packages changed"; fi
 elif [ -f package.json ]; then
   npm test --if-present
 else
@@ -89,7 +91,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           config: { message: "Duyệt kế hoạch kiến trúc trước khi code.", show_outputs: ["plan"], on_reject: { reexecute: "plan" } },
         },
         { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_plan"], config: IMPLEMENT, max_attempts: 2 },
-        { key: "test", type: "command", name: "Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800 } },
+        { key: "test", type: "command", name: "Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go" } },
         { key: "review", type: "agent", name: "Code Review", depends_on: ["test"], config: REVIEW },
         { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["review"], config: { mode: "approval", content_from: "implement" } },
       ],
@@ -143,7 +145,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           config: { show_outputs: ["root_cause", "fix_proposal"], on_reject: { reexecute: "fix_proposal" } },
         },
         { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_fix"], config: IMPLEMENT, max_attempts: 2 },
-        { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800 } },
+        { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go" } },
         { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["regression_test"], config: { mode: "approval", content_from: "implement" } },
       ],
     },
@@ -240,7 +242,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           config: { show_outputs: ["plan"], on_reject: { reexecute: "plan" } },
         },
         { key: "refactor", type: "coding_agent", name: "Refactor", depends_on: ["approval"], config: IMPLEMENT, max_attempts: 2 },
-        { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["refactor"], config: { command: TEST_COMMAND, timeout_seconds: 1800 } },
+        { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["refactor"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go" } },
         { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["regression_test"], config: { mode: "approval", content_from: "refactor" } },
       ],
     },
