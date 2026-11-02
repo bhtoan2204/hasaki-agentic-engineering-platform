@@ -105,7 +105,12 @@ export const commandExecutor: StepExecutor = {
     const cfg = ctx.step.config;
     const timeoutMs = Number(cfg.timeout_seconds ?? 600) * 1000;
     const targets = cfg.cwd ? [{ repo: "(cwd)", path: String(cfg.cwd), branch: ctx.run.branch }] : await workspacesOf(ctx.run.id);
-    if (!targets.length) return { kind: "failed", error: "no workspace to run in: no coding step prepared a worktree for this run", retryable: false };
+    if (!targets.length) {
+      // Nothing was changed (e.g. the coding step concluded the fix already exists): nothing to test.
+      if (cfg.require_workspace) return { kind: "failed", error: "no workspace to run in: no coding step prepared a worktree for this run", retryable: false };
+      await ctx.log("system", "skipped: this run has no worktree (no code was changed), so there is nothing to run the command in");
+      return { kind: "completed", output: { skipped: true, passed: true, reason: "no code changes in this run (no worktree)", results: [] } };
+    }
     const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number }> = [];
     for (const t of targets) {
       await ctx.log("system", `$ ${String(cfg.command).split("\n")[0]}… in ${t.repo}`);
@@ -282,7 +287,8 @@ export const pullRequestExecutor: StepExecutor = {
         return { kind: "failed", error: `${w.repo}: push failed: ${msg}`, retryable: true };
       }
       const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits });
-      const pr = await provider.openOrUpdatePullRequest({ repo: w.repo, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
+      const slug = (await repositories.get(w.repo))?.remote_slug || w.repo;
+      const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
       await q(
         pool,
         `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id)

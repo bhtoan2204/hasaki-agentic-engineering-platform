@@ -39,13 +39,25 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
     String(cfg.instructions ?? `Perform the "${step.name}" step.`),
   ];
   if (cfg.output_contract) lines.push("", "## Output contract (submit_result.output must match)", String(cfg.output_contract));
-  if (ctx.knowledge.length) {
+  // Large reference material (imported skills, wiki pages, scoped cursor rules) is listed with a description only;
+  // the agent loads the full text with mcp__platform__read_knowledge when it is relevant. Explicit assignments are inlined.
+  const onDemand = ctx.knowledge.filter((k) => (k.metadata as any)?.load === "on_demand" && k.reason !== "assigned to step");
+  const inline = ctx.knowledge.filter((k) => !onDemand.includes(k));
+  if (inline.length) {
     lines.push("", "## Applicable knowledge (platform-curated, trusted)");
-    for (const k of ctx.knowledge) {
+    for (const k of inline) {
       lines.push(`### [${k.category}] ${k.title} (${k.key} v${k.version}, ${k.reason})`, k.content.trim());
       const meta = k.metadata as any;
       if (k.category === "agent_skill" && meta?.output_contract) lines.push(`Skill output contract: ${meta.output_contract}`);
     }
+  }
+  if (onDemand.length) {
+    lines.push(
+      "",
+      "## Available skills and reference docs (load on demand)",
+      "When a description matches what you are about to do, call mcp__platform__read_knowledge with its key BEFORE acting and follow it.",
+    );
+    for (const k of onDemand) lines.push(`- \`${k.key}\` [${k.category}] ${k.title}: ${String((k.metadata as any)?.description ?? "").replace(/\s+/g, " ").slice(0, 400)}`);
   }
   return lines.join("\n");
 }

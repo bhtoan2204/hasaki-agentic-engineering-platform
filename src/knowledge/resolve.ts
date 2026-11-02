@@ -100,6 +100,10 @@ export function applicabilityMatches(a: Applicability, ctx: ResolutionContext): 
 
 const rank = (s: Scope) => SCOPES.indexOf(s);
 
+const RESTRICTING = ["repos", "projects", "workflows", "step_keys", "step_types"] as const;
+const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
+const describeRestriction = (a: Applicability) => RESTRICTING.filter((k) => a[k]?.length).map((k) => `${k} ${a[k]!.join(", ")}`).join("; ");
+
 /** Total order: negative when `a` beats `b`. */
 export function compareCandidates(a: KnowledgeCandidate, b: KnowledgeCandidate): number {
   if (a.enforced !== b.enforced) return a.enforced ? -1 : 1;
@@ -116,9 +120,9 @@ export function resolveKnowledge(candidates: KnowledgeCandidate[], ctx: Resoluti
     if (ctx.explicit.includes(c.key)) eligible.push({ ...c, reason: "assigned to step" });
     else if (c.category !== "agent_skill" && scopeMatches(c, ctx) && applicabilityMatches(c.applicability, ctx))
       eligible.push({ ...c, reason: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""} scope` });
-    else if (c.category === "agent_skill" && scopeMatches(c, ctx) && c.scope_type !== "GLOBAL" && applicabilityMatches(c.applicability, ctx))
-      // Skills are opt-in: only explicitly assigned ones or ones scoped narrower than GLOBAL are injected.
-      eligible.push({ ...c, reason: `skill scoped to ${c.scope_type}:${c.scope_ref}` });
+    else if (c.category === "agent_skill" && scopeMatches(c, ctx) && (c.scope_type !== "GLOBAL" || isRestricted(c.applicability)) && applicabilityMatches(c.applicability, ctx))
+      // Skills are opt-in: explicitly assigned, scoped narrower than GLOBAL, or restricted by applicability (repos, projects...).
+      eligible.push({ ...c, reason: c.scope_type !== "GLOBAL" ? `skill scoped to ${c.scope_type}:${c.scope_ref}` : `skill for ${describeRestriction(c.applicability)}` });
   }
   const applied: Resolution["applied"] = [];
   const overridden: Resolution["overridden"] = [];

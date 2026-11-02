@@ -474,6 +474,20 @@ test("context snapshots record applied knowledge versions and are immutable", as
   assert.equal((await knowledge.get("refund-once"))!.versions.length, 2);
 });
 
+test("command step is skipped (not failed) when the run changed no code", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "test", type: "command", depends_on: ["implement"], config: { command: "go test ./..." } },
+    { key: "pr", type: "git_pull_request", depends_on: ["test"] },
+  ]);
+  scripts.implement = () => ({ kind: "completed", output: { summary: "already fixed upstream, no change" } });
+  const run = await startRun({ definitionKey: key, repositories: ["oms-api"], inputs: { project: "OMS" } });
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  assert.equal((await stepOf(run.id, "test")).output.skipped, true);
+  assert.deepEqual((await stepOf(run.id, "pr")).output.pull_requests, []);
+});
+
 test("repository selection outside the allowed set is rejected at run start", async () => {
   await assert.rejects(startRun({ definitionKey: "code-review", repositories: ["payment-src"], inputs: { project: "OMS" } }), /not allowed/);
 });

@@ -17,6 +17,8 @@ export interface PolicyContext {
   /** Absolute worktree paths the step may edit. */
   workspaces: string[];
   baseBranch: string;
+  /** Primary checkouts (reposRoot): readable, never modifiable — neither by Edit/Write nor by shell commands. */
+  protectedRoots?: string[];
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -59,20 +61,51 @@ export function segments(command: string) {
     .filter(Boolean);
 }
 
-export function decideBash(command: string, ctx: PolicyContext): Decision {
+/** null = read-only; otherwise the first offending segment / reason. */
+function readOnlyViolation(command: string): string | null {
+  if (/(^|[^0-9&])>{1,2}(?!&)\s*(?!\/dev\/null)/.test(command.replace(/2>&1/g, ""))) return "output redirection writes files";
+  for (const seg of segments(command)) {
+    const s = seg.replace(/^cd\s+\S+\s*$/, "pwd");
+    if (!READ_ONLY.some((re) => re.test(s))) return `"${seg.slice(0, 80)}" is not a read-only command`;
+  }
+  return null;
+}
+
+/** Absolute paths mentioned in a shell command (good enough for policy; ~ is expanded). */
+export function pathsIn(command: string): string[] {
+  const home = process.env.HOME ?? "";
+  return [...command.matchAll(/(?:^|[\s'"=:(])((?:~|\/)[^\s'"`;|&<>()]*)/g)].map((m) => m[1].replace(/^~(?=\/|$)/, home)).filter((p) => p.length > 1);
+}
+
+/**
+ * `cwd` is the shell's current directory as reported by the PreToolUse hook — Claude Code keeps it across Bash calls,
+ * so "cd <primary checkout>" followed by "git checkout -b x" is caught on the second call too.
+ */
+export function decideBash(command: string, ctx: PolicyContext, cwd?: string): Decision {
   for (const [re, why] of ALWAYS_DENIED) if (re.test(command)) return deny(why);
   const base = ctx.baseBranch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (new RegExp(`\\bgit\\s+(-C\\s+\\S+\\s+)?(checkout|switch)\\s+${base}\\b`).test(command)) return deny(`do not check out ${ctx.baseBranch}`);
-  if (ctx.mode === "coding") return allow;
-  if (/(^|[^0-9&])>{1,2}(?!&)\s*(?!\/dev\/null)/.test(command.replace(/2>&1/g, ""))) return deny("analysis steps cannot write files (output redirection)");
-  for (const seg of segments(command)) {
-    const s = seg.replace(/^cd\s+\S+\s*$/, "pwd");
-    if (!READ_ONLY.some((re) => re.test(s))) return deny(`analysis steps may only run read-only commands; "${seg.slice(0, 80)}" is not on the allowlist`);
+  if (ctx.mode === "coding") {
+    if (/\bgit\s+(-C\s+\S+\s+)?(checkout\s+-[bB]|switch\s+-[cC]|branch\s+(?!-)[^\s|;&]+)/.test(command))
+      return deny("branches are managed by the platform: use mcp__platform__prepare_branch and work in the returned worktree");
+    const roots = ctx.protectedRoots ?? [];
+    const primary = (p: string) => isInside(p, roots) && !isInside(p, ctx.workspaces);
+    const touched = [...(cwd && primary(cwd) ? [cwd] : []), ...pathsIn(command).filter(primary)];
+    if (touched.length) {
+      const v = readOnlyViolation(command);
+      if (v)
+        return deny(
+          `${touched[0]} is a primary checkout and is read-only (${v}). Call mcp__platform__prepare_branch and run modifying commands inside the returned worktree` +
+            (ctx.workspaces.length ? ` (${ctx.workspaces.join(", ")})` : "") + ".",
+        );
+    }
+    return allow;
   }
-  return allow;
+  const v = readOnlyViolation(command);
+  return v ? deny(`analysis steps may only run read-only commands; ${v}`) : allow;
 }
 
-export function decide(tool: string, input: Record<string, unknown>, ctx: PolicyContext): Decision {
+export function decide(tool: string, input: Record<string, unknown>, ctx: PolicyContext, cwd?: string): Decision {
   if (tool.startsWith("mcp__platform__")) return allow;
   switch (tool) {
     case "Read":
@@ -98,7 +131,7 @@ export function decide(tool: string, input: Record<string, unknown>, ctx: Policy
       return allow;
     }
     case "Bash":
-      return decideBash(String(input.command ?? ""), ctx);
+      return decideBash(String(input.command ?? ""), ctx, cwd);
     default:
       return deny(`tool ${tool} is not allowed in workflow steps`);
   }

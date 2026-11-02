@@ -1,0 +1,60 @@
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { pool } from "../src/db/pool.ts";
+import { migrate } from "../src/db/migrate.ts";
+import { config } from "../src/config.ts";
+import { writeFileSync } from "node:fs";
+import { repositories, syncRepositoriesFromConfig, repoPath } from "../src/repos/service.ts";
+import { frontmatter, importFromRepositories, looksSecret } from "../src/knowledge/importer.ts";
+import { knowledge } from "../src/knowledge/service.ts";
+
+after(() => pool.end());
+
+test("group folders (e.g. oms-src/) are expanded into their git repos; non-repos are disabled", async () => {
+  await migrate();
+  for (const p of ["oms-src/oms-api", "oms-src/oms-background", "solo"]) mkdirSync(join(config.reposRoot, p, ".git"), { recursive: true });
+  mkdirSync(join(config.reposRoot, "oms-src", "docs"), { recursive: true }); // not a repo
+  await repositories.upsert("oms-src", { projects: ["OMS"] }); // what the old sync registered
+  await syncRepositoriesFromConfig();
+  const byName = Object.fromEntries((await repositories.list()).map((r) => [r.name, r]));
+  assert.equal(byName["oms-api"].path, "oms-src/oms-api");
+  assert.equal(repoPath(byName["oms-api"]), join(config.reposRoot, "oms-src/oms-api"));
+  assert.ok(byName["oms-api"].projects.includes("OMS"), "mapped via config.projects OMS → oms-api");
+  assert.equal(byName["oms-background"].path, "oms-src/oms-background");
+  assert.equal(byName["solo"].path, "");
+  assert.equal(byName["oms-src"].enabled, false, "group folder itself is not a repo");
+  assert.equal(byName["docs"], undefined);
+  assert.deepEqual((await repositories.allowedFor("OMS")).sort(), ["oms-api", "oms-background"]);
+});
+
+test("repository knowledge import: CLAUDE.md, shared skills, secrets skipped, re-import versions only changes", async () => {
+  const api = join(config.reposRoot, "oms-src/oms-api"), bg = join(config.reposRoot, "oms-src/oms-background");
+  writeFileSync(join(api, "CLAUDE.md"), "# oms-api\n\nMoney fields are int64 VND.\n");
+  writeFileSync(join(api, "AGENTS.md"), "# oms-api\n\nMoney fields are int64 VND.\n"); // duplicate of CLAUDE.md
+  for (const d of [api, bg]) {
+    mkdirSync(join(d, ".claude/skills/solid"), { recursive: true });
+    writeFileSync(join(d, ".claude/skills/solid/SKILL.md"), "---\nname: solid\ndescription: apply SOLID\n---\n# SOLID\nSRP first.\n");
+  }
+  mkdirSync(join(bg, "docs"), { recursive: true });
+  writeFileSync(join(bg, "CLAUDE.md"), "# bg\nDB_PASSWORD=Sup3rS3cretValue123\n");
+  const r1 = await importFromRepositories();
+  const keys = r1.candidates.map((c) => c.key);
+  assert.ok(keys.includes("oms-api.claude"));
+  assert.ok(!keys.includes("oms-api.agents"), "identical AGENTS.md is not imported twice");
+  assert.ok(r1.skipped.some((s) => s.path === "oms-background/CLAUDE.md" && /credentials/.test(s.reason)));
+  const solid = (await knowledge.get("skill.solid"))!;
+  assert.deepEqual(solid.versions[0].applicability.repos.sort(), ["oms-api", "oms-background"]);
+  assert.equal(solid.versions[0].metadata.load, "on_demand");
+  assert.equal(solid.versions[0].metadata.description, "apply SOLID");
+  const r2 = await importFromRepositories();
+  assert.equal(r2.created + r2.updated, 0, "unchanged files create no versions");
+  writeFileSync(join(api, "CLAUDE.md"), "# oms-api\n\nMoney fields are int64 VND. Refund once.\n");
+  const r3 = await importFromRepositories();
+  assert.equal(r3.updated, 1);
+  assert.equal((await knowledge.get("oms-api.claude"))!.versions.length, 2);
+  assert.ok(looksSecret("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjM0NjI4fQ.Ktmu1SKlCfLAw0aP0e1_37SNNOSk"));
+  assert.ok(!looksSecret("set API_KEY=<your key> in .env"));
+  assert.equal(frontmatter("---\nname: x\n---\nbody").fields.name, "x");
+});

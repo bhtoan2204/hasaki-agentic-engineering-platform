@@ -45,8 +45,10 @@ export interface Workspace {
 
 /** Create (or reuse) the run's isolated worktree for `repo` and record it. Never touches reposRoot checkouts. */
 export async function prepareWorkspace(run: { id: number; branch: string }, repo: string): Promise<Workspace> {
-  const b = await prepareBranch(workspaceKey(run.branch), repo, run.branch);
-  if (b.path === join(config.reposRoot, repo)) {
+  const reg = await one<{ path: string }>(pool, "SELECT path FROM repositories WHERE name = $1", [repo]);
+  const rel = reg?.path || repo;
+  const b = await prepareBranch(workspaceKey(run.branch), repo, run.branch, rel);
+  if (b.path === join(config.reposRoot, rel)) {
     // Legacy prepareBranch reuses the developer's checkout when it is on the task branch. Workflows never edit
     // the primary checkout: refuse instead.
     throw new Error(`${repo}: branch ${run.branch} is checked out in your primary checkout; switch it to another branch first`);

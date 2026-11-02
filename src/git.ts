@@ -47,8 +47,9 @@ export interface PreparedBranch {
  *  - branch exists only on origin    -> worktree tracking origin/<branch>
  *  - otherwise                       -> new branch from origin/<baseBranch>
  */
-export async function prepareBranch(code: string, repo: string, branch = code): Promise<PreparedBranch> {
-  const repoPath = join(config.reposRoot, repo);
+/** `relPath`: repo location relative to reposRoot when it differs from its name (e.g. "oms-src/oms-api"). */
+export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo): Promise<PreparedBranch> {
+  const repoPath = join(config.reposRoot, relPath);
   if (!existsSync(join(repoPath, ".git"))) throw new Error(`repo not found: ${repoPath}`);
   const wt = join(taskDir(code), repo);
 

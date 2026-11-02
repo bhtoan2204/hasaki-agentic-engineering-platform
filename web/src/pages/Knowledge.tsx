@@ -41,7 +41,10 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
       <div className="grid2" style={{ gridTemplateColumns: "minmax(320px, 1fr) 1.4fr", marginTop: 12, alignItems: "start" }}>
         <div>
           <Tabs tabs={CATS} value={cat} onChange={setCat} />
-          <div className="row tight" style={{ marginBottom: 8 }}><button className="sm" onClick={() => navigate("/knowledge/~new")}>+ Item mới</button></div>
+          <div className="row tight" style={{ marginBottom: 8 }}>
+            <button className="sm" onClick={() => navigate("/knowledge/~new")}>+ Item mới</button>
+            <RepoImport onDone={reload} />
+          </div>
           {loading && !data ? <Loading /> : error ? <ErrorBox error={error} onRetry={reload} /> : !data?.length ? <Empty>Chưa có item.</Empty> : (
             <table>
               <tbody>
@@ -60,6 +63,40 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
         <div>{itemKey ? <KnowledgeEditor key={itemKey} itemKey={itemKey} defaultCategory={cat || "business_rule"} onSaved={reload} /> : <Empty>Chọn một item để xem/sửa, hoặc tạo mới.</Empty>}</div>
       </div>
     </div>
+  );
+}
+
+/** Scan repositories (CLAUDE.md, skills, cursor rules, wiki docs): preview first, then import. */
+function RepoImport({ onDone }: { onDone: () => void }) {
+  const [preview, setPreview] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (dry: boolean) => {
+    setBusy(true);
+    const r = await act(() => api<any>("/api/knowledge/import-repos", { dry_run: dry }), dry ? undefined : "Đã import từ repository");
+    setBusy(false);
+    if (!r) return;
+    if (dry) setPreview(r);
+    else (setPreview(null), onDone());
+  };
+  return (
+    <>
+      <button className="sm ghost" disabled={busy} onClick={() => run(true)}>{busy ? "Đang quét…" : "⟳ Quét repository"}</button>
+      {preview && (
+        <div className="card" style={{ width: "100%", marginTop: 8 }}>
+          <div className="row tight">
+            <b className="grow">{preview.created} mới · {preview.updated} cập nhật · {preview.unchanged} không đổi</b>
+            <button className="sm" disabled={busy || !(preview.created + preview.updated)} onClick={() => run(false)}>Import</button>
+            <button className="xs ghost" onClick={() => setPreview(null)}>✕</button>
+          </div>
+          <div style={{ maxHeight: 260, overflow: "auto", marginTop: 6 }}>
+            {preview.candidates.filter((c: any) => c.action !== "unchanged").map((c: any) => (
+              <div key={c.key} className="small"><Badge s={c.action === "create" ? "READY" : "WAITING"}>{c.action}</Badge> <span className="mono">{c.key}</span> <span className="muted">{c.category} · {c.repos.join(", ")}</span></div>
+            ))}
+            {preview.skipped.map((s: any) => <div key={s.path} className="small err">bỏ qua {s.path} — {s.reason}</div>)}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

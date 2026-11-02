@@ -109,6 +109,17 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
       },
     ),
     tool(
+      "read_knowledge",
+      "Read the full text of a skill, business rule or reference doc listed in your system prompt (by key).",
+      { key: z.string() },
+      async ({ key }) => {
+        const k = ctx.context.knowledge.find((x) => x.key === key);
+        if (!k) return text(`"${key}" is not available to this step. Available: ${ctx.context.knowledge.map((x) => x.key).join(", ")}`);
+        await ctx.log("system", `loaded knowledge ${key} v${k.version}`);
+        return text(`# ${k.title} (${k.key} v${k.version})\n\n${k.content}`);
+      },
+    ),
+    tool(
       "read_step_output",
       "Read the full output of an earlier (completed) step of this run.",
       { step_key: z.string() },
@@ -173,7 +184,7 @@ export const claudeExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const ws = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
-    const policy: PolicyContext = { mode, workspaces: ws.map((w) => w.path), baseBranch: config.baseBranch };
+    const policy: PolicyContext = { mode, workspaces: ws.map((w) => w.path), baseBranch: config.baseBranch, protectedRoots: [config.reposRoot] };
     const cwd = taskDir(workspaceKey(ctx.run.branch));
     let submitted: Record<string, unknown> | undefined;
 
@@ -183,7 +194,7 @@ export const claudeExecutor: StepExecutor = {
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode);
 
     const preToolUse: HookCallback = async (input: any) => {
-      const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy);
+      const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy, input.cwd);
       if (d.allow) return {};
       await ctx.log("tool", `denied ${input.tool_name}: ${d.reason}`);
       return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: d.reason } };

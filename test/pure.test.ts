@@ -149,10 +149,27 @@ test("tool policy: dangerous shell denied everywhere, analysis shell allowlisted
   assert.ok(decideBash("grep -rn x . 2>&1 | head", analysis).allow);
 });
 
+test("tool policy: primary checkouts are read-only for coding steps, including after `cd` (hook cwd)", () => {
+  const ctx: PolicyContext = { ...coding, protectedRoots: ["/home/me/src"] };
+  const primary = "/home/me/src/oms-src/oms-api";
+  // the exact sequence from run #1: cd into the primary checkout, then create a branch / edit with python
+  assert.ok(decideBash(`cd ${primary} && git status --short | head -20`, ctx).allow, "reading is fine");
+  assert.ok(!decideBash("git checkout -b HSK-1 origin/release/prod", ctx, primary).allow);
+  assert.ok(!decideBash("python3 - <<'EOF'\nopen('a.go','w')\nEOF", ctx, primary).allow);
+  assert.ok(!decideBash(`sed -i 's/a/b/' ${primary}/pkg/x.go`, ctx).allow);
+  assert.ok(!decideBash(`cd ${primary} && go mod tidy`, ctx).allow);
+  assert.ok(decideBash("git log --oneline -5", ctx, primary).allow);
+  // inside the worktree everything (except the global deny-list) is allowed
+  assert.ok(decideBash("go mod tidy && go test ./...", ctx, coding.workspaces[0]).allow);
+  assert.ok(decideBash(`sed -i 's/a/b/' ${coding.workspaces[0]}/x.go`, ctx, "/tmp").allow);
+  assert.ok(!decideBash("git switch -c other", ctx, coding.workspaces[0]).allow, "branches come from prepare_branch");
+});
+
 // ---------------------------------------------------------------- repositories
 const repo = (name: string, over: Partial<RepositoryRow> = {}): RepositoryRow => ({
   id: 0,
   name,
+  path: "",
   provider: "bitbucket",
   remote_slug: name,
   description: "",

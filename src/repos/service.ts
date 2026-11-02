@@ -6,6 +6,8 @@ import { pool, q, one, type Db } from "../db/pool.ts";
 export interface RepositoryRow {
   id: number;
   name: string;
+  /** Relative to reposRoot; '' = same as name. */
+  path: string;
   provider: string;
   remote_slug: string;
   description: string;
@@ -19,7 +21,7 @@ export interface RepositoryRow {
   enabled: boolean;
 }
 
-const EDITABLE = ["description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
+const EDITABLE = ["path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
 
 export const repositories = {
   list(db: Db = pool) {
@@ -59,24 +61,61 @@ export const repositories = {
   },
 };
 
-/** Register repos from config.projects and the git checkouts in reposRoot. Never overwrites user edits. */
-export async function syncRepositoriesFromConfig() {
-  const mapped = new Map<string, Set<string>>();
-  for (const [project, repos] of Object.entries(config.projects)) {
-    for (const r of repos) (mapped.get(r) ?? mapped.set(r, new Set()).get(r)!).add(project);
+export const repoPath = (r: Pick<RepositoryRow, "name" | "path">) => join(config.reposRoot, r.path || r.name);
+const isGit = (rel: string) => existsSync(join(config.reposRoot, rel, ".git"));
+
+/**
+ * Expand a reposRoot-relative entry into git repositories: the entry itself if it is a repo, otherwise its direct
+ * sub-folders that are repos (a "group" folder such as oms-src/ holding oms-api, oms-background, ...).
+ */
+export function expandRepoEntry(rel: string): string[] {
+  if (isGit(rel)) return [rel];
+  const dir = join(config.reposRoot, rel);
+  if (!existsSync(dir)) {
+    // A bare repo name ("oms-api") may live inside a group folder ("oms-src/oms-api").
+    if (rel.includes("/") || !existsSync(config.reposRoot)) return [];
+    return readdirSync(config.reposRoot).map((g) => join(g, rel)).filter(isGit);
   }
-  const onDisk = existsSync(config.reposRoot)
-    ? readdirSync(config.reposRoot).filter((r) => existsSync(join(config.reposRoot, r, ".git")))
-    : [];
-  for (const name of new Set([...mapped.keys(), ...onDisk])) {
+  try {
+    return readdirSync(dir).filter((d) => isGit(join(rel, d))).map((d) => join(rel, d));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Register git repositories from config.projects (entries may be repos or group folders) and from reposRoot (one level,
+ * plus group folders). Never overwrites user edits; entries that are not git repositories are disabled, not deleted.
+ */
+export async function syncRepositoriesFromConfig() {
+  const found = new Map<string, Set<string>>(); // relative path -> projects
+  const add = (rel: string, project?: string) => {
+    const s = found.get(rel) ?? found.set(rel, new Set()).get(rel)!;
+    if (project) s.add(project);
+  };
+  for (const [project, entries] of Object.entries(config.projects)) for (const e of entries) for (const rel of expandRepoEntry(e)) add(rel, project);
+  if (existsSync(config.reposRoot)) for (const d of readdirSync(config.reposRoot)) for (const rel of expandRepoEntry(d)) add(rel);
+  const taken = new Map<string, string>();
+  for (const [rel, projects] of found) {
+    let name = rel.split("/").pop()!;
+    if (taken.has(name) && taken.get(name) !== rel) name = rel.replace(/\//g, ".");
+    taken.set(name, rel);
     const existing = await repositories.get(name);
-    const projects = [...(mapped.get(name) ?? [])];
-    if (!existing) await repositories.upsert(name, { projects, remote_slug: name });
+    const path = rel === name ? "" : rel;
+    if (!existing) await repositories.upsert(name, { path, projects: [...projects], remote_slug: name });
     else {
       const merged = [...new Set([...existing.projects, ...projects])];
-      if (merged.length !== existing.projects.length) await repositories.upsert(name, { projects: merged });
+      const patch: Partial<RepositoryRow> = {};
+      if (merged.length !== existing.projects.length) patch.projects = merged;
+      if (!existing.path && path) patch.path = path;
+      if (Object.keys(patch).length) await repositories.upsert(name, patch);
     }
   }
+  for (const r of await repositories.list())
+    if (r.enabled && !isGit(r.path || r.name)) {
+      await repositories.upsert(r.name, { enabled: false, description: r.description || `disabled: ${r.path || r.name} is not a git repository under reposRoot` });
+      console.log(`repository ${r.name}: ${r.path || r.name} is not a git repository — disabled`);
+    }
 }
 
 // ---------------------------------------------------------------- ranking

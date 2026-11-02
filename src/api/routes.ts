@@ -5,6 +5,7 @@ import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasa
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
 import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
 import { knowledge } from "../knowledge/service.ts";
+import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
 import { rankRepositories, repositories, isAmbiguous } from "../repos/service.ts";
 import { definitions } from "../workflow/definitions.ts";
@@ -166,6 +167,8 @@ export const routes: Route[] = [
   // ------------------------------------------------------------ knowledge
   ["GET", /^\/api\/knowledge$/, ({ url }) => knowledge.list({ category: url.searchParams.get("category") ?? undefined })],
   ["POST", /^\/api\/knowledge$/, ({ body }) => knowledge.create(body)],
+  // Scan the registered repositories (CLAUDE.md, skills, cursor rules, wiki docs) and import them; dry_run previews.
+  ["POST", /^\/api\/knowledge\/import-repos$/, ({ body }) => importFromRepositories({ dryRun: !!body.dry_run })],
   [
     "POST",
     /^\/api\/knowledge\/preview$/,
