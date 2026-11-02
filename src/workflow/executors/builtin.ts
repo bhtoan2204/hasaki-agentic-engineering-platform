@@ -224,6 +224,30 @@ export const integrationExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- git_pull_request
 
+/** PR title/summary/decisions for one repo, from the content step's output (shared with the PR preview). */
+export function prFields(source: any, repo: string, code: string | undefined, runTitle: string) {
+  const content = source?.pull_requests?.[repo] ?? {};
+  return {
+    title: String(content.title ?? source?.title ?? `${code ? code + ": " : ""}${runTitle}`).slice(0, 250),
+    summary: String(content.summary ?? source?.summary ?? ""),
+    decisions: (content.decisions ?? source?.decisions ?? []) as Array<{ title: string; detail: string }>,
+  };
+}
+
+export function prDescription(x: { code?: string; runId: number; summary: string; decisions: Array<{ title: string; detail: string }>; commits: string }) {
+  return [
+    x.code ? `Task: **${x.code}**` : `Workflow run #${x.runId}`,
+    "",
+    x.summary,
+    "",
+    x.decisions.length ? "## Decisions\n" + x.decisions.map((d) => `- **${d.title}**: ${d.detail}`).join("\n") : "",
+    "",
+    "## Commits\n```\n" + x.commits + "\n```",
+    "",
+    "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  ].join("\n");
+}
+
 /**
  * Opens (or updates) one PR per workspace with commits. Idempotent across retries: the provider updates the
  * open PR for source→target and `pull_requests` is unique per (provider, repo, source, target).
@@ -245,10 +269,7 @@ export const pullRequestExecutor: StepExecutor = {
         await ctx.log("system", `skip PR for ${w.repo}: not in the run's selected repositories`);
         continue;
       }
-      const content = source.pull_requests?.[w.repo] ?? {};
-      const title = String(content.title ?? source.title ?? `${code ? code + ": " : ""}${ctx.run.title}`).slice(0, 250);
-      const summary = String(content.summary ?? source.summary ?? "");
-      const decisions: Array<{ title: string; detail: string }> = content.decisions ?? source.decisions ?? [];
+      const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {
         ({ commits } = await provider.push(w.path, w.branch));
@@ -260,17 +281,7 @@ export const pullRequestExecutor: StepExecutor = {
         }
         return { kind: "failed", error: `${w.repo}: push failed: ${msg}`, retryable: true };
       }
-      const description = [
-        code ? `Task: **${code}**` : `Workflow run #${ctx.run.id}`,
-        "",
-        summary,
-        "",
-        decisions.length ? "## Decisions\n" + decisions.map((d) => `- **${d.title}**: ${d.detail}`).join("\n") : "",
-        "",
-        "## Commits\n```\n" + commits + "\n```",
-        "",
-        "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
-      ].join("\n");
+      const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits });
       const pr = await provider.openOrUpdatePullRequest({ repo: w.repo, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
       await q(
         pool,

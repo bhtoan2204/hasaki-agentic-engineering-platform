@@ -30,7 +30,8 @@ export async function claimJob(workerId: string, leaseSeconds: number): Promise<
             fencing_token = j.fencing_token + 1, claims = j.claims + 1, updated_at = now()
       WHERE j.id = (
         SELECT j2.id FROM workflow_jobs j2 JOIN workflow_runs r ON r.id = j2.run_id
-         WHERE j2.status = 'queued' AND j2.available_at <= now() AND r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING')
+         WHERE j2.status = 'queued' AND j2.available_at <= now()
+           AND (r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') OR (r.status = 'PAUSED' AND j2.force))
          ORDER BY j2.available_at, j2.id
          FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
       RETURNING j.*`,

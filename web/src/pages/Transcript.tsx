@@ -1,0 +1,219 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api.ts";
+import { Badge, Copy, dur, ago, Markdown, time } from "../ui.tsx";
+
+interface Ev {
+  id: number;
+  kind: string;
+  content: string;
+  data: any;
+  created_at: string;
+}
+
+const FILTERS = [
+  ["all", "Tất cả"],
+  ["messages", "💬 Messages"],
+  ["tools", "🔧 Tools"],
+  ["read", "📖 Files read"],
+  ["modified", "✏️ Files modified"],
+  ["commands", "⌨️ Commands"],
+  ["errors", "⚠️ Errors"],
+  ["reasoning", "💭 Reasoning"],
+  ["prompts", "➡️ Prompts"],
+] as const;
+type Filter = (typeof FILTERS)[number][0];
+
+const READ_TOOLS = ["Read", "Grep", "Glob", "LS"];
+const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+function toolHint(name: string, input: any = {}) {
+  return String(input.file_path ?? input.notebook_path ?? input.path ?? input.pattern ?? input.command ?? input.repo ?? input.url ?? input.query ?? input.description ?? input.step_key ?? "").split("\n")[0];
+}
+
+/**
+ * Claude Code execution viewer for one attempt: streamed from the backend (SSE-triggered incremental fetches of
+ * /api/attempts/:id/transcript). Shows only what the SDK returned; "reasoning" is the summarised thinking the API exposes.
+ */
+export function Transcript({ attemptId, live, tick }: { attemptId: number; live: boolean; tick: number }) {
+  const [events, setEvents] = useState<Ev[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [follow, setFollow] = useState(true);
+  const last = useRef(0);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setEvents([]);
+    last.current = 0;
+  }, [attemptId]);
+  useEffect(() => {
+    let stop = false;
+    api<Ev[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
+      if (stop || !rows.length) return;
+      last.current = rows[rows.length - 1].id;
+      setEvents((prev) => [...prev, ...rows]);
+    });
+    return () => {
+      stop = true;
+    };
+  }, [attemptId, tick]);
+  useEffect(() => {
+    if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [events, follow, filter]);
+
+  const results = useMemo(() => {
+    const m: Record<string, Ev> = {};
+    for (const e of events) if (e.kind === "tool_result" && e.data?.tool_use_id) m[e.data.tool_use_id] = e;
+    return m;
+  }, [events]);
+  const tools = events.filter((e) => e.kind === "tool" && e.data?.name);
+  const filesRead = [...new Set(tools.filter((e) => READ_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.name, e.data.input)))];
+  const filesModified = [...new Set(tools.filter((e) => EDIT_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.name, e.data.input)))];
+  const commands = tools.filter((e) => e.data.name === "Bash");
+  const errors = events.filter((e) => (e.kind === "tool_result" && e.data?.is_error) || (e.kind === "tool" && !e.data?.name && e.content.startsWith("denied")) || (e.kind === "result" && e.data?.is_error));
+  const result = [...events].reverse().find((e) => e.kind === "result");
+
+  const visible = events.filter((e) => {
+    switch (filter) {
+      case "all":
+        return e.kind !== "tool_result" || !e.data?.tool_use_id || !tools.some((t) => t.data.id === e.data.tool_use_id);
+      case "messages":
+        return e.kind === "agent" || e.kind === "result";
+      case "tools":
+        return e.kind === "tool";
+      case "read":
+        return e.kind === "tool" && READ_TOOLS.includes(e.data?.name);
+      case "modified":
+        return e.kind === "tool" && EDIT_TOOLS.includes(e.data?.name);
+      case "commands":
+        return e.kind === "tool" && e.data?.name === "Bash";
+      case "errors":
+        return errors.includes(e) || (e.kind === "tool" && results[e.data?.id]?.data?.is_error);
+      case "reasoning":
+        return e.kind === "thinking";
+      case "prompts":
+        return e.kind === "prompt" || e.kind === "system_prompt";
+    }
+  });
+
+  return (
+    <div>
+      <div className="grid3 small" style={{ gap: 8 }}>
+        <div className="card" style={{ margin: 0, padding: 8 }}>
+          <b>📖 {filesRead.length}</b> files read
+          <div className="muted mono" style={{ maxHeight: 90, overflow: "auto" }}>{filesRead.map((f) => <div key={f}>{f}</div>)}</div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: 8 }}>
+          <b>✏️ {filesModified.length}</b> files modified
+          <div className="muted mono" style={{ maxHeight: 90, overflow: "auto" }}>{filesModified.map((f) => <div key={f}>{f}</div>)}</div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: 8 }}>
+          <b>⌨️ {commands.length}</b> commands · <b className={errors.length ? "err" : ""}>⚠️ {errors.length}</b> errors
+          {result && (
+            <div className="muted">
+              {result.data?.num_turns} turns · {dur(result.data?.duration_ms)}
+              {result.data?.total_cost_usd != null && ` · $${Number(result.data.total_cost_usd).toFixed(3)}`}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="tl-filters">
+        {FILTERS.map(([k, label]) => (
+          <button key={k} className={filter === k ? "" : "ghost"} onClick={() => setFilter(k)}>{label}</button>
+        ))}
+        <span className="grow" />
+        <label className="small muted"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
+      </div>
+      <div ref={box} style={{ maxHeight: "62vh", overflow: "auto" }}>
+        {visible.map((e) => <Entry key={e.id} e={e} result={e.kind === "tool" ? results[e.data?.id] : undefined} live={live} />)}
+        {!events.length && <div className="muted small">Chưa có sự kiện nào cho attempt này.</div>}
+        {live && (
+          <div className="msg live">
+            <span className="spinner" /> Claude đang làm việc… {events.length ? `hoạt động cuối ${ago(events[events.length - 1].created_at)} trước` : "đang khởi động"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
+  const sub = e.data?.parent ? " sub" : "";
+  const t = <span>{time(e.created_at)}</span>;
+  switch (e.kind) {
+    case "system_prompt":
+      return (
+        <details className="msg reason">
+          <summary>📋 System prompt (trusted) · tools: {(e.data?.tools ?? []).join(", ")} {e.data?.knowledge?.length ? `· knowledge: ${e.data.knowledge.join(", ")}` : ""}</summary>
+          <div className="row tight"><span className="grow" /><Copy text={e.content} label="Copy prompt" /></div>
+          <div className="pre">{e.content}</div>
+        </details>
+      );
+    case "prompt":
+      return (
+        <div className={"msg prompt" + sub}>
+          <div className="who">➡️ Platform → Claude {e.data?.resume_session && <Badge s="READY">resume session</Badge>} {t}<span className="grow" /><Copy text={e.content} label="Copy prompt" /></div>
+          {e.content.length > 2500 ? (
+            <details><summary>{e.content.slice(0, 160)}… ({e.content.length} ký tự)</summary><div className="pre">{e.content}</div></details>
+          ) : (
+            <div className="pre">{e.content}</div>
+          )}
+        </div>
+      );
+    case "agent":
+      return (
+        <div className={"msg claude" + sub}>
+          <div className="who">🤖 Claude {t}<span className="grow" /><Copy text={e.content} /></div>
+          <Markdown text={e.content} />
+        </div>
+      );
+    case "thinking":
+      return (
+        <details className={"msg reason" + sub}>
+          <summary>💭 Reasoning summary {t}</summary>
+          <div className="pre">{e.content}</div>
+        </details>
+      );
+    case "tool": {
+      if (!e.data?.name) return <div className={"msg note" + sub}>{t} {e.content}</div>;
+      const err = result?.data?.is_error;
+      return (
+        <div className={"msg tool" + sub + (err ? " toolerr" : "")}>
+          <div className="who">
+            🔧 <b style={{ color: "var(--text)" }}>{e.data.name.replace(/^mcp__platform__/, "platform·")}</b>
+            <span className="mono" style={{ color: "var(--text)" }}>{toolHint(e.data.name, e.data.input).slice(0, 160)}</span>
+            {t}
+            {err && <Badge s="FAILED">error</Badge>}
+            {!result && live && <Badge s="RUNNING">running…</Badge>}
+          </div>
+          <details><summary>input</summary><pre>{JSON.stringify(e.data.input, null, 2)}</pre></details>
+          {result && (
+            <details open={err}>
+              <summary>result ({result.content.length} chars)</summary>
+              <div className="row tight"><span className="grow" /><Copy text={result.content} /></div>
+              <pre className={err ? "err" : ""}>{result.content}</pre>
+            </details>
+          )}
+        </div>
+      );
+    }
+    case "tool_result":
+      return (
+        <details className={"msg tool" + sub}>
+          <summary>↩︎ tool result {t}</summary>
+          <pre>{e.content}</pre>
+        </details>
+      );
+    case "result": {
+      const d = e.data ?? {};
+      return (
+        <div className="msg done">
+          <b>{d.is_error ? "❌" : "✅"} Turn finished</b> · {d.num_turns ?? "?"} turns · {dur(d.duration_ms)}
+          {d.total_cost_usd != null && ` · $${Number(d.total_cost_usd).toFixed(3)}`}
+          {d.usage && ` · in ${d.usage.input_tokens ?? 0} / out ${d.usage.output_tokens ?? 0} tokens`} <span className="muted small">{time(e.created_at)}</span>
+        </div>
+      );
+    }
+    default:
+      return <div className={"msg note" + sub}>{t} <b>{e.kind}</b> {e.content}</div>;
+  }
+}

@@ -48,6 +48,8 @@ export const StepSpec = z.object({
   requires_approval: z.boolean().default(false),
   max_attempts: z.number().int().min(1).max(10).default(1),
   retry_backoff_seconds: z.number().int().min(0).max(3600).default(5),
+  /** Editor-only: node position in the visual builder. */
+  ui: z.object({ x: z.number(), y: z.number() }).optional(),
 });
 export type StepSpec = z.infer<typeof StepSpec>;
 
@@ -58,6 +60,9 @@ export const WorkflowSpec = z.object({
   feedback_step: z.string().optional(),
   /** Inputs the run form asks for (purely descriptive; values land in run.inputs). */
   inputs: z.record(z.string(), z.object({ description: z.string().default(""), required: z.boolean().default(false) })).default({}),
+  /** Knowledge item / skill keys applied to every step of this workflow. */
+  knowledge: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
   steps: z.array(StepSpec).min(1),
 });
 export type WorkflowSpec = z.infer<typeof WorkflowSpec>;

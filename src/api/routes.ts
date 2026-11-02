@@ -22,6 +22,8 @@ import {
   rejectStep,
   reexecuteStep,
   resumeRun,
+  runStepNow,
+  stepDetail,
   retryStep,
   runDetail,
   selectRepositories,
@@ -32,6 +34,7 @@ import {
 } from "../workflow/engine.ts";
 import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
+import { runChanges } from "../git/changes.ts";
 
 export class HttpError extends Error {
   status: number;
@@ -136,7 +139,10 @@ export const routes: Route[] = [
   ],
   ["GET", /^\/api\/runs\/(\d+)$/, ({ p }) => runDetail(num(p[0]))],
   ["GET", /^\/api\/runs\/(\d+)\/events$/, ({ p, url }) => runEvents.list(num(p[0]), Number(url.searchParams.get("after") ?? 0))],
-  ["POST", /^\/api\/runs\/(\d+)\/start$/, ({ p, body }) => startPendingRun(num(p[0]), body.repositories)],
+  ["POST", /^\/api\/runs\/(\d+)\/start$/, ({ p, body }) => startPendingRun(num(p[0]), body.repositories, !!body.step_mode)],
+  ["GET", /^\/api\/runs\/(\d+)\/changes$/, ({ p }) => runChanges(num(p[0]))],
+  ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)$/, ({ p }) => stepDetail(num(p[0]), p[1])],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/run$/, ({ p }) => runStepNow(num(p[0]), p[1])],
   ["POST", /^\/api\/runs\/(\d+)\/pause$/, ({ p }) => pauseRun(num(p[0]))],
   ["POST", /^\/api\/runs\/(\d+)\/resume$/, ({ p }) => resumeRun(num(p[0]))],
   ["POST", /^\/api\/runs\/(\d+)\/cancel$/, ({ p, body }) => cancelRun(num(p[0]), body.reason || "canceled by user")],
@@ -174,6 +180,31 @@ export const routes: Route[] = [
         text: String(body.text ?? ""),
         explicit: body.explicit ?? [],
       }),
+  ],
+  // Executions that actually received this item (from immutable context snapshots) + explicit assignments in workflows.
+  [
+    "GET",
+    /^\/api\/knowledge\/([a-z0-9_.-]+)\/usage$/,
+    async ({ p }) => {
+      const used = await q(
+        pool,
+        `SELECT cs.run_id, s.key AS step_key, s.name AS step_name, r.title AS run_title, r.definition_key, cs.created_at,
+                (SELECT (k->>'version')::int FROM jsonb_array_elements(cs.content->'knowledge') k WHERE k->>'key' = $1 LIMIT 1) AS version
+           FROM context_snapshots cs JOIN workflow_steps s ON s.id = cs.step_id JOIN workflow_runs r ON r.id = cs.run_id
+          WHERE cs.content->'knowledge' @> jsonb_build_array(jsonb_build_object('key', $1::text))
+          ORDER BY cs.id DESC LIMIT 100`,
+        [p[0]],
+      );
+      const assigned: Array<{ workflow: string; version: number | string; step: string | null }> = [];
+      for (const d of await q(pool, `SELECT d.key, d.draft_spec, v.version, v.spec FROM workflow_definitions d LEFT JOIN workflow_definition_versions v ON v.definition_id = d.id AND v.version = d.latest_version WHERE NOT d.archived`)) {
+        for (const [spec, ver] of [[d.spec, d.version], [d.draft_spec, "draft"]] as const) {
+          if (!spec) continue;
+          if ([...(spec.knowledge ?? []), ...(spec.skills ?? [])].includes(p[0])) assigned.push({ workflow: d.key, version: ver, step: null });
+          for (const st of spec.steps ?? []) if ([...(st.config?.knowledge ?? []), ...(st.config?.skills ?? [])].includes(p[0])) assigned.push({ workflow: d.key, version: ver, step: st.key });
+        }
+      }
+      return { used, assigned };
+    },
   ],
   ["GET", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, async ({ p }) => must(await knowledge.get(p[0]), "knowledge item")],
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, ({ p, body }) => knowledge.update(p[0], body)],

@@ -112,7 +112,8 @@ function runIfMatches(runIf: NonNullable<StepRow["run_if"]>, byKey: Map<string, 
  */
 export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): Promise<RunRow> {
   const run = await lockRun(c, runId);
-  if (run.status === "PAUSED" || run.status === "CANCELED" || run.status === "PENDING") return run;
+  if (run.status === "CANCELED" || run.status === "PENDING") return run;
+  // PAUSED runs still promote steps (so step mode shows what is runnable next) but nothing is enqueued.
   const steps = await stepsOf(c, runId);
   const byKey = new Map(steps.map((s) => [s.key, s]));
   let changed = true;
@@ -132,7 +133,7 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
       changed = true;
     }
   }
-  for (const s of steps) if (s.status === "READY") await ensureJob(c, s);
+  if (run.status !== "PAUSED") for (const s of steps) if (s.status === "READY") await ensureJob(c, s);
   await setRunStatus(c, run, deriveRunStatus(run.status, steps), afterCommit);
   return run;
 }
@@ -193,12 +194,14 @@ export async function startRun(input: StartRunInput) {
   });
 }
 
-export async function startPendingRun(runId: number, repositoriesOverride?: string[]) {
+/** `stepMode`: start PAUSED, then run steps one at a time with runStepNow(). */
+export async function startPendingRun(runId: number, repositoriesOverride?: string[], stepMode = false) {
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PENDING") throw new EngineError(`run ${runId} is ${run.status}, not PENDING`);
     if (repositoriesOverride) await setSelectedRepositories(c, run, repositoriesOverride);
     await setRunStatus(c, run, "RUNNING");
+    if (stepMode) await setRunStatus(c, run, "PAUSED");
     await advance(c, runId, afterCommit);
     return getRun(runId, c);
   });
@@ -330,6 +333,25 @@ export async function sendFeedback(runId: number, message: string) {
   const key = run.graph.feedback_step ?? run.graph.steps.find((s) => s.type === "coding_agent")?.key;
   if (!key) throw new EngineError("this workflow has no step that accepts feedback");
   return reexecuteStep(runId, key, { feedback: message });
+}
+
+/**
+ * Step mode: execute one READY step of a PAUSED run now. The run stays paused, so nothing else starts; when the
+ * step finishes its dependants become READY and can be run the same way (or the run resumed).
+ */
+export async function runStepNow(runId: number, stepKey: string) {
+  return withTx(async (c, afterCommit) => {
+    const run = await lockRun(c, runId);
+    if (run.status !== "PAUSED") throw new EngineError(`run is ${run.status}: "run step" is for paused runs (step mode); running runs schedule steps automatically`);
+    await advance(c, runId, afterCommit);
+    const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
+    if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
+    if (s.status !== "READY" && s.status !== "RETRYING") throw new EngineError(`step "${stepKey}" is ${s.status}; only READY steps can be run (dependencies must be complete)`);
+    await ensureJob(c, s);
+    await q(c, "UPDATE workflow_jobs SET force = true, available_at = LEAST(available_at, now()) WHERE step_id = $1 AND status = 'queued'", [s.id]);
+    await runEvents.add(c, runId, "user", `run step ${stepKey} (step mode)`, s.id);
+    return getRun(runId, c);
+  });
 }
 
 export async function skipStep(runId: number, stepKey: string, reason = "skipped by user") {
@@ -479,7 +501,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 FOR UPDATE", [job.id]);
     if (!j || j.status !== "running" || j.fencing_token !== job.fencing_token) return null;
     const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [job.step_id]))!;
-    const runnable = !["PAUSED", "CANCELED", "PENDING"].includes(run.status);
+    const runnable = !["PAUSED", "CANCELED", "PENDING"].includes(run.status) || (run.status === "PAUSED" && (j as any).force === true);
     if (step.generation !== j.generation || !["READY", "RETRYING"].includes(step.status) || !runnable) {
       // Paused runs: hand the job back untouched; everything else is stale.
       if (run.status === "PAUSED" && step.generation === j.generation)
@@ -682,6 +704,22 @@ export async function runDetail(runId: number) {
   const workItem = run.work_item_id ? await one(pool, "SELECT id, code, title, source, project FROM work_items WHERE id = $1", [run.work_item_id]) : null;
   const def = await one(pool, "SELECT version FROM workflow_definition_versions WHERE id = $1", [run.definition_version_id]);
   return { ...run, definition_version: def?.version, work_item: workItem, attempts, questions, artifacts, pull_requests: prs, workspaces, checkpoints };
+}
+
+/** Everything the step inspector shows for one step. */
+export async function stepDetail(runId: number, stepKey: string) {
+  const step = await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
+  if (!step) throw new EngineError(`step "${stepKey}" not found`, 404);
+  const [attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs] = await Promise.all([
+    q(pool, "SELECT * FROM workflow_step_attempts WHERE step_id = $1 ORDER BY number", [step.id]),
+    q(pool, "SELECT * FROM workflow_questions WHERE step_id = $1 ORDER BY id", [step.id]),
+    q(pool, "SELECT * FROM workflow_checkpoints WHERE step_id = $1 ORDER BY id", [step.id]),
+    q(pool, "SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = $1 ORDER BY id", [step.id]),
+    q(pool, "SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = $1 ORDER BY s.id", [step.id]),
+    q(pool, "SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = $1 ORDER BY id", [step.id]),
+    q(pool, "SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = $1 ORDER BY id DESC LIMIT 10", [step.id]),
+  ]);
+  return { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs };
 }
 
 export function openQuestions(db: Db = pool) {

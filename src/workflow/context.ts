@@ -82,7 +82,12 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   const project = input.work_item?.project || String(input.run.inputs?.project ?? "");
   const repositories = run.selected_repositories;
   const cfg = step.config ?? {};
-  const explicit = [...((cfg.skills as string[]) ?? []), ...((cfg.knowledge as string[]) ?? [])];
+  const explicit = [
+    ...((cfg.skills as string[]) ?? []),
+    ...((cfg.knowledge as string[]) ?? []),
+    ...(run.graph.skills ?? []),
+    ...(run.graph.knowledge ?? []),
+  ];
   const res = resolveKnowledge(await knowledge.candidates(c), {
     organization: config.organization,
     project,

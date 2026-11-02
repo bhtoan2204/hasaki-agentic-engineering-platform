@@ -13,13 +13,28 @@ Architecture: [`docs/architecture/current-state.md`](docs/architecture/current-s
 ## Run
 
 ```bash
-npm install
 docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
+npm install
 cp config.example.json config.json    # reposRoot, projects, bitbucket, ...
 export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # optional; without them the PR step stores a "create PR" link
-npm start                             # http://localhost:4545 — applies migrations, seeds templates/repos/knowledge
-npm test                              # creates a throwaway platform_test database on the same server
+npm start                             # builds the UI, then http://localhost:4545 (migrations + seeds run on boot)
 ```
+
+Development: `npm run dev` (backend with --watch) + `npm run dev:web` (Vite hot reload on http://localhost:5173,
+proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` uses a throwaway `platform_test` database.
+
+## UI (React + XYFlow, `web/`)
+
+| Screen | What you can do |
+|---|---|
+| **Runs → run** | Live execution graph (SSE from PostgreSQL LISTEN/NOTIFY, polling fallback). Start / step mode / pause / resume / cancel. Click a node → inspector: config, resolved input, output (Markdown + JSON tree, copy), applied knowledge from the context snapshot, Claude session, Q&A, checkpoints, artifacts, attempt history; retry, re-execute from here, skip, run this step (step mode). Questions and approvals are answered in the inspector; blocked nodes pulse. |
+| **Claude tab** | Execution viewer streamed while the step runs: prompts, Claude messages, tool calls with full input/result, files read / modified, commands, errors, reasoning summaries, turn cost — filterable by type. |
+| **🔍 Changes** | Per workspace: commits ahead of `release/prod`, changed files, colored diff, uncommitted work, the exact PR title/description the PR step will send, test/review results. Approve the PR step from there. |
+| **Workflows → editor** | Node canvas: add steps from the palette, drag, connect (dependencies), delete; per-type forms (prompts, output contract, skills, business rules, repository discovery, approval/reject routing, commands, conditions, PR mode); validate, save draft, publish version, load older versions, run (normal or step mode). |
+| **Knowledge** | Business rules, architecture, conventions, repo instructions, skills; scope + applicability, version history, audit, where it is assigned and which executions actually received it. |
+| **Work Items / Questions / Repositories** | Import (Hasaki list or task id, Jira, JSON), manual requests, start runs; cross-run questions inbox; repository registry and ranking preview. |
+
+The previous vanilla UI is still served at `/classic`.
 
 Node ≥ 22.18 (runs `.ts` directly), `claude` logged in, SSH key that can push to Bitbucket.
 

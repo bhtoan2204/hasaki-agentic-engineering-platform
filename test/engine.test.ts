@@ -19,6 +19,9 @@ import {
   resumeRun,
   retryStep,
   runDetail,
+  runStepNow,
+  startPendingRun,
+  stepDetail,
   sendFeedback,
   startRun,
 } from "../src/workflow/engine.ts";
@@ -148,6 +151,10 @@ test("Scenario A: manual request through Feature Implementation to a Bitbucket P
   assert.equal(st.approve_plan, "WAITING_APPROVAL");
 
   await approveStep(run.id, "approve_plan");
+  await drain();
+  assert.equal((await stepOf(run.id, "pr")).status, "WAITING_APPROVAL", "PR waits for review of the changes");
+  assert.equal(prCalls.length, 0);
+  await approveStep(run.id, "pr");
   await drain();
   const final = await runDetail(run.id);
   assert.equal(final.status, "COMPLETED", JSON.stringify(await statuses(run.id)));
@@ -469,4 +476,33 @@ test("context snapshots record applied knowledge versions and are immutable", as
 
 test("repository selection outside the allowed set is rejected at run start", async () => {
   await assert.rejects(startRun({ definitionKey: "code-review", repositories: ["payment-src"], inputs: { project: "OMS" } }), /not allowed/);
+});
+
+test("step mode: a paused run executes one chosen step at a time; inspector API and NOTIFY", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent" }, { key: "b", type: "agent", depends_on: ["a"] }, { key: "c", type: "agent", depends_on: ["a"] }]);
+  const listen = await pool.connect();
+  const notes: string[] = [];
+  listen.on("notification", (n) => notes.push(n.payload!));
+  await listen.query("LISTEN workflow_events");
+  const run = await startRun({ definitionKey: key, start: false });
+  await startPendingRun(run.id, undefined, true);
+  assert.equal((await getRun(run.id)).status, "PAUSED");
+  assert.equal(await drain(), 0, "nothing runs by itself in step mode");
+  await assert.rejects(runStepNow(run.id, "b"), /only READY/);
+  await runStepNow(run.id, "a");
+  assert.equal(await drain(), 1);
+  assert.deepEqual(await statuses(run.id), { a: "COMPLETED", b: "READY", c: "READY" });
+  assert.equal((await getRun(run.id)).status, "PAUSED");
+  await runStepNow(run.id, "c");
+  await drain();
+  assert.deepEqual(await statuses(run.id), { a: "COMPLETED", b: "READY", c: "COMPLETED" });
+  await resumeRun(run.id);
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  const d = await stepDetail(run.id, "a");
+  assert.equal(d.attempts.length, 1);
+  assert.equal(d.snapshots.length, 1);
+  await new Promise((r) => setTimeout(r, 100));
+  listen.release();
+  assert.ok(notes.some((n) => JSON.parse(n).run_id === run.id), "events are announced for SSE");
 });
