@@ -12,6 +12,7 @@ import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
 import { errorStatus, HttpError, routes } from "./api/routes.ts";
 import { handleStream, startEventStream } from "./api/stream.ts";
+import { childGroups } from "./workflow/local.ts";
 
 // The React app (web/, built by `npm run build`, which `npm start` runs first) is served from web/dist.
 // The previous vanilla UI stays available at /classic while it is phased out.
@@ -99,6 +100,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, async () => {
     console.log(`${sig}: stopping workers (in-flight attempts finish or are reaped after their lease)`);
     server.close();
+    childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
     setTimeout(() => process.exit(0), 3000).unref();
     await scheduler.stop();
     process.exit(0);

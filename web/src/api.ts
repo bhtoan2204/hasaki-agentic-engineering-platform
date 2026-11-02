@@ -39,44 +39,83 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
 export type LiveState = "sse" | "polling" | "connecting";
 
 /**
- * Live updates: Server-Sent Events relayed from PostgreSQL LISTEN/NOTIFY (`/api/stream`). Calls `onChange` (debounced)
- * whenever an event for the run (or any run) is written. Falls back to polling every 3s if SSE is unavailable.
+ * One EventSource per browser tab, shared by every component (browsers allow only ~6 HTTP/1.1 connections per host;
+ * one stream per component across a few tabs used them all and every fetch hung). The stream is closed while the tab is
+ * hidden and reopened (with a refresh) when it becomes visible again. Falls back to polling when SSE is unavailable.
  */
+type Sub = { runId: number | null; cb: (p?: any) => void; setState: (s: LiveState) => void };
+const subs = new Set<Sub>();
+let es: EventSource | null = null;
+let state: LiveState = "connecting";
+let poll: ReturnType<typeof setInterval> | null = null;
+
+function setShared(s: LiveState) {
+  state = s;
+  subs.forEach((x) => x.setState(s));
+}
+function broadcast(p?: any) {
+  subs.forEach((x) => {
+    if (!p || x.runId === null || p.run_id === x.runId) x.cb(p);
+  });
+}
+function stopPolling() {
+  if (poll) clearInterval(poll), (poll = null);
+}
+function startPolling() {
+  setShared("polling");
+  if (!poll) poll = setInterval(() => broadcast(), 3000);
+}
+function open() {
+  if (es || !subs.size || document.visibilityState === "hidden") return;
+  try {
+    es = new EventSource("/api/stream");
+    es.addEventListener("hello", () => (stopPolling(), setShared("sse")));
+    es.addEventListener("change", (e) => broadcast(JSON.parse((e as MessageEvent).data)));
+    es.onerror = () => startPolling(); // EventSource reconnects by itself; poll meanwhile
+  } catch {
+    startPolling();
+  }
+}
+function close() {
+  es?.close();
+  es = null;
+  stopPolling();
+}
+if (typeof document !== "undefined")
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") close();
+    else {
+      open();
+      broadcast(); // catch up on what happened while hidden
+    }
+  });
+
+/** Calls `onChange` (debounced) when an event for `runId` (or any run when null) is written to PostgreSQL. */
 export function useLive(runId: number | null, onChange: (payload?: any) => void, enabled = true) {
-  const [state, setState] = useState<LiveState>("connecting");
+  const [live, setLive] = useState<LiveState>(state);
   const cb = useRef(onChange);
   cb.current = onChange;
   useEffect(() => {
     if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let poll: ReturnType<typeof setInterval> | null = null;
-    const fire = (p?: any) => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => cb.current(p), 250);
+    const sub: Sub = {
+      runId,
+      setState: setLive,
+      cb: (p) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => cb.current(p), 250);
+      },
     };
-    const startPolling = () => {
-      setState("polling");
-      if (!poll) poll = setInterval(() => cb.current(), 3000);
-    };
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource(`/api/stream${runId ? `?run_id=${runId}` : ""}`);
-      es.addEventListener("hello", () => {
-        setState("sse");
-        if (poll) clearInterval(poll), (poll = null);
-      });
-      es.addEventListener("change", (e) => fire(JSON.parse((e as MessageEvent).data)));
-      es.onerror = () => startPolling(); // EventSource retries by itself; poll meanwhile
-    } catch {
-      startPolling();
-    }
+    subs.add(sub);
+    setLive(state);
+    open();
     return () => {
-      es?.close();
+      subs.delete(sub);
       if (timer) clearTimeout(timer);
-      if (poll) clearInterval(poll);
+      if (!subs.size) close();
     };
   }, [runId, enabled]);
-  return state;
+  return live;
 }
 
 export const STATUS_COLORS: Record<string, string> = {

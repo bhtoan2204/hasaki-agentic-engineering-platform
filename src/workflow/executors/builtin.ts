@@ -5,6 +5,7 @@ import { gitProvider, workspacesOf } from "../../git/provider.ts";
 import { isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
 import { classify, goBaseline, parseGoTest } from "./baseline.ts";
+import { childGroups } from "../local.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -82,6 +83,7 @@ function runCommand(command: string, cwd: string, env: Record<string, string>, t
       } catch {}
     };
     signal.addEventListener("abort", killTree, { once: true });
+    if (child.pid) childGroups.add(child.pid);
     let output = "";
     const cap = 512 * 1024;
     let pending = "";
@@ -106,6 +108,7 @@ function runCommand(command: string, cwd: string, env: Record<string, string>, t
       output += `\n[spawn error] ${e.message}`;
     });
     child.on("close", (code) => {
+      if (child.pid) childGroups.remove(child.pid);
       clearTimeout(t);
       clearInterval(ticker);
       flush();

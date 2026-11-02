@@ -603,3 +603,19 @@ test("regression test step compares Go failures with the base branch (real go + 
   assert.match(st.error!, /TestAdd/);
   assert.doesNotMatch(st.error!, /TestNeedsDB/);
 });
+
+test("server shutdown kills detached command process groups (no orphaned go test)", async () => {
+  const { childGroups } = await import("../src/workflow/local.ts");
+  const { execSync } = await import("node:child_process");
+  const cwd = mkdtempSync(join(process.env.TEST_ROOT!, "orphan-"));
+  const marker = `orphan-marker-${Date.now()}`;
+  const key = await customWorkflow([{ key: "slow", type: "command", config: { cwd, command: `sleep 30; echo ${marker}` } }]);
+  await startRun({ definitionKey: key });
+  const worker = runOnce("w-orphan", { leaseSeconds: 30, heartbeatSeconds: 5 });
+  const alive = () => execSync(`ps -eo args | grep -c "[s]leep 30; echo ${marker}" || true`).toString().trim();
+  for (let i = 0; i < 25 && alive() === "0"; i++) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(alive(), "1", "command is running");
+  childGroups.killAll(); // what the SIGINT/SIGTERM handler and process exit do
+  await worker;
+  assert.equal(alive(), "0", "no orphaned process left");
+});
