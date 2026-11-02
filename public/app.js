@@ -64,7 +64,12 @@ async function render(force = false) {
     if (STATE.route !== hash) return;
     const openDetails = $$("details[data-k]").filter((d) => d.open).map((d) => d.dataset.k);
     const scroll = window.scrollY;
+    const inner = Object.fromEntries($$("[data-scroll]").map((el) => [el.dataset.scroll, { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 40 }]));
     $("#view").innerHTML = html;
+    $$("[data-scroll]").forEach((el) => {
+      const st = inner[el.dataset.scroll];
+      el.scrollTop = !st || st.bottom ? el.scrollHeight : st.top; // follow the live conversation unless the user scrolled up
+    });
     openDetails.forEach((k) => {
       const d = $(`details[data-k="${k}"]`);
       if (d) d.open = true;
@@ -370,6 +375,93 @@ function approvalPanel(run, s) {
       <button class="danger" onclick="A.reject(${run.id}, '${s.key}')">Reject${s.config?.on_reject?.reexecute ? ` → redo ${esc(s.config.on_reject.reexecute)}` : ""}</button></div></div>`;
 }
 
+// ---------------------------------------------------------------- agent conversation
+
+const convSel = {}; // stepKey -> selected attempt id
+const AGENT_TYPES = ["agent", "coding_agent"];
+const ago = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - new Date(t)) / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${s % 60}s` : `${Math.floor(s / 3600)}h`;
+};
+const fmtDur = (ms) => (ms == null ? "" : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`);
+
+function toolLabel(name, input = {}) {
+  const short = name.replace(/^mcp__platform__/, "platform·");
+  const hint = input.file_path ?? input.path ?? input.pattern ?? input.command ?? input.repo ?? input.description ?? input.url ?? input.query ?? input.step_key ?? "";
+  return `<b>${esc(short)}</b> <span class="mono">${esc(String(hint).split("\n")[0].slice(0, 140))}</span>`;
+}
+
+function renderTranscript(events, live) {
+  const results = {};
+  for (const e of events) if (e.kind === "tool_result" && e.data?.tool_use_id) results[e.data.tool_use_id] = e;
+  const out = [];
+  for (const e of events) {
+    const sub = e.data?.parent ? " sub" : "";
+    const t = `<span class="muted small">${time(e.created_at)}</span>`;
+    const long = (txt, n = 1800) => (txt.length > n ? `<details><summary>${esc(txt.slice(0, 200))}… (${txt.length} ký tự)</summary><div class="pre">${esc(txt)}</div></details>` : `<div class="pre">${esc(txt)}</div>`);
+    switch (e.kind) {
+      case "system_prompt":
+        out.push(`<details class="msg sys"><summary>📋 System prompt (trusted) · ${esc((e.data?.tools || []).join(", "))}${e.data?.knowledge?.length ? " · knowledge: " + esc(e.data.knowledge.join(", ")) : ""}</summary><div class="pre">${esc(e.content)}</div></details>`);
+        break;
+      case "prompt":
+        out.push(`<div class="msg user${sub}"><div class="who">➡️ Platform → Claude ${e.data?.resume_session ? '<span class="badge s-READY">resume session</span>' : ""} ${t}</div>${long(e.content)}</div>`);
+        break;
+      case "agent":
+        out.push(`<div class="msg claude${sub}"><div class="who">🤖 Claude ${t}</div><div class="pre">${esc(e.content)}</div></div>`);
+        break;
+      case "thinking":
+        out.push(`<details class="msg think${sub}"><summary>💭 Thinking ${t}</summary><div class="pre">${esc(e.content)}</div></details>`);
+        break;
+      case "tool": {
+        if (!e.data?.name) {
+          out.push(`<div class="msg note${sub}">${t} ${esc(e.content)}</div>`); // e.g. "denied Bash: …"
+          break;
+        }
+        const r = results[e.data.id];
+        out.push(`<div class="msg tool${sub}"><div class="who">🔧 ${toolLabel(e.data.name, e.data.input)} ${t} ${r ? (r.data?.is_error ? badge("FAILED").replace("FAILED", "lỗi") : "") : live ? '<span class="badge s-RUNNING">đang chạy…</span>' : ""}</div>
+          <details><summary>input</summary><pre>${esc(JSON.stringify(e.data.input, null, 2))}</pre></details>
+          ${r ? `<details${r.data?.is_error ? " open" : ""}><summary>kết quả (${r.content.length} ký tự)</summary><pre${r.data?.is_error ? ' class="err"' : ""}>${esc(r.content)}</pre></details>` : ""}</div>`);
+        break;
+      }
+      case "tool_result":
+        if (!e.data?.tool_use_id || !events.some((x) => x.kind === "tool" && x.data?.id === e.data.tool_use_id))
+          out.push(`<details class="msg tool${sub}"><summary>↩︎ tool result</summary><pre>${esc(e.content)}</pre></details>`);
+        break;
+      case "result": {
+        const d = e.data || {};
+        out.push(`<div class="msg done"><b>${d.is_error ? "❌" : "✅"} Lượt kết thúc</b> · ${d.num_turns ?? "?"} turns · ${fmtDur(d.duration_ms)}${d.total_cost_usd != null ? ` · $${Number(d.total_cost_usd).toFixed(3)}` : ""}
+          ${d.usage ? ` · in ${d.usage.input_tokens ?? 0} / out ${d.usage.output_tokens ?? 0} tok` : ""} ${t}${e.content ? `<details><summary>câu trả lời cuối</summary><div class="pre">${esc(e.content)}</div></details>` : ""}</div>`);
+        break;
+      }
+      default:
+        out.push(`<div class="msg note${sub}">${t} ${esc(e.content)}</div>`);
+    }
+  }
+  if (live) {
+    const last = events.at(-1);
+    out.push(`<div class="msg live">⏳ Claude đang làm việc…${last ? ` hoạt động cuối ${ago(last.created_at)} trước` : " đang khởi động"}</div>`);
+  }
+  return out.join("") || `<div class="muted small">Chưa có hội thoại.</div>`;
+}
+
+async function conversationPanel(s, atts) {
+  if (!AGENT_TYPES.includes(s.type) || !atts.length) return "";
+  const k = "conv-" + s.key;
+  const running = s.status === "RUNNING";
+  const wasOpen = $(`details[data-k="${k}"]`)?.open;
+  const open = wasOpen ?? running;
+  const selected = Number(convSel[s.key] ?? s.current_attempt_id ?? atts.at(-1).id);
+  const att = atts.find((a) => a.id === selected) ?? atts.at(-1);
+  const live = running && att.id === s.current_attempt_id;
+  const events = open ? await api(`/api/attempts/${att.id}/transcript`) : [];
+  return `<details data-k="${k}" ${open ? "open data-loaded=\"1\"" : ""} ontoggle="if (this.open && !this.dataset.loaded) render(true)">
+    <summary>💬 Hội thoại với Claude ${live ? '<span class="badge s-RUNNING">live</span>' : ""}</summary>
+    <div class="row" style="margin:4px 0">${atts.length > 1 ? `<select style="width:auto" onchange="A.convAttempt('${s.key}', this.value)">${atts
+      .map((a) => `<option value="${a.id}" ${a.id === att.id ? "selected" : ""}>attempt #${a.number} · gen ${a.generation} · ${a.status}</option>`)
+      .join("")}</select>` : `<span class="muted small">attempt #${att.number} · ${att.status}</span>`}</div>
+    <div class="convo" data-scroll="${k}">${open ? renderTranscript(events, live) : ""}</div></details>`;
+}
+
 async function runDetail(id) {
   const [r, events] = await Promise.all([api(`/api/runs/${id}`), api(`/api/runs/${id}/events`)]);
   const attempts = {};
@@ -396,9 +488,10 @@ async function runDetail(id) {
     <div class="graph">${r.steps
       .map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}<span class="node s-${s.status}" title="${esc(s.type)} · depends on ${esc(s.depends_on.join(", ") || "-")}" onclick="document.getElementById('step-${s.key}').scrollIntoView({behavior:'smooth'})">${esc(s.name)}</span>`)
       .join("")}</div>
-    ${r.steps
-      .map((s) => {
+    ${(await Promise.all(r.steps
+      .map(async (s) => {
         const atts = attempts[s.key] || [];
+        const convo = await conversationPanel(s, atts);
         const qs = questions[s.key] || [];
         const open = qs.filter((q) => q.status === "open");
         const can = (a) => RUN_ACTIONS[a].includes(s.status) && active;
@@ -413,6 +506,7 @@ async function runDetail(id) {
           ${s.error ? `<div class="err small">${esc(s.error)}</div>` : ""}
           ${open.length ? open.map((q) => questionForm({ ...q, step_name: "" })).join("") + `<div class="row"><button onclick="A.answer([${open.map((q) => q.id).join(",")}])">Send answers & resume</button></div>` : ""}
           ${s.status === "WAITING_APPROVAL" ? approvalPanel(r, s) : ""}
+          ${convo}
           ${s.output != null ? `<details data-k="out-${s.key}"><summary>output</summary>${json(s.output)}</details>` : ""}
           ${(artifacts[s.id] || []).length ? `<div class="row small">${artifacts[s.id].map((a) => `<button class="ghost sm" onclick="A.artifact(${a.id})">📎 ${esc(a.name)}</button>`).join("")}</div>` : ""}
           ${qs.filter((q) => q.status !== "open").length ? `<details data-k="qa-${s.key}"><summary>${qs.filter((q) => q.status !== "open").length} earlier question(s)</summary>${qs.filter((q) => q.status !== "open").map((q) => `<div class="q"><b>${esc(q.question)}</b> ${badge(q.status)}<div class="muted">→ ${esc(q.answer ?? "")}</div></div>`).join("")}</details>` : ""}
@@ -424,8 +518,7 @@ async function runDetail(id) {
             )
             .join("")}</table></details>` : ""}
         </div>`;
-      })
-      .join("")}
+      }))).join("")}
     <div id="modal"></div>
     ${r.pull_requests.length ? `<h3>Pull requests</h3>${prTable(r.pull_requests)}` : ""}
     ${active && (r.graph.feedback_step || r.steps.some((s) => s.type === "coding_agent")) ? `<h3>Feedback for the agent (re-runs the feedback step; tests and PR follow)</h3>
@@ -561,6 +654,10 @@ window.A = {
     }
     if (action === "skip" && !confirm("Skip this step?")) return;
     return act(() => api(`/api/runs/${id}/steps/${key}/${action}`, body));
+  },
+  convAttempt: (key, id) => {
+    convSel[key] = Number(id);
+    render(true);
   },
   pickOption: (id, v) => {
     drafts["ans-" + id] = v;

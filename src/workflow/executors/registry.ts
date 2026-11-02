@@ -11,7 +11,8 @@ export interface ExecutionContext {
   input: StepInput;
   context: ResolvedContext;
   signal: AbortSignal;
-  log(kind: "agent" | "tool" | "system", content: string): Promise<void>;
+  /** Timeline / transcript entry for this attempt. `data` holds structured details (tool input, cost...). */
+  log(kind: "agent" | "tool" | "system" | "system_prompt" | "prompt" | "thinking" | "tool_result" | "result", content: string, data?: unknown): Promise<void>;
   artifact(kind: string, name: string, content: string, data?: unknown): Promise<number>;
   /** Persist questions against this attempt immediately (used by the ask_user MCP tool). */
   ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;
@@ -38,7 +39,7 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
   const { run, step, attempt } = base;
   return {
     ...base,
-    log: (kind, content) => runEvents.add(pool, run.id, kind, content, step.id, attempt.id),
+    log: (kind, content, data) => runEvents.add(pool, run.id, kind, content, step.id, attempt.id, data ?? null),
     async artifact(kind, name, content, data) {
       const r = await one(pool, "INSERT INTO workflow_artifacts (run_id, step_id, attempt_id, kind, name, content, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id", [
         run.id,

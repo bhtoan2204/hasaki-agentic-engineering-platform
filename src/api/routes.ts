@@ -147,6 +147,7 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/approve$/, ({ p, body }) => approveStep(num(p[0]), p[1], { comment: body.comment, by: body.by, repositories: body.repositories })],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reject$/, ({ p, body }) => rejectStep(num(p[0]), p[1], { comment: body.comment, by: body.by, reexecute: body.reexecute })],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/skip$/, ({ p, body }) => skipStep(num(p[0]), p[1], body.reason || "skipped by user")],
+  ["GET", /^\/api\/attempts\/(\d+)\/transcript$/, ({ p, url }) => runEvents.transcript(num(p[0]), Number(url.searchParams.get("after") ?? 0))],
   ["GET", /^\/api\/artifacts\/(\d+)$/, async ({ p }) => must(await one(pool, "SELECT * FROM workflow_artifacts WHERE id = $1", [num(p[0])]), "artifact")],
   ["GET", /^\/api\/snapshots\/(\d+)$/, async ({ p }) => must(await one(pool, "SELECT * FROM context_snapshots WHERE id = $1", [num(p[0])]), "snapshot")],
   ["GET", /^\/api\/pull-requests$/, () => q(pool, "SELECT p.*, w.code AS work_item_code FROM pull_requests p LEFT JOIN work_items w ON w.id = p.work_item_id ORDER BY p.updated_at DESC LIMIT 200")],

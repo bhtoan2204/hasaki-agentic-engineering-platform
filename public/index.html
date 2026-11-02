@@ -466,6 +466,19 @@
         display: none
       }
     }
+
+    .convo { max-height: 640px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 4px }
+    .msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 13px }
+    .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 4px }
+    .msg .pre { white-space: pre-wrap; word-break: break-word }
+    .msg.user { border-left: 3px solid var(--accent) }
+    .msg.claude { border-left: 3px solid var(--ok) }
+    .msg.tool { font-size: 12.5px; padding: 6px 10px }
+    .msg.think, .msg.sys { color: var(--muted); font-style: italic; padding: 4px 10px }
+    .msg.note { border: 0; background: transparent; color: var(--muted); font-size: 12px; padding: 2px 10px }
+    .msg.done { border-left: 3px solid var(--muted) }
+    .msg.live { border: 1px dashed var(--accent); color: var(--accent); background: transparent }
+    .msg.sub { margin-left: 28px }
   </style>
 </head>
 

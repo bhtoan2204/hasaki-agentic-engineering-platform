@@ -19,6 +19,49 @@ function summarize(input: unknown) {
   return s.length > 300 ? s.slice(0, 300) + "…" : s;
 }
 
+const MAX_RESULT_CHARS = 30_000;
+const cap = (t: string) => (t.length > MAX_RESULT_CHARS ? t.slice(0, MAX_RESULT_CHARS) + `\n… (${t.length - MAX_RESULT_CHARS} more chars)` : t);
+
+function toolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content))
+    return content.map((c: any) => (c?.type === "text" ? c.text : c?.type === "image" ? "[image]" : JSON.stringify(c))).join("\n");
+  return JSON.stringify(content ?? "");
+}
+
+/**
+ * Persist the conversation as it streams: every assistant block (text, thinking, tool call with full input), every
+ * tool result, and the turn summary (cost, turns, duration). Subagent traffic is tagged with parent_tool_use_id.
+ */
+async function recordTranscript(ctx: ExecutionContext, msg: any, cwd: string) {
+  const parent = msg.parent_tool_use_id ?? null;
+  if (msg.type === "system" && msg.subtype === "init") {
+    await ctx.recordSession(msg.session_id, cwd, msg.model ?? config.model);
+    await ctx.log("system", `Claude session ${msg.session_id} started (model ${msg.model ?? "default"})`, { session_id: msg.session_id, model: msg.model, tools: msg.tools });
+  } else if (msg.type === "assistant") {
+    for (const block of msg.message?.content ?? []) {
+      if (block.type === "text" && block.text.trim()) await ctx.log("agent", block.text, { parent });
+      else if (block.type === "thinking" && block.thinking?.trim()) await ctx.log("thinking", block.thinking, { parent });
+      else if (block.type === "tool_use")
+        await ctx.log("tool", `${block.name} ${summarize(block.input)}`, { id: block.id, name: block.name, input: block.input, parent });
+    }
+  } else if (msg.type === "user" && Array.isArray(msg.message?.content)) {
+    for (const block of msg.message.content) {
+      if (block.type === "tool_result")
+        await ctx.log("tool_result", cap(toolResultText(block.content)), { tool_use_id: block.tool_use_id, is_error: !!block.is_error, parent });
+    }
+  } else if (msg.type === "result") {
+    await ctx.log("result", msg.subtype === "success" ? String(msg.result ?? "") : `stopped: ${msg.subtype}`, {
+      subtype: msg.subtype,
+      is_error: msg.is_error,
+      num_turns: msg.num_turns,
+      duration_ms: msg.duration_ms,
+      total_cost_usd: msg.total_cost_usd,
+      usage: msg.usage,
+    });
+  }
+}
+
 /**
  * Platform MCP tools, bound to one attempt (run + step + attempt), so every question, note, branch and
  * result lands on the right execution record.
@@ -158,6 +201,7 @@ export const claudeExecutor: StepExecutor = {
         yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: "" };
       }
       const result = { isError: false, text: "", assistantTurns: 0 };
+      await ctx.log("prompt", prompt, { resume_session: resumeId ?? null });
       try {
         for await (const msg of query({
           prompt: input(),
@@ -178,15 +222,9 @@ export const claudeExecutor: StepExecutor = {
             disallowedTools: ["AskUserQuestion"],
           },
         })) {
-          if (msg.type === "system" && msg.subtype === "init") {
-            await ctx.recordSession(msg.session_id, cwd, config.model);
-          } else if (msg.type === "assistant") {
-            result.assistantTurns++;
-            for (const block of msg.message.content) {
-              if (block.type === "text" && block.text.trim()) await ctx.log("agent", block.text);
-              else if (block.type === "tool_use") await ctx.log("tool", `${block.name} ${summarize(block.input)}`);
-            }
-          } else if (msg.type === "result") {
+          await recordTranscript(ctx, msg, cwd);
+          if (msg.type === "assistant") result.assistantTurns++;
+          else if (msg.type === "result") {
             result.isError = msg.is_error;
             result.text = msg.subtype === "success" ? msg.result : msg.subtype;
           }
@@ -197,6 +235,7 @@ export const claudeExecutor: StepExecutor = {
       return result;
     };
 
+    await ctx.log("system_prompt", systemAppend, { mode, tools: toolsFor(mode), knowledge: ctx.context.knowledge.map((k) => `${k.key}@${k.version}`) });
     let result;
     if (resume && existsSync(cwd)) {
       await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
