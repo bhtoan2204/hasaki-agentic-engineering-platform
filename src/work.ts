@@ -1,9 +1,9 @@
 import { config } from "./config.ts";
-import { inbox, tasks } from "./db.ts";
+import { inbox } from "./db.ts";
 import { authStatus, workApi } from "./hasakiAuth.ts";
-import { enqueue } from "./agent.ts";
 import { normalizeTask } from "./prompt.ts";
 import { notify } from "./notify.ts";
+import { applyAutomationPolicy, workItems, type WorkItemRow } from "./workitems/service.ts";
 
 const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD, local time
 
@@ -34,20 +34,36 @@ export async function fetchTaskList() {
   return list;
 }
 
-/** Fetch full detail of one task, import it and start the agent. */
-export async function pickTask(workId: number) {
+/**
+ * Import a Hasaki task payload ({data:{...}} or bare data) as a work item. Importing NEVER executes:
+ * a run starts only on an explicit user action or when `automationPolicy` names a workflow.
+ */
+export async function importHasakiTask(raw: unknown, automationPolicy: WorkItemRow["automation_policy"] = null) {
+  const t = normalizeTask(raw);
+  const { item, created } = await workItems.upsertImported({
+    source: "hasaki_work",
+    code: t.code,
+    externalId: t.workId != null ? String(t.workId) : null,
+    title: t.name,
+    description: String(t.data.note ?? ""),
+    project: t.project,
+    payload: t.data,
+    automationPolicy,
+  });
+  return { item, created };
+}
+
+/** Fetch full detail of one task from Hasaki Work and import it (no execution). */
+export async function pickTask(workId: number, automationPolicy: WorkItemRow["automation_policy"] = null) {
   const json = await workApi("GET", config.hasakiWork.detailPath.replace("{id}", String(workId)));
-  const t = normalizeTask(json);
-  const existing = await tasks.get(t.code);
-  await tasks.upsert(t.code, t.workId ?? workId, t.name, t.project, t.data);
+  const { item, created } = await importHasakiTask(json, automationPolicy);
   await inbox.markPicked(workId);
-  if (!existing) await enqueue(t.code);
-  return { code: t.code, started: !existing };
+  return { code: item.code, work_item_id: item.id, created, started: false };
 }
 
 let timer: NodeJS.Timeout | null = null;
 
-/** Optional background poll: refresh the inbox and, with autoPick, execute new tasks. */
+/** Optional background poll: refresh the inbox; with autoPick, import new tasks (and run autoWorkflow if set). */
 export function startPolling() {
   const minutes = config.hasakiWork.pollMinutes;
   if (!minutes || timer) return;
@@ -56,10 +72,13 @@ export function startPolling() {
     try {
       await fetchTaskList();
       if (!config.hasakiWork.autoPick) return;
+      const policy = config.hasakiWork.autoWorkflow ? { workflow: config.hasakiWork.autoWorkflow } : null;
       for (const row of await inbox.unpicked()) {
-        if (await tasks.get(row.code)) continue;
-        await pickTask(Number(row.work_id));
-        await notify(`📥 Đã nhận task ${row.code}`, row.code);
+        if (await workItems.byCode(row.code)) continue;
+        const picked = await pickTask(Number(row.work_id), policy);
+        const item = (await workItems.get(picked.work_item_id))!;
+        const run = await applyAutomationPolicy(item);
+        await notify(`📥 Đã nhận task ${row.code}${run ? ` – chạy workflow ${policy!.workflow} (run #${run.id})` : ""}`, `/work-items/${item.id}`);
       }
     } catch (e) {
       console.error("poll failed:", (e as Error).message);

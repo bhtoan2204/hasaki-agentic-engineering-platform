@@ -21,9 +21,9 @@ async function call(path: string, init: RequestInit = {}) {
  * Open (or update) the PR for branch -> baseBranch.
  * Without credentials we can't call the API, so return Bitbucket's "new PR" link for a human to click.
  */
-export async function openPullRequest(repo: string, branch: string, title: string, description: string) {
+export async function openPullRequest(repo: string, branch: string, title: string, description: string, opts: { draft?: boolean; dest?: string } = {}) {
   const ws = config.bitbucket.workspace;
-  const dest = config.baseBranch;
+  const dest = opts.dest ?? config.baseBranch;
   if (!config.bitbucket.user || !config.bitbucket.token) {
     const url = `https://bitbucket.org/${ws}/${repo}/pull-requests/new?source=${encodeURIComponent(branch)}&dest=${encodeURIComponent(dest)}`;
     return { url, created: false, note: "No Bitbucket credentials configured: open this link to create the PR." };
@@ -37,6 +37,7 @@ export async function openPullRequest(repo: string, branch: string, title: strin
     source: { branch: { name: branch } },
     destination: { branch: { name: dest } },
     close_source_branch: false,
+    ...(opts.draft ? { draft: true } : {}),
     reviewers: config.bitbucket.reviewers.map((uuid) => ({ uuid })),
   });
 

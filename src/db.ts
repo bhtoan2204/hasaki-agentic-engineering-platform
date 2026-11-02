@@ -1,70 +1,13 @@
-import pg from "pg";
-import { config } from "./config.ts";
+import { pool } from "./db/pool.ts";
+export { migrate } from "./db/migrate.ts";
+export { pool };
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 5 });
-
+/**
+ * Legacy (pre-workflow) tables: tasks, events, questions, prs, inbox, settings.
+ * They are kept read-mostly for history and the backwards-compatible /api/tasks endpoints;
+ * new execution state lives in the workflow_* tables (see src/workflow).
+ */
 const q = async <T = any>(sql: string, params: unknown[] = []) => (await pool.query(sql, params)).rows as T[];
-
-export async function migrate() {
-  await pool.query(`
-CREATE TABLE IF NOT EXISTS tasks (
-  code        TEXT PRIMARY KEY,
-  work_id     BIGINT,                  -- Hasaki Work task id (data.id)
-  name        TEXT NOT NULL,
-  project     TEXT NOT NULL DEFAULT '',
-  payload     JSONB NOT NULL,          -- the task "data" object
-  status      TEXT NOT NULL,           -- queued | running | waiting_answer | review | idle | failed
-  session_id  TEXT,
-  error       TEXT,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE TABLE IF NOT EXISTS events (
-  id         BIGSERIAL PRIMARY KEY,
-  task_code  TEXT NOT NULL REFERENCES tasks(code) ON DELETE CASCADE,
-  kind       TEXT NOT NULL,            -- status | agent | tool | user | system
-  content    TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS events_task ON events(task_code, id);
-CREATE TABLE IF NOT EXISTS questions (
-  id          BIGSERIAL PRIMARY KEY,
-  task_code   TEXT NOT NULL REFERENCES tasks(code) ON DELETE CASCADE,
-  question    TEXT NOT NULL,
-  context     TEXT NOT NULL DEFAULT '',
-  options     JSONB NOT NULL DEFAULT '[]',
-  answer      TEXT,
-  answered_at TIMESTAMPTZ,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE TABLE IF NOT EXISTS prs (
-  id         BIGSERIAL PRIMARY KEY,
-  task_code  TEXT NOT NULL REFERENCES tasks(code) ON DELETE CASCADE,
-  repo       TEXT NOT NULL,
-  branch     TEXT NOT NULL,
-  url        TEXT NOT NULL,
-  title      TEXT NOT NULL,
-  summary    TEXT NOT NULL DEFAULT '',
-  decisions  JSONB NOT NULL DEFAULT '[]',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(task_code, repo)
-);
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
--- Tasks seen in the Hasaki Work list; picked = imported into the platform.
-CREATE TABLE IF NOT EXISTS inbox (
-  work_id    BIGINT PRIMARY KEY,
-  code       TEXT NOT NULL,
-  name       TEXT NOT NULL,
-  project    TEXT NOT NULL DEFAULT '',
-  raw        JSONB NOT NULL,
-  picked     BOOLEAN NOT NULL DEFAULT false,
-  seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-`);
-}
 
 export type TaskStatus = "queued" | "running" | "waiting_answer" | "review" | "idle" | "failed";
 
@@ -168,8 +111,9 @@ export const inbox = {
   },
   list() {
     return q(
-      `SELECT i.work_id, i.code, i.name, i.project, i.picked, i.seen_at, t.status
-         FROM inbox i LEFT JOIN tasks t ON t.code = i.code ORDER BY i.seen_at DESC, i.work_id DESC LIMIT 200`,
+      `SELECT i.work_id, i.code, i.name, i.project, i.picked, i.seen_at, w.id AS work_item_id, w.status AS work_item_status,
+              (SELECT r.status FROM workflow_runs r WHERE r.work_item_id = w.id ORDER BY r.id DESC LIMIT 1) AS run_status
+         FROM inbox i LEFT JOIN work_items w ON w.code = i.code ORDER BY i.seen_at DESC, i.work_id DESC LIMIT 200`,
     );
   },
   async markPicked(workId: number) {

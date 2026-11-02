@@ -1,0 +1,172 @@
+import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
+import { CATEGORIES, SCOPES, type KnowledgeCandidate } from "./resolve.ts";
+
+export interface KnowledgeInput {
+  key: string;
+  category: string;
+  scope_type: string;
+  scope_ref?: string;
+  title: string;
+  conflict_key?: string | null;
+  priority?: number;
+  enforced?: boolean;
+  enabled?: boolean;
+  content: string;
+  applicability?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  change_note?: string;
+  created_by?: string;
+}
+
+function check(x: Partial<KnowledgeInput>) {
+  if (x.category && !(CATEGORIES as readonly string[]).includes(x.category)) throw new Error(`unknown category ${x.category}`);
+  if (x.scope_type && !(SCOPES as readonly string[]).includes(x.scope_type)) throw new Error(`unknown scope ${x.scope_type}`);
+  if (x.scope_type && x.scope_type !== "GLOBAL" && !x.scope_ref) throw new Error(`scope ${x.scope_type} needs scope_ref`);
+}
+
+export const knowledge = {
+  list(filter: { category?: string } = {}, db: Db = pool) {
+    return q(
+      db,
+      `SELECT i.*, v.content, v.applicability, v.metadata, v.created_at AS version_created_at
+         FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
+        WHERE ($1::text IS NULL OR i.category = $1) ORDER BY i.category, i.scope_type, i.key`,
+      [filter.category ?? null],
+    );
+  },
+
+  async get(key: string, db: Db = pool) {
+    const item = await one(db, "SELECT * FROM knowledge_items WHERE key = $1", [key]);
+    if (!item) return undefined;
+    const versions = await q(db, "SELECT * FROM knowledge_versions WHERE item_id = $1 ORDER BY version DESC", [item.id]);
+    const audit = await q(db, "SELECT * FROM knowledge_audit WHERE item_id = $1 ORDER BY id DESC LIMIT 100", [item.id]);
+    return { ...item, versions, audit };
+  },
+
+  async create(x: KnowledgeInput) {
+    check(x);
+    return withTx(async (c) => {
+      const scopeRef = x.scope_type === "GLOBAL" ? "" : (x.scope_ref ?? "");
+      const item = await one(
+        c,
+        `INSERT INTO knowledge_items (key, category, scope_type, scope_ref, title, conflict_key, priority, enforced, enabled, current_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1) RETURNING *`,
+        [x.key, x.category, x.scope_type, scopeRef, x.title, x.conflict_key || null, x.priority ?? 0, x.enforced ?? false, x.enabled ?? true],
+      );
+      await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by) VALUES ($1, 1, $2, $3, $4, $5, $6)`, [
+        item.id,
+        x.content,
+        json(x.applicability ?? {}),
+        json(x.metadata ?? {}),
+        x.change_note ?? "created",
+        x.created_by ?? "",
+      ]);
+      await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'created', $2)", [item.id, json({ scope: x.scope_type, scope_ref: scopeRef })]);
+      return knowledge.get(x.key, c);
+    });
+  },
+
+  /**
+   * Content/applicability/metadata changes create a new version (history is never rewritten);
+   * item attribute changes (scope, enabled, priority...) are recorded in the audit log.
+   */
+  async update(key: string, x: Partial<KnowledgeInput>) {
+    check(x);
+    return withTx(async (c) => {
+      const item = await one(c, "SELECT * FROM knowledge_items WHERE key = $1 FOR UPDATE", [key]);
+      if (!item) throw new Error(`knowledge item "${key}" not found`);
+      const cur = await one(c, "SELECT * FROM knowledge_versions WHERE item_id = $1 AND version = $2", [item.id, item.current_version]);
+      const content = x.content ?? cur.content;
+      const applicability = x.applicability ?? cur.applicability;
+      const metadata = x.metadata ?? cur.metadata;
+      if (content !== cur.content || json(applicability) !== json(cur.applicability) || json(metadata) !== json(cur.metadata)) {
+        const version = item.current_version + 1;
+        await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
+          item.id,
+          version,
+          content,
+          json(applicability),
+          json(metadata),
+          x.change_note ?? "",
+          x.created_by ?? "",
+        ]);
+        await q(c, "UPDATE knowledge_items SET current_version = $2, updated_at = now() WHERE id = $1", [item.id, version]);
+        await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'version', $2)", [item.id, json({ version, note: x.change_note ?? "" })]);
+      }
+      const attrs = (["title", "scope_type", "scope_ref", "conflict_key", "priority", "enforced", "enabled"] as const).filter(
+        (k) => x[k] !== undefined && x[k] !== item[k],
+      );
+      if (attrs.length) {
+        const vals = attrs.map((k) => (k === "conflict_key" ? x[k] || null : k === "scope_ref" && (x.scope_type ?? item.scope_type) === "GLOBAL" ? "" : x[k]));
+        await q(c, `UPDATE knowledge_items SET ${attrs.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`, [item.id, ...vals]);
+        const action = attrs.length === 1 && attrs[0] === "enabled" ? (x.enabled ? "enabled" : "disabled") : "updated";
+        await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, $2, $3)", [
+          item.id,
+          action,
+          json(Object.fromEntries(attrs.map((k) => [k, { from: item[k], to: x[k] }]))),
+        ]);
+      }
+      return knowledge.get(key, c);
+    });
+  },
+
+  /** Enabled items at their current version, as resolution candidates. */
+  candidates(db: Db = pool) {
+    return q<KnowledgeCandidate>(
+      db,
+      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced,
+              v.version, v.content, v.applicability, v.metadata
+         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
+        WHERE i.enabled`,
+    );
+  },
+};
+
+/** A few starter items so a fresh install shows how scopes and skills work. Only inserted when missing. */
+export async function seedKnowledge() {
+  const seeds: KnowledgeInput[] = [
+    {
+      key: "commit-convention",
+      category: "repository_convention",
+      scope_type: "ORGANIZATION",
+      scope_ref: "hasaki",
+      title: "Hasaki commit convention (TECH-HD-001)",
+      content:
+        "Commit message: `<type>(<scope>): <imperative summary, < 50 chars>`, blank line, body explaining WHY, then footer lines " +
+        "`func: <FUNCTION_CODE>` (only if the task or git log of the touched files gives a real code; never invent one) and " +
+        "`task: <task code>`. Types: feat | fix | refactor | perf | test | docs | style | build | ci | chore. No Co-Authored-By trailer.",
+      applicability: { step_types: ["coding_agent"] },
+    },
+    {
+      key: "no-secrets-in-code",
+      category: "security_policy",
+      scope_type: "GLOBAL",
+      title: "Never commit secrets or customer PII",
+      conflict_key: "security.secrets",
+      enforced: true,
+      content: "Never commit credentials, tokens, private keys or customer personal data (phone, address, email) to code, tests, logs or PR text.",
+    },
+    {
+      key: "security-review",
+      category: "agent_skill",
+      scope_type: "GLOBAL",
+      title: "Security Review",
+      content:
+        "Check: injection (SQL, command, template), missing authorization on new endpoints, secrets in code/config, PII in logs, " +
+        "unsafe deserialisation, SSRF in outbound calls, missing input validation at trust boundaries. Report each finding with " +
+        "severity, file:line, exploit scenario and a concrete fix.",
+      metadata: { required_tools: ["Read", "Grep", "Glob"], output_contract: "{ findings: [{ severity, file, line, issue, suggestion }] }" },
+    },
+    {
+      key: "unit-test-generation",
+      category: "agent_skill",
+      scope_type: "GLOBAL",
+      title: "Unit Test Generation",
+      content:
+        "Write table-driven tests next to the code under test, covering the happy path, each error branch and boundary values. " +
+        "Prefer real collaborators over mocks unless they cross a process boundary.",
+      metadata: { required_tools: ["Read", "Edit", "Write", "Bash"] },
+    },
+  ];
+  for (const s of seeds) if (!(await knowledge.get(s.key))) await knowledge.create({ ...s, change_note: "seed" });
+}

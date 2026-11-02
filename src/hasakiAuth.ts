@@ -134,6 +134,11 @@ export async function workApi(method: string, path: string, params?: Record<stri
     throw new Error("Token Hasaki Work hết hạn — đăng nhập lại trên platform.");
   }
   const json: any = await res.json().catch(() => null);
+  if (res.status === 404)
+    throw new Error(
+      `Hasaki Work ${method} ${url.pathname}: HTTP 404 — endpoint không tồn tại. Mở work.hasaki.vn/tasks, DevTools > Network, ` +
+        `tìm request lấy danh sách task tới ${config.hasakiWork.apiUrl} rồi sửa hasakiWork.listPath / detailPath / listQuery trong config.json.`,
+    );
   if (!res.ok || !json) throw new Error(`Hasaki Work ${method} ${path}: HTTP ${res.status}`);
   return json;
 }

@@ -1,45 +1,65 @@
-# Claude Task Platform
+# Workflow Platform (Claude Task Platform v2)
 
-Nhận task Hasaki (JSON từ task API) → Claude Code (Agent SDK) tự tìm chỗ sửa → hỏi lại trên platform khi chưa rõ
-→ code trên nhánh `<task code>` → push + mở PR Bitbucket vào `release/prod` → báo lên platform kèm các quyết định cần review.
+Workflow-driven AI engineering platform. Engineering requests (**work items**: manual, Hasaki Work, Jira) are executed
+by reusable, versioned **workflows** made of typed steps (AI agent, coding agent, human input, approval, command,
+condition, integration, pull request). Every step has durable state, attempt history, questions, checkpoints and
+context snapshots in PostgreSQL. Claude Code (Agent SDK) is the executor for agent steps; Bitbucket is the Git provider.
 
-## Chạy
+Importing a task **never** executes anything. You pick a workflow and start a run (or set an explicit automation policy).
+
+Architecture: [`docs/architecture/current-state.md`](docs/architecture/current-state.md) ·
+[`target-state.md`](docs/architecture/target-state.md) · [`migration-plan.md`](docs/architecture/migration-plan.md)
+
+## Run
 
 ```bash
 npm install
-cp config.example.json config.json   # sửa reposRoot, projects, bitbucket...
-export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # tuỳ chọn, thiếu thì platform trả link tạo PR
-npm start                             # http://localhost:4545
+docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
+cp config.example.json config.json    # reposRoot, projects, bitbucket, ...
+export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # optional; without them the PR step stores a "create PR" link
+npm start                             # http://localhost:4545 — applies migrations, seeds templates/repos/knowledge
+npm test                              # creates a throwaway platform_test database on the same server
 ```
 
-Cần Node >= 22.18 (chạy thẳng `.ts`, dùng `node:sqlite`), `claude` đã login, SSH key push được Bitbucket.
+Node ≥ 22.18 (runs `.ts` directly), `claude` logged in, SSH key that can push to Bitbucket.
 
-## Luồng
+## Concepts
 
-| Trạng thái | Ý nghĩa |
+| | |
 |---|---|
-| `queued` | chờ tới lượt (mặc định chạy 1 agent một lúc — `maxConcurrent`) |
-| `running` | agent đang làm |
-| `waiting_answer` | agent gọi `ask_user`, đã dừng; trả lời trên UI → resume đúng session |
-| `review` | đã có PR; gửi feedback ở ô "Nhắn cho agent" → agent sửa, commit, cập nhật PR |
-| `idle` / `failed` | agent dừng không có PR / lỗi — nhắn để chạy tiếp |
+| Work item | The request. `REQ-n` (manual), Hasaki task code, Jira key. The code is the branch name. Many runs per item. |
+| Workflow | Key + immutable published versions. Built-ins: Feature Implementation, Bug Investigation, Code Review, Refactoring, Work Item Analysis. Edit in the UI → draft → publish. |
+| Run | One execution, pinned to a definition version, with its own resolved graph, allowed/selected repositories and branch. Can exist without a work item. |
+| Step / attempt | Status `PENDING READY RUNNING WAITING_INPUT WAITING_APPROVAL COMPLETED FAILED RETRYING CANCELED SKIPPED`; every execution is an attempt with input, output, context snapshot, Claude session, error. |
 
-Agent có 4 tool riêng (`mcp__platform__*`): `prepare_branch`, `ask_user`, `post_update`, `create_pull_request`.
+Human-in-the-loop: agents call `ask_user` → step `WAITING_INPUT` (no worker held) → answer in the run page or the
+Questions inbox → the step resumes its Claude session if safe, otherwise rebuilds context from persisted history.
+Approvals: `human_approval` steps, or `requires_approval: true` on any step (PR mode `approval`).
+Retry / re-execute from any step: downstream steps are invalidated (generation bump); upstream results are reused.
 
-## API
+Scheduling is PostgreSQL-only: `workflow_jobs` claimed with `FOR UPDATE SKIP LOCKED`, leases + heartbeats + fencing
+tokens; crashed workers' jobs are reaped and retried. Several processes may share the database.
 
-- `POST /api/tasks` — body là nguyên response task API (`{data:{...}}`) hoặc chỉ `data`. Task mới sẽ chạy ngay; gửi lại cùng code chỉ cập nhật payload.
-- `GET /api/tasks`, `GET /api/tasks/:code`
-- `POST /api/tasks/:code/answers` — `{answers: {"<questionId>": "..."}}`
-- `POST /api/tasks/:code/messages` — `{message: "..."}`
-- `POST /api/tasks/:code/cancel`
+## Safety
 
-Ví dụ đẩy task từ script/cron: `curl -XPOST localhost:4545/api/tasks -H 'content-type: application/json' -d @task.json`
+- No `bypassPermissions`. Each agent step gets an explicit tool list and a PreToolUse/`canUseTool` policy
+  (`src/agent/toolPolicy.ts`): analysis steps are read-only (shell allowlist); coding steps may edit only inside the
+  run's worktrees; `git push`, `reset --hard`, `clean`, `rm -rf`, checking out `release/prod` are always denied.
+- Code is edited only in worktrees under `~/.claude-task-platform/worktrees/<branch>/<repo>`; the primary checkout is never used.
+- Repositories outside a run's allowed set (project mapping in the registry) are rejected at selection, at `prepare_branch` and at PR time.
+- Task text and earlier agent output are passed as `<untrusted_input>`; platform rules and curated knowledge go in the system prompt.
+- PRs are opened by the `git_pull_request` step (`auto | approval | draft | none`), idempotent per repo/branch. Nothing is merged or deployed.
+- The API has no auth — it listens on loopback only.
 
-## An toàn
+## Main API
 
-- Agent chạy `bypassPermissions` (không ai bấm duyệt), nhưng bị chặn `git push`, `git reset --hard`, `git clean`, `rm -rf`;
-  push chỉ đi qua `create_pull_request` (kiểm tra sạch + có commit trước khi push).
-- Code được sửa trong git worktree riêng ở `~/.claude-task-platform/worktrees/<code>/<repo>` — checkout của bạn
-  ở `~/src/<repo>` không bị đụng. Ngoại lệ: nếu bạn đang checkout đúng nhánh task trong repo chính, agent dùng luôn checkout đó.
-- Platform không có auth — chỉ bind/dùng trên máy local.
+| | |
+|---|---|
+| `GET/POST /api/work-items`, `POST /api/work-items/import`, `GET/POST /api/work-items/:id` | work items (POST creates a manual request; import = Hasaki/Jira, no execution) |
+| `POST /api/work-items/:id/runs` `{workflow, repositories?, inputs?, start?}` · `POST /api/work-items/:id/analyze` | start a run / read-only analysis |
+| `GET/POST /api/workflows`, `POST /api/workflows/:key/draft`, `/publish`, `/validate` | workflow library |
+| `GET/POST /api/runs`, `GET /api/runs/:id`, `POST /api/runs/:id/{start,pause,resume,cancel,repositories,feedback}` | runs |
+| `POST /api/runs/:id/steps/:key/{retry,reexecute,approve,reject,skip}` | step controls |
+| `GET /api/questions`, `POST /api/questions/answers` `{answers:{id:text}}` | questions inbox |
+| `GET/POST /api/knowledge`, `POST /api/knowledge/preview`, `GET/POST /api/repositories`, `POST /api/repositories/rank` | knowledge, repository registry |
+| `/api/tasks*`, `/api/work/*` | legacy endpoints, kept compatible (`POST /api/tasks?workflow=<key>` imports and starts) |

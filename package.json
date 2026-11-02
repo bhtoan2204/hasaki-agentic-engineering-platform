@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Hasaki task -> Claude Code agent -> Bitbucket PR, with a web UI for questions and review",
+  "description": "Workflow-driven AI engineering platform: work items, versioned workflows, durable step execution, Claude Code agents, Bitbucket PRs",
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
-    "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts"
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",

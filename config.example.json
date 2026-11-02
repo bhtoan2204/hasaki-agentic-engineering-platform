@@ -3,13 +3,39 @@
   "reposRoot": "/home/bhtoan/src",
   "baseBranch": "release/prod",
   "projects": {
-    "OMS": ["oms-api", "oms-background", "oms-frontend", "oms-gateway", "oms-export", "oms-invoice", "oms-open-gateway"],
-    "Payment": ["payment-src"]
+    "OMS": [
+      "oms-src"
+    ],
+    "Payment": [
+      "payment-src"
+    ]
   },
   "fileBaseUrl": "",
-  "bitbucket": { "workspace": "hasaki-tech", "user": "", "token": "", "reviewers": [] },
+  "bitbucket": {
+    "workspace": "hasaki-tech",
+    "user": "",
+    "token": "",
+    "reviewers": []
+  },
   "notifyWebhook": "",
   "model": "",
   "maxConcurrent": 1,
-  "maxTurns": 300
+  "maxTurns": 300,
+  "organization": "hasaki",
+  "hasakiWork": {
+    "pollMinutes": 0,
+    "autoPick": false,
+    "autoWorkflow": ""
+  },
+  "scheduler": {
+    "workers": 1,
+    "leaseSeconds": 60,
+    "heartbeatSeconds": 10,
+    "pollMs": 1000
+  },
+  "jira": {
+    "baseUrl": "",
+    "user": "",
+    "token": ""
+  }
 }

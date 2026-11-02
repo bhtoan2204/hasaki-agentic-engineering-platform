@@ -6,7 +6,7 @@ export interface Config {
   port: number;
   /** Where the real repo checkouts live (oms-api, oms-background, ...). */
   reposRoot: string;
-  /** Platform data: sqlite db, worktrees, downloaded task files. */
+  /** Platform data: worktrees, downloaded task files, Chromium profile. */
   dataDir: string;
   /** Branch new task branches are cut from. */
   baseBranch: string;
@@ -40,10 +40,28 @@ export interface Config {
     detailPath: string;
     /** Query of the task list page, e.g. status=_00_01 (to_date is set to today). */
     listQuery: Record<string, string>;
-    /** Auto-execute picked tasks (true) or just list them for you to pick (false). */
+    /** Auto-import new tasks from the list (true) or just list them for you to pick (false). Importing never executes. */
     autoPick: boolean;
+    /** Workflow key auto-started for auto-picked tasks (the automation policy). Empty = import only. */
+    autoWorkflow: string;
   };
   databaseUrl: string;
+  /** Organization name used for ORGANIZATION-scoped knowledge. */
+  organization: string;
+  /** Durable workflow scheduler. */
+  scheduler: {
+    /** Worker loops in this process (concurrent step executions). Defaults to maxConcurrent. */
+    workers: number;
+    leaseSeconds: number;
+    heartbeatSeconds: number;
+    pollMs: number;
+  };
+  jira: {
+    /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
+    baseUrl: string;
+    user: string;
+    token: string;
+  };
 }
 
 const defaults: Config = {
@@ -73,12 +91,16 @@ const defaults: Config = {
     apiUrl: "https://wshr.hasaki.vn/api",
     chromiumPath: "",
     pollMinutes: 0,
-    listPath: "task",
-    detailPath: "task/{id}",
-    listQuery: { status: "_00_01" },
+    listPath: "hr/projects/mytasks-es",
+    detailPath: "hr/projects/task-input/{id}",
+    listQuery: { option: "my-task", status: "_00_01", limit: "100", offset: "0" },
     autoPick: false,
+    autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
+  organization: "hasaki",
+  scheduler: { workers: 0, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
+  jira: { baseUrl: "", user: "", token: "" },
 };
 
 function load(): Config {
@@ -89,7 +111,12 @@ function load(): Config {
     ...fromFile,
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
+    scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
+    jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
   };
+  if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
+  cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
+  cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
