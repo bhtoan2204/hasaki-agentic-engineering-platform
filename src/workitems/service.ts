@@ -91,7 +91,7 @@ export const workItems = {
         await q(c, `UPDATE work_items SET title = $2, description = $3, project = $4, payload = $5, external_id = COALESCE($6, external_id), updated_at = now() WHERE id = $1`, [
           existing.id,
           x.title,
-          x.description ?? existing.description,
+          (existing as any).description_source === "manual" || !x.description ? existing.description : x.description,
           x.project ?? existing.project,
           json(x.payload ?? existing.payload),
           x.externalId ?? null,
@@ -110,6 +110,7 @@ export const workItems = {
 
   async update(id: number, patch: { title?: string; description?: string; project?: string; status?: string; automation_policy?: unknown }) {
     const keys = (["title", "description", "project", "status", "automation_policy"] as const).filter((k) => patch[k] !== undefined);
+    if (patch.description !== undefined) await q(pool, "UPDATE work_items SET description_source = 'manual' WHERE id = $1", [id]);
     if (keys.length)
       await q(pool, `UPDATE work_items SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`, [
         id,

@@ -951,3 +951,19 @@ test("report: deterministic generation (no Claude call) when no requirement need
   assert.equal(reasonerCalls, 1, "code/log requirement with evidence → semantic judgement");
   for (const id of [run.id, run2.id]) await cancelRun(id);
 });
+
+test("work item description: manual edits survive re-import and reach the agent prompt", async () => {
+  const { buildUserPrompt } = await import("../src/agent/stepPrompt.ts");
+  const code = `DESC-${++reportSeq}`;
+  const payload = { data: { id: 99100 + reportSeq, code, name: "[Bug] Sai trạng thái", note: "", project: { name: "OMS" } } };
+  const { item } = await importHasakiTask(payload);
+  assert.equal(item.description, "");
+  await workItems.update(item.id, { description: "Đơn 123: trạng thái phải là Delivered sau khi GHN callback." });
+  const again = await importHasakiTask(payload); // Hasaki still sends an empty note
+  assert.equal(again.item.description, "Đơn 123: trạng thái phải là Delivered sau khi GHN callback.");
+  const changed = await importHasakiTask({ data: { ...payload.data, note: "note from Hasaki" } });
+  assert.equal(changed.item.description, "Đơn 123: trạng thái phải là Delivered sau khi GHN callback.", "manual edit wins over a later imported note");
+  const wi = (await workItems.get(item.id))!;
+  const prompt = buildUserPrompt({ run: { inputs: {}, selected_repositories: [] }, work_item: wi, upstream: {}, answers: [], pending: null } as any, []);
+  assert.match(prompt, /GHN callback/);
+});

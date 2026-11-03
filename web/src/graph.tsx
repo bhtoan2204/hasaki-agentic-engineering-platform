@@ -24,7 +24,7 @@ export interface StepLike {
   requires_approval?: boolean;
 }
 
-/** Layered layout by longest-path depth; used when a definition has no saved node positions. */
+/** Vertical layered layout by longest-path depth (later steps below); used when a definition has no saved node positions. */
 export function autoLayout(steps: StepLike[]): Record<string, { x: number; y: number }> {
   const byKey = new Map(steps.map((s) => [s.key, s]));
   const depth = new Map<string, number>();
@@ -41,7 +41,7 @@ export function autoLayout(steps: StepLike[]): Record<string, { x: number; y: nu
   const layers = new Map<number, string[]>();
   for (const s of steps) (layers.get(depth.get(s.key)!) ?? layers.set(depth.get(s.key)!, []).get(depth.get(s.key)!)!).push(s.key);
   const pos: Record<string, { x: number; y: number }> = {};
-  for (const [l, keys] of layers) keys.forEach((k, i) => (pos[k] = { x: l * 270, y: (i - (keys.length - 1) / 2) * 120 }));
+  for (const [l, keys] of layers) keys.forEach((k, i) => (pos[k] = { x: (i - (keys.length - 1) / 2) * 250, y: l * 140 }));
   return pos;
 }
 
@@ -82,7 +82,7 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
   const cls = ["node", data.selected && "selected", blocked && "blocked", status === "RUNNING" && "running"].filter(Boolean).join(" ");
   return (
     <div className={cls} style={{ borderColor: data.invalid ? "var(--err)" : color }}>
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Top} />
       <div className="t">
         {STEP_ICONS[step.type] ?? "•"} {step.name || step.key}
       </div>
@@ -101,7 +101,7 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
         {!!step.run_if && <span className="flag">conditional</span>}
         {Array.isArray((step as any).config?.merged_from) && (step as any).config.merged_from.length > 0 && <span className="flag" title="FAST profile: analysis steps folded into this session">⊕ {(step as any).config.merged_from.join(" + ")}</span>}
       </div>
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Bottom} />
     </div>
   );
 }

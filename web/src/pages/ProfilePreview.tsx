@@ -71,7 +71,7 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
               ))}
             </div>
           )}
-          <div style={{ height: 170, border: "1px solid var(--line)", borderRadius: 8 }}>
+          <div style={{ height: 300, border: "1px solid var(--line)", borderRadius: 8 }}>
             <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView fitViewOptions={{ padding: 0.15, maxZoom: 0.8 }} nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} zoomOnScroll={false} panOnDrag proOptions={{ hideAttribution: true }}>
               <Background gap={16} />
             </ReactFlow>

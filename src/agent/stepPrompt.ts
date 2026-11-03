@@ -90,7 +90,7 @@ export function renderWorkItem(input: StepInput, files: string[]) {
   const wi = input.work_item;
   if (!wi) return "(no work item: this run was started directly)";
   // Hasaki task payloads keep their rich rendering (assignee, attachments, task AI hints...).
-  if (wi.payload?.code && wi.payload?.name) return buildTaskPrompt(wi.payload, input.run.selected_repositories, files);
+  if (wi.payload?.code && wi.payload?.name) return buildTaskPrompt({ ...wi.payload, note: wi.description || wi.payload.note }, input.run.selected_repositories, files);
   return [`# ${wi.code}: ${wi.title}`, `- Source: ${wi.source}`, `- Project: ${wi.project || "?"}`, "", "## Description", wi.description || "(empty)"].join("\n");
 }
 

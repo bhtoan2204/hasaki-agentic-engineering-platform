@@ -121,6 +121,42 @@ export function WorkItemsPage() {
   );
 }
 
+/** View / edit the request description (tasks often arrive with an empty note). Edits are kept across re-imports. */
+function DescriptionEditor({ id, description, source, onSaved }: { id: number; description: string; source?: string; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(description ?? "");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const r = await act(() => api(`/api/work-items/${id}`, { description: text }), "Đã lưu mô tả");
+    setBusy(false);
+    if (r) (setEditing(false), onSaved());
+  };
+  return (
+    <div>
+      <div className="row tight">
+        <h4 className="grow" style={{ margin: 0 }}>Yêu cầu</h4>
+        {source === "manual" && !editing && <span className="muted small" title="Đã sửa tay — import lại từ Hasaki Work/Jira sẽ không ghi đè">✎ đã sửa tay</span>}
+        {!editing && <button className="xs ghost" onClick={() => (setText(description ?? ""), setEditing(true))}>{description ? "Sửa" : "+ Thêm mô tả"}</button>}
+      </div>
+      {editing ? (
+        <div style={{ marginTop: 6 }}>
+          <textarea rows={8} autoFocus placeholder="Mô tả yêu cầu: hiện tượng, kết quả mong đợi, đối tượng (mã đơn...), repo/màn hình liên quan… (Markdown)" value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="row">
+            <button className="sm" disabled={busy} onClick={save}>{busy ? "Đang lưu…" : "Lưu"}</button>
+            <button className="sm ghost" onClick={() => setEditing(false)}>Huỷ</button>
+            <span className="muted small">Agent sẽ dùng mô tả này ở các lần chạy sau.</span>
+          </div>
+        </div>
+      ) : description ? (
+        <div style={{ marginTop: 6 }}><Markdown text={description} /></div>
+      ) : (
+        <div className="muted" style={{ marginTop: 6 }}>(không có mô tả — bấm “+ Thêm mô tả” để bổ sung trước khi chạy workflow)</div>
+      )}
+    </div>
+  );
+}
+
 export function WorkItemDetail({ id }: { id: number }) {
   const { data: w, error, loading, reload } = useApi<any>(`/api/work-items/${id}`);
   const { data: wfs } = useApi<any[]>("/api/workflows");
@@ -142,8 +178,7 @@ export function WorkItemDetail({ id }: { id: number }) {
       <div className="muted"><span className="mono">{w.code}</span> · {w.source} · {w.project || "không có project"} · {w.status}</div>
       <div className="grid2" style={{ marginTop: 12 }}>
         <div className="card">
-          <h4>Yêu cầu</h4>
-          {w.description ? <Markdown text={w.description} /> : <span className="muted">(không có mô tả)</span>}
+          <DescriptionEditor id={id} description={w.description} source={w.description_source} onSaved={reload} />
           {w.payload && Object.keys(w.payload).length > 0 && <details><summary>raw payload</summary><JsonBlock value={w.payload} /></details>}
         </div>
         <div className="card">
