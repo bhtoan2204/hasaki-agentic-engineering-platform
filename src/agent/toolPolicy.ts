@@ -67,6 +67,8 @@ const READ_ONLY = [
   /^sed\b(?!.*(\s-[a-zA-Z]*i|--in-place|\/w\s|;\s*w\s|^sed\s+(-\S+\s+)*['"]?w\s))/, // no in-place edit, no `w file`
   /^awk\b(?!.*system\()/,
   /^git\s+(-C\s+\S+\s+)?(log|show|diff|status|blame|branch|rev-parse|ls-files|ls-tree|grep|cat-file|merge-base|describe|remote\s+-v|fetch|stash\s+(list|show))\b/,
+  /^git\s+(-C\s+\S+\s+)?symbolic-ref(\s+(-q|--quiet|--short))*\s+\S+\s*$/, // one argument = read; two = write
+  /^(\[|test)\s/, // [ -d dir ], test -f file
   /^go\s+(list|doc|version|env|vet)\b/,
   /^(node|npm)\s+(-v|--version|ls)\b/,
 ];
@@ -102,6 +104,8 @@ export function parseShell(command: string): ShellParse {
   let cur = "";
   let code = "";
   let quote: string | null = null;
+  // open $( ... ) substitutions: the quote state outside each one, and its own unclosed "(" count
+  const subst: Array<{ quote: string | null; parens: number }> = [];
   const fail = (error: string): ShellParse => ({ segments, redirects, heredocs, code, error });
   const flush = () => {
     const t = cur.trim();
@@ -111,6 +115,21 @@ export function parseShell(command: string): ShellParse {
   const add = (t: string) => ((cur += t), (code += t));
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
+    if (c === "$" && command[i + 1] === "(" && quote !== "'") {
+      subst.push({ quote, parens: 0 });
+      quote = null;
+      add("$(");
+      i++;
+      continue;
+    }
+    if (subst.length && !quote && (c === "(" || c === ")")) {
+      const top = subst[subst.length - 1];
+      add(c);
+      if (c === "(") top.parens++;
+      else if (top.parens > 0) top.parens--;
+      else quote = subst.pop()!.quote;
+      continue;
+    }
     if (quote) {
       if (c === "\\" && quote === '"') {
         add(c + (command[i + 1] ?? ""));
@@ -190,6 +209,10 @@ export function parseShell(command: string): ShellParse {
       i = pos - 1;
       continue;
     }
+    if (subst.length && (c === "\n" || c === ";" || c === "|" || c === "&")) {
+      add(c); // inside $( ... ): checked as its own command later
+      continue;
+    }
     if (c === "\n" || c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
       flush();
       const two = (c === "|" && command[i + 1] === "|") || c === "&";
@@ -221,6 +244,7 @@ export function parseShell(command: string): ShellParse {
     }
     add(c);
   }
+  if (subst.length) return fail("unterminated $( ... )");
   if (quote) return fail("unterminated quote");
   if (pending.length) return fail(`unterminated heredoc <<${pending[0].delim}`);
   flush();
@@ -248,12 +272,16 @@ function readOnlyViolation(command: string): string | null {
   const commands: Array<{ seg: string; s: string }> = [];
   for (const seg of p.segments) {
     // $(...) substitutions run commands too: check each one, then treat it as an opaque word.
-    let s = seg;
-    for (let m; (m = s.match(/\$\(([^()]*)\)/)); ) {
-      const inner = readOnlyViolation(m[1]);
-      if (inner) return inner;
-      s = s.replace(m[0], "SUBST");
+    const { text, inner } = extractSubstitutions(seg);
+    if (inner === null) return "cannot parse safely: unbalanced $( ... )";
+    for (const body of inner) {
+      const v = readOnlyViolation(body);
+      if (v) return v;
     }
+    let s = text;
+    // VAR=value only sets a shell variable; VAR=value cmd ... runs cmd
+    if (/^([A-Za-z_]\w*=\S*\s*)+$/.test(s)) continue;
+    s = s.replace(/^([A-Za-z_]\w*=\S*\s+)+/, "");
     if (/`/.test(s.replace(/'[^']*'/g, ""))) return "backtick command substitution";
     commands.push({ seg, s });
   }
@@ -264,6 +292,41 @@ function readOnlyViolation(command: string): string | null {
     if (!READ_ONLY.some((re) => re.test(s))) return `"${cmd.slice(0, 80)}" is not a read-only command`;
   }
   return null;
+}
+
+/** Top-level `$( ... )` bodies of one simple command, replaced by SUBST in `text`; inner = null when unbalanced. */
+export function extractSubstitutions(seg: string): { text: string; inner: string[] | null } {
+  const inner: string[] = [];
+  let text = "";
+  let sq = false;
+  let dq = false;
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (c === "'" && !dq) sq = !sq;
+    else if (c === '"' && !sq) dq = !dq;
+    if (!sq && c === "$" && seg[i + 1] === "(") {
+      let depth = 0;
+      let j = i + 1;
+      let q: string | null = null;
+      for (; j < seg.length; j++) {
+        const d = seg[j];
+        if (q) {
+          if (d === q) q = null;
+          continue;
+        }
+        if (d === "'" || d === '"') q = d;
+        else if (d === "(") depth++;
+        else if (d === ")" && --depth === 0) break;
+      }
+      if (j >= seg.length) return { text, inner: null };
+      inner.push(seg.slice(i + 2, j));
+      text += "SUBST";
+      i = j;
+      continue;
+    }
+    text += c;
+  }
+  return { text, inner };
 }
 
 export const loopUnsupported = (detail: string) =>

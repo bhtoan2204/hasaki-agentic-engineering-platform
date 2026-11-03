@@ -494,3 +494,46 @@ describe("Bash policy: loops in analysis steps", () => {
     }
   });
 });
+
+describe("Bash policy: command substitution and assignments", () => {
+  const ws = "/data/worktrees/HSK-737TG2HL/payment";
+  const ctx: PolicyContext = { mode: "coding", workspaces: [ws], baseBranch: "release/prod", protectedRoots: ["/home/me/src"] };
+  const A: PolicyContext = { mode: "analysis", workspaces: [], baseBranch: "release/prod" };
+  // verbatim shape of the denied command (paths adapted)
+  const original = `ls /home/me/src/payment-src/ 2>/dev/null; f=$(ls -d /home/me/src/*/payment-fiserv /home/me/src/payment-fiserv 2>/dev/null | head -1); echo $f; cat $f/internal/transaction/aggregates/payment_order_invariant.go; sed -n 170,190p $f/internal/transaction/aggregates/payment_order_event.go`;
+
+  test("a pipe inside $( ... ) does not split the outer command", () => {
+    assert.deepEqual(parseShell(`f=$(ls -d a b | head -1); echo $f`).segments, ["f=$(ls -d a b | head -1)", "echo $f"]);
+    assert.deepEqual(parseShell(`echo "$(git log -1 --format="%h %s" | cut -c1-20)"`).segments.length, 1);
+    assert.deepEqual(parseShell(`echo $((1 + 2)); ls`).segments, ["echo $((1 + 2))", "ls"]);
+  });
+
+  test("the original read-only command is allowed against the primary checkout and in analysis", () => {
+    assert.deepEqual(decideBash(original, ctx, ws), { allow: true });
+    assert.deepEqual(decideBash(original, A), { allow: true });
+    assert.deepEqual(decideBash(`base=$(git merge-base HEAD origin/release/prod); git diff --stat "$base"`, A), { allow: true });
+    assert.deepEqual(decideBash(`n=$(rg -c x f | wc -l)`, A), { allow: true });
+  });
+
+  test("writes hidden in substitutions or after assignments are still denied", () => {
+    for (const c of [
+      `f=$(touch /home/me/src/payment/x)`,
+      `f=$(ls | tee /home/me/src/payment/out)`,
+      `f=$(ls > /home/me/src/payment/out); echo $f`,
+      `X=1 git -C /home/me/src/payment commit -m x`,
+      `f=$(echo ok); rm /home/me/src/payment/go.mod`,
+      `echo "$(sed -i s/a/b/ /home/me/src/payment/go.mod)"`,
+    ])
+      assert.equal(decideBash(c, ctx, ws).allow, false, c);
+    for (const c of [`f=$(touch x)`, `X=1 touch y`, `f=$(ls > out)`, `echo $(ls | xargs rm)`]) assert.equal(decideBash(c, A).allow, false, c);
+    assert.match((decideBash(`f=$(ls -d a | head -1`, A) as any).reason, /cannot parse/);
+  });
+});
+
+test("git symbolic-ref (read form) and [ ] tests are read-only; subshells stay unsupported", () => {
+  const A: PolicyContext = { mode: "analysis", workspaces: [], baseBranch: "release/prod" };
+  for (const c of [`git -C payment symbolic-ref refs/remotes/origin/HEAD`, `git symbolic-ref --short HEAD`, `[ -d oms-api ] && git -C oms-api log -1`, `test -f go.mod && cat go.mod`])
+    assert.deepEqual(decideBash(c, A), { allow: true }, c);
+  assert.equal(decideBash(`git symbolic-ref HEAD refs/heads/x`, A).allow, false);
+  assert.match((decideBash(`for r in a b; do [ -d $r ] && (cd $r && git log -1); done`, A) as any).reason, /chưa được hỗ trợ/);
+});
