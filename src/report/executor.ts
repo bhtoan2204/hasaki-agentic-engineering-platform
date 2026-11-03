@@ -7,6 +7,7 @@ import type { ExecResult } from "../workflow/types.ts";
 import { parseAiSuggest, type ReportSpec } from "./aiSuggest.ts";
 import { collectEvidence, type Evidence } from "./evidence.ts";
 import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./build.ts";
+import { testExceptionsOf } from "../workflow/executors/builtin.ts";
 
 /**
  * Task Result Report executor.
@@ -110,6 +111,8 @@ export const taskResultReportExecutor: StepExecutor = {
       .join("\n")
       .slice(0, 1200) || (spec.language === "vi" ? "Chưa có tóm tắt triển khai." : "No implementation summary available.");
     const report = buildReport(spec, evidence, proposal, { task: { code: wi?.code ?? null, title: wi?.title ?? null, id: wi?.payload?.id ?? wi?.id ?? null }, fallbackSummary: fallback });
+    for (const e of await testExceptionsOf(ctx.run.id))
+      report.limitations.push(`${spec.language === "vi" ? "Ngoại lệ test được chấp nhận (kết quả vẫn FAILED)" : "Accepted test exception (result remains FAILED)"}: ${e.step} — ${e.exception.failures.map((f: any) => f.test ?? f.build_error ?? f.package).join(", ")}`);
     const markdown = renderMarkdown(report);
     const jsonId = await ctx.artifact("report_json", `task-result-report.draft-${ctx.attempt.number}.json`, JSON.stringify(report, null, 2), { draft: true, counts: report.counts });
     const mdId = await ctx.artifact("report", `task-result-report.draft-${ctx.attempt.number}.md`, markdown, { draft: true, counts: report.counts });

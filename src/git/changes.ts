@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
-import { prDescription, prFields } from "../workflow/executors/builtin.ts";
+import { prDescription, prFields, testExceptionsOf } from "../workflow/executors/builtin.ts";
 import { workspacesOf } from "./provider.ts";
 
 const exec = promisify(execFile);
@@ -30,6 +30,7 @@ export async function runChanges(runId: number) {
   const prStep = steps.find((s) => s.type === "git_pull_request");
   const source = prStep ? (steps.find((s) => s.key === prStep.config?.content_from)?.output ?? steps.find((s) => s.output?.pull_requests)?.output ?? {}) : {};
   const base = `origin/${config.baseBranch}`;
+  const testExceptions = await testExceptionsOf(runId);
   const repos = [];
   for (const w of await workspacesOf(runId)) {
     if (!existsSync(w.path)) {
@@ -64,7 +65,7 @@ export async function runChanges(runId: number) {
       pr_preview: {
         title: f.title,
         target: config.baseBranch,
-        description: prDescription({ code: run.work_item_code ?? undefined, runId, summary: f.summary, decisions: f.decisions, commits: commitList.map((c) => `${c.hash} ${c.subject}`).join("\n") }),
+        description: prDescription({ code: run.work_item_code ?? undefined, runId, summary: f.summary, decisions: f.decisions, commits: commitList.map((c) => `${c.hash} ${c.subject}`).join("\n"), testExceptions }),
         will_open: run.selected_repositories.includes(w.repo) && commitList.length > 0 && !status.trim(),
       },
     });

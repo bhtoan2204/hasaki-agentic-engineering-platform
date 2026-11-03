@@ -539,6 +539,8 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
       for (const stepId of new Set(qs.map((x) => x.step_id as number))) {
         const s = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1", [stepId]))!;
         if (s.status !== "WAITING_INPUT") continue;
+        // Answers to questions of an older attempt are recorded but never resume anything (no extra job).
+        if (!qs.some((x) => x.step_id === stepId && x.attempt_id === s.current_attempt_id)) continue;
         const open = await one<{ n: number }>(c, "SELECT count(*)::int AS n FROM workflow_questions WHERE step_id = $1 AND status = 'open'", [stepId]);
         if (open!.n) continue;
         await q(c, "UPDATE workflow_step_attempts SET resolved_at = now() WHERE id = $1", [s.current_attempt_id]);
@@ -704,7 +706,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       if (result.questions?.length) await insertQuestions(c, step, attempt.id, result.questions);
       const open = (await one<{ n: number }>(c, "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'", [attempt.id]))!.n;
       if (!open) return applyResult(c, run, step, attempt, jobId, { kind: "failed", error: "step requested input but asked no question", retryable: false }, afterCommit);
-      await closeAttempt("WAITING_INPUT", null);
+      await closeAttempt("WAITING_INPUT", result.output ?? null);
       await q(c, "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)", [
         run.id,
         step.id,
@@ -715,7 +717,9 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       await closeJob("done");
       afterCommit(() =>
         notifyStepWaiting(`❓ Run #${run.id} (${run.title}) – bước ${step.name} có ${open} câu hỏi cần trả lời`, {
-          runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT", detail: `${open} câu hỏi cần trả lời`, stepId: step.id, generation: step.generation, attemptId: attempt.id,
+          runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
+          detail: (result.output as any)?.diagnosis?.summary ? `${(result.output as any).diagnosis.summary} — chọn cách xử lý` : `${open} câu hỏi cần trả lời`,
+          stepId: step.id, generation: step.generation, attemptId: attempt.id,
         }),
       );
       break;
@@ -738,6 +742,13 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
         }),
       );
       break;
+    }
+    case "reexecute": {
+      // Close this attempt first (it decided), then re-execute the target: this step is downstream and becomes PENDING.
+      await closeAttempt("COMPLETED", result.output ?? { reexecute: result.target });
+      await closeJob("done");
+      await reexecuteTx(c, run, result.target, { feedback: result.feedback }, afterCommit, `re-executed by ${step.key} (developer decision after test failure)`);
+      return;
     }
     case "failed": {
       await closeAttempt("FAILED", null, { message: result.error, details: result.details ?? null });

@@ -46,6 +46,8 @@ import type { ExecResult } from "../src/workflow/types.ts";
 import { setReportReasoner, taskResultReportExecutor } from "../src/report/executor.ts";
 import { withReportStep, REPORT_STEP_KEY, previewRun } from "../src/workflow/engine.ts";
 import { addEvidence } from "../src/report/evidenceStore.ts";
+import { OPTIONS, setTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
+import { testExceptionsOf, prDescription } from "../src/workflow/executors/builtin.ts";
 
 // ---------------------------------------------------------------- fakes
 
@@ -591,7 +593,7 @@ test("regression test step compares Go failures with the base branch (real go + 
   writeFileSync(join(dir, "calc/sub_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestSub(t *testing.T) { if Sub(3, 1) != 2 { t.Fatal("bad") } }\n');
   sh("add", "."); sh("commit", "-qm", "add Sub");
 
-  const key = await customWorkflow([{ key: "test", type: "command", config: { command: 'go test ${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} ./...', baseline_compare: "go", timeout_seconds: 300 } }]);
+  const key = await customWorkflow([{ key: "test", type: "command", config: { command: 'go test ${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} ./...', baseline_compare: "go", on_failure: "fail", timeout_seconds: 300 } }]);
   const run = await startRun({ definitionKey: key, start: false });
   await recordWorkspace(run.id, { repo: "calc", branch: "TASK-1", path: dir, created_from: "test" });
   await startPendingRun(run.id);
@@ -1036,4 +1038,159 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     config.publicUrl = saved.publicUrl;
     srv.close();
   }
+});
+
+// ---------------------------------------------------------------- interactive test failure handling (real go + git)
+async function goRepo(opts: { baseFailing: boolean; branchBug: boolean }) {
+  const { execFileSync } = await import("node:child_process");
+  const { writeFileSync, mkdirSync } = await import("node:fs");
+  const dir = mkdtempSync(join(process.env.TEST_ROOT!, "tf-"));
+  const g = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { stdio: "pipe" });
+  writeFileSync(join(dir, "go.mod"), "module example.com/m\n\ngo 1.21\n");
+  mkdirSync(join(dir, "calc"));
+  writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a + b }\n");
+  writeFileSync(join(dir, "calc/add_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) { if Add(1, 1) != 2 { t.Fatal("Add(1,1) != 2") } }\n');
+  if (opts.baseFailing) writeFileSync(join(dir, "calc/db_test.go"), 'package calc\n\nimport "testing"\n\nfunc TestNeedsDB(t *testing.T) { t.Fatal("failed to initialize database, got error dial tcp 172.16.200.135:3306: connect: connection timed out") }\n');
+  g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t");
+  g("add", "."); g("commit", "-qm", "base"); g("update-ref", "refs/remotes/origin/release/prod", "HEAD");
+  g("checkout", "-qb", "TASK-TF");
+  if (opts.branchBug) writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a - b }\n");
+  else writeFileSync(join(dir, "calc/calc.go"), "package calc\n\n// Add adds.\nfunc Add(a, b int) int { return a + b }\n");
+  g("commit", "-qam", "change");
+  return dir;
+}
+async function tfRun(dir: string) {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "test", type: "command", depends_on: ["implement"], config: { command: "go test ./...", baseline_compare: "go", timeout_seconds: 300 } },
+    { key: "pr", type: "git_pull_request", depends_on: ["test"] },
+  ]);
+  scripts.implement = async (ctx) => {
+    await recordWorkspace(ctx.run.id, { repo: "calc", branch: "TASK-TF", path: dir, created_from: "test" });
+    return { kind: "completed", output: { summary: "changed calc", pull_requests: {} } };
+  };
+  const run = await startRun({ definitionKey: key, repositories: ["oms-api"], inputs: { project: "OMS" } });
+  await drain();
+  return run;
+}
+const openQ = async (runId: number) => q(pool, "SELECT * FROM workflow_questions WHERE run_id = $1 AND status = 'open' ORDER BY id", [runId]);
+const liveJobs = async (runId: number) => (await one(pool, "SELECT count(*)::int AS n FROM workflow_jobs WHERE run_id = $1 AND status IN ('queued','running')", [runId])).n;
+
+test("test failure 1/4: only baseline failures → diagnosis, confirmation required, exception recorded, test stays FAILED", async () => {
+  setTestFailureAdvisor({ explain: async () => ({ text: "TestNeedsDB cần DB nội bộ; cũng fail trên baseline.", suggestion: "Có thể tiếp tục với ngoại lệ." }), interpret: async () => ({ kind: "unclear", question: "Bạn muốn chạy lại hay tiếp tục?" }) });
+  const dir = await goRepo({ baseFailing: true, branchBug: false });
+  const run = await tfRun(dir);
+  let st = await stepOf(run.id, "test");
+  assert.equal(st.status, "WAITING_INPUT");
+  assert.equal(await liveJobs(run.id), 0, "worker released while waiting");
+  const a1 = (await attemptsOf(run.id, "test")).at(-1)!;
+  const d = a1.output.diagnosis;
+  assert.equal(d.command, "go test ./...");
+  assert.equal(d.results[0].exit_code, 1);
+  assert.deepEqual(d.counts, { pre_existing: 1, new: 0, environment: 0, insufficient: 0 });
+  assert.equal(d.failures[0].test, "TestNeedsDB");
+  assert.match(d.failures[0].log, /dial tcp 172\.16\.200\.135/);
+  assert.ok(d.failures[0].env_signal);
+  assert.match(d.explanation.text, /baseline/);
+  let [q1] = await openQ(run.id);
+  assert.ok(q1.options.includes(OPTIONS.accept));
+  // "tiếp tục" without explicit confirmation → asked again
+  await answerQuestions({ [q1.id]: "tiếp tục" });
+  await drain();
+  st = await stepOf(run.id, "test");
+  assert.equal(st.status, "WAITING_INPUT");
+  [q1] = await openQ(run.id);
+  assert.match(q1.question, /xác nhận/);
+  await answerQuestions({ [q1.id]: OPTIONS.accept });
+  await drain();
+  st = await stepOf(run.id, "test");
+  assert.equal(st.status, "COMPLETED");
+  assert.equal(st.output.test_status, "FAILED");
+  assert.equal(st.output.passed, false);
+  assert.equal(st.output.accepted_exception.failures[0].test, "TestNeedsDB");
+  const exc = await testExceptionsOf(run.id);
+  assert.equal(exc.length, 1);
+  assert.match(prDescription({ runId: run.id, summary: "", decisions: [], commits: "", testExceptions: exc }), /Test exceptions[\s\S]*TestNeedsDB/);
+  assert.equal((await stepOf(run.id, "pr")).status, "COMPLETED");
+});
+
+test("test failure 2/4: new failure → accept refused; 'Sửa rồi test lại' re-executes the coding step with instructions, tests rerun", async () => {
+  setTestFailureAdvisor(null);
+  const dir = await goRepo({ baseFailing: false, branchBug: true });
+  const run = await tfRun(dir);
+  let [qq] = await openQ(run.id);
+  const d = (await attemptsOf(run.id, "test")).at(-1)!.output.diagnosis;
+  assert.deepEqual(d.counts, { pre_existing: 0, new: 1, environment: 0, insufficient: 0 });
+  assert.equal(d.failures[0].test, "TestAdd");
+  assert.equal(d.explanation.by, "rules");
+  assert.ok(!qq.options.includes(OPTIONS.accept), "accept is not offered");
+  await answerQuestions({ [qq.id]: "Tiếp tục với lỗi baseline (tôi xác nhận ngoại lệ)" });
+  await drain();
+  assert.equal((await stepOf(run.id, "test")).status, "WAITING_INPUT", "refused: not all failures are on the baseline");
+  [qq] = await openQ(run.id);
+  assert.match(qq.question, /Không thể tiếp tục/);
+  const { writeFileSync } = await import("node:fs");
+  scripts.implement = async (ctx) => {
+    assert.match(ctx.input.pending.feedback, /Add phải cộng/);
+    assert.match(ctx.input.pending.feedback, /TestAdd/);
+    writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a + b }\n");
+    await recordWorkspace(ctx.run.id, { repo: "calc", branch: "TASK-TF", path: dir, created_from: "test" });
+    return { kind: "completed", output: { summary: "fixed Add", pull_requests: {} } };
+  };
+  await answerQuestions({ [qq.id]: "Sửa rồi test lại: Add phải cộng chứ không trừ" });
+  await drain();
+  const st = await stepOf(run.id, "test");
+  assert.equal(st.status, "COMPLETED");
+  assert.equal(st.output.passed, true);
+  const hist = await attemptsOf(run.id, "test");
+  assert.ok(hist.some((a) => a.output?.decision?.kind === "fix" && a.output.decision.target === "implement"), "decision recorded on the attempt");
+  assert.ok(hist.length >= 3 && hist.some((a) => a.invalidated_at), "old attempts kept (invalidated)");
+});
+
+test("test failure 3/4: old + new failures shown separately; rerun creates a new attempt keeping old logs; stop fails the step", async () => {
+  setTestFailureAdvisor(null);
+  const dir = await goRepo({ baseFailing: true, branchBug: true });
+  const run = await tfRun(dir);
+  const d = (await attemptsOf(run.id, "test")).at(-1)!.output.diagnosis;
+  assert.equal(d.counts.pre_existing, 1);
+  assert.equal(d.counts.new, 1);
+  assert.equal(d.all_pre_existing, false);
+  assert.deepEqual(d.failures.map((f: any) => `${f.test}:${f.category}`).sort(), ["TestAdd:new", "TestNeedsDB:pre_existing"]);
+  let [qq] = await openQ(run.id);
+  await answerQuestions({ [qq.id]: OPTIONS.rerun });
+  await drain();
+  const hist = await attemptsOf(run.id, "test");
+  assert.equal(hist.length, 2);
+  assert.equal(hist[1].output.decision.kind, "rerun");
+  assert.ok(hist[1].output.diagnosis, "rerun failed again → diagnosed and asked again");
+  assert.equal((await q(pool, "SELECT count(*)::int AS n FROM workflow_artifacts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.key = 'test' AND a.kind = 'log'", [run.id]))[0].n, 2, "both attempts' logs kept");
+  [qq] = await openQ(run.id);
+  await answerQuestions({ [qq.id]: OPTIONS.stop });
+  await drain();
+  const st = await stepOf(run.id, "test");
+  assert.equal(st.status, "FAILED");
+  assert.match(st.error!, /stopped after test failure/);
+  assert.equal((await getRun(run.id)).status, "FAILED");
+});
+
+test("test failure 4/4: waiting state survives a restart (all in PostgreSQL); duplicate or stale answers trigger no job", async () => {
+  setTestFailureAdvisor(null);
+  const dir = await goRepo({ baseFailing: true, branchBug: false });
+  const run = await tfRun(dir);
+  const [qq] = await openQ(run.id);
+  // "restart": nothing in memory is needed — question, diagnosis and checkpoint are read back from the database
+  const detail = await stepDetail(run.id, "test");
+  assert.equal(detail.step.status, "WAITING_INPUT");
+  assert.equal(detail.questions.filter((x: any) => x.status === "open").length, 1);
+  assert.equal(detail.checkpoints.at(-1).data.test_failure.counts.pre_existing, 1);
+  assert.equal(await liveJobs(run.id), 0);
+  await answerQuestions({ [qq.id]: OPTIONS.rerun });
+  assert.equal(await liveJobs(run.id), 1, "exactly one job for the answer");
+  await assert.rejects(answerQuestions({ [qq.id]: OPTIONS.rerun }), /no open questions/);
+  assert.equal(await liveJobs(run.id), 1, "re-sending the same answer creates no job");
+  await drain();
+  assert.equal((await stepOf(run.id, "test")).status, "WAITING_INPUT", "asked again after the rerun");
+  await assert.rejects(answerQuestions({ [qq.id]: OPTIONS.accept }), /no open questions/, "the old attempt's question cannot be answered again");
+  assert.equal(await liveJobs(run.id), 0);
+  await cancelRun(run.id);
 });

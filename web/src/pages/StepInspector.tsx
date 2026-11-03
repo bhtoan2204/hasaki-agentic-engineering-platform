@@ -210,6 +210,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       {tab === "report" && <ReportPanel run={run} step={step} artifacts={artifacts} attempts={attempts} onChanged={refresh} />}
       {tab === "overview" && (
         <div>
+          {step.type === "command" && <TestFailurePanel attempts={attempts} questions={questions} current={attempt} step={step} />}
           {step.type === "command" && <BaselineSummary results={(attempt?.output ?? attempt?.error?.details)?.results} />}
           {attempt?.metrics && <AttemptMetrics m={attempt.metrics} />}
           <div className="kv">
@@ -288,6 +289,82 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
           {jobs.map((j: any) => (
             <div key={j.id} className="small mono">#{j.id} {j.status} gen{j.generation} claims={j.claims}{j.force ? " force" : ""} {j.lease_owner ?? ""} {j.last_error ?? ""}</div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CAT: Record<string, [string, string]> = {
+  new: ["FAILED", "lỗi mới"],
+  pre_existing: ["WAITING", "đã có trên baseline"],
+  environment: ["PAUSED", "lỗi môi trường"],
+  insufficient: ["PENDING", "chưa đủ bằng chứng"],
+};
+const DECISION: Record<string, string> = { rerun: "Chạy lại test", fix: "Sửa rồi test lại", accept_baseline: "Tiếp tục với lỗi baseline", stop: "Dừng", unclear: "Chưa rõ → hỏi lại" };
+
+/** Test failure diagnosis (real output + baseline), AI explanation, and the exchange/decision history of this step. */
+function TestFailurePanel({ attempts, questions, current, step }: { attempts: any[]; questions: any[]; current: any; step: any }) {
+  const payload = (a: any) => a?.output ?? a?.error?.details;
+  const withDiag = [...attempts].reverse().find((a) => payload(a)?.diagnosis);
+  const d = payload(current)?.diagnosis ?? payload(withDiag)?.diagnosis;
+  const decisions = attempts.filter((a) => payload(a)?.decision).map((a) => ({ n: a.number, ...payload(a).decision }));
+  const exception = step.output?.accepted_exception;
+  if (!d && !decisions.length) return null;
+  const groups = (["new", "pre_existing", "environment", "insufficient"] as const).filter((k) => d?.failures.some((f: any) => f.category === k));
+  return (
+    <div className="card" style={{ padding: 10, borderColor: step.status === "WAITING_INPUT" ? "var(--warn)" : undefined }}>
+      <div className="row tight"><h4 className="grow" style={{ margin: 0 }}>🧪 Chẩn đoán test</h4>{step.output?.test_status === "FAILED" && <Badge s="FAILED">test FAILED</Badge>}</div>
+      {d && (
+        <>
+          <div className="small" style={{ margin: "4px 0" }}><b>{d.summary}</b></div>
+          <div className="muted small mono" style={{ wordBreak: "break-all" }}>{d.command.split("\n").find((l: string) => l.includes("go test")) ?? d.command.split("\n")[0]}</div>
+          <div className="muted small">
+            {d.results.map((r: any) => `${r.repo}: exit ${r.timed_out ? "timeout" : r.exit_code}`).join(" · ")} · baseline {d.baseline_available ? <span className="mono">{String(d.base_sha).slice(0, 9)}</span> : "không có"}
+          </div>
+          {d.explanation && (
+            <div className="card" style={{ padding: 8, margin: "6px 0", background: "var(--panel2)" }}>
+              <div className="small"><b>{d.explanation.by === "claude" ? "AI" : "Tóm tắt"}:</b> {d.explanation.text}</div>
+              <div className="small" style={{ marginTop: 2 }}><b>Đề xuất:</b> {d.explanation.suggestion}</div>
+            </div>
+          )}
+          {groups.map((g) => (
+            <div key={g} style={{ marginTop: 6 }}>
+              <Badge s={CAT[g][0]}>{CAT[g][1]} · {d.failures.filter((f: any) => f.category === g).length}</Badge>
+              {d.failures.filter((f: any) => f.category === g).map((f: any, i: number) => (
+                <details key={i} style={{ marginLeft: 8 }}>
+                  <summary style={{ color: "var(--text)" }}>
+                    <span className="mono small">{f.repo} {f.package?.split("/").slice(-2).join("/")} {f.test ?? f.build_error ?? ""}</span> <span className="muted small">— {f.reason}{f.env_signal && g !== "environment" ? " (log có dấu hiệu lỗi mạng/DB)" : ""}</span>
+                  </summary>
+                  <pre>{f.log}</pre>
+                </details>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+      {exception && (
+        <div className="small" style={{ marginTop: 8, color: "var(--warn)" }}>
+          ⚠ Đã chấp nhận ngoại lệ baseline ({exception.failures.length} lỗi) — kết quả test vẫn FAILED, được ghi vào PR và báo cáo.
+        </div>
+      )}
+      {(questions.length > 0 || decisions.length > 0) && (
+        <div style={{ marginTop: 8 }}>
+          <b className="small">Trao đổi & quyết định</b>
+          {attempts.map((a) => {
+            const qs = questions.filter((q: any) => q.attempt_id === a.id);
+            const dec = payload(a)?.decision;
+            if (!qs.length && !dec) return null;
+            return (
+              <div key={a.id} className="small" style={{ margin: "4px 0", paddingLeft: 8, borderLeft: "2px solid var(--line)" }}>
+                <span className="muted">attempt #{a.number} · {a.status}</span>
+                {dec && <div>→ quyết định: <b>{DECISION[dec.kind] ?? dec.kind}</b>{dec.target ? ` (${dec.target})` : ""}{dec.instructions ? ` — “${dec.instructions}”` : ""}</div>}
+                {qs.map((q: any) => (
+                  <div key={q.id}>❓ {q.question}{q.answer ? <> <br />💬 <b>{q.answer}</b></> : q.status === "open" ? <span className="muted"> (đang chờ)</span> : <span className="muted"> ({q.status})</span>}</div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -58,10 +58,10 @@ export async function collectEvidence(runId: number, reportStepId: number): Prom
         for (const r of o.results ?? [])
           add({
             kind: "test_result",
-            title: `${s.name} · ${r.repo}: ${r.passed ?? r.exit_code === 0 ? "passed" : "failed"}${r.baseline ? ` (${r.baseline.regressions?.length ?? "?"} regressions vs base, ${r.baseline.pre_existing?.length ?? 0} pre-existing)` : ""}`,
+            title: `${s.name} · ${r.repo}: ${o.accepted_exception ? "FAILED (accepted baseline exception)" : r.passed ?? r.exit_code === 0 ? "passed" : "failed"}${r.baseline ? ` (${r.baseline.regressions?.length ?? "?"} regressions vs base, ${r.baseline.pre_existing?.length ?? 0} pre-existing)` : ""}`,
             detail: clip(r.baseline ?? { exit_code: r.exit_code }, 800),
             ref: { step_key: s.key, artifact_id: r.artifact_id, repo: r.repo },
-            passed: r.passed ?? r.exit_code === 0,
+            passed: o.accepted_exception ? false : (r.passed ?? r.exit_code === 0),
             at: s.finished_at,
           });
         break;

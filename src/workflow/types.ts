@@ -153,5 +153,7 @@ export interface QuestionInput {
 export type ExecResult =
   | { kind: "completed"; output: unknown }
   | { kind: "failed"; error: string; retryable?: boolean; details?: unknown }
-  | { kind: "waiting_input"; checkpoint?: Record<string, unknown>; questions?: QuestionInput[] }
+  | { kind: "waiting_input"; checkpoint?: Record<string, unknown>; questions?: QuestionInput[]; output?: unknown }
+  /** Re-execute an upstream step with feedback (its dependants, including this step, are invalidated and rerun). */
+  | { kind: "reexecute"; target: string; feedback: string; output?: unknown }
   | { kind: "waiting_approval"; request: Record<string, unknown>; checkpoint?: Record<string, unknown> };

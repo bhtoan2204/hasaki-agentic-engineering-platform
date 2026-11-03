@@ -6,6 +6,7 @@ import { isAmbiguous, rankRepositories, repositories, type RankedRepository, typ
 import { getPath } from "../graph.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
+import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -125,6 +126,16 @@ export const commandExecutor: StepExecutor = {
   async execute(ctx) {
     // Per-attempt overrides (e.g. "retry with baseline comparison") arrive through pending input.
     const cfg = { ...ctx.step.config, ...(ctx.input.pending?.config_overrides ?? {}) };
+    // Interactive failure handling (default for test steps with baseline comparison): ask the developer instead of failing.
+    const interactive = String(cfg.on_failure ?? (cfg.baseline_compare ? "ask" : "fail")) === "ask";
+    let decision: any = null;
+    const resumed = ctx.input.pending?.resume;
+    const priorDiagnosis = resumed?.checkpoint?.test_failure as Diagnosis | undefined;
+    if (interactive && priorDiagnosis && resumed?.from_attempt_id) {
+      const r = await handleDecision(ctx, priorDiagnosis, resumed.from_attempt_id);
+      if (r.result) return r.result;
+      decision = r.decision; // rerun: execute the tests again below, in this new attempt
+    }
     const timeoutMs = Number(cfg.timeout_seconds ?? 600) * 1000;
     const targets = cfg.cwd ? [{ repo: "(cwd)", path: String(cfg.cwd), branch: ctx.run.branch }] : await workspacesOf(ctx.run.id);
     if (!targets.length) {
@@ -134,10 +145,13 @@ export const commandExecutor: StepExecutor = {
       return { kind: "completed", output: { skipped: true, passed: true, reason: "no code changes in this run (no worktree)", results: [] } };
     }
     const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number; baseline?: any; passed?: boolean }> = [];
+    const outputs: Record<string, string> = {};
     for (const t of targets) {
       await ctx.log("system", `▶ ${t.repo}: running command in ${t.path}`);
       const started = Date.now();
-      const known = cfg.baseline_compare === "go" && cfg.skip_known_base_failures !== false ? await knownBaseFailures(t.path) : null;
+      // Skipping known base failures continues past them without confirmation: opt-in in interactive mode.
+      const skipKnown = cfg.skip_known_base_failures ?? !interactive;
+      const known = cfg.baseline_compare === "go" && skipKnown ? await knownBaseFailures(t.path) : null;
       if (known?.skipRegex) await ctx.log("system", `skipping ${known.tests.length} test(s) known to fail on ${config.baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`, { skipped_known_failures: known.tests });
       const r = await runCommand(
         String(cfg.command),
@@ -151,11 +165,18 @@ export const commandExecutor: StepExecutor = {
       const artifactId = await ctx.artifact("log", `${ctx.step.key}-${t.repo}.log`, r.output, { exit_code: r.code, timed_out: r.timedOut });
       const entry: (typeof results)[number] & { skipped_known_failures?: string[] } = { repo: t.repo, exit_code: r.code, timed_out: r.timedOut, artifact_id: artifactId, passed: r.code === 0, ...(known?.tests.length ? { skipped_known_failures: known.tests } : {}) };
       if (r.code !== 0 && !r.timedOut && cfg.baseline_compare === "go") entry.baseline = await compareWithBaseline(ctx, t, r.output, timeoutMs);
-      if (entry.baseline?.regressions && !entry.baseline.regressions.length) entry.passed = true;
+      // Auto-accepting failures that also fail on the base branch: opt-in when interactive (the developer confirms instead).
+      if (entry.baseline?.regressions && !entry.baseline.regressions.length && (cfg.baseline_auto_accept ?? !interactive)) entry.passed = true;
+      outputs[t.repo] = r.output;
       results.push(entry);
     }
     const failed = results.filter((r) => !r.passed);
-    const output = { results, passed: failed.length === 0 };
+    const output = { results, passed: failed.length === 0, ...(decision ? { decision } : {}) };
+    if (failed.length && !cfg.allow_failure && interactive) {
+      // Automatic retries first (max_attempts); when they are exhausted, diagnose and ask the developer.
+      if (ctx.step.attempt_count < ctx.step.max_attempts) return { kind: "failed", error: `tests failed (attempt ${ctx.step.attempt_count}/${ctx.step.max_attempts}); retrying`, retryable: true, details: output };
+      return askAboutFailure(ctx, { command: String(cfg.command), outputs, results }, decision);
+    }
     if (failed.length && !cfg.allow_failure) {
       const why = (f: (typeof results)[number]) => {
         const reg = f.baseline?.regressions;
@@ -301,7 +322,8 @@ export function prFields(source: any, repo: string, code: string | undefined, ru
   };
 }
 
-export function prDescription(x: { code?: string; runId: number; summary: string; decisions: Array<{ title: string; detail: string }>; commits: string }) {
+export function prDescription(x: { code?: string; runId: number; summary: string; decisions: Array<{ title: string; detail: string }>; commits: string; testExceptions?: Array<{ step: string; exception: any }> }) {
+  const exc = x.testExceptions ?? [];
   return [
     x.code ? `Task: **${x.code}**` : `Workflow run #${x.runId}`,
     "",
@@ -311,8 +333,24 @@ export function prDescription(x: { code?: string; runId: number; summary: string
     "",
     "## Commits\n```\n" + x.commits + "\n```",
     "",
+    ...(exc.length
+      ? [
+          "## Test exceptions (accepted by the developer — test result remains FAILED)",
+          ...exc.flatMap((e) => [
+            `- ${e.step}: failures that also fail on the base branch${e.exception.base_sha ? ` (${String(e.exception.base_sha).slice(0, 9)})` : ""}:`,
+            ...e.exception.failures.map((f: any) => `  - ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}`.trimEnd()),
+          ]),
+          "",
+        ]
+      : []),
     "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
   ].join("\n");
+}
+
+/** Accepted baseline test exceptions recorded by upstream command steps of a run (for PR text and reports). */
+export async function testExceptionsOf(runId: number) {
+  const rows = await q(pool, "SELECT key, output FROM workflow_steps WHERE run_id = $1 AND type = 'command' AND output ? 'accepted_exception' ORDER BY position", [runId]);
+  return rows.map((r: any) => ({ step: r.key, exception: r.output.accepted_exception }));
 }
 
 /**
@@ -348,7 +386,7 @@ export const pullRequestExecutor: StepExecutor = {
         }
         return { kind: "failed", error: `${w.repo}: push failed: ${msg}`, retryable: true };
       }
-      const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits });
+      const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits, testExceptions: await testExceptionsOf(ctx.run.id) });
       const slug = (await repositories.get(w.repo))?.remote_slug || w.repo;
       const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
       await q(
