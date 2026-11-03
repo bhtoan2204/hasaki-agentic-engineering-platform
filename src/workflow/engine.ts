@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
-import { notify } from "../notify.ts";
+import { notify, notifyStepWaiting } from "../notify.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
 import { definitions } from "./definitions.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
@@ -156,7 +156,11 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
         await setStepStatus(c, s, "SKIPPED", { output: { skipped: true, reason: `run_if ${s.run_if.step} not matched` }, finished_at: new Date() });
       } else if (s.requires_approval && !(s.approval?.granted && s.approval.generation === s.generation)) {
         await setStepStatus(c, s, "WAITING_APPROVAL", { approval: { gate: true, generation: s.generation, requested_at: new Date() } }, "approval gate");
-        afterCommit?.(() => notify(`✋ Run #${run.id}: bước ${s.name} cần duyệt trước khi chạy`, `/runs/${run.id}`));
+        afterCommit?.(() =>
+          notifyStepWaiting(`✋ Run #${run.id}: bước ${s.name} cần duyệt trước khi chạy`, {
+            runId: run.id, runTitle: run.title, stepKey: s.key, stepName: s.name, status: "WAITING_APPROVAL", detail: "cần duyệt trước khi chạy bước này", stepId: s.id, generation: s.generation,
+          }),
+        );
       } else {
         await setStepStatus(c, s, "READY", { ready_at: new Date() });
       }
@@ -709,7 +713,11 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       ]);
       await setStepStatus(c, step, "WAITING_INPUT", {}, `${open} question(s)`);
       await closeJob("done");
-      afterCommit(() => notify(`❓ Run #${run.id} (${run.title}) – bước ${step.name} có ${open} câu hỏi cần trả lời`, `/runs/${run.id}`));
+      afterCommit(() =>
+        notifyStepWaiting(`❓ Run #${run.id} (${run.title}) – bước ${step.name} có ${open} câu hỏi cần trả lời`, {
+          runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT", detail: `${open} câu hỏi cần trả lời`, stepId: step.id, generation: step.generation, attemptId: attempt.id,
+        }),
+      );
       break;
     }
     case "waiting_approval": {
@@ -722,7 +730,13 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       ]);
       await setStepStatus(c, step, "WAITING_APPROVAL", { approval: { request: result.request, generation: step.generation, requested_at: now } });
       await closeJob("done");
-      afterCommit(() => notify(`✋ Run #${run.id} (${run.title}) – bước ${step.name} chờ duyệt`, `/runs/${run.id}`));
+      afterCommit(() =>
+        notifyStepWaiting(`✋ Run #${run.id} (${run.title}) – bước ${step.name} chờ duyệt`, {
+          runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_APPROVAL",
+          detail: String((result.request as any)?.message ?? (step.type === "task_result_report" ? "xem lại báo cáo kết quả task" : "chờ duyệt")).slice(0, 300),
+          stepId: step.id, generation: step.generation, attemptId: attempt.id,
+        }),
+      );
       break;
     }
     case "failed": {

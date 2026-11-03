@@ -967,3 +967,73 @@ test("work item description: manual edits survive re-import and reach the agent 
   const prompt = buildUserPrompt({ run: { inputs: {}, selected_repositories: [] }, work_item: wi, upstream: {}, answers: [], pending: null } as any, []);
   assert.match(prompt, /GHN callback/);
 });
+
+// ---------------------------------------------------------------- Telegram notifications
+test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, deep link to the step, never fails the workflow", async () => {
+  const { createServer } = await import("node:http");
+  const { config } = await import("../src/config.ts");
+  const msgs: any[] = [];
+  let status = 200;
+  const srv = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c)).on("end", () => {
+      msgs.push({ path: req.url, ...JSON.parse(body) });
+      res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(status === 200 ? { ok: true } : { ok: false, description: "Bad Request: chat not found" }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  const port = (srv.address() as any).port;
+  const saved = { ...config.telegram, publicUrl: config.publicUrl };
+  Object.assign(config.telegram, { botToken: "TEST:TOKEN", chatId: "42", apiBase: `http://127.0.0.1:${port}` });
+  try {
+    const key = await customWorkflow([
+      { key: "ask", type: "human_input", name: "Hỏi rule", config: { questions: [{ question: "COD?" }, { question: "Refund?" }] } },
+      { key: "approve", type: "human_approval", name: "Duyệt kế hoạch", depends_on: ["ask"], config: { message: "Duyệt kế hoạch fix" } },
+      { key: "gated", type: "agent", name: "Gated step", depends_on: ["approve"], requires_approval: true },
+    ]);
+    const run = await startRun({ definitionKey: key, title: "HSK-1: Thiếu <ZIP>" });
+    await drain();
+    assert.equal(msgs.length, 1, "WAITING_INPUT → exactly one message (no extra run-level WAITING message)");
+    assert.equal(msgs[0].path, "/botTEST:TOKEN/sendMessage");
+    assert.equal(msgs[0].chat_id, "42");
+    assert.match(msgs[0].text, /Cần bạn trả lời câu hỏi/);
+    assert.match(msgs[0].text, /Task: HSK-1: Thiếu &lt;ZIP&gt;/, "HTML-escaped task name");
+    assert.match(msgs[0].text, new RegExp(`Run: #${run.id}`));
+    assert.match(msgs[0].text, /Bước: Hỏi rule \(<code>ask<\/code>\)/);
+    assert.match(msgs[0].text, /2 câu hỏi cần trả lời/);
+    assert.equal(msgs[0].reply_markup, undefined, "local publicUrl → no URL button");
+    assert.ok(msgs[0].text.includes(`/#/runs/${run.id}/ask`), "local link as text");
+    // HTTPS publicUrl → inline URL button
+    config.publicUrl = "https://platform.example.com";
+    const qs = await q(pool, "SELECT id FROM workflow_questions WHERE run_id = $1", [run.id]);
+    await answerQuestions(Object.fromEntries(qs.map((x) => [x.id, "ok"])));
+    await drain();
+    assert.equal(msgs.length, 2, "WAITING_APPROVAL → one more message");
+    assert.match(msgs[1].text, /Cần bạn duyệt/);
+    assert.match(msgs[1].text, /Duyệt kế hoạch fix/);
+    assert.deepEqual(msgs[1].reply_markup.inline_keyboard[0][0], { text: "Mở bước cần xử lý", url: `https://platform.example.com/#/runs/${run.id}/approve` });
+    assert.ok(!msgs[1].text.includes("Mở bước cần xử lý:"), "no duplicate text link when the button exists");
+    // Telegram failing (HTTP 400) must not affect the workflow; the approval gate still notifies
+    status = 400;
+    await approveStep(run.id, "approve");
+    await drain();
+    assert.equal(msgs.length, 3, "approval gate (requires_approval) → one message");
+    assert.equal(msgs[2].reply_markup.inline_keyboard[0][0].url, `https://platform.example.com/#/runs/${run.id}/gated`);
+    assert.equal((await stepOf(run.id, "gated")).status, "WAITING_APPROVAL");
+    // unreachable API: still no effect on the workflow
+    config.telegram.apiBase = "http://127.0.0.1:1";
+    await approveStep(run.id, "gated");
+    await drain();
+    assert.equal((await getRun(run.id)).status, "COMPLETED");
+    // not configured → nothing sent
+    Object.assign(config.telegram, { botToken: "", apiBase: `http://127.0.0.1:${port}` });
+    const run2 = await startRun({ definitionKey: key });
+    await drain();
+    assert.equal(msgs.length, 3);
+    await cancelRun(run2.id);
+  } finally {
+    Object.assign(config.telegram, { botToken: saved.botToken, chatId: saved.chatId, apiBase: saved.apiBase });
+    config.publicUrl = saved.publicUrl;
+    srv.close();
+  }
+});

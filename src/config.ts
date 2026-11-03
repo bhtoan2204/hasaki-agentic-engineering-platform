@@ -72,6 +72,8 @@ export interface Config {
     /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
     upstreamTokens: number;
   };
+  /** Optional one-way Telegram notifications (env TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID; never put the token in config.json). */
+  telegram: { botToken: string; chatId: string; apiBase: string };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
     baseUrl: string;
@@ -117,6 +119,7 @@ const defaults: Config = {
   organization: "hasaki",
   scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
+  telegram: { botToken: "", chatId: "", apiBase: "https://api.telegram.org" },
   agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
 
@@ -133,6 +136,11 @@ function load(): Config {
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
   };
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
+  cfg.telegram = {
+    botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
+    chatId: process.env.TELEGRAM_CHAT_ID ?? "",
+    apiBase: process.env.TELEGRAM_API_BASE ?? defaults.telegram.apiBase,
+  };
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;

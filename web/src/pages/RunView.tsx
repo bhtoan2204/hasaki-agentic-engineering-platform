@@ -44,6 +44,10 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status) };
   }, [run, stepKey]);
 
+  // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
+  useEffect(() => {
+    if (run && stepKey && stepKey !== "~changes" && !run.steps.some((s: any) => s.key === stepKey)) navigate(`/runs/${id}`);
+  }, [run, stepKey, id]);
   if (loading && !run) return <Loading />;
   if (error) return <div className="page"><ErrorBox error={error} onRetry={reload} /></div>;
 

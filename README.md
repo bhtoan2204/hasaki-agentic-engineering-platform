@@ -40,6 +40,24 @@ The previous vanilla UI is still served at `/classic`.
 
 Node ≥ 22.18 (runs `.ts` directly), `claude` logged in, SSH key that can push to Bitbucket.
 
+## Telegram notifications (optional)
+
+When a step starts waiting for you (WAITING_INPUT: questions, WAITING_APPROVAL: approval / report review / approval gate)
+the platform sends one Telegram message with the task, run, step and reason, plus a link that opens the run with that
+step selected (`#/runs/<id>/<step>`). One-way only: you answer/approve in the app.
+
+1. Send any message (e.g. `/start`) to your bot, then get your chat id:
+   `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":[-0-9]*'`
+2. `cp .env.example .env` and set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (`.env` is git-ignored;
+   `npm start`, `npm run dev` and `npm run serve` load it with `node --env-file-if-exists=.env`).
+   Exported shell variables work too.
+3. Restart. Without both variables nothing is sent. Links use `publicUrl`: an `https://` publicUrl becomes a
+   "Mở bước cần xử lý" button; a local URL (default `http://localhost:4545`) is sent as a text link.
+
+Sending is fire-and-forget with a 5 s timeout; failures are logged without the token and never affect the workflow or
+`NOTIFY_WEBHOOK`, which keeps its existing messages. Run-level "WAITING" goes to the webhook only, so Telegram gets one
+message per waiting step.
+
 ## Concepts
 
 | | |
