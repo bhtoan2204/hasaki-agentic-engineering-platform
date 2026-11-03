@@ -423,3 +423,74 @@ describe("Bash policy: heredoc data vs shell syntax", () => {
     assert.deepEqual(decideBash(`git commit -q -F - <<'EOF'\ndocs: explain why we never git push from agents\nEOF`, ctx, W), { allow: true });
   });
 });
+
+test("telegramUrl: localhost becomes 127.0.0.1 (clickable in Telegram); other hosts unchanged", async () => {
+  const { telegramUrl } = await import("../src/telegram.ts");
+  assert.equal(telegramUrl("http://localhost:4545/#/runs/6/analyze"), "http://127.0.0.1:4545/#/runs/6/analyze");
+  assert.equal(telegramUrl("http://LOCALHOST/#/x"), "http://127.0.0.1/#/x");
+  assert.equal(telegramUrl("https://platform.example.com/#/runs/1/a"), "https://platform.example.com/#/runs/1/a");
+  assert.equal(telegramUrl("http://localhost.example.com/x"), "http://localhost.example.com/x");
+});
+
+describe("Bash policy: loops in analysis steps", () => {
+  const A: PolicyContext = { mode: "analysis", workspaces: [], baseBranch: "release/prod" };
+  const reason = (c: string) => (decideBash(c, A) as any).reason as string | undefined;
+
+  test("read-only loops (rg, git, while read, nested, multi-line) are allowed", () => {
+    for (const c of [
+      `for f in app/repos/*_es_repo.go; do rg -n "Search\\(" "$f" | head -3; done`,
+      `for r in oms-api oms-background; do echo "== $r"; rg -l "ListShipment" "$r/app" | head; done`,
+      `for r in oms-api oms-background\ndo\n  git -C "$r" log --oneline -3\ndone`,
+      `rg -l "UseBalance" app | while read -r f; do wc -l "$f"; done`,
+      `for a in x y; do for b in 1 2; do echo "$a$b"; done; done`,
+      `for f in $(rg -l Outbox app); do rg -c "ShipmentWithRepo" "$f"; done 2>/dev/null | sort`,
+    ])
+      assert.deepEqual(decideBash(c, A), { allow: true }, c);
+  });
+
+  test("loops that write files are denied as non read-only", () => {
+    for (const c of [
+      `for f in *.go; do sed -i 's/a/b/' "$f"; done`,
+      `for f in a b; do touch "$f"; done`,
+      `for f in a b; do rg -l x "$f"; git add "$f"; done`,
+      `for f in $(touch x); do echo "$f"; done`,
+      `rg -l x | while read -r f; do rm "$f"; done`,
+    ]) {
+      const r = reason(c);
+      assert.ok(r, c);
+      assert.match(r!, /read-only/, c);
+    }
+  });
+
+  test("output redirection inside or after a loop is denied", () => {
+    for (const c of [
+      `for f in a b; do rg x "$f" > "$f.out"; done`,
+      `for f in a b; do rg x "$f" >> all.txt; done`,
+      `for f in a b; do rg x "$f"; done > out.txt`,
+      `for f in a b; do rg x "$f" | tee out.txt; done`,
+    ]) {
+      assert.equal(decideBash(c, A).allow, false, c);
+    }
+    assert.match(reason(`for f in a b; do rg x "$f"; done > out.txt`)!, /output redirection/);
+  });
+
+  test("loop syntax the policy cannot fully analyse is denied with a clear message", () => {
+    for (const c of [
+      `for ((i=0; i<3; i++)); do echo $i; done`,
+      `for f in a b; do echo "$f"`, // not closed
+      `for f in a b do echo "$f"; done`, // missing ;
+      `for f; do echo "$f"; done`, // no word list
+      `echo a; done`,
+      `do echo x`,
+      `for f in a b; rg x; do echo; done`,
+      `while true; do rg x; done`,
+      `until false; do rg x; done`,
+      `for f in a; do if rg -q x "$f"; then echo "$f"; fi; done`,
+    ]) {
+      const r = reason(c);
+      assert.ok(r, c);
+      assert.match(r!, /cú pháp vòng lặp chưa được hỗ trợ/, c);
+      assert.match(r!, /Tách vòng lặp thành các lệnh đơn rồi chạy lại/, c);
+    }
+  });
+});

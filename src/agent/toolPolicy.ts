@@ -245,6 +245,7 @@ function readOnlyViolation(command: string): string | null {
   if (p.error) return `cannot parse safely: ${p.error}`;
   const bad = p.redirects.find((r) => !harmlessRedirect(r.target));
   if (bad) return `output redirection writes files (> ${bad.target})`;
+  const commands: Array<{ seg: string; s: string }> = [];
   for (const seg of p.segments) {
     // $(...) substitutions run commands too: check each one, then treat it as an opaque word.
     let s = seg;
@@ -254,11 +255,64 @@ function readOnlyViolation(command: string): string | null {
       s = s.replace(m[0], "SUBST");
     }
     if (/`/.test(s.replace(/'[^']*'/g, ""))) return "backtick command substitution";
-    if (/^(done|fi|then|else|do|\{|\})$/.test(s) || /^for\s+\w+\s+in\b/.test(s) || /^while\s+(IFS=\S*\s+)?read\b/.test(s)) continue;
-    s = s.replace(/^(do|then|else)\s+/, "").replace(/^cd\s+\S+\s*$/, "pwd");
-    if (!READ_ONLY.some((re) => re.test(s))) return `"${seg.slice(0, 80)}" is not a read-only command`;
+    commands.push({ seg, s });
+  }
+  const loop = loopStructure(commands.map((c) => c.s));
+  if ("error" in loop) return loopUnsupported(loop.error);
+  for (const cmd of loop.commands) {
+    const s = cmd.replace(/^cd\s+\S+\s*$/, "pwd");
+    if (!READ_ONLY.some((re) => re.test(s))) return `"${cmd.slice(0, 80)}" is not a read-only command`;
   }
   return null;
+}
+
+export const loopUnsupported = (detail: string) =>
+  `cú pháp vòng lặp chưa được hỗ trợ (${detail}). Tách vòng lặp thành các lệnh đơn rồi chạy lại: mỗi lệnh một lần gọi Bash, ` +
+  `hoặc nối các lệnh chỉ đọc bằng && / ; (chỉ hỗ trợ "for NAME in WORDS; do CMD; done" và "... | while read VAR; do CMD; done")`;
+
+/**
+ * Validates loop structure over simple commands and returns the indexes of the commands that actually run (loop
+ * bodies, plain commands). Supported: `for NAME in WORDS; do ...; done` and `while [IFS=..] read [-r] VAR...; do ...;
+ * done`, nested when balanced. Anything else that looks like control flow is reported as unsupported, never guessed.
+ */
+function loopStructure(input: string[]): { commands: string[] } | { error: string } {
+  const commands: string[] = [];
+  // "do CMD" on one line is "do" followed by CMD (which may itself open a nested loop)
+  const segs = input.flatMap((s) => (/^do\s+\S/.test(s) ? ["do", s.slice(2).trim()] : [s]));
+  const stack: Array<{ kind: string; open: boolean }> = []; // open = `do` seen
+  for (const s of segs) {
+    const top = stack.at(-1);
+    if (/^for\b/.test(s)) {
+      const m = s.match(/^for\s+([A-Za-z_]\w*)\s+in(?:\s+(.*))?$/);
+      if (!m) return { error: `"${s.slice(0, 60)}" — chỉ hỗ trợ dạng "for NAME in WORDS"` };
+      if (/(^|\s)(do|done)(\s|$)/.test(m[2] ?? "")) return { error: `thiếu ";" trước do trong "${s.slice(0, 60)}"` };
+      if (top && !top.open) return { error: "vòng lặp lồng trước do" };
+      stack.push({ kind: "for", open: false });
+      // the word list may hold $(...) — already checked above; the `for` line itself runs nothing
+      continue;
+    }
+    if (/^while\b/.test(s)) {
+      if (!/^while\s+(IFS=\S*\s+)?read(\s+-r)?(\s+[A-Za-z_]\w*)+$/.test(s)) return { error: `"${s.slice(0, 60)}" — chỉ hỗ trợ "while read VAR"` };
+      if (top && !top.open) return { error: "vòng lặp lồng trước do" };
+      stack.push({ kind: "while", open: false });
+      continue;
+    }
+    if (/^do(\s|$)/.test(s)) {
+      if (!top || top.open) return { error: '"do" không thuộc vòng lặp nào' };
+      top.open = true;
+      continue;
+    }
+    if (/^done(\s+<\s*\S+)?$/.test(s)) {
+      if (!top || !top.open) return { error: '"done" không khớp với do' };
+      stack.pop();
+      continue;
+    }
+    if (/^(until|select|if|then|elif|else|fi|case|esac|function)\b|^[{}()]|^\(\(/.test(s)) return { error: `"${s.slice(0, 40)}" không được hỗ trợ` };
+    if (top && !top.open) return { error: `có lệnh giữa "${top.kind}" và "do"` };
+    commands.push(s);
+  }
+  if (stack.length) return { error: `vòng lặp "${stack.at(-1)!.kind}" chưa được đóng bằng done` };
+  return { commands };
 }
 
 const TEMP_ROOTS = () => [...new Set(["/tmp", tmpdir(), process.env.TMPDIR].filter(Boolean) as string[])].map((r) => resolve(r));

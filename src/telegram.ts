@@ -16,11 +16,16 @@ export interface StepWaiting {
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 export const stepLink = (runId: number, stepKey: string) => `${config.publicUrl.replace(/\/$/, "")}/#/runs/${runId}/${encodeURIComponent(stepKey)}`;
-/** Telegram only accepts public http(s) URLs in inline buttons; local links are sent as text. */
+/**
+ * Telegram drops links to `localhost` (neither auto-linked nor kept as <a href>), but links to 127.0.0.1 stay
+ * clickable (verified via the entities Telegram returns). Same machine, so the link still opens the local UI.
+ */
+export const telegramUrl = (url: string) => url.replace(/^(https?:\/\/)localhost(?=[:/?#]|$)/i, "$1127.0.0.1");
+/** Telegram only accepts public http(s) URLs in inline buttons; local links are sent as a text link. */
 export const isPublicHttps = (url: string) => /^https:\/\//i.test(url) && !/^https:\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(url);
 
 export function buildStepMessage(w: StepWaiting) {
-  const url = stepLink(w.runId, w.stepKey);
+  const url = telegramUrl(stepLink(w.runId, w.stepKey));
   const reason = w.status === "WAITING_INPUT" ? "❓ Cần bạn trả lời câu hỏi" : "✋ Cần bạn duyệt";
   const button = isPublicHttps(url);
   const text = [
@@ -29,7 +34,7 @@ export function buildStepMessage(w: StepWaiting) {
     `Run: #${w.runId}`,
     `Bước: ${esc(w.stepName)} (<code>${esc(w.stepKey)}</code>)`,
     `Lý do: ${esc(w.detail)}`,
-    ...(button ? [] : ["", `Mở bước cần xử lý: ${esc(url)}`]),
+    ...(button ? [] : ["", `Mở bước cần xử lý: <a href="${esc(url).replace(/"/g, "&quot;")}">${esc(url)}</a>`]),
   ].join("\n");
   return {
     text,

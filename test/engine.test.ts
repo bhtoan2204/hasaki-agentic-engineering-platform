@@ -987,6 +987,7 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
   const port = (srv.address() as any).port;
   const saved = { ...config.telegram, publicUrl: config.publicUrl };
   Object.assign(config.telegram, { botToken: "TEST:TOKEN", chatId: "42", apiBase: `http://127.0.0.1:${port}` });
+  config.publicUrl = "http://localhost:4545";
   try {
     const key = await customWorkflow([
       { key: "ask", type: "human_input", name: "Hỏi rule", config: { questions: [{ question: "COD?" }, { question: "Refund?" }] } },
@@ -1005,6 +1006,10 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     assert.match(msgs[0].text, /2 câu hỏi cần trả lời/);
     assert.equal(msgs[0].reply_markup, undefined, "local publicUrl → no URL button");
     assert.ok(msgs[0].text.includes(`/#/runs/${run.id}/ask`), "local link as text");
+    // Telegram drops localhost links; 127.0.0.1 stays clickable, as an <a href>
+    const local = `http://127.0.0.1:4545/#/runs/${run.id}/ask`;
+    assert.ok(msgs[0].text.includes(`<a href="${local}">${local}</a>`), msgs[0].text);
+    assert.ok(!msgs[0].text.includes("localhost"));
     // HTTPS publicUrl → inline URL button
     config.publicUrl = "https://platform.example.com";
     const qs = await q(pool, "SELECT id FROM workflow_questions WHERE run_id = $1", [run.id]);
