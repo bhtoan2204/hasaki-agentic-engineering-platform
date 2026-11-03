@@ -377,7 +377,9 @@ export const pullRequestExecutor: StepExecutor = {
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {
-        ({ commits } = await provider.push(w.path, w.branch));
+        const pushed = await provider.push(w.path, w.branch);
+        commits = pushed.commits;
+        if (pushed.note) await ctx.log("system", `${w.repo}: ${pushed.note}`);
       } catch (e) {
         const msg = (e as Error).message;
         if (/no commits ahead/.test(msg)) {

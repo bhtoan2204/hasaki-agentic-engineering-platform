@@ -8,12 +8,12 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "start": "npm run build && node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
-    "dev": "node --watch --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
+    "start": "npm run build && node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
+    "dev": "node --watch --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc -p . && tsc -p web",
     "build": "vite build --config web/vite.config.ts",
-    "serve": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
+    "serve": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "knowledge:import": "node --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts",
     "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts"

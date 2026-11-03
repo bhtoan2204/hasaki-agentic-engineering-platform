@@ -9,7 +9,7 @@ import { isAmbiguous, rankRepositories, type RepositoryRow } from "../src/repos/
 import { evaluateCondition } from "../src/workflow/executors/builtin.ts";
 import { classify, parseGoTest } from "../src/workflow/executors/baseline.ts";
 import { adfToText, normalizeJiraIssue } from "../src/integrations/jira.ts";
-import { buildSystemAppend, buildUserPrompt } from "../src/agent/stepPrompt.ts";
+import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "../src/agent/stepPrompt.ts";
 
 // ---------------------------------------------------------------- graph / spec
 const step = (key: string, depends_on: string[] = [], type = "agent") => ({ key, type, depends_on });
@@ -276,4 +276,16 @@ test("baseline classification: old failures are pre-existing, new tests/compile 
   assert.equal(reg.usecases.build_errors.length, 1, "the mock regression is still caught in a package with an old error");
   assert.match(reg.usecases.build_errors[0], /ResolveWardByPxCode/);
   assert.deepEqual(reg.utils.tests, ["TestZip", "TestZip/zip_plus_4"], "base passed: new test failures");
+});
+
+test("resume message after re-execute carries instructions, skills and worktree state", () => {
+  const input = { answers: [], pending: { feedback: "Use payload data", reexecute: { instructions: "Use payload data", skills: [{ key: "latency-service-boundaries", version: 1, title: "Latency & Service Boundaries" }] } } } as any;
+  const msg = buildResumeMessage(input, undefined, [{ title: "Current worktree state", body: "M order.go" }]);
+  assert.match(msg, /re-executed this step/);
+  assert.match(msg, /Use payload data/);
+  assert.match(msg, /latency-service-boundaries v1/);
+  assert.match(msg, /Current worktree state:\nM order.go/);
+  assert.doesNotMatch(msg, /Reviewer feedback/);
+  const plain = buildResumeMessage({ answers: [], pending: { feedback: "fix lint" } } as any, undefined);
+  assert.match(plain, /Reviewer feedback/);
 });

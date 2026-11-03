@@ -62,7 +62,10 @@ export async function sendTelegramStepWaiting(w: StepWaiting, dedupeKey: string)
     return { ok: true };
   } catch (e) {
     // never include the request URL (it contains the token)
-    console.error(`telegram sendMessage failed: ${(e as Error).name === "TimeoutError" ? "timeout" : (e as Error).message.replace(botToken, "***")}`);
+    const err = e as Error & { cause?: { code?: string; message?: string } };
+    const why = err.name === "TimeoutError" ? "timeout" : [err.message, err.cause?.code, err.cause?.message].filter(Boolean).join(" | ");
+    const hint = err.cause?.code === "SELF_SIGNED_CERT_IN_CHAIN" || err.cause?.code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" ? " (TLS-intercepting proxy? start node with --use-system-ca or set NODE_EXTRA_CA_CERTS)" : "";
+    console.error(`telegram sendMessage failed: ${why.split(botToken).join("***")}${hint}`);
     return { ok: false };
   }
 }

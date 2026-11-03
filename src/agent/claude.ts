@@ -423,7 +423,7 @@ export const claudeExecutor: StepExecutor = {
     if (resume && existsSync(cwd)) {
       await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
       try {
-        result = await run(buildResumeMessage(ctx.input, resume.fromAttempt), resume.sessionId);
+        result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras), resume.sessionId);
       } catch (e) {
         if (ctx.signal.aborted) throw e;
         result = { isError: true, text: (e as Error).message, assistantTurns: 0 };

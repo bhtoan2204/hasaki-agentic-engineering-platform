@@ -145,11 +145,17 @@ export function buildUserPrompt(
 }
 
 /** Message used when resuming the same Claude session after a pause. */
-export function buildResumeMessage(input: StepInput, newAnswerAttemptId: number | undefined): string {
+export function buildResumeMessage(input: StepInput, newAnswerAttemptId: number | undefined, extras: { title: string; body: string }[] = []): string {
   const fresh = input.answers.filter((a) => newAnswerAttemptId === undefined || a.attempt_id === newAnswerAttemptId);
   const lines: string[] = [];
   if (fresh.length) lines.push("Developer's answers:", "", fresh.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n"));
-  if (input.pending?.feedback) lines.push("", "Reviewer feedback:", untrusted("reviewer", String(input.pending.feedback)));
+  const rx = input.pending?.reexecute;
+  if (rx) {
+    lines.push("", "The developer re-executed this step. Revise your previous result (the conversation above) accordingly.");
+    if (rx.instructions) lines.push("", "Developer instructions for this re-execution (they take priority over your earlier conclusions):", String(rx.instructions));
+    if (rx.skills?.length) lines.push("", "Skills selected for this re-execution (full text in the system prompt — apply them):", rx.skills.map((s: any) => `- ${s.key} v${s.version}${s.title ? ` — ${s.title}` : ""}`).join("\n"));
+  } else if (input.pending?.feedback) lines.push("", "Reviewer feedback:", untrusted("reviewer", String(input.pending.feedback)));
+  for (const x of extras) lines.push("", `${x.title}:`, x.body);
   lines.push("", "Continue this step. Remember to call mcp__platform__submit_result when done.");
   return lines.join("\n");
 }

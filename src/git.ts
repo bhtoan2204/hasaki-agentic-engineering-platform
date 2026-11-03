@@ -84,6 +84,33 @@ export async function pushBranch(path: string, branch: string) {
   if (dirty) throw new Error(`uncommitted changes in ${path}, commit them first:\n${dirty}`);
   const ahead = await git(path, "rev-list", "--count", `origin/${config.baseBranch}..${branch}`);
   if (ahead === "0") throw new Error(`${branch} has no commits ahead of ${config.baseBranch}`);
-  await git(path, "push", "-u", "origin", branch);
-  return { commits: await git(path, "log", "--format=%h %s", `origin/${config.baseBranch}..${branch}`) };
+  let note: string | undefined;
+  try {
+    await git(path, "push", "-u", "origin", branch);
+  } catch (e) {
+    if (!/non-fast-forward|fetch first|\[rejected\]/.test((e as Error).message)) throw e;
+    note = await rewriteOwnBranch(path, branch, e as Error);
+  }
+  return { commits: await git(path, "log", "--format=%h %s", `origin/${config.baseBranch}..${branch}`), note };
+}
+
+/**
+ * The remote branch diverged from the local one. That is expected when an agent intentionally rewrote the run's own
+ * branch after an earlier push (e.g. a re-execution dropped a commit). Re-push only when the remote tip is a state this
+ * worktree's branch itself had (in its reflog): then nobody else added commits on top, and --force-with-lease pinned to
+ * that exact tip makes the overwrite atomic. Commits from anyone else always stop the push.
+ */
+async function rewriteOwnBranch(path: string, branch: string, original: Error) {
+  await git(path, "fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+  const remoteTip = await git(path, "rev-parse", `refs/remotes/origin/${branch}`);
+  const own = (await git(path, "reflog", "show", "--format=%H", `refs/heads/${branch}`)).split("\n").includes(remoteTip);
+  if (!own) {
+    const foreign = await git(path, "log", "--format=%h %an: %s", `${branch}..refs/remotes/origin/${branch}`);
+    throw new Error(
+      `remote ${branch} has commits this worktree never had, so it was not overwritten. Integrate or remove them manually:\n${foreign}\n\n${original.message}`,
+    );
+  }
+  const dropped = await git(path, "log", "--format=%h %s", `${branch}..${remoteTip}`);
+  await git(path, "push", "-u", `--force-with-lease=${branch}:${remoteTip}`, "origin", branch);
+  return `branch history was rewritten locally; replaced remote ${remoteTip.slice(0, 9)} (lease-protected). Commits removed from the remote branch:\n${dropped}`;
 }

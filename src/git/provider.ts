@@ -11,7 +11,7 @@ import { prepareBranch, pushBranch } from "../git.ts";
 export interface GitProvider {
   name: string;
   /** Push `branch` from a worktree; must refuse dirty trees / branches without commits. Returns the commit list. */
-  push(path: string, branch: string): Promise<{ commits: string }>;
+  push(path: string, branch: string): Promise<{ commits: string; note?: string }>;
   /** Idempotent: updates the open PR for source → target if there is one. */
   openOrUpdatePullRequest(pr: { repo: string; source: string; target: string; title: string; description: string; draft: boolean }): Promise<{
     url: string;
