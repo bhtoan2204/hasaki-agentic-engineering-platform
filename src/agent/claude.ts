@@ -1,5 +1,7 @@
 import { query, tool, createSdkMcpServer, type SDKUserMessage, type HookCallback, type CanUseTool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
@@ -74,6 +76,19 @@ const SUBAGENTS: Record<string, { description: string; prompt: string }> = {
 };
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
+const execP = promisify(execFile);
+
+/** Current state of each worktree (read-only git), so a re-executed coding step continues from it instead of redoing it. */
+async function worktreeState(workspaces: Array<{ repo: string; path: string }>): Promise<string> {
+  const out: string[] = [];
+  for (const w of workspaces) {
+    if (!existsSync(w.path)) continue;
+    const g = (...a: string[]) => execP("git", ["-C", w.path, ...a], { maxBuffer: 4 * 1024 * 1024 }).then((r) => r.stdout.trim()).catch((e) => `(git ${a[0]} failed: ${String(e.message).split("\n")[0]})`);
+    const [status, log, stat] = await Promise.all([g("status", "--porcelain"), g("log", "--oneline", "-n", "15", `origin/${config.baseBranch}..HEAD`), g("diff", "--stat", `origin/${config.baseBranch}...HEAD`)]);
+    out.push(`### ${w.repo} (${w.path})`, `commits ahead of ${config.baseBranch}:\n${log || "(none)"}`, `uncommitted:\n${status || "(clean)"}`, `diff stat vs ${config.baseBranch}:\n${stat.split("\n").slice(-25).join("\n") || "(none)"}`);
+  }
+  return out.join("\n");
+}
 
 function summarize(input: unknown) {
   const s = JSON.stringify(input);
@@ -323,7 +338,9 @@ export const claudeExecutor: StepExecutor = {
 
     const resume = await resumableSession(ctx, cwd);
     const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload) : [];
-    const freshPrompt = () => buildUserPrompt(ctx.input, files, [], ctx.context.upstream, ctx.context.fileRefs);
+    const reexec = ctx.input.pending?.reexecute || ctx.input.pending?.feedback;
+    const extras = mode === "coding" && reexec && ws.length ? [{ title: "Current worktree state (inspect it first; never reset or discard these changes)", body: await worktreeState(ws) }] : [];
+    const freshPrompt = () => buildUserPrompt(ctx.input, files, [], ctx.context.upstream, ctx.context.fileRefs, extras);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode);
 
     const preToolUse: HookCallback = async (input: any) => {
@@ -415,10 +432,10 @@ export const claudeExecutor: StepExecutor = {
         // Session missing or not resumable: rebuild from durable artifacts instead.
         await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
         await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
-        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs));
+        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
       }
     } else {
-      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs) : freshPrompt());
+      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras) : freshPrompt());
     }
     } finally {
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});

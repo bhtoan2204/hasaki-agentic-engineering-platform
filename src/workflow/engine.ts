@@ -435,12 +435,26 @@ async function reexecuteTx(c: Db, run: RunRow, stepKey: string, pending: Record<
   await advance(c, run.id, afterCommit);
 }
 
-export async function reexecuteStep(runId: number, stepKey: string, opts: { input?: Record<string, unknown>; feedback?: string } = {}) {
+/**
+ * Re-execute a step, optionally with developer instructions and extra skills for THIS re-execution only. Skills are
+ * pinned to their current version and stored with the instructions in the step's pending input before anything is
+ * enqueued, so a worker restart or a job retry uses exactly the same input. Templates and default prompts are untouched.
+ */
+export async function reexecuteStep(runId: number, stepKey: string, opts: { input?: Record<string, unknown>; feedback?: string; skills?: string[]; by?: string } = {}) {
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);
-    const pending = opts.feedback || opts.input ? { ...(opts.input ?? {}), ...(opts.feedback ? { feedback: opts.feedback } : {}) } : null;
-    await reexecuteTx(c, run, stepKey, pending, afterCommit, opts.feedback ? "re-executed with feedback" : "re-executed by user");
-    if (opts.feedback) await runEvents.add(c, runId, "user", opts.feedback);
+    const feedback = opts.feedback?.trim() || undefined;
+    const keys = [...new Set((opts.skills ?? []).map(String).filter(Boolean))];
+    const pinned = keys.length
+      ? await q<{ key: string; version: number; title: string }>(c, "SELECT key, current_version AS version, title FROM knowledge_items WHERE key = ANY($1) ORDER BY key", [keys])
+      : [];
+    const unknown = keys.filter((k) => !pinned.some((p) => p.key === k));
+    if (unknown.length) throw new EngineError(`unknown skill(s): ${unknown.join(", ")}`, 400);
+    const reexecute = feedback || pinned.length ? { instructions: feedback ?? null, skills: pinned, requested_by: opts.by ?? "", at: new Date().toISOString() } : null;
+    const pending = feedback || opts.input || reexecute ? { ...(opts.input ?? {}), ...(feedback ? { feedback } : {}), ...(reexecute ? { reexecute } : {}) } : null;
+    const why = reexecute ? `re-executed with ${[feedback && "instructions", pinned.length && `skills ${pinned.map((p) => `${p.key}@v${p.version}`).join(", ")}`].filter(Boolean).join(" + ")}` : "re-executed by user";
+    await reexecuteTx(c, run, stepKey, pending, afterCommit, why);
+    if (feedback) await runEvents.add(c, runId, "user", feedback);
     return getRun(runId, c);
   });
 }

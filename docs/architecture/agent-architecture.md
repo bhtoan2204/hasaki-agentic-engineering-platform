@@ -117,3 +117,19 @@ Driven by Hasaki Work `task_ai.ai_suggest`. Code: `src/report/` (parser, evidenc
 * **Lifecycle.** The run is not COMPLETED until the report is approved. Re-executing any upstream step invalidates the
   report (generation bump) and the next draft uses the latest evidence. Crash/restart: leases are reaped and the step
   retried; drafts and uploads live in PostgreSQL. Nothing is posted to Hasaki Work, no task is closed, nothing merged.
+
+## Re-execute with instructions
+
+`POST /api/runs/:id/steps/:key/reexecute` accepts `{ feedback?, skills?: [knowledge keys], by? }` (both optional — an
+empty body is the previous plain re-execute). Skills are pinned to their current version and, together with the
+instructions, stored in the step's `pending_input.reexecute` inside the same transaction that bumps the generation and
+invalidates dependants — before any job is enqueued — so a worker restart or a job retry uses the same input. The
+context resolver injects pinned skills at that exact version (inline, reason "selected for this re-execution") and
+records `prompt_plan.reexecute` in the immutable snapshot. The prompt of the new attempt contains the instructions, the
+selected skills and the previous attempt's output; a coding step also gets the current worktree state (status, commits,
+diff stat) and is told to continue from it — `git restore/stash/checkout --` are denied by the tool policy, so nothing is
+discarded automatically. Upstream results and old attempts are kept; dependants are invalidated by the existing
+mechanism and approval gates ask again for the new generation. Templates and default prompts are never modified.
+
+Skill **Latency & Service Boundaries** (`latency-service-boundaries`, seeded, opt-in) can be selected at re-execution
+or assigned to analysis/coding steps in the workflow editor.

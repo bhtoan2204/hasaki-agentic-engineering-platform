@@ -57,6 +57,8 @@ const ALWAYS_DENIED: Array<[RegExp, string]> = [
   [/\bgit\s+(-C\s+\S+\s+)?worktree\s+(remove|prune)\b/, "worktrees are managed by the platform"],
   [/\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/, "deleting branches is not allowed"],
   [/\bsudo\b/, "sudo is not allowed"],
+  [/\bgit\s+(-C\s+\S+\s+)?(restore|stash)\b/, "do not discard or stash existing changes; edit them deliberately"],
+  [/\bgit\s+(-C\s+\S+\s+)?checkout\s+(--\s|\.(\s|$))/, "do not discard existing changes with git checkout --"],
 ];
 
 // First word(s) of each pipeline segment allowed in analysis steps.

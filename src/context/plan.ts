@@ -62,7 +62,7 @@ export function planKnowledge(
   opts: { requestText: string; stepType: string; inlineTokens: number; indexSize: number },
 ): DisclosureEntry[] {
   const scored = items.map((k) => ({ k, ...scoreKnowledge(k, opts.requestText, opts.stepType), tokens: estimateTokens(k.content) }));
-  const mandatory = (x: (typeof scored)[number]) => x.k.reason === "assigned to step" || x.k.enforced === true;
+  const mandatory = (x: (typeof scored)[number]) => x.k.reason === "assigned to step" || x.k.reason.startsWith("selected for this re-execution") || x.k.enforced === true;
   const wantsInline = (x: (typeof scored)[number]) => mandatory(x) || x.k.metadata?.load !== "on_demand";
   const out: DisclosureEntry[] = [];
   let used = 0;

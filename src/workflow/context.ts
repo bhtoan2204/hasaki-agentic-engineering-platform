@@ -18,6 +18,8 @@ export interface StepInput {
   /** Answers/feedback/overrides queued for this attempt (resume info, reviewer feedback...). */
   pending: any;
   approval: any;
+  /** When re-executed with instructions: the latest earlier attempt of this step (what to revise). */
+  previous_attempt?: { number: number; generation: number; status: string; output: any; error: any } | null;
 }
 
 export interface ResolvedContext {
@@ -92,7 +94,17 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",
     [step.id],
   );
+  const reexec = step.pending_input?.reexecute || step.pending_input?.feedback;
+  const previous_attempt = reexec
+    ? ((await one(
+        c,
+        `SELECT number, generation, status, output, error FROM workflow_step_attempts
+          WHERE step_id = $1 AND generation < $2 AND (output IS NOT NULL OR error IS NOT NULL) ORDER BY number DESC LIMIT 1`,
+        [step.id, step.generation],
+      )) ?? null)
+    : null;
   return {
+    previous_attempt,
     run: {
       id: run.id,
       title: run.title,
@@ -134,6 +146,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     ...(run.graph.skills ?? []),
     ...(run.graph.knowledge ?? []),
   ];
+  const pinned: Array<{ key: string; version: number }> = input.pending?.reexecute?.skills ?? [];
   const res = resolveKnowledge(await knowledge.candidates(c), {
     organization: config.organization,
     project,
@@ -144,7 +157,18 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     text: requestText(input),
     explicit,
   });
-  const rankText = [requestText(input), step.name, String(cfg.instructions ?? "")].join("\n");
+  // Skills selected for this re-execution, at the exact version pinned when it was requested.
+  for (const p of pinned) {
+    const v = await one(
+      c,
+      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, v.version, v.content, v.applicability, v.metadata
+         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = $2 WHERE i.key = $1`,
+      [p.key, p.version],
+    );
+    res.applied = res.applied.filter((k) => k.key !== p.key);
+    if (v) res.applied.push({ ...v, reason: `selected for this re-execution (v${p.version})` });
+  }
+  const rankText = [requestText(input), step.name, String(cfg.instructions ?? ""), String(input.pending?.reexecute?.instructions ?? "")].join("\n");
   const disclosure = planKnowledge(res.applied, {
     requestText: rankText,
     stepType: step.type,
@@ -163,6 +187,9 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
       file_refs: fileRefs,
       budgets: { inline_knowledge_tokens: config.agent.inlineKnowledgeTokens, index_size: config.agent.knowledgeIndexSize, upstream_tokens: config.agent.upstreamTokens },
       setting_sources: config.agent.settingSources,
+      reexecute: input.pending?.reexecute
+        ? { instructions: input.pending.reexecute.instructions, skills: pinned.map((p) => `${p.key}@v${p.version}`), previous_attempt: input.previous_attempt?.number ?? null }
+        : null,
       delegation: cfg.delegation?.enabled === true,
     },
     project,

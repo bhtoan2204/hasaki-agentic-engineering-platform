@@ -169,7 +169,7 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/repositories$/, ({ p, body }) => selectRepositories(num(p[0]), body.repositories ?? [])],
   ["POST", /^\/api\/runs\/(\d+)\/feedback$/, ({ p, body }) => sendFeedback(num(p[0]), String(body.message ?? "").trim() || fail("empty message"))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/retry$/, ({ p, body }) => retryStep(num(p[0]), p[1], body.input)],
-  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/, ({ p, body }) => reexecuteStep(num(p[0]), p[1], { feedback: body.feedback, input: body.input })],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/, ({ p, body }) => reexecuteStep(num(p[0]), p[1], { feedback: body.feedback, input: body.input, skills: body.skills, by: body.by })],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/approve$/, ({ p, body }) => approveStep(num(p[0]), p[1], { comment: body.comment, by: body.by, repositories: body.repositories, data: body.data })],
   // Evidence for the Task Result Report: a file (base64) or a note, optionally tied to one requirement id (e.g. "S1.R2").
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/evidence$/, ({ p, body }) => addEvidence(num(p[0]), p[1], body)],

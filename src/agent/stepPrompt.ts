@@ -3,6 +3,7 @@ import { buildTaskPrompt } from "../prompt.ts";
 import type { ResolvedContext, StepInput } from "../workflow/context.ts";
 import type { RunRow, StepRow } from "../workflow/types.ts";
 import type { ToolMode } from "./toolPolicy.ts";
+import { summarizeValue } from "../context/plan.ts";
 
 /**
  * Prompt assembly with an explicit trust boundary:
@@ -33,6 +34,11 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
     `- Do NOT run git push. Pull requests are opened by a later workflow step.`,
     `- If business behaviour is genuinely ambiguous and cannot be settled by reading code, call mcp__platform__ask_user with ALL open questions at once (each with the context you found and your recommended option first), then END YOUR TURN. Answers arrive as the next message.`,
     `- Use mcp__platform__post_update for short progress notes at milestones.`,
+    ...(mode === "coding" && (step.pending_input?.reexecute || step.pending_input?.feedback)
+      ? [
+          `- This is a RE-EXECUTION: the worktree already contains work from earlier attempts. Before editing, inspect it (git status, git diff, git log origin/${config.baseBranch}..HEAD in each worktree) and continue from that state. Never reset, stash, restore or delete existing changes; change them deliberately with edits and new commits.`,
+        ]
+      : []),
     `- Be economical with tools: start from the code locations listed in the prompt, use Grep with a path/glob and Read with offset/limit instead of scanning whole repositories, run independent reads in parallel, and do not re-read files whose content you already have.`,
     `- When done, call mcp__platform__submit_result exactly once with the step output object, then end your turn.`,
     "",
@@ -100,6 +106,7 @@ export function buildUserPrompt(
   notes: string[] = [],
   upstream?: { plan: Record<string, { mode: string; full_tokens: number }>; text: Record<string, string> },
   fileRefs: Array<{ path: string; refs: number; from: string[] }> = [],
+  extras: Array<{ title: string; body: string }> = [],
 ): string {
   const parts = [`Execute this workflow step now. Run inputs: ${JSON.stringify(input.run.inputs ?? {})}`];
   parts.push("## Engineering request", untrusted("work_item", renderWorkItem(input, files)));
@@ -120,7 +127,19 @@ export function buildUserPrompt(
     );
   if (input.answers.length)
     parts.push("## Developer answers to earlier questions in this step", input.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n"));
-  if (input.pending?.feedback) parts.push("## Reviewer feedback to address", untrusted("reviewer", String(input.pending.feedback)));
+  const rx = input.pending?.reexecute;
+  if (rx || input.pending?.feedback) {
+    const instr = rx?.instructions ?? input.pending?.feedback;
+    if (instr) parts.push("## Developer instructions for this re-execution (they take priority over conclusions of the previous attempt)", String(instr));
+    if (rx?.skills?.length) parts.push("## Skills selected for this re-execution (full text in the system prompt — apply them)", rx.skills.map((s: any) => `- ${s.key} v${s.version}${s.title ? ` — ${s.title}` : ""}`).join("\n"));
+    const prev = input.previous_attempt;
+    if (prev)
+      parts.push(
+        `## Your previous attempt of this step (#${prev.number}, ${prev.status}) — revise it according to the instructions`,
+        untrusted(`step:previous_attempt#${prev.number}`, summarizeValue(prev.output ?? prev.error, 6000)),
+      );
+  }
+  for (const x of extras) parts.push(`## ${x.title}`, x.body);
   if (notes.length) parts.push("## Your progress notes from the previous attempt of this step", notes.map((n) => `- ${n}`).join("\n"));
   return parts.join("\n\n");
 }

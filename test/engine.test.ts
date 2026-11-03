@@ -1194,3 +1194,89 @@ test("test failure 4/4: waiting state survives a restart (all in PostgreSQL); du
   assert.equal(await liveJobs(run.id), 0);
   await cancelRun(run.id);
 });
+
+// ---------------------------------------------------------------- re-execute with instructions + skills
+test("re-execute with instructions + skill: stored before enqueue, pinned version, in snapshot and real prompts; downstream reruns", async () => {
+  const { buildSystemAppend, buildUserPrompt } = await import("../src/agent/stepPrompt.ts");
+  const { seedKnowledge } = await import("../src/knowledge/service.ts");
+  await seedKnowledge();
+  const skill = (await knowledge.get("latency-service-boundaries"))!;
+  assert.equal(skill.category, "agent_skill");
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent", max_attempts: 2, retry_backoff_seconds: 0 },
+    { key: "test", type: "agent", depends_on: ["implement"] },
+    { key: "review", type: "agent", depends_on: ["test"], requires_approval: true },
+  ]);
+  let version = "v1";
+  scripts.implement = async (ctx, n) => {
+    if (ctx.input.pending?.reexecute && n === 2) return { kind: "failed", error: "transient", retryable: true }; // first re-exec attempt fails → retry
+    return { kind: "completed", output: { summary: `implementation ${version}: calls service B` } };
+  };
+  scripts.test = (ctx) => ({ kind: "completed", output: { tested: ctx.input.upstream.implement.output.summary } });
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  await approveStep(run.id, "review");
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  const firstImpl = (await attemptsOf(run.id, "implement"))[0];
+
+  version = "v2";
+  await reexecuteStep(run.id, "implement", { feedback: "Xem lại call sang service B. Dữ liệu đã có trong payload", skills: ["latency-service-boundaries"], by: "toan" });
+  // stored on the step before any worker runs; review must be approved again for the new generation
+  const pendingNow = (await stepOf(run.id, "implement")).pending_input;
+  assert.equal(pendingNow.reexecute.instructions, "Xem lại call sang service B. Dữ liệu đã có trong payload");
+  assert.deepEqual(pendingNow.reexecute.skills.map((x: any) => `${x.key}@${x.version}`), [`latency-service-boundaries@${skill.current_version}`]);
+  // the skill changes before the job runs (e.g. worker restarted) → the pinned version is still used
+  await knowledge.update("latency-service-boundaries", { content: skill.versions[0].content + "\nEDITED LATER", change_note: "edit" });
+  await drain();
+  const impl = await stepOf(run.id, "implement");
+  assert.equal(impl.status, "COMPLETED");
+  const reCtxs = seen.implement.filter((c) => c.run.id === run.id && c.input.pending?.reexecute);
+  assert.equal(reCtxs.length, 2, "the retry after a transient failure used the same stored input");
+  for (const c of reCtxs) assert.equal(c.input.pending.reexecute.instructions, pendingNow.reexecute.instructions);
+  const ctx = reCtxs[1];
+  const pinned = ctx.context.knowledge.find((k) => k.key === "latency-service-boundaries")!;
+  assert.equal(pinned.version, skill.current_version);
+  assert.ok(!pinned.content.includes("EDITED LATER"));
+  assert.match(pinned.reason, /selected for this re-execution/);
+  assert.equal(ctx.context.disclosure.find((d) => d.key === "latency-service-boundaries")!.disclosure, "inline");
+  // actual prompts of the new attempt
+  const sys = buildSystemAppend(ctx.run, ctx.step, ctx.context, "coding");
+  const user = buildUserPrompt(ctx.input, [], [], ctx.context.upstream, ctx.context.fileRefs, [{ title: "Current worktree state", body: "(state)" }]);
+  assert.match(sys, /Latency & Service Boundaries/);
+  assert.match(sys, /trace the request path/i);
+  assert.match(sys, /RE-EXECUTION: the worktree already contains work/);
+  assert.match(user, /Developer instructions for this re-execution[\s\S]*Dữ liệu đã có trong payload/);
+  assert.match(user, /Skills selected for this re-execution[\s\S]*latency-service-boundaries v/);
+  assert.match(user, new RegExp(`previous attempt of this step \\(#${firstImpl.number}`));
+  assert.match(user, /implementation v1: calls service B/, "the previous attempt's output is referenced");
+  const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [ctx.context.snapshot_id]);
+  assert.equal(snap.content.prompt_plan.reexecute.instructions, pendingNow.reexecute.instructions);
+  assert.deepEqual(snap.content.prompt_plan.reexecute.skills, [`latency-service-boundaries@v${skill.current_version}`]);
+  // old attempt still viewable; downstream reran with the new output; approval asked again
+  const hist = await attemptsOf(run.id, "implement");
+  assert.equal(hist[0].output.summary, "implementation v1: calls service B");
+  assert.ok(hist[0].invalidated_at);
+  assert.equal((await stepOf(run.id, "test")).output.tested, "implementation v2: calls service B");
+  assert.equal((await stepOf(run.id, "review")).status, "WAITING_APPROVAL", "approval re-requested for the new generation");
+  assert.equal(impl.pending_input, null, "pending cleared once the step completed");
+});
+
+test("re-execute without instructions behaves as before; unknown skills are rejected; worktree changes cannot be discarded", async () => {
+  const { buildUserPrompt } = await import("../src/agent/stepPrompt.ts");
+  const { decideBash } = await import("../src/agent/toolPolicy.ts");
+  const key = await customWorkflow([{ key: "a", type: "agent" }, { key: "b", type: "agent", depends_on: ["a"] }]);
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  await reexecuteStep(run.id, "a");
+  assert.equal((await stepOf(run.id, "a")).pending_input, null);
+  await drain();
+  const ctx = seen.a.filter((c) => c.run.id === run.id).at(-1)!;
+  assert.equal(ctx.input.previous_attempt, null);
+  assert.doesNotMatch(buildUserPrompt(ctx.input, []), /re-execution|previous attempt/i);
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  await assert.rejects(reexecuteStep(run.id, "a", { skills: ["does-not-exist"] }), /unknown skill/);
+  const coding = { mode: "coding" as const, workspaces: ["/w"], baseBranch: "release/prod" };
+  for (const cmd of ["git restore pkg/x.go", "git stash", "git -C /w stash push", "git checkout -- .", "git checkout ."]) assert.ok(!decideBash(cmd, coding, "/w").allow, cmd);
+  assert.ok(decideBash("git status && git diff", coding, "/w").allow);
+});

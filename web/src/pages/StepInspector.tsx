@@ -146,7 +146,9 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
     onChanged();
   };
   const action = async (path: string, body: any = {}, ok?: string) => {
-    if (await act(() => api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body), ok)) refresh();
+    const r = await act(() => api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body), ok);
+    if (r) refresh();
+    return r;
   };
   const canRun = run.status === "PAUSED" && ["READY", "RETRYING"].includes(step.status);
   const canRetry = runActive && ["FAILED", "CANCELED"].includes(step.status);
@@ -230,14 +232,8 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
             </div>
           )}
           <JsonBlock value={step.config} title="Configuration" />
-          {canReexec && (
-            <div className="card" style={{ padding: 10 }}>
-              <b className="small">Re-execute from this step</b>
-              <div className="muted small">Các bước phía sau sẽ bị invalidate và chạy lại; các bước phía trước được giữ nguyên.</div>
-              <textarea rows={2} placeholder="Feedback cho bước (tuỳ chọn)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
-              <div className="row"><button className="sm" onClick={() => action("reexecute", feedback ? { feedback } : {}, "Re-executing").then(() => setFeedback(""))}>↻ Re-execute</button></div>
-            </div>
-          )}
+          {attempt?.input?.pending?.reexecute && <ReexecuteInfo rx={attempt.input.pending.reexecute} prev={attempt.input.previous_attempt?.number} />}
+          {canReexec && <ReexecuteDialog run={run} step={step} onSubmit={(body) => action("reexecute", body, "Đã mở attempt mới")} />}
           {checkpoints.length > 0 && (
             <details>
               <summary>Checkpoints ({checkpoints.length})</summary>
@@ -278,7 +274,14 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
             <tbody>
               {attempts.map((a: any) => (
                 <tr key={a.id} className="click" style={{ opacity: a.invalidated_at ? 0.6 : 1 }} onClick={() => (setAttemptId(a.id), setTab(isAgent ? "execution" : "output"))}>
-                  <td>{a.number}</td><td>{a.generation}</td><td><Badge s={a.status} />{a.invalidated_at && <div className="muted small">invalidated</div>}</td>
+                  <td>{a.number}</td><td>{a.generation}</td><td><Badge s={a.status} />{a.invalidated_at && <div className="muted small">invalidated</div>}
+                    {a.input?.pending?.reexecute && (
+                      <div className="small" style={{ marginTop: 2 }}>
+                        ↻ {a.input.pending.reexecute.instructions ? `“${String(a.input.pending.reexecute.instructions).slice(0, 80)}”` : "re-execute"}
+                        {a.input.pending.reexecute.skills?.length > 0 && <span className="muted"> · {a.input.pending.reexecute.skills.map((s: any) => `${s.key}@v${s.version}`).join(", ")}</span>}
+                      </div>
+                    )}
+                  </td>
                   <td>{time(a.started_at)}</td><td>{time(a.finished_at)}</td><td className="mono small">{(a.worker ?? "").split(":").slice(-1)[0]}</td>
                   <td className="err small">{a.error?.message}</td>
                 </tr>
@@ -458,6 +461,73 @@ function AttemptMetrics({ m }: { m: any }) {
         <span>Integration</span><span className="small">{(m.integration_calls ?? []).map((c: any) => `${c.name} ${c.ok ? "✓" : "✗"} ${c.ms}ms`).join(", ") || "—"}</span>
         <span>Subagents</span><span className="small">{(m.subagents ?? []).map((s: any) => s.type).join(", ") || "—"}</span>
         {m.denied?.length > 0 && <><span>Bị chặn</span><span className="small err">{m.denied.map((d: any) => `${d.tool}${d.subagent ? ` (${d.subagent})` : ""}: ${d.reason}`).join(" · ")}</span></>}
+      </div>
+    </div>
+  );
+}
+
+/** Instructions and skills this attempt was re-executed with (stored with the attempt's input). */
+function ReexecuteInfo({ rx, prev }: { rx: any; prev?: number }) {
+  return (
+    <div className="card" style={{ padding: 10, borderColor: "var(--accent)" }}>
+      <b className="small">↻ Lần chạy lại này</b> <span className="muted small">{rx.requested_by ? `bởi ${rx.requested_by} · ` : ""}{time(rx.at)}{prev ? ` · sửa từ attempt #${prev}` : ""}</span>
+      {rx.instructions ? <div style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>{rx.instructions}</div> : <div className="muted small">(không có chỉ dẫn)</div>}
+      {rx.skills?.length > 0 && <div className="small" style={{ marginTop: 4 }}>Skills: {rx.skills.map((s: any) => <span key={s.key} className="pill">{s.title ?? s.key} <span className="muted mono">v{s.version}</span></span>)}</div>}
+    </div>
+  );
+}
+
+/** Re-execute this step with optional instructions + skills; shows which dependants will rerun / re-ask approval. */
+function ReexecuteDialog({ run, step, onSubmit }: { run: any; step: any; onSubmit: (body: any) => Promise<unknown> }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [skills, setSkills] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const { data: catalog } = useApi<any[]>(open ? "/api/knowledge?category=agent_skill" : null, [open]);
+  const graph: any[] = run.graph?.steps ?? [];
+  const affected: string[] = [];
+  const stack = [step.key];
+  while (stack.length) {
+    const k = stack.pop()!;
+    for (const s of graph) if ((s.depends_on ?? []).includes(k) && !affected.includes(s.key)) (affected.push(s.key), stack.push(s.key));
+  }
+  const byKey = new Map(run.steps.map((s: any) => [s.key, s]));
+  if (!open) return <div className="row"><button className="sm" onClick={() => setOpen(true)}>↻ Re-execute…</button><span className="muted small">chạy lại bước này (có thể kèm chỉ dẫn / skill)</span></div>;
+  return (
+    <div className="card" style={{ padding: 10, borderColor: "var(--accent)" }}>
+      <div className="row tight"><b className="grow">↻ Chạy lại “{step.name}” với chỉ dẫn</b><button className="xs ghost" onClick={() => setOpen(false)}>✕</button></div>
+      <textarea rows={4} autoFocus placeholder="Chỉ dẫn cho lần chạy lại (tuỳ chọn), vd: Xem lại call sang service B. Dữ liệu đã có trong payload" value={text} onChange={(e) => setText(e.target.value)} style={{ marginTop: 6 }} />
+      <div className="small" style={{ marginTop: 6 }}>
+        <b>Skills cho lần này</b> <span className="muted">(tuỳ chọn; ghim theo version hiện tại)</span>
+        <div>
+          {skills.map((k) => (
+            <span key={k} className="pill">{catalog?.find((c) => c.key === k)?.title ?? k}<button onClick={() => setSkills(skills.filter((x) => x !== k))}>✕</button></span>
+          ))}
+        </div>
+        <select value="" onChange={(e) => e.target.value && setSkills([...skills, e.target.value])}>
+          <option value="">+ thêm skill…</option>
+          {(catalog ?? []).filter((c) => !skills.includes(c.key)).map((c) => <option key={c.key} value={c.key}>{c.title} ({c.key} v{c.current_version}){c.enabled ? "" : " [off]"}</option>)}
+        </select>
+      </div>
+      <div className="small" style={{ marginTop: 6 }}>
+        <b>Sẽ chạy lại:</b> <span className="mono">{step.key}</span>
+        {affected.length ? (
+          <> → {affected.map((k) => {
+            const s: any = byKey.get(k);
+            const gate = s?.requires_approval || s?.type === "human_approval" || s?.type === "task_result_report" || (s?.type === "git_pull_request" && s?.config?.mode === "approval");
+            return <span key={k} className="pill">{s?.name ?? k}{gate ? " ✋ duyệt lại" : ""}</span>;
+          })}</>
+        ) : <span className="muted"> (không có bước phụ thuộc)</span>}
+        <div className="muted">Các bước phía trước giữ nguyên kết quả; attempt cũ vẫn xem được trong History.</div>
+      </div>
+      <div className="row">
+        <button disabled={busy} onClick={async () => {
+          setBusy(true);
+          const r = await onSubmit({ ...(text.trim() ? { feedback: text.trim() } : {}), ...(skills.length ? { skills } : {}) });
+          setBusy(false);
+          if (r !== undefined) (setOpen(false), setText(""), setSkills([]));
+        }}>{busy ? "Đang tạo…" : "Xác nhận chạy lại"}</button>
+        <button className="ghost" onClick={() => setOpen(false)}>Huỷ</button>
       </div>
     </div>
   );
