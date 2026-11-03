@@ -3,6 +3,7 @@ import { q, one, json, type Db } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
 import { planKnowledge, planUpstream, type DisclosureEntry, type UpstreamPlanEntry } from "../context/plan.ts";
+import { repoPath } from "../repos/service.ts";
 import { hashOf } from "./definitions.ts";
 import { ancestors } from "./graph.ts";
 import type { RunRow, StepRow } from "./types.ts";
@@ -37,6 +38,8 @@ export interface ResolvedContext {
   requestText: string;
   /** Code locations already identified by upstream steps (current attempts only), most referenced first. */
   fileRefs: Array<{ path: string; refs: number; from: string[] }>;
+  /** Primary checkout path of each repository the run may use (selected, else allowed). */
+  repoPaths?: Array<{ name: string; path: string }>;
 }
 
 const CODE_REF = /(?:^|[\s`'"(\[])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
@@ -218,5 +221,9 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     hash,
     json(content),
   ]);
-  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs };
+  const names = repositories.length ? repositories : run.allowed_repositories;
+  const repoPaths = names.length
+    ? (await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
+    : [];
+  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs, repoPaths };
 }
