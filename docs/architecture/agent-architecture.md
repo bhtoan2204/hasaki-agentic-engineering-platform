@@ -202,14 +202,24 @@ output contract) are affected — other downstream agents still read the author'
   only their platform `verification` record and other post-coding agents are dropped. The verifier gets the request,
   pre-implementation analysis, applicable knowledge, a platform-collected `git diff` (+ HEAD per repo, untrusted) and
   real test outputs.
-- **Verdict**: `{ verdict: PASS | FAIL | BLOCKED, findings[{severity, file, line, explanation, evidence}], summary }`.
-  Malformed output → BLOCKED; FAIL without a high/medium finding is not actionable (→ PASS if only style nits,
-  BLOCKED if empty). Legacy `{ approved }` maps to PASS/FAIL.
-- **Enforcement**: PASS completes (records `verified_heads`). FAIL → `reexecute` of the workflow's feedback step (or the
-  nearest coding step) with the findings, which re-runs tests and a fresh verification; at most `max_repairs` (default
-  2) FAIL rounds per step per run, then the step fails and the PR never runs. BLOCKED → a question to the developer.
-- **Stale results**: the PR step compares each worktree's HEAD with the last PASS's `verified_heads` and refuses to
-  publish code that changed after verification.
+- **Verdict** (`normalizeVerdict`, fail-closed — the platform never upgrades a verdict):
+  `{ verdict: PASS | FAIL | BLOCKED, findings[{severity, file, line, explanation, evidence}], summary }`.
+  PASS needs no high/medium finding (low findings stay as advisory notes). FAIL is kept whenever it has findings —
+  also low-only findings, which then appear in the repair feedback. FAIL with no finding, a missing/unknown verdict,
+  non-list findings, PASS with high/medium findings, or a verdict contradicting `approved` → BLOCKED. Unknown severity
+  counts as medium. Legacy `{ approved }` alone maps to PASS/FAIL.
+- **Commit binding**: evidence is collected per worktree; an unreadable HEAD or uncommitted changes → BLOCKED before the
+  verifier runs. After the run the HEADs are re-read: a PASS whose code moved meanwhile becomes BLOCKED. PASS records
+  `verified_heads` (repo → commit).
+- **Enforcement**: PASS completes. FAIL → `reexecute` of the workflow's feedback step (or the nearest coding step) with
+  the findings, which re-runs tests and a fresh verification; at most `max_repairs` (default 2) FAIL rounds per step
+  per run, then the step fails and the PR never runs. BLOCKED → a question (the PR still needs a PASS afterwards).
+- **PR gate** (`verificationGate`, `git_pull_request`): when the run has any `independent: true` step, verification is
+  REQUIRED — every such step must be COMPLETED with a valid PASS, and its `verified_heads` must cover every published
+  repository at exactly the branch tip that would be pushed (HEAD = branch tip, clean worktree). Skipped / failed /
+  blocked verifiers, missing or partial `verified_heads`, a commit after the PASS or a dirty worktree refuse the PR
+  (dirty → workspace class, asks a human; stale → fails; re-execute the verification step to judge the new commit).
+  Workflows without an independent step (opted out with `independent: false`, FAST) keep verification optional.
 
 ## Failure recovery
 
@@ -233,8 +243,12 @@ for "stop").
 top-N by relevance — no history dump). On run COMPLETED: `memory.run-<id>.<repo>.facts` (trust `verified`, enabled:
 changed files, commit, verification/test outcomes) and `…conclusions` (trust `unverified`, disabled: quoted agent
 summaries/decisions). `POST /api/knowledge/:key/approve|reject {by}` is the only promotion path. Context resolution
-loads only `verified`/`approved` memory and drops items whose files changed on the base branch since their commit
-(`prompt_plan.memory_excluded`). No vector database.
+loads only `verified`/`approved` memory that is provably **FRESH** (`memoryFreshness`):
+FRESH = commit present in the clone, `origin/<base>` fetched within 24 h, none of the item's files changed on the base
+since the task; STALE = such a file changed later; UNKNOWN = anything that prevents proof (no commit / file list,
+repository not registered or not cloned, commit missing from the clone, missing or old remote-tracking ref, git error).
+Only FRESH loads — missing provenance is never assumed fresh. `prompt_plan.memory_excluded` lists dropped keys and
+`prompt_plan.memory_freshness` records state + reason per item. Human approval rules are unchanged. No vector database.
 
 ## Evaluation
 

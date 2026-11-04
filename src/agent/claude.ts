@@ -18,7 +18,7 @@ import { callTool, capResult, describeTool, integrationTools, listTools } from "
 import { runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
-import { collectEvidence, enforceVerdict, hasTestEvidence, isIndependent, normalizeVerdict, repairTargetFor } from "./independentReview.ts";
+import { collectEvidence, enforceVerdict, evidenceDrift, hasTestEvidence, isIndependent, normalizeVerdict, repairTargetFor } from "./independentReview.ts";
 import { diffTestsAgainstBase, repairPrompt, verificationLoop, verificationSummary, verifyConfig, verifyWorkspaces, type VerificationRound, type VerifyDeps } from "./verify.ts";
 
 /** Per-attempt observability, accumulated across the SDK message stream (and across a resume fallback). */
@@ -352,11 +352,14 @@ export const claudeExecutor: StepExecutor = {
     const independent = isIndependent(ctx.step.config);
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
     const resume = independent ? null : await resumableSession(ctx, cwd);
-    let evidence: { heads: Record<string, string>; text: string } | null = null;
+    let evidence: { heads: Record<string, string>; problems: string[]; text: string } | null = null;
     if (independent) {
       if (ctx.step.config.strict === true && !hasTestEvidence(ctx.input.upstream))
         return enforceVerdict({ verdict: "BLOCKED", findings: [], summary: "", blocked_reason: "strict verification requires real test evidence from an upstream test step, and none ran" }, { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} });
       evidence = await collectEvidence(ws.map((w) => ({ repo: w.repo, path: w.path })), config.baseBranch);
+      // A verdict must bind to exact commits: never verify uncommitted or unreadable state (the PR could not match it).
+      if (evidence.problems.length)
+        return enforceVerdict({ verdict: "BLOCKED", findings: [], summary: "", blocked_reason: `the code under review is not bound to a commit: ${evidence.problems.join("; ")}` }, { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} });
       if (!ws.length) evidence.text = "(no worktree: the coding step changed no code)";
     }
     const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload) : [];
@@ -490,7 +493,9 @@ export const claudeExecutor: StepExecutor = {
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
 
     if (independent) {
-      const v = normalizeVerdict(submitted ?? {});
+      let v = normalizeVerdict(submitted ?? {});
+      const drift = await evidenceDrift(ws.map((w) => ({ repo: w.repo, path: w.path })), evidence?.heads ?? {});
+      if (drift.length && v.verdict === "PASS") v = { ...v, verdict: "BLOCKED", blocked_reason: `the verdict no longer matches the code: ${drift.join("; ")}` };
       const repairsUsed = (await one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE step_id = $1 AND output->>'verdict' = 'FAIL'", [ctx.step.id]))!.n;
       const maxRepairs = Math.max(0, Math.min(5, Number(ctx.step.config.max_repairs ?? 2)));
       metrics.independent_verification = { verdict: v.verdict, findings: v.findings.length, high: v.findings.filter((f) => f.severity === "high").length, repairs_used: repairsUsed, max_repairs: maxRepairs };

@@ -60,27 +60,46 @@ export function independentUpstream<T extends { output: any }>(graph: Array<Pick
 
 const SEVERITIES = new Set(["high", "medium", "low"]);
 
-/** Parse the verifier's submit_result; legacy `{ approved }` contracts map to PASS/FAIL. Malformed → BLOCKED. */
+/**
+ * Parse the verifier's submit_result. Fail-closed: the platform never upgrades a verdict.
+ *  - PASS needs an explicit PASS (or legacy `approved: true`) with no high/medium findings; low findings stay attached
+ *    as advisory notes.
+ *  - FAIL is always kept as FAIL when it has findings — including low-only findings (the verifier's call; the repair
+ *    feedback then lists them). FAIL without any finding cannot drive a repair → BLOCKED.
+ *  - Missing, unknown or contradictory output (PASS + high/medium findings, verdict vs `approved` disagreeing, malformed
+ *    findings) → BLOCKED: a human decides, it is never treated as success.
+ */
 export function normalizeVerdict(raw: any): VerdictOutput {
-  const o = raw && typeof raw === "object" ? raw : {};
-  let verdict: Verdict | null = typeof o.verdict === "string" && ["PASS", "FAIL", "BLOCKED"].includes(o.verdict.toUpperCase()) ? (o.verdict.toUpperCase() as Verdict) : null;
-  if (!verdict && typeof o.approved === "boolean") verdict = o.approved ? "PASS" : "FAIL";
-  const findings: Finding[] = (Array.isArray(o.findings) ? o.findings : []).map((f: any) => ({
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const summary = typeof o.summary === "string" ? o.summary : "";
+  const blocked = (reason: string, findings: Finding[] = []): VerdictOutput => ({ verdict: "BLOCKED", findings, summary, blocked_reason: reason });
+  const hasVerdict = o.verdict !== undefined && o.verdict !== null;
+  const named = typeof o.verdict === "string" ? o.verdict.trim().toUpperCase() : "";
+  if (hasVerdict && !["PASS", "FAIL", "BLOCKED"].includes(named)) return blocked(`the verifier returned an unknown verdict ${JSON.stringify(o.verdict).slice(0, 60)}`);
+  if (o.findings !== undefined && o.findings !== null && !Array.isArray(o.findings)) return blocked("the verifier returned malformed findings (not a list)");
+  const findings: Finding[] = (o.findings ?? []).map((f: any) => ({
     severity: SEVERITIES.has(String(f?.severity).toLowerCase()) ? (String(f.severity).toLowerCase() as Finding["severity"]) : "medium",
     file: String(f?.file ?? ""),
     line: Number.isFinite(Number(f?.line)) && f?.line !== null && f?.line !== "" ? Number(f.line) : null,
     explanation: String(f?.explanation ?? f?.issue ?? ""),
     evidence: String(f?.evidence ?? f?.suggestion ?? ""),
   }));
-  if (!verdict) return { verdict: "BLOCKED", findings, summary: String(o.summary ?? ""), blocked_reason: "the verifier returned no PASS/FAIL/BLOCKED verdict" };
-  // A FAIL must be actionable: at least one high/medium finding with a location.
-  if (verdict === "FAIL" && !findings.some((f) => f.severity !== "low")) verdict = findings.length ? "PASS" : "BLOCKED";
-  return { verdict, findings, summary: String(o.summary ?? ""), ...(verdict === "BLOCKED" ? { blocked_reason: String(o.blocked_reason ?? (o.verdict ? "" : "FAIL without actionable findings")) || "verifier could not decide" } : {}) };
+  let verdict: Verdict | null = hasVerdict ? (named as Verdict) : null;
+  if (verdict && typeof o.approved === "boolean" && verdict !== "BLOCKED" && o.approved !== (verdict === "PASS"))
+    return blocked(`contradictory verifier output: verdict ${verdict} but approved=${o.approved}`, findings);
+  if (!verdict && typeof o.approved === "boolean") verdict = o.approved ? "PASS" : "FAIL";
+  if (!verdict) return blocked("the verifier returned no PASS/FAIL/BLOCKED verdict", findings);
+  const serious = findings.filter((f) => f.severity !== "low");
+  if (verdict === "PASS" && serious.length) return blocked(`contradictory verifier output: PASS with ${serious.length} high/medium finding(s)`, findings);
+  if (verdict === "FAIL" && !findings.length) return blocked("FAIL without any finding — nothing to repair", findings);
+  if (verdict === "BLOCKED") return blocked(String(o.blocked_reason ?? "").trim() || "verifier could not decide", findings);
+  return { verdict, findings, summary };
 }
 
 export function findingsFeedback(v: VerdictOutput, round: number, max: number) {
-  const lines = v.findings
-    .filter((f) => f.severity !== "low")
+  // Low findings are listed only when the FAIL rests on them alone (the verifier's explicit call).
+  const serious = v.findings.filter((f) => f.severity !== "low");
+  const lines = (serious.length ? serious : v.findings)
     .map((f, i) => `${i + 1}. [${f.severity}] ${f.file}${f.line ? `:${f.line}` : ""} — ${f.explanation}${f.evidence ? `\n   evidence: ${f.evidence}` : ""}`);
   return [
     `Independent verification FAILED (repair ${round} of ${max}). Fix every finding below, keep the change minimal, run the relevant tests, commit, then submit_result again.`,
@@ -100,18 +119,58 @@ export function enforceVerdict(v: VerdictOutput, opts: { repairsUsed: number; ma
     return {
       kind: "waiting_input",
       output,
-      questions: [{ question: `Independent verification is BLOCKED: ${v.blocked_reason ?? "verifier could not decide"}. How should it proceed?`, context: v.summary || undefined, options: ["Provide the missing information in your answer and re-verify", "Accept the risk and let the PR approval decide"] }],
+      questions: [{ question: `Independent verification is BLOCKED: ${v.blocked_reason ?? "verifier could not decide"}. How should it proceed?`, context: v.summary || undefined, options: ["Provide the missing information in your answer and re-verify (the PR still requires a PASS)"] }],
     } as ExecResult;
   if (opts.repairTarget && opts.repairsUsed < opts.maxRepairs)
     return { kind: "reexecute", target: opts.repairTarget, feedback: findingsFeedback(v, opts.repairsUsed + 1, opts.maxRepairs), output } as ExecResult;
-  const top = v.findings.filter((f) => f.severity !== "low").slice(0, 3).map((f) => `${f.file}${f.line ? `:${f.line}` : ""} ${f.explanation}`).join(" | ");
+  const top = (v.findings.some((f) => f.severity !== "low") ? v.findings.filter((f) => f.severity !== "low") : v.findings).slice(0, 3).map((f) => `${f.file}${f.line ? `:${f.line}` : ""} ${f.explanation}`).join(" | ");
   return { kind: "failed", error: `independent verification FAILED after ${opts.repairsUsed} repair round(s): ${top}`, retryable: false, details: output };
 }
 
-/** Commits the PR would publish vs. the commits the last PASS judged. Returns the repos that changed (stale). */
+/**
+ * Commits the PR would publish vs. the commits the last PASS judged. Returns the repos that are stale: changed since
+ * the PASS, or never judged by it (a repo missing from the verified set is not covered — fail closed).
+ */
 export function staleVerification(verified: Record<string, string> | undefined, current: Record<string, string>): string[] {
-  if (!verified) return [];
-  return Object.entries(current).filter(([repo, sha]) => verified[repo] && verified[repo] !== sha).map(([repo]) => repo);
+  return Object.entries(current).filter(([repo, sha]) => !sha || !verified?.[repo] || verified[repo] !== sha).map(([repo]) => repo);
+}
+
+/** Git state of one repository the PR step is about to publish. */
+export interface PublishState {
+  head: string; // worktree HEAD ("" = unreadable)
+  branchTip: string; // tip of the branch that is pushed ("" = unreadable)
+  dirty: string; // `git status --porcelain` ("" = clean)
+}
+
+/**
+ * The PR gate. `verifiers` = every step of the run marked `independent: true` (with its current status/output);
+ * none → verification is optional for this workflow and the gate is open. Otherwise EVERY verifier must hold a valid
+ * PASS whose `verified_heads` cover every published repository at exactly the commit that would be pushed, from a
+ * clean worktree. Returns the reasons the PR must not be opened (empty = allowed).
+ */
+export function verificationGate(verifiers: Array<{ key: string; status: string; output: any }>, publish: Record<string, PublishState>): string[] {
+  const problems: string[] = [];
+  for (const [repo, st] of Object.entries(publish)) {
+    if (!st.head || !st.branchTip) problems.push(`${repo}: cannot read the commit that would be published`);
+    else if (st.head !== st.branchTip) problems.push(`${repo}: worktree HEAD ${st.head.slice(0, 12)} is not the tip of the pushed branch (${st.branchTip.slice(0, 12)})`);
+    if (st.dirty) problems.push(`${repo}: uncommitted changes in the worktree (they were not verified and would not be published as reviewed)`);
+  }
+  for (const v of verifiers) {
+    const o = v.output ?? {};
+    if (v.status !== "COMPLETED" || o.independent !== true || o.verdict !== "PASS" || o.approved !== true) {
+      problems.push(`independent verification "${v.key}" has no valid PASS (status ${v.status}${o.verdict ? `, verdict ${o.verdict}` : ""})`);
+      continue;
+    }
+    const heads = o.verified_heads && typeof o.verified_heads === "object" ? (o.verified_heads as Record<string, string>) : null;
+    if (!heads) {
+      problems.push(`independent verification "${v.key}" recorded no verified commits`);
+      continue;
+    }
+    const current = Object.fromEntries(Object.entries(publish).map(([repo, st]) => [repo, st.branchTip]));
+    for (const repo of staleVerification(heads, current))
+      problems.push(heads[repo] ? `${repo}: changed after independent verification "${v.key}" (verified ${heads[repo].slice(0, 12)}, now ${current[repo]?.slice(0, 12) || "unknown"})` : `${repo}: not covered by independent verification "${v.key}"`);
+  }
+  return problems;
 }
 
 export async function headOf(path: string) {
@@ -135,21 +194,48 @@ export function repairTargetFor(graph: { feedback_step?: string; steps: Array<Pi
   return null;
 }
 
-/** Platform-collected evidence: the diff vs origin/<base> and the HEAD of every worktree (bounded). */
+/**
+ * Platform-collected evidence: the diff vs origin/<base> and the HEAD of every worktree (bounded). `problems` lists
+ * what makes the evidence unbindable to a commit (unreadable HEAD, uncommitted changes): a verdict on it would not
+ * describe what the PR publishes, so the executor blocks instead of verifying.
+ */
 export async function collectEvidence(workspaces: Array<{ repo: string; path: string }>, baseBranch: string, maxChars = 60_000) {
   const heads: Record<string, string> = {};
+  const problems: string[] = [];
   const parts: string[] = [];
   let budget = maxChars;
   for (const w of workspaces) {
-    heads[w.repo] = await headOf(w.path);
+    const head = await headOf(w.path).catch(() => "");
+    const dirty = await dirtyOf(w.path);
+    if (!head) {
+      problems.push(`${w.repo}: cannot read HEAD of ${w.path}`);
+      continue;
+    }
+    heads[w.repo] = head;
+    if (dirty) problems.push(`${w.repo}: uncommitted changes in ${w.path} — the coding step must commit before verification:\n${dirty.slice(0, 2000)}`);
     const stat = (await exec("git", ["-C", w.path, "diff", "--stat", `origin/${baseBranch}...HEAD`], { maxBuffer: 8 << 20 }).catch(() => ({ stdout: "(diff unavailable)" }))).stdout.trim();
     let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", `origin/${baseBranch}...HEAD`], { maxBuffer: 64 << 20 }).catch(() => ({ stdout: "" }))).stdout;
-    const dirty = (await exec("git", ["-C", w.path, "status", "--porcelain"]).catch(() => ({ stdout: "" }))).stdout.trim();
     if (diff.length > budget) diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff origin/${baseBranch}...HEAD in ${w.path} for the rest`;
     budget -= diff.length;
-    parts.push(`### ${w.repo} @ ${heads[w.repo].slice(0, 12)} (worktree ${w.path})\n${dirty ? `UNCOMMITTED CHANGES (not part of the verified commit):\n${dirty}\n` : ""}${stat}\n\n${diff}`);
+    parts.push(`### ${w.repo} @ ${head.slice(0, 12)} (worktree ${w.path})\n${stat}\n\n${diff}`);
   }
-  return { heads, text: parts.join("\n\n") };
+  return { heads, problems, text: parts.join("\n\n") };
+}
+
+/** `git status --porcelain` of a worktree; an unreadable status counts as dirty (fail closed). */
+export async function dirtyOf(path: string) {
+  return (await exec("git", ["-C", path, "status", "--porcelain"]).catch((e) => ({ stdout: `(git status failed: ${(e as Error).message.split("\n")[0]})` }))).stdout.trim();
+}
+
+/** Re-read the worktrees after the verifier ran: the verdict only holds if nothing moved meanwhile. */
+export async function evidenceDrift(workspaces: Array<{ repo: string; path: string }>, heads: Record<string, string>) {
+  const drift: string[] = [];
+  for (const w of workspaces) {
+    const now = await headOf(w.path).catch(() => "");
+    if (now !== heads[w.repo]) drift.push(`${w.repo}: HEAD moved during verification (${(heads[w.repo] ?? "").slice(0, 12)} → ${now.slice(0, 12) || "unreadable"})`);
+    else if (await dirtyOf(w.path)) drift.push(`${w.repo}: worktree changed during verification`);
+  }
+  return drift;
 }
 
 /** Real test evidence among upstream outputs (command steps with results). */

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { knowledge } from "../src/knowledge/service.ts";
-import { buildMemoryItems, isStale, reviewMemory, type MemoryMeta } from "../src/knowledge/memory.ts";
+import { buildMemoryItems, isStale, memoryFreshness, reviewMemory, type MemoryMeta } from "../src/knowledge/memory.ts";
 import { summarizeEval, type EvalRow } from "../src/eval/summary.ts";
 
 before(() => migrate());
@@ -65,6 +65,22 @@ test("stale memory: files edited on the base branch after the task commit make t
   assert.equal(await isStale(meta(["a.go"]), repo), true);
   assert.equal(await isStale(meta(["b.go"]), repo), false);
   assert.equal(await isStale({ ...meta(["a.go"]), commit_sha: "0".repeat(40) }, repo), true, "unknown commit cannot be vouched for");
+  // three states: FRESH / STALE / UNKNOWN — missing provenance is never assumed fresh
+  const st = async (m: any, dir: string | null = repo, opts = {}) => (await memoryFreshness(m, dir, opts)).state;
+  assert.equal(await st(meta(["b.go"])), "FRESH");
+  assert.equal(await st(meta(["a.go"])), "STALE");
+  assert.equal(await st(meta([])), "FRESH", "a task that changed no file cannot go stale (commit still verified to exist)");
+  assert.equal(await st({ ...meta([]), commit_sha: "0".repeat(40) }), "UNKNOWN");
+  assert.equal(await st({ ...meta(["a.go"]), commit_sha: "0".repeat(40) }), "UNKNOWN", "commit not in this clone");
+  assert.equal(await st({ ...meta(["a.go"]), commit_sha: "" }), "UNKNOWN", "no commit recorded");
+  assert.equal(await st({ ...meta(["a.go"]), commit_sha: "not a sha; rm -rf /" }), "UNKNOWN");
+  assert.equal(await st({ ...meta(["a.go"]), files: undefined }), "UNKNOWN", "no file list recorded");
+  assert.equal(await st(null), "UNKNOWN");
+  assert.equal(await st(meta(["b.go"]), null), "UNKNOWN", "repository not registered / available");
+  assert.equal(await st(meta(["b.go"]), join(root, "missing")), "UNKNOWN");
+  assert.equal(await st({ ...meta(["b.go"]), base_branch: "release/none" }), "UNKNOWN", "remote-tracking ref missing");
+  assert.equal(await st(meta(["b.go"]), repo, { now: Date.now() + 48 * 3600_000 }), "UNKNOWN", "remote refs not fetched recently cannot vouch for freshness");
+  assert.equal(await isStale({ ...meta(["a.go"]), commit_sha: "" }, repo), true, "compat wrapper: missing provenance is NOT fresh");
 });
 
 test("eval summary: success, regressions, verifier accuracy (false pass / false alarm), repair success, cost", () => {

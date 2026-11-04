@@ -5,7 +5,7 @@ import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
 import { planKnowledge, planUpstream, type DisclosureEntry, type UpstreamPlanEntry } from "../context/plan.ts";
 import { repoPath } from "../repos/service.ts";
 import { independentUpstream, isIndependent } from "../agent/independentReview.ts";
-import { isStale } from "../knowledge/memory.ts";
+import { memoryFreshness } from "../knowledge/memory.ts";
 import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
 import { createHash } from "node:crypto";
@@ -182,8 +182,10 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     res.applied = res.applied.filter((k) => k.key !== p.key);
     if (v) res.applied.push({ ...v, reason: `selected for this re-execution (v${p.version})` });
   }
-  // Cross-task memory: never untrusted conclusions (they are disabled until approved), never stale items.
+  // Cross-task memory: never untrusted conclusions (they are disabled until approved); only provably FRESH items load
+  // (STALE and UNKNOWN — missing provenance, unavailable repo or history — are excluded and recorded with the reason).
   const memoryStale: string[] = [];
+  const memoryStates: Array<{ key: string; trust: string | null; state: string; reason: string }> = [];
   const memoryItems = res.applied.filter((k) => k.category === "task_memory");
   if (memoryItems.length) {
     const repoRows = await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
@@ -191,7 +193,9 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
       const m = (k.metadata as any)?.memory;
       const trusted = m && (m.trust === "verified" || m.trust === "approved");
       const row = repoRows.find((r) => r.name === m?.repo);
-      if (!trusted || (row && (await isStale(m, repoPath(row))))) memoryStale.push(k.key);
+      const fresh = trusted ? await memoryFreshness(m, row ? repoPath(row) : null) : { state: "UNKNOWN", reason: "not verified or approved" };
+      memoryStates.push({ key: k.key, trust: m?.trust ?? null, state: fresh.state, reason: fresh.reason });
+      if (!trusted || fresh.state !== "FRESH") memoryStale.push(k.key);
     }
     res.applied = res.applied.filter((k) => !memoryStale.includes(k.key));
   }
@@ -221,6 +225,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
       // The checks this attempt is held to (coding steps): audit trail for "why did it (not) complete".
       verification: step.type === "coding_agent" ? verificationPlan(cfg) : null,
       memory_excluded: memoryStale,
+      memory_freshness: memoryStates,
     },
     project,
     repositories,

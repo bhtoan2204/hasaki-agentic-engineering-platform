@@ -7,7 +7,7 @@ import { getPath } from "../graph.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
 import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
-import { headOf, staleVerification } from "../../agent/independentReview.ts";
+import { dirtyOf, headOf, verificationGate, type PublishState } from "../../agent/independentReview.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -374,6 +374,15 @@ export async function verificationNotesOf(runId: number) {
     }));
 }
 
+const revParse = (path: string, ref: string) =>
+  new Promise<string>((resolve) => {
+    const p = spawn("git", ["-C", path, "rev-parse", "--verify", "--quiet", ref]);
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("error", () => resolve(""));
+    p.on("close", (code) => resolve(code === 0 ? out.trim() : ""));
+  });
+
 /**
  * Opens (or updates) one PR per workspace with commits. Idempotent across retries: the provider updates the
  * open PR for source→target and `pull_requests` is unique per (provider, repo, source, target).
@@ -390,14 +399,19 @@ export const pullRequestExecutor: StepExecutor = {
     const provider = gitProvider();
     const code = ctx.input.work_item?.code;
     const out: any[] = [];
-    // An independent PASS covers exactly the commits it judged: refuse to publish anything that changed afterwards.
-    const verified = Object.values(ctx.input.upstream).filter((u) => u.output?.independent === true && u.output?.verdict === "PASS" && u.output?.verified_heads);
-    if (verified.length) {
-      const current: Record<string, string> = {};
-      for (const w of workspaces) current[w.repo] = await headOf(w.path).catch(() => "");
-      const stale = verified.flatMap((u) => staleVerification(u.output.verified_heads, current));
-      if (stale.length)
-        return { kind: "failed", error: `implementation changed after independent verification in ${[...new Set(stale)].join(", ")} — re-execute the verification step before opening the PR`, retryable: false };
+    // Independent verification gate. Steps marked `independent: true` make verification REQUIRED: every one must hold
+    // a valid PASS covering every published repo at exactly the commit that would be pushed, from a clean worktree.
+    // Workflows without such a step (opted out, FAST profile) keep verification optional.
+    const verifiers = await q<{ key: string; status: string; output: any }>(pool, "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 AND config->>'independent' = 'true' ORDER BY position", [ctx.run.id]);
+    if (verifiers.length) {
+      const publish: Record<string, PublishState> = {};
+      for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo)))
+        publish[w.repo] = { head: await headOf(w.path).catch(() => ""), branchTip: await revParse(w.path, `refs/heads/${w.branch}`), dirty: await dirtyOf(w.path) };
+      const problems = verificationGate(verifiers, publish);
+      if (problems.length) {
+        await ctx.log("system", `PR blocked by the verification gate:\n- ${problems.join("\n- ")}`);
+        return { kind: "failed", error: `independent verification gate: ${problems.join("; ")} — re-run the verification step (or the coding step) before opening the PR`, retryable: false };
+      }
     }
     for (const w of workspaces) {
       if (!ctx.run.selected_repositories.includes(w.repo)) {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { enforceVerdict, findingsFeedback, independentUpstream, normalizeVerdict, repairTargetFor, staleVerification } from "../src/agent/independentReview.ts";
+import { enforceVerdict, findingsFeedback, independentUpstream, normalizeVerdict, repairTargetFor, staleVerification, verificationGate } from "../src/agent/independentReview.ts";
 import { backoff, classifyFailure } from "../src/workflow/failures.ts";
 import { applyProfile } from "../src/workflow/profiles.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
@@ -39,9 +39,40 @@ test("verdicts: structured, legacy approved mapped, malformed or unactionable ne
   const junk = normalizeVerdict({ summary: "looks fine" });
   assert.equal(junk.verdict, "BLOCKED", "no verdict → BLOCKED, not PASS");
   assert.equal(normalizeVerdict({ verdict: "FAIL", findings: [] }).verdict, "BLOCKED", "FAIL without findings cannot drive a repair");
-  assert.equal(normalizeVerdict({ verdict: "FAIL", findings: [{ severity: "low", file: "a", explanation: "naming" }] }).verdict, "PASS", "style-only findings do not fail");
   const f = normalizeVerdict({ verdict: "FAIL", findings: [{ severity: "weird", file: "a.go", line: "12", explanation: "e", evidence: "ev" }] }).findings[0];
-  assert.deepEqual(f, { severity: "medium", file: "a.go", line: 12, explanation: "e", evidence: "ev" });
+  assert.deepEqual(f, { severity: "medium", file: "a.go", line: 12, explanation: "e", evidence: "ev" }, "unknown severity is treated as medium, not low");
+});
+
+test("verdicts: a FAIL is never converted into a PASS; low-severity-only findings have explicit handling", () => {
+  const lowFail = normalizeVerdict({ verdict: "FAIL", findings: [{ severity: "low", file: "a.go", line: 4, explanation: "naming" }] });
+  assert.equal(lowFail.verdict, "FAIL", "the verifier's FAIL stands even when every finding is low");
+  assert.match(findingsFeedback(lowFail, 1, 2), /\[low\] a\.go:4 — naming/, "low-only FAIL repair feedback lists those findings (not an empty request)");
+  const lowPass = normalizeVerdict({ verdict: "PASS", findings: [{ severity: "low", file: "a.go", explanation: "nit" }] });
+  assert.deepEqual([lowPass.verdict, lowPass.findings.length], ["PASS", 1], "PASS with low findings: advisory notes kept");
+  for (const v of ["FAIL", "fail", "BLOCKED"]) assert.notEqual(normalizeVerdict({ verdict: v, findings: [{ severity: "low", file: "x" }] }).verdict, "PASS");
+});
+
+test("verdicts: malformed or contradictory verifier output is BLOCKED, never success", () => {
+  const cases: Array<[any, RegExp]> = [
+    [{ verdict: "PASS", findings: [{ severity: "high", file: "a.go", explanation: "sql injection" }] }, /PASS with 1 high\/medium/],
+    [{ verdict: "PASS", findings: [{ severity: "??", file: "a.go" }] }, /PASS with 1 high\/medium/],
+    [{ verdict: "PASS", approved: false }, /contradictory/],
+    [{ verdict: "FAIL", approved: true, findings: [{ severity: "high", file: "a" }] }, /contradictory/],
+    [{ verdict: "LGTM", approved: true }, /unknown verdict/],
+    [{ verdict: true }, /unknown verdict/],
+    [{ verdict: "PASS", findings: "none" }, /malformed findings/],
+    [{ verdict: "PASS", findings: { a: 1 } }, /malformed findings/],
+    [null, /no PASS\/FAIL\/BLOCKED/],
+    ["PASS", /no PASS\/FAIL\/BLOCKED/],
+    [[{ verdict: "PASS" }], /no PASS\/FAIL\/BLOCKED/],
+    [{ verdict: "BLOCKED" }, /could not decide/],
+  ];
+  for (const [raw, reason] of cases) {
+    const v = normalizeVerdict(raw);
+    assert.equal(v.verdict, "BLOCKED", JSON.stringify(raw));
+    assert.match(String(v.blocked_reason), reason, JSON.stringify(raw));
+    assert.notEqual(enforceVerdict(v, { repairsUsed: 0, maxRepairs: 2, repairTarget: "implement", heads: { svc: "abc" } }).kind, "completed");
+  }
 });
 
 test("enforcement: PASS completes with the judged commits; FAIL repairs within budget, then fails; BLOCKED asks", () => {
@@ -60,10 +91,38 @@ test("enforcement: PASS completes with the judged commits; FAIL repairs within b
   assert.match(findingsFeedback(fail, 1, 2), /a\.go:1 — wrong\n   evidence: x/);
 });
 
-test("stale verification: any commit after the PASS blocks the PR; unverified repos are not invented", () => {
+test("stale verification: any commit after the PASS, or a repo the PASS never judged, is stale", () => {
   assert.deepEqual(staleVerification({ svc: "abc", api: "def" }, { svc: "abc", api: "999" }), ["api"]);
-  assert.deepEqual(staleVerification({ svc: "abc" }, { svc: "abc", other: "x" }), []);
-  assert.deepEqual(staleVerification(undefined, { svc: "abc" }), []);
+  assert.deepEqual(staleVerification({ svc: "abc" }, { svc: "abc", other: "x" }), ["other"], "an unverified repo is not covered");
+  assert.deepEqual(staleVerification(undefined, { svc: "abc" }), ["svc"], "no verified commits → nothing is covered");
+  assert.deepEqual(staleVerification({ svc: "abc" }, { svc: "" }), ["svc"], "unreadable current commit is never treated as matching");
+  assert.deepEqual(staleVerification({ svc: "abc", gone: "x" }, { svc: "abc" }), [], "verified repos that publish nothing are fine");
+});
+
+test("PR gate: every required verifier needs a valid PASS bound to the exact, clean commits of every published repo", () => {
+  const pass = (heads: Record<string, string>, over: Record<string, unknown> = {}) => ({ key: "review", status: "COMPLETED", output: { verdict: "PASS", approved: true, independent: true, verified_heads: heads, ...over } });
+  const clean = (sha: string) => ({ head: sha, branchTip: sha, dirty: "" });
+  assert.deepEqual(verificationGate([], { svc: clean("a") }), [], "no independent step → verification optional, gate open");
+  assert.deepEqual(verificationGate([pass({ svc: "a", api: "b" })], { svc: clean("a"), api: clean("b") }), []);
+  const g = (v: any[], p: any) => verificationGate(v, p).join(" | ");
+  assert.match(g([pass({ svc: "a" })], { svc: clean("b") }), /svc: changed after independent verification "review" \(verified a, now b\)/);
+  assert.match(g([pass({ svc: "a" })], { svc: clean("a"), api: clean("b") }), /api: not covered/, "every published repo must be verified");
+  assert.match(g([pass({ svc: "a" })], { svc: { head: "a", branchTip: "a", dirty: " M x.go" } }), /uncommitted changes/);
+  assert.match(g([pass({ svc: "a" })], { svc: { head: "a", branchTip: "c", dirty: "" } }), /not the tip of the pushed branch/);
+  assert.match(g([pass({ svc: "a" })], { svc: { head: "", branchTip: "", dirty: "" } }), /cannot read the commit/);
+  assert.match(g([pass({})], { svc: clean("a") }), /svc: not covered/);
+  assert.match(g([pass({ svc: "a" }, { verified_heads: undefined })], { svc: clean("a") }), /recorded no verified commits/);
+  for (const bad of [
+    { key: "review", status: "SKIPPED", output: { skipped: true } },
+    { key: "review", status: "FAILED", output: { verdict: "FAIL", independent: true } },
+    { key: "review", status: "WAITING_INPUT", output: { verdict: "BLOCKED", independent: true } },
+    { key: "review", status: "PENDING", output: null },
+    pass({ svc: "a" }, { approved: false }),
+    pass({ svc: "a" }, { independent: undefined }),
+    { key: "review", status: "COMPLETED", output: { approved: true, findings: [] } }, // legacy non-independent output
+  ])
+    assert.match(g([bad], { svc: clean("a") }), /has no valid PASS/, JSON.stringify(bad));
+  assert.match(g([pass({ svc: "a" }), { key: "audit", status: "SKIPPED", output: {} }], { svc: clean("a") }), /"audit" has no valid PASS/, "every required verifier counts");
 });
 
 test("repair target: feedback_step, else the nearest coding step upstream", () => {
