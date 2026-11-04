@@ -5,6 +5,8 @@ import { notify, notifyStepWaiting } from "../notify.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
 import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
+import { classifyFailure } from "./failures.ts";
+import { extractRunMemory } from "../knowledge/memory.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
@@ -107,6 +109,8 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "WAITING")) {
     const icon = { COMPLETED: "✅", FAILED: "❌", WAITING: "⏸️" }[to];
     afterCommit(() => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`));
+    // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
+    if (to === "COMPLETED") afterCommit(() => extractRunMemory(run.id).catch((e) => console.error(`memory extraction for run ${run.id}: ${(e as Error).message}`)));
   }
 }
 
@@ -578,8 +582,14 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
           await setStepStatus(c, s, "COMPLETED", { output, finished_at: new Date() }, "answered");
         } else {
           const cp = await one(c, "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [s.current_attempt_id]);
-          const pending = { ...(s.pending_input ?? {}), resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} } };
-          await setStepStatus(c, s, "READY", { pending_input: pending, ready_at: new Date() }, "answers received, resuming");
+          // A step paused by failure recovery: "stop" ends it as FAILED; anything else runs it again.
+          const stop = cp?.data?.failure && (await q<{ answer: string }>(c, "SELECT answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'", [s.current_attempt_id])).some((a) => /^\s*(dừng|stop)\b/i.test(a.answer));
+          if (stop) {
+            await setStepStatus(c, s, "FAILED", { error: `stopped by the developer after ${cp.data.failure.class} failure`, finished_at: new Date() }, "stopped after failure");
+          } else {
+            const pending = { ...(s.pending_input ?? {}), resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} } };
+            await setStepStatus(c, s, "READY", { pending_input: pending, ready_at: new Date() }, "answers received, resuming");
+          }
         }
         resumed.push(`${runId}:${s.key}`);
       }
@@ -775,11 +785,28 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       return;
     }
     case "failed": {
-      await closeAttempt("FAILED", null, { message: result.error, details: result.details ?? null });
-      if (result.retryable !== false && step.attempt_count < step.max_attempts) {
-        await setStepStatus(c, step, "RETRYING", { error: result.error }, `attempt ${step.attempt_count}/${step.max_attempts} failed`);
+      const decision = classifyFailure(result.error, { executorRetryable: result.retryable, attempt: step.attempt_count, maxAttempts: step.max_attempts, baseBackoff: step.retry_backoff_s });
+      await closeAttempt("FAILED", null, { message: result.error, details: result.details ?? null, failure: decision });
+      if (decision.action === "human") {
+        // Pause instead of failing: the developer resolves the cause and answers; the step then runs again.
+        await insertQuestions(c, step, attempt.id, [
+          { question: `Bước "${step.name}" cần bạn xử lý (${decision.class}): ${result.error.slice(0, 600)}`, context: decision.reason, options: ["Đã xử lý xong — chạy lại bước", "Dừng ở đây"] },
+        ]);
+        await q(c, "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)", [run.id, step.id, attempt.id, json({ failure: decision })]);
+        await setStepStatus(c, step, "WAITING_INPUT", {}, `paused: ${decision.class}`);
         await closeJob("done", result.error);
-        await ensureJob(c, step, step.retry_backoff_s);
+        afterCommit(() =>
+          notifyStepWaiting(`⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`, {
+            runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
+            detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id,
+          }),
+        );
+        break;
+      }
+      if (decision.action === "retry") {
+        await setStepStatus(c, step, "RETRYING", { error: result.error }, `attempt ${step.attempt_count}/${step.max_attempts} failed (${decision.class}); retry in ${decision.delay_s}s`);
+        await closeJob("done", result.error);
+        await ensureJob(c, step, decision.delay_s);
       } else {
         await setStepStatus(c, step, "FAILED", { error: result.error, finished_at: now });
         await closeJob("failed", result.error);

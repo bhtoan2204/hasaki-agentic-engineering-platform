@@ -1298,3 +1298,165 @@ test("existing-branch directive in the work item description lands in run.inputs
   assert.deepEqual((await getRun(explicit.id)).inputs.branches, { "oms-background": "HSK-OTHER" });
   await assert.rejects(startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "*": "release/prod" } } }), /base branch/);
 });
+
+// ---------------------------------------------------------------- independent verification + failure recovery
+const { enforceVerdict, normalizeVerdict, repairTargetFor } = await import("../src/agent/independentReview.ts");
+/** Mirrors the Claude executor's enforcement for a scripted verifier verdict. */
+const verifier = (verdictFor: (n: number, ctx: ExecutionContext) => any): Script => async (ctx, n) => {
+  const used = (await one(pool, "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE step_id = $1 AND output->>'verdict' = 'FAIL'", [ctx.step.id])).n;
+  return enforceVerdict(normalizeVerdict(verdictFor(n, ctx)), { repairsUsed: used, maxRepairs: Number(ctx.step.config.max_repairs ?? 2), repairTarget: repairTargetFor(ctx.run.graph, ctx.step.key), heads: { svc: `sha${n}` } });
+};
+const FAIL = { verdict: "FAIL", findings: [{ severity: "high", file: "pay.go", line: 12, explanation: "refund ignores installments", evidence: "pay.go:12 uses amount" }], summary: "x" };
+
+test("independent verification: STANDARD isolates the verifier, FAIL repairs then re-verifies, PASS continues", async () => {
+  const key = await customWorkflow(
+    [
+      { key: "implement", type: "coding_agent", retry_backoff_seconds: 0 },
+      { key: "review", type: "agent", name: "Code Review", depends_on: ["implement"] },
+      { key: "after", type: "agent", depends_on: ["review"] },
+    ],
+    { feedback_step: "implement" },
+  );
+  const feedbacks: Array<{ run: number; text: string }> = [];
+  scripts.implement = async (ctx, n) => (ctx.input.pending?.feedback && feedbacks.push({ run: ctx.run.id, text: ctx.input.pending.feedback }), { kind: "completed", output: { summary: `my reasoning v${n}: trust me`, decisions: ["d"], verification: { passed: true, status: "clean" } } });
+  scripts.review = verifier((n, ctx) => {
+    assert.equal(ctx.step.config.independent, true, "STANDARD marks the review as independent");
+    assert.equal(ctx.input.upstream.implement.output.summary, undefined, "author's summary withheld");
+    assert.deepEqual(ctx.input.upstream.implement.output.verification, { passed: true, status: "clean" }, "platform evidence kept");
+    return n < 3 ? FAIL : { verdict: "PASS", findings: [], summary: "ok" };
+  });
+  const run = await startRun({ definitionKey: key, title: "iv", profile: "STANDARD" } as any);
+  await drain();
+  assert.equal((await stepOf(run.id, "review")).status, "COMPLETED");
+  assert.equal((await stepOf(run.id, "review")).output.verdict, "PASS");
+  assert.deepEqual((await stepOf(run.id, "review")).output.verified_heads, { svc: "sha3" });
+  // count per run: drain() also executes leftover jobs of earlier tests
+  assert.deepEqual((await attemptsOf(run.id, "review")).map((a: any) => a.output?.verdict), ["FAIL", "FAIL", "PASS"]);
+  assert.equal((await attemptsOf(run.id, "implement")).length, 3, "two repair rounds");
+  const mine = feedbacks.filter((f) => f.run === run.id).map((f) => f.text);
+  assert.equal(mine.length, 2);
+  assert.match(mine[0], /repair 1 of 2[\s\S]*pay\.go:12 — refund ignores installments/);
+  assert.equal((await stepOf(run.id, "after")).status, "COMPLETED");
+});
+
+test("independent verification: repair budget exhausted → FAILED, downstream never runs; BLOCKED asks a human", async () => {
+  const key = await customWorkflow(
+    [
+      { key: "implement", type: "coding_agent", retry_backoff_seconds: 0 },
+      { key: "review", type: "agent", name: "Review", depends_on: ["implement"], config: { max_repairs: 1 } },
+      { key: "pr", type: "agent", depends_on: ["review"] },
+    ],
+    { feedback_step: "implement" },
+  );
+  scripts.review = verifier(() => FAIL);
+  const run = await startRun({ definitionKey: key, title: "iv2", profile: "STANDARD" } as any);
+  await drain();
+  const review = await stepOf(run.id, "review");
+  assert.equal(review.status, "FAILED");
+  assert.match(String(review.error), /independent verification FAILED after 1 repair/);
+  assert.equal((await attemptsOf(run.id, "implement")).length, 2);
+  assert.equal((await stepOf(run.id, "pr")).status, "PENDING", "no PR without a PASS");
+  const failAttempt = (await attemptsOf(run.id, "review")).at(-1);
+  assert.equal(failAttempt.error.failure.class, "code");
+
+  scripts.review = verifier(() => ({ verdict: "BLOCKED", blocked_reason: "no acceptance criteria for installment refunds", findings: [] }));
+  const run2 = await startRun({ definitionKey: key, title: "iv3", profile: "STANDARD" } as any);
+  await drain();
+  assert.equal((await stepOf(run2.id, "review")).status, "WAITING_INPUT");
+  const qs = await openQ(run2.id);
+  assert.match(qs[0].question, /BLOCKED: no acceptance criteria/);
+});
+
+test("failure recovery: auth stops at once, workspace conflict pauses for a human, rate limits back off", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent", max_attempts: 3, retry_backoff_seconds: 0 }]);
+  scripts.a = () => ({ kind: "failed", error: "Bitbucket HTTP 401 Unauthorized", retryable: true });
+  const r1 = await startRun({ definitionKey: key, title: "auth" } as any);
+  await drain();
+  assert.equal((await stepOf(r1.id, "a")).status, "FAILED");
+  assert.equal((await attemptsOf(r1.id, "a")).length, 1, "no pointless retries of an auth error");
+  assert.equal((await attemptsOf(r1.id, "a"))[0].error.failure.class, "auth");
+
+  const tries: Record<number, number> = {};
+  scripts.a = (ctx) => ((tries[ctx.run.id] = (tries[ctx.run.id] ?? 0) + 1) === 1 ? { kind: "failed", error: "push rejected (non-fast-forward)", retryable: true } : { kind: "completed", output: { ok: true } });
+  const r2 = await startRun({ definitionKey: key, title: "conflict" } as any);
+  await drain();
+  assert.equal((await stepOf(r2.id, "a")).status, "WAITING_INPUT");
+  const q2 = await openQ(r2.id);
+  assert.match(q2[0].question, /workspace/);
+  await answerQuestions({ [q2[0].id]: "Đã xử lý xong — chạy lại bước" }, "dev");
+  await drain();
+  assert.equal((await stepOf(r2.id, "a")).status, "COMPLETED", "resumed after the human fixed it");
+
+  scripts.a = () => ({ kind: "failed", error: "merge conflict in go.mod", retryable: true });
+  const r3 = await startRun({ definitionKey: key, title: "conflict-stop" } as any);
+  await drain();
+  const q3 = await openQ(r3.id);
+  await answerQuestions({ [q3[0].id]: "Dừng ở đây" }, "dev");
+  await drain();
+  assert.equal((await stepOf(r3.id, "a")).status, "FAILED");
+
+  const key1 = await customWorkflow([{ key: "a", type: "agent", max_attempts: 1, retry_backoff_seconds: 0 }]);
+  scripts.a = () => ({ kind: "failed", error: "429 Too Many Requests: rate limit", retryable: true });
+  const r4 = await startRun({ definitionKey: key1, title: "rate" } as any);
+  await drain();
+  assert.equal((await stepOf(r4.id, "a")).status, "RETRYING", "rate limits retry even on max_attempts=1");
+  const job = await one(pool, "SELECT available_at > now() + interval '20 seconds' AS later FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id WHERE s.run_id = $1 AND j.status = 'queued'", [r4.id]);
+  assert.equal(job.later, true, "backoff delay applied");
+  await cancelRun(r4.id, "test done");
+});
+
+test("cross-task memory: only verified/approved memory reaches the context; untrusted conclusions never do", async () => {
+  const meta = (trust: string) => ({ run_id: 1, work_item: "OLD-1", repo: "oms-api", commit_sha: "", base_branch: "release/prod", files: [], trust, confidence: "high", extracted_at: "", sources: [] });
+  const mk = (key: string, trust: string, enabled: boolean) =>
+    knowledge.create({ key, category: "task_memory", scope_type: "REPOSITORY", scope_ref: "oms-api", title: `${key} shipment cancel refund`, content: `memory ${key}`, enabled, applicability: { repos: ["oms-api"] }, metadata: { load: "on_demand", description: "shipment cancel refund", memory: meta(trust) } });
+  await mk("memory.t1.oms-api.facts", "verified", true);
+  await mk("memory.t1.oms-api.conclusions", "unverified", true); // force-enabled through the generic API: still excluded
+  await mk("memory.t2.oms-api.conclusions", "approved", true);
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  let keys: string[] = [];
+  let excluded: string[] = [];
+  scripts.a = async (ctx) => {
+    keys = ctx.context.disclosure.map((d) => d.key);
+    excluded = (await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [ctx.context.snapshot_id])).content.prompt_plan.memory_excluded;
+    return { kind: "completed", output: {} };
+  };
+  await startRun({ definitionKey: key, title: "cancel shipment refund", repositories: ["oms-api"] } as any);
+  await drain();
+  assert.ok(keys.includes("memory.t1.oms-api.facts"));
+  assert.ok(keys.includes("memory.t2.oms-api.conclusions"));
+  assert.ok(!keys.includes("memory.t1.oms-api.conclusions"));
+  assert.deepEqual(excluded, ["memory.t1.oms-api.conclusions"]);
+});
+
+test("cross-task memory: a COMPLETED run with a worktree yields verified facts + disabled conclusions", async () => {
+  const { extractRunMemory } = await import("../src/knowledge/memory.ts");
+  const { execFileSync } = await import("node:child_process");
+  const { writeFileSync } = await import("node:fs");
+  const sh = (cwd: string, ...a: string[]) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
+  const root = mkdtempSync(join(process.env.TEST_ROOT!, "memx-"));
+  const origin = join(root, "o.git"), wt = join(root, "wt");
+  execFileSync("git", ["init", "-q", "--bare", origin]);
+  execFileSync("git", ["clone", "-q", origin, wt]);
+  sh(wt, "checkout", "-qb", "release/prod");
+  writeFileSync(join(wt, "a.go"), "package a\n");
+  sh(wt, "add", "."), sh(wt, "commit", "-qm", "base"), sh(wt, "push", "-q", "origin", "release/prod");
+  sh(wt, "checkout", "-qb", "T");
+  writeFileSync(join(wt, "a.go"), "package a\n// change\n");
+  sh(wt, "commit", "-qam", "change");
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  scripts.implement = async (ctx) => {
+    await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: "T", path: wt, created_from: "test" });
+    return { kind: "completed", output: { summary: "Use the installment amount for refunds.", decisions: [{ title: "cache", detail: "skip cache for refunds" }] } };
+  };
+  const run = await startRun({ definitionKey: key, title: "memory run", repositories: ["oms-api"] } as any);
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  await extractRunMemory(run.id); // idempotent with the afterCommit hook
+  const facts = await knowledge.get(`memory.run-${run.id}.oms-api.facts`);
+  const concl = await knowledge.get(`memory.run-${run.id}.oms-api.conclusions`);
+  assert.ok(facts && concl, "both items written");
+  assert.equal(facts.enabled, true);
+  assert.deepEqual(facts.versions[0].metadata.memory.files, ["a.go"]);
+  assert.equal(concl.enabled, false, "conclusions wait for approval");
+  assert.match(concl.versions[0].content, /> Use the installment amount for refunds\./);
+});

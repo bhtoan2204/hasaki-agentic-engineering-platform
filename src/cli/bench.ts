@@ -1,5 +1,5 @@
 /**
- * Execution-profile benchmark: `npm run bench -- [--live] [--scenarios=1,2] [--profiles=FAST,STANDARD]`
+ * Benchmark: `npm run bench -- [--live] [--scenarios=1,2] [--profiles=FAST,STANDARD,DEEP] [--candidate=claude-cli] [--suite=name]`
  *
  * Creates a throwaway database and Go fixture repositories, then for each scenario/profile resolves the run graph and
  * (with --live) executes it end to end with the REAL Claude executor. Human gates are auto-approved and questions
@@ -109,19 +109,35 @@ const ACCEPT: Record<string, Acceptance[]> = {
   "3": [{ repo: "ecom-mapper", pkg: "./mapper", file: "mapper/zz_acceptance_test.go", code: 'package mapper\n\nimport "testing"\n\nfunc TestAcceptanceZip4(t *testing.T) {\n\tc := MapCustomer(EcomCustomer{PostalCode: "91911-9191"})\n\tif c.PostalCode != "91911" || c.PostalCodeExt != "9191" {\n\t\tt.Fatalf("%q %q", c.PostalCode, c.PostalCodeExt)\n\t}\n}\n' }],
 };
 
-async function acceptance(runId: number, checks: Acceptance[] | undefined): Promise<boolean | null> {
-  if (!checks) return null;
+/** The fixture's OWN tests (no hidden ones yet): did the candidate break existing behaviour? */
+function regressionIn(dir: string): boolean {
+  try {
+    execFileSync("bash", ["-lc", "go test -count=1 ./..."], { cwd: dir, stdio: "pipe", timeout: 300_000 });
+    return false;
+  } catch {
+    return true;
+  }
+}
+/** Hidden acceptance tests are written only now — after the candidate finished — and run in `dirFor(repo)`. */
+function gradeIn(dirFor: (repo: string) => string | null, checks: Acceptance[] | undefined): { correct: boolean | null; regression: boolean | null } {
+  if (!checks) return { correct: null, regression: null };
+  let regression = false;
   for (const c of checks) {
-    const ws = (await q(pool, "SELECT path FROM execution_workspaces WHERE run_id = $1 AND repo = $2 ORDER BY id DESC LIMIT 1", [runId, c.repo]))[0];
-    if (!ws) return false; // nothing was changed in that repository
-    writeFileSync(join(ws.path, c.file), c.code);
+    const dir = dirFor(c.repo);
+    if (!dir) return { correct: false, regression: null }; // nothing was changed in that repository
+    regression ||= regressionIn(dir);
+    writeFileSync(join(dir, c.file), c.code);
     try {
-      execFileSync("bash", ["-lc", `go test -count=1 -run Acceptance ${c.pkg}`], { cwd: ws.path, stdio: "pipe", timeout: 300_000 });
+      execFileSync("bash", ["-lc", `go test -count=1 -run Acceptance ${c.pkg}`], { cwd: dir, stdio: "pipe", timeout: 300_000 });
     } catch {
-      return false;
+      return { correct: false, regression };
     }
   }
-  return true;
+  return { correct: true, regression };
+}
+async function acceptance(runId: number, checks: Acceptance[] | undefined) {
+  const ws = await q(pool, "SELECT repo, path FROM execution_workspaces WHERE run_id = $1 ORDER BY id DESC", [runId]);
+  return gradeIn((repo) => ws.find((w: any) => w.repo === repo)?.path ?? null, checks);
 }
 
 const SCENARIOS: Record<string, { name: string; workflow: string; task: Record<string, unknown>; repositories?: string[] }> = {
@@ -152,7 +168,7 @@ async function drive(runId: number, timeoutMs: number) {
 
 const results: any[] = [];
 let seq = 0;
-for (const sk of pick(args.scenarios, Object.keys(SCENARIOS))) {
+for (const sk of args.candidate === "claude-cli" ? [] : pick(args.scenarios, Object.keys(SCENARIOS))) {
   const sc = SCENARIOS[sk];
   for (const profile of pick(args.profiles, ["AUTO", "STANDARD"])) {
     const { item } = await importHasakiTask({ data: { id: 777000 + ++seq, code: `BENCH-${sk}-${profile}-${seq}`, project: { name: "BENCH" }, ...sc.task } });
@@ -175,14 +191,68 @@ for (const sk of pick(args.scenarios, Object.keys(SCENARIOS))) {
                                          string_agg(DISTINCT a.metrics->'verification'->>'outcome', ',') AS outcomes
                                     FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.type = 'coding_agent'`, [run.id]))[0];
       const gates = (await q(pool, "SELECT count(*)::int AS n FROM workflow_steps WHERE run_id = $1 AND type IN ('human_approval', 'human_input') AND status = 'COMPLETED'", [run.id]))[0].n;
-      Object.assign(row, { correct: await acceptance(run.id, ACCEPT[sk]), verify_passed: v.passed, verify_rounds: v.rounds, repairs: v.repairs, verify_outcomes: v.outcomes, human_gates: gates + qs });
+      const graded = await acceptance(run.id, ACCEPT[sk]);
+      const iv = (await q(pool, "SELECT output->>'verdict' AS verdict FROM workflow_steps WHERE run_id = $1 AND output ? 'verdict' ORDER BY position DESC LIMIT 1", [run.id]))[0];
+      const ivFails = (await q(pool, "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE run_id = $1 AND output->>'verdict' = 'FAIL'", [run.id]))[0].n;
+      Object.assign(row, { correct: graded.correct, regression: graded.regression, verdict: iv?.verdict ?? null, verify_passed: v.passed, verify_rounds: v.rounds, repairs: v.repairs + ivFails, verify_outcomes: v.outcomes, human_gates: gates + qs });
       Object.assign(row, { run_id: run.id, status, wall_s: Math.round(m.wall_ms / 1000), claude_sessions: m.totals.claude_sessions, claude_s: Math.round(m.totals.claude_ms / 1000), turns: diff.turns, tool_calls: m.totals.tool_calls, input_tokens: m.totals.input_tokens, output_tokens: m.totals.output_tokens, cache_read_tokens: m.totals.cache_read_tokens, cost_usd_est: m.totals.cost_usd, test_s: Math.round(m.totals.command_ms / 1000) });
     }
     results.push(row);
     console.log(JSON.stringify(row));
   }
 }
+// ---------------------------------------------------------------- candidate: Claude Code CLI on the same fixtures
+// Same task text, a clean clone of the fixture repo, no hidden tests on disk; graded afterwards exactly like the platform.
+if (args.candidate === "claude-cli") {
+  for (const sk of pick(args.scenarios, Object.keys(SCENARIOS))) {
+    const sc = SCENARIOS[sk];
+    const repo = sc.repositories?.[0] ?? ACCEPT[sk]?.[0]?.repo;
+    if (!repo || (sc.repositories?.length ?? 0) > 1) {
+      console.log(`skip ${sk}: the CLI candidate runs single-repository scenarios`);
+      continue;
+    }
+    const dir = mkdtempSync(join(tmpdir(), `cli-${sk}-`));
+    execFileSync("git", ["clone", "-q", join(repos, repo), dir]);
+    const prompt = `${sc.task.name}\n\n${sc.task.note}\n\nChange the code in this repository to complete the task, keep the change minimal, run the tests, and commit.`;
+    const t0 = Date.now();
+    let out: any = {};
+    let status = "COMPLETED";
+    try {
+      const raw = execFileSync("claude", ["-p", prompt, "--output-format", "json", "--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Grep,Glob,Bash(go test:*),Bash(go build:*),Bash(git:*)"], { cwd: dir, encoding: "utf8", timeout: Number(args.timeout ?? 1_200_000), maxBuffer: 64 << 20 });
+      out = JSON.parse(raw.trim().split("\n").pop() ?? "{}");
+      if (out.is_error) status = "FAILED";
+    } catch (e) {
+      status = (e as any).signal === "SIGTERM" ? "TIMEOUT" : "ERROR";
+    }
+    const graded = gradeIn((r) => (r === repo ? dir : null), ACCEPT[sk]);
+    const row = { scenario: `${sk}. ${sc.name}`, candidate: "claude-cli", status, correct: graded.correct, regression: graded.regression, wall_s: Math.round((Date.now() - t0) / 1000), cost_usd_est: out.total_cost_usd ?? null, turns: out.num_turns ?? null, output_tokens: out.usage?.output_tokens ?? null };
+    results.push(row);
+    console.log(JSON.stringify(row));
+  }
+}
+
 writeFileSync(join(root, "bench-results.json"), JSON.stringify(results, null, 2));
+
+// ---------------------------------------------------------------- persist to the MAIN database (Insights → Evals)
+if (live || args.candidate) {
+  const main = new pg.Client({ connectionString: admin });
+  try {
+    await main.connect();
+    for (const r of results) {
+      if (!("status" in r)) continue;
+      await main.query(
+        `INSERT INTO eval_results (suite, scenario, candidate, profile, status, correct, regression, verdict, repairs, human_gates, wall_s, cost_usd, tokens, run_id, data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        [String(args.suite ?? "bench-v2"), r.scenario, r.candidate ?? "platform", r.candidate ? null : r.profile, r.status, r.correct ?? null, r.regression ?? null, r.verdict ?? null, r.repairs ?? 0, r.human_gates ?? 0, r.wall_s ?? null, r.cost_usd_est ?? null, (Number(r.input_tokens ?? 0) + Number(r.output_tokens ?? 0)) || null, r.run_id ?? null, JSON.stringify(r)],
+      );
+    }
+    console.log(`persisted ${results.filter((r) => "status" in r).length} result(s) to eval_results`);
+  } catch (e) {
+    console.log(`could not persist eval results (run migrations on the main database first): ${(e as Error).message}`);
+  } finally {
+    await main.end().catch(() => {});
+  }
+}
 console.log("\n" + ["scenario", "requested", "profile", "steps", "ai_steps", ...(live ? ["status", "correct", "verify", "repairs", "human", "worktrees", "questions", "prs", "wall_s", "claude_s", "test_s", "claude_sessions", "turns", "tool_calls", "out_tok", "cost≈$"] : [])].join(" | "));
 for (const r of results)
   console.log([r.scenario, r.requested, r.profile, r.steps, r.ai_steps, ...(live ? [r.status, r.correct ?? "n/a", r.verify_passed ?? "n/a", r.repairs, r.human_gates, r.worktrees, r.questions, r.prs, r.wall_s, r.claude_s, r.test_s, r.claude_sessions, r.turns, r.tool_calls, r.output_tokens, r.cost_usd_est] : [])].join(" | "));

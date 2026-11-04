@@ -4,6 +4,8 @@ import { knowledge } from "../knowledge/service.ts";
 import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
 import { planKnowledge, planUpstream, type DisclosureEntry, type UpstreamPlanEntry } from "../context/plan.ts";
 import { repoPath } from "../repos/service.ts";
+import { independentUpstream, isIndependent } from "../agent/independentReview.ts";
+import { isStale } from "../knowledge/memory.ts";
 import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
 import { createHash } from "node:crypto";
@@ -95,6 +97,12 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
     ]))
       upstream[s.key] = { status: s.status, attempt_id: s.current_attempt_id, output: s.output };
   }
+  // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
+  if (isIndependent(step.config)) {
+    const filtered = independentUpstream(run.graph.steps, upstream);
+    for (const k of Object.keys(upstream)) if (!(k in filtered)) delete upstream[k];
+    Object.assign(upstream, filtered);
+  }
   const answers = await q(
     c,
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",
@@ -174,6 +182,19 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     res.applied = res.applied.filter((k) => k.key !== p.key);
     if (v) res.applied.push({ ...v, reason: `selected for this re-execution (v${p.version})` });
   }
+  // Cross-task memory: never untrusted conclusions (they are disabled until approved), never stale items.
+  const memoryStale: string[] = [];
+  const memoryItems = res.applied.filter((k) => k.category === "task_memory");
+  if (memoryItems.length) {
+    const repoRows = await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
+    for (const k of memoryItems) {
+      const m = (k.metadata as any)?.memory;
+      const trusted = m && (m.trust === "verified" || m.trust === "approved");
+      const row = repoRows.find((r) => r.name === m?.repo);
+      if (!trusted || (row && (await isStale(m, repoPath(row))))) memoryStale.push(k.key);
+    }
+    res.applied = res.applied.filter((k) => !memoryStale.includes(k.key));
+  }
   const rankText = [requestText(input), step.name, String(cfg.instructions ?? ""), String(input.pending?.reexecute?.instructions ?? "")].join("\n");
   const disclosure = planKnowledge(res.applied, {
     requestText: rankText,
@@ -199,6 +220,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
       delegation: cfg.delegation?.enabled === true,
       // The checks this attempt is held to (coding steps): audit trail for "why did it (not) complete".
       verification: step.type === "coding_agent" ? verificationPlan(cfg) : null,
+      memory_excluded: memoryStale,
     },
     project,
     repositories,

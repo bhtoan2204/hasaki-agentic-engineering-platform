@@ -49,6 +49,12 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
           `- Verification gate: after you call submit_result the platform runs the workflow's verification (build + tests of the packages you changed, baseline-aware: failures that also exist on origin/${config.baseBranch} are not yours) in every worktree. The step only completes when it passes; failures come back to you to fix (at most ${verifyConfig(cfg, TEST_COMMAND)!.maxRepairs} repair round(s)). Run the relevant tests yourself before submitting, and never delete, skip or weaken tests to make them pass.`,
         ]
       : []),
+    ...(cfg.independent === true
+      ? [
+          `- INDEPENDENT VERIFICATION: you are a fresh verifier, not the author. Judge the change only against the original request, the analysed requirements/acceptance criteria, the applicable rules in your context, the platform-collected git diff and real test evidence. The coding agent's explanations were deliberately withheld; never treat a claim as evidence — confirm it in the code (read files, git diff/log/show) or in test output.`,
+          `- Return via submit_result exactly: { verdict: "PASS" | "FAIL" | "BLOCKED", findings: [{ severity: "high"|"medium"|"low", file, line, explanation, evidence }], summary, blocked_reason? }. FAIL only for concrete, fixable defects (wrong behaviour, missing requirement, broken/absent test for changed logic, security/data risk) — each with file, line and the evidence you saw. BLOCKED when you cannot decide without information you cannot obtain (say exactly what is missing). Style nits are "low" and never cause FAIL.`,
+        ]
+      : []),
     `- Be economical with tools: start from the code locations listed in the prompt, use Grep with a path/glob and Read with offset/limit instead of scanning whole repositories, run independent reads in parallel, and do not re-read files whose content you already have.`,
     `- When done, call mcp__platform__submit_result exactly once with the step output object, then end your turn.`,
     "",

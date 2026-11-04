@@ -5,6 +5,8 @@ import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasa
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
 import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
 import { knowledge } from "../knowledge/service.ts";
+import { reviewMemory } from "../knowledge/memory.ts";
+import { summarizeEval } from "../eval/summary.ts";
 import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
 import { rankRepositories, repositories, isAmbiguous } from "../repos/service.ts";
@@ -231,6 +233,14 @@ export const routes: Route[] = [
       return { used, assigned };
     },
   ],
+  // Cross-task memory: a human promotes (or rejects) agent conclusions; nothing else makes them trusted.
+  ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/approve$/, ({ p, body }) => reviewMemory(p[0], "approve", String(body.by ?? ""))],
+  ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/reject$/, ({ p, body }) => reviewMemory(p[0], "reject", String(body.by ?? ""))],
+  ["GET", /^\/api\/evals$/, async ({ url }) => {
+    const suite = url.searchParams.get("suite");
+    const rows = await q(pool, `SELECT * FROM eval_results WHERE ($1::text IS NULL OR suite = $1) ORDER BY id DESC LIMIT 500`, [suite]);
+    return { rows, summary: summarizeEval(rows as any) };
+  }],
   ["GET", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, async ({ p }) => must(await knowledge.get(p[0]), "knowledge item")],
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, ({ p, body }) => knowledge.update(p[0], body)],
 

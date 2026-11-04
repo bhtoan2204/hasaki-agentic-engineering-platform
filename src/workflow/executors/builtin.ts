@@ -7,6 +7,7 @@ import { getPath } from "../graph.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
 import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
+import { headOf, staleVerification } from "../../agent/independentReview.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -389,6 +390,15 @@ export const pullRequestExecutor: StepExecutor = {
     const provider = gitProvider();
     const code = ctx.input.work_item?.code;
     const out: any[] = [];
+    // An independent PASS covers exactly the commits it judged: refuse to publish anything that changed afterwards.
+    const verified = Object.values(ctx.input.upstream).filter((u) => u.output?.independent === true && u.output?.verdict === "PASS" && u.output?.verified_heads);
+    if (verified.length) {
+      const current: Record<string, string> = {};
+      for (const w of workspaces) current[w.repo] = await headOf(w.path).catch(() => "");
+      const stale = verified.flatMap((u) => staleVerification(u.output.verified_heads, current));
+      if (stale.length)
+        return { kind: "failed", error: `implementation changed after independent verification in ${[...new Set(stale)].join(", ")} — re-execute the verification step before opening the PR`, retryable: false };
+    }
     for (const w of workspaces) {
       if (!ctx.run.selected_repositories.includes(w.repo)) {
         await ctx.log("system", `skip PR for ${w.repo}: not in the run's selected repositories`);

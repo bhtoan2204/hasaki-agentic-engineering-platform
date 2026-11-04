@@ -265,6 +265,8 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
         {tab === "overview" && (
           <div>
             {verification && <VerificationCard v={verification} />}
+            {(attempt?.output?.verdict || attempt?.error?.details?.verdict) && <VerdictCard v={attempt.output?.verdict ? attempt.output : attempt.error.details} />}
+            {attempt?.error?.failure && <FailureCard f={attempt.error.failure} />}
             {step.type === "command" && <TestFailurePanel attempts={attempts} questions={questions} current={attempt} step={step} />}
             {step.type === "command" && <BaselineSummary results={(attempt?.output ?? attempt?.error?.details)?.results} />}
             {attempt?.metrics && <AttemptMetrics m={attempt.metrics} />}
@@ -348,7 +350,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
                         )}
                       </td>
                       <td className="small">{time(a.started_at)}</td><td className="small">{time(a.finished_at)}</td><td className="mono small">{(a.worker ?? "").split(":").slice(-1)[0]}</td>
-                      <td className="err small">{a.error?.message}</td>
+                      <td className="err small">{a.error?.failure && <span className="pill" title={a.error.failure.reason}>{a.error.failure.class} → {a.error.failure.action}</span>} {a.error?.message}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -813,6 +815,47 @@ export function Artifacts({ artifacts }: { artifacts: any[] }) {
           {data.data && <JsonBlock value={data.data} title="Data" />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Independent verification verdict (fresh-session verifier; enforced before the PR). */
+function VerdictCard({ v }: { v: any }) {
+  const tone = v.verdict === "PASS" ? "COMPLETED" : v.verdict === "FAIL" ? "FAILED" : "WAITING_INPUT";
+  const findings = (v.findings ?? []) as any[];
+  return (
+    <div className="card" style={{ borderLeft: `4px solid var(${v.verdict === "PASS" ? "--st-ok" : v.verdict === "FAIL" ? "--st-err" : "--st-wait"})` }}>
+      <div className="card-head"><h4>Independent verification</h4><Badge s={tone}>{v.verdict}</Badge></div>
+      <div className="small muted">Fresh session · coding agent's claims withheld · judged {Object.entries(v.verified_heads ?? {}).map(([r, sha]) => `${r}@${String(sha).slice(0, 9)}`).join(", ") || "—"}</div>
+      {v.summary && <p className="small">{v.summary}</p>}
+      {v.blocked_reason && <p className="small" style={{ color: "var(--st-wait)" }}>Blocked: {v.blocked_reason}</p>}
+      {findings.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead><tr><th>Severity</th><th>Location</th><th>Finding</th><th>Evidence</th></tr></thead>
+            <tbody>
+              {findings.map((f, i) => (
+                <tr key={i}>
+                  <td><Badge s={f.severity === "high" ? "FAILED" : f.severity === "medium" ? "WAITING" : "PENDING"}>{f.severity}</Badge></td>
+                  <td className="mono small">{f.file}{f.line ? `:${f.line}` : ""}</td>
+                  <td className="small">{f.explanation}</td>
+                  <td className="small muted">{f.evidence}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Failure classification and the recovery decision the engine took. */
+function FailureCard({ f }: { f: any }) {
+  return (
+    <div className="card tight" style={{ borderLeft: "4px solid var(--st-err)" }}>
+      <div className="row tight"><b className="small">Failure: {f.class}</b><span className="pill">{f.action === "retry" ? `retry in ${f.delay_s}s` : f.action === "human" ? "paused for a human" : "stopped"}</span></div>
+      <div className="small muted">{f.reason}</div>
     </div>
   );
 }

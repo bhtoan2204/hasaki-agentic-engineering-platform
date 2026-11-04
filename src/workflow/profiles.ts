@@ -108,9 +108,30 @@ export class ProfileNotApplicable extends Error {}
 export function applyProfile(spec: WorkflowSpec, profile: Profile): { spec: WorkflowSpec; changes: ProfileChange[] } {
   const changes: ProfileChange[] = [];
   const clone = (): StepSpec[] => spec.steps.map((s) => ({ ...s, depends_on: [...s.depends_on], config: { ...s.config } }));
-  if (profile === "STANDARD") return { spec, changes };
+  // Reviews after a coding step become independent verifiers (fresh session, no author claims, enforced verdict).
+  // STANDARD: unless the workflow opts out (independent: false). DEEP: always, and strict (needs real test evidence).
+  // Only steps that ARE reviews (by key/name or a verdict-style output contract) — other downstream agents still need the author's output.
+  const looksLikeReview = (s: StepSpec) => /review|verif|audit|\bqa\b/i.test(`${s.key} ${s.name ?? ""}`) || /\b(approved|verdict)\b/.test(String(s.config.output_contract ?? ""));
+  const verifierKeys = new Set(spec.steps.filter((s) => s.type === "agent" && looksLikeReview(s) && spec.steps.some((c) => c.type === "coding_agent" && downstream(spec.steps, c.key).has(s.key))).map((s) => s.key));
+  const markIndependent = (steps: StepSpec[], strict: boolean) => {
+    for (const s of steps) {
+      if (!verifierKeys.has(s.key)) continue;
+      if (!strict && s.config.independent === false) continue;
+      if (s.config.independent === true && !strict) continue;
+      s.config.independent = true;
+      if (strict) s.config.strict = true;
+      changes.push({ step: s.key, action: "modified", detail: strict ? "independent verification required (fresh session, strict: needs test evidence)" : "independent verification (fresh session, verdict enforced before the PR)" });
+    }
+  };
+  if (profile === "STANDARD") {
+    if (!verifierKeys.size) return { spec, changes };
+    const steps = clone();
+    markIndependent(steps, false);
+    return { spec: changes.length ? { ...spec, steps } : spec, changes };
+  }
   if (profile === "DEEP") {
     const steps = clone();
+    markIndependent(steps, true);
     for (const s of steps) {
       if (s.type === "human_approval" && s.config.auto_approve_unambiguous) {
         delete s.config.auto_approve_unambiguous;

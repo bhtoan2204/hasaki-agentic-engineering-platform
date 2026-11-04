@@ -16,10 +16,11 @@ const CATS: Array<[string, string]> = [
   ["domain_knowledge", "Domain"],
   ["security_policy", "Security"],
   ["agent_skill", "Skills"],
+  ["task_memory", "Task memory"],
 ];
 const CAT_ICON: Record<string, LucideIcon> = {
   "": Layers, business_rule: Landmark, architecture_guideline: Building2, coding_standard: Code2, repository_convention: FolderGit2,
-  domain_knowledge: BookMarked, security_policy: Shield, agent_skill: Sparkles,
+  domain_knowledge: BookMarked, security_policy: Shield, agent_skill: Sparkles, task_memory: History,
 };
 const catLabel = (c: string) => CATS.find(([k]) => k === c)?.[1] ?? c;
 const SCOPES = ["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY", "WORKFLOW", "STEP"];
@@ -333,6 +334,7 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
       <div className="card kn-body">
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
+        {tab === "overview" && !isNew && cur?.metadata?.memory && <MemoryProvenance itemKey={item.key} m={cur.metadata.memory} onDone={reload} />}
         {tab === "overview" && !isNew && (
           <div className="kn-overview">
             <Section icon={FileText} title={item.category === "agent_skill" ? "Skill instructions" : "Nội dung"} aside={<span className="muted small">v{cur?.version ?? item.current_version}</span>}>
@@ -463,6 +465,36 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Cross-task memory provenance + the explicit human promotion step (only path to trusted agent conclusions). */
+function MemoryProvenance({ itemKey, m, onDone }: { itemKey: string; m: any; onDone: () => void }) {
+  const [by, setBy] = useState("");
+  const tone = m.trust === "verified" || m.trust === "approved" ? "COMPLETED" : m.trust === "rejected" ? "FAILED" : "WAITING";
+  const decide = async (d: "approve" | "reject") => {
+    if (await act(() => api(`/api/knowledge/${itemKey}/${d}`, { by }), d === "approve" ? "Đã duyệt — được nạp vào context của task sau" : "Đã từ chối")) onDone();
+  };
+  return (
+    <div className="card" style={{ borderLeft: `4px solid var(${tone === "COMPLETED" ? "--st-ok" : tone === "FAILED" ? "--st-err" : "--st-wait"})` }}>
+      <div className="card-head"><h4>Task memory provenance</h4><Badge s={tone}>{m.trust}</Badge><span className="pill">confidence: {m.confidence}</span></div>
+      <div className="kv small">
+        <span>Run</span><span><a href={`#/runs/${m.run_id}`}>#{m.run_id}</a> {m.work_item ?? ""}</span>
+        <span>Repository</span><span className="mono">{m.repo} @ {String(m.commit_sha ?? "").slice(0, 12)} (base {m.base_branch})</span>
+        <span>Files</span><span className="mono">{(m.files ?? []).slice(0, 8).join(", ") || "—"}</span>
+        <span>Sources</span><span>{(m.sources ?? []).join(", ")}</span>
+        <span>Extracted</span><span>{time(m.extracted_at)}</span>
+        {m.approved_by && <><span>Reviewed by</span><span>{m.approved_by} · {time(m.approved_at)}</span></>}
+      </div>
+      {m.trust === "unverified" && (
+        <div className="row">
+          <span className="small muted grow">Kết luận của agent chưa được kiểm chứng: không bao giờ nạp vào context cho tới khi được duyệt.</span>
+          <input style={{ width: 180 }} placeholder="Tên người duyệt" value={by} onChange={(e) => setBy(e.target.value)} aria-label="Tên người duyệt" />
+          <button className="sm ok" disabled={!by.trim()} onClick={() => decide("approve")}>Duyệt</button>
+          <button className="sm ghost" disabled={!by.trim()} onClick={() => decide("reject")}>Từ chối</button>
+        </div>
+      )}
     </div>
   );
 }

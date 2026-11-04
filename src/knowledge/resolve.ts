@@ -19,6 +19,8 @@ export const CATEGORIES = [
   "security_policy",
   "agent_skill",
   "repository_convention",
+  /** Knowledge extracted from completed runs (see knowledge/memory.ts). */
+  "task_memory",
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 

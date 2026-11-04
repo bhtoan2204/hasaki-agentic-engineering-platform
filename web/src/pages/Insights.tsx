@@ -192,6 +192,7 @@ export function InsightsPage() {
       </div>
 
       {ev && <HarnessEvaluation e={ev} />}
+      <EvalComparison />
 
       <div className="ins-grid">
         <Panel
@@ -389,5 +390,42 @@ function RepeatedFailures({ rows }: { rows: any[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Benchmark results (eval_results): candidates × profiles, graded by hidden acceptance tests. */
+function EvalComparison() {
+  const { data } = useApi<any>("/api/evals");
+  const groups = (data?.summary ?? []) as any[];
+  const v = (x: any, suffix = "") => (x == null ? "—" : `${x}${suffix}`);
+  return (
+    <section className="card" style={{ marginTop: 16 }}>
+      <div className="card-head"><h4>Benchmark comparison</h4><span className="sub">npm run bench -- --live · hidden acceptance tests · candidates and profiles</span></div>
+      {!groups.length ? (
+        <div className="muted small">Chưa có kết quả benchmark. Chạy <span className="kbd">npm run bench -- --live --profiles=FAST,STANDARD,DEEP</span> (và <span className="kbd">--candidate=claude-cli</span>) để so sánh.</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Candidate / profile</th><th>Runs</th><th>Success</th><th>Regression</th><th>Verifier accuracy</th><th>False pass / alarm</th><th>Repair success</th><th>Human</th><th>Avg time</th><th>Avg cost</th></tr></thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr key={g.group}>
+                  <td><b>{g.group}</b></td>
+                  <td className="mono">{g.runs}</td>
+                  <td className="mono">{v(g.success_rate_pct, "%")} <span className="muted small">({g.graded} graded)</span></td>
+                  <td className="mono">{v(g.regression_rate_pct, "%")}</td>
+                  <td className="mono">{g.verifier ? `${g.verifier.accuracy_pct}% of ${g.verifier.judged}` : "—"}</td>
+                  <td className="mono">{g.verifier ? `${g.verifier.false_pass} / ${g.verifier.false_alarm}` : "—"}</td>
+                  <td className="mono">{v(g.repair_success_pct, "%")}</td>
+                  <td className="mono">{v(g.human_intervention_pct, "%")}</td>
+                  <td className="mono">{v(g.avg_wall_s, "s")}</td>
+                  <td className="mono">{g.avg_cost_usd == null ? "—" : `$${g.avg_cost_usd}`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

@@ -189,3 +189,69 @@ outcome, repairs and human gates per run.
   `accepted_preexisting`, `errors`, `needs_review`, `disabled`.
 - Repair budget: rounds are kept in the waiting-input checkpoint, so a pause during a repair does not reset it. The
   budget is per attempt; a new attempt (re-execute / engine retry) starts a fresh loop.
+
+## Independent verification (reviews after a coding step)
+
+`src/agent/independentReview.ts`; enabled by the execution profile (`src/workflow/profiles.ts`):
+FAST drops AI review (unchanged, tests + PR approval remain) · STANDARD marks review steps after a coding step
+`independent: true` (a workflow can opt out with `independent: false`) · DEEP always, plus `strict: true` (BLOCKED
+without real test evidence). Only steps that are reviews (key/name review|verify|audit|qa or a verdict/approved
+output contract) are affected — other downstream agents still read the author's output.
+
+- **Isolation**: fresh Claude session (never resumed); `buildStepInput` filters upstream so coding steps contribute
+  only their platform `verification` record and other post-coding agents are dropped. The verifier gets the request,
+  pre-implementation analysis, applicable knowledge, a platform-collected `git diff` (+ HEAD per repo, untrusted) and
+  real test outputs.
+- **Verdict**: `{ verdict: PASS | FAIL | BLOCKED, findings[{severity, file, line, explanation, evidence}], summary }`.
+  Malformed output → BLOCKED; FAIL without a high/medium finding is not actionable (→ PASS if only style nits,
+  BLOCKED if empty). Legacy `{ approved }` maps to PASS/FAIL.
+- **Enforcement**: PASS completes (records `verified_heads`). FAIL → `reexecute` of the workflow's feedback step (or the
+  nearest coding step) with the findings, which re-runs tests and a fresh verification; at most `max_repairs` (default
+  2) FAIL rounds per step per run, then the step fails and the PR never runs. BLOCKED → a question to the developer.
+- **Stale results**: the PR step compares each worktree's HEAD with the last PASS's `verified_heads` and refuses to
+  publish code that changed after verification.
+
+## Failure recovery
+
+`src/workflow/failures.ts`, applied in `engine.applyResult` to every failed attempt (stored as `error.failure`):
+
+| class | action |
+|---|---|
+| transient (network, 5xx, lease expiry) | retry with exponential backoff (base `retry_backoff_seconds`, cap 15 min), bounded by `max_attempts` |
+| rate_limit (429, overloaded) | retry with backoff, base ≥ 30 s, at least 3 attempts, then stop |
+| code (tests/build/verification) | the executor's decision (repair loops live in the executors) |
+| missing_requirements, workspace (git conflict, branch checked out elsewhere, dirty worktree) | pause: a question; "Dừng…/Stop" fails the step, any other answer runs it again |
+| auth (401/403, bad credentials) | stop at once |
+| no_progress (same failures twice) | stop |
+
+Leases, fencing tokens, idempotent jobs and the step state machine are unchanged (new transition WAITING_INPUT → FAILED
+for "stop").
+
+## Cross-task memory
+
+`src/knowledge/memory.ts`, category `task_memory` (migration 011), scope REPOSITORY, `load: on_demand` (index only,
+top-N by relevance — no history dump). On run COMPLETED: `memory.run-<id>.<repo>.facts` (trust `verified`, enabled:
+changed files, commit, verification/test outcomes) and `…conclusions` (trust `unverified`, disabled: quoted agent
+summaries/decisions). `POST /api/knowledge/:key/approve|reject {by}` is the only promotion path. Context resolution
+loads only `verified`/`approved` memory and drops items whose files changed on the base branch since their commit
+(`prompt_plan.memory_excluded`). No vector database.
+
+## Evaluation
+
+`npm run bench -- --live --profiles=FAST,STANDARD,DEEP [--candidate=claude-cli] [--suite=…]` → `eval_results`
+(main DB) → `GET /api/evals` → Insights "Benchmark comparison". Correctness = hidden acceptance tests written into the
+worktree only after the candidate finished; regression = the fixture's own tests; verifier accuracy is verdict-level
+(false pass / false alarm vs. acceptance). The Claude Code CLI candidate runs on a clean clone of the same fixture with
+the same task text.
+
+## Model routing
+
+`config.agent.models` (`{ profile|"*": { stepType|"verifier": model } }`), resolved by `modelFor`: step config →
+profile route → `*` route → `config.model` → SDK default; `metrics.model` + `metrics.model_source` record the choice.
+Empty by default (no behaviour change, no model ids in code).
+
+## Retrieval (audited, not changed)
+
+Measured over all recorded attempts: Grep 242 calls / 0.04 s avg / 0.2 min total, Read 186 / 0.02 s / 0.1 min, vs
+Bash (builds/tests) 50.5 min. Retrieval is not a measurable bottleneck, so no symbol index or embeddings were added;
+the existing file-reference handoff between steps stays.
