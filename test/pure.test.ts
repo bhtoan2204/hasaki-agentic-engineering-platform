@@ -583,3 +583,22 @@ test("assignments inside loop bodies are read-only (run 9: do b=$(git … | grep
   assert.deepEqual(decideBash(real, A), { allow: true });
   for (const c of [`for r in a b; do b=$(touch x); done`, `for r in a b; do X=1 touch "$r"; done`, `for r in a b; do b=1; rm "$r"; done`]) assert.equal(decideBash(c, A).allow, false, c);
 });
+
+test("scratch worktrees under /tmp may be created from the primary checkout (coding only), never with a new branch", () => {
+  const ctx: PolicyContext = { mode: "coding", workspaces: ["/data/worktrees/HSK-30/oms-api"], baseBranch: "release/prod", protectedRoots: ["/home/me/src"] };
+  const ws = "/data/worktrees/HSK-30/oms-api";
+  for (const c of [
+    "git -C /home/me/src/oms-src/oms-api worktree add -q --detach /tmp/hsk30-base origin/release/prod",
+    "git -C /home/me/src/oms-src/oms-api worktree add -q --detach /tmp/hsk30-base origin/release/prod && cd /tmp/hsk30-base && go test ./app/... > /tmp/base.log 2>&1; git -C /home/me/src/oms-src/oms-api worktree remove --force /tmp/hsk30-base",
+  ])
+    assert.deepEqual(decideBash(c, ctx, ws), { allow: true }, c);
+  for (const c of [
+    "git -C /home/me/src/oms-src/oms-api worktree add -b scratch /tmp/x origin/release/prod", // creates a branch
+    "git -C /home/me/src/oms-src/oms-api worktree add --detach /home/me/src/oms-src/other HEAD", // not under /tmp
+    "git -C /home/me/src/oms-src/oms-api worktree add --detach /tmp/x HEAD && touch /home/me/src/oms-src/oms-api/f", // other write still caught
+    "cd /home/me/src/oms-src/oms-api && git worktree add --detach /tmp/x HEAD && git commit -am x",
+  ])
+    assert.equal(decideBash(c, ctx, ws).allow, false, c);
+  // analysis steps stay strictly read-only
+  assert.equal(decideBash("git -C /home/me/src/oms-src/oms-api worktree add -q --detach /tmp/x HEAD", { ...ctx, mode: "analysis", workspaces: [] }).allow, false);
+});

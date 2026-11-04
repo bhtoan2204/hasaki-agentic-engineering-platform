@@ -265,7 +265,7 @@ const scanText = (p: ShellParse) => [p.code, ...p.heredocs.filter((h) => !h.data
 const harmlessRedirect = (t: string) => t === "/dev/null" || t === "&/dev/null" || /^&[0-9-]$/.test(t);
 
 /** null = read-only; otherwise the first offending segment / reason. */
-function readOnlyViolation(command: string): string | null {
+function readOnlyViolation(command: string, allow: (seg: string) => boolean = () => false): string | null {
   const p = parseShell(command);
   if (p.error) return `cannot parse safely: ${p.error}`;
   const bad = p.redirects.find((r) => !harmlessRedirect(r.target));
@@ -289,6 +289,7 @@ function readOnlyViolation(command: string): string | null {
   const loop = loopStructure(commands.map((c) => c.s));
   if ("error" in loop) return loopUnsupported(loop.error);
   for (const cmd of loop.commands) {
+    if (allow(cmd)) continue;
     // VAR=value only sets a shell variable (also inside loop bodies: `do b=$(…)`); VAR=value cmd … runs cmd
     if (/^([A-Za-z_]\w*=\S*\s*)+$/.test(cmd)) continue;
     const s = cmd.replace(/^([A-Za-z_]\w*=\S*\s+)+/, "").replace(/^cd\s+\S+\s*$/, "pwd");
@@ -455,6 +456,21 @@ export function packageInstallViolation(p: ShellParse, dirs: Array<string | unde
 }
 
 /**
+ * A scratch worktree: `git [-C repo] worktree add [--detach|-f|-q…] <path under /tmp> [<commit-ish>]` without creating a
+ * branch (-b/-B), or `worktree remove` of such a path. It only writes under /tmp (plus git's own worktree bookkeeping
+ * in the repository's .git), never the checkout's files — agents use it to run tests on the base commit.
+ */
+export function isScratchWorktreeOp(seg: string): boolean {
+  const m = seg.match(/^git\s+(?:-C\s+\S+\s+)?worktree\s+(add|remove)\s+(.*)$/);
+  if (!m) return false;
+  const args = m[2].trim().split(/\s+/);
+  if (args.some((a) => /^-(b|B)$/.test(a) || a.startsWith("--orphan"))) return false;
+  const path = args.find((a) => !a.startsWith("-"));
+  if (!path || /[$`~]/.test(path) || !path.startsWith("/")) return false;
+  return TEMP_ROOTS().some((r) => strictlyInside(resolve(path.replace(/^['"]|['"]$/g, "")), r));
+}
+
+/**
  * `git worktree remove` is allowed only for scratch worktrees under /tmp or $TMPDIR (e.g. a detached checkout the agent
  * made to run tests on the base commit). The run's own worktrees and any repository checkout stay off-limits.
  */
@@ -518,7 +534,16 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     });
     const pkgWrite = packageInstallViolation(p, dirs, ctx.workspaces);
     if (pkgWrite) return deny(pkgWrite);
-    const touched = [...(cwd && primary(cwd) ? [cwd] : []), ...dirs.filter((d): d is string => !!d && primary(d)), ...pathsIn(command).filter((x) => primary(x) && !readSources.has(resolve(x)))];
+    p.segments.forEach((seg) => {
+      const c = seg.match(/^git\s+-C\s+(\S+)\s+worktree\s/);
+      if (c && isScratchWorktreeOp(seg)) readSources.add(resolve(expandHome(c[1])));
+    });
+    const scratchOnly = (i: number) => isScratchWorktreeOp(p.segments[i] ?? "");
+    const touched = [
+      ...(cwd && primary(cwd) && !p.segments.every((seg, i) => scratchOnly(i) || readOnlyViolation(seg) === null) ? [cwd] : []),
+      ...dirs.filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i)),
+      ...pathsIn(command).filter((x) => primary(x) && !readSources.has(resolve(x))),
+    ];
     // Literal variables assigned in the same command (`L=/abs/dir; … > $L-lint.log`) are expanded for redirect checks.
     const vars = new Map<string, string>();
     for (const seg of p.segments) {
@@ -537,7 +562,7 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       if (primary(abs)) touched.push(abs);
     }
     if (touched.length) {
-      const v = readOnlyViolation(command);
+      const v = readOnlyViolation(command, isScratchWorktreeOp);
       if (v)
         return deny(
           `${touched[0]} is a primary checkout and is read-only (${v}). Call mcp__platform__prepare_branch and run modifying commands inside the returned worktree` +
