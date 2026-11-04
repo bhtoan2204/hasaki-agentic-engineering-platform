@@ -1,4 +1,4 @@
-import { pool, q } from "../db/pool.ts";
+import { pool, q, one } from "../db/pool.ts";
 
 /** Observability queries over workflow_step_attempts.metrics (+ timestamps for every step type). */
 
@@ -129,5 +129,49 @@ export async function metricsSummary(days = 30) {
                FROM workflow_step_attempts a, jsonb_array_elements(COALESCE(a.metrics->'denied', '[]'::jsonb)) d
               WHERE a.started_at > ${since} GROUP BY 1, 2 ORDER BY times DESC LIMIT 25`),
   ]);
-  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied };
+  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation: await harnessEvaluation(since) };
+}
+
+/**
+ * Harness evaluation (kept apart from execution status): did coding steps pass the platform's own verification, how
+ * many repairs it took, which failures keep recurring, and how often a human had to step in.
+ */
+export async function harnessEvaluation(since: string) {
+  const [verification, patterns, human] = await Promise.all([
+    one<any>(
+      pool,
+      `SELECT count(*)::int AS coding_attempts,
+              count(*) FILTER (WHERE a.metrics ? 'verification' AND a.metrics->'verification'->>'outcome' <> 'skipped')::int AS verified,
+              count(*) FILTER (WHERE (a.metrics->'verification'->>'passed')::boolean)::int AS passed,
+              count(*) FILTER (WHERE (a.metrics->'verification'->>'passed')::boolean AND (a.metrics->'verification'->>'repairs')::int = 0)::int AS passed_first_try,
+              round(avg((a.metrics->'verification'->>'repairs')::numeric) FILTER (WHERE a.metrics ? 'verification'), 2) AS avg_repairs,
+              count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'no_progress')::int AS stopped_no_progress,
+              count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'failed')::int AS repair_budget_exhausted,
+              round(avg((a.metrics->'verification'->>'duration_ms')::numeric) FILTER (WHERE a.metrics ? 'verification') / 1000, 1) AS avg_verify_s
+         FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
+        WHERE s.type = 'coding_agent' AND a.started_at > ${since}`,
+    ),
+    q(
+      pool,
+      `SELECT left(sig, 300) AS signature, count(*)::int AS times, count(DISTINCT a.run_id)::int AS runs
+         FROM workflow_step_attempts a, jsonb_array_elements_text(COALESCE(a.metrics->'verification'->'failure_signatures', '[]'::jsonb)) sig
+        WHERE a.started_at > ${since} GROUP BY sig HAVING count(*) > 1 ORDER BY times DESC LIMIT 15`,
+    ),
+    one<any>(
+      pool,
+      `SELECT count(*)::int AS runs,
+              count(*) FILTER (WHERE EXISTS (SELECT 1 FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'answered')
+                                  OR EXISTS (SELECT 1 FROM workflow_steps hs WHERE hs.run_id = r.id AND hs.type = 'human_approval' AND hs.status = 'COMPLETED' AND COALESCE(hs.output->>'auto', 'false') <> 'true')
+                                  OR EXISTS (SELECT 1 FROM workflow_step_attempts ra WHERE ra.run_id = r.id AND ra.input->'pending' ? 'reexecute'))::int AS with_human,
+              (SELECT count(*)::int FROM workflow_questions qq JOIN workflow_runs r2 ON r2.id = qq.run_id WHERE r2.created_at > ${since} AND qq.status = 'answered') AS answers,
+              (SELECT count(*)::int FROM workflow_step_attempts ra JOIN workflow_runs r2 ON r2.id = ra.run_id WHERE r2.created_at > ${since} AND ra.input->'pending' ? 'reexecute') AS reexecutions
+         FROM workflow_runs r WHERE r.created_at > ${since}`,
+    ),
+  ]);
+  const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
+  return {
+    verification: { ...verification, pass_rate_pct: pct(verification.passed, verification.verified), first_try_pass_rate_pct: pct(verification.passed_first_try, verification.verified) },
+    repeated_failures: patterns,
+    human_intervention: { ...human, rate_pct: pct(human.with_human, human.runs) },
+  };
 }

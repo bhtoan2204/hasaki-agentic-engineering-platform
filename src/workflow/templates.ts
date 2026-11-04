@@ -4,7 +4,7 @@
  */
 
 // Tests only the Go packages touched on the branch (oms-api has a known red baseline elsewhere), npm otherwise.
-const TEST_COMMAND = `set -e
+export const TEST_COMMAND = `set -e
 if [ -f go.mod ]; then
   pkgs=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" -- '*.go' | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
   echo "== go build ./..."

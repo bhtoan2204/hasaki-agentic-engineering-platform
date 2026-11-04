@@ -51,14 +51,14 @@ export function isInside(path: string, roots: string[]) {
 }
 
 const ALWAYS_DENIED: Array<[RegExp, string]> = [
-  [/\bgit\s+(-C\s+\S+\s+)?push\b/, "pushing is done by the platform's pull request step"],
-  [/\bgit\s+(-C\s+\S+\s+)?reset\s+--hard\b/, "git reset --hard is not allowed"],
-  [/\bgit\s+(-C\s+\S+\s+)?clean\b/, "git clean is not allowed"],
-  [/\bgit\s+(-C\s+\S+\s+)?worktree\s+(remove|prune)\b/, "worktrees are managed by the platform"],
-  [/\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/, "deleting branches is not allowed"],
-  [/\bsudo\b/, "sudo is not allowed"],
+  [/\bgit\s+(-C\s+\S+\s+)?push\b/, "pushing is done by the platform's pull request step — commit locally and finish with mcp__platform__submit_result"],
+  [/\bgit\s+(-C\s+\S+\s+)?reset\s+--hard\b/, "git reset --hard is not allowed — to undo a change, edit the files back or add a new commit (git revert)"],
+  [/\bgit\s+(-C\s+\S+\s+)?clean\b/, "git clean is not allowed — remove only files you created, by name (rm <file>)"],
+  [/\bgit\s+(-C\s+\S+\s+)?worktree\s+(remove|prune)\b/, "worktrees are managed by the platform — keep working in the worktree returned by mcp__platform__prepare_branch"],
+  [/\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/, "deleting branches is not allowed — branches belong to the platform; just keep committing on the run branch"],
+  [/\bsudo\b/, "sudo is not allowed — the step runs unprivileged; if a tool is missing, say so in submit_result"],
   [/\bgit\s+(-C\s+\S+\s+)?(restore\b|stash\b(?!\s+(list|show)\b))/, "do not discard or stash existing changes; edit them deliberately"],
-  [/\bgit\s+(-C\s+\S+\s+)?checkout\s+(--\s|\.(\s|$))/, "do not discard existing changes with git checkout --"],
+  [/\bgit\s+(-C\s+\S+\s+)?checkout\s+(--\s|\.(\s|$))/, "do not discard existing changes with git checkout -- — edit the file back deliberately instead"],
 ];
 
 // First word(s) of each pipeline segment allowed in analysis steps.
@@ -458,7 +458,7 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
   const base = ctx.baseBranch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (new RegExp(`\\bgit\\s+(-C\\s+\\S+\\s+)?(checkout|switch)\\s+${base}\\b`).test(scan)) return deny(`do not check out ${ctx.baseBranch}`);
+  if (new RegExp(`\\bgit\\s+(-C\\s+\\S+\\s+)?(checkout|switch)\\s+${base}\\b`).test(scan)) return deny(`do not check out ${ctx.baseBranch} — compare with git diff origin/${ctx.baseBranch}...HEAD or read a file with git show origin/${ctx.baseBranch}:<path>`);
   if (ctx.mode === "coding") {
     if (/\bgit\s+(-C\s+\S+\s+)?(checkout\s+-[bB]|switch\s+-[cC]|branch\s+(?!-)[^\s|;&]+)/.test(scan))
       return deny("branches are managed by the platform: use mcp__platform__prepare_branch and work in the returned worktree");

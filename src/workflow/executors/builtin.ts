@@ -74,7 +74,7 @@ export const conditionExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- command
 
-function runCommand(command: string, cwd: string, env: Record<string, string>, timeoutMs: number, signal: AbortSignal, onChunk?: (text: string) => void) {
+export function runCommand(command: string, cwd: string, env: Record<string, string>, timeoutMs: number, signal: AbortSignal, onChunk?: (text: string) => void) {
   return new Promise<{ code: number | null; output: string; timedOut: boolean }>((resolve) => {
     const child = spawn("bash", ["-lc", command], { cwd, env: { ...process.env, ...env }, signal, detached: true });
     // Kill the whole process group (bash + go test + test binaries) on abort/timeout, not only bash.

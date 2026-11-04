@@ -133,3 +133,31 @@ mechanism and approval gates ask again for the new generation. Templates and def
 
 Skill **Latency & Service Boundaries** (`latency-service-boundaries`, seeded, opt-in) can be selected at re-execution
 or assigned to analysis/coding steps in the workflow editor.
+
+## Harness: verification-and-repair loop (coding steps)
+
+`src/agent/verify.ts`, wired at the end of `claudeExecutor` for `coding_agent` steps.
+
+1. The agent works and calls `submit_result` as before.
+2. The platform runs the step's verification in every worktree of the run (`config.verify.command`, default: the
+   template's affected-scope `TEST_COMMAND` — `go build ./...` + `go test` of changed packages). Tests already known to
+   fail on the same base commit are skipped (`GO_TEST_SKIP`), remaining failures are compared with `origin/<base>`
+   (`goBaseline` / `classify`): only new failures count. Removing `func Test…` or adding `t.Skip` versus the base branch
+   counts as a failure (verification weakening) unless `verify.allow_test_weakening: true`.
+3. Failures become structured diagnostics (packages, tests, compile errors, a bounded output excerpt wrapped in
+   `<untrusted_input source="verification:<repo>">`) sent to the **same Claude session** (resume; rebuilt from durable
+   inputs if the session is gone). Same tool policy and hooks as the main turn.
+4. Bounded: at most `verify.max_repairs` (default 2, max 5) repairs; two consecutive rounds with the same failure
+   signature stop early (`no_progress`). The step **fails (not retryable)** unless verification passed — the agent's own
+   claim never counts. Human gates are untouched; a question asked during a repair pauses the step and the rounds so far
+   are stored in the checkpoint, so the budget survives resume. Cancellation kills the verification process group.
+5. Recorded: `output.verification` (summary), attempt `metrics.verification` (outcome, rounds, repairs, duration,
+   failure signatures), one log artifact per repo and round, and the gate (`command_sha256`, `max_repairs`, …) in the
+   context snapshot's `prompt_plan.verification`. The system prompt announces the gate up front.
+
+Disable per step with `config.verify: false`. The later `test` step of the templates still runs unchanged.
+
+Evaluation (separate from execution status): `GET /api/metrics/summary` → `evaluation` (verification pass rate,
+first-try pass rate, repairs, budget-exhausted / no-progress stops, repeated failure signatures, human-intervention
+rate) shown on Insights; `npm run bench -- --live` adds hidden acceptance tests per scenario (`correct`), verification
+outcome, repairs and human gates per run.

@@ -4,6 +4,9 @@ import { knowledge } from "../knowledge/service.ts";
 import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
 import { planKnowledge, planUpstream, type DisclosureEntry, type UpstreamPlanEntry } from "../context/plan.ts";
 import { repoPath } from "../repos/service.ts";
+import { TEST_COMMAND } from "./templates.ts";
+import { verifyConfig } from "../agent/verify.ts";
+import { createHash } from "node:crypto";
 import { hashOf } from "./definitions.ts";
 import { ancestors } from "./graph.ts";
 import type { RunRow, StepRow } from "./types.ts";
@@ -194,6 +197,8 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
         ? { instructions: input.pending.reexecute.instructions, skills: pinned.map((p) => `${p.key}@v${p.version}`), previous_attempt: input.previous_attempt?.number ?? null }
         : null,
       delegation: cfg.delegation?.enabled === true,
+      // The checks this attempt is held to (coding steps): audit trail for "why did it (not) complete".
+      verification: step.type === "coding_agent" ? verificationPlan(cfg) : null,
     },
     project,
     repositories,
@@ -226,4 +231,10 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     ? (await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
     : [];
   return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs, repoPaths };
+}
+
+function verificationPlan(cfg: Record<string, any>) {
+  const v = verifyConfig(cfg, TEST_COMMAND);
+  if (!v) return { enabled: false };
+  return { enabled: true, command_sha256: createHash("sha256").update(v.command).digest("hex").slice(0, 16), default_command: v.command === TEST_COMMAND, max_repairs: v.maxRepairs, baseline: v.baseline, allow_test_weakening: v.allowTestWeakening };
 }

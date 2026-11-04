@@ -1,4 +1,6 @@
 import { config } from "../config.ts";
+import { TEST_COMMAND } from "../workflow/templates.ts";
+import { verifyConfig } from "./verify.ts";
 import { buildTaskPrompt } from "../prompt.ts";
 import type { ResolvedContext, StepInput } from "../workflow/context.ts";
 import type { RunRow, StepRow } from "../workflow/types.ts";
@@ -39,6 +41,11 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
     ...(mode === "coding" && (step.pending_input?.reexecute || step.pending_input?.feedback)
       ? [
           `- This is a RE-EXECUTION: the worktree already contains work from earlier attempts. Before editing, inspect it (git status, git diff, git log origin/${config.baseBranch}..HEAD in each worktree) and continue from that state. Never reset, stash, restore or delete existing changes; change them deliberately with edits and new commits.`,
+        ]
+      : []),
+    ...(mode === "coding" && verifyConfig(cfg, TEST_COMMAND)
+      ? [
+          `- Verification gate: after you call submit_result the platform runs the workflow's verification (build + tests of the packages you changed, baseline-aware: failures that also exist on origin/${config.baseBranch} are not yours) in every worktree. The step only completes when it passes; failures come back to you to fix (at most ${verifyConfig(cfg, TEST_COMMAND)!.maxRepairs} repair round(s)). Run the relevant tests yourself before submitting, and never delete, skip or weaken tests to make them pass.`,
         ]
       : []),
     `- Be economical with tools: start from the code locations listed in the prompt, use Grep with a path/glob and Read with offset/limit instead of scanning whole repositories, run independent reads in parallel, and do not re-read files whose content you already have.`,

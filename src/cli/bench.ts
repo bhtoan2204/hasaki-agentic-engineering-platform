@@ -98,6 +98,32 @@ setGitProvider({
   },
 });
 
+/**
+ * Hidden acceptance checks (never shown to the agent): written into the run's worktree after the run and executed.
+ * They grade task correctness separately from the run's execution status.
+ */
+type Acceptance = { repo: string; pkg: string; file: string; code: string };
+const ACCEPT: Record<string, Acceptance[]> = {
+  "1": [{ repo: "ecom-mapper", pkg: "./mapper", file: "mapper/zz_acceptance_test.go", code: 'package mapper\n\nimport "testing"\n\nfunc TestAcceptancePostal(t *testing.T) {\n\tif got := MapCustomer(EcomCustomer{PostalCode: "91911"}).PostalCode; got != "91911" {\n\t\tt.Fatalf("postal %q", got)\n\t}\n}\n' }],
+  "2": [{ repo: "ecom-mapper", pkg: "./mapper", file: "mapper/zz_acceptance_test.go", code: 'package mapper\n\nimport "testing"\n\nfunc TestAcceptanceSpaces(t *testing.T) {\n\tif got := MapCustomer(EcomCustomer{Name: " Ann   Lee "}).FullName; got != "Ann Lee" {\n\t\tt.Fatalf("name %q", got)\n\t}\n}\n' }],
+  "3": [{ repo: "ecom-mapper", pkg: "./mapper", file: "mapper/zz_acceptance_test.go", code: 'package mapper\n\nimport "testing"\n\nfunc TestAcceptanceZip4(t *testing.T) {\n\tc := MapCustomer(EcomCustomer{PostalCode: "91911-9191"})\n\tif c.PostalCode != "91911" || c.PostalCodeExt != "9191" {\n\t\tt.Fatalf("%q %q", c.PostalCode, c.PostalCodeExt)\n\t}\n}\n' }],
+};
+
+async function acceptance(runId: number, checks: Acceptance[] | undefined): Promise<boolean | null> {
+  if (!checks) return null;
+  for (const c of checks) {
+    const ws = (await q(pool, "SELECT path FROM execution_workspaces WHERE run_id = $1 AND repo = $2 ORDER BY id DESC LIMIT 1", [runId, c.repo]))[0];
+    if (!ws) return false; // nothing was changed in that repository
+    writeFileSync(join(ws.path, c.file), c.code);
+    try {
+      execFileSync("bash", ["-lc", `go test -count=1 -run Acceptance ${c.pkg}`], { cwd: ws.path, stdio: "pipe", timeout: 300_000 });
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 const SCENARIOS: Record<string, { name: string; workflow: string; task: Record<string, unknown>; repositories?: string[] }> = {
   "1": { name: "One-field mapping fix", workflow: "bug-investigation", task: { name: "[Bug] Thiếu postal_code khi map customer từ Ecom sang OMS", note: "MapCustomer trong mapper bỏ mất trường postal_code: OmsCustomer.PostalCode luôn rỗng. Cần map PostalCode từ EcomCustomer." } },
   "2": { name: "Small bug, known repository", workflow: "bug-investigation", task: { name: "[Bug] Tên khách hàng không được chuẩn hoá khoảng trắng giữa các từ", note: "MapCustomer chỉ TrimSpace hai đầu; 'Ann   Lee' phải thành 'Ann Lee'." }, repositories: ["ecom-mapper"] },
@@ -141,6 +167,15 @@ for (const sk of pick(args.scenarios, Object.keys(SCENARIOS))) {
       const qs = (await q(pool, "SELECT count(*)::int AS n FROM workflow_questions WHERE run_id = $1", [run.id]))[0].n;
       const committed = (await q(pool, "SELECT count(*)::int AS n FROM pull_requests WHERE run_id = $1", [run.id]))[0].n;
       Object.assign(row, { worktrees: ws, questions: qs, prs: committed });
+      // harness evaluation — separate from execution status
+      const v = (await q(pool, `SELECT count(*) FILTER (WHERE a.metrics ? 'verification')::int AS verified,
+                                         bool_and((a.metrics->'verification'->>'passed')::boolean) FILTER (WHERE a.metrics ? 'verification') AS passed,
+                                         COALESCE(sum((a.metrics->'verification'->>'repairs')::int), 0)::int AS repairs,
+                                         COALESCE(sum((a.metrics->'verification'->>'rounds')::int), 0)::int AS rounds,
+                                         string_agg(DISTINCT a.metrics->'verification'->>'outcome', ',') AS outcomes
+                                    FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.type = 'coding_agent'`, [run.id]))[0];
+      const gates = (await q(pool, "SELECT count(*)::int AS n FROM workflow_steps WHERE run_id = $1 AND type IN ('human_approval', 'human_input') AND status = 'COMPLETED'", [run.id]))[0].n;
+      Object.assign(row, { correct: await acceptance(run.id, ACCEPT[sk]), verify_passed: v.passed, verify_rounds: v.rounds, repairs: v.repairs, verify_outcomes: v.outcomes, human_gates: gates + qs });
       Object.assign(row, { run_id: run.id, status, wall_s: Math.round(m.wall_ms / 1000), claude_sessions: m.totals.claude_sessions, claude_s: Math.round(m.totals.claude_ms / 1000), turns: diff.turns, tool_calls: m.totals.tool_calls, input_tokens: m.totals.input_tokens, output_tokens: m.totals.output_tokens, cache_read_tokens: m.totals.cache_read_tokens, cost_usd_est: m.totals.cost_usd, test_s: Math.round(m.totals.command_ms / 1000) });
     }
     results.push(row);
@@ -148,9 +183,16 @@ for (const sk of pick(args.scenarios, Object.keys(SCENARIOS))) {
   }
 }
 writeFileSync(join(root, "bench-results.json"), JSON.stringify(results, null, 2));
-console.log("\n" + ["scenario", "requested", "profile", "steps", "ai_steps", ...(live ? ["status", "worktrees", "questions", "prs", "wall_s", "claude_s", "test_s", "claude_sessions", "turns", "tool_calls", "out_tok", "cost≈$"] : [])].join(" | "));
+console.log("\n" + ["scenario", "requested", "profile", "steps", "ai_steps", ...(live ? ["status", "correct", "verify", "repairs", "human", "worktrees", "questions", "prs", "wall_s", "claude_s", "test_s", "claude_sessions", "turns", "tool_calls", "out_tok", "cost≈$"] : [])].join(" | "));
 for (const r of results)
-  console.log([r.scenario, r.requested, r.profile, r.steps, r.ai_steps, ...(live ? [r.status, r.worktrees, r.questions, r.prs, r.wall_s, r.claude_s, r.test_s, r.claude_sessions, r.turns, r.tool_calls, r.output_tokens, r.cost_usd_est] : [])].join(" | "));
+  console.log([r.scenario, r.requested, r.profile, r.steps, r.ai_steps, ...(live ? [r.status, r.correct ?? "n/a", r.verify_passed ?? "n/a", r.repairs, r.human_gates, r.worktrees, r.questions, r.prs, r.wall_s, r.claude_s, r.test_s, r.claude_sessions, r.turns, r.tool_calls, r.output_tokens, r.cost_usd_est] : [])].join(" | "));
+if (live) {
+  // Evaluation summary (correctness ≠ execution status: a COMPLETED run can still be wrong).
+  const graded = results.filter((r) => r.correct !== null && r.correct !== undefined);
+  const verified = results.filter((r) => r.verify_passed !== null && r.verify_passed !== undefined);
+  const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "n/a");
+  console.log(`\nevaluation: correct ${pct(graded.filter((r) => r.correct).length, graded.length)} of ${graded.length} graded · verification pass ${pct(verified.filter((r) => r.verify_passed).length, verified.length)} · repairs/run ${(results.reduce((s, r) => s + (r.repairs ?? 0), 0) / Math.max(1, results.length)).toFixed(2)} · runs with human gates ${pct(results.filter((r) => r.human_gates > 0).length, results.length)} · cost≈$${results.reduce((s, r) => s + (r.cost_usd_est ?? 0), 0).toFixed(3)}`);
+}
 console.log(`\nresults: ${join(root, "bench-results.json")}`);
 await pool.end();
 process.exit(0);

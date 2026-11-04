@@ -15,6 +15,10 @@ import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "./stepPr
 import { decide, toolsFor, SUBAGENT_PLATFORM_TOOLS, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
 import { scoreKnowledge } from "../context/plan.ts";
 import { callTool, capResult, describeTool, integrationTools, listTools } from "./toolRegistry.ts";
+import { runCommand } from "../workflow/executors/builtin.ts";
+import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
+import { TEST_COMMAND } from "../workflow/templates.ts";
+import { diffTestsAgainstBase, repairPrompt, verificationLoop, verificationSummary, verifyConfig, verifyWorkspaces, type VerificationRound, type VerifyDeps } from "./verify.ts";
 
 /** Per-attempt observability, accumulated across the SDK message stream (and across a resume fallback). */
 export interface AgentMetrics {
@@ -28,6 +32,8 @@ export interface AgentMetrics {
   tool_errors: number;
   denied: Array<{ tool: string; reason: string; subagent?: string }>;
   skills_loaded: string[];
+  /** Harness verification outcome of a coding attempt (see verify.ts). */
+  verification?: Record<string, unknown>;
   knowledge_searches: string[];
   integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }>;
   subagents: Array<{ type: string; id: string; started_at: string; ended_at?: string }>;
@@ -441,13 +447,77 @@ export const claudeExecutor: StepExecutor = {
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
     }
 
-    if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: true };
-    const open = (await one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'", [ctx.attempt.id]))!.n;
-    if (open) {
+    // Verification rounds from before a pause (questions asked during a repair) keep counting against the budget.
+    const rounds: VerificationRound[] = [...(ctx.input.pending?.resume?.checkpoint?.verification?.rounds ?? [])];
+    const openQuestions = async () => (await one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'", [ctx.attempt.id]))!.n > 0;
+    const pause = async (lastText: string): Promise<ExecResult> => {
       const session = await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [ctx.attempt.id]);
-      return { kind: "waiting_input", checkpoint: { session_id: session?.session_id ?? null, cwd, workspaces: policy.workspaces, mode, last_message: result.text.slice(0, 4000) } };
+      return { kind: "waiting_input", checkpoint: { session_id: session?.session_id ?? null, cwd, workspaces: policy.workspaces, mode, last_message: lastText.slice(0, 4000), ...(rounds.length ? { verification: { rounds } } : {}) } };
+    };
+    if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: true };
+    if (await openQuestions()) return pause(result.text);
+    let output: Record<string, unknown> = submitted ?? { summary: result.text };
+
+    // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
+    const vcfg = mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
+    if (vcfg) {
+      const trees = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
+      if (!trees.length) {
+        await ctx.log("system", "verification skipped: the agent prepared no worktree (no code was changed)");
+        return { kind: "completed", output: { ...output, verification: { outcome: "skipped", passed: null, reason: "no worktree: no code was changed" } } };
+      }
+      const env = { BASE_BRANCH: config.baseBranch, RUN_ID: String(ctx.run.id) };
+      const deps: VerifyDeps = {
+        run: runCommand,
+        knownFailures: (p) => knownBaseFailures(p),
+        baseline: async (repo, failing) =>
+          (await goBaseline(repo.path, failing, (cmd, dir) => runCommand(cmd, dir, { ...env, REPO: repo.repo }, vcfg.timeoutMs, ctx.signal, (c) => void ctx.log("log", c, { repo: repo.repo, baseline: true })))).report,
+        diffTests: (p) => diffTestsAgainstBase(p, config.baseBranch),
+        artifact: (name, content, data) => ctx.artifact("log", name, content, { ...data, verification: true }),
+        log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
+      };
+      let accepted = output;
+      const loop = await verificationLoop<ExecResult>({
+        cfg: vcfg,
+        prior: [...rounds], // rounds keeps the full history (prior + new) for the pause checkpoint
+        signal: ctx.signal,
+        verify: async (n) => {
+          const r = await verifyWorkspaces(trees.map((w) => ({ repo: w.repo, path: w.path, branch: w.branch })), trees.map((w) => w.path), vcfg, n, ctx.signal, deps, env);
+          rounds.push(r);
+          return r;
+        },
+        repair: async (failed, n) => {
+          await ctx.log("system", `verification failed — repair ${n}/${vcfg.maxRepairs} in the same Claude session`, { verification: failed.round });
+          const sid = (await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND resumable ORDER BY id DESC LIMIT 1", [ctx.attempt.id]))?.session_id;
+          const msg = repairPrompt(failed, n, vcfg);
+          submitted = undefined;
+          let r = sid
+            ? await run(msg, sid).catch((e) => {
+                if (ctx.signal.aborted) throw e;
+                return { isError: true, text: (e as Error).message, assistantTurns: 0 };
+              })
+            : null;
+          // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
+          if (!r || (r.isError && r.assistantTurns === 0)) r = await run(`${freshPrompt()}\n\n${msg}`);
+          if (submitted) accepted = submitted;
+          if (r.isError) return { kind: "failed", error: `repair ${n} failed: ${r.text || "agent run failed"}`, retryable: true };
+          if (await openQuestions()) return pause(r.text);
+          return undefined;
+        },
+      });
+      const summary = verificationSummary(vcfg, loop);
+      metrics.verification = summary;
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      if (loop.outcome === "canceled") throw new Error("verification canceled");
+      if (loop.stop) return loop.stop;
+      if (!summary.passed) {
+        const failing = summary.last.filter((x) => !x.passed).map((x) => `${x.repo}: ${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`);
+        const why = loop.outcome === "no_progress" ? "made no progress (same failures twice)" : `still failing after ${loop.repairs} repair(s)`;
+        return { kind: "failed", error: `verification ${why} — ${failing.join(" | ")}`, retryable: false, details: { verification: summary } };
+      }
+      output = { ...accepted, verification: summary };
     }
-    return { kind: "completed", output: submitted ?? { summary: result.text } };
+    return { kind: "completed", output };
   },
 };
 
