@@ -217,14 +217,14 @@ export function chibiSprite(role: Role): ChibiSprite {
   return s;
 }
 
-/** Hasaki red uniform. */
-export const HASAKI_RED = "#e2231a";
+/** Hasaki uniform: logo-green polo. */
+export const HASAKI_GREEN = "#2f6b4f";
 export function chibiPalette(role: Role): Palette {
   const look = CHARACTERS[role].look;
   return {
     k: "#2b1d1a", e: "#2b1d1a", w: "#ffffff", c: "#f49a98", m: "#8a2a2a", M: "#d24b55",
-    s: look.skin[0], S: look.skin[1], h: look.hair[0], H: look.hair[1], C: "#fff4f2", B: "#f7d4d1",
-    r: HASAKI_RED, R: "#b3141a", L: HASAKI_RED, g: "#3a3a48", a: "#6b7488", A: "#3b4252",
+    s: look.skin[0], S: look.skin[1], h: look.hair[0], H: look.hair[1], C: "#f4fbf7", B: "#cfe6d9",
+    r: HASAKI_GREEN, R: "#1f4a36", L: HASAKI_GREEN, g: "#3a3a48", a: "#6b7488", A: "#3b4252",
     y: "#f5c542", Y: "#3a2a1a", p: look.pants, K: "#1d1d26",
   };
 }
@@ -232,14 +232,14 @@ export function chibiPalette(role: Role): Palette {
 // ------------------------------------------------------------------ small props
 export const PROPS = {
   paper: { rows: ["kkkkkkk", "kwwwwwk", "kwkkkwk", "kwwwwwk", "kwkkwwk", "kwwwwwk", "kwkkkwk", "kwwwwwk", "kkkkkkk"], pal: { k: "#5b5f6e", w: "#fbfbf7" } },
-  mug: { rows: [".w.w.", "kkkkk.", "kwwwkk", "kwrwk.k", "kwwwkk", "kkkkk."], pal: { k: "#4b3a33", w: "#fff7ef", r: HASAKI_RED } },
+  mug: { rows: [".w.w.", "kkkkk.", "kwwwkk", "kwrwk.k", "kwwwkk", "kkkkk."], pal: { k: "#4b3a33", w: "#fff7ef", r: HASAKI_GREEN } },
   bulb: { rows: ["..kkk..", ".kyyyk.", "kyywyyk", "kyyyyyk", ".kyyyk.", "..kak..", "..kak..", "...k..."], pal: { k: "#6a5418", y: "#ffd84a", w: "#fffbe0", a: "#a3a3b0" } },
   question: { rows: [".kkkk.", "kwwwwk", "kwkkwk", "...kwk", "..kwk.", "..kwk.", "..kk..", "......", "..kk..", "..kk.."], pal: { k: "#7a3d00", w: "#ffd36b" } },
   check: { rows: ["......kk", ".....kgk", "k...kgk.", "kgk.kgk.", ".kgkgk..", "..kgk...", "...k...."], pal: { k: "#14532d", g: "#4ade80" } },
   sweat: { rows: [".k.", "kbk", "kbk", ".k."], pal: { k: "#2563eb", b: "#93c5fd" } },
   clip: { rows: [".kkk.", "kkkkkk", "kwwwwk", "kwgwwk", "kwwgwk", "kgwwwk", "kwwwwk", "kkkkkk"], pal: { k: "#6b4f2a", w: "#fffdf5", g: "#16a34a" } },
   glass: { rows: [".kkk..", "kbbbk.", "kbwbk.", "kbbbk.", ".kkkk.", "....kk", ".....k"], pal: { k: "#3a3a48", b: "#bfe3ff", w: "#ffffff" } },
-  box: { rows: ["kkkkkkkkk", "kttttttdk", "kbbbbbbbk", "kbbwwwbbk", "kbbbbbbbk", "kbbbbbbbk", "kkkkkkkkk"], pal: { k: "#6b4423", t: "#c99a5b", d: "#b0844a", b: "#d9ad6d", w: HASAKI_RED } },
+  box: { rows: ["kkkkkkkkk", "kttttttdk", "kbbbbbbbk", "kbbwwwbbk", "kbbbbbbbk", "kbbbbbbbk", "kkkkkkkkk"], pal: { k: "#6b4423", t: "#c99a5b", d: "#b0844a", b: "#d9ad6d", w: HASAKI_GREEN } },
   book: { rows: ["kkkkkkkkk", "kwwwkwwwk", "kwkwkwkwk", "kwwwkwwwk", "kwkwkwkwk", "kkkkkkkkk"], pal: { k: "#7c2d12", w: "#fff7ed" } },
   plane: { rows: ["kk.....", "kwkk...", "kwwwkk.", "kwwwwwk", "kwwkk..", "kkk...."], pal: { k: "#475569", w: "#ffffff" } },
   zzz: { rows: ["kkk..", "..k..", ".k...", "kkk.."], pal: { k: "#64748b" } },

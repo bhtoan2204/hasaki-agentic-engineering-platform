@@ -68,7 +68,7 @@ export function Room({ now }: { now: number }) {
         <circle cx={7} cy={7} r={7} fill="var(--o-trim)" />
         <circle cx={7} cy={7} r={5.6} fill="#fffaf2" />
         <line x1={7} y1={7} x2={7 + 3 * Math.sin((hr * Math.PI) / 180)} y2={7 - 3 * Math.cos((hr * Math.PI) / 180)} stroke="#2b1d1a" strokeWidth={1.1} />
-        <line x1={7} y1={7} x2={7 + 4.6 * Math.sin((mn * Math.PI) / 180)} y2={7 - 4.6 * Math.cos((mn * Math.PI) / 180)} stroke="#e2231a" strokeWidth={0.7} />
+        <line x1={7} y1={7} x2={7 + 4.6 * Math.sin((mn * Math.PI) / 180)} y2={7 - 4.6 * Math.cos((mn * Math.PI) / 180)} stroke="#2f6b4f" strokeWidth={0.7} />
         <R x={6.5} y={6.5} w={1} h={1} c="#2b1d1a" />
       </g>
       {/* rug for the human desk area */}
@@ -82,7 +82,7 @@ export function Plant({ x, y, small, big }: { x: number; y: number; small?: bool
   if (small)
     return (
       <g transform={`translate(${x} ${y})`}>
-        <R x={2} y={5} w={5} h={4} c="#e2231a" />
+        <R x={2} y={5} w={5} h={4} c="#2f6b4f" />
         <g className="o-sway"><R x={1} y={2} w={2} h={3} c="#3f9b52" /><R x={4} y={0} w={2} h={5} c="#58b86a" /><R x={6} y={2} w={2} h={3} c="#3f9b52" /></g>
       </g>
     );
@@ -141,7 +141,7 @@ export function Mug({ x, y, steam }: { x: number; y: number; steam?: boolean }) 
   return (
     <g>
       {steam && <g className="o-steam"><R x={x + 1} y={y - 3} w={1} h={2} c="var(--o-steam)" /><R x={x + 3} y={y - 4} w={1} h={2} c="var(--o-steam)" /></g>}
-      <R x={x} y={y} w={4} h={4} c="#fff7ef" /><R x={x + 1} y={y + 1} w={2} h={1} c="#e2231a" /><R x={x + 4} y={y + 1} w={1} h={2} c="#fff7ef" />
+      <R x={x} y={y} w={4} h={4} c="#fff7ef" /><R x={x + 1} y={y + 1} w={2} h={1} c="#2f6b4f" /><R x={x + 4} y={y + 1} w={1} h={2} c="#fff7ef" />
     </g>
   );
 }
@@ -201,10 +201,10 @@ export function Whiteboard({ x, y, mode }: { x: number; y: number; mode: ScreenM
       <R x={x} y={y} w={46} h={34} c="var(--o-trim-dark)" />
       <R x={x + 1} y={y + 1} w={44} h={32} c="#fbfbf8" />
       <R x={x + 4} y={y + 33} w={38} h={2} c="var(--o-trim-dark)" />
-      <R x={x + 30} y={y + 32} w={4} h={1} c="#e2231a" /><R x={x + 35} y={y + 32} w={4} h={1} c="#2563eb" />
+      <R x={x + 30} y={y + 32} w={4} h={1} c="#2f6b4f" /><R x={x + 35} y={y + 32} w={4} h={1} c="#2563eb" />
       <g className="b-diagram" fill="none" strokeWidth={0.8}>
         <rect x={x + 5} y={y + 5} width={10} height={6} stroke="#2563eb" className="b-line" />
-        <rect x={x + 28} y={y + 5} width={12} height={6} stroke="#e2231a" className="b-line" style={{ animationDelay: ".6s" }} />
+        <rect x={x + 28} y={y + 5} width={12} height={6} stroke="#2f6b4f" className="b-line" style={{ animationDelay: ".6s" }} />
         <rect x={x + 16} y={y + 21} width={14} height={7} stroke="#16a34a" className="b-line" style={{ animationDelay: "1.2s" }} />
         <path d={`M${x + 15} ${y + 8} H${x + 28}`} stroke="#334155" className="b-line" style={{ animationDelay: "1.8s" }} />
         <path d={`M${x + 10} ${y + 11} V${y + 24} H${x + 16}`} stroke="#334155" className="b-line" style={{ animationDelay: "2.2s" }} />
@@ -220,7 +220,7 @@ export function PaperStack({ x, y }: { x: number; y: number }) {
   return (
     <g>
       {[0, 1, 2, 3].map((i) => <R key={i} x={x + (i % 2)} y={y - i * 2} w={10} h={2} c={i % 2 ? "#ffffff" : "#eceae4"} />)}
-      <R x={x + 2} y={y - 7} w={6} h={1} c="#e2231a" />
+      <R x={x + 2} y={y - 7} w={6} h={1} c="#2f6b4f" />
     </g>
   );
 }
@@ -230,7 +230,7 @@ export function Lamp({ x, y, on }: { x: number; y: number; on: boolean }) {
     <g>
       {on && <ellipse cx={x + 4} cy={y + 12} rx={9} ry={4} fill="var(--o-glow)" className="o-glow" />}
       <R x={x + 3} y={y + 4} w={1} h={8} c="#3f4553" />
-      <R x={x} y={y} w={8} h={4} c="#e2231a" />
+      <R x={x} y={y} w={8} h={4} c="#2f6b4f" />
       <R x={x + 1} y={y + 12} w={6} h={1} c="#3f4553" />
     </g>
   );
@@ -261,7 +261,7 @@ export function PackTable({ x, y, mode }: { x: number; y: number; mode: ScreenMo
       {mode === "ok" && <R x={x + 41} y={y - 12} w={8} h={3} c="#d9ad6d" />}
       {/* boxes next to the table */}
       <g transform={`translate(${x + 56} ${y + 2})`}>
-        <R x={0} y={6} w={14} h={12} c="#d9ad6d" /><R x={0} y={6} w={14} h={2} c="#c99a5b" /><R x={5} y={9} w={4} h={2} c="#e2231a" />
+        <R x={0} y={6} w={14} h={12} c="#d9ad6d" /><R x={0} y={6} w={14} h={2} c="#c99a5b" /><R x={5} y={9} w={4} h={2} c="#2f6b4f" />
         <R x={2} y={-4} w={10} h={10} c="#e0b87a" /><R x={2} y={-4} w={10} h={2} c="#c99a5b" />
       </g>
     </g>
@@ -279,8 +279,8 @@ export function HelpDesk({ x, y, waiting }: { x: number; y: number; waiting: num
       {/* counter */}
       <R x={x} y={y} w={66} h={4} c="var(--o-wood-top)" />
       <R x={x} y={y + 4} w={66} h={1} c="var(--o-wood-dark)" />
-      <R x={x + 1} y={y + 5} w={64} h={14} c="#e2231a" />
-      <R x={x + 1} y={y + 5} w={64} h={1} c="#ff5a4f" />
+      <R x={x + 1} y={y + 5} w={64} h={14} c="#2f6b4f" />
+      <R x={x + 1} y={y + 5} w={64} h={1} c="#4f9474" />
       <HasakiMark x={x + 28} y={y + 8} />
       {/* bell */}
       <R x={x + 52} y={y - 4} w={7} h={3} c="#f5c542" className={waiting ? "o-bell" : undefined} />
@@ -314,7 +314,7 @@ export function Product({ x, y, kind, color }: { x: number; y: number; kind: "pu
 /** Wall display shelf: two tiers of skincare, serums, lipsticks and facial masks. */
 export function BeautyShelf({ x, y }: { x: number; y: number }) {
   const row1: Array<[Parameters<typeof Product>[0]["kind"], string]> = [["pump", "#f6c1c7"], ["serum", "#e8a33a"], ["serum", "#f08aa5"], ["jar", "#fbe3d3"], ["pump", "#cfe7d8"], ["tube", "#fdf1e7"], ["serum", "#c9a3e8"], ["jar", "#ffd1dc"]];
-  const row2: Array<[Parameters<typeof Product>[0]["kind"], string]> = [["mask", "#ff9eb5"], ["mask", "#9ed8c3"], ["lipstick", "#c8102e"], ["lipstick", "#e85a7a"], ["lipstick", "#a4123f"], ["cushion", "#f3d1b8"], ["mask", "#ffd27a"], ["tube", "#e2231a"]];
+  const row2: Array<[Parameters<typeof Product>[0]["kind"], string]> = [["mask", "#ff9eb5"], ["mask", "#9ed8c3"], ["lipstick", "#c8102e"], ["lipstick", "#e85a7a"], ["lipstick", "#a4123f"], ["cushion", "#f3d1b8"], ["mask", "#ffd27a"], ["tube", "#2f6b4f"]];
   return (
     <g>
       <R x={x - 1} y={y - 1} w={58} h={23} c="var(--o-shelf-back)" />
@@ -332,9 +332,9 @@ export function BeautyBar({ x, y }: { x: number; y: number }) {
     <g>
       <R x={x} y={y} w={96} h={3} c="#fffaf3" />
       <R x={x} y={y + 3} w={96} h={1} c="#e7d6c7" />
-      <R x={x + 1} y={y + 4} w={94} h={18} c="#e2231a" />
-      <R x={x + 1} y={y + 4} w={94} h={1} c="#ff5a4f" />
-      <R x={x + 4} y={y + 9} w={88} h={8} c="#b3141a" opacity={0.35} />
+      <R x={x + 1} y={y + 4} w={94} h={18} c="#2f6b4f" />
+      <R x={x + 1} y={y + 4} w={94} h={1} c="#4f9474" />
+      <R x={x + 4} y={y + 9} w={88} h={8} c="#1f4a36" opacity={0.35} />
       <text x={x + 48} y={y + 15} textAnchor="middle" className="o-bar-text">HASAKI BEAUTY BAR</text>
       {/* testers on mirrored trays */}
       <R x={x + 6} y={y - 1} w={26} h={1} c="#c9d6df" /><R x={x + 64} y={y - 1} w={26} h={1} c="#c9d6df" />
@@ -362,7 +362,7 @@ export function PendantLamp({ x, len = 8 }: { x: number; len?: number }) {
     <g>
       <polygon points={`${x - 3},${len + 4} ${x + 3},${len + 4} ${x + 16},${len + 46} ${x - 16},${len + 46}`} fill="var(--o-lamp-cone)" className="o-cone" />
       <R x={x - 0.25} y={0} w={0.5} h={len} c="#5b4636" />
-      <R x={x - 3} y={len} w={6} h={3} c="#e2231a" />
+      <R x={x - 3} y={len} w={6} h={3} c="#2f6b4f" />
       <R x={x - 2} y={len + 3} w={4} h={1} c="#ffe7a8" />
     </g>
   );
@@ -386,7 +386,7 @@ export function ShippingBox({ x, y }: { x: number; y: number }) {
     <g>
       <R x={x} y={y} w={14} h={10} c="#d9ad6d" />
       <R x={x} y={y} w={14} h={2} c="#c99a5b" />
-      <R x={x + 6} y={y} w={2} h={10} c="#e2231a" />
+      <R x={x + 6} y={y} w={2} h={10} c="#2f6b4f" />
       <R x={x + 9} y={y + 4} w={4} h={4} c="#ffffff" />
       {[0, 1, 2, 3].map((i) => <R key={i} x={x + 9.4 + i * 0.9} y={y + 4.6} w={0.4} h={2.6} c="#1f1f26" />)}
     </g>
@@ -398,9 +398,9 @@ export function LogoSign({ x, y, href }: { x: number; y: number; href: string })
   return (
     <g>
       <R x={x + 1} y={y + 15} w={86} h={2} c="rgba(0,0,0,.18)" />
-      <R x={x} y={y} w={86} h={16} c="#e2231a" />
-      <R x={x} y={y} w={86} h={1} c="#ff5a4f" />
-      <R x={x} y={y + 15} w={86} h={1} c="#a50f14" />
+      <R x={x} y={y} w={86} h={16} c="#2f6b4f" />
+      <R x={x} y={y} w={86} h={1} c="#4f9474" />
+      <R x={x} y={y + 15} w={86} h={1} c="#183d2c" />
       <rect x={x + 2} y={y + 1.5} width={13} height={13} rx={2.5} fill="#ffffff" />
       <image href={href} x={x + 2} y={y + 1.5} width={13} height={13} preserveAspectRatio="xMidYMid meet" style={{ imageRendering: "auto" }} />
       <text x={x + 18} y={y + 8.6} className="o-brand-text">AI Workspace</text>

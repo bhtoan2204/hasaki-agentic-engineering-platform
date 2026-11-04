@@ -1,13 +1,13 @@
 /* ============================================================ Agent Office
    Scene palette (day = light theme, night = dark theme, like the rest of the app). */
 .office {
-  --o-wall: #f7efe4; --o-wall-line: #efe3d3; --o-wainscot: #ead9c4; --o-trim: #b98b62; --o-trim-dark: #8a6342;
-  --o-hasaki-stripe: #e2231a; --o-floor: #d7a974; --o-floor-line: #b8864f; --o-floor-grain: #c99862;
+  --o-wall: #f5f4ee; --o-wall-line: #ebeae2; --o-wainscot: #e1e6dc; --o-trim: #b98b62; --o-trim-dark: #8a6342;
+  --o-hasaki-stripe: #2f6b4f; --o-floor: #d7a974; --o-floor-line: #b8864f; --o-floor-grain: #c99862;
   --o-wood: #a8714a; --o-wood-top: #c88e5f; --o-wood-dark: #7a4f30; --o-chair: #3d4458; --o-chair-in: #4d5670;
-  --o-sky: #9fd3ff; --o-skyline: #c9d9ea; --o-skyline-win: #ffffff; --o-rug: #e2231a; --o-rug-in: #f6e3d6;
-  --o-pot: #e2231a; --o-pot-rim: #b3141a; --o-screen: #0f172a; --o-steam: rgba(255,255,255,.75); --o-glow: rgba(255, 214, 120, .35);
-  --o-bubble: #fffdf8; --o-ink: #2b1d1a; --o-stage-edge: #e8d8c4; --o-sign: #fffaf0;
-  --o-red: #e2231a; --o-shelf-back: #f3e3d8; --o-lamp-cone: rgba(255, 220, 150, .16);
+  --o-sky: #9fd3ff; --o-skyline: #c9d9ea; --o-skyline-win: #ffffff; --o-rug: #1c211e; --o-rug-in: #e4efe8;
+  --o-pot: #1c211e; --o-pot-rim: #2e3632; --o-screen: #0f172a; --o-steam: rgba(255,255,255,.75); --o-glow: rgba(255, 214, 120, .35);
+  --o-bubble: #ffffff; --o-ink: #111513; --o-stage-edge: #dfe6e0; --o-sign: #fffaf0;
+  --o-red: #2f6b4f; --o-shelf-back: #e7ece4; --o-lamp-cone: rgba(255, 220, 150, .16);
   display: flex; flex-direction: column; height: 100%; overflow: auto; background: var(--bg);
 }
 @media all {
@@ -56,7 +56,7 @@
 .office--fs { background: #120f16 } .office--fs .office-main { max-width: none }
 .office--fs .office-stage { max-height: calc(100vh - 140px); aspect-ratio: 16 / 9; margin: 0 auto; width: min(100%, calc((100vh - 140px) * 16 / 9)) }
 .o-brand-text { font: 700 7px/1 ui-rounded, "Nunito", system-ui, sans-serif; fill: #fff; letter-spacing: .02em }
-.o-brand-sub { font: 700 3.2px/1 ui-monospace, monospace; fill: #ffd9d6; letter-spacing: .14em }
+.o-brand-sub { font: 700 3.2px/1 ui-monospace, monospace; fill: #d9ebe1; letter-spacing: .14em }
 .o-sign-text { font: 700 4.2px/1 ui-monospace, monospace; fill: var(--o-ink) }
 .o-sign-sub { font: 3.4px/1 ui-monospace, monospace; fill: #7a5a40 }
 .o-tiny { font: 700 4px/1 ui-monospace, monospace; fill: #fff }

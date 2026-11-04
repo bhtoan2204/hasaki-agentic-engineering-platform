@@ -54,7 +54,7 @@ export const ChibiAgent = memo(function ChibiAgent({
       {act === "delegating" && <Prop name="paper" x={25} y={14} className="p-plane" />}
       {pose === "celebrate" && (
         <g className="p-confetti">
-          {[["#e2231a", 2, -2], ["#facc15", 9, -6], ["#22c55e", 18, -4], ["#3b82f6", 25, -1], ["#ec4899", 13, -9], ["#ffffff", 22, -8]].map(([c, cx, cy], i) => (
+          {[["#2f6b4f", 2, -2], ["#facc15", 9, -6], ["#22c55e", 18, -4], ["#3b82f6", 25, -1], ["#ec4899", 13, -9], ["#ffffff", 22, -8]].map(([c, cx, cy], i) => (
             <rect key={i} x={cx as number} y={cy as number} width={2} height={2} fill={c as string} style={{ animationDelay: `${i * 0.12}s` }} />
           ))}
         </g>

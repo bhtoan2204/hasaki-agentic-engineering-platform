@@ -6,7 +6,7 @@
 
 Rules
 - Never recolour or distort the logo. It is always shown on a light plate (`BrandLogo`, office wall sign).
-- The red UI accent (`--brand` in `web/src/styles.css`) is the product colour of Hasaki AI Workspace, not a logo colour.
+- The UI palette (`--brand*` in `web/src/styles.css`) is built from the logo green plus black; the logo itself is never recoloured.
 - The chibi uniforms and pixel signage use a small stylised pixel "H" emblem (`web/src/office/brand.tsx`), because a
   200×200 raster logo cannot be drawn at 5×3 pixels; it is a decorative emblem, not a replacement for the logo.
 

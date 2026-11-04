@@ -10,15 +10,16 @@
 @import "@fontsource/be-vietnam-pro/700.css";
 
 :root {
-  /* brand */
-  --brand: #d81f26; --brand-600: #b8151c; --brand-700: #8f0f15; --brand-400: #ec4b4f; --brand-100: #fde3e1; --brand-50: #fff4f2;
-  --blush: #fbe4e2; --peach: #ffe6d6; --cream: #fbf6f1; --rose-ink: #a3343a;
-  /* neutrals (warm) */
-  --bg: #f8f3ee; --surface: #ffffff; --surface-2: #fdf9f6; --surface-3: #f6eee8; --ink: #2a1c1b; --ink-2: #5b4846; --muted: #8b7774;
-  --line: #efe3dc; --line-strong: #e2d2c9; --code: #f7efe9; --sel: rgba(216, 31, 38, .09); --focus: rgba(216, 31, 38, .28);
-  /* status (no SaaS blue: running = berry, waiting = amber) */
-  --st-run: #c2337a; --st-run-bg: #fbe6f0; --st-wait: #c47a12; --st-wait-bg: #fdf0dc; --st-ok: #1e8a57; --st-ok-bg: #e2f4ea;
-  --st-err: #c4352d; --st-err-bg: #fbe5e2; --st-idle: #8b7774; --st-idle-bg: #f2ebe7;
+  /* brand — the official Hasaki logo green + black */
+  --brand: #2f6b4f; --brand-600: #24563f; --brand-700: #183d2c; --brand-400: #4f9474; --brand-100: #d9ebe1; --brand-50: #eef6f1;
+  --blush: #e3f0e8; --peach: #eef3e6; --cream: #f6f7f4; --rose-ink: #24563f;
+  --black: #111513; --black-2: #1b201d; --black-3: #262d29;
+  /* neutrals */
+  --bg: #f4f6f3; --surface: #ffffff; --surface-2: #f9faf8; --surface-3: #edf1ee; --ink: #111513; --ink-2: #39423d; --muted: #6c7670;
+  --line: #e2e8e4; --line-strong: #cfd8d2; --code: #f1f4f2; --sel: rgba(47, 107, 79, .10); --focus: rgba(47, 107, 79, .30);
+  /* status (running = berry, waiting = amber, ok = bright green distinct from the brand green) */
+  --st-run: #b2316f; --st-run-bg: #f9e5ef; --st-wait: #b8740e; --st-wait-bg: #fcf0dc; --st-ok: #16884e; --st-ok-bg: #e0f3e8;
+  --st-err: #c4352d; --st-err-bg: #fbe5e2; --st-idle: #6c7670; --st-idle-bg: #edf1ee;
   /* type */
   --font: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -26,9 +27,9 @@
   /* space / radius / elevation */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
   --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --r-pill: 999px;
-  --shadow-1: 0 1px 2px rgba(80, 30, 20, .05), 0 1px 1px rgba(80, 30, 20, .03);
-  --shadow-2: 0 6px 18px -8px rgba(110, 40, 25, .18), 0 2px 4px rgba(110, 40, 25, .04);
-  --shadow-3: 0 24px 48px -20px rgba(110, 40, 25, .32);
+  --shadow-1: 0 1px 2px rgba(17, 21, 19, .06), 0 1px 1px rgba(17, 21, 19, .03);
+  --shadow-2: 0 6px 18px -8px rgba(17, 40, 28, .20), 0 2px 4px rgba(17, 21, 19, .04);
+  --shadow-3: 0 24px 48px -20px rgba(17, 40, 28, .34);
   --sidebar-w: 248px; --topbar-h: 60px;
   /* legacy aliases used by existing pages */
   --panel: var(--surface); --panel2: var(--surface-2); --text: var(--ink); --accent: var(--brand);
@@ -36,13 +37,14 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --brand: #ff4d52; --brand-600: #ff6b6f; --brand-700: #ffa3a5; --brand-400: #ff7a7d; --brand-100: #3a1719; --brand-50: #2a1415;
-  --blush: #3a2224; --peach: #3b2a20; --cream: #1d1614; --rose-ink: #ff9ea2;
-  --bg: #15100f; --surface: #1f1817; --surface-2: #1a1413; --surface-3: #2a201e; --ink: #f6ece8; --ink-2: #d7c4bf; --muted: #a8928d;
-  --line: #352a28; --line-strong: #463835; --code: #261e1c; --sel: rgba(255, 77, 82, .14); --focus: rgba(255, 77, 82, .35);
-  --st-run: #ff6fae; --st-run-bg: #3b1a2a; --st-wait: #f4b04f; --st-wait-bg: #3a2a13; --st-ok: #4fd18d; --st-ok-bg: #163322;
-  --st-err: #ff6b62; --st-err-bg: #3d1915; --st-idle: #a8928d; --st-idle-bg: #2b2220;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4); --shadow-2: 0 8px 22px -10px rgba(0, 0, 0, .6); --shadow-3: 0 24px 48px -20px rgba(0, 0, 0, .7);
+  --brand: #5cc28f; --brand-600: #7fd3a8; --brand-700: #b3e8cb; --brand-400: #46a878; --brand-100: #16301f; --brand-50: #0f2218;
+  --blush: #142a1d; --peach: #1b2a1f; --cream: #0e1210; --rose-ink: #8fdcb5;
+  --black: #070908; --black-2: #0f1311; --black-3: #1a201c;
+  --bg: #0b0e0c; --surface: #141916; --surface-2: #111512; --surface-3: #1d241f; --ink: #eef3ef; --ink-2: #c4cec7; --muted: #8d9891;
+  --line: #24302a; --line-strong: #33413a; --code: #18201b; --sel: rgba(92, 194, 143, .14); --focus: rgba(92, 194, 143, .35);
+  --st-run: #f06fae; --st-run-bg: #391a2a; --st-wait: #f2b04e; --st-wait-bg: #382912; --st-ok: #4fd18d; --st-ok-bg: #133120;
+  --st-err: #ff6b62; --st-err-bg: #3d1915; --st-idle: #8d9891; --st-idle-bg: #1d241f;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .5); --shadow-2: 0 8px 22px -10px rgba(0, 0, 0, .7); --shadow-3: 0 24px 48px -20px rgba(0, 0, 0, .8);
   color-scheme: dark;
 }
 
@@ -63,7 +65,7 @@ pre { background: var(--code); padding: 10px 12px; border-radius: var(--r-sm); o
 button, .btn {
   font: 600 var(--fs-sm)/1.2 var(--font); border: 1px solid transparent; border-radius: var(--r-sm); padding: 8px 14px; cursor: pointer; white-space: nowrap;
   background: var(--brand); color: #fff; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
-  box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 1px 2px rgba(150, 20, 25, .25); transition: background .15s, box-shadow .15s, transform .05s, border-color .15s;
+  box-shadow: 0 1px 0 rgba(255,255,255,.16) inset, 0 1px 2px rgba(17, 40, 28, .28); transition: background .15s, box-shadow .15s, transform .05s, border-color .15s;
 }
 button:hover, .btn:hover { background: var(--brand-600); text-decoration: none }
 button:active { transform: translateY(1px) }
@@ -155,7 +157,7 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .loading-screen { display: grid; place-items: center; padding: 60px 0; color: var(--muted); gap: 10px }
 
 /* ---------------------------------------------------------------- overlays: drawer / dialog / tooltip */
-.scrim { position: fixed; inset: 0; background: rgba(40, 15, 12, .32); backdrop-filter: blur(2px); z-index: 90; animation: fadein .15s }
+.scrim { position: fixed; inset: 0; background: rgba(8, 12, 10, .45); backdrop-filter: blur(2px); z-index: 90; animation: fadein .15s }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); background: var(--surface); box-shadow: var(--shadow-3); z-index: 91; display: flex; flex-direction: column; animation: slidein .2s ease-out }
 .drawer-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line) } .drawer-head h4 { margin: 0; flex: 1; font-size: var(--fs-lg) }
 .drawer-body { padding: 16px 20px; overflow: auto; flex: 1 }
@@ -278,3 +280,20 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; mar
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0 }
 .brand-name { font-weight: 700; font-size: 15px; letter-spacing: -.01em; color: var(--ink) }
 .brand-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+
+/* answer options / long labels inside buttons must wrap (agent questions carry long option text) */
+.rv-option-row button, .qx-opt { white-space: normal; text-align: left; max-width: 100%; line-height: 1.4; overflow-wrap: anywhere; align-items: flex-start }
+.rv-option-row button svg, .qx-opt svg { flex: none; margin-top: 2px }
+.inspector { overflow-x: hidden } .inspector pre, .inspector code { overflow-wrap: anywhere }
+
+/* ---------------------------------------------------------------- black sidebar (green + black identity) */
+.sidebar { background: var(--black); border-right-color: var(--black); color: #e9efeb }
+.sb-brand, .sb-brand .brand-name { color: #ffffff } .sb-brand .brand-sub { color: #9aa79f }
+.sb-group { color: #7f8c84 }
+.sb-link { color: #c8d2cc } .sb-link svg { color: #8e9b93 }
+.sb-link:hover { background: var(--black-3); color: #ffffff } .sb-link:hover svg { color: #d6dfd9 }
+.sb-link.on { background: linear-gradient(90deg, rgba(79, 148, 116, .30), rgba(79, 148, 116, .10)); color: #ffffff } .sb-link.on svg { color: #7fd3a8 }
+.sb-link.on::before { background: #5cc28f }
+.sidebar .count { background: #5cc28f; color: var(--black) }
+.sb-foot { border-top-color: var(--black-3) } .sb-ws b { color: #ffffff } .sb-ws span { color: #8e9b93 }
+.sb-avatar { background: linear-gradient(135deg, var(--brand), #4f9474) }
