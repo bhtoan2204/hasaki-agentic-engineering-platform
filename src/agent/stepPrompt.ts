@@ -21,7 +21,6 @@ const untrusted = (label: string, body: string) =>
 
 export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedContext, mode: ToolMode): string {
   const cfg = step.config ?? {};
-  const workItemCode = run.branch;
   const lines = [
     `You are executing ONE step of an engineering workflow on the Hasaki workflow platform, UNATTENDED.`,
     `Workflow: ${run.definition_key} · run #${run.id} · step "${step.name}" (${step.key}, type ${step.type}).`,

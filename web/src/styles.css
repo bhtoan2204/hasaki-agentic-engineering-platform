@@ -129,7 +129,6 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .chip-brand { background: var(--brand-50); color: var(--brand-700) }
 .kbd { font: 600 11px var(--mono); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink-2) }
 .count { background: var(--brand); color: #fff; border-radius: var(--r-pill); padding: 0 7px; font-size: 11px; font-weight: 700; line-height: 18px; min-width: 18px; text-align: center }
-.chips { display: inline-flex; gap: 3px; flex-wrap: wrap } .chip { width: 10px; height: 10px; border-radius: 3px; background: currentColor }
 .progress { height: 6px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; display: flex }
 .progress > span { height: 100%; display: block }
 

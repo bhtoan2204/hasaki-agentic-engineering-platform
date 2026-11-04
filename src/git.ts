@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
@@ -20,13 +20,6 @@ async function refExists(cwd: string, ref: string) {
   }
 }
 
-/** Repos the agent may work in for a given task project. */
-export function allowedRepos(project: string): string[] {
-  const mapped = Object.entries(config.projects).find(([k]) => k.toLowerCase() === project.toLowerCase())?.[1];
-  if (mapped) return mapped.filter((r) => existsSync(join(config.reposRoot, r, ".git")));
-  return readdirSync(config.reposRoot).filter((r) => existsSync(join(config.reposRoot, r, ".git")));
-}
-
 export function taskDir(code: string) {
   const dir = join(config.dataDir, "worktrees", code);
   mkdirSync(dir, { recursive: true });
@@ -41,13 +34,15 @@ export interface PreparedBranch {
 }
 
 /**
- * Give the agent an isolated checkout of `branch` for `repo`.
- * We use `git worktree` so the developer's own checkout (and any uncommitted work in it) is never touched.
+ * Give the agent an isolated checkout of `branch` for `repo` via `git worktree`.
+ * If the developer already has `branch` checked out in the primary tree, git cannot add a second worktree,
+ * so this returns that checkout; workflow runs refuse it in `prepareWorkspace`.
  *  - branch already exists locally   -> worktree on it
  *  - branch exists only on origin    -> worktree tracking origin/<branch>
  *  - otherwise                       -> new branch from origin/<baseBranch>
+ *
+ * `relPath`: repo location relative to reposRoot when it differs from its name (e.g. "oms-src/oms-api").
  */
-/** `relPath`: repo location relative to reposRoot when it differs from its name (e.g. "oms-src/oms-api"). */
 export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo, opts: { mustExist?: boolean } = {}): Promise<PreparedBranch> {
   const repoPath = join(config.reposRoot, relPath);
   if (!existsSync(join(repoPath, ".git"))) throw new Error(`repo not found: ${repoPath}`);

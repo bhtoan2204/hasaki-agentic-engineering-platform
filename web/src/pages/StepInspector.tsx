@@ -158,7 +158,6 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const { data, error, loading, reload } = useApi<any>(`/api/runs/${run.id}/steps/${stepKey}`);
   const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
   const [attemptId, setAttemptId] = useState<number | null>(null);
-  const [feedback, setFeedback] = useState("");
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => setAttemptId(null), [stepKey]);
   if (loading && !data) return <div className="rv-pane"><Loading /></div>;

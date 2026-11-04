@@ -1,16 +1,8 @@
 import { useMemo, useState } from "react";
 import { Activity, CircleCheck, CircleHelp, CircleX, Clock, GitBranch, Hourglass, Play, PlayCircle, Workflow } from "lucide-react";
-import { api, useApi, useLive, STATUS_COLORS, STATUS_LABELS } from "../api.ts";
-import { act, ago, Badge, EmptyState, ErrorBox, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, StatCard, dur } from "../ui.tsx";
+import { useApi, useLive, STATUS_COLORS, STATUS_LABELS } from "../api.ts";
+import { ago, Badge, EmptyState, ErrorBox, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, StatCard, dur } from "../ui.tsx";
 import "./Runs.css";
-
-export function StepChips({ steps }: { steps: Array<{ key: string; status: string }> | null }) {
-  return (
-    <span className="chips">
-      {(steps ?? []).map((s) => <span key={s.key} className="chip" title={`${s.key}: ${s.status}`} style={{ color: STATUS_COLORS[s.status] }} />)}
-    </span>
-  );
-}
 
 const DONE_STEP = new Set(["COMPLETED", "SKIPPED"]);
 
@@ -141,9 +133,4 @@ export function RunsPage() {
       <div className="muted small runs-foot">Hoặc chạy từ một <a href="#/work-items">Work Item</a> để gắn run với task.</div>
     </div>
   );
-}
-
-export async function startRunFor(body: any) {
-  const r = await act(() => api<any>("/api/runs", body));
-  if (r) navigate(`/runs/${r.id}`);
 }

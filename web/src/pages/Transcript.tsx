@@ -48,7 +48,7 @@ function StatTile({ icon: I, n, label, children }: { icon: LucideIcon; n: ReactN
   );
 }
 
-function toolHint(name: string, input: any = {}) {
+function toolHint(input: any = {}) {
   return String(input.file_path ?? input.notebook_path ?? input.path ?? input.pattern ?? input.command ?? input.repo ?? input.url ?? input.query ?? input.description ?? input.step_key ?? "").split("\n")[0];
 }
 
@@ -88,8 +88,8 @@ export function Transcript({ attemptId, live, tick }: { attemptId: number; live:
     return m;
   }, [events]);
   const tools = events.filter((e) => e.kind === "tool" && e.data?.name);
-  const filesRead = [...new Set(tools.filter((e) => READ_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.name, e.data.input)))];
-  const filesModified = [...new Set(tools.filter((e) => EDIT_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.name, e.data.input)))];
+  const filesRead = [...new Set(tools.filter((e) => READ_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.input)))];
+  const filesModified = [...new Set(tools.filter((e) => EDIT_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.input)))];
   const commands = tools.filter((e) => e.data.name === "Bash");
   const errors = events.filter((e) => (e.kind === "tool_result" && e.data?.is_error) || (e.kind === "tool" && !e.data?.name && e.content.startsWith("denied")) || (e.kind === "result" && e.data?.is_error));
   const result = [...events].reverse().find((e) => e.kind === "result");
@@ -202,7 +202,7 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
         <div className={"msg tool" + sub + (err ? " toolerr" : "")}>
           <div className="who">
             <Av icon={TI} /><b>{e.data.name.replace(/^mcp__platform__/, "platform·")}</b>
-            <span className="mono">{toolHint(e.data.name, e.data.input).slice(0, 160)}</span>
+            <span className="mono">{toolHint(e.data.input).slice(0, 160)}</span>
             {t}
             {err && <Badge s="FAILED">error</Badge>}
             {!result && live && <Badge s="RUNNING">running…</Badge>}

@@ -10,7 +10,7 @@ export interface Config {
   dataDir: string;
   /** Branch new task branches are cut from. */
   baseBranch: string;
-  /** Task project name -> repos the agent may touch. Unknown project = every git repo in reposRoot. */
+  /** Task project name -> repository paths or group folders under reposRoot. Synced into the repository registry. */
   projects: Record<string, string[]>;
   /** Prefix to turn task note_files ("task/26/10/30/...png") into a downloadable URL. Empty = don't download. */
   fileBaseUrl: string;

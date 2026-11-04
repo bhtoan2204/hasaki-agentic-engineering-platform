@@ -312,7 +312,7 @@ async function resumableSession(ctx: ExecutionContext, cwd: string): Promise<{ s
   return null;
 }
 
-async function progressNotes(ctx: ExecutionContext, fromAttempt?: number) {
+async function progressNotes(fromAttempt?: number) {
   if (!fromAttempt) return [];
   const rows = await q<{ data: any }>(pool, "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'progress' ORDER BY id", [fromAttempt]);
   return rows.map((r) => String(r.data?.note ?? "")).filter(Boolean);
@@ -472,10 +472,10 @@ export const claudeExecutor: StepExecutor = {
           // Session missing or not resumable: rebuild from durable artifacts instead.
           await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
           await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
-          result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
+          result = await run(buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
         }
       } else {
-        result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras) : freshPrompt());
+        result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras) : freshPrompt());
       }
     } finally {
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });

@@ -7,20 +7,6 @@ import { STATUS_COLORS, STATUS_LABELS } from "./api.ts";
 // Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
 import "./pages/RunView.css";
 
-/** Plain-text icons per step type (kept for <option> labels and other text-only contexts). */
-export const STEP_ICONS: Record<string, string> = {
-  agent: "🤖",
-  coding_agent: "🧑‍💻",
-  human_input: "✍️",
-  human_approval: "✅",
-  integration: "🔌",
-  command: "⌨️",
-  condition: "🔀",
-  git_pull_request: "🔀",
-};
-STEP_ICONS.git_pull_request = "⤴️";
-STEP_ICONS.task_result_report = "📋";
-
 /** Lucide icon per step type (graph nodes, inspector headers). */
 export const STEP_TYPE_ICONS: Record<string, LucideIcon> = {
   agent: Bot,

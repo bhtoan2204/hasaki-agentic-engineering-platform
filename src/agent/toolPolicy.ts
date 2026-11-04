@@ -257,8 +257,6 @@ export function parseShell(command: string): ShellParse {
   return { segments, redirects, heredocs, code };
 }
 
-export const segments = (command: string) => parseShell(command).segments;
-
 /** Text the policy scans for paths and forbidden commands: shell code plus script bodies (never data bodies). */
 const scanText = (p: ShellParse) => [p.code, ...p.heredocs.filter((h) => !h.data).map((h) => h.body)].join("\n");
 
@@ -497,9 +495,6 @@ export function pathsIn(command: string): string[] {
   const text = p.error ? command : scanText(p);
   return [...text.matchAll(/(?:^|[\s'"=:(])((?:~|\/)[^\s'"`;|&<>()]*)/g)].map((m) => expandHome(m[1])).filter((x) => x.startsWith("/") && x.length > 1);
 }
-
-/** The command with heredoc bodies removed (what the shell itself parses). */
-export const stripHeredocs = (command: string) => parseShell(command).code;
 
 /**
  * `cwd` is the shell's current directory as reported by the PreToolUse hook — Claude Code keeps it across Bash calls,

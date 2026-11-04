@@ -74,7 +74,3 @@ export async function recordWorkspace(runId: number, w: Workspace, db: Db = pool
 export function workspacesOf(runId: number, db: Db = pool) {
   return q<Workspace>(db, "SELECT repo, branch, path, created_from FROM execution_workspaces WHERE run_id = $1 ORDER BY repo", [runId]);
 }
-
-export function findWorkspace(runId: number, repo: string) {
-  return one<Workspace>(pool, "SELECT repo, branch, path, created_from FROM execution_workspaces WHERE run_id = $1 AND repo = $2", [runId, repo]);
-}

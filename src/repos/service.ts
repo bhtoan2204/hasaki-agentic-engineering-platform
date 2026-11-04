@@ -50,8 +50,8 @@ export const repositories = {
   },
 
   /**
-   * The deterministic allowed set for a project — same semantics as the legacy `allowedRepos(project)`:
-   * repos mapped to the project, or every enabled repo when the project has no mapping.
+   * Enabled repositories allowed to perform `action` for a project: those mapped to the project,
+   * or every such repository when the project has no mapping.
    */
   async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
     const rows = await q<RepositoryRow>(db, "SELECT * FROM repositories WHERE enabled AND $1 = ANY(allowed_actions) ORDER BY name", [action]);

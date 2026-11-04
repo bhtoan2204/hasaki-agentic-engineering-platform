@@ -1,12 +1,12 @@
 # Hasaki AI Workspace — design system
 
 Product: **Hasaki AI Workspace** — "Your Intelligent Engineering Headquarters". A premium internal AI-engineering
-SaaS with a beauty-retail identity: Hasaki-inspired red accent, white + warm cream surfaces, blush/peach accents,
+SaaS with a beauty-retail identity: Hasaki logo green accent, white + warm surfaces, soft green tints,
 rounded cards, soft shadows, generous spacing, Be Vietnam Pro typography, lucide icons. Light theme is the reference;
 dark theme is token-driven (`:root[data-theme="dark"]`). Vietnamese UI copy (keep existing wording style).
 
 ## Tokens (web/src/styles.css — never hard-code colours in pages)
-- Brand: `--brand` (#d81f26), `--brand-600/700` (hover/ink), `--brand-400`, `--brand-100/50` (tints), `--blush`, `--peach`, `--cream`, `--rose-ink`.
+- Brand: `--brand` (#2f6b4f, the Hasaki logo green), `--brand-600/700` (darker), `--brand-400`, `--brand-100/50` (tints), `--blush`, `--peach`, `--cream`, `--rose-ink` (green-tinted tokens; the names predate this palette).
 - Neutrals: `--bg` (cream page), `--surface` (cards), `--surface-2` (subtle), `--surface-3` (wells), `--ink`, `--ink-2`, `--muted`, `--line`, `--line-strong`, `--code`.
 - Status: `--st-run` (berry — RUNNING/READY/RETRYING), `--st-wait` (amber — WAITING_*), `--st-ok` (green), `--st-err` (red), `--st-idle` (warm grey); each has a `-bg` tint. No SaaS blue anywhere.
 - Type: `--font`, `--mono`, `--fs-xs … --fs-3xl`. Space `--sp-1…8`. Radius `--r-sm 8 / md 12 / lg 16 / xl 22 / pill`. Elevation `--shadow-1/2/3`.
