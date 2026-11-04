@@ -824,7 +824,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
  */
 export async function finishAttempt(jobId: number, token: number, attemptId: number, result: ExecResult) {
   return withTx(async (c, afterCommit) => {
-    const attempt0 = await one<AttemptRow>(pool, "SELECT run_id FROM workflow_step_attempts WHERE id = $1", [attemptId]);
+    const attempt0 = await one<AttemptRow>(c, "SELECT run_id FROM workflow_step_attempts WHERE id = $1", [attemptId]);
     if (!attempt0) return { applied: false, reason: "attempt not found" };
     const run = await lockRun(c, attempt0.run_id);
     const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 FOR UPDATE", [jobId]);

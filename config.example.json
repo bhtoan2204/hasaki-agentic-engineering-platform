@@ -18,6 +18,10 @@
     "reviewers": []
   },
   "notifyWebhook": "",
+  "database": {
+    "poolMax": 10,
+    "connectionTimeoutMillis": 5000
+  },
   "model": "",
   "maxConcurrent": 1,
   "maxTurns": 300,

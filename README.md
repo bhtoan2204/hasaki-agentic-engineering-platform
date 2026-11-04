@@ -25,6 +25,9 @@ npm start                             # builds the UI, then http://localhost:454
 Development: `npm run dev` (backend with --watch) + `npm run dev:web` (Vite hot reload on http://localhost:5173,
 proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` uses a throwaway `platform_test` database.
 
+The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a free client
+(`database.poolMax` / `database.connectionTimeoutMillis` in config.json, or `DATABASE_POOL_MAX` / `DATABASE_CONNECTION_TIMEOUT_MS`).
+
 ## UI (React + XYFlow, `web/`)
 
 | Screen | What you can do |
@@ -54,9 +57,8 @@ step selected (`#/runs/<id>/<step>`). One-way only: you answer/approve in the ap
 3. Restart. Without both variables nothing is sent. Links use `publicUrl`: an `https://` publicUrl becomes a
    "Mở bước cần xử lý" button; a local URL (default `http://localhost:4545`) is sent as a text link.
 
-Sending is fire-and-forget with a 5 s timeout; failures are logged without the token and never affect the workflow or
-`NOTIFY_WEBHOOK`, which keeps its existing messages. Run-level "WAITING" goes to the webhook only, so Telegram gets one
-message per waiting step.
+Sending is fire-and-forget with a 5 s timeout (Telegram and the webhook POST). Failures are logged without the token
+and never affect the workflow. Run-level "WAITING" goes to the webhook only, so Telegram gets one message per waiting step.
 
 ## Concepts
 

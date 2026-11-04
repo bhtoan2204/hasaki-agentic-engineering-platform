@@ -11,6 +11,7 @@ export async function notify(message: string, target?: string) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: message + link }),
+      signal: AbortSignal.timeout(5000),
     });
   } catch (e) {
     console.error("notify failed:", (e as Error).message);

@@ -19,7 +19,9 @@ import { knowledge } from "./service.ts";
  */
 
 const exec = promisify(execFile);
-const git = async (cwd: string, ...args: string[]) => (await exec("git", ["-C", cwd, ...args], { maxBuffer: 8 << 20 })).stdout.trim();
+/** Bound git while a workflow transaction may be holding row locks. A hang becomes UNKNOWN / skipped, not an open transaction. */
+const GIT_TIMEOUT_MS = 30_000;
+const git = async (cwd: string, ...args: string[]) => (await exec("git", ["-C", cwd, ...args], { maxBuffer: 8 << 20, timeout: GIT_TIMEOUT_MS })).stdout.trim();
 const quote = (s: string, max = 1500) => String(s ?? "").replace(/<\/?untrusted_input[^>]*>/gi, "").slice(0, max).split("\n").map((l) => `> ${l}`).join("\n");
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
 

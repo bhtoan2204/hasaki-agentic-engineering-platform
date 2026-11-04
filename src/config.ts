@@ -46,6 +46,11 @@ export interface Config {
     autoWorkflow: string;
   };
   databaseUrl: string;
+  /**
+   * Local PostgreSQL pool. Default 10 clients is enough for one user and a few workflows.
+   * Override in config.json (`database`) or with DATABASE_POOL_MAX / DATABASE_CONNECTION_TIMEOUT_MS.
+   */
+  database: { poolMax: number; connectionTimeoutMillis: number };
   /** Organization name used for ORGANIZATION-scoped knowledge. */
   organization: string;
   /** Durable workflow scheduler. */
@@ -122,6 +127,7 @@ const defaults: Config = {
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
+  database: { poolMax: 10, connectionTimeoutMillis: 5000 },
   organization: "hasaki",
   scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
@@ -140,6 +146,7 @@ function load(): Config {
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
     jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
+    database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
   cfg.telegram = {
@@ -150,6 +157,10 @@ function load(): Config {
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
+  cfg.database = {
+    poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),
+    connectionTimeoutMillis: positiveInt("database.connectionTimeoutMillis", process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? cfg.database.connectionTimeoutMillis),
+  };
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
   cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;
@@ -158,6 +169,14 @@ function load(): Config {
   if (!cfg.publicUrl) cfg.publicUrl = `http://localhost:${cfg.port}`;
   mkdirSync(cfg.dataDir, { recursive: true });
   return cfg;
+}
+
+/** Positive integer from config.json or the environment. NaN, fractions, and values below 1 are rejected. */
+export function positiveInt(name: string, raw: unknown): number {
+  if (typeof raw !== "number" && typeof raw !== "string") throw new Error(`${name} must be a positive integer`);
+  const n = typeof raw === "number" ? raw : Number(raw.trim());
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
+  return n;
 }
 
 export const config = load();
