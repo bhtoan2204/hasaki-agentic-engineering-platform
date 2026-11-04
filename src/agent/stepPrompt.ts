@@ -1,6 +1,7 @@
 import { config } from "../config.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
 import { verifyConfig } from "./verify.ts";
+import { branchFor } from "../workflow/branches.ts";
 import { buildTaskPrompt } from "../prompt.ts";
 import type { ResolvedContext, StepInput } from "../workflow/context.ts";
 import type { RunRow, StepRow } from "../workflow/types.ts";
@@ -33,7 +34,7 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
       ? `- Repositories allowed for this run (primary checkouts — use these exact paths, do not guess): ${ctx.repoPaths.map((r) => `${r.name} = ${r.path}`).join("; ")}.`
       : `- Repositories allowed for this run: ${ctx.repositories.length ? ctx.repositories.join(", ") : run.allowed_repositories.join(", ")} (under ${config.reposRoot}).`,
     mode === "coding"
-      ? `- Read code anywhere, but edit ONLY inside worktrees returned by mcp__platform__prepare_branch (branch "${workItemCode}", cut from origin/${config.baseBranch}). Never edit ${config.reposRoot}/<repo> directly.`
+      ? `- Read code anywhere, but edit ONLY inside worktrees returned by mcp__platform__prepare_branch. Never edit ${config.reposRoot}/<repo> directly. ${branchRule(run, ctx.repositories.length ? ctx.repositories : run.allowed_repositories)}`
       : `- This step is READ-ONLY: do not modify files. Shell is limited to read-only commands.`,
     `- Do NOT run git push. Pull requests are opened by a later workflow step.`,
     `- If business behaviour is genuinely ambiguous and cannot be settled by reading code, call mcp__platform__ask_user with ALL open questions at once (each with the context you found and your recommended option first), then END YOUR TURN. Answers arrive as the next message.`,
@@ -167,4 +168,15 @@ export function buildResumeMessage(input: StepInput, newAnswerAttemptId: number 
   for (const x of extras) lines.push("", `${x.title}:`, x.body);
   lines.push("", "Continue this step. Remember to call mcp__platform__submit_result when done.");
   return lines.join("\n");
+}
+
+/** Which branch each repository's worktree is on: a requested existing branch (continue it) or the run branch. */
+function branchRule(run: RunRow, repos: string[]) {
+  const existing = repos.map((r) => [r, branchFor(run, r)] as const).filter(([, b]) => b.existing);
+  const fresh = `branch "${run.branch}", cut from origin/${config.baseBranch}`;
+  if (!existing.length) return `Worktrees are on ${fresh}.`;
+  return (
+    existing.map(([r, b]) => `${r}: CONTINUE the existing branch "${b.branch}" (its worktree is on that branch; commit there — do not create or merge another branch into it)`).join("; ") +
+    (existing.length < repos.length ? `; other repositories: ${fresh}.` : ".")
+  );
 }

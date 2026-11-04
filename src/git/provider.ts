@@ -3,6 +3,7 @@ import { config } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest } from "../bitbucket.ts";
 import { prepareBranch, pushBranch } from "../git.ts";
+import { branchFor } from "../workflow/branches.ts";
 
 /**
  * Seam for Git hosting. Bitbucket is the only implementation today; a GitHub provider would implement the
@@ -44,14 +45,18 @@ export interface Workspace {
 }
 
 /** Create (or reuse) the run's isolated worktree for `repo` and record it. Never touches reposRoot checkouts. */
-export async function prepareWorkspace(run: { id: number; branch: string }, repo: string): Promise<Workspace> {
+export async function prepareWorkspace(run: { id: number; branch: string; inputs?: Record<string, any> | null }, repo: string): Promise<Workspace> {
   const reg = await one<{ path: string }>(pool, "SELECT path FROM repositories WHERE name = $1", [repo]);
   const rel = reg?.path || repo;
-  const b = await prepareBranch(workspaceKey(run.branch), repo, run.branch, rel);
+  // An existing branch requested for this repository (inputs.branches / description directive) replaces the run branch.
+  const target = branchFor(run, repo);
+  const b = await prepareBranch(workspaceKey(run.branch), repo, target.branch, rel, { mustExist: target.existing });
   if (b.path === join(config.reposRoot, rel)) {
     // Legacy prepareBranch reuses the developer's checkout when it is on the task branch. Workflows never edit
     // the primary checkout: refuse instead.
-    throw new Error(`${repo}: branch ${run.branch} is checked out in your primary checkout; switch it to another branch first`);
+    throw new Error(
+      `${repo}: branch ${target.branch} is checked out in your primary checkout (${join(config.reposRoot, rel)}); switch that checkout to another branch first (e.g. git switch ${config.baseBranch}) so the run can work on ${target.branch} in its own worktree`,
+    );
   }
   await recordWorkspace(run.id, { repo, branch: b.branch, path: b.path, created_from: b.createdFrom });
   return { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };

@@ -48,7 +48,7 @@ export interface PreparedBranch {
  *  - otherwise                       -> new branch from origin/<baseBranch>
  */
 /** `relPath`: repo location relative to reposRoot when it differs from its name (e.g. "oms-src/oms-api"). */
-export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo): Promise<PreparedBranch> {
+export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo, opts: { mustExist?: boolean } = {}): Promise<PreparedBranch> {
   const repoPath = join(config.reposRoot, relPath);
   if (!existsSync(join(repoPath, ".git"))) throw new Error(`repo not found: ${repoPath}`);
   const wt = join(taskDir(code), repo);
@@ -67,12 +67,16 @@ export async function prepareBranch(code: string, repo: string, branch = code, r
     const mainBranch = await git(repoPath, "branch", "--show-current");
     if (mainBranch === branch) return { repo, branch, path: repoPath, createdFrom: "developer's own checkout" };
     await git(repoPath, "worktree", "add", wt, branch);
+    // Continuing an existing branch: catch up with origin when the local copy is only behind (never rewrites history).
+    if (opts.mustExist && (await refExists(repoPath, `refs/remotes/origin/${branch}`))) await git(wt, "merge", "--ff-only", `origin/${branch}`).catch(() => {});
     return { repo, branch, path: wt, createdFrom: "existing local branch" };
   }
   if (await refExists(repoPath, `refs/remotes/origin/${branch}`)) {
     await git(repoPath, "worktree", "add", "--track", "-b", branch, wt, `origin/${branch}`);
     return { repo, branch, path: wt, createdFrom: `origin/${branch}` };
   }
+  // An explicitly requested existing branch is never invented from the base.
+  if (opts.mustExist) throw new Error(`${repo}: branch ${branch} does not exist locally or on origin — check the name (it is never created from ${config.baseBranch})`);
   const base = `origin/${config.baseBranch}`;
   if (!(await refExists(repoPath, base))) throw new Error(`${repo}: base branch ${base} not found`);
   await git(repoPath, "worktree", "add", "--no-track", "-b", branch, wt, base);

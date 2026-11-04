@@ -112,6 +112,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <div className="rv-meta">
                 <span title="Workflow"><Workflow size={13} /><a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a> <span className="muted">v{run.definition_version}</span></span>
                 <span title="Branch"><GitBranch size={13} /><span className="mono">{run.branch}</span></span>
+                {Object.entries((run.inputs?.branches ?? {}) as Record<string, string>).map(([repo, b]) => (
+                  <span key={repo} className="pill chip-brand" title={`Làm tiếp branch có sẵn${run.inputs?.branches_source ? ` (từ ${run.inputs.branches_source})` : ""} — không tạo branch mới`}>
+                    <GitBranch size={12} /> {repo === "*" ? "mọi repo" : repo} → <span className="mono">{b}</span> (làm tiếp)
+                  </span>
+                ))}
                 {run.work_item && <span title="Work item"><Ticket size={13} /><a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a></span>}
                 {run.created_at && <span title="Created"><CalendarClock size={13} />{time(run.created_at)}</span>}
               </div>

@@ -1,8 +1,10 @@
 import type pg from "pg";
+import { config } from "../config.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
 import { definitions } from "./definitions.ts";
+import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
@@ -278,6 +280,14 @@ export async function startRun(input: StartRunInput) {
     const { dv, wi, inputs, allowed, selected, graph } = r;
     const { id } = (await one<{ id: number }>(c, "SELECT nextval('workflow_runs_id_seq')::bigint AS id"))!;
     const branch = wi?.code ?? `wf/run-${id}`;
+    // Existing-branch directives: explicit inputs.branches, else detected from the work item text ("làm tiếp từ branch X ở repo").
+    const explicitBranches = normalizeBranchMap(inputs.branches, config.baseBranch);
+    if (explicitBranches) inputs.branches = explicitBranches;
+    else if (wi) {
+      const repoNames = (await q<{ name: string }>(c, "SELECT name FROM repositories")).map((x) => x.name);
+      const detected = detectBranchDirectives([wi.title, wi.description, wi.payload?.note].filter(Boolean).join("\n"), repoNames, config.baseBranch);
+      if (Object.keys(detected).length) Object.assign(inputs, { branches: detected, branches_source: "work item description" });
+    }
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     const resolvedGraph = { ...graph, profile: r.decision.profile, profile_changes: r.changes };
     await q(

@@ -1285,3 +1285,16 @@ test("re-execute without instructions behaves as before; unknown skills are reje
   for (const cmd of ["git restore pkg/x.go", "git stash", "git -C /w stash push", "git checkout -- .", "git checkout ."]) assert.ok(!decideBash(cmd, coding, "/w").allow, cmd);
   assert.ok(decideBash("git status && git diff", coding, "/w").allow);
 });
+
+test("existing-branch directive in the work item description lands in run.inputs.branches; explicit inputs win", async () => {
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent", name: "Implementation" }]);
+  const wi = await workItems.createManual({ title: "VNPay installment", project: "OMS", description: "Làm tiếp từ branch HSK-QA679L33 ở oms-background, không checkout sang branch mới.\nXử lý installment." });
+  const run = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"] });
+  const r = await getRun(run.id);
+  assert.deepEqual(r.inputs.branches, { "oms-background": "HSK-QA679L33" });
+  assert.equal(r.inputs.branches_source, "work item description");
+  assert.equal(r.branch, wi.code, "the run keeps its own branch name for every other repository");
+  const explicit = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "oms-background": "HSK-OTHER" } } });
+  assert.deepEqual((await getRun(explicit.id)).inputs.branches, { "oms-background": "HSK-OTHER" });
+  await assert.rejects(startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "*": "release/prod" } } }), /base branch/);
+});
