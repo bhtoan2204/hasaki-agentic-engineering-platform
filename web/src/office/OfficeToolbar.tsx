@@ -1,3 +1,4 @@
+import { Maximize2, Minimize2, Pause, Play, Shrink, Sparkles, Expand } from "lucide-react";
 import type { LiveState } from "../api.ts";
 
 export function OfficeToolbar({
@@ -36,7 +37,7 @@ export function OfficeToolbar({
             </optgroup>
           )}
           <optgroup label="Mô phỏng">
-            <option value="preview">✨ Preview Office (dữ liệu mẫu)</option>
+            <option value="preview">Preview Office (dữ liệu mẫu)</option>
           </optgroup>
         </select>
       </label>
@@ -44,15 +45,15 @@ export function OfficeToolbar({
       <span className="grow" />
       {!preview && live && <span className={`office-live is-${live}`} title="Cập nhật từ PostgreSQL LISTEN/NOTIFY qua SSE">{live === "sse" ? "● live" : live === "polling" ? "◌ polling" : "… đang kết nối"}</span>}
       <button className={`ghost sm${preview ? " is-on" : ""}`} aria-pressed={preview} onClick={() => onPreview(!preview)} title="Mô phỏng mọi animation bằng dữ liệu mẫu — không tạo task, không chạy Claude">
-        ✨ Preview
+        <Sparkles size={15} /> Preview
       </button>
       <button className={`ghost sm${animate ? " is-on" : ""}`} aria-pressed={animate} onClick={() => onAnimate(!animate)}>
-        {animate ? "⏸ Animation" : "▶ Animation"}
+        {animate ? <><Pause size={15} /> Animation</> : <><Play size={15} /> Animation</>}
       </button>
       <button className={`ghost sm${compact ? " is-on" : ""}`} aria-pressed={compact} onClick={() => onCompact(!compact)}>
-        {compact ? "⤢ Rộng" : "⤡ Gọn"}
+        {compact ? <><Expand size={15} /> Rộng</> : <><Shrink size={15} /> Gọn</>}
       </button>
-      <button className="ghost sm" aria-pressed={fullscreen} onClick={onFullscreen}>{fullscreen ? "✕ Thoát toàn màn hình" : "⛶ Toàn màn hình"}</button>
+      <button className="ghost sm" aria-pressed={fullscreen} onClick={onFullscreen}>{fullscreen ? <><Minimize2 size={15} /> Thoát toàn màn hình</> : <><Maximize2 size={15} /> Toàn màn hình</>}</button>
     </div>
   );
 }

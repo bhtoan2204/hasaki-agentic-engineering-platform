@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChibiAgent } from "./ChibiAgent.tsx";
-import { HasakiBanner } from "./brand.tsx";
-import { Chair, CoffeeCorner, Desk, HelpDesk, Keyboard, Lamp, Monitor, Mug, PackTable, PaperStack, Plant, Room, screenMode, Whiteboard } from "./Furniture.tsx";
+import { BRAND } from "../brand/brand.ts";
+import { BeautyBar, BeautyShelf, Chair, CoffeeCorner, Desk, HelpDesk, Keyboard, Lamp, LogoSign, Monitor, Mug, PackTable, PaperStack, PendantLamp, Plant, Room, Scanner, ShippingBox, screenMode, Whiteboard } from "./Furniture.tsx";
 import { AgentSpeechBubble } from "./AgentSpeechBubble.tsx";
 import { ROLE_INFO } from "./workflowToAgentMapper.ts";
 import type { AgentView, Role } from "./types.ts";
@@ -110,7 +110,8 @@ export function OfficeScene({
           </pattern>
         </defs>
         <Room now={now} />
-        <HasakiBanner x={150} y={6} />
+        <LogoSign x={150} y={5} href={BRAND.logoUrl} />
+        <BeautyShelf x={180} y={23} />
         <Whiteboard x={82} y={16} mode={mode("architect")} />
         <HelpDesk x={HELP.x} y={HELP.y} waiting={waiting} />
 
@@ -151,8 +152,17 @@ export function OfficeScene({
         <Desk x={226} y={124} w={56} />
         <PackTable x={226} y={124} mode={mode("pr")} />
 
+        <Scanner x={229} y={117} active={by.pr.pose === "work"} />
+        <ShippingBox x={212} y={140} />
+        <BeautyBar x={112} y={160} />
         <Plant x={2} y={146} big />
         <Plant x={296} y={146} big />
+        {/* ambient light (decorative, not execution state) */}
+        <g className="o-ambient" pointerEvents="none">
+          <PendantLamp x={60} len={6} />
+          <PendantLamp x={160} len={4} />
+          <PendantLamp x={262} len={6} />
+        </g>
       </svg>
 
       {showBubbles &&

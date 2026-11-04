@@ -141,13 +141,17 @@ export async function harnessEvaluation(since: string) {
     one<any>(
       pool,
       `SELECT count(*)::int AS coding_attempts,
-              count(*) FILTER (WHERE a.metrics ? 'verification' AND a.metrics->'verification'->>'outcome' <> 'skipped')::int AS verified,
+              count(*) FILTER (WHERE a.metrics ? 'verification' AND a.metrics->'verification'->>'outcome' NOT IN ('skipped', 'disabled'))::int AS verified,
               count(*) FILTER (WHERE (a.metrics->'verification'->>'passed')::boolean)::int AS passed,
               count(*) FILTER (WHERE (a.metrics->'verification'->>'passed')::boolean AND (a.metrics->'verification'->>'repairs')::int = 0)::int AS passed_first_try,
               round(avg((a.metrics->'verification'->>'repairs')::numeric) FILTER (WHERE a.metrics ? 'verification'), 2) AS avg_repairs,
               count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'no_progress')::int AS stopped_no_progress,
               count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'failed')::int AS repair_budget_exhausted,
-              round(avg((a.metrics->'verification'->>'duration_ms')::numeric) FILTER (WHERE a.metrics ? 'verification') / 1000, 1) AS avg_verify_s
+              round(avg((a.metrics->'verification'->>'duration_ms')::numeric) FILTER (WHERE a.metrics ? 'verification') / 1000, 1) AS avg_verify_s,
+              count(*) FILTER (WHERE a.metrics->'verification'->>'status' = 'accepted_with_preexisting')::int AS accepted_preexisting,
+              count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'error')::int AS errors,
+              count(*) FILTER (WHERE (a.metrics->'verification'->>'needs_review')::boolean)::int AS needs_review,
+              count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'disabled')::int AS disabled
          FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
         WHERE s.type = 'coding_agent' AND a.started_at > ${since}`,
     ),

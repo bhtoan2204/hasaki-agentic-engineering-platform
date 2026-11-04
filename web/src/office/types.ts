@@ -7,7 +7,8 @@ export type StepStatus = "PENDING" | "READY" | "RUNNING" | "WAITING_INPUT" | "WA
 export type Role = "analyst" | "architect" | "developer" | "tester" | "reviewer" | "pr";
 
 /** What the character's body does — derived from step status only. */
-export type Pose = "idle" | "prepare" | "work" | "ask" | "approval" | "celebrate" | "done" | "frustrated" | "stopped" | "skipped";
+/** "greet" is decorative only (Overview mascot) — the mapper never produces it. */
+export type Pose = "idle" | "prepare" | "work" | "ask" | "approval" | "celebrate" | "done" | "frustrated" | "stopped" | "skipped" | "greet";
 
 /** What the character's hands do while working — derived from real tool calls / step type. */
 export type Activity =
@@ -36,6 +37,9 @@ export interface AttemptLite {
   started_at?: string | null;
   finished_at?: string | null;
   error?: any;
+  /** Attempt metrics (incl. harness `verification`) and output, when the API provides them. */
+  metrics?: any;
+  output?: any;
 }
 export interface QuestionLite {
   step_key: string;

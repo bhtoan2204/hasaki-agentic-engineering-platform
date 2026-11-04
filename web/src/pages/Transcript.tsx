@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  AlertTriangle, ArrowRight, Bot, Brain, CheckCircle2, CornerDownLeft, FolderSearch, Layers, ListFilter, MessageSquare, Pencil, ScrollText, Send,
+  SquareTerminal, Wrench, XCircle, type LucideIcon,
+} from "lucide-react";
 import { api } from "../api.ts";
 import { Badge, Copy, dur, ago, Markdown, time } from "../ui.tsx";
+import "./RunView.css";
 
 interface Ev {
   id: number;
@@ -12,19 +17,36 @@ interface Ev {
 
 const FILTERS = [
   ["all", "Tất cả"],
-  ["messages", "💬 Messages"],
-  ["tools", "🔧 Tools"],
-  ["read", "📖 Files read"],
-  ["modified", "✏️ Files modified"],
-  ["commands", "⌨️ Commands"],
-  ["errors", "⚠️ Errors"],
-  ["reasoning", "💭 Reasoning"],
-  ["prompts", "➡️ Prompts"],
+  ["messages", "Messages"],
+  ["tools", "Tools"],
+  ["read", "Files read"],
+  ["modified", "Files modified"],
+  ["commands", "Commands"],
+  ["errors", "Errors"],
+  ["reasoning", "Reasoning"],
+  ["prompts", "Prompts"],
 ] as const;
 type Filter = (typeof FILTERS)[number][0];
+const FILTER_ICON: Record<Filter, LucideIcon> = {
+  all: Layers, messages: MessageSquare, tools: Wrench, read: FolderSearch, modified: Pencil, commands: SquareTerminal, errors: AlertTriangle, reasoning: Brain, prompts: ArrowRight,
+};
+const Av = ({ icon: I }: { icon: LucideIcon }) => <span className="tr-av" aria-hidden><I size={13} strokeWidth={2.2} /></span>;
 
 const READ_TOOLS = ["Read", "Grep", "Glob", "LS"];
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+function toolIcon(name: string): LucideIcon {
+  return READ_TOOLS.includes(name) ? FolderSearch : EDIT_TOOLS.includes(name) ? Pencil : name === "Bash" ? SquareTerminal : Wrench;
+}
+
+function StatTile({ icon: I, n, label, children }: { icon: LucideIcon; n: ReactNode; label: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="tr-stat">
+      <div className="tr-stat-top"><I size={14} /><b>{n}</b>{label}</div>
+      {children}
+    </div>
+  );
+}
 
 function toolHint(name: string, input: any = {}) {
   return String(input.file_path ?? input.notebook_path ?? input.path ?? input.pattern ?? input.command ?? input.repo ?? input.url ?? input.query ?? input.description ?? input.step_key ?? "").split("\n")[0];
@@ -97,33 +119,32 @@ export function Transcript({ attemptId, live, tick }: { attemptId: number; live:
 
   return (
     <div>
-      <div className="grid3 small" style={{ gap: 8 }}>
-        <div className="card" style={{ margin: 0, padding: 8 }}>
-          <b>📖 {filesRead.length}</b> files read
-          <div className="muted mono" style={{ maxHeight: 90, overflow: "auto" }}>{filesRead.map((f) => <div key={f}>{f}</div>)}</div>
-        </div>
-        <div className="card" style={{ margin: 0, padding: 8 }}>
-          <b>✏️ {filesModified.length}</b> files modified
-          <div className="muted mono" style={{ maxHeight: 90, overflow: "auto" }}>{filesModified.map((f) => <div key={f}>{f}</div>)}</div>
-        </div>
-        <div className="card" style={{ margin: 0, padding: 8 }}>
-          <b>⌨️ {commands.length}</b> commands · <b className={errors.length ? "err" : ""}>⚠️ {errors.length}</b> errors
+      <div className="tr-stats">
+        <StatTile icon={FolderSearch} n={filesRead.length} label="files read">
+          <div className="mono" title={filesRead.join("\n")}>{filesRead.map((f) => <div key={f}>{f}</div>)}</div>
+        </StatTile>
+        <StatTile icon={Pencil} n={filesModified.length} label="files modified">
+          <div className="mono" title={filesModified.join("\n")}>{filesModified.map((f) => <div key={f}>{f}</div>)}</div>
+        </StatTile>
+        <StatTile icon={SquareTerminal} n={commands.length} label={<>commands · <b className={errors.length ? "err" : ""} style={{ fontSize: "inherit" }}>{errors.length}</b> errors</>}>
           {result && (
-            <div className="muted">
+            <div className="muted small" style={{ marginTop: 4 }}>
               {result.data?.num_turns} turns · {dur(result.data?.duration_ms)}
               {result.data?.total_cost_usd != null && ` · $${Number(result.data.total_cost_usd).toFixed(3)}`}
             </div>
           )}
-        </div>
+        </StatTile>
       </div>
-      <div className="tl-filters">
-        {FILTERS.map(([k, label]) => (
-          <button key={k} className={filter === k ? "" : "ghost"} onClick={() => setFilter(k)}>{label}</button>
-        ))}
+      <div className="tl-filters" role="group" aria-label="Lọc sự kiện">
+        <ListFilter size={14} color="var(--muted)" aria-hidden />
+        {FILTERS.map(([k, label]) => {
+          const I = FILTER_ICON[k];
+          return <button key={k} className={filter === k ? "" : "ghost"} aria-pressed={filter === k} onClick={() => setFilter(k)}><I size={12} />{label}</button>;
+        })}
         <span className="grow" />
-        <label className="small muted"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
+        <label className="small muted" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> follow</label>
       </div>
-      <div ref={box} style={{ maxHeight: "62vh", overflow: "auto" }}>
+      <div ref={box} className="tr-feed">
         {visible.map((e) => <Entry key={e.id} e={e} result={e.kind === "tool" ? results[e.data?.id] : undefined} live={live} />)}
         {!events.length && <div className="muted small">Chưa có sự kiện nào cho attempt này.</div>}
         {live && (
@@ -143,7 +164,7 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
     case "system_prompt":
       return (
         <details className="msg reason">
-          <summary>📋 System prompt (trusted) · tools: {(e.data?.tools ?? []).join(", ")} {e.data?.knowledge?.length ? `· knowledge: ${e.data.knowledge.join(", ")}` : ""}</summary>
+          <summary><Av icon={ScrollText} /> System prompt (trusted) · tools: {(e.data?.tools ?? []).join(", ")} {e.data?.knowledge?.length ? `· knowledge: ${e.data.knowledge.join(", ")}` : ""}</summary>
           <div className="row tight"><span className="grow" /><Copy text={e.content} label="Copy prompt" /></div>
           <div className="pre">{e.content}</div>
         </details>
@@ -151,7 +172,7 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
     case "prompt":
       return (
         <div className={"msg prompt" + sub}>
-          <div className="who">➡️ Platform → Claude {e.data?.resume_session && <Badge s="READY">resume session</Badge>} {t}<span className="grow" /><Copy text={e.content} label="Copy prompt" /></div>
+          <div className="who"><Av icon={Send} /><b>Platform → Claude</b> {e.data?.resume_session && <Badge s="READY">resume session</Badge>} {t}<span className="grow" /><Copy text={e.content} label="Copy prompt" /></div>
           {e.content.length > 2500 ? (
             <details><summary>{e.content.slice(0, 160)}… ({e.content.length} ký tự)</summary><div className="pre">{e.content}</div></details>
           ) : (
@@ -162,25 +183,26 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
     case "agent":
       return (
         <div className={"msg claude" + sub}>
-          <div className="who">🤖 Claude {t}<span className="grow" /><Copy text={e.content} /></div>
+          <div className="who"><Av icon={Bot} /><b>Claude</b> {t}<span className="grow" /><Copy text={e.content} /></div>
           <Markdown text={e.content} />
         </div>
       );
     case "thinking":
       return (
         <details className={"msg reason" + sub}>
-          <summary>💭 Reasoning summary {t}</summary>
+          <summary><Av icon={Brain} /> Reasoning summary {t}</summary>
           <div className="pre">{e.content}</div>
         </details>
       );
     case "tool": {
       if (!e.data?.name) return <div className={"msg note" + sub}>{t} {e.content}</div>;
       const err = result?.data?.is_error;
+      const TI = toolIcon(e.data.name);
       return (
         <div className={"msg tool" + sub + (err ? " toolerr" : "")}>
           <div className="who">
-            🔧 <b style={{ color: "var(--text)" }}>{e.data.name.replace(/^mcp__platform__/, "platform·")}</b>
-            <span className="mono" style={{ color: "var(--text)" }}>{toolHint(e.data.name, e.data.input).slice(0, 160)}</span>
+            <Av icon={TI} /><b>{e.data.name.replace(/^mcp__platform__/, "platform·")}</b>
+            <span className="mono">{toolHint(e.data.name, e.data.input).slice(0, 160)}</span>
             {t}
             {err && <Badge s="FAILED">error</Badge>}
             {!result && live && <Badge s="RUNNING">running…</Badge>}
@@ -199,15 +221,15 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
     case "tool_result":
       return (
         <details className={"msg tool" + sub}>
-          <summary>↩︎ tool result {t}</summary>
+          <summary><Av icon={CornerDownLeft} /> tool result {t}</summary>
           <pre>{e.content}</pre>
         </details>
       );
     case "result": {
       const d = e.data ?? {};
       return (
-        <div className="msg done">
-          <b>{d.is_error ? "❌" : "✅"} Turn finished</b> · {d.num_turns ?? "?"} turns · {dur(d.duration_ms)}
+        <div className={"msg done " + (d.is_error ? "bad" : "ok")}>
+          {d.is_error ? <XCircle size={15} color="var(--st-err)" /> : <CheckCircle2 size={15} color="var(--st-ok)" />}<b>Turn finished</b> · {d.num_turns ?? "?"} turns · {dur(d.duration_ms)}
           {d.total_cost_usd != null && ` · $${Number(d.total_cost_usd).toFixed(3)}`}
           {d.usage && ` · in ${d.usage.input_tokens ?? 0} / out ${d.usage.output_tokens ?? 0} tokens`} <span className="muted small">{time(e.created_at)}</span>
         </div>

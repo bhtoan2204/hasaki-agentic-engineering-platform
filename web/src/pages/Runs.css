@@ -1,0 +1,39 @@
+/* Runs — execution monitoring (RunsPage + shared RunsTable). */
+.runs-launch { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; max-width: 100% }
+.runs-launch select { width: auto; min-width: 200px; max-width: 100% }
+
+.runs-stats { margin-bottom: var(--sp-5) }
+.runs-stats .stat { transition: transform .15s, box-shadow .15s }
+.runs-stats .stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-2) }
+
+.runs-toolbar { display: flex; gap: var(--sp-3); align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: var(--sp-3) }
+.runs-seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; border-radius: var(--r-sm) }
+.runs-seg::-webkit-scrollbar { display: none }
+.runs-seg .segmented { white-space: nowrap }
+
+.runs-table table { min-width: 860px }
+.runs-table td { vertical-align: middle }
+.runs-main { min-width: 220px; max-width: 380px }
+.runs-title { display: flex; align-items: baseline; gap: 8px; min-width: 0 }
+.runs-id { font: 600 11.5px var(--mono); color: var(--muted); flex: none }
+.runs-name { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+.runs-meta { display: flex; gap: 10px; align-items: center; margin-top: 3px; color: var(--muted); min-width: 0; flex-wrap: wrap }
+.runs-meta .mono { font-size: 11.5px }
+.runs-branch { display: inline-flex; align-items: center; gap: 4px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.runs-branch svg { flex: none }
+.runs-wf { display: inline-flex; align-items: center; gap: 5px; font-weight: 500; color: var(--ink-2) }
+.runs-wf svg { color: var(--muted) }
+.runs-ago { white-space: nowrap }
+.runs-ago svg { vertical-align: -2px; margin-right: 4px }
+
+.runs-progress { display: flex; align-items: center; gap: 8px; min-width: 130px }
+.runs-bar { flex: 1; display: flex; gap: 2px; height: 7px; min-width: 80px }
+.runs-bar > span { flex: 1; border-radius: 3px; background: var(--surface-3) }
+.runs-progress-n { font: 600 11.5px var(--mono); color: var(--ink-2); white-space: nowrap }
+
+.runs-foot { margin-top: var(--sp-3) }
+
+@media (max-width: 900px) {
+  .runs-launch { width: 100% } .runs-launch select { flex: 1; min-width: 0 }
+  .runs-toolbar .search { width: 100% !important }
+}

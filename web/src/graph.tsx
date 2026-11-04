@@ -1,6 +1,13 @@
 import { Handle, Position, type Edge, type Node, type NodeProps, MarkerType } from "@xyflow/react";
-import { STATUS_COLORS } from "./api.ts";
+import {
+  Bot, CheckCircle2, Circle, CircleDashed, ClipboardList, Code2, GitBranch, GitMerge, GitPullRequest, Hand, Loader2, MessageCircleQuestion,
+  PauseCircle, PenLine, Plug, RotateCcw, ShieldCheck, SkipForward, SquareTerminal, XCircle, Ban, Clock, Split, type LucideIcon,
+} from "lucide-react";
+import { STATUS_COLORS, STATUS_LABELS } from "./api.ts";
+// Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
+import "./pages/RunView.css";
 
+/** Plain-text icons per step type (kept for <option> labels and other text-only contexts). */
 export const STEP_ICONS: Record<string, string> = {
   agent: "🤖",
   coding_agent: "🧑‍💻",
@@ -13,6 +20,38 @@ export const STEP_ICONS: Record<string, string> = {
 };
 STEP_ICONS.git_pull_request = "⤴️";
 STEP_ICONS.task_result_report = "📋";
+
+/** Lucide icon per step type (graph nodes, inspector headers). */
+export const STEP_TYPE_ICONS: Record<string, LucideIcon> = {
+  agent: Bot,
+  coding_agent: Code2,
+  human_input: PenLine,
+  human_approval: ShieldCheck,
+  integration: Plug,
+  command: SquareTerminal,
+  condition: Split,
+  git_pull_request: GitPullRequest,
+  task_result_report: ClipboardList,
+};
+export const stepTypeIcon = (type?: string): LucideIcon => (type && STEP_TYPE_ICONS[type]) || Circle;
+
+/** Lucide icon per step/run status. */
+export const STATUS_ICONS: Record<string, LucideIcon> = {
+  PENDING: CircleDashed,
+  READY: Clock,
+  RUNNING: Loader2,
+  RETRYING: RotateCcw,
+  WAITING: PauseCircle,
+  WAITING_INPUT: MessageCircleQuestion,
+  WAITING_APPROVAL: Hand,
+  PAUSED: PauseCircle,
+  COMPLETED: CheckCircle2,
+  FAILED: XCircle,
+  STALE: XCircle,
+  CANCELED: Ban,
+  SKIPPED: SkipForward,
+};
+export const statusIcon = (s?: string): LucideIcon => (s && STATUS_ICONS[s]) || CircleDashed;
 
 export interface StepLike {
   key: string;
@@ -45,22 +84,35 @@ export function autoLayout(steps: StepLike[]): Record<string, { x: number; y: nu
   return pos;
 }
 
+/** Edge colour from the statuses at both ends: done = green, flowing into a live step = berry, failed = red, waiting = amber. */
+function edgeColor(src?: string, dst?: string) {
+  if (dst === "RUNNING" || dst === "RETRYING") return "var(--st-run)";
+  if (dst === "FAILED" || dst === "STALE") return "var(--st-err)";
+  if (dst === "WAITING_INPUT" || dst === "WAITING_APPROVAL" || dst === "WAITING") return "var(--st-wait)";
+  if (src === "COMPLETED" || src === "SKIPPED") return "var(--st-ok)";
+  return "var(--line-strong)";
+}
+
 export function toEdges(steps: StepLike[], statusOf?: (k: string) => string | undefined): Edge[] {
   const edges: Edge[] = [];
   for (const s of steps)
     for (const d of s.depends_on ?? []) {
       const st = statusOf?.(d);
+      const dst = statusOf?.(s.key);
       const active = st === "COMPLETED" || st === "SKIPPED";
+      const stroke = statusOf ? edgeColor(st, dst) : "var(--muted)";
       edges.push({
         id: `${d}->${s.key}`,
         source: d,
         target: s.key,
-        animated: statusOf?.(s.key) === "RUNNING",
+        animated: dst === "RUNNING",
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-        style: { stroke: statusOf ? (active ? STATUS_COLORS.COMPLETED : "var(--muted)") : "var(--muted)", strokeWidth: 1.6, opacity: statusOf && !active ? 0.6 : 1 },
+        style: { stroke, strokeWidth: statusOf && (active || dst === "RUNNING") ? 2 : 1.6, opacity: statusOf && !active && stroke === "var(--line-strong)" ? 0.85 : 1 },
         label: (s.run_if as any)?.step === d ? `if = ${JSON.stringify((s.run_if as any).equals)}` : undefined,
-        labelStyle: { fontSize: 10, fill: "var(--muted)" },
-        labelBgStyle: { fill: "var(--panel)" },
+        labelStyle: { fontSize: 10, fontWeight: 600, fill: "var(--ink-2)" },
+        labelBgStyle: { fill: "var(--surface)", stroke: "var(--line)" },
+        labelBgPadding: [6, 3],
+        labelBgBorderRadius: 6,
       });
     }
   return edges;
@@ -77,30 +129,40 @@ export type StepNodeData = {
 
 export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
   const { step, status } = data;
-  const color = status ? STATUS_COLORS[status] : "var(--line)";
+  const color = data.invalid ? "var(--st-err)" : status ? STATUS_COLORS[status] ?? "var(--st-idle)" : "var(--line-strong)";
   const blocked = status === "WAITING_INPUT" || status === "WAITING_APPROVAL";
-  const cls = ["node", data.selected && "selected", blocked && "blocked", status === "RUNNING" && "running"].filter(Boolean).join(" ");
+  const cls = ["node", "gn", status ? "has-status" : "no-status", data.selected && "selected", blocked && "blocked", status === "RUNNING" && "running", data.invalid && "invalid"]
+    .filter(Boolean)
+    .join(" ");
+  const TypeIcon = stepTypeIcon(step.type);
+  const StIcon = statusIcon(status);
+  const merged: string[] = Array.isArray((step as any).config?.merged_from) ? (step as any).config.merged_from : [];
   return (
-    <div className={cls} style={{ borderColor: data.invalid ? "var(--err)" : color }}>
+    <div className={cls} style={{ ["--gn-c" as any]: color }}>
       <Handle type="target" position={Position.Top} />
-      <div className="t">
-        {STEP_ICONS[step.type] ?? "•"} {step.name || step.key}
+      <span className="gn-rail" aria-hidden />
+      <div className="gn-head">
+        <span className="gn-type" title={step.type}><TypeIcon size={15} strokeWidth={2} /></span>
+        <div className="gn-titles">
+          <div className="t">{step.name || step.key}</div>
+          <div className="sub">{step.key} · {step.type}</div>
+        </div>
+        {status && (
+          <span className="gn-st" title={STATUS_LABELS[status] ? `${STATUS_LABELS[status]} (${status})` : status}>
+            <StIcon size={16} strokeWidth={2.2} className={status === "RUNNING" ? "gn-spin" : undefined} />
+          </span>
+        )}
       </div>
-      <div className="sub">
-        {step.key} · {step.type}
-      </div>
-      {status && (
-        <div className="row tight" style={{ marginTop: 4, gap: 4 }}>
-          <span className="badge" style={{ color }}>{status === "RUNNING" ? "● RUNNING" : status}</span>
-          {!!data.attempts && <span className="muted small">#{data.attempts}</span>}
-          {!!data.openQuestions && <span className="badge" style={{ color: "var(--warn)" }}>❓ {data.openQuestions}</span>}
+      {(status || !!data.attempts || !!data.openQuestions || step.requires_approval || !!step.run_if || merged.length > 0) && (
+        <div className="flags">
+          {status && <span className="gn-pill gn-pill-st">{STATUS_LABELS[status] ?? status}</span>}
+          {!!data.attempts && <span className="gn-pill" title={`${data.attempts} attempt`}><RotateCcw size={10} strokeWidth={2.4} />{data.attempts}</span>}
+          {!!data.openQuestions && <span className="gn-pill gn-pill-wait" title="Câu hỏi đang chờ"><MessageCircleQuestion size={10} strokeWidth={2.4} />{data.openQuestions}</span>}
+          {step.requires_approval && <span className="gn-pill" title="Cần duyệt trước khi chạy"><ShieldCheck size={10} strokeWidth={2.4} />duyệt</span>}
+          {!!step.run_if && <span className="gn-pill" title="Chạy có điều kiện"><GitBranch size={10} strokeWidth={2.4} />điều kiện</span>}
+          {merged.length > 0 && <span className="gn-pill" title="FAST profile: analysis steps folded into this session"><GitMerge size={10} strokeWidth={2.4} />{merged.join(" + ")}</span>}
         </div>
       )}
-      <div className="flags">
-        {step.requires_approval && <span className="flag">approval gate</span>}
-        {!!step.run_if && <span className="flag">conditional</span>}
-        {Array.isArray((step as any).config?.merged_from) && (step as any).config.merged_from.length > 0 && <span className="flag" title="FAST profile: analysis steps folded into this session">⊕ {(step as any).config.merged_from.join(" + ")}</span>}
-      </div>
       <Handle type="source" position={Position.Bottom} />
     </div>
   );

@@ -143,7 +143,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
           </p>
         </section>
 
-        {sel && <AgentDetailsPanel agent={sel} runId={preview ? null : runId} events={events} now={now} preview={preview} onClose={() => setSelected(null)} />}
+        {sel && <AgentDetailsPanel agent={sel} runId={preview ? null : runId} events={events} now={now} preview={preview} attempts={snapshot.attempts} onClose={() => setSelected(null)} />}
       </div>
     </div>
   );

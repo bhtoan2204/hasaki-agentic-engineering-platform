@@ -322,8 +322,9 @@ export function prFields(source: any, repo: string, code: string | undefined, ru
   };
 }
 
-export function prDescription(x: { code?: string; runId: number; summary: string; decisions: Array<{ title: string; detail: string }>; commits: string; testExceptions?: Array<{ step: string; exception: any }> }) {
+export function prDescription(x: { code?: string; runId: number; summary: string; decisions: Array<{ title: string; detail: string }>; commits: string; testExceptions?: Array<{ step: string; exception: any }>; verificationNotes?: Array<{ step: string; status: string; lines: string[] }> }) {
   const exc = x.testExceptions ?? [];
+  const vn = (x.verificationNotes ?? []).filter((n) => n.lines.length);
   return [
     x.code ? `Task: **${x.code}**` : `Workflow run #${x.runId}`,
     "",
@@ -343,6 +344,9 @@ export function prDescription(x: { code?: string; runId: number; summary: string
           "",
         ]
       : []),
+    ...(vn.length
+      ? ["## Verification notes (automated checks were not conclusive — please review)", ...vn.flatMap((n) => [`- ${n.step} (${n.status}):`, ...n.lines.map((l) => `  - ${l}`)]), ""]
+      : []),
     "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
   ].join("\n");
 }
@@ -351,6 +355,22 @@ export function prDescription(x: { code?: string; runId: number; summary: string
 export async function testExceptionsOf(runId: number) {
   const rows = await q(pool, "SELECT key, output FROM workflow_steps WHERE run_id = $1 AND type = 'command' AND output ? 'accepted_exception' ORDER BY position", [runId]);
   return rows.map((r: any) => ({ step: r.key, exception: r.output.accepted_exception }));
+}
+
+/** Harness verification results a reviewer must see: accepted pre-existing failures and needs-review signals. */
+export async function verificationNotesOf(runId: number) {
+  const rows = await q(pool, "SELECT key, output->'verification' AS v FROM workflow_steps WHERE run_id = $1 AND type = 'coding_agent' AND output ? 'verification' ORDER BY position", [runId]);
+  return rows
+    .filter((r: any) => r.v && (r.v.status === "accepted_with_preexisting" || r.v.needs_review || r.v.status === "disabled"))
+    .map((r: any) => ({
+      step: r.key,
+      status: String(r.v.status),
+      lines: [
+        ...(r.v.status === "disabled" ? ["verification disabled by the workflow definition"] : []),
+        ...((r.v.last ?? []) as any[]).filter((x) => x.status === "accepted_preexisting").map((x) => `${x.repo}: ${x.note ?? "pre-existing failures accepted"}`),
+        ...((r.v.review_reasons ?? []) as string[]),
+      ],
+    }));
 }
 
 /**
@@ -388,7 +408,7 @@ export const pullRequestExecutor: StepExecutor = {
         }
         return { kind: "failed", error: `${w.repo}: push failed: ${msg}`, retryable: true };
       }
-      const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits, testExceptions: await testExceptionsOf(ctx.run.id) });
+      const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits, testExceptions: await testExceptionsOf(ctx.run.id), verificationNotes: await verificationNotesOf(ctx.run.id) });
       const slug = (await repositories.get(w.repo))?.remote_slug || w.repo;
       const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
       await q(

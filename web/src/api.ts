@@ -119,17 +119,35 @@ export function useLive(runId: number | null, onChange: (payload?: any) => void,
 }
 
 export const STATUS_COLORS: Record<string, string> = {
-  PENDING: "var(--muted)",
-  READY: "var(--accent)",
-  RUNNING: "var(--accent)",
-  RETRYING: "var(--accent)",
-  WAITING: "var(--warn)",
-  WAITING_INPUT: "var(--warn)",
-  WAITING_APPROVAL: "var(--warn)",
-  PAUSED: "var(--warn)",
-  COMPLETED: "var(--ok)",
-  FAILED: "var(--err)",
-  STALE: "var(--err)",
-  CANCELED: "var(--muted)",
-  SKIPPED: "var(--muted)",
+  PENDING: "var(--st-idle)",
+  READY: "var(--st-run)",
+  RUNNING: "var(--st-run)",
+  RETRYING: "var(--st-run)",
+  WAITING: "var(--st-wait)",
+  WAITING_INPUT: "var(--st-wait)",
+  WAITING_APPROVAL: "var(--st-wait)",
+  PAUSED: "var(--st-wait)",
+  COMPLETED: "var(--st-ok)",
+  FAILED: "var(--st-err)",
+  STALE: "var(--st-err)",
+  CANCELED: "var(--st-idle)",
+  SKIPPED: "var(--st-idle)",
 };
+
+/** Human labels for statuses (Vietnamese UI). */
+export const STATUS_LABELS: Record<string, string> = {
+  PENDING: "Chờ",
+  READY: "Sẵn sàng",
+  RUNNING: "Đang chạy",
+  RETRYING: "Thử lại",
+  WAITING: "Chờ bạn",
+  WAITING_INPUT: "Cần trả lời",
+  WAITING_APPROVAL: "Cần duyệt",
+  PAUSED: "Tạm dừng",
+  COMPLETED: "Hoàn thành",
+  FAILED: "Lỗi",
+  STALE: "Cũ",
+  CANCELED: "Đã huỷ",
+  SKIPPED: "Bỏ qua",
+};
+export const LIVE_STATUSES = new Set(["RUNNING", "RETRYING", "WAITING", "WAITING_INPUT", "WAITING_APPROVAL"]);

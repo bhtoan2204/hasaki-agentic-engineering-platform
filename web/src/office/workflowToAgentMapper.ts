@@ -1,3 +1,4 @@
+import { CHARACTERS } from "./characters.ts";
 import type { Activity, AgentView, AttemptLite, EventLite, GraphStepLite, OfficeSnapshot, Pose, Role, StepLite, StepStatus } from "./types.ts";
 
 /**
@@ -7,14 +8,8 @@ import type { Activity, AgentView, AttemptLite, EventLite, GraphStepLite, Office
 
 export const ROLES: Role[] = ["analyst", "architect", "developer", "tester", "reviewer", "pr"];
 
-export const ROLE_INFO: Record<Role, { name: string; title: string; does: string }> = {
-  analyst: { name: "Tuấn", title: "Analyst", does: "Đọc yêu cầu, phân tích, đặt câu hỏi" },
-  architect: { name: "Duy", title: "Architect", does: "Lên kế hoạch và thiết kế giải pháp" },
-  developer: { name: "Con Claude của Toàn =))))", title: "Developer", does: "Viết code trong worktree của run" },
-  tester: { name: "Hằng", title: "Tester", does: "Chạy test và so với baseline" },
-  reviewer: { name: "Ngọc và Thiên", title: "Reviewer", does: "Review diff, bảo mật, kiến trúc" },
-  pr: { name: "Toàn", title: "PR Agent", does: "Đóng gói thay đổi, mở PR, viết báo cáo" },
-};
+/** Display info per role — configured in characters.ts (names, looks, personality are not mapping logic). */
+export const ROLE_INFO = CHARACTERS;
 
 const ACTIVE: string[] = ["RUNNING", "RETRYING", "WAITING_INPUT", "WAITING_APPROVAL"];
 const CELEBRATE_MS = 8000;
@@ -223,6 +218,8 @@ export function mapOffice(snap: OfficeSnapshot, now: number): AgentView[] {
       case "skipped":
         bubble = "Bỏ qua";
         break;
+      default:
+        bubble = "";
     }
     const info = ROLE_INFO[role];
     const detail = step

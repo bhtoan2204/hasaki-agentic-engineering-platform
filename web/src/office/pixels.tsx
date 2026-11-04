@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 import type { Role } from "./types.ts";
+import { CHARACTERS, type HairStyle } from "./characters.ts";
 
 /**
  * Tiny pixel-art toolkit: sprites are string grids ("." = transparent, one char = one palette colour) rendered as
@@ -61,15 +62,15 @@ function inHead(hx: number, hy: number) {
 }
 
 type HairFn = (hx: number, hy: number, inside: boolean) => string | null;
-const HAIR: Record<Role, HairFn> = {
+const HAIR: Record<HairStyle, HairFn> = {
   // neat bob with a side part
-  analyst: (x, y, inside) => {
+  bob: (x, y, inside) => {
     if (inside && (y < 5 || (y < 7 && x < 13) || ((x <= 2 || x >= 19) && y < 13))) return y === 2 && x >= 5 && x <= 8 ? "H" : "h";
     if ((x === -1 || x === HW) && y >= 6 && y <= 13) return "h";
     return null;
   },
   // spiky, with a pencil behind the ear
-  architect: (x, y, inside) => {
+  spiky: (x, y, inside) => {
     if (y === 7 && x >= HW - 1 && x <= HW + 2) return x === HW + 2 ? "Y" : "y";
     if (inside && (y < 5 || ((x <= 1 || x >= 20) && y < 9) || (y < 7 && x % 4 === 1))) return y === 2 && x >= 13 && x <= 15 ? "H" : "h";
     if (y === -1 && [3, 4, 8, 9, 13, 14, 17, 18].includes(x)) return "h";
@@ -77,7 +78,7 @@ const HAIR: Record<Role, HairFn> = {
     return null;
   },
   // short hair + headphones
-  developer: (x, y, inside) => {
+  short: (x, y, inside) => {
     if ((x >= -2 && x <= 0) || (x >= HW - 1 && x <= HW + 1)) if (y >= 9 && y <= 13) return "A";
     if (y === -1 && x >= 3 && x <= 18) return "a";
     if (y === 0 && (x === 2 || x === 19)) return "a";
@@ -86,20 +87,20 @@ const HAIR: Record<Role, HairFn> = {
     return null;
   },
   // side-swept fringe + ponytail
-  tester: (x, y, inside) => {
+  ponytail: (x, y, inside) => {
     if (x === HW && (y === 4 || y === 5)) return "r";
     if (x >= HW && x <= HW + 2 && y >= 4 && y <= 13 - (x - HW) * 2) return "h";
     if (inside && (y < 4 || (x < 12 && y < 8 - Math.floor(x / 3)) || ((x <= 1 || x >= 20) && y < 10))) return y === 2 && x >= 4 && x <= 7 ? "H" : "h";
     return null;
   },
   // top bun
-  reviewer: (x, y, inside) => {
+  bun: (x, y, inside) => {
     if ((x - 10.5) ** 2 + (y + 2) ** 2 <= 9) return y === -3 && (x === 9 || x === 10) ? "H" : "h";
     if (inside && (y < 5 || ((x <= 2 || x >= 19) && y < 10))) return y === 2 && x >= 14 && x <= 16 ? "H" : "h";
     return null;
   },
   // red Hasaki cap with a white mark
-  pr: (x, y, inside) => {
+  cap: (x, y, inside) => {
     if (y === -1 && (x === 10 || x === 11)) return "r";
     if (y === 5 && x >= 3 && x <= HW + 3) return "R";
     if (inside && y < 5) return y === 2 && (x === 10 || x === 11) ? "w" : y === 4 ? "R" : "r";
@@ -108,7 +109,6 @@ const HAIR: Record<Role, HairFn> = {
   },
 };
 
-const GLASSES: Partial<Record<Role, "square" | "round">> = { analyst: "square", reviewer: "round" };
 
 export interface ChibiSprite {
   head: Grid;
@@ -124,7 +124,8 @@ export interface ChibiSprite {
 
 function buildHead(role: Role): Grid {
   const c = blank();
-  const hair = HAIR[role];
+  const look = CHARACTERS[role].look;
+  const hair = HAIR[look.hairStyle];
   for (let hy = -4; hy < HH + 2; hy++)
     for (let hx = -4; hx < HW + 4; hx++) {
       const inside = inHead(hx, hy);
@@ -135,7 +136,7 @@ function buildHead(role: Role): Grid {
   // blush
   for (const [x, y] of [[4, 13], [5, 13], [16, 13], [17, 13]]) put(c, HX + x, HY + y, "c");
   const o = outline(c, "gyY");
-  const g = GLASSES[role];
+  const g = look.glasses;
   if (g)
     for (const ox of [5, 13])
       for (let y = 9; y <= 13; y++)
@@ -162,13 +163,14 @@ function buildBody(): Grid {
     const [a, b] = span(r);
     for (let x = a; x <= b; x++) put(c, BX + x, BY + r, r === 9 || (x >= 12 && r >= 2) ? "R" : "r");
   }
-  // white V collar + neck
-  for (const [x, y] of [[6, 0], [9, 0], [7, 1], [8, 1]]) put(c, BX + x, BY + y, "w");
+  // polo: neck, folded white-trimmed collar, button placket
   for (const [x, y] of [[7, 0], [8, 0]]) put(c, BX + x, BY + y, "s");
+  for (const [x, y] of [[4, 1], [5, 1], [6, 1], [9, 1], [10, 1], [11, 1], [5, 2], [6, 2], [9, 2], [10, 2]]) put(c, BX + x, BY + y, "C");
+  for (const y of [1, 2, 3, 4]) put(c, BX + 7, BY + y, "R"), put(c, BX + 8, BY + y, y % 2 ? "B" : "R");
   const o = outline(c);
-  // Hasaki-style chest mark (placeholder — see brand.tsx)
+  // Hasaki-style chest emblem (stylised pixel "H"; the real logo is used on signage — see web/src/brand)
   const logo = ["whwhw", "whhhw", "whwhw"];
-  logo.forEach((row, ry) => [...row].forEach((ch, rx) => (o[BY + 3 + ry][BX + 2 + rx] = ch === "h" ? "L" : "w")));
+  logo.forEach((row, ry) => [...row].forEach((ch, rx) => (o[BY + 4 + ry][BX + 10 + rx] = ch === "h" ? "L" : "w")));
   return rows(o);
 }
 
@@ -176,7 +178,7 @@ function buildArm(side: "L" | "R"): Grid {
   const c = blank();
   const x0 = side === "L" ? 3 : 23;
   const top = HY + HH;
-  for (let y = 0; y < 9; y++) for (let x = 0; x < 4; x++) put(c, x0 + x, top + y, y < 5 ? (x === (side === "L" ? 0 : 3) ? "R" : "r") : "s");
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 4; x++) put(c, x0 + x, top + y, y < 4 ? (x === (side === "L" ? 0 : 3) ? "R" : "r") : y === 4 ? "C" : "s");
   return rows(outline(c));
 }
 
@@ -215,30 +217,15 @@ export function chibiSprite(role: Role): ChibiSprite {
   return s;
 }
 
-const SKIN: Record<Role, [string, string]> = {
-  analyst: ["#f8d7bb", "#e8b994"],
-  architect: ["#eec29b", "#d6a37a"],
-  developer: ["#f5cfab", "#e2b089"],
-  tester: ["#fadcc2", "#ebbf9c"],
-  reviewer: ["#e9bb92", "#cf9b70"],
-  pr: ["#f3cba5", "#dcab82"],
-};
-const HAIR_COL: Record<Role, [string, string]> = {
-  analyst: ["#4a3326", "#6e4c37"],
-  architect: ["#23222e", "#3c3a4d"],
-  developer: ["#2a3047", "#45507a"],
-  tester: ["#9a4421", "#c0602f"],
-  reviewer: ["#33213d", "#563a66"],
-  pr: ["#5a3b25", "#7a5236"],
-};
 /** Hasaki red uniform. */
 export const HASAKI_RED = "#e2231a";
 export function chibiPalette(role: Role): Palette {
+  const look = CHARACTERS[role].look;
   return {
     k: "#2b1d1a", e: "#2b1d1a", w: "#ffffff", c: "#f49a98", m: "#8a2a2a", M: "#d24b55",
-    s: SKIN[role][0], S: SKIN[role][1], h: HAIR_COL[role][0], H: HAIR_COL[role][1],
+    s: look.skin[0], S: look.skin[1], h: look.hair[0], H: look.hair[1], C: "#fff4f2", B: "#f7d4d1",
     r: HASAKI_RED, R: "#b3141a", L: HASAKI_RED, g: "#3a3a48", a: "#6b7488", A: "#3b4252",
-    y: "#f5c542", Y: "#3a2a1a", p: "#33405e", K: "#1d1d26",
+    y: "#f5c542", Y: "#3a2a1a", p: look.pants, K: "#1d1d26",
   };
 }
 

@@ -161,3 +161,31 @@ Evaluation (separate from execution status): `GET /api/metrics/summary` → `eva
 first-try pass rate, repairs, budget-exhausted / no-progress stops, repeated failure signatures, human-intervention
 rate) shown on Insights; `npm run bench -- --live` adds hidden acceptance tests per scenario (`correct`), verification
 outcome, repairs and human gates per run.
+
+### Harness audit (verification hardening)
+
+- **Canonical-path authorisation** (`authorizeWorkspace`): the verification directory must exist and its `realpath` must
+  equal the `realpath` of one of the run's worktrees. A symlink inside a worktree, a sub-directory or a prefix look-alike
+  (`…/svc-evil`) is refused.
+- **Four repo statuses**: `passed` (clean), `accepted_preexisting` (only base-branch failures, **confirmed by a re-run
+  with exactly those tests excluded**; anything else still failing → `failed`), `failed` (regressions, unclassified
+  failures, timeouts, hard test weakening) and `error` (verification itself could not complete). Unknown/unparseable
+  failures and an unavailable baseline always count as failures. Pre-existing *build* errors cannot be isolated with
+  `-skip`; they are accepted explicitly with `needs_review`.
+- **Integrity errors are explicit**: if the test diff cannot be inspected, the repo is `error` (never clean). The loop
+  stops on `error` without spending repairs (the agent cannot fix infrastructure) and the step fails with a message
+  that says it is not a code failure.
+- **Test weakening**: hard signals (fail) — removed `func Test…`, added `t.Skip`, deleted `_test.go`, commented-out test,
+  `//go:build ignore`; soft signals (`needs_review`, does not fail) — ≥3 net assertion lines removed, `if false`.
+  These are regex heuristics: they catch blatant cases and route doubtful ones to a human; they do not prove integrity.
+- **Policy**: only the versioned workflow definition can configure or disable the gate (`verify: false` literally);
+  timeouts are clamped to 30 s–1 h, repairs to 0–5, an empty command falls back to the default. Disabling is recorded
+  as outcome `disabled` (output, metrics, PR description).
+- **Reviewer visibility**: accepted pre-existing failures, needs-review signals and a disabled gate are listed in the PR
+  description ("Verification notes") and in the PR preview; the PR step keeps its human approval gate.
+- **Summary** (`output.verification` / `metrics.verification`): `status` = `clean` | `accepted_with_preexisting` |
+  `failed` | `no_progress` | `error` | `disabled` | `skipped`, plus `needs_review`, `review_reasons`, `errors`, per-repo
+  `status`, `pre_existing_tests`, `weakened`, `suspected`. `GET /api/metrics/summary` → `evaluation.verification` adds
+  `accepted_preexisting`, `errors`, `needs_review`, `disabled`.
+- Repair budget: rounds are kept in the waiting-input checkpoint, so a pause during a repair does not reset it. The
+  budget is per attempt; a new attempt (re-execute / engine retry) starts a fresh loop.

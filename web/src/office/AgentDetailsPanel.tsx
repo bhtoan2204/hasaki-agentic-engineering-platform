@@ -1,9 +1,10 @@
+import { Circle, ClipboardCheck, CornerDownLeft, FileText, Hand, Lightbulb, MessageSquare, ScrollText, Settings, Wrench, X, type LucideIcon } from "lucide-react";
 import { Badge, dur, time } from "../ui.tsx";
 import { chibiPalette, chibiSprite, Px } from "./pixels.tsx";
 import { ROLE_INFO } from "./workflowToAgentMapper.ts";
-import type { AgentView, EventLite } from "./types.ts";
+import type { AgentView, AttemptLite, EventLite } from "./types.ts";
 
-const ICON: Record<string, string> = { tool: "🔧", tool_result: "↩", agent: "💬", thinking: "💭", prompt: "📝", system: "⚙", status: "●", system_prompt: "📜" };
+const ICON: Record<string, LucideIcon> = { tool: Wrench, tool_result: CornerDownLeft, agent: MessageSquare, thinking: Lightbulb, prompt: FileText, system: Settings, status: Circle, system_prompt: ScrollText };
 
 function summarize(e: EventLite): string {
   if (e.kind === "tool" && e.data?.name) {
@@ -15,7 +16,7 @@ function summarize(e: EventLite): string {
 }
 
 /** Execution details of the character's step(s) + links into the existing inspector / question & approval flow. */
-export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose }: { agent: AgentView; runId: number | null; events: EventLite[]; now: number; preview: boolean; onClose: () => void }) {
+export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose, attempts = [] }: { agent: AgentView; runId: number | null; events: EventLite[]; now: number; preview: boolean; onClose: () => void; attempts?: AttemptLite[] }) {
   const info = ROLE_INFO[agent.role];
   const s = chibiSprite(agent.role);
   const pal = chibiPalette(agent.role);
@@ -33,7 +34,7 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose 
           <div className="office-panel-name">{info.name} <span className="muted">· {info.title}</span></div>
           <div className="muted small">{info.does}</div>
         </div>
-        <button className="ghost sm" onClick={onClose} aria-label="Đóng">✕</button>
+        <button className="quiet icon" onClick={onClose} aria-label="Đóng"><X size={17} /></button>
       </header>
 
       {!step ? (
@@ -52,17 +53,19 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose 
 
           {(agent.pose === "ask" || agent.pose === "approval") && (
             <div className="office-panel-cta">
-              <span>{agent.pose === "ask" ? `✋ ${agent.bubble}` : "📋 Bước này đang chờ bạn duyệt"}</span>
+              <span className="row tight" style={{ gap: 6 }}>{agent.pose === "ask" ? <><Hand size={15} /> {agent.bubble}</> : <><ClipboardCheck size={15} /> Bước này đang chờ bạn duyệt</>}</span>
               {link ? <a className="o-btn" href={link}>{agent.pose === "ask" ? "Trả lời câu hỏi" : "Mở phần duyệt"}</a> : <span className="muted small">(xem trước — không có gì để trả lời)</span>}
             </div>
           )}
+
+          <VerificationCard v={agent.attempt?.metrics?.verification ?? agent.attempt?.output?.verification} />
 
           <h3>Hoạt động gần đây</h3>
           {recent.length ? (
             <ol className="office-events">
               {recent.map((e) => (
                 <li key={e.id}>
-                  <span className="office-ev-icon" aria-hidden>{ICON[e.kind] ?? "•"}</span>
+                  <span className="office-ev-icon" aria-hidden>{(() => { const I = ICON[e.kind] ?? Circle; return <I size={13} />; })()}</span>
                   <span className="office-ev-text">{summarize(e)}</span>
                   <span className="office-ev-time">{time(e.created_at)}</span>
                 </li>
@@ -73,6 +76,8 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose 
           )}
         </>
       )}
+
+      <StepHistory attempts={attempts.filter((a) => agent.steps.some((st) => st.key === a.step_key))} />
 
       {agent.steps.length > 1 && (
         <>
@@ -92,5 +97,54 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose 
         {runId && !preview && <a className="small" href={`#/runs/${runId}`}>Xem graph của run</a>}
       </div>
     </aside>
+  );
+}
+
+/** Harness verification of the current attempt (real metrics only; nothing rendered when absent). */
+function VerificationCard({ v }: { v: any }) {
+  if (!v || typeof v !== "object") return null;
+  const tone = v.passed === true ? (v.status === "accepted_with_preexisting" || v.needs_review ? "WAITING" : "COMPLETED") : v.passed === false ? "FAILED" : "PENDING";
+  return (
+    <>
+      <h3>Verification</h3>
+      <div className="office-verify">
+        <div className="row tight">
+          <Badge s={tone}>{String(v.status ?? v.outcome ?? "—")}</Badge>
+          {typeof v.rounds === "number" && <span className="small muted">{v.rounds} vòng · sửa {v.repairs ?? 0}/{v.max_repairs ?? "?"}</span>}
+          {typeof v.duration_ms === "number" && <span className="small muted">· {dur(v.duration_ms)}</span>}
+        </div>
+        {(v.last ?? []).map((r: any) => (
+          <div key={r.repo} className="small office-verify-repo">
+            <b>{r.repo}</b> <span className="mono">{r.status ?? (r.passed ? "passed" : "failed")}</span>
+            {r.regressions?.length > 0 && <span> · {r.regressions.map((g: any) => [String(g.package).split("/").pop(), ...(g.tests ?? [])].slice(0, 3).join(" ")).join("; ")}</span>}
+            {r.weakened?.length > 0 && <span className="err"> · test bị làm yếu: {r.weakened.join(", ")}</span>}
+            {r.note && <div className="muted">{r.note}</div>}
+            {r.error && <div className="err">{r.error}</div>}
+          </div>
+        ))}
+        {v.needs_review && <div className="small" style={{ color: "var(--st-wait)" }}>Cần người xem lại: {(v.review_reasons ?? []).join("; ")}</div>}
+        {v.reason && <div className="small muted">{v.reason}</div>}
+      </div>
+    </>
+  );
+}
+
+/** Attempts of the role's steps (newest first) with their errors. */
+function StepHistory({ attempts }: { attempts: AttemptLite[] }) {
+  if (!attempts.length) return null;
+  const list = [...attempts].sort((a, b) => b.id - a.id).slice(0, 8);
+  return (
+    <>
+      <h3>Lịch sử attempt</h3>
+      <ol className="office-history">
+        {list.map((a) => (
+          <li key={a.id}>
+            <span className="mono small">{a.step_key} #{a.number}</span> <Badge s={a.status} />
+            {a.started_at && a.finished_at && <span className="small muted"> {dur(Date.parse(a.finished_at) - Date.parse(a.started_at))}</span>}
+            {a.error && <div className="small err">{String(typeof a.error === "string" ? a.error : a.error?.message ?? JSON.stringify(a.error)).split("\n")[0].slice(0, 200)}</div>}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }

@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Search, X, type LucideIcon } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import { marked } from "marked";
-import { STATUS_COLORS } from "./api.ts";
+import { LIVE_STATUSES, STATUS_COLORS, STATUS_LABELS } from "./api.ts";
+import { BrandLogo } from "./brand/BrandLogo.tsx";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 // Agent output may contain raw HTML: render it as text, never as markup.
@@ -16,10 +18,11 @@ export const ago = (t?: string | null) => {
 };
 export const dur = (ms?: number | null) => (ms == null ? "" : ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`);
 
-export function Badge({ s, children }: { s: string; children?: ReactNode }) {
+/** Status badge (dot + label). `children` overrides the label; `label` shows the Vietnamese name instead of the code. */
+export function Badge({ s, children, label }: { s: string; children?: ReactNode; label?: boolean }) {
   return (
-    <span className="badge" style={{ color: STATUS_COLORS[s] ?? "var(--muted)" }}>
-      {children ?? s}
+    <span className={`badge${LIVE_STATUSES.has(s) ? " is-live" : ""}`} style={{ color: STATUS_COLORS[s] ?? "var(--muted)" }} title={STATUS_LABELS[s] ? `${STATUS_LABELS[s]} (${s})` : s}>
+      {children ?? (label ? STATUS_LABELS[s] ?? s : s)}
     </span>
   );
 }
@@ -94,8 +97,101 @@ export function JsonBlock({ value, title }: { value: unknown; title?: string }) 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
-export function Loading() {
-  return <div className="empty"><span className="spinner" /> Đang tải…</div>;
+/** Friendly empty state with a soft brand illustration. */
+export function EmptyState({ icon: I, title, children, action }: { icon?: LucideIcon; title: string; children?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="empty">
+      <div className="empty-art">{I ? <I size={34} strokeWidth={1.6} color="var(--brand)" /> : <BrandLogo size={52} />}</div>
+      <div className="empty-title">{title}</div>
+      {children && <div style={{ maxWidth: 460 }}>{children}</div>}
+      {action}
+    </div>
+  );
+}
+export function Loading({ label = "Đang tải…" }: { label?: string }) {
+  return (
+    <div className="loading-screen" role="status">
+      <BrandLogo size={44} />
+      <span><span className="spinner" /> {label}</span>
+    </div>
+  );
+}
+export function Skeleton({ h = 14, w = "100%", r }: { h?: number; w?: number | string; r?: number }) {
+  return <div className="skeleton" style={{ height: h, width: w, borderRadius: r }} aria-hidden />;
+}
+export function SkeletonRows({ rows = 5 }: { rows?: number }) {
+  return <div className="stack" style={{ gap: 10 }}>{Array.from({ length: rows }, (_, i) => <Skeleton key={i} h={42} r={12} />)}</div>;
+}
+
+/** Contextual page header: breadcrumbs, icon, title, subtitle, actions. */
+export function PageHeader({ icon: I, title, subtitle, crumbs, actions, children }: { icon?: LucideIcon; title: ReactNode; subtitle?: ReactNode; crumbs?: Array<[string, string?]>; actions?: ReactNode; children?: ReactNode }) {
+  return (
+    <header className="page-header">
+      <div className="ph-main">
+        {crumbs && crumbs.length > 0 && (
+          <nav className="crumbs" aria-label="Breadcrumb">
+            {crumbs.map(([label, href], i) => (
+              <span key={i} className="row tight" style={{ gap: 6 }}>
+                {i > 0 && <span aria-hidden>/</span>}
+                {href ? <a href={href}>{label}</a> : <span>{label}</span>}
+              </span>
+            ))}
+          </nav>
+        )}
+        <h1 className="ph-title">{I && <span className="ph-icon"><I size={21} strokeWidth={2} /></span>}<span>{title}</span></h1>
+        {subtitle && <div className="ph-sub">{subtitle}</div>}
+        {children}
+      </div>
+      {actions && <div className="ph-actions">{actions}</div>}
+    </header>
+  );
+}
+
+export type Tone = "brand" | "run" | "wait" | "ok" | "err";
+export function StatCard({ icon: I, label, value, hint, tone = "brand", onClick }: { icon?: LucideIcon; label: string; value: ReactNode; hint?: ReactNode; tone?: Tone; onClick?: () => void }) {
+  return (
+    <div className={`stat tone-${tone}`} onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value ?? "—"}</div>
+      {hint && <div className="stat-hint">{hint}</div>}
+      {I && <div className="stat-icon"><I size={18} strokeWidth={2} /></div>}
+    </div>
+  );
+}
+
+export function Segmented<T extends string>({ options, value, onChange, label }: { options: Array<[T, ReactNode]>; value: T; onChange: (v: T) => void; label?: string }) {
+  return (
+    <div className="segmented" role="group" aria-label={label}>
+      {options.map(([k, l]) => <button key={k} type="button" className={k === value ? "on" : ""} aria-pressed={k === value} onClick={() => onChange(k)}>{l}</button>)}
+    </div>
+  );
+}
+
+export function SearchInput({ value, onChange, placeholder = "Tìm…", width = 260 }: { value: string; onChange: (v: string) => void; placeholder?: string; width?: number | string }) {
+  return (
+    <label className="search" style={{ width }}>
+      <Search size={15} />
+      <input type="search" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} aria-label={placeholder} />
+    </label>
+  );
+}
+
+/** Side drawer with scrim; Escape closes. */
+export function Drawer({ title, onClose, children, width }: { title: ReactNode; onClose: () => void; children: ReactNode; width?: number }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <>
+      <div className="scrim" onClick={onClose} />
+      <aside className="drawer" role="dialog" aria-modal="true" style={width ? { width: `min(${width}px, 100vw)` } : undefined}>
+        <div className="drawer-head"><h4>{title}</h4><button className="quiet icon" onClick={onClose} aria-label="Đóng"><X size={18} /></button></div>
+        <div className="drawer-body">{children}</div>
+      </aside>
+    </>
+  );
 }
 export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => void }) {
   return (

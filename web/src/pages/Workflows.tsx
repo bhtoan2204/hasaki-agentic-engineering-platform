@@ -1,11 +1,44 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  BadgeCheck, Bot, Clock, Code2, Copy, FilePlus2, FileText, GitBranch, GitPullRequest, Layers, MessageCircleQuestion, Play, Plug, Plus, Sparkles,
+  Terminal, Workflow, type LucideIcon,
+} from "lucide-react";
 import { api, useApi } from "../api.ts";
-import { act, ago, Badge, ErrorBox, Loading, navigate } from "../ui.tsx";
+import { act, ago, Badge, Drawer, EmptyState, ErrorBox, Field, Loading, navigate, PageHeader, SearchInput, Segmented, Skeleton } from "../ui.tsx";
+import "./Workflows.css";
+
+/** Step type → lucide icon + short label (mirrors the editor palette). */
+export const WF_TYPE_ICON: Record<string, LucideIcon> = {
+  agent: Bot,
+  coding_agent: Code2,
+  human_input: MessageCircleQuestion,
+  human_approval: BadgeCheck,
+  integration: Plug,
+  command: Terminal,
+  condition: GitBranch,
+  git_pull_request: GitPullRequest,
+  task_result_report: FileText,
+};
+const SHORT_LABEL: Record<string, string> = {
+  agent: "Agent", coding_agent: "Coding", human_input: "Input", human_approval: "Approval", integration: "Integration",
+  command: "Command", condition: "Condition", git_pull_request: "PR", task_result_report: "Report",
+};
+export const WF_TYPE_TONE: Record<string, string> = {
+  agent: "ai", coding_agent: "ai", human_input: "human", human_approval: "human", integration: "logic", command: "logic", condition: "logic",
+  git_pull_request: "ship", task_result_report: "ship",
+};
+
+type Filter = "all" | "template" | "published" | "draft";
 
 export function WorkflowsPage() {
   const { data, error, loading, reload } = useApi<any[]>("/api/workflows");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  // null = drawer closed; "" = blank workflow; otherwise the key of the workflow being duplicated
+  const [creating, setCreating] = useState<string | null>(null);
+
   const create = async (from?: any) => {
     const spec = from
       ? { ...(from.draft_spec ?? from.versions[0].spec), name: name || `${from.name} (copy)` }
@@ -17,34 +50,160 @@ export function WorkflowsPage() {
     if (!key) return act(async () => { throw new Error("Nhập key cho workflow mới trước"); });
     create(await api(`/api/workflows/${src}`));
   };
+
+  const list = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (data ?? []).filter((w) => {
+      if (filter === "template" && !w.is_template) return false;
+      if (filter === "published" && !w.latest_version) return false;
+      if (filter === "draft" && !w.has_draft) return false;
+      return !needle || [w.name, w.key, w.description].some((x) => String(x ?? "").toLowerCase().includes(needle));
+    });
+  }, [data, q, filter]);
+
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
+
+  const all = data ?? [];
+  const counts = {
+    all: all.length,
+    template: all.filter((w) => w.is_template).length,
+    published: all.filter((w) => w.latest_version).length,
+    draft: all.filter((w) => w.has_draft).length,
+  };
+  const openCreate = (src = "") => {
+    setName("");
+    setCreating(src);
+  };
+  const source = creating ? all.find((w) => w.key === creating) : null;
+
   return (
-    <div>
-      <h2>Workflow Library</h2>
-      <div className="muted">Workflow có version. Mở để chỉnh trên canvas, publish version mới; run đang chạy giữ version cũ.</div>
-      <div className="card row" style={{ marginTop: 10 }}>
-        <b className="small">Workflow mới:</b>
-        <input style={{ maxWidth: 220 }} placeholder="key (lowercase-dashes)" value={key} onChange={(e) => setKey(e.target.value.toLowerCase())} />
-        <input style={{ maxWidth: 260 }} placeholder="Tên" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="sm" disabled={!key} onClick={() => create()}>Tạo trống</button>
-        <span className="muted small">hoặc “Duplicate” một template bên dưới</span>
+    <div className="wfs">
+      <PageHeader
+        icon={Workflow}
+        title="Workflow Studio"
+        subtitle="Workflow có version. Mở để chỉnh trên canvas, publish version mới; run đang chạy giữ version cũ."
+        actions={<button onClick={() => openCreate()}><Plus size={16} strokeWidth={2.2} /> Workflow mới</button>}
+      />
+
+      <div className="toolbar wfs-toolbar">
+        <SearchInput value={q} onChange={setQ} placeholder="Tìm theo tên, key, mô tả…" width="min(340px, 100%)" />
+        <Segmented<Filter>
+          label="Lọc workflow"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            ["all", <>Tất cả <span className="wfs-n">{counts.all}</span></>],
+            ["template", <>Template <span className="wfs-n">{counts.template}</span></>],
+            ["published", <>Đã publish <span className="wfs-n">{counts.published}</span></>],
+            ["draft", <>Draft <span className="wfs-n">{counts.draft}</span></>],
+          ]}
+        />
       </div>
-      <table>
-        <thead><tr><th>Workflow</th><th>Key</th><th>Version</th><th>Runs</th><th>Cập nhật</th><th></th></tr></thead>
-        <tbody>
-          {(data ?? []).map((w) => (
-            <tr key={w.key} className="click" onClick={() => navigate(`/workflows/${w.key}`)}>
-              <td><b>{w.name}</b>{w.is_template && <> <Badge s="PENDING">template</Badge></>}<div className="muted small">{w.description}</div></td>
-              <td className="mono">{w.key}</td>
-              <td>{w.latest_version ? `v${w.latest_version}` : <Badge s="PENDING">chưa publish</Badge>} {w.has_draft && <Badge s="WAITING">draft</Badge>}</td>
-              <td>{w.run_count}</td>
-              <td className="muted small">{ago(w.updated_at)} trước</td>
-              <td><button className="xs ghost" onClick={(e) => (e.stopPropagation(), duplicate(w.key))}>Duplicate</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      {all.length === 0 ? (
+        <div className="card wfs-empty">
+          <EmptyState icon={Workflow} title="Chưa có workflow nào" action={<button onClick={() => openCreate()}><Plus size={16} /> Tạo workflow đầu tiên</button>}>
+            Workflow là một đồ thị các bước (agent, duyệt, command, PR…). Tạo mới rồi thiết kế trên canvas.
+          </EmptyState>
+        </div>
+      ) : list.length === 0 ? (
+        <div className="card wfs-empty">
+          <EmptyState icon={Layers} title="Không có workflow khớp bộ lọc" action={<button className="ghost sm" onClick={() => (setQ(""), setFilter("all"))}>Xoá bộ lọc</button>} />
+        </div>
+      ) : (
+        <div className="wfs-grid">
+          {list.map((w) => <WorkflowCard key={w.key} w={w} onDuplicate={() => openCreate(w.key)} />)}
+          <button className="wfs-new" onClick={() => openCreate()}>
+            <span className="wfs-new-icon"><FilePlus2 size={22} strokeWidth={1.8} /></span>
+            <b>Workflow trống</b>
+            <span className="muted small">Bắt đầu với một bước Analyze</span>
+          </button>
+        </div>
+      )}
+
+      {creating !== null && (
+        <Drawer title={creating ? "Duplicate workflow" : "Workflow mới"} onClose={() => setCreating(null)}>
+          <form
+            className="wfs-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (creating) duplicate(creating);
+              else if (key) create();
+            }}
+          >
+            {source && (
+              <div className="wfs-src">
+                <span className="wfs-src-icon"><Copy size={16} /></span>
+                <div>
+                  <div className="muted small">Sao chép từ</div>
+                  <b>{source.name}</b> <span className="mono muted">{source.key}</span>
+                </div>
+              </div>
+            )}
+            <Field label="Key" hint="lowercase-dashes — dùng trong URL và khi tạo run">
+              <input autoFocus placeholder="key (lowercase-dashes)" value={key} onChange={(e) => setKey(e.target.value.toLowerCase())} />
+            </Field>
+            <Field label="Tên">
+              <input placeholder={source ? `${source.name} (copy)` : "Tên"} value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            {!creating && <p className="muted small">Workflow trống sẽ có sẵn một bước <span className="mono">analyze</span> (AI agent). Bạn có thể dùng “Duplicate” trên một template để bắt đầu nhanh hơn.</p>}
+            <div className="row">
+              <button type="submit" disabled={!key}>{creating ? <><Copy size={15} /> Duplicate &amp; mở editor</> : <><Plus size={15} /> Tạo trống</>}</button>
+              <button type="button" className="ghost" onClick={() => setCreating(null)}>Huỷ</button>
+            </div>
+          </form>
+        </Drawer>
+      )}
     </div>
+  );
+}
+
+function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
+  // The list endpoint carries no step data; read the definition to show its shape (read-only GET).
+  const { data: def } = useApi<any>(`/api/workflows/${w.key}`);
+  const spec = def ? (def.draft_spec ?? def.versions?.[0]?.spec) : null;
+  const steps: any[] = spec?.steps ?? [];
+  const types = [...new Set(steps.map((s) => s.type as string))];
+  const open = () => navigate(`/workflows/${w.key}`);
+  return (
+    <article className="wfs-card" role="link" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === "Enter" && open()} aria-label={`Mở workflow ${w.name}`}>
+      <div className="wfs-card-top">
+        <span className="wfs-card-icon"><Workflow size={19} strokeWidth={1.9} /></span>
+        <div className="wfs-card-title">
+          <b>{w.name}</b>
+          <span className="mono muted">{w.key}</span>
+        </div>
+        <button className="ghost xs" onClick={(e) => (e.stopPropagation(), onDuplicate())} aria-label={`Duplicate ${w.name}`}><Copy size={13} /> Duplicate</button>
+      </div>
+
+      <div className="wfs-badges">
+        {w.is_template && <span className="pill chip-brand wfs-tpl"><Sparkles size={12} /> template</span>}
+        {w.latest_version ? <Badge s="COMPLETED">v{w.latest_version} published</Badge> : <Badge s="PENDING">chưa publish</Badge>}
+        {w.has_draft && <Badge s="WAITING">draft</Badge>}
+      </div>
+
+      <p className="wfs-desc">{w.description || <span className="muted">Chưa có mô tả</span>}</p>
+
+      <div className="wfs-types">
+        {!def ? (
+          <><Skeleton h={22} w={74} r={999} /><Skeleton h={22} w={60} r={999} /></>
+        ) : types.length ? (
+          types.map((t) => {
+            const I = WF_TYPE_ICON[t] ?? Layers;
+            return <span key={t} className={`wfs-type tone-${WF_TYPE_TONE[t] ?? "logic"}`} title={t}><I size={12} strokeWidth={2} /> {SHORT_LABEL[t] ?? t}</span>;
+          })
+        ) : (
+          <span className="muted small">Chưa có bước</span>
+        )}
+      </div>
+
+      <div className="wfs-meta">
+        <span title="Số bước"><Layers size={13} /> {def ? `${steps.length} bước` : "—"}</span>
+        <span title="Số run"><Play size={13} /> {w.run_count ?? "—"} runs</span>
+        <span className="grow" />
+        <span title={w.updated_at}><Clock size={13} /> {w.updated_at ? `${ago(w.updated_at)} trước` : "—"}</span>
+      </div>
+    </article>
   );
 }

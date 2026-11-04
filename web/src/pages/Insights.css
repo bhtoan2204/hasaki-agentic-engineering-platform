@@ -1,0 +1,90 @@
+/* Insights — observability dashboard. Charts are plain CSS/SVG driven by tokens. */
+.ins { min-width: 0 }
+.ins .nowrap { white-space: nowrap }
+.ins-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4) }
+.ins-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); align-items: start }
+.ins-grid > .ins-panel { margin-bottom: 0 }
+.ins-grid { margin-bottom: var(--sp-3) }
+
+/* panel */
+.ins-panel { min-width: 0; padding: var(--sp-4) var(--sp-5) var(--sp-5) }
+.ins-panel-head { display: flex; align-items: flex-start; gap: var(--sp-3); margin-bottom: var(--sp-4); flex-wrap: wrap }
+.ins-panel-icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(135deg, var(--brand-50), var(--blush)); color: var(--brand); flex: none }
+.ins-panel-titles { flex: 1; min-width: 160px }
+.ins-panel-titles h4 { margin: 0; font-size: var(--fs-md) }
+.ins-panel-sub { color: var(--muted); font-size: var(--fs-sm); margin-top: 2px }
+.ins-empty { color: var(--muted); font-size: var(--fs-sm); padding: var(--sp-4); text-align: center; background: var(--surface-2); border: 1px dashed var(--line-strong); border-radius: var(--r-md) }
+
+/* horizontal bars */
+.ins-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; overflow-x: hidden; padding-right: 2px }
+.ins-bar { display: grid; grid-template-columns: minmax(96px, 36%) minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; min-width: 0 }
+.ins-bar-label { min-width: 0; display: flex; flex-direction: column; line-height: 1.25 }
+.ins-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); font-weight: 500; color: var(--ink) }
+.ins-bar-hint { color: var(--muted); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ins-bar-track { height: 12px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden }
+.ins-bar-fill { height: 100%; border-radius: var(--r-pill); display: flex; overflow: hidden; transition: width .4s ease }
+.ins-bar-fill > span { height: 100%; display: block }
+.ins-bar-value { font: 600 var(--fs-sm) var(--mono); color: var(--ink-2); text-align: right; min-width: 56px; white-space: nowrap }
+.ins-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--fs-xs); color: var(--muted) }
+.ins-legend span { display: inline-flex; align-items: center; gap: 5px }
+.ins-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block }
+
+/* ring */
+.ins-ring { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 120px }
+.ins-ring svg circle { transition: stroke-dasharray .5s ease }
+.ins-ring-text { font: 700 19px var(--font); fill: var(--ink) }
+.ins-ring-label { font-weight: 600; font-size: var(--fs-sm); margin-top: 4px }
+.ins-ring-sub { color: var(--muted); font-size: var(--fs-xs) }
+
+/* metrics */
+.ins-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-3) }
+.ins-metrics-col { grid-template-columns: 1fr; margin: 0; flex: 1; min-width: 120px }
+.ins-metric { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 9px 12px; min-width: 0 }
+.ins-metric-label { color: var(--muted); font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ins-metric-value { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.01em; margin-top: 2px }
+.ins-metric.tone-ok .ins-metric-value { color: var(--st-ok) } .ins-metric.tone-err .ins-metric-value { color: var(--st-err) }
+.ins-metric.tone-wait .ins-metric-value { color: var(--st-wait) } .ins-metric.tone-run .ins-metric-value { color: var(--st-run) }
+
+/* harness evaluation */
+.ins-eval { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--sp-3); align-items: stretch; margin-bottom: var(--sp-3) }
+.ins-eval > .ins-panel { margin-bottom: 0 }
+.ins-eval-main { background: linear-gradient(160deg, var(--surface) 55%, var(--brand-50)) }
+.ins-eval-body { display: flex; gap: var(--sp-5); align-items: flex-start; flex-wrap: wrap }
+.ins-rings { display: flex; gap: var(--sp-4); flex-wrap: wrap; justify-content: center }
+.ins-eval-side { flex: 1; min-width: 240px }
+.ins-outcome { display: flex; flex-direction: column; gap: 6px }
+.ins-outcome-bar { height: 14px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; display: flex }
+.ins-outcome-bar span { height: 100%; display: block }
+.ins-human { display: flex; gap: var(--sp-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-2) }
+
+/* tables */
+.ins-table { min-width: 560px }
+.ins-table td.ins-num { text-align: right; white-space: nowrap }
+.ins-error { display: block; max-width: 560px; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-sm); color: var(--ink-2) }
+.ins-sig { display: block; white-space: pre-wrap; word-break: break-word; background: var(--code); padding: 4px 8px; border-radius: 6px; font-size: 11.5px }
+.ins-times { white-space: nowrap }
+.ins-times .mono { margin-left: 8px }
+.ins-mini-track { display: inline-block; vertical-align: middle; width: 80px; height: 8px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden }
+.ins-mini-track span { display: block; height: 100%; background: var(--st-err); border-radius: var(--r-pill) }
+.ins-avail { display: inline-flex }
+
+/* denied list */
+.ins-denied { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow: auto }
+.ins-denied li { display: flex; gap: var(--sp-3); align-items: flex-start; padding: 8px 10px; border-radius: var(--r-md); background: var(--st-err-bg) }
+.ins-denied-times { font: 700 var(--fs-sm) var(--mono); color: var(--st-err); min-width: 38px; flex: none }
+.ins-denied-body { min-width: 0; word-break: break-word }
+
+@media (max-width: 1100px) {
+  .ins-eval { grid-template-columns: minmax(0, 1fr) }
+}
+@media (max-width: 900px) {
+  .ins-grid { grid-template-columns: minmax(0, 1fr) }
+  .ins-panel { padding: var(--sp-3) var(--sp-4) var(--sp-4) }
+  .ins .table-wrap table { display: table }
+}
+@media (max-width: 520px) {
+  .ins-bar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px }
+  .ins-bar-label { grid-column: 1 / -1 }
+  .ins-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .ins .page-header .segmented { width: 100%; overflow-x: auto }
+}

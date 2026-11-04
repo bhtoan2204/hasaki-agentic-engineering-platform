@@ -7,19 +7,19 @@
   --o-sky: #9fd3ff; --o-skyline: #c9d9ea; --o-skyline-win: #ffffff; --o-rug: #e2231a; --o-rug-in: #f6e3d6;
   --o-pot: #e2231a; --o-pot-rim: #b3141a; --o-screen: #0f172a; --o-steam: rgba(255,255,255,.75); --o-glow: rgba(255, 214, 120, .35);
   --o-bubble: #fffdf8; --o-ink: #2b1d1a; --o-stage-edge: #e8d8c4; --o-sign: #fffaf0;
-  --o-red: #e2231a;
+  --o-red: #e2231a; --o-shelf-back: #f3e3d8; --o-lamp-cone: rgba(255, 220, 150, .16);
   display: flex; flex-direction: column; height: 100%; overflow: auto; background: var(--bg);
 }
-@media (prefers-color-scheme: dark) {
-  .office {
+@media all {
+  :root[data-theme="dark"] .office {
     --o-wall: #2a2733; --o-wall-line: #2f2c39; --o-wainscot: #34303f; --o-trim: #6b5240; --o-trim-dark: #4e3a2c;
     --o-floor: #5a4130; --o-floor-line: #46321f; --o-floor-grain: #50392a; --o-wood: #6e4a32; --o-wood-top: #8a5f40; --o-wood-dark: #4a3020;
     --o-chair: #232838; --o-chair-in: #2d3449; --o-sky: #1a2246; --o-skyline: #2c3560; --o-skyline-win: #ffd76b;
-    --o-rug-in: #3b2f35; --o-screen: #0b1020; --o-sign: #efe2cb; --o-glow: rgba(255, 196, 90, .5); --o-bubble: #fff8ee; --o-stage-edge: #3a3444;
+    --o-rug-in: #3b2f35; --o-screen: #0b1020; --o-sign: #efe2cb; --o-shelf-back: #3a2f36; --o-lamp-cone: rgba(255, 200, 110, .22); --o-glow: rgba(255, 196, 90, .5); --o-bubble: #fff8ee; --o-stage-edge: #3a3444;
   }
 }
 .office .o-night { display: none }
-@media (prefers-color-scheme: dark) { .office .o-day { display: none } .office .o-night { display: inline } }
+:root[data-theme="dark"] .office .o-day { display: none } :root[data-theme="dark"] .office .o-night { display: inline }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
 
@@ -248,3 +248,18 @@ button.linkish { background: none; color: var(--accent); padding: 0; border: 0; 
 /* animations off (toolbar toggle; defaults off with prefers-reduced-motion) */
 .office--still *, .office--still *::before, .office--still *::after { animation: none !important; transition: none !important }
 @media (prefers-reduced-motion: reduce) { .office .chibi, .office .o-bubble { transition: none } }
+
+/* Office 2.0: beauty retail details */
+.o-bar-text { font: 700 4.6px/1 var(--font, ui-sans-serif); fill: #ffffff; letter-spacing: .18em }
+@keyframes o-cone { 0%, 100% { opacity: .85 } 50% { opacity: 1 } }
+.o-cone { animation: o-cone 5s ease-in-out infinite }
+@keyframes o-sparkle { 0%, 70%, 100% { opacity: 0 } 80% { opacity: 1 } }
+.o-sparkle rect { animation: o-sparkle 3.6s steps(2) infinite } .o-sparkle rect:nth-child(2) { animation-delay: 1.7s }
+@keyframes o-beam { 0%, 100% { opacity: .9 } 50% { opacity: .2 } }
+.o-scan-beam, .o-scan-led { animation: o-beam .5s steps(2) infinite }
+/* greeting mascot pose (Overview) */
+.chibi[data-pose="greet"] .c-armR { animation: o-wave .9s steps(2) infinite }
+.office-verify { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px }
+.office-verify-repo { border-top: 1px dashed var(--line); padding-top: 5px }
+.office-history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px }
+.office-history li { border-left: 2px solid var(--line); padding-left: 8px }

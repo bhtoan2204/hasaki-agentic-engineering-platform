@@ -71,14 +71,6 @@ export function Room({ now }: { now: number }) {
         <line x1={7} y1={7} x2={7 + 4.6 * Math.sin((mn * Math.PI) / 180)} y2={7 - 4.6 * Math.cos((mn * Math.PI) / 180)} stroke="#e2231a" strokeWidth={0.7} />
         <R x={6.5} y={6.5} w={1} h={1} c="#2b1d1a" />
       </g>
-      {/* wall shelf with books + tiny plants */}
-      <g transform="translate(186 24)">
-        <R x={0} y={8} w={46} h={2} c="var(--o-wood-dark)" />
-        {[[2, "#e2231a"], [5, "#f3f4f6"], [8, "#3b82f6"], [11, "#e2231a"]].map(([bx, c], i) => <R key={i} x={bx as number} y={1} w={3} h={7} c={c as string} />)}
-        <R x={14} y={3} w={3} h={5} c="#f59e0b" />
-        <Plant x={22} y={-1} small />
-        <Plant x={36} y={-1} small />
-      </g>
       {/* rug for the human desk area */}
       <R x={244} y={86} w={74} h={16} c="var(--o-rug)" />
       <R x={246} y={88} w={70} h={12} c="var(--o-rug-in)" />
@@ -294,6 +286,127 @@ export function HelpDesk({ x, y, waiting }: { x: number; y: number; waiting: num
       <R x={x + 52} y={y - 4} w={7} h={3} c="#f5c542" className={waiting ? "o-bell" : undefined} />
       <R x={x + 55} y={y - 5} w={1} h={1} c="#a16207" />
       <R x={x + 51} y={y - 1} w={9} h={1} c="#a16207" />
+    </g>
+  );
+}
+
+// ------------------------------------------------------------------ beauty retail
+/** Small cosmetic products, pixel style. `kind` picks the silhouette. */
+export function Product({ x, y, kind, color }: { x: number; y: number; kind: "pump" | "serum" | "jar" | "lipstick" | "mask" | "tube" | "cushion"; color: string }) {
+  switch (kind) {
+    case "pump":
+      return <g><R x={x + 1} y={y} w={2} h={1} c="#3a3a48" /><R x={x + 1.5} y={y + 1} w={1} h={1} c="#3a3a48" /><R x={x} y={y + 2} w={4} h={6} c={color} /><R x={x} y={y + 4} w={4} h={2} c="#ffffff" opacity={0.8} /></g>;
+    case "serum":
+      return <g><R x={x + 1} y={y} w={1} h={2} c="#1f1f26" /><R x={x + 0.5} y={y + 2} w={2} h={1} c="#ffffff" /><R x={x} y={y + 3} w={3} h={5} c={color} /><R x={x} y={y + 3} w={1} h={5} c="#ffffff" opacity={0.35} /></g>;
+    case "jar":
+      return <g><R x={x} y={y + 4} w={5} h={1} c="#ffffff" /><R x={x} y={y + 5} w={5} h={3} c={color} /><R x={x + 1} y={y + 6} w={3} h={1} c="#ffffff" opacity={0.7} /></g>;
+    case "lipstick":
+      return <g><R x={x + 0.5} y={y + 2} w={1.5} h={2} c={color} /><R x={x + 0.5} y={y + 1.5} w={1} h={1} c={color} /><R x={x} y={y + 4} w={2.5} h={1} c="#d4af37" /><R x={x} y={y + 5} w={2.5} h={3} c="#1f1f26" /></g>;
+    case "mask":
+      return <g><R x={x} y={y + 1} w={6} h={7} c={color} /><R x={x + 1.5} y={y + 2.5} w={3} h={3} c="#ffffff" opacity={0.85} /><R x={x + 2} y={y + 3.3} w={0.6} h={0.6} c={color} /><R x={x + 3.4} y={y + 3.3} w={0.6} h={0.6} c={color} /><R x={x} y={y + 6.5} w={6} h={1} c="#ffffff" opacity={0.6} /></g>;
+    case "tube":
+      return <g><R x={x + 0.5} y={y} w={2} h={1} c="#ffffff" /><R x={x} y={y + 1} w={3} h={7} c={color} /><R x={x} y={y + 1} w={3} h={1} c="#ffffff" opacity={0.5} /></g>;
+    case "cushion":
+      return <g><R x={x} y={y + 5} w={5} h={3} c={color} /><R x={x} y={y + 5} w={5} h={1} c="#ffffff" opacity={0.6} /></g>;
+  }
+}
+
+/** Wall display shelf: two tiers of skincare, serums, lipsticks and facial masks. */
+export function BeautyShelf({ x, y }: { x: number; y: number }) {
+  const row1: Array<[Parameters<typeof Product>[0]["kind"], string]> = [["pump", "#f6c1c7"], ["serum", "#e8a33a"], ["serum", "#f08aa5"], ["jar", "#fbe3d3"], ["pump", "#cfe7d8"], ["tube", "#fdf1e7"], ["serum", "#c9a3e8"], ["jar", "#ffd1dc"]];
+  const row2: Array<[Parameters<typeof Product>[0]["kind"], string]> = [["mask", "#ff9eb5"], ["mask", "#9ed8c3"], ["lipstick", "#c8102e"], ["lipstick", "#e85a7a"], ["lipstick", "#a4123f"], ["cushion", "#f3d1b8"], ["mask", "#ffd27a"], ["tube", "#e2231a"]];
+  return (
+    <g>
+      <R x={x - 1} y={y - 1} w={58} h={23} c="var(--o-shelf-back)" />
+      {[0, 11].map((dy) => <g key={dy}><R x={x - 2} y={y + 9 + dy} w={60} h={2} c="var(--o-wood-top)" /><R x={x - 2} y={y + 11 + dy} w={60} h={1} c="var(--o-wood-dark)" /></g>)}
+      {row1.map(([k, c], i) => <Product key={i} x={x + 1 + i * 7} y={y + 1} kind={k} color={c} />)}
+      {row2.map(([k, c], i) => <Product key={i} x={x + 1 + i * 7} y={y + 12} kind={k} color={c} />)}
+      <g className="o-sparkle"><R x={x + 18} y={y + 2} w={1} h={1} c="#ffffff" /><R x={x + 44} y={y + 13} w={1} h={1} c="#ffffff" /></g>
+    </g>
+  );
+}
+
+/** Foreground "Beauty Bar" counter with testers — the office sits inside a Hasaki store. */
+export function BeautyBar({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <R x={x} y={y} w={96} h={3} c="#fffaf3" />
+      <R x={x} y={y + 3} w={96} h={1} c="#e7d6c7" />
+      <R x={x + 1} y={y + 4} w={94} h={18} c="#e2231a" />
+      <R x={x + 1} y={y + 4} w={94} h={1} c="#ff5a4f" />
+      <R x={x + 4} y={y + 9} w={88} h={8} c="#b3141a" opacity={0.35} />
+      <text x={x + 48} y={y + 15} textAnchor="middle" className="o-bar-text">HASAKI BEAUTY BAR</text>
+      {/* testers on mirrored trays */}
+      <R x={x + 6} y={y - 1} w={26} h={1} c="#c9d6df" /><R x={x + 64} y={y - 1} w={26} h={1} c="#c9d6df" />
+      <Product x={x + 7} y={y - 9} kind="pump" color="#f6c1c7" />
+      <Product x={x + 13} y={y - 9} kind="serum" color="#e8a33a" />
+      <Product x={x + 18} y={y - 9} kind="jar" color="#fbe3d3" />
+      <Product x={x + 25} y={y - 9} kind="lipstick" color="#c8102e" />
+      <Product x={x + 28} y={y - 9} kind="lipstick" color="#e85a7a" />
+      <Product x={x + 65} y={y - 9} kind="mask" color="#ff9eb5" />
+      <Product x={x + 72} y={y - 9} kind="mask" color="#9ed8c3" />
+      <Product x={x + 79} y={y - 9} kind="tube" color="#fdf1e7" />
+      <Product x={x + 84} y={y - 9} kind="cushion" color="#f3d1b8" />
+      {/* round mirror */}
+      <circle cx={x + 48} cy={y - 7} r={6} fill="#d4af37" />
+      <circle cx={x + 48} cy={y - 7} r={4.8} fill="#e8f1f6" />
+      <R x={x + 46} y={y - 10} w={2} h={1} c="#ffffff" />
+      <R x={x + 47} y={y - 1} w={2} h={1} c="#d4af37" />
+    </g>
+  );
+}
+
+/** Warm pendant lamp hanging from the ceiling with a soft light cone (ambient). */
+export function PendantLamp({ x, len = 8 }: { x: number; len?: number }) {
+  return (
+    <g>
+      <polygon points={`${x - 3},${len + 4} ${x + 3},${len + 4} ${x + 16},${len + 46} ${x - 16},${len + 46}`} fill="var(--o-lamp-cone)" className="o-cone" />
+      <R x={x - 0.25} y={0} w={0.5} h={len} c="#5b4636" />
+      <R x={x - 3} y={len} w={6} h={3} c="#e2231a" />
+      <R x={x - 2} y={len + 3} w={4} h={1} c="#ffe7a8" />
+    </g>
+  );
+}
+
+/** Handheld barcode scanner (packing station). */
+export function Scanner({ x, y, active }: { x: number; y: number; active: boolean }) {
+  return (
+    <g>
+      <R x={x} y={y} w={6} h={3} c="#2f3340" />
+      <R x={x + 1} y={y + 3} w={2} h={4} c="#2f3340" />
+      <R x={x + 5} y={y + 1} w={1} h={1} c={active ? "#ff3b30" : "#7b1d1d"} className={active ? "o-scan-led" : undefined} />
+      {active && <R x={x + 6} y={y + 1.2} w={7} h={0.5} c="#ff3b30" opacity={0.75} className="o-scan-beam" />}
+    </g>
+  );
+}
+
+/** Shipping box with Hasaki tape and a barcode label. */
+export function ShippingBox({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <R x={x} y={y} w={14} h={10} c="#d9ad6d" />
+      <R x={x} y={y} w={14} h={2} c="#c99a5b" />
+      <R x={x + 6} y={y} w={2} h={10} c="#e2231a" />
+      <R x={x + 9} y={y + 4} w={4} h={4} c="#ffffff" />
+      {[0, 1, 2, 3].map((i) => <R key={i} x={x + 9.4 + i * 0.9} y={y + 4.6} w={0.4} h={2.6} c="#1f1f26" />)}
+    </g>
+  );
+}
+
+/** Wall sign with the official Hasaki logo on a white plate (logo never recoloured). */
+export function LogoSign({ x, y, href }: { x: number; y: number; href: string }) {
+  return (
+    <g>
+      <R x={x + 1} y={y + 15} w={86} h={2} c="rgba(0,0,0,.18)" />
+      <R x={x} y={y} w={86} h={16} c="#e2231a" />
+      <R x={x} y={y} w={86} h={1} c="#ff5a4f" />
+      <R x={x} y={y + 15} w={86} h={1} c="#a50f14" />
+      <rect x={x + 2} y={y + 1.5} width={13} height={13} rx={2.5} fill="#ffffff" />
+      <image href={href} x={x + 2} y={y + 1.5} width={13} height={13} preserveAspectRatio="xMidYMid meet" style={{ imageRendering: "auto" }} />
+      <text x={x + 18} y={y + 8.6} className="o-brand-text">AI Workspace</text>
+      <text x={x + 18} y={y + 12.8} className="o-brand-sub">ENGINEERING HEADQUARTERS</text>
+      <R x={x - 1} y={y - 3} w={1} h={4} c="var(--o-trim)" />
+      <R x={x + 86} y={y - 3} w={1} h={4} c="var(--o-trim)" />
     </g>
   );
 }

@@ -460,11 +460,20 @@ export const claudeExecutor: StepExecutor = {
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
     const vcfg = mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
+    if (mode === "coding" && !vcfg) {
+      // Only the versioned workflow definition can turn the gate off; record it so evaluation never counts it as passed.
+      await ctx.log("system", "verification disabled by the workflow definition (config.verify = false)");
+      metrics.verification = { outcome: "disabled", status: "disabled", passed: null };
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      output = { ...output, verification: { outcome: "disabled", status: "disabled", passed: null } };
+    }
     if (vcfg) {
       const trees = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
       if (!trees.length) {
         await ctx.log("system", "verification skipped: the agent prepared no worktree (no code was changed)");
-        return { kind: "completed", output: { ...output, verification: { outcome: "skipped", passed: null, reason: "no worktree: no code was changed" } } };
+        metrics.verification = { outcome: "skipped", status: "skipped", passed: null };
+        await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+        return { kind: "completed", output: { ...output, verification: { outcome: "skipped", status: "skipped", passed: null, reason: "no worktree: no code was changed" } } };
       }
       const env = { BASE_BRANCH: config.baseBranch, RUN_ID: String(ctx.run.id) };
       const deps: VerifyDeps = {
@@ -510,11 +519,14 @@ export const claudeExecutor: StepExecutor = {
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
       if (loop.outcome === "canceled") throw new Error("verification canceled");
       if (loop.stop) return loop.stop;
+      if (loop.outcome === "error")
+        return { kind: "failed", error: `verification could not complete (not a code failure, the agent was not asked to repair): ${summary.errors.join(" | ")}`, retryable: false, details: { verification: summary } };
       if (!summary.passed) {
         const failing = summary.last.filter((x) => !x.passed).map((x) => `${x.repo}: ${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`);
         const why = loop.outcome === "no_progress" ? "made no progress (same failures twice)" : `still failing after ${loop.repairs} repair(s)`;
         return { kind: "failed", error: `verification ${why} — ${failing.join(" | ")}`, retryable: false, details: { verification: summary } };
       }
+      if (summary.needs_review) await ctx.log("system", `verification passed but needs human review: ${summary.review_reasons.join("; ")}`, { verification: "needs_review" });
       output = { ...accepted, verification: summary };
     }
     return { kind: "completed", output };
