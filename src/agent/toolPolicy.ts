@@ -289,7 +289,9 @@ function readOnlyViolation(command: string): string | null {
   const loop = loopStructure(commands.map((c) => c.s));
   if ("error" in loop) return loopUnsupported(loop.error);
   for (const cmd of loop.commands) {
-    const s = cmd.replace(/^cd\s+\S+\s*$/, "pwd");
+    // VAR=value only sets a shell variable (also inside loop bodies: `do b=$(…)`); VAR=value cmd … runs cmd
+    if (/^([A-Za-z_]\w*=\S*\s*)+$/.test(cmd)) continue;
+    const s = cmd.replace(/^([A-Za-z_]\w*=\S*\s+)+/, "").replace(/^cd\s+\S+\s*$/, "pwd");
     if (!READ_ONLY.some((re) => re.test(s))) return `"${cmd.slice(0, 80)}" is not a read-only command`;
   }
   return null;
@@ -446,7 +448,7 @@ export function packageInstallViolation(p: ShellParse, dirs: Array<string | unde
     let symlinked = linkedHere;
     try {
       if (dir && isInside(dir, workspaces)) symlinked ||= lstatSync(resolve(dir, "node_modules")).isSymbolicLink();
-    } catch {}
+    } catch { }
     if (symlinked) return "node_modules in this worktree is a symlink to the primary checkout: installing/changing packages would modify the primary checkout. Remove the symlink first (rm node_modules) and install into the worktree, or report the needed dependency in submit_result";
   }
   return null;

@@ -576,3 +576,10 @@ test("run 8 false positives: read-only symlink source, literal variables, relati
   assert.match((decideBash("npm i -D vitest", ctx, ws) as any).reason, /symlink to the primary checkout/);
   assert.deepEqual(decideBash("npx prettier --check src/a.ts", ctx, ws), { allow: true });
 });
+
+test("assignments inside loop bodies are read-only (run 9: do b=$(git … | grep …))", () => {
+  const A: PolicyContext = { mode: "analysis", workspaces: [], baseBranch: "release/prod" };
+  const real = `cd /home/me/src/oms-src; for r in */; do b=$(git -C $r branch -a 2>/dev/null | grep -i "split/8-channel" ); [ -n "$b" ] && echo "$r: $b"; echo "$r current: $(git -C $r rev-parse --abbrev-ref HEAD 2>/dev/null)"; done`;
+  assert.deepEqual(decideBash(real, A), { allow: true });
+  for (const c of [`for r in a b; do b=$(touch x); done`, `for r in a b; do X=1 touch "$r"; done`, `for r in a b; do b=1; rm "$r"; done`]) assert.equal(decideBash(c, A).allow, false, c);
+});
