@@ -331,10 +331,10 @@ export const claudeExecutor: StepExecutor = {
     const nativeTools = toolsFor(mode, { delegation, claudeSkills: settingSources.length > 0 });
     const agents = delegation
       ? Object.fromEntries(
-          (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
-            .filter((n) => SUBAGENTS[n])
-            .map((n) => [n, { ...SUBAGENTS[n], tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
-        )
+        (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
+          .filter((n) => SUBAGENTS[n])
+          .map((n) => [n, { ...SUBAGENTS[n], tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
+      )
       : undefined;
     const metrics = newMetrics((ctx.step.config.model as string) || config.model || "default");
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
@@ -349,9 +349,17 @@ export const claudeExecutor: StepExecutor = {
     const freshPrompt = () => buildUserPrompt(ctx.input, files, [], ctx.context.upstream, ctx.context.fileRefs, extras);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode);
 
+    // The PreToolUse hook sees the shell's real cwd; canUseTool (called afterwards for the same call) does not.
+    // Remember the hook's allow so cwd-dependent checks (relative redirects, `cd`) are not re-judged without a cwd.
+    const hookAllowed = new Set<string>();
+    const callKey = (name: string, input: unknown) => `${name}\u0000${JSON.stringify(input ?? {})}`;
     const preToolUse: HookCallback = async (input: any) => {
       const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy, input.cwd, input.agent_id);
-      if (d.allow) return {};
+      if (d.allow) {
+        hookAllowed.add(callKey(input.tool_name, input.tool_input));
+        if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
+        return {};
+      }
       metrics.denied.push({ tool: input.tool_name, reason: d.reason, ...(input.agent_id ? { subagent: input.agent_type ?? input.agent_id } : {}) });
       await ctx.log("tool", `denied ${input.tool_name}${input.agent_id ? ` (subagent ${input.agent_type ?? ""})` : ""}: ${d.reason}`);
       return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: d.reason } };
@@ -368,7 +376,9 @@ export const claudeExecutor: StepExecutor = {
       return {};
     };
     const canUseTool: CanUseTool = async (name, input) => {
-      const d = decide(name, input, policy);
+      const k = callKey(name, input);
+      if (hookAllowed.delete(k)) return { behavior: "allow", updatedInput: input };
+      const d = decide(name, input, policy, cwd);
       return d.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: d.reason };
     };
 
@@ -426,25 +436,25 @@ export const claudeExecutor: StepExecutor = {
     });
     let result;
     try {
-    if (resume && existsSync(cwd)) {
-      await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
-      try {
-        result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras), resume.sessionId);
-      } catch (e) {
-        if (ctx.signal.aborted) throw e;
-        result = { isError: true, text: (e as Error).message, assistantTurns: 0 };
+      if (resume && existsSync(cwd)) {
+        await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
+        try {
+          result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras), resume.sessionId);
+        } catch (e) {
+          if (ctx.signal.aborted) throw e;
+          result = { isError: true, text: (e as Error).message, assistantTurns: 0 };
+        }
+        if (result.isError && result.assistantTurns === 0) {
+          // Session missing or not resumable: rebuild from durable artifacts instead.
+          await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
+          await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
+          result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
+        }
+      } else {
+        result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras) : freshPrompt());
       }
-      if (result.isError && result.assistantTurns === 0) {
-        // Session missing or not resumable: rebuild from durable artifacts instead.
-        await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
-        await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
-        result = await run(buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
-      }
-    } else {
-      result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(ctx, resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras) : freshPrompt());
-    }
     } finally {
-      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
     }
 
     // Verification rounds from before a pause (questions asked during a repair) keep counting against the budget.
@@ -464,7 +474,7 @@ export const claudeExecutor: StepExecutor = {
       // Only the versioned workflow definition can turn the gate off; record it so evaluation never counts it as passed.
       await ctx.log("system", "verification disabled by the workflow definition (config.verify = false)");
       metrics.verification = { outcome: "disabled", status: "disabled", passed: null };
-      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
       output = { ...output, verification: { outcome: "disabled", status: "disabled", passed: null } };
     }
     if (vcfg) {
@@ -472,7 +482,7 @@ export const claudeExecutor: StepExecutor = {
       if (!trees.length) {
         await ctx.log("system", "verification skipped: the agent prepared no worktree (no code was changed)");
         metrics.verification = { outcome: "skipped", status: "skipped", passed: null };
-        await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+        await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
         return { kind: "completed", output: { ...output, verification: { outcome: "skipped", status: "skipped", passed: null, reason: "no worktree: no code was changed" } } };
       }
       const env = { BASE_BRANCH: config.baseBranch, RUN_ID: String(ctx.run.id) };
@@ -502,9 +512,9 @@ export const claudeExecutor: StepExecutor = {
           submitted = undefined;
           let r = sid
             ? await run(msg, sid).catch((e) => {
-                if (ctx.signal.aborted) throw e;
-                return { isError: true, text: (e as Error).message, assistantTurns: 0 };
-              })
+              if (ctx.signal.aborted) throw e;
+              return { isError: true, text: (e as Error).message, assistantTurns: 0 };
+            })
             : null;
           // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
           if (!r || (r.isError && r.assistantTurns === 0)) r = await run(`${freshPrompt()}\n\n${msg}`);
@@ -516,7 +526,7 @@ export const claudeExecutor: StepExecutor = {
       });
       const summary = verificationSummary(vcfg, loop);
       metrics.verification = summary;
-      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
       if (loop.outcome === "canceled") throw new Error("verification canceled");
       if (loop.stop) return loop.stop;
       if (loop.outcome === "error")

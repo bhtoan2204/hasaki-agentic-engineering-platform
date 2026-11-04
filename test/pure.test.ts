@@ -537,3 +537,42 @@ test("git symbolic-ref (read form) and [ ] tests are read-only; subshells stay u
   assert.equal(decideBash(`git symbolic-ref HEAD refs/heads/x`, A).allow, false);
   assert.match((decideBash(`for r in a b; do [ -d $r ] && (cd $r && git log -1); done`, A) as any).reason, /chưa được hỗ trợ/);
 });
+
+test("git worktree remove: scratch worktrees under /tmp are fine; platform worktrees and prune are not", () => {
+  const ctx: PolicyContext = { mode: "coding", workspaces: ["/data/worktrees/HSK-30/oms-api"], baseBranch: "release/prod", protectedRoots: ["/home/me/src"] };
+  const real = "git worktree add -q --detach /tmp/hsk30-base HEAD && cd /tmp/hsk30-base && go test ./app/dto/ -count=1 > /tmp/hsk30base.log 2>&1; echo base=$?; grep -E \"^(FAIL|---|ok)\" /tmp/hsk30base.log | head; cd / && git -C /data/worktrees/HSK-30/oms-api worktree remove --force /tmp/hsk30-base";
+  assert.deepEqual(decideBash(real, ctx, "/data/worktrees/HSK-30/oms-api"), { allow: true });
+  for (const c of ["git worktree remove /data/worktrees/HSK-30/oms-api", "git worktree remove --force /tmp", "git worktree remove ../x", "git worktree remove $DIR", "git worktree prune"])
+    assert.equal(decideBash(c, ctx, "/data/worktrees/HSK-30/oms-api").allow, false, c);
+});
+
+test("run 8 false positives: read-only symlink source, literal variables, relative redirects with a known cwd", async () => {
+  const { mkdtempSync, mkdirSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "pol-"));
+  const ws = join(root, "worktrees/HSK-30/oms-frontend");
+  const primaryFe = join(root, "src/oms-frontend");
+  mkdirSync(ws, { recursive: true });
+  mkdirSync(join(primaryFe, "node_modules"), { recursive: true });
+  const ctx: PolicyContext = { mode: "coding", workspaces: [ws], baseBranch: "release/prod", protectedRoots: [join(root, "src")] };
+  const ok = [
+    `grep -n "node_modules" .gitignore; ln -s ${primaryFe}/node_modules node_modules; ls -la node_modules | head -1`,
+    `npx eslint --max-warnings 0 src/consts/payment.ts > fe-lint.log 2>&1; echo lint=$?; tail -15 fe-lint.log; npx tsc --noEmit > fe-tsc.log 2>&1; rm -f fe-lint.log fe-tsc.log`,
+    `L=${ws}/.fe; npx eslint --max-warnings 0 src/consts/payment.ts > $L-lint.log 2>&1; echo lint=$?; tail -15 $L-lint.log; rm -f $L-*.log`,
+    `cp ${primaryFe}/.eslintrc.json .eslintrc.local.json`,
+  ];
+  for (const c of ok) assert.deepEqual(decideBash(c, ctx, ws), { allow: true }, c);
+  const bad = [
+    `ln -s ${ws}/x ${primaryFe}/node_modules/x`, // link written into the primary checkout
+    `L=${primaryFe}; echo x > $L/notes.txt`, // variable resolves into the primary checkout
+    `echo x > $UNKNOWN/f`,
+    `ln -s ${primaryFe}/node_modules node_modules && npm install lodash`, // would write through the link
+    `cp ${ws}/a ${primaryFe}/a`,
+  ];
+  for (const c of bad) assert.equal(decideBash(c, ctx, ws).allow, false, c);
+  // an existing symlinked node_modules blocks installs; npx tools still run
+  symlinkSync(join(primaryFe, "node_modules"), join(ws, "node_modules"));
+  assert.match((decideBash("npm i -D vitest", ctx, ws) as any).reason, /symlink to the primary checkout/);
+  assert.deepEqual(decideBash("npx prettier --check src/a.ts", ctx, ws), { allow: true });
+});

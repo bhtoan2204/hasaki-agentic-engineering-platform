@@ -1,3 +1,4 @@
+import { lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve, sep } from "node:path";
 
@@ -54,7 +55,7 @@ const ALWAYS_DENIED: Array<[RegExp, string]> = [
   [/\bgit\s+(-C\s+\S+\s+)?push\b/, "pushing is done by the platform's pull request step — commit locally and finish with mcp__platform__submit_result"],
   [/\bgit\s+(-C\s+\S+\s+)?reset\s+--hard\b/, "git reset --hard is not allowed — to undo a change, edit the files back or add a new commit (git revert)"],
   [/\bgit\s+(-C\s+\S+\s+)?clean\b/, "git clean is not allowed — remove only files you created, by name (rm <file>)"],
-  [/\bgit\s+(-C\s+\S+\s+)?worktree\s+(remove|prune)\b/, "worktrees are managed by the platform — keep working in the worktree returned by mcp__platform__prepare_branch"],
+  [/\bgit\s+(-C\s+\S+\s+)?worktree\s+prune\b/, "worktrees are managed by the platform — keep working in the worktree returned by mcp__platform__prepare_branch"],
   [/\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/, "deleting branches is not allowed — branches belong to the platform; just keep committing on the run branch"],
   [/\bsudo\b/, "sudo is not allowed — the step runs unprivileged; if a tool is missing, say so in submit_result"],
   [/\bgit\s+(-C\s+\S+\s+)?(restore\b|stash\b(?!\s+(list|show)\b))/, "do not discard or stash existing changes; edit them deliberately"],
@@ -434,6 +435,42 @@ export function rmRfViolation(command: string | ShellParse, ctx: PolicyContext, 
 }
 
 /**
+ * A worktree may borrow the primary checkout's node_modules through a symlink (to run eslint/tsc/prettier), but then a
+ * package install would write THROUGH the link into the primary checkout: refuse it while node_modules is a symlink.
+ */
+export function packageInstallViolation(p: ShellParse, dirs: Array<string | undefined>, workspaces: string[]): string | null {
+  const linkedHere = p.segments.some((seg) => /^ln\s+-[a-zA-Z]*s[a-zA-Z]*\s+\S*node_modules\/?\s+\S*node_modules\/?$/.test(seg));
+  for (const [i, seg] of p.segments.entries()) {
+    if (!/^(npm|yarn|pnpm)\s+(install|i|ci|add|remove|rm|uninstall|update|up|upgrade|link)\b/.test(seg)) continue;
+    const dir = dirs[i];
+    let symlinked = linkedHere;
+    try {
+      if (dir && isInside(dir, workspaces)) symlinked ||= lstatSync(resolve(dir, "node_modules")).isSymbolicLink();
+    } catch {}
+    if (symlinked) return "node_modules in this worktree is a symlink to the primary checkout: installing/changing packages would modify the primary checkout. Remove the symlink first (rm node_modules) and install into the worktree, or report the needed dependency in submit_result";
+  }
+  return null;
+}
+
+/**
+ * `git worktree remove` is allowed only for scratch worktrees under /tmp or $TMPDIR (e.g. a detached checkout the agent
+ * made to run tests on the base commit). The run's own worktrees and any repository checkout stay off-limits.
+ */
+export function worktreeRemoveViolation(p: ShellParse): string | null {
+  for (const seg of p.segments) {
+    const m = seg.match(/\bgit\s+(?:-C\s+\S+\s+)?worktree\s+remove\b(.*)$/);
+    if (!m) continue;
+    const targets = m[1].trim().split(/\s+/).filter((a) => a && !a.startsWith("-")).map((a) => a.replace(/^['"]|['"]$/g, ""));
+    if (!targets.length) return "git worktree remove without a target";
+    for (const t of targets) {
+      if (/[$`~]/.test(t) || !t.startsWith("/") || !TEMP_ROOTS().some((r) => strictlyInside(resolve(t), r)))
+        return `worktrees are managed by the platform — you may only remove scratch worktrees you created under /tmp (absolute path), not "${t}"; keep working in the worktree returned by mcp__platform__prepare_branch`;
+    }
+  }
+  return null;
+}
+
+/**
  * Absolute paths mentioned in the shell code and in inline scripts (heredoc bodies fed to an interpreter); heredoc
  * data such as a commit message is not scanned. Only real absolute paths count: "~128k" in prose is not a path.
  */
@@ -457,6 +494,8 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
   for (const [re, why] of ALWAYS_DENIED) if (re.test(scan)) return deny(why);
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
+  const wt = worktreeRemoveViolation(p);
+  if (wt) return deny(wt);
   const base = ctx.baseBranch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   if (new RegExp(`\\bgit\\s+(-C\\s+\\S+\\s+)?(checkout|switch)\\s+${base}\\b`).test(scan)) return deny(`do not check out ${ctx.baseBranch} — compare with git diff origin/${ctx.baseBranch}...HEAD or read a file with git show origin/${ctx.baseBranch}:<path>`);
   if (ctx.mode === "coding") {
@@ -465,12 +504,32 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     const roots = ctx.protectedRoots ?? [];
     const primary = (x: string) => isInside(x, roots) && !isInside(x, ctx.workspaces);
     const dirs = segmentDirs(p, cwd);
-    const touched = [...(cwd && primary(cwd) ? [cwd] : []), ...dirs.filter((d): d is string => !!d && primary(d)), ...pathsIn(command).filter(primary)];
+    // `ln -s <primary>/node_modules node_modules`, `cp <primary>/file .`: the primary path is only READ, the write lands
+    // in the worktree. Those source paths do not make the command a write to the primary checkout.
+    const readSources = new Set<string>();
+    p.segments.forEach((seg, i) => {
+      const m = seg.match(/^(ln|cp)\s+((?:-[a-zA-Z]+\s+)*)(\S+)\s+(\S+)$/);
+      if (!m || (m[1] === "ln" && !/s/.test(m[2])) || (m[1] === "cp" && /l/.test(m[2]))) return;
+      const src = expandHome(m[3]), dst = expandHome(m[4]);
+      const dstAbs = dst.startsWith("/") ? resolve(dst) : dirs[i] ? resolve(dirs[i]!, dst) : null;
+      if (src.startsWith("/") && dstAbs && isInside(dstAbs, ctx.workspaces)) readSources.add(resolve(src));
+    });
+    const pkgWrite = packageInstallViolation(p, dirs, ctx.workspaces);
+    if (pkgWrite) return deny(pkgWrite);
+    const touched = [...(cwd && primary(cwd) ? [cwd] : []), ...dirs.filter((d): d is string => !!d && primary(d)), ...pathsIn(command).filter((x) => primary(x) && !readSources.has(resolve(x)))];
+    // Literal variables assigned in the same command (`L=/abs/dir; … > $L-lint.log`) are expanded for redirect checks.
+    const vars = new Map<string, string>();
+    for (const seg of p.segments) {
+      const a = seg.match(/^([A-Za-z_]\w*)=(?:'([^']*)'|"([^"$`]*)"|([^\s$`'"]+))$/);
+      if (a) vars.set(a[1], a[2] ?? a[3] ?? a[4] ?? "");
+    }
+    const expandVars = (t: string) => t.replace(/\$\{(\w+)\}|\$(\w+)/g, (all, b, c) => vars.get(b ?? c) ?? all);
     // Real output redirections: resolve each target where its command runs, so `> ../../src/repo/f` is caught too.
     for (const r of p.redirects) {
       if (harmlessRedirect(r.target) || r.target.startsWith("&")) continue;
-      if (/[$`*?{]/.test(r.target)) return deny(`cannot resolve redirection target "${r.target}" safely; use a literal path`);
-      const t = expandHome(r.target);
+      const target = expandVars(r.target);
+      if (/[$`*?{]/.test(target)) return deny(`cannot resolve redirection target "${r.target}" safely; use a literal path (or assign the variable a literal value earlier in the same command)`);
+      const t = expandHome(target);
       if (!t.startsWith("/") && !dirs[r.seg]) return deny(`cannot resolve relative redirection target "${r.target}": the working directory is unknown`);
       const abs = t.startsWith("/") ? resolve(t) : resolve(dirs[r.seg]!, t);
       if (primary(abs)) touched.push(abs);
