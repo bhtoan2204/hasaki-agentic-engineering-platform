@@ -480,7 +480,7 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       if (v)
         return deny(
           `${touched[0]} is a primary checkout and is read-only (${v}). Call mcp__platform__prepare_branch and run modifying commands inside the returned worktree` +
-            (ctx.workspaces.length ? ` (${ctx.workspaces.join(", ")})` : "") + ".",
+          (ctx.workspaces.length ? ` (${ctx.workspaces.join(", ")})` : "") + ".",
         );
     }
     return allow;
