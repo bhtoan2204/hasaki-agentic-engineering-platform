@@ -87,8 +87,10 @@ export async function runMetrics(runId: number) {
   };
 }
 
-export async function metricsSummary(days = 30) {
+export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?: boolean }) {
   const since = `now() - make_interval(days => ${Number(days) || 30})`;
+  const own = !scope ? "" : scope.all ? "AND r.owner_id IS NOT NULL" : `AND r.owner_id = ${Number(scope.ownerId)}`;
+  const attemptOwn = !scope ? "" : scope.all ? "AND a.run_id IN (SELECT id FROM workflow_runs WHERE owner_id IS NOT NULL)" : `AND a.run_id IN (SELECT id FROM workflow_runs WHERE owner_id = ${Number(scope.ownerId)})`;
   const byProfile = await q(
     pool,
     `SELECT r.profile, count(DISTINCT r.id)::int AS runs, count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
@@ -97,7 +99,7 @@ export async function metricsSummary(days = 30) {
             round(COALESCE(sum((a.metrics->>'cost_usd')::numeric), 0) / NULLIF(count(DISTINCT r.id), 0), 3) AS cost_per_run,
             round(count(a.id) FILTER (WHERE a.metrics ? 'turns')::numeric / NULLIF(count(DISTINCT r.id), 0), 1) AS claude_attempts_per_run
        FROM workflow_runs r LEFT JOIN workflow_step_attempts a ON a.run_id = r.id
-      WHERE r.created_at > ${since} GROUP BY 1 ORDER BY 1`,
+      WHERE r.created_at > ${since} ${own} GROUP BY 1 ORDER BY 1`,
   );
   const [byWorkflow, byStepType, tools, integrations, skills, failures, denied] = await Promise.all([
     q(pool, `SELECT r.definition_key, count(DISTINCT r.id)::int AS runs,
@@ -106,37 +108,37 @@ export async function metricsSummary(days = 30) {
                     round(COALESCE(sum((a.metrics->>'cost_usd')::numeric), 0), 4) AS cost_usd,
                     COALESCE(sum((a.metrics->'tokens'->>'input')::bigint + (a.metrics->'tokens'->>'output')::bigint), 0)::bigint AS tokens
                FROM workflow_runs r LEFT JOIN workflow_step_attempts a ON a.run_id = r.id
-              WHERE r.created_at > ${since} GROUP BY 1 ORDER BY runs DESC`),
+              WHERE r.created_at > ${since} ${own} GROUP BY 1 ORDER BY runs DESC`),
     q(pool, `SELECT s.type, count(*)::int AS attempts, count(*) FILTER (WHERE a.status = 'FAILED')::int AS failed,
                     round(avg(extract(epoch FROM (a.finished_at - a.started_at)))::numeric, 1) AS avg_seconds,
                     round(COALESCE(sum((a.metrics->>'cost_usd')::numeric), 0), 4) AS cost_usd
                FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
-              WHERE a.started_at > ${since} GROUP BY 1 ORDER BY attempts DESC`),
+              WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1 ORDER BY attempts DESC`),
     q(pool, `SELECT t.key AS tool, sum(t.value::int)::int AS calls, count(DISTINCT a.id)::int AS attempts
                FROM workflow_step_attempts a, jsonb_each_text(COALESCE(a.metrics->'tool_calls', '{}'::jsonb)) t
-              WHERE a.started_at > ${since} GROUP BY 1 ORDER BY calls DESC`),
+              WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1 ORDER BY calls DESC`),
     q(pool, `SELECT c->>'name' AS name, count(*)::int AS calls, count(*) FILTER (WHERE (c->>'ok')::boolean IS NOT TRUE)::int AS failed,
                     round(avg((c->>'ms')::numeric))::int AS avg_ms
                FROM workflow_step_attempts a, jsonb_array_elements(COALESCE(a.metrics->'integration_calls', '[]'::jsonb)) c
-              WHERE a.started_at > ${since} GROUP BY 1 ORDER BY calls DESC`),
+              WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1 ORDER BY calls DESC`),
     q(pool, `SELECT k AS key, count(*)::int AS loads
                FROM workflow_step_attempts a, jsonb_array_elements_text(COALESCE(a.metrics->'skills_loaded', '[]'::jsonb)) k
-              WHERE a.started_at > ${since} GROUP BY 1 ORDER BY loads DESC LIMIT 50`),
+              WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1 ORDER BY loads DESC LIMIT 50`),
     q(pool, `SELECT a.run_id, s.key AS step_key, s.type, a.number, a.finished_at, left(COALESCE(a.error->>'message', ''), 300) AS error
                FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
-              WHERE a.status = 'FAILED' AND a.started_at > ${since} ORDER BY a.id DESC LIMIT 25`),
+              WHERE a.status = 'FAILED' AND a.started_at > ${since} ${attemptOwn} ORDER BY a.id DESC LIMIT 25`),
     q(pool, `SELECT d->>'tool' AS tool, left(d->>'reason', 160) AS reason, count(*)::int AS times
                FROM workflow_step_attempts a, jsonb_array_elements(COALESCE(a.metrics->'denied', '[]'::jsonb)) d
-              WHERE a.started_at > ${since} GROUP BY 1, 2 ORDER BY times DESC LIMIT 25`),
+              WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1, 2 ORDER BY times DESC LIMIT 25`),
   ]);
-  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation: await harnessEvaluation(since) };
+  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation: await harnessEvaluation(since, attemptOwn, own) };
 }
 
 /**
  * Harness evaluation (kept apart from execution status): did coding steps pass the platform's own verification, how
  * many repairs it took, which failures keep recurring, and how often a human had to step in.
  */
-export async function harnessEvaluation(since: string) {
+export async function harnessEvaluation(since: string, attemptOwn = "", own = "") {
   const [verification, patterns, human] = await Promise.all([
     one<any>(
       pool,
@@ -153,13 +155,13 @@ export async function harnessEvaluation(since: string) {
               count(*) FILTER (WHERE (a.metrics->'verification'->>'needs_review')::boolean)::int AS needs_review,
               count(*) FILTER (WHERE a.metrics->'verification'->>'outcome' = 'disabled')::int AS disabled
          FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
-        WHERE s.type = 'coding_agent' AND a.started_at > ${since}`,
+        WHERE s.type = 'coding_agent' AND a.started_at > ${since} ${attemptOwn}`,
     ),
     q(
       pool,
       `SELECT left(sig, 300) AS signature, count(*)::int AS times, count(DISTINCT a.run_id)::int AS runs
          FROM workflow_step_attempts a, jsonb_array_elements_text(COALESCE(a.metrics->'verification'->'failure_signatures', '[]'::jsonb)) sig
-        WHERE a.started_at > ${since} GROUP BY sig HAVING count(*) > 1 ORDER BY times DESC LIMIT 15`,
+        WHERE a.started_at > ${since} ${attemptOwn} GROUP BY sig HAVING count(*) > 1 ORDER BY times DESC LIMIT 15`,
     ),
     one<any>(
       pool,
@@ -167,9 +169,9 @@ export async function harnessEvaluation(since: string) {
               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'answered')
                                   OR EXISTS (SELECT 1 FROM workflow_steps hs WHERE hs.run_id = r.id AND hs.type = 'human_approval' AND hs.status = 'COMPLETED' AND COALESCE(hs.output->>'auto', 'false') <> 'true')
                                   OR EXISTS (SELECT 1 FROM workflow_step_attempts ra WHERE ra.run_id = r.id AND ra.input->'pending' ? 'reexecute'))::int AS with_human,
-              (SELECT count(*)::int FROM workflow_questions qq JOIN workflow_runs r2 ON r2.id = qq.run_id WHERE r2.created_at > ${since} AND qq.status = 'answered') AS answers,
-              (SELECT count(*)::int FROM workflow_step_attempts ra JOIN workflow_runs r2 ON r2.id = ra.run_id WHERE r2.created_at > ${since} AND ra.input->'pending' ? 'reexecute') AS reexecutions
-         FROM workflow_runs r WHERE r.created_at > ${since}`,
+              (SELECT count(*)::int FROM workflow_questions qq JOIN workflow_runs r2 ON r2.id = qq.run_id WHERE r2.created_at > ${since} AND qq.status = 'answered' ${own.replaceAll("r.owner_id", "r2.owner_id")}) AS answers,
+              (SELECT count(*)::int FROM workflow_step_attempts ra JOIN workflow_runs r2 ON r2.id = ra.run_id WHERE r2.created_at > ${since} AND ra.input->'pending' ? 'reexecute' ${own.replaceAll("r.owner_id", "r2.owner_id")}) AS reexecutions
+         FROM workflow_runs r WHERE r.created_at > ${since} ${own}`,
     ),
   ]);
   const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);

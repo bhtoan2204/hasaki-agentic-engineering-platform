@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { config } from "../config.ts";
+import { execution } from "../auth/execution.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
 import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
@@ -15,6 +16,8 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
  */
 export interface PlatformToolEnv {
   runId: number;
+  /** Run owner. Tool calls that touch credentials use this, not a process-global user. */
+  ownerId?: number | null;
   stepId: number;
   attemptId: number;
   fencingToken: number | null;
@@ -74,6 +77,11 @@ async function openQuestions(attemptId: number): Promise<number> {
 }
 
 export async function dispatchPlatformTool(name: string, args: any, env: PlatformToolEnv): Promise<string> {
+  if (env.ownerId) return execution.run({ userId: Number(env.ownerId), runId: env.runId, kind: "run" }, () => dispatchOwned(name, args, env));
+  return dispatchOwned(name, args, env);
+}
+
+async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Promise<string> {
   const live = await attemptIsLive(env.attemptId, env.fencingToken);
   if (!live.ok) return `ERROR: refused ${name}: ${live.reason}`;
   if (MUTATING.has(name) && (await openQuestions(env.attemptId)) > 0)
@@ -231,6 +239,7 @@ export function envFromExecution(
 ): PlatformToolEnv {
   return {
     runId: ctx.run.id,
+    ownerId: ctx.run.owner_id ?? null,
     stepId: ctx.step.id,
     attemptId: ctx.attempt.id,
     fencingToken: ctx.attempt.fencing_token,
@@ -267,6 +276,7 @@ export async function envFromDatabase(ids: { runId: number; stepId: number; atte
   const { runEvents } = await import("../workflow/events.ts");
   return {
     runId: run.id,
+    ownerId: run.owner_id ?? null,
     stepId: step.id,
     attemptId: attempt.id,
     fencingToken: attempt.fencing_token,

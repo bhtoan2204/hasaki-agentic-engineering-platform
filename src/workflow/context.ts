@@ -163,7 +163,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     ...(run.graph.knowledge ?? []),
   ];
   const pinned: Array<{ key: string; version: number }> = input.pending?.reexecute?.skills ?? [];
-  const res = resolveKnowledge(await knowledge.candidates(c), {
+  const res = resolveKnowledge(await knowledge.candidates(c, run.owner_id), {
     organization: config.organization,
     project,
     repositories,

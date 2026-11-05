@@ -23,9 +23,7 @@ export async function notify(message: string, target?: string) {
  * The webhook keeps its existing message; Telegram gets a message with a deep link to the step. Independent: a failure
  * of one never affects the other or the workflow.
  */
-export async function notifyStepWaiting(webhookMessage: string, w: StepWaiting & { stepId: number; generation: number; attemptId?: number | null }) {
-  await Promise.allSettled([
-    notify(webhookMessage, `/runs/${w.runId}`),
-    sendTelegramStepWaiting(w, `${w.stepId}:${w.generation}:${w.attemptId ?? "gate"}:${w.status}`),
-  ]);
+export async function notifyStepWaiting(_webhookMessage: string, w: StepWaiting & { stepId: number; generation: number; attemptId?: number | null }) {
+  // Private step summaries are not posted to the shared webhook. They go only to the run owner's chat.
+  await sendTelegramStepWaiting(w, `${w.stepId}:${w.generation}:${w.attemptId ?? "gate"}:${w.status}`);
 }

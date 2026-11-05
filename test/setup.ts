@@ -9,6 +9,8 @@ import { join } from "node:path";
 import pg from "pg";
 
 const admin = process.env.TEST_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
+const adminUrl = new URL(admin);
+if (!["localhost", "127.0.0.1", "[::1]"].includes(adminUrl.hostname)) throw new Error("Tests require a local isolated PostgreSQL; remote database refused.");
 const dbName = "platform_test";
 const c = new pg.Client({ connectionString: admin });
 await c.connect();
@@ -33,6 +35,9 @@ const u = new URL(admin);
 u.pathname = "/" + dbName;
 process.env.DATABASE_URL = u.toString();
 process.env.PLATFORM_CONFIG = cfgPath;
+process.env.PLATFORM_TEST = "1";
+process.env.AUTH_SECRET = "test-auth-secret-not-for-production";
+process.env.COOKIE_SECURE = "0";
 delete process.env.NOTIFY_WEBHOOK;
 process.env.TEST_ROOT = root;
 mkdirSync(join(root, "empty-user-skills"));

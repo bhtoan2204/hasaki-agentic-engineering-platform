@@ -184,7 +184,7 @@ test("Scenario A: manual request through Feature Implementation to a Bitbucket P
   // STANDARD (auto) makes the review an independent verifier: the PR needs its PASS on the exact pushed commits.
   scripts.review = liveVerifier(() => ({ approved: true, findings: [] }));
   const run = await startRun({ definitionKey: "feature-implementation", workItemId: wi.id });
-  assert.equal(run.branch, wi.code);
+  assert.equal(run.branch, `u${run.owner_id}-${wi.code}`);
   assert.deepEqual(run.allowed_repositories.sort(), ["oms-api", "oms-background"]);
 
   await drain();
@@ -215,7 +215,7 @@ test("Scenario A: manual request through Feature Implementation to a Bitbucket P
   assert.deepEqual(final.selected_repositories, ["oms-api"]);
   assert.equal(final.pull_requests.length, 1);
   assert.equal(final.pull_requests[0].repo, "oms-api");
-  assert.equal(final.pull_requests[0].source_branch, wi.code);
+  assert.equal(final.pull_requests[0].source_branch, final.branch);
   assert.equal(final.pull_requests[0].target_branch, "release/prod");
   assert.ok(final.artifacts.some((a: any) => a.kind === "log"), "test command log stored");
   for (const a of final.attempts) assert.ok(a.context_snapshot_id, "every attempt has a context snapshot");
@@ -293,7 +293,7 @@ test("Scenario D: code review workflow without a work item stores findings, no P
   scripts.security = () => ({ kind: "completed", output: { summary: "1 issue", findings: [{ severity: "high", repo: "oms-api", file: "b.go", line: 9, issue: "SQL injection", suggestion: "bind params" }] } });
   const run = await startRun({ definitionKey: "code-review", repositories: ["oms-api"], inputs: { focus: "refund" } });
   assert.equal(run.work_item_id, null);
-  assert.equal(run.branch, `wf/run-${run.id}`);
+  assert.equal(run.branch, `u${run.owner_id}-run-${run.id}`);
   await drain();
   const d = await runDetail(run.id);
   assert.equal(d.status, "COMPLETED");
@@ -1030,6 +1030,9 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
   const saved = { ...config.telegram, publicUrl: config.publicUrl };
   Object.assign(config.telegram, { botToken: "TEST:TOKEN", chatId: "42", apiBase: `http://127.0.0.1:${port}` });
   config.publicUrl = "http://localhost:4545";
+  const { ensureTestOwner } = await import("../src/auth/testOwner.ts");
+  const { putUserSecret } = await import("../src/auth/secrets.ts");
+  await putUserSecret(await ensureTestOwner(), "telegram_chat", "42");
   try {
     const key = await customWorkflow([
       { key: "ask", type: "human_input", name: "Hỏi rule", config: { questions: [{ question: "COD?" }, { question: "Refund?" }] } },
@@ -1335,7 +1338,7 @@ test("existing-branch directive in the work item description lands in run.inputs
   const r = await getRun(run.id);
   assert.deepEqual(r.inputs.branches, { "oms-background": "HSK-QA679L33" });
   assert.equal(r.inputs.branches_source, "work item description");
-  assert.equal(r.branch, wi.code, "the run keeps its own branch name for every other repository");
+  assert.equal(r.branch, `u${r.owner_id}-${wi.code}`, "the run keeps its own branch name for every other repository");
   const explicit = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "oms-background": "HSK-OTHER" } } });
   assert.deepEqual((await getRun(explicit.id)).inputs.branches, { "oms-background": "HSK-OTHER" });
   await assert.rejects(startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "*": "release/prod" } } }), /base branch/);
@@ -1522,8 +1525,9 @@ test("cross-task memory: a COMPLETED run with a worktree yields verified facts +
   await drain();
   assert.equal((await getRun(run.id)).status, "COMPLETED");
   await extractRunMemory(run.id); // idempotent with the afterCommit hook
-  const facts = await knowledge.get(`memory.run-${run.id}.oms-api.facts`);
-  const concl = await knowledge.get(`memory.run-${run.id}.oms-api.conclusions`);
+  const facts = await knowledge.get(`memory.run-${run.id}.oms-api.facts`, pool, run.owner_id);
+  const concl = await knowledge.get(`memory.run-${run.id}.oms-api.conclusions`, pool, run.owner_id);
+  assert.equal(await knowledge.get(`memory.run-${run.id}.oms-api.facts`), undefined, "task memory is not shared");
   assert.ok(facts && concl, "both items written");
   assert.equal(facts.enabled, true);
   assert.deepEqual(facts.versions[0].metadata.memory.files, ["a.go"]);

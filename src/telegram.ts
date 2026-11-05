@@ -1,5 +1,6 @@
 import { config } from "./config.ts";
 import type { OutputLocale } from "./agent/language.ts";
+import { getUserSecret } from "./auth/secrets.ts";
 
 /**
  * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without TELEGRAM_BOT_TOKEN and
@@ -15,6 +16,8 @@ export interface StepWaiting {
   detail: string;
   /** Run output locale. Omitted keeps the original Vietnamese template (legacy callers). */
   locale?: OutputLocale;
+  /** Private notifications go to this user's destination, never the shared team chat. */
+  ownerId?: number | null;
 }
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
@@ -56,12 +59,13 @@ export function buildStepMessage(w: StepWaiting) {
 const sent = new Map<string, number>(); // dedupe key → time (guards against double emission of one transition)
 
 export async function sendTelegramStepWaiting(w: StepWaiting, dedupeKey: string) {
-  const { botToken, chatId } = config.telegram;
+  const botToken = config.telegram.botToken;
+  const chatId = w.ownerId ? await getUserSecret(w.ownerId, "telegram_chat") : null;
   if (!botToken || !chatId) return { skipped: "not configured" as const };
   if (sent.has(dedupeKey)) return { skipped: "duplicate" as const };
   sent.set(dedupeKey, Date.now());
   if (sent.size > 2000) for (const k of [...sent.keys()].slice(0, 1000)) sent.delete(k);
-  return postMessage(buildStepMessage(w));
+  return postMessage(buildStepMessage(w), chatId);
 }
 
 export const escapeHtml = esc;
@@ -72,8 +76,8 @@ export async function sendTelegramHtml(html: string, replyMarkup?: unknown) {
   return postMessage({ text: html, parse_mode: "HTML", disable_web_page_preview: true, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) });
 }
 
-async function postMessage(message: Record<string, unknown>) {
-  const { botToken, chatId, apiBase } = config.telegram;
+async function postMessage(message: Record<string, unknown>, chatId = config.telegram.chatId) {
+  const { botToken, apiBase } = config.telegram;
   try {
     const res = await fetch(`${apiBase.replace(/\/$/, "")}/bot${botToken}/sendMessage`, {
       method: "POST",

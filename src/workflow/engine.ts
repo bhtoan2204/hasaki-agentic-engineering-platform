@@ -5,6 +5,7 @@ import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
+import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
@@ -169,7 +170,7 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
           return notifyStepWaiting(en ? `✋ Run #${run.id}: ${s.name} needs approval before it runs` : `✋ Run #${run.id}: bước ${s.name} cần duyệt trước khi chạy`, {
             runId: run.id, runTitle: run.title, stepKey: s.key, stepName: s.name, status: "WAITING_APPROVAL",
             detail: en ? "approve before this step runs" : "cần duyệt trước khi chạy bước này",
-            stepId: s.id, generation: s.generation, locale: outputLocale(run),
+            stepId: s.id, generation: s.generation, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
           });
         });
       } else {
@@ -200,6 +201,8 @@ export interface StartRunInput {
   outputLocale?: "vi" | "en";
   /** Agent implementation. Omitted → claude. Resolved once; retries keep the stored value. */
   agentProvider?: AgentProvider | string;
+  /** Authenticated creator. A run started from a work item always uses that item's owner. */
+  ownerId?: number;
 }
 
 export interface ResolvedRunGraph {
@@ -213,6 +216,7 @@ export interface ResolvedRunGraph {
   changes: ProfileChange[];
   graph: WorkflowSpec;
   reportAdded: boolean;
+  ownerId: number;
 }
 
 /**
@@ -221,10 +225,19 @@ export interface ResolvedRunGraph {
  * startRun and by the preview API, so what the user previews is exactly what runs.
  */
 export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<ResolvedRunGraph> {
-  const dv = await definitions.version(input.definitionKey, input.version, c);
-  if (!dv) throw new EngineError(`workflow "${input.definitionKey}"${input.version ? ` v${input.version}` : ""} has no published version`, 404);
   const wi = input.workItemId ? await one(c, "SELECT * FROM work_items WHERE id = $1", [input.workItemId]) : null;
   if (input.workItemId && !wi) throw new EngineError(`work item ${input.workItemId} not found`, 404);
+  let ownerId = input.ownerId ?? null;
+  if (wi) {
+    if (wi.owner_id == null) throw new EngineError("work item has no owner", 404);
+    if (ownerId != null && Number(ownerId) !== Number(wi.owner_id)) throw new EngineError("run owner must match the work item", 403);
+    ownerId = Number(wi.owner_id);
+  } else if (ownerId == null && process.env.PLATFORM_TEST === "1") ownerId = await ensureTestOwner();
+  if (ownerId == null) throw new EngineError("a run needs an owner", 400);
+  const owner = await one<{ active: boolean }>(c, "SELECT active FROM users WHERE id = $1", [ownerId]);
+  if (!owner?.active) throw new EngineError("owner is not active", 403);
+  const dv = await definitions.version(input.definitionKey, input.version, c, ownerId);
+  if (!dv) throw new EngineError(`workflow "${input.definitionKey}"${input.version ? ` v${input.version}` : ""} has no published version`, 404);
   const inputs = input.inputs ?? {};
   const project = wi?.project || String(inputs.project ?? "");
   const allowed = await repositories.allowedFor(project, "read", c);
@@ -270,7 +283,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
     resolved = { spec: dv.spec, changes: [] };
   }
   const graph = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
-  return { dv, wi, inputs, allowed, selected, reusedRepositories, decision, changes: resolved.changes, graph, reportAdded: graph !== resolved.spec };
+  return { dv, wi, inputs, allowed, selected, reusedRepositories, decision, changes: resolved.changes, graph, reportAdded: graph !== resolved.spec, ownerId: ownerId! };
 }
 
 export async function previewRun(input: StartRunInput) {
@@ -300,7 +313,9 @@ export async function startRun(input: StartRunInput) {
     const r = await resolveRunGraph(c, input);
     const { dv, wi, inputs, allowed, selected, graph } = r;
     const { id } = (await one<{ id: number }>(c, "SELECT nextval('workflow_runs_id_seq')::bigint AS id"))!;
-    const branch = wi?.code ?? `wf/run-${id}`;
+    const raw = String(wi?.code ?? `run-${id}`).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 48);
+    const branch = `u${r.ownerId}-${raw}`.slice(0, 80);
+    if (wi && inputs.task_code == null) inputs.task_code = wi.code;
     // Existing-branch directives: explicit inputs.branches, else detected from the work item text ("làm tiếp từ branch X ở repo").
     const explicitBranches = normalizeBranchMap(inputs.branches, config.baseBranch);
     if (explicitBranches) inputs.branches = explicitBranches;
@@ -314,9 +329,9 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider],
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider, r.ownerId],
     );
     const order = topoOrder(graph.steps);
     for (const s of graph.steps) {
@@ -689,6 +704,15 @@ export interface BegunAttempt {
 export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAttempt | null> {
   return withTx(async (c) => {
     const run = await lockRun(c, job.run_id);
+    if (run.owner_id == null) {
+      await q(c, "UPDATE workflow_jobs SET status = 'canceled', last_error = 'unassigned owner', updated_at = now() WHERE id = $1", [job.id]);
+      return null;
+    }
+    const owner = await one<{ active: boolean }>(c, "SELECT active FROM users WHERE id = $1", [run.owner_id]);
+    if (!owner?.active) {
+      await q(c, "UPDATE workflow_jobs SET status = 'canceled', last_error = 'owner inactive', updated_at = now() WHERE id = $1", [job.id]);
+      return null;
+    }
     const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 FOR UPDATE", [job.id]);
     if (!j || j.status !== "running" || j.fencing_token !== job.fencing_token) return null;
     const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [job.step_id]))!;
@@ -773,7 +797,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
           detail: (result.output as any)?.diagnosis?.summary
             ? `${(result.output as any).diagnosis.summary} — ${en ? "choose how to proceed" : "chọn cách xử lý"}`
             : (en ? `${open} question(s) to answer` : `${open} câu hỏi cần trả lời`),
-          stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run),
+          stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
         });
       });
       break;
@@ -793,7 +817,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
         return notifyStepWaiting(en ? `✋ Run #${run.id} (${run.title}) – ${step.name} is waiting for approval` : `✋ Run #${run.id} (${run.title}) – bước ${step.name} chờ duyệt`, {
           runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_APPROVAL",
           detail: String((result.request as any)?.message ?? (step.type === "task_result_report" ? (en ? "review the task result report" : "xem lại báo cáo kết quả task") : (en ? "waiting for approval" : "chờ duyệt"))).slice(0, 300),
-          stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run),
+          stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
         });
       });
       break;
@@ -826,7 +850,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
         afterCommit(() =>
           notifyStepWaiting(en ? `⏸ Run #${run.id} (${run.title}) – ${step.name} is paused: ${decision.class}` : `⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`, {
             runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
-            detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run),
+            detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
           }),
         );
         break;
@@ -914,16 +938,17 @@ export async function getRun(runId: number, db: Db = pool) {
   return { ...run, steps };
 }
 
-export function listRuns(filter: { workItemId?: number; status?: string; limit?: number } = {}, db: Db = pool) {
+export function listRuns(filter: { workItemId?: number; status?: string; limit?: number; ownerId?: number; all?: boolean } = {}, db: Db = pool) {
+  const scope = filter.all ? "AND r.owner_id IS NOT NULL" : filter.ownerId ? "AND r.owner_id = " + Number(filter.ownerId) : "";
   return q(
     db,
-    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.agent_provider, r.created_at, r.updated_at, r.finished_at,
+    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.agent_provider, r.owner_id, r.created_at, r.updated_at, r.finished_at,
             v.version AS definition_version, w.code AS work_item_code,
             (SELECT count(*)::int FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'open') AS open_questions,
             (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps
        FROM workflow_runs r JOIN workflow_definition_versions v ON v.id = r.definition_version_id
        LEFT JOIN work_items w ON w.id = r.work_item_id
-      WHERE ($1::bigint IS NULL OR r.work_item_id = $1) AND ($2::text IS NULL OR r.status = $2)
+      WHERE ($1::bigint IS NULL OR r.work_item_id = $1) AND ($2::text IS NULL OR r.status = $2) ${scope}
       ORDER BY r.id DESC LIMIT $3`,
     [filter.workItemId ?? null, filter.status ?? null, filter.limit ?? 100],
   );
@@ -960,22 +985,24 @@ export async function stepDetail(runId: number, stepKey: string) {
   return { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs };
 }
 
-export function openQuestions(db: Db = pool) {
+export function openQuestions(db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {
+  const extra = !scope ? "" : scope.all ? "AND r.owner_id IS NOT NULL" : "AND r.owner_id = " + Number(scope.ownerId);
   return q(
     db,
     `SELECT q.*, s.key AS step_key, s.name AS step_name, s.type AS step_type, r.title AS run_title, r.status AS run_status, w.code AS work_item_code
        FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id JOIN workflow_runs r ON r.id = q.run_id
        LEFT JOIN work_items w ON w.id = r.work_item_id
-      WHERE q.status = 'open' ORDER BY q.created_at`,
+      WHERE q.status = 'open' ${extra} ORDER BY q.created_at`,
   );
 }
 
-export function answeredQuestions(limit = 100, db: Db = pool) {
+export function answeredQuestions(limit = 100, db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {
+  const extra = !scope ? "" : scope.all ? "AND r.owner_id IS NOT NULL" : "AND r.owner_id = " + Number(scope.ownerId);
   return q(
     db,
     `SELECT q.*, s.key AS step_key, s.name AS step_name, s.status AS step_status, r.title AS run_title
        FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id JOIN workflow_runs r ON r.id = q.run_id
-      WHERE q.status = 'answered' ORDER BY q.answered_at DESC LIMIT $1`,
+      WHERE q.status = 'answered' ${extra} ORDER BY q.answered_at DESC LIMIT $1`,
     [limit],
   );
 }

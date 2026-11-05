@@ -3,6 +3,7 @@ import { config } from "../config.ts";
 import { pool, q, one, json, withTx } from "../db/pool.ts";
 import { settings } from "../db.ts";
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
+import { ensureTestOwner } from "../auth/testOwner.ts";
 import { workItems } from "../workitems/service.ts";
 import { startRun } from "../workflow/engine.ts";
 import { escapeHtml as esc, linkFooter, RULE, sendTelegramHtml } from "../telegram.ts";
@@ -372,7 +373,7 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   const day = opts.day && /^\d{4}-\d{2}-\d{2}$/.test(opts.day) ? opts.day : latest ?? today;
   const groups = await q(
     pool,
-    `SELECT g.*, g.day::text AS day, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
+    `SELECT g.*, g.day::text AS day, w.owner_id AS work_item_owner_id, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
             r.id AS run_id, r.status AS run_status,
             (SELECT coalesce(json_agg(json_build_object('repo', p.repo, 'url', p.url, 'title', p.title) ORDER BY p.id), '[]')
                FROM pull_requests p WHERE p.work_item_id = g.work_item_id) AS pull_requests
@@ -416,15 +417,17 @@ export async function setIgnored(fp: string, ignored: boolean) {
  * Attach an existing work item (by code, e.g. HSK-123 / REQ-45, or numeric id) as the fix for a group, or detach with
  * an empty reference. Lets a bug that was already reported elsewhere be tracked from the production error page.
  */
-export async function linkWorkItem(fp: string, ref: string) {
+export async function linkWorkItem(fp: string, ref: string, ownerId?: number) {
   await getGroup(fp);
   const r = ref.trim();
   if (!r) {
     await q(pool, "UPDATE prod_error_groups SET work_item_id = NULL, updated_at = now() WHERE fingerprint = $1", [fp]);
     return { fingerprint: fp, work_item_id: null };
   }
-  const wi = (await workItems.byCode(r)) ?? (/^\d+$/.test(r) ? await workItems.get(Number(r)) : undefined);
-  if (!wi) throw new Error(`không có work item "${r}"`);
+  const owner = ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
+  if (!owner) throw new Error("owner is required");
+  const wi = (await workItems.byCode(r, owner)) ?? (/^\d+$/.test(r) ? await workItems.get(Number(r)) : undefined);
+  if (!wi || Number(wi.owner_id) !== owner) throw new Error(`không có work item "${r}"`);
   await q(pool, "UPDATE prod_error_groups SET work_item_id = $2, updated_at = now() WHERE fingerprint = $1", [fp, wi.id]);
   return { fingerprint: fp, work_item_id: wi.id, code: wi.code };
 }
@@ -483,16 +486,19 @@ export function describeGroup(g: GroupRow) {
 }
 
 /** Create a Bug Investigation work item for a group and start its workflow (stops for approval before any fix). */
-export async function investigate(fp: string) {
+export async function investigate(fp: string, ownerId?: number) {
   const g = await getGroup(fp);
-  if (g.work_item_id) {
+  if (g.work_item_id && ownerId) {
+    const wi = await workItems.get(g.work_item_id);
+    if (wi && Number(wi.owner_id) === ownerId) return { created: false, work_item_id: wi.id, code: wi.code };
+  } else if (g.work_item_id && !ownerId) {
     const wi = await workItems.get(g.work_item_id);
     if (wi) return { created: false, work_item_id: wi.id, code: wi.code };
   }
   const project = config.prodErrors.namespaces.find((n) => n.namespace === g.namespace)?.project ?? "";
   const title = `[Prod] ${g.service}: ${g.signature}`.slice(0, 160);
-  const item = await workItems.createManual({ title, description: describeGroup(g), project });
-  await q(pool, "UPDATE prod_error_groups SET work_item_id = $2, updated_at = now() WHERE fingerprint = $1", [fp, item.id]);
-  const run: any = await startRun({ definitionKey: "bug-investigation", workItemId: item.id });
+  const item = await workItems.createManual({ title, description: describeGroup(g), project, ownerId });
+  if (!g.work_item_id) await q(pool, "UPDATE prod_error_groups SET work_item_id = $2, updated_at = now() WHERE fingerprint = $1", [fp, item.id]);
+  const run: any = await startRun({ definitionKey: "bug-investigation", workItemId: item.id, ownerId: item.owner_id ?? ownerId });
   return { created: true, work_item_id: item.id, code: item.code, run_id: run?.id ?? null };
 }

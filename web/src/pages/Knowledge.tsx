@@ -130,6 +130,7 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
                       <span className="kn-item-body">
                         <span className="kn-item-title">
                           <b>{k.title}</b>
+                          <Badge s={k.owner_id ? "RUNNING" : "COMPLETED"}>{k.owner_id ? t("auth.my") : t("auth.shared")}</Badge>
                           {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
                           {!k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                         </span>

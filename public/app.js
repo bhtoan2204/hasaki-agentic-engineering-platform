@@ -18,6 +18,7 @@ function setUiLocale(next) {
   try { localStorage.setItem(UI_KEY, locale); } catch {}
   document.documentElement.lang = locale;
   paintChrome();
+  if (!ME) { $("#view").dataset.login = ""; void showLogin(); return; }
   if (typeof render === "function") Promise.resolve(render(true)).then(() => { paintModal(); paintRank(); paintPreview(); });
 }
 function paintChrome() {
@@ -49,11 +50,53 @@ const wiBadge = (s) => {
 const json = (v) => `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`;
 const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",").map((x) => x.trim()).filter(Boolean));
 
+let ME = null;
+let CSRF = "";
 async function api(path, body) {
-  const r = await fetch(path, body !== undefined ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (body !== undefined && CSRF) headers["X-CSRF-Token"] = CSRF;
+  const r = await fetch(path, { method: body !== undefined ? "POST" : "GET", headers, credentials: "include", body: body !== undefined ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && !String(path).startsWith("/api/auth/login")) {
+    ME = null;
+    CSRF = "";
+    for (const k of Object.keys(drafts)) delete drafts[k];
+    showLogin();
+  }
   if (!r.ok) throw new Error((j.error || r.status) + (j.details ? "\n" + j.details.join("\n") : ""));
   return j;
+}
+async function showLogin() {
+  const view = $("#view");
+  if (!view || view.dataset.login === "1") return;
+  view.dataset.login = "1";
+  view.innerHTML = `<form id="login-form" class="card" style="max-width:420px;margin:8vh auto;display:grid;gap:8px">
+    <h1>${esc(tr("auth.login"))}</h1>
+    <label>${esc(tr("auth.username"))}<input id="lu" autocomplete="username"></label>
+    <label>${esc(tr("auth.password"))}<input id="lp" type="password" autocomplete="current-password"></label>
+    <button class="primary" type="submit">${esc(tr("auth.submit"))}</button>
+  </form>`;
+  try {
+    const status = await api("/api/auth/status");
+    if (ME || view.dataset.login !== "1") return;
+    if (status.bootstrapRequired) {
+      view.innerHTML = `<div class="card"><p>${esc(tr("auth.bootstrap"))}</p><code>npm run admin:bootstrap -- --username &lt;username&gt; --claim-legacy</code><p>${esc(tr("auth.bootstrapReload"))}</p></div>`;
+      return;
+    }
+  } catch (e) { toast(e.message); }
+  $("#login-form").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api("/api/auth/login", { username: $("#lu").value, password: $("#lp").value });
+      ME = res.user;
+      CSRF = res.csrf;
+      view.dataset.login = "";
+      location.reload();
+    } catch (err) {
+      toast(err.message || tr("auth.invalid"));
+    }
+  };
 }
 function toast(msg, info = false) {
   const t = document.createElement("div");
@@ -93,6 +136,7 @@ let STATE = { route: "", parts: [] };
 // ---------------------------------------------------------------- router
 
 async function render(force = false) {
+  if (!ME) { showLogin(); return; }
   const hash = location.hash.slice(1) || "/work-items";
   // Legacy links (#TASK-CODE from notifications of the old platform) → the work item.
   if (!hash.startsWith("/")) {
@@ -105,6 +149,35 @@ async function render(force = false) {
     return;
   }
   const parts = hash.split("/").filter(Boolean);
+  if (parts[0] === "users") {
+    if (ME.role !== "admin") { $("#view").innerHTML = `<div class="card">${esc(tr("auth.users"))}</div>`; return; }
+    const users = await api("/api/users");
+    $("#view").innerHTML = `<div class="card"><h1>${esc(tr("auth.users"))}</h1>
+      <form id="new-user" style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="nu-name" placeholder="${esc(tr("auth.username"))}">
+        <input id="nu-pw" type="password" placeholder="${esc(tr("auth.password"))}">
+        <select id="nu-role"><option value="member">${esc(tr("auth.role.member"))}</option><option value="admin">${esc(tr("auth.role.admin"))}</option></select>
+        <button class="primary" type="submit">${esc(tr("auth.create"))}</button>
+      </form>
+      <ul>${users.map((u) => `<li><b>${esc(u.username)}</b> ${esc(u.role)} ${u.active ? "" : "(off)"}
+        <button type="button" data-reset="${u.id}">${esc(tr("auth.reset"))}</button>
+        <button type="button" data-active="${u.id}" data-on="${u.active}">${esc(u.active ? tr("auth.deactivate") : tr("auth.activate"))}</button></li>`).join("")}</ul>
+    </div>`;
+    $("#new-user").onsubmit = async (e) => {
+      e.preventDefault();
+      await api("/api/users", { username: $("#nu-name").value, password: $("#nu-pw").value, role: $("#nu-role").value });
+      await render(true);
+    };
+    $$("[data-reset]").forEach((b) => b.onclick = async () => {
+      const password = prompt(tr("auth.newPassword"));
+      if (password) { await api(`/api/users/${b.dataset.reset}/password`, { password }); toast(tr("auth.reset"), true); }
+    });
+    $$("[data-active]").forEach((b) => b.onclick = async () => {
+      await api(`/api/users/${b.dataset.active}/active`, { active: b.dataset.on !== "true" });
+      await render(true);
+    });
+    return;
+  }
   const active = document.activeElement;
   const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) && $("#view").contains(active);
   if (!force && typing && STATE.route === hash) return; // don't clobber typing on poll
@@ -898,6 +971,35 @@ window.A = {
   document.documentElement.lang = locale;
   DICT = await api("/api/ui-messages").catch(() => ({ vi: {}, en: {} }));
   paintChrome();
+  const bar = $("#lang");
+  if (bar && !$("#logout")) {
+    const out = document.createElement("button");
+    out.id = "logout";
+    out.type = "button";
+    out.textContent = tr("auth.logout");
+    out.onclick = async () => {
+      try { await api("/api/auth/logout", {}); } catch {}
+      ME = null; CSRF = "";
+      for (const k of Object.keys(drafts)) delete drafts[k];
+      location.reload();
+    };
+    const pw = document.createElement("button");
+    pw.type = "button";
+    pw.textContent = tr("auth.passwordChange");
+    pw.onclick = async () => {
+      const password = prompt(tr("auth.newPassword"));
+      if (!password) return;
+      await api("/api/auth/password", { password });
+      location.reload();
+    };
+    bar.before(pw, out);
+  }
+  try {
+    const me = await api("/api/auth/me");
+    ME = me.user;
+    CSRF = me.csrf;
+  } catch { ME = null; }
+  if (!ME) { showLogin(); return; }
   META = await api("/api/meta").catch(() => null);
   await render(true);
   setInterval(() => render(false), 3000);

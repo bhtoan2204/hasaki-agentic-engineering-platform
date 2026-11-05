@@ -1,16 +1,32 @@
 import { config } from "./config.ts";
+import { currentUserId } from "./auth/execution.ts";
+import { getUserSecret } from "./auth/secrets.ts";
 
 const API = "https://api.bitbucket.org/2.0";
 
-function auth() {
-  const { user, token } = config.bitbucket;
-  return "Basic " + Buffer.from(`${user}:${token}`).toString("base64");
+/**
+ * Personal credentials belong to the run owner. The process config is the explicit shared
+ * service account, never another user's saved token.
+ */
+async function resolveBitbucket() {
+  const userId = currentUserId();
+  if (userId) {
+    const user = await getUserSecret(userId, "bitbucket_user");
+    const token = await getUserSecret(userId, "bitbucket_token");
+    if (user && token) return { user, token, workspace: config.bitbucket.workspace, reviewers: config.bitbucket.reviewers };
+    if (user || token) throw new Error("This account's Bitbucket credentials are incomplete");
+  }
+  const shared = config.bitbucket;
+  if (shared.user && shared.token) return { user: shared.user, token: shared.token, workspace: shared.workspace, reviewers: shared.reviewers };
+  return null;
 }
 
 async function call(path: string, init: RequestInit = {}) {
+  const creds = await resolveBitbucket();
+  if (!creds) throw new Error("No Bitbucket credentials for this account");
   const res = await fetch(API + path, {
     ...init,
-    headers: { Authorization: auth(), "Content-Type": "application/json", Accept: "application/json" },
+    headers: { Authorization: "Basic " + Buffer.from(`${creds.user}:${creds.token}`).toString("base64"), "Content-Type": "application/json", Accept: "application/json" },
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Bitbucket ${res.status}: ${JSON.stringify(body?.error ?? body)}`);
@@ -22,9 +38,10 @@ async function call(path: string, init: RequestInit = {}) {
  * Without credentials we can't call the API, so return Bitbucket's "new PR" link for a human to click.
  */
 export async function openPullRequest(repo: string, branch: string, title: string, description: string, opts: { draft?: boolean; dest?: string } = {}) {
-  const ws = config.bitbucket.workspace;
+  const creds = await resolveBitbucket();
+  const ws = creds?.workspace || config.bitbucket.workspace;
   const dest = opts.dest ?? config.baseBranch;
-  if (!config.bitbucket.user || !config.bitbucket.token) {
+  if (!creds) {
     const url = `https://bitbucket.org/${ws}/${repo}/pull-requests/new?source=${encodeURIComponent(branch)}&dest=${encodeURIComponent(dest)}`;
     return { url, created: false, note: "No Bitbucket credentials configured: open this link to create the PR." };
   }
@@ -38,7 +55,7 @@ export async function openPullRequest(repo: string, branch: string, title: strin
     destination: { branch: { name: dest } },
     close_source_branch: false,
     ...(opts.draft ? { draft: true } : {}),
-    reviewers: config.bitbucket.reviewers.map((uuid) => ({ uuid })),
+    reviewers: creds.reviewers.map((uuid) => ({ uuid })),
   });
 
   if (existing.values?.length) {
@@ -52,9 +69,10 @@ export async function openPullRequest(repo: string, branch: string, title: strin
 
 /** Read-only: pull requests of a repository (optionally filtered by source branch / state). */
 export async function listPullRequests(repo: string, opts: { branch?: string; state?: string } = {}) {
-  if (!config.bitbucket.user || !config.bitbucket.token) throw new Error("Bitbucket credentials not configured (BITBUCKET_USER / BITBUCKET_TOKEN)");
+  const creds = await resolveBitbucket();
+  if (!creds) throw new Error("No Bitbucket credentials for this account");
   const filters = [`state="${(opts.state ?? "OPEN").toUpperCase()}"`, ...(opts.branch ? [`source.branch.name="${opts.branch.replace(/"/g, "")}"`] : [])];
-  const body = await call(`/repositories/${config.bitbucket.workspace}/${repo}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
+  const body = await call(`/repositories/${creds.workspace}/${repo}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
   return (body.values ?? []).map((p: any) => ({
     id: p.id,
     title: p.title,

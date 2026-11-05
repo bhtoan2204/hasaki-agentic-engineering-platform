@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { config } from "../config.ts";
+import { execution } from "../auth/execution.ts";
 import { pool, one, q } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
@@ -81,7 +82,8 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   let result: ExecResult;
   try {
     const ctx = makeContext({ ...begun, signal: ac.signal });
-    result = await getExecutor(begun.step.type).execute(ctx);
+    const ownerId = Number(begun.run.owner_id);
+    result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, () => getExecutor(begun.step.type).execute(ctx));
   } catch (e) {
     result = ac.signal.aborted
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }

@@ -1,5 +1,6 @@
 import { config } from "../config.ts";
 import { settings } from "../db.ts";
+import { deleteUserSecret, getUserSecret, putUserSecret } from "../auth/secrets.ts";
 
 /**
  * Telegram and Bitbucket credentials managed from the Integrations page instead of environment variables.
@@ -34,11 +35,7 @@ function apply() {
   const t = saved.telegram ?? fromEnv.telegram;
   config.telegram.botToken = t.botToken;
   config.telegram.chatId = t.chatId;
-  const b = saved.bitbucket;
-  config.bitbucket.user = b?.user ?? fromEnv.bitbucket.user;
-  config.bitbucket.token = b?.token ?? fromEnv.bitbucket.token;
-  config.bitbucket.workspace = b?.workspace || fromEnv.bitbucket.workspace;
-  config.bitbucket.reviewers = b?.reviewers ?? fromEnv.bitbucket.reviewers;
+  // Bitbucket in config stays the shared service account from startup. Personal tokens are not copied onto it.
 }
 
 export async function loadAccountSettings() {
@@ -124,16 +121,21 @@ async function bbGet(user: string, token: string, path: string) {
   return { status: res.status, ok: res.ok, body: j };
 }
 
-export function bitbucketStatus() {
-  const b = config.bitbucket;
+export async function bitbucketStatus(userId?: number) {
+  const personalUser = userId ? await getUserSecret(userId, "bitbucket_user") : null;
+  const personalToken = userId ? await getUserSecret(userId, "bitbucket_token") : null;
+  const personal = !!(personalUser && personalToken);
+  const user = personal ? personalUser : config.bitbucket.user;
+  const token = personal ? personalToken! : config.bitbucket.token;
   return {
-    configured: !!(b.user && b.token),
-    source: saved.bitbucket ? "platform" : fromEnv.bitbucket.user || fromEnv.bitbucket.token ? "env" : "none",
+    configured: !!(user && token),
+    source: personal ? "user" : user || token ? "shared" : "none",
+    personal,
     envAvailable: !!(fromEnv.bitbucket.user && fromEnv.bitbucket.token),
-    user: b.user || null,
-    token: mask(b.token),
-    workspace: b.workspace,
-    reviewers: b.reviewers,
+    user: user || null,
+    token: mask(token),
+    workspace: config.bitbucket.workspace,
+    reviewers: config.bitbucket.reviewers,
   };
 }
 
@@ -141,37 +143,46 @@ export function bitbucketStatus() {
  * Save; an empty token keeps the current one. Checked against the workspace (list one repository) before saving —
  * the token needs read and write access to pull requests and read access to repositories.
  */
-export async function setBitbucket(input: { user?: string; token?: string; workspace?: string; reviewers?: string[] | string }) {
+export async function setBitbucket(input: { user?: string; token?: string; workspace?: string; reviewers?: string[] | string }, userId?: number) {
   const user = String(input.user ?? "").trim();
-  const token = String(input.token ?? "").trim() || config.bitbucket.token;
+  const token = String(input.token ?? "").trim() || (userId ? (await getUserSecret(userId, "bitbucket_token")) ?? "" : "");
   const workspace = String(input.workspace ?? "").trim() || config.bitbucket.workspace;
   const reviewers = (Array.isArray(input.reviewers) ? input.reviewers : String(input.reviewers ?? "").split(/[\s,]+/)).map((r) => r.trim()).filter(Boolean);
   if (!user || !token) throw new Error("cần user (email Atlassian hoặc username Bitbucket) và token");
   const bad = reviewers.find((r) => !/^\{[0-9a-f-]{36}\}$/i.test(r));
   if (bad) throw new Error(`reviewer "${bad}" không phải UUID Bitbucket dạng {xxxxxxxx-xxxx-…}`);
+  if (!userId) throw new Error("Bitbucket credentials are saved per user");
   const repos = await bbGet(user, token, `/repositories/${encodeURIComponent(workspace)}?pagelen=1`);
   if (repos.status === 401) throw new Error("Bitbucket 401: user/token sai (API token Atlassian: user là email; app password: user là username)");
   if (!repos.ok) throw new Error(`Bitbucket ${repos.status} khi đọc workspace ${workspace}: ${repos.body?.error?.message ?? "không có quyền"}`);
   const me = await bbGet(user, token, "/user").catch(() => null);
-  saved.bitbucket = { user, token, workspace, reviewers };
-  await settings.set("bitbucket", JSON.stringify(saved.bitbucket));
-  apply();
-  return { ...bitbucketStatus(), account: me?.ok ? (me.body.display_name ?? me.body.username ?? null) : null };
+  await putUserSecret(userId, "bitbucket_user", user);
+  await putUserSecret(userId, "bitbucket_token", token);
+  return { ...(await bitbucketStatus(userId)), account: me?.ok ? (me.body.display_name ?? me.body.username ?? null) : null };
 }
 
-export async function clearBitbucket() {
-  saved.bitbucket = null;
-  await settings.set("bitbucket", "");
-  apply();
-  return bitbucketStatus();
+export async function clearBitbucket(userId?: number) {
+  if (userId) {
+    await deleteUserSecret(userId, "bitbucket_user");
+    await deleteUserSecret(userId, "bitbucket_token");
+  }
+  return bitbucketStatus(userId);
 }
 
 /** Copy what .env provides into the platform (after which the variables can be removed from .env). */
-export async function adoptEnv(which: "telegram" | "bitbucket") {
+export async function adoptEnv(which: "telegram" | "bitbucket", userId?: number) {
   if (which === "telegram") {
     if (!fromEnv.telegram.botToken || !fromEnv.telegram.chatId) throw new Error(".env không có TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID");
     return setTelegram(fromEnv.telegram);
   }
   if (!fromEnv.bitbucket.user || !fromEnv.bitbucket.token) throw new Error(".env không có BITBUCKET_USER và BITBUCKET_TOKEN");
-  return setBitbucket(fromEnv.bitbucket);
+  return setBitbucket(fromEnv.bitbucket, userId);
+}
+
+/** The chat that receives this user's private run notifications. The shared bot token is unchanged. */
+export async function setTelegramDestination(userId: number, chatId: string) {
+  const id = String(chatId ?? "").trim();
+  if (!/^-?\d+$/.test(id) && !/^@\w{4,}$/.test(id)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
+  await putUserSecret(userId, "telegram_chat", id);
+  return { chatId: id };
 }

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { config } from "../config.ts";
+import { currentUserId } from "../auth/execution.ts";
+import { getUserSecret } from "../auth/secrets.ts";
 import { pool, q } from "../db/pool.ts";
 import { listPullRequests } from "../bitbucket.ts";
 import { workApi } from "../hasakiAuth.ts";
@@ -108,7 +110,9 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => true,
     handler: async ({ task_id }) => {
-      const j: any = await workApi("GET", config.hasakiWork.detailPath.replace("{id}", String(task_id)));
+      const userId = currentUserId();
+      if (!userId) throw new Error("this run has no owner");
+      const j: any = await workApi(userId, "GET", config.hasakiWork.detailPath.replace("{id}", String(task_id)));
       const d = j?.data ?? j;
       return { id: d.id, code: d.code, name: d.name, project: d.project?.name, note: d.note, status: d.status, date_end: d.date_end, note_files: d.note_files, parent: d.parent && { code: d.parent.code, name: d.parent.name }, assignees: (d.assign_to_user ?? []).map((u: any) => u.staff_name), ai_hint: d.task_ai?.ai_suggest?.reasoning };
     },
@@ -121,7 +125,9 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => true,
     handler: async () => {
-      const j: any = await workApi("GET", config.hasakiWork.listPath, { ...config.hasakiWork.listQuery, to_date: new Date().toLocaleDateString("sv-SE") });
+      const userId = currentUserId();
+      if (!userId) throw new Error("this run has no owner");
+      const j: any = await workApi(userId, "GET", config.hasakiWork.listPath, { ...config.hasakiWork.listQuery, to_date: new Date().toLocaleDateString("sv-SE") });
       const rows: any[] = Array.isArray(j?.data) ? j.data : (j?.data?.rows ?? []);
       return rows.map((t) => ({ id: t.id, code: t.code, name: t.name, project: t.project?.name ?? t.project_name }));
     },
@@ -134,8 +140,16 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => (config.jira.baseUrl && config.jira.user && config.jira.token ? true : "Jira not configured (jira.baseUrl, JIRA_USER, JIRA_TOKEN)"),
     handler: async ({ key }) => {
+      const userId = currentUserId();
+      const personalUser = userId ? await getUserSecret(userId, "jira_user") : null;
+      const personalToken = userId ? await getUserSecret(userId, "jira_token") : null;
+      if ((personalUser && !personalToken) || (!personalUser && personalToken)) throw new Error("This account's Jira credentials are incomplete");
+      const user = personalUser || config.jira.user;
+      const token = personalToken || config.jira.token;
+      if (!userId) throw new Error("this run has no owner");
+      if (!config.jira.baseUrl || !user || !token) throw new Error("Jira is not configured for this account");
       const res = await fetch(`${config.jira.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${key}?fields=summary,description,project,status,issuetype,priority,labels`, {
-        headers: { Authorization: "Basic " + Buffer.from(`${config.jira.user}:${config.jira.token}`).toString("base64"), Accept: "application/json" },
+        headers: { Authorization: "Basic " + Buffer.from(`${user}:${token}`).toString("base64"), Accept: "application/json" },
       });
       if (!res.ok) throw new Error(`Jira ${res.status}`);
       return normalizeJiraIssue(await res.json());

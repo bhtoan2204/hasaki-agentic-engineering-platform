@@ -1,8 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+let csrf = "";
+let supportView = false;
+let authed = false;
+
+export function setCsrf(token: string) {
+  csrf = token;
+}
+export function setSupportView(on: boolean) {
+  supportView = on;
+}
+export function supportViewOn() {
+  return supportView;
+}
+export function setAuthed(on: boolean) {
+  authed = on;
+  if (!on) {
+    csrf = "";
+    supportView = false;
+    close();
+  }
+}
+
+function withScope(path: string) {
+  if (!supportView || path.startsWith("/api/auth") || path.startsWith("/api/ui-messages")) return path;
+  return path + (path.includes("?") ? "&" : "?") + "scope=all";
+}
+
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
-  const r = await fetch(path, body !== undefined ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const scoped = withScope(path);
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (body !== undefined && csrf) headers["X-CSRF-Token"] = csrf;
+  const r = await fetch(scoped, { method: body !== undefined ? "POST" : "GET", headers, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: "include" });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && !path.startsWith("/api/auth/login")) {
+    setAuthed(false);
+    window.dispatchEvent(new Event("auth:lost"));
+  }
   if (!r.ok) throw new Error((j.error || `HTTP ${r.status}`) + (j.details ? "\n" + j.details.join("\n") : ""));
   return j as T;
 }
@@ -66,9 +101,9 @@ function startPolling() {
   if (!poll) poll = setInterval(() => broadcast(), 3000);
 }
 function open() {
-  if (es || !subs.size || document.visibilityState === "hidden") return;
+  if (!authed || es || !subs.size || document.visibilityState === "hidden") return;
   try {
-    es = new EventSource("/api/stream");
+    es = new EventSource(supportView ? "/api/stream?scope=all" : "/api/stream");
     es.addEventListener("hello", () => (stopPolling(), setShared("sse")));
     es.addEventListener("change", (e) => broadcast(JSON.parse((e as MessageEvent).data)));
     es.onerror = () => startPolling(); // EventSource reconnects by itself; poll meanwhile

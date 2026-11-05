@@ -92,7 +92,7 @@ export function buildMemoryItems(x: {
 /** Extract memory from a COMPLETED run. Idempotent (existing keys are left untouched). */
 export async function extractRunMemory(runId: number) {
   const run = await one(pool, "SELECT r.*, w.code AS wi_code FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1", [runId]);
-  if (!run || run.status !== "COMPLETED") return [];
+  if (!run || run.status !== "COMPLETED" || run.owner_id == null) return [];
   const steps = await q(pool, "SELECT key, type, output FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);
   const coding = steps.filter((s: any) => s.type === "coding_agent" && s.output);
   const verdict = steps.find((s: any) => s.output?.independent === true)?.output?.verdict ?? null;
@@ -113,10 +113,11 @@ export async function extractRunMemory(runId: number) {
       verification: coding[0]?.output?.verification, independentVerdict: verdict, testsPassed, conclusions,
     });
     for (const it of items) {
-      if (await knowledge.get(it.key)) continue;
+      if (await knowledge.get(it.key, pool, run.owner_id ?? null)) continue;
       await knowledge.create({
         key: it.key, category: "task_memory", scope_type: "REPOSITORY", scope_ref: w.repo, title: it.title, content: it.content, enabled: it.enabled,
         applicability: { repos: [w.repo] }, metadata: { load: "on_demand", description: it.title, memory: it.meta }, created_by: "memory extraction", change_note: `from run #${runId}`,
+        ownerId: run.owner_id ?? null,
       });
       written.push(it.key);
     }
@@ -125,14 +126,14 @@ export async function extractRunMemory(runId: number) {
 }
 
 /** Promote (or reject) an agent-conclusion memory item. Only a human call path reaches this. */
-export async function reviewMemory(key: string, decision: "approve" | "reject", by: string) {
-  const item = await knowledge.get(key);
+export async function reviewMemory(key: string, decision: "approve" | "reject", by: string, ownerId: number | null = null) {
+  const item = await knowledge.get(key, pool, ownerId);
   if (!item || item.category !== "task_memory") throw new Error(`memory item "${key}" not found`);
   const meta = item.versions[0]?.metadata ?? {};
   if (!meta.memory) throw new Error(`"${key}" has no memory provenance`);
   if (!by.trim()) throw new Error("approval needs the reviewer's name");
   const memory = { ...meta.memory, trust: decision === "approve" ? "approved" : "rejected", approved_by: by, approved_at: new Date().toISOString() };
-  return knowledge.update(key, { enabled: decision === "approve", metadata: { ...meta, memory }, change_note: `${decision}d by ${by}`, created_by: by });
+  return knowledge.update(key, { enabled: decision === "approve", metadata: { ...meta, memory }, change_note: `${decision}d by ${by}`, created_by: by }, ownerId);
 }
 
 export type Freshness = "FRESH" | "STALE" | "UNKNOWN";

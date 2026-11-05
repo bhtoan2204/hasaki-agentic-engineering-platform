@@ -90,6 +90,8 @@ export interface RunRow {
   output_locale?: "vi" | "en" | null;
   /** claude (default, including rows from before the column) or cursor. Fixed for the life of the run. */
   agent_provider?: "claude" | "cursor";
+  /** Null only for unassigned legacy rows, which are not runnable. */
+  owner_id?: number | null;
 }
 
 export interface StepRow {

@@ -164,7 +164,7 @@ export function WorkflowsPage() {
 function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
   const { t } = useI18n();
   // The list endpoint carries no step data; read the definition to show its shape (read-only GET).
-  const { data: def } = useApi<any>(`/api/workflows/${w.key}`);
+  const { data: def } = useApi<any>(`/api/workflows/${encodeURIComponent(w.key)}${w.owner_id ? `?owner=${w.owner_id}` : ""}`);
   const spec = def ? (def.draft_spec ?? def.versions?.[0]?.spec) : null;
   const steps: any[] = spec?.steps ?? [];
   const types = [...new Set(steps.map((s) => s.type as string))];
@@ -175,6 +175,7 @@ function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
         <span className="wfs-card-icon"><Workflow size={19} strokeWidth={1.9} /></span>
         <div className="wfs-card-title">
           <b>{w.name}</b>
+          <span className="pill">{w.owner_id ? t("auth.my") : t("auth.shared")}</span>
           <span className="mono muted">{w.key}</span>
         </div>
         <button className="ghost xs" onClick={(e) => (e.stopPropagation(), onDuplicate())} aria-label={t("wfs.dupName", { name: w.name })}><Copy size={13} /> {t("wfs.duplicate")}</button>

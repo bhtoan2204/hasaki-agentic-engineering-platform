@@ -14,13 +14,56 @@ Architecture: [`docs/architecture/agent-architecture.md`](docs/architecture/agen
 
 ## Run
 
+One centrally hosted backend and worker, used from browsers. Sharing the PostgreSQL database does **not** make
+local repositories, worktrees or Claude/Cursor sessions portable: those live on the machine that runs the worker.
+`HOST=0.0.0.0` exposes that one installation. The default listen address stays loopback.
+
 ```bash
 docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
 npm install
 cp config.example.json config.json    # reposRoot, projects, bitbucket, ...
-export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # optional; without them the PR step stores a "create PR" link
+export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # optional shared service account, not a personal token
+# Keep the existing AUTH_SECRET in the git-ignored .env; never regenerate it on restart.
+# For a NEW install only, generate a cryptographically random secret and save it privately in .env.
+# Localhost HTTP works automatically. Set COOKIE_SECURE=1 behind HTTPS.
+npm run admin:bootstrap -- --username alice --claim-legacy
+# Migrations run before bootstrap, even on an empty database.
+# Enter the password twice at the hidden terminal prompt (10–200 characters).
+# ADMIN_PASSWORD is also supported; no default password.
 npm start                             # builds the UI, then http://localhost:4545 (migrations + seeds run on boot)
 ```
+
+The login screens at `/` and `/classic` show CLI setup instructions when no active admin exists.
+Bootstrap leaves an existing account’s password and role unchanged. Creation and legacy claiming commit together.
+
+There is no public signup and no bootstrap HTTP route. `--claim-legacy` assigns existing ownerless private rows
+(work items, runs, inbox, legacy tasks) to that admin in one transaction. Seeded skills, rules and workflow
+templates stay shared (`owner_id` NULL). Unassigned private rows stay invisible until they are claimed.
+
+## Access
+
+| Resource | Member | Admin |
+| --- | --- | --- |
+| Seeded skills, rules, conventions, workflow templates, repository registry, shared integration settings | Read and use | Modify, publish, archive |
+| Work items, inbox imports, private workflows, runs and everything under a run, private knowledge, task memory | Own rows only | Own rows by default. "View the whole team's resources" is explicit and audited |
+| Clone a shared template | Yes, into a private workflow | Yes |
+| Promote a private workflow or knowledge item to shared | No | Yes, after review |
+
+A run started from a work item keeps that work item's owner. A shared template does not make its runs shared.
+Applicability scopes such as GLOBAL and REPOSITORY are not visibility. Task memory extracted from a private run
+stays private; approving it does not publish it. Child rows (questions, attempts, artifacts, snapshots, events)
+are authorized through their run. Guessing another user's id returns 404.
+
+Personal Hasaki Work, Bitbucket and Jira credentials belong to the user and are encrypted with `AUTH_SECRET`.
+A missing personal account does not fall back to someone else's token. `BITBUCKET_*` / `JIRA_*` in the
+environment are the explicit shared service account. The server does not open a Hasaki login window; paste a
+token. Telegram's bot is admin-managed; private step notifications go only to that user's chat. Production-error
+monitors stay shared, and a member who investigates gets their own work item. The shared error list does not
+link to another member's task.
+
+Claude and Cursor credentials are the worker machine's admin-managed logins in this version. Personal agent
+accounts per user are not included. Agents share one OS user, so this is application isolation for a trusted
+team, not a sandbox: tools are checked against the run owner, but a process on the host can still read the disk.
 
 Development: `npm run dev` (backend with --watch) + `npm run dev:web` (Vite hot reload on http://localhost:5173,
 proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` uses a throwaway `platform_test` database.

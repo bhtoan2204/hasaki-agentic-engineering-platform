@@ -16,6 +16,8 @@ export interface KnowledgeInput {
   metadata?: Record<string, unknown>;
   change_note?: string;
   created_by?: string;
+  /** Null is shared team knowledge. A number is that user's private item. */
+  ownerId?: number | null;
 }
 
 function check(x: Partial<KnowledgeInput>) {
@@ -25,18 +27,26 @@ function check(x: Partial<KnowledgeInput>) {
 }
 
 export const knowledge = {
-  list(filter: { category?: string } = {}, db: Db = pool) {
+  list(filter: { category?: string; ownerId?: number; all?: boolean } = {}, db: Db = pool) {
+    const scoped = filter.ownerId != null || filter.all === true;
     return q(
       db,
       `SELECT i.*, v.content, v.applicability, v.metadata, v.created_at AS version_created_at
          FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
-        WHERE ($1::text IS NULL OR i.category = $1) ORDER BY i.category, i.scope_type, i.key`,
-      [filter.category ?? null],
+        WHERE ($1::text IS NULL OR i.category = $1)
+          AND (
+            ($2::bool AND i.owner_id IS NULL)
+            OR ($3::bool AND (i.owner_id IS NULL OR i.owner_id = $4))
+            OR ($5::bool)
+          )
+        ORDER BY i.category, i.scope_type, i.owner_id NULLS FIRST, i.key`,
+      [filter.category ?? null, !scoped, filter.ownerId != null && !filter.all, filter.ownerId ?? null, !!filter.all],
     );
   },
 
-  async get(key: string, db: Db = pool) {
-    const item = await one(db, "SELECT * FROM knowledge_items WHERE key = $1", [key]);
+  /** Shared item when ownerId is omitted. Pass the owner to read that user's private item. */
+  async get(key: string, db: Db = pool, ownerId: number | null = null) {
+    const item = await one(db, "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2", [key, ownerId]);
     if (!item) return undefined;
     const versions = await q(db, "SELECT * FROM knowledge_versions WHERE item_id = $1 ORDER BY version DESC", [item.id]);
     const audit = await q(db, "SELECT * FROM knowledge_audit WHERE item_id = $1 ORDER BY id DESC LIMIT 100", [item.id]);
@@ -49,9 +59,9 @@ export const knowledge = {
       const scopeRef = x.scope_type === "GLOBAL" ? "" : (x.scope_ref ?? "");
       const item = await one(
         c,
-        `INSERT INTO knowledge_items (key, category, scope_type, scope_ref, title, conflict_key, priority, enforced, enabled, current_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1) RETURNING *`,
-        [x.key, x.category, x.scope_type, scopeRef, x.title, x.conflict_key || null, x.priority ?? 0, x.enforced ?? false, x.enabled ?? true],
+        `INSERT INTO knowledge_items (key, category, scope_type, scope_ref, title, conflict_key, priority, enforced, enabled, current_version, owner_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10) RETURNING *`,
+        [x.key, x.category, x.scope_type, scopeRef, x.title, x.conflict_key || null, x.priority ?? 0, x.enforced ?? false, x.enabled ?? true, x.ownerId ?? null],
       );
       await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by) VALUES ($1, 1, $2, $3, $4, $5, $6)`, [
         item.id,
@@ -62,7 +72,7 @@ export const knowledge = {
         x.created_by ?? "",
       ]);
       await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'created', $2)", [item.id, json({ scope: x.scope_type, scope_ref: scopeRef })]);
-      return knowledge.get(x.key, c);
+      return knowledge.get(x.key, c, x.ownerId ?? null);
     });
   },
 
@@ -70,10 +80,10 @@ export const knowledge = {
    * Content/applicability/metadata changes create a new version (history is never rewritten);
    * item attribute changes (scope, enabled, priority...) are recorded in the audit log.
    */
-  async update(key: string, x: Partial<KnowledgeInput>) {
+  async update(key: string, x: Partial<KnowledgeInput>, ownerId: number | null = null) {
     check(x);
     return withTx(async (c) => {
-      const item = await one(c, "SELECT * FROM knowledge_items WHERE key = $1 FOR UPDATE", [key]);
+      const item = await one(c, "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE", [key, ownerId]);
       if (!item) throw new Error(`knowledge item "${key}" not found`);
       const cur = await one(c, "SELECT * FROM knowledge_versions WHERE item_id = $1 AND version = $2", [item.id, item.current_version]);
       const content = x.content ?? cur.content;
@@ -106,18 +116,22 @@ export const knowledge = {
           json(Object.fromEntries(attrs.map((k) => [k, { from: item[k], to: x[k] }]))),
         ]);
       }
-      return knowledge.get(key, c);
+      return knowledge.get(key, c, ownerId);
     });
   },
 
-  /** Enabled items at their current version, as resolution candidates. */
-  candidates(db: Db = pool) {
+  /**
+   * Enabled items the run may see: shared knowledge plus that owner's private items.
+   * Applicability scope (GLOBAL, REPOSITORY, …) is not visibility.
+   */
+  candidates(db: Db = pool, ownerId?: number | null) {
     return q<KnowledgeCandidate>(
       db,
       `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced,
               v.version, v.content, v.applicability, v.metadata
          FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
-        WHERE i.enabled`,
+        WHERE i.enabled AND (i.owner_id IS NULL OR ($1::bigint IS NOT NULL AND i.owner_id = $1))`,
+      [ownerId ?? null],
     );
   },
 };
