@@ -20,6 +20,8 @@ import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import { WF_TYPE_ICON, WF_TYPE_TONE } from "./Workflows.tsx";
+import { useI18n } from "../i18n/index.tsx";
+import type { UiLocale } from "../i18n/messages.ts";
 import "./WorkflowEditor.css";
 
 type Step = {
@@ -738,12 +740,14 @@ function StepForm({ step, spec, knowledge, updateStep, renameStep, removeStep, o
 }
 
 function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
+  const { t, locale } = useI18n();
   const { data: repos } = useApi<any[]>("/api/repositories");
   const { data: items } = useApi<any[]>("/api/work-items");
   const [sel, setSel] = useState<string[]>([]);
   const [wi, setWi] = useState("");
   const [inputs, setInputs] = useState("{}");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
+  const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
   const start = async (mode: "start" | "step" | "pending") => {
     let parsed;
     try {
@@ -751,7 +755,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
     } catch {
       return toast("Inputs không phải JSON hợp lệ");
     }
-    const r = await act(() => api<any>("/api/runs", { workflow: wfKey, work_item_id: wi ? Number(wi) : null, repositories: sel, inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) }, start: mode === "start", profile }));
+    const r = await act(() => api<any>("/api/runs", { workflow: wfKey, work_item_id: wi ? Number(wi) : null, repositories: sel, inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) }, start: mode === "start", profile, output_locale: outputLocale }));
     if (!r) return;
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
@@ -790,6 +794,12 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
             )}
           </div>
           <Field label="Inputs (JSON)" hint='vd {"project":"OMS","focus":"refund","branch":"TASK-1","risk":"low"}'><textarea className="code" rows={3} value={inputs} onChange={(e) => setInputs(e.target.value)} /></Field>
+          <Field label={t("run.outputLanguage")} hint={t("run.outputHint")}>
+            <select value={outputLocale} onChange={(e) => setOutputLocale(e.target.value as UiLocale)}>
+              <option value="vi">{t("lang.vi")}</option>
+              <option value="en">{t("lang.en")}</option>
+            </select>
+          </Field>
         </Section>
         <Section icon={Workflow} title="Profile & preview">
           <ProfilePreview workflow={wfKey} workItemId={wi ? Number(wi) : null} repositories={sel} inputs={(() => { try { return JSON.parse(inputs || "{}"); } catch { return {}; } })()} value={profile} onChange={setProfile} />

@@ -1,4 +1,5 @@
 import { config } from "./config.ts";
+import type { OutputLocale } from "./agent/language.ts";
 
 /**
  * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without TELEGRAM_BOT_TOKEN and
@@ -12,6 +13,8 @@ export interface StepWaiting {
   status: "WAITING_INPUT" | "WAITING_APPROVAL";
   /** Why the step waits, in a few words (e.g. "2 câu hỏi cần trả lời"). */
   detail: string;
+  /** Run output locale. Omitted keeps the original Vietnamese template (legacy callers). */
+  locale?: OutputLocale;
 }
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
@@ -35,15 +38,16 @@ export function linkFooter(url: string, label: string) {
 
 export function buildStepMessage(w: StepWaiting) {
   const input = w.status === "WAITING_INPUT";
-  const footer = linkFooter(stepLink(w.runId, w.stepKey), input ? "Mở để trả lời" : "Mở để duyệt");
+  const en = w.locale === "en";
+  const footer = linkFooter(stepLink(w.runId, w.stepKey), input ? (en ? "Open to answer" : "Mở để trả lời") : (en ? "Open to approve" : "Mở để duyệt"));
   const text = [
-    input ? "❓ <b>CẦN BẠN TRẢ LỜI</b>" : "✋ <b>CẦN BẠN DUYỆT</b>",
+    input ? (en ? "❓ <b>NEEDS YOUR ANSWER</b>" : "❓ <b>CẦN BẠN TRẢ LỜI</b>") : (en ? "✋ <b>NEEDS YOUR APPROVAL</b>" : "✋ <b>CẦN BẠN DUYỆT</b>"),
     RULE,
     `📋 <b>${esc(w.runTitle)}</b>`,
     "",
-    `▸ Bước: <b>${esc(w.stepName)}</b> · <code>${esc(w.stepKey)}</code>`,
+    `▸ ${en ? "Step" : "Bước"}: <b>${esc(w.stepName)}</b> · <code>${esc(w.stepKey)}</code>`,
     `▸ Run: #${w.runId}`,
-    `▸ Lý do: <i>${esc(w.detail)}</i>`,
+    `▸ ${en ? "Reason" : "Lý do"}: <i>${esc(w.detail)}</i>`,
     ...(footer.text ? ["", footer.text] : []),
   ].join("\n");
   return { text, parse_mode: "HTML", disable_web_page_preview: true, ...(footer.reply_markup ? { reply_markup: footer.reply_markup } : {}) };

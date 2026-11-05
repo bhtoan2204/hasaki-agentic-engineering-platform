@@ -195,6 +195,7 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .tb-title { font-weight: 600; color: var(--ink-2); font-size: 13.5px; display: flex; align-items: center; gap: 8px; min-width: 0 }
 .tb-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .tb-right { margin-left: auto; display: flex; align-items: center; gap: 8px }
+.lang-switch { display: inline-flex; gap: 2px } .lang-switch .sm { min-width: 36px; padding-inline: 8px }
 .live-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: var(--r-pill); background: var(--surface); border: 1px solid var(--line); color: var(--muted) }
 .live-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted) } .live-pill.is-sse { color: var(--st-ok) } .live-pill.is-sse i { background: var(--st-ok); animation: livepulse 2s infinite; color: var(--st-ok) }
 .live-pill.is-polling { color: var(--st-wait) } .live-pill.is-polling i { background: var(--st-wait) }

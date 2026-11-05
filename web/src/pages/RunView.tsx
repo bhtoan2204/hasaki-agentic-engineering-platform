@@ -4,7 +4,8 @@ import {
   Activity, AlertTriangle, CalendarClock, ChevronRight, ClipboardList, FileDiff, FolderGit2, GitBranch, GitPullRequest, Hand, Hourglass,
   Info, ListTree, MessageCircleQuestion, MessageSquareText, Pause, Play, Send, Square, StepForward, Ticket, Timer, Workflow, Zap, CheckCircle2, XCircle, GitMerge, Ban, PenLine,
 } from "lucide-react";
-import { api, STATUS_COLORS, STATUS_LABELS, useApi, useLive } from "../api.ts";
+import { api, STATUS_COLORS, useApi, useLive } from "../api.ts";
+import { useI18n } from "../i18n/index.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
@@ -18,6 +19,7 @@ const byOrder = (a: string, b: string) => (STATUS_ORDER.indexOf(a) + 1 || 99) - 
 
 /** Live execution graph of one run + inspector. Route: #/runs/:id[/:stepKey | /~changes]. */
 export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
+  const { t, status } = useI18n();
   const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
   const [tick, setTick] = useState(0);
   const live = useLive(id, () => {
@@ -108,6 +110,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span className="rv-name">{run.title || run.definition_key}</span>
                 <Badge s={run.status} label />
                 <ProfileBadge profile={run.profile} title={(run.profile_decision?.reasons ?? []).join("\n")} />
+                <span className="pill" title={run.output_locale ? t("run.outputCurrent") : t("run.outputLegacyHint")}>
+                  {t("run.outputCurrent")}: {run.output_locale === "en" ? t("lang.en") : run.output_locale === "vi" ? t("lang.vi") : t("run.outputLegacy")}
+                </span>
               </h1>
               <div className="rv-meta">
                 <span title="Workflow"><Workflow size={13} /><a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a> <span className="muted">v{run.definition_version}</span></span>
@@ -141,10 +146,10 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           <div className="rv-summary">
             <span className="rv-total">{done}/{total} bước xong</span>
             <div className="progress rv-progress" role="img" aria-label={`${done}/${total} bước xong`}>
-              {countEntries.map(([s, n]) => <span key={s} style={{ width: `${(n / total) * 100}%`, background: STATUS_COLORS[s] ?? "var(--st-idle)" }} title={`${STATUS_LABELS[s] ?? s}: ${n}`} />)}
+              {countEntries.map(([s, n]) => <span key={s} style={{ width: `${(n / total) * 100}%`, background: STATUS_COLORS[s] ?? "var(--st-idle)" }} title={`${status(s)}: ${n}`} />)}
             </div>
             <div className="rv-counts">
-              {countEntries.map(([s, n]) => <Badge key={s} s={s}>{STATUS_LABELS[s] ?? s} · {n}</Badge>)}
+              {countEntries.map(([s, n]) => <Badge key={s} s={s}>{status(s)} · {n}</Badge>)}
             </div>
           </div>
         )}

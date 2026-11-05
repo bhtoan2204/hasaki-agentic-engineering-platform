@@ -1,4 +1,5 @@
 import { config } from "../config.ts";
+import { resolveOutputLocale } from "../agent/language.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { events as legacyEvents, inbox, prs as legacyPrs, questions as legacyQuestions, tasks as legacyTasks } from "../db.ts";
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
@@ -112,10 +113,10 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/work-items\/(\d+)\/runs$/,
     ({ p, body }) =>
-      startRun({ definitionKey: String(body.workflow ?? ""), version: body.version, workItemId: num(p[0]), inputs: body.inputs, repositories: body.repositories, title: body.title, start: body.start, profile: body.profile }),
+      startRun({ definitionKey: String(body.workflow ?? ""), version: body.version, workItemId: num(p[0]), inputs: body.inputs, repositories: body.repositories, title: body.title, start: body.start, profile: body.profile, outputLocale: localeOf(body) }),
   ],
   // "Analyze Work Item": a read-only workflow (analysis + repository recommendation), no code changes.
-  ["POST", /^\/api\/work-items\/(\d+)\/analyze$/, ({ p }) => startRun({ definitionKey: "work-item-analysis", workItemId: num(p[0]) })],
+  ["POST", /^\/api\/work-items\/(\d+)\/analyze$/, ({ p, body }) => startRun({ definitionKey: "work-item-analysis", workItemId: num(p[0]), outputLocale: localeOf(body) })],
 
   // ------------------------------------------------------------ workflow definitions
   ["GET", /^\/api\/workflows$/, () => definitions.list()],
@@ -155,6 +156,7 @@ export const routes: Route[] = [
         title: body.title,
         start: body.start,
         profile: body.profile,
+        outputLocale: localeOf(body),
       }),
   ],
   // What would run: profile decision, graph changes and the resolved DAG (nothing is created).
@@ -371,6 +373,14 @@ export const routes: Route[] = [
 
 function fail(msg: string): never {
   throw new HttpError(400, msg);
+}
+
+function localeOf(body: { output_locale?: unknown }) {
+  try {
+    return resolveOutputLocale(body?.output_locale);
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
 }
 
 export function errorStatus(e: unknown) {

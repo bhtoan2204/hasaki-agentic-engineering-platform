@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { config } from "../config.ts";
+import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
@@ -162,11 +163,14 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
         await setStepStatus(c, s, "SKIPPED", { output: { skipped: true, reason: `run_if ${s.run_if.step} not matched` }, finished_at: new Date() });
       } else if (s.requires_approval && !(s.approval?.granted && s.approval.generation === s.generation)) {
         await setStepStatus(c, s, "WAITING_APPROVAL", { approval: { gate: true, generation: s.generation, requested_at: new Date() } }, "approval gate");
-        afterCommit?.(() =>
-          notifyStepWaiting(`✋ Run #${run.id}: bước ${s.name} cần duyệt trước khi chạy`, {
-            runId: run.id, runTitle: run.title, stepKey: s.key, stepName: s.name, status: "WAITING_APPROVAL", detail: "cần duyệt trước khi chạy bước này", stepId: s.id, generation: s.generation,
-          }),
-        );
+        afterCommit?.(() => {
+          const en = outputLocale(run) === "en";
+          return notifyStepWaiting(en ? `✋ Run #${run.id}: ${s.name} needs approval before it runs` : `✋ Run #${run.id}: bước ${s.name} cần duyệt trước khi chạy`, {
+            runId: run.id, runTitle: run.title, stepKey: s.key, stepName: s.name, status: "WAITING_APPROVAL",
+            detail: en ? "approve before this step runs" : "cần duyệt trước khi chạy bước này",
+            stepId: s.id, generation: s.generation, locale: outputLocale(run),
+          });
+        });
       } else {
         await setStepStatus(c, s, "READY", { ready_at: new Date() });
       }
@@ -191,6 +195,8 @@ export interface StartRunInput {
   start?: boolean;
   /** Execution profile: AUTO (default, deterministic classification) or a manual override. */
   profile?: ProfileChoice;
+  /** Language of summaries, questions and reports. Omitted → vi. Invalid values are rejected. */
+  outputLocale?: "vi" | "en";
 }
 
 export interface ResolvedRunGraph {
@@ -279,6 +285,12 @@ export async function previewRun(input: StartRunInput) {
 }
 
 export async function startRun(input: StartRunInput) {
+  let output_locale: OutputLocale;
+  try {
+    output_locale = resolveOutputLocale(input.outputLocale);
+  } catch (e) {
+    throw new EngineError((e as Error).message, 400);
+  }
   return withTx(async (c, afterCommit) => {
     const r = await resolveRunGraph(c, input);
     const { dv, wi, inputs, allowed, selected, graph } = r;
@@ -297,9 +309,9 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12)`,
-      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision)],
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale],
     );
     const order = topoOrder(graph.steps);
     for (const s of graph.steps) {
@@ -749,13 +761,16 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       ]);
       await setStepStatus(c, step, "WAITING_INPUT", {}, `${open} question(s)`);
       await closeJob("done");
-      afterCommit(() =>
-        notifyStepWaiting(`❓ Run #${run.id} (${run.title}) – bước ${step.name} có ${open} câu hỏi cần trả lời`, {
+      afterCommit(() => {
+        const en = outputLocale(run) === "en";
+        return notifyStepWaiting(en ? `❓ Run #${run.id} (${run.title}) – ${step.name} has ${open} question(s) to answer` : `❓ Run #${run.id} (${run.title}) – bước ${step.name} có ${open} câu hỏi cần trả lời`, {
           runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
-          detail: (result.output as any)?.diagnosis?.summary ? `${(result.output as any).diagnosis.summary} — chọn cách xử lý` : `${open} câu hỏi cần trả lời`,
-          stepId: step.id, generation: step.generation, attemptId: attempt.id,
-        }),
-      );
+          detail: (result.output as any)?.diagnosis?.summary
+            ? `${(result.output as any).diagnosis.summary} — ${en ? "choose how to proceed" : "chọn cách xử lý"}`
+            : (en ? `${open} question(s) to answer` : `${open} câu hỏi cần trả lời`),
+          stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run),
+        });
+      });
       break;
     }
     case "waiting_approval": {
@@ -768,13 +783,14 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       ]);
       await setStepStatus(c, step, "WAITING_APPROVAL", { approval: { request: result.request, generation: step.generation, requested_at: now } });
       await closeJob("done");
-      afterCommit(() =>
-        notifyStepWaiting(`✋ Run #${run.id} (${run.title}) – bước ${step.name} chờ duyệt`, {
+      afterCommit(() => {
+        const en = outputLocale(run) === "en";
+        return notifyStepWaiting(en ? `✋ Run #${run.id} (${run.title}) – ${step.name} is waiting for approval` : `✋ Run #${run.id} (${run.title}) – bước ${step.name} chờ duyệt`, {
           runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_APPROVAL",
-          detail: String((result.request as any)?.message ?? (step.type === "task_result_report" ? "xem lại báo cáo kết quả task" : "chờ duyệt")).slice(0, 300),
-          stepId: step.id, generation: step.generation, attemptId: attempt.id,
-        }),
-      );
+          detail: String((result.request as any)?.message ?? (step.type === "task_result_report" ? (en ? "review the task result report" : "xem lại báo cáo kết quả task") : (en ? "waiting for approval" : "chờ duyệt"))).slice(0, 300),
+          stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run),
+        });
+      });
       break;
     }
     case "reexecute": {
@@ -789,16 +805,23 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       await closeAttempt("FAILED", null, { message: result.error, details: result.details ?? null, failure: decision });
       if (decision.action === "human") {
         // Pause instead of failing: the developer resolves the cause and answers; the step then runs again.
+        const en = outputLocale(run) === "en";
         await insertQuestions(c, step, attempt.id, [
-          { question: `Bước "${step.name}" cần bạn xử lý (${decision.class}): ${result.error.slice(0, 600)}`, context: decision.reason, options: ["Đã xử lý xong — chạy lại bước", "Dừng ở đây"] },
+          {
+            question: en
+              ? `Step "${step.name}" needs you (${decision.class}): ${result.error.slice(0, 600)}`
+              : `Bước "${step.name}" cần bạn xử lý (${decision.class}): ${result.error.slice(0, 600)}`,
+            context: decision.reason,
+            options: en ? ["Rerun this step", "Stop here"] : ["Đã xử lý xong — chạy lại bước", "Dừng ở đây"],
+          },
         ]);
         await q(c, "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)", [run.id, step.id, attempt.id, json({ failure: decision })]);
         await setStepStatus(c, step, "WAITING_INPUT", {}, `paused: ${decision.class}`);
         await closeJob("done", result.error);
         afterCommit(() =>
-          notifyStepWaiting(`⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`, {
+          notifyStepWaiting(en ? `⏸ Run #${run.id} (${run.title}) – ${step.name} is paused: ${decision.class}` : `⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`, {
             runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
-            detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id,
+            detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run),
           }),
         );
         break;
@@ -889,7 +912,7 @@ export async function getRun(runId: number, db: Db = pool) {
 export function listRuns(filter: { workItemId?: number; status?: string; limit?: number } = {}, db: Db = pool) {
   return q(
     db,
-    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.created_at, r.updated_at, r.finished_at,
+    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.created_at, r.updated_at, r.finished_at,
             v.version AS definition_version, w.code AS work_item_code,
             (SELECT count(*)::int FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'open') AS open_questions,
             (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps

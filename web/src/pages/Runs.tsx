@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Activity, CircleCheck, CircleHelp, CircleX, Clock, GitBranch, Hourglass, Play, PlayCircle, Workflow } from "lucide-react";
-import { useApi, useLive, STATUS_COLORS, STATUS_LABELS } from "../api.ts";
+import { useApi, useLive, STATUS_COLORS } from "../api.ts";
+import { useI18n } from "../i18n/index.tsx";
 import { ago, Badge, EmptyState, ErrorBox, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, StatCard, dur } from "../ui.tsx";
 import "./Runs.css";
 
@@ -8,6 +9,7 @@ const DONE_STEP = new Set(["COMPLETED", "SKIPPED"]);
 
 /** Segmented progress bar: one segment per step, coloured by its status (pending steps stay on the track). */
 function StepProgress({ steps }: { steps: Array<{ key: string; status: string }> | null }) {
+  const { status } = useI18n();
   const list = steps ?? [];
   if (!list.length) return <span className="muted small">—</span>;
   const done = list.filter((s) => DONE_STEP.has(s.status)).length;
@@ -15,7 +17,7 @@ function StepProgress({ steps }: { steps: Array<{ key: string; status: string }>
     <div className="runs-progress">
       <div className="runs-bar" role="img" aria-label={`${done}/${list.length} bước hoàn thành`}>
         {list.map((s) => (
-          <span key={s.key} title={`${s.key}: ${STATUS_LABELS[s.status] ?? s.status}`} style={{ background: s.status === "PENDING" ? undefined : STATUS_COLORS[s.status] }} />
+          <span key={s.key} title={`${s.key}: ${status(s.status)}`} style={{ background: s.status === "PENDING" ? undefined : STATUS_COLORS[s.status] }} />
         ))}
       </div>
       <span className="runs-progress-n">{done}/{list.length}</span>
@@ -60,6 +62,7 @@ export function RunsTable({ runs }: { runs: any[] }) {
 const STATUS_FILTERS = ["RUNNING", "WAITING", "PAUSED", "PENDING", "FAILED", "COMPLETED", "CANCELED"];
 
 export function RunsPage() {
+  const { t, status: statusName } = useI18n();
   const [status, setStatus] = useState("");
   const { data, error, loading, reload } = useApi<any[]>(`/api/runs${status ? `?status=${status}` : ""}`, [status]);
   // Stat cards always describe the unfiltered list; when a status filter is active fetch it separately.
@@ -121,7 +124,7 @@ export function RunsPage() {
             label="Lọc theo trạng thái"
             value={status}
             onChange={setStatus}
-            options={[["", "Tất cả"], ...STATUS_FILTERS.map((s) => [s, STATUS_LABELS[s] ?? s] as [string, string])]}
+            options={[["", t("common.all")], ...STATUS_FILTERS.map((s) => [s, statusName(s)] as [string, string])]}
           />
         </div>
         <SearchInput value={q} onChange={setQ} placeholder="Tìm run, branch, workflow…" width="min(300px, 100%)" />

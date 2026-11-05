@@ -7,12 +7,14 @@ import { api, useApi, useLive } from "../api.ts";
 import { act, ago, Badge, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Loading, Markdown, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, time } from "../ui.tsx";
 import { RunsTable } from "./Runs.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
+import { uiLocale, useI18n } from "../i18n/index.tsx";
+import type { UiLocale } from "../i18n/messages.ts";
 import "./WorkItems.css";
 
 /** Production error groups this work item fixes, with their latest counts (did the fix make them stop?). */
 function ProdErrorRefs({ rows }: { rows: any[] }) {
   if (!rows?.length) return null;
-  const hm = (t: string | null) => (t ? new Date(t).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", hour12: false }) : "–");
+  const hm = (t: string | null) => (t ? new Date(t).toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", hour12: false }) : "–");
   return (
     <section className="card wi-prod">
       <div className="card-head"><span className="wi-hicon"><Siren size={16} strokeWidth={2} /></span><h4>Lỗi production liên quan</h4><span className="muted small">từ trang Lỗi production</span></div>
@@ -311,12 +313,14 @@ export function WorkItemDetail({ id }: { id: number }) {
   const { data: w, error, loading, reload } = useApi<any>(`/api/work-items/${id}`);
   const { data: wfs } = useApi<any[]>("/api/workflows");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
+  const { t, locale } = useI18n();
   const [wf, setWf] = useState("feature-implementation");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
+  const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const start = async (mode: "start" | "step" | "pending") => {
-    const r = await act(() => api<any>(`/api/work-items/${id}/runs`, { workflow: wf, start: mode === "start", profile }));
+    const r = await act(() => api<any>(`/api/work-items/${id}/runs`, { workflow: wf, start: mode === "start", profile, output_locale: outputLocale }));
     if (!r) return;
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
@@ -379,8 +383,8 @@ export function WorkItemDetail({ id }: { id: number }) {
             <div className="wi-launch-head">
               <span className="wi-launch-icon"><Play size={18} strokeWidth={2.2} /></span>
               <div>
-                <h4>Chạy workflow</h4>
-                <div className="muted small">Chọn workflow và profile, rồi bắt đầu.</div>
+                <h4>{t("run.launch")}</h4>
+                <div className="muted small">{t("run.launchHint")}</div>
               </div>
             </div>
             <Field label="Workflow">
@@ -390,11 +394,17 @@ export function WorkItemDetail({ id }: { id: number }) {
             </Field>
             {selectedWf?.description && <div className="wi-wfdesc">{selectedWf.description}</div>}
             <ProfilePreview workflow={wf} workItemId={id} value={profile} onChange={setProfile} />
-            <button className="wi-start" onClick={() => start("start")}><Play size={16} strokeWidth={2.2} />Start</button>
+            <Field label={t("run.outputLanguage")} hint={t("run.outputHint")}>
+              <select value={outputLocale} onChange={(e) => setOutputLocale(e.target.value as UiLocale)}>
+                <option value="vi">{t("lang.vi")}</option>
+                <option value="en">{t("lang.en")}</option>
+              </select>
+            </Field>
+            <button className="wi-start" onClick={() => start("start")}><Play size={16} strokeWidth={2.2} />{t("run.start")}</button>
             <div className="wi-launch-alt">
-              <button className="ghost sm" onClick={() => start("step")} title="Run steps one at a time"><StepForward size={14} strokeWidth={2} />Step mode</button>
-              <button className="ghost sm" onClick={() => start("pending")}><Settings2 size={14} strokeWidth={2} />Tạo (cấu hình trước)</button>
-              <button className="ghost sm" onClick={async () => { const r = await act(() => api<any>(`/api/work-items/${id}/analyze`, {})); if (r) navigate(`/runs/${r.id}`); }}><ScanSearch size={14} strokeWidth={2} />Chỉ phân tích</button>
+              <button className="ghost sm" onClick={() => start("step")} title={t("run.step")}><StepForward size={14} strokeWidth={2} />{t("run.step")}</button>
+              <button className="ghost sm" onClick={() => start("pending")}><Settings2 size={14} strokeWidth={2} />{t("run.pending")}</button>
+              <button className="ghost sm" onClick={async () => { const r = await act(() => api<any>(`/api/work-items/${id}/analyze`, { output_locale: outputLocale })); if (r) navigate(`/runs/${r.id}`); }}><ScanSearch size={14} strokeWidth={2} />{t("run.analyze")}</button>
             </div>
           </section>
 

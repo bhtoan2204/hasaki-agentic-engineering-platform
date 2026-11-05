@@ -4,6 +4,7 @@ import { ancestors } from "../graph.ts";
 import { parseGoTest } from "./baseline.ts";
 import type { ExecutionContext } from "./registry.ts";
 import type { ExecResult } from "../types.ts";
+import { languagePolicy, outputLocale, type OutputLocale } from "../../agent/language.ts";
 
 /**
  * Human-in-the-loop handling of a failed test step (after automatic retries are exhausted):
@@ -129,6 +130,17 @@ export const OPTIONS = {
   stop: "Dừng",
 };
 
+const OPTIONS_EN = {
+  rerun: "Rerun tests",
+  fix: "Fix then retest",
+  accept: "Continue with baseline failures (I confirm the exception)",
+  stop: "Stop",
+};
+
+export function failureOptions(locale: OutputLocale = "vi") {
+  return locale === "en" ? OPTIONS_EN : OPTIONS;
+}
+
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
 
 /** Deterministic parse of the answer (buttons or clear free text). `unclear` → AI or a follow-up question. */
@@ -144,8 +156,8 @@ export function parseDecision(answer: string): { kind: DecisionKind; confirmed: 
 }
 
 export interface TestFailureAdvisor {
-  explain(d: Diagnosis): Promise<{ text: string; suggestion: string }>;
-  interpret(d: Diagnosis, history: Array<{ question: string; answer: string }>, answer: string): Promise<{ kind: DecisionKind; instructions?: string; question?: string; confirmed?: boolean }>;
+  explain(d: Diagnosis, locale?: OutputLocale): Promise<{ text: string; suggestion: string }>;
+  interpret(d: Diagnosis, history: Array<{ question: string; answer: string }>, answer: string, locale?: OutputLocale): Promise<{ kind: DecisionKind; instructions?: string; question?: string; confirmed?: boolean }>;
 }
 let advisor: TestFailureAdvisor | null = null;
 export function setTestFailureAdvisor(a: TestFailureAdvisor | null) {
@@ -167,10 +179,11 @@ const compact = (d: Diagnosis) =>
   JSON.stringify({ command: d.command, base: d.base_sha, failures: d.failures.map((f) => ({ repo: f.repo, package: f.package, test: f.test, build_error: f.build_error, category: f.category, reason: f.reason, log: f.log.slice(0, 1200) })) }, null, 1).slice(0, 40_000);
 
 export const claudeTestFailureAdvisor: TestFailureAdvisor = {
-  async explain(d) {
+  async explain(d, locale = "vi") {
     return askClaude(
       [
-        "Explain this test failure to a developer in Vietnamese, briefly (max 5 sentences): what failed, based on which evidence",
+        languagePolicy(locale),
+        "Explain this test failure to a developer briefly (max 5 sentences): what failed, based on which evidence",
         "(cite test names / log lines), and the suggested next action. Respect the given categories: never call a failure",
         "pre-existing unless its category is pre_existing. Reply JSON only: {\"text\": \"...\", \"suggestion\": \"...\"}.",
         "<untrusted_input source=\"test_output\">",
@@ -179,13 +192,14 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
       ].join("\n"),
     );
   },
-  async interpret(d, history, answer) {
+  async interpret(d, history, answer, locale = "vi") {
     return askClaude(
       [
+        languagePolicy(locale),
         "A developer answered how to proceed with a failed test step. Map the answer to ONE decision:",
         '"rerun" (run tests again), "fix" (send instructions to the coding step, then retest), "accept_baseline" (continue with',
         'failures that already fail on the base branch — only if the developer explicitly confirms), "stop", or "unclear".',
-        "If unclear or a needed detail is missing, return a short clarifying question in Vietnamese.",
+        "If unclear or a needed detail is missing, return a short clarifying question in the output language.",
         'Reply JSON only: {"kind": "...", "instructions": "for fix: what to change", "confirmed": true|false, "question": "if unclear"}',
         `Allowed to accept baseline: ${d.all_pre_existing}`,
         "History:",
@@ -199,18 +213,28 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
   },
 };
 
-export function buildQuestion(d: Diagnosis, prefix = "", replace = false): { question: string; context: string; options: string[] } {
-  const options = [OPTIONS.rerun, OPTIONS.fix, ...(d.all_pre_existing ? [OPTIONS.accept] : []), OPTIONS.stop];
-  const head = d.all_pre_existing
-    ? "Tất cả lỗi đều đã fail trên baseline. Chạy lại, sửa thêm, hay tiếp tục với ngoại lệ?"
-    : d.counts.new
-      ? "Có lỗi mới so với baseline. Chạy lại, sửa rồi test lại, hay dừng?"
-      : "Test fail nhưng chưa đủ bằng chứng để coi là lỗi có sẵn. Chạy lại, điều tra/sửa, hay dừng?";
+export function buildQuestion(d: Diagnosis, prefix = "", replace = false, locale: OutputLocale = "vi"): { question: string; context: string; options: string[] } {
+  const opt = failureOptions(locale);
+  const options = [opt.rerun, opt.fix, ...(d.all_pre_existing ? [opt.accept] : []), opt.stop];
+  const head = locale === "en"
+    ? d.all_pre_existing
+      ? "Every failure already fails on the baseline. Rerun, fix more, or continue with an exception?"
+      : d.counts.new
+        ? "There are new failures compared with the baseline. Rerun, fix and retest, or stop?"
+        : "Tests failed, but there is not enough evidence to treat them as pre-existing. Rerun, investigate, or stop?"
+    : d.all_pre_existing
+      ? "Tất cả lỗi đều đã fail trên baseline. Chạy lại, sửa thêm, hay tiếp tục với ngoại lệ?"
+      : d.counts.new
+        ? "Có lỗi mới so với baseline. Chạy lại, sửa rồi test lại, hay dừng?"
+        : "Test fail nhưng chưa đủ bằng chứng để coi là lỗi có sẵn. Chạy lại, điều tra/sửa, hay dừng?";
+  const unavailable = locale === "en"
+    ? "Continuing with baseline failures is not available: some failures are not proven to exist on the baseline."
+    : "“Tiếp tục với lỗi baseline” không khả dụng: còn lỗi chưa được chứng minh là có trên baseline.";
   const ctx = [
     d.summary,
-    d.explanation ? `AI: ${d.explanation.text}\nĐề xuất: ${d.explanation.suggestion}` : "",
+    d.explanation ? `AI: ${d.explanation.text}\n${locale === "en" ? "Suggestion" : "Đề xuất"}: ${d.explanation.suggestion}` : "",
     ...d.failures.slice(0, 8).map((f) => `• [${f.category}] ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""} — ${f.reason}`),
-    d.all_pre_existing ? "" : "“Tiếp tục với lỗi baseline” không khả dụng: còn lỗi chưa được chứng minh là có trên baseline.",
+    d.all_pre_existing ? "" : unavailable,
   ]
     .filter(Boolean)
     .join("\n");
@@ -219,9 +243,10 @@ export function buildQuestion(d: Diagnosis, prefix = "", replace = false): { que
 
 /** First failure of an attempt: diagnose, explain, ask. */
 export async function askAboutFailure(ctx: ExecutionContext, input: Parameters<typeof diagnose>[0], decision: unknown = null): Promise<ExecResult> {
+  const locale = outputLocale(ctx.run);
   const d = diagnose(input);
   try {
-    d.explanation = advisor ? { ...(await advisor.explain(d)), by: "claude" } : undefined;
+    d.explanation = advisor ? { ...(await advisor.explain(d, locale)), by: "claude" } : undefined;
   } catch (e) {
     await ctx.log("system", `test failure explanation unavailable: ${(e as Error).message}`);
   }
@@ -229,12 +254,14 @@ export async function askAboutFailure(ctx: ExecutionContext, input: Parameters<t
     d.explanation = {
       by: "rules",
       text: d.summary,
-      suggestion: d.counts.new ? "Xem log các lỗi mới, rồi chọn “Sửa rồi test lại” với chỉ dẫn cụ thể." : d.all_pre_existing ? "Các lỗi đều có trên baseline; có thể tiếp tục với ngoại lệ nếu bạn xác nhận." : "Kiểm tra môi trường (DB/network) rồi chạy lại.",
+      suggestion: locale === "en"
+        ? d.counts.new ? "Read the logs of the new failures, then choose “Fix then retest” with specific instructions." : d.all_pre_existing ? "Every failure exists on the baseline; you can continue with an exception if you confirm it." : "Check the environment (DB/network), then rerun."
+        : d.counts.new ? "Xem log các lỗi mới, rồi chọn “Sửa rồi test lại” với chỉ dẫn cụ thể." : d.all_pre_existing ? "Các lỗi đều có trên baseline; có thể tiếp tục với ngoại lệ nếu bạn xác nhận." : "Kiểm tra môi trường (DB/network) rồi chạy lại.",
     };
   await ctx.log("system", d.summary, { diagnosis: d.counts });
   return {
     kind: "waiting_input",
-    questions: [buildQuestion(d)],
+    questions: [buildQuestion(d, "", false, locale)],
     output: { test_status: "FAILED", passed: false, diagnosis: d, results: input.results, ...(decision ? { decision } : {}) },
     checkpoint: { test_failure: d },
   };
@@ -245,11 +272,12 @@ export async function handleDecision(ctx: ExecutionContext, d: Diagnosis, fromAt
   const mine = ctx.input.answers.filter((a) => a.attempt_id === fromAttempt);
   const answer = mine.at(-1)?.answer ?? "";
   const history = ctx.input.answers.map((a) => ({ question: a.question, answer: a.answer }));
+  const locale = outputLocale(ctx.run);
   let p: { kind: DecisionKind; confirmed: boolean; instructions: string; question?: string } = { ...parseDecision(answer), question: undefined };
-  if (answer === OPTIONS.accept) p.confirmed = true;
+  if (answer === failureOptions(locale).accept || answer === OPTIONS.accept) p.confirmed = true;
   if (p.kind === "unclear" && advisor) {
     try {
-      const ai = await advisor.interpret(d, history, answer);
+      const ai = await advisor.interpret(d, history, answer, locale);
       p = { kind: ai.kind, confirmed: !!ai.confirmed, instructions: ai.instructions ?? answer, question: ai.question };
     } catch (e) {
       await ctx.log("system", `answer interpretation unavailable: ${(e as Error).message}`);
@@ -258,7 +286,7 @@ export async function handleDecision(ctx: ExecutionContext, d: Diagnosis, fromAt
   const decision = { kind: p.kind, answer, instructions: p.instructions || null, confirmed: p.confirmed, from_attempt: fromAttempt, at: new Date().toISOString() };
   await ctx.log("system", `test failure decision: ${p.kind}${p.instructions ? ` — ${p.instructions.slice(0, 200)}` : ""}`, { decision });
   const reask = (prefix: string, replace = false) => ({
-    result: { kind: "waiting_input", questions: [buildQuestion(d, prefix, replace)], output: { test_status: "FAILED", passed: false, diagnosis: d, decision }, checkpoint: { test_failure: d } } as ExecResult,
+    result: { kind: "waiting_input", questions: [buildQuestion(d, prefix, replace, locale)], output: { test_status: "FAILED", passed: false, diagnosis: d, decision }, checkpoint: { test_failure: d } } as ExecResult,
     decision,
   });
   switch (p.kind) {

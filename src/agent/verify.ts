@@ -3,6 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { classify, parseGoTest, type Classification, type GoTestReport } from "../workflow/executors/baseline.ts";
+import { languageReminder, type OutputLocale } from "./language.ts";
 
 /**
  * Verification-and-repair loop for coding steps (harness layer around the Claude executor).
@@ -325,7 +326,7 @@ export async function verificationLoop<S>(opts: {
 const untrusted = (label: string, body: string) => `<untrusted_input source="${label}">\n${body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`;
 
 /** Repair instructions for the agent: actionable diagnostics, tool output marked untrusted, firm rules. */
-export function repairPrompt(r: VerificationRound, repairNo: number, cfg: VerifyConfig): string {
+export function repairPrompt(r: VerificationRound, repairNo: number, cfg: VerifyConfig, locale: OutputLocale = "vi"): string {
   const parts = [
     `## Verification failed — repair ${repairNo} of ${cfg.maxRepairs}`,
     "The platform ran the mandatory verification on your worktree(s). Your result is NOT accepted until it passes.",
@@ -342,6 +343,7 @@ export function repairPrompt(r: VerificationRound, repairNo: number, cfg: Verify
     "Rules: fix the cause in code (change a test only when the test itself is wrong, and say why in your result). Never delete, skip or weaken tests,",
     "never edit CI/verification scripts, and keep working only inside the worktree. Run the failing tests yourself to confirm, commit, then call",
     "mcp__platform__submit_result again with an updated summary. If the failure cannot be fixed within this task, explain why in submit_result.",
+    languageReminder(locale),
   );
   return parts.join("\n\n");
 }

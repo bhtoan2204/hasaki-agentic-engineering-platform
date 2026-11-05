@@ -86,6 +86,8 @@ export interface RunRow {
   finished_at: string | null;
   profile?: "FAST" | "STANDARD" | "DEEP";
   profile_decision?: unknown;
+  /** User-facing prose language for this run. NULL on rows created before the column existed. */
+  output_locale?: "vi" | "en" | null;
 }
 
 export interface StepRow {

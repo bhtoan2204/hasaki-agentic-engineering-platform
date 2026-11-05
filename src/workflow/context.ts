@@ -10,12 +10,13 @@ import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
 import { createHash } from "node:crypto";
 import { hashOf } from "./definitions.ts";
+import { outputLocale } from "../agent/language.ts";
 import { ancestors } from "./graph.ts";
 import type { RunRow, StepRow } from "./types.ts";
 
 /** Everything a step attempt receives. Persisted as the attempt's input snapshot. */
 export interface StepInput {
-  run: { id: number; title: string; inputs: Record<string, any>; branch: string; definition_key: string; selected_repositories: string[]; allowed_repositories: string[] };
+  run: { id: number; title: string; inputs: Record<string, any>; branch: string; definition_key: string; selected_repositories: string[]; allowed_repositories: string[]; output_locale?: "vi" | "en" | null };
   work_item: { id: number; code: string; title: string; description: string; project: string; source: string; payload: any } | null;
   /** Outputs of every ancestor step, keyed by step key, with the attempt that produced them. */
   upstream: Record<string, { status: string; attempt_id: number | null; output: any }>;
@@ -127,6 +128,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
       definition_key: run.definition_key,
       selected_repositories: run.selected_repositories,
       allowed_repositories: run.allowed_repositories,
+      output_locale: outputLocale(run),
     },
     work_item: wi ?? null,
     upstream,

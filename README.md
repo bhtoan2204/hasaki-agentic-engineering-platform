@@ -28,6 +28,16 @@ proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` u
 The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a free client
 (`database.poolMax` / `database.connectionTimeoutMillis` in config.json, or `DATABASE_POOL_MAX` / `DATABASE_CONNECTION_TIMEOUT_MS`).
 
+## Language
+
+The React UI supports Vietnamese (`vi`, default) and English (`en`). The selector in the top bar is stored in
+`localStorage` (`hasaki.uiLocale`) and does not change the page or form state. A new run stores `output_locale`
+on the run (`vi` or `en`). It defaults to the UI language and can be overridden in the start form. Omitted API
+values default to `vi`; any other value is rejected. Retries, resume, repair and verification read that column.
+Runs created before the column existed have `output_locale` NULL: the UI shows “not recorded” and does not
+rewrite saved text; new generation for those runs falls back to Vietnamese. The phased-out page at `/classic`
+is still the old Vietnamese UI. Historical translation of stored agent output is not in this version.
+
 ## UI (React + XYFlow, `web/`)
 
 | Screen | What you can do |

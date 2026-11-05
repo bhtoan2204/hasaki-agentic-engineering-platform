@@ -16,6 +16,8 @@ import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
 import { ProdErrorsPage } from "./pages/ProdErrors.tsx";
+import { useI18n } from "./i18n/index.tsx";
+import type { UiLocale } from "./i18n/messages.ts";
 
 function useHash() {
   const [hash, setHash] = useState(location.hash.slice(1) || "/overview");
@@ -46,28 +48,29 @@ function useTheme(): [Theme, (t: Theme) => void] {
 }
 
 /** Navigation: route key → label + icon. Routes are unchanged so deep links keep working. */
-const NAV: Array<{ group: string; items: Array<{ key: string; label: string; icon: LucideIcon }> }> = [
-  { group: "Workspace", items: [
-    { key: "overview", label: "Overview", icon: LayoutDashboard },
-    { key: "office", label: "Agent Office", icon: Building2 },
+const NAV: Array<{ group: string; items: Array<{ key: string; labelKey: string; icon: LucideIcon }> }> = [
+  { group: "workspace", items: [
+    { key: "overview", labelKey: "nav.overview", icon: LayoutDashboard },
+    { key: "office", labelKey: "nav.office", icon: Building2 },
   ] },
-  { group: "Engineering", items: [
-    { key: "work-items", label: "Work Items", icon: ClipboardList },
-    { key: "runs", label: "Workflow Runs", icon: PlayCircle },
-    { key: "workflows", label: "Workflow Studio", icon: Workflow },
-    { key: "questions", label: "Questions & Approvals", icon: Inbox },
-    { key: "prod-errors", label: "Lỗi production", icon: Siren },
+  { group: "engineering", items: [
+    { key: "work-items", labelKey: "nav.workItems", icon: ClipboardList },
+    { key: "runs", labelKey: "nav.runs", icon: PlayCircle },
+    { key: "workflows", labelKey: "nav.workflows", icon: Workflow },
+    { key: "questions", labelKey: "nav.questions", icon: Inbox },
+    { key: "prod-errors", labelKey: "nav.prodErrors", icon: Siren },
   ] },
-  { group: "Library", items: [
-    { key: "knowledge", label: "Knowledge", icon: BookOpen },
-    { key: "repositories", label: "Repositories", icon: FolderGit2 },
-    { key: "integrations", label: "Integrations", icon: PlugZap },
-    { key: "insights", label: "Insights", icon: LineChart },
+  { group: "library", items: [
+    { key: "knowledge", labelKey: "nav.knowledge", icon: BookOpen },
+    { key: "repositories", labelKey: "nav.repositories", icon: FolderGit2 },
+    { key: "integrations", labelKey: "nav.integrations", icon: PlugZap },
+    { key: "insights", labelKey: "nav.insights", icon: LineChart },
   ] },
 ];
 const LABEL = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.key, i])));
 
 export function App() {
+  const { t, locale, setLocale } = useI18n();
   const hash = useHash();
   const parts = hash.split("/").filter(Boolean);
   const [theme, setTheme] = useTheme();
@@ -137,19 +140,19 @@ export function App() {
 
   return (
     <div className={`app${navOpen ? " nav-open" : ""}`}>
-      <aside className="sidebar" aria-label="Điều hướng chính">
+      <aside className="sidebar" aria-label={t("nav.aria")}>
         <a className="sb-brand" href="#/overview" aria-label={`${BRAND.product} — Overview`}>
           <BrandLogo size={40} withName />
         </a>
         <nav className="sb-nav">
           {NAV.map((g) => (
             <div key={g.group}>
-              <div className="sb-group">{g.group}</div>
-              {g.items.map(({ key, label, icon: I }) => (
+              <div className="sb-group">{t(`nav.group.${g.group}`)}</div>
+              {g.items.map(({ key, labelKey, icon: I }) => (
                 <a key={key} href={`#/${key}`} className={`sb-link${section === key || (key === "overview" && !LABEL[section]) ? " on" : ""}`} aria-current={section === key ? "page" : undefined}>
                   <I size={18} strokeWidth={1.9} />
-                  <span>{label}</span>
-                  {key === "questions" && openQuestions > 0 && <span className="count" aria-label={`${openQuestions} câu hỏi đang chờ`}>{openQuestions}</span>}
+                  <span>{t(labelKey)}</span>
+                  {key === "questions" && openQuestions > 0 && <span className="count" aria-label={t("nav.questionsWaiting", { n: openQuestions })}>{openQuestions}</span>}
                 </a>
               ))}
             </div>
@@ -164,17 +167,22 @@ export function App() {
 
       <div className="main">
         <header className="topbar">
-          <button className="quiet icon menu-btn" onClick={() => setNavOpen(true)} aria-label="Mở menu"><Menu size={20} /></button>
-          <div className="tb-title"><CurrentIcon size={17} color="var(--brand)" /><span>{current.label}</span></div>
+          <button className="quiet icon menu-btn" onClick={() => setNavOpen(true)} aria-label={t("nav.menu")}><Menu size={20} /></button>
+          <div className="tb-title"><CurrentIcon size={17} color="var(--brand)" /><span>{t(current.labelKey)}</span></div>
           <div className="tb-right">
-            <span className={`live-pill is-${live}`} title="Cập nhật trực tiếp qua Server-Sent Events từ PostgreSQL LISTEN/NOTIFY">
-              <i /> <b>{live === "sse" ? "Live" : live === "polling" ? "Polling" : "Đang kết nối"}</b>
+            <span className={`live-pill is-${live}`} title={t("live.tip")}>
+              <i /> <b>{live === "sse" ? t("live.sse") : live === "polling" ? t("live.polling") : t("live.connecting")}</b>
             </span>
-            <a className="btn ghost icon inbox-btn" href="#/questions" aria-label={`Questions & Approvals: ${openQuestions} đang chờ`} data-tip="Cần bạn xử lý">
+            <div className="lang-switch" role="group" aria-label={t("lang.switch")}>
+              {(["vi", "en"] as UiLocale[]).map((code) => (
+                <button key={code} type="button" className={locale === code ? "sm" : "sm ghost"} aria-pressed={locale === code} onClick={() => setLocale(code)}>{code.toUpperCase()}</button>
+              ))}
+            </div>
+            <a className="btn ghost icon inbox-btn" href="#/questions" aria-label={t("inbox.label", { n: openQuestions })} data-tip={t("inbox.tip")}>
               <Inbox size={17} />
               {openQuestions > 0 && <span className="count">{openQuestions}</span>}
             </a>
-            <button className="ghost icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "Chuyển sang giao diện tối" : "Chuyển sang giao diện sáng"} data-tip={theme === "light" ? "Giao diện tối" : "Giao diện sáng"}>
+            <button className="ghost icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? t("theme.toDark") : t("theme.toLight")} data-tip={theme === "light" ? t("theme.dark") : t("theme.light")}>
               {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
             </button>
           </div>

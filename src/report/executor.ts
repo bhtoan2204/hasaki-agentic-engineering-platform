@@ -8,6 +8,7 @@ import { parseAiSuggest, type ReportSpec } from "./aiSuggest.ts";
 import { collectEvidence, type Evidence } from "./evidence.ts";
 import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./build.ts";
 import { testExceptionsOf } from "../workflow/executors/builtin.ts";
+import { languagePolicy, outputLocale } from "../agent/language.ts";
 
 /**
  * Task Result Report executor.
@@ -32,6 +33,7 @@ export const claudeReportReasoner: ReportReasoner = async (ctx, spec, evidence) 
     "screenshots, logs or test results. A code change does not prove a business outcome. A screenshot requirement needs an",
     "actual image item. Failed tests do not verify. Task attachments show the original problem, not the fix.",
     "For each requirement return status VERIFIED (evidence supports it), PARTIAL (some support, incomplete) or MISSING.",
+    languagePolicy(spec.language === "en" ? "en" : "vi"),
     `Write "summary" (3–5 sentences, what was actually done) and explanations in ${vi ? "Vietnamese" : "English"}.`,
     'Reply with JSON only: {"summary": "...", "requirements": [{"id": "S1.R1", "status": "...", "evidence_ids": ["E3"], "explanation": "..."}], "limitations": ["..."]}',
     "",
@@ -84,7 +86,9 @@ async function finalize(ctx: ExecutionContext): Promise<ExecResult> {
 
 export const taskResultReportExecutor: StepExecutor = {
   async execute(ctx) {
-    const spec = reportSpecFor(ctx);
+    const parsed = reportSpecFor(ctx);
+    // The task text may be in any language. Report prose follows the run's output locale, not that detection.
+    const spec = parsed ? { ...parsed, language: outputLocale(ctx.run) } : null;
     if (!spec) return { kind: "completed", output: { skipped: true, reason: "work item has no ai_suggest.report" } };
     if (ctx.input.approval?.granted && ctx.input.approval.generation === ctx.step.generation) return finalize(ctx);
 

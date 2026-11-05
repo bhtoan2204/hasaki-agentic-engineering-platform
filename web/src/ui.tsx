@@ -2,15 +2,16 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Search, X, type LucideIcon } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import { marked } from "marked";
-import { LIVE_STATUSES, STATUS_COLORS, STATUS_LABELS } from "./api.ts";
+import { LIVE_STATUSES, STATUS_COLORS } from "./api.ts";
 import { BrandLogo } from "./brand/BrandLogo.tsx";
+import { uiLocale, useI18n } from "./i18n/index.tsx";
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 // Agent output may contain raw HTML: render it as text, never as markup.
 marked.use({ renderer: { html: (t: any) => escapeHtml(t.text ?? t.raw ?? "") }, gfm: true, breaks: true });
 
 export const time = (t?: string | null) =>
-  t ? new Date(t).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit", day: "2-digit", month: "2-digit" }) : "";
+  t ? new Date(t).toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", day: "2-digit", month: "2-digit" }) : "";
 export const ago = (t?: string | null) => {
   if (!t) return "";
   const s = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 1000));
@@ -18,11 +19,14 @@ export const ago = (t?: string | null) => {
 };
 export const dur = (ms?: number | null) => (ms == null ? "" : ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`);
 
-/** Status badge (dot + label). `children` overrides the label; `label` shows the Vietnamese name instead of the code. */
+/** Status badge (dot + label). `children` overrides the label; `label` shows the translated name instead of the code. */
 export function Badge({ s, children, label }: { s: string; children?: ReactNode; label?: boolean }) {
+  const { status } = useI18n();
+  const name = status(s);
+  const known = name !== `status.${s}`;
   return (
-    <span className={`badge${LIVE_STATUSES.has(s) ? " is-live" : ""}`} style={{ color: STATUS_COLORS[s] ?? "var(--muted)" }} title={STATUS_LABELS[s] ? `${STATUS_LABELS[s]} (${s})` : s}>
-      {children ?? (label ? STATUS_LABELS[s] ?? s : s)}
+    <span className={`badge${LIVE_STATUSES.has(s) ? " is-live" : ""}`} style={{ color: STATUS_COLORS[s] ?? "var(--muted)" }} title={known ? `${name} (${s})` : s}>
+      {children ?? (label ? (known ? name : s) : s)}
     </span>
   );
 }
@@ -31,12 +35,13 @@ export function Markdown({ text }: { text: string }) {
   return <div className="md" dangerouslySetInnerHTML={{ __html: marked.parse(text ?? "", { async: false }) as string }} />;
 }
 
-export function Copy({ text, label = "Copy" }: { text: string; label?: string }) {
+export function Copy({ text, label }: { text: string; label?: string }) {
+  const { t } = useI18n();
   const [done, setDone] = useState(false);
   return (
     <button
       className="ghost xs"
-      title="Copy to clipboard"
+      title={t("common.copy")}
       onClick={async (e) => {
         e.stopPropagation();
         await navigator.clipboard.writeText(text).catch(() => {});
@@ -44,7 +49,7 @@ export function Copy({ text, label = "Copy" }: { text: string; label?: string })
         setTimeout(() => setDone(false), 1200);
       }}
     >
-      {done ? "✓ Copied" : label}
+      {done ? `✓ ${t("common.copied")}` : (label ?? t("common.copy"))}
     </button>
   );
 }
@@ -108,11 +113,12 @@ export function EmptyState({ icon: I, title, children, action }: { icon?: Lucide
     </div>
   );
 }
-export function Loading({ label = "Đang tải…" }: { label?: string }) {
+export function Loading({ label }: { label?: string }) {
+  const { t } = useI18n();
   return (
     <div className="loading-screen" role="status">
       <BrandLogo size={44} />
-      <span><span className="spinner" /> {label}</span>
+      <span><span className="spinner" /> {label ?? t("common.loading")}</span>
     </div>
   );
 }
@@ -167,17 +173,20 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
   );
 }
 
-export function SearchInput({ value, onChange, placeholder = "Tìm…", width = 260 }: { value: string; onChange: (v: string) => void; placeholder?: string; width?: number | string }) {
+export function SearchInput({ value, onChange, placeholder, width = 260 }: { value: string; onChange: (v: string) => void; placeholder?: string; width?: number | string }) {
+  const { t } = useI18n();
+  const text = placeholder ?? t("common.search");
   return (
     <label className="search" style={{ width }}>
       <Search size={15} />
-      <input type="search" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} aria-label={placeholder} />
+      <input type="search" value={value} placeholder={text} onChange={(e) => onChange(e.target.value)} aria-label={text} />
     </label>
   );
 }
 
 /** Side drawer with scrim; Escape closes. */
 export function Drawer({ title, onClose, children, width }: { title: ReactNode; onClose: () => void; children: ReactNode; width?: number }) {
+  const { t } = useI18n();
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
@@ -187,17 +196,18 @@ export function Drawer({ title, onClose, children, width }: { title: ReactNode; 
     <>
       <div className="scrim" onClick={onClose} />
       <aside className="drawer" role="dialog" aria-modal="true" style={width ? { width: `min(${width}px, 100vw)` } : undefined}>
-        <div className="drawer-head"><h4>{title}</h4><button className="quiet icon" onClick={onClose} aria-label="Đóng"><X size={18} /></button></div>
+        <div className="drawer-head"><h4>{title}</h4><button className="quiet icon" onClick={onClose} aria-label={t("common.close")}><X size={18} /></button></div>
         <div className="drawer-body">{children}</div>
       </aside>
     </>
   );
 }
 export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="errorbox">
-      <b>Lỗi:</b> <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
-      {onRetry && <button className="ghost xs" onClick={onRetry} style={{ marginLeft: 8 }}>Thử lại</button>}
+      <b>{t("common.error")}:</b> <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
+      {onRetry && <button className="ghost xs" onClick={onRetry} style={{ marginLeft: 8 }}>{t("common.retry")}</button>}
     </div>
   );
 }

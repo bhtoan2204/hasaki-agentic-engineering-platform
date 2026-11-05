@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { config } from "../config.ts";
+import { languagePolicy, outputLocale } from "./language.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { taskDir } from "../git.ts";
 import { prepareWorkspace, workspaceKey, workspacesOf } from "../git/provider.ts";
@@ -155,6 +156,7 @@ async function recordTranscript(ctx: ExecutionContext, msg: any, cwd: string) {
  */
 function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyContext, onSubmit: (o: Record<string, unknown>) => void, metrics: AgentMetrics) {
   const editable = ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories;
+  const prose = outputLocale(ctx.run) === "vi" ? "Vietnamese" : "English";
   const tools: SdkMcpToolDefinition<any>[] = [
     tool(
       "ask_user",
@@ -163,7 +165,7 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
         questions: z
           .array(
             z.object({
-              question: z.string().describe("the question, in Vietnamese"),
+              question: z.string().describe(`the question, in ${prose}`),
               context: z.string().optional().describe("what you found in the code that makes this unclear (file:line)"),
               options: z.array(z.string()).optional().describe("candidate answers; put your recommendation first"),
             }),
@@ -176,7 +178,7 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
         return text("Questions posted. Stop now and end your turn without further tool calls.");
       },
     ),
-    tool("post_update", "Post a short progress note (Vietnamese) to the platform timeline.", { message: z.string() }, async ({ message }) => {
+    tool("post_update", `Post a short progress note in ${prose} to the platform timeline.`, { message: z.string().describe(`progress note in ${prose}`) }, async ({ message }) => {
       await ctx.log("agent", message);
       await q(pool, "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'progress', $4)", [
         ctx.run.id,
@@ -338,7 +340,7 @@ export const claudeExecutor: StepExecutor = {
       ? Object.fromEntries(
         (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
           .filter((n) => SUBAGENTS[n])
-          .map((n) => [n, { ...SUBAGENTS[n], tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
+          .map((n) => [n, { ...SUBAGENTS[n], prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`, tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
       )
       : undefined;
     const routed = modelFor(ctx.step, ctx.run.profile);
@@ -355,7 +357,14 @@ export const claudeExecutor: StepExecutor = {
     let evidence: { heads: Record<string, string>; problems: string[]; text: string } | null = null;
     if (independent) {
       if (ctx.step.config.strict === true && !hasTestEvidence(ctx.input.upstream))
-        return enforceVerdict({ verdict: "BLOCKED", findings: [], summary: "", blocked_reason: "strict verification requires real test evidence from an upstream test step, and none ran" }, { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} });
+        return enforceVerdict({
+          verdict: "BLOCKED",
+          findings: [],
+          summary: "",
+          blocked_reason: outputLocale(ctx.run) === "vi"
+            ? "Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy."
+            : "Strict verification requires real test evidence from an upstream test step, and none ran.",
+        }, { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} });
       evidence = await collectEvidence(ws.map((w) => ({ repo: w.repo, path: w.path })), config.baseBranch);
       // A verdict must bind to exact commits: never verify uncommitted or unreadable state (the PR could not match it).
       if (evidence.problems.length)
@@ -463,7 +472,7 @@ export const claudeExecutor: StepExecutor = {
       if (resume && existsSync(cwd)) {
         await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
         try {
-          result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras), resume.sessionId);
+          result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras, outputLocale(ctx.run)), resume.sessionId);
         } catch (e) {
           if (ctx.signal.aborted) throw e;
           result = { isError: true, text: (e as Error).message, assistantTurns: 0 };
@@ -544,7 +553,7 @@ export const claudeExecutor: StepExecutor = {
         repair: async (failed, n) => {
           await ctx.log("system", `verification failed — repair ${n}/${vcfg.maxRepairs} in the same Claude session`, { verification: failed.round });
           const sid = (await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND resumable ORDER BY id DESC LIMIT 1", [ctx.attempt.id]))?.session_id;
-          const msg = repairPrompt(failed, n, vcfg);
+          const msg = repairPrompt(failed, n, vcfg, outputLocale(ctx.run));
           submitted = undefined;
           let r = sid
             ? await run(msg, sid).catch((e) => {
@@ -583,8 +592,10 @@ export const claudeExecutor: StepExecutor = {
 export async function rankRepositoriesWithClaude(ctx: ExecutionContext, ranked: RankedRepository[], repos: RepositoryRow[]): Promise<RankedRepository[]> {
   const meta = repos.map((r) => ({ name: r.name, description: r.description, services: r.services, tags: r.tags, projects: r.projects, dependencies: r.dependencies }));
   const prompt = [
+    languagePolicy(outputLocale(ctx.run)),
+    "",
     "Rank these repositories by how likely they must change for the engineering request. Use ONLY the listed repository names.",
-    'Reply with JSON only: [{"repo": "...", "score": 0-10, "reasons": ["why this repo is relevant"]}]',
+    'Reply with JSON only: [{"repo": "...", "score": 0-10, "reasons": ["why this repo is relevant"]}]. Each reason is natural language and follows the output language above.',
     "",
     "Repositories:",
     JSON.stringify(meta, null, 2),

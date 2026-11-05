@@ -3,7 +3,8 @@ import {
   Bot, CheckCircle2, Circle, CircleDashed, ClipboardList, Code2, GitBranch, GitMerge, GitPullRequest, Hand, Loader2, MessageCircleQuestion,
   PauseCircle, PenLine, Plug, RotateCcw, ShieldCheck, SkipForward, SquareTerminal, XCircle, Ban, Clock, Split, type LucideIcon,
 } from "lucide-react";
-import { STATUS_COLORS, STATUS_LABELS } from "./api.ts";
+import { STATUS_COLORS } from "./api.ts";
+import { useI18n } from "./i18n/index.tsx";
 // Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
 import "./pages/RunView.css";
 
@@ -114,6 +115,7 @@ export type StepNodeData = {
 };
 
 export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
+  const { t, status: statusName } = useI18n();
   const { step, status } = data;
   const color = data.invalid ? "var(--st-err)" : status ? STATUS_COLORS[status] ?? "var(--st-idle)" : "var(--line-strong)";
   const blocked = status === "WAITING_INPUT" || status === "WAITING_APPROVAL";
@@ -134,19 +136,19 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
           <div className="sub">{step.key} · {step.type}</div>
         </div>
         {status && (
-          <span className="gn-st" title={STATUS_LABELS[status] ? `${STATUS_LABELS[status]} (${status})` : status}>
+          <span className="gn-st" title={`${statusName(status)} (${status})`}>
             <StIcon size={16} strokeWidth={2.2} className={status === "RUNNING" ? "gn-spin" : undefined} />
           </span>
         )}
       </div>
       {(status || !!data.attempts || !!data.openQuestions || step.requires_approval || !!step.run_if || merged.length > 0) && (
         <div className="flags">
-          {status && <span className="gn-pill gn-pill-st">{STATUS_LABELS[status] ?? status}</span>}
-          {!!data.attempts && <span className="gn-pill" title={`${data.attempts} attempt`}><RotateCcw size={10} strokeWidth={2.4} />{data.attempts}</span>}
-          {!!data.openQuestions && <span className="gn-pill gn-pill-wait" title="Câu hỏi đang chờ"><MessageCircleQuestion size={10} strokeWidth={2.4} />{data.openQuestions}</span>}
-          {step.requires_approval && <span className="gn-pill" title="Cần duyệt trước khi chạy"><ShieldCheck size={10} strokeWidth={2.4} />duyệt</span>}
-          {!!step.run_if && <span className="gn-pill" title="Chạy có điều kiện"><GitBranch size={10} strokeWidth={2.4} />điều kiện</span>}
-          {merged.length > 0 && <span className="gn-pill" title="FAST profile: analysis steps folded into this session"><GitMerge size={10} strokeWidth={2.4} />{merged.join(" + ")}</span>}
+          {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
+          {!!data.attempts && <span className="gn-pill" title={t("graph.attempts", { n: data.attempts })}><RotateCcw size={10} strokeWidth={2.4} />{data.attempts}</span>}
+          {!!data.openQuestions && <span className="gn-pill gn-pill-wait" title={t("graph.questions")}><MessageCircleQuestion size={10} strokeWidth={2.4} />{data.openQuestions}</span>}
+          {step.requires_approval && <span className="gn-pill" title={t("graph.approval")}><ShieldCheck size={10} strokeWidth={2.4} /></span>}
+          {!!step.run_if && <span className="gn-pill" title={t("graph.condition")}><GitBranch size={10} strokeWidth={2.4} /></span>}
+          {merged.length > 0 && <span className="gn-pill" title={t("graph.merged")}><GitMerge size={10} strokeWidth={2.4} />{merged.join(" + ")}</span>}
         </div>
       )}
       <Handle type="source" position={Position.Bottom} />
