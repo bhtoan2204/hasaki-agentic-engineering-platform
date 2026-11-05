@@ -4,6 +4,9 @@ import { events as legacyEvents, inbox, prs as legacyPrs, questions as legacyQue
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
 import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
+import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd.ts";
+import { clearSplunkCookie, setSplunkCookie, splunkStatus } from "../integrations/splunk.ts";
+import { clearKafkaCookie, kafkaStatus, setKafkaCookie } from "../integrations/kafka.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { reviewMemory } from "../knowledge/memory.ts";
 import { summarizeEval } from "../eval/summary.ts";
@@ -265,6 +268,19 @@ export const routes: Route[] = [
   ["POST", /^\/api\/work\/refresh$/, async () => ({ count: (await fetchTaskList()).length, inbox: await inbox.list() })],
   ["GET", /^\/api\/work\/inbox$/, () => inbox.list()],
   ["POST", /^\/api\/work\/pick\/(\d+)$/, ({ p }) => pickTask(Number(p[0]))],
+
+  // ------------------------------------------------------------ Argo CD (QC logs): pasted token, read-only
+  ["GET", /^\/api\/integrations\/argocd$/, () => argoStatus()],
+  ["POST", /^\/api\/integrations\/argocd\/token$/, ({ body }) => setArgoToken(String(body.token ?? ""))],
+  ["POST", /^\/api\/integrations\/argocd\/logout$/, () => clearArgoToken()],
+  // Splunk (production SIEM): pasted session cookie, read-only searches
+  ["GET", /^\/api\/integrations\/splunk$/, ({ url }) => splunkStatus(url.searchParams.get("check") === "1")],
+  ["POST", /^\/api\/integrations\/splunk\/cookie$/, ({ body }) => setSplunkCookie(String(body.cookie ?? ""))],
+  ["POST", /^\/api\/integrations\/splunk\/logout$/, () => clearSplunkCookie()],
+  // Kafka UI (QC): pasted session cookie, GET-only client
+  ["GET", /^\/api\/integrations\/kafka$/, ({ url }) => kafkaStatus(url.searchParams.get("check") === "1")],
+  ["POST", /^\/api\/integrations\/kafka\/cookie$/, ({ body }) => setKafkaCookie(String(body.cookie ?? ""))],
+  ["POST", /^\/api\/integrations\/kafka\/logout$/, () => clearKafkaCookie()],
 
   // ------------------------------------------------------------ legacy /api/tasks (backwards compatible)
   [

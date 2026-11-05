@@ -4,6 +4,9 @@ import { pool, q } from "../db/pool.ts";
 import { listPullRequests } from "../bitbucket.ts";
 import { workApi } from "../hasakiAuth.ts";
 import { normalizeJiraIssue } from "../integrations/jira.ts";
+import { appPods, argoStatus, listApps, podLogs } from "../integrations/argocd.ts";
+import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
+import { consumerGroupDetail, consumerGroups, kafkaConnected, kafkaExpired, listTopics, readMessages } from "../integrations/kafka.ts";
 import { rankRepositories, repositories, tokens } from "../repos/service.ts";
 import { runChanges } from "../git/changes.ts";
 
@@ -136,6 +139,112 @@ export function registerBuiltinTools() {
       if (!res.ok) throw new Error(`Jira ${res.status}`);
       return normalizeJiraIssue(await res.json());
     },
+  });
+  const argoAvailable = () => {
+    const st = argoStatus();
+    return st.loggedIn ? true : st.expired ? "Argo CD token expired — ask the user (ask_user) to paste a new argocd.token on the platform's Integrations page" : "Argo CD not connected — the user pastes argocd.token on the platform's Integrations page";
+  };
+  registerIntegrationTool({
+    name: "argocd.list_apps",
+    summary: "QC (Argo CD): find applications/services deployed on QC by name, with health and sync status.",
+    description: "Read-only. Argo CD QC applications whose name/namespace/project contains every word of `query` (e.g. \"payment zalopay\"); empty query lists all (max 100). Use the returned `app` with argocd.app_pods / argocd.pod_logs.",
+    input: z.object({ query: z.string().optional() }),
+    readOnly: true,
+    available: argoAvailable,
+    handler: ({ query }) => listApps(query),
+  });
+  registerIntegrationTool({
+    name: "argocd.app_pods",
+    summary: "QC (Argo CD): pods and workloads of an application — status, restarts, images, crash/health messages.",
+    description: "Read-only. Resource tree of an Argo CD QC application reduced to workloads (Deployment, StatefulSet, CronJob…) and pods with status reason, ready containers, restart count, image tags and health message. Check restarts/CrashLoopBackOff before reading logs.",
+    input: z.object({ app: z.string().min(1), app_namespace: z.string().optional() }),
+    readOnly: true,
+    available: argoAvailable,
+    handler: ({ app, app_namespace }) => appPods(app, app_namespace),
+  });
+  registerIntegrationTool({
+    name: "argocd.pod_logs",
+    summary: "QC (Argo CD): read logs of a pod or a whole deployment on QC, filtered by text (order code, trace id, error).",
+    description:
+      "Read-only. Container logs from Argo CD QC for `pod` (from argocd.app_pods) or `workload` {kind, name} (all its pods). " +
+      "`filter` is a plain substring match done by Argo CD (use an order_code, transaction_code, request id or \"error\"). " +
+      "`since_minutes` limits the time window, `tail_lines` defaults to 300 (max 2000), `previous: true` reads the previous (crashed) container. " +
+      "Credential-looking values are masked. QC only — production logs are not available here.",
+    input: z.object({
+      app: z.string().min(1),
+      app_namespace: z.string().optional(),
+      namespace: z.string().optional(),
+      pod: z.string().optional(),
+      workload: z.object({ kind: z.string(), name: z.string(), group: z.string().optional() }).optional(),
+      container: z.string().optional(),
+      since_minutes: z.number().positive().max(7 * 24 * 60).optional(),
+      tail_lines: z.number().int().positive().max(2000).optional(),
+      filter: z.string().optional(),
+      previous: z.boolean().optional(),
+    }),
+    readOnly: true,
+    available: argoAvailable,
+    handler: (args) => podLogs(args),
+  });
+  const kafkaAvailable = () =>
+    kafkaConnected() ? true : kafkaExpired() ? "Kafka UI session expired — ask the user (ask_user) to paste a new Kafka UI cookie on the platform's Integrations page" : "Kafka UI not connected — the user pastes the Kafka UI cookie on the platform's Integrations page";
+  const cluster = z.string().optional();
+  registerIntegrationTool({
+    name: "kafka.list_topics",
+    summary: "QC Kafka: find topics by name (partitions, replication, message count).",
+    description: "Read-only (Kafka UI QC). Topics whose name contains `query` (max 100, internal topics hidden). `cluster` is only needed when Kafka UI has several clusters.",
+    input: z.object({ query: z.string().optional(), cluster }),
+    readOnly: true,
+    available: kafkaAvailable,
+    handler: ({ query, cluster }) => listTopics(query, cluster),
+  });
+  registerIntegrationTool({
+    name: "kafka.consumer_groups",
+    summary: "QC Kafka: consumer groups with state, members and lag — or one group's per-partition offsets/lag.",
+    description: "Read-only (Kafka UI QC). Without `group`: groups whose id contains `query`, with state, member count, topics and total lag. With `group`: per-partition current/end offset, lag and the consumer/host holding it — use it to see whether a consumer is stuck or behind.",
+    input: z.object({ query: z.string().optional(), group: z.string().optional(), cluster }),
+    readOnly: true,
+    available: kafkaAvailable,
+    handler: ({ query, group, cluster }) => (group ? consumerGroupDetail(group, cluster) : consumerGroups(query, cluster)),
+  });
+  registerIntegrationTool({
+    name: "kafka.read_messages",
+    summary: "QC Kafka: read/search messages of a topic (newest, or since N minutes), filtered by text in key/value.",
+    description:
+      "Read-only (Kafka UI QC). Messages of `topic`: the newest ones, or from `since_minutes` ago forward. `filter` is a substring searched in key and value " +
+      "(use an order_code, transaction_code or event id). `limit` defaults to 20 (max 200); values are decoded as strings, cut at 4000 chars, credentials masked. Never produces or changes anything.",
+    input: z.object({
+      topic: z.string().min(1),
+      filter: z.string().optional(),
+      since_minutes: z.number().positive().max(30 * 24 * 60).optional(),
+      partition: z.number().int().min(0).optional(),
+      limit: z.number().int().positive().max(200).optional(),
+      cluster,
+    }),
+    readOnly: true,
+    available: kafkaAvailable,
+    handler: (args) => readMessages(args),
+  });
+  registerIntegrationTool({
+    name: "splunk.search",
+    summary: "PRODUCTION logs (Splunk SIEM): run a read-only SPL search over a bounded time window; PII is masked.",
+    description:
+      "Read-only search of production logs in Splunk (siem.hasaki.work) with the developer's session. " +
+      "`query` is SPL: e.g. `index=<idx> \"HSK-T123\" | head 50` or `index=<idx> level=error | stats count by service`. " +
+      "Always name the index and narrow by a concrete identifier (order_code, transaction_code, request id) before broad searches. " +
+      "Commands that write or reach outside search (delete, collect, outputlookup, sendemail, rest, map, script…) are refused. " +
+      "`since_minutes` (default 60) and `until_minutes` set the window relative to now; `max_results` defaults to 100. " +
+      "E-mails, phone numbers, card numbers and credentials are masked in results. Production data: quote only what the investigation needs.",
+    input: z.object({
+      query: z.string().min(3),
+      since_minutes: z.number().positive().optional(),
+      until_minutes: z.number().min(0).optional(),
+      max_results: z.number().int().positive().optional(),
+    }),
+    readOnly: true,
+    available: () =>
+      splunkConnected() ? true : splunkExpired() ? "Splunk session expired — ask the user (ask_user) to paste a new Splunk cookie on the platform's Integrations page" : "Splunk not connected — the user pastes the Splunk Web cookie on the platform's Integrations page",
+    handler: (args) => splunkSearch(args),
   });
   registerIntegrationTool({
     name: "bitbucket.list_pull_requests",

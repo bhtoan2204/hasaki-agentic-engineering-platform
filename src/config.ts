@@ -85,6 +85,15 @@ export interface Config {
   };
   /** Optional one-way Telegram notifications (env TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID; never put the token in config.json). */
   telegram: { botToken: string; chatId: string; apiBase: string };
+  /** Argo CD (QC) for reading pod logs during bug investigation. The token is pasted in the UI (Integrations), never in config. */
+  argocd: { baseUrl: string };
+  /**
+   * Splunk (production SIEM). The session cookie is pasted in the UI (Integrations), never in config.
+   * allowedIndexes: when non-empty, every search must name only these indexes. maxMinutes / maxResults cap each search.
+   */
+  /** Kafka UI (kafbat, QC). Session cookie pasted in the UI. cluster: empty = the only online cluster. */
+  kafka: { baseUrl: string; cluster: string; maxMessages: number; timeoutSeconds: number };
+  splunk: { baseUrl: string; locale: string; allowedIndexes: string[]; maxMinutes: number; maxResults: number; timeoutSeconds: number };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
     baseUrl: string;
@@ -131,6 +140,9 @@ const defaults: Config = {
   organization: "hasaki",
   scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
+  argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
+  kafka: { baseUrl: "https://kafka-ui-qc-v2.hasaki.dev", cluster: "", maxMessages: 200, timeoutSeconds: 60 },
+  splunk: { baseUrl: "https://siem.hasaki.work", locale: "en-US", allowedIndexes: [], maxMinutes: 7 * 24 * 60, maxResults: 500, timeoutSeconds: 60 },
   telegram: { botToken: "", chatId: "", apiBase: "https://api.telegram.org" },
   agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
@@ -145,6 +157,9 @@ function load(): Config {
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
     jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
+    argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
+    splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
+    kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };
