@@ -1,3 +1,4 @@
+import { existingChromeOwner } from "../src/existingWorkChrome.ts";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,4 +54,23 @@ test("profile identity is stable and isolated by user and installation", () => {
   assert.notEqual(chromeProfilePath("/tmp/root", "install-a", 1), chromeProfilePath("/tmp/root", "install-a", 2));
   assert.notEqual(chromeProfilePath("/tmp/root", "install-a", 1), chromeProfilePath("/tmp/root", "install-b", 1));
   assert.throws(() => chromeProfilePath("/tmp/root", "install-a", -1));
+});
+
+test("personal Chrome is pinned to the configured authenticated actor", async () => {
+  const prior = { owner: process.env.HASAKI_WORK_EXISTING_CHROME_USER, mode: process.env.HASAKI_WORK_BROWSER_MODE, profile: process.env.HASAKI_WORK_CHROME_PROFILE, host: process.env.HOST };
+  try {
+    delete process.env.HASAKI_WORK_EXISTING_CHROME_USER;
+    assert.equal(existingChromeOwner("toan"), false);
+    process.env.HASAKI_WORK_EXISTING_CHROME_USER = "toan";
+    assert.equal(existingChromeOwner("toan"), true);
+    assert.equal(existingChromeOwner("other"), false);
+    assert.equal(existingChromeOwner(undefined), false);
+    process.env.HASAKI_WORK_BROWSER_MODE = "local";
+    process.env.HASAKI_WORK_CHROME_PROFILE = "existing";
+    process.env.HOST = "127.0.0.1";
+    await assert.rejects(openChrome(123, async () => {}, 1000, "other"), /chrome_existing_owner/);
+    assert.equal(connectionStatus(123).connectionState, "idle");
+  } finally {
+    for (const [k,v] of Object.entries({ HASAKI_WORK_EXISTING_CHROME_USER: prior.owner, HASAKI_WORK_BROWSER_MODE: prior.mode, HASAKI_WORK_CHROME_PROFILE: prior.profile, HOST: prior.host })) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
 });

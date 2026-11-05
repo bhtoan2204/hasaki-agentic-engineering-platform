@@ -76,7 +76,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
       {st?.expiresAt && <div className="muted small wi-hexp"><Clock size={12} strokeWidth={2} /> {t("wi.expires", { time: time(st.expiresAt) })}</div>}
       {st && (
         <div className="stack wi-hlogin">
-          <p className="muted small">{t(st.browserMode === "local" ? "chrome.local" : "chrome.hosted")}</p>
+          <p className="muted small">{t(st.browserMode === "local" ? (st.chromeProfile === "existing" ? "chrome.existing" : "chrome.local") : "chrome.hosted")}</p>
           {st.connectionState !== "idle" && <p role="status">{t(`chrome.${st.connectionState}`)}</p>}
           {st.connectionError && <p role="alert" className="err">{t(st.connectionError)}</p>}
           {st.browserMode === "local" && <div className="row tight">

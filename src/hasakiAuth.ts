@@ -1,5 +1,6 @@
 import { config } from "./config.ts";
 import { deleteUserSecret, getUserSecret, putUserSecret } from "./auth/secrets.ts";
+import { existingChromeOwner } from "./existingWorkChrome.ts";
 import { HttpError } from "./http/error.ts";
 import { cancelChrome, connectionStatus, localChromeEnabled, openChrome } from "./workChrome.ts";
 
@@ -62,9 +63,10 @@ export async function getToken(userId: number): Promise<string> {
   return token.value;
 }
 
-export async function openLoginWindow(userId: number) {
+export async function openLoginWindow(userId: number, username?: string) {
   if (!localChromeEnabled()) throw new HttpError(403, "chrome_hosted");
-  await openChrome(userId, (raw, valid) => setToken(raw, userId, valid));
+  if (process.env.HASAKI_WORK_CHROME_PROFILE === "existing" && !existingChromeOwner(username)) throw new HttpError(403, "chrome_existing_owner");
+  await openChrome(userId, (raw, valid) => setToken(raw, userId, valid), 300000, username);
   return authStatus(userId);
 }
 export async function closeLoginWindow(userId: number) { await cancelChrome(userId); }

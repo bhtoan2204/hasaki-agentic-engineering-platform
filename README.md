@@ -182,7 +182,7 @@ Set `HASAKI_WORK_BROWSER_MODE=local` in the git-ignored `.env`, then restart wit
 Keep `HOST=127.0.0.1` (or leave it unset). The default mode is hosted: only personal token paste is available.
 Never enable local mode on a shared deployment. Chrome opens on the backend machine.
 
-The Work Items panel offers **Connect with Chrome**. Complete sign-in/MFA yourself in the separate Chrome window.
+The Work Items panel offers **Connect with Chrome**. The platform opens Work and clicks its official Hasaki SSO button, so Work generates a fresh PKCE/state flow in the same profile. It never replays a copied identity-provider URL. Complete sign-in/MFA yourself in the separate Chrome window.
 A persistent dedicated profile is reused per installation and platform user under
 `dataDir/work-chrome/<installation-id>/<user>/profile` (Windows: `%LOCALAPPDATA%/HasakiWorkChrome/<installation-id>/<user>/profile`).
 Sign in once in this profile; subsequent connections retain its browser session. Personal Chrome profiles are never used or copied.
@@ -201,3 +201,22 @@ On WSL, a Windows PowerShell stdio bridge connects Windows Chrome loopback to a 
 Mirrored networking is not required. Chrome opens the login URL immediately. Both endpoints stay on 127.0.0.1;
 no DevTools port is exposed to the LAN. The bridge is closed with its connection session. If company policy blocks debugging or SSO rejects connected Chrome, use personal token paste.
 Chrome detection/DevTools connectivity does not prove that SSO accepts the browser.
+
+
+#### Use your existing personal Chrome profile (Windows + WSL, Chrome 144+)
+
+Set `HASAKI_WORK_BROWSER_MODE=local`, `HASAKI_WORK_CHROME_PROFILE=existing`, and
+`HASAKI_WORK_EXISTING_CHROME_USER=toan` in `.env`, then restart the worker.
+The username is checked against the authenticated server actor; client-supplied user IDs are ignored.
+Only this local account may attach to the personal browser. This mode is not for shared hosting.
+
+In your existing Chrome, enable Remote debugging at `chrome://inspect/#remote-debugging`.
+Keep exactly one `work.hasaki.vn` tab open in your intended Chrome profile. Click Connect in the platform,
+then select **Allow** when Chrome asks. This uses Chrome's 144+ consent feature, not the launch flags that
+are ignored for the default data directory. Debugging permission applies to the browser, and Chrome shows a control banner.
+The application reads only the chosen Work tab's API authorization header; it does not read cookies or copy profiles.
+Cancel, timeout and successful connection detach the relay without closing personal Chrome or its tabs.
+If you reject permission or debugging is disabled, the UI explains how to retry; no new profile is silently launched.
+The platform reloads the chosen Work tab to capture a fresh authenticated request and follows its official SSO flow if needed.
+To return to a dedicated profile, set `HASAKI_WORK_CHROME_PROFILE=dedicated`.
+Reference: https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session

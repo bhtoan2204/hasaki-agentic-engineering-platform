@@ -208,3 +208,20 @@ test("a resumed run keeps the owner stored on the row", async () => {
   assert.equal(result.body.error, "chrome_hosted");
   assert.equal((await member.call("/api/work/status")).body.browserMode, "hosted");
 });
+
+test("personal Chrome endpoint rejects another member even with a forged owner in the body", async () => {
+  const previous = { mode: process.env.HASAKI_WORK_BROWSER_MODE, profile: process.env.HASAKI_WORK_CHROME_PROFILE, owner: process.env.HASAKI_WORK_EXISTING_CHROME_USER, host: process.env.HOST };
+  try {
+    process.env.HASAKI_WORK_BROWSER_MODE = "local";
+    process.env.HASAKI_WORK_CHROME_PROFILE = "existing";
+    process.env.HASAKI_WORK_EXISTING_CHROME_USER = "toan";
+    process.env.HOST = "127.0.0.1";
+    const member = client();
+    await member.login("memberb", "member-b-password");
+    const result = await member.call("/api/work/login-window", { username: "toan", userId: 1 });
+    assert.equal(result.status, 403);
+    assert.equal(result.body.error, "chrome_existing_owner");
+  } finally {
+    for (const [k,v] of Object.entries({ HASAKI_WORK_BROWSER_MODE: previous.mode, HASAKI_WORK_CHROME_PROFILE: previous.profile, HASAKI_WORK_EXISTING_CHROME_USER: previous.owner, HOST: previous.host })) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+});

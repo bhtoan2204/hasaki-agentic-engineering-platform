@@ -2,12 +2,14 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
+import { attachExistingWindowsChrome, existingChromeOwner } from "./existingWorkChrome.ts";
+import { startWorkSso } from "./workSso.ts";
 import { windowsChromeRelay } from "./windowsChromeRelay.ts";
 import { config } from "./config.ts";
 
 export type ConnectionState = "idle" | "waiting" | "connected" | "cancelled" | "timeout" | "error";
-type Session = { state: ConnectionState; error?: string; browser?: Browser; stop?: () => void; timer?: NodeJS.Timeout; busy?: boolean; releaseProfile?: () => void; relay?: Awaited<ReturnType<typeof windowsChromeRelay>> };
+type Session = { external?: boolean; state: ConnectionState; error?: string; browser?: Browser; stop?: () => void; timer?: NodeJS.Timeout; busy?: boolean; releaseProfile?: () => void; relay?: Awaited<ReturnType<typeof windowsChromeRelay>> };
 const sessions = new Map<number, Session>();
 export const localChromeEnabled = () => process.env.HASAKI_WORK_BROWSER_MODE === "local" && (!process.env.HOST || ["localhost", "127.0.0.1", "::1"].includes(process.env.HOST));
 export function chromePath() {
@@ -33,26 +35,39 @@ export function chromeProfilePath(root: string, installation: string, userId: nu
 }
 export function connectionStatus(id: number) {
   const s = sessions.get(id);
-  return { browserMode: localChromeEnabled() ? "local" : "hosted", connectionState: s?.state ?? "idle", connectionError: s?.error ?? null, browserReady: !!s?.browser && s.state === "waiting", windowOpen: s?.state === "waiting" };
+  return { chromeProfile: process.env.HASAKI_WORK_CHROME_PROFILE === "existing" ? "existing" : "dedicated", browserMode: localChromeEnabled() ? "local" : "hosted", connectionState: s?.state ?? "idle", connectionError: s?.error ?? null, browserReady: !!s?.browser && s.state === "waiting", windowOpen: s?.state === "waiting" };
 }
 async function finish(s: Session, state: ConnectionState, error?: string) {
   s.state = state; s.error = error;
   clearTimeout(s.timer);
   const stop = s.stop; s.stop = undefined;
-  await Promise.race([s.browser?.close().catch(() => {}), new Promise((r) => setTimeout(r, 2000).unref())]);
+  if (s.external) { s.relay?.close(); s.relay = undefined; }
+  await Promise.race([s.external ? Promise.resolve() : s.browser?.close().catch(() => {}), new Promise((r) => setTimeout(r, 2000).unref())]);
   s.relay?.close();
   stop?.();
   s.releaseProfile?.(); s.releaseProfile = undefined;
 }
 export async function cancelChrome(id: number) { const s = sessions.get(id); if (s?.state === "waiting") await finish(s, "cancelled"); }
-export async function openChrome(id: number, accept: (token: string, valid: () => boolean) => Promise<void>, timeoutMs = 300000) {
+export async function openChrome(id: number, accept: (token: string, valid: () => boolean) => Promise<void>, timeoutMs = 300000, username?: string) {
   if (!localChromeEnabled()) throw new Error("chrome_hosted");
+  if (process.env.HASAKI_WORK_CHROME_PROFILE === "existing" && !existingChromeOwner(username)) throw new Error("chrome_existing_owner");
   if (sessions.get(id)?.state === "waiting") return;
   const s: Session = { state: "waiting" }; sessions.set(id, s);
   s.timer = setTimeout(() => { void finish(s, "timeout"); }, timeoutMs);
   void (async () => {
     try {
       const executable = chromePath();
+      let personalPage: Page | undefined;
+      if (process.env.HASAKI_WORK_CHROME_PROFILE === "existing") {
+        s.external = true;
+        s.browser = await attachExistingWindowsChrome(executable, () => s.state === "waiting", (relay) => { s.relay = relay; });
+        if (!s.browser || s.state !== "waiting") { s.relay?.close(); return; }
+        const tabs = s.browser.contexts().flatMap((context) => context.pages()).filter((page) => {
+          try { return new URL(page.url()).origin === "https://work.hasaki.vn"; } catch { return false; }
+        });
+        if (tabs.length !== 1) throw new Error("chrome_existing_tab");
+        personalPage = tabs[0];
+      } else {
       const installation = installationId();
       let profile = chromeProfilePath(join(config.dataDir, "work-chrome"), installation, id);
       let nativeProfile = profile;
@@ -95,11 +110,12 @@ export async function openChrome(id: number, accept: (token: string, valid: () =
           s.browser = await chromium.connectOverCDP(`ws://127.0.0.1:${s.relay?.port ?? port}${socket}`, { timeout: windows ? 5000 : 700 });
         } catch {}
       }
-      if (s.state !== "waiting") { await s.browser?.close().catch(() => {}); s.relay?.close(); s.stop?.(); return; }
-      if (!s.browser) throw new Error(windows ? "chrome_wsl_loopback" : "chrome_debugging");
+      }
+      if (s.state !== "waiting") { if (!s.external) await s.browser?.close().catch(() => {}); s.relay?.close(); s.stop?.(); return; }
+      if (!s.browser) throw new Error(executable.startsWith("/mnt/") ? "chrome_wsl_loopback" : "chrome_debugging");
       const context = s.browser.contexts()[0];
       const api = new URL(config.hasakiWork.apiUrl);
-      context.on("request", async (req) => {
+      (personalPage ?? context).on("request", async (req) => {
         const url = new URL(req.url());
         if (url.origin !== api.origin || !url.pathname.startsWith(api.pathname.replace(/\/$/, "") + "/") || s.state !== "waiting" || s.busy) return;
         const auth = (await req.allHeaders().catch(() => ({} as Record<string, string>)))["authorization"];
@@ -110,11 +126,11 @@ export async function openChrome(id: number, accept: (token: string, valid: () =
         finally { s.busy = false; }
       });
       s.browser.on("disconnected", () => { if (s.state === "waiting") void finish(s, "cancelled"); });
-      const page = context.pages()[0] ?? await context.newPage();
+      const page = personalPage ?? context.pages()[0] ?? await context.newPage();
       // Reopen Work after listeners attach so a remembered login also emits its API request.
-      await page.goto("https://work.hasaki.vn/auth/login", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await startWorkSso(page, () => s.state === "waiting");
     } catch (e) {
-      if (s.state === "waiting") await finish(s, "error", ["chrome_missing", "chrome_wsl_loopback", "chrome_debugging", "chrome_profile_busy", "chrome_profile"].includes((e as Error).message) ? (e as Error).message : "chrome_start");
+      if (s.state === "waiting") await finish(s, "error", ["chrome_missing", "chrome_wsl_loopback", "chrome_debugging", "chrome_profile_busy", "chrome_profile", "chrome_sso_start", "chrome_existing_permission", "chrome_existing_tab", "chrome_existing_platform"].includes((e as Error).message) ? (e as Error).message : "chrome_start");
     }
   })();
 }
