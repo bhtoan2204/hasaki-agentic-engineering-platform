@@ -1,0 +1,39 @@
+.ig-group { margin-bottom: var(--sp-6) }
+.ig-group-title { font-size: var(--fs-md); margin: 0 0 var(--sp-2) }
+.ig-list { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden }
+.ig-row + .ig-row { border-top: 1px solid var(--line) }
+
+.ig-head {
+  all: unset; box-sizing: border-box; width: 100%; cursor: pointer;
+  display: grid; grid-template-columns: 16px 28px minmax(120px, auto) 1fr auto; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+.ig-head:hover { background: var(--surface-2) }
+.ig-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px }
+.ig-chev { color: var(--muted); transition: transform .15s ease }
+.is-open .ig-chev { transform: rotate(90deg) }
+.ig-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); background: var(--brand-50); color: var(--brand) }
+.ig-title { font-weight: 600; display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap }
+.ig-env { font-weight: 500; font-size: var(--fs-xs); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 0 8px }
+.ig-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0 }
+
+.ig-pill { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; padding: 2px 10px; border-radius: var(--r-pill); white-space: nowrap }
+.ig-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor }
+.ig-ok { color: var(--st-ok); background: var(--st-ok-bg) }
+.ig-expired { color: var(--st-err); background: var(--st-err-bg) }
+.ig-off, .ig-loading { color: var(--st-idle); background: var(--st-idle-bg) }
+
+.ig-body { padding: 0 var(--sp-4) var(--sp-4) calc(var(--sp-4) + 16px + 28px + 2 * var(--sp-3)); display: flex; flex-direction: column; gap: var(--sp-3) }
+.ig-body p { margin: 0 }
+.ig-steps { margin: 0; padding-left: 18px; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px }
+.ig-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2) }
+.ig-grid { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)) }
+.ig-note { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--st-wait-bg); color: var(--ink-2) }
+.ig-chats { display: flex; flex-wrap: wrap; gap: var(--sp-2) }
+.ig-chats .is-sel { border-color: var(--brand); color: var(--brand) }
+
+@media (max-width: 720px) {
+  .ig-head { grid-template-columns: 16px 28px 1fr auto; }
+  .ig-summary { display: none }
+  .ig-body { padding-left: var(--sp-4) }
+}

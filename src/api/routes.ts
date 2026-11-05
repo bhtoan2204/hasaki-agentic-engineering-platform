@@ -7,6 +7,8 @@ import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
 import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd.ts";
 import { clearSplunkCookie, setSplunkCookie, splunkStatus } from "../integrations/splunk.ts";
 import { clearKafkaCookie, kafkaStatus, setKafkaCookie } from "../integrations/kafka.ts";
+import { clearVaultToken, setVaultToken, vaultStatus } from "../integrations/vault.ts";
+import { adoptEnv, bitbucketStatus, clearBitbucket, clearTelegram, setBitbucket, setTelegram, telegramChats, telegramStatus, testTelegram } from "../integrations/accounts.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { reviewMemory } from "../knowledge/memory.ts";
 import { summarizeEval } from "../eval/summary.ts";
@@ -277,6 +279,21 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/splunk$/, ({ url }) => splunkStatus(url.searchParams.get("check") === "1")],
   ["POST", /^\/api\/integrations\/splunk\/cookie$/, ({ body }) => setSplunkCookie(String(body.cookie ?? ""))],
   ["POST", /^\/api\/integrations\/splunk\/logout$/, () => clearSplunkCookie()],
+  // Telegram + Bitbucket credentials (saved in the platform instead of .env; secrets never returned)
+  ["GET", /^\/api\/integrations\/telegram$/, () => telegramStatus()],
+  ["POST", /^\/api\/integrations\/telegram$/, ({ body }) => setTelegram(body)],
+  ["POST", /^\/api\/integrations\/telegram\/chats$/, ({ body }) => telegramChats(body)],
+  ["POST", /^\/api\/integrations\/telegram\/test$/, () => testTelegram()],
+  ["POST", /^\/api\/integrations\/telegram\/clear$/, () => clearTelegram()],
+  ["POST", /^\/api\/integrations\/telegram\/adopt-env$/, () => adoptEnv("telegram")],
+  ["GET", /^\/api\/integrations\/bitbucket$/, () => bitbucketStatus()],
+  ["POST", /^\/api\/integrations\/bitbucket$/, ({ body }) => setBitbucket(body)],
+  ["POST", /^\/api\/integrations\/bitbucket\/clear$/, () => clearBitbucket()],
+  ["POST", /^\/api\/integrations\/bitbucket\/adopt-env$/, () => adoptEnv("bitbucket")],
+  // Vault (QC): pasted token; agents see key names and presence, never values
+  ["GET", /^\/api\/integrations\/vault$/, ({ url }) => vaultStatus(url.searchParams.get("check") === "1")],
+  ["POST", /^\/api\/integrations\/vault\/token$/, ({ body }) => setVaultToken(String(body.token ?? ""))],
+  ["POST", /^\/api\/integrations\/vault\/logout$/, () => clearVaultToken()],
   // Kafka UI (QC): pasted session cookie, GET-only client
   ["GET", /^\/api\/integrations\/kafka$/, ({ url }) => kafkaStatus(url.searchParams.get("check") === "1")],
   ["POST", /^\/api\/integrations\/kafka\/cookie$/, ({ body }) => setKafkaCookie(String(body.cookie ?? ""))],

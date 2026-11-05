@@ -92,6 +92,8 @@ export interface Config {
    * allowedIndexes: when non-empty, every search must name only these indexes. maxMinutes / maxResults cap each search.
    */
   /** Kafka UI (kafbat, QC). Session cookie pasted in the UI. cluster: empty = the only online cluster. */
+  /** Vault (QC). Token pasted in the UI; values are never returned to agents. */
+  vault: { baseUrl: string };
   kafka: { baseUrl: string; cluster: string; maxMessages: number; timeoutSeconds: number };
   splunk: { baseUrl: string; locale: string; allowedIndexes: string[]; maxMinutes: number; maxResults: number; timeoutSeconds: number };
   jira: {
@@ -141,6 +143,7 @@ const defaults: Config = {
   scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
+  vault: { baseUrl: "https://vault-qc-v2.hasaki.dev" },
   kafka: { baseUrl: "https://kafka-ui-qc-v2.hasaki.dev", cluster: "", maxMessages: 200, timeoutSeconds: 60 },
   splunk: { baseUrl: "https://siem.hasaki.work", locale: "en-US", allowedIndexes: [], maxMinutes: 7 * 24 * 60, maxResults: 500, timeoutSeconds: 60 },
   telegram: { botToken: "", chatId: "", apiBase: "https://api.telegram.org" },
@@ -160,6 +163,7 @@ function load(): Config {
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
+    vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };

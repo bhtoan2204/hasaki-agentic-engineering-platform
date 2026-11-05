@@ -6,6 +6,7 @@ import { workApi } from "../hasakiAuth.ts";
 import { normalizeJiraIssue } from "../integrations/jira.ts";
 import { appPods, argoStatus, listApps, podLogs } from "../integrations/argocd.ts";
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
+import { vaultConnected, vaultExpired, vaultKeys, vaultList } from "../integrations/vault.ts";
 import { consumerGroupDetail, consumerGroups, kafkaConnected, kafkaExpired, listTopics, readMessages } from "../integrations/kafka.ts";
 import { rankRepositories, repositories, tokens } from "../repos/service.ts";
 import { runChanges } from "../git/changes.ts";
@@ -224,6 +225,28 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: kafkaAvailable,
     handler: (args) => readMessages(args),
+  });
+  const vaultAvailable = () =>
+    vaultConnected() ? true : vaultExpired() ? "Vault token expired — ask the user (ask_user) to paste a new Vault token on the platform's Integrations page" : "Vault not connected — the user pastes a Vault token on the platform's Integrations page";
+  registerIntegrationTool({
+    name: "vault.list",
+    summary: "QC Vault: list KV mounts, or the secret paths under a folder (to find a service's config/secrets).",
+    description: "Read-only (Vault QC). Without `path`: the KV mounts the developer's token can see. With `path` (e.g. \"secret/payment/\"): entries under it; names ending in \"/\" are folders.",
+    input: z.object({ path: z.string().optional() }),
+    readOnly: true,
+    available: vaultAvailable,
+    handler: ({ path }) => vaultList(path),
+  });
+  registerIntegrationTool({
+    name: "vault.keys",
+    summary: "QC Vault: which keys a secret defines (set / empty / length) and whether expected env keys exist — never the values.",
+    description:
+      "Read-only (Vault QC). Key names of the secret at `path` with set/empty and length; values are withheld, except short numbers/booleans under non-sensitive names " +
+      "(e.g. a timeout of 15). `expect`: key names to check for presence (exact, then case-insensitive) — use it to verify a service on QC defines an env var the code reads.",
+    input: z.object({ path: z.string().min(1), expect: z.array(z.string()).optional() }),
+    readOnly: true,
+    available: vaultAvailable,
+    handler: ({ path, expect }) => vaultKeys(path, expect),
   });
   registerIntegrationTool({
     name: "splunk.search",
