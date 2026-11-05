@@ -110,6 +110,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span className="rv-name">{run.title || run.definition_key}</span>
                 <Badge s={run.status} label />
                 <ProfileBadge profile={run.profile} title={(run.profile_decision?.reasons ?? []).join("\n")} />
+                <span className="pill" title={t("run.agentHint")}>{t("run.agent")}: {t(run.agent_provider === "cursor" ? "run.agent.cursor" : "run.agent.claude")}</span>
                 <span className="pill" title={run.output_locale ? t("run.outputCurrent") : t("run.outputLegacyHint")}>
                   {t("run.outputCurrent")}: {run.output_locale === "en" ? t("lang.en") : run.output_locale === "vi" ? t("lang.vi") : t("run.outputLegacy")}
                 </span>

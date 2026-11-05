@@ -747,6 +747,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   const [inputs, setInputs] = useState("{}");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
+  const [agentProvider, setAgentProvider] = useState<"claude" | "cursor">("claude");
   const start = async (mode: "start" | "step" | "pending") => {
     let parsed;
     try {
@@ -754,7 +755,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
     } catch {
       return toast(t("wfe.badInputs"));
     }
-    const r = await act(() => api<any>("/api/runs", { workflow: wfKey, work_item_id: wi ? Number(wi) : null, repositories: sel, inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) }, start: mode === "start", profile, output_locale: outputLocale }));
+    const r = await act(() => api<any>("/api/runs", { workflow: wfKey, work_item_id: wi ? Number(wi) : null, repositories: sel, inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) }, start: mode === "start", profile, output_locale: outputLocale, agent_provider: agentProvider }));
     if (!r) return;
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
@@ -797,6 +798,12 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
             <select value={outputLocale} onChange={(e) => setOutputLocale(e.target.value as UiLocale)}>
               <option value="vi">{t("lang.vi")}</option>
               <option value="en">{t("lang.en")}</option>
+            </select>
+          </Field>
+          <Field label={t("run.agent")} hint={t("run.agentHint")}>
+            <select value={agentProvider} onChange={(e) => setAgentProvider(e.target.value as "claude" | "cursor")}>
+              <option value="claude">{t("run.agent.claude")}</option>
+              <option value="cursor">{t("run.agent.cursor")}</option>
             </select>
           </Field>
         </Section>

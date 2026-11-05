@@ -1439,6 +1439,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cl.turns.other": "{n} lượt",
     "cl.chars.one": "{n} ký tự",
     "cl.chars.other": "{n} ký tự",
+    "run.agent": "Agent",
+    "run.agent.claude": "Claude Code",
+    "run.agent.cursor": "Cursor Agent",
+    "run.agentHint": "Chọn một lần khi tạo run. Thử lại, tiếp tục và sửa lỗi giữ đúng agent này.",
   },
   en: {
     "common.ago": "{when} ago",
@@ -2879,5 +2883,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cl.turns.other": "{n} turns",
     "cl.chars.one": "{n} character",
     "cl.chars.other": "{n} characters",
+    "run.agent": "Agent",
+    "run.agent.claude": "Claude Code",
+    "run.agent.cursor": "Cursor Agent",
+    "run.agentHint": "Chosen once when the run is created. Retries, resume and repair keep this agent.",
   },
 };

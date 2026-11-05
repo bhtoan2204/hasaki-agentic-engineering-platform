@@ -35,8 +35,30 @@ The React UI supports Vietnamese (`vi`, default) and English (`en`). The selecto
 on the run (`vi` or `en`). It defaults to the UI language and can be overridden in the start form. Omitted API
 values default to `vi`; any other value is rejected. Retries, resume, repair and verification read that column.
 Runs created before the column existed have `output_locale` NULL: the UI shows “not recorded” and does not
-rewrite saved text; new generation for those runs falls back to Vietnamese. The phased-out page at `/classic`
-is still the old Vietnamese UI. Historical translation of stored agent output is not in this version.
+rewrite saved text; new generation for those runs falls back to Vietnamese. `/classic` uses the same
+dictionary. Historical translation of stored agent output is not in this version.
+
+## Agents (Claude Code and Cursor)
+
+A run stores `agent_provider`: `claude` (default) or `cursor`. It is chosen on the start form in the React app and
+`/classic`, and on `POST /api/runs` as `agent_provider`. Omitted means Claude. Any other value is rejected. Retries,
+resume, repair and repository ranking stay on that provider. Claude model ids are not sent to Cursor.
+
+Cursor uses the installed CLI (`agent`, or `agent.cursorBin` / `CURSOR_AGENT_BIN`), version **2026.11.05** or a build
+that advertises `--print`, `--output-format stream-json`, `--resume`, `--mode`, `--sandbox`, `--trust`, `--approve-mcps`
+and `--force`. Log in with `agent login`, or set `CURSOR_API_KEY` in the server environment (never in a run payload).
+
+What this CLI can and cannot do:
+
+- Headless `--print` plus `stream-json` is how progress is recorded. Exit code 0 without a `result` event does not complete the step.
+- Analysis steps use `--mode ask` and `--sandbox enabled` (read-only). Coding steps need `--force` or the CLI only proposes edits; the platform still writes `<workspace>/.cursor/cli.json` deny rules (no `git push`, no writes to the primary checkout) and kills the process if a streamed tool call violates the same policy as Claude. `--force` is not the policy.
+- Platform tools (`ask_user`, `submit_result`, `prepare_branch`, knowledge, integrations) are a per-run stdio MCP server. There is no open HTTP endpoint. The bridge file is deleted when the process exits.
+- `--resume <session_id>` is used only for a Cursor session saved for that step. If resume fails, the step is rebuilt from the database and the current worktree. The worktree is not reset.
+- Delegation (subagents) is refused: this CLI has no equivalent of the platform's read-only subagent hook.
+- Cost and token totals are left null. The CLI's documented result event has duration, not usage.
+- Other MCP servers in the operator's global Cursor config can still be approved because `--approve-mcps` is required for unattended runs.
+
+If `agent` is missing or not logged in, the step fails with that reason. It does not switch to Claude.
 
 ## UI (React + XYFlow, `web/`)
 

@@ -16,7 +16,7 @@ export interface ExecutionContext {
   artifact(kind: string, name: string, content: string, data?: unknown): Promise<number>;
   /** Persist questions against this attempt immediately (used by the ask_user MCP tool). */
   ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;
-  recordSession(sessionId: string, cwd: string, model?: string): Promise<void>;
+  recordSession(sessionId: string, cwd: string, model?: string, provider?: "claude" | "cursor"): Promise<void>;
   /** Observability: tokens, cost, tool usage, skills loaded, integration calls, subagents (merged into attempt.metrics). */
   recordMetrics(metrics: Record<string, unknown>): Promise<void>;
 }
@@ -70,9 +70,9 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
     async recordMetrics(m) {
       await q(pool, "UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || $2::jsonb WHERE id = $1", [attempt.id, json(m)]);
     },
-    async recordSession(sessionId, cwd, model = "") {
+    async recordSession(sessionId, cwd, model = "", provider = "claude") {
       await q(pool, "UPDATE workflow_step_attempts SET agent_session_id = $2 WHERE id = $1", [attempt.id, sessionId]);
-      await q(pool, "INSERT INTO agent_sessions (attempt_id, session_id, cwd, model) VALUES ($1, $2, $3, $4)", [attempt.id, sessionId, cwd, model]);
+      await q(pool, "INSERT INTO agent_sessions (attempt_id, session_id, cwd, model, provider) VALUES ($1, $2, $3, $4, $5)", [attempt.id, sessionId, cwd, model, provider]);
     },
   };
 }

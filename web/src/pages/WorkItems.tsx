@@ -317,10 +317,11 @@ export function WorkItemDetail({ id }: { id: number }) {
   const [wf, setWf] = useState("feature-implementation");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
+  const [agentProvider, setAgentProvider] = useState<"claude" | "cursor">("claude");
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const start = async (mode: "start" | "step" | "pending") => {
-    const r = await act(() => api<any>(`/api/work-items/${id}/runs`, { workflow: wf, start: mode === "start", profile, output_locale: outputLocale }));
+    const r = await act(() => api<any>(`/api/work-items/${id}/runs`, { workflow: wf, start: mode === "start", profile, output_locale: outputLocale, agent_provider: agentProvider }));
     if (!r) return;
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
@@ -400,11 +401,17 @@ export function WorkItemDetail({ id }: { id: number }) {
                 <option value="en">{t("lang.en")}</option>
               </select>
             </Field>
+            <Field label={t("run.agent")} hint={t("run.agentHint")}>
+              <select value={agentProvider} onChange={(e) => setAgentProvider(e.target.value as "claude" | "cursor")}>
+                <option value="claude">{t("run.agent.claude")}</option>
+                <option value="cursor">{t("run.agent.cursor")}</option>
+              </select>
+            </Field>
             <button className="wi-start" onClick={() => start("start")}><Play size={16} strokeWidth={2.2} />{t("run.start")}</button>
             <div className="wi-launch-alt">
               <button className="ghost sm" onClick={() => start("step")} title={t("run.step")}><StepForward size={14} strokeWidth={2} />{t("run.step")}</button>
               <button className="ghost sm" onClick={() => start("pending")}><Settings2 size={14} strokeWidth={2} />{t("run.pending")}</button>
-              <button className="ghost sm" onClick={async () => { const r = await act(() => api<any>(`/api/work-items/${id}/analyze`, { output_locale: outputLocale })); if (r) navigate(`/runs/${r.id}`); }}><ScanSearch size={14} strokeWidth={2} />{t("run.analyze")}</button>
+              <button className="ghost sm" onClick={async () => { const r = await act(() => api<any>(`/api/work-items/${id}/analyze`, { output_locale: outputLocale, agent_provider: agentProvider })); if (r) navigate(`/runs/${r.id}`); }}><ScanSearch size={14} strokeWidth={2} />{t("run.analyze")}</button>
             </div>
           </section>
 

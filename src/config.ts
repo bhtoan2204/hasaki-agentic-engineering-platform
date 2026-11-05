@@ -76,6 +76,8 @@ export interface Config {
     knowledgeIndexSize: number;
     /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
     upstreamTokens: number;
+    /** Cursor CLI binary. Empty uses `agent` on PATH. Claude model ids are never sent to it. */
+    cursorBin?: string;
     /**
      * Optional model routing, e.g. { "FAST": { "agent": "<model>" }, "DEEP": { "verifier": "<model>" }, "*": { "coding_agent": "<model>" } }.
      * Keys: profile (or "*") → step type, or "verifier" for independent verification steps. Resolution order:

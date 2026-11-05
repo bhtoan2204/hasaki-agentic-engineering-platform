@@ -624,7 +624,7 @@ function AttemptMetrics({ m }: { m: any }) {
     <div className="rv-card">
       <div className="rv-card-head"><h4><Cpu size={16} /> {t("si.metrics")}</h4>{m.model && <span className="mono muted small">{m.model}</span>}</div>
       <div className="rv-minis" style={{ marginBottom: 10 }}>
-        <div className="rv-mini"><span>{t("si.cost")}</span><b>${Number(m.cost_usd ?? 0).toFixed(4)}</b></div>
+        <div className="rv-mini"><span>{t("si.cost")}</span><b>{m.cost_usd == null ? "—" : `$${Number(m.cost_usd).toFixed(4)}`}</b></div>
         <div className="rv-mini"><span>{t("si.turns")}</span><b>{m.turns ?? "—"}</b></div>
         <div className="rv-mini"><span>{t("si.duration")}</span><b>{Math.round((m.duration_ms ?? 0) / 1000)}s</b></div>
         <div className="rv-mini"><span>{t("si.session")}</span><b>{m.sessions ?? "—"}</b></div>
