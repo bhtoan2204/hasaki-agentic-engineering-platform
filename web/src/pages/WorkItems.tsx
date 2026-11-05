@@ -68,7 +68,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
     <section className="card wi-hasaki">
       <div className="card-head">
         <span className="wi-hicon"><Sparkles size={16} strokeWidth={2} /></span>
-        <h4>Hasaki Work</h4>
+        <h4>{t("wi.src.hasaki_work")}</h4>
         {st && (st.loggedIn ? <Badge s="COMPLETED">{t("wi.loggedIn")}</Badge> : <Badge s="FAILED">{t("wi.loggedOut")}</Badge>)}
       </div>
       {st?.expiresAt && <div className="muted small wi-hexp"><Clock size={12} strokeWidth={2} /> {t("wi.expires", { time: time(st.expiresAt) })}</div>}
@@ -78,7 +78,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
             <button className="sm" onClick={async () => (await act(() => api("/api/work/login-window", {}))) && reloadSt()}><LogIn size={14} strokeWidth={2} />{t("wi.openLogin")}</button>
           )}
           <div className="wi-inline">
-            <input aria-label="Token" placeholder={t("wi.tokenPh")} value={token} onChange={(e) => setToken(e.target.value)} />
+            <input aria-label={t("ig.token")} placeholder={t("wi.tokenPh")} value={token} onChange={(e) => setToken(e.target.value)} />
             <button className="sm ghost" onClick={async () => (await act(() => api("/api/work/token", { token }), t("wi.tokenSaved"))) && (setToken(""), reloadSt())}><KeyRound size={14} strokeWidth={2} />{t("wi.save")}</button>
           </div>
         </div>
@@ -87,7 +87,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
         <div className="stack wi-hlogin">
           <button className="sm" disabled={busy} onClick={refresh}><RefreshCw size={14} strokeWidth={2} className={busy ? "wi-spin" : undefined} />{busy ? t("wi.fetching") : t("wi.fetchTasks")}</button>
           <div className="wi-inline">
-            <input aria-label="Task id" placeholder={t("wi.taskId")} value={taskId} onChange={(e) => setTaskId(e.target.value)} />
+            <input aria-label={t("wi.taskId")} placeholder={t("wi.taskId")} value={taskId} onChange={(e) => setTaskId(e.target.value)} />
             <button className="sm ghost" disabled={!taskId} onClick={() => pick(taskId)}><Download size={14} strokeWidth={2} />{t("kn.import")}</button>
           </div>
         </div>
@@ -232,7 +232,7 @@ export function WorkItemsPage() {
       {panel === "create" && (
         <Drawer title={t("wi.createTitle")} onClose={() => setPanel("")}>
           <Field label={t("wi.fieldTitle")}><input autoFocus placeholder={t("wi.titlePh")} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-          <Field label="Project"><input placeholder={t("wi.projectPh")} value={form.project} onChange={(e) => setForm({ ...form, project: e.target.value })} /></Field>
+          <Field label={t("common.project")}><input placeholder={t("wi.projectPh")} value={form.project} onChange={(e) => setForm({ ...form, project: e.target.value })} /></Field>
           <Field label={t("wi.description")}><textarea rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
           <div className="row">
             <button disabled={!form.title.trim()} onClick={async () => { const w = await act(() => api<any>("/api/work-items", form)); if (w) navigate(`/work-items/${w.id}`); }}><Plus size={15} strokeWidth={2.2} />{t("wi.create")}</button>
@@ -242,7 +242,7 @@ export function WorkItemsPage() {
       )}
       {panel === "import" && (
         <Drawer title={t("wi.importBtn")} onClose={() => setPanel("")}>
-          <Field label="JSON"><textarea className="code" rows={10} placeholder={t("wi.jsonPh")} value={paste} onChange={(e) => setPaste(e.target.value)} /></Field>
+          <Field label="JSON"><textarea className="code" rows={10} placeholder={t("wi.jsonPh")} value={paste} onChange={(e) => setPaste(e.target.value)} aria-label="JSON" /></Field>
           <div className="row">
             <button className="ghost" disabled={!paste} onClick={() => importJson("hasaki_work")}><Download size={14} strokeWidth={2} />{t("wi.importHasaki")}</button>
             <button className="ghost" disabled={!paste} onClick={() => importJson("jira")}><Download size={14} strokeWidth={2} />{t("wi.importJira")}</button>
@@ -357,7 +357,7 @@ export function WorkItemDetail({ id }: { id: number }) {
 
           {w.pull_requests.length > 0 && (
             <section className="card">
-              <div className="card-head"><span className="wi-hicon"><GitPullRequest size={16} strokeWidth={2} /></span><h4>Pull requests</h4></div>
+              <div className="card-head"><span className="wi-hicon"><GitPullRequest size={16} strokeWidth={2} /></span><h4>{t("common.pullRequests")}</h4></div>
               <div className="wi-prs">
                 {w.pull_requests.map((p: any) => (
                   <div key={p.id} className="wi-pr">
@@ -387,7 +387,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 <div className="muted small">{t("run.launchHint")}</div>
               </div>
             </div>
-            <Field label="Workflow">
+            <Field label={t("common.workflow")}>
               <select value={wf} onChange={(e) => setWf(e.target.value)}>
                 {(wfs ?? []).filter((x) => x.latest_version > 0).map((x) => <option key={x.key} value={x.key}>{x.name} (v{x.latest_version}) — {x.description?.slice(0, 60)}</option>)}
               </select>

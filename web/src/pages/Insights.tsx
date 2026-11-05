@@ -4,16 +4,18 @@ import {
 } from "lucide-react";
 import { useApi, useLive } from "../api.ts";
 import { Badge, EmptyState, ErrorBox, JsonBlock, Loading, navigate, PageHeader, Segmented, StatCard, Tabs, time } from "../ui.tsx";
+import { uiLocale, useI18n } from "../i18n/index.tsx";
 import "./Insights.css";
 
 // ---------------------------------------------------------------- number helpers (pg numeric/bigint arrive as strings)
 
 const num = (x: unknown): number | null => (x == null || x === "" || Number.isNaN(Number(x)) ? null : Number(x));
 const sum = (rows: any[] | undefined, k: string) => (rows ?? []).reduce((a, r) => a + (num(r[k]) ?? 0), 0);
-const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString("vi-VN"));
-const fmtNum = (x: number | null, d = 1) => (x == null ? "—" : x.toLocaleString("vi-VN", { maximumFractionDigits: d }));
-const fmtCompact = (x: number | null) => (x == null ? "—" : Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(x));
-const fmtUsd = (x: number | null) => (x == null ? "—" : `$${x.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: x < 1 ? 4 : 2 })}`);
+const numLoc = () => (uiLocale() === "vi" ? "vi-VN" : "en-GB");
+const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString(numLoc()));
+const fmtNum = (x: number | null, d = 1) => (x == null ? "—" : x.toLocaleString(numLoc(), { maximumFractionDigits: d }));
+const fmtCompact = (x: number | null) => (x == null ? "—" : Intl.NumberFormat(numLoc(), { notation: "compact", maximumFractionDigits: 1 }).format(x));
+const fmtUsd = (x: number | null) => (x == null ? "—" : `$${x.toLocaleString(numLoc(), { minimumFractionDigits: 2, maximumFractionDigits: x < 1 ? 4 : 2 })}`);
 const fmtPct = (x: number | null) => (x == null ? "—" : `${fmtNum(x, 1)}%`);
 const fmtSec = (x: number | null) => (x == null ? "—" : x >= 60 ? `${Math.floor(x / 60)}m${Math.round(x % 60)}s` : `${fmtNum(x, 1)}s`);
 const pct = (a: number, b: number) => (b ? (a / b) * 100 : null);
@@ -24,8 +26,9 @@ type Seg = { value: number; color: string; label: string };
 type BarRow = { key: string; label: ReactNode; value: number | null; display?: ReactNode; hint?: ReactNode; segments?: Seg[]; title?: string };
 
 /** Horizontal bars, scaled to the largest value; optional stacked segments. */
-function Bars({ rows, color = "var(--brand)", empty = "Chưa có dữ liệu." }: { rows: BarRow[]; color?: string; empty?: string }) {
-  if (!rows.length) return <div className="ins-empty">{empty}</div>;
+function Bars({ rows, color = "var(--brand)", empty }: { rows: BarRow[]; color?: string; empty?: string }) {
+  const { t } = useI18n();
+  if (!rows.length) return <div className="ins-empty">{empty ?? t("ins.empty")}</div>;
   const max = Math.max(...rows.map((r) => r.value ?? 0), 0);
   return (
     <ul className="ins-bars">
@@ -106,7 +109,8 @@ function Metric({ label, value, tone, title }: { label: string; value: ReactNode
 
 /** Plain data table inside a scroll wrapper. */
 function Table({ rows, cols }: { rows: any[]; cols: Array<[string, string, ((r: any) => any)?]> }) {
-  if (!rows?.length) return <div className="ins-empty">Chưa có dữ liệu.</div>;
+  const { t } = useI18n();
+  if (!rows?.length) return <div className="ins-empty">{t("ins.empty")}</div>;
   return (
     <div className="table-wrap">
       <table className="ins-table">
@@ -125,6 +129,7 @@ const TAB_KEYS: InsightsTab[] = ["overview", "quality", "tools", "failures", "re
 
 /** `tab` comes from the URL (#/insights/<tab>) so a tab can be linked and survives reloads. */
 export function InsightsPage({ tab: tabParam }: { tab?: string }) {
+  const { t } = useI18n();
   const tab: InsightsTab = TAB_KEYS.includes(tabParam as InsightsTab) ? (tabParam as InsightsTab) : "overview";
   const setTab = (t: InsightsTab) => navigate(t === "overview" ? "/insights" : `/insights/${t}`);
   const [days, setDays] = useState(30);
@@ -137,9 +142,9 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
   const header = (
     <PageHeader
       icon={LineChart}
-      title="Insights"
-      subtitle="Chi phí, token, thời gian, lỗi và mức dùng tool/skill — lấy từ metrics của từng attempt trong PostgreSQL."
-      actions={<Segmented label="Khoảng thời gian" options={[1, 7, 30, 90].map((d) => [String(d), `${d} ngày`] as [string, string])} value={String(days)} onChange={(v) => setDays(Number(v))} />}
+      title={t("ins.title")}
+      subtitle={t("ins.subtitle")}
+      actions={<Segmented label={t("ins.range")} options={[1, 7, 30, 90].map((d) => [String(d), t("ins.days", { n: d })] as [string, string])} value={String(days)} onChange={(v) => setDays(Number(v))} />}
     />
   );
   if (loading && !data) return <div className="ins">{header}<Loading /></div>;
@@ -157,7 +162,7 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
 
   const wfRows: BarRow[] = wf.map((r) => {
     const rr = num(r.runs) ?? 0, c = num(r.completed) ?? 0, f = num(r.failed) ?? 0;
-    const hint = `${fmtInt(rr)} runs · ${fmtInt(c)} xong · ${fmtInt(f)} lỗi`;
+    const hint = t("ins.doneHint", { runs: fmtInt(rr), done: fmtInt(c), failed: fmtInt(f) });
     const base = { key: r.definition_key ?? "—", label: <span className="mono">{r.definition_key ?? "—"}</span>, hint, title: `${r.definition_key}: ${fmtUsd(num(r.cost_usd))} · ${fmtInt(num(r.tokens))} tokens` };
     if (wfMetric === "cost") return { ...base, value: num(r.cost_usd), display: fmtUsd(num(r.cost_usd)) };
     if (wfMetric === "tokens") return { ...base, value: num(r.tokens), display: fmtCompact(num(r.tokens)) };
@@ -166,9 +171,9 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
       value: rr,
       display: fmtInt(rr),
       segments: [
-        { value: c, color: "var(--st-ok)", label: "Hoàn thành" },
-        { value: f, color: "var(--st-err)", label: "Lỗi" },
-        { value: Math.max(0, rr - c - f), color: "var(--st-idle)", label: "Khác" },
+        { value: c, color: "var(--st-ok)", label: t("ins.completed") },
+        { value: f, color: "var(--st-err)", label: t("ins.failed") },
+        { value: Math.max(0, rr - c - f), color: "var(--st-idle)", label: t("ins.other") },
       ],
     };
   });
@@ -176,7 +181,7 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
 
   const stRows: BarRow[] = (data.by_step_type ?? []).map((r: any) => {
     const att = num(r.attempts) ?? 0, f = num(r.failed) ?? 0;
-    const base = { key: r.type ?? "—", label: <span className="mono">{r.type ?? "—"}</span>, hint: `${fmtInt(att)} attempts · ${fmtInt(f)} lỗi · ${fmtUsd(num(r.cost_usd))}` };
+    const base = { key: r.type ?? "—", label: <span className="mono">{r.type ?? "—"}</span>, hint: t("ins.stepHint", { attempts: fmtInt(att), failed: fmtInt(f), cost: fmtUsd(num(r.cost_usd)) }) };
     if (stMetric === "avg") return { ...base, value: num(r.avg_seconds), display: fmtSec(num(r.avg_seconds)) };
     if (stMetric === "fail") return { ...base, value: pct(f, att), display: fmtPct(pct(f, att)) };
     return { ...base, value: num(r.cost_usd), display: fmtUsd(num(r.cost_usd)) };
@@ -189,23 +194,23 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
       {error && <ErrorBox error={error} onRetry={reload} />}
 
       <div className="ins-stats">
-        <StatCard icon={Activity} label="Runs" value={fmtInt(runs)} hint={`trong ${days} ngày`} tone="run" />
-        <StatCard icon={Check} label="Hoàn thành" value={fmtPct(pct(completed, runs))} hint={`${fmtInt(completed)} xong · ${fmtInt(failed)} lỗi`} tone="ok" />
-        <StatCard icon={Coins} label="Chi phí ≈" value={fmtUsd(runs ? cost : null)} hint="ước tính từ SDK" tone="brand" />
-        <StatCard icon={Cpu} label="Tokens (in+out)" value={fmtCompact(runs ? tokens : null)} hint={runs ? `${fmtInt(tokens)} tokens` : undefined} tone="wait" />
-        <StatCard icon={ShieldCheck} label="Verification pass" value={fmtPct(num(v.pass_rate_pct))} hint={ev ? `${fmtInt(num(v.passed))}/${fmtInt(num(v.verified))} attempts` : undefined} tone="ok" />
-        <StatCard icon={Hand} label="Run cần người" value={fmtPct(num(h.rate_pct))} hint={ev ? `${fmtInt(num(h.with_human))}/${fmtInt(num(h.runs))} runs` : undefined} tone="wait" />
+        <StatCard icon={Activity} label={t("ins.runs")} value={fmtInt(runs)} hint={t("ins.inDays", { n: days })} tone="run" />
+        <StatCard icon={Check} label={t("ins.completed")} value={fmtPct(pct(completed, runs))} hint={t("ins.doneFailed", { done: fmtInt(completed), failed: fmtInt(failed) })} tone="ok" />
+        <StatCard icon={Coins} label={t("ins.cost")} value={fmtUsd(runs ? cost : null)} hint={t("ins.sdk")} tone="brand" />
+        <StatCard icon={Cpu} label={t("ins.tokens")} value={fmtCompact(runs ? tokens : null)} hint={runs ? t("ins.tokensN", { n: fmtInt(tokens) }) : undefined} tone="wait" />
+        <StatCard icon={ShieldCheck} label={t("ins.verify")} value={fmtPct(num(v.pass_rate_pct))} hint={ev ? t("ins.attempts", { passed: fmtInt(num(v.passed)), total: fmtInt(num(v.verified)) }) : undefined} tone="ok" />
+        <StatCard icon={Hand} label={t("ins.needHuman")} value={fmtPct(num(h.rate_pct))} hint={ev ? t("ins.humanOf", { human: fmtInt(num(h.with_human)), runs: fmtInt(num(h.runs)) }) : undefined} tone="wait" />
       </div>
 
       <Tabs<InsightsTab>
         value={tab}
         onChange={setTab}
         tabs={[
-          ["overview", "Tổng quan"],
-          ["quality", "Chất lượng"],
-          ["tools", "Tool & skill"],
-          ["failures", <>Lỗi gần đây{data.failures?.length ? <span className="ins-tab-count">{data.failures.length}</span> : null}</>],
-          ["registry", "Tool registry"],
+          ["overview", t("ins.tab.overview")],
+          ["quality", t("ins.tab.quality")],
+          ["tools", t("ins.tab.tools")],
+          ["failures", <>{t("ins.tab.failures")}{data.failures?.length ? <span className="ins-tab-count">{data.failures.length}</span> : null}</>],
+          ["registry", t("ins.tab.registry")],
         ]}
       />
 
@@ -214,26 +219,26 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
           <div className="ins-grid">
             <Panel
               icon={Workflow}
-              title="Theo workflow"
-              sub={wfMetric === "runs" ? <Legend items={[["Hoàn thành", "var(--st-ok)"], ["Lỗi", "var(--st-err)"], ["Khác", "var(--st-idle)"]]} /> : wfMetric === "cost" ? "Chi phí ước tính ($)" : "Tokens (input + output)"}
-              actions={<Segmented label="Chỉ số workflow" options={[["cost", "Cost"], ["tokens", "Tokens"], ["runs", "Runs"]]} value={wfMetric} onChange={setWfMetric} />}
+              title={t("ins.byWorkflow")}
+              sub={wfMetric === "runs" ? <Legend items={[[t("ins.completed"), "var(--st-ok)"], [t("ins.failed"), "var(--st-err)"], [t("ins.other"), "var(--st-idle)"]]} /> : wfMetric === "cost" ? t("ins.estCost") : t("ins.tokensIO")}
+              actions={<Segmented label={t("ins.wfMetric")} options={[["cost", t("ins.metric.cost")], ["tokens", t("ins.metric.tokens")], ["runs", t("ins.metric.runs")]]} value={wfMetric} onChange={setWfMetric} />}
             >
               <Bars rows={wfSorted} color={wfMetric === "tokens" ? "var(--st-wait)" : "var(--brand)"} />
             </Panel>
             <Panel
               icon={Timer}
-              title="Theo loại bước"
-              sub={stMetric === "avg" ? "Thời gian trung bình mỗi attempt" : stMetric === "fail" ? "Tỉ lệ attempt lỗi" : "Chi phí ước tính ($)"}
-              actions={<Segmented label="Chỉ số loại bước" options={[["avg", "Thời gian"], ["fail", "Lỗi"], ["cost", "Cost"]]} value={stMetric} onChange={setStMetric} />}
+              title={t("ins.byType")}
+              sub={stMetric === "avg" ? t("ins.avgTime") : stMetric === "fail" ? t("ins.failRate") : t("ins.estCost")}
+              actions={<Segmented label={t("ins.stepMetric")} options={[["avg", t("ins.time")], ["fail", t("ins.failed")], ["cost", t("ins.metric.cost")]]} value={stMetric} onChange={setStMetric} />}
             >
               <Bars rows={stSorted} color={stMetric === "fail" ? "var(--st-err)" : stMetric === "avg" ? "var(--st-run)" : "var(--brand)"} />
             </Panel>
           </div>
 
-          <Panel icon={Users} title="So sánh theo profile" sub="Thời gian, số bước Claude, turns và chi phí trung bình mỗi run">
+          <Panel icon={Users} title={t("ins.byProfile")} sub={t("ins.profileSub")}>
             <Table
               rows={data.by_profile}
-              cols={[["profile", "Profile"], ["runs", "Runs"], ["completed", "Completed"], ["avg_wall_min", "Avg wall (min)"], ["claude_attempts_per_run", "Claude steps/run"], ["turns_per_run", "Turns/run"], ["cost_per_run", "≈ Cost/run ($)"]]}
+              cols={[["profile", t("ins.col.profile")], ["runs", t("ins.col.runs")], ["completed", t("ins.col.completed")], ["avg_wall_min", t("ins.col.wall")], ["claude_attempts_per_run", t("ins.col.claude")], ["turns_per_run", t("ins.col.turns")], ["cost_per_run", t("ins.col.cost")]]}
             />
           </Panel>
         </>
@@ -247,28 +252,28 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
       {tab === "tools" && (
         <>
           <div className="ins-grid">
-            <Panel icon={Wrench} title="Tool (Claude Code + platform)" sub="Số lần gọi">
+            <Panel icon={Wrench} title={t("ins.toolsTitle")} sub={t("ins.calls")}>
               <Bars
-                rows={(data.tools ?? []).map((r: any) => ({ key: r.tool, label: <span className="mono">{r.tool}</span>, value: num(r.calls), display: fmtInt(num(r.calls)), hint: `${fmtInt(num(r.attempts))} attempts` }))}
+                rows={(data.tools ?? []).map((r: any) => ({ key: r.tool, label: <span className="mono">{r.tool}</span>, value: num(r.calls), display: fmtInt(num(r.calls)), hint: t("ins.nAttempts", { n: fmtInt(num(r.attempts)) }) }))}
                 color="var(--st-run)"
               />
             </Panel>
-            <Panel icon={Plug} title="Integration tools" sub={<Legend items={[["OK", "var(--st-ok)"], ["Lỗi", "var(--st-err)"]]} />}>
+            <Panel icon={Plug} title={t("ins.integrations")} sub={<Legend items={[[t("ins.ok"), "var(--st-ok)"], [t("ins.failed"), "var(--st-err)"]]} />}>
               <Bars
                 rows={(data.integrations ?? []).map((r: any) => {
                   const calls = num(r.calls) ?? 0, f = num(r.failed) ?? 0;
                   return {
-                    key: r.name, label: <span className="mono">{r.name}</span>, value: calls, display: fmtInt(calls), hint: `${fmtInt(f)} lỗi · TB ${r.avg_ms != null ? `${fmtInt(num(r.avg_ms))}ms` : "—"}`,
-                    segments: [{ value: Math.max(0, calls - f), color: "var(--st-ok)", label: "OK" }, { value: f, color: "var(--st-err)", label: "Lỗi" }],
+                    key: r.name, label: <span className="mono">{r.name}</span>, value: calls, display: fmtInt(calls), hint: t("ins.failAvg", { failed: fmtInt(f), avg: t("ins.avgMs", { ms: r.avg_ms != null ? `${fmtInt(num(r.avg_ms))}ms` : "—" }) }),
+                    segments: [{ value: Math.max(0, calls - f), color: "var(--st-ok)", label: t("ins.ok") }, { value: f, color: "var(--st-err)", label: t("ins.failed") }],
                   };
                 })}
               />
             </Panel>
-            <Panel icon={Sparkles} title="Skills / knowledge đã nạp" sub="Số lần nạp vào bước">
+            <Panel icon={Sparkles} title={t("ins.skillsLoaded")} sub={t("ins.loads")}>
               <Bars rows={(data.skills ?? []).map((r: any) => ({ key: r.key, label: <a className="mono" href={`#/knowledge/${r.key}`}>{r.key}</a>, value: num(r.loads), display: fmtInt(num(r.loads)) }))} color="var(--rose-ink)" />
             </Panel>
-            <Panel icon={Ban} title="Tool bị policy chặn" sub="Theo tool + lý do">
-              {!(data.denied ?? []).length ? <div className="ins-empty">Không có tool nào bị chặn.</div> : (
+            <Panel icon={Ban} title={t("ins.denied")} sub={t("ins.deniedSub")}>
+              {!(data.denied ?? []).length ? <div className="ins-empty">{t("ins.noneDenied")}</div> : (
                 <ul className="ins-denied">
                   {data.denied.map((r: any, i: number) => (
                     <li key={i}>
@@ -284,14 +289,14 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
       )}
       {tab === "failures" && (
         <>
-          <Panel icon={AlertTriangle} title="Lỗi gần đây" sub="25 attempt lỗi mới nhất">
+          <Panel icon={AlertTriangle} title={t("ins.recent")} sub={t("ins.recentSub")}>
             <Table
               rows={data.failures}
               cols={[
-                ["run_id", "Run", (r) => <a onClick={() => navigate(`/runs/${r.run_id}/${r.step_key}`)} style={{ cursor: "pointer" }} className="mono">#{r.run_id} · {r.step_key}</a>],
-                ["type", "Type", (r) => <span className="pill">{r.type}</span>],
-                ["finished_at", "At", (r) => <span className="muted nowrap">{time(r.finished_at)}</span>],
-                ["error", "Error", (r) => <span className="ins-error">{r.error}</span>],
+                ["run_id", t("ins.col.run"), (r) => <a onClick={() => navigate(`/runs/${r.run_id}/${r.step_key}`)} style={{ cursor: "pointer" }} className="mono">#{r.run_id} · {r.step_key}</a>],
+                ["type", t("ins.col.type"), (r) => <span className="pill">{r.type}</span>],
+                ["finished_at", t("ins.col.at"), (r) => <span className="muted nowrap">{time(r.finished_at)}</span>],
+                ["error", t("ins.col.error"), (r) => <span className="ins-error">{r.error}</span>],
               ]}
             />
           </Panel>
@@ -299,15 +304,15 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
       )}
       {tab === "registry" && (
         <>
-          <Panel icon={Plug} title="Integration tool registry" sub="Agent khám phá qua list_tools → describe_tool → call_tool (không nạp schema từ đầu).">
+          <Panel icon={Plug} title={t("ins.registry")} sub={t("ins.registrySub")}>
             <Table
               rows={tools ?? []}
               cols={[
-                ["name", "Name", (r) => <b className="mono">{r.name}</b>],
-                ["summary", "Summary"],
-                ["read_only", "Mode", (r) => (r.read_only ? <Badge s="COMPLETED">read-only</Badge> : <Badge s="WAITING">write</Badge>)],
-                ["available", "Available", (r) => (r.available === true ? <span className="okc ins-avail"><Check size={15} strokeWidth={2.4} aria-label="available" /></span> : <span className="muted small">{String(r.available)}</span>)],
-                ["input_schema", "Schema", (r) => <details><summary>schema</summary><JsonBlock value={r.input_schema} /></details>],
+                ["name", t("ins.col.name"), (r) => <b className="mono">{r.name}</b>],
+                ["summary", t("ins.col.summary")],
+                ["read_only", t("ins.col.mode"), (r) => (r.read_only ? <Badge s="COMPLETED">{t("ins.readOnly")}</Badge> : <Badge s="WAITING">{t("ins.write")}</Badge>)],
+                ["available", t("ins.col.available"), (r) => (r.available === true ? <span className="okc ins-avail"><Check size={15} strokeWidth={2.4} aria-label={t("ins.available")} /></span> : <span className="muted small">{String(r.available)}</span>)],
+                ["input_schema", "Schema", (r) => <details><summary>{t("ins.schema")}</summary><JsonBlock value={r.input_schema} /></details>],
               ]}
             />
           </Panel>
@@ -339,6 +344,7 @@ function Extras({ obj, known }: { obj: Record<string, any>; known: Set<string> }
 
 /** Harness evaluation — whether coding steps passed the platform's own verification; separate from run status. */
 function HarnessEvaluation({ e }: { e: any }) {
+  const { t } = useI18n();
   const v = e.verification ?? {};
   const h = e.human_intervention ?? {};
   const verified = num(v.verified) ?? 0;
@@ -347,10 +353,10 @@ function HarnessEvaluation({ e }: { e: any }) {
   const noProgress = num(v.stopped_no_progress) ?? 0;
   const other = Math.max(0, verified - passed - exhausted - noProgress);
   const outcome: Seg[] = [
-    { value: passed, color: "var(--st-ok)", label: "Pass" },
-    { value: exhausted, color: "var(--st-err)", label: "Hết lượt sửa" },
-    { value: noProgress, color: "var(--st-wait)", label: "Không tiến triển" },
-    { value: other, color: "var(--st-idle)", label: "Khác" },
+    { value: passed, color: "var(--st-ok)", label: t("ins.pass") },
+    { value: exhausted, color: "var(--st-err)", label: t("ins.exhausted") },
+    { value: noProgress, color: "var(--st-wait)", label: t("ins.noProgress") },
+    { value: other, color: "var(--st-idle)", label: t("ins.other") },
   ];
   return (
     <>
@@ -358,58 +364,59 @@ function HarnessEvaluation({ e }: { e: any }) {
         <Panel
           icon={ShieldCheck}
           className="ins-eval-main"
-          title="Harness evaluation"
-          sub="Tách biệt với trạng thái run: coding step có qua verification của platform không, mất bao nhiêu lần sửa, lỗi nào lặp lại."
+          title={t("ins.harness")}
+          sub={t("ins.harnessSub")}
         >
           <div className="ins-eval-body">
             <div className="ins-rings">
-              <Ring value={num(v.pass_rate_pct)} label="Verification pass" sub={`${fmtInt(num(v.passed))}/${fmtInt(num(v.verified))} đã kiểm`} color="var(--st-ok)" />
-              <Ring value={num(v.first_try_pass_rate_pct)} label="Pass lần đầu" sub={`${fmtInt(num(v.passed_first_try))} attempts`} color="var(--brand)" />
+              <Ring value={num(v.pass_rate_pct)} label={t("ins.verify")} sub={t("ins.checked", { passed: fmtInt(num(v.passed)), verified: fmtInt(num(v.verified)) })} color="var(--st-ok)" />
+              <Ring value={num(v.first_try_pass_rate_pct)} label={t("ins.firstPass")} sub={t("ins.nAttempts", { n: fmtInt(num(v.passed_first_try)) })} color="var(--brand)" />
             </div>
             <div className="ins-eval-side">
               <div className="ins-metrics">
-                <Metric label="Coding attempts" value={fmtInt(num(v.coding_attempts))} />
-                <Metric label="Repairs / attempt" value={fmtNum(num(v.avg_repairs), 2)} tone="run" />
-                <Metric label="Verify TB" value={fmtSec(num(v.avg_verify_s))} />
-                <Metric label="Hết lượt sửa" value={fmtInt(num(v.repair_budget_exhausted))} tone="err" title="repair budget exhausted" />
-                <Metric label="Không tiến triển" value={fmtInt(num(v.stopped_no_progress))} tone="wait" title="stopped: no progress" />
+                <Metric label={t("ins.codingAttempts")} value={fmtInt(num(v.coding_attempts))} />
+                <Metric label={t("ins.repairs")} value={fmtNum(num(v.avg_repairs), 2)} tone="run" />
+                <Metric label={t("ins.verifyAvg")} value={fmtSec(num(v.avg_verify_s))} />
+                <Metric label={t("ins.exhausted")} value={fmtInt(num(v.repair_budget_exhausted))} tone="err" title={t("ins.exhausted")} />
+                <Metric label={t("ins.noProgress")} value={fmtInt(num(v.stopped_no_progress))} tone="wait" title={t("ins.noProgress")} />
               </div>
               {verified > 0 ? (
                 <div className="ins-outcome">
-                  <div className="ins-outcome-bar" role="img" aria-label="Phân bố kết quả verification">
+                  <div className="ins-outcome-bar" role="img" aria-label={t("ins.outcome")}>
                     {outcome.map((s) => s.value > 0 && <span key={s.label} style={{ width: `${(s.value / verified) * 100}%`, background: s.color }} title={`${s.label}: ${s.value}`} />)}
                   </div>
                   <Legend items={outcome.filter((s) => s.value > 0).map((s) => [`${s.label} · ${s.value}`, s.color] as [string, string])} />
                 </div>
-              ) : <div className="ins-empty">Chưa có coding attempt nào được verify.</div>}
+              ) : <div className="ins-empty">{t("ins.noneVerified")}</div>}
             </div>
           </div>
           <Extras obj={v} known={KNOWN_V} />
         </Panel>
-        <Panel icon={Hand} className="ins-eval-human" title="Can thiệp của người" sub="Run có câu trả lời, duyệt thủ công hoặc re-execute">
+        <Panel icon={Hand} className="ins-eval-human" title={t("ins.humanTitle")} sub={t("ins.humanSub")}>
           <div className="ins-human">
-            <Ring value={num(h.rate_pct)} label="Run cần người" sub={`${fmtInt(num(h.with_human))}/${fmtInt(num(h.runs))} runs`} color="var(--st-wait)" />
+            <Ring value={num(h.rate_pct)} label={t("ins.needHuman")} sub={t("ins.humanOf", { human: fmtInt(num(h.with_human)), runs: fmtInt(num(h.runs)) })} color="var(--st-wait)" />
             <div className="ins-metrics ins-metrics-col">
-              <Metric label="Câu trả lời" value={fmtInt(num(h.answers))} />
-              <Metric label="Re-execute" value={fmtInt(num(h.reexecutions))} />
+              <Metric label={t("ins.answers")} value={fmtInt(num(h.answers))} />
+              <Metric label={t("ins.reexec")} value={fmtInt(num(h.reexecutions))} />
             </div>
           </div>
           <Extras obj={h} known={KNOWN_H} />
         </Panel>
       </div>
-      <Panel icon={Repeat} title="Lỗi verification lặp lại" sub="Failure signature xuất hiện nhiều hơn một lần">
-        {e.repeated_failures?.length > 0 ? <RepeatedFailures rows={e.repeated_failures} /> : <EmptyState icon={Gauge} title="Không có lỗi lặp lại">Chưa có failure signature nào lặp lại trong khoảng thời gian này.</EmptyState>}
+      <Panel icon={Repeat} title={t("ins.repeated")} sub={t("ins.repeatedSub")}>
+        {e.repeated_failures?.length > 0 ? <RepeatedFailures rows={e.repeated_failures} /> : <EmptyState icon={Gauge} title={t("ins.noneRepeated")}>{t("ins.noneRepeatedBody")}</EmptyState>}
       </Panel>
     </>
   );
 }
 
 function RepeatedFailures({ rows }: { rows: any[] }) {
+  const { t } = useI18n();
   const max = Math.max(...rows.map((r) => num(r.times) ?? 0), 1);
   return (
     <div className="table-wrap">
       <table className="ins-table">
-        <thead><tr><th>Failure signature</th><th>Times</th><th>Runs</th></tr></thead>
+        <thead><tr><th>{t("ins.signature")}</th><th>{t("ins.times")}</th><th>{t("ins.col.runs")}</th></tr></thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
@@ -429,26 +436,27 @@ function RepeatedFailures({ rows }: { rows: any[] }) {
 
 /** Benchmark results (eval_results): candidates × profiles, graded by hidden acceptance tests. */
 function EvalComparison() {
+  const { t } = useI18n();
   const { data } = useApi<any>("/api/evals");
   const groups = (data?.summary ?? []) as any[];
   const v = (x: any, suffix = "") => (x == null ? "—" : `${x}${suffix}`);
   return (
     <section className="card">
-      <div className="card-head"><h4>Benchmark comparison</h4><span className="sub">npm run bench -- --live · hidden acceptance tests · candidates and profiles</span></div>
+      <div className="card-head"><h4>{t("ins.bench")}</h4><span className="sub">{t("ins.benchSub")}</span></div>
       {!groups.length ? (
-        <div className="muted small">Chưa có kết quả benchmark. Chạy <span className="kbd">npm run bench -- --live --profiles=FAST,STANDARD,DEEP</span> (và <span className="kbd">--candidate=claude-cli</span>) để so sánh.</div>
+        <div className="muted small">{t("ins.benchEmpty")} <span className="kbd">npm run bench -- --live --profiles=FAST,STANDARD,DEEP</span> <span className="kbd">--candidate=claude-cli</span></div>
       ) : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Candidate / profile</th><th>Runs</th><th>Success</th><th>Regression</th><th>Verifier accuracy</th><th>False pass / alarm</th><th>Repair success</th><th>Human</th><th>Avg time</th><th>Avg cost</th></tr></thead>
+            <thead><tr><th>{t("ins.col.candidate")}</th><th>{t("ins.col.runs")}</th><th>{t("ins.col.success")}</th><th>{t("ins.col.regression")}</th><th>{t("ins.col.accuracy")}</th><th>{t("ins.col.false")}</th><th>{t("ins.col.repair")}</th><th>{t("ins.col.human")}</th><th>{t("ins.col.avgTime")}</th><th>{t("ins.col.avgCost")}</th></tr></thead>
             <tbody>
               {groups.map((g) => (
                 <tr key={g.group}>
                   <td><b>{g.group}</b></td>
                   <td className="mono">{g.runs}</td>
-                  <td className="mono">{v(g.success_rate_pct, "%")} <span className="muted small">({g.graded} graded)</span></td>
+                  <td className="mono">{v(g.success_rate_pct, "%")} <span className="muted small">({t("ins.graded", { n: g.graded })})</span></td>
                   <td className="mono">{v(g.regression_rate_pct, "%")}</td>
-                  <td className="mono">{g.verifier ? `${g.verifier.accuracy_pct}% of ${g.verifier.judged}` : "—"}</td>
+                  <td className="mono">{g.verifier ? t("ins.ofJudged", { pct: g.verifier.accuracy_pct, n: g.verifier.judged }) : "—"}</td>
                   <td className="mono">{g.verifier ? `${g.verifier.false_pass} / ${g.verifier.false_alarm}` : "—"}</td>
                   <td className="mono">{v(g.repair_success_pct, "%")}</td>
                   <td className="mono">{v(g.human_intervention_pct, "%")}</td>

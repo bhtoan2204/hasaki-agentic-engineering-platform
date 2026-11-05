@@ -6,9 +6,9 @@ export type UiLocale = (typeof UI_LOCALES)[number];
 
 const baseMessages: Record<UiLocale, Record<string, string>> = {
   vi: {
-    "nav.group.workspace": "Workspace",
-    "nav.group.engineering": "Engineering",
-    "nav.group.library": "Library",
+    "nav.group.workspace": "Không gian làm việc",
+    "nav.group.engineering": "Kỹ thuật",
+    "nav.group.library": "Thư viện",
     "nav.overview": "Tổng quan",
     "nav.office": "Agent Office",
     "nav.workItems": "Work Items",

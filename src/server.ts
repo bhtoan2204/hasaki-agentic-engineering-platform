@@ -17,6 +17,7 @@ import { startScheduler } from "./workflow/scheduler.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
 import { errorStatus, HttpError, routes } from "./api/routes.ts";
+import { messages as uiMessages } from "../web/src/i18n/messages.ts";
 import { handleStream, startEventStream } from "./api/stream.ts";
 import { childGroups } from "./workflow/local.ts";
 import { pool } from "./db/pool.ts";
@@ -69,6 +70,10 @@ async function readJson(req: IncomingMessage): Promise<any> {
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   if (req.method === "GET" && url.pathname === "/api/stream") return handleStream(req, res, url);
+  if (req.method === "GET" && url.pathname === "/api/ui-messages") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
+    return res.end(JSON.stringify(uiMessages));
+  }
   // Raw evidence files (images/PDF) for preview/download.
   const raw = req.method === "GET" && url.pathname.match(/^\/api\/artifacts\/(\d+)\/raw$/);
   if (raw) {

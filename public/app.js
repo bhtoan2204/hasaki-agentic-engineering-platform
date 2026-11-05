@@ -1,9 +1,39 @@
 // Workflow Platform UI — vanilla JS, hash router, every screen backed by /api/*.
+// Copy comes from the same catalog the React app uses (/api/ui-messages). Locale is hasaki.uiLocale.
+const UI_KEY = "hasaki.uiLocale";
+let DICT = { vi: {}, en: {} };
+let locale = "vi";
+function tr(key, params) {
+  const raw = DICT[locale]?.[key] ?? DICT.vi?.[key] ?? key;
+  if (!params) return raw;
+  return raw.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? `{${name}}` : String(params[name])));
+}
+function setUiLocale(next) {
+  locale = next === "en" ? "en" : "vi";
+  try { localStorage.setItem(UI_KEY, locale); } catch {}
+  document.documentElement.lang = locale;
+  paintChrome();
+  if (typeof render === "function") render(true);
+}
+function paintChrome() {
+  document.querySelectorAll("[data-key]").forEach((el) => {
+    const label = tr(el.dataset.key);
+    const count = el.querySelector("#qcount");
+    el.childNodes.forEach((n) => { if (n.nodeType === 3) n.textContent = label; });
+    if (!el.childNodes.length || ![...el.childNodes].some((n) => n.nodeType === 3)) el.prepend(document.createTextNode(label));
+    if (count) el.append(count);
+  });
+  document.querySelectorAll("#lang button").forEach((b) => { b.style.fontWeight = b.dataset.lang === locale ? "700" : "400"; });
+}
+window.setUiLocale = setUiLocale;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const time = (t) => (t ? new Date(t).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "");
-const badge = (s) => `<span class="badge s-${esc(s)}">${esc(s)}</span>`;
+const time = (t) => (t ? new Date(t).toLocaleString(locale === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "");
+const badge = (s) => {
+  const name = tr("status." + s);
+  return `<span class="badge s-${esc(s)}">${esc(name === "status." + s ? s : name)}</span>`;
+};
 const json = (v) => `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`;
 const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",").map((x) => x.trim()).filter(Boolean));
 
@@ -99,8 +129,8 @@ function stepChips(steps) {
   return `<span class="chips">${(steps || []).map((s) => `<span class="chip s-${s.status}" title="${esc(s.key)}: ${s.status}"></span>`).join("")}</span>`;
 }
 function runsTable(runs) {
-  if (!runs.length) return `<div class="empty">No runs yet</div>`;
-  return `<table><tr><th>#</th><th>Run</th><th>Workflow</th><th>Status</th><th>Steps</th><th>Questions</th><th>Updated</th></tr>
+  if (!runs.length) return `<div class="empty">${esc(tr("runs.emptyTitle"))}</div>`;
+  return `<table><tr><th>#</th><th>${esc(tr("ins.col.run"))}</th><th>${esc(tr("common.workflow"))}</th><th>${esc(tr("wi.status"))}</th><th>${esc(tr("wfe.type"))}</th><th>${esc(tr("nav.questions"))}</th><th>${esc(tr("common.created"))}</th></tr>
     ${runs
       .map(
         (r) => `<tr class="click" onclick="location.hash='/runs/${r.id}'"><td>${r.id}</td><td>${esc(r.title)}<div class="muted small mono">${esc(r.branch)}</div></td>
@@ -117,45 +147,45 @@ const VIEWS = {
   async "work-items"(id) {
     if (id) return workItemDetail(Number(id));
     const [items, status, inbox] = await Promise.all([api("/api/work-items"), api("/api/work/status"), api("/api/work/inbox")]);
-    const exp = status.expiresAt ? ` · hết hạn ${new Date(status.expiresAt).toLocaleString("vi-VN")}` : "";
+    const exp = status.expiresAt ? ` · ${esc(tr("ig.expires", { time: new Date(status.expiresAt).toLocaleString(locale === "vi" ? "vi-VN" : "en-GB") }))}` : "";
     return `
-      <h2>Work Items</h2><div class="muted">Engineering requests. Importing never executes anything — choose a workflow explicitly.</div>
+      <h2>${esc(tr("nav.workItems"))}</h2><div class="muted">${esc(tr("wi.subtitle"))}</div>
       <div class="grid3" style="margin-top:14px">
-        <div class="card"><h4>New manual request</h4>
-          <input placeholder="Title" ${keep("wi-title")} value="${esc(drafts["wi-title"] || "")}">
-          <div class="row"><input placeholder="Project (e.g. OMS)" ${keep("wi-project")} value="${esc(drafts["wi-project"] || "")}"></div>
-          <label>Description</label><textarea rows="3" ${keep("wi-desc")}>${esc(drafts["wi-desc"] || "")}</textarea>
-          <div class="row"><button onclick="A.createWorkItem()">Create</button></div></div>
-        <div class="card"><h4>Import</h4>
-          <label>Paste Hasaki task JSON or Jira issue JSON</label><textarea class="code" rows="4" ${keep("wi-json")}>${esc(drafts["wi-json"] || "")}</textarea>
-          <div class="row"><button class="ghost" onclick="A.importJson('hasaki_work')">Import Hasaki</button><button class="ghost" onclick="A.importJson('jira')">Import Jira</button></div>
-          ${META?.jiraEnabled ? `<div class="row"><input placeholder="JIRA-123" ${keep("jira-key")}><button class="ghost" onclick="A.importJiraKey()">Fetch</button></div>` : `<div class="muted small" style="margin-top:6px">Jira API not configured (jira.baseUrl, JIRA_USER, JIRA_TOKEN) — paste JSON instead.</div>`}
+        <div class="card"><h4>${esc(tr("wi.createTitle"))}</h4>
+          <input placeholder="${esc(tr("wi.titlePh"))}" ${keep("wi-title")} value="${esc(drafts["wi-title"] || "")}">
+          <div class="row"><input placeholder="${esc(tr("wi.projectPh"))}" ${keep("wi-project")} value="${esc(drafts["wi-project"] || "")}"></div>
+          <label>${esc(tr("wi.description"))}</label><textarea rows="3" ${keep("wi-desc")}>${esc(drafts["wi-desc"] || "")}</textarea>
+          <div class="row"><button onclick="A.createWorkItem()">${esc(tr("wi.create"))}</button></div></div>
+        <div class="card"><h4>${esc(tr("kn.import"))}</h4>
+          <label>${esc(tr("wi.jsonPh"))}</label><textarea class="code" rows="4" ${keep("wi-json")}>${esc(drafts["wi-json"] || "")}</textarea>
+          <div class="row"><button class="ghost" onclick="A.importJson('hasaki_work')">${esc(tr("wi.importHasaki"))}</button><button class="ghost" onclick="A.importJson('jira')">${esc(tr("wi.importJira"))}</button></div>
+          ${META?.jiraEnabled ? `<div class="row"><input placeholder="JIRA-123" ${keep("jira-key")}><button class="ghost" onclick="A.importJiraKey()">${esc(tr("wi.fetch"))}</button></div>` : `<div class="muted small" style="margin-top:6px">${esc(tr("wi.jiraOff"))}</div>`}
         </div>
-        <div class="card"><h4>Hasaki Work ${status.loggedIn ? badge("COMPLETED").replace("COMPLETED", "đã đăng nhập") : badge("FAILED").replace("FAILED", "chưa đăng nhập")}</h4>
+        <div class="card"><h4>${esc(tr("wi.src.hasaki_work"))} ${status.loggedIn ? badge("COMPLETED").replace(/>[^<]*</, `>${esc(tr("wi.loggedIn"))}<`) : badge("FAILED").replace(/>[^<]*</, `>${esc(tr("wi.loggedOut"))}<`)}</h4>
           <div class="muted small">${exp}</div>
           ${
             status.loggedIn
-              ? `<div class="row"><button onclick="A.refreshInbox(this)">Lấy task</button></div>`
-              : `<div class="row">${status.windowOpen ? `<span class="muted">Đăng nhập trong cửa sổ Chromium…</span>` : `<button onclick="A.openLogin()">Mở trình duyệt đăng nhập</button>`}</div>
-                 <div class="row"><input placeholder="hoặc dán token (Bearer eyJ…)" ${keep("tok")}><button onclick="A.saveToken()">Lưu</button></div>`
+              ? `<div class="row"><button onclick="A.refreshInbox(this)">${esc(tr("wi.fetchTasks"))}</button></div>`
+              : `<div class="row">${status.windowOpen ? `<span class="muted">${esc(tr("wi.loginWindow"))}</span>` : `<button onclick="A.openLogin()">${esc(tr("wi.openLogin"))}</button>`}</div>
+                 <div class="row"><input placeholder="${esc(tr("wi.tokenPh"))}" ${keep("tok")}><button onclick="A.saveToken()">${esc(tr("ig.save"))}</button></div>`
           }
-          ${status.loggedIn ? `<div class="row"><input placeholder="Task id (số trong URL, vd 14408473)" ${keep("hw-id")} value="${esc(drafts["hw-id"] || "")}"><button class="ghost" onclick="A.importHasakiId()">Import</button></div>` : ""}
+          ${status.loggedIn ? `<div class="row"><input placeholder="${esc(tr("wi.taskId"))}" ${keep("hw-id")} value="${esc(drafts["hw-id"] || "")}"><button class="ghost" onclick="A.importHasakiId()">${esc(tr("kn.import"))}</button></div>` : ""}
           ${inbox.length ? `<div style="max-height:220px;overflow:auto;margin-top:8px">${inbox
             .map(
               (r) => `<div class="row small" style="margin:4px 0"><div style="flex:1"><span class="mono muted">${esc(r.code)}</span> ${esc(r.name)}</div>
-              ${r.work_item_id ? `<a href="#/work-items/${r.work_item_id}">${r.run_status ? badge(r.run_status) : "imported"}</a>` : `<button class="sm ghost" onclick="A.pick(${r.work_id}, this)">Import</button>`}</div>`,
+              ${r.work_item_id ? `<a href="#/work-items/${r.work_item_id}">${r.run_status ? badge(r.run_status) : esc(tr("wi.imported"))}</a>` : `<button class="sm ghost" onclick="A.pick(${r.work_id}, this)">${esc(tr("kn.import"))}</button>`}</div>`,
             )
             .join("")}</div>` : ""}
         </div>
       </div>
-      <h3>All work items</h3>
-      ${items.length ? `<table><tr><th>Code</th><th>Title</th><th>Source</th><th>Project</th><th>Status</th><th>Runs</th><th>Last run</th><th>Updated</th></tr>
+      <h3>${esc(tr("wi.all"))}</h3>
+      ${items.length ? `<table><tr><th>Code</th><th>${esc(tr("wi.fieldTitle"))}</th><th>${esc(tr("wi.source"))}</th><th>${esc(tr("common.project"))}</th><th>${esc(tr("wi.status"))}</th><th>Runs</th><th>${esc(tr("runs.col.run"))}</th><th>${esc(tr("runs.col.updated"))}</th></tr>
         ${items
           .map(
             (w) => `<tr class="click" onclick="location.hash='/work-items/${w.id}'"><td class="mono">${esc(w.code)}</td><td>${esc(w.title)}</td><td>${esc(w.source)}</td>
           <td>${esc(w.project)}</td><td>${badge(w.status)}</td><td>${w.run_count}</td><td>${w.last_run_status ? badge(w.last_run_status) : ""}</td><td class="muted">${time(w.updated_at)}</td></tr>`,
           )
-          .join("")}</table>` : `<div class="empty">No work items</div>`}`;
+          .join("")}</table>` : `<div class="empty">${esc(tr("wi.empty"))}</div>`}`;
   },
 
   // ------------------------------------------------ Runs
@@ -163,13 +193,13 @@ const VIEWS = {
     if (id) return runDetail(Number(id));
     const [runs, workflows] = await Promise.all([api("/api/runs"), api("/api/workflows")]);
     return `
-      <h2>Workflow Runs</h2>
-      <div class="card"><h4>Start a workflow without a work item</h4>
-        <div class="grid3"><div><label>Workflow</label>${workflowSelect("nr-wf", workflows, "code-review")}</div>
+      <h2>${esc(tr("runs.title"))}</h2>
+      <div class="card"><h4>${esc(tr("runs.openRun"))}</h4>
+        <div class="grid3"><div><label>${esc(tr("common.workflow"))}</label>${workflowSelect("nr-wf", workflows, "code-review")}</div>
         <div><label>Repositories (comma separated)</label><input ${keep("nr-repos")} value="${esc(drafts["nr-repos"] || "")}" placeholder="oms-api"></div>
         <div><label>Title</label><input ${keep("nr-title")} value="${esc(drafts["nr-title"] || "")}"></div></div>
         <label>Inputs (JSON, e.g. {"branch":"TASK-1","focus":"refund flow","project":"OMS"})</label><textarea class="code" rows="2" ${keep("nr-inputs")}>${esc(drafts["nr-inputs"] || "{}")}</textarea>
-        <div class="row"><button onclick="A.newRun(true)">Start</button><button class="ghost" onclick="A.newRun(false)">Create (configure first)</button></div></div>
+        <div class="row"><button onclick="A.newRun(true)">${esc(tr("rv.start"))}</button><button class="ghost" onclick="A.newRun(false)">${esc(tr("wfe.createPending"))}</button></div></div>
       ${runsTable(runs)}`;
   },
 
@@ -179,24 +209,24 @@ const VIEWS = {
     const byRun = {};
     for (const q of open) (byRun[q.run_id] ??= []).push(q);
     return `
-      <h2>Questions Inbox</h2><div class="muted">Questions raised by workflow steps. Answering resumes the blocked step from its checkpoint.</div>
+      <h2>${esc(tr("qx.title"))}</h2><div class="muted">${esc(tr("qx.subtitle"))}</div>
       ${
         open.length
           ? Object.entries(byRun)
               .map(
                 ([runId, qs]) => `<div class="card"><div class="row" style="margin:0"><b><a href="#/runs/${runId}">Run #${runId}</a></b> ${esc(qs[0].run_title)} ${badge(qs[0].run_status)}</div>
               ${qs.map(questionForm).join("")}
-              <div class="row"><button onclick="A.answer([${qs.map((q) => q.id).join(",")}])">Send answers & resume</button></div></div>`,
+              <div class="row"><button onclick="A.answer([${qs.map((q) => q.id).join(",")}])">${esc(tr("si.sendContinue"))}</button></div></div>`,
               )
               .join("")
-          : `<div class="empty">No open questions 🎉</div>`
+          : `<div class="empty">${esc(tr("qx.emptyTitle"))}</div>`
       }
-      <h3>Answer history</h3>
+      <h3>${esc(tr("qx.history"))}</h3>
       ${history.length ? `<table><tr><th>Run</th><th>Step</th><th>Question</th><th>Answer</th><th>Step now</th><th>When</th></tr>${history
         .map(
           (q) => `<tr><td><a href="#/runs/${q.run_id}">#${q.run_id}</a></td><td>${esc(q.step_name)}</td><td>${esc(q.question)}</td><td>${esc(q.answer)}</td><td>${badge(q.step_status)}</td><td class="muted">${time(q.answered_at)}</td></tr>`,
         )
-        .join("")}</table>` : `<div class="empty">Nothing answered yet</div>`}`;
+        .join("")}</table>` : `<div class="empty">${esc(tr("qx.emptyBody"))}</div>`}`;
   },
 
   // ------------------------------------------------ Workflow library
@@ -209,7 +239,7 @@ const VIEWS = {
       2,
     );
     return `
-      <h2>Workflow Library</h2><div class="muted">Reusable, versioned definitions. Runs are pinned to the version they started with.</div>
+      <h2>${esc(tr("wfs.title"))}</h2><div class="muted">${esc(tr("wfs.subtitle"))}</div>
       <table style="margin-top:12px"><tr><th>Key</th><th>Name</th><th>Latest</th><th>Runs</th><th></th><th>Updated</th></tr>
       ${wfs
         .map(
@@ -217,7 +247,7 @@ const VIEWS = {
         <td>v${w.latest_version}${w.has_draft ? ' <span class="badge s-WAITING">draft</span>' : ""}</td><td>${w.run_count}</td><td>${w.is_template ? '<span class="badge s-PENDING">template</span>' : ""}</td><td class="muted">${time(w.updated_at)}</td></tr>`,
         )
         .join("")}</table>
-      <div class="card" style="margin-top:14px"><h4>New workflow</h4>
+      <div class="card" style="margin-top:14px"><h4>${esc(tr("wfs.new"))}</h4>
         <div class="row"><input placeholder="key (lowercase-with-dashes)" ${keep("wf-key")} value="${esc(drafts["wf-key"] || "")}"></div>
         <label>Definition (JSON). Step types: ${esc((META?.stepTypes || []).join(", "))}</label>
         <textarea class="code" rows="12" ${keep("wf-spec")}>${esc(drafts["wf-spec"] || sample)}</textarea>
@@ -231,7 +261,7 @@ const VIEWS = {
     const cats = META?.knowledgeCategories || [];
     const scopes = META?.knowledgeScopes || [];
     return `
-      <h2>Knowledge</h2><div class="muted">Business rules, architecture guidelines, standards, security policies and agent skills. Resolved per step by scope precedence: ${esc(scopes.join(" < "))}.</div>
+      <h2>${esc(tr("kn.title"))}</h2><div class="muted">${esc(tr("kn.subtitle"))}</div>
       <table style="margin-top:12px"><tr><th>Key</th><th>Title</th><th>Category</th><th>Scope</th><th>Conflict key</th><th>Version</th><th>Enabled</th></tr>
       ${items
         .map(
@@ -241,7 +271,7 @@ const VIEWS = {
         )
         .join("")}</table>
       <div class="grid2" style="margin-top:14px">
-        <div class="card"><h4>New knowledge item</h4>
+        <div class="card"><h4>${esc(tr("kn.newTitle"))}</h4>
           <div class="grid2"><div><label>Key</label><input ${keep("k-key")} value="${esc(drafts["k-key"] || "")}"></div><div><label>Title</label><input ${keep("k-title")} value="${esc(drafts["k-title"] || "")}"></div>
           <div><label>Category</label><select ${keep("k-cat")}>${cats.map((c) => `<option ${drafts["k-cat"] === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
           <div><label>Scope</label><select ${keep("k-scope")}>${scopes.map((c) => `<option ${drafts["k-scope"] === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
@@ -265,7 +295,7 @@ const VIEWS = {
     const repos = await api("/api/repositories");
     const r = name ? repos.find((x) => x.name === name) : null;
     return `
-      <h2>Repositories</h2><div class="muted">Registry used for discovery and the deterministic allowed set. Agents never modify repositories outside a run's allowed set.</div>
+      <h2>${esc(tr("repo.title"))}</h2><div class="muted">${esc(tr("repo.subtitle"))}</div>
       <table style="margin-top:12px"><tr><th>Name</th><th>Projects</th><th>Services</th><th>Tags</th><th>Allowed actions</th><th>Enabled</th><th>Description</th></tr>
       ${repos
         .map(
@@ -286,7 +316,7 @@ const VIEWS = {
           <label>Description</label><textarea id="r-desc" rows="2">${esc(r?.description || "")}</textarea>
           <label>Architecture notes</label><textarea id="r-arch" rows="2">${esc(r?.architecture || "")}</textarea>
           <div class="row"><button onclick="A.saveRepo()">Save</button></div></div>
-        <div class="card"><h4>Ranking preview</h4>
+        <div class="card"><h4>${esc(tr("repo.rankTitle"))}</h4>
           <div class="row"><input placeholder="request text" ${keep("rk-text")} value="${esc(drafts["rk-text"] || "")}"><input placeholder="project" ${keep("rk-proj")} value="${esc(drafts["rk-proj"] || "")}" style="max-width:120px"><button class="ghost" onclick="A.rank()">Rank</button></div>
           <div id="rank"></div></div>
       </div>`;
@@ -303,7 +333,7 @@ async function workItemDetail(id) {
     <h2>${esc(w.title)}</h2>
     <div class="muted"><span class="mono">${esc(w.code)}</span> · ${esc(w.source)} · ${esc(w.project || "no project")} ${badge(w.status)}</div>
     <div class="grid2" style="margin-top:14px">
-      <div class="card"><h4>Request</h4><div style="white-space:pre-wrap">${esc(w.description || "(no description)")}</div>
+      <div class="card"><h4>${esc(tr("wi.request"))}</h4><div style="white-space:pre-wrap">${esc(w.description || tr("wi.noDesc"))}</div>
         ${w.payload && Object.keys(w.payload).length ? `<details data-k="payload"><summary>raw payload</summary>${json(w.payload)}</details>` : ""}</div>
       <div class="card"><h4>Actions</h4>
         <label>Workflow</label>${workflowSelect("wi-wf", workflows, "feature-implementation")}
@@ -316,8 +346,8 @@ async function workItemDetail(id) {
           <select style="width:auto" onchange="A.setStatus(${w.id}, this.value)">${["open", "in_progress", "done", "archived"].map((s) => `<option ${s === w.status ? "selected" : ""}>${s}</option>`).join("")}</select></div>
       </div>
     </div>
-    <h3>Execution history</h3>${runsTable(w.runs)}
-    ${w.pull_requests.length ? `<h3>Pull requests</h3>${prTable(w.pull_requests)}` : ""}
+    <h3>${esc(tr("wi.history"))}</h3>${runsTable(w.runs)}
+    ${w.pull_requests.length ? `<h3>${esc(tr("common.pullRequests"))}</h3>${prTable(w.pull_requests)}` : ""}
     ${
       legacy && (legacy.questions.length || legacy.events.length)
         ? `<h3>Legacy history (before workflows)</h3><div class="card">
@@ -520,10 +550,10 @@ async function runDetail(id) {
         </div>`;
       }))).join("")}
     <div id="modal"></div>
-    ${r.pull_requests.length ? `<h3>Pull requests</h3>${prTable(r.pull_requests)}` : ""}
-    ${active && (r.graph.feedback_step || r.steps.some((s) => s.type === "coding_agent")) ? `<h3>Feedback for the agent (re-runs the feedback step; tests and PR follow)</h3>
+    ${r.pull_requests.length ? `<h3>${esc(tr("common.pullRequests"))}</h3>${prTable(r.pull_requests)}` : ""}
+    ${active && (r.graph.feedback_step || r.steps.some((s) => s.type === "coding_agent")) ? `<h3>${esc(tr("rv.feedbackTitle"))}</h3>
       <textarea rows="3" ${keep("fb")}>${esc(drafts.fb || "")}</textarea><div class="row"><button onclick="A.feedback(${r.id})">Send feedback</button></div>` : ""}
-    <h3>Timeline</h3>
+    <h3>${esc(tr("common.timeline"))}</h3>
     ${events
       .slice()
       .reverse()
@@ -542,16 +572,16 @@ async function workflowDetail(key) {
     <h2>${esc(w.name)}</h2><div class="muted"><span class="mono">${esc(w.key)}</span> · latest v${w.latest_version}${w.draft_spec ? ' · <span class="badge s-WAITING">unpublished draft</span>' : ""}</div>
     <div class="muted">${esc(w.description)}</div>
     ${spec ? `<div class="graph">${spec.steps.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}<span class="node" title="${esc(s.type)} · after ${esc((s.depends_on || []).join(", ") || "-")}">${esc(s.name || s.key)} <span class="muted small">${esc(s.type)}</span></span>`).join("")}</div>` : ""}
-    <div class="card"><h4>Steps</h4><table><tr><th>Key</th><th>Type</th><th>Depends on</th><th>Options</th></tr>${(spec?.steps || [])
-      .map((s) => `<tr><td class="mono">${esc(s.key)}</td><td>${esc(s.type)}</td><td>${esc((s.depends_on || []).join(", "))}</td><td class="small">${[s.requires_approval ? "approval gate" : "", s.max_attempts > 1 ? `max ${s.max_attempts} attempts` : "", s.run_if ? "run_if" : "", (s.config?.skills || []).length ? "skills: " + s.config.skills.join(", ") : ""].filter(Boolean).join(" · ")}</td></tr>`)
+    <div class="card"><h4>${esc(tr("wfe.addStep"))}</h4><table><tr><th>${esc(tr("wfe.key"))}</th><th>${esc(tr("wfe.type"))}</th><th>${esc(tr("wfe.depends"))}</th><th>${esc(tr("wfe.execution"))}</th></tr>${(spec?.steps || [])
+      .map((s) => `<tr><td class="mono">${esc(s.key)}</td><td>${esc(s.type)}</td><td>${esc((s.depends_on || []).join(", "))}</td><td class="small">${[s.requires_approval ? tr("si.gate") : "", s.max_attempts > 1 ? tr("si.maxAttempts") + " " + s.max_attempts : "", s.run_if ? "run_if" : "", (s.config?.skills || []).length ? "skills: " + s.config.skills.join(", ") : ""].filter(Boolean).join(" · ")}</td></tr>`)
       .join("")}</table></div>
     <div class="card"><h4>Edit definition</h4><div class="muted small">Saving creates a draft; running runs are unaffected. Publishing freezes it as v${w.latest_version + 1}.</div>
       <textarea class="code" rows="22" ${keep(id)}>${esc(drafts[id] ?? JSON.stringify(spec, null, 2))}</textarea>
       <div class="row"><button class="ghost" onclick="A.validateSpec('${id}')">Validate</button><button class="ghost" onclick="A.saveDraft('${key}')">Save draft</button>
         <input placeholder="change note" ${keep("note-" + key)} style="max-width:260px"><button onclick="A.publish('${key}')">Publish new version</button>
         <button class="ghost" onclick="location.hash='/runs'; drafts['nr-wf']='${key}'">Start a run…</button></div></div>
-    <h3>Versions</h3><table><tr><th>Version</th><th>Published</th><th>Note</th><th>Hash</th></tr>${w.versions
-      .map((v) => `<tr><td>v${v.version}</td><td>${time(v.published_at)}</td><td>${esc(v.change_note)}</td><td class="mono small">${esc(v.spec_hash.slice(0, 12))}</td></tr>`)
+    <h3>${esc(tr("wfe.versions"))}</h3><table><tr><th>${esc(tr("wfe.versions"))}</th><th>${esc(tr("wfe.publishedBadge"))}</th><th>${esc(tr("wfe.changeNoteAria"))}</th><th>Hash</th></tr>${w.versions
+      .map((v) => "<tr><td>v" + v.version + "</td><td>" + time(v.published_at) + "</td><td>" + esc(v.change_note) + "</td><td class=\"mono small\">" + esc(v.spec_hash.slice(0, 12)) + "</td></tr>")
       .join("")}</table>`;
 }
 
@@ -570,8 +600,8 @@ async function knowledgeDetail(key) {
       <div class="grid2"><div><label>Applicability</label><textarea id="ke-app" class="code" rows="3">${esc(JSON.stringify(cur?.applicability || {}, null, 2))}</textarea></div>
       <div><label>Metadata</label><textarea id="ke-meta" class="code" rows="3">${esc(JSON.stringify(cur?.metadata || {}, null, 2))}</textarea></div></div>
       <div class="row"><input id="ke-note" placeholder="change note"><button onclick="A.updateKnowledge('${k.key}')">Save</button></div></div>
-    <h3>Versions</h3>${k.versions.map((v) => `<details data-k="kv-${v.version}"><summary>v${v.version} · ${time(v.created_at)} · ${esc(v.change_note)}</summary><div class="card"><div style="white-space:pre-wrap">${esc(v.content)}</div>${json({ applicability: v.applicability, metadata: v.metadata })}</div></details>`).join("")}
-    <h3>Audit</h3>${k.audit.map((a) => `<div class="small"><span class="muted">${time(a.created_at)}</span> <b>${esc(a.action)}</b> <span class="mono">${esc(JSON.stringify(a.detail))}</span></div>`).join("")}`;
+    <h3>${esc(tr("kn.versions"))}</h3>${k.versions.map((v) => `<details data-k="kv-${v.version}"><summary>v${v.version} · ${time(v.created_at)} · ${esc(v.change_note)}</summary><div class="card"><div style="white-space:pre-wrap">${esc(v.content)}</div>${json({ applicability: v.applicability, metadata: v.metadata })}</div></details>`).join("")}
+    <h3>${esc(tr("kn.audit"))}</h3>${k.audit.map((a) => `<div class="small"><span class="muted">${time(a.created_at)}</span> <b>${esc(a.action)}</b> <span class="mono">${esc(JSON.stringify(a.detail))}</span></div>`).join("")}`;
 }
 
 // ---------------------------------------------------------------- actions
@@ -641,7 +671,7 @@ window.A = {
       location.hash = "/runs/" + r.id;
     }),
   runAction: (id, action) => {
-    if (action === "cancel" && !confirm("Cancel this run? Running steps are stopped.")) return;
+    if (action === "cancel" && !confirm(tr("rv.cancelConfirm"))) return;
     return act(() => api(`/api/runs/${id}/${action}`, {}));
   },
   setRepos: (id) => act(() => api(`/api/runs/${id}/repositories`, { repositories: list(val("sel-repos")) }), "Repositories updated"),
@@ -652,7 +682,7 @@ window.A = {
       if (fb === null) return;
       body = fb ? { feedback: fb } : {};
     }
-    if (action === "skip" && !confirm("Skip this step?")) return;
+    if (action === "skip" && !confirm(tr("si.skipAsk"))) return;
     return act(() => api(`/api/runs/${id}/steps/${key}/${action}`, body));
   },
   convAttempt: (key, id) => {
@@ -798,6 +828,10 @@ window.A = {
 };
 
 (async () => {
+  try { locale = localStorage.getItem(UI_KEY) === "en" ? "en" : "vi"; } catch {}
+  document.documentElement.lang = locale;
+  DICT = await api("/api/ui-messages").catch(() => ({ vi: {}, en: {} }));
+  paintChrome();
   META = await api("/api/meta").catch(() => null);
   await render(true);
   setInterval(() => render(false), 3000);

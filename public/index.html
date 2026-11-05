@@ -485,12 +485,16 @@
 <body>
   <header>
     <b>⚙︎ Workflow Platform</b>
-    <a href="#/work-items" data-nav="work-items">Work Items</a>
-    <a href="#/runs" data-nav="runs">Runs</a>
-    <a href="#/questions" data-nav="questions">Questions<span id="qcount"></span></a>
-    <a href="#/workflows" data-nav="workflows">Workflows</a>
-    <a href="#/knowledge" data-nav="knowledge">Knowledge</a>
-    <a href="#/repositories" data-nav="repositories">Repositories</a>
+    <a href="#/work-items" data-nav="work-items" data-key="nav.workItems">Work Items</a>
+    <a href="#/runs" data-nav="runs" data-key="nav.runs">Runs</a>
+    <a href="#/questions" data-nav="questions" data-key="nav.questions">Questions<span id="qcount"></span></a>
+    <a href="#/workflows" data-nav="workflows" data-key="nav.workflows">Workflows</a>
+    <a href="#/knowledge" data-nav="knowledge" data-key="nav.knowledge">Knowledge</a>
+    <a href="#/repositories" data-nav="repositories" data-key="nav.repositories">Repositories</a>
+    <span id="lang" style="margin-left:auto;display:inline-flex;gap:4px;padding:8px 0">
+      <button type="button" data-lang="vi" onclick="setUiLocale('vi')">VI</button>
+      <button type="button" data-lang="en" onclick="setUiLocale('en')">EN</button>
+    </span>
   </header>
   <main id="view">
     <div class="empty">Loading…</div>

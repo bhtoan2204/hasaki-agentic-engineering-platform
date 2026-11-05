@@ -98,23 +98,23 @@ export function assess(g: { level: string; signature: string; sample: string; to
   const reasons: string[] = [];
   const text = `${g.signature}\n${g.sample}`;
   let s = g.today >= 1000 ? 2 : 1;
-  if (g.today >= 1000) reasons.push(`nhiều (${g.today} lần)`);
+  if (g.today >= 1000) reasons.push(`many|${g.today}`);
   if (/^(FATAL|PANIC|DPANIC|CRITICAL)$/.test(g.level) || CRASH.test(text)) {
     s = 4;
-    reasons.push("panic / fatal");
+    reasons.push("panic");
   }
   let changed = false;
   if (g.yesterday === 0) {
-    reasons.push("mới: hôm qua cùng khung giờ không có");
+    reasons.push("new");
     s = Math.max(s, g.today >= 5 ? 3 : 2);
     changed = true;
   } else if (g.today >= 50 && g.today >= 3 * g.yesterday) {
-    reasons.push(`tăng ×${Math.round(g.today / g.yesterday)} so với hôm qua (${g.yesterday})`);
+    reasons.push(`up|${Math.round(g.today / g.yesterday)}|${g.yesterday}`);
     s = Math.max(s, 3);
     changed = true;
-  } else if (g.today * 2 <= g.yesterday) reasons.push(`giảm (hôm qua ${g.yesterday})`);
+  } else if (g.today * 2 <= g.yesterday) reasons.push(`down|${g.yesterday}`);
   if (MONEY.test(text)) {
-    reasons.push("liên quan tiền / callback / chữ ký");
+    reasons.push("money");
     // new/spiking money-related errors go up one level; critical only with real volume
     if (changed && g.today >= 5) s = Math.max(s, Math.min(g.today >= 50 ? 4 : 3, s + 1));
   }

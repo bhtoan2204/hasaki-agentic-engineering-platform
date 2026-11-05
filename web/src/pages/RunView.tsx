@@ -115,15 +115,15 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 </span>
               </h1>
               <div className="rv-meta">
-                <span title="Workflow"><Workflow size={13} /><a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a> <span className="muted">v{run.definition_version}</span></span>
-                <span title="Branch"><GitBranch size={13} /><span className="mono">{run.branch}</span></span>
+                <span title={t("common.workflow")}><Workflow size={13} /><a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a> <span className="muted">v{run.definition_version}</span></span>
+                <span title={t("common.branch")}><GitBranch size={13} /><span className="mono">{run.branch}</span></span>
                 {Object.entries((run.inputs?.branches ?? {}) as Record<string, string>).map(([repo, b]) => (
                   <span key={repo} className="pill chip-brand" title={t("rv.continueTip", { source: run.inputs?.branches_source ? t("rv.from", { source: run.inputs.branches_source }) : "" })}>
                     <GitBranch size={12} /> {repo === "*" ? t("rv.allRepos") : repo} → <span className="mono">{b}</span> ({t("rv.continueOn")})
                   </span>
                 ))}
-                {run.work_item && <span title="Work item"><Ticket size={13} /><a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a></span>}
-                {run.created_at && <span title="Created"><CalendarClock size={13} />{time(run.created_at)}</span>}
+                {run.work_item && <span title={t("common.workItem")}><Ticket size={13} /><a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a></span>}
+                {run.created_at && <span title={t("common.created")}><CalendarClock size={13} />{time(run.created_at)}</span>}
               </div>
             </div>
           </div>
@@ -224,7 +224,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <div className="rv-note"><Info size={14} />{t("rv.clickNode")}</div>
               {run.pull_requests.length > 0 && (
                 <div className="rv-sec">
-                  <div className="rv-sec-title"><GitPullRequest size={14} /> Pull requests</div>
+                  <div className="rv-sec-title"><GitPullRequest size={14} /> {t("common.pullRequests")}</div>
                   {run.pull_requests.map((p: any) => (
                     <div key={p.id} className="rv-card soft" style={{ padding: "9px 12px", margin: "6px 0" }}>
                       <div className="small"><b>{p.repo}</b> · <a href={p.url} target="_blank" rel="noopener">{p.title}</a></div>
@@ -360,8 +360,8 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
       </div>
       <div className="rv-kv">
         <span>Claude</span><span>{t("rv.claudeLine", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns, cost: totals.cost_usd.toFixed(3) })}</span>
-        <span>Tokens</span><span>{t("rv.tokens", { inn: num(totals.input_tokens), out: num(totals.output_tokens), cache: num(totals.cache_read_tokens) })}</span>
-        <span>Tools</span><span>{t("rv.tools", { calls: totals.tool_calls, tool: fmtS(totals.tool_ms), command: fmtS(totals.command_ms), integration: totals.integration_calls, skills: totals.skills_loaded })}</span>
+        <span>{t("common.tokens")}</span><span>{t("rv.tokens", { inn: num(totals.input_tokens), out: num(totals.output_tokens), cache: num(totals.cache_read_tokens) })}</span>
+        <span>{t("common.tools")}</span><span>{t("rv.tools", { calls: totals.tool_calls, tool: fmtS(totals.tool_ms), command: fmtS(totals.command_ms), integration: totals.integration_calls, skills: totals.skills_loaded })}</span>
         <span>{t("rv.retries")}</span><span>{data.bottleneck ? t("rv.retrySlow", { retries: totals.retries, failed: totals.failed, step: data.bottleneck }) : t("rv.retryLine", { retries: totals.retries, failed: totals.failed })}</span>
       </div>
       <div style={{ marginTop: 12 }}>
@@ -411,7 +411,7 @@ function RunTimeline({ runId, tick }: { runId: number; tick: number }) {
   if (!data) return null;
   return (
     <div className="rv-sec">
-      <div className="rv-sec-title"><Activity size={14} /> Timeline</div>
+      <div className="rv-sec-title"><Activity size={14} /> {t("common.timeline")}</div>
       <div className="rv-tl">
         {data.slice().reverse().slice(0, 300).map((e) => (
           <div key={e.id} className="rv-tl-row">
