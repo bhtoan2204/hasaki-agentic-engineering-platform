@@ -206,7 +206,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
               <Badge s={step.status} label />
               <span className="mono">{step.key}</span>
               <span>{step.type}</span>
-              <span>gen {step.generation}</span>
+              <span>{t("cl.gen")} {step.generation}</span>
               <span>{attempt ? t("si.attemptN", { n: attempt.number }) : t("si.notRun")}{attempts.length > 1 ? ` / ${attempts.length}` : ""}</span>
             </div>
           </div>
@@ -227,7 +227,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
             {attempts.length > 1 && (
               <select aria-label={t("si.pickAttempt")} value={attempt?.id} onChange={(e) => setAttemptId(Number(e.target.value))}>
                 {attempts.map((a: any) => (
-                  <option key={a.id} value={a.id}>{t("si.attemptN", { n: a.number })} · gen {a.generation} · {a.status}{a.invalidated_at ? ` (${t("si.invalidated")})` : ""}</option>
+                  <option key={a.id} value={a.id}>{t("si.attemptN", { n: a.number })} · {t("cl.gen")} {a.generation} · {t("status." + a.status)}{a.invalidated_at ? ` (${t("si.invalidated")})` : ""}</option>
                 ))}
               </select>
             )}
@@ -331,7 +331,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
           <div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>#</th><th>Gen</th><th>{t("wi.status")}</th><th>{t("si.started")}</th><th>{t("si.finished")}</th><th>{t("si.worker")}</th><th>{t("common.error")}</th></tr></thead>
+                <thead><tr><th>#</th><th>{t("cl.gen")}</th><th>{t("wi.status")}</th><th>{t("si.started")}</th><th>{t("si.finished")}</th><th>{t("si.worker")}</th><th>{t("common.error")}</th></tr></thead>
                 <tbody>
                   {attempts.map((a: any) => (
                     <tr key={a.id} className="click" style={{ opacity: a.invalidated_at ? 0.6 : 1, background: a.id === attempt?.id ? "var(--sel)" : undefined }} onClick={() => (setAttemptId(a.id), setTab(isAgent ? "execution" : "output"))}>
@@ -627,7 +627,7 @@ function AttemptMetrics({ m }: { m: any }) {
         <div className="rv-mini"><span>{t("si.cost")}</span><b>${Number(m.cost_usd ?? 0).toFixed(4)}</b></div>
         <div className="rv-mini"><span>{t("si.turns")}</span><b>{m.turns ?? "—"}</b></div>
         <div className="rv-mini"><span>{t("si.duration")}</span><b>{Math.round((m.duration_ms ?? 0) / 1000)}s</b></div>
-        <div className="rv-mini"><span>Session</span><b>{m.sessions ?? "—"}</b></div>
+        <div className="rv-mini"><span>{t("si.session")}</span><b>{m.sessions ?? "—"}</b></div>
       </div>
       <div className="rv-kv">
         <span>{t("common.tokens")}</span><span>{t("si.tokenLine", { inn: m.tokens?.input, out: m.tokens?.output, read: m.tokens?.cache_read, write: m.tokens?.cache_creation })}</span>
@@ -652,7 +652,7 @@ function ReexecuteInfo({ rx, prev }: { rx: any; prev?: number }) {
         <span className="muted small">{rx.requested_by ? `${t("si.by", { name: rx.requested_by })} · ` : ""}{time(rx.at)}{prev ? ` · ${t("si.fromAttempt", { n: prev })}` : ""}</span>
       </div>
       {rx.instructions ? <div style={{ whiteSpace: "pre-wrap" }}>{rx.instructions}</div> : <div className="muted small">{t("si.noGuidance")}</div>}
-      {rx.skills?.length > 0 && <div className="small" style={{ marginTop: 6 }}>Skills: {rx.skills.map((s: any) => <span key={s.key} className="pill">{s.title ?? s.key} <span className="muted mono">v{s.version}</span></span>)}</div>}
+      {rx.skills?.length > 0 && <div className="small" style={{ marginTop: 6 }}>{t("kn.cat.agent_skill")}: {rx.skills.map((s: any) => <span key={s.key} className="pill">{s.title ?? s.key} <span className="muted mono">v{s.version}</span></span>)}</div>}
     </div>
   );
 }
@@ -681,7 +681,7 @@ function ReexecuteDialog({ run, step, onSubmit }: { run: any; step: any; onSubmi
       </div>
     );
   return (
-    <section className="rv-card" style={{ borderColor: "var(--brand-400)", boxShadow: "0 0 0 3px var(--focus), var(--shadow-2)" }} aria-label="Re-execute">
+    <section className="rv-card" style={{ borderColor: "var(--brand-400)", boxShadow: "0 0 0 3px var(--focus), var(--shadow-2)" }} aria-label={t("si.reexecuteWord")}>
       <div className="rv-card-head">
         <h4><RotateCcw size={16} /> {t("si.rerunTitle", { name: step.name })}</h4>
         <button className="quiet icon" aria-label={t("common.close")} onClick={() => setOpen(false)}><X size={16} /></button>

@@ -347,6 +347,13 @@ function Editor({ wfKey }: { wfKey: string }) {
             fitView
             fitViewOptions={{ padding: 0.25, maxZoom: 1, minZoom: 0.7, nodes: nodes.slice(0, 5).map((n: { id: string }) => ({ id: n.id })) }}
             minZoom={0.2}
+            ariaLabelConfig={{
+              "controls.ariaLabel": t("flow.controls"),
+              "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
+              "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
+              "controls.fitView.ariaLabel": t("flow.fit"),
+              "controls.interactive.ariaLabel": t("flow.interactive"),
+            }}
           >
             <Background gap={18} />
             <Controls />

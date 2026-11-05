@@ -467,6 +467,8 @@
       }
     }
 
+    #modal { max-width: 1280px; margin: 0 auto; padding: 0 28px 24px }
+    #modal:empty { display: none }
     .convo { max-height: 640px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 4px }
     .msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 13px }
     .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 4px }
@@ -487,7 +489,7 @@
     <b>⚙︎ Workflow Platform</b>
     <a href="#/work-items" data-nav="work-items" data-key="nav.workItems">Work Items</a>
     <a href="#/runs" data-nav="runs" data-key="nav.runs">Runs</a>
-    <a href="#/questions" data-nav="questions" data-key="nav.questions">Questions<span id="qcount"></span></a>
+    <a href="#/questions" data-nav="questions" data-key="nav.questions">Câu hỏi & duyệt<span id="qcount"></span></a>
     <a href="#/workflows" data-nav="workflows" data-key="nav.workflows">Workflows</a>
     <a href="#/knowledge" data-nav="knowledge" data-key="nav.knowledge">Knowledge</a>
     <a href="#/repositories" data-nav="repositories" data-key="nav.repositories">Repositories</a>
@@ -497,8 +499,9 @@
     </span>
   </header>
   <main id="view">
-    <div class="empty">Loading…</div>
+    <div class="empty" data-key="cl.loading">Đang tải…</div>
   </main>
+  <div id="modal"></div>
   <script src="/app.js"></script>
 </body>
 

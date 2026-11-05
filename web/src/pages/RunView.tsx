@@ -186,6 +186,13 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             // Long workflows: fit around the selected step (or the start) at a readable zoom instead of shrinking everything.
             fitViewOptions={{ padding: 0.25, maxZoom: 1, minZoom: 0.7, nodes: focusNodes(nodes.map((n) => n.id), stepKey) }}
             minZoom={0.2}
+            ariaLabelConfig={{
+              "controls.ariaLabel": t("flow.controls"),
+              "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
+              "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
+              "controls.fitView.ariaLabel": t("flow.fit"),
+              "controls.interactive.ariaLabel": t("flow.interactive"),
+            }}
           >
             <Background gap={18} />
             <Controls showInteractive={false} />
