@@ -23,6 +23,9 @@
     "connectionTimeoutMillis": 5000
   },
   "model": "",
+  "agent": {
+    "cursorBin": "agent"
+  },
   "maxConcurrent": 1,
   "maxTurns": 300,
   "organization": "hasaki",

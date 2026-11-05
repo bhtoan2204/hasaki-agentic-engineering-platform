@@ -1,6 +1,7 @@
 import type pg from "pg";
 import { config } from "../config.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
+import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
@@ -197,6 +198,8 @@ export interface StartRunInput {
   profile?: ProfileChoice;
   /** Language of summaries, questions and reports. Omitted → vi. Invalid values are rejected. */
   outputLocale?: "vi" | "en";
+  /** Agent implementation. Omitted → claude. Resolved once; retries keep the stored value. */
+  agentProvider?: AgentProvider | string;
 }
 
 export interface ResolvedRunGraph {
@@ -286,8 +289,10 @@ export async function previewRun(input: StartRunInput) {
 
 export async function startRun(input: StartRunInput) {
   let output_locale: OutputLocale;
+  let agent_provider: AgentProvider;
   try {
     output_locale = resolveOutputLocale(input.outputLocale);
+    agent_provider = resolveAgentProvider(input.agentProvider);
   } catch (e) {
     throw new EngineError((e as Error).message, 400);
   }
@@ -309,9 +314,9 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale],
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider],
     );
     const order = topoOrder(graph.steps);
     for (const s of graph.steps) {
@@ -327,7 +332,7 @@ export async function startRun(input: StartRunInput) {
       c,
       id,
       "system",
-      `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""} · profile ${r.decision.profile} (${r.decision.reasons.join("; ")})` +
+      `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""} · agent ${agent_provider} · profile ${r.decision.profile} (${r.decision.reasons.join("; ")})` +
         (r.changes.length ? ` · ${r.changes.length} graph change(s)` : "") +
         (r.reportAdded ? " · Task Result Report step added (ai_suggest.report)" : "") +
         (r.reusedRepositories ? ` · reused repositories ${selected.join(", ")}` : ""),
@@ -912,7 +917,7 @@ export async function getRun(runId: number, db: Db = pool) {
 export function listRuns(filter: { workItemId?: number; status?: string; limit?: number } = {}, db: Db = pool) {
   return q(
     db,
-    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.created_at, r.updated_at, r.finished_at,
+    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.agent_provider, r.created_at, r.updated_at, r.finished_at,
             v.version AS definition_version, w.code AS work_item_code,
             (SELECT count(*)::int FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'open') AS open_questions,
             (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps

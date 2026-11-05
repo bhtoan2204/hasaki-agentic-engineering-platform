@@ -5,17 +5,19 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { config } from "../config.ts";
 import { languagePolicy, outputLocale } from "./language.ts";
+import { agentProvider } from "./provider.ts";
+import { cursorAgentTurn, cursorCapabilities, cursorComplete } from "./cursor/run.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { taskDir } from "../git.ts";
-import { prepareWorkspace, workspaceKey, workspacesOf } from "../git/provider.ts";
+import { workspaceKey, workspacesOf } from "../git/provider.ts";
 import type { ExecutionContext, StepExecutor } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 import type { RankedRepository, RepositoryRow } from "../repos/service.ts";
 import { downloadAttachments } from "./attachments.ts";
 import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "./stepPrompt.ts";
 import { decide, toolsFor, SUBAGENT_PLATFORM_TOOLS, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
-import { scoreKnowledge } from "../context/plan.ts";
-import { callTool, capResult, describeTool, integrationTools, listTools } from "./toolRegistry.ts";
+import { integrationTools } from "./toolRegistry.ts";
+import { dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
 import { runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
@@ -28,8 +30,9 @@ export interface AgentMetrics {
   sessions: number;
   turns: number;
   duration_ms: number;
-  cost_usd: number;
-  tokens: { input: number; output: number; cache_read: number; cache_creation: number };
+  /** Null when the provider does not report a cost. Never invent 0. */
+  cost_usd: number | null;
+  tokens: { input: number; output: number; cache_read: number; cache_creation: number } | null;
   tool_calls: Record<string, number>;
   tool_errors: number;
   denied: Array<{ tool: string; reason: string; subagent?: string }>;
@@ -61,8 +64,9 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
   } else if (msg.type === "result") {
     m.turns += msg.num_turns ?? 0;
     m.duration_ms += msg.duration_ms ?? 0;
-    m.cost_usd = Math.round((m.cost_usd + (msg.total_cost_usd ?? 0)) * 1e6) / 1e6;
+    m.cost_usd = Math.round(((m.cost_usd ?? 0) + (msg.total_cost_usd ?? 0)) * 1e6) / 1e6;
     const u = msg.usage ?? {};
+    if (!m.tokens) m.tokens = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
     m.tokens.input += u.input_tokens ?? 0;
     m.tokens.output += u.output_tokens ?? 0;
     m.tokens.cache_read += u.cache_read_input_tokens ?? 0;
@@ -157,6 +161,8 @@ async function recordTranscript(ctx: ExecutionContext, msg: any, cwd: string) {
 function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyContext, onSubmit: (o: Record<string, unknown>) => void, metrics: AgentMetrics) {
   const editable = ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories;
   const prose = outputLocale(ctx.run) === "vi" ? "Vietnamese" : "English";
+  const env = envFromExecution(ctx, mode, policy, metrics, onSubmit);
+  const call = (name: string) => async (args: any) => text(await dispatchPlatformTool(name, args, env));
   const tools: SdkMcpToolDefinition<any>[] = [
     tool(
       "ask_user",
@@ -172,102 +178,16 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
           )
           .min(1),
       },
-      async (args) => {
-        const n = await ctx.ask(args.questions);
-        await ctx.log("system", `${n} question(s) posted`);
-        return text("Questions posted. Stop now and end your turn without further tool calls.");
-      },
+      call("ask_user"),
     ),
-    tool("post_update", `Post a short progress note in ${prose} to the platform timeline.`, { message: z.string().describe(`progress note in ${prose}`) }, async ({ message }) => {
-      await ctx.log("agent", message);
-      await q(pool, "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'progress', $4)", [
-        ctx.run.id,
-        ctx.step.id,
-        ctx.attempt.id,
-        JSON.stringify({ note: message }),
-      ]);
-      return text("ok");
-    }),
-    tool(
-      "submit_result",
-      "Submit this step's output (an object matching the step's output contract). Call once, at the end.",
-      { output: z.record(z.string(), z.any()).describe("the step output object") },
-      async ({ output }) => {
-        onSubmit(output);
-        return text("Result recorded. End your turn now.");
-      },
-    ),
-    tool(
-      "read_knowledge",
-      "Read the full text of a skill, business rule or reference doc listed in your system prompt (by key).",
-      { key: z.string() },
-      async ({ key }) => {
-        const k = ctx.context.knowledge.find((x) => x.key === key);
-        if (!k) return text(`"${key}" is not available to this step. Use search_knowledge to find applicable items.`);
-        await ctx.log("system", `loaded knowledge ${key} v${k.version}`, { knowledge: key, version: k.version });
-        if (!metrics.skills_loaded.includes(key)) metrics.skills_loaded.push(key);
-        return text(`# ${k.title} (${k.key} v${k.version})\n\n${k.content}`);
-      },
-    ),
-    tool(
-      "search_knowledge",
-      "Search the skills, business rules and reference docs that apply to this step (including ones not listed in the prompt). Returns keys to load with read_knowledge.",
-      { query: z.string().min(2), limit: z.number().int().min(1).max(20).optional() },
-      async ({ query, limit }) => {
-        metrics.knowledge_searches.push(query);
-        const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
-        const hits = ctx.context.knowledge
-          .map((k) => ({ k, ...scoreKnowledge(k as any, query, ctx.step.type) }))
-          .filter((x) => x.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, limit ?? 8)
-          .map((x) => ({ key: x.k.key, title: x.k.title, category: x.k.category, description: String((x.k.metadata as any)?.description ?? "").slice(0, 300), score: x.score, already_in_prompt: tier.get(x.k.key) === "inline" }));
-        await ctx.log("system", `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`, { query, hits: hits.map((h) => h.key) });
-        return text(hits.length ? JSON.stringify(hits, null, 2) : "No applicable knowledge matches. Try other words.");
-      },
-    ),
-    tool(
-      "read_step_output",
-      "Read the FULL output of an earlier step of this run (the prompt may only contain a summary). `attempt` = attempt number for a historical/invalidated output.",
-      { step_key: z.string(), attempt: z.number().int().positive().optional() },
-      async ({ step_key, attempt }) => {
-        if (attempt) {
-          const row = await one(pool, "SELECT a.number, a.generation, a.status, a.output, a.invalidated_at FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.key = $2 AND a.number = $3", [ctx.run.id, step_key, attempt]);
-          return text(row ? capResult(row) : `No attempt #${attempt} of "${step_key}".`);
-        }
-        const u = ctx.input.upstream[step_key];
-        return text(u ? capResult(u.output) : `No completed upstream step "${step_key}". Available: ${Object.keys(ctx.input.upstream).join(", ")}`);
-      },
-    ),
-    tool(
-      "list_tools",
-      "Discover domain integration tools (Hasaki Work, Jira, Bitbucket, repository registry, this run's history/changes). Optional query ranks by relevance.",
-      { query: z.string().optional() },
-      async ({ query }) => text(JSON.stringify(listTools(query, { mode }), null, 2)),
-    ),
-    tool(
-      "describe_tool",
-      "Full description and input schema of an integration tool (load before the first call).",
-      { name: z.string() },
-      async ({ name }) => {
-        try {
-          return text(JSON.stringify(describeTool(name), null, 2));
-        } catch (e) {
-          return text((e as Error).message);
-        }
-      },
-    ),
-    tool(
-      "call_tool",
-      "Call an integration tool by name with arguments matching its schema (see describe_tool).",
-      { name: z.string(), arguments: z.record(z.string(), z.any()).optional() },
-      async ({ name, arguments: args }) => {
-        const r = await callTool(name, args ?? {}, { runId: ctx.run.id, allowedRepositories: ctx.run.allowed_repositories, mode });
-        metrics.integration_calls.push({ name, ok: r.ok, ms: r.ms, ...(r.error ? { error: r.error.slice(0, 200) } : {}) });
-        await ctx.log("system", `integration ${name} ${r.ok ? "ok" : "failed"} (${r.ms}ms)${r.error ? `: ${r.error}` : ""}`, { integration: name, ok: r.ok, ms: r.ms });
-        return text(r.ok ? capResult(r.result) : `ERROR: ${r.error}`);
-      },
-    ),
+    tool("post_update", `Post a short progress note in ${prose} to the platform timeline.`, { message: z.string().describe(`progress note in ${prose}`) }, call("post_update")),
+    tool("submit_result", "Submit this step's output (an object matching the step's output contract). Call once, at the end.", { output: z.record(z.string(), z.any()).describe("the step output object") }, call("submit_result")),
+    tool("read_knowledge", "Read the full text of a skill, business rule or reference doc listed in your system prompt (by key).", { key: z.string() }, call("read_knowledge")),
+    tool("search_knowledge", "Search the skills, business rules and reference docs that apply to this step (including ones not listed in the prompt). Returns keys to load with read_knowledge.", { query: z.string().min(2), limit: z.number().int().min(1).max(20).optional() }, call("search_knowledge")),
+    tool("read_step_output", "Read the FULL output of an earlier step of this run (the prompt may only contain a summary). `attempt` = attempt number for a historical/invalidated output.", { step_key: z.string(), attempt: z.number().int().positive().optional() }, call("read_step_output")),
+    tool("list_tools", "Discover domain integration tools (Hasaki Work, Jira, Bitbucket, repository registry, this run's history/changes). Optional query ranks by relevance.", { query: z.string().optional() }, call("list_tools")),
+    tool("describe_tool", "Full description and input schema of an integration tool (load before the first call).", { name: z.string() }, call("describe_tool")),
+    tool("call_tool", "Call an integration tool by name with arguments matching its schema (see describe_tool).", { name: z.string(), arguments: z.record(z.string(), z.any()).optional() }, call("call_tool")),
   ];
   if (mode === "coding") {
     tools.unshift(
@@ -275,13 +195,7 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
         "prepare_branch",
         `Create or reuse the branch "${ctx.run.branch}" for a repo in an isolated git worktree and return its path. Allowed repos: ${editable.join(", ")}`,
         { repo: z.string().describe("repo directory name, e.g. oms-api") },
-        async ({ repo }) => {
-          if (!editable.includes(repo)) return text(`Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`);
-          const w = await prepareWorkspace(ctx.run, repo);
-          if (!policy.workspaces.includes(w.path)) policy.workspaces.push(w.path);
-          await ctx.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
-          return text(`Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`);
-        },
+        call("prepare_branch"),
       ),
     );
   }
@@ -289,14 +203,14 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
 }
 
 /** Find a Claude session that can be resumed safely for this attempt (same step, same upstream context). */
-async function resumableSession(ctx: ExecutionContext, cwd: string): Promise<{ sessionId: string; fromAttempt?: number } | null> {
+async function resumableSession(ctx: ExecutionContext, cwd: string, provider: "claude" | "cursor"): Promise<{ sessionId: string; fromAttempt?: number } | null> {
   const resume = ctx.input.pending?.resume;
   const candidates = await q<{ session_id: string; attempt_id: number; snapshot: any }>(
     pool,
     `SELECT s.session_id, s.attempt_id, cs.content AS snapshot
        FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id LEFT JOIN context_snapshots cs ON cs.id = a.context_snapshot_id
-      WHERE a.step_id = $1 AND s.resumable AND s.cwd = $2 ORDER BY s.id DESC LIMIT 5`,
-    [ctx.step.id, cwd],
+      WHERE a.step_id = $1 AND s.resumable AND s.cwd = $2 AND s.provider = $3 ORDER BY s.id DESC LIMIT 5`,
+    [ctx.step.id, cwd, provider],
   );
   if (!candidates.length) return null;
   const current = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [ctx.context.snapshot_id]);
@@ -323,6 +237,13 @@ async function progressNotes(fromAttempt?: number) {
 export const claudeExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
+    const provider = agentProvider(ctx.run);
+    if (provider === "cursor") {
+      if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
+        return { kind: "failed", error: "This Cursor CLI cannot enforce the platform's read-only subagent policy. Disable delegation on the step, or create the run with Claude.", retryable: false };
+      const cap = await cursorCapabilities();
+      if (!cap.ok) return { kind: "failed", error: cap.error || "Cursor CLI is not usable", retryable: false };
+    }
     const ws = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
     const delegationCfg = ctx.step.config.delegation as { enabled?: boolean; agents?: string[] } | undefined;
     const delegation = delegationCfg?.enabled === true;
@@ -343,9 +264,13 @@ export const claudeExecutor: StepExecutor = {
           .map((n) => [n, { ...SUBAGENTS[n], prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`, tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
       )
       : undefined;
-    const routed = modelFor(ctx.step, ctx.run.profile);
-    const metrics = newMetrics(routed.model || "default");
+    const routed = provider === "cursor" ? { model: "", source: "cursor account default" } : modelFor(ctx.step, ctx.run.profile);
+    const metrics = newMetrics(routed.model || (provider === "cursor" ? "" : "default"));
     metrics.model_source = routed.source;
+    if (provider === "cursor") {
+      metrics.cost_usd = null;
+      metrics.tokens = null;
+    }
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
     for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
     const cwd = taskDir(workspaceKey(ctx.run.branch));
@@ -353,7 +278,7 @@ export const claudeExecutor: StepExecutor = {
 
     const independent = isIndependent(ctx.step.config);
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
-    const resume = independent ? null : await resumableSession(ctx, cwd);
+    const resume = independent ? null : await resumableSession(ctx, cwd, provider);
     let evidence: { heads: Record<string, string>; problems: string[]; text: string } | null = null;
     if (independent) {
       if (ctx.step.config.strict === true && !hasTestEvidence(ctx.input.upstream))
@@ -416,6 +341,12 @@ export const claudeExecutor: StepExecutor = {
     };
 
     const run = async (prompt: string, resumeId?: string) => {
+      await ctx.log("prompt", prompt, { resume_session: resumeId ?? null, provider });
+      if (provider === "cursor") {
+        const result = await cursorAgentTurn({ ctx, mode, policy, cwd, prompt: `${systemAppend}\n\n${prompt}`, resumeId });
+        if (result.submitted) submitted = result.submitted;
+        return { isError: result.isError, text: result.text, assistantTurns: result.assistantTurns };
+      }
       const ac = new AbortController();
       const onAbort = () => ac.abort();
       ctx.signal.addEventListener("abort", onAbort);
@@ -423,7 +354,6 @@ export const claudeExecutor: StepExecutor = {
         yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: "" };
       }
       const result = { isError: false, text: "", assistantTurns: 0 };
-      await ctx.log("prompt", prompt, { resume_session: resumeId ?? null });
       try {
         for await (const msg of query({
           prompt: input(),
@@ -470,7 +400,7 @@ export const claudeExecutor: StepExecutor = {
     let result;
     try {
       if (resume && existsSync(cwd)) {
-        await ctx.log("system", `resuming Claude session ${resume.sessionId}`);
+        await ctx.log("system", `resuming ${provider} session ${resume.sessionId}`, { provider });
         try {
           result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras, outputLocale(ctx.run)), resume.sessionId);
         } catch (e) {
@@ -479,7 +409,7 @@ export const claudeExecutor: StepExecutor = {
         }
         if (result.isError && result.assistantTurns === 0) {
           // Session missing or not resumable: rebuild from durable artifacts instead.
-          await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1", [resume.sessionId]);
+          await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1 AND provider = $2", [resume.sessionId, provider]);
           await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
           result = await run(buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
         }
@@ -551,8 +481,8 @@ export const claudeExecutor: StepExecutor = {
           return r;
         },
         repair: async (failed, n) => {
-          await ctx.log("system", `verification failed — repair ${n}/${vcfg.maxRepairs} in the same Claude session`, { verification: failed.round });
-          const sid = (await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND resumable ORDER BY id DESC LIMIT 1", [ctx.attempt.id]))?.session_id;
+          await ctx.log("system", `verification failed — repair ${n}/${vcfg.maxRepairs} in the same ${provider} session`, { verification: failed.round, provider });
+          const sid = (await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1", [ctx.attempt.id, provider]))?.session_id;
           const msg = repairPrompt(failed, n, vcfg, outputLocale(ctx.run));
           submitted = undefined;
           let r = sid
@@ -609,6 +539,9 @@ export async function rankRepositoriesWithClaude(ctx: ExecutionContext, ranked: 
     "</untrusted_input>",
   ].join("\n");
   let out = "";
+  if (agentProvider(ctx.run) === "cursor") {
+    out = await cursorComplete(prompt, ctx.signal);
+  } else
   for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
     if (msg.type === "result" && msg.subtype === "success") out = msg.result;
   }

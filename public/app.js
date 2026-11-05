@@ -223,6 +223,8 @@ const VIEWS = {
         <div><label>${esc(tr("cl.reposCsv"))}</label><input ${keep("nr-repos")} value="${esc(drafts["nr-repos"] || "")}" placeholder="${esc(tr("cl.reposPh"))}"></div>
         <div><label>${esc(tr("wi.fieldTitle"))}</label><input ${keep("nr-title")} value="${esc(drafts["nr-title"] || "")}"></div></div>
         <label>${esc(tr("cl.inputsHint"))}</label><textarea class="code" rows="2" ${keep("nr-inputs")}>${esc(drafts["nr-inputs"] || "{}")}</textarea>
+        <label>${esc(tr("run.agent"))}</label><select ${keep("nr-provider")}>${["claude", "cursor"].map((p) => `<option value="${p}" ${(drafts["nr-provider"] || "claude") === p ? "selected" : ""}>${esc(tr("run.agent." + p))}</option>`).join("")}</select>
+        <div class="muted small">${esc(tr("run.agentHint"))}</div>
         <div class="row"><button onclick="A.newRun(true)">${esc(tr("rv.start"))}</button><button class="ghost" onclick="A.newRun(false)">${esc(tr("wfe.createPending"))}</button></div></div>
       ${runsTable(runs)}`;
   },
@@ -362,6 +364,7 @@ async function workItemDetail(id) {
       <div class="card"><h4>${esc(tr("cl.actions"))}</h4>
         <label>${esc(tr("common.workflow"))}</label>${workflowSelect("wi-wf", workflows, "feature-implementation")}
         <label>${esc(tr("cl.reposOpt"))}</label><input ${keep("wi-repos")} value="${esc(drafts["wi-repos"] || "")}">
+        <label>${esc(tr("run.agent"))}</label><select ${keep("wi-provider")}>${["claude", "cursor"].map((p) => `<option value="${p}" ${(drafts["wi-provider"] || "claude") === p ? "selected" : ""}>${esc(tr("run.agent." + p))}</option>`).join("")}</select>
         <div class="row"><button onclick="A.startForItem(${w.id}, true)">${esc(tr("cl.startRun"))}</button><button class="ghost" onclick="A.startForItem(${w.id}, false)">${esc(tr("cl.createRun"))}</button>
           <button class="ghost" onclick="A.analyze(${w.id})">${esc(tr("cl.analyzeOnly"))}</button></div>
         <label>${esc(tr("wi.policy"))}</label>
@@ -447,7 +450,11 @@ function toolLabel(name, input = {}) {
   return `<b>${esc(short)}</b> <span class="mono">${esc(String(hint).split("\n")[0].slice(0, 140))}</span>`;
 }
 
-function renderTranscript(events, live) {
+function agentName(provider) {
+  return tr(provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude");
+}
+function renderTranscript(events, live, provider) {
+  const name = agentName(provider);
   const results = {};
   for (const e of events) if (e.kind === "tool_result" && e.data?.tool_use_id) results[e.data.tool_use_id] = e;
   const out = [];
@@ -460,10 +467,10 @@ function renderTranscript(events, live) {
         out.push(`<details class="msg sys"><summary>📋 ${esc(tr("cl.system"))} · ${esc((e.data?.tools || []).join(", "))}${e.data?.knowledge?.length ? " · " + esc(tr("cl.knowledgeWord")) + ": " + esc(e.data.knowledge.join(", ")) : ""}</summary><div class="pre">${esc(e.content)}</div></details>`);
         break;
       case "prompt":
-        out.push(`<div class="msg user${sub}"><div class="who">➡️ ${esc(tr("cl.platformTo"))} ${e.data?.resume_session ? `<span class="badge s-READY">${esc(tr("cl.resume"))}</span>` : ""} ${when}</div>${long(e.content)}</div>`);
+        out.push(`<div class="msg user${sub}"><div class="who">➡️ ${esc(tr("cl.platformTo", { name }))} ${e.data?.resume_session ? `<span class="badge s-READY">${esc(tr("cl.resume"))}</span>` : ""} ${when}</div>${long(e.content)}</div>`);
         break;
       case "agent":
-        out.push(`<div class="msg claude${sub}"><div class="who">🤖 Claude ${when}</div><div class="pre">${esc(e.content)}</div></div>`);
+        out.push(`<div class="msg claude${sub}"><div class="who">🤖 ${esc(name)} ${when}</div><div class="pre">${esc(e.content)}</div></div>`);
         break;
       case "thinking":
         out.push(`<details class="msg think${sub}"><summary>💭 ${esc(tr("cl.thinking"))} ${when}</summary><div class="pre">${esc(e.content)}</div></details>`);
@@ -498,12 +505,12 @@ function renderTranscript(events, live) {
   if (live) {
     const last = events.at(-1);
     const tail = last ? tr("cl.lastAgo", { ago: ago(last.created_at) }) : tr("cl.starting");
-    out.push(`<div class="msg live">⏳ ${esc(tr("cl.working"))} ${esc(tail)}</div>`);
+    out.push(`<div class="msg live">⏳ ${esc(tr("cl.working", { name }))} ${esc(tail)}</div>`);
   }
   return out.join("") || `<div class="muted small">${esc(tr("cl.noConvo"))}</div>`;
 }
 
-async function conversationPanel(s, atts) {
+async function conversationPanel(s, atts, provider) {
   if (!AGENT_TYPES.includes(s.type) || !atts.length) return "";
   const k = "conv-" + s.key;
   const running = s.status === "RUNNING";
@@ -514,11 +521,11 @@ async function conversationPanel(s, atts) {
   const live = running && att.id === s.current_attempt_id;
   const events = open ? await api(`/api/attempts/${att.id}/transcript`) : [];
   return `<details data-k="${k}" ${open ? "open data-loaded=\"1\"" : ""} ontoggle="if (this.open && !this.dataset.loaded) render(true)">
-    <summary>💬 ${esc(tr("cl.convo"))} ${live ? `<span class="badge s-RUNNING">${esc(tr("cl.live"))}</span>` : ""}</summary>
+    <summary>💬 ${esc(tr("cl.convo", { name: agentName(provider) }))} ${live ? `<span class="badge s-RUNNING">${esc(tr("cl.live"))}</span>` : ""}</summary>
     <div class="row" style="margin:4px 0">${atts.length > 1 ? `<select style="width:auto" onchange="A.convAttempt('${s.key}', this.value)">${atts
       .map((a) => `<option value="${a.id}" ${a.id === att.id ? "selected" : ""}>${esc(tr("cl.attemptLine", { n: a.number, gen: a.generation, status: statusText(a.status) }))}</option>`)
       .join("")}</select>` : `<span class="muted small">${esc(tr("cl.attemptShort", { n: att.number, status: statusText(att.status) }))}</span>`}</div>
-    <div class="convo" data-scroll="${k}">${open ? renderTranscript(events, live) : ""}</div></details>`;
+    <div class="convo" data-scroll="${k}">${open ? renderTranscript(events, live, provider) : ""}</div></details>`;
 }
 
 async function runDetail(id) {
@@ -533,7 +540,7 @@ async function runDetail(id) {
   return `
     <div class="muted small"><a href="#/runs">${esc(tr("nav.runs"))}</a> / ${r.work_item ? `<a href="#/work-items/${r.work_item.id}">${esc(r.work_item.code)}</a>` : esc(tr("cl.noWorkItem"))}</div>
     <h2>${esc(tr("ins.col.run"))} #${r.id} · ${esc(r.title)}</h2>
-    <div class="muted">${esc(r.definition_key)} v${r.definition_version} · ${esc(tr("common.branch"))} <span class="mono">${esc(r.branch)}</span> · ${badge(r.status)} ${r.error ? `<span class="err">${esc(r.error)}</span>` : ""}</div>
+    <div class="muted">${esc(r.definition_key)} v${r.definition_version} · ${esc(tr("run.agent"))} ${esc(tr(r.agent_provider === "cursor" ? "run.agent.cursor" : "run.agent.claude"))} · ${esc(tr("common.branch"))} <span class="mono">${esc(r.branch)}</span> · ${badge(r.status)} ${r.error ? `<span class="err">${esc(r.error)}</span>` : ""}</div>
     <div class="row">
       ${r.status === "PENDING" ? `<button onclick="A.runAction(${r.id}, 'start')">${esc(tr("rv.start"))}</button>` : ""}
       ${["RUNNING", "WAITING"].includes(r.status) ? `<button class="ghost" onclick="A.runAction(${r.id}, 'pause')">${esc(tr("rv.pause"))}</button>` : ""}
@@ -550,7 +557,7 @@ async function runDetail(id) {
     ${(await Promise.all(r.steps
       .map(async (s) => {
         const atts = attempts[s.key] || [];
-        const convo = await conversationPanel(s, atts);
+        const convo = await conversationPanel(s, atts, r.agent_provider);
         const qs = questions[s.key] || [];
         const open = qs.filter((q) => q.status === "open");
         const can = (a) => RUN_ACTIONS[a].includes(s.status) && active;
@@ -723,16 +730,16 @@ window.A = {
   startForItem: (id, start) =>
     act(async () => {
       const repos = list(val("wi-repos"));
-      const r = await api(`/api/work-items/${id}/runs`, { workflow: val("wi-wf") || "feature-implementation", repositories: repos.length ? repos : undefined, start });
+      const r = await api(`/api/work-items/${id}/runs`, { workflow: val("wi-wf") || "feature-implementation", repositories: repos.length ? repos : undefined, start, agent_provider: val("wi-provider") || "claude" });
       location.hash = "/runs/" + r.id;
     }),
-  analyze: (id) => act(async () => (location.hash = "/runs/" + (await api(`/api/work-items/${id}/analyze`, {})).id)),
+  analyze: (id) => act(async () => (location.hash = "/runs/" + (await api(`/api/work-items/${id}/analyze`, { agent_provider: val("wi-provider") || "claude" })).id)),
   setPolicy: (id, on) => act(() => api(`/api/work-items/${id}`, { automation_policy: on ? { workflow: val("wi-wf") } : null }), tr("wi.saved")),
   setStatus: (id, status) => act(() => api(`/api/work-items/${id}`, { status })),
   newRun: (start) =>
     act(async () => {
       const repos = list(val("nr-repos"));
-      const r = await api("/api/runs", { workflow: val("nr-wf"), repositories: repos, title: val("nr-title") || undefined, inputs: { ...parseJson(val("nr-inputs"), "inputs"), ...(repos.length ? { repositories: repos } : {}) }, start });
+      const r = await api("/api/runs", { workflow: val("nr-wf"), repositories: repos, title: val("nr-title") || undefined, inputs: { ...parseJson(val("nr-inputs"), "inputs"), ...(repos.length ? { repositories: repos } : {}) }, start, agent_provider: val("nr-provider") || "claude" });
       location.hash = "/runs/" + r.id;
     }),
   runAction: (id, action) => {

@@ -9,6 +9,8 @@ import { collectEvidence, type Evidence } from "./evidence.ts";
 import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./build.ts";
 import { testExceptionsOf } from "../workflow/executors/builtin.ts";
 import { languagePolicy, outputLocale } from "../agent/language.ts";
+import { agentProvider } from "../agent/provider.ts";
+import { cursorComplete } from "../agent/cursor/run.ts";
 
 /**
  * Task Result Report executor.
@@ -48,6 +50,10 @@ export const claudeReportReasoner: ReportReasoner = async (ctx, spec, evidence) 
   ].join("\n");
   const m = newMetrics(config.model || "default");
   let out = "";
+  if (agentProvider(ctx.run) === "cursor") {
+    out = await cursorComplete(prompt, ctx.signal);
+    await ctx.recordMetrics({ provider: "cursor", model: null, model_source: "cursor account default", cost_usd: null, tokens: null });
+  } else
   for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
     accumulateMetrics(m, msg);
     if (msg.type === "result" && msg.subtype === "success") out = msg.result;

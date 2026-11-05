@@ -5,6 +5,8 @@ import { parseGoTest } from "./baseline.ts";
 import type { ExecutionContext } from "./registry.ts";
 import type { ExecResult } from "../types.ts";
 import { languagePolicy, outputLocale, type OutputLocale } from "../../agent/language.ts";
+import { agentProvider, type AgentProvider } from "../../agent/provider.ts";
+import { cursorComplete } from "../../agent/cursor/run.ts";
 
 /**
  * Human-in-the-loop handling of a failed test step (after automatic retries are exhausted):
@@ -39,7 +41,7 @@ export interface Diagnosis {
   counts: Record<Category, number>;
   all_pre_existing: boolean;
   summary: string;
-  explanation?: { text: string; suggestion: string; by: "claude" | "rules" };
+  explanation?: { text: string; suggestion: string; by: "claude" | "cursor" | "rules" };
 }
 
 const ENV = /dial tcp|connection refused|connection (setup )?timed out|no such host|i\/o timeout|tls handshake|network is unreachable|failed to initialize database|context deadline exceeded|could not connect|ECONNREFUSED|ETIMEDOUT/i;
@@ -156,19 +158,23 @@ export function parseDecision(answer: string): { kind: DecisionKind; confirmed: 
 }
 
 export interface TestFailureAdvisor {
-  explain(d: Diagnosis, locale?: OutputLocale): Promise<{ text: string; suggestion: string }>;
-  interpret(d: Diagnosis, history: Array<{ question: string; answer: string }>, answer: string, locale?: OutputLocale): Promise<{ kind: DecisionKind; instructions?: string; question?: string; confirmed?: boolean }>;
+  explain(d: Diagnosis, locale?: OutputLocale, provider?: AgentProvider): Promise<{ text: string; suggestion: string }>;
+  interpret(d: Diagnosis, history: Array<{ question: string; answer: string }>, answer: string, locale?: OutputLocale, provider?: AgentProvider): Promise<{ kind: DecisionKind; instructions?: string; question?: string; confirmed?: boolean }>;
 }
 let advisor: TestFailureAdvisor | null = null;
 export function setTestFailureAdvisor(a: TestFailureAdvisor | null) {
   advisor = a;
 }
 
-async function askClaude(prompt: string, ctx?: ExecutionContext): Promise<any> {
+async function askClaude(prompt: string, ctx?: ExecutionContext, provider: AgentProvider = "claude"): Promise<any> {
   let out = "";
+  if (provider === "cursor") {
+    out = await cursorComplete(prompt, ctx?.signal);
+    if (ctx) await ctx.recordMetrics({ provider: "cursor", advisor_cost_usd: null, cost_usd: null, tokens: null }).catch(() => {});
+  } else
   for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
     if (msg.type === "result" && msg.subtype === "success") out = msg.result;
-    if (msg.type === "result" && ctx) await ctx.recordMetrics({ advisor_cost_usd: (msg as any).total_cost_usd ?? 0 }).catch(() => {});
+    if (msg.type === "result" && ctx && (msg as any).total_cost_usd != null) await ctx.recordMetrics({ advisor_cost_usd: (msg as any).total_cost_usd }).catch(() => {});
   }
   const j = out.match(/\{[\s\S]*\}/)?.[0];
   if (!j) throw new Error("no JSON from advisor");
@@ -179,7 +185,7 @@ const compact = (d: Diagnosis) =>
   JSON.stringify({ command: d.command, base: d.base_sha, failures: d.failures.map((f) => ({ repo: f.repo, package: f.package, test: f.test, build_error: f.build_error, category: f.category, reason: f.reason, log: f.log.slice(0, 1200) })) }, null, 1).slice(0, 40_000);
 
 export const claudeTestFailureAdvisor: TestFailureAdvisor = {
-  async explain(d, locale = "vi") {
+  async explain(d, locale = "vi", provider: AgentProvider = "claude") {
     return askClaude(
       [
         languagePolicy(locale),
@@ -190,9 +196,11 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
         compact(d),
         "</untrusted_input>",
       ].join("\n"),
+      undefined,
+      provider,
     );
   },
-  async interpret(d, history, answer, locale = "vi") {
+  async interpret(d, history, answer, locale = "vi", provider: AgentProvider = "claude") {
     return askClaude(
       [
         languagePolicy(locale),
@@ -209,6 +217,8 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
         "</untrusted_input>",
         "Failure summary: " + d.summary,
       ].join("\n"),
+      undefined,
+      provider,
     );
   },
 };
@@ -246,7 +256,7 @@ export async function askAboutFailure(ctx: ExecutionContext, input: Parameters<t
   const locale = outputLocale(ctx.run);
   const d = diagnose(input);
   try {
-    d.explanation = advisor ? { ...(await advisor.explain(d, locale)), by: "claude" } : undefined;
+    d.explanation = advisor ? { ...(await advisor.explain(d, locale, agentProvider(ctx.run))), by: agentProvider(ctx.run) } : undefined;
   } catch (e) {
     await ctx.log("system", `test failure explanation unavailable: ${(e as Error).message}`);
   }
@@ -277,7 +287,7 @@ export async function handleDecision(ctx: ExecutionContext, d: Diagnosis, fromAt
   if (answer === failureOptions(locale).accept || answer === OPTIONS.accept) p.confirmed = true;
   if (p.kind === "unclear" && advisor) {
     try {
-      const ai = await advisor.interpret(d, history, answer, locale);
+      const ai = await advisor.interpret(d, history, answer, locale, agentProvider(ctx.run));
       p = { kind: ai.kind, confirmed: !!ai.confirmed, instructions: ai.instructions ?? answer, question: ai.question };
     } catch (e) {
       await ctx.log("system", `answer interpretation unavailable: ${(e as Error).message}`);

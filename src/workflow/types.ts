@@ -88,6 +88,8 @@ export interface RunRow {
   profile_decision?: unknown;
   /** User-facing prose language for this run. NULL on rows created before the column existed. */
   output_locale?: "vi" | "en" | null;
+  /** claude (default, including rows from before the column) or cursor. Fixed for the life of the run. */
+  agent_provider?: "claude" | "cursor";
 }
 
 export interface StepRow {
