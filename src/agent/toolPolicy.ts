@@ -555,9 +555,11 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       return !!d && !primary(d) && !pathsIn(seg).some(primary);
     };
     const away = (i: number) => elsewhere(p.segments[i] ?? "");
+    // A segment is charged to the directory it runs in (following `cd` earlier in the same command) only when it writes:
+    // `cd <worktree> && mkdir x` from a primary cwd writes in the worktree, not in the primary checkout. After a `cd` that
+    // cannot be resolved (`cd $X`) the directory is unknown: it is still charged to the cwd.
     const touched = [
-      ...(cwd && primary(cwd) && !p.segments.every((seg, i) => scratchOnly(i) || away(i) || readOnlyViolation(seg) === null) ? [cwd] : []),
-      ...dirs.filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i) && !away(i)),
+      ...dirs.map((d) => d ?? cwd).filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i) && !away(i) && readOnlyViolation(p.segments[i] ?? "") !== null),
       ...pathsIn(command).filter((x) => primary(x) && !readSources.has(resolve(x))),
     ];
     // Literal variables assigned in the same command (`L=/abs/dir; … > $L-lint.log`) are expanded for redirect checks.
