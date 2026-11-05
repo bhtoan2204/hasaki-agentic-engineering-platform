@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
@@ -79,4 +79,48 @@ test("user-level ~/.claude skills: imported once (copies of repo skills skipped)
   assert.equal((await knowledge.get("user.skill.pr"))!.enabled, false, "pushes/opens PRs on its own: imported disabled");
   process.env.CLAUDE_USER_SKILLS_DIR = join(config.reposRoot, "..", "empty-user-skills");
   assert.ok((await repositories.get("oms-api"))!.description.includes("Money fields"), "repo description filled from CLAUDE.md");
+});
+
+test("wiki import: conventions inlined for sibling code repos, conflicts.md imported, removed docs retired and revived", async () => {
+  const wiki = join(config.reposRoot, "pay-src/pay-wiki"), core = join(config.reposRoot, "pay-src/pay-core");
+  for (const d of [wiki, core]) mkdirSync(join(d, ".git"), { recursive: true });
+  mkdirSync(join(wiki, "docs/development"), { recursive: true });
+  mkdirSync(join(wiki, "docs/flows"), { recursive: true });
+  mkdirSync(join(wiki, ".inventory"), { recursive: true });
+  writeFileSync(join(wiki, "docs/development/conventions.md"), "# Conventions\n\nErrors wrap with %w.\n");
+  writeFileSync(join(wiki, "docs/flows/refund.md"), "# Refund\n\nTwo steps.\n");
+  writeFileSync(join(wiki, "docs/flows/old.md"), "# Old flow\n\nGone soon.\n");
+  writeFileSync(join(wiki, ".inventory/conflicts.md"), "# conflicts\n\nOutbox is async.\n");
+  writeFileSync(join(wiki, ".inventory/env-vars.md"), "# env\n");
+  await repositories.upsert("pay-wiki", { path: "pay-src/pay-wiki", projects: ["Pay"] });
+  await repositories.upsert("pay-core", { path: "pay-src/pay-core", projects: ["Pay"] });
+  const r1 = await importFromRepositories();
+  const keys = r1.candidates.map((c) => c.key);
+  const conv = (await knowledge.get("pay-wiki.conventions"))!;
+  assert.equal(conv.scope_type, "GLOBAL");
+  assert.deepEqual(conv.versions[0].applicability, { repos: ["pay-core"] }, "applies to the code repos next to the wiki");
+  assert.equal(conv.versions[0].metadata.load, "inline");
+  assert.ok(!keys.includes("pay-wiki.docs.development.conventions"), "not imported twice");
+  assert.ok(keys.includes("pay-wiki.inventory.conflicts"), "conflicts.md imported");
+  assert.ok(!keys.some((k) => /env-vars/.test(k)), "other .inventory files are not");
+  assert.ok(keys.includes("pay-wiki.docs.flows.old"));
+
+  rmSync(join(wiki, "docs/flows/old.md"));
+  const r2 = await importFromRepositories();
+  assert.equal(r2.retired, 1);
+  const old = (await knowledge.get("pay-wiki.docs.flows.old"))!;
+  assert.equal(old.enabled, false);
+  assert.match(old.versions[0].metadata.retired_reason, /docs\/flows\/old\.md/);
+  assert.equal((await knowledge.get("pay-wiki.docs.flows.refund"))!.enabled, true);
+  assert.equal((await importFromRepositories()).retired, 0, "already retired: nothing more to do");
+
+  writeFileSync(join(wiki, "docs/flows/old.md"), "# Old flow\n\nGone soon.\n");
+  await importFromRepositories();
+  assert.equal((await knowledge.get("pay-wiki.docs.flows.old"))!.enabled, true, "source is back: re-enabled");
+});
+
+test("looksSecret ignores config-path references but still catches literal values", () => {
+  assert.ok(!looksSecret("secretB64 = payment_client.ecom_global.secret"));
+  assert.ok(looksSecret("secretB64 = c2VjcmV0dmFsdWVfMTIzNDU2Nzg5"));
+  assert.ok(looksSecret("api_key: 9f8e7d6c5b4a39281706"));
 });

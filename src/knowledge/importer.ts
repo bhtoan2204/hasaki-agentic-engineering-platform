@@ -13,32 +13,40 @@ import { hashOf } from "../workflow/definitions.ts";
  *   .claude/skills/<n>/SKILL.md, .agents/skills/...    → agent_skill, on-demand (index in prompt, read_knowledge tool)
  *   .cursor/rules/*.mdc                                → coding_standard for that repo, on-demand
  *   docs/** of *-wiki repositories                     → architecture_guideline / domain_knowledge, on-demand, per project
+ *   docs/(sub/)*convention*.md of a *-wiki repository   → repository_convention inlined for the code repos next to the wiki
+ *   .inventory/conflicts.md of a *-wiki repository     → domain_knowledge (where the docs disagree with the code)
  * Identical skills found in several repositories become one item whose applicability lists those repositories.
  * Files that look like they contain credentials are skipped. Re-running creates new versions only for changed files.
+ * Items whose source file disappeared from a scanned repository are disabled ("retired"), and re-enabled if it returns.
  */
 
 const MAX_CHARS = 60_000;
+const SECRET_ASSIGNMENT = /\b[\w-]*(password|passwd|secret|api[_-]?key|token|client[_-]?secret)[\w-]*\s*[:=]\s*["']?(?!<|\$\{|\{\{|xxx|\.\.\.|your|example|changeme)([A-Za-z0-9/+_\-.]{12,})/gi;
+/** `secret = payment_client.ecom_global.secret`: a reference to a field/config path, not a value. */
+const IDENTIFIER_PATH = /^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$/;
 const SECRET_RE = [
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /\b(AKIA|ASIA)[A-Z0-9]{16}\b/, // AWS key id
   /\b(sk|rk)_(live|test)_[A-Za-z0-9]{16,}/, // Stripe-like
-  /\b[\w-]*(password|passwd|secret|api[_-]?key|token|client[_-]?secret)[\w-]*\s*[:=]\s*["']?(?!<|\$\{|\{\{|xxx|\.\.\.|your|example|changeme)[A-Za-z0-9/+_\-.]{12,}/i,
 ];
 const SKIP_PATH = [/env-production/i, /\.env/i, /secret/i, /superpowers\/(plans|specs)\//, /\/node_modules\//, /\/vendor\//];
 /** Interactive/meta skills from ~/.claude that would act autonomously in an unattended step. Imported disabled. */
 export const USER_SKILLS_DISABLED = ["execute", "define", "pr", "address", "rebase-clean", "qa-review", "feedback", "codex-advisor", "skill-creator", "synced", "agent-browser", "upstream", "ask", "decision-analysis", "fact-check"];
+/** Extra wiki files outside docs/ worth importing (path relative to the wiki root). */
+const WIKI_EXTRA = [/^\.inventory\/conflicts\.md$/];
 const WIKI_SKIP = [/changelog/i, /build-docs/i, /reference\/links/i, /frontend-demo/i, /authoring\.md$/i];
 
 export interface ImportCandidate extends KnowledgeInput {
   source: { repo: string; path: string; sha256: string }[];
 }
 export interface ImportReport {
-  candidates: Array<{ key: string; title: string; category: string; scope: string; repos: string[]; chars: number; action: "create" | "update" | "unchanged" }>;
+  candidates: Array<{ key: string; title: string; category: string; scope: string; repos: string[]; chars: number; action: "create" | "update" | "unchanged" | "retire" }>;
   skipped: Array<{ path: string; reason: string }>;
   created: number;
   updated: number;
   unchanged: number;
+  retired: number;
 }
 
 const slug = (s: string) =>
@@ -62,7 +70,9 @@ export function frontmatter(text: string): { fields: Record<string, string>; bod
 }
 
 export function looksSecret(text: string) {
-  return SECRET_RE.some((re) => re.test(text));
+  if (SECRET_RE.some((re) => re.test(text))) return true;
+  for (const m of text.matchAll(SECRET_ASSIGNMENT)) if (!IDENTIFIER_PATH.test(m[2])) return true;
+  return false;
 }
 
 function firstHeading(text: string) {
@@ -94,8 +104,9 @@ function walk(dir: string, depth = 4): string[] {
 }
 
 /** Scan every enabled repository on disk and build import candidates (no DB writes). */
-export async function scanRepositories(): Promise<{ candidates: ImportCandidate[]; skipped: ImportReport["skipped"] }> {
-  const repos = (await repositories.list()).filter((r) => r.enabled && existsSync(join(repoPath(r), ".git")));
+export async function scanRepositories(): Promise<{ candidates: ImportCandidate[]; skipped: ImportReport["skipped"]; scanned: string[] }> {
+  const all = await repositories.list();
+  const repos = all.filter((r) => r.enabled && existsSync(join(repoPath(r), ".git")));
   const skipped: ImportReport["skipped"] = [];
   const out: ImportCandidate[] = [];
   const skills = new Map<string, { name: string; text: string; repos: RepositoryRow[]; paths: string[] }>(); // by name+hash
@@ -115,6 +126,10 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
   for (const r of repos) {
     const root = repoPath(r);
     const src = (file: string, text: string) => ({ repo: r.name, path: relative(root, file), sha256: sha(text) });
+    const isWiki = /wiki/i.test(r.name);
+    // Code repositories living next to a wiki (same group folder, e.g. payment-src/*): the wiki's conventions apply to them.
+    const group = r.path.includes("/") ? r.path.split("/")[0] : "";
+    const siblings = isWiki && group ? all.filter((x) => x.enabled && x.name !== r.name && !/wiki/i.test(x.name) && x.path.split("/")[0] === group).map((x) => x.name).sort() : [];
 
     // 1. Agent instructions / conventions: inlined for that repository (identical copies, e.g. AGENTS.md = CLAUDE.md, once).
     const seenText = new Set<string>();
@@ -138,6 +153,20 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
     for (const file of walk(join(root, "docs"), 1).filter((f) => /convention/i.test(basename(f)) && f.endsWith(".md"))) {
       const text = read(r, file);
       if (!text) continue;
+      if (isWiki) {
+        // Nobody codes in the wiki itself: inline the conventions for the code repositories it documents.
+        out.push({
+          key: slug(`${r.name}.${basename(file, ".md")}`),
+          category: "repository_convention",
+          scope_type: "GLOBAL",
+          title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
+          content: text,
+          applicability: siblings.length ? { repos: siblings } : { repos: [r.name] },
+          metadata: { load: "inline", description: firstParagraph(text) },
+          source: [src(file, text)],
+        });
+        continue;
+      }
       out.push({
         key: slug(`${r.name}.${basename(file, ".md")}`),
         category: "repository_convention",
@@ -187,15 +216,16 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
     }
 
     // 4. Wiki repositories: architecture + partner/domain docs for the whole project, on demand.
-    if (/wiki/i.test(r.name)) {
-      const projects = [...new Set((await repositories.list()).filter((x) => x.path.split("/")[0] === r.path.split("/")[0] && x.path).flatMap((x) => x.projects).concat(r.projects))];
-      for (const file of walk(root, 4).filter((f) => f.endsWith(".md") && /\/docs\//.test(f))) {
+    if (isWiki) {
+      const projects = [...new Set(all.filter((x) => x.path.split("/")[0] === r.path.split("/")[0] && x.path).flatMap((x) => x.projects).concat(r.projects))];
+      for (const file of walk(root, 4).filter((f) => f.endsWith(".md") && (/\/docs\//.test(f) || WIKI_EXTRA.some((re) => re.test(relative(root, f)))))) {
         const rel = relative(root, file);
         if (WIKI_SKIP.some((re) => re.test(rel))) continue;
+        if (/\/docs\//.test(file) && /convention/i.test(basename(file)) && relative(join(root, "docs"), file).split("/").length <= 2) continue; // imported above as a convention
         const text = read(r, file);
         if (!text) continue;
         out.push({
-          key: slug(`${r.name}.${rel.replace(/\.md$/, "").replace(/\//g, ".")}`),
+          key: slug(`${r.name}.${rel.replace(/^\./, "").replace(/\.md$/, "").replace(/\//g, ".")}`),
           category: /architecture/i.test(rel) ? "architecture_guideline" : "domain_knowledge",
           scope_type: "GLOBAL",
           title: `${r.name}: ${firstHeading(text) ?? rel}`,
@@ -265,13 +295,13 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
       source: s.repos.map((r, i) => ({ repo: r.name, path: s.paths[i].slice(r.name.length + 1), sha256: sha(s.text) })),
     });
   }
-  return { candidates: out, skipped };
+  return { candidates: out, skipped, scanned: repos.map((r) => r.name) };
 }
 
 /** Create/update registry items from the scan. Unchanged files create no new version. */
 export async function importFromRepositories(opts: { dryRun?: boolean } = {}): Promise<ImportReport> {
-  const { candidates, skipped } = await scanRepositories();
-  const report: ImportReport = { candidates: [], skipped, created: 0, updated: 0, unchanged: 0 };
+  const { candidates, skipped, scanned } = await scanRepositories();
+  const report: ImportReport = { candidates: [], skipped, created: 0, updated: 0, unchanged: 0, retired: 0 };
   // Repositories without a description get the opening paragraph of their CLAUDE.md (improves discovery ranking).
   if (!opts.dryRun)
     for (const c of candidates.filter((x) => x.category === "repository_convention" && x.scope_type === "REPOSITORY" && /\.claude$/.test(x.key))) {
@@ -284,6 +314,7 @@ export async function importFromRepositories(opts: { dryRun?: boolean } = {}): P
     const metadata = { ...(item.metadata ?? {}), source, imported_from_repository: true };
     const existing = await knowledge.get(c.key);
     let action: "create" | "update" | "unchanged" = "create";
+    const wasRetired = !!existing && !existing.enabled && !!existing.versions[0]?.metadata?.retired_reason;
     if (existing) {
       const v = existing.versions[0];
       // JSONB reorders keys, so compare canonical hashes rather than JSON strings.
@@ -293,7 +324,7 @@ export async function importFromRepositories(opts: { dryRun?: boolean } = {}): P
         hashOf(v.metadata?.source ?? null) === hashOf(source) &&
         existing.scope_type === c.scope_type &&
         existing.scope_ref === (c.scope_ref ?? "");
-      action = same ? "unchanged" : "update";
+      action = same && !wasRetired ? "unchanged" : "update";
     }
     report.candidates.push({ key: c.key, title: c.title, category: c.category, scope: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""}`, repos: [...new Set(source.map((s) => s.repo))], chars: c.content.length, action });
     report[action === "create" ? "created" : action === "update" ? "updated" : "unchanged"]++;
@@ -306,9 +337,29 @@ export async function importFromRepositories(opts: { dryRun?: boolean } = {}): P
         metadata,
         scope_type: c.scope_type,
         scope_ref: c.scope_ref ?? "",
-        change_note: "re-imported: source file changed",
+        change_note: wasRetired ? "re-imported: source file is back" : "re-imported: source file changed",
         created_by: "repository import",
+        ...(wasRetired ? { enabled: true } : {}),
       });
+  }
+
+  // Retire imported items whose source files are gone from repositories that were scanned (moved/deleted docs).
+  // Only items owned by the import (metadata.imported_from_repository) and only when every source repo was on disk.
+  const produced = new Set(candidates.map((c) => c.key));
+  const scannedSet = new Set(scanned);
+  for (const it of (await knowledge.list()) as any[]) {
+    if (!it.enabled || produced.has(it.key) || !it.metadata?.imported_from_repository) continue;
+    const sources: { repo: string; path: string }[] = it.metadata.source ?? [];
+    if (!sources.length || !sources.every((s) => scannedSet.has(s.repo))) continue;
+    report.candidates.push({ key: it.key, title: it.title, category: it.category, scope: `${it.scope_type}${it.scope_ref ? ":" + it.scope_ref : ""}`, repos: [...new Set(sources.map((s) => s.repo))], chars: (it.content ?? "").length, action: "retire" });
+    report.retired++;
+    if (opts.dryRun) continue;
+    await knowledge.update(it.key, {
+      enabled: false,
+      metadata: { ...it.metadata, retired_reason: `source no longer produced: ${sources.map((s) => `${s.repo}/${s.path}`).join(", ")}` },
+      change_note: "retired: source file removed or no longer imported",
+      created_by: "repository import",
+    });
   }
   return report;
 }
