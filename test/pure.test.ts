@@ -602,3 +602,30 @@ test("scratch worktrees under /tmp may be created from the primary checkout (cod
   // analysis steps stay strictly read-only
   assert.equal(decideBash("git -C /home/me/src/oms-src/oms-api worktree add -q --detach /tmp/x HEAD", { ...ctx, mode: "analysis", workspaces: [] }).allow, false);
 });
+
+// ---------------------------------------------------------------- regression: HSK-H5FG3YF2 `go -C <worktree>` from a primary cwd
+test("tool policy: `go -C <worktree>` / `git -C <worktree>` run there even when the shell cwd is a primary checkout", () => {
+  const W = "/data/worktrees/HSK-H5FG3YF2/payment-zalopay";
+  const P = "/home/me/src/payment-src/payment-techcom"; // cwd left behind by an earlier cd
+  const ctx: PolicyContext = { mode: "coding", workspaces: [W], baseBranch: "release/prod", protectedRoots: ["/home/me/src"] };
+  for (const cmd of [
+    `go -C ${W} build ./...`,
+    `go -C ${W} test ./internal/... 2>&1 | tail -20`,
+    `go -C ${W} vet ./... && git -C ${W} status`,
+    `git -C ${W} add -A && git -C ${W} commit -qm "fix: x"`,
+    `make -C ${W} test`,
+    `npm --prefix ${W} test`,
+    `GOFLAGS=-mod=mod go -C ${W} generate ./...`,
+    `go -C ${W} test ./... && cat ${P}/go.mod`, // reading the primary checkout is fine
+  ])
+    assert.deepEqual(decideBash(cmd, ctx, P), { allow: true }, cmd);
+  for (const cmd of [
+    `go -C ${W} build -o ${P}/bin/app ./cmd`, // output lands in the primary checkout
+    `go -C ${W} test ./... && go build ./...`, // second command runs in the primary cwd
+    `go -C ${P} generate ./...`,
+    `git -C ${P} commit -qm x`,
+    `go -C relative/dir build ./...`, // not a literal absolute dir: charged to the cwd
+    `go -C ${W} test ./... > ${P}/out.txt`,
+  ])
+    assert.equal(decideBash(cmd, ctx, P).allow, false, cmd);
+});

@@ -497,6 +497,19 @@ export function pathsIn(command: string): string[] {
 }
 
 /**
+ * The directory a command explicitly runs in via its own flag (`go -C d`, `git -C d`, `make -C d`, `npm --prefix d`,
+ * `pnpm -C d` / `--dir d`, `yarn --cwd d`), when it is a literal absolute (or ~) path. Otherwise undefined.
+ */
+export function explicitDir(seg: string): string | undefined {
+  const m = seg
+    .replace(/^([A-Za-z_]\w*=\S*\s+)+/, "")
+    .match(/^(?:(?:go|git|make|pnpm)\s+-C(?:\s+|=)|npm\s+(?:\S+\s+)*?--prefix(?:\s+|=)|pnpm\s+--dir(?:\s+|=)|yarn\s+--cwd(?:\s+|=))(\S+)/);
+  if (!m) return undefined;
+  const d = expandHome(m[1].replace(/^(['"])(.*)\1$/, "$2"));
+  return d.startsWith("/") && !/[$`*?]/.test(d) ? resolve(d) : undefined;
+}
+
+/**
  * `cwd` is the shell's current directory as reported by the PreToolUse hook — Claude Code keeps it across Bash calls,
  * so "cd <primary checkout>" followed by "git checkout -b x" is caught on the second call too.
  */
@@ -534,9 +547,17 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       if (c && isScratchWorktreeOp(seg)) readSources.add(resolve(expandHome(c[1])));
     });
     const scratchOnly = (i: number) => isScratchWorktreeOp(p.segments[i] ?? "");
+    // `go -C /worktree test`, `git -C /worktree commit`, `npm --prefix /worktree i`: the command runs in that directory,
+    // not in the shell's cwd. Such a segment is charged to the directory it names (absolute paths only), provided it
+    // mentions no primary-checkout path itself (`go -C /wt build -o /primary/bin` still counts as a write there).
+    const elsewhere = (seg: string) => {
+      const d = explicitDir(seg);
+      return !!d && !primary(d) && !pathsIn(seg).some(primary);
+    };
+    const away = (i: number) => elsewhere(p.segments[i] ?? "");
     const touched = [
-      ...(cwd && primary(cwd) && !p.segments.every((seg, i) => scratchOnly(i) || readOnlyViolation(seg) === null) ? [cwd] : []),
-      ...dirs.filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i)),
+      ...(cwd && primary(cwd) && !p.segments.every((seg, i) => scratchOnly(i) || away(i) || readOnlyViolation(seg) === null) ? [cwd] : []),
+      ...dirs.filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i) && !away(i)),
       ...pathsIn(command).filter((x) => primary(x) && !readSources.has(resolve(x))),
     ];
     // Literal variables assigned in the same command (`L=/abs/dir; … > $L-lint.log`) are expanded for redirect checks.
@@ -557,7 +578,7 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       if (primary(abs)) touched.push(abs);
     }
     if (touched.length) {
-      const v = readOnlyViolation(command, isScratchWorktreeOp);
+      const v = readOnlyViolation(command, (s) => isScratchWorktreeOp(s) || elsewhere(s));
       if (v)
         return deny(
           `${touched[0]} is a primary checkout and is read-only (${v}). Call mcp__platform__prepare_branch and run modifying commands inside the returned worktree` +
