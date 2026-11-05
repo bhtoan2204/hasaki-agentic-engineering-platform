@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronRight, CircleHelp, Clock, Download, FileJson, FileText, FolderGit2, GitPullRequest, History, KeyRound, ListTodo, LogIn, PenLine, Pencil, Play, Plus,
   RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap, Siren,
@@ -52,6 +52,8 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
   const { data: st, reload: reloadSt } = useApi<any>("/api/work/status");
   const { data: inbox, reload: reloadInbox } = useApi<any[]>("/api/work/inbox");
   const [token, setToken] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  useEffect(() => { if (!st?.windowOpen) return; const timer = setInterval(reloadSt, 1500); return () => clearInterval(timer); }, [st?.windowOpen, reloadSt]);
   const [taskId, setTaskId] = useState("");
   const [busy, setBusy] = useState(false);
   const refresh = async () => {
@@ -72,15 +74,22 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
         {st && (st.loggedIn ? <Badge s="COMPLETED">{t("wi.loggedIn")}</Badge> : <Badge s="FAILED">{t("wi.loggedOut")}</Badge>)}
       </div>
       {st?.expiresAt && <div className="muted small wi-hexp"><Clock size={12} strokeWidth={2} /> {t("wi.expires", { time: time(st.expiresAt) })}</div>}
-      {st && !st.loggedIn && (
+      {st && (
         <div className="stack wi-hlogin">
-          {st.windowOpen ? <span className="muted small"><span className="spinner" /> {t("wi.loginWindow")}</span> : (
-            <button className="sm" onClick={async () => (await act(() => api("/api/work/login-window", {}))) && reloadSt()}><LogIn size={14} strokeWidth={2} />{t("wi.openLogin")}</button>
-          )}
-          <div className="wi-inline">
-            <input aria-label={t("ig.token")} placeholder={t("wi.tokenPh")} value={token} onChange={(e) => setToken(e.target.value)} />
-            <button className="sm ghost" onClick={async () => (await act(() => api("/api/work/token", { token }), t("wi.tokenSaved"))) && (setToken(""), reloadSt())}><KeyRound size={14} strokeWidth={2} />{t("wi.save")}</button>
-          </div>
+          <p className="muted small">{t(st.browserMode === "local" ? "chrome.local" : "chrome.hosted")}</p>
+          {st.connectionState !== "idle" && <p role="status">{t(`chrome.${st.connectionState}`)}</p>}
+          {st.connectionError && <p role="alert" className="err">{t(st.connectionError)}</p>}
+          {st.browserMode === "local" && <div className="row tight">
+            <button className="sm" disabled={connecting || st.windowOpen} onClick={async () => { setConnecting(true); await act(() => api("/api/work/login-window", {})); await reloadSt(); setConnecting(false); }}><LogIn size={14} />{t("chrome.connect")}</button>
+            {st.windowOpen && <button className="ghost sm" onClick={async () => { await act(() => api("/api/work/login-window/close", {})); await reloadSt(); }}>{t("common.cancel")}</button>}
+          </div>}
+          <form className="wi-inline" autoComplete="off" aria-label={t("ig.token")} onSubmit={async (e) => {
+            e.preventDefault();
+            if (await act(() => api("/api/work/token", { token }), t("wi.tokenSaved"))) { setToken(""); await reloadSt(); }
+          }}>
+            <input name="hasaki-work-api-token" aria-label={t("ig.token")} type="password" autoComplete="off" data-lpignore="true" data-1p-ignore="true" placeholder={t("wi.tokenPh")} value={token} onChange={(e) => setToken(e.target.value)} />
+            <button type="submit" disabled={!token.trim()} className="sm ghost"><KeyRound size={14} strokeWidth={2} />{t("wi.save")}</button>
+          </form>
         </div>
       )}
       {st?.loggedIn && (

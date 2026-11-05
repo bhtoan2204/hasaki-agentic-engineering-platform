@@ -353,8 +353,8 @@ export const routes: Route[] = [
 
   // ------------------------------------------------------------ Hasaki Work (unchanged endpoints; pick = import only)
   ["GET", /^\/api\/work\/status$/, ({ actor }) => authStatus(actor.id)],
-  ["POST", /^\/api\/work\/login-window$/, async () => { await openLoginWindow(); }],
-  ["POST", /^\/api\/work\/login-window\/close$/, async ({ actor }) => (await closeLoginWindow(), authStatus(actor.id))],
+  ["POST", /^\/api\/work\/login-window$/, async ({ actor }) => openLoginWindow(actor.id)],
+  ["POST", /^\/api\/work\/login-window\/close$/, async ({ actor }) => (await closeLoginWindow(actor.id), authStatus(actor.id))],
   ["POST", /^\/api\/work\/token$/, async ({ body, actor }) => (await setToken(String(body.token ?? ""), actor.id), authStatus(actor.id))],
   ["POST", /^\/api\/work\/refresh$/, async ({ actor }) => ({ count: (await fetchTaskList(actor.id)).length, inbox: await inbox.list(actor.id) })],
   ["GET", /^\/api\/work\/inbox$/, ({ actor }) => inbox.list(actor.id)],

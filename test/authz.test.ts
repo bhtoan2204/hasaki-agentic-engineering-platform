@@ -199,3 +199,12 @@ test("a resumed run keeps the owner stored on the row", async () => {
   const req = { headers: { cookie: "" }, socket: {} } as any;
   assert.equal(await sessionFromRequest(req), null);
 });
+
+ test("Chrome hosted endpoint stays authenticated, CSRF protected and cannot be enabled by client input", async () => {
+  const member = client();
+  await member.login("memberb", "member-b-password");
+  const result = await member.call("/api/work/login-window", { userId: 1, browserMode: "local" });
+  assert.equal(result.status, 403);
+  assert.equal(result.body.error, "chrome_hosted");
+  assert.equal((await member.call("/api/work/status")).body.browserMode, "hosted");
+});

@@ -180,7 +180,7 @@ export function SearchInput({ value, onChange, placeholder, width = 260 }: { val
   return (
     <label className="search" style={{ width }}>
       <Search size={15} />
-      <input type="search" value={value} placeholder={text} onChange={(e) => onChange(e.target.value)} aria-label={text} />
+      <input type="search" name="workspace-search" autoComplete="off" autoCapitalize="none" spellCheck={false} data-lpignore="true" data-1p-ignore="true" value={value} placeholder={text} onChange={(e) => onChange(e.target.value)} aria-label={text} />
     </label>
   );
 }

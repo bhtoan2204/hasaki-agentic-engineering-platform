@@ -1,12 +1,9 @@
 import { config } from "./config.ts";
 import { deleteUserSecret, getUserSecret, putUserSecret } from "./auth/secrets.ts";
 import { HttpError } from "./http/error.ts";
+import { cancelChrome, connectionStatus, localChromeEnabled, openChrome } from "./workChrome.ts";
 
-/**
- * Hasaki Work login stays in the user's own browser. This shared server does not open a Chromium
- * window or reuse a global profile. Each user pastes their own Bearer token; it is stored encrypted
- * and never used for anyone else.
- */
+/** Personal tokens are verified before encryption; Chrome sessions are isolated per actor. */
 const tokens = new Map<number, { value: string; exp: number }>();
 
 function jwtExp(t: string) {
@@ -21,21 +18,31 @@ export async function loadToken() {
   /* Tokens stay in user_secrets and are loaded for the user who is calling. Nothing global is warmed. */
 }
 
-export async function setToken(raw: string, userId: number) {
+export async function setToken(raw: string, userId: number, valid = () => true) {
   const value = raw.trim().replace(/^Authorization:\s*/i, "").replace(/^Bearer\s+/i, "");
+  if (jwtExp(value) && jwtExp(value) <= Date.now() / 1000 + 30) throw new Error("chrome_verification");
   if (value.split(".").length !== 3) throw new Error("token không đúng dạng JWT (xxx.yyy.zzz)");
-  tokens.set(userId, { value, exp: jwtExp(value) });
+  const url = new URL(config.hasakiWork.apiUrl + "/" + config.hasakiWork.listPath.replace(/^\//, ""));
+  for (const [k, v] of Object.entries(config.hasakiWork.listQuery)) url.searchParams.set(k, String(v));
+  url.searchParams.set("to_date", new Date().toISOString().slice(0, 10));
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${value}`, Accept: "application/json", "X-Locale": "vi" }, signal: AbortSignal.timeout(10000), redirect: "error" });
+  if (!response.ok || !response.headers.get("content-type")?.includes("json")) throw new Error("chrome_verification");
+  const body = await response.json();
+  if (!body || typeof body !== "object" || body.success === false || body.error || (typeof body.code === "number" && body.code >= 400)) throw new Error("chrome_verification");
+  if (!valid()) return;
   await putUserSecret(userId, "hasaki_token", value);
+  tokens.set(userId, { value, exp: jwtExp(value) });
 }
 
-export function authStatus(userId?: number) {
+export async function authStatus(userId: number) {
+  await getToken(userId).catch(() => {});
   const token = userId ? tokens.get(userId) : undefined;
   const now = Date.now() / 1000;
   const valid = !!token && (token.exp === 0 || token.exp - 30 > now);
   return {
     loggedIn: valid,
     expiresAt: token?.exp ? new Date(token.exp * 1000).toISOString() : null,
-    windowOpen: false,
+    ...connectionStatus(userId),
   };
 }
 
@@ -55,14 +62,12 @@ export async function getToken(userId: number): Promise<string> {
   return token.value;
 }
 
-/** Disabled: a host browser profile cannot be isolated per user on the shared server. */
-export async function openLoginWindow(): Promise<void> {
-  throw new HttpError(403, "The shared server does not open a Hasaki Work login window. Paste your own token.");
+export async function openLoginWindow(userId: number) {
+  if (!localChromeEnabled()) throw new HttpError(403, "chrome_hosted");
+  await openChrome(userId, (raw, valid) => setToken(raw, userId, valid));
+  return authStatus(userId);
 }
-
-export async function closeLoginWindow() {
-  return;
-}
+export async function closeLoginWindow(userId: number) { await cancelChrome(userId); }
 
 /** Call the wshr API the way the web app does. */
 export async function workApi(userId: number, method: string, path: string, params?: Record<string, string | number>, body?: unknown) {

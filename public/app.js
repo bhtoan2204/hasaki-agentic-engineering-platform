@@ -267,7 +267,7 @@ const VIEWS = {
           ${
             status.loggedIn
               ? `<div class="row"><button onclick="A.refreshInbox(this)">${esc(tr("wi.fetchTasks"))}</button></div>`
-              : `<div class="row">${status.windowOpen ? `<span class="muted">${esc(tr("wi.loginWindow"))}</span>` : `<button onclick="A.openLogin()">${esc(tr("wi.openLogin"))}</button>`}</div>
+              : `<div class="row">${status.windowOpen ? `<span class="muted">${esc(tr("wi.loginWindow"))}</span>` : (status.browserMode === "local" ? `<button onclick="A.openLogin()">${esc(tr("chrome.connect"))}</button>` : `<span>${esc(tr("chrome.hosted"))}</span>`)}</div>
                  <div class="row"><input placeholder="${esc(tr("wi.tokenPh"))}" ${keep("tok")} value="${esc(drafts["tok"] || "")}"><button onclick="A.saveToken()">${esc(tr("ig.save"))}</button></div>`
           }
           ${status.loggedIn ? `<div class="row"><input placeholder="${esc(tr("wi.taskId"))}" ${keep("hw-id")} value="${esc(drafts["hw-id"] || "")}"><button class="ghost" onclick="A.importHasakiId()">${esc(tr("kn.import"))}</button></div>` : ""}

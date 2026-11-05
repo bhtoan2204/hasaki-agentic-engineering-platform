@@ -31,7 +31,7 @@ export interface Config {
   maxTurns: number;
   hasakiWork: {
     apiUrl: string;
-    /** Empty = the Chromium that playwright-core ships with (~/.cache/ms-playwright). */
+    /** Deprecated: browser connections use HASAKI_WORK_CHROME_PATH and explicit local mode. */
     chromiumPath: string;
     /** Poll the task list every N minutes and auto-pick new tasks. 0 = only when you click "Lấy task". */
     pollMinutes: number;

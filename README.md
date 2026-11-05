@@ -175,3 +175,29 @@ tokens; crashed workers' jobs are reaped and retried. Several processes may shar
 | `GET /api/questions`, `POST /api/questions/answers` `{answers:{id:text}}` | questions inbox |
 | `GET/POST /api/knowledge`, `POST /api/knowledge/preview`, `GET/POST /api/repositories`, `POST /api/repositories/rank` | knowledge, repository registry |
 | `/api/tasks*`, `/api/work/*` | legacy endpoints, kept compatible (`POST /api/tasks?workflow=<key>` imports and starts) |
+
+### Connect Hasaki Work using Google Chrome (local worker)
+
+Set `HASAKI_WORK_BROWSER_MODE=local` in the git-ignored `.env`, then restart with `npm start`.
+Keep `HOST=127.0.0.1` (or leave it unset). The default mode is hosted: only personal token paste is available.
+Never enable local mode on a shared deployment. Chrome opens on the backend machine.
+
+The Work Items panel offers **Connect with Chrome**. Complete sign-in/MFA yourself in the separate Chrome window.
+A persistent dedicated profile is reused per installation and platform user under
+`dataDir/work-chrome/<installation-id>/<user>/profile` (Windows: `%LOCALAPPDATA%/HasakiWorkChrome/<installation-id>/<user>/profile`).
+Sign in once in this profile; subsequent connections retain its browser session. Personal Chrome profiles are never used or copied.
+Earlier temporary session profiles are left untouched. A profile lock prevents concurrent workers from attaching to or closing another session.
+After a worker crash, stop all workers and close that dedicated Work window before removing only its empty `.platform-connection-lock` directory.
+Do not remove the profile itself or its Chrome lock files.
+Existing profiles are preserved. The session expires after five minutes; Cancel closes only this session's Chrome.
+The platform observes Bearer headers sent to the configured Work API, verifies a candidate with the configured read-only
+list endpoint, and encrypts it for the initiating user. Passwords/MFA and API payloads are not logged.
+There is no confirmed official OAuth callback integration in this repository; no cookie or storage keys are assumed.
+
+Chrome is detected on Linux/macOS/Windows, including Windows Chrome under WSL. Optionally set
+`HASAKI_WORK_CHROME_PATH` to the official Chrome executable; a missing explicit path never falls back.
+`hasakiWork.chromiumPath` is deprecated and not used. Bundled Chromium is never selected.
+On WSL, a Windows PowerShell stdio bridge connects Windows Chrome loopback to a temporary WSL loopback listener.
+Mirrored networking is not required. Chrome opens the login URL immediately. Both endpoints stay on 127.0.0.1;
+no DevTools port is exposed to the LAN. The bridge is closed with its connection session. If company policy blocks debugging or SSO rejects connected Chrome, use personal token paste.
+Chrome detection/DevTools connectivity does not prove that SSO accepts the browser.
