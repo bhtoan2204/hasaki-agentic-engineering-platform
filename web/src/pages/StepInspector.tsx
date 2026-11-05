@@ -37,7 +37,7 @@ export function OutputView({ value }: { value: any }) {
   );
 }
 
-export function QuestionsForm({ questions, onDone }: { questions: any[]; onDone: () => void }) {
+export function QuestionsForm({ questions, onDone, provider = "claude" }: { questions: any[]; onDone: () => void; provider?: "claude" | "cursor" }) {
   const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -56,7 +56,7 @@ export function QuestionsForm({ questions, onDone }: { questions: any[]; onDone:
       <div className="rv-attn-head">
         <span className="rv-attn-icon"><MessageCircleQuestion size={20} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h4>{t("si.waitingAnswers", { n: questions.length })}</h4>
+          <h4>{t("si.waitingAnswers", { n: questions.length, name: t(provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude") })}</h4>
           <div className="rv-attn-sub">{t("si.pausedUntil")}</div>
         </div>
       </div>
@@ -185,7 +185,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const tabs: Array<[Tab, React.ReactNode]> = [
     ...(step.type === "task_result_report" ? ([["report", <TabLabel icon={ClipboardList}>{t("si.tab.report")}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ["overview", <TabLabel icon={Info}>{t("si.tab.overview")}</TabLabel>],
-    ...(isAgent ? ([["execution", <TabLabel icon={Bot}>Claude {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
+    ...(isAgent ? ([["execution", <TabLabel icon={Bot}>{t(run.agent_provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude")} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ...(step.type === "command" ? ([["execution", <TabLabel icon={SquareTerminal}>{t("si.tab.live")} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ["input", <TabLabel icon={LogIn}>{t("si.tab.input")}</TabLabel>],
     ["output", <TabLabel icon={LogOut}>{t("si.tab.output")}</TabLabel>],
@@ -236,7 +236,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       </div>
 
       <div className="si-body">
-        {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} />}
+        {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} provider={run.agent_provider === "cursor" ? "cursor" : "claude"} />}
         {step.status === "WAITING_APPROVAL" && step.type !== "task_result_report" && <ApprovalPanel run={run} step={step} onDone={refresh} />}
         {step.type === "task_result_report" && step.status === "WAITING_APPROVAL" && tab !== "report" && (
           <div className="rv-attn" style={{ padding: "12px 16px" }}>
@@ -296,7 +296,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
             )}
           </div>
         )}
-        {tab === "execution" && (!attempt ? <Empty>{t("si.notStarted")}</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
+        {tab === "execution" && (!attempt ? <Empty>{t("si.notStarted")}</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} provider={run.agent_provider === "cursor" ? "cursor" : "claude"} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
         {tab === "input" && (attempt ? <JsonBlock value={attempt.input} title={t("si.resolvedInput", { n: attempt.number })} /> : <Empty>{t("si.inputLater")}</Empty>)}
         {tab === "output" && (
           <div>

@@ -47,8 +47,9 @@ function toolHint(input: any = {}) {
  * Claude Code execution viewer for one attempt: streamed from the backend (SSE-triggered incremental fetches of
  * /api/attempts/:id/transcript). Shows only what the SDK returned; "reasoning" is the summarised thinking the API exposes.
  */
-export function Transcript({ attemptId, live, tick }: { attemptId: number; live: boolean; tick: number }) {
+export function Transcript({ attemptId, live, tick, provider = "claude" }: { attemptId: number; live: boolean; tick: number; provider?: "claude" | "cursor" }) {
   const { t } = useI18n();
+  const agent = t(provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude");
   const [events, setEvents] = useState<Ev[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [follow, setFollow] = useState(true);
@@ -137,11 +138,11 @@ export function Transcript({ attemptId, live, tick }: { attemptId: number; live:
         <label className="small muted" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t("tr.follow")}</label>
       </div>
       <div ref={box} className="tr-feed">
-        {visible.map((e) => <Entry key={e.id} e={e} result={e.kind === "tool" ? results[e.data?.id] : undefined} live={live} />)}
+        {visible.map((e) => <Entry key={e.id} e={e} result={e.kind === "tool" ? results[e.data?.id] : undefined} live={live} agent={agent} />)}
         {!events.length && <div className="muted small">{t("tr.empty")}</div>}
         {live && (
           <div className="msg live">
-            <span className="spinner" /> {t("tr.working")} {events.length ? t("tr.last", { ago: ago(events[events.length - 1].created_at) }) : t("tr.starting")}
+            <span className="spinner" /> {t("tr.working", { name: agent })} {events.length ? t("tr.last", { ago: ago(events[events.length - 1].created_at) }) : t("tr.starting")}
           </div>
         )}
       </div>
@@ -149,7 +150,7 @@ export function Transcript({ attemptId, live, tick }: { attemptId: number; live:
   );
 }
 
-function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
+function Entry({ e, result, live, agent }: { e: Ev; result?: Ev; live: boolean; agent: string }) {
   const { t } = useI18n();
   const sub = e.data?.parent ? " sub" : "";
   const when = <span>{time(e.created_at)}</span>;
@@ -165,7 +166,7 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
     case "prompt":
       return (
         <div className={"msg prompt" + sub}>
-          <div className="who"><Av icon={Send} /><b>{t("tr.toClaude")}</b> {e.data?.resume_session && <Badge s="READY">{t("tr.resume")}</Badge>} {when}<span className="grow" /><Copy text={e.content} label={t("tr.copyPrompt")} /></div>
+          <div className="who"><Av icon={Send} /><b>{t("tr.toAgent", { name: agent })}</b> {e.data?.resume_session && <Badge s="READY">{t("tr.resume")}</Badge>} {when}<span className="grow" /><Copy text={e.content} label={t("tr.copyPrompt")} /></div>
           {e.content.length > 2500 ? (
             <details><summary>{e.content.slice(0, 160)}… ({t("tr.chars", { n: e.content.length })})</summary><div className="pre">{e.content}</div></details>
           ) : (
@@ -176,7 +177,7 @@ function Entry({ e, result, live }: { e: Ev; result?: Ev; live: boolean }) {
     case "agent":
       return (
         <div className={"msg claude" + sub}>
-          <div className="who"><Av icon={Bot} /><b>Claude</b> {when}<span className="grow" /><Copy text={e.content} /></div>
+          <div className="who"><Av icon={Bot} /><b>{agent}</b> {when}<span className="grow" /><Copy text={e.content} /></div>
           <Markdown text={e.content} />
         </div>
       );

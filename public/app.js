@@ -450,7 +450,11 @@ function toolLabel(name, input = {}) {
   return `<b>${esc(short)}</b> <span class="mono">${esc(String(hint).split("\n")[0].slice(0, 140))}</span>`;
 }
 
-function renderTranscript(events, live) {
+function agentName(provider) {
+  return tr(provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude");
+}
+function renderTranscript(events, live, provider) {
+  const name = agentName(provider);
   const results = {};
   for (const e of events) if (e.kind === "tool_result" && e.data?.tool_use_id) results[e.data.tool_use_id] = e;
   const out = [];
@@ -463,10 +467,10 @@ function renderTranscript(events, live) {
         out.push(`<details class="msg sys"><summary>📋 ${esc(tr("cl.system"))} · ${esc((e.data?.tools || []).join(", "))}${e.data?.knowledge?.length ? " · " + esc(tr("cl.knowledgeWord")) + ": " + esc(e.data.knowledge.join(", ")) : ""}</summary><div class="pre">${esc(e.content)}</div></details>`);
         break;
       case "prompt":
-        out.push(`<div class="msg user${sub}"><div class="who">➡️ ${esc(tr("cl.platformTo"))} ${e.data?.resume_session ? `<span class="badge s-READY">${esc(tr("cl.resume"))}</span>` : ""} ${when}</div>${long(e.content)}</div>`);
+        out.push(`<div class="msg user${sub}"><div class="who">➡️ ${esc(tr("cl.platformTo", { name }))} ${e.data?.resume_session ? `<span class="badge s-READY">${esc(tr("cl.resume"))}</span>` : ""} ${when}</div>${long(e.content)}</div>`);
         break;
       case "agent":
-        out.push(`<div class="msg claude${sub}"><div class="who">🤖 Claude ${when}</div><div class="pre">${esc(e.content)}</div></div>`);
+        out.push(`<div class="msg claude${sub}"><div class="who">🤖 ${esc(name)} ${when}</div><div class="pre">${esc(e.content)}</div></div>`);
         break;
       case "thinking":
         out.push(`<details class="msg think${sub}"><summary>💭 ${esc(tr("cl.thinking"))} ${when}</summary><div class="pre">${esc(e.content)}</div></details>`);
@@ -501,12 +505,12 @@ function renderTranscript(events, live) {
   if (live) {
     const last = events.at(-1);
     const tail = last ? tr("cl.lastAgo", { ago: ago(last.created_at) }) : tr("cl.starting");
-    out.push(`<div class="msg live">⏳ ${esc(tr("cl.working"))} ${esc(tail)}</div>`);
+    out.push(`<div class="msg live">⏳ ${esc(tr("cl.working", { name }))} ${esc(tail)}</div>`);
   }
   return out.join("") || `<div class="muted small">${esc(tr("cl.noConvo"))}</div>`;
 }
 
-async function conversationPanel(s, atts) {
+async function conversationPanel(s, atts, provider) {
   if (!AGENT_TYPES.includes(s.type) || !atts.length) return "";
   const k = "conv-" + s.key;
   const running = s.status === "RUNNING";
@@ -517,11 +521,11 @@ async function conversationPanel(s, atts) {
   const live = running && att.id === s.current_attempt_id;
   const events = open ? await api(`/api/attempts/${att.id}/transcript`) : [];
   return `<details data-k="${k}" ${open ? "open data-loaded=\"1\"" : ""} ontoggle="if (this.open && !this.dataset.loaded) render(true)">
-    <summary>💬 ${esc(tr("cl.convo"))} ${live ? `<span class="badge s-RUNNING">${esc(tr("cl.live"))}</span>` : ""}</summary>
+    <summary>💬 ${esc(tr("cl.convo", { name: agentName(provider) }))} ${live ? `<span class="badge s-RUNNING">${esc(tr("cl.live"))}</span>` : ""}</summary>
     <div class="row" style="margin:4px 0">${atts.length > 1 ? `<select style="width:auto" onchange="A.convAttempt('${s.key}', this.value)">${atts
       .map((a) => `<option value="${a.id}" ${a.id === att.id ? "selected" : ""}>${esc(tr("cl.attemptLine", { n: a.number, gen: a.generation, status: statusText(a.status) }))}</option>`)
       .join("")}</select>` : `<span class="muted small">${esc(tr("cl.attemptShort", { n: att.number, status: statusText(att.status) }))}</span>`}</div>
-    <div class="convo" data-scroll="${k}">${open ? renderTranscript(events, live) : ""}</div></details>`;
+    <div class="convo" data-scroll="${k}">${open ? renderTranscript(events, live, provider) : ""}</div></details>`;
 }
 
 async function runDetail(id) {
@@ -553,7 +557,7 @@ async function runDetail(id) {
     ${(await Promise.all(r.steps
       .map(async (s) => {
         const atts = attempts[s.key] || [];
-        const convo = await conversationPanel(s, atts);
+        const convo = await conversationPanel(s, atts, r.agent_provider);
         const qs = questions[s.key] || [];
         const open = qs.filter((q) => q.status === "open");
         const can = (a) => RUN_ACTIONS[a].includes(s.status) && active;
