@@ -1,13 +1,40 @@
 import { useMemo, useState } from "react";
 import {
   ChevronRight, CircleHelp, Clock, Download, FileJson, FileText, FolderGit2, GitPullRequest, History, KeyRound, ListTodo, LogIn, PenLine, Pencil, Play, Plus,
-  RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap,
+  RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap, Siren,
 } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
 import { act, ago, Badge, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Loading, Markdown, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, time } from "../ui.tsx";
 import { RunsTable } from "./Runs.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import "./WorkItems.css";
+
+/** Production error groups this work item fixes, with their latest counts (did the fix make them stop?). */
+function ProdErrorRefs({ rows }: { rows: any[] }) {
+  if (!rows?.length) return null;
+  const hm = (t: string | null) => (t ? new Date(t).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", hour12: false }) : "–");
+  return (
+    <section className="card wi-prod">
+      <div className="card-head"><span className="wi-hicon"><Siren size={16} strokeWidth={2} /></span><h4>Lỗi production liên quan</h4><span className="muted small">từ trang Lỗi production</span></div>
+      {rows.map((g) => {
+        const current = g.day === g.latest_day;
+        return (
+          <a key={g.fingerprint} className="wi-prod-row" href={`#/prod-errors/${g.fingerprint}`}>
+            <span className={`pe-sev pe-${g.severity}`}>{g.severity}</span>
+            <span className="wi-prod-main">
+              <b>{g.service}</b> <span className="mono small">{g.signature}</span>
+              <span className="muted small">
+                {current
+                  ? <>Lần quét mới nhất ({g.day}): <b>{g.today_count}</b> lần, gần nhất {hm(g.last_at)}{g.yesterday_count ? ` · hôm qua ${g.yesterday_count}` : ""}</>
+                  : <>Không còn thấy ở lần quét mới nhất ({g.latest_day}) — lần cuối {hm(g.last_at)}</>}
+              </span>
+            </span>
+          </a>
+        );
+      })}
+    </section>
+  );
+}
 
 const WI_STATUS: Record<string, { label: string }> = {
   open: { label: "Mở" },
@@ -316,6 +343,8 @@ export function WorkItemDetail({ id }: { id: number }) {
             <DescriptionEditor id={id} description={w.description} source={w.description_source} onSaved={reload} />
             {w.payload && Object.keys(w.payload).length > 0 && <details className="wi-raw"><summary>raw payload</summary><JsonBlock value={w.payload} /></details>}
           </section>
+
+          <ProdErrorRefs rows={w.prod_errors} />
 
           <section className="wi-section">
             <div className="wi-section-head"><History size={16} strokeWidth={2} /><h4>Lịch sử thực thi</h4><span className="muted small">{w.runs.length} run</span></div>

@@ -39,11 +39,12 @@ export function parseSplunkCookie(raw: string): { cookie: string; formKey: strin
   return { cookie: pairs.join("; "), formKey };
 }
 
-async function call(method: "GET" | "POST", path: string, s: { cookie: string; formKey: string }, form?: Record<string, string>) {
+async function call(method: "GET" | "POST", path: string, s: { cookie: string; formKey: string }, form?: Record<string, string>, timeoutSeconds = config.splunk.timeoutSeconds) {
   const res = await fetch(`${base()}${path}`, {
     method,
     redirect: "manual",
-    signal: AbortSignal.timeout(config.splunk.timeoutSeconds * 1000),
+    // a little longer than the search's own max_time, so Splunk finalizes and answers first
+    signal: AbortSignal.timeout((timeoutSeconds + 15) * 1000),
     headers: {
       Cookie: s.cookie,
       Accept: "application/json",
@@ -147,28 +148,72 @@ export function checkSpl(raw: string): string {
   return spl;
 }
 
+async function searchJob(s: { cookie: string; formKey: string }, params: Record<string, string>, count: number, timeout: number, onProgress: (p: SearchProgress) => void) {
+  const job = await call("POST", "/services/search/jobs", s, { ...params, exec_mode: "normal" }, 30);
+  const sid = job?.sid;
+  if (!sid) throw new Error("Splunk không trả về search id");
+  const path = `/services/search/jobs/${encodeURIComponent(sid)}`;
+  const deadline = Date.now() + (timeout + 30) * 1000;
+  let messages: any[] = [];
+  for (;;) {
+    const c = (await call("GET", `${path}?output_mode=json`, s, undefined, 30))?.entry?.[0]?.content ?? {};
+    const state = String(c.dispatchState ?? "QUEUED");
+    const done = c.isDone === true || c.isDone === "1" || state === "DONE";
+    onProgress({ state, pct: done ? 100 : Math.max(0, Math.min(99, Math.round(Number(c.doneProgress ?? 0) * 100))), scanned: Number(c.scanCount ?? 0), matched: Number(c.eventCount ?? 0) });
+    messages = Array.isArray(c.messages) ? c.messages : [];
+    if (state === "FAILED") throw new Error(`Splunk search lỗi: ${messages.map((m: any) => m.text ?? m).join("; ") || "FAILED"}`);
+    if (done) break;
+    if (Date.now() > deadline) {
+      await call("POST", `${path}/control`, s, { action: "cancel" }, 15).catch(() => {});
+      throw new Error(`Splunk search quá ${timeout}s, đã huỷ`);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  const res = await call("GET", `${path}/results?output_mode=json&count=${count}`, s, undefined, 60);
+  return { results: res?.results ?? [], messages: [...(res?.messages ?? []), ...messages.filter((m: any) => m?.type && m?.text)] };
+}
+
 export interface SplunkQuery {
   query: string;
   since_minutes?: number;
   until_minutes?: number;
   max_results?: number;
+  /** platform-internal (scheduled scans); agents use the configured limit */
+  timeout_seconds?: number;
 }
 
-export async function splunkSearch(q: SplunkQuery) {
+export interface SearchProgress {
+  /** Splunk dispatch state: QUEUED, PARSING, RUNNING, FINALIZING, DONE */
+  state: string;
+  /** 0–100 */
+  pct: number;
+  /** events read from the index so far */
+  scanned: number;
+  /** events matching the search so far */
+  matched: number;
+}
+
+/**
+ * Without `onProgress`: one blocking "oneshot" request (agent tool). With it: an asynchronous job polled for progress
+ * (done %, events scanned), cancelled if it outlives the timeout — used by the long production error scan.
+ */
+export async function splunkSearch(q: SplunkQuery, onProgress?: (p: SearchProgress) => void) {
   if (!session?.valid) throw new Error(session ? "phiên Splunk hết hạn — người dùng cần dán cookie mới ở trang Integrations" : "chưa kết nối Splunk — người dùng dán cookie ở trang Integrations");
   const spl = checkSpl(q.query);
   const since = Math.min(q.since_minutes ?? 60, config.splunk.maxMinutes);
   const until = Math.max(0, Math.min(q.until_minutes ?? 0, since - 1));
   const count = Math.min(q.max_results ?? 100, config.splunk.maxResults);
-  const j = await call("POST", "/services/search/jobs", session, {
+  const timeout = q.timeout_seconds ?? config.splunk.timeoutSeconds;
+  const params = {
     search: spl,
-    exec_mode: "oneshot",
     earliest_time: `-${Math.round(since)}m`,
     latest_time: until ? `-${Math.round(until)}m` : "now",
-    count: String(count),
     output_mode: "json",
-    max_time: String(config.splunk.timeoutSeconds),
-  });
+    max_time: String(timeout),
+  };
+  const j = onProgress
+    ? await searchJob(session, params, count, timeout, onProgress)
+    : await call("POST", "/services/search/jobs", session, { ...params, exec_mode: "oneshot", count: String(count) }, timeout);
   session.checkedAt = Date.now();
   const rows: any[] = j?.results ?? [];
   const mask = (v: unknown): unknown => (typeof v === "string" ? redactPii(v) : Array.isArray(v) ? v.map(mask) : v);

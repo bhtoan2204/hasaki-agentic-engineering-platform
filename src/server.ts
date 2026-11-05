@@ -10,6 +10,7 @@ import { loadSplunkCookie } from "./integrations/splunk.ts";
 import { loadKafkaCookie } from "./integrations/kafka.ts";
 import { loadAccountSettings } from "./integrations/accounts.ts";
 import { loadVaultToken } from "./integrations/vault.ts";
+import { startProdErrorSchedule } from "./prodErrors/scan.ts";
 import { seedTemplates } from "./workflow/definitions.ts";
 import { registerDefaultExecutors } from "./workflow/executors/index.ts";
 import { startScheduler } from "./workflow/scheduler.ts";
@@ -112,6 +113,7 @@ await startEventStream();
 // Durable scheduler: in-flight work resumes from PostgreSQL (expired leases are reaped and retried).
 const scheduler = startScheduler();
 startPolling();
+startProdErrorSchedule();
 
 // No auth on this API, so listen on loopback only (set HOST=0.0.0.0 to expose deliberately).
 const server = createServer(handle).listen(config.port, process.env.HOST ?? "127.0.0.1", () => console.log(`workflow platform on ${config.publicUrl}`));

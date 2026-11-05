@@ -8,6 +8,7 @@ import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd
 import { clearSplunkCookie, setSplunkCookie, splunkStatus } from "../integrations/splunk.ts";
 import { clearKafkaCookie, kafkaStatus, setKafkaCookie } from "../integrations/kafka.ts";
 import { clearVaultToken, setVaultToken, vaultStatus } from "../integrations/vault.ts";
+import { groupsForWorkItem, investigate, linkWorkItem, listGroups, saveSettings as saveProdErrorSettings, setIgnored, startScan } from "../prodErrors/scan.ts";
 import { adoptEnv, bitbucketStatus, clearBitbucket, clearTelegram, setBitbucket, setTelegram, telegramChats, telegramStatus, testTelegram } from "../integrations/accounts.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { reviewMemory } from "../knowledge/memory.ts";
@@ -105,7 +106,7 @@ export const routes: Route[] = [
       throw new HttpError(400, "source must be hasaki_work or jira");
     },
   ],
-  ["GET", /^\/api\/work-items\/(\d+)$/, async ({ p }) => must(await workItems.detail(num(p[0])), "work item")],
+  ["GET", /^\/api\/work-items\/(\d+)$/, async ({ p }) => ({ ...must(await workItems.detail(num(p[0])), "work item"), prod_errors: await groupsForWorkItem(num(p[0])) })],
   ["POST", /^\/api\/work-items\/(\d+)$/, async ({ p, body }) => must(await workItems.update(num(p[0]), body), "work item")],
   [
     "POST",
@@ -279,6 +280,12 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/splunk$/, ({ url }) => splunkStatus(url.searchParams.get("check") === "1")],
   ["POST", /^\/api\/integrations\/splunk\/cookie$/, ({ body }) => setSplunkCookie(String(body.cookie ?? ""))],
   ["POST", /^\/api\/integrations\/splunk\/logout$/, () => clearSplunkCookie()],
+  ["GET", /^\/api\/prod-errors$/, ({ url }) => listGroups({ day: url.searchParams.get("day") ?? undefined, all: url.searchParams.get("all") === "1" })],
+  ["POST", /^\/api\/prod-errors\/scan$/, () => startScan("manual")],
+  ["POST", /^\/api\/prod-errors\/settings$/, ({ body }) => saveProdErrorSettings(body)],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/ignore$/, ({ p, body }) => setIgnored(p[0], body.ignored !== false)],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/investigate$/, ({ p }) => investigate(p[0])],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/link$/, ({ p, body }) => linkWorkItem(p[0], String(body.work_item ?? ""))],
   // Telegram + Bitbucket credentials (saved in the platform instead of .env; secrets never returned)
   ["GET", /^\/api\/integrations\/telegram$/, () => telegramStatus()],
   ["POST", /^\/api\/integrations\/telegram$/, ({ body }) => setTelegram(body)],

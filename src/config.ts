@@ -96,6 +96,16 @@ export interface Config {
   vault: { baseUrl: string };
   kafka: { baseUrl: string; cluster: string; maxMessages: number; timeoutSeconds: number };
   splunk: { baseUrl: string; locale: string; allowedIndexes: string[]; maxMinutes: number; maxResults: number; timeoutSeconds: number };
+  /** Daily production error scan over Splunk (page "Lỗi production"). */
+  prodErrors: {
+    index: string;
+    /** Kubernetes namespace → platform project (the project the "Điều tra" work item belongs to). */
+    namespaces: Array<{ namespace: string; project: string }>;
+    timezone: string;
+    /** Default scan times (HH:MM, local); editable on the page. */
+    schedule: string[];
+    timeoutSeconds: number;
+  };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
     baseUrl: string;
@@ -147,6 +157,16 @@ const defaults: Config = {
   kafka: { baseUrl: "https://kafka-ui-qc-v2.hasaki.dev", cluster: "", maxMessages: 200, timeoutSeconds: 60 },
   splunk: { baseUrl: "https://siem.hasaki.work", locale: "en-US", allowedIndexes: [], maxMinutes: 7 * 24 * 60, maxResults: 500, timeoutSeconds: 60 },
   telegram: { botToken: "", chatId: "", apiBase: "https://api.telegram.org" },
+  prodErrors: {
+    index: "k8s_prod",
+    namespaces: [
+      { namespace: "oms-prod", project: "OMS" },
+      { namespace: "payment-prod", project: "Payment" },
+    ],
+    timezone: "Asia/Ho_Chi_Minh",
+    schedule: ["09:00", "14:00", "17:00"],
+    timeoutSeconds: 300,
+  },
   agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
 
@@ -164,6 +184,7 @@ function load(): Config {
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },
+    prodErrors: { ...defaults.prodErrors, ...(fromFile.prodErrors ?? {}) },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };

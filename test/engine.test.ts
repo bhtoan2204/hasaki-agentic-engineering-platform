@@ -1041,16 +1041,16 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     assert.equal(msgs.length, 1, "WAITING_INPUT → exactly one message (no extra run-level WAITING message)");
     assert.equal(msgs[0].path, "/botTEST:TOKEN/sendMessage");
     assert.equal(msgs[0].chat_id, "42");
-    assert.match(msgs[0].text, /Cần bạn trả lời câu hỏi/);
-    assert.match(msgs[0].text, /Task: HSK-1: Thiếu &lt;ZIP&gt;/, "HTML-escaped task name");
+    assert.match(msgs[0].text, /CẦN BẠN TRẢ LỜI/);
+    assert.match(msgs[0].text, /<b>HSK-1: Thiếu &lt;ZIP&gt;<\/b>/, "HTML-escaped task name");
     assert.match(msgs[0].text, new RegExp(`Run: #${run.id}`));
-    assert.match(msgs[0].text, /Bước: Hỏi rule \(<code>ask<\/code>\)/);
+    assert.match(msgs[0].text, /Bước: <b>Hỏi rule<\/b> · <code>ask<\/code>/);
     assert.match(msgs[0].text, /2 câu hỏi cần trả lời/);
     assert.equal(msgs[0].reply_markup, undefined, "local publicUrl → no URL button");
     assert.ok(msgs[0].text.includes(`/#/runs/${run.id}/ask`), "local link as text");
     // Telegram drops localhost links; 127.0.0.1 stays clickable, as an <a href>
     const local = `http://127.0.0.1:4545/#/runs/${run.id}/ask`;
-    assert.ok(msgs[0].text.includes(`<a href="${local}">${local}</a>`), msgs[0].text);
+    assert.ok(msgs[0].text.includes(`<a href="${local}">Mở để trả lời</a>`), msgs[0].text);
     assert.ok(!msgs[0].text.includes("localhost"));
     // HTTPS publicUrl → inline URL button
     config.publicUrl = "https://platform.example.com";
@@ -1058,10 +1058,10 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     await answerQuestions(Object.fromEntries(qs.map((x) => [x.id, "ok"])));
     await drain();
     assert.equal(msgs.length, 2, "WAITING_APPROVAL → one more message");
-    assert.match(msgs[1].text, /Cần bạn duyệt/);
+    assert.match(msgs[1].text, /CẦN BẠN DUYỆT/);
     assert.match(msgs[1].text, /Duyệt kế hoạch fix/);
-    assert.deepEqual(msgs[1].reply_markup.inline_keyboard[0][0], { text: "Mở bước cần xử lý", url: `https://platform.example.com/#/runs/${run.id}/approve` });
-    assert.ok(!msgs[1].text.includes("Mở bước cần xử lý:"), "no duplicate text link when the button exists");
+    assert.deepEqual(msgs[1].reply_markup.inline_keyboard[0][0], { text: "Mở để duyệt", url: `https://platform.example.com/#/runs/${run.id}/approve` });
+    assert.ok(!msgs[1].text.includes("<a href"), "no duplicate text link when the button exists");
     // Telegram failing (HTTP 400) must not affect the workflow; the approval gate still notifies
     status = 400;
     await approveStep(run.id, "approve");

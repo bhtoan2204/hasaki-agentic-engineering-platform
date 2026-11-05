@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BookOpen, Building2, ClipboardList, FolderGit2, Inbox, LayoutDashboard, LineChart, Menu, Moon, PlayCircle, PlugZap, Sun, Workflow, type LucideIcon } from "lucide-react";
+import { BookOpen, Building2, ClipboardList, FolderGit2, Inbox, LayoutDashboard, LineChart, Menu, Moon, PlayCircle, PlugZap, Siren, Sun, Workflow, type LucideIcon } from "lucide-react";
 import { api, useLive, type LiveState } from "./api.ts";
 import { BRAND } from "./brand/brand.ts";
 import { BrandLogo } from "./brand/BrandLogo.tsx";
@@ -15,6 +15,7 @@ import { InsightsPage } from "./pages/Insights.tsx";
 import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
+import { ProdErrorsPage } from "./pages/ProdErrors.tsx";
 
 function useHash() {
   const [hash, setHash] = useState(location.hash.slice(1) || "/overview");
@@ -55,6 +56,7 @@ const NAV: Array<{ group: string; items: Array<{ key: string; label: string; ico
     { key: "runs", label: "Workflow Runs", icon: PlayCircle },
     { key: "workflows", label: "Workflow Studio", icon: Workflow },
     { key: "questions", label: "Questions & Approvals", icon: Inbox },
+    { key: "prod-errors", label: "Lỗi production", icon: Siren },
   ] },
   { group: "Library", items: [
     { key: "knowledge", label: "Knowledge", icon: BookOpen },
@@ -114,11 +116,14 @@ export function App() {
     case "repositories":
       page = <RepositoriesPage name={parts[1]} />;
       break;
+    case "prod-errors":
+      page = <ProdErrorsPage focus={parts[1]} />;
+      break;
     case "integrations":
       page = <IntegrationsPage />;
       break;
     case "insights":
-      page = <InsightsPage />;
+      page = <InsightsPage tab={parts[1]} />;
       break;
     case "office":
       page = <AgentOfficePage param={parts[1]} />;

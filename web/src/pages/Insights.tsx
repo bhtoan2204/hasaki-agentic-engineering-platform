@@ -3,7 +3,7 @@ import {
   Activity, AlertTriangle, Ban, Check, Coins, Cpu, Gauge, Hand, LineChart, Plug, Repeat, ShieldCheck, Sparkles, Timer, Users, Workflow, Wrench, type LucideIcon,
 } from "lucide-react";
 import { useApi, useLive } from "../api.ts";
-import { Badge, EmptyState, ErrorBox, JsonBlock, Loading, navigate, PageHeader, Segmented, StatCard, time } from "../ui.tsx";
+import { Badge, EmptyState, ErrorBox, JsonBlock, Loading, navigate, PageHeader, Segmented, StatCard, Tabs, time } from "../ui.tsx";
 import "./Insights.css";
 
 // ---------------------------------------------------------------- number helpers (pg numeric/bigint arrive as strings)
@@ -120,7 +120,13 @@ function Table({ rows, cols }: { rows: any[]; cols: Array<[string, string, ((r: 
 // ---------------------------------------------------------------- page
 
 /** Observability: cost/tokens per workflow, step-type durations & failures, tool / integration / skill usage. */
-export function InsightsPage() {
+type InsightsTab = "overview" | "quality" | "tools" | "failures" | "registry";
+const TAB_KEYS: InsightsTab[] = ["overview", "quality", "tools", "failures", "registry"];
+
+/** `tab` comes from the URL (#/insights/<tab>) so a tab can be linked and survives reloads. */
+export function InsightsPage({ tab: tabParam }: { tab?: string }) {
+  const tab: InsightsTab = TAB_KEYS.includes(tabParam as InsightsTab) ? (tabParam as InsightsTab) : "overview";
+  const setTab = (t: InsightsTab) => navigate(t === "overview" ? "/insights" : `/insights/${t}`);
   const [days, setDays] = useState(30);
   const { data, error, loading, reload } = useApi<any>(`/api/metrics/summary?days=${days}`, [days]);
   const { data: tools } = useApi<any[]>("/api/tools");
@@ -191,94 +197,122 @@ export function InsightsPage() {
         <StatCard icon={Hand} label="Run cần người" value={fmtPct(num(h.rate_pct))} hint={ev ? `${fmtInt(num(h.with_human))}/${fmtInt(num(h.runs))} runs` : undefined} tone="wait" />
       </div>
 
-      {ev && <HarnessEvaluation e={ev} />}
-      <EvalComparison />
+      <Tabs<InsightsTab>
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          ["overview", "Tổng quan"],
+          ["quality", "Chất lượng"],
+          ["tools", "Tool & skill"],
+          ["failures", <>Lỗi gần đây{data.failures?.length ? <span className="ins-tab-count">{data.failures.length}</span> : null}</>],
+          ["registry", "Tool registry"],
+        ]}
+      />
 
-      <div className="ins-grid">
-        <Panel
-          icon={Workflow}
-          title="Theo workflow"
-          sub={wfMetric === "runs" ? <Legend items={[["Hoàn thành", "var(--st-ok)"], ["Lỗi", "var(--st-err)"], ["Khác", "var(--st-idle)"]]} /> : wfMetric === "cost" ? "Chi phí ước tính ($)" : "Tokens (input + output)"}
-          actions={<Segmented label="Chỉ số workflow" options={[["cost", "Cost"], ["tokens", "Tokens"], ["runs", "Runs"]]} value={wfMetric} onChange={setWfMetric} />}
-        >
-          <Bars rows={wfSorted} color={wfMetric === "tokens" ? "var(--st-wait)" : "var(--brand)"} />
-        </Panel>
-        <Panel
-          icon={Timer}
-          title="Theo loại bước"
-          sub={stMetric === "avg" ? "Thời gian trung bình mỗi attempt" : stMetric === "fail" ? "Tỉ lệ attempt lỗi" : "Chi phí ước tính ($)"}
-          actions={<Segmented label="Chỉ số loại bước" options={[["avg", "Thời gian"], ["fail", "Lỗi"], ["cost", "Cost"]]} value={stMetric} onChange={setStMetric} />}
-        >
-          <Bars rows={stSorted} color={stMetric === "fail" ? "var(--st-err)" : stMetric === "avg" ? "var(--st-run)" : "var(--brand)"} />
-        </Panel>
-      </div>
+      {tab === "overview" && (
+        <>
+          <div className="ins-grid">
+            <Panel
+              icon={Workflow}
+              title="Theo workflow"
+              sub={wfMetric === "runs" ? <Legend items={[["Hoàn thành", "var(--st-ok)"], ["Lỗi", "var(--st-err)"], ["Khác", "var(--st-idle)"]]} /> : wfMetric === "cost" ? "Chi phí ước tính ($)" : "Tokens (input + output)"}
+              actions={<Segmented label="Chỉ số workflow" options={[["cost", "Cost"], ["tokens", "Tokens"], ["runs", "Runs"]]} value={wfMetric} onChange={setWfMetric} />}
+            >
+              <Bars rows={wfSorted} color={wfMetric === "tokens" ? "var(--st-wait)" : "var(--brand)"} />
+            </Panel>
+            <Panel
+              icon={Timer}
+              title="Theo loại bước"
+              sub={stMetric === "avg" ? "Thời gian trung bình mỗi attempt" : stMetric === "fail" ? "Tỉ lệ attempt lỗi" : "Chi phí ước tính ($)"}
+              actions={<Segmented label="Chỉ số loại bước" options={[["avg", "Thời gian"], ["fail", "Lỗi"], ["cost", "Cost"]]} value={stMetric} onChange={setStMetric} />}
+            >
+              <Bars rows={stSorted} color={stMetric === "fail" ? "var(--st-err)" : stMetric === "avg" ? "var(--st-run)" : "var(--brand)"} />
+            </Panel>
+          </div>
 
-      <Panel icon={Users} title="So sánh theo profile" sub="Thời gian, số bước Claude, turns và chi phí trung bình mỗi run">
-        <Table
-          rows={data.by_profile}
-          cols={[["profile", "Profile"], ["runs", "Runs"], ["completed", "Completed"], ["avg_wall_min", "Avg wall (min)"], ["claude_attempts_per_run", "Claude steps/run"], ["turns_per_run", "Turns/run"], ["cost_per_run", "≈ Cost/run ($)"]]}
-        />
-      </Panel>
-
-      <div className="ins-grid">
-        <Panel icon={Wrench} title="Tool (Claude Code + platform)" sub="Số lần gọi">
-          <Bars
-            rows={(data.tools ?? []).map((r: any) => ({ key: r.tool, label: <span className="mono">{r.tool}</span>, value: num(r.calls), display: fmtInt(num(r.calls)), hint: `${fmtInt(num(r.attempts))} attempts` }))}
-            color="var(--st-run)"
-          />
-        </Panel>
-        <Panel icon={Plug} title="Integration tools" sub={<Legend items={[["OK", "var(--st-ok)"], ["Lỗi", "var(--st-err)"]]} />}>
-          <Bars
-            rows={(data.integrations ?? []).map((r: any) => {
-              const calls = num(r.calls) ?? 0, f = num(r.failed) ?? 0;
-              return {
-                key: r.name, label: <span className="mono">{r.name}</span>, value: calls, display: fmtInt(calls), hint: `${fmtInt(f)} lỗi · TB ${r.avg_ms != null ? `${fmtInt(num(r.avg_ms))}ms` : "—"}`,
-                segments: [{ value: Math.max(0, calls - f), color: "var(--st-ok)", label: "OK" }, { value: f, color: "var(--st-err)", label: "Lỗi" }],
-              };
-            })}
-          />
-        </Panel>
-        <Panel icon={Sparkles} title="Skills / knowledge đã nạp" sub="Số lần nạp vào bước">
-          <Bars rows={(data.skills ?? []).map((r: any) => ({ key: r.key, label: <a className="mono" href={`#/knowledge/${r.key}`}>{r.key}</a>, value: num(r.loads), display: fmtInt(num(r.loads)) }))} color="var(--rose-ink)" />
-        </Panel>
-        <Panel icon={Ban} title="Tool bị policy chặn" sub="Theo tool + lý do">
-          {!(data.denied ?? []).length ? <div className="ins-empty">Không có tool nào bị chặn.</div> : (
-            <ul className="ins-denied">
-              {data.denied.map((r: any, i: number) => (
-                <li key={i}>
-                  <span className="ins-denied-times">{fmtInt(num(r.times))}×</span>
-                  <div className="ins-denied-body"><b className="mono">{r.tool}</b><div className="muted small">{r.reason}</div></div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
-
-      <Panel icon={AlertTriangle} title="Lỗi gần đây" sub="25 attempt lỗi mới nhất">
-        <Table
-          rows={data.failures}
-          cols={[
-            ["run_id", "Run", (r) => <a onClick={() => navigate(`/runs/${r.run_id}/${r.step_key}`)} style={{ cursor: "pointer" }} className="mono">#{r.run_id} · {r.step_key}</a>],
-            ["type", "Type", (r) => <span className="pill">{r.type}</span>],
-            ["finished_at", "At", (r) => <span className="muted nowrap">{time(r.finished_at)}</span>],
-            ["error", "Error", (r) => <span className="ins-error">{r.error}</span>],
-          ]}
-        />
-      </Panel>
-
-      <Panel icon={Plug} title="Integration tool registry" sub="Agent khám phá qua list_tools → describe_tool → call_tool (không nạp schema từ đầu).">
-        <Table
-          rows={tools ?? []}
-          cols={[
-            ["name", "Name", (r) => <b className="mono">{r.name}</b>],
-            ["summary", "Summary"],
-            ["read_only", "Mode", (r) => (r.read_only ? <Badge s="COMPLETED">read-only</Badge> : <Badge s="WAITING">write</Badge>)],
-            ["available", "Available", (r) => (r.available === true ? <span className="okc ins-avail"><Check size={15} strokeWidth={2.4} aria-label="available" /></span> : <span className="muted small">{String(r.available)}</span>)],
-            ["input_schema", "Schema", (r) => <details><summary>schema</summary><JsonBlock value={r.input_schema} /></details>],
-          ]}
-        />
-      </Panel>
+          <Panel icon={Users} title="So sánh theo profile" sub="Thời gian, số bước Claude, turns và chi phí trung bình mỗi run">
+            <Table
+              rows={data.by_profile}
+              cols={[["profile", "Profile"], ["runs", "Runs"], ["completed", "Completed"], ["avg_wall_min", "Avg wall (min)"], ["claude_attempts_per_run", "Claude steps/run"], ["turns_per_run", "Turns/run"], ["cost_per_run", "≈ Cost/run ($)"]]}
+            />
+          </Panel>
+        </>
+      )}
+      {tab === "quality" && (
+        <>
+          {ev && <HarnessEvaluation e={ev} />}
+          <EvalComparison />
+        </>
+      )}
+      {tab === "tools" && (
+        <>
+          <div className="ins-grid">
+            <Panel icon={Wrench} title="Tool (Claude Code + platform)" sub="Số lần gọi">
+              <Bars
+                rows={(data.tools ?? []).map((r: any) => ({ key: r.tool, label: <span className="mono">{r.tool}</span>, value: num(r.calls), display: fmtInt(num(r.calls)), hint: `${fmtInt(num(r.attempts))} attempts` }))}
+                color="var(--st-run)"
+              />
+            </Panel>
+            <Panel icon={Plug} title="Integration tools" sub={<Legend items={[["OK", "var(--st-ok)"], ["Lỗi", "var(--st-err)"]]} />}>
+              <Bars
+                rows={(data.integrations ?? []).map((r: any) => {
+                  const calls = num(r.calls) ?? 0, f = num(r.failed) ?? 0;
+                  return {
+                    key: r.name, label: <span className="mono">{r.name}</span>, value: calls, display: fmtInt(calls), hint: `${fmtInt(f)} lỗi · TB ${r.avg_ms != null ? `${fmtInt(num(r.avg_ms))}ms` : "—"}`,
+                    segments: [{ value: Math.max(0, calls - f), color: "var(--st-ok)", label: "OK" }, { value: f, color: "var(--st-err)", label: "Lỗi" }],
+                  };
+                })}
+              />
+            </Panel>
+            <Panel icon={Sparkles} title="Skills / knowledge đã nạp" sub="Số lần nạp vào bước">
+              <Bars rows={(data.skills ?? []).map((r: any) => ({ key: r.key, label: <a className="mono" href={`#/knowledge/${r.key}`}>{r.key}</a>, value: num(r.loads), display: fmtInt(num(r.loads)) }))} color="var(--rose-ink)" />
+            </Panel>
+            <Panel icon={Ban} title="Tool bị policy chặn" sub="Theo tool + lý do">
+              {!(data.denied ?? []).length ? <div className="ins-empty">Không có tool nào bị chặn.</div> : (
+                <ul className="ins-denied">
+                  {data.denied.map((r: any, i: number) => (
+                    <li key={i}>
+                      <span className="ins-denied-times">{fmtInt(num(r.times))}×</span>
+                      <div className="ins-denied-body"><b className="mono">{r.tool}</b><div className="muted small">{r.reason}</div></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+        </>
+      )}
+      {tab === "failures" && (
+        <>
+          <Panel icon={AlertTriangle} title="Lỗi gần đây" sub="25 attempt lỗi mới nhất">
+            <Table
+              rows={data.failures}
+              cols={[
+                ["run_id", "Run", (r) => <a onClick={() => navigate(`/runs/${r.run_id}/${r.step_key}`)} style={{ cursor: "pointer" }} className="mono">#{r.run_id} · {r.step_key}</a>],
+                ["type", "Type", (r) => <span className="pill">{r.type}</span>],
+                ["finished_at", "At", (r) => <span className="muted nowrap">{time(r.finished_at)}</span>],
+                ["error", "Error", (r) => <span className="ins-error">{r.error}</span>],
+              ]}
+            />
+          </Panel>
+        </>
+      )}
+      {tab === "registry" && (
+        <>
+          <Panel icon={Plug} title="Integration tool registry" sub="Agent khám phá qua list_tools → describe_tool → call_tool (không nạp schema từ đầu).">
+            <Table
+              rows={tools ?? []}
+              cols={[
+                ["name", "Name", (r) => <b className="mono">{r.name}</b>],
+                ["summary", "Summary"],
+                ["read_only", "Mode", (r) => (r.read_only ? <Badge s="COMPLETED">read-only</Badge> : <Badge s="WAITING">write</Badge>)],
+                ["available", "Available", (r) => (r.available === true ? <span className="okc ins-avail"><Check size={15} strokeWidth={2.4} aria-label="available" /></span> : <span className="muted small">{String(r.available)}</span>)],
+                ["input_schema", "Schema", (r) => <details><summary>schema</summary><JsonBlock value={r.input_schema} /></details>],
+              ]}
+            />
+          </Panel>
+        </>
+      )}
     </div>
   );
 }
@@ -399,7 +433,7 @@ function EvalComparison() {
   const groups = (data?.summary ?? []) as any[];
   const v = (x: any, suffix = "") => (x == null ? "—" : `${x}${suffix}`);
   return (
-    <section className="card" style={{ marginTop: 16 }}>
+    <section className="card">
       <div className="card-head"><h4>Benchmark comparison</h4><span className="sub">npm run bench -- --live · hidden acceptance tests · candidates and profiles</span></div>
       {!groups.length ? (
         <div className="muted small">Chưa có kết quả benchmark. Chạy <span className="kbd">npm run bench -- --live --profiles=FAST,STANDARD,DEEP</span> (và <span className="kbd">--candidate=claude-cli</span>) để so sánh.</div>
