@@ -29,6 +29,22 @@ test("group folders (e.g. oms-src/) are expanded into their git repos; non-repos
   assert.deepEqual((await repositories.allowedFor("OMS")).sort(), ["oms-api", "oms-background"]);
 });
 
+test("a repo holding standalone repos (old-inside/ versions .claude/ only) registers both; submodules are not split out", async () => {
+  for (const p of ["old-inside/.git", "old-inside/hasaki-inside-ws/.git", "old-inside/hasaki-inside/.git"]) mkdirSync(join(config.reposRoot, p), { recursive: true });
+  mkdirSync(join(config.reposRoot, "old-inside/vendor-sub"), { recursive: true });
+  writeFileSync(join(config.reposRoot, "old-inside/vendor-sub/.git"), "gitdir: ../.git/modules/vendor-sub\n"); // submodule
+  mkdirSync(join(config.reposRoot, "old-inside/docs"), { recursive: true });
+  await syncRepositoriesFromConfig();
+  const byName = Object.fromEntries((await repositories.list()).map((r) => [r.name, r]));
+  assert.equal(byName["old-inside"].path, "");
+  assert.equal(byName["old-inside"].enabled, true);
+  assert.equal(byName["hasaki-inside-ws"].path, "old-inside/hasaki-inside-ws");
+  assert.equal(repoPath(byName["hasaki-inside-ws"]), join(config.reposRoot, "old-inside/hasaki-inside-ws"));
+  assert.equal(byName["hasaki-inside"].path, "old-inside/hasaki-inside");
+  assert.equal(byName["vendor-sub"], undefined, "submodule belongs to old-inside");
+  assert.equal(byName["docs"], undefined);
+});
+
 test("repository knowledge import: CLAUDE.md, shared skills, secrets skipped, re-import versions only changes", async () => {
   const api = join(config.reposRoot, "oms-src/oms-api"), bg = join(config.reposRoot, "oms-src/oms-background");
   writeFileSync(join(api, "CLAUDE.md"), "# oms-api\n\nMoney fields are int64 VND.\n");

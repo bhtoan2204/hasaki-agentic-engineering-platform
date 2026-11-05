@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
@@ -63,13 +63,29 @@ export const repositories = {
 
 export const repoPath = (r: Pick<RepositoryRow, "name" | "path">) => join(config.reposRoot, r.path || r.name);
 const isGit = (rel: string) => existsSync(join(config.reposRoot, rel, ".git"));
+/** A standalone repository: its own .git directory (a submodule or linked worktree has a .git file instead). */
+const isOwnGitDir = (rel: string) => {
+  try {
+    return statSync(join(config.reposRoot, rel, ".git")).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Expand a reposRoot-relative entry into git repositories: the entry itself if it is a repo, otherwise its direct
- * sub-folders that are repos (a "group" folder such as oms-src/ holding oms-api, oms-background, ...).
+ * sub-folders that are repos (a "group" folder such as oms-src/ holding oms-api, oms-background, ...). A repo that is
+ * itself a group (old-inside/ versions only .claude/ and holds hasaki-inside-ws, ... as separate repos) yields both
+ * the repo and its nested standalone repos; submodules are not listed separately.
  */
 export function expandRepoEntry(rel: string): string[] {
-  if (isGit(rel)) return [rel];
+  if (isGit(rel)) {
+    try {
+      return [rel, ...readdirSync(join(config.reposRoot, rel)).filter((d) => isOwnGitDir(join(rel, d))).map((d) => join(rel, d))];
+    } catch {
+      return [rel];
+    }
+  }
   const dir = join(config.reposRoot, rel);
   if (!existsSync(dir)) {
     // A bare repo name ("oms-api") may live inside a group folder ("oms-src/oms-api").
