@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, ArrowRight, BadgeCheck, Building2, CheckCircle
 import { api, useApi, useLive } from "../api.ts";
 import { BRAND } from "../brand/brand.ts";
 import { ago, Badge, EmptyState, navigate, StatCard } from "../ui.tsx";
+import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ChibiAgent } from "../office/ChibiAgent.tsx";
 import { OfficeScene } from "../office/OfficeScene.tsx";
 import { useNow, useOfficeExecutionState } from "../office/useOfficeExecutionState.ts";
@@ -13,10 +14,11 @@ import "./Overview.css";
 
 const EMPTY: OfficeSnapshot = { run: null, steps: [], graph: [], attempts: [], questions: [], events: {} };
 const ACTIVE = ["RUNNING", "WAITING", "PAUSED"];
-const fmt = (n: number | null | undefined, d = 0) => (n == null || Number.isNaN(n) ? "—" : n.toLocaleString("vi-VN", { maximumFractionDigits: d }));
+const fmt = (n: number | null | undefined, d = 0) => (n == null || Number.isNaN(n) ? "—" : n.toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB", { maximumFractionDigits: d }));
 
 /** Landing dashboard: real workflow activity, a live mini office, recent work and harness health. */
 export function OverviewPage() {
+  const { t } = useI18n();
   const { data: runs, reload: reloadRuns } = useApi<any[]>("/api/runs");
   const { data: questions, reload: reloadQ } = useApi<any[]>("/api/questions");
   const { data: metrics, reload: reloadM } = useApi<any>("/api/metrics/summary?days=30");
@@ -42,11 +44,11 @@ export function OverviewPage() {
     <div className="ov">
       <Hero active={active.length} waiting={(questions ?? []).length} />
 
-      <section aria-label="Hoạt động workflow" className="grid4 ov-stats">
-        <StatCard icon={Activity} tone="run" label="Đang chạy" value={runs ? counts.running : null} hint={active.length ? `${active.length} run đang hoạt động` : "Không có run nào đang chạy"} onClick={() => navigate("/runs")} />
-        <StatCard icon={Inbox} tone="wait" label="Chờ bạn" value={runs ? counts.waiting : null} hint={`${(questions ?? []).length} câu hỏi đang mở`} onClick={() => navigate("/questions")} />
-        <StatCard icon={CheckCircle2} tone="ok" label="Hoàn thành" value={runs ? counts.completed : null} hint={`trên ${list.length} run gần nhất`} onClick={() => navigate("/runs")} />
-        <StatCard icon={XCircle} tone="err" label="Lỗi" value={runs ? counts.failed : null} hint="cần xem lại" onClick={() => navigate("/runs")} />
+      <section aria-label={t("ov.activity")} className="grid4 ov-stats">
+        <StatCard icon={Activity} tone="run" label={t("status.RUNNING")} value={runs ? counts.running : null} hint={active.length ? t("ov.activeRuns", { n: active.length }) : t("office.none")} onClick={() => navigate("/runs")} />
+        <StatCard icon={Inbox} tone="wait" label={t("ov.waitingYou")} value={runs ? counts.waiting : null} hint={t("ov.openQuestions", { n: (questions ?? []).length })} onClick={() => navigate("/questions")} />
+        <StatCard icon={CheckCircle2} tone="ok" label={t("status.COMPLETED")} value={runs ? counts.completed : null} hint={t("ov.ofRecent", { n: list.length })} onClick={() => navigate("/runs")} />
+        <StatCard icon={XCircle} tone="err" label={t("status.FAILED")} value={runs ? counts.failed : null} hint={t("ov.needsReview")} onClick={() => navigate("/runs")} />
       </section>
 
       <div className="ov-main">
@@ -66,6 +68,7 @@ export function OverviewPage() {
 }
 
 function Hero({ active, waiting }: { active: number; waiting: number }) {
+  const { t } = useI18n();
   return (
     <section className="ov-hero card hero">
       <div className="ov-hero-text">
@@ -73,13 +76,13 @@ function Hero({ active, waiting }: { active: number; waiting: number }) {
         <h1>Welcome to {BRAND.product}</h1>
         <p>
           {active
-            ? <>Đang có <b>{active}</b> workflow hoạt động{waiting ? <>, <b>{waiting}</b> câu hỏi đang chờ bạn</> : ""}. Đội AI đang làm việc trong văn phòng.</>
-            : <>Chưa có workflow nào đang chạy. Chọn một work item để giao việc cho đội AI — phân tích, code, test, review và mở PR.</>}
+            ? <>{t("ov.heroActive", { n: active })}{waiting ? <> {t("ov.heroWaiting", { n: waiting })}</> : ""}. {t("ov.heroOffice")}</>
+            : <>{t("ov.heroEmpty")}</>}
         </p>
         <div className="row">
-          <a className="btn" href="#/work-items"><PlayCircle size={16} /> Bắt đầu workflow</a>
-          <a className="btn ghost" href="#/office"><Building2 size={16} /> Vào Agent Office</a>
-          {waiting > 0 && <a className="btn ghost" href="#/questions"><Inbox size={16} /> Trả lời {waiting} câu hỏi</a>}
+          <a className="btn" href="#/work-items"><PlayCircle size={16} /> {t("ov.start")}</a>
+          <a className="btn ghost" href="#/office"><Building2 size={16} /> {t("ov.enterOffice")}</a>
+          {waiting > 0 && <a className="btn ghost" href="#/questions"><Inbox size={16} /> {t("ov.answerN", { n: waiting })}</a>}
         </div>
       </div>
       <div className="ov-mascot" aria-hidden>
@@ -87,50 +90,52 @@ function Hero({ active, waiting }: { active: number; waiting: number }) {
           <ellipse cx={15} cy={39} rx={11} ry={2} fill="rgba(160, 60, 40, .16)" />
           <ChibiAgent role="pr" pose="greet" activity={null} x={0} y={0} walking={false} />
         </svg>
-        <div className="ov-mascot-bubble">Xin chào! 👋</div>
+        <div className="ov-mascot-bubble">{t("ov.hello")}</div>
       </div>
     </section>
   );
 }
 
 function MiniOffice({ runId }: { runId: number | null }) {
+  const { t, locale } = useI18n();
   const { snapshot } = useOfficeExecutionState(runId, null);
   const now = useNow(1000);
   const snap = snapshot ?? EMPTY;
-  const agents = useMemo(() => mapOffice(snap, now), [snap, now]);
+  const agents = useMemo(() => mapOffice(snap, now, locale), [snap, now, locale]);
   const working = agents.filter((a) => a.pose === "work").length;
   const waiting = agents.filter((a) => a.pose === "ask" || a.pose === "approval").length;
   return (
     <section className="card ov-office">
       <div className="card-head">
         <Building2 size={18} color="var(--brand)" />
-        <h4>Agent Office</h4>
-        <span className="sub">{snap.run ? <>Run #{snap.run.id} · {working} đang làm{waiting ? ` · ${waiting} cần bạn` : ""}</> : "Văn phòng đang nghỉ — không có run nào chạy"}</span>
-        <a className="btn ghost sm" href={runId ? `#/office/${runId}` : "#/office"}>Mở rộng <ArrowRight size={14} /></a>
+        <h4>{t("nav.office")}</h4>
+        <span className="sub">{snap.run ? <>Run #{snap.run.id} · {t("ov.working", { n: working })}{waiting ? ` · ${t("ov.needYou", { n: waiting })}` : ""}</> : t("ov.officeIdle")}</span>
+        <a className="btn ghost sm" href={runId ? `#/office/${runId}` : "#/office"}>{t("ov.expand")} <ArrowRight size={14} /></a>
       </div>
-      <div className="office office--mini" onClick={() => navigate(runId ? `/office/${runId}` : "/office")} role="link" tabIndex={0} aria-label="Mở Agent Office" onKeyDown={(e) => e.key === "Enter" && navigate(runId ? `/office/${runId}` : "/office")}>
+      <div className="office office--mini" onClick={() => navigate(runId ? `/office/${runId}` : "/office")} role="link" tabIndex={0} aria-label={t("ov.openOffice")} onKeyDown={(e) => e.key === "Enter" && navigate(runId ? `/office/${runId}` : "/office")}>
         <OfficeScene agents={agents} now={now} still={false} selected={null} onSelect={() => navigate(runId ? `/office/${runId}` : "/office")} showBubbles={!!snap.run} />
       </div>
-      <p className="small muted ov-note">Mỗi nhân vật là một vai trò logic của workflow; trạng thái lấy từ dữ liệu thật của run.</p>
+      <p className="small muted ov-note">{t("ov.officeNote")}</p>
     </section>
   );
 }
 
 function ActionInbox({ questions }: { questions: any[] }) {
+  const { t } = useI18n();
   const byStep = new Map<string, any[]>();
   for (const q of questions) byStep.set(`${q.run_id}/${q.step_key}`, [...(byStep.get(`${q.run_id}/${q.step_key}`) ?? []), q]);
   return (
     <section className="card ov-inbox">
-      <div className="card-head"><Inbox size={18} color="var(--st-wait)" /><h4>Cần bạn xử lý</h4><a className="small" href="#/questions">Xem tất cả</a></div>
+      <div className="card-head"><Inbox size={18} color="var(--st-wait)" /><h4>{t("inbox.tip")}</h4><a className="small" href="#/questions">{t("ov.seeAll")}</a></div>
       {byStep.size === 0 ? (
-        <div className="ov-inbox-empty"><BadgeCheck size={18} color="var(--st-ok)" /> Không có câu hỏi nào đang chờ.</div>
+        <div className="ov-inbox-empty"><BadgeCheck size={18} color="var(--st-ok)" /> {t("ov.noQuestions")}</div>
       ) : (
         <ul className="ov-list">
           {[...byStep.entries()].slice(0, 4).map(([k, qs]) => (
             <li key={k}>
               <a href={`#/runs/${qs[0].run_id}/${encodeURIComponent(qs[0].step_key)}`}>
                 <span className="ov-dot wait" />
-                <span className="ov-li-main"><b>Run #{qs[0].run_id} · {qs[0].step_key}</b><span className="muted small">{qs.length} câu hỏi · {String(qs[0].question ?? "").slice(0, 90)}</span></span>
+                <span className="ov-li-main"><b>Run #{qs[0].run_id} · {qs[0].step_key}</b><span className="muted small">{t("office.bubble.questions", { n: qs.length })} · {String(qs[0].question ?? "").slice(0, 90)}</span></span>
                 <ArrowRight size={15} />
               </a>
             </li>
@@ -142,6 +147,7 @@ function ActionInbox({ questions }: { questions: any[] }) {
 }
 
 function HarnessHealth({ m }: { m: any }) {
+  const { t } = useI18n();
   const e = m?.evaluation;
   const v = e?.verification;
   const runs = (m?.by_profile ?? []) as any[];
@@ -149,15 +155,15 @@ function HarnessHealth({ m }: { m: any }) {
   const avgWall = totalRuns ? runs.reduce((s, r) => s + Number(r.avg_wall_min ?? 0) * (r.runs ?? 0), 0) / totalRuns : null;
   const cost = ((m?.by_workflow ?? []) as any[]).reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
   const rows: Array<[typeof ShieldCheck, string, string, string?]> = [
-    [ShieldCheck, "Verification pass", v?.pass_rate_pct != null ? `${v.pass_rate_pct}%` : "—", v ? `${v.passed}/${v.verified} coding attempt${v.accepted_preexisting ? ` · ${v.accepted_preexisting} kèm lỗi có sẵn` : ""}` : "chưa có dữ liệu"],
-    [Wrench, "Repairs / attempt", v?.avg_repairs != null ? fmt(Number(v.avg_repairs), 2) : "—", v ? `${v.stopped_no_progress ?? 0} dừng vì không tiến triển · ${v.repair_budget_exhausted ?? 0} hết lượt` : undefined],
-    [Clock, "Thời gian / run", avgWall != null && totalRuns ? `${fmt(avgWall, 1)} phút` : "—", totalRuns ? `${totalRuns} run trong 30 ngày` : undefined],
-    [Coins, "Chi phí agent (30 ngày)", m ? `$${fmt(cost, 2)}` : "—", "ước tính từ token"],
-    [UserRound, "Run cần người", e?.human_intervention?.rate_pct != null ? `${e.human_intervention.rate_pct}%` : "—", e ? `${e.human_intervention.answers ?? 0} câu trả lời · ${e.human_intervention.reexecutions ?? 0} re-execute` : undefined],
+    [ShieldCheck, t("ov.health.pass"), v?.pass_rate_pct != null ? `${v.pass_rate_pct}%` : "—", v ? t("ov.health.passHint", { passed: v.passed, verified: v.verified, extra: v.accepted_preexisting ? t("ov.health.preexisting", { n: v.accepted_preexisting }) : "" }) : t("ov.health.noData")],
+    [Wrench, t("ov.health.repairs"), v?.avg_repairs != null ? fmt(Number(v.avg_repairs), 2) : "—", v ? t("ov.health.repairsHint", { stopped: v.stopped_no_progress ?? 0, exhausted: v.repair_budget_exhausted ?? 0 }) : undefined],
+    [Clock, t("ov.health.time"), avgWall != null && totalRuns ? t("ov.health.minutes", { n: fmt(avgWall, 1) }) : "—", totalRuns ? t("ov.health.runs30", { n: totalRuns }) : undefined],
+    [Coins, t("ov.health.cost"), m ? `$${fmt(cost, 2)}` : "—", t("ov.health.costHint")],
+    [UserRound, t("ov.health.human"), e?.human_intervention?.rate_pct != null ? `${e.human_intervention.rate_pct}%` : "—", e ? t("ov.health.humanHint", { answers: e.human_intervention.answers ?? 0, reexec: e.human_intervention.reexecutions ?? 0 }) : undefined],
   ];
   return (
     <section className="card ov-health">
-      <div className="card-head"><HeartPulse size={18} color="var(--brand)" /><h4>Harness Health</h4><a className="small" href="#/insights">Insights</a></div>
+      <div className="card-head"><HeartPulse size={18} color="var(--brand)" /><h4>{t("ov.health.title")}</h4><a className="small" href="#/insights">{t("nav.insights")}</a></div>
       {!m ? (
         <div className="stack" style={{ gap: 8 }}>{[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 30 }} />)}</div>
       ) : (
@@ -176,11 +182,12 @@ function HarnessHealth({ m }: { m: any }) {
 }
 
 function RecentRuns({ runs }: { runs: any[] }) {
+  const { t } = useI18n();
   return (
     <section className="card">
-      <div className="card-head"><PlayCircle size={18} color="var(--brand)" /><h4>Lượt chạy gần đây</h4><a className="small" href="#/runs">Tất cả runs</a></div>
+      <div className="card-head"><PlayCircle size={18} color="var(--brand)" /><h4>{t("ov.recent")}</h4><a className="small" href="#/runs">{t("ov.allRuns")}</a></div>
       {!runs.length ? (
-        <EmptyState title="Chưa có run nào" action={<a className="btn sm" href="#/work-items">Bắt đầu workflow</a>}>Run đầu tiên sẽ xuất hiện ở đây.</EmptyState>
+        <EmptyState title={t("runs.emptyTitle")} action={<a className="btn sm" href="#/work-items">{t("ov.start")}</a>}>{t("ov.firstRun")}</EmptyState>
       ) : (
         <ul className="ov-list">
           {runs.map((r) => {
@@ -192,9 +199,9 @@ function RecentRuns({ runs }: { runs: any[] }) {
                   <span className="ov-run-id">#{r.id}</span>
                   <span className="ov-li-main">
                     <b className="ov-ellipsis">{r.title}</b>
-                    <span className="muted small">{r.definition_key} · {ago(r.updated_at)} trước</span>
+                    <span className="muted small">{r.definition_key} · {t("common.ago", { when: ago(r.updated_at) })}</span>
                   </span>
-                  <span className="ov-run-progress" title={`${done}/${steps.length} bước`}>
+                  <span className="ov-run-progress" title={t("runs.progressAria", { done, total: steps.length })}>
                     <span className="progress"><span style={{ width: `${steps.length ? (done / steps.length) * 100 : 0}%`, background: r.status === "FAILED" ? "var(--st-err)" : "var(--st-ok)" }} /></span>
                   </span>
                   <Badge s={r.status} label />
@@ -210,6 +217,7 @@ function RecentRuns({ runs }: { runs: any[] }) {
 
 /** Verification outcomes of the coding attempts in the latest runs (from attempt metrics; real data only). */
 function RecentVerification({ runs }: { runs: any[] }) {
+  const { t } = useI18n();
   const ids = runs.map((r) => r.id).join(",");
   const [rows, setRows] = useState<any[] | null>(null);
   useEffect(() => {
@@ -231,11 +239,11 @@ function RecentVerification({ runs }: { runs: any[] }) {
   }, [ids]);
   return (
     <section className="card">
-      <div className="card-head"><ShieldCheck size={18} color="var(--brand)" /><h4>Kết quả verification</h4><span className="sub">coding step gần đây</span></div>
+      <div className="card-head"><ShieldCheck size={18} color="var(--brand)" /><h4>{t("ov.verify")}</h4><span className="sub">{t("ov.verifySub")}</span></div>
       {rows === null ? (
         <div className="stack" style={{ gap: 8 }}>{[0, 1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 36 }} />)}</div>
       ) : !rows.length ? (
-        <div className="ov-inbox-empty"><RefreshCw size={16} /> Chưa có coding step nào chạy qua verification gate.</div>
+        <div className="ov-inbox-empty"><RefreshCw size={16} /> {t("ov.verifyEmpty")}</div>
       ) : (
         <ul className="ov-list">
           {rows.map((r) => {
@@ -245,7 +253,7 @@ function RecentVerification({ runs }: { runs: any[] }) {
               <li key={`${r.run}-${r.step}-${r.n}`}>
                 <a href={`#/runs/${r.run}/${encodeURIComponent(r.step)}`}>
                   <span className={`ov-dot ${tone === "COMPLETED" ? "ok" : tone === "FAILED" ? "err" : tone === "WAITING" ? "wait" : ""}`} />
-                  <span className="ov-li-main"><b>Run #{r.run} · {r.step} #{r.n}</b><span className="muted small">{typeof r.v.rounds === "number" ? `${r.v.rounds} vòng · sửa ${r.v.repairs ?? 0}` : r.v.reason ?? ""}{r.v.needs_review ? " · cần xem lại" : ""}</span></span>
+                  <span className="ov-li-main"><b>Run #{r.run} · {r.step} #{r.n}</b><span className="muted small">{typeof r.v.rounds === "number" ? t("ov.verifyRounds", { rounds: r.v.rounds, repairs: r.v.repairs ?? 0 }) : r.v.reason ?? ""}{r.v.needs_review ? ` · ${t("ov.needsReview")}` : ""}</span></span>
                   <Badge s={tone}>{status}</Badge>
                 </a>
               </li>
@@ -253,7 +261,7 @@ function RecentVerification({ runs }: { runs: any[] }) {
           })}
         </ul>
       )}
-      {rows && rows.some((r) => r.v.passed === false) && <div className="small ov-warn"><AlertTriangle size={14} /> Có coding step không qua verification — mở run để xem chẩn đoán.</div>}
+      {rows && rows.some((r) => r.v.passed === false) && <div className="small ov-warn"><AlertTriangle size={14} /> {t("ov.verifyFail")}</div>}
     </section>
   );
 }

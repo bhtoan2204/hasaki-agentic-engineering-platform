@@ -1,3 +1,4 @@
+import { translate, type UiLocale } from "../i18n/messages.ts";
 import { CHARACTERS } from "./characters.ts";
 import type { Activity, AgentView, AttemptLite, EventLite, GraphStepLite, OfficeSnapshot, Pose, Role, StepLite, StepStatus } from "./types.ts";
 
@@ -94,65 +95,68 @@ const base = (p: unknown) => String(p ?? "").split("/").filter(Boolean).pop() ??
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 /** A real tool call → what the hands do + a short human description. Unknown tools fall back to the role's work. */
-export function activityFromTool(name: string, input: any): { activity: Activity; text: string } | null {
+export function activityFromTool(name: string, input: any, locale: UiLocale = "vi"): { activity: Activity; text: string } | null {
   const n = name.replace(/^mcp__platform__/, "");
   const i = input ?? {};
+  const say = (key: string, params?: Record<string, string | number>) => translate(locale, key, params);
+  const fileWord = say("office.act.file");
   switch (n) {
     case "Read":
-      return { activity: "reading", text: `Đọc ${base(i.file_path) || "file"}` };
+      return { activity: "reading", text: say("office.act.read", { file: base(i.file_path) || fileWord }) };
     case "Grep":
-      return { activity: "searching", text: `Tìm "${clip(String(i.pattern ?? ""), 28)}"` };
+      return { activity: "searching", text: say("office.act.grep", { q: clip(String(i.pattern ?? ""), 28) }) };
     case "Glob":
     case "LS":
-      return { activity: "searching", text: `Dò ${clip(String(i.pattern ?? i.path ?? "thư mục"), 28)}` };
+      return { activity: "searching", text: say("office.act.glob", { q: clip(String(i.pattern ?? i.path ?? say("office.act.folder")), 28) }) };
     case "Edit":
     case "MultiEdit":
     case "Write":
     case "NotebookEdit":
-      return { activity: "typing", text: `Sửa ${base(i.file_path ?? i.notebook_path) || "file"}` };
+      return { activity: "typing", text: say("office.act.edit", { file: base(i.file_path ?? i.notebook_path) || fileWord }) };
     case "Bash": {
       const cmd = String(i.command ?? "").trim();
-      if (/\b(go test|npm (run )?test|pytest|jest|vitest|cargo test|make test)\b/.test(cmd)) return { activity: "testing", text: "Chạy test" };
+      if (/\b(go test|npm (run )?test|pytest|jest|vitest|cargo test|make test)\b/.test(cmd)) return { activity: "testing", text: say("office.act.test") };
       if (/^\s*(cd \S+\s*&&\s*)?git\b/.test(cmd)) return { activity: "git", text: `git ${clip(cmd.replace(/^.*?git\s+(-C\s+\S+\s+)?/, ""), 30)}` };
       return { activity: "terminal", text: `$ ${clip(cmd.split("\n")[0], 34)}` };
     }
     case "WebFetch":
     case "WebSearch":
-      return { activity: "browsing", text: "Tra cứu tài liệu" };
+      return { activity: "browsing", text: say("office.act.web") };
     case "Task":
     case "Agent":
-      return { activity: "delegating", text: `Nhờ subagent${i.subagent_type ? ` ${i.subagent_type}` : ""}` };
+      return { activity: "delegating", text: say("office.act.delegate", { who: i.subagent_type ? ` ${i.subagent_type}` : "" }) };
     case "TodoWrite":
-      return { activity: "planning", text: "Lên checklist" };
+      return { activity: "planning", text: say("office.act.todo") };
     case "ask_user":
-      return { activity: "asking", text: "Soạn câu hỏi cho bạn" };
+      return { activity: "asking", text: say("office.act.ask") };
     case "submit_result":
-      return { activity: "submitting", text: "Nộp kết quả" };
+      return { activity: "submitting", text: say("office.act.submit") };
     case "prepare_branch":
-      return { activity: "git", text: "Chuẩn bị worktree" };
+      return { activity: "git", text: say("office.act.worktree") };
     case "post_update":
-      return { activity: "writing", text: "Ghi tiến độ" };
+      return { activity: "writing", text: say("office.act.progress") };
     case "read_knowledge":
     case "search_knowledge":
-      return { activity: "knowledge", text: `Tra skill ${clip(String(i.key ?? i.query ?? ""), 24)}`.trim() };
+      return { activity: "knowledge", text: say("office.act.skill", { q: clip(String(i.key ?? i.query ?? ""), 24) }).trim() };
     case "read_step_output":
-      return { activity: "reading", text: `Đọc kết quả bước ${i.step_key ?? ""}`.trim() };
+      return { activity: "reading", text: say("office.act.stepOut", { step: i.step_key ?? "" }).trim() };
     case "list_tools":
     case "describe_tool":
     case "call_tool":
-      return { activity: "browsing", text: `Dùng tool ${clip(String(i.name ?? ""), 24)}`.trim() };
+      return { activity: "browsing", text: say("office.act.tool", { name: clip(String(i.name ?? ""), 24) }).trim() };
     default:
       return null;
   }
 }
 
 /** Latest real activity of an attempt from its transcript; null when there is nothing to show. */
-export function activityFromEvents(events: EventLite[] | undefined, stepType: string): { activity: Activity; text: string } | null {
+export function activityFromEvents(events: EventLite[] | undefined, stepType: string, locale: UiLocale = "vi"): { activity: Activity; text: string } | null {
   if (!events?.length) return null;
+  const say = (key: string, params?: Record<string, string | number>) => translate(locale, key, params);
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
-    if (e.kind === "tool" && e.data?.name) return activityFromTool(String(e.data.name), e.data.input);
-    if (e.kind === "thinking") return { activity: "thinking", text: "Đang suy nghĩ…" };
+    if (e.kind === "tool" && e.data?.name) return activityFromTool(String(e.data.name), e.data.input, locale);
+    if (e.kind === "thinking") return { activity: "thinking", text: say("office.act.thinking") };
     if (e.kind === "agent" && e.content?.trim()) return { activity: "writing", text: clip(e.content.trim().split("\n")[0], 40) };
     if (stepType === "command" && e.content?.trim()) {
       const line = e.content.trim().split("\n").filter(Boolean).pop() ?? "";
@@ -167,7 +171,8 @@ function firstLine(err: any) {
   return clip(String(m).split("\n")[0], 60);
 }
 
-export function mapOffice(snap: OfficeSnapshot, now: number): AgentView[] {
+export function mapOffice(snap: OfficeSnapshot, now: number, locale: UiLocale = "vi"): AgentView[] {
+  const say = (key: string, params?: Record<string, string | number>) => translate(locale, key, params);
   const byRole = new Map<Role, StepLite[]>(ROLES.map((r) => [r, []]));
   for (const s of [...snap.steps].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))) byRole.get(roleOfStep(s, snap.graph))!.push(s);
 
@@ -179,7 +184,7 @@ export function mapOffice(snap: OfficeSnapshot, now: number): AgentView[] {
     const pose = step ? poseOf(status, attempt?.finished_at, now) : "idle";
     const openQuestions = step ? snap.questions.filter((q) => q.step_key === step.key && q.status === "open").length : 0;
     const activeCount = steps.filter((s) => ACTIVE.includes(s.status)).length;
-    const live = step && pose === "work" ? activityFromEvents(attempt ? snap.events[attempt.id] : undefined, step.type) : null;
+    const live = step && pose === "work" ? activityFromEvents(attempt ? snap.events[attempt.id] : undefined, step.type, locale) : null;
     const activity: Activity | null = pose === "work" ? live?.activity ?? DEFAULT_ACTIVITY[role] : pose === "ask" ? "asking" : null;
     const started = attempt?.started_at ? Date.parse(attempt.started_at) : null;
     const durationMs = started ? (attempt?.finished_at ? Date.parse(attempt.finished_at) : now) - started : null;
@@ -189,42 +194,43 @@ export function mapOffice(snap: OfficeSnapshot, now: number): AgentView[] {
     let bubble: string;
     switch (pose) {
       case "idle":
-        bubble = step ? `Chờ tới lượt: ${stepName}` : snap.run ? "Bước này không có trong run" : "Đang chờ việc ☕";
+        bubble = step ? say("office.bubble.waitTurn", { step: stepName }) : snap.run ? say("office.bubble.noStep") : say("office.bubble.idle");
         break;
       case "prepare":
-        bubble = "Chuẩn bị bàn làm việc…";
+        bubble = say("office.bubble.prepare");
         break;
       case "work":
-        bubble = (retrying ? "Thử lại! " : "") + (live?.text ?? `${stepName}…`);
+        bubble = (retrying ? say("office.bubble.retryPrefix") : "") + (live?.text ?? `${stepName}…`);
         break;
       case "ask":
-        bubble = openQuestions ? `Cần bạn trả lời ${openQuestions} câu hỏi` : "Cần bạn nhập thông tin";
+        bubble = openQuestions ? say("office.bubble.questions", { n: openQuestions }) : say("office.bubble.needInput");
         break;
       case "approval":
-        bubble = "Cần bạn duyệt";
+        bubble = say("office.bubble.approve");
         break;
       case "celebrate":
-        bubble = "Xong rồi!";
+        bubble = say("office.bubble.celebrate");
         break;
       case "done":
-        bubble = "✓ Hoàn thành";
+        bubble = say("office.bubble.done");
         break;
       case "frustrated":
-        bubble = attempt?.error ? `Lỗi: ${firstLine(attempt.error)}` : "Bước này lỗi rồi…";
+        bubble = attempt?.error ? say("office.bubble.error", { msg: firstLine(attempt.error) }) : say("office.bubble.failed");
         break;
       case "stopped":
-        bubble = "Đã dừng";
+        bubble = say("office.bubble.stopped");
         break;
       case "skipped":
-        bubble = "Bỏ qua";
+        bubble = say("office.bubble.skipped");
         break;
       default:
         bubble = "";
     }
     const info = ROLE_INFO[role];
+    const title = say(`office.role.${role}.title`);
     const detail = step
-      ? `${info.name} · ${info.title} — ${stepName} (${status})${pose === "work" && live ? `: ${live.text}` : ""}`
-      : `${info.name} · ${info.title} — ${snap.run ? "không có bước nào trong run này" : "chưa có việc"}`;
+      ? `${info.name} · ${title} — ${stepName} (${status})${pose === "work" && live ? `: ${live.text}` : ""}`
+      : `${info.name} · ${title} — ${snap.run ? say("office.bubble.noStep") : say("office.bubble.noWork")}`;
     return { role, step, steps, status, pose, activity, bubble, detail, activeCount, retrying, openQuestions, attempt, durationMs };
   });
 }

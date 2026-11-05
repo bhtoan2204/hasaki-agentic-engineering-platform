@@ -63,7 +63,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   if (error) return <div className="page"><ErrorBox error={error} onRetry={reload} /></div>;
 
   const runAction = async (a: string, body: any = {}) => {
-    if (a === "cancel" && !confirm("Cancel this run? Running steps are stopped.")) return;
+    if (a === "cancel" && !confirm(t("rv.cancelConfirm"))) return;
     if (await act(() => api(`/api/runs/${id}/${a}`, body))) reload();
   };
   const blocked = run.steps.filter((s: any) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL");
@@ -88,17 +88,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       <header className="rv-head">
         <div className="rv-headrow">
           <nav className="rv-crumbs" aria-label="Breadcrumb">
-            <a href="#/runs"><Activity size={13} /> Workflow Runs</a>
+            <a href="#/runs"><Activity size={13} /> {t("nav.runs")}</a>
             <ChevronRight size={13} aria-hidden />
             <span className={stepKey ? undefined : "rv-cur"}>{stepKey ? <a href={`#/runs/${id}`}>Run #{run.id}</a> : `Run #${run.id}`}</span>
             {stepKey && (
               <>
                 <ChevronRight size={13} aria-hidden />
-                <span className="rv-cur">{stepKey === "~changes" ? "Changes" : run.steps.find((s: any) => s.key === stepKey)?.name ?? stepKey}</span>
+                <span className="rv-cur">{stepKey === "~changes" ? t("ch.title") : run.steps.find((s: any) => s.key === stepKey)?.name ?? stepKey}</span>
               </>
             )}
           </nav>
-          <span className={`rv-live is-${live}`} title="update channel"><i />{live === "sse" ? "Live" : live === "polling" ? "Polling" : "Đang kết nối"}</span>
+          <span className={`rv-live is-${live}`} title={t("rv.channel")}><i />{live === "sse" ? t("rv.live") : live === "polling" ? t("rv.polling") : t("rv.connecting")}</span>
         </div>
 
         <div className="rv-top">
@@ -118,8 +118,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span title="Workflow"><Workflow size={13} /><a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a> <span className="muted">v{run.definition_version}</span></span>
                 <span title="Branch"><GitBranch size={13} /><span className="mono">{run.branch}</span></span>
                 {Object.entries((run.inputs?.branches ?? {}) as Record<string, string>).map(([repo, b]) => (
-                  <span key={repo} className="pill chip-brand" title={`Làm tiếp branch có sẵn${run.inputs?.branches_source ? ` (từ ${run.inputs.branches_source})` : ""} — không tạo branch mới`}>
-                    <GitBranch size={12} /> {repo === "*" ? "mọi repo" : repo} → <span className="mono">{b}</span> (làm tiếp)
+                  <span key={repo} className="pill chip-brand" title={t("rv.continueTip", { source: run.inputs?.branches_source ? t("rv.from", { source: run.inputs.branches_source }) : "" })}>
+                    <GitBranch size={12} /> {repo === "*" ? t("rv.allRepos") : repo} → <span className="mono">{b}</span> ({t("rv.continueOn")})
                   </span>
                 ))}
                 {run.work_item && <span title="Work item"><Ticket size={13} /><a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a></span>}
@@ -130,22 +130,22 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           <div className="rv-actions">
             {run.status === "PENDING" && (
               <>
-                <button className="sm" onClick={() => runAction("start")}><Play size={14} /> Start</button>
-                <button className="sm ghost" title="Start paused and run steps one by one" onClick={() => runAction("start", { step_mode: true })}><StepForward size={14} /> Step mode</button>
+                <button className="sm" onClick={() => runAction("start")}><Play size={14} /> {t("rv.start")}</button>
+                <button className="sm ghost" title={t("rv.stepModeTip")} onClick={() => runAction("start", { step_mode: true })}><StepForward size={14} /> {t("rv.stepMode")}</button>
               </>
             )}
-            {["RUNNING", "WAITING", "FAILED"].includes(run.status) && <button className="sm ghost" onClick={() => runAction("pause")}><Pause size={14} /> Pause</button>}
-            {run.status === "PAUSED" && <button className="sm" onClick={() => runAction("resume")}><Play size={14} /> Resume</button>}
-            {canFeedback && <button className="sm ghost" onClick={openFeedback} title="Gửi feedback cho agent"><MessageSquareText size={14} /> Feedback</button>}
-            <button className={stepKey === "~changes" ? "sm" : "sm ghost"} disabled={!hasWorkspaces} title={hasWorkspaces ? "" : "No code changes yet"} onClick={() => navigate(`/runs/${id}/~changes`)}><FileDiff size={14} /> Changes</button>
-            {!["CANCELED", "COMPLETED"].includes(run.status) && <button className="sm danger" onClick={() => runAction("cancel")}><Square size={13} /> Cancel</button>}
+            {["RUNNING", "WAITING", "FAILED"].includes(run.status) && <button className="sm ghost" onClick={() => runAction("pause")}><Pause size={14} /> {t("rv.pause")}</button>}
+            {run.status === "PAUSED" && <button className="sm" onClick={() => runAction("resume")}><Play size={14} /> {t("rv.resume")}</button>}
+            {canFeedback && <button className="sm ghost" onClick={openFeedback} title={t("rv.feedbackTip")}><MessageSquareText size={14} /> {t("rv.feedback")}</button>}
+            <button className={stepKey === "~changes" ? "sm" : "sm ghost"} disabled={!hasWorkspaces} title={hasWorkspaces ? "" : t("rv.noChanges")} onClick={() => navigate(`/runs/${id}/~changes`)}><FileDiff size={14} /> {t("ch.title")}</button>
+            {!["CANCELED", "COMPLETED"].includes(run.status) && <button className="sm danger" onClick={() => runAction("cancel")}><Square size={13} /> {t("rv.cancel")}</button>}
           </div>
         </div>
 
         {total > 0 && (
           <div className="rv-summary">
-            <span className="rv-total">{done}/{total} bước xong</span>
-            <div className="progress rv-progress" role="img" aria-label={`${done}/${total} bước xong`}>
+            <span className="rv-total">{t("rv.doneOf", { done, total })}</span>
+            <div className="progress rv-progress" role="img" aria-label={t("rv.doneOf", { done, total })}>
               {countEntries.map(([s, n]) => <span key={s} style={{ width: `${(n / total) * 100}%`, background: STATUS_COLORS[s] ?? "var(--st-idle)" }} title={`${status(s)}: ${n}`} />)}
             </div>
             <div className="rv-counts">
@@ -158,7 +158,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       {blocked.length > 0 && (
         <div className="rv-banner wait" role="status">
           <Hand size={16} />
-          <b>Đang chờ bạn:</b>
+          <b>{t("rv.waitingYou")}</b>
           {blocked.map((s: any) => (
             <button key={s.key} className="ghost xs" onClick={() => navigate(`/runs/${id}/${s.key}`)}>
               {s.status === "WAITING_INPUT" ? <MessageCircleQuestion size={12} /> : <Hand size={12} />} {s.name}
@@ -170,7 +170,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       {run.status === "PAUSED" && (
         <div className="rv-banner idle">
           <Info size={15} />
-          <span>Run đang tạm dừng (step mode): chọn một bước <b>READY</b> rồi bấm “Run this step”, hoặc Resume để chạy tự động.</span>
+          <span>{t("rv.pausedHint")}</span>
         </div>
       )}
       <div className="split">
@@ -199,29 +199,29 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           ) : (
             <div className="rv-pane">
               <div className="rv-card-head" style={{ marginBottom: 4 }}>
-                <h4 style={{ fontSize: "var(--fs-lg)" }}><ListTree size={18} /> Tổng quan run</h4>
+                <h4 style={{ fontSize: "var(--fs-lg)" }}><ListTree size={18} /> {t("rv.overview")}</h4>
               </div>
               <div className="rv-minis">
-                <div className="rv-mini"><span>Tổng bước</span><b>{total}</b></div>
-                <div className="rv-mini tone-ok"><span>Xong</span><b>{done}</b></div>
-                <div className="rv-mini tone-run"><span>Đang chạy</span><b>{(counts.RUNNING ?? 0) + (counts.RETRYING ?? 0)}</b></div>
-                <div className="rv-mini tone-wait"><span>Chờ bạn</span><b>{blocked.length}</b></div>
-                <div className="rv-mini tone-err"><span>Lỗi</span><b>{counts.FAILED ?? 0}</b></div>
+                <div className="rv-mini"><span>{t("rv.totalSteps")}</span><b>{total}</b></div>
+                <div className="rv-mini tone-ok"><span>{t("rv.finished")}</span><b>{done}</b></div>
+                <div className="rv-mini tone-run"><span>{t("rv.running")}</span><b>{(counts.RUNNING ?? 0) + (counts.RETRYING ?? 0)}</b></div>
+                <div className="rv-mini tone-wait"><span>{t("rv.needYou")}</span><b>{blocked.length}</b></div>
+                <div className="rv-mini tone-err"><span>{t("rv.errors")}</span><b>{counts.FAILED ?? 0}</b></div>
               </div>
               <div className="rv-card">
                 <div className="rv-kv">
-                  <span>Selected repos</span><span>{run.selected_repositories.join(", ") || <span className="muted">(chưa chọn)</span>}</span>
-                  <span>Allowed repos</span><span className="small">{run.allowed_repositories.join(", ")}</span>
-                  <span>Created</span><span>{time(run.created_at)}</span>
-                  <span>Finished</span><span>{time(run.finished_at) || "—"}</span>
-                  {run.error && <><span>Error</span><span className="err">{run.error}</span></>}
+                  <span>{t("rv.selectedRepos")}</span><span>{run.selected_repositories.join(", ") || <span className="muted">{t("rv.noneSelected")}</span>}</span>
+                  <span>{t("rv.allowedRepos")}</span><span className="small">{run.allowed_repositories.join(", ")}</span>
+                  <span>{t("rv.created")}</span><span>{time(run.created_at)}</span>
+                  <span>{t("rv.finishedAt")}</span><span>{time(run.finished_at) || "—"}</span>
+                  {run.error && <><span>{t("common.error")}</span><span className="err">{run.error}</span></>}
                 </div>
               </div>
               <ReportCard run={run} />
               <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
               {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
-              <div className="rv-note"><Info size={14} />Bấm vào một node để xem cấu hình, input/output, knowledge, hội thoại Claude, câu hỏi và lịch sử attempt.</div>
+              <div className="rv-note"><Info size={14} />{t("rv.clickNode")}</div>
               {run.pull_requests.length > 0 && (
                 <div className="rv-sec">
                   <div className="rv-sec-title"><GitPullRequest size={14} /> Pull requests</div>
@@ -234,12 +234,12 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               )}
               {canFeedback && (
                 <div className="rv-sec">
-                  <div className="rv-sec-title"><MessageSquareText size={14} /> Feedback cho agent</div>
+                  <div className="rv-sec-title"><MessageSquareText size={14} /> {t("rv.feedbackTitle")}</div>
                   <div className="rv-card">
-                    <div className="muted small">Chạy lại bước nhận feedback (<span className="mono">{run.graph.feedback_step ?? "coding step"}</span>); test và PR chạy lại sau đó, PR cũ được cập nhật.</div>
-                    <textarea id="rv-feedback" rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder="Mô tả điều cần agent sửa…" style={{ marginTop: 8 }} />
+                    <div className="muted small">{t("rv.feedbackBody", { step: run.graph.feedback_step ?? t("rv.codingStep") })}</div>
+                    <textarea id="rv-feedback" rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} placeholder={t("rv.feedbackPh")} style={{ marginTop: 8 }} />
                     <div className="row">
-                      <button className="sm" disabled={!feedback.trim()} onClick={async () => (await act(() => api(`/api/runs/${id}/feedback`, { message: feedback }), "Feedback sent")) && (setFeedback(""), reload())}><Send size={13} /> Gửi feedback</button>
+                      <button className="sm" disabled={!feedback.trim()} onClick={async () => (await act(() => api(`/api/runs/${id}/feedback`, { message: feedback }), t("rv.feedbackSent"))) && (setFeedback(""), reload())}><Send size={13} /> {t("rv.sendFeedback")}</button>
                     </div>
                   </div>
                 </div>
@@ -255,6 +255,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
 /** READY steps that no worker has picked up yet: say who is holding the workers and for how long. */
 function QueueBanner({ run, tick }: { run: any; tick: number }) {
+  const { t } = useI18n();
   const waiting = run.steps.filter((s: any) => s.status === "READY" || s.status === "RETRYING");
   const { data, reload } = useApi<any>(waiting.length && !["PAUSED", "CANCELED"].includes(run.status) ? "/api/scheduler" : null);
   useEffect(() => void reload(), [tick, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -271,13 +272,13 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
     <div className="rv-banner brand">
       <Hourglass size={15} />
       <span>
-        <b>{waiting.map((s: any) => s.name).join(", ")}</b> đang chờ worker ({data.workers} worker chung + {data.light_workers} worker cho bước nhẹ). Đang bận:{" "}
+        {t("rv.queueWait", { steps: waiting.map((s: any) => s.name).join(", "), workers: data.workers, light: data.light_workers })}{" "}
         {others.map((j: any) => (
           <a key={j.job_id} href={`#/runs/${j.run_id}/${j.step_key}`} style={{ marginRight: 10 }}>
             run #{j.run_id} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
           </a>
         ))}
-        <span className="muted small">— tăng scheduler.workers trong config.json để chạy song song.</span>
+        <span className="muted small">— {t("rv.queueHint")}</span>
       </span>
     </div>
   );
@@ -285,6 +286,7 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
 
 /** Shortcut to the Task Result Report (when this run has one). */
 function ReportCard({ run }: { run: any }) {
+  const { t } = useI18n();
   const s = run.steps.find((x: any) => x.type === "task_result_report");
   if (!s) return null;
   const report = s.output?.report ?? s.approval?.request?.report;
@@ -293,39 +295,40 @@ function ReportCard({ run }: { run: any }) {
   return (
     <div className={waiting ? "rv-attn" : "rv-card"} style={waiting ? { padding: "12px 14px" } : undefined}>
       <div className="rv-card-head">
-        <h4><ClipboardList size={16} /> Task Result Report</h4> <Badge s={s.status} label />
+        <h4><ClipboardList size={16} /> {t("rv.report")}</h4> <Badge s={s.status} label />
       </div>
       {report ? (
         <div className="rv-chipline small">
-          <Badge s="COMPLETED"><CheckCircle2 size={11} /> {report.counts.VERIFIED} verified</Badge>
-          <Badge s="WAITING"><AlertTriangle size={11} /> {report.counts.PARTIAL} partial</Badge>
-          <Badge s="FAILED"><XCircle size={11} /> {report.counts.MISSING} missing</Badge>
-          <span className="muted">{s.status === "COMPLETED" ? "đã duyệt" : waiting ? "chờ bạn xem lại" : ""}</span>
+          <Badge s="COMPLETED"><CheckCircle2 size={11} /> {t("rv.verified", { n: report.counts.VERIFIED })}</Badge>
+          <Badge s="WAITING"><AlertTriangle size={11} /> {t("rv.partial", { n: report.counts.PARTIAL })}</Badge>
+          <Badge s="FAILED"><XCircle size={11} /> {t("rv.missing", { n: report.counts.MISSING })}</Badge>
+          <span className="muted">{s.status === "COMPLETED" ? t("rv.approved") : waiting ? t("rv.reviewWait") : ""}</span>
         </div>
       ) : (
-        <div className="muted small">Được tạo sau khi các bước của task hoàn tất.</div>
+        <div className="muted small">{t("rv.reportLater")}</div>
       )}
       <div className="row">
-        <button className={waiting ? "sm" : "sm ghost"} onClick={() => navigate(`/runs/${run.id}/${s.key}`)}><ClipboardList size={13} /> Mở báo cáo</button>
-        {md && <Copy text={md} label="Copy Markdown" />}
+        <button className={waiting ? "sm" : "sm ghost"} onClick={() => navigate(`/runs/${run.id}/${s.key}`)}><ClipboardList size={13} /> {t("rv.openReport")}</button>
+        {md && <Copy text={md} label={t("rv.copyMd")} />}
       </div>
     </div>
   );
 }
 
 function ProfileCard({ run }: { run: any }) {
+  const { t } = useI18n();
   const d = run.profile_decision;
   const changes: any[] = run.graph?.profile_changes ?? [];
   if (!d) return null;
   return (
     <div className="rv-card">
-      <div className="rv-card-head"><h4><Zap size={16} /> Execution profile</h4><ProfileBadge profile={run.profile} /></div>
-      <div className="small muted">{d.requested === "AUTO" ? `tự chọn (${d.confidence} confidence)` : "chọn thủ công"}</div>
+      <div className="rv-card-head"><h4><Zap size={16} /> {t("rv.profile")}</h4><ProfileBadge profile={run.profile} /></div>
+      <div className="small muted">{d.requested === "AUTO" ? t("rv.autoPick", { confidence: d.confidence }) : t("rv.manualPick")}</div>
       <ul className="small" style={{ margin: "6px 0", paddingLeft: 18 }}>{(d.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
       {(d.warnings ?? []).map((w: string) => <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}><AlertTriangle size={13} />{w}</div>)}
       {changes.length > 0 && (
         <details>
-          <summary>{changes.length} thay đổi so với definition</summary>
+          <summary>{t("rv.changesVs", { n: changes.length })}</summary>
           {changes.map((c) => <div key={c.step + c.action} className="small">{c.action === "merged_into" ? <GitMerge size={12} style={{ verticalAlign: -2 }} /> : c.action === "removed" ? <Ban size={12} style={{ verticalAlign: -2 }} /> : <PenLine size={12} style={{ verticalAlign: -2 }} />} <span className="mono">{c.step}</span> {c.action === "merged_into" ? `→ ${c.into}` : c.action} — <span className="muted">{c.detail}</span></div>)}
         </details>
       )}
@@ -337,33 +340,35 @@ const fmtS = (ms: number) => (ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000
 
 /** Latency breakdown: measured queue / machine / human time per step (+ Claude, tools, commands), cost as an estimate. */
 function RunTotals({ runId, tick }: { runId: number; tick: number }) {
+  const { t, locale } = useI18n();
   const { data, reload } = useApi<any>(`/api/metrics/runs/${runId}`);
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) return null;
-  const t = data.totals;
+  const totals = data.totals;
+  const num = (n: number) => n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
   const steps = Object.entries<any>(data.per_step);
   const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
   const C = { queue: "var(--st-idle)", claude: "var(--brand)", command: "var(--st-wait)", other: "var(--st-ok)", human: "color-mix(in srgb, var(--st-wait) 40%, transparent)" };
   return (
     <div className="rv-card">
-      <div className="rv-card-head"><h4><Timer size={16} /> Latency</h4><span className="muted small">đo từ PostgreSQL; chi phí là ước tính của SDK</span></div>
+      <div className="rv-card-head"><h4><Timer size={16} /> {t("rv.latency")}</h4><span className="muted small">{t("rv.latencyHint")}</span></div>
       <div className="rv-minis" style={{ marginBottom: 10 }}>
-        <div className="rv-mini"><span>Wall</span><b>{fmtS(data.wall_ms)}</b></div>
-        <div className="rv-mini"><span>Máy</span><b>{fmtS(t.exec_ms)}</b></div>
-        <div className="rv-mini"><span>Queue</span><b>{fmtS(t.queue_ms)}</b></div>
-        <div className="rv-mini"><span>Chờ người</span><b>{fmtS(t.human_ms)}</b></div>
+        <div className="rv-mini"><span>{t("rv.wall")}</span><b>{fmtS(data.wall_ms)}</b></div>
+        <div className="rv-mini"><span>{t("rv.machine")}</span><b>{fmtS(totals.exec_ms)}</b></div>
+        <div className="rv-mini"><span>{t("rv.queue")}</span><b>{fmtS(totals.queue_ms)}</b></div>
+        <div className="rv-mini"><span>{t("rv.humanWait")}</span><b>{fmtS(totals.human_ms)}</b></div>
       </div>
       <div className="rv-kv">
-        <span>Claude</span><span>{t.claude_sessions} session · {fmtS(t.claude_ms)} · {t.turns} turns · ≈${t.cost_usd.toFixed(3)} (ước tính)</span>
-        <span>Tokens</span><span>in {t.input_tokens.toLocaleString()} · out {t.output_tokens.toLocaleString()} · cache {t.cache_read_tokens.toLocaleString()}</span>
-        <span>Tools</span><span>{t.tool_calls} calls · {fmtS(t.tool_ms)} · command/test {fmtS(t.command_ms)} · {t.integration_calls} integration · {t.skills_loaded} skill</span>
-        <span>Retry / lỗi</span><span>{t.retries} retry · {t.failed} attempt lỗi{data.bottleneck && <> · chậm nhất: <b className="mono">{data.bottleneck}</b></>}</span>
+        <span>Claude</span><span>{t("rv.claudeLine", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns, cost: totals.cost_usd.toFixed(3) })}</span>
+        <span>Tokens</span><span>{t("rv.tokens", { inn: num(totals.input_tokens), out: num(totals.output_tokens), cache: num(totals.cache_read_tokens) })}</span>
+        <span>Tools</span><span>{t("rv.tools", { calls: totals.tool_calls, tool: fmtS(totals.tool_ms), command: fmtS(totals.command_ms), integration: totals.integration_calls, skills: totals.skills_loaded })}</span>
+        <span>{t("rv.retries")}</span><span>{data.bottleneck ? t("rv.retrySlow", { retries: totals.retries, failed: totals.failed, step: data.bottleneck }) : t("rv.retryLine", { retries: totals.retries, failed: totals.failed })}</span>
       </div>
       <div style={{ marginTop: 12 }}>
         {steps.map(([k, s]) => (
           <div key={k} className="small" style={{ display: "grid", gridTemplateColumns: "minmax(80px, 120px) 1fr 64px", gap: 8, alignItems: "center", margin: "4px 0" }}>
-            <span className="mono" title={`${s.type} · ${s.attempts} attempt`} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k}</span>
-            <span className="progress" style={{ height: 8 }} title={`queue ${fmtS(s.queue_ms)} · exec ${fmtS(s.exec_ms)} · human ${fmtS(s.human_ms)}${s.claude_ms ? ` · claude ${fmtS(s.claude_ms)} / ${s.turns} turns` : ""}`}>
+            <span className="mono" title={t("rv.attemptTip", { type: s.type, n: s.attempts })} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k}</span>
+            <span className="progress" style={{ height: 8 }} title={`${t("rv.barTip", { queue: fmtS(s.queue_ms), exec: fmtS(s.exec_ms), human: fmtS(s.human_ms) })}${s.claude_ms ? t("rv.barClaude", { time: fmtS(s.claude_ms), turns: s.turns }) : ""}`}>
               <span style={{ width: `${(s.queue_ms / max) * 100}%`, background: C.queue }} />
               <span style={{ width: `${(s.exec_ms / max) * 100}%`, background: s.type === "command" ? C.command : s.claude_ms ? C.claude : C.other }} />
               <span style={{ width: `${(s.human_ms / max) * 100}%`, background: C.human }} />
@@ -372,8 +377,8 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
           </div>
         ))}
         <div className="rv-chipline muted small" style={{ marginTop: 8, gap: 12 }}>
-          {([["queue", "chờ queue"], ["claude", "Claude"], ["command", "command/test"], ["other", "bước khác"], ["human", "chờ người"]] as const).map(([k, l]) => (
-            <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i style={{ width: 10, height: 10, borderRadius: 3, background: C[k], display: "inline-block" }} />{l}</span>
+          {(["queue", "claude", "command", "other", "human"] as const).map((k) => (
+            <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><i style={{ width: 10, height: 10, borderRadius: 3, background: C[k], display: "inline-block" }} />{k === "claude" ? "Claude" : t(`rv.legend.${k}`)}</span>
           ))}
         </div>
       </div>
@@ -382,10 +387,11 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
 }
 
 function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
+  const { t } = useI18n();
   const [sel, setSel] = useState<string[]>(run.selected_repositories);
   return (
     <div className="rv-card">
-      <div className="rv-card-head"><h4><FolderGit2 size={16} /> Repositories cho run này</h4></div>
+      <div className="rv-card-head"><h4><FolderGit2 size={16} /> {t("rv.repos")}</h4></div>
       <div className="rv-chipline">
         {run.allowed_repositories.map((r: string) => (
           <label key={r} className="rv-repo-opt" style={{ margin: 0, padding: "6px 10px", alignItems: "center", fontSize: 13 }}>
@@ -393,12 +399,13 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
           </label>
         ))}
       </div>
-      <div className="row"><button className="sm ghost" onClick={async () => (await act(() => api(`/api/runs/${run.id}/repositories`, { repositories: sel }), "Saved")) && onDone()}>Lưu</button></div>
+      <div className="row"><button className="sm ghost" onClick={async () => (await act(() => api(`/api/runs/${run.id}/repositories`, { repositories: sel }), t("wi.saved"))) && onDone()}>{t("kn.save")}</button></div>
     </div>
   );
 }
 
 function RunTimeline({ runId, tick }: { runId: number; tick: number }) {
+  const { t } = useI18n();
   const { data, reload } = useApi<any[]>(`/api/runs/${runId}/events`);
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) return null;
@@ -415,7 +422,7 @@ function RunTimeline({ runId, tick }: { runId: number; tick: number }) {
             </span>
           </div>
         ))}
-        {!data.length && <div className="muted small" style={{ padding: 12 }}>Chưa có sự kiện.</div>}
+        {!data.length && <div className="muted small" style={{ padding: 12 }}>{t("rv.noEvents")}</div>}
       </div>
     </div>
   );

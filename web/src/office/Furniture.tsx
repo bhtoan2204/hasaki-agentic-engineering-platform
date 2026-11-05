@@ -1,5 +1,6 @@
 import { useId, type CSSProperties } from "react";
 import { HasakiMark } from "./brand.tsx";
+import { useI18n } from "../i18n/index.tsx";
 import type { Pose } from "./types.ts";
 
 /** Pixel-art furniture for the office. Colours come from CSS variables (office.css) so day/night themes apply. */
@@ -269,13 +270,14 @@ export function PackTable({ x, y, mode }: { x: number; y: number; mode: ScreenMo
 }
 
 export function HelpDesk({ x, y, waiting }: { x: number; y: number; waiting: number }) {
+  const { t } = useI18n();
   return (
     <g className="o-help" data-waiting={waiting || undefined}>
       {/* wall sign */}
       <R x={x + 8} y={y - 52} w={48} h={16} c={waiting ? "#f59e0b" : "var(--o-trim-dark)"} className={waiting ? "o-sign-on" : undefined} />
       <R x={x + 9} y={y - 51} w={46} h={14} c={waiting ? "#fff7e0" : "var(--o-sign)"} />
-      <text x={x + 32} y={y - 45.4} textAnchor="middle" className="o-sign-text">HỎI &amp; DUYỆT</text>
-      <text x={x + 32} y={y - 40} textAnchor="middle" className="o-sign-sub">{waiting ? `${waiting} cần bạn` : "không ai chờ"}</text>
+      <text x={x + 32} y={y - 45.4} textAnchor="middle" className="o-sign-text">{t("office.sign")}</text>
+      <text x={x + 32} y={y - 40} textAnchor="middle" className="o-sign-sub">{waiting ? t("office.waitingSign", { n: waiting }) : t("office.nobodyWaiting")}</text>
       {/* counter */}
       <R x={x} y={y} w={66} h={4} c="var(--o-wood-top)" />
       <R x={x} y={y + 4} w={66} h={1} c="var(--o-wood-dark)" />

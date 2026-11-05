@@ -5,12 +5,10 @@ import {
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { act, Badge, Drawer, EmptyState, ErrorBox, Field, Loading, Markdown, navigate, PageHeader, SearchInput, Segmented, StatCard } from "../ui.tsx";
+import { useI18n } from "../i18n/index.tsx";
 import "./Repositories.css";
 
 const LISTS = ["projects", "services", "tags", "owners", "dependencies", "allowed_actions"] as const;
-const LIST_LABEL: Record<(typeof LISTS)[number], string> = {
-  projects: "Projects", services: "Services", tags: "Tags", owners: "Owners", dependencies: "Dependencies", allowed_actions: "Allowed actions",
-};
 const ACTION_ICON: Record<string, LucideIcon> = { read: Eye, write: PenLine, pull_request: GitPullRequest };
 
 function Chips({ items, empty = "—", kind = "" }: { items?: string[]; empty?: ReactNode; kind?: string }) {
@@ -31,6 +29,7 @@ function Actions({ items }: { items?: string[] }) {
 const repoDir = (r: any) => r.path || r.name;
 
 export function RepositoriesPage({ name }: { name?: string }) {
+  const { t } = useI18n();
   const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
   const [form, setForm] = useState<any>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
@@ -59,7 +58,7 @@ export function RepositoriesPage({ name }: { name?: string }) {
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const save = async () => {
     const body = { ...form, ...Object.fromEntries(LISTS.map((k) => [k, String(form[k]).split(",").map((x: string) => x.trim()).filter(Boolean)])) };
-    if (await act(() => api(`/api/repositories/${encodeURIComponent(form.name)}`, body), "Đã lưu")) (reload(), setCreating(false), navigate(`/repositories/${form.name}`));
+    if (await act(() => api(`/api/repositories/${encodeURIComponent(form.name)}`, body), t("repo.saved"))) (reload(), setCreating(false), navigate(`/repositories/${form.name}`));
   };
   const startNew = () => {
     if (name) navigate("/repositories");
@@ -77,19 +76,19 @@ export function RepositoriesPage({ name }: { name?: string }) {
       <div className="repo">
         <PageHeader
           icon={FolderGit2}
-          crumbs={[["Repositories", "#/repositories"], [name]]}
+          crumbs={[[t("repo.title"), "#/repositories"], [name]]}
           title={<span className="mono">{name}</span>}
           subtitle={r?.description || undefined}
           actions={
             <>
-              <button className="ghost" onClick={() => navigate("/repositories")}><ArrowLeft size={15} />Danh sách</button>
-              <button className="ghost" onClick={startNew}><Plus size={15} />Thêm repo</button>
+              <button className="ghost" onClick={() => navigate("/repositories")}><ArrowLeft size={15} />{t("repo.list")}</button>
+              <button className="ghost" onClick={startNew}><Plus size={15} />{t("repo.add")}</button>
             </>
           }
         />
         {!r ? (
-          <EmptyState icon={FolderGit2} title="Không tìm thấy repository" action={<button className="ghost sm" onClick={() => navigate("/repositories")}>Về danh sách</button>}>
-            <span className="mono">{name}</span> chưa có trong registry.
+          <EmptyState icon={FolderGit2} title={t("repo.missing")} action={<button className="ghost sm" onClick={() => navigate("/repositories")}>{t("repo.back")}</button>}>
+            {t("repo.notRegistered", { name })}
           </EmptyState>
         ) : null}
         <div className="repo-detail">
@@ -102,40 +101,40 @@ export function RepositoriesPage({ name }: { name?: string }) {
                     <div className="repo-hero-name mono">{r.name}</div>
                     <div className="repo-hero-path"><span className="mono">{repoDir(r)}</span>{r.provider && <span className="repo-chip">{r.provider}</span>}</div>
                   </div>
-                  {r.enabled ? <Badge s="COMPLETED">enabled</Badge> : <Badge s="CANCELED">off</Badge>}
+                  {r.enabled ? <Badge s="COMPLETED">{t("kn.enabled")}</Badge> : <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                 </div>
                 <dl className="repo-kv">
-                  <div><dt>Thư mục (reposRoot)</dt><dd className="mono">{repoDir(r)}{!r.path && <span className="muted small"> (= tên)</span>}</dd></div>
-                  <div><dt>Provider</dt><dd>{r.provider || <span className="muted">—</span>}</dd></div>
-                  <div><dt>Remote</dt><dd className="mono">{r.remote_slug || <span className="muted">—</span>}</dd></div>
+                  <div><dt>{t("repo.dir")}</dt><dd className="mono">{repoDir(r)}{!r.path && <span className="muted small"> {t("repo.equalsName")}</span>}</dd></div>
+                  <div><dt>{t("repo.provider")}</dt><dd>{r.provider || <span className="muted">—</span>}</dd></div>
+                  <div><dt>{t("repo.remote")}</dt><dd className="mono">{r.remote_slug || <span className="muted">—</span>}</dd></div>
                 </dl>
               </div>
 
               <section className="card">
-                <div className="card-head"><ShieldCheck size={16} color="var(--brand)" /><h4>Quyền & phạm vi</h4></div>
+                <div className="card-head"><ShieldCheck size={16} color="var(--brand)" /><h4>{t("repo.perms")}</h4></div>
                 <div className="repo-perm">
                   <div>
-                    <div className="repo-label">Allowed actions</div>
+                    <div className="repo-label">{t("repo.allowed")}</div>
                     <Actions items={r.allowed_actions} />
                   </div>
                   <div>
-                    <div className="repo-label">Projects được phép</div>
-                    <Chips items={r.projects} kind="is-project" empty="Chưa gán project" />
+                    <div className="repo-label">{t("repo.projectsAllowed")}</div>
+                    <Chips items={r.projects} kind="is-project" empty={t("repo.noProject")} />
                   </div>
                 </div>
               </section>
 
               <div className="repo-grid2">
                 <section className="card">
-                  <div className="card-head"><Boxes size={16} color="var(--brand)" /><h4>Services & tags</h4></div>
-                  <div className="repo-label">Services</div>
+                  <div className="card-head"><Boxes size={16} color="var(--brand)" /><h4>{t("repo.servicesTags")}</h4></div>
+                  <div className="repo-label">{t("repo.services")}</div>
                   <Chips items={r.services} />
-                  <div className="repo-label">Tags</div>
+                  <div className="repo-label">{t("repo.tags")}</div>
                   <Chips items={r.tags} kind="is-tag" />
                 </section>
                 <section className="card">
-                  <div className="card-head"><Network size={16} color="var(--brand)" /><h4>Dependencies & owners</h4></div>
-                  <div className="repo-label">Dependencies</div>
+                  <div className="card-head"><Network size={16} color="var(--brand)" /><h4>{t("repo.depsOwners")}</h4></div>
+                  <div className="repo-label">{t("repo.dependencies")}</div>
                   {r.dependencies?.length ? (
                     <span className="repo-chips">
                       {r.dependencies.map((d: string) => {
@@ -144,14 +143,14 @@ export function RepositoriesPage({ name }: { name?: string }) {
                       })}
                     </span>
                   ) : <span className="muted small">—</span>}
-                  <div className="repo-label">Owners</div>
+                  <div className="repo-label">{t("repo.owners")}</div>
                   {r.owners?.length ? <span className="repo-chips">{r.owners.map((o: string) => <span key={o} className="repo-chip"><UserRound size={11} />{o}</span>)}</span> : <span className="muted small">—</span>}
                 </section>
               </div>
 
               <section className="card">
-                <div className="card-head"><FolderKanban size={16} color="var(--brand)" /><h4>Kiến trúc / ghi chú</h4></div>
-                {r.architecture ? <div className="repo-arch"><Markdown text={r.architecture} /></div> : <span className="muted small">Chưa có ghi chú kiến trúc.</span>}
+                <div className="card-head"><FolderKanban size={16} color="var(--brand)" /><h4>{t("repo.arch")}</h4></div>
+                {r.architecture ? <div className="repo-arch"><Markdown text={r.architecture} /></div> : <span className="muted small">{t("repo.noArch")}</span>}
               </section>
             </div>
           )}
@@ -170,29 +169,29 @@ export function RepositoriesPage({ name }: { name?: string }) {
     <div className="repo">
       <PageHeader
         icon={FolderGit2}
-        title="Repositories"
-        subtitle="Registry dùng cho repository discovery và tập repo được phép (theo project). Agent không bao giờ sửa repo ngoài tập được phép của run."
-        actions={<button onClick={startNew}><Plus size={15} strokeWidth={2.2} />Thêm repo</button>}
+        title={t("repo.title")}
+        subtitle={t("repo.subtitle")}
+        actions={<button onClick={startNew}><Plus size={15} strokeWidth={2.2} />{t("repo.add")}</button>}
       />
       <div className="repo-stats">
-        <StatCard icon={FolderGit2} label="Repositories" value={all.length} tone="brand" />
-        <StatCard icon={Power} label="Đang bật" value={enabled} hint={`${all.length - enabled} tắt`} tone="ok" />
-        <StatCard icon={FolderKanban} label="Projects" value={projects.size} hint="đã gán repo" tone="run" />
-        <StatCard icon={PenLine} label="Cho phép ghi" value={writable} hint="enabled + write" tone="wait" />
+        <StatCard icon={FolderGit2} label={t("repo.title")} value={all.length} tone="brand" />
+        <StatCard icon={Power} label={t("repo.on")} value={enabled} hint={t("repo.offN", { n: all.length - enabled })} tone="ok" />
+        <StatCard icon={FolderKanban} label={t("repo.list.projects")} value={projects.size} hint={t("repo.projectsHint")} tone="run" />
+        <StatCard icon={PenLine} label={t("repo.writable")} value={writable} hint={t("repo.writableHint")} tone="wait" />
       </div>
 
       <div className="repo-layout">
         <div className="repo-main">
           <div className="toolbar">
-            <SearchInput value={q} onChange={setQ} placeholder="Tìm repo, project, service…" width="min(100%, 320px)" />
-            <Segmented label="Trạng thái" options={[["all", "Tất cả"], ["on", "Đang bật"], ["off", "Tắt"]]} value={filter} onChange={setFilter} />
+            <SearchInput value={q} onChange={setQ} placeholder={t("repo.search")} width="min(100%, 320px)" />
+            <Segmented label={t("repo.status")} options={[["all", t("repo.all")], ["on", t("repo.on")], ["off", t("repo.off")]]} value={filter} onChange={setFilter} />
             <span className="grow" />
-            <span className="muted small">{shown.length}/{all.length} repo</span>
+            <span className="muted small">{t("repo.count", { shown: shown.length, all: all.length })}</span>
           </div>
           {!all.length ? (
-            <EmptyState icon={FolderGit2} title="Chưa có repository" action={<button onClick={startNew}><Plus size={15} />Thêm repo</button>}>Thêm repo để agent có thể khám phá và làm việc trên đó.</EmptyState>
+            <EmptyState icon={FolderGit2} title={t("repo.empty")} action={<button onClick={startNew}><Plus size={15} />{t("repo.add")}</button>}>{t("repo.emptyBody")}</EmptyState>
           ) : !shown.length ? (
-            <div className="repo-none">Không có repo khớp bộ lọc.</div>
+            <div className="repo-none">{t("repo.noMatch")}</div>
           ) : (
             <div className="repo-cards">
               {shown.map((r) => (
@@ -203,13 +202,13 @@ export function RepositoriesPage({ name }: { name?: string }) {
                       <b className="mono">{r.name}</b>
                       <span className="repo-card-path mono">{r.remote_slug || repoDir(r)}</span>
                     </div>
-                    {!r.enabled && <Badge s="CANCELED">off</Badge>}
+                    {!r.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                   </div>
-                  <div className="repo-card-desc">{r.description || <span className="muted">Chưa có mô tả.</span>}</div>
+                  <div className="repo-card-desc">{r.description || <span className="muted">{t("repo.noDesc")}</span>}</div>
                   <div className="repo-card-rows">
-                    <div><span className="repo-label-inline"><FolderKanban size={12} />Projects</span><Chips items={r.projects} kind="is-project" /></div>
-                    <div><span className="repo-label-inline"><Tag size={12} />Services / tags</span><Chips items={[...r.services, ...r.tags]} /></div>
-                    <div><span className="repo-label-inline"><ShieldCheck size={12} />Actions</span><Actions items={r.allowed_actions} /></div>
+                    <div><span className="repo-label-inline"><FolderKanban size={12} />{t("repo.list.projects")}</span><Chips items={r.projects} kind="is-project" /></div>
+                    <div><span className="repo-label-inline"><Tag size={12} />{t("repo.servicesTagsInline")}</span><Chips items={[...r.services, ...r.tags]} /></div>
+                    <div><span className="repo-label-inline"><ShieldCheck size={12} />{t("repo.actions")}</span><Actions items={r.allowed_actions} /></div>
                   </div>
                 </button>
               ))}
@@ -219,17 +218,17 @@ export function RepositoriesPage({ name }: { name?: string }) {
 
         <aside className="repo-side">
           <section className="card repo-rank">
-            <div className="card-head"><Compass size={16} color="var(--brand)" /><h4>Thử gợi ý repo</h4></div>
-            <div className="muted small" style={{ marginBottom: 8 }}>Mô tả yêu cầu để xem repo nào sẽ được chọn cho project.</div>
-            <textarea rows={2} placeholder="mô tả yêu cầu" value={rank.text} onChange={(e) => setRank({ ...rank, text: e.target.value })} aria-label="Mô tả yêu cầu" />
+            <div className="card-head"><Compass size={16} color="var(--brand)" /><h4>{t("repo.rankTitle")}</h4></div>
+            <div className="muted small" style={{ marginBottom: 8 }}>{t("repo.rankHint")}</div>
+            <textarea rows={2} placeholder={t("repo.rankPh")} value={rank.text} onChange={(e) => setRank({ ...rank, text: e.target.value })} aria-label={t("repo.rankAria")} />
             <div className="row">
-              <input className="repo-rank-project" placeholder="project" value={rank.project} onChange={(e) => setRank({ ...rank, project: e.target.value })} aria-label="Project" />
-              <button className="sm ghost" onClick={async () => setRanked(await act(() => api("/api/repositories/rank", rank)))}>Xếp hạng</button>
+              <input className="repo-rank-project" placeholder={t("repo.project")} value={rank.project} onChange={(e) => setRank({ ...rank, project: e.target.value })} aria-label={t("repo.project")} />
+              <button className="sm ghost" onClick={async () => setRanked(await act(() => api("/api/repositories/rank", rank)))}>{t("repo.rank")}</button>
             </div>
             {ranked && (
               <div className="repo-ranked">
-                {ranked.ambiguous && <div className="repo-ambig"><AlertTriangle size={14} />Không rõ ràng — workflow sẽ hỏi bạn chọn</div>}
-                {!ranked.ranked.length && <div className="muted small">Không có repo nào phù hợp.</div>}
+                {ranked.ambiguous && <div className="repo-ambig"><AlertTriangle size={14} />{t("repo.ambiguous")}</div>}
+                {!ranked.ranked.length && <div className="muted small">{t("repo.noneFit")}</div>}
                 {(() => {
                   const max = Math.max(...ranked.ranked.map((x: any) => Number(x.score) || 0), 1);
                   return ranked.ranked.map((x: any, i: number) => (
@@ -256,37 +255,39 @@ export function RepositoriesPage({ name }: { name?: string }) {
 }
 
 function NewRepoDrawer({ form, setForm, onSave, onClose }: { form: any; setForm: (f: any) => void; onSave: () => void; onClose: () => void }) {
+  const { t } = useI18n();
   return (
-    <Drawer title="Thêm repo" onClose={onClose} width={560}>
+    <Drawer title={t("repo.add")} onClose={onClose} width={560}>
       {form ? <RepoForm form={form} setForm={setForm} isNew onSave={onSave} bare /> : <Loading />}
     </Drawer>
   );
 }
 
 function RepoForm({ form, setForm, isNew, onSave, bare }: { form: any; setForm: (f: any) => void; isNew: boolean; onSave: () => void; bare?: boolean }) {
+  const { t } = useI18n();
   const body = (
     <>
-      <Field label="Tên (thư mục trong reposRoot)"><input value={form.name} disabled={!isNew} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-      <Field label="Mô tả (dùng để gợi ý repo)"><textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+      <Field label={t("repo.name")}><input value={form.name} disabled={!isNew} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+      <Field label={t("repo.desc")}><textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
       <div className="repo-form-grid">
         {LISTS.map((k) => (
-          <Field key={k} label={LIST_LABEL[k]} hint="phân cách bằng dấu phẩy">
+          <Field key={k} label={t(`repo.list.${k}`)} hint={t("repo.comma")}>
             <input value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
           </Field>
         ))}
       </div>
-      <Field label="Kiến trúc / ghi chú"><textarea rows={4} value={form.architecture} onChange={(e) => setForm({ ...form, architecture: e.target.value })} /></Field>
+      <Field label={t("repo.arch")}><textarea rows={4} value={form.architecture} onChange={(e) => setForm({ ...form, architecture: e.target.value })} /></Field>
       <div className="repo-form-foot">
-        <label className="repo-toggle"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> Enabled</label>
+        <label className="repo-toggle"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> {t("kn.enabled")}</label>
         <span className="grow" />
-        <button disabled={!form.name} onClick={onSave}><Save size={15} />Lưu</button>
+        <button disabled={!form.name} onClick={onSave}><Save size={15} />{t("kn.save")}</button>
       </div>
     </>
   );
   if (bare) return <div className="repo-form">{body}</div>;
   return (
     <section className="card repo-form">
-      <div className="card-head"><PenLine size={16} color="var(--brand)" /><h4>{isNew ? "Thêm repo" : `Sửa ${form.name}`}</h4></div>
+      <div className="card-head"><PenLine size={16} color="var(--brand)" /><h4>{isNew ? t("repo.add") : t("repo.edit", { name: form.name })}</h4></div>
       {body}
     </section>
   );

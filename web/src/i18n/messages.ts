@@ -1,8 +1,10 @@
 /** UI strings. Keys must exist in both locales. Status codes and routes are not keys here. */
+import { catalog } from "./catalog.ts";
+
 export const UI_LOCALES = ["vi", "en"] as const;
 export type UiLocale = (typeof UI_LOCALES)[number];
 
-export const messages: Record<UiLocale, Record<string, string>> = {
+const baseMessages: Record<UiLocale, Record<string, string>> = {
   vi: {
     "nav.group.workspace": "Workspace",
     "nav.group.engineering": "Engineering",
@@ -86,6 +88,59 @@ export const messages: Record<UiLocale, Record<string, string>> = {
     "office.compact": "Gọn",
     "office.fullscreen": "Toàn màn hình",
     "office.exitFullscreen": "Thoát toàn màn hình",
+    "office.act.file": "file",
+    "office.act.folder": "thư mục",
+    "office.act.read": "Đọc {file}",
+    "office.act.grep": "Tìm \"{q}\"",
+    "office.act.glob": "Dò {q}",
+    "office.act.edit": "Sửa {file}",
+    "office.act.test": "Chạy test",
+    "office.act.web": "Tra cứu tài liệu",
+    "office.act.delegate": "Nhờ subagent{who}",
+    "office.act.todo": "Lên checklist",
+    "office.act.ask": "Soạn câu hỏi cho bạn",
+    "office.act.submit": "Nộp kết quả",
+    "office.act.worktree": "Chuẩn bị worktree",
+    "office.act.progress": "Ghi tiến độ",
+    "office.act.skill": "Tra skill {q}",
+    "office.act.stepOut": "Đọc kết quả bước {step}",
+    "office.act.tool": "Dùng tool {name}",
+    "office.act.thinking": "Đang suy nghĩ…",
+    "office.bubble.waitTurn": "Chờ tới lượt: {step}",
+    "office.bubble.noStep": "Bước này không có trong run",
+    "office.bubble.idle": "Đang chờ việc ☕",
+    "office.bubble.prepare": "Chuẩn bị bàn làm việc…",
+    "office.bubble.retryPrefix": "Thử lại! ",
+    "office.bubble.questions": "Cần bạn trả lời {n} câu hỏi",
+    "office.bubble.questions.one": "Cần bạn trả lời {n} câu hỏi",
+    "office.bubble.questions.other": "Cần bạn trả lời {n} câu hỏi",
+    "office.bubble.needInput": "Cần bạn nhập thông tin",
+    "office.bubble.approve": "Cần bạn duyệt",
+    "office.bubble.celebrate": "Xong rồi!",
+    "office.bubble.done": "✓ Hoàn thành",
+    "office.bubble.error": "Lỗi: {msg}",
+    "office.bubble.failed": "Bước này lỗi rồi…",
+    "office.bubble.stopped": "Đã dừng",
+    "office.bubble.skipped": "Bỏ qua",
+    "office.bubble.noWork": "chưa có việc",
+    "office.role.analyst.title": "Analyst",
+    "office.role.analyst.does": "Đọc yêu cầu, phân tích, đặt câu hỏi",
+    "office.role.analyst.personality": "Tỉ mỉ, luôn hỏi “tại sao?” trước khi bắt tay vào việc",
+    "office.role.architect.title": "Architect",
+    "office.role.architect.does": "Lên kế hoạch và thiết kế giải pháp",
+    "office.role.architect.personality": "Nghĩ bằng sơ đồ, không rời cây bút dạ",
+    "office.role.developer.title": "Developer",
+    "office.role.developer.does": "Viết code trong worktree của run",
+    "office.role.developer.personality": "Đeo tai nghe, gõ phím như rap",
+    "office.role.tester.title": "Tester",
+    "office.role.tester.does": "Chạy test và so với baseline",
+    "office.role.tester.personality": "Không tin bất cứ thứ gì chưa có test xanh",
+    "office.role.reviewer.title": "Reviewer",
+    "office.role.reviewer.does": "Review diff, bảo mật, kiến trúc",
+    "office.role.reviewer.personality": "Đọc từng dòng diff, gật gù khi ổn",
+    "office.role.pr.title": "PR Agent",
+    "office.role.pr.does": "Đóng gói thay đổi, mở PR, viết báo cáo",
+    "office.role.pr.personality": "Đóng gói gọn gàng như đơn hàng Hasaki",
   },
   en: {
     "nav.group.workspace": "Workspace",
@@ -170,11 +225,74 @@ export const messages: Record<UiLocale, Record<string, string>> = {
     "office.compact": "Compact",
     "office.fullscreen": "Full screen",
     "office.exitFullscreen": "Exit full screen",
+    "office.act.file": "a file",
+    "office.act.folder": "a folder",
+    "office.act.read": "Reading {file}",
+    "office.act.grep": "Searching \"{q}\"",
+    "office.act.glob": "Scanning {q}",
+    "office.act.edit": "Editing {file}",
+    "office.act.test": "Running tests",
+    "office.act.web": "Looking up docs",
+    "office.act.delegate": "Asking a subagent{who}",
+    "office.act.todo": "Updating the checklist",
+    "office.act.ask": "Writing a question for you",
+    "office.act.submit": "Submitting the result",
+    "office.act.worktree": "Preparing the worktree",
+    "office.act.progress": "Posting progress",
+    "office.act.skill": "Looking up skill {q}",
+    "office.act.stepOut": "Reading step output {step}",
+    "office.act.tool": "Using tool {name}",
+    "office.act.thinking": "Thinking…",
+    "office.bubble.waitTurn": "Waiting for: {step}",
+    "office.bubble.noStep": "This step is not in the run",
+    "office.bubble.idle": "Waiting for work ☕",
+    "office.bubble.prepare": "Setting up the desk…",
+    "office.bubble.retryPrefix": "Retrying! ",
+    "office.bubble.questions": "Needs you to answer {n} questions",
+    "office.bubble.questions.one": "Needs you to answer {n} question",
+    "office.bubble.questions.other": "Needs you to answer {n} questions",
+    "office.bubble.needInput": "Needs your input",
+    "office.bubble.approve": "Needs your approval",
+    "office.bubble.celebrate": "Done!",
+    "office.bubble.done": "✓ Completed",
+    "office.bubble.error": "Error: {msg}",
+    "office.bubble.failed": "This step failed…",
+    "office.bubble.stopped": "Stopped",
+    "office.bubble.skipped": "Skipped",
+    "office.bubble.noWork": "no work yet",
+    "office.role.analyst.title": "Analyst",
+    "office.role.analyst.does": "Reads the request, analyses it, and asks questions",
+    "office.role.analyst.personality": "Careful, and always asks why before starting",
+    "office.role.architect.title": "Architect",
+    "office.role.architect.does": "Plans and designs the solution",
+    "office.role.architect.personality": "Thinks in diagrams and keeps a marker handy",
+    "office.role.developer.title": "Developer",
+    "office.role.developer.does": "Writes code in the run worktree",
+    "office.role.developer.personality": "Headphones on, typing in rhythm",
+    "office.role.tester.title": "Tester",
+    "office.role.tester.does": "Runs tests and compares them with the baseline",
+    "office.role.tester.personality": "Trusts nothing that is not a green test",
+    "office.role.reviewer.title": "Reviewer",
+    "office.role.reviewer.does": "Reviews the diff, security, and architecture",
+    "office.role.reviewer.personality": "Reads every line of the diff",
+    "office.role.pr.title": "PR Agent",
+    "office.role.pr.does": "Packages the change, opens the PR, and writes the report",
+    "office.role.pr.personality": "Packs the change as neatly as a Hasaki order",
   },
 };
 
+export const messages: Record<UiLocale, Record<string, string>> = {
+  vi: { ...baseMessages.vi, ...catalog.vi },
+  en: { ...baseMessages.en, ...catalog.en },
+};
+
 export function translate(locale: UiLocale, key: string, params?: Record<string, string | number>): string {
-  const raw = messages[locale][key] ?? messages.vi[key] ?? key;
+  let lookup = key;
+  if (params && params.n != null) {
+    const form = Number(params.n) === 1 ? `${key}.one` : `${key}.other`;
+    if (messages.vi[form]) lookup = form;
+  }
+  const raw = messages[locale][lookup] ?? messages.vi[lookup] ?? messages[locale][key] ?? messages.vi[key] ?? key;
   if (!params) return raw;
   return raw.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? `{${name}}` : String(params[name])));
 }

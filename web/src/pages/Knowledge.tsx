@@ -5,33 +5,16 @@ import {
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { act, Badge, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Markdown, navigate, PageHeader, SearchInput, SkeletonRows, Tabs, time } from "../ui.tsx";
+import { useI18n } from "../i18n/index.tsx";
 import "./Knowledge.css";
 
-const CATS: Array<[string, string]> = [
-  ["", "Tất cả"],
-  ["business_rule", "Business rules"],
-  ["architecture_guideline", "Architecture"],
-  ["coding_standard", "Coding conventions"],
-  ["repository_convention", "Repo instructions"],
-  ["domain_knowledge", "Domain"],
-  ["security_policy", "Security"],
-  ["agent_skill", "Skills"],
-  ["task_memory", "Task memory"],
-];
+const CATS = ["", "business_rule", "architecture_guideline", "coding_standard", "repository_convention", "domain_knowledge", "security_policy", "agent_skill", "task_memory"] as const;
 const CAT_ICON: Record<string, LucideIcon> = {
   "": Layers, business_rule: Landmark, architecture_guideline: Building2, coding_standard: Code2, repository_convention: FolderGit2,
   domain_knowledge: BookMarked, security_policy: Shield, agent_skill: Sparkles, task_memory: History,
 };
-const catLabel = (c: string) => CATS.find(([k]) => k === c)?.[1] ?? c;
+const catKey = (c: string) => (c ? `kn.cat.${c}` : "kn.cat.all");
 const SCOPES = ["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY", "WORKFLOW", "STEP"];
-const SCOPE_HINT: Record<string, string> = {
-  GLOBAL: "",
-  ORGANIZATION: "vd hasaki",
-  PROJECT: "vd OMS",
-  REPOSITORY: "vd oms-api",
-  WORKFLOW: "workflow key, vd feature-implementation",
-  STEP: "workflow:step hoặc step key, vd feature-implementation:implement",
-};
 const SCOPE_STYLE: Record<string, { color: string; icon: LucideIcon }> = {
   GLOBAL: { color: "var(--brand)", icon: Globe },
   ORGANIZATION: { color: "var(--st-run)", icon: Building2 },
@@ -42,10 +25,11 @@ const SCOPE_STYLE: Record<string, { color: string; icon: LucideIcon }> = {
 };
 
 function ScopeBadge({ type, scopeRef }: { type: string; scopeRef?: string }) {
+  const { t } = useI18n();
   const s = SCOPE_STYLE[type] ?? { color: "var(--muted)", icon: Globe };
   const I = s.icon;
   return (
-    <span className="kn-scope" style={{ color: s.color }} title={`Scope ${type}${scopeRef ? `: ${scopeRef}` : ""}`}>
+    <span className="kn-scope" style={{ color: s.color }} title={`${t("kn.scopeTitle", { type })}${scopeRef ? `: ${scopeRef}` : ""}`}>
       <I size={12} strokeWidth={2.2} />{type}{scopeRef ? <span className="kn-scope-ref">:{scopeRef}</span> : null}
     </span>
   );
@@ -53,8 +37,10 @@ function ScopeBadge({ type, scopeRef }: { type: string; scopeRef?: string }) {
 /** Load mode follows the context planner: metadata.load === "on_demand" → index only, anything else → inline. */
 const loadMode = (metadata: any) => (metadata?.load === "on_demand" ? "on_demand" : "inline");
 function LoadChip({ metadata }: { metadata: any }) {
+  const { t } = useI18n();
   const m = loadMode(metadata);
-  return <span className={`kn-load is-${m}`} title={m === "on_demand" ? "Chỉ đưa vào index, agent nạp khi cần" : "Nạp đầy đủ vào prompt"}>{m === "on_demand" ? <Eye size={11} /> : <Zap size={11} />}{m === "on_demand" ? "on-demand" : "inline"}</span>;
+  const onDemand = m === "on_demand";
+  return <span className={`kn-load is-${m}`} title={onDemand ? t("kn.onDemandTip") : t("kn.inlineTip")}>{onDemand ? <Eye size={11} /> : <Zap size={11} />}{onDemand ? t("kn.onDemand") : t("kn.inline")}</span>;
 }
 
 type Draft = {
@@ -67,6 +53,7 @@ const emptyDraft = (category = "business_rule"): Draft => ({
 });
 
 export function KnowledgePage({ itemKey }: { itemKey?: string }) {
+  const { t } = useI18n();
   const [cat, setCat] = useState("");
   const { data, error, loading, reload } = useApi<any[]>(`/api/knowledge${cat ? `?category=${cat}` : ""}`, [cat]);
   // Category counts need the unfiltered list; only fetched separately while a category filter is active.
@@ -96,22 +83,22 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
     <div className="kn">
       <PageHeader
         icon={BookOpen}
-        title="Knowledge & Skills"
-        subtitle="Business rule, architecture guideline, convention và agent skill. Mỗi bước nhận đúng các item áp dụng theo scope (GLOBAL < ORG < PROJECT < REPO < WORKFLOW < STEP) hoặc được gán trong workflow editor."
+        title={t("kn.title")}
+        subtitle={t("kn.subtitle")}
         actions={
           <>
             <RepoImport onDone={reloadAll} />
-            <button onClick={() => navigate("/knowledge/~new")}><Plus size={15} strokeWidth={2.2} />Item mới</button>
+            <button onClick={() => navigate("/knowledge/~new")}><Plus size={15} strokeWidth={2.2} />{t("kn.newItem")}</button>
           </>
         }
       />
-      <nav className="kn-cats" aria-label="Danh mục">
-        {CATS.map(([k, label]) => {
+      <nav className="kn-cats" aria-label={t("kn.cats")}>
+        {CATS.map((k) => {
           const I = CAT_ICON[k] ?? Layers;
           return (
             <button key={k} type="button" className={`kn-cat${k === cat ? " on" : ""}`} aria-pressed={k === cat} onClick={() => setCat(k)}>
               <I size={15} strokeWidth={2} />
-              <span>{label}</span>
+              <span>{t(catKey(k))}</span>
               {counts && <span className="kn-cat-count">{counts[k] ?? 0}</span>}
             </button>
           );
@@ -120,18 +107,18 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
       <div className={`kn-layout${itemKey ? " has-detail" : ""}`}>
         <aside className="kn-list">
           <div className="kn-filter">
-            <SearchInput value={q} onChange={setQ} placeholder="Tìm theo tên, key…" width="100%" />
-            <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Lọc theo scope">
-              <option value="">Mọi scope</option>
+            <SearchInput value={q} onChange={setQ} placeholder={t("kn.searchPh")} width="100%" />
+            <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label={t("kn.scopeFilter")}>
+              <option value="">{t("kn.allScopes")}</option>
               {SCOPES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           {loading && !data ? <SkeletonRows rows={6} /> : error ? <ErrorBox error={error} onRetry={reload} /> : !data?.length ? (
-            <EmptyState icon={BookOpen} title="Chưa có item" action={<button className="sm" onClick={() => navigate("/knowledge/~new")}><Plus size={14} />Tạo item</button>}>
-              Tạo item mới hoặc quét repository để import CLAUDE.md, skills, rules.
+            <EmptyState icon={BookOpen} title={t("kn.emptyTitle")} action={<button className="sm" onClick={() => navigate("/knowledge/~new")}><Plus size={14} />{t("kn.create")}</button>}>
+              {t("kn.emptyBody")}
             </EmptyState>
           ) : !items.length ? (
-            <div className="kn-none">Không có item khớp bộ lọc.</div>
+            <div className="kn-none">{t("kn.noMatch")}</div>
           ) : (
             <ul className="kn-items">
               {items.map((k) => {
@@ -143,13 +130,13 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
                       <span className="kn-item-body">
                         <span className="kn-item-title">
                           <b>{k.title}</b>
-                          {k.enforced && <Badge s="FAILED">enforced</Badge>}
-                          {!k.enabled && <Badge s="CANCELED">off</Badge>}
+                          {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
+                          {!k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                         </span>
                         <span className="kn-item-key mono">{k.key}</span>
                         <span className="kn-item-meta">
                           <ScopeBadge type={k.scope_type} scopeRef={k.scope_ref} />
-                          <span className="kn-tag">{catLabel(k.category)}</span>
+                          <span className="kn-tag">{t(catKey(k.category))}</span>
                           <span className="kn-tag mono">v{k.current_version}</span>
                           <LoadChip metadata={k.metadata} />
                         </span>
@@ -166,8 +153,8 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
             <KnowledgeEditor key={itemKey} itemKey={itemKey} defaultCategory={cat || "business_rule"} onSaved={reloadAll} />
           ) : (
             <div className="card kn-placeholder">
-              <EmptyState icon={BookOpen} title="Chọn một item để xem/sửa" action={<button className="sm ghost" onClick={() => navigate("/knowledge/~new")}><Plus size={14} />Tạo mới</button>}>
-                Mỗi item có nội dung Markdown, scope áp dụng, lịch sử version và audit log.
+              <EmptyState icon={BookOpen} title={t("kn.pickTitle")} action={<button className="sm ghost" onClick={() => navigate("/knowledge/~new")}><Plus size={14} />{t("kn.createNew")}</button>}>
+                {t("kn.pickBody")}
               </EmptyState>
             </div>
           )}
@@ -179,11 +166,12 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
 
 /** Scan repositories (CLAUDE.md, skills, cursor rules, wiki docs): preview first, then import. */
 function RepoImport({ onDone }: { onDone: () => void }) {
+  const { t } = useI18n();
   const [preview, setPreview] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const run = async (dry: boolean) => {
     setBusy(true);
-    const r = await act(() => api<any>("/api/knowledge/import-repos", { dry_run: dry }), dry ? undefined : "Đã import từ repository");
+    const r = await act(() => api<any>("/api/knowledge/import-repos", { dry_run: dry }), dry ? undefined : t("kn.imported"));
     setBusy(false);
     if (!r) return;
     if (dry) setPreview(r);
@@ -192,17 +180,17 @@ function RepoImport({ onDone }: { onDone: () => void }) {
   const changed = preview ? preview.candidates.filter((c: any) => c.action !== "unchanged") : [];
   return (
     <>
-      <button className="ghost" disabled={busy} onClick={() => run(true)}>{busy ? <span className="spinner" /> : <ScanSearch size={15} />}{busy ? "Đang quét…" : "Quét repository"}</button>
+      <button className="ghost" disabled={busy} onClick={() => run(true)}>{busy ? <span className="spinner" /> : <ScanSearch size={15} />}{busy ? t("kn.scanning") : t("kn.scan")}</button>
       {preview && (
-        <Drawer title="Import từ repository" onClose={() => setPreview(null)} width={560}>
+        <Drawer title={t("kn.importTitle")} onClose={() => setPreview(null)} width={560}>
           <div className="kn-import-sum">
-            <div><b>{preview.created}</b><span>mới</span></div>
-            <div><b>{preview.updated}</b><span>cập nhật</span></div>
-            <div><b>{preview.unchanged}</b><span>không đổi</span></div>
+            <div><b>{preview.created}</b><span>{t("kn.createdN")}</span></div>
+            <div><b>{preview.updated}</b><span>{t("kn.updatedN")}</span></div>
+            <div><b>{preview.unchanged}</b><span>{t("kn.unchangedN")}</span></div>
           </div>
           <div className="row tight" style={{ marginBottom: 12 }}>
-            <button disabled={busy || !(preview.created + preview.updated)} onClick={() => run(false)}>Import</button>
-            <button className="ghost" onClick={() => setPreview(null)}>Đóng</button>
+            <button disabled={busy || !(preview.created + preview.updated)} onClick={() => run(false)}>{t("kn.import")}</button>
+            <button className="ghost" onClick={() => setPreview(null)}>{t("common.close")}</button>
           </div>
           {changed.length > 0 && (
             <ul className="kn-import-list">
@@ -216,11 +204,11 @@ function RepoImport({ onDone }: { onDone: () => void }) {
           )}
           {preview.skipped.length > 0 && (
             <>
-              <h3>Bỏ qua</h3>
-              {preview.skipped.map((s: any) => <div key={s.path} className="small err kn-skip">bỏ qua <span className="mono">{s.path}</span> — {s.reason}</div>)}
+              <h3>{t("kn.skipped")}</h3>
+              {preview.skipped.map((s: any) => <div key={s.path} className="small err kn-skip">{t("kn.skip", { path: s.path, reason: s.reason })}</div>)}
             </>
           )}
-          {!changed.length && !preview.skipped.length && <div className="muted small">Không có thay đổi nào.</div>}
+          {!changed.length && !preview.skipped.length && <div className="muted small">{t("kn.noChange")}</div>}
         </Drawer>
       )}
     </>
@@ -257,6 +245,7 @@ function KeyValues({ value, empty }: { value: any; empty: string }) {
 }
 
 function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: string; defaultCategory: string; onSaved: () => void }) {
+  const { t } = useI18n();
   const isNew = itemKey === "~new";
   const { data: item, error, reload } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}`);
   const { data: usage } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}/usage`);
@@ -272,7 +261,7 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
       applicability: JSON.stringify(v?.applicability ?? {}, null, 2), metadata: JSON.stringify(v?.metadata ?? {}, null, 2), change_note: "",
     });
   }, [item]);
-  const back = <button className="quiet sm kn-back" onClick={() => navigate("/knowledge")}><ArrowLeft size={15} />Danh sách</button>;
+  const back = <button className="quiet sm kn-back" onClick={() => navigate("/knowledge")}><ArrowLeft size={15} />{t("kn.back")}</button>;
   if (error) return <div>{back}<ErrorBox error={error} /></div>;
   if (!isNew && !item) return <div className="card"><SkeletonRows rows={5} /></div>;
   const set = (patch: Partial<Draft>) => setD({ ...d, ...patch });
@@ -282,10 +271,10 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
       applicability = JSON.parse(d.applicability || "{}");
       metadata = JSON.parse(d.metadata || "{}");
     } catch {
-      return act(async () => { throw new Error("Applicability / metadata phải là JSON hợp lệ"); });
+      return act(async () => { throw new Error(t("kn.badJson")); });
     }
     const body = { ...d, conflict_key: d.conflict_key || null, applicability, metadata };
-    const r = await act(() => api<any>(isNew ? "/api/knowledge" : `/api/knowledge/${itemKey}`, body), isNew ? "Đã tạo" : "Đã lưu (nội dung đổi → version mới)");
+    const r = await act(() => api<any>(isNew ? "/api/knowledge" : `/api/knowledge/${itemKey}`, body), isNew ? t("kn.created") : t("kn.saved"));
     if (r) {
       onSaved();
       if (isNew) navigate(`/knowledge/${r.key}`);
@@ -295,14 +284,14 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
   const cur = isNew ? null : item.versions[0];
   const CatIcon = CAT_ICON[isNew ? d.category : item.category] ?? FileText;
   const tabs: Array<[typeof tab, ReactNode]> = isNew
-    ? [["edit", <><SquarePen size={14} />Soạn</>], ["preview", <><Eye size={14} />Preview</>]]
+    ? [["edit", <><SquarePen size={14} />{t("kn.compose")}</>], ["preview", <><Eye size={14} />{t("common.preview")}</>]]
     : [
-        ["overview", <><FileText size={14} />Tổng quan</>],
-        ["edit", <><SquarePen size={14} />Sửa</>],
-        ["preview", <><Eye size={14} />Preview</>],
-        ["versions", <><History size={14} />Versions <span className="kn-tab-count">{item.versions.length}</span></>],
-        ["audit", <><ScrollText size={14} />Audit <span className="kn-tab-count">{item.audit.length}</span></>],
-        ["usage", <><Workflow size={14} />Đã dùng <span className="kn-tab-count">{usage?.used.length ?? 0}</span></>],
+        ["overview", <><FileText size={14} />{t("kn.overview")}</>],
+        ["edit", <><SquarePen size={14} />{t("common.edit")}</>],
+        ["preview", <><Eye size={14} />{t("common.preview")}</>],
+        ["versions", <><History size={14} />{t("kn.versions")} <span className="kn-tab-count">{item.versions.length}</span></>],
+        ["audit", <><ScrollText size={14} />{t("kn.audit")} <span className="kn-tab-count">{item.audit.length}</span></>],
+        ["usage", <><Workflow size={14} />{t("kn.used")} <span className="kn-tab-count">{usage?.used.length ?? 0}</span></>],
       ];
 
   return (
@@ -311,24 +300,24 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
       <div className="card kn-head">
         <span className="kn-head-icon"><CatIcon size={20} strokeWidth={2} /></span>
         <div className="kn-head-main">
-          <h2 className="kn-head-title">{isNew ? "Knowledge item mới" : d.title || item.title}</h2>
+          <h2 className="kn-head-title">{isNew ? t("kn.newTitle") : d.title || item.title}</h2>
           {isNew ? (
-            <div className="muted small">Điền thông tin, scope và nội dung rồi bấm Tạo.</div>
+            <div className="muted small">{t("kn.newHint")}</div>
           ) : (
             <>
               <div className="kn-head-key mono">{item.key}</div>
               <div className="kn-item-meta">
                 <ScopeBadge type={item.scope_type} scopeRef={item.scope_ref} />
-                <span className="kn-tag">{catLabel(item.category)}</span>
+                <span className="kn-tag">{t(catKey(item.category))}</span>
                 <span className="kn-tag mono">v{item.current_version}</span>
                 <LoadChip metadata={cur?.metadata} />
-                {item.enforced && <Badge s="FAILED">enforced</Badge>}
-                {item.enabled ? <Badge s="COMPLETED">enabled</Badge> : <Badge s="CANCELED">off</Badge>}
+                {item.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
+                {item.enabled ? <Badge s="COMPLETED">{t("kn.enabled")}</Badge> : <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
               </div>
             </>
           )}
         </div>
-        {!isNew && <div className="kn-head-time muted small">cập nhật {time(item.updated_at)}</div>}
+        {!isNew && <div className="kn-head-time muted small">{t("kn.updatedAt", { time: time(item.updated_at) })}</div>}
       </div>
 
       <div className="card kn-body">
@@ -337,23 +326,23 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
         {tab === "overview" && !isNew && cur?.metadata?.memory && <MemoryProvenance itemKey={item.key} m={cur.metadata.memory} onDone={reload} />}
         {tab === "overview" && !isNew && (
           <div className="kn-overview">
-            <Section icon={FileText} title={item.category === "agent_skill" ? "Skill instructions" : "Nội dung"} aside={<span className="muted small">v{cur?.version ?? item.current_version}</span>}>
-              <div className="kn-content">{cur?.content ? <Markdown text={cur.content} /> : <span className="muted">(trống)</span>}</div>
+            <Section icon={FileText} title={item.category === "agent_skill" ? t("kn.skillInstructions") : t("kn.content")} aside={<span className="muted small">v{cur?.version ?? item.current_version}</span>}>
+              <div className="kn-content">{cur?.content ? <Markdown text={cur.content} /> : <span className="muted">{t("kn.emptyContent")}</span>}</div>
             </Section>
             <div className="kn-overview-grid">
-              <Section icon={Layers} title="Scope & applicability">
+              <Section icon={Layers} title={t("kn.scopeSection")}>
                 <dl className="kn-kv">
-                  <div className="kn-kv-row"><dt>scope</dt><dd><ScopeBadge type={item.scope_type} scopeRef={item.scope_ref} /></dd></div>
-                  <div className="kn-kv-row"><dt>conflict key</dt><dd>{item.conflict_key ? <span className="mono">{item.conflict_key}</span> : <span className="muted">—</span>}</dd></div>
-                  <div className="kn-kv-row"><dt>priority</dt><dd className="mono">{item.priority}</dd></div>
-                  <div className="kn-kv-row"><dt>enforced</dt><dd>{item.enforced ? <span className="kn-flag"><Lock size={12} />scope hẹp hơn không ghi đè được</span> : <span className="muted">không</span>}</dd></div>
-                  <div className="kn-kv-row"><dt>enabled</dt><dd>{item.enabled ? <span className="okc">có</span> : <span className="kn-flag"><Power size={12} />tắt</span>}</dd></div>
+                  <div className="kn-kv-row"><dt>{t("kn.scope")}</dt><dd><ScopeBadge type={item.scope_type} scopeRef={item.scope_ref} /></dd></div>
+                  <div className="kn-kv-row"><dt>{t("kn.conflictKey")}</dt><dd>{item.conflict_key ? <span className="mono">{item.conflict_key}</span> : <span className="muted">—</span>}</dd></div>
+                  <div className="kn-kv-row"><dt>{t("kn.priority")}</dt><dd className="mono">{item.priority}</dd></div>
+                  <div className="kn-kv-row"><dt>{t("kn.enforced")}</dt><dd>{item.enforced ? <span className="kn-flag"><Lock size={12} />{t("kn.enforcedYes")}</span> : <span className="muted">{t("kn.enforcedNo")}</span>}</dd></div>
+                  <div className="kn-kv-row"><dt>{t("kn.enabled")}</dt><dd>{item.enabled ? <span className="okc">{t("kn.enabledYes")}</span> : <span className="kn-flag"><Power size={12} />{t("kn.enabledNo")}</span>}</dd></div>
                 </dl>
-                <div className="kn-sub-head">Applicability</div>
-                <KeyValues value={cur?.applicability} empty="Không giới hạn — áp dụng theo scope." />
+                <div className="kn-sub-head">{t("kn.applicability")}</div>
+                <KeyValues value={cur?.applicability} empty={t("kn.applicabilityEmpty")} />
               </Section>
-              <Section icon={BookMarked} title="Metadata">
-                <KeyValues value={cur?.metadata} empty="Không có metadata." />
+              <Section icon={BookMarked} title={t("kn.metadata")}>
+                <KeyValues value={cur?.metadata} empty={t("kn.metadataEmpty")} />
               </Section>
             </div>
           </div>
@@ -362,45 +351,45 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
         {tab === "edit" && (
           <div className="kn-form">
             <fieldset className="kn-fieldset">
-              <legend>Định danh</legend>
+              <legend>{t("kn.identity")}</legend>
               <div className="kn-form-grid">
-                <Field label="Key"><input value={d.key} disabled={!isNew} onChange={(e) => set({ key: e.target.value })} /></Field>
-                <Field label="Title"><input value={d.title} onChange={(e) => set({ title: e.target.value })} /></Field>
-                <Field label="Category"><select value={d.category} disabled={!isNew} onChange={(e) => set({ category: e.target.value })}>{CATS.slice(1).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+                <Field label={t("kn.key")}><input value={d.key} disabled={!isNew} onChange={(e) => set({ key: e.target.value })} /></Field>
+                <Field label={t("kn.titleField")}><input value={d.title} onChange={(e) => set({ title: e.target.value })} /></Field>
+                <Field label={t("kn.category")}><select value={d.category} disabled={!isNew} onChange={(e) => set({ category: e.target.value })}>{CATS.slice(1).map((k) => <option key={k} value={k}>{t(catKey(k))}</option>)}</select></Field>
               </div>
             </fieldset>
             <fieldset className="kn-fieldset">
-              <legend>Scope & ưu tiên</legend>
+              <legend>{t("kn.scopePriority")}</legend>
               <div className="kn-form-grid">
-                <Field label="Scope"><select value={d.scope_type} onChange={(e) => set({ scope_type: e.target.value, scope_ref: e.target.value === "GLOBAL" ? "" : d.scope_ref })}>{SCOPES.map((s) => <option key={s}>{s}</option>)}</select></Field>
-                {d.scope_type !== "GLOBAL" && <Field label="Scope ref"><input placeholder={SCOPE_HINT[d.scope_type]} value={d.scope_ref} onChange={(e) => set({ scope_ref: e.target.value })} /></Field>}
-                <Field label="Conflict key" hint="Item cùng conflict key cạnh tranh; scope hẹp hơn thắng."><input value={d.conflict_key} onChange={(e) => set({ conflict_key: e.target.value })} /></Field>
-                <Field label="Priority"><input type="number" value={d.priority} onChange={(e) => set({ priority: Number(e.target.value) })} /></Field>
+                <Field label={t("kn.scope")}><select value={d.scope_type} onChange={(e) => set({ scope_type: e.target.value, scope_ref: e.target.value === "GLOBAL" ? "" : d.scope_ref })}>{SCOPES.map((s) => <option key={s}>{s}</option>)}</select></Field>
+                {d.scope_type !== "GLOBAL" && <Field label={t("kn.scopeRef")}><input placeholder={t(`kn.hint.${d.scope_type}`)} value={d.scope_ref} onChange={(e) => set({ scope_ref: e.target.value })} /></Field>}
+                <Field label={t("kn.conflictKey")} hint={t("kn.conflictHint")}><input value={d.conflict_key} onChange={(e) => set({ conflict_key: e.target.value })} /></Field>
+                <Field label={t("kn.priority")}><input type="number" value={d.priority} onChange={(e) => set({ priority: Number(e.target.value) })} /></Field>
               </div>
               <div className="kn-toggles">
-                <label className="kn-toggle"><input type="checkbox" checked={d.enabled} onChange={(e) => set({ enabled: e.target.checked })} /><span><b>Enabled</b></span></label>
-                <label className="kn-toggle"><input type="checkbox" checked={d.enforced} onChange={(e) => set({ enforced: e.target.checked })} /><span><b>Enforced</b> <span className="muted">(scope hẹp hơn không ghi đè được)</span></span></label>
+                <label className="kn-toggle"><input type="checkbox" checked={d.enabled} onChange={(e) => set({ enabled: e.target.checked })} /><span><b>{t("kn.enabled")}</b></span></label>
+                <label className="kn-toggle"><input type="checkbox" checked={d.enforced} onChange={(e) => set({ enforced: e.target.checked })} /><span><b>{t("kn.enforced")}</b> <span className="muted">({t("kn.enforcedYes")})</span></span></label>
               </div>
             </fieldset>
             <fieldset className="kn-fieldset">
-              <legend>Nội dung</legend>
-              <Field label={d.category === "agent_skill" ? "Skill instructions (Markdown)" : "Nội dung (Markdown)"}><textarea className="kn-textarea" rows={12} value={d.content} onChange={(e) => set({ content: e.target.value })} /></Field>
+              <legend>{t("kn.contentLegend")}</legend>
+              <Field label={d.category === "agent_skill" ? t("kn.skillMd") : t("kn.contentMd")}><textarea className="kn-textarea" rows={12} value={d.content} onChange={(e) => set({ content: e.target.value })} /></Field>
             </fieldset>
             <fieldset className="kn-fieldset">
-              <legend>Nâng cao</legend>
+              <legend>{t("kn.advanced")}</legend>
               <div className="kn-form-grid two">
-                <Field label="Applicability (JSON)" hint="step_types, step_keys, repos, projects, workflows, keywords"><textarea className="code" rows={6} value={d.applicability} onChange={(e) => set({ applicability: e.target.value })} /></Field>
-                <Field label="Metadata (JSON)" hint="skills: required_tools, output_contract"><textarea className="code" rows={6} value={d.metadata} onChange={(e) => set({ metadata: e.target.value })} /></Field>
+                <Field label={t("kn.applicabilityJson")} hint={t("kn.applicabilityHint")}><textarea className="code" rows={6} value={d.applicability} onChange={(e) => set({ applicability: e.target.value })} /></Field>
+                <Field label={t("kn.metadataJson")} hint={t("kn.metadataHint")}><textarea className="code" rows={6} value={d.metadata} onChange={(e) => set({ metadata: e.target.value })} /></Field>
               </div>
             </fieldset>
             <div className="kn-savebar">
-              {!isNew && <input placeholder="change note" value={d.change_note} onChange={(e) => set({ change_note: e.target.value })} aria-label="Change note" />}
-              <button onClick={save}>{isNew ? <Plus size={15} /> : <SquarePen size={15} />}{isNew ? "Tạo" : "Lưu"}</button>
+              {!isNew && <input placeholder={t("kn.changeNote")} value={d.change_note} onChange={(e) => set({ change_note: e.target.value })} aria-label={t("kn.changeNoteAria")} />}
+              <button onClick={save}>{isNew ? <Plus size={15} /> : <SquarePen size={15} />}{isNew ? t("kn.createBtn") : t("kn.save")}</button>
             </div>
           </div>
         )}
 
-        {tab === "preview" && <div className="kn-content"><Markdown text={d.content || "_(trống)_"} /></div>}
+        {tab === "preview" && <div className="kn-content"><Markdown text={d.content || `_(${t("kn.emptyContent")})_`} /></div>}
 
         {tab === "versions" && !isNew && (
           <ol className="kn-timeline">
@@ -412,10 +401,10 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
                   <div className="kn-tl-body">
                     <div className="kn-tl-row">
                       <b className="mono">v{v.version}</b>
-                      {v.version === item.current_version && <span className="kn-tag chip-brand">hiện tại</span>}
+                      {v.version === item.current_version && <span className="kn-tag chip-brand">{t("kn.current")}</span>}
                       <span className="muted small">{time(v.created_at)}{v.created_by ? ` · ${v.created_by}` : ""}</span>
                       <span className="grow" />
-                      <button className={open ? "xs" : "xs ghost"} onClick={() => setViewVersion(open ? null : v.version)}>{open ? "Ẩn" : "Xem"}</button>
+                      <button className={open ? "xs" : "xs ghost"} onClick={() => setViewVersion(open ? null : v.version)}>{open ? t("kn.hide") : t("kn.view")}</button>
                     </div>
                     {v.change_note && <div className="small kn-tl-note">{v.change_note}</div>}
                     {open && <div className="kn-content kn-tl-content"><Markdown text={v.content} /></div>}
@@ -439,28 +428,28 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
                 </li>
               ))}
             </ol>
-          ) : <div className="muted small">Chưa có audit.</div>
+          ) : <div className="muted small">{t("kn.noAudit")}</div>
         )}
 
         {tab === "usage" && !isNew && usage && (
           <div className="kn-usage">
-            <Section icon={Workflow} title="Được gán trong workflow">
+            <Section icon={Workflow} title={t("kn.assigned")}>
               {usage.assigned.length ? (
                 <ul className="kn-use-list">
                   {usage.assigned.map((a: any, i: number) => (
-                    <li key={i}><a href={`#/workflows/${a.workflow}`} className="mono">{a.workflow}</a> <span className="kn-tag">{a.version === "draft" ? "draft" : `v${a.version}`}</span> <span className="muted small">{a.step ? <>bước <b>{a.step}</b></> : "mọi bước"}</span></li>
+                    <li key={i}><a href={`#/workflows/${a.workflow}`} className="mono">{a.workflow}</a> <span className="kn-tag">{a.version === "draft" ? t("kn.draft") : `v${a.version}`}</span> <span className="muted small">{a.step ? t("kn.step", { step: a.step }) : t("kn.allSteps")}</span></li>
                   ))}
                 </ul>
-              ) : <div className="muted small">Không được gán trực tiếp (chỉ áp dụng theo scope).</div>}
+              ) : <div className="muted small">{t("kn.notAssigned")}</div>}
             </Section>
-            <Section icon={History} title="Thực sự được áp dụng trong các lần chạy">
+            <Section icon={History} title={t("kn.applied")}>
               {usage.used.length ? (
                 <ul className="kn-use-list">
                   {usage.used.map((u: any, i: number) => (
                     <li key={i}><a href={`#/runs/${u.run_id}/${u.step_key}`}>Run #{u.run_id} · {u.step_name}</a> <span className="muted small">{u.definition_key} · v{u.version} · {time(u.created_at)}</span></li>
                   ))}
                 </ul>
-              ) : <div className="muted small">Chưa bước nào nhận item này.</div>}
+              ) : <div className="muted small">{t("kn.noneApplied")}</div>}
             </Section>
           </div>
         )}
@@ -471,28 +460,29 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
 
 /** Cross-task memory provenance + the explicit human promotion step (only path to trusted agent conclusions). */
 function MemoryProvenance({ itemKey, m, onDone }: { itemKey: string; m: any; onDone: () => void }) {
+  const { t } = useI18n();
   const [by, setBy] = useState("");
   const tone = m.trust === "verified" || m.trust === "approved" ? "COMPLETED" : m.trust === "rejected" ? "FAILED" : "WAITING";
   const decide = async (d: "approve" | "reject") => {
-    if (await act(() => api(`/api/knowledge/${itemKey}/${d}`, { by }), d === "approve" ? "Đã duyệt — được nạp vào context của task sau" : "Đã từ chối")) onDone();
+    if (await act(() => api(`/api/knowledge/${itemKey}/${d}`, { by }), d === "approve" ? t("kn.approvedToast") : t("kn.rejectedToast"))) onDone();
   };
   return (
     <div className="card" style={{ borderLeft: `4px solid var(${tone === "COMPLETED" ? "--st-ok" : tone === "FAILED" ? "--st-err" : "--st-wait"})` }}>
-      <div className="card-head"><h4>Task memory provenance</h4><Badge s={tone}>{m.trust}</Badge><span className="pill">confidence: {m.confidence}</span></div>
+      <div className="card-head"><h4>{t("kn.memoryTitle")}</h4><Badge s={tone}>{m.trust}</Badge><span className="pill">confidence: {m.confidence}</span></div>
       <div className="kv small">
-        <span>Run</span><span><a href={`#/runs/${m.run_id}`}>#{m.run_id}</a> {m.work_item ?? ""}</span>
-        <span>Repository</span><span className="mono">{m.repo} @ {String(m.commit_sha ?? "").slice(0, 12)} (base {m.base_branch})</span>
-        <span>Files</span><span className="mono">{(m.files ?? []).slice(0, 8).join(", ") || "—"}</span>
-        <span>Sources</span><span>{(m.sources ?? []).join(", ")}</span>
-        <span>Extracted</span><span>{time(m.extracted_at)}</span>
-        {m.approved_by && <><span>Reviewed by</span><span>{m.approved_by} · {time(m.approved_at)}</span></>}
+        <span>{t("kn.run")}</span><span><a href={`#/runs/${m.run_id}`}>#{m.run_id}</a> {m.work_item ?? ""}</span>
+        <span>{t("kn.repository")}</span><span className="mono">{m.repo} @ {String(m.commit_sha ?? "").slice(0, 12)} (base {m.base_branch})</span>
+        <span>{t("kn.files")}</span><span className="mono">{(m.files ?? []).slice(0, 8).join(", ") || "—"}</span>
+        <span>{t("kn.sources")}</span><span>{(m.sources ?? []).join(", ")}</span>
+        <span>{t("kn.extracted")}</span><span>{time(m.extracted_at)}</span>
+        {m.approved_by && <><span>{t("kn.reviewedBy")}</span><span>{m.approved_by} · {time(m.approved_at)}</span></>}
       </div>
       {m.trust === "unverified" && (
         <div className="row">
-          <span className="small muted grow">Kết luận của agent chưa được kiểm chứng: không bao giờ nạp vào context cho tới khi được duyệt.</span>
-          <input style={{ width: 180 }} placeholder="Tên người duyệt" value={by} onChange={(e) => setBy(e.target.value)} aria-label="Tên người duyệt" />
-          <button className="sm ok" disabled={!by.trim()} onClick={() => decide("approve")}>Duyệt</button>
-          <button className="sm ghost" disabled={!by.trim()} onClick={() => decide("reject")}>Từ chối</button>
+          <span className="small muted grow">{t("kn.unverified")}</span>
+          <input style={{ width: 180 }} placeholder={t("kn.reviewerPh")} value={by} onChange={(e) => setBy(e.target.value)} aria-label={t("kn.reviewerPh")} />
+          <button className="sm ok" disabled={!by.trim()} onClick={() => decide("approve")}>{t("kn.approve")}</button>
+          <button className="sm ghost" disabled={!by.trim()} onClick={() => decide("reject")}>{t("kn.reject")}</button>
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import { Circle, ClipboardCheck, CornerDownLeft, FileText, Hand, Lightbulb, Mess
 import { Badge, dur, time } from "../ui.tsx";
 import { chibiPalette, chibiSprite, Px } from "./pixels.tsx";
 import { ROLE_INFO } from "./workflowToAgentMapper.ts";
+import { useI18n } from "../i18n/index.tsx";
 import type { AgentView, AttemptLite, EventLite } from "./types.ts";
 
 const ICON: Record<string, LucideIcon> = { tool: Wrench, tool_result: CornerDownLeft, agent: MessageSquare, thinking: Lightbulb, prompt: FileText, system: Settings, status: Circle, system_prompt: ScrollText };
@@ -17,7 +18,9 @@ function summarize(e: EventLite): string {
 
 /** Execution details of the character's step(s) + links into the existing inspector / question & approval flow. */
 export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose, attempts = [] }: { agent: AgentView; runId: number | null; events: EventLite[]; now: number; preview: boolean; onClose: () => void; attempts?: AttemptLite[] }) {
+  const { t } = useI18n();
   const info = ROLE_INFO[agent.role];
+  const title = t(`office.role.${agent.role}.title`);
   const s = chibiSprite(agent.role);
   const pal = chibiPalette(agent.role);
   const step = agent.step;
@@ -25,42 +28,42 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose,
   const recent = events.filter((e) => e.kind !== "system_prompt" && e.kind !== "prompt").slice(-14).reverse();
   const elapsed = agent.attempt?.started_at && !agent.attempt.finished_at ? now - Date.parse(agent.attempt.started_at) : agent.durationMs;
   return (
-    <aside className="office-panel" aria-label={`Chi tiết ${info.name} · ${info.title}`}>
+    <aside className="office-panel" aria-label={t("office.detail", { name: `${info.name} · ${title}` })}>
       <header className="office-panel-head">
         <svg viewBox="1 0 28 30" className="office-portrait" shapeRendering="crispEdges" aria-hidden>
           <Px rows={s.body} pal={pal} /><Px rows={s.head} pal={pal} /><Px rows={s.eyes} pal={pal} /><Px rows={s.mouth.smile} pal={pal} />
         </svg>
         <div className="grow">
-          <div className="office-panel-name">{info.name} <span className="muted">· {info.title}</span></div>
-          <div className="muted small">{info.does}</div>
+          <div className="office-panel-name">{info.name} <span className="muted">· {title}</span></div>
+          <div className="muted small">{t(`office.role.${agent.role}.does`)}</div>
         </div>
-        <button className="quiet icon" onClick={onClose} aria-label="Đóng"><X size={17} /></button>
+        <button className="quiet icon" onClick={onClose} aria-label={t("common.close")}><X size={17} /></button>
       </header>
 
       {!step ? (
-        <p className="muted">Run này không có bước nào thuộc vai trò {info.title}.</p>
+        <p className="muted">{t("office.noRole", { title })}</p>
       ) : (
         <>
           <div className="office-panel-now">
-            <div className="row tight"><b>{step.name}</b> <Badge s={step.status} />{agent.retrying && <span className="small okc">thử lại</span>}</div>
+            <div className="row tight"><b>{step.name}</b> <Badge s={step.status} />{agent.retrying && <span className="small okc">{t("office.retrying")}</span>}</div>
             <div className="small muted mono">{step.key} · {step.type}{agent.attempt ? ` · attempt #${agent.attempt.number}` : ""}</div>
             <div className="office-panel-activity">{agent.bubble}</div>
             <div className="small muted">
-              {agent.attempt?.started_at && <>Bắt đầu {time(agent.attempt.started_at)}</>}
-              {elapsed != null && <> · {agent.attempt?.finished_at ? "mất" : "đã chạy"} {dur(elapsed)}</>}
+              {agent.attempt?.started_at && <>{t("office.started", { time: time(agent.attempt.started_at) })}</>}
+              {elapsed != null && <> · {agent.attempt?.finished_at ? t("office.took", { dur: dur(elapsed) }) : t("office.ran", { dur: dur(elapsed) })}</>}
             </div>
           </div>
 
           {(agent.pose === "ask" || agent.pose === "approval") && (
             <div className="office-panel-cta">
-              <span className="row tight" style={{ gap: 6 }}>{agent.pose === "ask" ? <><Hand size={15} /> {agent.bubble}</> : <><ClipboardCheck size={15} /> Bước này đang chờ bạn duyệt</>}</span>
-              {link ? <a className="o-btn" href={link}>{agent.pose === "ask" ? "Trả lời câu hỏi" : "Mở phần duyệt"}</a> : <span className="muted small">(xem trước — không có gì để trả lời)</span>}
+              <span className="row tight" style={{ gap: 6 }}>{agent.pose === "ask" ? <><Hand size={15} /> {agent.bubble}</> : <><ClipboardCheck size={15} /> {t("office.waitingApproval")}</>}</span>
+              {link ? <a className="o-btn" href={link}>{agent.pose === "ask" ? t("office.answer") : t("office.openApproval")}</a> : <span className="muted small">{t("office.previewOnly")}</span>}
             </div>
           )}
 
           <VerificationCard v={agent.attempt?.metrics?.verification ?? agent.attempt?.output?.verification} />
 
-          <h3>Hoạt động gần đây</h3>
+          <h3>{t("office.recent")}</h3>
           {recent.length ? (
             <ol className="office-events">
               {recent.map((e) => (
@@ -72,7 +75,7 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose,
               ))}
             </ol>
           ) : (
-            <p className="muted small">{agent.status === "PENDING" ? "Chưa chạy." : "Chưa có sự kiện nào được ghi cho attempt này."}</p>
+            <p className="muted small">{agent.status === "PENDING" ? t("office.notStarted") : t("office.noEvents")}</p>
           )}
         </>
       )}
@@ -81,7 +84,7 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose,
 
       {agent.steps.length > 1 && (
         <>
-          <h3>Các bước của {info.title}</h3>
+          <h3>{t("office.stepsOf", { title })}</h3>
           <ul className="office-steps">
             {agent.steps.map((x) => (
               <li key={x.key}>
@@ -93,8 +96,8 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose,
       )}
 
       <div className="row">
-        {link && <a className="o-btn" href={link}>Mở Step Inspector →</a>}
-        {runId && !preview && <a className="small" href={`#/runs/${runId}`}>Xem graph của run</a>}
+        {link && <a className="o-btn" href={link}>{t("office.openInspector")}</a>}
+        {runId && !preview && <a className="small" href={`#/runs/${runId}`}>{t("office.seeGraph")}</a>}
       </div>
     </aside>
   );
@@ -102,6 +105,7 @@ export function AgentDetailsPanel({ agent, runId, events, now, preview, onClose,
 
 /** Harness verification of the current attempt (real metrics only; nothing rendered when absent). */
 function VerificationCard({ v }: { v: any }) {
+  const { t } = useI18n();
   if (!v || typeof v !== "object") return null;
   const tone = v.passed === true ? (v.status === "accepted_with_preexisting" || v.needs_review ? "WAITING" : "COMPLETED") : v.passed === false ? "FAILED" : "PENDING";
   return (
@@ -110,19 +114,19 @@ function VerificationCard({ v }: { v: any }) {
       <div className="office-verify">
         <div className="row tight">
           <Badge s={tone}>{String(v.status ?? v.outcome ?? "—")}</Badge>
-          {typeof v.rounds === "number" && <span className="small muted">{v.rounds} vòng · sửa {v.repairs ?? 0}/{v.max_repairs ?? "?"}</span>}
+          {typeof v.rounds === "number" && <span className="small muted">{t("office.verifyRounds", { rounds: v.rounds, repairs: v.repairs ?? 0, max: v.max_repairs ?? "?" })}</span>}
           {typeof v.duration_ms === "number" && <span className="small muted">· {dur(v.duration_ms)}</span>}
         </div>
         {(v.last ?? []).map((r: any) => (
           <div key={r.repo} className="small office-verify-repo">
             <b>{r.repo}</b> <span className="mono">{r.status ?? (r.passed ? "passed" : "failed")}</span>
             {r.regressions?.length > 0 && <span> · {r.regressions.map((g: any) => [String(g.package).split("/").pop(), ...(g.tests ?? [])].slice(0, 3).join(" ")).join("; ")}</span>}
-            {r.weakened?.length > 0 && <span className="err"> · test bị làm yếu: {r.weakened.join(", ")}</span>}
+            {r.weakened?.length > 0 && <span className="err"> · {t("office.weakTests")}: {r.weakened.join(", ")}</span>}
             {r.note && <div className="muted">{r.note}</div>}
             {r.error && <div className="err">{r.error}</div>}
           </div>
         ))}
-        {v.needs_review && <div className="small" style={{ color: "var(--st-wait)" }}>Cần người xem lại: {(v.review_reasons ?? []).join("; ")}</div>}
+        {v.needs_review && <div className="small" style={{ color: "var(--st-wait)" }}>{t("office.needsReview", { reasons: (v.review_reasons ?? []).join("; ") })}</div>}
         {v.reason && <div className="small muted">{v.reason}</div>}
       </div>
     </>
@@ -131,11 +135,12 @@ function VerificationCard({ v }: { v: any }) {
 
 /** Attempts of the role's steps (newest first) with their errors. */
 function StepHistory({ attempts }: { attempts: AttemptLite[] }) {
+  const { t } = useI18n();
   if (!attempts.length) return null;
   const list = [...attempts].sort((a, b) => b.id - a.id).slice(0, 8);
   return (
     <>
-      <h3>Lịch sử attempt</h3>
+      <h3>{t("office.attemptHistory")}</h3>
       <ol className="office-history">
         {list.map((a) => (
           <li key={a.id}>

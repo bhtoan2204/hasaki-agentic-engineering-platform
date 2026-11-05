@@ -6,6 +6,7 @@ import { OfficeScene } from "./OfficeScene.tsx";
 import { OfficeToolbar } from "./OfficeToolbar.tsx";
 import { useNow, useOfficeExecutionState, useOfficeRuns } from "./useOfficeExecutionState.ts";
 import { mapOffice, ROLE_INFO } from "./workflowToAgentMapper.ts";
+import { useI18n } from "../i18n/index.tsx";
 import type { OfficeSnapshot, Role } from "./types.ts";
 import "./office.css";
 
@@ -28,6 +29,7 @@ const reducedMotion = () => typeof matchMedia !== "undefined" && matchMedia("(pr
 
 /** Route: #/office[/<runId> | /preview]. */
 export function AgentOfficePage({ param }: { param?: string }) {
+  const { t, locale } = useI18n();
   const preview = param === "preview";
   const pinnedRun = param && param !== "preview" ? Number(param) : null;
   const { runs, active } = useOfficeRuns();
@@ -44,7 +46,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
   const demo = usePreviewOffice(preview);
   const now = useNow(1000);
   const snapshot = preview ? demo.snapshot : real.snapshot ?? EMPTY;
-  const agents = useMemo(() => mapOffice(snapshot, now), [snapshot, now]);
+  const agents = useMemo(() => mapOffice(snapshot, now, locale), [snapshot, now, locale]);
   const sel = selected ? agents.find((a) => a.role === selected) ?? null : null;
 
   useEffect(() => setFocusStep(sel?.step?.key ?? null), [sel?.step?.key]);
@@ -88,8 +90,8 @@ export function AgentOfficePage({ param }: { param?: string }) {
 
       {preview && (
         <div className="office-preview-ribbon" role="status">
-          <b>PREVIEW OFFICE</b> · dữ liệu mẫu cục bộ, không phải run thật — không tạo task, không chạy Claude.
-          <span className="office-caption">Cảnh {demo.frame + 1}/{demo.frames}: {demo.caption}</span>
+          {t("office.previewBanner")}
+          <span className="office-caption">{t("office.scene", { n: demo.frame + 1, total: demo.frames, caption: demo.caption })}</span>
         </div>
       )}
 
@@ -97,21 +99,21 @@ export function AgentOfficePage({ param }: { param?: string }) {
         <section className="office-main">
           <div className="office-runline">
             {preview ? (
-              <span className="muted">Run mô phỏng</span>
+              <span className="muted">{t("office.simRun")}</span>
             ) : run ? (
               <>
                 <b>Run #{run.id}</b> <span className="office-runtitle">{run.title}</span> <span className={`office-runstatus s-${run.status}`}>{run.status}</span>
               </>
             ) : real.error ? (
-              <span className="err">Không tải được run: {real.error}</span>
+              <span className="err">{t("office.loadFail", { error: real.error })}</span>
             ) : (
-              <span className="muted">{real.loading ? "Đang tải…" : "Chưa có workflow nào đang chạy — văn phòng đang nghỉ giải lao ☕"}</span>
+              <span className="muted">{real.loading ? t("office.loading") : t("office.break")}</span>
             )}
             <span className="grow" />
             <span className="office-stats" aria-live="polite">
-              {running > 0 && <span className="st-run">{running} đang làm</span>}
-              {waiting > 0 && <span className="st-wait">{waiting} cần bạn</span>}
-              {failed > 0 && <span className="st-fail">{failed} lỗi</span>}
+              {running > 0 && <span className="st-run">{t("ov.working", { n: running })}</span>}
+              {waiting > 0 && <span className="st-wait">{t("ov.needYou", { n: waiting })}</span>}
+              {failed > 0 && <span className="st-fail">{t("office.failedN", { n: failed })}</span>}
             </span>
           </div>
 
@@ -119,28 +121,25 @@ export function AgentOfficePage({ param }: { param?: string }) {
 
           {!preview && !run && !real.loading && (
             <div className="office-idle-card">
-              <div><b>Văn phòng đang rảnh.</b> Chọn một run trong lịch sử để xem lại, hoặc bật <button className="linkish" onClick={() => navigate("/office/preview")}>✨ Preview Office</button> để xem mọi animation.</div>
+              <div><b>{t("office.idleTitle")}</b> {t("office.idleBody")} <button className="linkish" onClick={() => navigate("/office/preview")}>{t("office.preview")}</button></div>
               <div className="office-idle-runs">
                 {runs.slice(0, 6).map((r) => <a key={r.id} href={`#/office/${r.id}`}>#{r.id} <span className="muted">{r.status}</span> {r.title}</a>)}
               </div>
             </div>
           )}
 
-          <ul className="office-roster" aria-label="Nhân viên">
+          <ul className="office-roster" aria-label={t("office.roster")}>
             {agents.map((a) => (
               <li key={a.role}>
                 <button className={`office-chip pose-${a.pose}${selected === a.role ? " is-sel" : ""}`} onClick={() => setSelected((s) => (s === a.role ? null : a.role))} aria-pressed={selected === a.role} title={a.detail}>
                   <span className="office-chip-dot" aria-hidden />
-                  <b>{ROLE_INFO[a.role].name}</b> <span className="muted">{ROLE_INFO[a.role].title}</span>
+                  <b>{ROLE_INFO[a.role].name}</b> <span className="muted">{t(`office.role.${a.role}.title`)}</span>
                   <span className="office-chip-state">{a.status ?? "—"}</span>
                 </button>
               </li>
             ))}
           </ul>
-          <p className="office-note muted small">
-            Mỗi nhân vật là <b>một vai trò logic</b> gom các bước cùng loại của workflow (phân tích, thiết kế, code, test, review, PR) — không phải các AI worker chạy độc lập.
-            Trạng thái và hoạt động lấy từ dữ liệu thật của run (step status, attempt, câu hỏi, tool call trong transcript).
-          </p>
+          <p className="office-note muted small">{t("office.note")}</p>
         </section>
 
         {sel && <AgentDetailsPanel agent={sel} runId={preview ? null : runId} events={events} now={now} preview={preview} attempts={snapshot.attempts} onClose={() => setSelected(null)} />}

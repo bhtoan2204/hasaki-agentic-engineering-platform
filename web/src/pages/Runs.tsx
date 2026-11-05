@@ -9,13 +9,13 @@ const DONE_STEP = new Set(["COMPLETED", "SKIPPED"]);
 
 /** Segmented progress bar: one segment per step, coloured by its status (pending steps stay on the track). */
 function StepProgress({ steps }: { steps: Array<{ key: string; status: string }> | null }) {
-  const { status } = useI18n();
+  const { status, t } = useI18n();
   const list = steps ?? [];
   if (!list.length) return <span className="muted small">—</span>;
   const done = list.filter((s) => DONE_STEP.has(s.status)).length;
   return (
     <div className="runs-progress">
-      <div className="runs-bar" role="img" aria-label={`${done}/${list.length} bước hoàn thành`}>
+      <div className="runs-bar" role="img" aria-label={t("runs.progressAria", { done, total: list.length })}>
         {list.map((s) => (
           <span key={s.key} title={`${s.key}: ${status(s.status)}`} style={{ background: s.status === "PENDING" ? undefined : STATUS_COLORS[s.status] }} />
         ))}
@@ -28,11 +28,12 @@ function StepProgress({ steps }: { steps: Array<{ key: string; status: string }>
 const runDuration = (r: any) => (r.finished_at && r.created_at ? dur(new Date(r.finished_at).getTime() - new Date(r.created_at).getTime()) : "");
 
 export function RunsTable({ runs }: { runs: any[] }) {
-  if (!runs.length) return <EmptyState icon={PlayCircle} title="Chưa có run nào">Chạy một workflow từ Work Item hoặc trang Workflows để bắt đầu.</EmptyState>;
+  const { t } = useI18n();
+  if (!runs.length) return <EmptyState icon={PlayCircle} title={t("runs.emptyTitle")}>{t("runs.emptyBody")}</EmptyState>;
   return (
     <div className="table-wrap runs-table">
       <table>
-        <thead><tr><th>Run</th><th>Workflow</th><th>Trạng thái</th><th>Tiến độ</th><th>Đang chờ</th><th>Thời lượng</th><th>Cập nhật</th></tr></thead>
+        <thead><tr><th>{t("runs.col.run")}</th><th>{t("runs.col.workflow")}</th><th>{t("runs.col.status")}</th><th>{t("runs.col.progress")}</th><th>{t("runs.col.waiting")}</th><th>{t("runs.col.duration")}</th><th>{t("runs.col.updated")}</th></tr></thead>
         <tbody>
           {runs.map((r) => (
             <tr key={r.id} className="click" tabIndex={0} onClick={() => navigate(`/runs/${r.id}`)} onKeyDown={(e) => e.key === "Enter" && navigate(`/runs/${r.id}`)}>
@@ -48,9 +49,9 @@ export function RunsTable({ runs }: { runs: any[] }) {
               <td><span className="runs-wf"><Workflow size={13} strokeWidth={1.9} />{r.definition_key}</span> <span className="muted small">v{r.definition_version}</span></td>
               <td><Badge s={r.status} label /></td>
               <td><StepProgress steps={r.steps} /></td>
-              <td>{r.open_questions > 0 ? <Badge s="WAITING_INPUT"><CircleHelp size={12} strokeWidth={2.2} /> {r.open_questions} câu hỏi</Badge> : <span className="muted small">—</span>}</td>
+              <td>{r.open_questions > 0 ? <Badge s="WAITING_INPUT"><CircleHelp size={12} strokeWidth={2.2} /> {t("runs.questions", { n: r.open_questions })}</Badge> : <span className="muted small">—</span>}</td>
               <td className="muted small">{runDuration(r) || "—"}</td>
-              <td className="muted small runs-ago" title={r.updated_at}><Clock size={12} strokeWidth={2} />{ago(r.updated_at)} trước</td>
+              <td className="muted small runs-ago" title={r.updated_at}><Clock size={12} strokeWidth={2} />{t("common.ago", { when: ago(r.updated_at) })}</td>
             </tr>
           ))}
         </tbody>
@@ -97,43 +98,43 @@ export function RunsPage() {
     <div className="runs-page">
       <PageHeader
         icon={Activity}
-        title="Workflow Runs"
-        subtitle="Theo dõi mọi lần thực thi workflow theo thời gian thực — trạng thái, tiến độ từng bước và câu hỏi đang chờ."
-        crumbs={[["Overview", "#/overview"], ["Runs"]]}
+        title={t("runs.title")}
+        subtitle={t("runs.subtitle")}
+        crumbs={[[t("nav.overview"), "#/overview"], [t("runs.title")]]}
         actions={
           <div className="runs-launch">
-            <select aria-label="Chọn workflow" value={wf} onChange={(e) => setWf(e.target.value)}>
-              <option value="">— chọn workflow —</option>
+            <select aria-label={t("runs.pickWf")} value={wf} onChange={(e) => setWf(e.target.value)}>
+              <option value="">{t("runs.pickWfPh")}</option>
               {(wfs ?? []).filter((w) => w.latest_version > 0).map((w) => <option key={w.key} value={w.key}>{w.name} (v{w.latest_version})</option>)}
             </select>
-            <button disabled={!wf} onClick={() => navigate(`/workflows/${wf}`)}><Play size={15} strokeWidth={2} />Mở & chạy…</button>
+            <button disabled={!wf} onClick={() => navigate(`/workflows/${wf}`)}><Play size={15} strokeWidth={2} />{t("runs.openRun")}</button>
           </div>
         }
       />
 
       <div className="grid4 runs-stats">
-        <StatCard icon={Activity} tone="run" label="Đang chạy" value={base ? counts.running : "—"} hint={base ? `trên ${base.length} run gần nhất` : undefined} onClick={() => toggle("RUNNING")} />
-        <StatCard icon={Hourglass} tone="wait" label="Chờ bạn" value={base ? counts.waiting : "—"} hint={base ? `${openQs} câu hỏi mở · ${counts.paused} tạm dừng` : undefined} onClick={() => toggle("WAITING")} />
-        <StatCard icon={CircleCheck} tone="ok" label="Hoàn thành" value={base ? counts.completed : "—"} onClick={() => toggle("COMPLETED")} />
-        <StatCard icon={CircleX} tone="err" label="Lỗi" value={base ? counts.failed : "—"} onClick={() => toggle("FAILED")} />
+        <StatCard icon={Activity} tone="run" label={t("status.RUNNING")} value={base ? counts.running : "—"} hint={base ? t("runs.runningHint", { n: base.length }) : undefined} onClick={() => toggle("RUNNING")} />
+        <StatCard icon={Hourglass} tone="wait" label={t("ov.waitingYou")} value={base ? counts.waiting : "—"} hint={base ? t("runs.waitHint", { q: openQs, p: counts.paused }) : undefined} onClick={() => toggle("WAITING")} />
+        <StatCard icon={CircleCheck} tone="ok" label={t("status.COMPLETED")} value={base ? counts.completed : "—"} onClick={() => toggle("COMPLETED")} />
+        <StatCard icon={CircleX} tone="err" label={t("status.FAILED")} value={base ? counts.failed : "—"} onClick={() => toggle("FAILED")} />
       </div>
 
       <div className="runs-toolbar">
         <div className="runs-seg">
           <Segmented<string>
-            label="Lọc theo trạng thái"
+            label={t("runs.filter")}
             value={status}
             onChange={setStatus}
             options={[["", t("common.all")], ...STATUS_FILTERS.map((s) => [s, statusName(s)] as [string, string])]}
           />
         </div>
-        <SearchInput value={q} onChange={setQ} placeholder="Tìm run, branch, workflow…" width="min(300px, 100%)" />
+        <SearchInput value={q} onChange={setQ} placeholder={t("runs.search")} width="min(300px, 100%)" />
       </div>
 
       {loading && !data ? <SkeletonRows rows={6} /> : error ? <ErrorBox error={error} onRetry={reload} /> : (
-        q && !shown.length && data?.length ? <EmptyState icon={PlayCircle} title="Không tìm thấy run phù hợp">Thử từ khoá khác hoặc bỏ bộ lọc.</EmptyState> : <RunsTable runs={shown} />
+        q && !shown.length && data?.length ? <EmptyState icon={PlayCircle} title={t("runs.noMatch")}>{t("runs.noMatchBody")}</EmptyState> : <RunsTable runs={shown} />
       )}
-      <div className="muted small runs-foot">Hoặc chạy từ một <a href="#/work-items">Work Item</a> để gắn run với task.</div>
+      <div className="muted small runs-foot">{t("runs.orPrefix")} <a href="#/work-items">{t("nav.workItems")}</a> {t("runs.orSuffix")}</div>
     </div>
   );
 }

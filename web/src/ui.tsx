@@ -84,6 +84,7 @@ export function Json({ value, depth = 0, name }: { value: unknown; depth?: numbe
 
 /** JSON block with tree/raw toggle and copy. */
 export function JsonBlock({ value, title }: { value: unknown; title?: string }) {
+  const { t } = useI18n();
   const [raw, setRaw] = useState(false);
   const text = JSON.stringify(value, null, 2) ?? "null";
   return (
@@ -91,7 +92,7 @@ export function JsonBlock({ value, title }: { value: unknown; title?: string }) 
       <div className="row tight">
         {title && <b className="small">{title}</b>}
         <span className="grow" />
-        <button className="ghost xs" onClick={() => setRaw(!raw)}>{raw ? "Tree" : "Raw"}</button>
+        <button className="ghost xs" onClick={() => setRaw(!raw)}>{raw ? t("common.tree") : t("common.raw")}</button>
         <Copy text={text} />
       </div>
       {raw ? <pre>{text}</pre> : <div className="jtree"><Json value={value} /></div>}

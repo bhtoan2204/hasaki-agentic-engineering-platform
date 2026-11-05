@@ -4,6 +4,7 @@ import { BRAND } from "../brand/brand.ts";
 import { BeautyBar, BeautyShelf, Chair, CoffeeCorner, Desk, HelpDesk, Keyboard, Lamp, LogoSign, Monitor, Mug, PackTable, PaperStack, PendantLamp, Plant, Room, Scanner, ShippingBox, screenMode, Whiteboard } from "./Furniture.tsx";
 import { AgentSpeechBubble } from "./AgentSpeechBubble.tsx";
 import { ROLE_INFO } from "./workflowToAgentMapper.ts";
+import { useI18n } from "../i18n/index.tsx";
 import type { AgentView, Role } from "./types.ts";
 
 export const STAGE_W = 320;
@@ -54,6 +55,7 @@ function useWalking(pos: Record<Role, { x: number; y: number }>, still: boolean)
 export function OfficeScene({
   agents, now, still, selected, onSelect, showBubbles = true,
 }: { agents: AgentView[]; now: number; still: boolean; selected: Role | null; onSelect: (r: Role) => void; showBubbles?: boolean }) {
+  const { t: tr } = useI18n();
   const t = targets(agents);
   const key = JSON.stringify(t);
   const stablePos = useStable(t, key);
@@ -99,7 +101,7 @@ export function OfficeScene({
 
   return (
     <div className="office-stage">
-      <svg viewBox={`0 0 ${STAGE_W} ${STAGE_H}`} className="office-svg" shapeRendering="crispEdges" role="group" aria-label="Văn phòng AI Agent">
+      <svg viewBox={`0 0 ${STAGE_W} ${STAGE_H}`} className="office-svg" shapeRendering="crispEdges" role="group" aria-label={tr("office.aria")}>
         <defs>
           <pattern id="o-planks" width="32" height="8" patternUnits="userSpaceOnUse">
             <rect width="32" height="8" fill="var(--o-floor)" />
@@ -175,8 +177,8 @@ export function OfficeScene({
 
       {hover && by[hover] && (
         <div className="office-hovercard" style={{ left: `${((t[hover].x + 15) / STAGE_W) * 100}%`, top: `${((t[hover].y + 41) / STAGE_H) * 100}%` }} role="tooltip">
-          <b>{ROLE_INFO[hover].name}</b> <span className="muted">· {ROLE_INFO[hover].title}</span>
-          <div>{by[hover].step ? <>Bước: <b>{by[hover].step!.name}</b> <span className="mono small">({by[hover].status})</span></> : <span className="muted">{ROLE_INFO[hover].does}</span>}</div>
+          <b>{ROLE_INFO[hover].name}</b> <span className="muted">· {tr(`office.role.${hover}.title`)}</span>
+          <div>{by[hover].step ? <>{tr("office.stepLabel")}: <b>{by[hover].step!.name}</b> <span className="mono small">({by[hover].status})</span></> : <span className="muted">{tr(`office.role.${hover}.does`)}</span>}</div>
           <div className="small">{by[hover].bubble}</div>
         </div>
       )}

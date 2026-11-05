@@ -12,12 +12,21 @@ import type { UiLocale } from "../i18n/messages.ts";
 import "./WorkItems.css";
 
 /** Production error groups this work item fixes, with their latest counts (did the fix make them stop?). */
+const WI_STATUS_KEY: Record<string, string> = { open: "wi.open", in_progress: "wi.doing", done: "wi.done", archived: "wi.archived" };
+const wiBadge = (s: string) => (s === "in_progress" ? "RUNNING" : s === "done" ? "COMPLETED" : "PENDING");
+function WiStatus({ s }: { s: string }) {
+  const { t } = useI18n();
+  return <Badge s={wiBadge(s)}>{t(WI_STATUS_KEY[s] ?? s)}</Badge>;
+}
+const sourceLabel = (t: (k: string) => string, s: string) => t(`wi.src.${s}`) === `wi.src.${s}` ? s : t(`wi.src.${s}`);
+
 function ProdErrorRefs({ rows }: { rows: any[] }) {
+  const { t } = useI18n();
   if (!rows?.length) return null;
   const hm = (t: string | null) => (t ? new Date(t).toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", hour12: false }) : "–");
   return (
     <section className="card wi-prod">
-      <div className="card-head"><span className="wi-hicon"><Siren size={16} strokeWidth={2} /></span><h4>Lỗi production liên quan</h4><span className="muted small">từ trang Lỗi production</span></div>
+      <div className="card-head"><span className="wi-hicon"><Siren size={16} strokeWidth={2} /></span><h4>{t("wi.prodTitle")}</h4><span className="muted small">{t("wi.prodFrom")}</span></div>
       {rows.map((g) => {
         const current = g.day === g.latest_day;
         return (
@@ -27,8 +36,8 @@ function ProdErrorRefs({ rows }: { rows: any[] }) {
               <b>{g.service}</b> <span className="mono small">{g.signature}</span>
               <span className="muted small">
                 {current
-                  ? <>Lần quét mới nhất ({g.day}): <b>{g.today_count}</b> lần, gần nhất {hm(g.last_at)}{g.yesterday_count ? ` · hôm qua ${g.yesterday_count}` : ""}</>
-                  : <>Không còn thấy ở lần quét mới nhất ({g.latest_day}) — lần cuối {hm(g.last_at)}</>}
+                  ? <>{t("wi.prodCurrent", { day: g.day, count: g.today_count, when: hm(g.last_at) })}{g.yesterday_count ? ` · ${t("wi.prodYesterday", { count: g.yesterday_count })}` : ""}</>
+                  : <>{t("wi.prodGone", { day: g.latest_day, when: hm(g.last_at) })}</>}
               </span>
             </span>
           </a>
@@ -38,19 +47,8 @@ function ProdErrorRefs({ rows }: { rows: any[] }) {
   );
 }
 
-const WI_STATUS: Record<string, { label: string }> = {
-  open: { label: "Mở" },
-  in_progress: { label: "Đang làm" },
-  done: { label: "Xong" },
-  archived: { label: "Lưu trữ" },
-};
-const wiBadge = (s: string) => (s === "in_progress" ? "RUNNING" : s === "done" ? "COMPLETED" : "PENDING");
-function WiStatus({ s }: { s: string }) {
-  return <Badge s={wiBadge(s)}>{WI_STATUS[s]?.label ?? s}</Badge>;
-}
-const SOURCE_LABELS: Record<string, string> = { manual: "Manual", hasaki_work: "Hasaki Work", jira: "Jira", legacy: "Legacy" };
-
 function HasakiPanel({ onImported }: { onImported: () => void }) {
+  const { t } = useI18n();
   const { data: st, reload: reloadSt } = useApi<any>("/api/work/status");
   const { data: inbox, reload: reloadInbox } = useApi<any[]>("/api/work/inbox");
   const [token, setToken] = useState("");
@@ -63,7 +61,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
     if (r) reloadInbox();
   };
   const pick = async (workId: number | string) => {
-    const r = await act(() => api<any>(`/api/work/pick/${workId}`, {}), "Đã import — chưa chạy gì, chọn workflow để chạy");
+    const r = await act(() => api<any>(`/api/work/pick/${workId}`, {}), t("wi.importedRun"));
     if (r) (reloadInbox(), onImported(), navigate(`/work-items/${r.work_item_id}`));
   };
   return (
@@ -71,32 +69,32 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
       <div className="card-head">
         <span className="wi-hicon"><Sparkles size={16} strokeWidth={2} /></span>
         <h4>Hasaki Work</h4>
-        {st && (st.loggedIn ? <Badge s="COMPLETED">đã đăng nhập</Badge> : <Badge s="FAILED">chưa đăng nhập</Badge>)}
+        {st && (st.loggedIn ? <Badge s="COMPLETED">{t("wi.loggedIn")}</Badge> : <Badge s="FAILED">{t("wi.loggedOut")}</Badge>)}
       </div>
-      {st?.expiresAt && <div className="muted small wi-hexp"><Clock size={12} strokeWidth={2} /> hết hạn {time(st.expiresAt)}</div>}
+      {st?.expiresAt && <div className="muted small wi-hexp"><Clock size={12} strokeWidth={2} /> {t("wi.expires", { time: time(st.expiresAt) })}</div>}
       {st && !st.loggedIn && (
         <div className="stack wi-hlogin">
-          {st.windowOpen ? <span className="muted small"><span className="spinner" /> Đăng nhập trong cửa sổ Chromium…</span> : (
-            <button className="sm" onClick={async () => (await act(() => api("/api/work/login-window", {}))) && reloadSt()}><LogIn size={14} strokeWidth={2} />Mở trình duyệt đăng nhập</button>
+          {st.windowOpen ? <span className="muted small"><span className="spinner" /> {t("wi.loginWindow")}</span> : (
+            <button className="sm" onClick={async () => (await act(() => api("/api/work/login-window", {}))) && reloadSt()}><LogIn size={14} strokeWidth={2} />{t("wi.openLogin")}</button>
           )}
           <div className="wi-inline">
-            <input aria-label="Token" placeholder="hoặc dán token (Bearer eyJ…)" value={token} onChange={(e) => setToken(e.target.value)} />
-            <button className="sm ghost" onClick={async () => (await act(() => api("/api/work/token", { token }), "Đã lưu token")) && (setToken(""), reloadSt())}><KeyRound size={14} strokeWidth={2} />Lưu</button>
+            <input aria-label="Token" placeholder={t("wi.tokenPh")} value={token} onChange={(e) => setToken(e.target.value)} />
+            <button className="sm ghost" onClick={async () => (await act(() => api("/api/work/token", { token }), t("wi.tokenSaved"))) && (setToken(""), reloadSt())}><KeyRound size={14} strokeWidth={2} />{t("wi.save")}</button>
           </div>
         </div>
       )}
       {st?.loggedIn && (
         <div className="stack wi-hlogin">
-          <button className="sm" disabled={busy} onClick={refresh}><RefreshCw size={14} strokeWidth={2} className={busy ? "wi-spin" : undefined} />{busy ? "Đang lấy…" : "Lấy task"}</button>
+          <button className="sm" disabled={busy} onClick={refresh}><RefreshCw size={14} strokeWidth={2} className={busy ? "wi-spin" : undefined} />{busy ? t("wi.fetching") : t("wi.fetchTasks")}</button>
           <div className="wi-inline">
-            <input aria-label="Task id" placeholder="Task id (vd 14408473)" value={taskId} onChange={(e) => setTaskId(e.target.value)} />
-            <button className="sm ghost" disabled={!taskId} onClick={() => pick(taskId)}><Download size={14} strokeWidth={2} />Import</button>
+            <input aria-label="Task id" placeholder={t("wi.taskId")} value={taskId} onChange={(e) => setTaskId(e.target.value)} />
+            <button className="sm ghost" disabled={!taskId} onClick={() => pick(taskId)}><Download size={14} strokeWidth={2} />{t("kn.import")}</button>
           </div>
         </div>
       )}
       {!!inbox?.length && (
         <>
-          <div className="wi-hsub">Hộp task <span className="muted">· {inbox.length}</span></div>
+          <div className="wi-hsub">{t("wi.inbox")} <span className="muted">· {inbox.length}</span></div>
           <div className="wi-hinbox">
             {inbox.map((r) => (
               <div key={r.work_id} className="wi-hitem">
@@ -105,9 +103,9 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
                   <div className="wi-hitem-name">{r.name}</div>
                 </div>
                 {r.work_item_id ? (
-                  <a className="wi-hitem-link" href={`#/work-items/${r.work_item_id}`}>{r.run_status ? <Badge s={r.run_status} label /> : <span className="pill chip-brand">imported</span>}</a>
+                  <a className="wi-hitem-link" href={`#/work-items/${r.work_item_id}`}>{r.run_status ? <Badge s={r.run_status} label /> : <span className="pill chip-brand">{t("wi.imported")}</span>}</a>
                 ) : (
-                  <button className="xs ghost" onClick={() => pick(r.work_id)}>Import</button>
+                  <button className="xs ghost" onClick={() => pick(r.work_id)}>{t("kn.import")}</button>
                 )}
               </div>
             ))}
@@ -119,6 +117,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
 }
 
 export function WorkItemsPage() {
+  const { t } = useI18n();
   const [source, setSource] = useState("");
   const { data, error, loading, reload } = useApi<any[]>(`/api/work-items${source ? `?source=${source}` : ""}`, [source]);
   const { data: meta } = useApi<any>("/api/meta");
@@ -134,9 +133,9 @@ export function WorkItemsPage() {
     try {
       payload = JSON.parse(paste);
     } catch {
-      return act(async () => { throw new Error("JSON không hợp lệ"); });
+      return act(async () => { throw new Error(t("wi.badJson")); });
     }
-    const r = await act(() => api<any>("/api/work-items/import", { source: src, payload }), "Đã import — chưa chạy gì");
+    const r = await act(() => api<any>("/api/work-items/import", { source: src, payload }), t("wi.importedOnly"));
     if (r) (setPaste(""), navigate(`/work-items/${r.item?.id ?? r.work_item_id}`));
   };
 
@@ -154,14 +153,14 @@ export function WorkItemsPage() {
     <div className="wi-page">
       <PageHeader
         icon={ListTodo}
-        title="Work Items"
-        subtitle="Yêu cầu kỹ thuật. Import không bao giờ tự chạy — bạn chọn workflow để chạy."
-        crumbs={[["Overview", "#/overview"], ["Work Items"]]}
+        title={t("wi.title")}
+        subtitle={t("wi.subtitle")}
+        crumbs={[[t("nav.overview"), "#/overview"], [t("wi.title")]]}
         actions={
           <>
-            <button className="ghost icon" aria-label="Làm mới danh sách" title="Làm mới" onClick={reload}><RefreshCw size={16} strokeWidth={2} /></button>
-            <button className="ghost" onClick={() => setPanel("import")}><FileJson size={15} strokeWidth={2} />Import JSON / Jira</button>
-            <button onClick={() => setPanel("create")}><Plus size={16} strokeWidth={2.2} />Yêu cầu mới</button>
+            <button className="ghost icon" aria-label={t("wi.refreshList")} title={t("wi.refresh")} onClick={reload}><RefreshCw size={16} strokeWidth={2} /></button>
+            <button className="ghost" onClick={() => setPanel("import")}><FileJson size={15} strokeWidth={2} />{t("wi.importBtn")}</button>
+            <button onClick={() => setPanel("create")}><Plus size={16} strokeWidth={2.2} />{t("wi.new")}</button>
           </>
         }
       />
@@ -169,18 +168,18 @@ export function WorkItemsPage() {
       <div className="wi-layout">
         <div className="wi-main">
           <div className="wi-toolbar">
-            <SearchInput value={q} onChange={setQ} placeholder="Tìm code, tiêu đề, project…" width="min(320px, 100%)" />
+            <SearchInput value={q} onChange={setQ} placeholder={t("wi.search")} width="min(320px, 100%)" />
             <div className="wi-scroll">
               <Segmented<string>
-                label="Nguồn"
+                label={t("wi.source")}
                 value={source}
                 onChange={setSource}
-                options={[["", "Mọi nguồn"], ...["manual", "hasaki_work", "jira", "legacy"].map((s) => [s, SOURCE_LABELS[s]] as [string, string])]}
+                options={[["", t("wi.allSources")], ...["manual", "hasaki_work", "jira", "legacy"].map((s) => [s, sourceLabel(t, s)] as [string, string])]}
               />
             </div>
           </div>
-          <div className="wi-statusbar" role="group" aria-label="Lọc theo trạng thái">
-            {([["", "Tất cả", data?.length ?? 0], ...Object.entries(WI_STATUS).map(([k, v]) => [k, v.label, counts[k] ?? 0])] as Array<[string, string, number]>).map(([k, label, n]) => (
+          <div className="wi-statusbar" role="group" aria-label={t("wi.filterStatus")}>
+            {([["", t("wi.all"), data?.length ?? 0], ...Object.keys(WI_STATUS_KEY).map((k) => [k, t(WI_STATUS_KEY[k]), counts[k] ?? 0])] as Array<[string, string, number]>).map(([k, label, n]) => (
               <button key={k || "all"} type="button" className={`wi-sf${statusF === k ? " on" : ""}`} aria-pressed={statusF === k} onClick={() => setStatusF(k)}>
                 {k && <i className={`wi-dot wi-dot-${k}`} />}{label}<span className="wi-sf-n">{n}</span>
               </button>
@@ -188,11 +187,11 @@ export function WorkItemsPage() {
           </div>
 
           {loading && !data ? <SkeletonRows rows={6} /> : error ? <ErrorBox error={error} onRetry={reload} /> : !data?.length ? (
-            <EmptyState icon={ListTodo} title="Chưa có work item" action={<button onClick={() => setPanel("create")}><Plus size={16} strokeWidth={2.2} />Tạo yêu cầu đầu tiên</button>}>
-              Tạo yêu cầu thủ công, import JSON/Jira hoặc lấy task từ Hasaki Work.
+            <EmptyState icon={ListTodo} title={t("wi.empty")} action={<button onClick={() => setPanel("create")}><Plus size={16} strokeWidth={2.2} />{t("wi.first")}</button>}>
+              {t("wi.emptyBody")}
             </EmptyState>
           ) : !shown.length ? (
-            <EmptyState icon={ScanSearch} title="Không có work item phù hợp">Thử từ khoá khác hoặc bỏ bộ lọc.</EmptyState>
+            <EmptyState icon={ScanSearch} title={t("wi.noMatch")}>{t("wi.noMatchBody")}</EmptyState>
           ) : (
             <div className="wi-list">
               {shown.map((w) => (
@@ -201,7 +200,7 @@ export function WorkItemsPage() {
                   <div className="wi-row-main">
                     <div className="wi-row-meta">
                       <span className="mono wi-code">{w.code}</span>
-                      <span className="wi-src">{SOURCE_LABELS[w.source] ?? w.source}</span>
+                      <span className="wi-src">{sourceLabel(t, w.source)}</span>
                       {w.project && <span className="wi-proj"><FolderGit2 size={12} strokeWidth={2} />{w.project}</span>}
                     </div>
                     <div className="wi-row-title">{w.title}</div>
@@ -209,10 +208,10 @@ export function WorkItemsPage() {
                   <div className="wi-row-side">
                     <WiStatus s={w.status} />
                     <div className="wi-row-runs">
-                      <span className="muted small"><Workflow size={12} strokeWidth={2} /> {w.run_count} run</span>
+                      <span className="muted small"><Workflow size={12} strokeWidth={2} /> {t("wi.runs", { n: w.run_count })}</span>
                       {w.last_run_status && <Badge s={w.last_run_status} label />}
                     </div>
-                    <span className="muted small wi-row-time"><Clock size={12} strokeWidth={2} />{ago(w.updated_at)} trước</span>
+                    <span className="muted small wi-row-time"><Clock size={12} strokeWidth={2} />{t("wi.ago", { ago: ago(w.updated_at) })}</span>
                   </div>
                   <ChevronRight size={18} strokeWidth={1.9} className="wi-chev" aria-hidden />
                 </a>
@@ -225,39 +224,39 @@ export function WorkItemsPage() {
           <HasakiPanel onImported={reload} />
           <div className="wi-note">
             <Zap size={15} strokeWidth={2} />
-            <span>Import chỉ tạo work item. Mở work item để xem mô tả và chọn workflow chạy.</span>
+            <span>{t("wi.note")}</span>
           </div>
         </aside>
       </div>
 
       {panel === "create" && (
-        <Drawer title="Yêu cầu mới (manual)" onClose={() => setPanel("")}>
-          <Field label="Tiêu đề"><input autoFocus placeholder="Tiêu đề" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-          <Field label="Project"><input placeholder="Project (vd OMS)" value={form.project} onChange={(e) => setForm({ ...form, project: e.target.value })} /></Field>
-          <Field label="Mô tả"><textarea rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+        <Drawer title={t("wi.createTitle")} onClose={() => setPanel("")}>
+          <Field label={t("wi.fieldTitle")}><input autoFocus placeholder={t("wi.titlePh")} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+          <Field label="Project"><input placeholder={t("wi.projectPh")} value={form.project} onChange={(e) => setForm({ ...form, project: e.target.value })} /></Field>
+          <Field label={t("wi.description")}><textarea rows={8} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
           <div className="row">
-            <button disabled={!form.title.trim()} onClick={async () => { const w = await act(() => api<any>("/api/work-items", form)); if (w) navigate(`/work-items/${w.id}`); }}><Plus size={15} strokeWidth={2.2} />Tạo</button>
-            <button className="ghost" onClick={() => setPanel("")}>Huỷ</button>
+            <button disabled={!form.title.trim()} onClick={async () => { const w = await act(() => api<any>("/api/work-items", form)); if (w) navigate(`/work-items/${w.id}`); }}><Plus size={15} strokeWidth={2.2} />{t("wi.create")}</button>
+            <button className="ghost" onClick={() => setPanel("")}>{t("common.cancel")}</button>
           </div>
         </Drawer>
       )}
       {panel === "import" && (
-        <Drawer title="Import JSON / Jira" onClose={() => setPanel("")}>
-          <Field label="JSON"><textarea className="code" rows={10} placeholder="Dán JSON task Hasaki hoặc Jira issue" value={paste} onChange={(e) => setPaste(e.target.value)} /></Field>
+        <Drawer title={t("wi.importBtn")} onClose={() => setPanel("")}>
+          <Field label="JSON"><textarea className="code" rows={10} placeholder={t("wi.jsonPh")} value={paste} onChange={(e) => setPaste(e.target.value)} /></Field>
           <div className="row">
-            <button className="ghost" disabled={!paste} onClick={() => importJson("hasaki_work")}><Download size={14} strokeWidth={2} />Import Hasaki</button>
-            <button className="ghost" disabled={!paste} onClick={() => importJson("jira")}><Download size={14} strokeWidth={2} />Import Jira</button>
+            <button className="ghost" disabled={!paste} onClick={() => importJson("hasaki_work")}><Download size={14} strokeWidth={2} />{t("wi.importHasaki")}</button>
+            <button className="ghost" disabled={!paste} onClick={() => importJson("jira")}><Download size={14} strokeWidth={2} />{t("wi.importJira")}</button>
           </div>
           <div className="divider" />
           {meta?.jiraEnabled ? (
-            <Field label="Lấy từ Jira API">
+            <Field label={t("wi.fromJira")}>
               <div className="wi-inline">
                 <input placeholder="JIRA-123" value={jiraKey} onChange={(e) => setJiraKey(e.target.value)} />
-                <button className="ghost" onClick={async () => { const r = await act(() => api<any>("/api/work-items/import", { source: "jira", key: jiraKey })); if (r) navigate(`/work-items/${r.item.id}`); }}>Fetch</button>
+                <button className="ghost" onClick={async () => { const r = await act(() => api<any>("/api/work-items/import", { source: "jira", key: jiraKey })); if (r) navigate(`/work-items/${r.item.id}`); }}>{t("wi.fetch")}</button>
               </div>
             </Field>
           ) : (
-            <div className="muted small">Jira API chưa cấu hình — dán JSON.</div>
+            <div className="muted small">{t("wi.jiraOff")}</div>
           )}
         </Drawer>
       )}
@@ -267,12 +266,13 @@ export function WorkItemsPage() {
 
 /** View / edit the request description (tasks often arrive with an empty note). Edits are kept across re-imports. */
 function DescriptionEditor({ id, description, source, onSaved }: { id: number; description: string; source?: string; onSaved: () => void }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(description ?? "");
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
-    const r = await act(() => api(`/api/work-items/${id}`, { description: text }), "Đã lưu mô tả");
+    const r = await act(() => api(`/api/work-items/${id}`, { description: text }), t("wi.savedDesc"));
     setBusy(false);
     if (r) (setEditing(false), onSaved());
   };
@@ -280,21 +280,21 @@ function DescriptionEditor({ id, description, source, onSaved }: { id: number; d
     <div>
       <div className="card-head">
         <span className="wi-hicon"><FileText size={16} strokeWidth={2} /></span>
-        <h4>Yêu cầu</h4>
-        {source === "manual" && !editing && <span className="pill" title="Đã sửa tay — import lại từ Hasaki Work/Jira sẽ không ghi đè"><PenLine size={12} strokeWidth={2} /> đã sửa tay</span>}
+        <h4>{t("wi.request")}</h4>
+        {source === "manual" && !editing && <span className="pill" title={t("wi.editedTip")}><PenLine size={12} strokeWidth={2} /> {t("wi.edited")}</span>}
         {!editing && (
           <button className="sm ghost" onClick={() => (setText(description ?? ""), setEditing(true))}>
-            {description ? <><Pencil size={13} strokeWidth={2} />Sửa</> : <><Plus size={14} strokeWidth={2.2} />Thêm mô tả</>}
+            {description ? <><Pencil size={13} strokeWidth={2} />{t("wi.edit")}</> : <><Plus size={14} strokeWidth={2.2} />{t("wi.addDesc")}</>}
           </button>
         )}
       </div>
       {editing ? (
         <div>
-          <textarea rows={10} autoFocus placeholder="Mô tả yêu cầu: hiện tượng, kết quả mong đợi, đối tượng (mã đơn...), repo/màn hình liên quan… (Markdown)" value={text} onChange={(e) => setText(e.target.value)} />
+          <textarea rows={10} autoFocus placeholder={t("wi.descPh")} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="row">
-            <button className="sm" disabled={busy} onClick={save}>{busy ? "Đang lưu…" : "Lưu"}</button>
-            <button className="sm ghost" onClick={() => setEditing(false)}>Huỷ</button>
-            <span className="muted small">Agent sẽ dùng mô tả này ở các lần chạy sau.</span>
+            <button className="sm" disabled={busy} onClick={save}>{busy ? t("wi.saving") : t("wi.save")}</button>
+            <button className="sm ghost" onClick={() => setEditing(false)}>{t("common.cancel")}</button>
+            <span className="muted small">{t("wi.agentUses")}</span>
           </div>
         </div>
       ) : description ? (
@@ -302,7 +302,7 @@ function DescriptionEditor({ id, description, source, onSaved }: { id: number; d
       ) : (
         <div className="wi-desc-empty">
           <CircleHelp size={18} strokeWidth={1.9} />
-          <span>Không có mô tả — bấm “Thêm mô tả” để bổ sung trước khi chạy workflow.</span>
+          <span>{t("wi.noDesc")}</span>
         </div>
       )}
     </div>
@@ -331,13 +331,13 @@ export function WorkItemDetail({ id }: { id: number }) {
       <PageHeader
         icon={ListTodo}
         title={w.title}
-        crumbs={[["Work Items", "#/work-items"], [w.code || `#${id}`]]}
+        crumbs={[[t("wi.title"), "#/work-items"], [w.code || `#${id}`]]}
       >
         <div className="wi-hmeta">
           <span className="mono wi-code">{w.code}</span>
           <WiStatus s={w.status} />
-          <span className="wi-src">{SOURCE_LABELS[w.source] ?? w.source}</span>
-          <span className="wi-proj"><FolderGit2 size={12} strokeWidth={2} />{w.project || "không có project"}</span>
+          <span className="wi-src">{sourceLabel(t, w.source)}</span>
+          <span className="wi-proj"><FolderGit2 size={12} strokeWidth={2} />{w.project || t("wi.noProject")}</span>
         </div>
       </PageHeader>
 
@@ -345,13 +345,13 @@ export function WorkItemDetail({ id }: { id: number }) {
         <div className="wi-detail-main">
           <section className="card">
             <DescriptionEditor id={id} description={w.description} source={w.description_source} onSaved={reload} />
-            {w.payload && Object.keys(w.payload).length > 0 && <details className="wi-raw"><summary>raw payload</summary><JsonBlock value={w.payload} /></details>}
+            {w.payload && Object.keys(w.payload).length > 0 && <details className="wi-raw"><summary>{t("wi.raw")}</summary><JsonBlock value={w.payload} /></details>}
           </section>
 
           <ProdErrorRefs rows={w.prod_errors} />
 
           <section className="wi-section">
-            <div className="wi-section-head"><History size={16} strokeWidth={2} /><h4>Lịch sử thực thi</h4><span className="muted small">{w.runs.length} run</span></div>
+            <div className="wi-section-head"><History size={16} strokeWidth={2} /><h4>{t("wi.history")}</h4><span className="muted small">{t("wi.runs", { n: w.runs.length })}</span></div>
             <RunsTable runs={w.runs} />
           </section>
 
@@ -371,8 +371,8 @@ export function WorkItemDetail({ id }: { id: number }) {
 
           {w.legacy && (w.legacy.questions.length > 0 || w.legacy.events.length > 0) && (
             <details className="card flat wi-legacy">
-              <summary>Lịch sử cũ (trước workflow) — {w.legacy.questions.length} câu hỏi, {w.legacy.events.length} sự kiện</summary>
-              {w.legacy.questions.map((q: any) => <div key={q.id} className="q"><b>{q.question}</b><div className="muted">→ {q.answer ?? "(chưa trả lời)"}</div></div>)}
+              <summary>{t("wi.legacy", { questions: w.legacy.questions.length, events: w.legacy.events.length })}</summary>
+              {w.legacy.questions.map((q: any) => <div key={q.id} className="q"><b>{q.question}</b><div className="muted">→ {q.answer ?? t("wi.unanswered")}</div></div>)}
               {w.legacy.events.map((e: any) => <div key={e.id} className="small"><span className="muted">{time(e.created_at)}</span> <b>{e.kind}</b> {e.content}</div>)}
             </details>
           )}
@@ -409,17 +409,17 @@ export function WorkItemDetail({ id }: { id: number }) {
           </section>
 
           <section className="card">
-            <div className="card-head"><span className="wi-hicon"><Settings2 size={16} strokeWidth={2} /></span><h4>Thiết lập</h4></div>
-            <Field label="Automation policy" hint="Chỉ dùng khi poller tự import task: tự chạy workflow này. Mặc định không có — không gì tự chạy.">
+            <div className="card-head"><span className="wi-hicon"><Settings2 size={16} strokeWidth={2} /></span><h4>{t("wi.settings")}</h4></div>
+            <Field label={t("wi.policy")} hint={t("wi.policyHint")}>
               <div className="wi-policy">
-                <span className="grow small">{w.automation_policy ? <>Tự chạy <b>{w.automation_policy.workflow}</b></> : "Không có"}</span>
-                <button className="xs ghost" onClick={async () => (await act(() => api(`/api/work-items/${id}`, { automation_policy: { workflow: wf } }), "Saved")) && reload()}>Dùng workflow đang chọn</button>
-                {w.automation_policy && <button className="xs ghost" onClick={async () => (await act(() => api(`/api/work-items/${id}`, { automation_policy: null }))) && reload()}>Xoá</button>}
+                <span className="grow small">{w.automation_policy ? t("wi.autoRun", { workflow: w.automation_policy.workflow }) : t("wi.none")}</span>
+                <button className="xs ghost" onClick={async () => (await act(() => api(`/api/work-items/${id}`, { automation_policy: { workflow: wf } }), t("wi.saved"))) && reload()}>{t("wi.useSelected")}</button>
+                {w.automation_policy && <button className="xs ghost" onClick={async () => (await act(() => api(`/api/work-items/${id}`, { automation_policy: null }))) && reload()}>{t("wi.remove")}</button>}
               </div>
             </Field>
-            <Field label="Trạng thái">
+            <Field label={t("wi.status")}>
               <select value={w.status} onChange={async (e) => (await act(() => api(`/api/work-items/${id}`, { status: e.target.value }))) && reload()}>
-                {["open", "in_progress", "done", "archived"].map((s) => <option key={s} value={s}>{WI_STATUS[s].label} ({s})</option>)}
+                {["open", "in_progress", "done", "archived"].map((s) => <option key={s} value={s}>{t(WI_STATUS_KEY[s])} ({s})</option>)}
               </select>
             </Field>
           </section>

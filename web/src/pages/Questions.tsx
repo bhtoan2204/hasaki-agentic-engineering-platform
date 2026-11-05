@@ -2,10 +2,12 @@ import { useState } from "react";
 import { ArrowUpRight, CircleCheck, CircleHelp, History, Inbox, Layers, MessageCircleQuestion, Send, Star } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
 import { act, Badge, Copy, EmptyState, ErrorBox, Loading, navigate, PageHeader, StatCard, time } from "../ui.tsx";
+import { useI18n } from "../i18n/index.tsx";
 import "./Questions.css";
 
 /** One blocked step: its open questions, option picks / free-text answers, and a single submit that resumes the step. */
 function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
+  const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const head = qs[0];
@@ -31,9 +33,9 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
             <Badge s={head.run_status} label />
           </div>
           <div className="qx-title">{head.run_title}</div>
-          <div className="qx-step"><Layers size={13} strokeWidth={2} /> Bước <b>{head.step_name}</b> <span className="mono muted">{head.step_key}</span></div>
+          <div className="qx-step"><Layers size={13} strokeWidth={2} /> {t("qx.step")} <b>{head.step_name}</b> <span className="mono muted">{head.step_key}</span></div>
         </div>
-        <button className="ghost sm" onClick={() => navigate(`/runs/${head.run_id}/${head.step_key}`)}>Mở trong workflow <ArrowUpRight size={14} strokeWidth={2} /></button>
+        <button className="ghost sm" onClick={() => navigate(`/runs/${head.run_id}/${head.step_key}`)}>{t("qx.openInWf")} <ArrowUpRight size={14} strokeWidth={2} /></button>
       </header>
 
       <div className="qx-body">
@@ -46,16 +48,16 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
             </div>
             {q.context && <div className="qx-q-context">{q.context}</div>}
             {!!q.options?.length && (
-              <div className="qx-options" role="group" aria-label="Lựa chọn">
+              <div className="qx-options" role="group" aria-label={t("qx.choices")}>
                 {q.options.map((o: string, i: number) => (
                   <button key={o} type="button" className={`qx-opt${answers[q.id] === o ? " on" : ""}`} aria-pressed={answers[q.id] === o} onClick={() => setAnswers({ ...answers, [q.id]: o })}>
-                    {i === 0 && <Star size={13} strokeWidth={2} aria-label="Đề xuất" />}
+                    {i === 0 && <Star size={13} strokeWidth={2} aria-label={t("qx.suggested")} />}
                     {o}
                   </button>
                 ))}
               </div>
             )}
-            <textarea rows={2} aria-label={`Trả lời câu ${n + 1}`} placeholder={q.suggested_answer ? `Gợi ý: ${q.suggested_answer}` : "Câu trả lời…"} value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })} />
+            <textarea rows={2} aria-label={t("qx.answerN", { n: n + 1 })} placeholder={q.suggested_answer ? t("qx.hintPh", { text: q.suggested_answer }) : t("qx.answerPh")} value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })} />
           </div>
         ))}
       </div>
@@ -63,10 +65,10 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
       <footer className="qx-foot">
         <div className="qx-consequence">
           <CircleHelp size={15} strokeWidth={2} />
-          <span>Gửi xong, câu trả lời được lưu vào PostgreSQL và bước <b>{head.step_name}</b> tiếp tục từ checkpoint khi mọi câu đã được trả lời.</span>
+          <span>{t("qx.consequence", { step: head.step_name })}</span>
         </div>
-        <span className="muted small">{answered}/{qs.length} đã trả lời</span>
-        <button disabled={busy || !ready} onClick={submit}><Send size={15} strokeWidth={2} />{busy ? "Đang gửi…" : "Gửi trả lời & tiếp tục bước"}</button>
+        <span className="muted small">{t("qx.answered", { done: answered, total: qs.length })}</span>
+        <button disabled={busy || !ready} onClick={submit}><Send size={15} strokeWidth={2} />{busy ? t("qx.sending") : t("qx.send")}</button>
       </footer>
     </section>
   );
@@ -74,6 +76,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
 
 /** Every open question across runs, grouped by blocked step; answer inline or jump to the step in its run graph. */
 export function QuestionsPage() {
+  const { t } = useI18n();
   const { data: open, error, loading, reload } = useApi<any[]>("/api/questions");
   const { data: history, reload: reloadHistory } = useApi<any[]>("/api/questions/history");
   useLive(null, () => (reload(), reloadHistory()));
@@ -87,20 +90,20 @@ export function QuestionsPage() {
     <div className="qx-page">
       <PageHeader
         icon={Inbox}
-        title="Questions & Approvals"
-        subtitle="Câu hỏi các bước đang chờ bạn. Trả lời xong, bước tự tiếp tục từ checkpoint. Phê duyệt (approval) thực hiện trong bước của run."
-        crumbs={[["Overview", "#/overview"], ["Questions"]]}
+        title={t("qx.title")}
+        subtitle={t("qx.subtitle")}
+        crumbs={[[t("nav.overview"), "#/overview"], [t("qx.title")]]}
       />
 
       <div className="grid3 qx-stats">
-        <StatCard icon={MessageCircleQuestion} tone="wait" label="Câu hỏi đang chờ" value={open?.length ?? 0} hint={`${runs} run bị chặn`} />
-        <StatCard icon={Layers} tone="run" label="Bước đang chờ" value={entries.length} />
-        <StatCard icon={CircleCheck} tone="ok" label="Đã trả lời" value={history ? history.length : "—"} hint={history && history.length >= 100 ? "100 gần nhất" : undefined} />
+        <StatCard icon={MessageCircleQuestion} tone="wait" label={t("qx.waiting")} value={open?.length ?? 0} hint={t("qx.blockedRuns", { n: runs })} />
+        <StatCard icon={Layers} tone="run" label={t("qx.waitingSteps")} value={entries.length} />
+        <StatCard icon={CircleCheck} tone="ok" label={t("qx.answeredStat")} value={history ? history.length : "—"} hint={history && history.length >= 100 ? t("qx.latest100") : undefined} />
       </div>
 
       {!entries.length ? (
         <div className="qx-empty">
-          <EmptyState icon={CircleCheck} title="Không có câu hỏi nào đang chờ">Mọi bước đều đang chạy trơn tru. Câu hỏi mới từ agent sẽ xuất hiện ở đây.</EmptyState>
+          <EmptyState icon={CircleCheck} title={t("qx.emptyTitle")}>{t("qx.emptyBody")}</EmptyState>
         </div>
       ) : (
         <div className="qx-list">
@@ -108,11 +111,11 @@ export function QuestionsPage() {
         </div>
       )}
 
-      <h3 className="qx-section"><History size={14} strokeWidth={2} /> Lịch sử trả lời</h3>
-      {!history?.length ? <div className="card flat muted small">Chưa có.</div> : (
+      <h3 className="qx-section"><History size={14} strokeWidth={2} /> {t("qx.history")}</h3>
+      {!history?.length ? <div className="card flat muted small">{t("qx.noneYet")}</div> : (
         <div className="table-wrap">
           <table className="qx-history">
-            <thead><tr><th>Run</th><th>Bước</th><th>Câu hỏi</th><th>Trả lời</th><th>Bước hiện tại</th><th>Lúc</th></tr></thead>
+            <thead><tr><th>Run</th><th>{t("qx.step")}</th><th>{t("qx.col.question")}</th><th>{t("qx.col.answer")}</th><th>{t("qx.col.stepNow")}</th><th>{t("qx.col.when")}</th></tr></thead>
             <tbody>
               {history.map((q) => (
                 <tr key={q.id} className="click" tabIndex={0} onClick={() => navigate(`/runs/${q.run_id}/${q.step_key}`)} onKeyDown={(e) => e.key === "Enter" && navigate(`/runs/${q.run_id}/${q.step_key}`)}>

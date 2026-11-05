@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ROLE_INFO } from "./workflowToAgentMapper.ts";
+import { useI18n } from "../i18n/index.tsx";
 import type { AttemptLite, EventLite, GraphStepLite, OfficeSnapshot, QuestionLite, StepLite } from "./types.ts";
 
 /**
@@ -30,27 +31,27 @@ interface Frame {
 const P = "PENDING", RUN = "RUNNING", OK = "COMPLETED";
 const all = (s: string) => Object.fromEntries(GRAPH.map((g) => [g.key, s]));
 const FRAMES: Frame[] = [
-  { caption: "Văn phòng yên tĩnh — mọi người uống cà phê chờ việc", status: all(P) },
-  { caption: "{analyst} đọc yêu cầu (tool Read)", status: { ...all(P), analyze: RUN }, events: { analyze: [{ kind: "tool", name: "Read", input: { file_path: "docs/requirements/payment-refund.md" } }] } },
-  { caption: "{analyst} tìm trong code (tool Grep)", status: { ...all(P), analyze: RUN }, events: { analyze: [{ kind: "tool", name: "Grep", input: { pattern: "RefundShipment" } }] } },
-  { caption: "{analyst} suy nghĩ (thinking)", status: { ...all(P), analyze: RUN }, events: { analyze: [{ kind: "thinking", content: "…" }] } },
-  { caption: "{analyst} cần bạn trả lời — đi tới quầy Hỏi & Duyệt", status: { ...all(P), analyze: "WAITING_INPUT" }, questions: ["analyze", "analyze"] },
-  { caption: "{analyst} dò repository (Repository Discovery)", status: { ...all(P), analyze: OK, discover: RUN } },
-  { caption: "{analyst} xong việc và ăn mừng", status: { ...all(P), analyze: OK, discover: OK } },
-  { caption: "{architect} vẽ kiến trúc trên bảng trắng", status: { ...all(P), analyze: OK, discover: OK, plan: RUN } },
-  { caption: "{architect} tra skill trong Knowledge", status: { ...all(P), analyze: OK, discover: OK, plan: RUN }, events: { plan: [{ kind: "tool", name: "mcp__platform__read_knowledge", input: { key: "oms-money-model" } }] } },
-  { caption: "Kế hoạch chờ bạn duyệt", status: { ...all(P), analyze: OK, discover: OK, plan: OK, approve_plan: "WAITING_APPROVAL" } },
-  { caption: "{developer} sửa code (tool Edit)", status: { ...all(OK), implement: RUN, test: P, review: P, pr: P }, events: { implement: [{ kind: "tool", name: "Edit", input: { file_path: "app/usecases/payment_refund.go" } }] } },
-  { caption: "{developer} chạy lệnh trong terminal", status: { ...all(OK), implement: RUN, test: P, review: P, pr: P }, events: { implement: [{ kind: "tool", name: "Bash", input: { command: "go build ./..." } }] } },
-  { caption: "{developer} tạo commit (git)", status: { ...all(OK), implement: RUN, test: P, review: P, pr: P }, events: { implement: [{ kind: "tool", name: "Bash", input: { command: "git commit -q -F -" } }] } },
-  { caption: "{tester} chạy test", status: { ...all(OK), implement: OK, test: RUN, review: P, pr: P }, events: { test: [{ kind: "output", content: "== go test -short ./app/usecases" }] } },
-  { caption: "Test fail — {tester} bối rối", status: { ...all(OK), implement: OK, test: "FAILED", review: P, pr: P }, errors: { test: "Test_parseCreateItem_missing failed" } },
-  { caption: "Thử lại với quyết tâm mới", status: { ...all(OK), implement: OK, test: "RETRYING", review: P, pr: P }, events: { test: [{ kind: "output", content: "== go test -short ./app/usecases (retry)" }] } },
-  { caption: "{reviewer} review diff", status: { ...all(OK), review: RUN, pr: P }, events: { review: [{ kind: "tool", name: "Bash", input: { command: "git diff origin/release/prod...HEAD" } }] } },
-  { caption: "{pr} đóng gói thay đổi thành PR", status: { ...all(OK), pr: RUN } },
-  { caption: "Xong cả run 🎉", status: all(OK) },
+  { caption: "office.cap.quiet", status: all(P) },
+  { caption: "office.cap.read", status: { ...all(P), analyze: RUN }, events: { analyze: [{ kind: "tool", name: "Read", input: { file_path: "docs/requirements/payment-refund.md" } }] } },
+  { caption: "office.cap.grep", status: { ...all(P), analyze: RUN }, events: { analyze: [{ kind: "tool", name: "Grep", input: { pattern: "RefundShipment" } }] } },
+  { caption: "office.cap.think", status: { ...all(P), analyze: RUN }, events: { analyze: [{ kind: "thinking", content: "…" }] } },
+  { caption: "office.cap.ask", status: { ...all(P), analyze: "WAITING_INPUT" }, questions: ["analyze", "analyze"] },
+  { caption: "office.cap.discover", status: { ...all(P), analyze: OK, discover: RUN } },
+  { caption: "office.cap.done", status: { ...all(P), analyze: OK, discover: OK } },
+  { caption: "office.cap.plan", status: { ...all(P), analyze: OK, discover: OK, plan: RUN } },
+  { caption: "office.cap.skill", status: { ...all(P), analyze: OK, discover: OK, plan: RUN }, events: { plan: [{ kind: "tool", name: "mcp__platform__read_knowledge", input: { key: "oms-money-model" } }] } },
+  { caption: "office.cap.approve", status: { ...all(P), analyze: OK, discover: OK, plan: OK, approve_plan: "WAITING_APPROVAL" } },
+  { caption: "office.cap.edit", status: { ...all(OK), implement: RUN, test: P, review: P, pr: P }, events: { implement: [{ kind: "tool", name: "Edit", input: { file_path: "app/usecases/payment_refund.go" } }] } },
+  { caption: "office.cap.bash", status: { ...all(OK), implement: RUN, test: P, review: P, pr: P }, events: { implement: [{ kind: "tool", name: "Bash", input: { command: "go build ./..." } }] } },
+  { caption: "office.cap.commit", status: { ...all(OK), implement: RUN, test: P, review: P, pr: P }, events: { implement: [{ kind: "tool", name: "Bash", input: { command: "git commit -q -F -" } }] } },
+  { caption: "office.cap.test", status: { ...all(OK), implement: OK, test: RUN, review: P, pr: P }, events: { test: [{ kind: "output", content: "== go test -short ./app/usecases" }] } },
+  { caption: "office.cap.fail", status: { ...all(OK), implement: OK, test: "FAILED", review: P, pr: P }, errors: { test: "Test_parseCreateItem_missing failed" } },
+  { caption: "office.cap.retry", status: { ...all(OK), implement: OK, test: "RETRYING", review: P, pr: P }, events: { test: [{ kind: "output", content: "== go test -short ./app/usecases (retry)" }] } },
+  { caption: "office.cap.review", status: { ...all(OK), review: RUN, pr: P }, events: { review: [{ kind: "tool", name: "Bash", input: { command: "git diff origin/release/prod...HEAD" } }] } },
+  { caption: "office.cap.pr", status: { ...all(OK), pr: RUN } },
+  { caption: "office.cap.finish", status: all(OK) },
   {
-    caption: "Bộ sưu tập trạng thái: READY · SKIPPED · CANCELED · FAILED · WAITING_APPROVAL · RETRYING",
+    caption: "office.cap.gallery",
     status: { analyze: "READY", discover: P, plan: "SKIPPED", approve_plan: "SKIPPED", implement: "CANCELED", test: "FAILED", review: "WAITING_APPROVAL", pr: "RETRYING" },
     errors: { test: "go test: 3 regressions" },
   },
@@ -58,6 +59,7 @@ const FRAMES: Frame[] = [
 const FRAME_MS = 3800;
 
 export function usePreviewOffice(enabled: boolean) {
+  const { t } = useI18n();
   const [i, setI] = useState(0);
   const times = useRef<{ started: Record<string, number>; finished: Record<string, number>; events: Record<string, EventLite[]>; seq: number }>({ started: {}, finished: {}, events: {}, seq: 1 });
   useEffect(() => {
@@ -97,7 +99,7 @@ export function usePreviewOffice(enabled: boolean) {
     }));
   const questions: QuestionLite[] = (frame.questions ?? []).map((k) => ({ step_key: k, status: "open" }));
   const events = Object.fromEntries(steps.filter((s) => s.current_attempt_id).map((s) => [s.current_attempt_id!, tm.events[s.key] ?? []]));
-  const snapshot: OfficeSnapshot = { run: { id: 0, title: "PREVIEW · dữ liệu mẫu", status: "PREVIEW" }, steps, graph: GRAPH, attempts, questions, events };
-  const caption = frame.caption.replace(/\{(\w+)\}/g, (_, r) => ROLE_INFO[r as keyof typeof ROLE_INFO]?.name ?? r);
+  const snapshot: OfficeSnapshot = { run: { id: 0, title: t("office.previewTitle"), status: "PREVIEW" }, steps, graph: GRAPH, attempts, questions, events };
+  const caption = t(frame.caption).replace(/\{(\w+)\}/g, (_, r) => ROLE_INFO[r as keyof typeof ROLE_INFO]?.name ?? r);
   return { snapshot, caption, frame: i, frames: FRAMES.length };
 }

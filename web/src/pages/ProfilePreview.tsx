@@ -3,6 +3,7 @@ import { ReactFlow, Background, type Node } from "@xyflow/react";
 import { api } from "../api.ts";
 import { AlertTriangle, ArrowRight, Gauge, GitMerge, Layers, Microscope, PenLine, Sparkles, Ban, Zap } from "lucide-react";
 import { Badge, Segmented } from "../ui.tsx";
+import { useI18n } from "../i18n/index.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
 
@@ -26,6 +27,7 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
   value: ProfileChoice;
   onChange: (p: ProfileChoice) => void;
 }) {
+  const { t } = useI18n();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const key = JSON.stringify([workflow, workItemId, repositories, inputs, value]);
@@ -49,9 +51,9 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
   return (
     <div>
       <div className="row tight" style={{ gap: 10 }}>
-        <b className="small" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Gauge size={15} color="var(--brand)" /> Execution profile</b>
+        <b className="small" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Gauge size={15} color="var(--brand)" /> {t("pp.profile")}</b>
         <Segmented<ProfileChoice>
-          label="Execution profile"
+          label={t("pp.profile")}
           value={value}
           onChange={onChange}
           options={[
@@ -66,9 +68,9 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
       {data && (
         <div style={{ marginTop: 10 }}>
           <div className="small rv-chipline">
-            <ArrowRight size={13} color="var(--muted)" /> <ProfileBadge profile={data.profile.profile} /> <span className="muted">({data.profile.confidence} confidence)</span> · {data.graph.steps.length} bước (definition có {data.published_steps})
-            {data.report_step && " · + Task Result Report"}
-            {data.reused_repositories && <> · dùng lại repo <b>{data.selected_repositories.join(", ")}</b></>}
+            <ArrowRight size={13} color="var(--muted)" /> <ProfileBadge profile={data.profile.profile} /> <span className="muted">({t("pp.confidence", { n: data.profile.confidence })})</span> · {t("pp.steps", { n: data.graph.steps.length, total: data.published_steps })}
+            {data.report_step && t("pp.report")}
+            {data.reused_repositories && <> · {t("pp.reuse")} <b>{data.selected_repositories.join(", ")}</b></>}
           </div>
           <ul className="small" style={{ margin: "4px 0", paddingLeft: 18 }}>{data.profile.reasons.map((r: string) => <li key={r}>{r}</li>)}</ul>
           {data.profile.warnings.map((w: string) => <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}><AlertTriangle size={13} />{w}</div>)}
@@ -77,7 +79,7 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
               {data.changes.map((c: any) => (
                 <div key={c.step + c.action}>
                   {c.action === "merged_into" ? <GitMerge size={13} /> : c.action === "removed" ? <Ban size={13} /> : <PenLine size={13} />} <span className="mono">{c.step}</span>{" "}
-                  {c.action === "merged_into" ? <>gộp vào <span className="mono">{c.into}</span></> : c.action === "removed" ? "bỏ qua" : "điều chỉnh"} — <span className="muted">{c.detail}</span>
+                  {c.action === "merged_into" ? <>{t("pp.merged")} <span className="mono">{c.into}</span></> : c.action === "removed" ? t("pp.removed") : t("pp.adjusted")} — <span className="muted">{c.detail}</span>
                 </div>
               ))}
             </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
+import { uiLocale, useI18n } from "../i18n/index.tsx";
 
 export interface Progress {
   phase: "connect" | "search" | "group" | "save" | "notify";
@@ -11,17 +12,17 @@ export interface Progress {
   startedAt: string;
 }
 
-const STEPS: Array<{ key: Progress["phase"][]; label: string }> = [
-  { key: ["connect"], label: "Kết nối Splunk" },
-  { key: ["search"], label: "Splunk đọc log OMS + payment" },
-  { key: ["group"], label: "Gom nhóm & chấm mức nghiêm trọng" },
-  { key: ["save", "notify"], label: "Lưu kết quả" },
+const STEP_KEYS: Array<{ key: Progress["phase"][]; label: string }> = [
+  { key: ["connect"], label: "scan.connect" },
+  { key: ["search"], label: "scan.search" },
+  { key: ["group"], label: "scan.group" },
+  { key: ["save", "notify"], label: "scan.save" },
 ];
 const ORDER: Progress["phase"][] = ["connect", "search", "group", "save", "notify"];
 
-const compact = (n: number) => Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+const compact = (n: number) => Intl.NumberFormat(uiLocale() === "vi" ? "vi-VN" : "en-GB", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-const SPLUNK_STATE: Record<string, string> = { QUEUED: "đang xếp hàng", PARSING: "đang phân tích query", RUNNING: "đang chạy", FINALIZING: "đang tổng hợp", DONE: "xong" };
+const SPLUNK_KEY: Record<string, string> = { QUEUED: "scan.queued", PARSING: "scan.parsing", RUNNING: "scan.running", FINALIZING: "scan.finalizing", DONE: "scan.done" };
 
 /** A small original chibi bug-hunter (headband + magnifying glass), drawn inline so it themes with the page. */
 function Chibi() {
@@ -61,6 +62,7 @@ function Chibi() {
 }
 
 export function ScanProgressCard({ progress, typicalSeconds, startedAt }: { progress: Progress | null; typicalSeconds: number | null; startedAt?: string }) {
+  const { t } = useI18n();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -76,16 +78,16 @@ export function ScanProgressCard({ progress, typicalSeconds, startedAt }: { prog
     <div className="sp-card" role="status" aria-live="polite">
       <div className="sp-top">
         <div>
-          <div className="sp-title">Đang săn bug trên production…</div>
+          <div className="sp-title">{t("scan.title")}</div>
           <div className="muted small">
             {p.phase === "search"
-              ? <>Splunk {SPLUNK_STATE[p.splunkState ?? ""] ?? "đang chạy"} · đã đọc <b>{compact(p.scanned)}</b> dòng log{p.matched ? <> · <b>{compact(p.matched)}</b> dòng lỗi</> : null}</>
-              : STEPS.find((s) => s.key.includes(p.phase))?.label}
+              ? <>Splunk {t(SPLUNK_KEY[p.splunkState ?? ""] ?? "scan.running")} · {t("scan.read", { n: compact(p.scanned) })}{p.matched ? <> · {t("scan.matched", { n: compact(p.matched) })}</> : null}</>
+              : t(STEP_KEYS.find((s) => s.key.includes(p.phase))?.label ?? "scan.connect")}
           </div>
         </div>
         <div className="sp-pct">
           <b>{pct}%</b>
-          <span className="muted small">{clock(elapsed)}{remaining != null ? ` · còn ~${clock(remaining)}` : typicalSeconds ? " · sắp xong" : ""}</span>
+          <span className="muted small">{clock(elapsed)}{remaining != null ? ` · ${t("scan.left", { t: clock(remaining) })}` : typicalSeconds ? ` · ${t("scan.almost")}` : ""}</span>
         </div>
       </div>
 
@@ -100,14 +102,14 @@ export function ScanProgressCard({ progress, typicalSeconds, startedAt }: { prog
       </div>
 
       <ol className="sp-steps">
-        {STEPS.map((s, i) => {
+        {STEP_KEYS.map((s, i) => {
           const idx = Math.min(...s.key.map((k) => ORDER.indexOf(k)));
           const last = Math.max(...s.key.map((k) => ORDER.indexOf(k)));
           const state = current > last ? "done" : current >= idx ? "now" : "todo";
           return (
             <li key={i} className={`sp-step is-${state}`}>
               <span className="sp-dot">{state === "done" ? <Check size={12} strokeWidth={3} /> : i + 1}</span>
-              <span>{s.label}{s.key.includes("search") && state === "now" ? ` (${p.searchPct}%)` : ""}</span>
+              <span>{t(s.label)}{s.key.includes("search") && state === "now" ? ` (${p.searchPct}%)` : ""}</span>
             </li>
           );
         })}
