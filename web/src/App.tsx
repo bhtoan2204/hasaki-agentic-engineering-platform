@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
-import { BookOpen, Building2, ClipboardList, FolderGit2, Inbox, LayoutDashboard, LineChart, Menu, Moon, PlayCircle, PlugZap, Siren, Sun, Workflow, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { PanelLeftClose, PanelLeftOpen, ShieldCheck, UserRound, Users, X, BookOpen, Building2, ClipboardList, FolderGit2, Inbox, LayoutDashboard, LineChart, Menu, Moon, PlayCircle, PlugZap, Siren, Sun, Workflow, type LucideIcon } from "lucide-react";
 import { api, setAuthed, setCsrf, setSupportView, useLive, type LiveState } from "./api.ts";
+import { AccountMenu, AccountPage } from "./pages/Account.tsx";
+import { Loading } from "./ui.tsx";
+import "./shell-account.css";
 import { Login, UsersPage, type SessionUser } from "./pages/Login.tsx";
 import { BRAND } from "./brand/brand.ts";
 import { BrandLogo } from "./brand/BrandLogo.tsx";
@@ -68,7 +71,9 @@ const NAV: Array<{ group: string; items: Array<{ key: string; labelKey: string; 
     { key: "insights", labelKey: "nav.insights", icon: LineChart },
   ] },
 ];
-const LABEL = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.key, i])));
+const LABEL = { ...Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.key, i]))),
+  users: { labelKey: "auth.users", icon: Users }, account: { labelKey: "auth.account", icon: UserRound },
+} as Record<string, { labelKey: string; icon: LucideIcon }>;
 
 export function App() {
   const { t, locale, setLocale } = useI18n();
@@ -76,9 +81,17 @@ export function App() {
   const parts = hash.split("/").filter(Boolean);
   const [theme, setTheme] = useTheme();
   const [navOpen, setNavOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [notice, setNotice] = useState("");
+  const sidebar = useRef<HTMLElement>(null);
+  const mobileTrigger = useRef<HTMLButtonElement>(null);
+  const pageRef = useRef<HTMLElement>(null);
   const [openQuestions, setOpenQuestions] = useState(0);
   const [me, setMe] = useState<SessionUser | null | undefined>(undefined);
   const [support, setSupport] = useState(false);
+  const signedOut = (message = "") => {
+    setAuthed(false); setMe(null); setSupport(false); setOpenQuestions(0); setNavOpen(false); setNotice(message);
+  };
   const refreshCount = () => api<any[]>("/api/questions").then((q) => setOpenQuestions(q.length)).catch(() => {});
   useEffect(() => {
     api<{ user: SessionUser; csrf: string }>("/api/auth/me")
@@ -86,12 +99,34 @@ export function App() {
       .catch(() => { setAuthed(false); setMe(null); });
   }, []);
   useEffect(() => {
-    const lost = () => setMe(null);
+    const lost = () => signedOut(me ? "auth.sessionExpired" : "");
     window.addEventListener("auth:lost", lost);
     return () => window.removeEventListener("auth:lost", lost);
-  }, []);
+  }, [me]);
   useEffect(() => { if (me) void refreshCount(); }, [me]);
-  useEffect(() => setNavOpen(false), [hash]);
+  useEffect(() => { if (me?.role === "member" && hash.startsWith("/users")) location.hash = "/overview"; }, [me, hash]);
+  useEffect(() => { setNavOpen(false); pageRef.current?.focus(); }, [hash]);
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 901px)");
+    const resize = () => { if (desktop.matches) setNavOpen(false); };
+    desktop.addEventListener("change", resize);
+    return () => desktop.removeEventListener("change", resize);
+  }, []);
+  useEffect(() => {
+    if (!navOpen) return;
+    sidebar.current?.querySelector<HTMLElement>("button, a")?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]")) return;
+      if (e.key === "Escape") { e.preventDefault(); setNavOpen(false); requestAnimationFrame(() => mobileTrigger.current?.focus()); }
+      if (e.key !== "Tab" || document.getElementById("account-menu")) return;
+      const items = [...(sidebar.current?.querySelectorAll<HTMLElement>("a, button:not(:disabled)") ?? [])].filter((el) => el.getClientRects().length > 0);
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [navOpen]);
   const live: LiveState = useLive(null, (p) => {
     if (!p || p.kind === "status" || p.kind === "system") void refreshCount();
   }, !!me);
@@ -141,7 +176,10 @@ export function App() {
       page = <InsightsPage tab={parts[1]} />;
       break;
     case "users":
-      page = me?.role === "admin" ? <UsersPage /> : <OverviewPage />;
+      page = me?.role === "admin" ? <UsersPage me={me} onSignedOut={signedOut} /> : <OverviewPage />;
+      break;
+    case "account":
+      page = me && <AccountPage me={me} passwordMode={parts[1] === "password"} onSignedOut={signedOut} />;
       break;
     case "office":
       page = <AgentOfficePage param={parts[1]} />;
@@ -150,23 +188,25 @@ export function App() {
     default:
       page = <OverviewPage />;
   }
-  if (me === undefined) return <main className="page"><p>{t("auth.loading")}</p></main>;
-  if (!me) return <Login onIn={setMe} />;
+  if (me === undefined) return <Loading label={t("auth.loading")} />;
+  if (!me) return <Login notice={notice} theme={theme} onTheme={() => setTheme(theme === "light" ? "dark" : "light")} onIn={(user) => { setNotice(""); setSupport(false); setMe(user); }} />;
   const current = LABEL[section] ?? LABEL.overview;
   const CurrentIcon = current.icon;
 
   return (
-    <div className={`app${navOpen ? " nav-open" : ""}`}>
-      <aside className="sidebar" aria-label={t("nav.aria")}>
+    <div className={`app${navOpen ? " nav-open" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
+      <aside ref={sidebar} id="main-sidebar" role={navOpen ? "dialog" : undefined} aria-modal={navOpen || undefined} className="sidebar" aria-label={t("nav.aria")}>
+        <button className="quiet icon sb-close" onClick={() => { setNavOpen(false); requestAnimationFrame(() => mobileTrigger.current?.focus()); }} aria-label={t("common.close")}><X size={18} /></button>
         <a className="sb-brand" href="#/overview" aria-label={`${BRAND.product} — Overview`}>
           <BrandLogo size={40} withName />
         </a>
+        <button className="sb-link sb-toggle" onClick={() => setCollapsed(!collapsed)} aria-label={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")} data-tip={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}<span>{t("auth.collapseSidebar")}</span></button>
         <nav className="sb-nav">
           {NAV.map((g) => (
             <div key={g.group}>
               <div className="sb-group">{t(`nav.group.${g.group}`)}</div>
               {g.items.map(({ key, labelKey, icon: I }) => (
-                <a key={key} href={`#/${key}`} className={`sb-link${section === key || (key === "overview" && !LABEL[section]) ? " on" : ""}`} aria-current={section === key ? "page" : undefined}>
+                <a key={key} href={`#/${key}`} className={`sb-link${section === key || (key === "overview" && !LABEL[section]) ? " on" : ""}`} aria-label={t(labelKey)} data-tip={collapsed ? t(labelKey) : undefined} aria-current={section === key ? "page" : undefined}>
                   <I size={18} strokeWidth={1.9} />
                   <span>{t(labelKey)}</span>
                   {key === "questions" && openQuestions > 0 && <span className="count" aria-label={t("nav.questionsWaiting", { n: openQuestions })}>{openQuestions}</span>}
@@ -174,21 +214,22 @@ export function App() {
               ))}
             </div>
           ))}
+          {me.role === "admin" && <div>
+            <div className="sb-group">{t("auth.administration")}</div>
+            <a href="#/users" className={`sb-link${section === "users" ? " on" : ""}`} aria-current={section === "users" ? "page" : undefined} aria-label={t("auth.users")} data-tip={collapsed ? t("auth.users") : undefined}><Users size={18} /><span>{t("auth.users")}</span></a>
+            <button className={`sb-link sb-support${support ? " on" : ""}`} aria-pressed={support} aria-label={`${t("auth.support")}: ${t(support ? "auth.scopeOn" : "auth.scopeOff")}`} data-tip={t(support ? "auth.scopeOn" : "auth.scopeOff")} onClick={() => { setSupportView(!support); setSupport(!support); }}>
+              <ShieldCheck size={18} /><span>{t("auth.support")}<small>{t(support ? "auth.scopeOn" : "auth.scopeOff")}</small></span>
+            </button>
+          </div>}
         </nav>
-        <div className="sb-foot">
-          <span className="sb-avatar" aria-hidden>{me.username.slice(0, 1).toUpperCase()}</span>
-          <span className="sb-ws">
-            <b>{me.username}</b>
-            <span>{me.role === "admin" ? t("auth.role.admin") : t("auth.role.member")} · {support ? t("auth.support") : t("auth.my")}</span>
-          </span>
-        </div>
+        <div className="sb-foot"><AccountMenu me={me} active={section === "account"} onSignedOut={signedOut} onNavigate={() => { setNavOpen(false); requestAnimationFrame(() => pageRef.current?.focus()); }} /></div>
       </aside>
       {navOpen && <div className="scrim" style={{ zIndex: 55 }} onClick={() => setNavOpen(false)} />}
 
-      <div className="main">
+      <div className="main" inert={navOpen || undefined}>
         <header className="topbar">
-          <button className="quiet icon menu-btn" onClick={() => setNavOpen(true)} aria-label={t("nav.menu")}><Menu size={20} /></button>
-          <div className="tb-title"><CurrentIcon size={17} color="var(--brand)" /><span>{t(current.labelKey)}</span></div>
+          <button ref={mobileTrigger} aria-expanded={navOpen} aria-controls="main-sidebar" className="quiet icon menu-btn" onClick={() => setNavOpen(true)} aria-label={t("nav.menu")}><Menu size={20} /></button>
+          <div className="tb-title"><CurrentIcon size={17} color="var(--brand)" /><span>{t(section === "account" && parts[1] === "password" ? "auth.passwordChange" : current.labelKey)}</span></div>
           <div className="tb-right">
             <span className={`live-pill is-${live}`} tabIndex={0} data-tip={t("live.tip")}>
               <i /> <b>{live === "sse" ? t("live.sse") : live === "polling" ? t("live.polling") : t("live.connecting")}</b>
@@ -202,27 +243,12 @@ export function App() {
               <Inbox size={17} />
               {openQuestions > 0 && <span className="count">{openQuestions}</span>}
             </a>
-            {me.role === "admin" && <a className="btn ghost sm" href="#/users">{t("auth.users")}</a>}
-            {me.role === "admin" && (
-              <label className="sm" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <input type="checkbox" checked={support} onChange={(e) => { setSupport(e.target.checked); setSupportView(e.target.checked); }} />
-                {t("auth.support")}
-              </label>
-            )}
-            <button className="ghost sm" onClick={async () => {
-              const password = prompt(t("auth.newPassword"));
-              if (!password) return;
-              await api("/api/auth/password", { password });
-              setAuthed(false);
-              setMe(null);
-            }}>{t("auth.passwordChange")}</button>
-            <button className="ghost sm" onClick={async () => { await api("/api/auth/logout", {}); setAuthed(false); setMe(null); }}>{t("auth.logout")}</button>
             <button className="ghost icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? t("theme.toDark") : t("theme.toLight")} data-tip={theme === "light" ? t("theme.dark") : t("theme.light")}>
               {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
             </button>
           </div>
         </header>
-        <main className={full ? "page full" : "page"} key={parts.slice(0, 2).join("/")}>
+        <main ref={pageRef} tabIndex={-1} className={full ? "page full" : "page"} key={`${me.id}:${support}:${parts.slice(0, 2).join("/")}`}>
           {page}
         </main>
       </div>

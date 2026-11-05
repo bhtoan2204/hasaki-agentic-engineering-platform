@@ -9,6 +9,9 @@ export function setCsrf(token: string) {
 }
 export function setSupportView(on: boolean) {
   supportView = on;
+  close();
+  open();
+  broadcast();
 }
 export function supportViewOn() {
   return supportView;

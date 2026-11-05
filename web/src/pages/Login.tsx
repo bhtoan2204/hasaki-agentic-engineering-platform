@@ -1,95 +1,73 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { Eye, EyeOff, KeyRound, LogIn, Moon, Sun } from "lucide-react";
 import { api, setAuthed, setCsrf } from "../api.ts";
+import { BrandLogo } from "../brand/BrandLogo.tsx";
+import { ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
-
+import "./Auth.css";
+export { UsersPage } from "./Users.tsx";
 export type SessionUser = { id: number; username: string; role: "admin" | "member" };
 
-export function Login({ onIn }: { onIn: (user: SessionUser) => void }) {
+export function PasswordField({ label, value, onChange, confirm = false, current = false, disabled = false }: {
+  label: string; value: string; onChange: (value: string) => void; confirm?: boolean; current?: boolean; disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  const id = useId();
+  const [visible, setVisible] = useState(false);
+  return <div className="field">
+    <label htmlFor={id}>{label}</label>
+    <div className="auth-password">
+      <input id={id} name={current ? "password" : confirm ? "confirmPassword" : "newPassword"} type={visible ? "text" : "password"}
+        autoComplete={current ? "current-password" : "new-password"} required minLength={current ? undefined : 10} maxLength={200}
+        value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} aria-describedby={!current ? `${id}-hint` : undefined} />
+      <button type="button" className="quiet icon" aria-label={t(visible ? "auth.hidePassword" : "auth.showPassword")} aria-pressed={visible}
+        onClick={() => setVisible(!visible)} disabled={disabled}>{visible ? <EyeOff size={17} /> : <Eye size={17} />}</button>
+    </div>
+    {!current && <small className="muted" id={`${id}-hint`}>{t("auth.passwordHint")}</small>}
+  </div>;
+}
+
+export function Login({ onIn, notice, theme, onTheme }: { onIn: (user: SessionUser) => void; notice?: string; theme: "light" | "dark"; onTheme: () => void }) {
   const { t, locale, setLocale } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [setup, setSetup] = useState<boolean | null>(null);
-  useEffect(() => { api<{ bootstrapRequired: boolean }>("/api/auth/status").then((s) => setSetup(s.bootstrapRequired)).catch((e) => setError(e.message)); }, []);
-  return (
-    <main className="page" style={{ maxWidth: 420, margin: "10vh auto" }}>
-      <button type="button" onClick={() => setLocale(locale === "vi" ? "en" : "vi")}>{locale === "vi" ? "EN" : "VI"}</button>
-      <h1>{t("auth.login")}</h1>
-      {setup && <div role="status"><p>{t("auth.bootstrap")}</p><code>npm run admin:bootstrap -- --username &lt;username&gt; --claim-legacy</code><p>{t("auth.bootstrapReload")}</p></div>}
-      <form hidden={setup === true}
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError("");
-          try {
-            const res = await api<{ user: SessionUser; csrf: string }>("/api/auth/login", { username, password });
-            setCsrf(res.csrf);
-            setAuthed(true);
-            onIn(res.user);
-          } catch (err) {
-            setError((err as Error).message || t("auth.invalid"));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <label>
-          {t("auth.username")}
-          <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        </label>
-        <label>
-          {t("auth.password")}
-          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </label>
-        {error && <p className="err">{error}</p>}
-        <button className="primary" disabled={busy || setup === null} type="submit">{t("auth.submit")}</button>
-      </form>
-    </main>
-  );
-}
-
-export function UsersPage() {
-  const { t } = useI18n();
-  const [users, setUsers] = useState<Array<SessionUser & { active: boolean }>>([]);
-  const [form, setForm] = useState({ username: "", password: "", role: "member" });
-  const [error, setError] = useState("");
-  const load = () => api<Array<SessionUser & { active: boolean }>>("/api/users").then(setUsers).catch((e) => setError(e.message));
-  useEffect(() => { void load(); }, []);
-  return (
-    <div>
-      <h1>{t("auth.users")}</h1>
-      {error && <p className="err">{error}</p>}
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setError("");
-          try {
-            await api("/api/users", form);
-            setForm({ username: "", password: "", role: "member" });
-            await load();
-          } catch (err) {
-            setError((err as Error).message);
-          }
-        }}
-      >
-        <input placeholder={t("auth.username")} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
-        <input type="password" placeholder={t("auth.password")} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-        <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-          <option value="member">{t("auth.role.member")}</option>
-          <option value="admin">{t("auth.role.admin")}</option>
-        </select>
-        <button className="primary" type="submit">{t("auth.create")}</button>
-      </form>
-      <ul>
-        {users.map((u) => (
-          <li key={u.id}>
-            <b>{u.username}</b> {u.role === "admin" ? t("auth.role.admin") : t("auth.role.member")} {u.active ? "" : "·"}
-            <button type="button" className="ghost sm" onClick={async () => { const password = prompt(t("auth.newPassword")); if (password) await api(`/api/users/${u.id}/password`, { password }); }}>{t("auth.reset")}</button>
-            <button type="button" className="ghost sm" onClick={async () => { await api(`/api/users/${u.id}/active`, { active: !u.active }); await load(); }}>{u.active ? t("auth.deactivate") : t("auth.activate")}</button>
-          </li>
-        ))}
-      </ul>
+  const load = () => {
+    setError("");
+    void api<{ bootstrapRequired: boolean }>("/api/auth/status").then((s) => setSetup(s.bootstrapRequired)).catch(() => setError("auth.unavailable"));
+  };
+  useEffect(load, []);
+  return <main className="auth-login"><div className="auth-login-inner">
+    <div className="auth-login-tools">
+      <div className="lang-switch" role="group" aria-label={t("lang.switch")}>{(["vi", "en"] as const).map((l) =>
+        <button type="button" key={l} className={locale === l ? "sm" : "ghost sm"} aria-pressed={locale === l} onClick={() => setLocale(l)}>{l.toUpperCase()}</button>)}</div>
+      <button className="ghost icon" aria-label={t(theme === "light" ? "theme.toDark" : "theme.toLight")} onClick={onTheme}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
     </div>
-  );
+    <BrandLogo size={44} withName subtitle={t("auth.workspace")} />
+    <section className="card hero">
+      <PageHeader icon={setup ? KeyRound : LogIn} title={t(setup ? "auth.setupTitle" : "auth.login")} subtitle={t("auth.loginIntro")} />
+      {notice && <p className="auth-notice" role="status">{t(notice)}</p>}
+      {error && <div role="alert"><ErrorBox error={t(error)} onRetry={setup === null ? load : undefined} /></div>}
+      {setup === null && !error && <Loading label={t("auth.loading")} />}
+      {setup === true && <div className="stack"><p className="muted">{t("auth.bootstrap")}</p>
+        <pre className="auth-command">npm run admin:bootstrap -- --username &lt;username&gt; --claim-legacy</pre>
+        <p className="small muted">{t("auth.bootstrapReload")}</p><button className="ghost" onClick={load}>{t("auth.checkSetup")}</button></div>}
+      {setup === false && <form onSubmit={async (e) => {
+        e.preventDefault(); if (busy) return;
+        if (!username.trim() || !password) { setError("auth.required"); return; }
+        setBusy(true); setError("");
+        try {
+          const res = await api<{ user: SessionUser; csrf: string }>("/api/auth/login", { username: username.trim(), password });
+          setCsrf(res.csrf); setAuthed(true); onIn(res.user);
+        } catch (err) { setError((err as Error).message === "Invalid username or password" ? "auth.invalid" : "auth.loginFailed"); }
+        finally { setBusy(false); }
+      }} aria-busy={busy}>
+        <Field label={t("auth.username")}><input name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={username} onChange={(e) => setUsername(e.target.value)} disabled={busy} autoFocus /></Field>
+        <PasswordField label={t("auth.password")} current value={password} onChange={setPassword} disabled={busy} />
+        <button className="auth-submit" disabled={busy} type="submit">{busy ? <span className="spinner" /> : <LogIn size={16} />}{t(busy ? "auth.signingIn" : "auth.submit")}</button>
+      </form>}
+    </section>
+  </div></main>;
 }

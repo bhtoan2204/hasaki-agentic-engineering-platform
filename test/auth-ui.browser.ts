@@ -1,0 +1,178 @@
+/** Run after npm run build:
+ * CHROMIUM_PATH=/path/to/chromium node --import ./test/setup.ts test/auth-ui.browser.ts
+ * setup.ts refuses remote databases. Screenshots contain only synthetic test users.
+ */
+import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import { chromium } from "playwright-core";
+import { pool } from "../src/db/pool.ts";
+import { migrate } from "../src/db/migrate.ts";
+import { handle } from "../src/http/app.ts";
+import { createUser } from "../src/auth/users.ts";
+import { seedTemplates } from "../src/workflow/definitions.ts";
+import { seedKnowledge } from "../src/knowledge/service.ts";
+
+assert.equal(process.env.PLATFORM_TEST, "1");
+assert.equal(new URL(process.env.DATABASE_URL!).pathname, "/platform_test");
+await migrate();
+await seedTemplates(); await seedKnowledge();
+const server = createServer(handle);
+await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+const out = process.env.UI_SCREENSHOT_DIR ?? "/tmp/hasaki-auth-ui-review";
+mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true, args: ["--no-sandbox"] });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const page = await context.newPage();
+page.setDefaultTimeout(7000);
+const errors: string[] = [];
+page.on("pageerror", (e) => errors.push(e.message));
+const password = randomBytes(20).toString("hex");
+const nextPassword = randomBytes(20).toString("hex");
+const screenshot = async (name: string) => { await page.locator(".toast").last().waitFor({ state: "hidden", timeout: 10000 }); await page.screenshot({ path: `${out}/${name}.png`, fullPage: true }); };
+const heading = (name: string) => page.getByRole("heading", { name, exact: true });
+const account = () => page.locator(".sb-account");
+async function login(name: string, pw: string) {
+  await page.getByLabel("Username", { exact: true }).fill(name);
+  await page.getByLabel("Password", { exact: true }).fill(pw);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await account().waitFor({ state: "attached" });
+}
+async function bounds() {
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "no page overflow");
+}
+try {
+  await page.goto(base + "/#/account");
+  await page.getByRole("button", { name: "EN", exact: true }).click();
+  await heading("Set up the first account").waitFor();
+  await screenshot("01-bootstrap");
+  await createUser({ username: "ui-admin", password, role: "admin" });
+  await createUser({ username: "ui-member", password, role: "member" });
+  await page.getByRole("button", { name: "Check again" }).click();
+  await heading("Sign in").waitFor();
+  await page.getByLabel("Username", { exact: true }).fill("ui-admin");
+  await page.getByLabel("Password", { exact: true }).fill("wrong-password");
+  await page.getByRole("button", { name: "Show password" }).click();
+  assert.equal(await page.getByLabel("Password", { exact: true }).getAttribute("type"), "text");
+  await page.getByRole("button", { name: "Hide password" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("alert").waitFor();
+  assert.equal(await page.getByLabel("Username", { exact: true }).inputValue(), "ui-admin");
+  await page.getByLabel("Password", { exact: true }).fill("");
+  await screenshot("02-login");
+  await login("ui-admin", password);
+  await heading("My account").waitFor();
+  await page.reload(); await heading("My account").waitFor();
+  assert.equal(await page.locator(".topbar").getByText("User management").count(), 0);
+  await account().click(); await page.getByRole("menu").waitFor();
+  await screenshot("03-account-menu");
+  await page.keyboard.press("Escape"); assert.ok(await account().evaluate((e) => e === document.activeElement));
+  await page.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+  await account().focus(); await page.keyboard.press("ArrowDown");
+  await page.getByRole("menu").waitFor(); await bounds(); await screenshot("04-collapsed-menu");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+  await page.locator(".sb-nav").getByRole("link", { name: "User management" }).click();
+  await heading("User management").waitFor();
+  await page.getByRole("cell", { name: "ui-member", exact: true }).waitFor();
+  await screenshot("05-users-light");
+  await page.getByRole("searchbox").fill("no-such-user");
+  await page.getByText("No matching accounts", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await page.route("**/api/users", (route) => route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"test failure"}' }));
+  await page.reload(); await page.getByText("Unable to load users. Please try again.", { exact: true }).waitFor();
+  await page.unroute("**/api/users");
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByRole("cell", { name: "ui-member", exact: true }).waitFor();
+  const tooltip = page.locator(".topbar [data-tip]").first();
+  await tooltip.focus(); await page.getByRole("tooltip").waitFor();
+  const tipBox = await page.getByRole("tooltip").boundingBox();
+  assert.ok(tipBox && tipBox.y >= 0 && tipBox.x >= 0 && tipBox.x + tipBox.width <= 1440);
+  await page.keyboard.press("Escape");
+  await page.getByRole("tooltip").waitFor({ state: "hidden" });
+  for (const route of ["knowledge", "repositories", "integrations"]) {
+    await page.goto(base + "/#/" + route);
+    await page.locator(".page-header").waitFor();
+    await screenshot("reference-" + route);
+  }
+  await page.goto(base + "/#/users");
+  await page.getByRole("cell", { name: "ui-member", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Create user", exact: true }).click();
+  await page.getByRole("dialog").waitFor();
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  assert.ok(await page.getByRole("button", { name: "Create user", exact: true }).evaluate((el) => el === document.activeElement));
+  await page.getByRole("button", { name: "Create user", exact: true }).click();
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press("Tab");
+    assert.ok(await page.getByRole("dialog").evaluate((el) => el.contains(document.activeElement)));
+  }
+  await page.getByRole("textbox", { name: /^Username/ }).fill("ui-created");
+  await page.getByLabel("New password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm new password", { exact: true }).fill(password);
+  await screenshot("06-create-dialog");
+  await page.getByRole("dialog").getByRole("button", { name: "Create user" }).click();
+  await page.getByRole("cell", { name: "ui-created", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Reset password · ui-member", exact: true }).click();
+  await page.getByLabel("New password", { exact: true }).fill(nextPassword);
+  await page.getByLabel("Confirm new password", { exact: true }).fill(nextPassword);
+  await page.getByRole("dialog").getByRole("button", { name: "Reset password", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Deactivate · ui-created", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Deactivate", exact: true }).click();
+  await page.getByRole("button", { name: "Activate · ui-created", exact: true }).waitFor().catch(async () => { await page.getByRole("button", { name: "Reactivate · ui-created", exact: true }).waitFor(); });
+  await page.locator(".topbar .ghost.icon").last().click();
+  await page.getByRole("button", { name: "VI", exact: true }).click();
+  await heading("Quản lý người dùng").waitFor(); await screenshot("07-users-dark-vi");
+  await page.getByRole("button", { name: "EN", exact: true }).click();
+  await page.getByRole("button", { name: /View the whole|View all|View.*team|View.*resources/ }).click();
+  assert.ok(await page.locator(".sb-support").getAttribute("aria-pressed") === "true");
+  await bounds();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".menu-btn").click();
+  await page.setViewportSize({ width: 1024, height: 900 });
+  assert.equal(await page.locator(".main").getAttribute("inert"), null);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".menu-btn").click(); await account().click();
+  await page.getByRole("menuitem", { name: "My account", exact: true }).click();
+  await heading("My account").waitFor(); await bounds();
+  await page.locator(".menu-btn").click(); await screenshot("08-mobile-drawer");
+  await account().click(); await page.getByRole("menuitem", { name: "Change password", exact: true }).click();
+  await page.getByLabel("New password", { exact: true }).fill(nextPassword);
+  await page.getByLabel("Confirm new password", { exact: true }).fill("different-password");
+  await page.getByRole("button", { name: "Change password", exact: true }).click();
+  await page.getByRole("alert").waitFor();
+  await page.getByLabel("Confirm new password", { exact: true }).fill(nextPassword);
+  await screenshot("09-mobile-password");
+  await page.getByRole("button", { name: "Change password", exact: true }).click();
+  await heading("Sign in").waitFor();
+  assert.equal((await context.request.get(base + "/api/auth/me")).status(), 401);
+  await login("ui-admin", nextPassword);
+  await page.locator(".menu-btn").click(); await account().click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+  await account().click(); await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Sign out", exact: true }).click();
+  await heading("Sign in").waitFor();
+  assert.equal((await context.request.get(base + "/api/users")).status(), 401);
+  await login("ui-member", nextPassword);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  assert.equal(await page.locator(".sb-nav").getByText("User management").count(), 0);
+  assert.equal(await page.locator(".sb-support").count(), 0);
+  await page.goto(base + "/#/account"); await heading("My account").waitFor();
+  await screenshot("10-member-account"); await bounds();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(base + "/classic"); await page.locator("#classic-account summary").click();
+  const classicMenu = await page.locator("#classic-account nav").boundingBox();
+  assert.ok(classicMenu && classicMenu.x >= 0 && classicMenu.x + classicMenu.width <= 390);
+  await screenshot("11-classic-account-mobile");
+  await page.getByRole("link", { name: "My account", exact: true }).waitFor();
+  assert.equal(await page.locator("#classic-account").getByText("User management").count(), 0);
+  await page.getByRole("link", { name: "My account", exact: true }).click(); await heading("My account").waitFor();
+  assert.deepEqual(errors, []);
+  console.log("PASS: bootstrap, login/refresh, admin/member navigation, account menu keyboard, create/reset/deactivate, password change, logout, classic links, mobile, collapse, VI/EN, light/dark. Screenshots: " + out);
+} catch (e) { await screenshot("failure"); throw e; } finally {
+  await browser.close(); server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); await pool.end();
+}

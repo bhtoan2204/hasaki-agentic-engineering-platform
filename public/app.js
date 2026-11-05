@@ -22,6 +22,8 @@ function setUiLocale(next) {
   if (typeof render === "function") Promise.resolve(render(true)).then(() => { paintModal(); paintRank(); paintPreview(); });
 }
 function paintChrome() {
+  const summary = document.querySelector("#classic-account summary");
+  if (summary && ME) summary.textContent = `${ME.username} · ${tr(`auth.role.${ME.role}`)}`;
   document.querySelectorAll("[data-key]").forEach((el) => {
     const label = tr(el.dataset.key);
     const count = el.querySelector("#qcount");
@@ -68,6 +70,7 @@ async function api(path, body) {
   return j;
 }
 async function showLogin() {
+  document.getElementById("classic-account")?.remove();
   const view = $("#view");
   if (!view || view.dataset.login === "1") return;
   view.dataset.login = "1";
@@ -149,6 +152,7 @@ async function render(force = false) {
     return;
   }
   const parts = hash.split("/").filter(Boolean);
+  if (parts[0] === "account") { location.href = "/#" + hash; return; }
   if (parts[0] === "users") {
     if (ME.role !== "admin") { $("#view").innerHTML = `<div class="card">${esc(tr("auth.users"))}</div>`; return; }
     const users = await api("/api/users");
@@ -971,35 +975,29 @@ window.A = {
   document.documentElement.lang = locale;
   DICT = await api("/api/ui-messages").catch(() => ({ vi: {}, en: {} }));
   paintChrome();
-  const bar = $("#lang");
-  if (bar && !$("#logout")) {
-    const out = document.createElement("button");
-    out.id = "logout";
-    out.type = "button";
-    out.textContent = tr("auth.logout");
-    out.onclick = async () => {
-      try { await api("/api/auth/logout", {}); } catch {}
-      ME = null; CSRF = "";
-      for (const k of Object.keys(drafts)) delete drafts[k];
-      location.reload();
-    };
-    const pw = document.createElement("button");
-    pw.type = "button";
-    pw.textContent = tr("auth.passwordChange");
-    pw.onclick = async () => {
-      const password = prompt(tr("auth.newPassword"));
-      if (!password) return;
-      await api("/api/auth/password", { password });
-      location.reload();
-    };
-    bar.before(pw, out);
-  }
   try {
     const me = await api("/api/auth/me");
     ME = me.user;
     CSRF = me.csrf;
   } catch { ME = null; }
   if (!ME) { showLogin(); return; }
+  const account = document.createElement("details");
+  account.id = "classic-account";
+  account.innerHTML = `<summary>${esc(ME.username)} · ${esc(tr(`auth.role.${ME.role}`))}</summary><nav aria-label="${esc(tr("auth.account"))}">
+    <a href="/#/account" data-key="auth.account">${esc(tr("auth.account"))}</a>
+    <a href="/#/account/password" data-key="auth.passwordChange">${esc(tr("auth.passwordChange"))}</a>
+    ${ME.role === "admin" ? `<a href="/#/users" data-key="auth.users">${esc(tr("auth.users"))}</a>` : ""}
+    <button id="logout" data-key="auth.logout" type="button">${esc(tr("auth.logout"))}</button></nav>`;
+  $("#lang").before(account);
+  $("#logout").onclick = async () => {
+    if (!confirm(tr("auth.logoutConfirm", { name: ME.username }))) return;
+    try { await api("/api/auth/logout", {}); }
+    catch { toast(tr("auth.logoutFailed")); return; }
+    ME = null; CSRF = "";
+    for (const k of Object.keys(drafts)) delete drafts[k];
+    location.reload();
+  };
+  account.addEventListener("keydown", (e) => { if (e.key === "Escape") { account.open = false; account.querySelector("summary").focus(); } });
   META = await api("/api/meta").catch(() => null);
   await render(true);
   setInterval(() => render(false), 3000);
