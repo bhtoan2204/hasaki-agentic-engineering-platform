@@ -48,6 +48,8 @@ const REVIEW = {
     "approved plan, coding standards and security policies in your context. Report findings; do not modify code.",
   output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, suggestion }], summary }",
   workspace_read: true,
+  // Scope + curated per-language rules from Alibaba OpenCodeReview (delegation mode, no extra model/API key).
+  open_code_review: true,
 };
 
 export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = [

@@ -21,6 +21,7 @@
     "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts"
   },
   "dependencies": {
+    "@alibaba-group/open-code-review": "1.13.6",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
     "@fontsource/be-vietnam-pro": "^5.1.0",
     "@node-rs/argon2": "^2.2.2",
