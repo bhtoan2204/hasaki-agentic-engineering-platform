@@ -20,6 +20,34 @@ pool.on("error", (err) => console.error("postgres idle client error:", err.messa
 /** A pool or a client inside a transaction: every repository function accepts either. */
 export type Db = pg.Pool | pg.PoolClient;
 
+/**
+ * Connection-level failures (not SQL errors): the network dropped the socket — e.g. Wi-Fi re-keying or the VPN
+ * (Cloudflare WARP) rebuilding its tunnel resets every open connection to the remote database at once.
+ */
+export function isTransientDbError(e: unknown) {
+  const err = e as { code?: string; message?: string } | undefined;
+  if (!err) return false;
+  if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "ENETUNREACH", "EHOSTUNREACH", "EAI_AGAIN", "57P01", "57P02", "57P03", "08000", "08003", "08006"].includes(err.code ?? "")) return true;
+  return /Connection terminated|connection timeout|timeout exceeded when trying to connect|Client has encountered a connection error|socket hang up/i.test(err.message ?? "");
+}
+
+/**
+ * Run `fn` again (with a short backoff) when it failed on a dropped connection; the pool hands out a fresh one.
+ * Only for operations that are safe to repeat: inserts of log rows, idempotent updates, or transactions that
+ * re-check their own state first (finishAttempt / releaseAttempt return early when already applied).
+ */
+export async function retryTransient<T>(fn: () => Promise<T>, label: string, delaysMs = [500, 1500, 4000, 8000]): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isTransientDbError(e) || i >= delaysMs.length) throw e;
+      console.warn(`${label}: database connection dropped (${(e as Error).message}); retrying in ${delaysMs[i]}ms`);
+      await new Promise((r) => setTimeout(r, delaysMs[i]));
+    }
+  }
+}
+
 export async function q<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
   return (await db.query(sql, params)).rows as T[];
 }

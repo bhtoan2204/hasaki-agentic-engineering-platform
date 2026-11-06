@@ -1745,3 +1745,27 @@ test("worker affinity: only the instance a run is pinned to claims its jobs; res
   await drain();
   assert.equal((await stepOf(legacy.id, "only")).status, "COMPLETED", "legacy runs (no instance) are claimed by anyone");
 });
+
+test("dropped database connections mid-step (Wi-Fi/VPN blip) do not fail the step", async () => {
+  const { isTransientDbError, retryTransient } = await import("../src/db/pool.ts");
+  assert.ok(isTransientDbError(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })));
+  assert.ok(isTransientDbError(new Error("Connection terminated unexpectedly")));
+  assert.ok(!isTransientDbError(Object.assign(new Error("duplicate key"), { code: "23505" })), "SQL errors are not retried");
+  let calls = 0;
+  assert.equal(await retryTransient(async () => (++calls < 3 ? Promise.reject(new Error("Connection terminated unexpectedly")) : "ok"), "t", [1, 1, 1]), "ok");
+  assert.equal(calls, 3);
+
+  const key = await customWorkflow([{ key: "blip", type: "agent", max_attempts: 1 }]);
+  scripts.blip = async (ctx) => {
+    await ctx.log("agent", "before the network drop");
+    // What a VPN reconnect does: every open connection to the database is killed at once.
+    await q(pool, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend'");
+    await ctx.log("agent", "after the network drop");
+    return { kind: "completed", output: { ok: true } };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  assert.equal((await stepOf(run.id, "blip")).status, "COMPLETED");
+  const logs = await q(pool, "SELECT content FROM workflow_events WHERE run_id = $1 AND kind = 'agent' ORDER BY id", [run.id]);
+  assert.deepEqual(logs.map((l: any) => l.content), ["before the network drop", "after the network drop"]);
+});

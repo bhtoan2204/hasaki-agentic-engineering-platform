@@ -1,4 +1,4 @@
-import { pool, q, one, json } from "../../db/pool.ts";
+import { pool, q, one, json, retryTransient } from "../../db/pool.ts";
 import { runEvents } from "../events.ts";
 import type { ResolvedContext, StepInput } from "../context.ts";
 import type { AgentProvider } from "../../agent/provider.ts";
@@ -42,9 +42,13 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
   const { run, step, attempt } = base;
   return {
     ...base,
-    log: (kind, content, data) => runEvents.add(pool, run.id, kind, content, step.id, attempt.id, data ?? null),
+    // A transcript line is never worth failing the step: retry over a dropped connection, then give up quietly.
+    log: (kind, content, data) =>
+      retryTransient(() => runEvents.add(pool, run.id, kind, content, step.id, attempt.id, data ?? null), `log ${kind} (run ${run.id})`).catch((e) => {
+        console.error(`run ${run.id} ${step.key}: could not record a ${kind} event: ${(e as Error).message}`);
+      }),
     async artifact(kind, name, content, data) {
-      const r = await one(pool, "INSERT INTO workflow_artifacts (run_id, step_id, attempt_id, kind, name, content, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id", [
+      const r = await retryTransient(() => one(pool, "INSERT INTO workflow_artifacts (run_id, step_id, attempt_id, kind, name, content, data) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id", [
         run.id,
         step.id,
         attempt.id,
@@ -52,7 +56,7 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
         name,
         content,
         json(data ?? null),
-      ]);
+      ]), `artifact ${name}`);
       return r.id;
     },
     async ask(questions) {

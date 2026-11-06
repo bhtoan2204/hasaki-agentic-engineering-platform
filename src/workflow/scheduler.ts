@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
-import { pool, one, q } from "../db/pool.ts";
+import { pool, one, q, retryTransient } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
@@ -100,8 +100,10 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   }
   // Shutting down: a step that failed because the server is stopping (its agent/command was killed) goes back to the
   // queue without using a retry. A step that finished on its own is still recorded normally.
-  if (draining && result.kind === "failed" && (await releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining))) return;
-  await finishAttempt(job.id, job.fencing_token, begun.attempt.id, result);
+  // Both re-check the attempt's state inside their transaction, so repeating them after a dropped connection is safe:
+  // a step that ran for an hour is not thrown away because the network blinked while its result was being saved.
+  if (draining && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining!), `release job ${job.id}`))) return;
+  await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result), `finish job ${job.id}`);
 }
 
 /** Claim and execute at most one job. Returns false when the queue had nothing runnable. Used by tests. */
