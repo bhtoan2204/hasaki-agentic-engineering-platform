@@ -10,6 +10,7 @@ export interface LocalRepository { name: string; path?: string; remote_slug?: st
 /** Shared path is a legacy relative layout hint only. Explicit LOCAL overrides always win. */
 export function resolveRepoPath(repo: LocalRepository, local = config): string {
   if (!/^[A-Za-z0-9._-]+$/.test(repo.name) || [".", ".."].includes(repo.name)) throw new Error("Invalid repository name");
+  if (/^bench-[a-f0-9]{12}-fixture-[a-z-]+$/.test(repo.name)) return resolve(local.dataDir, "evaluation-fixtures", repo.name);
   const override = local.repositories?.[repo.name];
   if (override !== undefined) {
     if (typeof override !== "string" || !override.trim() || !isAbsolute(override)) throw new Error(`repositories.${repo.name} must be an absolute local checkout path`);

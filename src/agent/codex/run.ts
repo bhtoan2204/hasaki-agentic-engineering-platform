@@ -1,3 +1,4 @@
+import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,6 +60,7 @@ export function codexEnv(base: NodeJS.ProcessEnv, extra: Record<string, string> 
     if (v === undefined || drop.test(k) || secretish.test(k)) continue;
     out[k] = v;
   }
+  if (execution.getStore()?.evaluation?.fixtureAgent) { for (const k of Object.keys(out)) if (k.startsWith("FAKE_CODEX_")) delete out[k]; out.FAKE_CODEX_MODE = "ok"; }
   return { ...out, ...extra };
 }
 

@@ -1,3 +1,4 @@
+import { isEvaluationRun } from "../eval/scope.ts";
 import { z } from "zod";
 import { config } from "../config.ts";
 import { pool, q, one, json, type Db } from "../db/pool.ts";
@@ -317,6 +318,7 @@ async function runInfo(runId: number, db: Db): Promise<(RunInfo & { status: stri
  * (also saved on the run). Idempotent: unchanged inputs are not re-analysed unless `force`.
  */
 export async function detectKnowledgeChanges(runId: number, opts: { force?: boolean } = {}, db: Db = pool) {
+  if (await isEvaluationRun(runId, db)) return { status: "disabled", reason: "Benchmarks never invoke learning models" };
   const run = await runInfo(runId, db);
   if (!run) throw new Error(`run ${runId} not found`);
   const record = async (rec: Record<string, unknown>) => {

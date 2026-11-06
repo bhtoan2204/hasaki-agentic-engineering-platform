@@ -1,12 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { join, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { config, instanceIdentityExplicit } from "./config.ts";
 import { pool, one, q, withTx, type Db } from "./db/pool.ts";
 import { localJobs } from "./workflow/local.ts";
 
 export const instanceSession = randomUUID();
 let started = false;
+
+export class InstanceConflictError extends Error {
+  readonly retrySeconds: number;
+  constructor(id: string, retrySeconds: number) {
+    super(`Instance identity conflict: ${id} has a live registration. Stop the other installation or use its own dataDir and PLATFORM_INSTANCE. If the previous process just exited, retry in ${retrySeconds} seconds; a continuing heartbeat will keep the registration protected.`);
+    this.name = "InstanceConflictError";
+    this.retrySeconds = retrySeconds;
+  }
+}
 
 /** Serializes duplicate startup using the registry row, with database time throughout. */
 export async function registerInstance(id = config.instanceId, session = instanceSession) {
@@ -28,7 +38,7 @@ export async function registerInstance(id = config.instanceId, session = instanc
     if (!row) {
       const live = await one(c, `SELECT GREATEST(1, ceil($2 - extract(epoch FROM now()-last_seen_at)))::int AS retry_seconds
         FROM platform_instances WHERE instance_id=$1`, [id, config.instance.offlineSeconds]);
-      throw new Error(`Instance identity conflict: ${id} has a live registration. Stop the other installation or use its own dataDir and PLATFORM_INSTANCE. If the previous process just exited, retry in ${live?.retry_seconds ?? config.instance.offlineSeconds} seconds; a continuing heartbeat will keep the registration protected.`);
+      throw new InstanceConflictError(id, live?.retry_seconds ?? config.instance.offlineSeconds);
     }
     // Replaced session may still have unexpired job leases. Expire and fence them before the new scheduler starts.
     await q(c, `UPDATE workflow_jobs j SET lease_expires_at = now() - interval '1 second', fencing_token = fencing_token + 1
@@ -51,10 +61,20 @@ export async function instanceHealth(id: string | null, db: Db = pool) {
   return row ?? { instance_id: id, health: "UNKNOWN", last_seen_at: null };
 }
 
-export async function startInstanceHeartbeat() {
+export async function startInstanceHeartbeat(options: { waitForPrevious?: boolean; onWait?: (seconds: number) => void } = {}) {
   if (started) throw new Error("Instance heartbeat already started");
   started = true;
-  try { await registerInstance(); } catch (e) { started = false; throw e; }
+  try {
+    try { await registerInstance(); }
+    catch (e) {
+      if (!options.waitForPrevious || !(e instanceof InstanceConflictError)) throw e;
+      // One bounded wait covers an unclean exit; a renewed heartbeat still blocks takeover.
+      const seconds = Math.min(config.instance.offlineSeconds, e.retrySeconds);
+      options.onWait?.(seconds);
+      await delay(seconds * 1000);
+      await registerInstance();
+    }
+  } catch (e) { started = false; throw e; }
   let stopped = false;
   let timer: ReturnType<typeof setTimeout>;
   let pending: Promise<void> = Promise.resolve();

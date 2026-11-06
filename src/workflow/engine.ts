@@ -986,7 +986,7 @@ async function adoptRun(c: Db, runId: number) {
 /** Only control steps without external effects can replay automatically. Unknown executors default to reconciliation. */
 export function safeRecovery(step: Pick<StepRow, "type" | "config">) {
   return ["condition", "human_input", "human_approval", "task_result_report"].includes(step.type)
-    || (step.type === "integration" && ["noop", "select_repositories", "repository_discovery"].includes(step.config?.action));
+    || (step.type === "integration" && ["noop", "select_repositories", "repository_discovery", "benchmark_case"].includes(step.config?.action));
 }
 
 async function recoverInterrupted(c: pg.PoolClient, run: RunRow, step: StepRow, attempt: AttemptRow, job: JobRow, reason: string) {

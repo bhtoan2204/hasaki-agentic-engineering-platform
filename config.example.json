@@ -87,5 +87,15 @@
     },
     "includeGenerated": false,
     "includeDependencies": false
+  },
+  "evaluation": {
+    "enabled": false,
+    "maxCases": 20,
+    "maxRepetitions": 3,
+    "maxCaseSeconds": 30,
+    "maxTokens": 20000,
+    "maxCostUsd": 2,
+    "maxLiveAgents": 1,
+    "sandboxImage": "docker.io/library/postgres:17-alpine"
   }
 }

@@ -1,3 +1,4 @@
+import { publishBuiltinSuite, listSuites, createEvaluation, evaluationList, evaluationDetail, cancelEvaluation, createComparison, comparisonDetail } from "../eval/service.ts";
 import { status as codeIndexStatus, enqueue as enqueueCodeIndex } from "../codeIntelligence/indexer.ts";
 import { hybridRank } from "../codeIntelligence/search.ts";
 import { config } from "../config.ts";
@@ -385,9 +386,18 @@ export const routes: Route[] = [
   // Cross-task memory: a human promotes (or rejects) agent conclusions; nothing else makes them trusted.
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/approve$/, async (c) => reviewMemory(c.p[0], "approve", c.actor.username, (await readableKnowledge(c, c.p[0])).owner_id ?? null)],
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/reject$/, async (c) => reviewMemory(c.p[0], "reject", c.actor.username, (await readableKnowledge(c, c.p[0])).owner_id ?? null)],
-  ["GET", /^\/api\/evals$/, async ({ url }) => {
+  ["GET", /^\/api\/benchmark-suites$/, () => listSuites()],
+  ["POST", /^\/api\/benchmark-suites\/publish$/, async ({ actor }) => { requireAdmin(actor); if (!config.evaluation.enabled) throw new HttpError(409, "Evaluation framework disabled"); const row=await publishBuiltinSuite(); return {id:row.id,key:row.suite_key,version:row.version}; }],
+  ["GET", /^\/api\/evaluation-runs$/, async ({ actor }) => ({enabled:config.evaluation.enabled,runs:await evaluationList(actor.id)})],
+  ["POST", /^\/api\/evaluation-runs$/, ({actor,body}) => createEvaluation(actor.id,body,actor.role==="admin")],
+  ["GET", /^\/api\/evaluation-runs\/(\d+)$/, ({actor,p}) => evaluationDetail(num(p[0]),actor.id)],
+  ["POST", /^\/api\/evaluation-runs\/(\d+)\/start$/, async ({actor,p}) => {if (!config.evaluation.enabled) throw new HttpError(409,"Evaluation framework disabled"); const row=await evaluationDetail(num(p[0]),actor.id);return startPendingRun(row.workflow_run_id);}],
+  ["POST", /^\/api\/evaluation-runs\/(\d+)\/cancel$/, ({actor,p}) => cancelEvaluation(num(p[0]),actor.id)],
+  ["POST", /^\/api\/evaluation-comparisons$/, ({actor,body}) => createComparison(actor.id,num(String(body.baseline_id)),num(String(body.candidate_id)),body.policy)],
+  ["GET", /^\/api\/evaluation-comparisons\/(\d+)$/, ({actor,p}) => comparisonDetail(num(p[0]),actor.id)],
+  ["GET", /^\/api\/evals$/, async ({ url, actor }) => {
     const suite = url.searchParams.get("suite");
-    const rows = await q(pool, `SELECT * FROM eval_results WHERE ($1::text IS NULL OR suite = $1) ORDER BY id DESC LIMIT 500`, [suite]);
+    const rows = await q(pool, `SELECT * FROM eval_results WHERE ($1::text IS NULL OR suite = $1) AND (owner_id IS NULL OR owner_id=$2) ORDER BY id DESC LIMIT 500`, [suite, actor.id]);
     return { rows, summary: summarizeEval(rows as any) };
   }],
   ["GET", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, (c) => readableKnowledge(c, c.p[0])],

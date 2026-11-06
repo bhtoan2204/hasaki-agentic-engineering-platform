@@ -1,3 +1,4 @@
+import { isEvaluationRun } from "./eval/scope.ts";
 import { config } from "./config.ts";
 import { sendTelegramStepWaiting, type StepWaiting } from "./telegram.ts";
 
@@ -5,6 +6,8 @@ import { sendTelegramStepWaiting, type StepWaiting } from "./telegram.ts";
 /** `target` is a UI route ("/runs/12") or, for legacy callers, a task code. */
 export async function notify(message: string, target?: string) {
   if (!config.notifyWebhook) return;
+  const runId = /^\/runs\/(\d+)$/.exec(target ?? "")?.[1];
+  if (runId && await isEvaluationRun(Number(runId))) return;
   const link = target ? `\n${config.publicUrl}/#${target}` : "";
   try {
     await fetch(config.notifyWebhook, {
@@ -24,6 +27,7 @@ export async function notify(message: string, target?: string) {
  * of one never affects the other or the workflow.
  */
 export async function notifyStepWaiting(_webhookMessage: string, w: StepWaiting & { stepId: number; generation: number; attemptId?: number | null }) {
+  if (await isEvaluationRun(w.runId)) return;
   // Private step summaries are not posted to the shared webhook. They go only to the run owner's chat.
   await sendTelegramStepWaiting(w, `${w.stepId}:${w.generation}:${w.attemptId ?? "gate"}:${w.status}`);
 }

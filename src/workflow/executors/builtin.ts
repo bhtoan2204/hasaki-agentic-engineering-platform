@@ -1,6 +1,7 @@
+import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
-import { config } from "../../config.ts";
+import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import { gitProvider, workspacesOf } from "../../git/provider.ts";
 import { isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
@@ -244,7 +245,7 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");
   const rankingStarted = Date.now();
   let ranked = await hybridRank(rows, { text, keywords, project: ctx.context.project });
-  if (config.codeIntelligence.enabled) await ctx.recordMetrics({ code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted } }).catch(() => {});
+  if (codeIntelligenceEnabled()) await ctx.recordMetrics({ code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted } }).catch(() => {});
   let method = "deterministic";
   // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
   if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false) {
@@ -311,6 +312,8 @@ async function publishReport(ctx: ExecutionContext): Promise<ExecResult> {
 export const integrationExecutor: StepExecutor = {
   async execute(ctx) {
     switch (ctx.step.config.action) {
+      case "benchmark_case":
+        return executeBenchmarkCase(ctx);
       case "repository_discovery":
         return repositoryDiscovery(ctx);
       case "select_repositories":

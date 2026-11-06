@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { config } from "../config.ts";
+import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, one, q } from "../db/pool.ts";
 import {
   rankRepositories,
@@ -93,7 +93,7 @@ export async function searchSymbols(
     terms = queryTerms(text);
   const hits: Hit[] = [];
   let fallback_count = 0;
-  if (!config.codeIntelligence.enabled || !terms.length)
+  if (!codeIntelligenceEnabled() || !terms.length)
     return { hits, fallback_count, search_latency: Date.now() - start };
   for (const repo of scope.repositories) {
     try {
@@ -220,7 +220,7 @@ export async function findDependencies(
   direction: "out" | "in" = "out",
 ) {
   authorize(scope);
-  if (!config.codeIntelligence.enabled) return [];
+  if (!codeIntelligenceEnabled()) return [];
   const result: any[] = [];
   let frontier = [symbol];
   const seen = new Set<string>();
@@ -426,7 +426,7 @@ export async function hybridRank(
   request: { text: string; keywords?: string[]; project?: string },
 ) {
   const old = rankRepositories(repos, request);
-  if (!config.codeIntelligence.enabled) return old;
+  if (!codeIntelligenceEnabled()) return old;
   try {
     const scope = {
       repositories: repos.map((r) => r.name).slice(0, 30),

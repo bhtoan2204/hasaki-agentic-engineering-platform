@@ -37,7 +37,10 @@ if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) {
 
 const applied = await migrate();
 if (applied.length) console.log(`migrations applied: ${applied.join(", ")}`);
-const instanceHeartbeat = await startInstanceHeartbeat();
+const instanceHeartbeat = await startInstanceHeartbeat({
+  waitForPrevious: true,
+  onWait: (seconds) => console.log(`Waiting ${seconds}s for the previous instance registration to expire. An active installation will remain protected.`),
+});
 await seedTemplates();
 await syncRepositoriesFromConfig();
 for (const warning of await validateLocalConfiguration()) console.warn(`Startup warning: ${warning}`);
@@ -71,7 +74,7 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 const scheduler = startScheduler();
 if (config.codeIntelligence.enabled) background("code intelligence startup", async () => {
-  for (const repo of await repositories.list()) if (repo.enabled && repo.allowed_actions.includes("read")) await enqueueCodeIndex(repo.name).catch(() => {});
+  for (const repo of await repositories.list()) if (repo.provider !== "benchmark" && repo.enabled && repo.allowed_actions.includes("read")) await enqueueCodeIndex(repo.name).catch(() => {});
 });
 startPolling();
 startProdErrorSchedule();

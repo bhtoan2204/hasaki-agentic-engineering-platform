@@ -65,7 +65,7 @@ export const repositories = {
    */
   async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
     const all = await allRepositories(db);
-    const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action));
+    const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action) && (r.provider !== "benchmark" || (project.startsWith("__benchmark:") && r.projects.includes(project))));
     const p = project.trim().toLowerCase();
     const scope = new Set(projectScope(project));
     const maps = (r: RepositoryRow) => r.projects.some((x) => scope.has(x.toLowerCase()));

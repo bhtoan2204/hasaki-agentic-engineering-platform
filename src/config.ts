@@ -1,3 +1,4 @@
+import { execution } from "./auth/execution.ts";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,6 +26,7 @@ export interface CodeIntelligenceConfig {
 export interface Config {
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
+  evaluation: { enabled: boolean; maxCases: number; maxRepetitions: number; maxCaseSeconds: number; maxTokens: number; maxCostUsd: number; sandboxImage: string; maxLiveAgents: number };
   port: number;
   /**
    * This platform instance (one per developer machine sharing the database). Runs created here are pinned to it and
@@ -177,6 +179,7 @@ export interface Config {
 
 const defaults: Config = {
   codeIntelligence: { enabled: false, includeGenerated: false, includeDependencies: false, maxFileBytes: 512 * 1024, maxFiles: 20000, maxScanBytes: 128 * 1024 * 1024, maxSymbols: 2000, concurrency: 1, timeoutMs: 120000, contextTokens: 2000, retentionDays: 7, excludes: [], sqlDialect: "postgresql", weights: { exact: 2, qualified: 2, path: 0.5, dependency: 0.5, text: 0.25, cap: 3 } },
+  evaluation: { enabled: false, maxCases: 20, maxRepetitions: 3, maxCaseSeconds: 30, maxTokens: 20000, maxCostUsd: 2, sandboxImage: "docker.io/library/postgres:17-alpine", maxLiveAgents: 1 },
   port: 4545,
   reposRoot: join(homedir(), "src"),
   dataDir: join(homedir(), ".claude-task-platform"),
@@ -245,6 +248,7 @@ function load(): Config {
   const cfg: Config = {
     ...defaults,
     ...fromFile,
+    evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
     codeIntelligence: { ...defaults.codeIntelligence, ...(fromFile.codeIntelligence ?? {}), weights: { ...defaults.codeIntelligence.weights, ...(fromFile.codeIntelligence?.weights ?? {}) } },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
@@ -260,6 +264,8 @@ function load(): Config {
     learning: { ...defaults.learning, ...(fromFile.learning ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };
+  for (const k of ["maxCases", "maxRepetitions", "maxCaseSeconds", "maxTokens", "maxLiveAgents"] as const) cfg.evaluation[k] = positiveInt(`evaluation.${k}`, cfg.evaluation[k]);
+  if (!Number.isFinite(cfg.evaluation.maxCostUsd) || cfg.evaluation.maxCostUsd < 0) throw new Error("evaluation.maxCostUsd must be nonnegative");
   for (const k of ["maxFileBytes", "maxFiles", "maxScanBytes", "maxSymbols", "concurrency", "timeoutMs", "contextTokens", "retentionDays"] as const) cfg.codeIntelligence[k] = positiveInt(`codeIntelligence.${k}`, cfg.codeIntelligence[k]);
   for (const v of Object.values(cfg.codeIntelligence.weights)) if (!Number.isFinite(v) || v < 0) throw new Error("Invalid code intelligence weight");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect)) throw new Error("Unsupported SQL dialect");
@@ -324,6 +330,7 @@ export interface CodexConfig {
 
 /** Codex settings with env overrides applied. Read at call time so tests and operators can change env. */
 export function codexConfig(): Required<Pick<CodexConfig, "bin" | "timeoutMs" | "model" | "reasoningEffort">> & { models: Record<string, Record<string, string>> } {
+  if (execution.getStore()?.evaluation?.fixtureAgent) return { bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-codex.mjs"), timeoutMs: 15000, model: "gpt-test", reasoningEffort: "low", models: {} };
   const c = config.agent.codex ?? {};
   const timeout = Number(process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
   return {
@@ -336,3 +343,6 @@ export function codexConfig(): Required<Pick<CodexConfig, "bin" | "timeoutMs" | 
 }
 
 export const config = load();
+
+/** Evaluation overrides are per async execution, never shared mutable flags. */
+export function codeIntelligenceEnabled() { return execution.getStore()?.evaluation?.codeIntelligence ?? config.codeIntelligence.enabled; }

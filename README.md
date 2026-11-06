@@ -316,3 +316,17 @@ Existing scheduler workers index registered repositories while idle. The reposit
 See [architecture, extraction coverage and operational limits](docs/architecture/code-intelligence.md) and [measured fixture benchmark](docs/architecture/code-intelligence-benchmark.json). To reproduce on an isolated **local test database**, run `npm run bench:code-intelligence`; it uses the existing test database setup, which recreates `platform_test`. Use `TEST_DATABASE_ADMIN_URL` for a different local test PostgreSQL. The benchmark never accepts a remote database.
 
 Development finalization results, real-repository measurements, startup verification, and remaining limits: [P1 validation report](docs/validation/p1-finalization.md). Re-run the authorized development check with `npm run validate:code-intelligence -- <development-database-name>`; it indexes the three registered OMS checkouts and removes its disposable worktrees.
+
+### Optional benchmark evaluations (P2)
+
+Set `evaluation.enabled: true` in the **local** `PLATFORM_CONFIG`; production defaults remain disabled. Migration `027_benchmark_framework` extends the existing evaluation tables and workflow scheduler. In **Insights → Quality**, an administrator publishes the immutable suite; users can launch bounded fixture runs, inspect evidence and compare paired results. Existing workflow questions, approvals, cancellation and artifacts remain the execution controls.
+
+To reproduce the synthetic P1 OFF/ON controls with no paid model calls:
+
+```sh
+EVAL_REPORT=/tmp/p2-report.json npm run bench -- --suite=backend-v1 --repetitions=2
+```
+
+The CLI accepts only local PostgreSQL, creates or reuses `platform_bench` without dropping its results, and keeps synthetic Git repositories under `${TMPDIR:-/tmp}/hasaki-p2-benchmark`. It uses the existing local container runtime/image, never pulls an image, and blocks if network, resource and lifetime isolation cannot be verified. The current adapter requires Linux/Nix and Podman-compatible `docker --timeout`; see the [P2 architecture and operating limits](docs/architecture/p2-evaluation.md). Human answers in this CLI are explicitly scripted fixture controls; use `--answer-fixtures=false` to pause for manual handling. Live model execution is blocked until a connector can enforce isolation and hard spending limits.
+
+See the [P2 validation report](docs/validation/p2-finalization.md), [measured paired results](docs/validation/p2-benchmark.json), and [dashboard evidence](docs/validation/p2-dashboard.png). Fixture scores do not establish live-agent quality or token savings.

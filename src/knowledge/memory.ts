@@ -1,3 +1,4 @@
+import { isEvaluationRun } from "../eval/scope.ts";
 import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -91,6 +92,7 @@ export function buildMemoryItems(x: {
 
 /** Extract memory from a COMPLETED run. Idempotent (existing keys are left untouched). */
 export async function extractRunMemory(runId: number) {
+  if (await isEvaluationRun(runId)) return [];
   const run = await one(pool, "SELECT r.*, w.code AS wi_code FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1", [runId]);
   if (!run || run.status !== "COMPLETED" || run.owner_id == null) return [];
   const steps = await q(pool, "SELECT key, type, output FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);

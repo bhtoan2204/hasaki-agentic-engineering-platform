@@ -1,4 +1,4 @@
-import { config } from "../config.ts";
+import { config, codeIntelligenceEnabled } from "../config.ts";
 import { repositories } from "../repos/service.ts";
 import { validateCheckout } from "../repos/paths.ts";
 import { workspacesOf } from "../git/provider.ts";
@@ -24,10 +24,11 @@ import {
 import { parserVersion, ParserLoadError } from "./parser.ts";
 
 export async function enqueue(repoName: string, runId?: number) {
-  if (!config.codeIntelligence.enabled) return null;
+  if (!codeIntelligenceEnabled()) return null;
   const repo = await repositories.get(repoName);
   if (!repo?.enabled || !repo.allowed_actions.includes("read"))
     throw new Error("Repository unavailable or unauthorized");
+  if (repo.provider === "benchmark") return null; // Evaluation steps refresh their own isolated snapshots synchronously.
   if (runId) {
     const run = await one(
       pool,
@@ -251,7 +252,7 @@ let active = 0;
 /** Idle work in the existing scheduler; durable PostgreSQL leases survive process crashes. */
 export async function runIndexOnce(signal?: AbortSignal) {
   if (
-    !config.codeIntelligence.enabled ||
+    !codeIntelligenceEnabled() ||
     active >= config.codeIntelligence.concurrency
   )
     return false;

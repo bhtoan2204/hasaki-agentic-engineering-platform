@@ -1,3 +1,4 @@
+import { EvaluationBenchmarks } from "./EvaluationBenchmarks.tsx";
 import { useState, type ReactNode } from "react";
 import {
   Activity, AlertTriangle, Ban, Check, Coins, Cpu, Gauge, Hand, LineChart, Plug, Repeat, ShieldCheck, Sparkles, Timer, Users, Workflow, Wrench, type LucideIcon,
@@ -246,7 +247,8 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
       {tab === "quality" && (
         <>
           {ev && <HarnessEvaluation e={ev} />}
-          <EvalComparison />
+          <EvaluationBenchmarks />
+      <EvalComparison />
         </>
       )}
       {tab === "tools" && (
@@ -444,7 +446,7 @@ function EvalComparison() {
     <section className="card">
       <div className="card-head"><h4>{t("ins.bench")}</h4><span className="sub">{t("ins.benchSub")}</span></div>
       {!groups.length ? (
-        <div className="muted small">{t("ins.benchEmpty")} <span className="kbd">npm run bench -- --live --profiles=FAST,STANDARD,DEEP</span> <span className="kbd">--candidate=claude-cli</span></div>
+        <div className="muted small">{t("ins.benchEmpty")} <span className="kbd">npm run bench -- --suite=backend-v1</span> <span className="kbd">--repetitions=2</span></div>
       ) : (
         <div className="table-wrap">
           <table>

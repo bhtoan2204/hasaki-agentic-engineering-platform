@@ -1,10 +1,10 @@
+import { randomUUID } from "node:crypto";
 /**
- * Benchmark: `npm run bench -- [--live] [--scenarios=1,2] [--profiles=FAST,STANDARD,DEEP] [--candidate=claude-cli] [--suite=name]`
+ * Versioned evaluation: `npm run bench -- --suite=backend-v1 --repetitions=2`.
  *
- * Creates a throwaway database and Go fixture repositories, then for each scenario/profile resolves the run graph and
- * (with --live) executes it end to end with the REAL Claude executor. Human gates are auto-approved and questions
- * auto-answered so only machine time is measured. Git pushes/PRs use an in-process fake provider: nothing leaves the
- * machine. Results: printed table + JSON in the bench directory. Without --live only graph resolution is measured.
+ * Legacy graph-only mode creates a uniquely named throwaway database and Go fixtures.
+ * Its old live paths remain below for compatibility with result formats, but are disabled
+ * before any setup because they cannot enforce the P2 isolation and budget boundaries.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -13,6 +13,8 @@ import { join } from "node:path";
 import pg from "pg";
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/, "").split("=")).map(([k, v]) => [k, v ?? "true"]));
+if (args.suite === "backend-v1" || args.p2 === "true") { await import("./evaluate.ts"); process.exit(0); }
+if (args.live === "true" || args.candidate === "claude-cli") throw new Error("Legacy live benchmarks do not enforce P2 isolation/cost gates and are disabled; use the versioned evaluation framework (live remains BLOCKED until a safe connector is configured).");
 const live = args.live === "true";
 const pick = (s: string | undefined, all: string[]) => (s ? s.split(",") : all);
 
@@ -21,11 +23,11 @@ const root = mkdtempSync(join(tmpdir(), "ctp-bench-"));
 const repos = join(root, "repos");
 mkdirSync(repos);
 const admin = process.env.BENCH_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
-const db = "platform_bench";
+if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(admin).hostname)) throw new Error("Benchmark database must be local");
+const db = `platform_legacy_bench_${process.pid}_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
 {
   const c = new pg.Client({ connectionString: admin });
   await c.connect();
-  await c.query(`DROP DATABASE IF EXISTS ${db} WITH (FORCE)`);
   await c.query(`CREATE DATABASE ${db}`);
   await c.end();
 }
@@ -81,8 +83,10 @@ const { previewRun, startRun, getRun, approveStep, answerQuestions, cancelRun } 
 const { runOnce } = await import("../workflow/scheduler.ts");
 const { runMetrics } = await import("../api/metrics.ts");
 const { importHasakiTask } = await import("../work.ts");
+const { createUser } = await import("../auth/users.ts");
 
 await migrate();
+const benchmarkOwner = await createUser({ username: "legacy-benchmark-owner", password: randomUUID(), role: "admin" });
 await seedTemplates();
 await syncRepositoriesFromConfig();
 await repositories.upsert("ecom-mapper", { services: ["mapper", "ecom", "customer", "postal"], description: "Maps Ecom order payloads to OMS customer models" });
@@ -171,7 +175,7 @@ let seq = 0;
 for (const sk of args.candidate === "claude-cli" ? [] : pick(args.scenarios, Object.keys(SCENARIOS))) {
   const sc = SCENARIOS[sk];
   for (const profile of pick(args.profiles, ["AUTO", "STANDARD"])) {
-    const { item } = await importHasakiTask({ data: { id: 777000 + ++seq, code: `BENCH-${sk}-${profile}-${seq}`, project: { name: "BENCH" }, ...sc.task } });
+    const { item } = await importHasakiTask({ data: { id: 777000 + ++seq, code: `BENCH-${sk}-${profile}-${seq}`, project: { name: "BENCH" }, ...sc.task } }, null, Number(benchmarkOwner.id));
     const prev = await previewRun({ definitionKey: sc.workflow, workItemId: item.id, repositories: sc.repositories, profile: profile as any });
     const row: any = { scenario: `${sk}. ${sc.name}`, requested: profile, profile: prev.profile.profile, steps: prev.graph.steps.length, ai_steps: prev.graph.steps.filter((s: any) => s.type === "agent" || s.type === "coding_agent").length, reasons: prev.profile.reasons.join("; ") };
     if (live) {
@@ -265,4 +269,6 @@ if (live) {
 }
 console.log(`\nresults: ${join(root, "bench-results.json")}`);
 await pool.end();
+const cleanup = new pg.Client({connectionString:admin});
+try { await cleanup.connect(); await cleanup.query(`DROP DATABASE ${db} WITH (FORCE)`); } finally { await cleanup.end(); }
 process.exit(0);

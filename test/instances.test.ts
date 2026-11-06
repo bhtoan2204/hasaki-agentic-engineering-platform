@@ -1,5 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
@@ -7,7 +8,7 @@ import { join } from "node:path";
 import { hostname } from "node:os";
 import { config } from "../src/config.ts";
 import { persistentInstanceId } from "../src/instanceIdentity.ts";
-import { instanceHealth, registerInstance, instanceSession, startInstanceHeartbeat } from "../src/instances.ts";
+import { InstanceConflictError, instanceHealth, registerInstance, instanceSession, startInstanceHeartbeat } from "../src/instances.ts";
 import { pool, q, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { definitions } from "../src/workflow/definitions.ts";
@@ -173,6 +174,49 @@ test("registry rejects concurrent duplicate live IDs; replacement fences jobs; h
   assert.equal((await instanceHealth(config.instanceId)).health, "OFFLINE");
   assert.equal((await instanceHealth("unknown")).health, "UNKNOWN");
   await q(pool, "DELETE FROM platform_instances WHERE instance_id = $1", [config.instanceId]);
+});
+
+test("server startup waits once for an unclean exit without changing instance identity", async () => {
+  const offline = config.instance.offlineSeconds;
+  config.instance.offlineSeconds = 1;
+  let hb: Awaited<ReturnType<typeof startInstanceHeartbeat>> | undefined;
+  const waits: number[] = [];
+  try {
+    await registerInstance(config.instanceId, randomUUID());
+    hb = await startInstanceHeartbeat({ waitForPrevious: true, onWait: (seconds) => waits.push(seconds) });
+    assert.deepEqual(waits, [1]);
+    assert.equal((await one(pool, "SELECT session_id FROM platform_instances WHERE instance_id=$1", [config.instanceId]))!.session_id, instanceSession);
+  } finally {
+    await hb?.stop();
+    config.instance.offlineSeconds = offline;
+    await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
+  }
+});
+
+test("startup grace period never replaces a registration that keeps heartbeating", async () => {
+  const offline = config.instance.offlineSeconds;
+  config.instance.offlineSeconds = 1;
+  let pending = Promise.resolve();
+  const liveSession = randomUUID();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  try {
+    await registerInstance(config.instanceId, liveSession);
+    await assert.rejects(startInstanceHeartbeat({ waitForPrevious: true, onWait: () => {
+      timer = setInterval(() => {
+        pending = pending.then(async () => { await q(pool, "UPDATE platform_instances SET last_seen_at=now() WHERE instance_id=$1 AND session_id=$2", [config.instanceId, liveSession]); });
+      }, 100);
+    } }), InstanceConflictError);
+    assert.equal((await one(pool, "SELECT session_id FROM platform_instances WHERE instance_id=$1", [config.instanceId]))!.session_id, liveSession);
+  } finally {
+    clearInterval(timer);
+    await pending;
+    config.instance.offlineSeconds = offline;
+    await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
+  }
+  // A rejected startup must release the in-process guard for a later attempt.
+  const hb = await startInstanceHeartbeat();
+  await hb.stop();
+  await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
 });
 
 test("lost identity with existing local workspace records requires explicit administration", async () => {

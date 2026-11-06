@@ -249,3 +249,20 @@ test("P1 status is authenticated; reindex and cancellation require an administra
     assert.deepEqual((await admin.call("/api/repositories/index-status")).body, { enabled: false, repositories: [] });
   } finally { config.codeIntelligence.enabled = previous; }
 });
+
+test("P2 suites and evaluation results require authentication and preserve evaluation ownership",async()=>{
+ const previous=config.evaluation.enabled;config.evaluation.enabled=true;
+ try{
+  const admin=client(),a=client(),b=client();await admin.login('admin','admin-password');await a.login('membera','member-a-password');await b.login('memberb','member-b-password');
+  assert.equal((await client().call('/api/benchmark-suites')).status,401);
+  assert.equal((await a.call('/api/benchmark-suites/publish',{})).status,403);
+  const suite=await admin.call('/api/benchmark-suites/publish',{});assert.equal(suite.status,200);
+  const evaluation=await a.call('/api/evaluation-runs',{suite_id:suite.body.id,request_key:'http-evaluation',configuration:{mode:'dry_run',case_limit:1}});assert.equal(evaluation.status,200);
+  assert.equal((await b.call(`/api/evaluation-runs/${evaluation.body.id}`)).status,404);
+  assert.equal((await b.call(`/api/evaluation-runs/${evaluation.body.id}/start`,{})).status,404);
+  assert.equal((await b.call(`/api/evaluation-runs/${evaluation.body.id}/cancel`,{})).status,404);
+  assert.equal((await a.call(`/api/evaluation-runs/${evaluation.body.id}`)).status,200);
+  assert.equal((await a.call('/api/evaluation-runs',{suite_id:suite.body.id,request_key:'http-live',configuration:{mode:'live',provider:'claude'}})).status,403);
+  assert.equal((await a.call(`/api/evaluation-runs/${evaluation.body.id}/cancel`,{})).status,200);
+ }finally{config.evaluation.enabled=previous;}
+});
