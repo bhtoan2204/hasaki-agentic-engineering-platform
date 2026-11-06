@@ -93,10 +93,19 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
   const [repos, setRepos] = useState<string[]>(req?.recommended ?? run.selected_repositories ?? []);
   const [branch, setBranch] = useState<string>(req?.branch ?? "");
   const [branches, setBranches] = useState<Record<string, string>>(() => ({ ...(req?.branches ?? {}) }));
+  const [repoFilter, setRepoFilter] = useState("");
+  const allowed: string[] = req?.allowed ?? run.allowed_repositories ?? [];
+  const candidateNames = new Set<string>((req?.candidates ?? []).map((c: any) => c.repo));
+  // Every allowed repository the discovery did not suggest, plus anything already selected that is not a candidate
+  // (e.g. reused from an earlier run), so the reviewer can add or remove any repo, not only the suggested ones.
+  const others = [...new Set([...allowed, ...repos])].filter((r) => !candidateNames.has(r)).sort();
+  const f = repoFilter.trim().toLowerCase();
+  const shownOthers = f ? others.filter((r) => r.toLowerCase().includes(f) || repos.includes(r)) : others;
+  const toggleRepo = (r: string, on: boolean) => setRepos((cur) => (on ? [...new Set([...cur, r])] : cur.filter((x) => x !== r)));
   // "payment-fiserv: Nhánh split/8-channel-splitting  payment_gateway_global: Nhánh split/6-channel-splitting" pasted
   // into the common field fills the per-repository fields instead.
   const onCommon = (v: string) => {
-    const names: string[] = (req?.candidates ?? []).map((c: any) => c.repo);
+    const names: string[] = [...new Set([...(req?.candidates ?? []).map((c: any) => c.repo), ...(req?.allowed ?? run.allowed_repositories ?? [])])];
     const found: Record<string, string> = {};
     for (const m of v.matchAll(/([A-Za-z0-9._-]+)\s*:\s*(?:nhánh|branch)?\s*([A-Za-z0-9][A-Za-z0-9._\/-]*)/gi)) if (names.includes(m[1])) found[m[1]] = m[2];
     if (Object.keys(found).length) {
@@ -134,7 +143,7 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
           </div>
           {(req.candidates ?? []).map((c: any) => (
             <label key={c.repo} className="rv-repo-opt">
-              <input type="checkbox" checked={repos.includes(c.repo)} onChange={(e) => setRepos(e.target.checked ? [...repos, c.repo] : repos.filter((r) => r !== c.repo))} />
+              <input type="checkbox" checked={repos.includes(c.repo)} onChange={(e) => toggleRepo(c.repo, e.target.checked)} />
               <span style={{ minWidth: 0 }}>
                 <b>{c.repo}</b> <span className="muted small">{t("si.score", { n: c.score })}</span>
                 <br />
@@ -142,7 +151,23 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
               </span>
             </label>
           ))}
-          <div className="muted small">{t("si.allowed", { list: (req.allowed ?? run.allowed_repositories).join(", ") })}</div>
+          {others.length > 0 && (
+            <div className="rv-repo-more">
+              <div className="rv-repo-more-head">
+                <span className="small" style={{ fontWeight: 600, color: "var(--ink-2)" }}>{t("si.otherRepos", { n: others.length })}</span>
+                {others.length > 8 && <input className="sm" type="search" value={repoFilter} placeholder={t("si.filterRepos")} aria-label={t("si.filterRepos")} onChange={(e) => setRepoFilter(e.target.value)} />}
+              </div>
+              <div className="rv-repo-chips">
+                {shownOthers.map((r) => (
+                  <label key={r} className={`rv-repo-chip${repos.includes(r) ? " on" : ""}`}>
+                    <input type="checkbox" checked={repos.includes(r)} onChange={(e) => toggleRepo(r, e.target.checked)} />
+                    <span className="mono">{r}</span>
+                  </label>
+                ))}
+                {shownOthers.length === 0 && <span className="muted small">{t("si.noRepoMatch")}</span>}
+              </div>
+            </div>
+          )}
           {req.ask_branch && (
             <div className="si-branch">
               <span className="small" style={{ fontWeight: 600, color: "var(--ink-2)" }}>{t("si.branch")}</span>
