@@ -163,7 +163,9 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     ...(run.graph.knowledge ?? []),
   ];
   const pinned: Array<{ key: string; version: number }> = input.pending?.reexecute?.skills ?? [];
-  const res = resolveKnowledge(await knowledge.candidates(c, run.owner_id), {
+  // One instant for version selection (effective dates) and expiry, recorded in the snapshot for reproducibility.
+  const at = new Date();
+  const res = resolveKnowledge(await knowledge.candidates(c, run.owner_id, at), {
     organization: config.organization,
     project,
     repositories,
@@ -172,6 +174,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     stepType: step.type,
     text: requestText(input),
     explicit,
+    now: at,
   });
   // Skills selected for this re-execution, at the exact version pinned when it was requested.
   for (const p of pinned) {
@@ -244,11 +247,14 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
       reason: k.reason,
       content: k.content,
       metadata: k.metadata,
+      ...(k.effective_from ? { effective_from: k.effective_from } : {}),
     })),
     overridden: res.overridden,
     missing_explicit: explicit.filter((k) => !res.applied.some((a) => a.key === k)),
   };
   const hash = hashOf(content);
+  // The resolution instant decides which versions were in effect; it is recorded but not part of the content hash.
+  Object.assign(content, { resolved_at: at.toISOString() });
   const row = await one(c, "INSERT INTO context_snapshots (run_id, step_id, hash, content) VALUES ($1, $2, $3, $4) RETURNING id", [
     run.id,
     step.id,

@@ -225,6 +225,17 @@ Retry / re-execute from any step: downstream steps are invalidated (generation b
 Scheduling is PostgreSQL-only: `workflow_jobs` claimed with `FOR UPDATE SKIP LOCKED`, leases + heartbeats + fencing
 tokens; crashed workers' jobs are reaped and retried. Several processes may share the database.
 
+**Continuous learning**: when a run completes, the human decisions in it are analysed: answers, approval comments,
+re-run instructions and the BA ticket. Agent output is never analysed. Each detected rule change is stored as a
+reviewable proposal (UPDATE / SUPERSEDE / DEPRECATE / CREATE) with verbatim evidence and its impact on skills,
+repositories and workflows. Nothing changes until a reviewer approves it in Knowledge ▸ Change proposals.
+
+Approval versions the rule. It can be scoped (e.g. one project) and effective from a date. The old rule is
+superseded only where the new one applies, and its history stays readable. Affected skills get their own validated
+update proposals, and every approved change can be rolled back. Later runs resolve only the rule in effect, and each
+context snapshot records which version a run received. See
+[docs/architecture/knowledge-evolution.md](docs/architecture/knowledge-evolution.md).
+
 ## Safety
 
 - No `bypassPermissions`. Each agent step gets an explicit tool list and a PreToolUse/`canUseTool` policy

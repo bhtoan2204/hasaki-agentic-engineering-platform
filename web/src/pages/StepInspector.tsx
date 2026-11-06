@@ -838,7 +838,11 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
       {c.overridden?.length > 0 && (
         <>
           <h3>{t("si.overridden")}</h3>
-          {c.overridden.map((o: any) => <div key={o.key} className="small muted">✗ {t("si.overriddenBy", { key: o.key, version: o.version, by: o.by, conflict: o.conflict_key })}</div>)}
+          {c.overridden.map((o: any) => (
+            <div key={o.key} className="small muted">
+              ✗ {o.reason === "superseded" ? t("si.supersededBy", { key: o.key, version: o.version, by: o.by }) : o.reason === "expired" ? t("si.expiredRule", { key: o.key, version: o.version }) : t("si.overriddenBy", { key: o.key, version: o.version, by: o.by, conflict: o.conflict_key })}
+            </div>
+          ))}
         </>
       )}
       {c.missing_explicit?.length > 0 && <div className="errorbox small">{t("si.missing", { list: c.missing_explicit.join(", ") })}</div>}

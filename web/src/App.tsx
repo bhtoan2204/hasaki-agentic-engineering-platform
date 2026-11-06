@@ -161,7 +161,7 @@ export function App() {
       } else page = <WorkflowsPage />;
       break;
     case "knowledge":
-      page = <KnowledgePage itemKey={parts[1]} />;
+      page = <KnowledgePage itemKey={parts[1]} subKey={parts[2]} />;
       break;
     case "repositories":
       page = <RepositoriesPage name={parts[1]} />;

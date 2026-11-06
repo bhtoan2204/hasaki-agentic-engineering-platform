@@ -18,6 +18,8 @@ export interface KnowledgeInput {
   created_by?: string;
   /** Null is shared team knowledge. A number is that user's private item. */
   ownerId?: number | null;
+  /** The new version takes effect at this instant (ISO); null/absent = immediately. */
+  effective_from?: string | null;
 }
 
 function check(x: Partial<KnowledgeInput>) {
@@ -50,12 +52,20 @@ export const knowledge = {
     if (!item) return undefined;
     const versions = await q(db, "SELECT * FROM knowledge_versions WHERE item_id = $1 ORDER BY version DESC", [item.id]);
     const audit = await q(db, "SELECT * FROM knowledge_audit WHERE item_id = $1 ORDER BY id DESC LIMIT 100", [item.id]);
-    return { ...item, versions, audit };
+    // Supersession both ways, plus the version in effect now (a later approved version may take effect in the future).
+    const superseded_by = item.superseded_by ? ((await one(db, "SELECT key, title, enabled FROM knowledge_items WHERE id = $1", [item.superseded_by])) ?? null) : null;
+    const supersedes = await q(db, "SELECT key, title, enabled, superseded_at FROM knowledge_items WHERE superseded_by = $1 ORDER BY key", [item.id]);
+    const now = Date.now();
+    const effective_version =
+      versions.find((v: any) => v.version <= item.current_version && (!v.effective_from || new Date(v.effective_from).getTime() <= now))?.version ?? null;
+    return { ...item, versions, audit, superseded_by_item: superseded_by, supersedes, effective_version };
   },
 
-  async create(x: KnowledgeInput) {
+  /** `db`: run inside the caller's transaction (proposal approval), else a new one. */
+  async create(x: KnowledgeInput, db?: Db) {
     check(x);
-    return withTx(async (c) => {
+    const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
+    return run(async (c) => {
       const scopeRef = x.scope_type === "GLOBAL" ? "" : (x.scope_ref ?? "");
       const item = await one(
         c,
@@ -63,13 +73,14 @@ export const knowledge = {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10) RETURNING *`,
         [x.key, x.category, x.scope_type, scopeRef, x.title, x.conflict_key || null, x.priority ?? 0, x.enforced ?? false, x.enabled ?? true, x.ownerId ?? null],
       );
-      await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by) VALUES ($1, 1, $2, $3, $4, $5, $6)`, [
+      await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`, [
         item.id,
         x.content,
         json(x.applicability ?? {}),
         json(x.metadata ?? {}),
         x.change_note ?? "created",
         x.created_by ?? "",
+        x.effective_from ?? null,
       ]);
       await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'created', $2)", [item.id, json({ scope: x.scope_type, scope_ref: scopeRef })]);
       return knowledge.get(x.key, c, x.ownerId ?? null);
@@ -80,18 +91,19 @@ export const knowledge = {
    * Content/applicability/metadata changes create a new version (history is never rewritten);
    * item attribute changes (scope, enabled, priority...) are recorded in the audit log.
    */
-  async update(key: string, x: Partial<KnowledgeInput>, ownerId: number | null = null) {
+  async update(key: string, x: Partial<KnowledgeInput>, ownerId: number | null = null, db?: Db) {
     check(x);
-    return withTx(async (c) => {
+    const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
+    return run(async (c) => {
       const item = await one(c, "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE", [key, ownerId]);
       if (!item) throw new Error(`knowledge item "${key}" not found`);
       const cur = await one(c, "SELECT * FROM knowledge_versions WHERE item_id = $1 AND version = $2", [item.id, item.current_version]);
       const content = x.content ?? cur.content;
       const applicability = x.applicability ?? cur.applicability;
       const metadata = x.metadata ?? cur.metadata;
-      if (content !== cur.content || json(applicability) !== json(cur.applicability) || json(metadata) !== json(cur.metadata)) {
+      if (content !== cur.content || json(applicability) !== json(cur.applicability) || json(metadata) !== json(cur.metadata) || (x.effective_from ?? null) !== null) {
         const version = item.current_version + 1;
-        await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
+        await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [
           item.id,
           version,
           content,
@@ -99,9 +111,10 @@ export const knowledge = {
           json(metadata),
           x.change_note ?? "",
           x.created_by ?? "",
+          x.effective_from ?? null,
         ]);
         await q(c, "UPDATE knowledge_items SET current_version = $2, updated_at = now() WHERE id = $1", [item.id, version]);
-        await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'version', $2)", [item.id, json({ version, note: x.change_note ?? "" })]);
+        await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'version', $2)", [item.id, json({ version, note: x.change_note ?? "", ...(x.effective_from ? { effective_from: x.effective_from } : {}) })]);
       }
       const attrs = (["title", "scope_type", "scope_ref", "conflict_key", "priority", "enforced", "enabled"] as const).filter(
         (k) => x[k] !== undefined && x[k] !== item[k],
@@ -123,15 +136,23 @@ export const knowledge = {
   /**
    * Enabled items the run may see: shared knowledge plus that owner's private items.
    * Applicability scope (GLOBAL, REPOSITORY, …) is not visibility.
+   * Each item comes at the version IN EFFECT at `at`: the newest version up to current_version whose effective_from has
+   * passed (an approved rule dated in the future does not apply yet; an item with no version in effect is left out).
+   * `superseded_by` is the successor's key while that successor is enabled.
    */
-  candidates(db: Db = pool, ownerId?: number | null) {
+  candidates(db: Db = pool, ownerId?: number | null, at: Date = new Date()) {
     return q<KnowledgeCandidate>(
       db,
-      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced,
-              v.version, v.content, v.applicability, v.metadata
-         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
+      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at,
+              v.version, v.content, v.applicability, v.metadata, v.effective_from, s.key AS superseded_by
+         FROM knowledge_items i
+         JOIN LATERAL (
+              SELECT * FROM knowledge_versions kv
+               WHERE kv.item_id = i.id AND kv.version <= i.current_version AND (kv.effective_from IS NULL OR kv.effective_from <= $2)
+               ORDER BY kv.version DESC LIMIT 1) v ON true
+         LEFT JOIN knowledge_items s ON s.id = i.superseded_by AND s.enabled
         WHERE i.enabled AND (i.owner_id IS NULL OR ($1::bigint IS NOT NULL AND i.owner_id = $1))`,
-      [ownerId ?? null],
+      [ownerId ?? null, at],
     );
   },
 };

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  ArrowLeft, BookMarked, BookOpen, Building2, Code2, Eye, FileText, FolderGit2, FolderKanban, Globe, History, Landmark, Layers, Lock, Plus, Power,
+  ArrowLeft, BookMarked, BookOpen, Building2, Code2, Eye, FileText, FolderGit2, FolderKanban, Globe, History, Landmark, Layers, Lightbulb, Lock, Plus, Power,
   ScanSearch, ScrollText, Shield, Sparkles, SquarePen, Workflow, Footprints, Zap, type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { act, Badge, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Markdown, navigate, PageHeader, SearchInput, SkeletonRows, Tabs, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
+import { ProposalsPanel, ProposalStatus } from "./KnowledgeProposals.tsx";
 import "./Knowledge.css";
 
 const CATS = ["", "business_rule", "architecture_guideline", "coding_standard", "repository_convention", "domain_knowledge", "security_policy", "agent_skill", "task_memory"] as const;
@@ -52,8 +53,9 @@ const emptyDraft = (category = "business_rule"): Draft => ({
   applicability: "{}", metadata: category === "agent_skill" ? '{\n  "required_tools": ["Read", "Grep"],\n  "output_contract": ""\n}' : "{}", change_note: "",
 });
 
-export function KnowledgePage({ itemKey }: { itemKey?: string }) {
+export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: string }) {
   const { t } = useI18n();
+  const pendingProposals = useApi<any[]>("/api/knowledge-proposals?status=pending");
   const [cat, setCat] = useState("");
   const { data, error, loading, reload } = useApi<any[]>(`/api/knowledge${cat ? `?category=${cat}` : ""}`, [cat]);
   // Category counts need the unfiltered list; only fetched separately while a category filter is active.
@@ -69,6 +71,7 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
   const reloadAll = () => {
     reload();
     if (cat) all.reload();
+    pendingProposals.reload();
   };
   const items = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -87,6 +90,9 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
         subtitle={t("kn.subtitle")}
         actions={
           <>
+            <button className={itemKey === "~proposals" ? "" : "ghost"} onClick={() => navigate("/knowledge/~proposals")} title={t("kp.subtitle")}>
+              <Lightbulb size={15} />{t("kp.button")}{pendingProposals.data?.length ? <span className="kn-cat-count kp-count">{pendingProposals.data.length}</span> : null}
+            </button>
             <RepoImport onDone={reloadAll} />
             <button onClick={() => navigate("/knowledge/~new")}><Plus size={15} strokeWidth={2.2} />{t("kn.newItem")}</button>
           </>
@@ -150,7 +156,9 @@ export function KnowledgePage({ itemKey }: { itemKey?: string }) {
           )}
         </aside>
         <section className="kn-detail">
-          {itemKey ? (
+          {itemKey === "~proposals" ? (
+            <ProposalsPanel id={subKey} onChanged={reloadAll} />
+          ) : itemKey ? (
             <KnowledgeEditor key={itemKey} itemKey={itemKey} defaultCategory={cat || "business_rule"} onSaved={reloadAll} />
           ) : (
             <div className="card kn-placeholder">
@@ -325,6 +333,7 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
         {tab === "overview" && !isNew && cur?.metadata?.memory && <MemoryProvenance itemKey={item.key} m={cur.metadata.memory} onDone={reload} />}
+        {tab === "overview" && !isNew && <Evolution item={item} />}
         {tab === "overview" && !isNew && (
           <div className="kn-overview">
             <Section icon={FileText} title={item.category === "agent_skill" ? t("kn.skillInstructions") : t("kn.content")} aside={<span className="muted small">v{cur?.version ?? item.current_version}</span>}>
@@ -407,6 +416,7 @@ function KnowledgeEditor({ itemKey, defaultCategory, onSaved }: { itemKey: strin
                       <span className="grow" />
                       <button className={open ? "xs" : "xs ghost"} onClick={() => setViewVersion(open ? null : v.version)}>{open ? t("kn.hide") : t("kn.view")}</button>
                     </div>
+                    {v.effective_from && <div className="small kn-tl-note">{t("kp.effectiveOn", { date: time(v.effective_from) })}{v.version === item.effective_version ? "" : new Date(v.effective_from) > new Date() ? ` · ${t("kp.notYet")}` : ""}</div>}
                     {v.change_note && <div className="small kn-tl-note">{v.change_note}</div>}
                     {open && <div className="kn-content kn-tl-content"><Markdown text={v.content} /></div>}
                   </div>
@@ -484,6 +494,29 @@ function MemoryProvenance({ itemKey, m, onDone }: { itemKey: string; m: any; onD
           <input style={{ width: 180 }} placeholder={t("kn.reviewerPh")} value={by} onChange={(e) => setBy(e.target.value)} aria-label={t("kn.reviewerPh")} />
           <button className="sm ok" disabled={!by.trim()} onClick={() => decide("approve")}>{t("kn.approve")}</button>
           <button className="sm ghost" disabled={!by.trim()} onClick={() => decide("reject")}>{t("kn.reject")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Rule evolution at a glance: supersession both ways, a version waiting for its effective date, related proposals. */
+function Evolution({ item }: { item: any }) {
+  const { t } = useI18n();
+  const { data: props } = useApi<any[]>(`/api/knowledge-proposals?target=${encodeURIComponent(item.key)}`, [item.key]);
+  const waiting = item.effective_version != null && item.effective_version !== item.current_version;
+  const expired = item.expires_at && new Date(item.expires_at) <= new Date();
+  if (!item.superseded_by_item && !item.supersedes?.length && !waiting && !item.expires_at && !props?.length) return null;
+  return (
+    <div className="card kp-evo">
+      {item.superseded_by_item && <div className="kp-note kp-warn small"><History size={14} /> {t("kp.supersededBy")} <a className="mono" href={`#/knowledge/${item.superseded_by_item.key}`}>{item.superseded_by_item.key}</a> — {t("kp.supersededHint")}</div>}
+      {item.supersedes?.length > 0 && <div className="kp-note small">{t("kp.replaces")} {item.supersedes.map((x: any) => <a key={x.key} className="mono" href={`#/knowledge/${x.key}`}>{x.key} </a>)}</div>}
+      {waiting && <div className="kp-note small">{t("kp.waitingVersion", { current: item.current_version, effective: item.effective_version })}</div>}
+      {item.expires_at && <div className={`kp-note small${expired ? " kp-warn" : ""}`}>{t(expired ? "kp.expired" : "kp.expires", { date: time(item.expires_at) })}</div>}
+      {props && props.length > 0 && (
+        <div className="small">
+          <b>{t("kp.related")}</b>{" "}
+          {props.slice(0, 8).map((p) => <a key={p.id} className="kp-rel" href={`#/knowledge/~proposals/${p.id}`}>#{p.id} {p.change_type} <ProposalStatus s={p.status} /></a>)}
         </div>
       )}
     </div>

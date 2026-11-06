@@ -77,6 +77,17 @@ export interface Config {
     pollMs: number;
   };
   /** Agent context and capability shaping (single agent + skills + tools). */
+  /** Continuous learning (knowledge/learning.ts): change detection from completed runs → reviewable proposals. */
+  learning: {
+    /** Detect knowledge changes when a run completes (one tool-less completion per run that has human input). */
+    detectChanges: boolean;
+    /** Existing rules shown to the analyzer (most relevant first). */
+    maxRulesInPrompt: number;
+    /** Characters of human input (answers, comments, requirement) analysed per run. */
+    maxSourceChars: number;
+    /** After a rule change is approved, draft updates for the skills it affects (each needs its own approval). */
+    evolveSkills: boolean;
+  };
   agent: {
     /**
      * Claude Code settings layers loaded by agent steps. Default [] so skills come from ONE place, the platform
@@ -191,6 +202,7 @@ const defaults: Config = {
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 300,
   },
+  learning: { detectChanges: true, maxRulesInPrompt: 20, maxSourceChars: 6000, evolveSkills: true },
   agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
 
@@ -210,6 +222,7 @@ function load(): Config {
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },
     prodErrors: { ...defaults.prodErrors, ...(fromFile.prodErrors ?? {}) },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
+    learning: { ...defaults.learning, ...(fromFile.learning ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;

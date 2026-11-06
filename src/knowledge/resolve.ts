@@ -7,6 +7,12 @@
  *      among enforced items the BROADEST scope wins (an organisation-wide policy outranks a project one);
  *   2. otherwise the most specific scope;
  *   3. then higher `priority`, then higher version, then key (stable tiebreak).
+ *
+ * Rule evolution (see knowledge/proposals.ts): an item superseded by another (`superseded_by`) is dropped wherever its
+ * successor is itself applicable — the successor's scope, applicability and effective date decide, so a rule changed
+ * for one project keeps applying to the others. Expired items (`expires_at` passed) never apply. Enforced items are
+ * never dropped by supersession (security policy precedence). Version selection by effective date happens in the
+ * candidate query (knowledge.candidates): each candidate already is the version in effect.
  */
 
 export const SCOPES = ["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY", "WORKFLOW", "STEP"] as const;
@@ -47,6 +53,12 @@ export interface KnowledgeCandidate {
   content: string;
   applicability: Applicability;
   metadata: Record<string, unknown>;
+  /** Key of the item that supersedes this one (null/absent: not superseded). */
+  superseded_by?: string | null;
+  /** After this instant the item no longer applies (DEPRECATE with an end date). */
+  expires_at?: string | Date | null;
+  /** When the served version took effect (null: since it was created). */
+  effective_from?: string | Date | null;
 }
 
 export interface ResolutionContext {
@@ -59,11 +71,13 @@ export interface ResolutionContext {
   text: string;
   /** Keys assigned explicitly in the step config (`skills`, `knowledge`): always included if enabled. */
   explicit: string[];
+  /** Evaluation instant for expiry (default: now). */
+  now?: Date;
 }
 
 export interface Resolution {
   applied: Array<KnowledgeCandidate & { reason: string }>;
-  overridden: Array<{ key: string; version: number; by: string; conflict_key: string }>;
+  overridden: Array<{ key: string; version: number; by: string; conflict_key: string; reason?: "conflict" | "superseded" | "expired" }>;
 }
 
 const eqi = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -117,8 +131,14 @@ export function compareCandidates(a: KnowledgeCandidate, b: KnowledgeCandidate):
 }
 
 export function resolveKnowledge(candidates: KnowledgeCandidate[], ctx: ResolutionContext): Resolution {
-  const eligible: Array<KnowledgeCandidate & { reason: string }> = [];
+  const now = (ctx.now ?? new Date()).getTime();
+  let eligible: Array<KnowledgeCandidate & { reason: string }> = [];
+  const overridden: Resolution["overridden"] = [];
   for (const c of candidates) {
+    if (c.expires_at && new Date(c.expires_at).getTime() <= now) {
+      if (ctx.explicit.includes(c.key)) overridden.push({ key: c.key, version: c.version, by: "", conflict_key: c.conflict_key ?? "", reason: "expired" });
+      continue;
+    }
     if (ctx.explicit.includes(c.key)) eligible.push({ ...c, reason: "assigned to step" });
     else if (c.category !== "agent_skill" && scopeMatches(c, ctx) && applicabilityMatches(c.applicability, ctx))
       eligible.push({ ...c, reason: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""} scope` });
@@ -126,8 +146,12 @@ export function resolveKnowledge(candidates: KnowledgeCandidate[], ctx: Resoluti
       // Skills are opt-in: explicitly assigned, scoped narrower than GLOBAL, or restricted by applicability (repos, projects...).
       eligible.push({ ...c, reason: c.scope_type !== "GLOBAL" ? `skill scoped to ${c.scope_type}:${c.scope_ref}` : `skill for ${describeRestriction(c.applicability)}` });
   }
+  // Supersession: drop an item when its successor applies here too (never an enforced policy).
+  const eligibleKeys = new Set(eligible.map((c) => c.key));
+  const superseded = eligible.filter((c) => !c.enforced && c.superseded_by && eligibleKeys.has(c.superseded_by));
+  for (const c of superseded) overridden.push({ key: c.key, version: c.version, by: c.superseded_by!, conflict_key: c.conflict_key ?? "", reason: "superseded" });
+  eligible = eligible.filter((c) => !superseded.includes(c));
   const applied: Resolution["applied"] = [];
-  const overridden: Resolution["overridden"] = [];
   const groups = new Map<string, typeof eligible>();
   for (const c of eligible) {
     if (!c.conflict_key) applied.push(c);
@@ -136,7 +160,7 @@ export function resolveKnowledge(candidates: KnowledgeCandidate[], ctx: Resoluti
   for (const [ck, group] of groups) {
     group.sort(compareCandidates);
     applied.push(group[0]);
-    for (const loser of group.slice(1)) overridden.push({ key: loser.key, version: loser.version, by: group[0].key, conflict_key: ck });
+    for (const loser of group.slice(1)) overridden.push({ key: loser.key, version: loser.version, by: group[0].key, conflict_key: ck, reason: "conflict" });
   }
   // Stable presentation order: category, then scope (broad first), then key.
   applied.sort((a, b) => a.category.localeCompare(b.category) || rank(a.scope_type) - rank(b.scope_type) || a.key.localeCompare(b.key));

@@ -74,8 +74,10 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
   if (inline.length) {
     lines.push("", "## Applicable knowledge (platform-curated, trusted)");
     for (const k of inline) {
-      lines.push(`### [${k.category}] ${k.title} (${k.key} v${k.version}, ${k.reason})`, k.content.trim());
       const meta = k.metadata as any;
+      // An evolved rule says what it replaced: existing code may still implement the old one.
+      const evo = [meta?.evolution?.supersedes ? `supersedes ${meta.evolution.supersedes}` : "", k.effective_from ? `effective from ${new Date(k.effective_from).toISOString().slice(0, 10)}` : ""].filter(Boolean).join(", ");
+      lines.push(`### [${k.category}] ${k.title} (${k.key} v${k.version}, ${k.reason}${evo ? `; ${evo}` : ""})`, k.content.trim());
       if (k.category === "agent_skill" && meta?.output_contract) lines.push(`Skill output contract: ${meta.output_contract}`);
     }
   }

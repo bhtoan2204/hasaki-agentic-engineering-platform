@@ -10,6 +10,7 @@ import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
 import { extractRunMemory } from "../knowledge/memory.ts";
+import { detectKnowledgeChanges } from "../knowledge/learning.ts";
 import { storeRunSummary } from "../report/runSummary.ts";
 import { background } from "./background.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
@@ -116,6 +117,8 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
     afterCommit(() => background(`notify run ${run.id}`, () => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`)));
     // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
     if (to === "COMPLETED") afterCommit(() => background(`memory extraction for run ${run.id}`, () => extractRunMemory(run.id)));
+    // Continuous learning: human decisions of this run → reviewable knowledge-change proposals (never auto-applied).
+    if (to === "COMPLETED") afterCommit(() => background(`knowledge change detection for run ${run.id}`, () => detectKnowledgeChanges(run.id)));
   }
   // "What did this run do?" snapshot for the work item page (factual, from the run's own records; never throws).
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => background(`run ${run.id} summary`, () => storeRunSummary(run.id)));

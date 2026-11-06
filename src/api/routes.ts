@@ -18,6 +18,9 @@ import { assertQuestionsAccessible, audit, requireAdmin, requireArtifact, requir
 import { listUsers, createUser, setActive, setPassword } from "../auth/users.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { reviewMemory } from "../knowledge/memory.ts";
+import { approveProposal, getProposal, listProposals, rejectProposal, reviewScope, rollbackProposal } from "../knowledge/proposals.ts";
+import { detectKnowledgeChanges, proposeSkillUpdates } from "../knowledge/learning.ts";
+import { background } from "../workflow/background.ts";
 import { summarizeEval } from "../eval/summary.ts";
 import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
@@ -103,6 +106,29 @@ async function workflowOwner(c: Ctx, key: string): Promise<number | null> {
   await requireOwner(c.actor, Number(row.owner_id), support(c), "workflow", key);
   return Number(row.owner_id);
 }
+
+/** Read access: own proposals, shared ones (repository import), or any with admin support access. */
+async function readableProposal(c: Ctx, id: number) {
+  const p = must(await getProposal(id), "proposal");
+  if (p.owner_id != null && Number(p.owner_id) !== c.actor.id) await requireOwner(c.actor, Number(p.owner_id), support(c), "knowledge_proposal", String(id));
+  return p;
+}
+
+/**
+ * Review rights follow knowledge edit rights: a change that writes shared knowledge (shared target, or CREATE as
+ * shared) needs an admin; a change to the owner's private knowledge needs that owner (or admin support access).
+ */
+async function requireReviewer(c: Ctx, id: number, createsShared = false) {
+  await readableProposal(c, id);
+  const scope = must(await reviewScope(id), "proposal");
+  if (scope.writesShared || createsShared || scope.proposalOwner == null) requireAdmin(c.actor);
+  else await requireOwner(c.actor, scope.proposalOwner, support(c), "knowledge_proposal", String(id));
+}
+
+/** After a rule change is applied: draft updates for the skills it affects (background, each needs its own approval). */
+const evolveSkillsAfter = (row: any) => {
+  if (!row.parent_id && config.learning.evolveSkills) background(`skill evolution for proposal ${row.id}`, () => proposeSkillUpdates(Number(row.id)));
+};
 
 async function readableKnowledge(c: Ctx, key: string) {
   const requested = c.url.searchParams.get("owner");
@@ -282,6 +308,25 @@ export const routes: Route[] = [
     if (shared) requireAdmin(actor);
     return knowledge.create({ ...body, ownerId: shared ? null : actor.id, created_by: actor.username });
   }],
+  // Knowledge evolution: change proposals (detected from runs, skill updates, repository conflicts) and their review.
+  ["GET", /^\/api\/knowledge-proposals$/, (c) =>
+    listProposals({
+      ownerId: c.actor.id,
+      all: support(c),
+      status: c.url.searchParams.get("status") || undefined,
+      runId: c.url.searchParams.get("run") ? num(c.url.searchParams.get("run")!) : undefined,
+      targetKey: c.url.searchParams.get("target") || undefined,
+    })],
+  ["GET", /^\/api\/knowledge-proposals\/(\d+)$/, (c) => readableProposal(c, num(c.p[0]))],
+  ["POST", /^\/api\/knowledge-proposals\/(\d+)\/approve$/, async (c) => {
+    const id = num(c.p[0]);
+    await requireReviewer(c, id, c.body.shared === true);
+    return approveProposal(id, { by: c.actor.username, comment: c.body.comment, edits: c.body.edits, acceptCurrentVersion: c.body.accept_current_version === true, overrideValidation: c.body.override_validation === true, shared: c.body.shared === true }, evolveSkillsAfter);
+  }],
+  ["POST", /^\/api\/knowledge-proposals\/(\d+)\/reject$/, async (c) => (await requireReviewer(c, num(c.p[0])), rejectProposal(num(c.p[0]), { by: c.actor.username, comment: c.body.comment }))],
+  ["POST", /^\/api\/knowledge-proposals\/(\d+)\/rollback$/, async (c) => (await requireReviewer(c, num(c.p[0])), rollbackProposal(num(c.p[0]), { by: c.actor.username, comment: c.body.comment }))],
+  // Re-run change detection for one run (e.g. after answering more questions, or for a run that did not complete).
+  ["POST", /^\/api\/runs\/(\d+)\/learn$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), detectKnowledgeChanges(num(c.p[0]), { force: c.body.force === true }))],
   ["POST", /^\/api\/knowledge\/import-repos$/, ({ body, actor }) => (requireAdmin(actor), importFromRepositories({ dryRun: !!body.dry_run }))],
   [
     "POST",

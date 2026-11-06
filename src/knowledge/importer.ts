@@ -6,6 +6,7 @@ import { config } from "../config.ts";
 import { repositories, repoPath, type RepositoryRow } from "../repos/service.ts";
 import { knowledge, type KnowledgeInput } from "./service.ts";
 import { hashOf } from "../workflow/definitions.ts";
+import { createProposal } from "./proposals.ts";
 
 /**
  * Import the knowledge that already lives in the source repositories into the registry:
@@ -18,6 +19,10 @@ import { hashOf } from "../workflow/definitions.ts";
  * Identical skills found in several repositories become one item whose applicability lists those repositories.
  * Files that look like they contain credentials are skipped. Re-running creates new versions only for changed files.
  * Items whose source file disappeared from a scanned repository are disabled ("retired"), and re-enabled if it returns.
+ * Registry wins over a stale file: an item evolved through an approved proposal (metadata.evolution) is not overwritten.
+ * If its source file is unchanged since that evolution the registry version stays ("registry_newer"); if the file
+ * changed too, the file's text becomes a pending UPDATE proposal for a human to reconcile ("conflict"). Repository
+ * files are never written by the platform.
  */
 
 const MAX_CHARS = 60_000;
@@ -41,12 +46,14 @@ export interface ImportCandidate extends KnowledgeInput {
   source: { repo: string; path: string; sha256: string }[];
 }
 export interface ImportReport {
-  candidates: Array<{ key: string; title: string; category: string; scope: string; repos: string[]; chars: number; action: "create" | "update" | "unchanged" | "retire" }>;
+  candidates: Array<{ key: string; title: string; category: string; scope: string; repos: string[]; chars: number; action: "create" | "update" | "unchanged" | "retire" | "registry_newer" | "conflict"; proposal_id?: number }>;
   skipped: Array<{ path: string; reason: string }>;
   created: number;
   updated: number;
   unchanged: number;
   retired: number;
+  /** Evolved in the registry, repository file changed too: a proposal was opened instead of overwriting. */
+  conflicts: number;
 }
 
 const slug = (s: string) =>
@@ -301,7 +308,7 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
 /** Create/update registry items from the scan. Unchanged files create no new version. */
 export async function importFromRepositories(opts: { dryRun?: boolean } = {}): Promise<ImportReport> {
   const { candidates, skipped, scanned } = await scanRepositories();
-  const report: ImportReport = { candidates: [], skipped, created: 0, updated: 0, unchanged: 0, retired: 0 };
+  const report: ImportReport = { candidates: [], skipped, created: 0, updated: 0, unchanged: 0, retired: 0, conflicts: 0 };
   // Repositories without a description get the opening paragraph of their CLAUDE.md (improves discovery ranking).
   if (!opts.dryRun)
     for (const c of candidates.filter((x) => x.category === "repository_convention" && x.scope_type === "REPOSITORY" && /\.claude$/.test(x.key))) {
@@ -313,6 +320,32 @@ export async function importFromRepositories(opts: { dryRun?: boolean } = {}): P
     const { source, ...item } = c;
     const metadata = { ...(item.metadata ?? {}), source, imported_from_repository: true };
     const existing = await knowledge.get(c.key);
+    const evolution = existing?.versions[0]?.metadata?.evolution;
+    if (existing && evolution && existing.versions[0].content !== c.content) {
+      const fileUnchanged = hashOf(evolution.base_source ?? null) === hashOf(source);
+      const row: ImportReport["candidates"][number] = { key: c.key, title: c.title, category: c.category, scope: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""}`, repos: [...new Set(source.map((s) => s.repo))], chars: c.content.length, action: fileUnchanged ? "registry_newer" : "conflict" };
+      if (fileUnchanged) report.unchanged++;
+      else {
+        report.conflicts++;
+        if (!opts.dryRun) {
+          const r = await createProposal({
+            ownerId: existing.owner_id ?? null,
+            changeType: "UPDATE",
+            targetKey: c.key,
+            proposed: { content: c.content, scope_type: existing.scope_type, scope_ref: existing.scope_ref },
+            domain: c.category,
+            confidence: 0.5,
+            uncertainty: `the registry version came from proposal #${evolution.proposal_id}; the repository file changed afterwards — keep one, or merge both`,
+            evidence: source.map((s) => ({ source: "repository_file", ref: { repo: s.repo, path: s.path, sha256: s.sha256 }, author: "repository import", trust: "platform" as const, quote: c.content.slice(0, 300) })),
+            sourceKind: "repository_import",
+            createdBy: "repository import",
+          }).catch(() => null);
+          if (r?.proposal) row.proposal_id = Number(r.proposal.id);
+        }
+      }
+      report.candidates.push(row);
+      continue;
+    }
     let action: "create" | "update" | "unchanged" = "create";
     const wasRetired = !!existing && !existing.enabled && !!existing.versions[0]?.metadata?.retired_reason;
     if (existing) {

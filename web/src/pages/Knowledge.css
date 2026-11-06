@@ -122,3 +122,25 @@
   .kn-kv-row { grid-template-columns: minmax(0, 1fr) }
   .kn-head-time { width: 100% }
 }
+
+/* knowledge evolution: change proposals */
+.kp-count { margin-left: 2px; background: var(--brand); color: var(--surface) }
+.kp-filter { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px }
+.kp-filter .kn-cat { padding: 5px 11px; font-size: 12.5px }
+.kp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px }
+.kp-warn { color: var(--st-wait); background: var(--st-wait-bg) }
+.kp-note { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; padding: 7px 10px; border-radius: var(--r-sm); background: var(--surface-2); margin-bottom: 8px; overflow-wrap: anywhere }
+.kp-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3) }
+@media (max-width: 720px) { .kp-compare { grid-template-columns: minmax(0, 1fr) } }
+.kp-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; max-height: 360px; overflow: auto }
+.kp-diff { margin: 6px 0 0; padding: 8px 0; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; max-height: 420px; overflow: auto }
+.kp-diff > div { padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere }
+.kp-diff .is-add { background: color-mix(in srgb, var(--st-ok) 14%, transparent) }
+.kp-diff .is-del { background: color-mix(in srgb, var(--st-err) 14%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--st-err) 50%, transparent) }
+.kp-evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px }
+.kp-quote { margin: 4px 0 0; padding: 6px 10px; border-left: 3px solid var(--brand-400); background: var(--surface-2); border-radius: 0 var(--r-sm) var(--r-sm) 0; font-size: 12.5px; overflow-wrap: anywhere }
+.kp-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px }
+.kp-decide { margin-top: var(--sp-3) }
+.kp-review { margin-top: var(--sp-3) }
+.kp-evo { margin-bottom: var(--sp-3) }
+.kp-rel { display: inline-flex; gap: 4px; align-items: center; margin: 2px 8px 2px 0 }
