@@ -149,6 +149,9 @@ export function applyProfile(spec: WorkflowSpec, profile: Profile): { spec: Work
   const order = topoOrder(spec.steps);
   const coding = order.map((k) => spec.steps.find((s) => s.key === k)!).find((s) => s.type === "coding_agent");
   if (!coding) throw new ProfileNotApplicable("workflow has no coding step to fold analysis into");
+  // An approval-gated coding step is an optional follow-up (e.g. "fix the review findings"): the analysis before it is
+  // the workflow's purpose, not a preamble FAST may fold away.
+  if (coding.requires_approval) throw new ProfileNotApplicable(`coding step "${coding.key}" is an optional, approval-gated follow-up; its upstream analysis is the workflow's purpose`);
   const anc = ancestors(spec.steps, coding.key);
   const merged = spec.steps.filter((s) => anc.has(s.key) && s.type === "agent");
   const planApprovals = spec.steps.filter((s) => anc.has(s.key) && s.type === "human_approval" && !s.config.select_repositories);

@@ -52,15 +52,18 @@ export interface OcrGuide {
   repos: Array<{ repo: string; files: number; error?: string }>;
 }
 
-/** Scope + rules for each workspace branch vs `origin/<base>`, as one prompt section (bounded in size). */
-export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path: string }>, baseBranch: string): Promise<OcrGuide> {
+/**
+ * Scope + rules for each target vs `origin/<base>`, as one prompt section (bounded in size). A target is a run worktree
+ * (`to` = HEAD), or a repository's main checkout with `to` = the remote branch under review (read-only: only refs).
+ */
+export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path: string; to?: string }>, baseBranch: string): Promise<OcrGuide> {
   const bin = ocrBinary();
   if (!bin) return { available: false, text: "", repos: [] };
   const parts: string[] = [];
   const repos: OcrGuide["repos"] = [];
   for (const w of workspaces) {
     try {
-      const preview = await ocr(bin, w.path, ["delegate", "preview", "--from", `origin/${baseBranch}`, "--to", "HEAD"]);
+      const preview = await ocr(bin, w.path, ["delegate", "preview", "--from", `origin/${baseBranch}`, "--to", w.to ?? "HEAD"]);
       const files = parsePreview(preview).slice(0, MAX_FILES);
       repos.push({ repo: w.repo, files: files.length });
       parts.push(`### ${w.repo}\n\n${preview.trim()}`);
@@ -73,6 +76,24 @@ export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path
   let text = parts.join("\n\n");
   if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS) + "\n\n… (rules truncated)";
   return { available: true, text, repos };
+}
+
+/**
+ * Main checkouts of `repos` that have `origin/<branch>`, after refreshing that one remote ref (a fetch only updates
+ * refs; the working tree is never touched). Repositories without the branch are left out.
+ */
+export async function reviewedBranchTargets(repos: string[], branch: string) {
+  const { repositories, repoPath } = await import("../repos/service.ts");
+  const out: Array<{ repo: string; path: string; to: string }> = [];
+  for (const repo of repos) {
+    const reg = await repositories.get(repo);
+    const dir = reg ? repoPath(reg) : "";
+    if (!dir || !existsSync(dir)) continue;
+    await exec("git", ["-C", dir, "fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { timeout: 60_000 }).catch(() => {});
+    const has = await exec("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]).then(() => true, () => false);
+    if (has) out.push({ repo, path: dir, to: `origin/${branch}` });
+  }
+  return out;
 }
 
 /** How the review agent must use the OCR material (kept next to the material it governs). */

@@ -39,6 +39,7 @@ export const humanApprovalExecutor: StepExecutor = {
       if (cfg.auto_approve_preselected && preselected.length)
         return { kind: "completed", output: { approved: true, auto: true, repositories: preselected, selected_repositories: preselected } };
       const recommended: string[] = discovery?.recommended ?? preselected;
+      if (cfg.ask_branch) Object.assign(request, { ask_branch: true, branch: typeof ctx.input.run.inputs?.branch === "string" ? ctx.input.run.inputs.branch : "" });
       Object.assign(request, {
         select_repositories: true,
         candidates: discovery?.candidates ?? ctx.run.allowed_repositories.map((r) => ({ repo: r, score: 0, reasons: [] })),

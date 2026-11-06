@@ -91,9 +91,11 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
   const gate = step.approval?.gate && !step.approval?.granted;
   const [comment, setComment] = useState("");
   const [repos, setRepos] = useState<string[]>(req?.recommended ?? run.selected_repositories ?? []);
+  const [branch, setBranch] = useState<string>(req?.branch ?? "");
   const send = async (approve: boolean) => {
     const body: any = { comment };
     if (approve && req?.select_repositories) body.repositories = repos;
+    if (approve && req?.ask_branch) body.data = { branch: branch.trim() };
     const r = await act(() => api(`/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`, body), approve ? t("si.approved") : t("si.rejected"));
     if (r) onDone();
   };
@@ -128,6 +130,13 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
             </label>
           ))}
           <div className="muted small">{t("si.allowed", { list: (req.allowed ?? run.allowed_repositories).join(", ") })}</div>
+          {req.ask_branch && (
+            <label className="si-branch">
+              <span className="small" style={{ fontWeight: 600, color: "var(--ink-2)" }}>{t("si.branch")}</span>
+              <input className="mono" value={branch} placeholder="HSK-XXXXXXXX" onChange={(e) => setBranch(e.target.value)} />
+              <span className="muted small">{t("si.branchHint")}</span>
+            </label>
+          )}
         </div>
       )}
       {Object.entries(req?.outputs ?? {}).map(([k, v]) => (
@@ -136,13 +145,18 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
           <OutputView value={v} />
         </details>
       ))}
-      <textarea rows={2} placeholder={t("si.commentPh")} value={comment} onChange={(e) => setComment(e.target.value)} style={{ marginTop: 10, background: "var(--surface)" }} />
+      <textarea rows={2} placeholder={gate ? t("si.gateCommentPh") : t("si.commentPh")} value={comment} onChange={(e) => setComment(e.target.value)} style={{ marginTop: 10, background: "var(--surface)" }} />
       <div className="rv-consequence">
         <CheckCircle2 size={14} color="var(--st-ok)" /><span>{req?.select_repositories ? t("si.approveRepos", { n: repos.length }) : t("si.approveDoes")}</span>
         <XCircle size={14} color="var(--st-err)" /><span>{reexec ? t("si.rejectRedo", { step: reexec }) : t("si.rejectDoes")}</span>
       </div>
       <div className="rv-attn-actions">
         <button className="ok big" onClick={() => send(true)}><ShieldCheck size={16} /> {t("si.approve")}</button>
+        {gate && (
+          <button className="ghost" title={t("si.skipGateHint")} onClick={async () => (await act(() => api(`/api/runs/${run.id}/steps/${step.key}/skip`, { reason: comment || "skipped by user" }), t("si.skipped"))) && onDone()}>
+            {t("si.skipGate")}
+          </button>
+        )}
         <button className="danger" onClick={() => send(false)}><X size={15} /> {reexec ? t("si.rejectRedoBtn", { step: reexec }) : t("si.reject")}</button>
       </div>
     </section>

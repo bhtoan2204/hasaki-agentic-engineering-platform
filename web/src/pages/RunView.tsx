@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { agentKey } from "../agentProvider.tsx";
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import {
@@ -19,7 +19,59 @@ const STATUS_ORDER = ["COMPLETED", "RUNNING", "RETRYING", "READY", "WAITING_INPU
 const byOrder = (a: string, b: string) => (STATUS_ORDER.indexOf(a) + 1 || 99) - (STATUS_ORDER.indexOf(b) + 1 || 99);
 
 /** Live execution graph of one run + inspector. Route: #/runs/:id[/:stepKey | /~changes]. */
+const PANE_KEY = "rv.inspectorWidth";
+const PANE_MIN = 360;
+const paneMax = () => Math.round(window.innerWidth * 0.85);
+
+/** Width of the step inspector, set by dragging its left edge (or the arrow keys); remembered per browser. */
+function useInspectorWidth() {
+  const [width, setWidth] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem(PANE_KEY));
+      return v >= PANE_MIN ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  const latest = useRef(width);
+  latest.current = width;
+  const save = (w: number | null) => {
+    try {
+      if (w == null) localStorage.removeItem(PANE_KEY);
+      else localStorage.setItem(PANE_KEY, String(Math.round(w)));
+    } catch {}
+  };
+  const clamp = (w: number) => Math.min(paneMax(), Math.max(PANE_MIN, w));
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const pane = e.currentTarget.nextElementSibling as HTMLElement | null;
+    if (!pane) return;
+    e.preventDefault();
+    const startX = e.clientX, startW = pane.getBoundingClientRect().width;
+    document.body.classList.add("rv-resizing");
+    const move = (ev: PointerEvent) => setWidth(clamp(startW + (startX - ev.clientX)));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("rv-resizing");
+      save(latest.current);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const pane = e.currentTarget.nextElementSibling as HTMLElement | null;
+    const w = clamp((latest.current ?? pane?.getBoundingClientRect().width ?? 560) + (e.key === "ArrowLeft" ? 40 : -40));
+    setWidth(w);
+    save(w);
+  };
+  const reset = () => (setWidth(null), save(null));
+  return { width, onPointerDown, onKeyDown, reset };
+}
+
 export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
+  const pane = useInspectorWidth();
   const { t, status } = useI18n();
   const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
   const [tick, setTick] = useState(0);
@@ -200,7 +252,21 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
-        <aside className={stepKey === "~changes" ? "inspector wide rv-inspector" : "inspector rv-inspector"}>
+        <div
+          className="rv-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t("rv.resize")}
+          title={t("rv.resize")}
+          tabIndex={0}
+          onPointerDown={pane.onPointerDown}
+          onKeyDown={pane.onKeyDown}
+          onDoubleClick={pane.reset}
+        />
+        <aside
+          className={`${stepKey === "~changes" ? "inspector wide rv-inspector" : "inspector rv-inspector"}${pane.width ? " sized" : ""}`}
+          style={pane.width ? ({ ["--rv-pane-w" as any]: `${pane.width}px` } as React.CSSProperties) : undefined}
+        >
           {stepKey === "~changes" ? (
             <div className="rv-pane"><Changes run={run} tick={tick} onChanged={reload} /></div>
           ) : stepKey ? (

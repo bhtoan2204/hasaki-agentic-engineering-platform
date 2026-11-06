@@ -35,8 +35,10 @@ const RunIf = z.object({
   step: z.string(),
   /** Dot path into that step's output; default "result". */
   path: z.string().optional(),
-  equals: z.unknown(),
-});
+  equals: z.unknown().optional(),
+  /** Match on the step's final status instead of its output (e.g. "COMPLETED": run only if that step ran). */
+  status: z.enum(["COMPLETED", "SKIPPED"]).optional(),
+}).refine((r) => r.status !== undefined || "equals" in r, { message: "run_if needs `equals` (output match) or `status`" });
 
 export const StepSpec = z.object({
   key: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "step key must be lowercase [a-z0-9_-]"),
@@ -105,7 +107,7 @@ export interface StepRow {
   position: number;
   depends_on: string[];
   config: Record<string, any>;
-  run_if: { step: string; path?: string; equals: unknown } | null;
+  run_if: { step: string; path?: string; equals: unknown; status?: "COMPLETED" | "SKIPPED" } | null;
   requires_approval: boolean;
   max_attempts: number;
   retry_backoff_s: number;

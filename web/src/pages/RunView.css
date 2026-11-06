@@ -214,6 +214,29 @@
   .rv-kv { grid-template-columns: 1fr; gap: 2px 0 } .rv-kv > :nth-child(even) { margin-bottom: 6px }
   .rv-live { margin-left: 0 }
   .rv-tl-row { grid-template-columns: 1fr }
+  .rv-resize { display: none } .inspector.rv-inspector.sized { width: auto; max-width: none }
 }
 .rv-headrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
 .rv-attn-actions button { white-space: normal; text-align: left }
+
+/* Resizable inspector: drag the handle on its left edge (double-click resets, arrow keys nudge). */
+.rv-resize { flex: none; width: 6px; margin-right: -3px; position: relative; z-index: 5; cursor: col-resize; background: transparent; touch-action: none }
+.rv-resize::after { content: ""; position: absolute; inset: 0 2px; border-radius: 2px; background: transparent; transition: background .15s }
+.rv-resize:hover::after, .rv-resize:focus-visible::after, body.rv-resizing .rv-resize::after { background: var(--brand) }
+.rv-resize:focus-visible { outline: none }
+.inspector.rv-inspector.sized { width: var(--rv-pane-w); max-width: 85vw }
+body.rv-resizing { cursor: col-resize; user-select: none }
+body.rv-resizing .react-flow { pointer-events: none }
+
+/* Tabs stay on one line (scroll sideways when narrow) so the sticky bar never grows over the content. */
+.si-body > .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; box-shadow: 0 8px 8px -8px color-mix(in srgb, var(--ink) 25%, transparent) }
+.si-body > .tabs { gap: 0 } .si-body > .tabs .tab { flex: none; white-space: nowrap; padding: 8px 9px }
+
+/* Tables inside the inspector fit its width: cells wrap (long paths, long issues) instead of running off the edge. */
+.rv-inspector table, .rv-inspector .md table { width: 100%; max-width: 100% }
+.rv-inspector td { overflow-wrap: anywhere }
+.rv-inspector th { white-space: normal }
+/* When the tab row is wider than the pane, fade its right edge so the hidden tabs read as "scroll for more". */
+.si-body > .tabs { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); padding-right: 24px }
+
+.si-branch { display: flex; flex-direction: column; gap: 4px; margin-top: 10px }

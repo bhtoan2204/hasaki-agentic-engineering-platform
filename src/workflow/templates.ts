@@ -42,6 +42,20 @@ const IMPLEMENT = {
   output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }",
 };
 
+/** Code review follow-up: fix what the review found, on the reviewed branch. */
+const FIX_FROM_REVIEW = {
+  instructions:
+    "Fix the findings of this run's code review. Read the full outputs of the analyze, architecture and security steps with " +
+    "read_step_output. The approval comment on this step (if any) says which findings to fix or skip; without one, fix the " +
+    "high and medium severity findings and leave low ones as not done. Verify each finding in the code before changing it: " +
+    "if it is not real, do not change code, list it under not_fixed with the reason. Call prepare_branch for each repository " +
+    "you change: when the run reviewed a branch, you get that branch and commit on top of it (never rewrite its history). " +
+    "Make the smallest correct change, add or update a test where it proves the fix, run the relevant build/tests, commit with " +
+    "the platform commit convention. Do not push: a later step opens the pull request. Finish by calling submit_result with " +
+    "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }.",
+  output_contract: "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { [repo]: { title, summary, decisions } }, verification }",
+};
+
 const REVIEW = {
   instructions:
     "Review the diff of every workspace branch against origin/$BASE_BRANCH (git diff, read-only). Check correctness, the " +
@@ -157,10 +171,10 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "code-review",
     spec: {
       name: "Code Review",
-      description: "Repository / branch selection → code analysis → architecture validation → security review → review report (no PR)",
+      description: "Repository / branch selection → code analysis (OpenCodeReview rules) → architecture → security → review report → optional: fix the findings on the reviewed branch → tests → PR",
       inputs: {
         repositories: { description: "repositories to review (optional: when empty, the run asks you to pick them)", required: false },
-        branch: { description: "branch to review against the base branch (empty = review the base branch itself)", required: false },
+        branch: { description: "branch to review against the base branch (empty = review the base branch itself); fixes are committed on it", required: false },
         focus: { description: "what to focus on", required: false },
       },
       steps: [
@@ -169,7 +183,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           key: "select",
           type: "human_approval",
           name: "Repository / PR Selection",
-          config: { message: "Chọn repo cần review cho lần chạy này.", select_repositories: true, auto_approve_preselected: true },
+          config: { message: "Chọn repo và branch cần review cho lần chạy này.", select_repositories: true, ask_branch: true, auto_approve_preselected: true },
         },
         {
           key: "analyze",
@@ -181,6 +195,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
               "Review the selected repositories (read-only). If inputs.branch is set, review `git diff origin/$BASE_BRANCH...origin/<branch>`; " +
               "otherwise review the areas named in inputs.focus. Report correctness and maintainability issues.",
             output_contract: "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
+            open_code_review: true,
           },
         },
         {
@@ -211,6 +226,11 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["architecture", "security"],
           config: { action: "publish_report", from: ["analyze", "architecture", "security"], title: "Code review report" },
         },
+        // Optional follow-up: approve to let the agent fix the review findings (the approval comment says which ones);
+        // skip it to end with the report only — tests and PR then have nothing to do and finish without changes.
+        { key: "fix", type: "coding_agent", name: "Fix Review Findings", depends_on: ["report"], requires_approval: true, config: FIX_FROM_REVIEW },
+        { key: "fix_test", type: "command", name: "Testing", depends_on: ["fix"], run_if: { step: "fix", status: "COMPLETED" }, config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
+        { key: "fix_pr", type: "git_pull_request", name: "Pull Request", depends_on: ["fix_test"], run_if: { step: "fix", status: "COMPLETED" }, config: { mode: "approval", content_from: "fix" } },
       ],
     },
   },

@@ -39,9 +39,13 @@ export function normalizeBranchMap(v: unknown, baseBranch: string): BranchMap | 
   return Object.keys(out).length ? out : null;
 }
 
-/** Branch to use for `repo` in a run: per-repo override, then "*", then the run's own branch. */
+/**
+ * Branch to use for `repo` in a run: per-repo override, then "*", then `inputs.branch` (the branch a code review run
+ * reviewed — its fixes are committed on top of it), then the run's own branch.
+ */
 export function branchFor(run: { branch: string; inputs?: Record<string, any> | null }, repo: string): { branch: string; existing: boolean } {
   const m = (run.inputs?.branches ?? null) as BranchMap | null;
-  const b = m?.[repo] ?? m?.["*"];
+  const reviewed = typeof run.inputs?.branch === "string" && run.inputs.branch.trim() ? run.inputs.branch.trim() : undefined;
+  const b = m?.[repo] ?? m?.["*"] ?? reviewed;
   return b ? { branch: b, existing: true } : { branch: run.branch, existing: false };
 }

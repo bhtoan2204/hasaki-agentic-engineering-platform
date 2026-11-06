@@ -142,6 +142,7 @@ async function cancelStepJobs(c: Db, stepId: number, reason: string): Promise<nu
 
 function runIfMatches(runIf: NonNullable<StepRow["run_if"]>, byKey: Map<string, StepRow>) {
   const src = byKey.get(runIf.step);
+  if (runIf.status) return src?.status === runIf.status;
   if (!src || src.status !== "COMPLETED") return false;
   return JSON.stringify(getPath(src.output, runIf.path ?? "result")) === JSON.stringify(runIf.equals);
 }
@@ -655,6 +656,18 @@ export async function approveStep(runId: number, stepKey: string, opts: { commen
         repos = opts.repositories ?? s.approval?.request?.recommended ?? run.selected_repositories;
         if (!repos?.length) throw new EngineError("select at least one repository", 400);
         await setSelectedRepositories(c, run, repos);
+      }
+      // Branch to review (and to commit fixes on), entered with the repositories. Empty = review the base branch.
+      const branch = typeof (opts.data as any)?.branch === "string" ? String((opts.data as any).branch).trim().replace(/^origin\//, "") : null;
+      if (s.config.ask_branch && branch !== null) {
+        if (branch) {
+          try {
+            normalizeBranchMap({ "*": branch }, config.baseBranch);
+          } catch (e) {
+            throw new EngineError((e as Error).message, 400);
+          }
+        }
+        await q(c, "UPDATE workflow_runs SET inputs = coalesce(inputs, '{}'::jsonb) || jsonb_build_object('branch', $2::text), updated_at = now() WHERE id = $1", [runId, branch || null]);
       }
       const output = { approved: true, comment: decision.comment, by: decision.by, ...(repos ? { repositories: repos } : {}) };
       if (s.current_attempt_id)

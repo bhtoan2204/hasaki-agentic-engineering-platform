@@ -24,6 +24,7 @@ import {
   startPendingRun,
   stepDetail,
   stopStep,
+  skipStep,
   sendFeedback,
   startRun,
 } from "../src/workflow/engine.ts";
@@ -295,8 +296,12 @@ test("Scenario D: code review workflow without a work item stores findings, no P
   assert.equal(run.work_item_id, null);
   assert.equal(run.branch, `u${run.owner_id}-run-${run.id}`);
   await drain();
+  assert.equal((await stepOf(run.id, "fix")).status, "WAITING_APPROVAL", "after the report the run offers to fix the findings");
+  await skipStep(run.id, "fix", "report only");
+  await drain();
   const d = await runDetail(run.id);
-  assert.equal(d.status, "COMPLETED");
+  assert.equal(d.status, "COMPLETED", "skipping the fix ends the run with the report only");
+  assert.deepEqual(["fix_test", "fix_pr"].map((k) => d.steps.find((x) => x.key === k)!.status), ["SKIPPED", "SKIPPED"], "no test/PR questions when nothing was fixed");
   const report = d.steps.find((s) => s.key === "report")!;
   assert.equal(report.output.findings_count, 2);
   const art = await one(pool, "SELECT * FROM workflow_artifacts WHERE id = $1", [report.output.report_artifact_id]);
@@ -1826,4 +1831,39 @@ test("code-review without repositories asks which to review (instead of failing)
   assert.equal(sel.status, "COMPLETED", "repositories passed at start: no question");
   assert.equal(sel.output.auto, true);
   assert.deepEqual((await getRun(given.id)).selected_repositories, ["oms-api"]);
+});
+
+
+test("code review → fix: branch chosen with the repositories, fixes approved with a note, committed on the reviewed branch", async () => {
+  const { branchFor } = await import("../src/workflow/branches.ts");
+  scripts.analyze = () => ({ kind: "completed", output: { summary: "2 issues", findings: [{ severity: "high", repo: "oms-api", file: "a.go", line: 3, issue: "nil deref", suggestion: "check" }, { severity: "low", repo: "oms-api", file: "b.go", line: 1, issue: "naming", suggestion: "rename" }] } });
+  scripts.architecture = () => ({ kind: "completed", output: { summary: "fine", violations: [] } });
+  scripts.security = () => ({ kind: "completed", output: { summary: "none", findings: [] } });
+  let seenNote = "", seenBranch = "";
+  scripts.fix = (ctx) => {
+    seenNote = String(ctx.input.approval?.comment ?? "");
+    seenBranch = branchFor(ctx.run, "oms-api").branch;
+    return { kind: "completed", output: { summary: "fixed the nil deref", fixed: [{ finding: "nil deref", repo: "oms-api", file: "a.go", change: "guard nil" }], not_fixed: [{ finding: "naming", reason: "low severity" }] } };
+  };
+  const run = await startRun({ definitionKey: "code-review", inputs: { focus: "history" } });
+  await drain();
+  const sel = await stepOf(run.id, "select");
+  assert.equal(sel.approval?.request?.ask_branch, true, "the selection also asks for the branch to review");
+  await assert.rejects(approveStep(run.id, "select", { repositories: ["oms-api"], data: { branch: "release/prod" } }), /base branch/);
+  await approveStep(run.id, "select", { repositories: ["oms-api"], data: { branch: "origin/HSK-G391U53I" } });
+  assert.equal((await getRun(run.id)).inputs.branch, "HSK-G391U53I", "origin/ prefix stripped, stored as the reviewed branch");
+  await drain();
+  assert.equal((await stepOf(run.id, "fix")).status, "WAITING_APPROVAL");
+  await approveStep(run.id, "fix", { comment: "chỉ sửa finding nil deref" });
+  await drain();
+  assert.equal(seenNote, "chỉ sửa finding nil deref", "the approval note reaches the fixing agent");
+  assert.equal(seenBranch, "HSK-G391U53I", "fixes are committed on the reviewed branch, not a new one");
+  assert.equal((await stepOf(run.id, "fix_pr")).status, "WAITING_APPROVAL", "the PR still needs the developer's approval");
+  await approveStep(run.id, "fix_pr", {});
+  await drain();
+  const d = await runDetail(run.id);
+  assert.equal(d.status, "COMPLETED");
+  const { getRunSummary } = await import("../src/report/runSummary.ts");
+  const fix = (await getRunSummary(run.id)).steps.find((x) => x.key === "fix")!;
+  assert.deepEqual(fix.lists.map((l) => l.items[0]), ["nil deref (a.go) → guard nil", "naming — low severity"]);
 });

@@ -62,6 +62,8 @@ const LIST_FIELDS: Array<[string, { vi: string; en: string }]> = [
   ["root_cause", { vi: "Nguyên nhân gốc", en: "Root cause" }],
   ["findings", { vi: "Phát hiện", en: "Findings" }],
   ["changes", { vi: "Thay đổi", en: "Changes" }],
+  ["fixed", { vi: "Đã sửa", en: "Fixed" }],
+  ["not_fixed", { vi: "Không sửa (lý do)", en: "Not fixed (why)" }],
   ["tests", { vi: "Kiểm thử", en: "Tests" }],
   ["verification", { vi: "Xác minh", en: "Verification" }],
   ["risks", { vi: "Rủi ro", en: "Risks" }],
@@ -78,10 +80,11 @@ function itemText(x: unknown): string {
   if (typeof x === "string") return clip(x.trim());
   if (typeof x !== "object") return String(x);
   const o = x as Record<string, unknown>;
-  const main = [o.issue, o.text, o.title, o.description, o.summary, o.requirement, o.risk, o.change, o.name, o.what].find((v) => typeof v === "string" && v.trim()) as string | undefined;
+  const main = [o.finding, o.issue, o.text, o.title, o.description, o.summary, o.requirement, o.risk, o.change, o.name, o.what].find((v) => typeof v === "string" && v.trim()) as string | undefined;
   const where = typeof o.file === "string" ? `${o.file}${o.line ? `:${o.line}` : ""}` : typeof o.path === "string" ? o.path : "";
   const sev = typeof o.severity === "string" ? `[${o.severity}] ` : "";
-  if (main) return clip(`${sev}${main}${where ? ` (${where})` : ""}`);
+  const extra = typeof o.change === "string" ? ` → ${o.change}` : typeof o.reason === "string" ? ` — ${o.reason}` : "";
+  if (main) return clip(`${sev}${main}${where ? ` (${where})` : ""}${extra}`);
   return clip(JSON.stringify(o), 300);
 }
 
