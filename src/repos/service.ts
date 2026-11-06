@@ -54,10 +54,13 @@ export const repositories = {
    * or every such repository when the project has no mapping.
    */
   async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
-    const rows = await q<RepositoryRow>(db, "SELECT * FROM repositories WHERE enabled AND $1 = ANY(allowed_actions) ORDER BY name", [action]);
+    const all = await q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+    const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action));
     const p = project.trim().toLowerCase();
-    const mapped = rows.filter((r) => r.projects.some((x) => x.toLowerCase() === p));
-    return (p && mapped.length ? mapped : rows).map((r) => r.name);
+    const maps = (r: RepositoryRow) => r.projects.some((x) => x.toLowerCase() === p);
+    // A known project never widens to every repository, even when all of its repositories are disabled right now.
+    if (p && all.some(maps)) return rows.filter(maps).map((r) => r.name);
+    return rows.map((r) => r.name);
   },
 };
 
@@ -84,8 +87,12 @@ export function expandRepoEntry(rel: string): string[] {
 }
 
 /**
- * Register git repositories from config.projects (entries may be repos or group folders) and from reposRoot (one level,
- * plus group folders). Never overwrites user edits; entries that are not git repositories are disabled, not deleted.
+ * Register git repositories from config.projects only (entries may be repos or group folders). Other checkouts under
+ * reposRoot (tools, plugins, personal projects) are never registered. Never overwrites user edits.
+ *
+ * The registry lives in a database that several machines may share, each with its own reposRoot. A repository missing
+ * from THIS machine is therefore left alone (it may exist on another one); only an entry that exists here but is not a
+ * git repository (a group folder registered by an old sync) is disabled.
  */
 export async function syncRepositoriesFromConfig() {
   const found = new Map<string, Set<string>>(); // relative path -> projects
@@ -94,7 +101,6 @@ export async function syncRepositoriesFromConfig() {
     if (project) s.add(project);
   };
   for (const [project, entries] of Object.entries(config.projects)) for (const e of entries) for (const rel of expandRepoEntry(e)) add(rel, project);
-  if (existsSync(config.reposRoot)) for (const d of readdirSync(config.reposRoot)) for (const rel of expandRepoEntry(d)) add(rel);
   const taken = new Map<string, string>();
   for (const [rel, projects] of found) {
     let name = rel.split("/").pop()!;
@@ -112,7 +118,7 @@ export async function syncRepositoriesFromConfig() {
     }
   }
   for (const r of await repositories.list())
-    if (r.enabled && !isGit(r.path || r.name)) {
+    if (r.enabled && existsSync(join(config.reposRoot, r.path || r.name)) && !isGit(r.path || r.name)) {
       await repositories.upsert(r.name, { enabled: false, description: r.description || `disabled: ${r.path || r.name} is not a git repository under reposRoot` });
       console.log(`repository ${r.name}: ${r.path || r.name} is not a git repository — disabled`);
     }

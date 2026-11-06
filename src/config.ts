@@ -48,9 +48,11 @@ export interface Config {
   databaseUrl: string;
   /**
    * Local PostgreSQL pool. Default 10 clients is enough for one user and a few workflows.
-   * Override in config.json (`database`) or with DATABASE_POOL_MAX / DATABASE_CONNECTION_TIMEOUT_MS.
+   * Override in config.json (`database`) or with DATABASE_POOL_MAX / DATABASE_CONNECTION_TIMEOUT_MS /
+   * DATABASE_POOL_MIN / DATABASE_IDLE_TIMEOUT_MS. The defaults favour a remote database (shared RDS over VPN): a new
+   * TLS connection costs several round trips, so a handful of clients stay open instead of closing after 10 s idle.
    */
-  database: { poolMax: number; connectionTimeoutMillis: number };
+  database: { poolMax: number; poolMin: number; connectionTimeoutMillis: number; idleTimeoutMillis: number };
   /** Organization name used for ORGANIZATION-scoped knowledge. */
   organization: string;
   /** Durable workflow scheduler. */
@@ -157,9 +159,9 @@ const defaults: Config = {
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
-  database: { poolMax: 10, connectionTimeoutMillis: 5000 },
+  database: { poolMax: 10, poolMin: 4, connectionTimeoutMillis: 15000, idleTimeoutMillis: 300000 },
   organization: "hasaki",
-  scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 60, heartbeatSeconds: 10, pollMs: 1000 },
+  scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 120, heartbeatSeconds: 10, pollMs: 1000 },
   jira: { baseUrl: "", user: "", token: "" },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
   vault: { baseUrl: "https://vault-qc-v2.hasaki.dev" },
@@ -208,8 +210,11 @@ function load(): Config {
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
     poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),
+    poolMin: Math.max(0, Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0),
     connectionTimeoutMillis: positiveInt("database.connectionTimeoutMillis", process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? cfg.database.connectionTimeoutMillis),
+    idleTimeoutMillis: positiveInt("database.idleTimeoutMillis", process.env.DATABASE_IDLE_TIMEOUT_MS ?? cfg.database.idleTimeoutMillis),
   };
+  cfg.database.poolMin = Math.min(cfg.database.poolMin, cfg.database.poolMax);
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
   cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;

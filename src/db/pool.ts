@@ -7,7 +7,12 @@ pg.types.setTypeParser(20, (v) => Number(v));
 export const pool = new pg.Pool({
   connectionString: config.databaseUrl,
   max: config.database.poolMax,
+  min: config.database.poolMin,
   connectionTimeoutMillis: config.database.connectionTimeoutMillis,
+  idleTimeoutMillis: config.database.idleTimeoutMillis,
+  // TCP keepalive so a VPN/NAT hop does not silently drop a long-idle client (the next query would then hang).
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 30000,
 });
 // Idle clients can error after a restart or network blip. Log the message only — never the connection string.
 pool.on("error", (err) => console.error("postgres idle client error:", err.message));

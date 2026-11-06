@@ -13,19 +13,25 @@ type Client = { res: ServerResponse; runId: number | null; userId: number; role:
 const clients = new Set<Client>();
 let listener: pg.Client | null = null;
 
-async function visible(client: Client, runId: number | null) {
+function visible(client: Client, runId: number, ownerId: number | null) {
   if (client.runId !== null && client.runId !== runId) return false;
-  if (runId == null) return false;
-  const row = (await pool.query("SELECT owner_id FROM workflow_runs WHERE id = $1", [runId])).rows[0];
-  const ownerId = row?.owner_id == null ? null : Number(row.owner_id);
   if (ownerId == null) return false;
   if (ownerId === client.userId) return true;
   return client.support && client.role === "admin";
 }
 
+/** One owner lookup per notification (not per subscriber): every lookup is a full round trip to the database. */
+async function fanOut(payload: string, runId: number | null) {
+  if (runId == null || !clients.size) return;
+  const row = (await pool.query("SELECT owner_id FROM workflow_runs WHERE id = $1", [runId])).rows[0];
+  const ownerId = row?.owner_id == null ? null : Number(row.owner_id);
+  for (const cl of clients) if (visible(cl, runId, ownerId)) cl.res.write(`event: change\ndata: ${payload}\n\n`);
+}
+
 export async function startEventStream() {
   const connect = async () => {
-    const c = new pg.Client({ connectionString: config.databaseUrl });
+    // keepAlive: this LISTEN connection is idle between events; without it a VPN/NAT hop can drop it silently.
+    const c = new pg.Client({ connectionString: config.databaseUrl, keepAlive: true, keepAliveInitialDelayMillis: 30000 });
     c.on("notification", (n) => {
       if (!n.payload) return;
       let runId: number | null = null;
@@ -34,11 +40,7 @@ export async function startEventStream() {
       } catch {
         return;
       }
-      for (const cl of clients) {
-        void visible(cl, runId).then((ok) => {
-          if (ok) cl.res.write(`event: change\ndata: ${n.payload}\n\n`);
-        });
-      }
+      fanOut(n.payload, runId).catch((e) => console.error("event stream fan-out:", e.message));
     });
     c.on("error", (e) => {
       console.error("event stream listener:", e.message);

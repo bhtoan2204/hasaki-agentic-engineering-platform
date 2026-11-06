@@ -329,7 +329,7 @@ export async function getSettings(): Promise<ProdErrorSettings> {
   try {
     const s = JSON.parse((await settings.get("prod_errors")) ?? "null");
     if (s) return { schedule: s.schedule ?? config.prodErrors.schedule, notify: s.notify ?? true };
-  } catch {}
+  } catch { }
   return { schedule: config.prodErrors.schedule, notify: true };
 }
 
@@ -369,9 +369,16 @@ export function startProdErrorSchedule() {
 
 export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   const today = dayWindow(new Date()).day;
-  const latest = (await one<{ day: string }>(pool, "SELECT max(day)::text AS day FROM prod_error_groups"))?.day ?? null;
-  const day = opts.day && /^\d{4}-\d{2}-\d{2}$/.test(opts.day) ? opts.day : latest ?? today;
-  const groups = await q(
+  // Independent queries run concurrently: against a remote database each one is a full network round trip.
+  const wanted = opts.day && /^\d{4}-\d{2}-\d{2}$/.test(opts.day) ? opts.day : null;
+  const [latestRow, lastScan, lastOk, settingsNow] = await Promise.all([
+    wanted ? Promise.resolve(undefined) : one<{ day: string }>(pool, "SELECT max(day)::text AS day FROM prod_error_groups"),
+    one(pool, "SELECT * FROM prod_error_scans ORDER BY id DESC LIMIT 1"),
+    one(pool, "SELECT * FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1"),
+    getSettings(),
+  ]);
+  const day = wanted ?? latestRow?.day ?? today;
+  const groupsQuery = q(
     pool,
     `SELECT g.*, g.day::text AS day, w.owner_id AS work_item_owner_id, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
             r.id AS run_id, r.status AS run_status,
@@ -383,9 +390,11 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
       WHERE g.day = $1 AND ($2 OR g.status = 'open') ORDER BY g.score DESC, g.today_count DESC`,
     [day, !!opts.all],
   );
-  const ignored = (await one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM prod_error_groups WHERE day = $1 AND status = 'ignored'", [day]))!.n;
-  const lastScan = await one(pool, "SELECT * FROM prod_error_scans ORDER BY id DESC LIMIT 1");
-  const lastOk = await one(pool, "SELECT * FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1");
+  const [groups, ignoredRow] = await Promise.all([
+    groupsQuery,
+    one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM prod_error_groups WHERE day = $1 AND status = 'ignored'", [day]),
+  ]);
+  const ignored = ignoredRow!.n;
   return {
     day,
     today,
@@ -394,7 +403,7 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
     lastScan,
     lastOk,
     ignored,
-    settings: await getSettings(),
+    settings: settingsNow,
     splunk: { connected: splunkConnected(), expired: splunkExpired() },
     namespaces: config.prodErrors.namespaces,
     groups,
