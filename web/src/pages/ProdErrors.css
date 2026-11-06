@@ -106,3 +106,18 @@
 .pe-run-waiting, .pe-run-waiting_input, .pe-run-waiting_approval { color: var(--st-wait) }
 .pe-wi { cursor: pointer; display: inline-flex; align-items: center; gap: 4px }
 .pe-wi:hover { filter: brightness(.96); text-decoration: underline }
+
+/* Scan options: projects + time window */
+.pe-scanpanel { display: flex; flex-direction: column; gap: var(--sp-3) }
+.pe-opt { display: grid; grid-template-columns: 130px 1fr; gap: var(--sp-3); align-items: center }
+.pe-opt-label { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2) }
+.pe-opt-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2) }
+.pe-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 999px; cursor: pointer; font-size: var(--fs-sm); user-select: none }
+.pe-chip input { margin: 0 }
+.pe-chip.on { border-color: var(--brand); background: var(--sel) }
+.pe-opt-range { display: flex; flex-wrap: wrap; gap: var(--sp-3) }
+.pe-opt-range label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm) }
+.pe-opt-range input { width: auto }
+.pe-opt-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap }
+.pe-shown { color: var(--ink-2) }
+@media (max-width: 640px) { .pe-opt { grid-template-columns: 1fr; gap: 6px } }

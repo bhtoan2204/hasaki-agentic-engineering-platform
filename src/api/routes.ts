@@ -376,7 +376,15 @@ export const routes: Route[] = [
     const data = await listGroups({ day: c.url.searchParams.get("day") ?? undefined, all: c.url.searchParams.get("all") === "1" });
     return { ...data, groups: (data.groups ?? []).map((g: any) => redactGroup(g, c.actor, support(c))) };
   }],
-  ["POST", /^\/api\/prod-errors\/scan$/, ({ actor }) => (requireAdmin(actor), startScan("manual"))],
+  ["POST", /^\/api\/prod-errors\/scan$/, ({ actor, body }) => (
+    requireAdmin(actor),
+    startScan("manual", {
+      namespaces: Array.isArray(body.namespaces) ? body.namespaces.map(String) : undefined,
+      preset: body.preset ? String(body.preset) as any : undefined,
+      from: body.from ? String(body.from) : undefined,
+      to: body.to ? String(body.to) : undefined,
+    })
+  )],
   ["POST", /^\/api\/prod-errors\/settings$/, ({ body, actor }) => (requireAdmin(actor), saveProdErrorSettings(body))],
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/ignore$/, ({ p, body, actor }) => (requireAdmin(actor), setIgnored(p[0], body.ignored !== false))],
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/investigate$/, ({ p, actor }) => investigate(p[0], actor.id)],

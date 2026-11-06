@@ -228,3 +228,40 @@ test("saveSettings: normalizes times, rejects invalid ones", async () => {
   await assert.rejects(saveSettings({ schedule: "25:00" }), /không hợp lệ/);
   assert.deepEqual(await saveSettings({ schedule: "" }), { schedule: [], notify: true });
 });
+
+test("scanWindow: presets, custom range, baseline and Splunk limits", async () => {
+  const { scanWindow } = await import("../src/prodErrors/scan.ts");
+  const now = new Date("2026-11-05T09:30:00Z"); // 16:30 local
+  const t = Math.floor(now.getTime() / 1000);
+  const h4 = scanWindow({ preset: "4h" }, now, "Asia/Ho_Chi_Minh");
+  assert.deepEqual([h4.start, h4.end, h4.baseStart, h4.baseEnd, h4.compare], [t - 4 * 3600, t, t - 4 * 3600 - 86400, t - 86400, "yesterday"]);
+  const y = scanWindow({ preset: "yesterday" }, now, "Asia/Ho_Chi_Minh");
+  assert.equal(y.day, "2026-11-04");
+  assert.equal(y.end - y.start, 86400);
+  assert.equal(y.start, Date.parse("2026-11-03T17:00:00Z") / 1000, "local midnight of the 4th");
+  const c = scanWindow({ preset: "custom", from: "2026-11-03T00:00:00Z", to: "2026-11-05T00:00:00Z" }, now, "Asia/Ho_Chi_Minh");
+  assert.equal(c.compare, "previous", "a 48h window is compared with the 48h before it");
+  assert.equal(c.baseEnd, c.start);
+  assert.ok(c.untilMinutes > 0, "a window ending in the past is bounded on the Splunk side too");
+  assert.throws(() => scanWindow({ preset: "custom", from: "2026-11-05T00:00:00Z", to: "2026-11-04T00:00:00Z" }, now), /trước/);
+  assert.throws(() => scanWindow({ preset: "custom", from: "2026-11-01T00:00:00Z", to: "2026-11-05T00:00:00Z" }, now), /tối đa 72 giờ/);
+  assert.throws(() => scanWindow({ preset: "custom", from: "2026-10-30T00:00:00Z", to: "2026-10-31T00:00:00Z" }, now), /7 ngày/);
+  assert.throws(() => scanWindow({ preset: "2d" as any }, now), /không hợp lệ/);
+});
+
+test("runScan with options: only the chosen project, the chosen window; the page lists that scan", async () => {
+  const { scanNamespaces } = await import("../src/prodErrors/scan.ts");
+  assert.throws(() => scanNamespaces(["nope-prod"]), /không có trong cấu hình/);
+  await setSplunkCookie(COOKIE);
+  rows = [row({ svc: "payment-vnpay", ns: "payment-prod", sig: "vnpay ipn checksum invalid", today: "12", yesterday: "0" })];
+  await runScan("manual", new Date(), { namespaces: ["payment-prod"], preset: "1h" });
+  const spl = searches.at(-1)!.get("search")!;
+  assert.equal(checkSpl(spl), spl);
+  assert.match(spl, /kubernetes\.namespace_name IN \("payment-prod"\)/, "only the chosen project");
+  assert.doesNotMatch(spl, /oms-prod/);
+  const list = await listGroups();
+  assert.equal(list.shown.preset, "1h");
+  assert.deepEqual(list.shown.namespaces, ["payment-prod"]);
+  assert.equal(new Date(list.shown.window_end).getTime() - new Date(list.shown.window_start).getTime(), 3600_000);
+  assert.deepEqual(list.groups.map((g: any) => g.service), ["payment-vnpay"], "groups of other scans are not mixed in");
+});

@@ -42,7 +42,86 @@ interface Data {
   settings: { schedule: string[]; notify: boolean };
   splunk: { connected: boolean; expired: boolean };
   namespaces: Array<{ namespace: string; project: string }>;
+  /** The scan whose groups are listed (null for scans from before scan options). */
+  shown: { preset: string; namespaces: string[]; window_start: string; window_end: string; baseline_start: string; baseline_end: string } | null;
+  maxCustomHours: number;
   groups: Group[];
+}
+
+type Preset = "1h" | "4h" | "12h" | "24h" | "today" | "yesterday" | "custom";
+const PRESETS: Preset[] = ["1h", "4h", "12h", "24h", "today", "yesterday", "custom"];
+/** datetime-local value (local time, minutes) for a Date. */
+const localInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const PREF_KEY = "pe.scanPrefs";
+function loadPrefs(): { preset: Preset; namespaces: string[] | null } {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREF_KEY) ?? "null");
+    if (v && PRESETS.includes(v.preset)) return { preset: v.preset, namespaces: Array.isArray(v.namespaces) ? v.namespaces : null };
+  } catch {}
+  return { preset: "today", namespaces: null };
+}
+const dt = (iso: string) => new Date(iso).toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", hour12: false });
+
+/** Which projects and which time window to scan; remembered per browser. */
+export function ScanPanel({ data, onStarted, onClose }: { data: Data; onStarted: () => void; onClose: () => void }) {
+  const { t } = useI18n();
+  const prefs = useMemo(loadPrefs, []);
+  const all = data.namespaces.map((n) => n.namespace);
+  const [chosen, setChosen] = useState<string[]>(() => (prefs.namespaces ?? all).filter((n) => all.includes(n)).length ? (prefs.namespaces ?? all).filter((n) => all.includes(n)) : all);
+  const [preset, setPreset] = useState<Preset>(prefs.preset);
+  const [from, setFrom] = useState(() => localInput(new Date(Date.now() - 6 * 3600_000)));
+  const [to, setTo] = useState(() => localInput(new Date()));
+  const [busy, setBusy] = useState(false);
+  const toggle = (n: string) => setChosen((c) => (c.includes(n) ? c.filter((x) => x !== n) : [...c, n]));
+  const customHours = (new Date(to).getTime() - new Date(from).getTime()) / 3600_000;
+  const customError = preset !== "custom" ? "" : !(customHours > 0) ? t("pe.opt.badRange") : customHours > data.maxCustomHours ? t("pe.opt.tooLong", { h: data.maxCustomHours }) : "";
+  const long = preset === "custom" && customHours > 24;
+  const start = async () => {
+    setBusy(true);
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ preset, namespaces: chosen })); } catch {}
+    const body: Record<string, unknown> = { preset, namespaces: chosen.length === all.length ? [] : chosen };
+    if (preset === "custom") Object.assign(body, { from: new Date(from).toISOString(), to: new Date(to).toISOString() });
+    const ok = await act(() => api("/api/prod-errors/scan", body));
+    setBusy(false);
+    if (ok) (onStarted(), onClose());
+  };
+  return (
+    <section className="card pe-scanpanel">
+      <div className="pe-opt">
+        <div className="pe-opt-label">{t("pe.opt.projects")}</div>
+        <div className="pe-opt-chips">
+          {data.namespaces.map((n) => (
+            <label key={n.namespace} className={`pe-chip${chosen.includes(n.namespace) ? " on" : ""}`}>
+              <input type="checkbox" checked={chosen.includes(n.namespace)} onChange={() => toggle(n.namespace)} />
+              {n.project} <span className="muted mono">{n.namespace}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="pe-opt">
+        <div className="pe-opt-label">{t("pe.opt.window")}</div>
+        <Segmented label={t("pe.opt.window")} value={preset} onChange={setPreset} options={PRESETS.map((p) => [p, t(`pe.preset.${p}`)] as [Preset, string])} />
+      </div>
+      {preset === "custom" && (
+        <div className="pe-opt">
+          <div className="pe-opt-label" />
+          <div className="pe-opt-range">
+            <label>{t("pe.opt.from")} <input type="datetime-local" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
+            <label>{t("pe.opt.to")} <input type="datetime-local" value={to} max={localInput(new Date())} onChange={(e) => setTo(e.target.value)} /></label>
+          </div>
+        </div>
+      )}
+      <div className="pe-opt">
+        <div className="pe-opt-label" />
+        <div className="pe-opt-foot">
+          <span className={customError ? "pe-warn small" : "muted small"}>{customError || (long ? t("pe.opt.comparePrev") : t("pe.opt.compareYesterday"))}</span>
+          <span className="grow" />
+          <button className="ghost sm" onClick={onClose}>{t("common.cancel")}</button>
+          <button className="sm" disabled={busy || !chosen.length || !!customError} onClick={start}><RefreshCw size={14} strokeWidth={2} />{t("pe.opt.scan")}</button>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 const hm = (t: string | null) => (t ? new Date(t).toLocaleTimeString(uiLocale() === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false }) : "–");
@@ -248,7 +327,7 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
     return c;
   }, [data, ns]);
 
-  const scan = async () => (await act(() => api("/api/prod-errors/scan", {}))) && reload();
+  const [panel, setPanel] = useState(false);
   const last = data?.lastScan;
   const lastOk = data?.lastOk;
 
@@ -259,7 +338,7 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
         title={t("pe.title")}
         subtitle={t("pe.subtitle", { projects: data?.namespaces.length ? new Intl.ListFormat(uiLocale() === "vi" ? "vi" : "en", { type: "conjunction" }).format(data.namespaces.map((n) => n.project)) : t("pe.projectsFallback") })}
         actions={
-          <button disabled={!data || data.scanning || !data.splunk.connected} onClick={scan} title={data && !data.splunk.connected ? t("pe.connectFirst") : undefined}>
+          <button disabled={!data || data.scanning || !data.splunk.connected} onClick={() => setPanel((v) => !v)} aria-expanded={panel} title={data && !data.splunk.connected ? t("pe.connectFirst") : undefined}>
             <RefreshCw size={15} strokeWidth={2} className={data?.scanning ? "spin" : ""} />{data?.scanning ? t("pe.scanning") : t("pe.scanNow")}
           </button>
         }
@@ -268,6 +347,7 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
       {!data && loading && <Loading />}
       {data && (
         <>
+          {panel && !data.scanning && <ScanPanel data={data} onStarted={reload} onClose={() => setPanel(false)} />}
           {data.scanning && <ScanProgressCard progress={data.progress} startedAt={last?.started_at} typicalSeconds={secs(lastOk?.started_at, lastOk?.finished_at)} />}
           <div className="pe-status small">
             {!data.splunk.connected && (
@@ -284,7 +364,15 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
             ) : (
               <span>{t("pe.never")}</span>
             )}
-            {data.day !== data.today && last && <span className="pe-warn">{t("pe.oldDay", { day: data.day })}</span>}
+            {data.shown ? (
+              <span className="pe-shown">
+                {t("pe.shown", {
+                  window: t(`pe.preset.${data.shown.preset}`),
+                  range: `${dt(data.shown.window_start)} – ${dt(data.shown.window_end)}`,
+                  projects: data.namespaces.filter((n) => data.shown!.namespaces.includes(n.namespace)).map((n) => n.project).join(", ") || "—",
+                })}
+              </span>
+            ) : data.day !== data.today && last && <span className="pe-warn">{t("pe.oldDay", { day: data.day })}</span>}
           </div>
           <Schedule s={data.settings} reload={reload} />
 
@@ -302,7 +390,7 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
           ) : (
             <div className="pe-list">
               <div className="pe-cols small muted" aria-hidden>
-                <span /><span>{t("pe.col.level")}</span><span>{t("pe.col.service")}</span><span>{t("pe.col.error")}</span><span className="pe-num">{t("pe.col.today")}</span><span>{t("pe.col.yesterday")}</span><span>{t("pe.col.latest")}</span><span />
+                <span /><span>{t("pe.col.level")}</span><span>{t("pe.col.service")}</span><span>{t("pe.col.error")}</span><span className="pe-num">{!data.shown || data.shown.preset === "today" ? t("pe.col.today") : t("pe.col.window")}</span><span>{!data.shown || data.shown.preset === "today" ? t("pe.col.yesterday") : t("pe.col.baseline")}</span><span>{t("pe.col.latest")}</span><span />
               </div>
               {groups.map((g) => (
                 <GroupRow key={g.fingerprint} g={g} open={open === g.fingerprint} onToggle={() => setOpen(open === g.fingerprint ? null : g.fingerprint)} reload={reload} />
