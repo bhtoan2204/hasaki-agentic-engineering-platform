@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { config } from "../config.ts";
+import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
@@ -626,10 +627,14 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
           await setStepStatus(c, s, "COMPLETED", { output, finished_at: new Date() }, "answered");
         } else {
           const cp = await one(c, "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [s.current_attempt_id]);
+          if (cp?.data?.recovery?.kind === "REQUIRES_RECONCILIATION") {
+            const reply = await one<{ answer: string }>(c, "SELECT answer FROM workflow_questions WHERE id = $1 AND status = 'answered'", [cp.data.recovery.question_id]);
+            if (!reply || !/^(Reconciled — continue|Đã đối soát — tiếp tục|Stop here|Dừng ở đây)$/i.test(reply.answer.trim())) throw new EngineError("Choose reconciled continue or stop; inspect external effects before retrying.", 409);
+          }
           // A step paused by failure recovery: "stop" ends it as FAILED; anything else runs it again.
-          const stop = cp?.data?.failure && (await q<{ answer: string }>(c, "SELECT answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'", [s.current_attempt_id])).some((a) => /^\s*(dừng|stop)\b/i.test(a.answer));
+          const stop = (cp?.data?.failure || cp?.data?.recovery) && (await q<{ answer: string }>(c, "SELECT answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'", [s.current_attempt_id])).some((a) => /^\s*(dừng|stop)\b/i.test(a.answer));
           if (stop) {
-            await setStepStatus(c, s, "FAILED", { error: `stopped by the developer after ${cp.data.failure.class} failure`, finished_at: new Date() }, "stopped after failure");
+            await setStepStatus(c, s, "FAILED", { error: `stopped by the developer after ${cp.data.failure?.class ?? "interruption"} failure`, finished_at: new Date() }, "stopped after failure");
           } else {
             const pending = { ...(s.pending_input ?? {}), resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} } };
             await setStepStatus(c, s, "READY", { pending_input: pending, ready_at: new Date() }, "answers received, resuming");
@@ -741,6 +746,7 @@ export interface BegunAttempt {
 export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAttempt | null> {
   return withTx(async (c) => {
     const run = await lockRun(c, job.run_id);
+    if (run.worker_instance !== config.instanceId || !(await ownsInstance(c))) return null;
     if (run.owner_id == null) {
       await q(c, "UPDATE workflow_jobs SET status = 'canceled', last_error = 'unassigned owner', updated_at = now() WHERE id = $1", [job.id]);
       return null;
@@ -750,9 +756,9 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       await q(c, "UPDATE workflow_jobs SET status = 'canceled', last_error = 'owner inactive', updated_at = now() WHERE id = $1", [job.id]);
       return null;
     }
-    const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 FOR UPDATE", [job.id]);
+    const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 AND lease_expires_at > clock_timestamp() FOR UPDATE", [job.id]);
     if (!j || j.status !== "running" || j.fencing_token !== job.fencing_token) return null;
-    const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [job.step_id]))!;
+    const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [j.step_id]))!;
     const runnable = !["PAUSED", "CANCELED", "PENDING"].includes(run.status) || (run.status === "PAUSED" && (j as any).force === true);
     if (step.generation !== j.generation || !["READY", "RETRYING"].includes(step.status) || !runnable) {
       // Paused runs: hand the job back untouched; everything else is stale.
@@ -779,8 +785,10 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
 export async function heartbeat(jobId: number, token: number, leaseSeconds: number) {
   const r = await pool.query(
     `UPDATE workflow_jobs SET lease_expires_at = now() + make_interval(secs => $3), updated_at = now()
-      WHERE id = $1 AND fencing_token = $2 AND status = 'running'`,
-    [jobId, token, leaseSeconds],
+      WHERE id = $1 AND fencing_token = $2 AND status = 'running' AND lease_expires_at > clock_timestamp()
+        AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id = workflow_jobs.run_id AND r.worker_instance = $4)
+        AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))`,
+    [jobId, token, leaseSeconds, config.instanceId, instanceSession],
   );
   return r.rowCount === 1;
 }
@@ -922,8 +930,13 @@ export async function finishAttempt(jobId: number, token: number, attemptId: num
     const attempt = (await one<AttemptRow>(c, "SELECT * FROM workflow_step_attempts WHERE id = $1 FOR UPDATE", [attemptId]))!;
     if (attempt.status !== "RUNNING") return { applied: false, reason: `attempt already ${attempt.status}` };
     const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [attempt.step_id]))!;
-    const fenced = !j || j.status !== "running" || j.fencing_token !== token;
+    const live = await one(c, "SELECT 1 FROM workflow_jobs WHERE id = $1 AND lease_expires_at > clock_timestamp()", [jobId]);
+    const fenced = !j || j.id !== attempt.job_id || j.run_id !== run.id || j.step_id !== step.id || j.status !== "running" || j.fencing_token !== token || !live || run.worker_instance !== config.instanceId || !(await ownsInstance(c));
     const stale = step.current_attempt_id !== attempt.id || step.generation !== attempt.generation || step.status !== "RUNNING";
+    if (fenced && !stale && j?.status === "running") {
+      // Keep RUNNING until the reaper reconciles this attempt. Marking it STALE here would strand its RUNNING step.
+      return { applied: false, reason: "lease lost (fenced out); awaiting reconciliation" };
+    }
     if (fenced || stale) {
       const reason = fenced ? "lease lost (fenced out)" : "step was invalidated while running";
       await q(c, "UPDATE workflow_step_attempts SET status = 'STALE', output = $2, error = $3, finished_at = now() WHERE id = $1", [
@@ -940,12 +953,12 @@ export async function finishAttempt(jobId: number, token: number, attemptId: num
 }
 
 /**
- * Graceful shutdown: hand a job this worker is executing back to the queue instead of failing it. The attempt is
- * marked STALE (interrupted) and does NOT count against the step's retry budget; any worker may pick the job up again.
+ * Graceful shutdown uses the same interruption policy as lease expiry: safe control steps requeue, while
+ * side-effecting work requires reconciliation. Interruptions do not consume the retry budget; ownership stays pinned.
  * Returns false when the job is no longer ours (fenced out, canceled, re-executed): then nothing is changed.
  */
 export async function releaseAttempt(jobId: number, token: number, attemptId: number, reason: string) {
-  return withTx(async (c) => {
+  return withTx(async (c, afterCommit) => {
     const attempt0 = await one<AttemptRow>(c, "SELECT run_id FROM workflow_step_attempts WHERE id = $1", [attemptId]);
     if (!attempt0) return false;
     const run = await lockRun(c, attempt0.run_id);
@@ -953,31 +966,58 @@ export async function releaseAttempt(jobId: number, token: number, attemptId: nu
     const attempt = (await one<AttemptRow>(c, "SELECT * FROM workflow_step_attempts WHERE id = $1 FOR UPDATE", [attemptId]))!;
     if (attempt.status !== "RUNNING" || !j || j.status !== "running" || j.fencing_token !== token) return false;
     const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [attempt.step_id]))!;
-    await q(c, "UPDATE workflow_step_attempts SET status = 'STALE', error = $2, finished_at = now() WHERE id = $1", [attempt.id, json({ message: reason, interrupted: true })]);
-    if (step.current_attempt_id !== attempt.id || step.generation !== attempt.generation || step.status !== "RUNNING") return false;
-    await setStepStatus(c, step, "READY", { attempt_count: Math.max(0, step.attempt_count - 1), error: null }, `attempt #${attempt.number} interrupted: ${reason}; requeued (not counted as a retry)`);
-    await q(
-      c,
-      `UPDATE workflow_jobs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, fencing_token = fencing_token + 1,
-              available_at = now(), last_error = $2, updated_at = now() WHERE id = $1`,
-      [j.id, `interrupted: ${reason}`],
-    );
-    await runEvents.add(c, run.id, "system", `${step.key}: attempt #${attempt.number} interrupted (${reason}); the step is queued again without using a retry`, step.id, attempt.id);
+    if (run.worker_instance !== config.instanceId || !(await ownsInstance(c))) return false;
+    await recoverInterrupted(c, run, step, attempt, j, reason);
+    await advance(c, run.id, afterCommit);
     return true;
   });
 }
 
 /**
- * Pin a run to the platform instance (machine) acting on it, so only that machine's workers execute its steps: the
- * repositories, worktrees and agent login live on that machine. Called when a user (re)starts work on a run.
+ * Validate the existing owner before starting/resuming/retrying. Local workspaces never move with an API action.
  */
 async function adoptRun(c: Db, runId: number) {
-  await q(c, "UPDATE workflow_runs SET worker_instance = $2 WHERE id = $1 AND worker_instance IS DISTINCT FROM $2", [runId, config.instanceId]);
+  const run = await one(c, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [runId]);
+  if (run?.worker_instance !== config.instanceId) throw new EngineError(run?.worker_instance
+    ? `Run belongs to ${run.worker_instance}; continue on that installation. Ownership is never transferred automatically.`
+    : "Legacy run has no assigned instance. An administrator must verify its worktrees and explicitly assign worker_instance.", 409);
+}
+
+/** Only control steps without external effects can replay automatically. Unknown executors default to reconciliation. */
+export function safeRecovery(step: Pick<StepRow, "type" | "config">) {
+  return ["condition", "human_input", "human_approval", "task_result_report"].includes(step.type)
+    || (step.type === "integration" && ["noop", "select_repositories", "repository_discovery"].includes(step.config?.action));
+}
+
+async function recoverInterrupted(c: pg.PoolClient, run: RunRow, step: StepRow, attempt: AttemptRow, job: JobRow, reason: string) {
+  if (step.current_attempt_id !== attempt.id || step.generation !== attempt.generation || step.status !== "RUNNING") return;
+  const safe = safeRecovery(step);
+  const cp = await one(c, "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [attempt.id]);
+  const session = await one(c, "SELECT session_id, cwd FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1", [attempt.id, run.agent_provider]);
+  const checkpoint = { ...(cp?.data ?? {}), ...(session ?? {}), recovery: { kind: safe ? "SAFE_RETRY" : "REQUIRES_RECONCILIATION", reason, from_attempt_id: attempt.id, question_id: null as number | null } };
+  await q(c, "UPDATE workflow_step_attempts SET status = $2, error = $3, finished_at = now() WHERE id = $1", [attempt.id, safe ? "STALE" : "WAITING_INPUT", json({ message: reason, interrupted: true })]);
+  const pending = { ...(step.pending_input ?? {}), resume: { from_attempt_id: attempt.id, checkpoint }, recovery: checkpoint.recovery };
+  if (!safe) {
+    const en = outputLocale(run) === "en";
+    const question = {
+      question: en ? `Interrupted ${step.name}: reconcile before continuing.` : `Bước ${step.name} bị gián đoạn: cần đối soát trước khi tiếp tục.`,
+      context: en ? "Inspect existing worktrees, checkpoints, provider session and external effects (push/PR/API). Continuing authorizes retry/resume with this state; never discard local changes." : "Kiểm tra worktree, checkpoint, phiên agent và tác động bên ngoài (push/PR/API). Tiếp tục cho phép thử lại/khôi phục từ trạng thái này; không xóa thay đổi cục bộ.",
+      options: en ? ["Reconciled — continue", "Stop here"] : ["Đã đối soát — tiếp tục", "Dừng ở đây"],
+    };
+    const row = await one(c, `INSERT INTO workflow_questions (run_id, step_id, attempt_id, question, context, options)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`, [run.id, step.id, attempt.id, question.question, question.context, json(question.options)]);
+    checkpoint.recovery.question_id = row!.id;
+  }
+  await q(c, "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)", [run.id, step.id, attempt.id, json(checkpoint)]);
+  await setStepStatus(c, step, safe ? "READY" : "WAITING_INPUT", { pending_input: pending, attempt_count: Math.max(0, step.attempt_count - 1), error: null }, reason);
+  await q(c, `UPDATE workflow_jobs SET status = $2, lease_owner = NULL, lease_expires_at = NULL, fencing_token = fencing_token + 1,
+    available_at = now(), last_error = $3, idempotency_key = CASE WHEN $4 THEN idempotency_key ELSE idempotency_key || ':interrupted:' || $5::text END, updated_at = now() WHERE id = $1`, [job.id, safe ? "queued" : "done", reason, safe, attempt.id]);
+  await runEvents.add(c, run.id, "system", `${step.key}: interrupted; ${checkpoint.recovery.kind}`, step.id, attempt.id);
 }
 
 /**
- * Recover from crashed workers: jobs whose lease expired are either handed back (no attempt started yet) or
- * their attempt is failed with "worker lease expired" and the normal retry policy applies.
+ * Reconcile expired leases without treating worker availability as a permanent executor failure.
+ * A reaper can run anywhere; only the owning instance can execute the resulting work.
  */
 export async function reapExpiredLeases() {
   const expired = await q<JobRow>(pool, "SELECT * FROM workflow_jobs WHERE status = 'running' AND lease_expires_at < now() ORDER BY id LIMIT 50");
@@ -988,17 +1028,16 @@ export async function reapExpiredLeases() {
       const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 AND status = 'running' AND lease_expires_at < now() FOR UPDATE", [job.id]);
       if (!j) return;
       reaped++;
-      await q(c, "UPDATE workflow_jobs SET fencing_token = fencing_token + 1, updated_at = now() WHERE id = $1", [j.id]);
       const attempt = await one<AttemptRow>(c, "SELECT * FROM workflow_step_attempts WHERE job_id = $1 AND status = 'RUNNING' FOR UPDATE", [j.id]);
       const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [j.step_id]))!;
       if (!attempt || step.current_attempt_id !== attempt.id) {
         if (attempt) await q(c, "UPDATE workflow_step_attempts SET status = 'STALE', finished_at = now() WHERE id = $1", [attempt.id]);
         // Claimed but never started (or already superseded): hand the job back.
-        await q(c, "UPDATE workflow_jobs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, last_error = 'lease expired before start' WHERE id = $1", [j.id]);
+        await q(c, "UPDATE workflow_jobs SET status = 'queued', fencing_token = fencing_token + 1, lease_owner = NULL, lease_expires_at = NULL, last_error = 'lease expired before start' WHERE id = $1", [j.id]);
         return;
       }
-      await runEvents.add(c, run.id, "system", `${step.key}: worker ${j.lease_owner} lost its lease; attempt #${attempt.number} failed`, step.id, attempt.id);
-      await applyResult(c, run, step, attempt, j.id, { kind: "failed", error: `worker lease expired (${j.lease_owner})`, retryable: true }, afterCommit);
+      await recoverInterrupted(c, run, step, attempt, j, `worker lease expired (${j.lease_owner})`);
+      await advance(c, run.id, afterCommit);
     });
   }
   return reaped;
@@ -1059,7 +1098,11 @@ export async function runDetail(runId: number) {
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
   const { wi_id, wi_code, wi_title, wi_source, wi_project, ...row } = run;
   const work_item = wi_id != null ? { id: wi_id, code: wi_code, title: wi_title, source: wi_source, project: wi_project } : null;
-  return { ...row, steps, work_item, attempts, questions, artifacts, pull_requests: prs, workspaces, checkpoints };
+  const worker = await instanceHealth(row.worker_instance ?? null);
+  const recovery = steps.some((s) => s.status === "WAITING_INPUT" && s.pending_input?.recovery)
+    ? "NEEDS_ATTENTION" : steps.some((s) => ["READY", "RUNNING"].includes(s.status) && s.pending_input?.recovery)
+    ? "RECOVERING" : !["COMPLETED", "CANCELED", "FAILED"].includes(row.status) && worker.health !== "ONLINE" ? "WAITING_FOR_WORKER" : null;
+  return { ...row, worker: { ...worker, local: row.worker_instance === config.instanceId, available: worker.health === "ONLINE", recovery }, steps, work_item, attempts, questions, artifacts, pull_requests: prs, workspaces, checkpoints };
 }
 
 /** Everything the step inspector shows for one step. */

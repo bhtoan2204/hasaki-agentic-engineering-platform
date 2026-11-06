@@ -56,5 +56,13 @@
     "baseUrl": "",
     "user": "",
     "token": ""
+  },
+  "dataDir": "/home/bhtoan/.claude-task-platform",
+  "instance": {
+    "heartbeatSeconds": 15,
+    "offlineSeconds": 60
+  },
+  "repositories": {
+    "oms-api": "/home/bhtoan/src/oms-src/oms-api"
   }
 }

@@ -1,14 +1,18 @@
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { persistentInstanceId } from "./instanceIdentity.ts";
 
 export interface Config {
   port: number;
   /**
    * This platform instance (one per developer machine sharing the database). Runs created here are pinned to it and
-   * only its workers execute them. PLATFORM_INSTANCE overrides; default is the machine's hostname.
+   * only its workers execute them. PLATFORM_INSTANCE overrides; otherwise persisted under dataDir.
    */
   instanceId: string;
+  instance: { heartbeatSeconds: number; offlineSeconds: number };
+  /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
+  repositories: Record<string, string>;
   /** Where the real repo checkouts live (oms-api, oms-background, ...). */
   reposRoot: string;
   /** Platform data: worktrees, downloaded task files, Chromium profile. */
@@ -102,6 +106,7 @@ export interface Config {
     upstreamTokens: number;
     /** Cursor CLI binary. Empty uses `agent` on PATH. Claude model ids are never sent to it. */
     cursorBin?: string;
+    claudeBin?: string;
     /**
      * OpenAI Codex CLI (provider "codex"). Runs as the Codex login of the WORKER machine (`codex login`, e.g. a ChatGPT
      * account); the platform never reads auth.json and never switches to an API key on its own. Claude model ids are
@@ -131,6 +136,8 @@ export interface Config {
   splunk: { baseUrl: string; locale: string; allowedIndexes: string[]; maxMinutes: number; maxResults: number; timeoutSeconds: number };
   /** Daily production error scan over Splunk (page "Lỗi production"). */
   prodErrors: {
+    /** LOCAL explicit actor for the existing scheduled scan. Unset = manual scans only. */
+    userId?: number;
     index: string;
     /** Kubernetes namespace → platform project (the project the "Điều tra" work item belongs to). */
     namespaces: Array<{ namespace: string; project: string }>;
@@ -152,6 +159,8 @@ const defaults: Config = {
   reposRoot: join(homedir(), "src"),
   dataDir: join(homedir(), ".claude-task-platform"),
   instanceId: "",
+  instance: { heartbeatSeconds: 15, offlineSeconds: 60 },
+  repositories: {},
   baseBranch: "release/prod",
   projects: {
     OMS: [
@@ -206,6 +215,8 @@ const defaults: Config = {
   agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
 
+export let instanceIdentityExplicit = false;
+
 function load(): Config {
   const file = resolve(process.env.PLATFORM_CONFIG ?? "config.json");
   const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
@@ -215,6 +226,7 @@ function load(): Config {
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
+    instance: { ...defaults.instance, ...(fromFile.instance ?? {}) },
     jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
@@ -233,7 +245,18 @@ function load(): Config {
   };
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
-  cfg.instanceId = (process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId || hostname()).replace(/:/g, "-"); // ":" separates lease-owner parts
+  cfg.dataDir = resolve(cfg.dataDir);
+  cfg.reposRoot = resolve(cfg.reposRoot);
+  instanceIdentityExplicit = !!(process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
+  cfg.instanceId = persistentInstanceId(cfg.dataDir, process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
+  cfg.instance.heartbeatSeconds = positiveInt("instance.heartbeatSeconds", cfg.instance.heartbeatSeconds);
+  cfg.instance.offlineSeconds = positiveInt("instance.offlineSeconds", cfg.instance.offlineSeconds);
+  if (cfg.instance.offlineSeconds <= cfg.instance.heartbeatSeconds * 2) throw new Error("instance.offlineSeconds must exceed twice heartbeatSeconds");
+  for (const key of ["workers", "leaseSeconds", "heartbeatSeconds", "pollMs"] as const) cfg.scheduler[key] = positiveInt(`scheduler.${key}`, cfg.scheduler[key]);
+  if (cfg.scheduler.heartbeatSeconds >= cfg.scheduler.leaseSeconds) throw new Error("scheduler heartbeat must be shorter than lease");
+  if (!Number.isInteger(cfg.scheduler.lightWorkers) || cfg.scheduler.lightWorkers < 0) throw new Error("scheduler.lightWorkers must be nonnegative");
+  const dbUrl = new URL(process.env.DATABASE_URL ?? cfg.databaseUrl);
+  if (!["postgres:", "postgresql:"].includes(dbUrl.protocol)) throw new Error("databaseUrl must use PostgreSQL");
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
     poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),

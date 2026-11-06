@@ -388,7 +388,9 @@ test("crashed worker: expired lease is reaped, step retried, zombie result rejec
   assert.equal(await claimJob("w-other", 30), undefined);
   await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
   assert.equal(await reapExpiredLeases(), 1);
-  assert.equal((await stepOf(run.id, "a")).status, "RETRYING");
+  assert.equal((await stepOf(run.id, "a")).status, "WAITING_INPUT");
+  const question = (await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1 AND status = 'open'", [run.id]))!;
+  await answerQuestions({ [question.id]: "Reconciled — continue" });
   const zombie = await finishAttempt(job.id, job.fencing_token, begun.attempt.id, { kind: "completed", output: { zombie: true } });
   assert.equal(zombie.applied, false);
   await drain();
@@ -396,7 +398,7 @@ test("crashed worker: expired lease is reaped, step retried, zombie result rejec
   assert.equal(a.status, "COMPLETED");
   assert.notEqual(a.output?.zombie, true);
   const hist = await attemptsOf(run.id, "a");
-  assert.equal(hist[0].status, "FAILED");
+  assert.equal(hist[0].status, "WAITING_INPUT");
   assert.match(hist[0].error.message, /lease expired/);
 });
 
@@ -871,13 +873,13 @@ test("report: a worker crash while generating is recovered from PostgreSQL (leas
   assert.equal(begun.step.key, REPORT_STEP_KEY);
   await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
   await reapExpiredLeases();
-  assert.equal((await stepOf(run.id, REPORT_STEP_KEY)).status, "RETRYING");
+  assert.equal((await stepOf(run.id, REPORT_STEP_KEY)).status, "READY");
   await pool.query("UPDATE workflow_jobs SET available_at = now() WHERE run_id = $1 AND status = 'queued'", [run.id]); // skip the 5s backoff
   await drain();
   const rep = await stepOf(run.id, REPORT_STEP_KEY);
   assert.equal(rep.status, "WAITING_APPROVAL");
   const persisted = await q(pool, "SELECT a.status FROM workflow_step_attempts a WHERE a.step_id = $1 ORDER BY a.number", [rep.id]);
-  assert.deepEqual(persisted.map((a) => a.status), ["WAITING_APPROVAL", "FAILED", "WAITING_APPROVAL"], "history kept: first draft, crashed attempt, new draft");
+  assert.deepEqual(persisted.map((a) => a.status), ["WAITING_APPROVAL", "STALE", "WAITING_APPROVAL"], "history kept: first draft, crashed attempt, new draft");
 });
 
 // ---------------------------------------------------------------- execution profiles & reuse
@@ -1715,19 +1717,21 @@ test("graceful shutdown: an interrupted step is requeued without using a retry, 
   assert.ok(started, "the step is running");
   await sched.drain("test shutdown");
   const st = await stepOf(run.id, "long");
-  assert.equal(st.status, "READY", "handed back to the queue, not FAILED");
+  assert.equal(st.status, "WAITING_INPUT", "interrupted agent requires reconciliation");
   assert.equal(st.attempt_count, 0, "the interrupted attempt does not count against max_attempts");
   const [a] = await attemptsOf(run.id, "long");
-  assert.equal(a.status, "STALE");
+  assert.equal(a.status, "WAITING_INPUT");
   assert.equal(a.error.interrupted, true);
   const job = await one(pool, "SELECT status, lease_owner FROM workflow_jobs WHERE step_id = $1", [st.id]);
-  assert.deepEqual(job, { status: "queued", lease_owner: null });
+  assert.deepEqual(job, { status: "done", lease_owner: null });
+  const question = (await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1 AND status = 'open'", [run.id]))!;
+  await answerQuestions({ [question.id]: "Reconciled — continue" });
   scripts.long = () => ({ kind: "completed", output: { ok: true } });
   await drain();
   assert.equal((await stepOf(run.id, "long")).status, "COMPLETED", "max_attempts=1 still allows the real attempt");
 });
 
-test("worker affinity: only the instance a run is pinned to claims its jobs; restarting work adopts the run", async () => {
+test("worker affinity: resume never adopts another machine; unassigned legacy runs require an administrator", async () => {
   const { config } = await import("../src/config.ts");
   const key = await customWorkflow([{ key: "only", type: "agent" }]);
   scripts.only = () => ({ kind: "completed", output: { ok: true } });
@@ -1740,15 +1744,15 @@ test("worker affinity: only the instance a run is pinned to claims its jobs; res
   assert.equal(stale.length, 0, "a claim by another instance is skipped by the trigger");
   assert.equal((await one(pool, "SELECT status FROM workflow_jobs WHERE run_id = $1", [run.id])).status, "queued");
   await pauseRun(run.id);
-  await resumeRun(run.id); // the developer restarts work from this machine
-  assert.equal((await getRun(run.id)).worker_instance, config.instanceId);
-  await drain();
-  assert.equal((await stepOf(run.id, "only")).status, "COMPLETED");
-  await q(pool, "UPDATE workflow_runs SET worker_instance = NULL WHERE id = $1", [run.id]);
+  await assert.rejects(resumeRun(run.id), /belongs to teammate-laptop/);
+  assert.equal((await getRun(run.id)).worker_instance, "teammate-laptop");
   const legacy = await startRun({ definitionKey: key });
   await q(pool, "UPDATE workflow_runs SET worker_instance = NULL WHERE id = $1", [legacy.id]);
-  await drain();
-  assert.equal((await stepOf(legacy.id, "only")).status, "COMPLETED", "legacy runs (no instance) are claimed by anyone");
+  assert.equal(await claimJob("legacy", 30), undefined);
+  await pauseRun(legacy.id);
+  await assert.rejects(resumeRun(legacy.id), /administrator/);
+  await cancelRun(run.id);
+  await cancelRun(legacy.id);
 });
 
 test("dropped database connections mid-step (Wi-Fi/VPN blip) do not fail the step", async () => {

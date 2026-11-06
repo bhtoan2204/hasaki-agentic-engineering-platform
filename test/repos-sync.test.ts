@@ -12,7 +12,7 @@ import { knowledge } from "../src/knowledge/service.ts";
 
 after(() => pool.end());
 
-test("group folders (e.g. oms-src/) are expanded into their git repos; non-repos are disabled", async () => {
+test("group folders (e.g. oms-src/) are expanded into their git repos; local non-repos leave shared metadata unchanged", async () => {
   await migrate();
   for (const p of ["oms-src/oms-api", "oms-src/oms-background", "solo"]) mkdirSync(join(config.reposRoot, p, ".git"), { recursive: true });
   mkdirSync(join(config.reposRoot, "oms-src", "docs"), { recursive: true }); // not a repo
@@ -24,9 +24,9 @@ test("group folders (e.g. oms-src/) are expanded into their git repos; non-repos
   assert.ok(byName["oms-api"].projects.includes("OMS"), "mapped via config.projects OMS → oms-api");
   assert.equal(byName["oms-background"].path, "oms-src/oms-background");
   assert.equal(byName["solo"], undefined, "a checkout under reposRoot that no project maps is not registered");
-  assert.equal(byName["oms-src"].enabled, false, "group folder itself is not a repo");
+  assert.equal(byName["oms-src"].enabled, true, "local filesystem cannot disable a shared entry");
   assert.equal(byName["docs"], undefined);
-  assert.deepEqual((await repositories.allowedFor("OMS")).sort(), ["oms-api", "oms-background"]);
+  assert.deepEqual((await repositories.allowedFor("OMS")).sort(), ["oms-api", "oms-background", "oms-src"]);
 });
 
 test("shared registry: a repo missing on this machine stays enabled; a known project never widens to every repo", async () => {
@@ -34,12 +34,12 @@ test("shared registry: a repo missing on this machine stays enabled; a known pro
   await repositories.upsert("unrelated-tool", { path: "github/unrelated-tool" });
   await syncRepositoriesFromConfig();
   assert.equal((await repositories.get("elsewhere-only"))!.enabled, true, "not on this disk is not a reason to disable a shared row");
-  for (const n of ["oms-api", "oms-background"]) await repositories.upsert(n, { enabled: false });
+  for (const n of ["oms-api", "oms-background", "oms-src"]) await repositories.upsert(n, { enabled: false });
   try {
     assert.deepEqual(await repositories.allowedFor("OMS"), [], "OMS has repositories (all disabled): never falls back to unrelated ones");
     assert.ok((await repositories.allowedFor("NoSuchProject")).includes("unrelated-tool"), "an unknown project still sees every enabled repo");
   } finally {
-    for (const n of ["oms-api", "oms-background"]) await repositories.upsert(n, { enabled: true });
+    for (const n of ["oms-api", "oms-background", "oms-src"]) await repositories.upsert(n, { enabled: true });
     await q(pool, "DELETE FROM repositories WHERE name IN ('elsewhere-only', 'unrelated-tool')");
   }
 });

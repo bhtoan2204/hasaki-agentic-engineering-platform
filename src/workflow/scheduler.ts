@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { instanceSession } from "../instances.ts";
 import { config } from "../config.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt } from "./engine.ts";
@@ -46,11 +48,12 @@ export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes
          WHERE j2.status = 'queued' AND j2.available_at <= now()
            AND (r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') OR (r.status = 'PAUSED' AND j2.force))
            AND ($3::text[] IS NULL OR s.type = ANY($3))
-           AND (r.worker_instance IS NULL OR r.worker_instance = $4)
+           AND r.worker_instance = $4
+           AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))
          ORDER BY j2.available_at, j2.id
          FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
       RETURNING j.*`,
-    [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId],
+    [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId, instanceSession],
   );
 }
 
@@ -83,6 +86,7 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
     try {
       if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds))) ac.abort();
     } catch (e) {
+      ac.abort();
       console.error(`heartbeat job ${job.id}:`, (e as Error).message);
     }
   }, opts.heartbeatSeconds * 1000);
@@ -90,7 +94,7 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   try {
     const ctx = makeContext({ ...begun, signal: ac.signal });
     const ownerId = Number(begun.run.owner_id);
-    result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, () => getExecutor(begun.step.type).execute(ctx));
+    result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });
   } catch (e) {
     result = ac.signal.aborted
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }
@@ -99,11 +103,11 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
-  // Shutting down: a step that failed because the server is stopping (its agent/command was killed) goes back to the
-  // queue without using a retry. A step that finished on its own is still recorded normally.
+  // Shutdown or heartbeat interruption uses the same recovery policy as lease expiry, without spending a retry.
+  // A step that finished on its own is still recorded normally.
   // Both re-check the attempt's state inside their transaction, so repeating them after a dropped connection is safe:
   // a step that ran for an hour is not thrown away because the network blinked while its result was being saved.
-  if (draining && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining!), `release job ${job.id}`))) return;
+  if ((draining || ac.signal.aborted) && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining || "worker interrupted: heartbeat unavailable or lease lost"), `release job ${job.id}`))) return;
   await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result), `finish job ${job.id}`);
 }
 
@@ -158,7 +162,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
       clearInterval(reaper);
       await Promise.all(loops);
     },
-    /** Graceful shutdown: stop claiming, interrupt running steps and hand them back to the queue (no retry used). */
+    /** Stop claiming and reconcile interrupted steps (safe retry or human review, no retry budget used). */
     async drain(reason = "server shutting down") {
       draining = reason;
       stopped = true;

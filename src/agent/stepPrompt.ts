@@ -146,6 +146,7 @@ export function buildUserPrompt(
     );
   if (input.answers.length)
     parts.push("## Developer answers to earlier questions in this step", input.answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n"));
+  if (input.pending?.resume?.checkpoint) parts.push("## Saved checkpoint (inspect existing state before continuing)", untrusted("checkpoint", stringifyCapped(input.pending.resume.checkpoint)));
   const rx = input.pending?.reexecute;
   if (rx || input.pending?.feedback) {
     const instr = rx?.instructions ?? input.pending?.feedback;

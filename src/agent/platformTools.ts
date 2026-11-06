@@ -4,6 +4,8 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
+import { repositories, repoPath } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
 import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
@@ -56,17 +58,21 @@ export async function attemptIsLive(attemptId: number, fencingToken: number | nu
     attempt_generation: number;
     job_status: string | null;
     fencing_token: number | null;
+    lease_live: boolean;
+    worker_instance: string | null;
   }>(
     pool,
     `SELECT a.status, s.status AS step_status, s.current_attempt_id, s.generation, a.generation AS attempt_generation,
-            j.status AS job_status, j.fencing_token
+            j.status AS job_status, j.fencing_token, j.lease_expires_at > clock_timestamp() AS lease_live, r.worker_instance
        FROM workflow_step_attempts a
        JOIN workflow_steps s ON s.id = a.step_id
+       JOIN workflow_runs r ON r.id = a.run_id
        LEFT JOIN workflow_jobs j ON j.id = a.job_id
       WHERE a.id = $1`,
     [attemptId],
   );
   if (!row) return { ok: false, reason: "attempt not found" };
+  if (row.worker_instance !== config.instanceId || !row.lease_live) return { ok: false, reason: "assigned worker mismatch or lease expired" };
   if (row.status !== "RUNNING") return { ok: false, reason: `attempt is ${row.status}` };
   if (row.step_status !== "RUNNING" || row.current_attempt_id !== attemptId || row.generation !== row.attempt_generation)
     return { ok: false, reason: "attempt is stale or the step was invalidated" };
@@ -81,7 +87,10 @@ async function openQuestions(attemptId: number): Promise<number> {
 }
 
 export async function dispatchPlatformTool(name: string, args: any, env: PlatformToolEnv): Promise<string> {
-  if (env.ownerId) return execution.run({ userId: Number(env.ownerId), runId: env.runId, kind: "run" }, () => dispatchOwned(name, args, env));
+  if (env.ownerId) return execution.run({ userId: Number(env.ownerId), runId: env.runId, kind: "run" }, async () => {
+    if (["call_tool", "list_tools"].includes(name)) await loadPersonalIntegrations();
+    return dispatchOwned(name, args, env);
+  });
   return dispatchOwned(name, args, env);
 }
 
@@ -304,7 +313,7 @@ export async function envFromDatabase(ids: { runId: number; stepId: number; atte
   const attempt = await one<any>(pool, "SELECT * FROM workflow_step_attempts WHERE id = $1", [ids.attemptId]);
   const step = await one<any>(pool, "SELECT * FROM workflow_steps WHERE id = $1", [ids.stepId]);
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [ids.runId]);
-  if (!attempt || !step || !run) throw new Error("bridge attempt not found");
+  if (!attempt || !step || !run || attempt.run_id !== run.id || attempt.step_id !== step.id || step.run_id !== run.id || run.worker_instance !== config.instanceId) throw new Error("bridge attempt not found or assigned to another instance");
   const snap = attempt.context_snapshot_id
     ? await one<any>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [attempt.context_snapshot_id])
     : null;
@@ -312,6 +321,7 @@ export async function envFromDatabase(ids: { runId: number; stepId: number; atte
   const input = attempt.input ?? {};
   const mode: ToolMode = step.type === "coding_agent" ? "coding" : "analysis";
   const ws = await workspacesOf(run.id);
+  const localPaths = (await repositories.list()).filter((r) => run.allowed_repositories.includes(r.name)).map((r) => repoPath(r));
   const { runEvents } = await import("../workflow/events.ts");
   return {
     runId: run.id,
@@ -328,7 +338,7 @@ export async function envFromDatabase(ids: { runId: number; stepId: number; atte
     disclosure: content.prompt_plan?.knowledge ?? [],
     upstream: input.upstream ?? {},
     stepType: step.type,
-    policy: { mode, workspaces: ws.map((w: { path: string }) => w.path), baseBranch: config.baseBranch, protectedRoots: [config.reposRoot] },
+    policy: { mode, workspaces: ws.map((w: { path: string }) => w.path), baseBranch: config.baseBranch, protectedRoots: [config.reposRoot, ...localPaths] },
     log: (kind, text, data) => runEvents.add(pool, run.id, kind, text, step.id, attempt.id, data ?? null),
     ask: async (questions) => {
       for (const x of questions)

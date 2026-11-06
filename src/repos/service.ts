@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { resolveRepoPath } from "./paths.ts";
 import { config } from "../config.ts";
 import { pool, q, one, inTx, txWrote, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
@@ -40,12 +41,13 @@ export const repositories = {
   },
   async upsert(name: string, patch: Partial<RepositoryRow>, db: Db = pool) {
     if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`invalid repository name "${name}"`);
+    if (patch.path && (isAbsolute(patch.path) || patch.path.split(/[\\/]/).includes(".."))) throw new Error("Shared repository path must be a relative layout hint; use local repositories overrides for absolute paths");
     const cols = EDITABLE.filter((k) => patch[k] !== undefined);
     const existing = await repositories.get(name, db);
     if (!existing) {
       await q(
         db,
-        `INSERT INTO repositories (name, ${cols.join(", ")}) VALUES ($1${cols.map((_, i) => `, $${i + 2}`).join("")})`,
+        `INSERT INTO repositories (name${cols.length ? ", " + cols.join(", ") : ""}) VALUES ($1${cols.map((_, i) => `, $${i + 2}`).join("")}) ON CONFLICT (name) DO NOTHING`,
         [name, ...cols.map((k) => patch[k])],
       );
     } else if (cols.length) {
@@ -90,7 +92,7 @@ export function projectScope(project: string, related: Record<string, string[]> 
   return [...scope];
 }
 
-export const repoPath = (r: Pick<RepositoryRow, "name" | "path">) => join(config.reposRoot, r.path || r.name);
+export const repoPath = resolveRepoPath;
 const isGit = (rel: string) => existsSync(join(config.reposRoot, rel, ".git"));
 
 /**
@@ -117,8 +119,7 @@ export function expandRepoEntry(rel: string): string[] {
  * reposRoot (tools, plugins, personal projects) are never registered. Never overwrites user edits.
  *
  * The registry lives in a database that several machines may share, each with its own reposRoot. A repository missing
- * from THIS machine is therefore left alone (it may exist on another one); only an entry that exists here but is not a
- * git repository (a group folder registered by an old sync) is disabled.
+ * from THIS machine is left alone. Local discovery only bootstraps absent entries; metadata edits are explicit.
  */
 export async function syncRepositoriesFromConfig() {
   const found = new Map<string, Set<string>>(); // relative path -> projects
@@ -135,19 +136,9 @@ export async function syncRepositoriesFromConfig() {
     const existing = await repositories.get(name);
     const path = rel === name ? "" : rel;
     if (!existing) await repositories.upsert(name, { path, projects: [...projects], remote_slug: name });
-    else {
-      const merged = [...new Set([...existing.projects, ...projects])];
-      const patch: Partial<RepositoryRow> = {};
-      if (merged.length !== existing.projects.length) patch.projects = merged;
-      if (!existing.path && path) patch.path = path;
-      if (Object.keys(patch).length) await repositories.upsert(name, patch);
-    }
   }
-  for (const r of await repositories.list())
-    if (r.enabled && existsSync(join(config.reposRoot, r.path || r.name)) && !isGit(r.path || r.name)) {
-      await repositories.upsert(r.name, { enabled: false, description: r.description || `disabled: ${r.path || r.name} is not a git repository under reposRoot` });
-      console.log(`repository ${r.name}: ${r.path || r.name} is not a git repository — disabled`);
-    }
+  // Existing shared entries are never changed based on this installation's config or filesystem.
+
 }
 
 // ---------------------------------------------------------------- ranking

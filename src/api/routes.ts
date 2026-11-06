@@ -1,4 +1,5 @@
 import { config } from "../config.ts";
+import { instanceHealth } from "../instances.ts";
 import { resolveOutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider } from "../agent/provider.ts";
 import { agentProviderStatus } from "../agent/providerStatus.ts";
@@ -395,6 +396,14 @@ export const routes: Route[] = [
     return knowledge.update(c.p[0], { ...c.body, created_by: c.actor.username }, item.owner_id ?? null);
   }],
 
+  ["GET", /^\/api\/runs\/(\d+)\/worker$/, async (c) => {
+    const id = num(c.p[0]);
+    await requireRun(c.actor, id, support(c));
+    const run = await one(pool, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [id]);
+    const health = await instanceHealth(run?.worker_instance ?? null);
+    return { ...health, local: run?.worker_instance === config.instanceId, available: health.health === "ONLINE" };
+  }],
+
   // ------------------------------------------------------------ repositories
   ["GET", /^\/api\/repositories$/, () => repositories.list()],
   [
@@ -419,12 +428,12 @@ export const routes: Route[] = [
 
   // ------------------------------------------------------------ Argo CD (QC logs): pasted token, read-only
   ["GET", /^\/api\/integrations\/argocd$/, () => argoStatus()],
-  ["POST", /^\/api\/integrations\/argocd\/token$/, ({ body, actor }) => (requireAdmin(actor), setArgoToken(String(body.token ?? "")))],
-  ["POST", /^\/api\/integrations\/argocd\/logout$/, ({ actor }) => (requireAdmin(actor), clearArgoToken())],
+  ["POST", /^\/api\/integrations\/argocd\/token$/, ({ body }) => setArgoToken(String(body.token ?? ""))],
+  ["POST", /^\/api\/integrations\/argocd\/logout$/, () => clearArgoToken()],
   // Splunk (production SIEM): pasted session cookie, read-only searches
   ["GET", /^\/api\/integrations\/splunk$/, ({ url }) => splunkStatus(url.searchParams.get("check") === "1")],
-  ["POST", /^\/api\/integrations\/splunk\/cookie$/, ({ body, actor }) => (requireAdmin(actor), setSplunkCookie(String(body.cookie ?? "")))],
-  ["POST", /^\/api\/integrations\/splunk\/logout$/, ({ actor }) => (requireAdmin(actor), clearSplunkCookie())],
+  ["POST", /^\/api\/integrations\/splunk\/cookie$/, ({ body }) => setSplunkCookie(String(body.cookie ?? ""))],
+  ["POST", /^\/api\/integrations\/splunk\/logout$/, () => clearSplunkCookie()],
   ["GET", /^\/api\/prod-errors$/, async (c) => {
     const data = await listGroups({ day: c.url.searchParams.get("day") ?? undefined, all: c.url.searchParams.get("all") === "1" });
     return { ...data, groups: (data.groups ?? []).map((g: any) => redactGroup(g, c.actor, support(c))) };
@@ -456,12 +465,12 @@ export const routes: Route[] = [
   ["POST", /^\/api\/integrations\/bitbucket\/adopt-env$/, ({ actor }) => adoptEnv("bitbucket", actor.id)],
   // Vault (QC): pasted token; agents see key names and presence, never values
   ["GET", /^\/api\/integrations\/vault$/, ({ url }) => vaultStatus(url.searchParams.get("check") === "1")],
-  ["POST", /^\/api\/integrations\/vault\/token$/, ({ body, actor }) => (requireAdmin(actor), setVaultToken(String(body.token ?? "")))],
-  ["POST", /^\/api\/integrations\/vault\/logout$/, ({ actor }) => (requireAdmin(actor), clearVaultToken())],
+  ["POST", /^\/api\/integrations\/vault\/token$/, ({ body }) => setVaultToken(String(body.token ?? ""))],
+  ["POST", /^\/api\/integrations\/vault\/logout$/, () => clearVaultToken()],
   // Kafka UI (QC): pasted session cookie, GET-only client
   ["GET", /^\/api\/integrations\/kafka$/, ({ url }) => kafkaStatus(url.searchParams.get("check") === "1")],
-  ["POST", /^\/api\/integrations\/kafka\/cookie$/, ({ body, actor }) => (requireAdmin(actor), setKafkaCookie(String(body.cookie ?? "")))],
-  ["POST", /^\/api\/integrations\/kafka\/logout$/, ({ actor }) => (requireAdmin(actor), clearKafkaCookie())],
+  ["POST", /^\/api\/integrations\/kafka\/cookie$/, ({ body }) => setKafkaCookie(String(body.cookie ?? ""))],
+  ["POST", /^\/api\/integrations\/kafka\/logout$/, () => clearKafkaCookie()],
 
   // ------------------------------------------------------------ legacy /api/tasks (backwards compatible)
   [

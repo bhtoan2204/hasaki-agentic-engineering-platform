@@ -1,5 +1,6 @@
+import { currentUserId } from "../auth/execution.ts";
 import { config } from "../config.ts";
-import { settings } from "../db.ts";
+import { personalSettings as settings, PersonalSession } from "./personal.ts";
 import { parseCurl } from "./curl.ts";
 
 /**
@@ -20,8 +21,16 @@ interface TokenInfo {
   ttl: number;
   checkedAt: number;
 }
-let session: { token: string; info: TokenInfo | null; valid: boolean } | null = null;
-let renewTimer: NodeJS.Timeout | null = null;
+const login = new PersonalSession<{ token: string; info: TokenInfo | null; valid: boolean }>();
+
+const renewTimers = new Map<number, ReturnType<typeof setInterval>>();
+function scheduleRenew() {
+  const id = currentUserId() ?? 0;
+  if (renewTimers.has(id)) return;
+  const timer = setInterval(() => void maybeRenew(), 15 * 60_000);
+  timer.unref();
+  renewTimers.set(id, timer);
+}
 
 const baseUrl = () => config.vault.baseUrl.replace(/\/$/, "");
 
@@ -40,7 +49,7 @@ async function call(path: string, token: string, opts: { method?: "GET" | "POST"
   const res = await fetch(url, { method: opts.method ?? "GET", headers: { "X-Vault-Token": token, Accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
   const j: any = await res.json().catch(() => ({}));
   if (res.status === 403 && /permission denied/i.test(String(j?.errors ?? "")) && path === "auth/token/lookup-self") {
-    if (session && token === session.token) session.valid = false;
+    if (login.current && token === login.current.token) login.current.valid = false;
     throw new Error("token Vault hết hạn hoặc không hợp lệ — người dùng cần dán token mới ở trang Integrations");
   }
   if (res.status === 404) return null;
@@ -63,45 +72,41 @@ async function lookup(token: string): Promise<TokenInfo> {
 
 /** Renew our own token when it has less than a third of a day (or half its TTL) left. Never throws. */
 async function maybeRenew() {
-  if (!session?.valid || !session.info?.renewable) return;
+  if (!login.current?.valid || !login.current.info?.renewable) return;
   try {
-    const info = await lookup(session.token);
-    session.info = info;
+    const info = await lookup(login.current.token);
+    login.current.info = info;
     if (info.ttl > 0 && info.ttl < 8 * 3600) {
-      await call("auth/token/renew-self", session.token, { method: "POST" });
-      session.info = await lookup(session.token);
+      await call("auth/token/renew-self", login.current.token, { method: "POST" });
+      login.current.info = await lookup(login.current.token);
     }
   } catch {
-    if (session) session.valid = false;
+    if (login.current) login.current.valid = false;
   }
-}
-function scheduleRenew() {
-  if (renewTimer) clearInterval(renewTimer);
-  renewTimer = setInterval(() => void maybeRenew(), 15 * 60_000);
-  renewTimer.unref();
 }
 
 export async function loadVaultToken() {
   const t = await settings.get(SETTING);
-  if (!t) return;
-  session = { token: t, info: null, valid: true };
+  if (!t) { if (login.current) login.current = null; return; }
+  if (login.current?.token === t) return;
+  login.current = { token: t, info: null, valid: true };
   scheduleRenew();
 }
 
 export async function vaultStatus(check = false) {
-  if (session && (check || !session.info || Date.now() - session.info.checkedAt > 60_000)) {
+  if (login.current && (check || !login.current.info || Date.now() - login.current.info.checkedAt > 60_000)) {
     try {
-      session.info = await lookup(session.token);
-      session.valid = true;
+      login.current.info = await lookup(login.current.token);
+      login.current.valid = true;
     } catch {
-      session.valid = false;
+      login.current.valid = false;
     }
   }
-  const i = session?.info;
+  const i = login.current?.info;
   return {
     baseUrl: baseUrl(),
-    connected: !!session?.valid,
-    expired: !!session && !session.valid,
+    connected: !!login.current?.valid,
+    expired: !!login.current && !login.current.valid,
     user: i?.user ?? null,
     policies: i?.policies ?? [],
     expiresAt: i?.expireTime ?? null,
@@ -112,25 +117,27 @@ export async function vaultStatus(check = false) {
 export async function setVaultToken(raw: string) {
   const token = parseVaultToken(raw);
   const info = await lookup(token);
-  session = { token, info, valid: true };
+  login.current = { token, info, valid: true };
   await settings.set(SETTING, token);
   scheduleRenew();
   return vaultStatus();
 }
 
 export async function clearVaultToken() {
-  session = null;
-  if (renewTimer) clearInterval(renewTimer), (renewTimer = null);
+  login.current = null;
+  const id = currentUserId() ?? 0;
+  clearInterval(renewTimers.get(id));
+  renewTimers.delete(id);
   await settings.set(SETTING, "");
   return vaultStatus();
 }
 
-export const vaultConnected = () => !!session?.valid;
-export const vaultExpired = () => !!session && !session.valid;
+export const vaultConnected = () => !!login.current?.valid;
+export const vaultExpired = () => !!login.current && !login.current.valid;
 
 function requireToken() {
-  if (!session?.valid) throw new Error(session ? "token Vault hết hạn — người dùng cần dán token mới ở trang Integrations" : "chưa kết nối Vault — người dùng dán token ở trang Integrations");
-  return session.token;
+  if (!login.current?.valid) throw new Error(login.current ? "token Vault hết hạn — người dùng cần dán token mới ở trang Integrations" : "chưa kết nối Vault — người dùng dán token ở trang Integrations");
+  return login.current.token;
 }
 
 // ---------------------------------------------------------------- read-only operations used by the agent tools

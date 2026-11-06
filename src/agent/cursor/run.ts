@@ -2,7 +2,7 @@ import { spawn, execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../../config.ts";
 import { pool, one } from "../../db/pool.ts";
@@ -99,9 +99,11 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   const promptFile = join(input.cwd, ".cursor", "task-prompt.txt");
   mkdirSync(join(input.cwd, ".cursor"), { recursive: true });
   writeFileSync(promptFile, input.prompt);
-  writeCursorPolicy(input.cwd, { reposRoot: config.reposRoot, workspaces: [...input.policy.workspaces] });
+  writeCursorPolicy(input.cwd, { reposRoot: config.reposRoot, protectedRoots: input.policy.protectedRoots, workspaces: [...input.policy.workspaces] });
   writeMcpConfig(input.cwd, process.execPath, [join(import.meta.dirname, "bridge.ts")], {
     PLATFORM_BRIDGE_TOKEN: token,
+    PLATFORM_INSTANCE: config.instanceId,
+    PLATFORM_CONFIG: resolve(process.env.PLATFORM_CONFIG ?? "config.json"),
     PLATFORM_RUN_ID: String(input.ctx.run.id),
     PLATFORM_STEP_ID: String(input.ctx.step.id),
     PLATFORM_ATTEMPT_ID: String(input.ctx.attempt.id),
@@ -275,7 +277,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
 }
 
 function extraDirs(input: CursorTurnInput): string[] {
-  const dirs = new Set<string>([config.reposRoot, ...input.policy.workspaces]);
+  const dirs = new Set<string>([config.reposRoot, ...(input.policy.protectedRoots ?? []), ...input.policy.workspaces]);
   dirs.delete(input.cwd);
   return [...dirs].filter((d) => d && existsSync(d));
 }

@@ -1,6 +1,6 @@
 import { config } from "../config.ts";
 import { settings } from "../db.ts";
-import { deleteUserSecret, getUserSecret, putUserSecret } from "../auth/secrets.ts";
+import { deleteUserSecret, getUserSecret, putUserSecret, getSharedSecret, putSharedSecret } from "../auth/secrets.ts";
 
 /**
  * Telegram and Bitbucket credentials managed from the Integrations page instead of environment variables.
@@ -22,7 +22,7 @@ let saved: { telegram: TelegramSaved | null; bitbucket: BitbucketSaved | null } 
 
 const mask = (s: string) => (!s ? "" : s.length <= 8 ? "••••" : `••••${s.slice(-4)}`);
 const readJson = async <T>(key: string): Promise<T | null> => {
-  const v = await settings.get(key);
+  const v = key === "telegram" ? (await getSharedSecret("telegram")) ?? await settings.get(key) : await settings.get(key);
   if (!v) return null;
   try {
     return JSON.parse(v) as T;
@@ -80,7 +80,7 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
   if (!/^-?\d+$/.test(chatId) && !/^@\w{4,}$/.test(chatId)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
   const me = await telegramApi(botToken, "getMe");
   saved.telegram = { botToken, chatId };
-  await settings.set("telegram", JSON.stringify(saved.telegram));
+  await putSharedSecret("telegram", JSON.stringify(saved.telegram));
   apply();
   return { ...(await telegramStatus()), bot: me?.username ? `@${me.username}` : null };
 }
@@ -110,7 +110,7 @@ export async function testTelegram(userId?: number, isAdmin = false) {
 
 export async function clearTelegram() {
   saved.telegram = null;
-  await settings.set("telegram", "");
+  await putSharedSecret("telegram", "null");
   apply();
   return telegramStatus();
 }

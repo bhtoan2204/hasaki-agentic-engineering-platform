@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
  * --force is NOT the policy. Print mode will not apply file edits without it (headless docs), so coding mode passes --force
  * only together with this file and the stream watcher. Analysis mode does not pass --force and uses --mode ask.
  */
-export function writeCursorPolicy(workspace: string, opts: { reposRoot: string; workspaces: string[] }): string {
+export function writeCursorPolicy(workspace: string, opts: { reposRoot: string; protectedRoots?: string[]; workspaces: string[] }): string {
   const dir = join(workspace, ".cursor");
   mkdirSync(dir, { recursive: true });
   const deny = [
@@ -25,7 +25,7 @@ export function writeCursorPolicy(workspace: string, opts: { reposRoot: string; 
     "Write(**/cli.json)",
     "Write(**/.git/**)",
   ];
-  if (opts.reposRoot) deny.push(`Write(${opts.reposRoot}/**)`);
+  for (const root of new Set([opts.reposRoot, ...(opts.protectedRoots ?? [])])) if (root) deny.push(`Write(${root}/**)`);
   const allow = ["Mcp(platform:*)", ...opts.workspaces.map((w) => `Write(${w}/**)`)];
   const file = join(dir, "cli.json");
   writeFileSync(file, JSON.stringify({ permissions: { allow, deny } }, null, 2));

@@ -74,6 +74,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const pane = useInspectorWidth();
   const { t, status } = useI18n();
   const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
+  const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
+  useEffect(() => { const timer = setInterval(reloadHealth, 15000); return () => clearInterval(timer); }, [id, reloadHealth]);
   const [tick, setTick] = useState(0);
   const live = useLive(id, () => {
     reload();
@@ -182,14 +184,14 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             </div>
           </div>
           <div className="rv-actions">
-            {run.status === "PENDING" && (
+            {run.status === "PENDING" && run.worker?.local && (
               <>
                 <button className="sm" onClick={() => runAction("start")}><Play size={14} /> {t("rv.start")}</button>
                 <button className="sm ghost" title={t("rv.stepModeTip")} onClick={() => runAction("start", { step_mode: true })}><StepForward size={14} /> {t("rv.stepMode")}</button>
               </>
             )}
             {["RUNNING", "WAITING", "FAILED"].includes(run.status) && <button className="sm ghost" onClick={() => runAction("pause")}><Pause size={14} /> {t("rv.pause")}</button>}
-            {run.status === "PAUSED" && <button className="sm" onClick={() => runAction("resume")}><Play size={14} /> {t("rv.resume")}</button>}
+            {run.status === "PAUSED" && run.worker?.local && <button className="sm" onClick={() => runAction("resume")}><Play size={14} /> {t("rv.resume")}</button>}
             {canFeedback && <button className="sm ghost" onClick={openFeedback} title={t("rv.feedbackTip")}><MessageSquareText size={14} /> {t("rv.feedback")}</button>}
             <button className={stepKey === "~changes" ? "sm" : "sm ghost"} disabled={!hasWorkspaces} title={hasWorkspaces ? "" : t("rv.noChanges")} onClick={() => navigate(`/runs/${id}/~changes`)}><FileDiff size={14} /> {t("ch.title")}</button>
             {!["CANCELED", "COMPLETED"].includes(run.status) && <button className="sm danger" onClick={() => runAction("cancel")}><Square size={13} /> {t("rv.cancel")}</button>}
@@ -220,6 +222,15 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           ))}
         </div>
       )}
+      {run.worker && <div className="rv-banner idle" role="status">
+        <Info size={15} /><span>{t("rv.assignedInstance")}: {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"} · {health?.health ?? run.worker.health}
+        {" · "}{t("rv.lastSeen")}: {(health?.last_seen_at ?? run.worker.last_seen_at) ? time(health?.last_seen_at ?? run.worker.last_seen_at) : "UNKNOWN"}
+        {" · "}{t("rv.workerAvailable")}: {(health?.available ?? run.worker.available) ? "ONLINE" : "WAITING_FOR_WORKER"}
+        {run.worker.recovery && <> · {run.worker.recovery}</>}
+        {(!run.worker.local || !(health?.available ?? run.worker.available)) && <> — {t("rv.ownerOnly")}</>}
+        {run.worker.recovery === "NEEDS_ATTENTION" && <> — {t("rv.reconcile")}</>}
+        </span>
+      </div>}
       <QueueBanner run={run} tick={tick} />
       {run.status === "PAUSED" && (
         <div className="rv-banner idle">

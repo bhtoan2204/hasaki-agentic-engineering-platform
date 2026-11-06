@@ -11,7 +11,8 @@ test("verified candidate belongs only to actor; failed and cancelled candidates 
   const a = await createUser({ username: "chrome-a", password: "isolated-test-password", role: "member" });
   const b = await createUser({ username: "chrome-b", password: "isolated-test-password", role: "member" });
   const previous = globalThis.fetch;
-  const token = (n: string) => `header.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now()/1000)+3600, n })).toString("base64url")}.signature`;
+  const expiry = Math.floor(Date.now() / 1000) + 3600;
+  const token = (n: string) => `header.${Buffer.from(JSON.stringify({ exp: expiry, n })).toString("base64url")}.signature`;
   try {
     globalThis.fetch = async () => new Response('{"data":[]}', { headers: { "content-type": "application/json" } });
     await setToken(token("a"), a.id);

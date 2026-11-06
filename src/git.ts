@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { join, relative } from "node:path";
+import { resolveRepoPath } from "./repos/paths.ts";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
 
@@ -21,8 +22,11 @@ async function refExists(cwd: string, ref: string) {
 }
 
 export function taskDir(code: string) {
+  if (!/^[A-Za-z0-9._-]+$/.test(code) || [".", ".."].includes(code)) throw new Error("Invalid workspace directory key");
   const dir = join(config.dataDir, "worktrees", code);
   mkdirSync(dir, { recursive: true });
+  const rel = relative(realpathSync(config.dataDir), realpathSync(dir));
+  if (rel === ".." || rel.startsWith("../")) throw new Error("Worktree root escapes local dataDir; fix symlinks manually");
   return dir;
 }
 
@@ -44,18 +48,22 @@ export interface PreparedBranch {
  * `relPath`: repo location relative to reposRoot when it differs from its name (e.g. "oms-src/oms-api").
  */
 export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo, opts: { mustExist?: boolean } = {}): Promise<PreparedBranch> {
-  const repoPath = join(config.reposRoot, relPath);
+  const repoPath = resolveRepoPath({ name: repo, path: relPath });
   if (!existsSync(join(repoPath, ".git"))) throw new Error(`repo not found: ${repoPath}`);
   const wt = join(taskDir(code), repo);
 
   if (existsSync(wt)) {
     const current = await git(wt, "branch", "--show-current");
-    if (current !== branch) await git(wt, "checkout", branch);
+    const inside = relative(realpathSync(config.dataDir), realpathSync(wt));
+    if (inside === ".." || inside.startsWith("../")) throw new Error("Worktree escapes local dataDir");
+    const primaryGit = await git(repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const worktreeGit = await git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    if (primaryGit !== worktreeGit || current !== branch) throw new Error(`Existing worktree conflicts with ${repo}/${branch}; inspect it manually. No changes were made.`);
     return { repo, branch, path: wt, createdFrom: "existing worktree" };
   }
 
   await git(repoPath, "fetch", "origin", "--prune");
-  await git(repoPath, "worktree", "prune");
+  // Keep stale worktree registrations for explicit reconciliation; never prune during recovery.
 
   if (await refExists(repoPath, `refs/heads/${branch}`)) {
     // If the developer has this branch checked out in the main tree, git refuses a second worktree: reuse theirs.

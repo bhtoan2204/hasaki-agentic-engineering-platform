@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { execution } from "../auth/execution.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { config } from "../config.ts";
 import { pool, q, one, json, withTx } from "../db/pool.ts";
 import { settings } from "../db.ts";
@@ -420,6 +422,8 @@ let timer: NodeJS.Timeout | null = null;
 /** Checks every 30 s whether a configured time (local) has come; a restart within the same minute does not rescan. */
 export function startProdErrorSchedule() {
   if (timer) return;
+  const userId = config.prodErrors.userId;
+  if (!userId) { console.warn("Scheduled production scans need an explicit local prodErrors.userId with its own Splunk login; manual scans remain available."); return; }
   let lastSlot = "";
   timer = setInterval(async () => {
     try {
@@ -428,7 +432,12 @@ export function startProdErrorSchedule() {
       if (slot === lastSlot || !(await getSettings()).schedule.includes(z.hm)) return;
       lastSlot = slot;
       const recent = await one(pool, "SELECT 1 FROM prod_error_scans WHERE trigger = 'schedule' AND started_at > now() - interval '5 minutes'");
-      if (!recent) startScan("schedule");
+      if (!recent) await execution.run({ userId, kind: "user" }, async () => {
+        const user = await one(pool, "SELECT active FROM users WHERE id = $1", [userId]);
+        if (!user?.active) throw new Error("Configured production scan user is missing or inactive");
+        await loadPersonalIntegrations();
+        startScan("schedule");
+      });
     } catch (e) {
       console.error("prod error schedule:", (e as Error).message);
     }

@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { config } from "./config.ts";
+import { startInstanceHeartbeat } from "./instances.ts";
+import { validateLocalConfiguration } from "./startupValidation.ts";
 import { handle } from "./http/app.ts";
 import { migrate } from "./db/migrate.ts";
 import { startPolling } from "./work.ts";
@@ -32,8 +34,10 @@ if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) {
 
 const applied = await migrate();
 if (applied.length) console.log(`migrations applied: ${applied.join(", ")}`);
+const instanceHeartbeat = await startInstanceHeartbeat();
 await seedTemplates();
 await syncRepositoriesFromConfig();
+for (const warning of await validateLocalConfiguration()) console.warn(`Startup warning: ${warning}`);
 await seedKnowledge();
 await loadAccountSettings();
 await loadToken();
@@ -54,19 +58,19 @@ await new Promise<void>((resolve, reject) => {
   server.once("error", reject);
   // One shared installation. HOST=0.0.0.0 exposes it on the central machine; the default stays loopback.
   server.listen(config.port, process.env.HOST ?? "127.0.0.1", () => resolve());
-}).catch((e: NodeJS.ErrnoException) => {
+}).catch(async (e: NodeJS.ErrnoException) => {
   console.error(e.code === "EADDRINUSE" ? `port ${config.port} is already in use: another platform server is running. Not starting.` : `cannot listen: ${e.message}`);
+  await instanceHeartbeat.stop().catch(() => {});
   process.exit(1);
 });
 console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
 
-// Durable scheduler: in-flight work resumes from PostgreSQL (expired leases are reaped and retried).
+// Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 const scheduler = startScheduler();
 startPolling();
 startProdErrorSchedule();
 
-// Graceful shutdown: running steps are interrupted and handed back to the queue (no retry used), so restarting the
-// server never fails a step. A second Ctrl+C exits immediately.
+// Graceful shutdown reconciles interrupted steps without consuming retries. A second Ctrl+C exits immediately.
 let shuttingDown = false;
 async function shutdown(reason: string, code: number) {
   if (shuttingDown) {
@@ -74,7 +78,7 @@ async function shutdown(reason: string, code: number) {
     process.exit(code || 1);
   }
   shuttingDown = true;
-  console.log(`${reason}: stopping workers; running steps are handed back to the queue (Ctrl+C again to force)`);
+  console.log(`${reason}: stopping workers; interrupted steps will be reconciled (Ctrl+C again to force)`);
   server.close();
   childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
   // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.
@@ -83,6 +87,8 @@ async function shutdown(reason: string, code: number) {
     await scheduler.drain(reason);
   } catch (e) {
     console.error("shutdown:", (e as Error).message);
+  } finally {
+    await instanceHeartbeat.stop().catch((e) => console.error("instance stop:", (e as Error).message));
   }
   process.exit(code);
 }

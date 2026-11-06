@@ -1,8 +1,8 @@
-import { join } from "node:path";
 import { config } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest } from "../bitbucket.ts";
 import { prepareBranch, pushBranch } from "../git.ts";
+import { validateCheckout, resolveRepoPath } from "../repos/paths.ts";
 import { branchFor } from "../workflow/branches.ts";
 
 /**
@@ -46,16 +46,19 @@ export interface Workspace {
 
 /** Create (or reuse) the run's isolated worktree for `repo` and record it. Never touches reposRoot checkouts. */
 export async function prepareWorkspace(run: { id: number; branch: string; inputs?: Record<string, any> | null }, repo: string): Promise<Workspace> {
-  const reg = await one<{ path: string }>(pool, "SELECT path FROM repositories WHERE name = $1", [repo]);
+  const owner = await one(pool, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [run.id]);
+  if (owner?.worker_instance !== config.instanceId) throw new Error("Workspaces may only be prepared by the assigned instance");
+  const reg = await one<{ name: string; path: string; remote_slug: string }>(pool, "SELECT name, path, remote_slug FROM repositories WHERE name = $1", [repo]);
+  await validateCheckout(reg ?? { name: repo });
   const rel = reg?.path || repo;
   // An existing branch requested for this repository (inputs.branches / description directive) replaces the run branch.
   const target = branchFor(run, repo);
   const b = await prepareBranch(workspaceKey(run.branch), repo, target.branch, rel, { mustExist: target.existing });
-  if (b.path === join(config.reposRoot, rel)) {
+  if (b.path === resolveRepoPath({ name: repo, path: rel })) {
     // Legacy prepareBranch reuses the developer's checkout when it is on the task branch. Workflows never edit
     // the primary checkout: refuse instead.
     throw new Error(
-      `${repo}: branch ${target.branch} is checked out in your primary checkout (${join(config.reposRoot, rel)}); switch that checkout to another branch first (e.g. git switch ${config.baseBranch}) so the run can work on ${target.branch} in its own worktree`,
+      `${repo}: branch ${target.branch} is checked out in your primary checkout (${resolveRepoPath({ name: repo, path: rel })}); switch that checkout to another branch first (e.g. git switch ${config.baseBranch}) so the run can work on ${target.branch} in its own worktree`,
     );
   }
   await recordWorkspace(run.id, { repo, branch: b.branch, path: b.path, created_from: b.createdFrom });

@@ -2,6 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { pool } from "../db/pool.ts";
+import { execution } from "../auth/execution.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { errorStatus, routes } from "../api/routes.ts";
 import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
 import { singleflight } from "../cache/index.ts";
@@ -133,7 +135,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       try {
         const ctx = { p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor };
         // Identical concurrent GETs of one user (every open tab refetches on the same live event) share one execution.
-        const out = method === "GET" ? await singleflight(`${actor.id} ${url.pathname}${url.search}`, async () => handler(ctx)) : await handler(ctx);
+        const execute = () => execution.run({ userId: actor.id, kind: "user" }, async () => {
+          if (/^\/api\/(integrations|prod-errors)/.test(url.pathname)) await loadPersonalIntegrations();
+          return handler(ctx);
+        });
+        const out = method === "GET" ? await singleflight(`${actor.id} ${url.pathname}${url.search}`, execute) : await execute();
         if (claim) await claim.finish(200, out ?? null);
         return send(res, 200, out ?? null);
       } catch (e) {

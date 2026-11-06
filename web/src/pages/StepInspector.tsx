@@ -236,9 +236,9 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
     if (r) refresh();
     return r;
   };
-  const canRun = run.status === "PAUSED" && ["READY", "RETRYING"].includes(step.status);
-  const canRetry = runActive && ["FAILED", "CANCELED"].includes(step.status);
-  const canReexec = runActive && ["COMPLETED", "SKIPPED", "WAITING_INPUT", "WAITING_APPROVAL", "FAILED"].includes(step.status);
+  const canRun = run.worker?.local && run.status === "PAUSED" && ["READY", "RETRYING"].includes(step.status);
+  const canRetry = run.worker?.local && runActive && ["FAILED", "CANCELED"].includes(step.status);
+  const canReexec = run.worker?.local && runActive && ["COMPLETED", "SKIPPED", "WAITING_INPUT", "WAITING_APPROVAL", "FAILED"].includes(step.status);
   const canSkip = runActive && ["PENDING", "READY", "FAILED", "WAITING_INPUT", "WAITING_APPROVAL"].includes(step.status);
   const verification = attempt
     ? attempt.output?.verification ?? attempt.metrics?.verification ?? attempt.error?.details?.verification ?? (attempt.id === step.current_attempt_id ? step.output?.verification : undefined)
