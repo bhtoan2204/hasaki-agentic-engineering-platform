@@ -5,6 +5,7 @@ import { pool, one, q, retryTransient } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
+import { settleBackground } from "./background.ts";
 import type { ExecResult, JobRow } from "./types.ts";
 
 /**
@@ -114,10 +115,12 @@ export async function runOnce(workerId = `${processId}:once`, opts: Pick<Schedul
   return true;
 }
 
-/** Run jobs until the queue is empty (tests / CLI). */
+/** Run jobs until the queue is empty (tests / CLI), then wait for their post-commit side effects. */
 export async function drain(maxJobs = 200) {
   let n = 0;
+  await settleBackground();
   while (n < maxJobs && (await runOnce())) n++;
+  await settleBackground();
   return n;
 }
 

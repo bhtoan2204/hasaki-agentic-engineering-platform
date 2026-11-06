@@ -11,6 +11,7 @@ import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
 import { extractRunMemory } from "../knowledge/memory.ts";
 import { storeRunSummary } from "../report/runSummary.ts";
+import { background } from "./background.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
@@ -112,12 +113,12 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
   await runEvents.add(c, run.id, "status", `run: ${from} → ${to}`);
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "WAITING")) {
     const icon = { COMPLETED: "✅", FAILED: "❌", WAITING: "⏸️" }[to];
-    afterCommit(() => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`));
+    afterCommit(() => background(`notify run ${run.id}`, () => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`)));
     // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
-    if (to === "COMPLETED") afterCommit(() => extractRunMemory(run.id).catch((e) => console.error(`memory extraction for run ${run.id}: ${(e as Error).message}`)));
+    if (to === "COMPLETED") afterCommit(() => background(`memory extraction for run ${run.id}`, () => extractRunMemory(run.id)));
   }
   // "What did this run do?" snapshot for the work item page (factual, from the run's own records; never throws).
-  if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => storeRunSummary(run.id));
+  if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => background(`run ${run.id} summary`, () => storeRunSummary(run.id)));
 }
 
 async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
@@ -169,14 +170,14 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
         await setStepStatus(c, s, "SKIPPED", { output: { skipped: true, reason: `run_if ${s.run_if.step} not matched` }, finished_at: new Date() });
       } else if (s.requires_approval && !(s.approval?.granted && s.approval.generation === s.generation)) {
         await setStepStatus(c, s, "WAITING_APPROVAL", { approval: { gate: true, generation: s.generation, requested_at: new Date() } }, "approval gate");
-        afterCommit?.(() => {
+        afterCommit?.(() => background(`notify run ${run.id}`, () => {
           const en = outputLocale(run) === "en";
           return notifyStepWaiting(en ? `✋ Run #${run.id}: ${s.name} needs approval before it runs` : `✋ Run #${run.id}: bước ${s.name} cần duyệt trước khi chạy`, {
             runId: run.id, runTitle: run.title, stepKey: s.key, stepName: s.name, status: "WAITING_APPROVAL",
             detail: en ? "approve before this step runs" : "cần duyệt trước khi chạy bước này",
             stepId: s.id, generation: s.generation, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
           });
-        });
+        }));
       } else {
         await setStepStatus(c, s, "READY", { ready_at: new Date() });
       }
@@ -810,7 +811,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       ]);
       await setStepStatus(c, step, "WAITING_INPUT", {}, `${open} question(s)`);
       await closeJob("done");
-      afterCommit(() => {
+      afterCommit(() => background(`notify run ${run.id}`, () => {
         const en = outputLocale(run) === "en";
         return notifyStepWaiting(en ? `❓ Run #${run.id} (${run.title}) – ${step.name} has ${open} question(s) to answer` : `❓ Run #${run.id} (${run.title}) – bước ${step.name} có ${open} câu hỏi cần trả lời`, {
           runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
@@ -819,7 +820,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
             : (en ? `${open} question(s) to answer` : `${open} câu hỏi cần trả lời`),
           stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
         });
-      });
+      }));
       break;
     }
     case "waiting_approval": {
@@ -832,14 +833,14 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       ]);
       await setStepStatus(c, step, "WAITING_APPROVAL", { approval: { request: result.request, generation: step.generation, requested_at: now } });
       await closeJob("done");
-      afterCommit(() => {
+      afterCommit(() => background(`notify run ${run.id}`, () => {
         const en = outputLocale(run) === "en";
         return notifyStepWaiting(en ? `✋ Run #${run.id} (${run.title}) – ${step.name} is waiting for approval` : `✋ Run #${run.id} (${run.title}) – bước ${step.name} chờ duyệt`, {
           runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_APPROVAL",
           detail: String((result.request as any)?.message ?? (step.type === "task_result_report" ? (en ? "review the task result report" : "xem lại báo cáo kết quả task") : (en ? "waiting for approval" : "chờ duyệt"))).slice(0, 300),
           stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
         });
-      });
+      }));
       break;
     }
     case "reexecute": {
@@ -868,10 +869,12 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
         await setStepStatus(c, step, "WAITING_INPUT", {}, `paused: ${decision.class}`);
         await closeJob("done", result.error);
         afterCommit(() =>
-          notifyStepWaiting(en ? `⏸ Run #${run.id} (${run.title}) – ${step.name} is paused: ${decision.class}` : `⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`, {
-            runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
-            detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
-          }),
+          background(`notify run ${run.id}`, () =>
+            notifyStepWaiting(en ? `⏸ Run #${run.id} (${run.title}) – ${step.name} is paused: ${decision.class}` : `⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`, {
+              runId: run.id, runTitle: run.title, stepKey: step.key, stepName: step.name, status: "WAITING_INPUT",
+              detail: decision.reason, stepId: step.id, generation: step.generation, attemptId: attempt.id, locale: outputLocale(run), ownerId: run.owner_id ?? undefined,
+            }),
+          ),
         );
         break;
       }
@@ -882,7 +885,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       } else {
         await setStepStatus(c, step, "FAILED", { error: result.error, finished_at: now });
         await closeJob("failed", result.error);
-        afterCommit(() => notify(`❌ Run #${run.id} (${run.title}) – bước ${step.name} lỗi: ${result.error.slice(0, 300)}`, `/runs/${run.id}`));
+        afterCommit(() => background(`notify run ${run.id}`, () => notify(`❌ Run #${run.id} (${run.title}) – bước ${step.name} lỗi: ${result.error.slice(0, 300)}`, `/runs/${run.id}`)));
       }
       break;
     }
