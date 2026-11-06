@@ -1,4 +1,3 @@
-import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
@@ -23,7 +22,10 @@ export interface SchedulerOptions {
   pollMs: number;
 }
 
-const processId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
+// Starts with the instance id: the database (migration 019) only lets the run's own instance take its jobs.
+const processId = `${config.instanceId}:${process.pid}:${randomUUID().slice(0, 8)}`;
+/** Lease owner as stored: always `<instance>:...`, also for ad-hoc worker ids (tests, CLI). */
+const leaseOwner = (workerId: string) => (workerId.startsWith(`${config.instanceId}:`) ? workerId : `${config.instanceId}:${workerId}`);
 
 /** Set while the server shuts down: interrupted jobs are handed back to the queue instead of being failed. */
 let draining: string | null = null;
@@ -47,7 +49,7 @@ export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes
          ORDER BY j2.available_at, j2.id
          FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
       RETURNING j.*`,
-    [workerId, leaseSeconds, onlyTypes ?? null, config.instanceId],
+    [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId],
   );
 }
 

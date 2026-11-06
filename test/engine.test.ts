@@ -1729,6 +1729,11 @@ test("worker affinity: only the instance a run is pinned to claims its jobs; res
   const run = await startRun({ definitionKey: key });
   await q(pool, "UPDATE workflow_runs SET worker_instance = 'teammate-laptop' WHERE id = $1", [run.id]);
   assert.equal(await claimJob("w-affinity", 30), undefined, "another machine's run is not claimed here");
+  // An instance on OLD code claims without the worker_instance filter: the database itself refuses (migration 019).
+  const stale = await q(pool, `UPDATE workflow_jobs SET status = 'running', lease_owner = 'zzz:70324:205ac1a3:w1', lease_expires_at = now() + interval '60 seconds'
+                               WHERE run_id = $1 AND status = 'queued' RETURNING id`, [run.id]);
+  assert.equal(stale.length, 0, "a claim by another instance is skipped by the trigger");
+  assert.equal((await one(pool, "SELECT status FROM workflow_jobs WHERE run_id = $1", [run.id])).status, "queued");
   await pauseRun(run.id);
   await resumeRun(run.id); // the developer restarts work from this machine
   assert.equal((await getRun(run.id)).worker_instance, config.instanceId);

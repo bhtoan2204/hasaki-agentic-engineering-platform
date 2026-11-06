@@ -213,7 +213,7 @@ function load(): Config {
   };
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
-  cfg.instanceId = process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId || hostname();
+  cfg.instanceId = (process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId || hostname()).replace(/:/g, "-"); // ":" separates lease-owner parts
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
     poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),

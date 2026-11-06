@@ -30,12 +30,31 @@ function withScope(path: string) {
   return path + (path.includes("?") ? "&" : "?") + "scope=all";
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * fetch() rejects (no HTTP status at all) when the browser drops in-flight requests, e.g. net::ERR_NETWORK_CHANGED
+ * while Wi-Fi re-keys or the VPN (Cloudflare WARP) reconnects. GETs are safe to repeat, so they are retried a few
+ * times with a short backoff; POSTs are not (the server may already have applied them).
+ */
+async function fetchRetrying(url: string, init: RequestInit, retries: number): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      if (attempt >= retries) throw e;
+      await sleep([500, 1500, 3000][attempt] ?? 3000);
+    }
+  }
+}
+
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   const scoped = withScope(path);
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (body !== undefined && csrf) headers["X-CSRF-Token"] = csrf;
-  const r = await fetch(scoped, { method: body !== undefined ? "POST" : "GET", headers, body: body !== undefined ? JSON.stringify(body) : undefined, credentials: "include" });
+  const isGet = body === undefined;
+  const r = await fetchRetrying(scoped, { method: isGet ? "GET" : "POST", headers, body: isGet ? undefined : JSON.stringify(body), credentials: "include" }, isGet ? 3 : 0);
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && !path.startsWith("/api/auth/login")) {
     setAuthed(false);
@@ -109,7 +128,14 @@ function open() {
     es = new EventSource(supportView ? "/api/stream?scope=all" : "/api/stream");
     es.addEventListener("hello", () => (stopPolling(), setShared("sse")));
     es.addEventListener("change", (e) => broadcast(JSON.parse((e as MessageEvent).data)));
-    es.onerror = () => startPolling(); // EventSource reconnects by itself; poll meanwhile
+    es.onerror = () => {
+      startPolling(); // EventSource reconnects by itself; poll meanwhile
+      // After a network change the browser may give up for good (CLOSED): open a fresh stream shortly.
+      if (es?.readyState === EventSource.CLOSED) {
+        es = null;
+        setTimeout(open, 2000);
+      }
+    };
   } catch {
     startPolling();
   }
@@ -119,6 +145,12 @@ function close() {
   es = null;
   stopPolling();
 }
+if (typeof window !== "undefined")
+  // Network back (Wi-Fi/VPN reconnected): reopen the stream if it died and catch up on missed changes.
+  window.addEventListener("online", () => {
+    if (!es || es.readyState === EventSource.CLOSED) (close(), open());
+    broadcast();
+  });
 if (typeof document !== "undefined")
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") close();
