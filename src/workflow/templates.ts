@@ -159,12 +159,18 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       name: "Code Review",
       description: "Repository / branch selection → code analysis → architecture validation → security review → review report (no PR)",
       inputs: {
-        repositories: { description: "repositories to review", required: true },
+        repositories: { description: "repositories to review (optional: when empty, the run asks you to pick them)", required: false },
         branch: { description: "branch to review against the base branch (empty = review the base branch itself)", required: false },
         focus: { description: "what to focus on", required: false },
       },
       steps: [
-        { key: "select", type: "integration", name: "Repository / PR Selection", config: { action: "select_repositories" } },
+        // Asks which repositories to review unless the run was started with them (then it passes straight through).
+        {
+          key: "select",
+          type: "human_approval",
+          name: "Repository / PR Selection",
+          config: { message: "Chọn repo cần review cho lần chạy này.", select_repositories: true, auto_approve_preselected: true },
+        },
         {
           key: "analyze",
           type: "agent",

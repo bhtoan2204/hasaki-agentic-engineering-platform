@@ -1805,3 +1805,25 @@ test("run summary: built from the run's own records and stored when the run fini
   assert.match(s.markdown, /Found the empty CDC payload path\./);
   assert.match(s.markdown, /Skip tombstones or log them\?/);
 });
+
+test("code-review without repositories asks which to review (instead of failing); with them it passes through", async () => {
+  for (const k of ["analyze", "architecture", "security"]) scripts[k] = () => ({ kind: "completed", output: { findings: [], summary: "ok" } });
+  const run = await startRun({ definitionKey: "code-review", inputs: { focus: "history detail" } });
+  await drain();
+  let sel = await stepOf(run.id, "select");
+  assert.equal(sel.status, "WAITING_APPROVAL", "the run waits for the developer to pick repositories");
+  assert.equal(sel.approval?.request?.select_repositories, true);
+  assert.ok((sel.approval?.request?.candidates ?? []).some((c: any) => c.repo === "oms-api"), "the project's repositories are offered");
+  await assert.rejects(approveStep(run.id, "select", {}), /select at least one repository/);
+  await approveStep(run.id, "select", { repositories: ["oms-api"], by: "toan" });
+  await drain();
+  assert.deepEqual((await getRun(run.id)).selected_repositories, ["oms-api"]);
+  assert.equal((await stepOf(run.id, "analyze")).status, "COMPLETED", "review continues with the picked repository");
+
+  const given = await startRun({ definitionKey: "code-review", inputs: { repositories: "oms-api" } }); // e.g. from the API, as a string
+  await drain();
+  sel = await stepOf(given.id, "select");
+  assert.equal(sel.status, "COMPLETED", "repositories passed at start: no question");
+  assert.equal(sel.output.auto, true);
+  assert.deepEqual((await getRun(given.id)).selected_repositories, ["oms-api"]);
+});

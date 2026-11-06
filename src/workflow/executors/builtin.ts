@@ -31,7 +31,14 @@ export const humanApprovalExecutor: StepExecutor = {
     const request: Record<string, unknown> = { message: cfg.message ?? `Approve "${ctx.step.name}"?`, outputs: shown };
     if (cfg.select_repositories) {
       const discovery = Object.values(ctx.input.upstream).find((u) => Array.isArray(u.output?.candidates))?.output;
-      const recommended: string[] = discovery?.recommended ?? ctx.run.selected_repositories;
+      // Repositories already chosen for the run: selected at creation, or passed as the `repositories` run input
+      // (an array, or a comma-separated string from the API); only ones the run is allowed to touch.
+      const raw = ctx.input.run.inputs?.repositories;
+      const fromInput = (Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? raw.split(",") : []).map((r) => r.trim()).filter(Boolean);
+      const preselected = (ctx.run.selected_repositories.length ? ctx.run.selected_repositories : fromInput).filter((r) => ctx.run.allowed_repositories.includes(r));
+      if (cfg.auto_approve_preselected && preselected.length)
+        return { kind: "completed", output: { approved: true, auto: true, repositories: preselected, selected_repositories: preselected } };
+      const recommended: string[] = discovery?.recommended ?? preselected;
       Object.assign(request, {
         select_repositories: true,
         candidates: discovery?.candidates ?? ctx.run.allowed_repositories.map((r) => ({ repo: r, score: 0, reasons: [] })),
