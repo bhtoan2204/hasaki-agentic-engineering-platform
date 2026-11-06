@@ -229,6 +229,13 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   const [chats, setChats] = useState<Array<{ id: string; name: string; type: string }> | null>(null);
   const [busy, setBusy] = useState(false);
   const chat = chatId ?? st?.chatId ?? "";
+  // Step notifications (question / approval) go to the run owner's OWN chat; without it nothing is sent.
+  const [mine, setMine] = useState<string | undefined>();
+  const myChat = mine ?? st?.myChatId ?? "";
+  const saveMine = async (value: string) => {
+    const r = await act(() => api<any>("/api/integrations/telegram/destination", { chatId: value }), t("ig.tg.mineSaved"));
+    if (r) (setMine(undefined), reload());
+  };
   const save = async () => {
     setBusy(true);
     const r = await act(() => api<any>("/api/integrations/telegram", { botToken: token, chatId: chat }), t("ig.tg.saved"));
@@ -241,7 +248,7 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   };
   return (
     <Row id="telegram" icon={Send} title="Telegram" health={!st ? "loading" : st.configured ? "ok" : "off"} {...p}
-      summary={st?.configured ? <>{t("ig.tg.chat", { id: st.chatId })} · {sourceLabel(t, st.source)}</> : t("ig.tg.summaryOff")}>
+      summary={st?.configured ? <>{t("ig.tg.chat", { id: st.chatId })} · {sourceLabel(t, st.source)}{!st.myChatId && <> · <b>{t("ig.tg.mineMissing")}</b></>}</> : t("ig.tg.summaryOff")}>
       <p className="muted small">{t("ig.tg.body")}</p>
       <EnvNote st={st} which="telegram" reload={reload} />
       <Steps>
@@ -258,6 +265,18 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
           {chats.length ? chats.map((c) => (
             <button key={c.id} className={`sm ghost${c.id === chat ? " is-sel" : ""}`} onClick={() => setChatId(c.id)}>{c.name || c.id} <span className="muted">· {c.type} · {c.id}</span></button>
           )) : <span className="muted">{t("ig.tg.none")}</span>}
+        </div>
+      )}
+      {st?.configured && (
+        <div className="ig-grid">
+          <Field label={t("ig.tg.mine")}>
+            <input value={myChat} placeholder={st.chatId ?? "123456789"} onChange={(e) => setMine(e.target.value)} />
+          </Field>
+          <div className="ig-actions">
+            <button className="sm" disabled={myChat === (st.myChatId ?? "")} onClick={() => saveMine(myChat)}><KeyRound size={14} strokeWidth={2} />{t("ig.tg.mineSave")}</button>
+            {st.chatId && st.myChatId !== st.chatId && <button className="sm ghost" onClick={() => saveMine(st.chatId)}>{t("ig.tg.useShared")}</button>}
+          </div>
+          <p className="muted small">{t("ig.tg.mineHint")}</p>
         </div>
       )}
       <div className="ig-actions">

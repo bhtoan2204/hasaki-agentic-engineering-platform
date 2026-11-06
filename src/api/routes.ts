@@ -380,11 +380,11 @@ export const routes: Route[] = [
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/investigate$/, ({ p, actor }) => investigate(p[0], actor.id)],
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/link$/, ({ p, body, actor }) => linkWorkItem(p[0], String(body.work_item ?? ""), actor.id)],
   // Telegram + Bitbucket credentials (saved in the platform instead of .env; secrets never returned)
-  ["GET", /^\/api\/integrations\/telegram$/, () => telegramStatus()],
+  ["GET", /^\/api\/integrations\/telegram$/, ({ actor }) => telegramStatus(actor.id)],
   ["POST", /^\/api\/integrations\/telegram$/, ({ body, actor }) => (requireAdmin(actor), setTelegram(body))],
   ["POST", /^\/api\/integrations\/telegram\/destination$/, ({ body, actor }) => setTelegramDestination(actor.id, String(body.chatId ?? body.chat_id ?? ""))],
   ["POST", /^\/api\/integrations\/telegram\/chats$/, ({ body, actor }) => (requireAdmin(actor), telegramChats(body))],
-  ["POST", /^\/api\/integrations\/telegram\/test$/, ({ actor }) => (requireAdmin(actor), testTelegram())],
+  ["POST", /^\/api\/integrations\/telegram\/test$/, ({ actor }) => testTelegram(actor.id, actor.role === "admin")],
   ["POST", /^\/api\/integrations\/telegram\/clear$/, ({ actor }) => (requireAdmin(actor), clearTelegram())],
   ["POST", /^\/api\/integrations\/telegram\/adopt-env$/, ({ actor }) => (requireAdmin(actor), adoptEnv("telegram"))],
   ["GET", /^\/api\/integrations\/bitbucket$/, ({ actor }) => bitbucketStatus(actor.id)],

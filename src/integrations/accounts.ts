@@ -59,9 +59,11 @@ async function telegramApi(token: string, method: string, body?: unknown) {
   return j.result;
 }
 
-export function telegramStatus() {
+export async function telegramStatus(userId?: number) {
   return {
     configured: !!(config.telegram.botToken && config.telegram.chatId),
+    /** Where THIS user's step notifications (question / approval) go. Without it they are not sent at all. */
+    myChatId: userId ? await getUserSecret(userId, "telegram_chat") : null,
     source: saved.telegram ? "platform" : fromEnv.telegram.botToken || fromEnv.telegram.chatId ? "env" : "none",
     envAvailable: !!(fromEnv.telegram.botToken && fromEnv.telegram.chatId),
     chatId: config.telegram.chatId || null,
@@ -80,7 +82,7 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
   saved.telegram = { botToken, chatId };
   await settings.set("telegram", JSON.stringify(saved.telegram));
   apply();
-  return { ...telegramStatus(), bot: me?.username ? `@${me.username}` : null };
+  return { ...(await telegramStatus()), bot: me?.username ? `@${me.username}` : null };
 }
 
 /** Recent chats that wrote to the bot (getUpdates), to pick the chat id without curl. */
@@ -96,10 +98,14 @@ export async function telegramChats(input: { botToken?: string }) {
   return [...chats.values()];
 }
 
-export async function testTelegram() {
-  if (!config.telegram.botToken || !config.telegram.chatId) throw new Error("Telegram chưa cấu hình");
-  await telegramApi(config.telegram.botToken, "sendMessage", { chat_id: config.telegram.chatId, text: "✅ Claude Task Platform: kết nối Telegram hoạt động." });
-  return { ok: true };
+/** Test the user's own destination when set (what step notifications use); otherwise the shared chat (admin only). */
+export async function testTelegram(userId?: number, isAdmin = false) {
+  if (!config.telegram.botToken) throw new Error("Telegram chưa cấu hình");
+  const mine = userId ? await getUserSecret(userId, "telegram_chat") : null;
+  const chatId = mine ?? (isAdmin ? config.telegram.chatId : "");
+  if (!chatId) throw new Error("chưa có chat nhận thông báo của bạn");
+  await telegramApi(config.telegram.botToken, "sendMessage", { chat_id: chatId, text: mine ? "✅ Claude Task Platform: thông báo bước (câu hỏi / duyệt) của bạn sẽ gửi vào chat này." : "✅ Claude Task Platform: kết nối Telegram hoạt động (chat chung)." });
+  return { ok: true, chat: mine ? "mine" : "shared" };
 }
 
 export async function clearTelegram() {
@@ -182,6 +188,10 @@ export async function adoptEnv(which: "telegram" | "bitbucket", userId?: number)
 /** The chat that receives this user's private run notifications. The shared bot token is unchanged. */
 export async function setTelegramDestination(userId: number, chatId: string) {
   const id = String(chatId ?? "").trim();
+  if (!id) {
+    await deleteUserSecret(userId, "telegram_chat");
+    return { chatId: null };
+  }
   if (!/^-?\d+$/.test(id) && !/^@\w{4,}$/.test(id)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
   await putUserSecret(userId, "telegram_chat", id);
   return { chatId: id };
