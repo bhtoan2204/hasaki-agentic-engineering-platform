@@ -19,6 +19,11 @@ import { seedKnowledge } from "./knowledge/service.ts";
 import { startEventStream } from "./api/stream.ts";
 import { childGroups } from "./workflow/local.ts";
 
+// The Claude Agent SDK (and detect-libc) call process.report.getReport() to tell glibc from musl. By default a report
+// resolves every open socket's peer with a SYNCHRONOUS reverse-DNS lookup on the main thread; over VPN each lookup
+// times out (5 s), so with the DB pool and SSE sockets open the whole server froze for minutes at every agent start.
+(process.report as NodeJS.ProcessReport & { excludeNetwork: boolean }).excludeNetwork = true; // Node ≥ 22.13; older @types lack it
+
 if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) {
   console.error("AUTH_SECRET must be set (at least 16 characters). Refusing to start.");
   process.exit(1);
