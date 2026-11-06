@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronRight, CircleHelp, Clock, Download, FileJson, FileText, FolderGit2, GitPullRequest, History, KeyRound, ListTodo, LogIn, PenLine, Pencil, Play, Plus,
-  RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap, Siren,
+  RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap, Siren, ClipboardList, CheckCircle2, XCircle, AlertTriangle, GitCommit,
 } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
-import { act, ago, Badge, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Loading, Markdown, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, time } from "../ui.tsx";
+import { act, ago, Badge, Copy, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Loading, Markdown, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, time } from "../ui.tsx";
 import { RunsTable } from "./Runs.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
@@ -80,11 +80,11 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
           <p className="muted small">{t(st.browserMode === "local" ? (st.chromeProfile === "existing" ? "chrome.existing" : "chrome.local") : "chrome.hosted")}</p>
           {st.connectionState !== "idle" && <p role="status">{t(`chrome.${st.connectionState}`)}</p>}
           {st.connectionError && <p role="alert" className="err">{t(st.connectionError)}</p>}
-          {st.browserMode === "local" && <div className="row tight">
-            <button className="sm" disabled={connecting || st.windowOpen} onClick={async () => { setConnecting(true); await act(() => api("/api/work/login-window", {})); await reloadSt(); setConnecting(false); }}><LogIn size={14} />{t("chrome.connect")}</button>
+          {st.browserMode === "local" && <div className="wi-hconnect">
+            <button className={st.loggedIn ? "sm ghost" : "sm"} disabled={connecting || st.windowOpen} onClick={async () => { setConnecting(true); await act(() => api("/api/work/login-window", {})); await reloadSt(); setConnecting(false); }}><LogIn size={14} />{t("chrome.connect")}</button>
             {st.windowOpen && <button className="ghost sm" onClick={async () => { await act(() => api("/api/work/login-window/close", {})); await reloadSt(); }}>{t("common.cancel")}</button>}
           </div>}
-          <form className="wi-inline" autoComplete="off" aria-label={t("ig.token")} onSubmit={async (e) => {
+          <form className="wi-inline wi-hfield" autoComplete="off" aria-label={t("ig.token")} onSubmit={async (e) => {
             e.preventDefault();
             if (await act(() => api("/api/work/token", { token }), t("wi.tokenSaved"))) { setToken(""); await reloadSt(); }
           }}>
@@ -94,9 +94,9 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
         </div>
       )}
       {st?.loggedIn && (
-        <div className="stack wi-hlogin">
+        <div className="stack wi-hlogin wi-hfetch">
           <button className="sm" disabled={busy} onClick={refresh}><RefreshCw size={14} strokeWidth={2} className={busy ? "wi-spin" : undefined} />{busy ? t("wi.fetching") : t("wi.fetchTasks")}</button>
-          <div className="wi-inline">
+          <div className="wi-inline wi-hfield">
             <input aria-label={t("wi.taskId")} placeholder={t("wi.taskId")} value={taskId} onChange={(e) => setTaskId(e.target.value)} />
             <button className="sm ghost" disabled={!taskId} onClick={() => pick(taskId)}><Download size={14} strokeWidth={2} />{t("kn.import")}</button>
           </div>
@@ -319,6 +319,116 @@ function DescriptionEditor({ id, description, source, onSaved }: { id: number; d
   );
 }
 
+const FINISHED = ["COMPLETED", "FAILED", "CANCELED"];
+const fmtDur = (ms: number | null) => {
+  if (ms == null) return "—";
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+};
+
+/** "What did the run do?" — a factual summary of a finished run (steps, code, tests, PRs, decisions, problems). */
+function RunSummaryCard({ runs }: { runs: any[] }) {
+  const { t } = useI18n();
+  const finished = useMemo(() => (runs ?? []).filter((r) => FINISHED.includes(r.status)).sort((a, b) => b.id - a.id), [runs]);
+  const [runId, setRunId] = useState<number | null>(null);
+  const current = runId ?? finished[0]?.id ?? null;
+  const [refresh, setRefresh] = useState(0);
+  const { data: s, error, loading } = useApi<any>(current ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}` : null, [refresh]);
+  if (!finished.length) return null;
+  return (
+    <section className="card wi-sum">
+      <div className="card-head">
+        <span className="wi-hicon"><ClipboardList size={16} strokeWidth={2} /></span>
+        <h4>{t("sum.title")}</h4>
+        {finished.length > 1 && (
+          <select className="wi-sum-pick" value={current ?? ""} onChange={(e) => (setRunId(Number(e.target.value)), setRefresh(0))}>
+            {finished.map((r) => <option key={r.id} value={r.id}>#{r.id} · {r.status}</option>)}
+          </select>
+        )}
+        {s?.markdown && <Copy text={s.markdown} label={t("sum.copy")} />}
+        <button className="ghost xs" title={t("sum.refresh")} onClick={() => setRefresh((n) => n + 1)}><RefreshCw size={12} strokeWidth={2} /></button>
+      </div>
+      {error ? <ErrorBox error={error} /> : !s || (loading && !s) ? <SkeletonRows rows={4} /> : <RunSummaryView s={s} />}
+    </section>
+  );
+}
+
+/** Presentational part of the run summary (also rendered standalone for visual checks). */
+export function RunSummaryView({ s }: { s: any }) {
+  const { t } = useI18n();
+  return (
+      <div className="wi-sum-body">
+        <div className="wi-sum-stats">
+          <Badge s={s.run.status} />
+          <span><b>{fmtDur(s.run.duration_ms)}</b> {t("sum.duration")}</span>
+          <span><b>{s.totals.steps_run}</b> {t("sum.steps")}</span>
+          <span><b>{s.totals.attempts}</b> {t("sum.attempts")}{s.totals.retries > 0 && <> ({t("sum.retries", { n: s.totals.retries })})</>}</span>
+          {s.changes.length > 0 && <span><b>{s.changes.reduce((n: number, c: any) => n + c.files.length, 0)}</b> {t("sum.files")} <span className="wi-sum-add">+{s.changes.reduce((n: number, c: any) => n + c.additions, 0)}</span> <span className="wi-sum-del">−{s.changes.reduce((n: number, c: any) => n + c.deletions, 0)}</span></span>}
+          {s.totals.cost_usd != null && <span><b>${s.totals.cost_usd}</b></span>}
+          <a className="wi-sum-open" href={`#/runs/${s.run.id}`}>{t("sum.openRun", { id: s.run.id })} <ChevronRight size={12} /></a>
+        </div>
+        {s.run.error && <p className="err small">{s.run.error}</p>}
+
+        <div className="wi-sum-h">{t("sum.done")}</div>
+        <ol className="wi-sum-steps">
+          {s.steps.map((st: any) => (
+            <li key={st.key} className={`wi-sum-step st-${st.status}`}>
+              <div className="wi-sum-step-head">
+                {st.status === "COMPLETED" ? <CheckCircle2 size={14} className="okc" /> : st.status === "FAILED" ? <XCircle size={14} className="err" /> : <ChevronRight size={14} className="muted" />}
+                <b>{st.name}</b>
+                <span className="muted small mono">{st.key}</span>
+                <span className="grow" />
+                <span className="muted small">{fmtDur(st.duration_ms)}{st.attempts > 1 ? ` · ${t("sum.tries", { n: st.attempts })}` : ""}</span>
+              </div>
+              {st.summary && <p className="wi-sum-text">{st.summary}</p>}
+              {st.lists.length > 0 && (
+                <details className="wi-sum-more">
+                  <summary>{st.lists.map((l: any) => `${l.label} (${l.items.length})`).join(" · ")}</summary>
+                  {st.lists.map((l: any) => (
+                    <div key={l.label} className="wi-sum-list">{st.lists.length > 1 && <div className="muted small">{l.label}</div>}<ul>{l.items.map((i: string, n: number) => <li key={n}>{i}</li>)}</ul></div>
+                  ))}
+                </details>
+              )}
+            </li>
+          ))}
+        </ol>
+
+        {s.changes.length > 0 && <>
+          <div className="wi-sum-h">{t("sum.changes")}</div>
+          {s.changes.map((c: any) => (
+            <details key={c.repo} className="wi-sum-repo">
+              <summary><b>{c.repo}</b> <span className="mono small">{c.branch}</span> · <span className="wi-sum-add">+{c.additions}</span> <span className="wi-sum-del">−{c.deletions}</span> · {t("sum.nFiles", { n: c.files.length })} · {t("sum.nCommits", { n: c.commits.length })}{c.note && <span className="muted"> · {c.note}</span>}</summary>
+              {c.commits.map((cm: any) => <div key={cm.hash} className="small"><GitCommit size={12} /> <span className="mono">{cm.hash}</span> {cm.subject}</div>)}
+              <ul className="wi-sum-files">{c.files.map((f: any) => <li key={f.path} className="mono small">{f.path} <span className="wi-sum-add">+{f.additions ?? "bin"}</span> <span className="wi-sum-del">−{f.deletions ?? "bin"}</span></li>)}</ul>
+            </details>
+          ))}
+        </>}
+
+        {s.tests.length > 0 && <>
+          <div className="wi-sum-h">{t("sum.tests")}</div>
+          <ul className="wi-sum-plain">{s.tests.map((x: any, n: number) => <li key={n}>{x.skipped ? "⏭" : x.passed ? "✅" : "❌"} <b>{x.repo}</b>{x.detail && <span className="muted"> — {x.detail}</span>}</li>)}</ul>
+        </>}
+
+        {s.pull_requests.length > 0 && <>
+          <div className="wi-sum-h">Pull requests</div>
+          <ul className="wi-sum-plain">{s.pull_requests.map((p: any) => <li key={p.url}><b>{p.repo}</b> · <a href={p.url} target="_blank" rel="noopener">{p.title}</a> <span className="muted mono small">{p.source_branch} → {p.target_branch}</span></li>)}</ul>
+        </>}
+
+        {s.decisions.length > 0 && <>
+          <div className="wi-sum-h">{t("sum.decisions")}</div>
+          <ul className="wi-sum-plain">{s.decisions.map((d: any, n: number) => (
+            <li key={n}>{d.kind === "answer" ? <><span className="muted">❓ {d.question}</span><div>→ {d.answer}</div></> : <>✋ <b>{d.question}</b>: {d.answer}</>}</li>
+          ))}</ul>
+        </>}
+
+        {s.problems.length > 0 && <>
+          <div className="wi-sum-h"><AlertTriangle size={13} /> {t("sum.problems")}</div>
+          <ul className="wi-sum-plain small">{s.problems.map((p: any, n: number) => <li key={n}><span className="mono">{p.step} #{p.attempt}</span> <span className="muted">({p.status})</span> {p.message}</li>)}</ul>
+        </>}
+      </div>
+  );
+}
+
 export function WorkItemDetail({ id }: { id: number }) {
   const { data: w, error, loading, reload } = useApi<any>(`/api/work-items/${id}`);
   const { data: wfs } = useApi<any[]>("/api/workflows");
@@ -360,6 +470,8 @@ export function WorkItemDetail({ id }: { id: number }) {
           </section>
 
           <ProdErrorRefs rows={w.prod_errors} />
+
+          <RunSummaryCard runs={w.runs} />
 
           <section className="wi-section">
             <div className="wi-section-head"><History size={16} strokeWidth={2} /><h4>{t("wi.history")}</h4><span className="muted small">{t("wi.runs", { n: w.runs.length })}</span></div>

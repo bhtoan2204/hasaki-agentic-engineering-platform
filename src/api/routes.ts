@@ -51,6 +51,7 @@ import {
 } from "../workflow/engine.ts";
 import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
+import { getRunSummary } from "../report/runSummary.ts";
 import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
@@ -247,6 +248,7 @@ export const routes: Route[] = [
   ["GET", /^\/api\/runs\/(\d+)\/events$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runEvents.list(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0)))],
   ["POST", /^\/api\/runs\/(\d+)\/start$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), startPendingRun(num(c.p[0]), c.body.repositories, !!c.body.step_mode))],
   ["GET", /^\/api\/runs\/(\d+)\/changes$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runChanges(num(c.p[0])))],
+  ["GET", /^\/api\/runs\/(\d+)\/summary$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), getRunSummary(num(c.p[0]), c.url.searchParams.get("refresh") === "1"))],
   ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), stepDetail(num(c.p[0]), c.p[1]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/run$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runStepNow(num(c.p[0]), c.p[1]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/stop$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), stopStep(num(c.p[0]), c.p[1], c.body.reason || "stopped by user"))],

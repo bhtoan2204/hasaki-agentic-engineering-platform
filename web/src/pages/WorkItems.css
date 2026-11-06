@@ -39,6 +39,16 @@
 .wi-hasaki { margin-bottom: 0 }
 .wi-hexp { display: flex; align-items: center; gap: 5px; margin: -4px 0 8px }
 .wi-hlogin { gap: var(--sp-2) } .wi-hlogin > button { justify-content: center }
+.wi-hlogin > p { margin: 0; line-height: 1.5 }
+/* Sign-in and task actions are two groups: separate them instead of stacking buttons back to back. */
+.wi-hfetch { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px dashed var(--line) }
+.wi-hconnect { display: flex; gap: var(--sp-2) }
+.wi-hconnect > button { flex: 1; justify-content: center }
+.wi-hconnect > button.ghost:last-child:not(:first-child) { flex: none }
+/* Field rows: input and button share one height; the buttons share one width so both rows line up. */
+.wi-hfield input, .wi-hfield button, .wi-hconnect > button, .wi-hfetch > button { height: 32px; box-sizing: border-box }
+.wi-hfield input { padding-block: 0 }
+.wi-hfield button { flex: none; width: 96px; justify-content: center }
 .wi-inline { display: flex; gap: var(--sp-2); align-items: center } .wi-inline input { flex: 1; min-width: 0 }
 .wi-hsub { font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: var(--sp-4) 0 6px }
 .wi-hinbox { max-height: 360px; overflow: auto; margin: 0 -8px; padding: 0 8px }
@@ -101,3 +111,20 @@
 .wi-prod .pe-sev { font-size: var(--fs-xs); font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); text-transform: capitalize; white-space: nowrap }
 .wi-prod .pe-critical { color: #fff; background: var(--st-err) } .wi-prod .pe-high { color: var(--st-err); background: var(--st-err-bg) }
 .wi-prod .pe-medium { color: var(--st-wait); background: var(--st-wait-bg) } .wi-prod .pe-low { color: var(--st-idle); background: var(--st-idle-bg) }
+
+/* Run summary ("what did the run do?") on the work item page */
+.wi-sum .card-head { flex-wrap: wrap }
+.wi-sum-pick { width: auto; height: 26px; padding: 0 8px; font-size: 12px }
+.wi-sum-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--fs-sm); color: var(--ink-2) }
+.wi-sum-open { margin-left: auto; font-size: var(--fs-sm); display: inline-flex; align-items: center; gap: 2px }
+.wi-sum-add { color: var(--st-ok) } .wi-sum-del { color: var(--st-err) }
+.wi-sum-h { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: var(--sp-4) 0 var(--sp-2) }
+.wi-sum-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
+.wi-sum-step { padding: 8px 10px; border-radius: 8px; border-left: 2px solid var(--line) }
+.wi-sum-step.st-COMPLETED { border-left-color: var(--st-ok) } .wi-sum-step.st-FAILED { border-left-color: var(--st-err); background: color-mix(in srgb, var(--st-err) 6%, transparent) }
+.wi-sum-step-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+.wi-sum-text { margin: 4px 0 0 20px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-sm); line-height: 1.55; color: var(--ink) }
+.wi-sum-more { margin: 4px 0 0 20px; font-size: var(--fs-sm) } .wi-sum-more > summary { cursor: pointer; color: var(--muted) }
+.wi-sum-list { margin-top: 6px } .wi-sum-list ul, .wi-sum-plain, .wi-sum-files { margin: 2px 0 0; padding-left: 18px } .wi-sum-list li, .wi-sum-plain li { overflow-wrap: anywhere; margin: 2px 0 }
+.wi-sum-repo { margin: 4px 0; font-size: var(--fs-sm) } .wi-sum-repo > summary { cursor: pointer }
+.wi-sum-files { max-height: 260px; overflow: auto }

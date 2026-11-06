@@ -1769,3 +1769,39 @@ test("dropped database connections mid-step (Wi-Fi/VPN blip) do not fail the ste
   const logs = await q(pool, "SELECT content FROM workflow_events WHERE run_id = $1 AND kind = 'agent' ORDER BY id", [run.id]);
   assert.deepEqual(logs.map((l: any) => l.content), ["before the network drop", "after the network drop"]);
 });
+
+test("run summary: built from the run's own records and stored when the run finishes", async () => {
+  const { getRunSummary } = await import("../src/report/runSummary.ts");
+  const key = await customWorkflow([
+    { key: "investigate", type: "agent", max_attempts: 2 },
+    { key: "ask", type: "agent", depends_on: ["investigate"] },
+  ]);
+  scripts.investigate = (_ctx, n) =>
+    n === 1
+      ? { kind: "failed", error: "ECONNRESET talking to the provider", retryable: true }
+      : { kind: "completed", output: { summary: "Found the empty CDC payload path.", findings: [{ file: "kafka/consumer.go", line: 148, issue: "tombstone not skipped", severity: "high" }], risks: ["more topics may emit tombstones"] } };
+  scripts.ask = (_ctx, n) => (n === 1 ? { kind: "waiting_input", questions: [{ question: "Skip tombstones or log them?" }] } : { kind: "completed", output: { summary: "Will skip tombstones." } });
+  const run = await startRun({ definitionKey: key });
+  await q(pool, "UPDATE workflow_steps SET retry_backoff_s = 0 WHERE run_id = $1", [run.id]);
+  await drain();
+  await q(pool, "UPDATE workflow_jobs SET available_at = now() WHERE run_id = $1 AND status = 'queued'", [run.id]);
+  await drain();
+  const qn = await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1", [run.id]);
+  await answerQuestions({ [qn.id]: "Skip them" }, "toan");
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+
+  const stored = (await one(pool, "SELECT summary FROM workflow_runs WHERE id = $1", [run.id])).summary;
+  assert.ok(stored, "snapshot stored when the run finished");
+  const s = await getRunSummary(run.id);
+  assert.equal(s.run.status, "COMPLETED");
+  const inv = s.steps.find((x) => x.key === "investigate")!;
+  assert.equal(inv.summary, "Found the empty CDC payload path.");
+  assert.equal(inv.attempts, 2);
+  assert.deepEqual(inv.lists.map((l) => l.items[0]), ["[high] tombstone not skipped (kafka/consumer.go:148)", "more topics may emit tombstones"]);
+  assert.equal(s.totals.retries, 1);
+  assert.ok(s.problems.some((p) => p.step === "investigate" && /ECONNRESET/.test(p.message)), "the failed attempt is listed");
+  assert.deepEqual(s.decisions.map((d) => [d.question, d.answer, d.by]), [["Skip tombstones or log them?", "Skip them", "toan"]]);
+  assert.match(s.markdown, /Found the empty CDC payload path\./);
+  assert.match(s.markdown, /Skip tombstones or log them\?/);
+});

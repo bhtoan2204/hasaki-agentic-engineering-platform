@@ -10,6 +10,7 @@ import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
 import { extractRunMemory } from "../knowledge/memory.ts";
+import { storeRunSummary } from "../report/runSummary.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
@@ -115,6 +116,8 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
     // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
     if (to === "COMPLETED") afterCommit(() => extractRunMemory(run.id).catch((e) => console.error(`memory extraction for run ${run.id}: ${(e as Error).message}`)));
   }
+  // "What did this run do?" snapshot for the work item page (factual, from the run's own records; never throws).
+  if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => storeRunSummary(run.id));
 }
 
 async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
