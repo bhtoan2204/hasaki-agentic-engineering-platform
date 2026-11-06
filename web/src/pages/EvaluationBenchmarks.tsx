@@ -51,7 +51,7 @@ export function EvaluationBenchmarks() {
     );
   if (!suites.data || !runs.data) return <Loading />;
   return (
-    <section className="card">
+    <section className="card ins-bench">
       <div className="card-head">
         <h4>Versioned benchmark evaluations</h4>
         <span className="sub">
@@ -112,7 +112,7 @@ export function EvaluationBenchmarks() {
           </tbody>
         </table>
       </div>
-      <div className="toolbar">
+      <div className="ins-bench-form">
         <label>
           Adapter{" "}
           <select value={adapter} onChange={(e) => setAdapter(e.target.value)}>
@@ -121,7 +121,7 @@ export function EvaluationBenchmarks() {
             <option value="agent_fixture">Actual executor / CLI fixture</option>
           </select>
         </label>
-        <label>
+        <label className="ins-bench-toggle">
           <input
             type="checkbox"
             checked={ci}
@@ -184,7 +184,7 @@ export function EvaluationBenchmarks() {
           </tbody>
         </table>
       </div>
-      <div className="toolbar">
+      <div className="ins-bench-form ins-bench-compare">
         <label>
           Baseline{" "}
           <select

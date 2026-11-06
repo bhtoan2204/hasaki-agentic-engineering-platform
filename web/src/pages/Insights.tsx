@@ -248,7 +248,7 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
         <>
           {ev && <HarnessEvaluation e={ev} />}
           <EvaluationBenchmarks />
-      <EvalComparison />
+          <EvalComparison />
         </>
       )}
       {tab === "tools" && (
