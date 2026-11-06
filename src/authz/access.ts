@@ -26,10 +26,23 @@ export async function requireOwner(actor: Actor, ownerId: number | null, support
   await audit(actor.id, "support.access", resourceType, resourceId);
 }
 
+/**
+ * A run's owner never changes once set (only legacy ownerless runs are claimed, NULL → admin), so non-NULL owners are
+ * cached: every run route checks ownership first, and with a remote database that check is a full round trip.
+ */
+const runOwners = new Map<number, number>();
 export async function requireRun(actor: Actor, runId: number, support: boolean) {
-  const row = await one<{ owner_id: number | null }>(pool, "SELECT owner_id FROM workflow_runs WHERE id = $1", [runId]);
-  if (!row) throw new HttpError(404, "not found");
-  await requireOwner(actor, row.owner_id, support, "run", String(runId));
+  let owner = runOwners.get(runId) ?? null;
+  if (owner == null) {
+    const row = await one<{ owner_id: number | null }>(pool, "SELECT owner_id FROM workflow_runs WHERE id = $1", [runId]);
+    if (!row) throw new HttpError(404, "not found");
+    owner = row.owner_id == null ? null : Number(row.owner_id);
+    if (owner != null) {
+      if (runOwners.size >= 20000) runOwners.delete(runOwners.keys().next().value!);
+      runOwners.set(runId, owner);
+    }
+  }
+  await requireOwner(actor, owner, support, "run", String(runId));
 }
 
 export async function requireWorkItem(actor: Actor, id: number, support: boolean) {

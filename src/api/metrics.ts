@@ -11,7 +11,7 @@ import { pool, q, one } from "../db/pool.ts";
  *   cost_usd  SDK estimate (not a bill)
  */
 export async function runMetrics(runId: number) {
-  const attempts = await q(
+  const [attempts, toolRows, [run]] = await Promise.all([q(
     pool,
     `SELECT a.id, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
             (extract(epoch FROM (COALESCE(a.finished_at, now()) - a.started_at)) * 1000)::bigint AS exec_ms,
@@ -21,15 +21,17 @@ export async function runMetrics(runId: number) {
        FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id LEFT JOIN workflow_jobs j ON j.id = a.job_id
       WHERE a.run_id = $1 ORDER BY a.id`,
     [runId],
-  );
+  ),
   // Tool execution time from paired events (measured at event-write granularity).
-  const toolRows = await q(
+  q(
     pool,
     `SELECT t.attempt_id, t.data->>'name' AS name, (extract(epoch FROM (r.created_at - t.created_at)) * 1000)::bigint AS ms
        FROM workflow_events t JOIN workflow_events r ON r.attempt_id = t.attempt_id AND r.kind = 'tool_result' AND r.data->>'tool_use_id' = t.data->>'id'
       WHERE t.run_id = $1 AND t.kind = 'tool'`,
     [runId],
-  );
+  ),
+  q(pool, "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1", [runId]),
+  ]);
   const toolMs = new Map<number, number>();
   const byTool: Record<string, { calls: number; ms: number }> = {};
   for (const t of toolRows) {
@@ -37,7 +39,6 @@ export async function runMetrics(runId: number) {
     (byTool[t.name] ??= { calls: 0, ms: 0 }).calls++;
     byTool[t.name].ms += Number(t.ms);
   }
-  const run = (await q(pool, "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1", [runId]))[0];
   const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0, cost_unknown: 0 };
   const perStep: Record<string, { type: string; attempts: number; exec_ms: number; queue_ms: number; human_ms: number; claude_ms: number; turns: number }> = {};
   for (const a of attempts) {
@@ -94,7 +95,8 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
   const since = `now() - make_interval(days => ${Number(days) || 30})`;
   const own = !scope ? "" : scope.all ? "AND r.owner_id IS NOT NULL" : `AND r.owner_id = ${Number(scope.ownerId)}`;
   const attemptOwn = !scope ? "" : scope.all ? "AND a.run_id IN (SELECT id FROM workflow_runs WHERE owner_id IS NOT NULL)" : `AND a.run_id IN (SELECT id FROM workflow_runs WHERE owner_id = ${Number(scope.ownerId)})`;
-  const byProfile = await q(
+  const evaluationPromise = harnessEvaluation(since, attemptOwn, own);
+  const byProfilePromise = q(
     pool,
     `SELECT r.profile, count(DISTINCT r.id)::int AS runs, count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
             round(avg(extract(epoch FROM (r.finished_at - r.started_at))) FILTER (WHERE r.finished_at IS NOT NULL)::numeric / 60, 1) AS avg_wall_min,
@@ -104,7 +106,9 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
        FROM workflow_runs r LEFT JOIN workflow_step_attempts a ON a.run_id = r.id
       WHERE r.created_at > ${since} ${own} GROUP BY 1 ORDER BY 1`,
   );
-  const [byWorkflow, byStepType, tools, integrations, skills, failures, denied] = await Promise.all([
+  const [evaluation, byProfile, byWorkflow, byStepType, tools, integrations, skills, failures, denied] = await Promise.all([
+    evaluationPromise,
+    byProfilePromise,
     q(pool, `SELECT r.definition_key, count(DISTINCT r.id)::int AS runs,
                     count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
                     count(DISTINCT r.id) FILTER (WHERE r.status = 'FAILED')::int AS failed,
@@ -134,7 +138,7 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
                FROM workflow_step_attempts a, jsonb_array_elements(COALESCE(a.metrics->'denied', '[]'::jsonb)) d
               WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1, 2 ORDER BY times DESC LIMIT 25`),
   ]);
-  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation: await harnessEvaluation(since, attemptOwn, own) };
+  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation };
 }
 
 /**

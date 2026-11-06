@@ -1,5 +1,6 @@
 import { pool, q, one, withTx, type Db } from "../db/pool.ts";
 import { hashPassword } from "./password.ts";
+import { forgetUserSessions } from "./sessionCache.ts";
 
 export type Role = "admin" | "member";
 export type PublicUser = { id: number; username: string; role: Role; active: boolean };
@@ -43,6 +44,7 @@ export async function setPassword(userId: number, password: string) {
     if (!row) throw new Error("user not found");
     await q(c, "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [userId]);
   });
+  forgetUserSessions(userId);
 }
 
 export async function setActive(userId: number, active: boolean) {
@@ -51,6 +53,7 @@ export async function setActive(userId: number, active: boolean) {
     if (!row) throw new Error("user not found");
     if (!active) await q(c, "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [userId]);
   });
+  forgetUserSessions(userId);
 }
 
 export async function userByUsername(username: string) {

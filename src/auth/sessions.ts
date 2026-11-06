@@ -3,6 +3,7 @@ import { pool, q, one } from "../db/pool.ts";
 import { randomToken, safeEqual, sessionHash } from "./crypto.ts";
 import { verifyPassword } from "./password.ts";
 import { publicUser, userByUsername, type PublicUser } from "./users.ts";
+import { cachedSession, forgetSession, forgetUserSessions, rememberSession } from "./sessionCache.ts";
 
 const COOKIE = "sid";
 const MAX_AGE_S = 8 * 60 * 60;
@@ -91,6 +92,7 @@ export async function login(username: string, password: string, req: IncomingMes
   const csrf = randomToken(24);
   const expires = new Date(Date.now() + MAX_AGE_S * 1000);
   await q(pool, "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [row.id]);
+  forgetUserSessions(Number(row.id));
   await q(pool, "INSERT INTO sessions (user_id, token_hash, csrf_token, expires_at) VALUES ($1, $2, $3, $4)", [
     row.id,
     sessionHash(token),
@@ -109,6 +111,8 @@ export async function sessionFromRequest(req: IncomingMessage): Promise<SessionU
   } catch {
     return null;
   }
+  const hit = cachedSession<SessionUser>(hash);
+  if (hit) return hit;
   const row = await one<{ id: number; username: string; role: string; active: boolean; csrf_token: string; expires_at: string; revoked_at: string | null }>(
     pool,
     `SELECT u.id, u.username, u.role, u.active, s.csrf_token, s.expires_at, s.revoked_at
@@ -117,15 +121,20 @@ export async function sessionFromRequest(req: IncomingMessage): Promise<SessionU
     [hash],
   );
   if (!row || row.revoked_at || !row.active) return null;
-  if (new Date(row.expires_at).getTime() <= Date.now()) return null;
-  return { ...publicUser(row), csrf: row.csrf_token };
+  const expiresAt = new Date(row.expires_at).getTime();
+  if (expiresAt <= Date.now()) return null;
+  const user = { ...publicUser(row), csrf: row.csrf_token };
+  rememberSession(hash, Number(row.id), expiresAt, user);
+  return user;
 }
 
 export async function logout(req: IncomingMessage) {
   const token = readCookie(req);
   if (!token) return;
   try {
-    await q(pool, "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL", [sessionHash(token)]);
+    const hash = sessionHash(token);
+    forgetSession(hash);
+    await q(pool, "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL", [hash]);
   } catch {
     /* missing AUTH_SECRET: nothing to revoke */
   }

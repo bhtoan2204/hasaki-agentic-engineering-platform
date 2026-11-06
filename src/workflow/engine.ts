@@ -371,7 +371,7 @@ export async function startRun(input: StartRunInput) {
 }
 
 export async function startPendingRun(runId: number, repositoriesOverride?: string[], stepMode = false) {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PENDING") throw new EngineError(`run ${runId} is ${run.status}, not PENDING`);
     await adoptRun(c, runId);
@@ -379,34 +379,34 @@ export async function startPendingRun(runId: number, repositoriesOverride?: stri
     await setRunStatus(c, run, "RUNNING");
     if (stepMode) await setRunStatus(c, run, "PAUSED");
     await advance(c, runId, afterCommit);
-    return getRun(runId, c);
+    return;
   });
 }
 
 export async function pauseRun(runId: number) {
-  return withTx(async (c) => {
+  return txThenRun(runId, async (c) => {
     const run = await lockRun(c, runId);
-    if (run.status === "PAUSED") return getRun(runId, c);
+    if (run.status === "PAUSED") return;
     await setRunStatus(c, run, "PAUSED");
-    return getRun(runId, c);
+    return;
   });
 }
 
 export async function resumeRun(runId: number) {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PAUSED") throw new EngineError(`run ${runId} is ${run.status}, not PAUSED`);
     await adoptRun(c, runId);
     await setRunStatus(c, run, "RUNNING");
     await advance(c, runId, afterCommit);
-    return getRun(runId, c);
+    return;
   });
 }
 
 export async function cancelRun(runId: number, reason = "canceled by user") {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
-    if (run.status === "CANCELED") return getRun(runId, c);
+    if (run.status === "CANCELED") return;
     const aborted: number[] = [];
     for (const s of await stepsOf(c, runId)) {
       if (["COMPLETED", "SKIPPED", "CANCELED", "FAILED"].includes(s.status)) continue;
@@ -420,7 +420,7 @@ export async function cancelRun(runId: number, reason = "canceled by user") {
     await q(c, "UPDATE workflow_questions SET status = 'dismissed' WHERE run_id = $1 AND status = 'open'", [runId]);
     await setRunStatus(c, run, "CANCELED", undefined, reason);
     afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
-    return getRun(runId, c);
+    return;
   });
 }
 
@@ -434,10 +434,10 @@ async function setSelectedRepositories(c: Db, run: RunRow, repos: string[]) {
 }
 
 export async function selectRepositories(runId: number, repos: string[]) {
-  return withTx(async (c) => {
+  return txThenRun(runId, async (c) => {
     const run = await lockRun(c, runId);
     await setSelectedRepositories(c, run, repos);
-    return getRun(runId, c);
+    return;
   });
 }
 
@@ -497,7 +497,7 @@ async function reexecuteTx(c: Db, run: RunRow, stepKey: string, pending: Record<
  * enqueued, so a worker restart or a job retry uses exactly the same input. Templates and default prompts are untouched.
  */
 export async function reexecuteStep(runId: number, stepKey: string, opts: { input?: Record<string, unknown>; feedback?: string; skills?: string[]; by?: string } = {}) {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     const feedback = opts.feedback?.trim() || undefined;
     const keys = [...new Set((opts.skills ?? []).map(String).filter(Boolean))];
@@ -512,7 +512,7 @@ export async function reexecuteStep(runId: number, stepKey: string, opts: { inpu
     const why = reexecute ? `re-executed with ${[feedback && "instructions", pinned.length && `skills ${pinned.map((p) => `${p.key}@v${p.version}`).join(", ")}`].filter(Boolean).join(" + ")}` : "re-executed by user";
     await reexecuteTx(c, run, stepKey, pending, afterCommit, why);
     if (feedback) await runEvents.add(c, runId, "user", feedback);
-    return getRun(runId, c);
+    return;
   });
 }
 
@@ -532,7 +532,7 @@ export async function sendFeedback(runId: number, message: string) {
  * step finishes its dependants become READY and can be run the same way (or the run resumed).
  */
 export async function runStepNow(runId: number, stepKey: string) {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PAUSED") throw new EngineError(`run is ${run.status}: "run step" is for paused runs (step mode); running runs schedule steps automatically`);
     await adoptRun(c, runId);
@@ -543,13 +543,13 @@ export async function runStepNow(runId: number, stepKey: string) {
     await ensureJob(c, s);
     await q(c, "UPDATE workflow_jobs SET force = true, available_at = LEAST(available_at, now()) WHERE step_id = $1 AND status = 'queued'", [s.id]);
     await runEvents.add(c, runId, "user", `run step ${stepKey} (step mode)`, s.id);
-    return getRun(runId, c);
+    return;
   });
 }
 
 /** Stop a RUNNING step now: its attempt is canceled, the worker is fenced out and aborted; the step becomes FAILED. */
 export async function stopStep(runId: number, stepKey: string, reason = "stopped by user") {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     await lockRun(c, runId);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
@@ -560,12 +560,12 @@ export async function stopStep(runId: number, stepKey: string, reason = "stopped
     await runEvents.add(c, runId, "user", `${reason}: ${stepKey}`, s.id);
     afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
     await advance(c, runId, afterCommit);
-    return getRun(runId, c);
+    return;
   });
 }
 
 export async function skipStep(runId: number, stepKey: string, reason = "skipped by user") {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     await lockRun(c, runId);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
@@ -575,7 +575,7 @@ export async function skipStep(runId: number, stepKey: string, reason = "skipped
     await setStepStatus(c, s, "SKIPPED", { output: { skipped: true, reason }, finished_at: new Date() }, reason);
     afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
     await advance(c, runId, afterCommit);
-    return getRun(runId, c);
+    return;
   });
 }
 
@@ -645,7 +645,7 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
 }
 
 export async function approveStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; repositories?: string[]; data?: unknown } = {}) {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
@@ -696,12 +696,12 @@ export async function approveStep(runId: number, stepKey: string, opts: { commen
     }
     if (opts.comment) await runEvents.add(c, runId, "user", `approved ${stepKey}: ${opts.comment}`, s.id);
     await advance(c, runId, afterCommit);
-    return getRun(runId, c);
+    return;
   });
 }
 
 export async function rejectStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; reexecute?: string } = {}) {
-  return withTx(async (c, afterCommit) => {
+  return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
@@ -723,7 +723,7 @@ export async function rejectStep(runId: number, stepKey: string, opts: { comment
       await setStepStatus(c, s, "FAILED", { error: `rejected: ${comment}`, approval: { ...(s.approval ?? {}), granted: false, comment, by: opts.by ?? "", at: new Date() } }, "rejected");
       await advance(c, runId, afterCommit);
     }
-    return getRun(runId, c);
+    return;
   });
 }
 
@@ -1007,10 +1007,19 @@ export async function reapExpiredLeases() {
 // ---------------------------------------------------------------- queries
 
 export async function getRun(runId: number, db: Db = pool) {
-  const run = await one<RunRow>(db, "SELECT * FROM workflow_runs WHERE id = $1", [runId]);
+  // Both reads go out together on the pool (one round trip); inside a transaction the client queues them anyway.
+  const [run, steps] = await Promise.all([one<RunRow>(db, "SELECT * FROM workflow_runs WHERE id = $1", [runId]), stepsOf(db, runId)]);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
-  const steps = await stepsOf(db, runId);
   return { ...run, steps };
+}
+
+/**
+ * A run-changing transaction whose caller wants the run back: commit first, then read the run on the pool (run + steps
+ * in parallel). Inside the transaction those reads would be two more sequential round trips holding the run lock.
+ */
+async function txThenRun(runId: number, fn: (c: pg.PoolClient, afterCommit: AfterCommit) => Promise<void>) {
+  await withTx(fn);
+  return getRun(runId);
 }
 
 export function listRuns(filter: { workItemId?: number; status?: string; limit?: number; ownerId?: number; all?: boolean } = {}, db: Db = pool) {
@@ -1029,9 +1038,17 @@ export function listRuns(filter: { workItemId?: number; status?: string; limit?:
   );
 }
 
+/** Run page payload. All reads go out together (one round-trip of latency, not one per query). */
 export async function runDetail(runId: number) {
-  const run = await getRun(runId);
-  const [attempts, questions, artifacts, prs, workspaces, checkpoints] = await Promise.all([
+  const [run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints] = await Promise.all([
+    one<RunRow & { definition_version: number; wi_id: number | null; wi_code: string; wi_title: string; wi_source: string; wi_project: string }>(
+      pool,
+      `SELECT r.*, v.version AS definition_version, w.id AS wi_id, w.code AS wi_code, w.title AS wi_title, w.source AS wi_source, w.project AS wi_project
+         FROM workflow_runs r LEFT JOIN workflow_definition_versions v ON v.id = r.definition_version_id LEFT JOIN work_items w ON w.id = r.work_item_id
+        WHERE r.id = $1`,
+      [runId],
+    ),
+    stepsOf(pool, runId),
     q(pool, "SELECT a.*, s.key AS step_key FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 ORDER BY a.id", [runId]),
     q(pool, "SELECT q.*, s.key AS step_key FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id WHERE q.run_id = $1 ORDER BY q.id", [runId]),
     q(pool, "SELECT id, step_id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE run_id = $1 ORDER BY id", [runId]),
@@ -1039,24 +1056,28 @@ export async function runDetail(runId: number) {
     q(pool, "SELECT * FROM execution_workspaces WHERE run_id = $1 ORDER BY id", [runId]),
     q(pool, "SELECT id, step_id, attempt_id, reason, data, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id", [runId]),
   ]);
-  const workItem = run.work_item_id ? await one(pool, "SELECT id, code, title, source, project FROM work_items WHERE id = $1", [run.work_item_id]) : null;
-  const def = await one(pool, "SELECT version FROM workflow_definition_versions WHERE id = $1", [run.definition_version_id]);
-  return { ...run, definition_version: def?.version, work_item: workItem, attempts, questions, artifacts, pull_requests: prs, workspaces, checkpoints };
+  if (!run) throw new EngineError(`run ${runId} not found`, 404);
+  const { wi_id, wi_code, wi_title, wi_source, wi_project, ...row } = run;
+  const work_item = wi_id != null ? { id: wi_id, code: wi_code, title: wi_title, source: wi_source, project: wi_project } : null;
+  return { ...row, steps, work_item, attempts, questions, artifacts, pull_requests: prs, workspaces, checkpoints };
 }
 
 /** Everything the step inspector shows for one step. */
 export async function stepDetail(runId: number, stepKey: string) {
-  const step = await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
-  if (!step) throw new EngineError(`step "${stepKey}" not found`, 404);
-  const [attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs] = await Promise.all([
-    q(pool, "SELECT * FROM workflow_step_attempts WHERE step_id = $1 ORDER BY number", [step.id]),
-    q(pool, "SELECT * FROM workflow_questions WHERE step_id = $1 ORDER BY id", [step.id]),
-    q(pool, "SELECT * FROM workflow_checkpoints WHERE step_id = $1 ORDER BY id", [step.id]),
-    q(pool, "SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = $1 ORDER BY id", [step.id]),
-    q(pool, "SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = $1 ORDER BY s.id", [step.id]),
-    q(pool, "SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = $1 ORDER BY id", [step.id]),
-    q(pool, "SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = $1 ORDER BY id DESC LIMIT 10", [step.id]),
+  // Every query addresses the step by (run, key) so all of them go out together.
+  const sid = "(SELECT id FROM workflow_steps WHERE run_id = $1 AND key = $2)";
+  const args = [runId, stepKey];
+  const [step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs] = await Promise.all([
+    one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
+    q(pool, `SELECT * FROM workflow_step_attempts WHERE step_id = ${sid} ORDER BY number`, args),
+    q(pool, `SELECT * FROM workflow_questions WHERE step_id = ${sid} ORDER BY id`, args),
+    q(pool, `SELECT * FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`, args),
+    q(pool, `SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = ${sid} ORDER BY id`, args),
+    q(pool, `SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = ${sid} ORDER BY s.id`, args),
+    q(pool, `SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`, args),
+    q(pool, `SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = ${sid} ORDER BY id DESC LIMIT 10`, args),
   ]);
+  if (!step) throw new EngineError(`step "${stepKey}" not found`, 404);
   return { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs };
 }
 

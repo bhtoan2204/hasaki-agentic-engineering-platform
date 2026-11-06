@@ -57,6 +57,40 @@ export async function one<T = any>(db: Db, sql: string, params: unknown[] = []):
 }
 
 /**
+ * Rows a transaction writes but never reads back (event log lines) are buffered on its client and written with ONE
+ * multi-row INSERT just before COMMIT: with a remote database every statement is a network round trip, and a single
+ * state transition writes several events. Same transaction, same order, same triggers (FOR EACH ROW still fires per
+ * row); outside withTx the insert happens immediately.
+ */
+const buffered = new WeakMap<object, Map<string, { table: string; columns: string[]; rows: unknown[][] }>>();
+
+export async function insertDeferred(db: Db, table: string, columns: string[], values: unknown[]) {
+  const buf = buffered.get(db);
+  if (!buf) {
+    await db.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})`, values);
+    return;
+  }
+  const k = `${table}(${columns.join(",")})`;
+  (buf.get(k) ?? buf.set(k, { table, columns, rows: [] }).get(k)!).rows.push(values);
+}
+
+async function flushDeferred(c: pg.PoolClient) {
+  const buf = buffered.get(c);
+  if (!buf) return;
+  for (const { table, columns, rows } of buf.values()) {
+    // Chunks keep the statement under PostgreSQL's 65535 bind-parameter limit.
+    const per = Math.max(1, Math.floor(60000 / columns.length));
+    for (let i = 0; i < rows.length; i += per) {
+      const chunk = rows.slice(i, i + per);
+      const params: unknown[] = [];
+      const tuples = chunk.map((r) => `(${r.map((v) => (params.push(v), `$${params.length}`)).join(", ")})`);
+      await c.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES ${tuples.join(", ")}`, params);
+    }
+  }
+  buf.clear();
+}
+
+/**
  * Run `fn` in a transaction on `db` (the app pool by default).
  * The client is released once, as soon as COMMIT or ROLLBACK finishes, and only then are `afterCommit`
  * callbacks awaited in registration order. They run only after a successful COMMIT. A callback error is logged
@@ -71,7 +105,9 @@ export async function withTx<T>(fn: (c: pg.PoolClient, afterCommit: (cb: () => u
   let destroy: Error | undefined;
   try {
     await c.query("BEGIN");
+    buffered.set(c, new Map());
     out = await fn(c, (cb) => after.push(cb));
+    await flushDeferred(c);
     await c.query("COMMIT");
     committed = true;
   } catch (e) {
@@ -85,6 +121,7 @@ export async function withTx<T>(fn: (c: pg.PoolClient, afterCommit: (cb: () => u
     }
     throw e;
   } finally {
+    buffered.delete(c);
     c.release(destroy);
   }
   for (const cb of after) {
