@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveRepoPath } from "./paths.ts";
 import { config } from "../config.ts";
 import { pool, q, one, inTx, txWrote, type Db } from "../db/pool.ts";
@@ -93,7 +93,19 @@ export function projectScope(project: string, related: Record<string, string[]> 
 }
 
 export const repoPath = resolveRepoPath;
-const isGit = (rel: string) => existsSync(join(config.reposRoot, rel, ".git"));
+const isGit = (rel: string) => {
+  const marker = join(config.reposRoot, rel, ".git");
+  if (!existsSync(marker)) return false;
+  // Linked worktrees are another checkout of an existing logical repository, not new registry entries.
+  // Submodules also have a .git file but do not have a commondir marker, so keep discovering them.
+  try {
+    if (statSync(marker).isFile()) {
+      const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(marker, "utf8"))?.[1];
+      if (gitdir && existsSync(join(resolve(dirname(marker), gitdir.trim()), "commondir"))) return false;
+    }
+  } catch { return false; }
+  return true;
+};
 
 /**
  * Expand a reposRoot-relative entry into git repositories: the entry itself if it is a repo, otherwise its direct

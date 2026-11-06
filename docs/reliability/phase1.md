@@ -87,3 +87,17 @@ Existing run workspace paths and session cwd values remain persisted operational
 Run `npm run typecheck`, `npm run build`, and `npm test`. The suite creates only the isolated local `platform_test` database through `test/setup.ts`; remote test URLs are refused. See the task's final report for checks actually executed.
 
 Verified on 2026-11-06 in the isolated task worktree: `npm run typecheck` passed, `npm run build` passed, `npm test` passed all **324 tests** (zero failures/skips), and `git diff --check` passed. The PostgreSQL-backed tests ran against the local container, including separate-process claim/registration checks. No live model calls were made. One pre-existing credential-test timestamp fixture was made deterministic after a second-boundary failure during verification.
+
+## Repairing an existing installation
+
+If another instance's legacy `repositories.path` points into a missing group folder, local resolution now falls back to an existing `reposRoot/<name>` checkout. Explicit `repositories` overrides still take precedence. Group discovery excludes linked Git worktrees (identified by their `commondir` marker), while retaining ordinary repositories and submodules. Existing incorrect registry entries still require an intentional operator correction; startup never disables them automatically.
+
+After explicitly verifying the legacy credential owner, an operator can run:
+
+```sh
+node --env-file=.env src/cli/claim-integration-credentials.ts --user-id 1 --kind splunk_cookie
+```
+
+The target must be an active administrator. The command encrypts and verifies the complete credential, refuses to overwrite a different personal credential, clears only the migrated plaintext value while retaining the settings row, and records an audit entry in the same transaction. Repetition is harmless. It never prints tokens or chooses an owner automatically. Without verified ownership, reconnect through Integrations instead.
+
+Repair verification on 2026-11-06: the real installation returned `startupWarnings: []` after explicit local mapping repairs, four requested clones, verified-owner Splunk credential transfer, and correction of the mistakenly registered worktree alias. `npm test` passed **328 tests**, typecheck/build passed, and `git diff --check` passed.

@@ -19,6 +19,10 @@ export function resolveRepoPath(repo: LocalRepository, local = config): string {
   const path = resolve(local.reposRoot, hint);
   const rel = relative(resolve(local.reposRoot), path);
   if (isAbsolute(hint) || rel === ".." || rel.startsWith("../")) throw new Error(`Unsafe shared path for ${repo.name}; set a local repositories override`);
+  // A shared legacy layout may describe another developer's machine. Prefer the conventional
+  // local checkout only when that legacy location is absent; explicit overrides always win.
+  const conventional = resolve(local.reposRoot, repo.name);
+  if (hint !== repo.name && !existsSync(path) && existsSync(join(conventional, ".git"))) return conventional;
   return path;
 }
 
