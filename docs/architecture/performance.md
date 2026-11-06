@@ -161,3 +161,39 @@ Also check whether the VPN path adds latency (100 ms Vietnam → Singapore is hi
   Rows are pruned after a day.
 * State transitions (approve, answer, re-execute, stop, cancel) are not keyed. The run row lock plus status checks
   already make a repeat a no-op that answers 409.
+
+## In-process caches (`src/cache/index.ts`)
+
+| Strategy | Used for | Invalidation |
+|---|---|---|
+| Cache-aside + per-key singleflight + generation check (no stale write-back) | `knowledge.candidates` per owner (every step attempt), repository registry (run start, discovery, PR, authz), published workflow definition versions (run start) | write in this process → cleared after COMMIT (`onCommittedWrite` in `db/pool.ts`, rollback clears nothing); write in another process → DB trigger `NOTIFY cache_invalidate` (migration 024) → listener; TTL 60 s / 5 min backstop |
+| Stale-while-revalidate | `/api/metrics/summary` | fresh 30 s, then stale ≤ 10 min while one background refresh runs |
+| Singleflight | identical concurrent GETs of one user (`http/app.ts`) | none (nothing stored) |
+
+**Safety rules**
+
+* The listener is started by the server. While it is disconnected (VPN drop, restart), every cache is flushed and
+  **bypassed**: notifications sent meanwhile are lost, so nothing cached may be trusted. When it reconnects it flushes
+  again before serving from cache. Processes without a listener (tests, CLI) rely on local invalidation only.
+* A transaction that wrote a cached table bypasses that cache for the rest of the transaction, so it sees its own
+  writes.
+* Cached values are returned as structured clones.
+* The knowledge cache keeps, per item, the version in effect plus newer future-dated versions, and selects by
+  `effective_from` in memory. An instant earlier than the load falls back to the database query.
+* Writes to cached tables must go through `q()`/`one()`. A raw `client.query` write is still caught by the trigger
+  (cross-process path), only later.
+* `CACHE=off` disables the cache-aside and SWR caches.
+
+**Measured** (100 ms injected per statement):
+
+| Request | No cache | Warm cache |
+|---|---|---|
+| start run | 1 727 ms (18 statements) | 1 320 ms (14) |
+| resolve context per step attempt | 508 ms | 408 ms |
+| metrics summary | 205 ms | 1 ms |
+| 3 tabs refetching one run | 24 statements | 8 statements |
+
+**Not cached on purpose**
+
+* Run and step detail. They change on every step, and the page already costs a single round trip.
+* Write paths. Write-through makes writes no faster, and write-behind would lose durable engine state.

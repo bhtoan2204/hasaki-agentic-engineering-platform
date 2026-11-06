@@ -1,7 +1,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.ts";
-import { pool, q, one, type Db } from "../db/pool.ts";
+import { pool, q, one, inTx, txWrote, type Db } from "../db/pool.ts";
+import { CacheAside } from "../cache/index.ts";
 
 export interface RepositoryRow {
   id: number;
@@ -21,14 +22,21 @@ export interface RepositoryRow {
   enabled: boolean;
 }
 
+/** The registry is small and read on every run start, discovery, PR and authorization check. */
+const repoCache = new CacheAside<RepositoryRow[]>("repositories", ["repositories"], 60_000, 1);
+function allRepositories(db: Db): Promise<RepositoryRow[]> {
+  const load = () => q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+  return inTx(db) && txWrote(db, "repositories") ? load() : repoCache.get("all", load);
+}
+
 const EDITABLE = ["path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
 
 export const repositories = {
   list(db: Db = pool) {
-    return q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+    return allRepositories(db);
   },
-  get(name: string, db: Db = pool) {
-    return one<RepositoryRow>(db, "SELECT * FROM repositories WHERE name = $1", [name]);
+  async get(name: string, db: Db = pool) {
+    return (await allRepositories(db)).find((r) => r.name === name);
   },
   async upsert(name: string, patch: Partial<RepositoryRow>, db: Db = pool) {
     if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`invalid repository name "${name}"`);
@@ -54,7 +62,7 @@ export const repositories = {
    * linked with it in config.relatedProjects, or every such repository when the project has no mapping.
    */
   async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
-    const all = await q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+    const all = await allRepositories(db);
     const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action));
     const p = project.trim().toLowerCase();
     const scope = new Set(projectScope(project));

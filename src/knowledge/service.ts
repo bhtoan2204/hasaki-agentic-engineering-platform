@@ -1,4 +1,5 @@
-import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
+import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
+import { CacheAside } from "../cache/index.ts";
 import { CATEGORIES, SCOPES, type KnowledgeCandidate } from "./resolve.ts";
 
 export interface KnowledgeInput {
@@ -140,7 +141,14 @@ export const knowledge = {
    * passed (an approved rule dated in the future does not apply yet; an item with no version in effect is left out).
    * `superseded_by` is the successor's key while that successor is enabled.
    */
-  candidates(db: Db = pool, ownerId?: number | null, at: Date = new Date()) {
+  async candidates(db: Db = pool, ownerId?: number | null, at: Date = new Date()): Promise<KnowledgeCandidate[]> {
+    // Cached per owner (read on every step attempt). Bypassed inside a transaction that wrote knowledge itself.
+    const wrote = inTx(db) && (txWrote(db, "knowledge_items") || txWrote(db, "knowledge_versions"));
+    if (!wrote) {
+      const snap = await candidateCache.get(String(ownerId ?? ""), () => loadCandidateSet(db, ownerId ?? null));
+      // Versions older than the one in effect at load time were dropped: an instant before that needs the database.
+      if (at.getTime() >= snap.loadedAt - 1000) return pickEffective(snap.items, at);
+    }
     return q<KnowledgeCandidate>(
       db,
       `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at,
@@ -156,6 +164,50 @@ export const knowledge = {
     );
   },
 };
+
+// ---------------------------------------------------------------- candidate cache
+
+interface CandidateSet {
+  loadedAt: number;
+  items: Array<Omit<KnowledgeCandidate, "version" | "content" | "applicability" | "metadata" | "effective_from"> & {
+    versions: Array<{ version: number; content: string; applicability: any; metadata: any; effective_from: string | null }>;
+  }>;
+}
+const candidateCache = new CacheAside<CandidateSet>("knowledge.candidates", ["knowledge_items", "knowledge_versions"], 60_000, 200);
+
+/**
+ * Every enabled visible item with the versions that can still be in effect: the one in effect now and newer ones
+ * dated in the future (time only moves forward, so older versions can never be selected again).
+ */
+async function loadCandidateSet(db: Db, ownerId: number | null): Promise<CandidateSet> {
+  const loadedAt = Date.now();
+  const items = await q(
+    db,
+    `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at, s.key AS superseded_by,
+            (SELECT json_agg(json_build_object('version', v.version, 'content', v.content, 'applicability', v.applicability, 'metadata', v.metadata,
+                                               'effective_from', v.effective_from) ORDER BY v.version DESC)
+               FROM knowledge_versions v
+              WHERE v.item_id = i.id AND v.version <= i.current_version
+                AND v.version >= COALESCE((SELECT max(e.version) FROM knowledge_versions e
+                                            WHERE e.item_id = i.id AND e.version <= i.current_version AND (e.effective_from IS NULL OR e.effective_from <= $2)), 0)
+            ) AS versions
+       FROM knowledge_items i LEFT JOIN knowledge_items s ON s.id = i.superseded_by AND s.enabled
+      WHERE i.enabled AND (i.owner_id IS NULL OR ($1::bigint IS NOT NULL AND i.owner_id = $1))`,
+    [ownerId, new Date(loadedAt)],
+  );
+  return { loadedAt, items: items.map((r) => ({ ...r, versions: r.versions ?? [] })) };
+}
+
+/** Same selection as the SQL path: per item the newest version whose effective_from has passed; none → left out. */
+function pickEffective(items: CandidateSet["items"], at: Date): KnowledgeCandidate[] {
+  const t = at.getTime();
+  const out: KnowledgeCandidate[] = [];
+  for (const { versions, ...it } of items) {
+    const v = versions.find((x) => !x.effective_from || new Date(x.effective_from).getTime() <= t);
+    if (v) out.push({ ...it, version: v.version, content: v.content, applicability: v.applicability ?? {}, metadata: v.metadata ?? {}, effective_from: v.effective_from } as KnowledgeCandidate);
+  }
+  return out;
+}
 
 /** A few starter items so a fresh install shows how scopes and skills work. Only inserted when missing. */
 export async function seedKnowledge() {

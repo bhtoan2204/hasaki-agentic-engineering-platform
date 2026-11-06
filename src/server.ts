@@ -14,6 +14,7 @@ import { startProdErrorSchedule } from "./prodErrors/scan.ts";
 import { seedTemplates } from "./workflow/definitions.ts";
 import { registerDefaultExecutors } from "./workflow/executors/index.ts";
 import { startScheduler } from "./workflow/scheduler.ts";
+import { startCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
 import { startEventStream } from "./api/stream.ts";
@@ -42,6 +43,9 @@ await loadKafkaCookie();
 await loadVaultToken();
 registerDefaultExecutors();
 await startEventStream();
+// Other processes' writes to cached tables (knowledge, repositories, workflows) arrive here; caches are bypassed while
+// this listener is down.
+await startCacheInvalidation();
 
 // Bind the port BEFORE starting workers: a second copy of the server (port already taken) must exit without having
 // claimed any job — otherwise it claims work, dies, and the job later fails with "worker lease expired".

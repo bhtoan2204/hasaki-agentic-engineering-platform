@@ -4,6 +4,7 @@ import { extname, join, normalize } from "node:path";
 import { pool } from "../db/pool.ts";
 import { errorStatus, routes } from "../api/routes.ts";
 import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
+import { singleflight } from "../cache/index.ts";
 import { HttpError } from "./error.ts";
 import { messages as uiMessages } from "../../web/src/i18n/messages.ts";
 import { handleStream } from "../api/stream.ts";
@@ -130,7 +131,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const claim = typeof idemKey === "string" && needsIdempotency(method, url.pathname) ? await claimIdempotency(actor.id, idemKey, url.pathname, body) : null;
       if (claim && claim.kind !== "run") return send(res, claim.status, claim.body, claim.kind === "replay" ? { "Idempotent-Replayed": "true" } : undefined);
       try {
-        const out = await handler({ p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor });
+        const ctx = { p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor };
+        // Identical concurrent GETs of one user (every open tab refetches on the same live event) share one execution.
+        const out = method === "GET" ? await singleflight(`${actor.id} ${url.pathname}${url.search}`, async () => handler(ctx)) : await handler(ctx);
         if (claim) await claim.finish(200, out ?? null);
         return send(res, 200, out ?? null);
       } catch (e) {

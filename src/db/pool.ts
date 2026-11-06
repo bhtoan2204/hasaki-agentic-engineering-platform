@@ -48,12 +48,52 @@ export async function retryTransient<T>(fn: () => Promise<T>, label: string, del
   }
 }
 
+// ---------------------------------------------------------------- committed-write notifications (cache invalidation)
+
+/**
+ * In-process caches (src/cache) must drop entries as soon as THIS process commits a write to their tables (read your
+ * own writes; other processes are covered by the database triggers of migration 024). Every write to those tables goes
+ * through q()/one(), which spot `INSERT INTO | UPDATE | DELETE FROM <table>`: inside withTx the tables are reported
+ * after COMMIT (a rollback reports nothing), outside a transaction right after the statement.
+ */
+const WRITE_RE = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)/i;
+const writeListeners: Array<(tables: Set<string>) => void> = [];
+const txWrites = new WeakMap<object, Set<string>>();
+export function onCommittedWrite(fn: (tables: Set<string>) => void) {
+  writeListeners.push(fn);
+}
+function emitWrites(tables: Set<string>) {
+  if (!tables.size) return;
+  for (const fn of writeListeners) {
+    try {
+      fn(tables);
+    } catch (e) {
+      console.error("write listener failed:", (e as Error).message);
+    }
+  }
+}
+/** Did this transaction (still open) write `table`? Caches bypass themselves then: the tx must see its own writes. */
+export const txWrote = (db: Db, table: string) => txWrites.get(db)?.has(table) ?? false;
+export const inTx = (db: Db) => txWrites.has(db);
+
+async function run(db: Db, sql: string, params: unknown[]) {
+  const m = WRITE_RE.exec(sql);
+  const r = await db.query(sql, params);
+  if (m) {
+    const t = m[1].toLowerCase();
+    const set = txWrites.get(db);
+    if (set) set.add(t);
+    else emitWrites(new Set([t]));
+  }
+  return r;
+}
+
 export async function q<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
-  return (await db.query(sql, params)).rows as T[];
+  return (await run(db, sql, params)).rows as T[];
 }
 
 export async function one<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T | undefined> {
-  return (await db.query(sql, params)).rows[0] as T | undefined;
+  return (await run(db, sql, params)).rows[0] as T | undefined;
 }
 
 /**
@@ -106,10 +146,12 @@ export async function withTx<T>(fn: (c: pg.PoolClient, afterCommit: (cb: () => u
   try {
     await c.query("BEGIN");
     buffered.set(c, new Map());
+    txWrites.set(c, new Set());
     out = await fn(c, (cb) => after.push(cb));
     await flushDeferred(c);
     await c.query("COMMIT");
     committed = true;
+    emitWrites(txWrites.get(c) ?? new Set());
   } catch (e) {
     if (!committed) {
       try {
@@ -122,6 +164,7 @@ export async function withTx<T>(fn: (c: pg.PoolClient, afterCommit: (cb: () => u
     throw e;
   } finally {
     buffered.delete(c);
+    txWrites.delete(c);
     c.release(destroy);
   }
   for (const cb of after) {

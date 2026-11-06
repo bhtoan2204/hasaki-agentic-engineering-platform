@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
+import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
+import { CacheAside } from "../cache/index.ts";
 import { validateSpec } from "./graph.ts";
 import { TEMPLATES } from "./templates.ts";
 import type { WorkflowSpec } from "./types.ts";
@@ -53,23 +54,9 @@ export const definitions = {
   /** A published version; latest when `version` is omitted. */
   /** The owner's private copy when it exists, otherwise the shared definition. */
   async version(key: string, version?: number, db: Db = pool, ownerId?: number | null): Promise<DefinitionVersion | undefined> {
-    if (ownerId) {
-      const priv = await one<DefinitionVersion>(
-        db,
-        `SELECT v.id, v.definition_id, d.key, v.version, v.spec, v.spec_hash
-           FROM workflow_definition_versions v JOIN workflow_definitions d ON d.id = v.definition_id
-          WHERE d.key = $1 AND d.owner_id = $3 AND v.version = COALESCE($2, d.latest_version)`,
-        [key, version ?? null, ownerId],
-      );
-      if (priv) return priv;
-    }
-    return one<DefinitionVersion>(
-      db,
-      `SELECT v.id, v.definition_id, d.key, v.version, v.spec, v.spec_hash
-         FROM workflow_definition_versions v JOIN workflow_definitions d ON d.id = v.definition_id
-        WHERE d.key = $1 AND d.owner_id IS NULL AND v.version = COALESCE($2, d.latest_version)`,
-      [key, version ?? null],
-    );
+    const wrote = inTx(db) && (txWrote(db, "workflow_definitions") || txWrote(db, "workflow_definition_versions"));
+    const load = () => loadDefinitionVersion(key, version, db, ownerId);
+    return wrote ? load() : versionCache.get(`${key}|${version ?? "latest"}|${ownerId ?? ""}`, load);
   },
 
   /** Create a definition with an (optionally published) first spec. ownerId null means shared. */
@@ -155,4 +142,27 @@ export async function seedTemplates() {
       });
     }
   }
+}
+
+/** Published version rows never change; the latest pointer does (watched through workflow_definitions writes). */
+const versionCache = new CacheAside<DefinitionVersion | undefined>("definitions.version", ["workflow_definitions", "workflow_definition_versions"], 300_000, 500);
+
+async function loadDefinitionVersion(key: string, version: number | undefined, db: Db, ownerId: number | null | undefined): Promise<DefinitionVersion | undefined> {
+  if (ownerId) {
+    const priv = await one<DefinitionVersion>(
+      db,
+      `SELECT v.id, v.definition_id, d.key, v.version, v.spec, v.spec_hash
+         FROM workflow_definition_versions v JOIN workflow_definitions d ON d.id = v.definition_id
+        WHERE d.key = $1 AND d.owner_id = $3 AND v.version = COALESCE($2, d.latest_version)`,
+      [key, version ?? null, ownerId],
+    );
+    if (priv) return priv;
+  }
+  return one<DefinitionVersion>(
+    db,
+    `SELECT v.id, v.definition_id, d.key, v.version, v.spec, v.spec_hash
+       FROM workflow_definition_versions v JOIN workflow_definitions d ON d.id = v.definition_id
+      WHERE d.key = $1 AND d.owner_id IS NULL AND v.version = COALESCE($2, d.latest_version)`,
+    [key, version ?? null],
+  );
 }

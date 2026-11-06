@@ -21,6 +21,9 @@ import { reviewMemory } from "../knowledge/memory.ts";
 import { approveProposal, getProposal, listProposals, rejectProposal, reviewScope, rollbackProposal } from "../knowledge/proposals.ts";
 import { detectKnowledgeChanges, proposeSkillUpdates } from "../knowledge/learning.ts";
 import { background } from "../workflow/background.ts";
+import { StaleWhileRevalidate } from "../cache/index.ts";
+
+const metricsSwr = new StaleWhileRevalidate<Awaited<ReturnType<typeof metricsSummary>>>("metrics.summary", 30_000, 600_000);
 import { summarizeEval } from "../eval/summary.ts";
 import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
@@ -234,7 +237,12 @@ export const routes: Route[] = [
   // ------------------------------------------------------------ runs
   ["GET", /^\/api\/scheduler$/, () => schedulerStatus()],
   ["GET", /^\/api\/agent-providers$/, (c) => agentProviderStatus(c.url.searchParams.get("refresh") === "1")],
-  ["GET", /^\/api\/metrics\/summary$/, (c) => metricsSummary(Number(c.url.searchParams.get("days") ?? 30), mine(c))],
+  // Expensive 30-day aggregates: fresh for 30 s, then served stale (≤ 10 min) while one refresh runs in the background.
+  ["GET", /^\/api\/metrics\/summary$/, (c) => {
+    const days = Number(c.url.searchParams.get("days") ?? 30);
+    const scope = mine(c);
+    return metricsSwr.get(`${days}|${scope.ownerId}|${scope.all}`, () => metricsSummary(days, scope));
+  }],
   ["GET", /^\/api\/metrics\/runs\/(\d+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runMetrics(num(c.p[0])))],
   ["GET", /^\/api\/tools$/, ({ url }) => listTools(url.searchParams.get("q") ?? undefined, { mode: "coding" }).map((t) => ({ ...t, ...describeTool(t.name) }))],
   ["GET", /^\/api\/runs$/, async (c) => {
