@@ -64,5 +64,28 @@
   },
   "repositories": {
     "oms-api": "/home/bhtoan/src/oms-src/oms-api"
+  },
+  "codeIntelligence": {
+    "enabled": false,
+    "sqlDialect": "postgresql",
+    "contextTokens": 2000,
+    "maxFileBytes": 524288,
+    "maxFiles": 20000,
+    "maxScanBytes": 134217728,
+    "maxSymbols": 2000,
+    "concurrency": 1,
+    "timeoutMs": 120000,
+    "retentionDays": 7,
+    "excludes": [],
+    "weights": {
+      "exact": 2,
+      "qualified": 2,
+      "path": 0.5,
+      "dependency": 0.5,
+      "text": 0.25,
+      "cap": 3
+    },
+    "includeGenerated": false,
+    "includeDependencies": false
   }
 }

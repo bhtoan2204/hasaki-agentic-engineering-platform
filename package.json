@@ -18,7 +18,9 @@
     "dev:web": "vite --config web/vite.config.ts",
     "knowledge:import": "node --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts",
     "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts",
-    "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts"
+    "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts",
+    "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
+    "validate:code-intelligence": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/validate-code-intelligence.ts"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "1.13.6",
@@ -32,6 +34,8 @@
     "playwright-core": "^1.49.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "tree-sitter-wasm": "2.0.4",
+    "web-tree-sitter": "0.27.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {

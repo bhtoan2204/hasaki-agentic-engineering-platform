@@ -1,3 +1,6 @@
+import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
+import { repositories } from "./repos/service.ts";
+import { background } from "./workflow/background.ts";
 import { createServer } from "node:http";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { config } from "./config.ts";
@@ -67,6 +70,9 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 const scheduler = startScheduler();
+if (config.codeIntelligence.enabled) background("code intelligence startup", async () => {
+  for (const repo of await repositories.list()) if (repo.enabled && repo.allowed_actions.includes("read")) await enqueueCodeIndex(repo.name).catch(() => {});
+});
 startPolling();
 startProdErrorSchedule();
 

@@ -1,3 +1,4 @@
+import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
 import { config } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
@@ -241,7 +242,9 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   if (!rows.length) return { kind: "failed", error: "no repositories are allowed for this run (check the repository registry / project mapping)", retryable: false };
   const keywords = Object.values(ctx.input.upstream).flatMap((u) => (Array.isArray(u.output?.keywords) ? u.output.keywords : []));
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");
-  let ranked = rankRepositories(rows, { text, keywords, project: ctx.context.project });
+  const rankingStarted = Date.now();
+  let ranked = await hybridRank(rows, { text, keywords, project: ctx.context.project });
+  if (config.codeIntelligence.enabled) await ctx.recordMetrics({ code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted } }).catch(() => {});
   let method = "deterministic";
   // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
   if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false) {

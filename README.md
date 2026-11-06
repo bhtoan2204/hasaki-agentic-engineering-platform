@@ -306,3 +306,13 @@ If you reject permission or debugging is disabled, the UI explains how to retry;
 The platform reloads the chosen Work tab to capture a fresh authenticated request and follows its official SSO flow if needed.
 To return to a dedicated profile, set `HASAKI_WORK_CHROME_PROFILE=dedicated`.
 Reference: https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session
+
+### Optional cross-repository code intelligence (P1)
+
+Set `codeIntelligence.enabled` to `true` in the **local** `PLATFORM_CONFIG` (defaults and limits are in `config.example.json`). The existing PostgreSQL migrations create the additive `code_intelligence` schema. No extra service or database extension is required. `git` and `rg` must be installed on the worker; Tree-sitter runtime/grammars are pinned npm dependencies.
+
+Existing scheduler workers index registered repositories while idle. The repository detail page shows status, commit, counts, progress and sanitized errors; administrators can queue reindexing or cancel it. Discovery and Claude/Cursor/Codex prompts use validated snapshots with metadata/direct-search fallback. The read-only `code_intelligence.search` integration tool exposes symbols, definitions, references, bounded dependencies and exact search within the run's allowed repositories.
+
+See [architecture, extraction coverage and operational limits](docs/architecture/code-intelligence.md) and [measured fixture benchmark](docs/architecture/code-intelligence-benchmark.json). To reproduce on an isolated **local test database**, run `npm run bench:code-intelligence`; it uses the existing test database setup, which recreates `platform_test`. Use `TEST_DATABASE_ADMIN_URL` for a different local test PostgreSQL. The benchmark never accepts a remote database.
+
+Development finalization results, real-repository measurements, startup verification, and remaining limits: [P1 validation report](docs/validation/p1-finalization.md). Re-run the authorized development check with `npm run validate:code-intelligence -- <development-database-name>`; it indexes the three registered OMS checkouts and removes its disposable worktrees.

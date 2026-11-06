@@ -1,0 +1,11 @@
+{
+  "database": "claude_task_platform",
+  "port": 4545,
+  "feature_enabled": true,
+  "health": 200,
+  "index_status_anonymous": 401,
+  "shutdown": {
+    "code": 0,
+    "signal": null
+  }
+}

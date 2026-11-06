@@ -18,5 +18,6 @@ export async function validateLocalConfiguration(probe = (bin: string) => !spawn
   for (const [provider, bin] of [["Claude", process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin || "claude"], ["Codex", codexConfig().bin], ["Cursor", process.env.CURSOR_AGENT_BIN || config.agent.cursorBin || "agent"]]) {
     if (!probe(bin)) warnings.push(`${provider} CLI unavailable; install/configure it locally and authenticate before selecting this provider. Other providers remain usable.`);
   }
+  if (config.codeIntelligence.enabled && !probe("rg")) warnings.push("Code intelligence live search unavailable: install ripgrep (rg) on this worker. Indexed navigation remains available.");
   return warnings;
 }

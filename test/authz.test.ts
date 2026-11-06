@@ -1,3 +1,5 @@
+import { config } from "../src/config.ts";
+import { repositories } from "../src/repos/service.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
@@ -224,4 +226,26 @@ test("personal Chrome endpoint rejects another member even with a forged owner i
   } finally {
     for (const [k,v] of Object.entries({ HASAKI_WORK_BROWSER_MODE: previous.mode, HASAKI_WORK_CHROME_PROFILE: previous.profile, HASAKI_WORK_EXISTING_CHROME_USER: previous.owner, HOST: previous.host })) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
+});
+
+
+test("P1 status is authenticated; reindex and cancellation require an administrator; disabling is reversible", async () => {
+  const previous = config.codeIntelligence.enabled;
+  try {
+    config.codeIntelligence.enabled = true;
+    const admin = client(), member = client();
+    await admin.login("admin", "admin-password");
+    await member.login("membera", "member-a-password");
+    await repositories.upsert("p1-api-status", { projects: ["P1"] });
+    assert.equal((await client().call("/api/repositories/index-status")).status, 401);
+    assert.equal((await member.call("/api/repositories/p1-api-status/reindex", {})).status, 403);
+    const queued = await admin.call("/api/repositories/p1-api-status/reindex", {});
+    assert.equal(queued.status, 200); assert.equal(queued.body.job.status, "queued");
+    const status = await member.call("/api/repositories/index-status");
+    assert.equal(status.status, 200); assert.equal(status.body.repositories.find((r: any) => r.name === "p1-api-status").status, "queued");
+    assert.equal((await member.call(`/api/repositories/index-runs/${queued.body.job.id}/cancel`, {})).status, 403);
+    assert.equal((await admin.call(`/api/repositories/index-runs/${queued.body.job.id}/cancel`, {})).status, 200);
+    config.codeIntelligence.enabled = false;
+    assert.deepEqual((await admin.call("/api/repositories/index-status")).body, { enabled: false, repositories: [] });
+  } finally { config.codeIntelligence.enabled = previous; }
 });

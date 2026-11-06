@@ -1,3 +1,4 @@
+import { runIndexOnce } from "../codeIntelligence/indexer.ts";
 import { randomUUID } from "node:crypto";
 import { instanceSession } from "../instances.ts";
 import { config } from "../config.ts";
@@ -114,7 +115,7 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
 /** Claim and execute at most one job. Returns false when the queue had nothing runnable. Used by tests. */
 export async function runOnce(workerId = `${processId}:once`, opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds"> = config.scheduler) {
   const job = await claimJob(workerId, opts.leaseSeconds);
-  if (!job) return false;
+  if (!job) return runIndexOnce();
   await processJob(job, workerId, opts);
   return true;
 }
@@ -130,6 +131,7 @@ export async function drain(maxJobs = 200) {
 
 export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   let stopped = false;
+  const indexAbort = new AbortController();
   const loops: Promise<void>[] = [];
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const lanes = [
@@ -144,6 +146,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
           try {
             const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
             if (job) await processJob(job, workerId, opts);
+            else if (!lane.types && await runIndexOnce(indexAbort.signal)) { /* optional idle indexing */ }
             else await sleep(opts.pollMs);
           } catch (e) {
             console.error(`worker ${workerId}:`, (e as Error).message);
@@ -159,6 +162,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   return {
     async stop() {
       stopped = true;
+      indexAbort.abort();
       clearInterval(reaper);
       await Promise.all(loops);
     },
@@ -166,6 +170,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     async drain(reason = "server shutting down") {
       draining = reason;
       stopped = true;
+      indexAbort.abort();
       clearInterval(reaper);
       localJobs.abortAll();
       await Promise.all(loops);

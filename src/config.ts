@@ -3,7 +3,28 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { persistentInstanceId } from "./instanceIdentity.ts";
 
+export interface CodeIntelligenceConfig {
+  enabled: boolean;
+  includeGenerated: boolean;
+  includeDependencies: boolean;
+  maxFileBytes: number;
+  maxFiles: number;
+  maxScanBytes: number;
+  maxSymbols: number;
+  concurrency: number;
+  timeoutMs: number;
+  contextTokens: number;
+  retentionDays: number;
+  /** Repository-relative directory prefixes, additive to default exclusions. */
+  excludes: string[];
+  /** Both use the bundled SQL grammar; unsupported dialect syntax is skipped, never translated. */
+  sqlDialect: "postgresql" | "generic";
+  weights: { exact: number; qualified: number; path: number; dependency: number; text: number; cap: number };
+}
+
 export interface Config {
+  /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
+  codeIntelligence: CodeIntelligenceConfig;
   port: number;
   /**
    * This platform instance (one per developer machine sharing the database). Runs created here are pinned to it and
@@ -155,6 +176,7 @@ export interface Config {
 }
 
 const defaults: Config = {
+  codeIntelligence: { enabled: false, includeGenerated: false, includeDependencies: false, maxFileBytes: 512 * 1024, maxFiles: 20000, maxScanBytes: 128 * 1024 * 1024, maxSymbols: 2000, concurrency: 1, timeoutMs: 120000, contextTokens: 2000, retentionDays: 7, excludes: [], sqlDialect: "postgresql", weights: { exact: 2, qualified: 2, path: 0.5, dependency: 0.5, text: 0.25, cap: 3 } },
   port: 4545,
   reposRoot: join(homedir(), "src"),
   dataDir: join(homedir(), ".claude-task-platform"),
@@ -223,6 +245,7 @@ function load(): Config {
   const cfg: Config = {
     ...defaults,
     ...fromFile,
+    codeIntelligence: { ...defaults.codeIntelligence, ...(fromFile.codeIntelligence ?? {}), weights: { ...defaults.codeIntelligence.weights, ...(fromFile.codeIntelligence?.weights ?? {}) } },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
@@ -237,6 +260,9 @@ function load(): Config {
     learning: { ...defaults.learning, ...(fromFile.learning ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };
+  for (const k of ["maxFileBytes", "maxFiles", "maxScanBytes", "maxSymbols", "concurrency", "timeoutMs", "contextTokens", "retentionDays"] as const) cfg.codeIntelligence[k] = positiveInt(`codeIntelligence.${k}`, cfg.codeIntelligence[k]);
+  for (const v of Object.values(cfg.codeIntelligence.weights)) if (!Number.isFinite(v) || v < 0) throw new Error("Invalid code intelligence weight");
+  if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect)) throw new Error("Unsupported SQL dialect");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
   cfg.telegram = {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",

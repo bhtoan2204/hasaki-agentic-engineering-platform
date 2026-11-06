@@ -1,3 +1,4 @@
+import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import { config } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest } from "../bitbucket.ts";
@@ -62,6 +63,7 @@ export async function prepareWorkspace(run: { id: number; branch: string; inputs
     );
   }
   await recordWorkspace(run.id, { repo, branch: b.branch, path: b.path, created_from: b.createdFrom });
+  if (config.codeIntelligence.enabled) await enqueueIndex(repo, run.id).catch(() => {});
   return { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
 }
 

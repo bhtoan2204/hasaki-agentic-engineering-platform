@@ -31,6 +31,7 @@ const repoDir = (r: any) => r.path || r.name;
 export function RepositoriesPage({ name }: { name?: string }) {
   const { t } = useI18n();
   const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
+  const index = useApi<{ enabled: boolean; repositories: any[] }>("/api/repositories/index-status");
   const [form, setForm] = useState<any>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
   const [ranked, setRanked] = useState<any>(null);
@@ -109,6 +110,26 @@ export function RepositoriesPage({ name }: { name?: string }) {
                   <div><dt>{t("repo.remote")}</dt><dd className="mono">{r.remote_slug || <span className="muted">—</span>}</dd></div>
                 </dl>
               </div>
+
+              <section className="card">
+                <div className="card-head"><Network size={16} color="var(--brand)" /><h4>Code intelligence</h4></div>
+                {index.error ? <ErrorBox error={index.error} onRetry={index.reload} /> : !index.data?.enabled ? <span className="muted small">Disabled on this instance</span> : (() => {
+                  const state = index.data.repositories.find((x: any) => x.name === r.name);
+                  return <>
+                    <dl className="repo-kv">
+                      <div><dt>Status</dt><dd>{state?.status ?? "Not indexed"}</dd></div>
+                      <div><dt>Progress</dt><dd>{state?.status === "running" ? `${state?.metrics?.processed_files ?? 0} / ${state?.metrics?.total_files ?? "…"}` : "—"}</dd></div>
+                      <div><dt>Commit</dt><dd className="mono">{state?.commit_sha?.slice(0, 12) ?? "—"}</dd></div>
+                      <div><dt>Files / symbols / relations</dt><dd>{state?.indexed_files ?? 0} / {state?.symbol_count ?? 0} / {state?.relation_count ?? 0}</dd></div>
+                      <div><dt>Last indexed</dt><dd>{state?.last_indexed_at ? new Date(state.last_indexed_at).toLocaleString() : "—"}</dd></div>
+                    </dl>
+                    {state?.last_indexing_error && <p className="muted small">{state.last_indexing_error}</p>}
+                    <button className="ghost sm" onClick={async () => { if (await act(() => api(`/api/repositories/${encodeURIComponent(r.name)}/reindex`, {}), "Indexing queued")) index.reload(); }}>Reindex (admin)</button>
+                    <button className="ghost sm" onClick={index.reload}>Refresh</button>
+                    {state?.indexing_run_id && ["queued", "running"].includes(state.status) && <button className="ghost sm" onClick={async () => { if (await act(() => api(`/api/repositories/index-runs/${state.indexing_run_id}/cancel`, {}), "Indexing canceled")) index.reload(); }}>Cancel (admin)</button>}
+                  </>;
+                })()}
+              </section>
 
               <section className="card">
                 <div className="card-head"><ShieldCheck size={16} color="var(--brand)" /><h4>{t("repo.perms")}</h4></div>

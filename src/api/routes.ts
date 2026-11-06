@@ -1,3 +1,5 @@
+import { status as codeIndexStatus, enqueue as enqueueCodeIndex } from "../codeIntelligence/indexer.ts";
+import { hybridRank } from "../codeIntelligence/search.ts";
 import { config } from "../config.ts";
 import { instanceHealth } from "../instances.ts";
 import { resolveOutputLocale } from "../agent/language.ts";
@@ -405,13 +407,16 @@ export const routes: Route[] = [
   }],
 
   // ------------------------------------------------------------ repositories
+  ["GET", /^\/api\/repositories\/index-status$/, async () => ({ enabled: config.codeIntelligence.enabled, repositories: config.codeIntelligence.enabled ? await codeIndexStatus() : [] })],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/reindex$/, async ({ p, actor }) => { requireAdmin(actor); return { enabled: config.codeIntelligence.enabled, job: await enqueueCodeIndex(p[0]) }; }],
+  ["POST", /^\/api\/repositories\/index-runs\/(\d+)\/cancel$/, async ({ p, actor }) => { requireAdmin(actor); await q(pool, "UPDATE code_intelligence.runs SET status='canceled', fencing_token=fencing_token+1,updated_at=now() WHERE id=$1 AND instance_id=$2 AND status IN ('queued','running')", [num(p[0]), config.instanceId]); return { ok: true }; }],
   ["GET", /^\/api\/repositories$/, () => repositories.list()],
   [
     "POST",
     /^\/api\/repositories\/rank$/,
     async ({ body }) => {
       const allowed = new Set(await repositories.allowedFor(String(body.project ?? "")));
-      const ranked = rankRepositories((await repositories.list()).filter((r) => allowed.has(r.name)), { text: String(body.text ?? ""), project: body.project });
+      const ranked = await hybridRank((await repositories.list()).filter((r) => allowed.has(r.name)), { text: String(body.text ?? ""), project: body.project });
       return { ranked, ambiguous: isAmbiguous(ranked) };
     },
   ],

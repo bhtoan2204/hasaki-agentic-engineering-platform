@@ -1,0 +1,322 @@
+{
+  "generated_at": "2026-11-06T16:15:05.088Z",
+  "repositories": [
+    {
+      "name": "oms-api",
+      "index_wall_ms": 3102.3444269999995,
+      "job": {
+        "status": "done",
+        "metrics": {
+          "indexed_files": 523,
+          "skipped_files": 0,
+          "index_duration": 103,
+          "parse_failures": 0,
+          "index_cache_hits": 0
+        },
+        "error": null,
+        "snapshot_id": 1
+      },
+      "languages": [
+        {
+          "language": "go",
+          "files": 514
+        },
+        {
+          "language": "proto",
+          "files": 7
+        },
+        {
+          "language": "sql",
+          "files": 2
+        }
+      ],
+      "sample": {
+        "file_path": "app/auth_middleware.go",
+        "symbol_name": "NewAuthHandlerMap",
+        "qualified_name": "app.NewAuthHandlerMap",
+        "symbol_kind": "function"
+      },
+      "search_ms": 346.5109809999999,
+      "relations": 0,
+      "metadata_ms": 1.1642139999999017,
+      "hybrid_ms": 302.0283079999999,
+      "metadata_score": 0,
+      "hybrid_score": 2,
+      "context_chars": 1643,
+      "context_ms": 1081.4619300000004,
+      "warm_reindex_ms": 130.6443680000002
+    },
+    {
+      "name": "oms-frontend",
+      "index_wall_ms": 6193.539794,
+      "job": {
+        "status": "done",
+        "metrics": {
+          "indexed_files": 608,
+          "skipped_files": 0,
+          "index_duration": 117,
+          "parse_failures": 0,
+          "index_cache_hits": 0
+        },
+        "error": null,
+        "snapshot_id": 2
+      },
+      "languages": [
+        {
+          "language": "tsx",
+          "files": 334
+        },
+        {
+          "language": "typescript",
+          "files": 274
+        }
+      ],
+      "sample": {
+        "file_path": "src/apis/auth/getMe.ts",
+        "symbol_name": "useGetMe",
+        "qualified_name": "useGetMe",
+        "symbol_kind": "function"
+      },
+      "search_ms": 294.6476819999998,
+      "relations": 2,
+      "metadata_ms": 0.3823769999999058,
+      "hybrid_ms": 290.89014700000007,
+      "metadata_score": 0,
+      "hybrid_score": 2.5,
+      "context_chars": 4169,
+      "context_ms": 4299.372733,
+      "warm_reindex_ms": 102.10945999999967
+    },
+    {
+      "name": "oms-background",
+      "index_wall_ms": 3143.9368240000003,
+      "job": {
+        "status": "done",
+        "metrics": {
+          "indexed_files": 591,
+          "skipped_files": 0,
+          "index_duration": 104,
+          "parse_failures": 0,
+          "index_cache_hits": 0
+        },
+        "error": null,
+        "snapshot_id": 3
+      },
+      "languages": [
+        {
+          "language": "go",
+          "files": 588
+        },
+        {
+          "language": "proto",
+          "files": 3
+        }
+      ],
+      "sample": {
+        "file_path": "app/delivery/http/app.go",
+        "symbol_name": "handleErr",
+        "qualified_name": "http.handleErr",
+        "symbol_kind": "function"
+      },
+      "search_ms": 291.25938099999985,
+      "relations": 2,
+      "metadata_ms": 0.06492100000104983,
+      "hybrid_ms": 295.1272630000003,
+      "metadata_score": 0,
+      "hybrid_score": 2,
+      "context_chars": 671,
+      "context_ms": 1353.0474360000007,
+      "warm_reindex_ms": 104.8436870000005
+    }
+  ],
+  "overlays": {
+    "concurrent_worktrees": 2,
+    "modified": "PASS",
+    "renamed": "PASS",
+    "deleted": "PASS",
+    "stale_fallback": "PASS",
+    "base_unaffected": "PASS",
+    "primary_checkout_unchanged": "PASS",
+    "snapshot_ids": [
+      9,
+      10
+    ]
+  },
+  "live_ai_tokens": "NOT VERIFIED: no paid provider invoked",
+  "database": {
+    "database": "claude_task_platform",
+    "server": "172.31.30.93/32"
+  },
+  "migrations": [],
+  "instance_lease": "normal registration acquired",
+  "scenarios": [
+    {
+      "query": "app.NewAuthHandlerMap",
+      "expected_source_repository": "oms-api",
+      "exact_definition_repositories": [
+        "oms-api"
+      ],
+      "metadata_ms": 0.11491800000112562,
+      "hybrid_ms": 925.9004420000001,
+      "metadata_top": "oms-api",
+      "hybrid_top": "oms-api",
+      "correct_selection": true,
+      "ranked": [
+        {
+          "repo": "oms-api",
+          "score": 2,
+          "reasons": [
+            "no keyword match",
+            "code evidence +2: qualified"
+          ]
+        },
+        {
+          "repo": "oms-background",
+          "score": 0,
+          "reasons": [
+            "no keyword match"
+          ]
+        },
+        {
+          "repo": "oms-frontend",
+          "score": 0,
+          "reasons": [
+            "no keyword match"
+          ]
+        }
+      ]
+    },
+    {
+      "query": "useGetMe",
+      "expected_source_repository": "oms-frontend",
+      "exact_definition_repositories": [
+        "oms-frontend"
+      ],
+      "metadata_ms": 0.31940700000268407,
+      "hybrid_ms": 1019.7600280000006,
+      "metadata_top": "oms-api",
+      "hybrid_top": "oms-frontend",
+      "correct_selection": true,
+      "ranked": [
+        {
+          "repo": "oms-frontend",
+          "score": 2.5,
+          "reasons": [
+            "no keyword match",
+            "code evidence +2.5: path, qualified"
+          ]
+        },
+        {
+          "repo": "oms-api",
+          "score": 0,
+          "reasons": [
+            "no keyword match"
+          ]
+        },
+        {
+          "repo": "oms-background",
+          "score": 0,
+          "reasons": [
+            "no keyword match"
+          ]
+        }
+      ]
+    },
+    {
+      "query": "http.handleErr",
+      "expected_source_repository": "oms-background",
+      "exact_definition_repositories": [
+        "oms-background"
+      ],
+      "metadata_ms": 0.12091300000247429,
+      "hybrid_ms": 1105.8928039999992,
+      "metadata_top": "oms-api",
+      "hybrid_top": "oms-background",
+      "correct_selection": true,
+      "ranked": [
+        {
+          "repo": "oms-background",
+          "score": 2,
+          "reasons": [
+            "no keyword match",
+            "code evidence +2: qualified"
+          ]
+        },
+        {
+          "repo": "oms-api",
+          "score": 0,
+          "reasons": [
+            "no keyword match"
+          ]
+        },
+        {
+          "repo": "oms-frontend",
+          "score": 0,
+          "reasons": [
+            "no keyword match"
+          ]
+        }
+      ]
+    }
+  ],
+  "disable": "PASS",
+  "status": [
+    {
+      "name": "oms-api",
+      "commit_sha": "e626320e952bb9973882e2d82ccf385c9637882e",
+      "indexed_files": 523,
+      "symbol_count": 6192,
+      "relation_count": 37023,
+      "last_indexed_at": "2026-11-06T16:07:24.004Z",
+      "indexing_run_id": 5,
+      "status": "done",
+      "last_indexing_error": null,
+      "metrics": {
+        "indexed_files": 523,
+        "skipped_files": 0,
+        "index_duration": 103,
+        "parse_failures": 0,
+        "index_cache_hits": 0
+      },
+      "updated_at": "2026-11-06T16:15:06.982Z"
+    },
+    {
+      "name": "oms-background",
+      "commit_sha": "f5cb56ca6e0c432ec69ce0042659babc5a248e87",
+      "indexed_files": 591,
+      "symbol_count": 6719,
+      "relation_count": 44557,
+      "last_indexed_at": "2026-11-06T16:07:45.448Z",
+      "indexing_run_id": 7,
+      "status": "done",
+      "last_indexing_error": null,
+      "metrics": {
+        "indexed_files": 591,
+        "skipped_files": 0,
+        "index_duration": 104,
+        "parse_failures": 0,
+        "index_cache_hits": 0
+      },
+      "updated_at": "2026-11-06T16:15:15.988Z"
+    },
+    {
+      "name": "oms-frontend",
+      "commit_sha": "9ac71aca48e38e85e5ca9d43b67091678e81b560",
+      "indexed_files": 608,
+      "symbol_count": 1740,
+      "relation_count": 18120,
+      "last_indexed_at": "2026-11-06T16:07:30.939Z",
+      "indexing_run_id": 6,
+      "status": "done",
+      "last_indexing_error": null,
+      "metrics": {
+        "indexed_files": 608,
+        "skipped_files": 0,
+        "index_duration": 117,
+        "parse_failures": 0,
+        "index_cache_hits": 0
+      },
+      "updated_at": "2026-11-06T16:15:09.751Z"
+    }
+  ]
+}

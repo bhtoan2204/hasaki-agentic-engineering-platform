@@ -25,7 +25,11 @@ export async function registerInstance(id = config.instanceId, session = instanc
       ON CONFLICT (instance_id) DO UPDATE SET session_id = excluded.session_id, started_at = now(), last_seen_at = now(), stopped_at = NULL
       WHERE platform_instances.stopped_at IS NOT NULL OR platform_instances.last_seen_at < now() - make_interval(secs => $3)
       RETURNING instance_id`, [id, session, config.instance.offlineSeconds]);
-    if (!row) throw new Error(`Instance identity conflict: ${id} has a live registration. Stop the other installation or use its own dataDir and PLATFORM_INSTANCE.`);
+    if (!row) {
+      const live = await one(c, `SELECT GREATEST(1, ceil($2 - extract(epoch FROM now()-last_seen_at)))::int AS retry_seconds
+        FROM platform_instances WHERE instance_id=$1`, [id, config.instance.offlineSeconds]);
+      throw new Error(`Instance identity conflict: ${id} has a live registration. Stop the other installation or use its own dataDir and PLATFORM_INSTANCE. If the previous process just exited, retry in ${live?.retry_seconds ?? config.instance.offlineSeconds} seconds; a continuing heartbeat will keep the registration protected.`);
+    }
     // Replaced session may still have unexpired job leases. Expire and fence them before the new scheduler starts.
     await q(c, `UPDATE workflow_jobs j SET lease_expires_at = now() - interval '1 second', fencing_token = fencing_token + 1
       FROM workflow_runs r WHERE j.run_id = r.id AND r.worker_instance = $1 AND j.status = 'running'`, [id]);
