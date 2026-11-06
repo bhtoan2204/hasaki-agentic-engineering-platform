@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { execFile } from "node:child_process";
+import { isAbsolute, relative, resolve } from "node:path";
+import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, q, one } from "../db/pool.ts";
@@ -6,11 +9,11 @@ import { outputLocale } from "./language.ts";
 import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
 import { scoreKnowledge } from "../context/plan.ts";
 import { callTool, capResult, describeTool, listTools } from "./toolRegistry.ts";
-import type { PolicyContext, ToolMode } from "./toolPolicy.ts";
+import { isInside, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 
 /**
- * Platform tools shared by Claude's in-process MCP server and Cursor's per-run stdio bridge.
+ * Platform tools shared by Claude's in-process MCP server, Cursor's per-run stdio bridge and Codex' per-attempt broker.
  * Every call is bound to one attempt. A fenced, stale, or canceled attempt cannot mutate.
  * After ask_user has open questions, further mutations are refused until the engine resumes.
  */
@@ -41,7 +44,8 @@ export interface PlatformToolEnv {
   onSubmit?(output: Record<string, unknown>): void;
 }
 
-const MUTATING = new Set(["prepare_branch", "submit_result", "call_tool"]);
+const MUTATING = new Set(["prepare_branch", "commit_changes", "submit_result", "call_tool"]);
+const execGit = promisify(execFile);
 
 export async function attemptIsLive(attemptId: number, fencingToken: number | null): Promise<{ ok: true } | { ok: false; reason: string }> {
   const row = await one<{
@@ -95,6 +99,8 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       return submitResult(args, env);
     case "prepare_branch":
       return prepareBranch(args, env);
+    case "commit_changes":
+      return commitChanges(args, env);
     case "read_knowledge":
       return readKnowledge(args, env);
     case "search_knowledge":
@@ -160,6 +166,39 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;
+}
+
+/**
+ * Commit inside one of the run's worktrees on behalf of an agent whose sandbox keeps .git read-only (Codex).
+ * Runs in the worker, outside the agent sandbox, so it is deliberately narrow: coding mode only, an existing run
+ * worktree only (never a primary checkout), optional paths must stay inside that worktree, and repository git hooks
+ * are disabled (no code from the repository runs outside the sandbox).
+ */
+async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
+  if (env.mode !== "coding") return "ERROR: commit_changes is only available in coding steps";
+  const repo = String(args?.repo ?? "");
+  const message = String(args?.message ?? "").trim();
+  if (!message) return "ERROR: commit_changes needs a commit message";
+  const w = (await workspacesOf(env.runId)).find((x) => x.repo === repo);
+  if (!w) return `ERROR: no worktree for "${repo}" in this run. Call prepare_branch first.`;
+  if (isInside(w.path, [config.reposRoot])) return "ERROR: refusing to commit in a primary checkout";
+  const paths = Array.isArray(args?.paths) ? args.paths.map(String).filter(Boolean) : [];
+  for (const p of paths) {
+    const abs = isAbsolute(p) ? resolve(p) : resolve(w.path, p);
+    if (!isInside(abs, [w.path]) || relative(w.path, abs).split(/[\\/]/)[0] === ".git") return `ERROR: path ${p} is outside the worktree ${w.path}`;
+  }
+  const git = (...a: string[]) => execGit("git", ["-C", w.path, "-c", "core.hooksPath=/dev/null", ...a], { maxBuffer: 8 * 1024 * 1024, timeout: 120_000 });
+  try {
+    await git("add", "-A", "--", ...(paths.length ? paths : ["."]));
+    const staged = (await git("diff", "--cached", "--name-only")).stdout.trim();
+    if (!staged) return "Nothing to commit: the worktree has no staged changes.";
+    await git("commit", "--no-verify", "-m", message);
+    const head = (await git("log", "-1", "--format=%h %s")).stdout.trim();
+    await env.log("system", `commit ${head} in ${repo} (${staged.split("\n").length} file(s))`, { repo, commit: head.split(" ")[0] });
+    return `Committed ${head} on ${w.branch} in ${w.path}\nFiles:\n${staged}`;
+  } catch (e: any) {
+    return `ERROR: git commit failed: ${String(e?.stderr || e?.message || e).slice(0, 1000)}`;
+  }
 }
 
 async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {

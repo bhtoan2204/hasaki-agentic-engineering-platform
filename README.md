@@ -61,7 +61,7 @@ token. Telegram's bot is admin-managed; private step notifications go only to th
 monitors stay shared, and a member who investigates gets their own work item. The shared error list does not
 link to another member's task.
 
-Claude and Cursor credentials are the worker machine's admin-managed logins in this version. Personal agent
+Claude, Cursor and Codex credentials are the worker machine's admin-managed logins in this version. Personal agent
 accounts per user are not included. Agents share one OS user, so this is application isolation for a trusted
 team, not a sandbox: tools are checked against the run owner, but a process on the host can still read the disk.
 
@@ -81,11 +81,14 @@ Runs created before the column existed have `output_locale` NULL: the UI shows �
 rewrite saved text; new generation for those runs falls back to Vietnamese. `/classic` uses the same
 dictionary. Historical translation of stored agent output is not in this version.
 
-## Agents (Claude Code and Cursor)
+## Agents (Claude Code, Cursor and OpenAI Codex)
 
-A run stores `agent_provider`: `claude` (default) or `cursor`. It is chosen on the start form in the React app and
+A run stores `agent_provider`: `claude` (default), `cursor` or `codex`. It is chosen on the start form in the React app and
 `/classic`, and on `POST /api/runs` as `agent_provider`. Omitted means Claude. Any other value is rejected. Retries,
-resume, repair and repository ranking stay on that provider. Claude model ids are not sent to Cursor.
+resume, repair, re-execution and every auxiliary AI call of the run (repository ranking, test-failure explanation and
+answer interpretation, report reasoning) stay on that provider. Claude model ids are not sent to Cursor or Codex.
+AI calls that do not belong to a run keep the global default (Claude, `model`). Switching provider inside a run or
+per step is not supported.
 
 Cursor uses the installed CLI (`agent`, or `agent.cursorBin` / `CURSOR_AGENT_BIN`), version **2026.11.05** or a build
 that advertises `--print`, `--output-format stream-json`, `--resume`, `--mode`, `--sandbox`, `--trust`, `--approve-mcps`
@@ -102,6 +105,76 @@ What this CLI can and cannot do:
 - Other MCP servers in the operator's global Cursor config can still be approved because `--approve-mcps` is required for unattended runs.
 
 If `agent` is missing or not logged in, the step fails with that reason. It does not switch to Claude.
+
+### OpenAI Codex
+
+Codex runs through the official Codex CLI in non-interactive mode (`codex exec --json`, resumed with
+`codex exec resume <thread_id>`). It is not the Responses API and not the Agents SDK.
+
+**Install and log in on the worker** (the machine that runs `npm start`):
+
+```bash
+npm i -g @openai/codex          # or point agent.codex.bin / CODEX_BIN at an existing binary
+codex login                     # e.g. "Sign in with ChatGPT"; no OPENAI_API_KEY is needed
+codex login status              # must print "Logged in using ..."
+codex debug models              # models and reasoning efforts this account can use
+```
+
+Tested with codex-cli 0.164. The probe (`GET /api/agent-providers`, also shown in the run forms when Codex is selected)
+checks the version, the required `exec`/`exec resume` flags, `codex login status` and the model catalog. It never
+calls a model and never reads `~/.codex/auth.json`.
+
+**Whose account runs the work.** Every Codex step runs as the Codex login of the worker's OS user (for example the
+operator's ChatGPT account). Run ownership on the platform does not create a Codex account per user, and all users
+share that account's usage limits. When the limit is reached the step fails with a "usage limit" error and is not
+retried automatically. The platform never switches to an API key, another provider or another billing method:
+`OPENAI_API_KEY` / `CODEX_API_KEY` are removed from the Codex environment. Wait for the reset, or start a new run with
+another provider.
+
+**Configuration** (`config.json` → `agent.codex`, env overrides in brackets):
+
+| key | default | |
+|---|---|---|
+| `bin` (`CODEX_BIN`) | `codex` | executable |
+| `timeoutMs` (`CODEX_TIMEOUT_MS`) | 45 min | hard limit per Codex turn; the whole process tree is killed |
+| `model` (`CODEX_MODEL`) | empty = account default | Codex model slug only |
+| `reasoningEffort` (`CODEX_REASONING_EFFORT`) | empty = model default | `model_reasoning_effort` |
+| `models` | `{}` | routing like `agent.models` (`profile`/`*` → step type or `verifier`), Codex slugs only |
+
+A step can override with `codex_model` / `codex_reasoning_effort` (the Claude-only `model` key is ignored for Codex).
+
+**How the platform policy is enforced** — per invocation, never by editing `~/.codex`:
+
+- `--ignore-user-config --ignore-rules --strict-config`: only the platform's `-c` settings apply (no user MCP servers,
+  hooks, plugins or rules); an unknown key is an error.
+- OS sandbox: analysis/review steps run `read-only`; coding steps run `workspace-write` whose only writable roots are
+  the run's task directory (its worktrees, including ones `prepare_branch` creates later) and a per-attempt temp dir.
+  Network is off. `approval_policy = never`: nothing is escalated out of the sandbox.
+- A `PreToolUse` hook runs **before** every shell command, `apply_patch` edit and MCP tool and asks the worker, which
+  applies the same `decide()` rules as Claude (no `git push`/`reset --hard`/branch changes, edits only inside the run's
+  worktrees, read-only shell in analysis, no reading `.env`/Codex credentials). Unknown tools and subagents are denied;
+  `PermissionRequest` is always denied. After `ask_user`, edits and state-changing commands are denied until answers arrive.
+- Codex skips hooks it has not persisted trust for, so the platform passes `--dangerously-bypass-hook-trust`. This only
+  lets the platform's own generated hooks run (user config is ignored); it does not bypass the sandbox or approvals.
+  If no hook ran, platform tools are refused and a tool event without a hook stops the step.
+- `.git` stays read-only in the sandbox, so Codex commits with the platform tool `commit_changes` (run worktree only,
+  repository git hooks disabled).
+- Platform tools reach the worker through a per-attempt Unix socket with a random token. The MCP bridge and hook get
+  only the socket path and token; `DATABASE_URL`, `AUTH_SECRET` and other secrets are not in the Codex environment, and
+  `PLATFORM_*` variables are excluded from the agent's shell.
+- Multi-agent, apps, plugins, browser/computer use and web search are disabled. Steps with delegation fail before
+  Codex starts (unsupported, no fallback).
+
+**Results.** A step completes only when the turn reached `turn.completed`, the process exited 0, and `submit_result`
+recorded an output with the step contract's top-level keys; then the usual verification and independent review run.
+Process errors are not ignored because `submit_result` was called. Tokens come from `turn.completed.usage`; cost is
+null (ChatGPT plans have no per-call price). The actual model comes from the hook payload (JSONL does not include it).
+Resume always names the stored thread id (never `--last`). If a thread cannot be resumed, the step is rebuilt from the
+persisted checkpoint (answers and progress notes) and the event is logged. Independent verification always starts a
+new thread.
+
+**Live smoke test (opt-in, uses quota):** `docker compose up -d postgres`, then
+`CODEX_LIVE=1 CODEX_BIN=$(which codex) CODEX_REASONING_EFFORT=low npm run smoke:codex`. `npm test` never calls a model.
 
 ## UI (React + XYFlow, `web/`)
 

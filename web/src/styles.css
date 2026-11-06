@@ -145,6 +145,7 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .empty-title { color: var(--ink); font-weight: 600; font-size: var(--fs-lg) }
 .empty-art { width: 84px; height: 84px; border-radius: 26px; background: radial-gradient(circle at 30% 30%, var(--peach), var(--blush)); display: grid; place-items: center; margin-bottom: 4px }
 .errorbox { background: var(--st-err-bg); border: 1px solid color-mix(in srgb, var(--st-err) 40%, transparent); color: var(--ink); padding: 12px 14px; border-radius: var(--r-md); margin: 8px 0 }
+.agent-notice { border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--r-md); padding: 8px 12px; margin: -2px 0 10px; font-size: var(--fs-xs); color: var(--ink-2) } .agent-notice p { margin: 0 0 4px } .agent-notice p:last-child { margin-bottom: 0 } .agent-notice-err { color: var(--st-err) }
 .skeleton { background: linear-gradient(90deg, var(--surface-3) 0%, var(--surface-2) 50%, var(--surface-3) 100%); background-size: 200% 100%; animation: shimmer 1.3s linear infinite; border-radius: var(--r-sm) }
 @keyframes shimmer { to { background-position: -200% 0 } }
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px }

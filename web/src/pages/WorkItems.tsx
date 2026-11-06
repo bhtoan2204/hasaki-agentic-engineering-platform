@@ -4,6 +4,7 @@ import {
   RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap, Siren,
 } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
+import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
 import { act, ago, Badge, Drawer, EmptyState, ErrorBox, Field, JsonBlock, Loading, Markdown, navigate, PageHeader, SearchInput, Segmented, SkeletonRows, time } from "../ui.tsx";
 import { RunsTable } from "./Runs.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
@@ -326,7 +327,7 @@ export function WorkItemDetail({ id }: { id: number }) {
   const [wf, setWf] = useState("feature-implementation");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
-  const [agentProvider, setAgentProvider] = useState<"claude" | "cursor">("claude");
+  const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const start = async (mode: "start" | "step" | "pending") => {
@@ -410,12 +411,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 <option value="en">{t("lang.en")}</option>
               </select>
             </Field>
-            <Field label={t("run.agent")} hint={t("run.agentHint")}>
-              <select value={agentProvider} onChange={(e) => setAgentProvider(e.target.value as "claude" | "cursor")}>
-                <option value="claude">{t("run.agent.claude")}</option>
-                <option value="cursor">{t("run.agent.cursor")}</option>
-              </select>
-            </Field>
+            <AgentProviderField value={agentProvider} onChange={setAgentProvider} />
             <button className="wi-start" onClick={() => start("start")}><Play size={16} strokeWidth={2.2} />{t("run.start")}</button>
             <div className="wi-launch-alt">
               <button className="ghost sm" onClick={() => start("step")} title={t("run.step")}><StepForward size={14} strokeWidth={2} />{t("run.step")}</button>

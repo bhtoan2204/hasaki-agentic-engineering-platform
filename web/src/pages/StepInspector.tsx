@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { agentKey, asProvider, type AgentProvider } from "../agentProvider.tsx";
 import {
   AlertTriangle, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, Cpu, FileDiff, FileText, FlaskConical, Hand, History,
   Info, Layers, ListChecks, LogIn, LogOut, MessageCircleQuestion, MessagesSquare, Paperclip, Play, RotateCcw, Send, ShieldAlert, ShieldCheck, SkipForward,
@@ -37,7 +38,7 @@ export function OutputView({ value }: { value: any }) {
   );
 }
 
-export function QuestionsForm({ questions, onDone, provider = "claude" }: { questions: any[]; onDone: () => void; provider?: "claude" | "cursor" }) {
+export function QuestionsForm({ questions, onDone, provider = "claude" }: { questions: any[]; onDone: () => void; provider?: AgentProvider }) {
   const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -56,7 +57,7 @@ export function QuestionsForm({ questions, onDone, provider = "claude" }: { ques
       <div className="rv-attn-head">
         <span className="rv-attn-icon"><MessageCircleQuestion size={20} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h4>{t("si.waitingAnswers", { n: questions.length, name: t(provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude") })}</h4>
+          <h4>{t("si.waitingAnswers", { n: questions.length, name: t(agentKey(provider, true)) })}</h4>
           <div className="rv-attn-sub">{t("si.pausedUntil")}</div>
         </div>
       </div>
@@ -185,7 +186,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const tabs: Array<[Tab, React.ReactNode]> = [
     ...(step.type === "task_result_report" ? ([["report", <TabLabel icon={ClipboardList}>{t("si.tab.report")}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ["overview", <TabLabel icon={Info}>{t("si.tab.overview")}</TabLabel>],
-    ...(isAgent ? ([["execution", <TabLabel icon={Bot}>{t(run.agent_provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude")} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
+    ...(isAgent ? ([["execution", <TabLabel icon={Bot}>{t(agentKey(run.agent_provider, true))} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ...(step.type === "command" ? ([["execution", <TabLabel icon={SquareTerminal}>{t("si.tab.live")} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ["input", <TabLabel icon={LogIn}>{t("si.tab.input")}</TabLabel>],
     ["output", <TabLabel icon={LogOut}>{t("si.tab.output")}</TabLabel>],
@@ -236,7 +237,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       </div>
 
       <div className="si-body">
-        {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} provider={run.agent_provider === "cursor" ? "cursor" : "claude"} />}
+        {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} provider={asProvider(run.agent_provider)} />}
         {step.status === "WAITING_APPROVAL" && step.type !== "task_result_report" && <ApprovalPanel run={run} step={step} onDone={refresh} />}
         {step.type === "task_result_report" && step.status === "WAITING_APPROVAL" && tab !== "report" && (
           <div className="rv-attn" style={{ padding: "12px 16px" }}>
@@ -296,7 +297,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
             )}
           </div>
         )}
-        {tab === "execution" && (!attempt ? <Empty>{t("si.notStarted")}</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} provider={run.agent_provider === "cursor" ? "cursor" : "claude"} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
+        {tab === "execution" && (!attempt ? <Empty>{t("si.notStarted")}</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} provider={asProvider(run.agent_provider)} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
         {tab === "input" && (attempt ? <JsonBlock value={attempt.input} title={t("si.resolvedInput", { n: attempt.number })} /> : <Empty>{t("si.inputLater")}</Empty>)}
         {tab === "output" && (
           <div>
@@ -622,7 +623,7 @@ function AttemptMetrics({ m }: { m: any }) {
   const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
   return (
     <div className="rv-card">
-      <div className="rv-card-head"><h4><Cpu size={16} /> {t("si.metrics")}</h4>{m.model && <span className="mono muted small">{m.model}</span>}</div>
+      <div className="rv-card-head"><h4><Cpu size={16} /> {t("si.metrics")}</h4><span className="mono muted small" title={m.model_source ?? ""}>{[m.provider ? t(agentKey(m.provider, true)) : null, m.model || (m.provider && m.provider !== "claude" ? t("run.codex.defaultModel") : null), m.reasoning_effort].filter(Boolean).join(" · ")}</span></div>
       <div className="rv-minis" style={{ marginBottom: 10 }}>
         <div className="rv-mini"><span>{t("si.cost")}</span><b>{m.cost_usd == null ? "—" : `$${Number(m.cost_usd).toFixed(4)}`}</b></div>
         <div className="rv-mini"><span>{t("si.turns")}</span><b>{m.turns ?? "—"}</b></div>
@@ -630,7 +631,7 @@ function AttemptMetrics({ m }: { m: any }) {
         <div className="rv-mini"><span>{t("si.session")}</span><b>{m.sessions ?? "—"}</b></div>
       </div>
       <div className="rv-kv">
-        <span>{t("common.tokens")}</span><span>{t("si.tokenLine", { inn: m.tokens?.input, out: m.tokens?.output, read: m.tokens?.cache_read, write: m.tokens?.cache_creation })}</span>
+        <span>{t("common.tokens")}</span><span>{m.tokens ? t("si.tokenLine", { inn: m.tokens.input, out: m.tokens.output, read: m.tokens.cache_read, write: m.tokens.cache_creation }) + (m.tokens.reasoning_output ? ` · ${t("si.reasoningTokens", { n: m.tokens.reasoning_output })}` : "") : "—"}</span>
         <span>{t("si.disclosure")}</span><span>{t("si.disclosureLine", { inline: m.disclosure?.inline, index: m.disclosure?.index, search: m.disclosure?.search, full: m.upstream?.full, summary: m.upstream?.summary })}</span>
         <span>{t("common.tools")}</span><span className="small">{tools.map(([k, v]) => `${k.replace("mcp__platform__", "platform·")}×${v}`).join(", ") || "—"}{m.tool_errors ? ` · ${t("si.toolErrors", { n: m.tool_errors })}` : ""}</span>
         <span>{t("si.skillsLoaded")}</span><span className="small">{(m.skills_loaded ?? []).join(", ") || "—"}{m.knowledge_searches?.length ? ` · ${t("si.searched", { q: m.knowledge_searches.map((q: string) => `"${q}"`).join(", ") })}` : ""}</span>

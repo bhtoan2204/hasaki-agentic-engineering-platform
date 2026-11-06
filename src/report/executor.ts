@@ -1,7 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { config } from "../config.ts";
 import { pool, one } from "../db/pool.ts";
-import { accumulateMetrics, newMetrics } from "../agent/claude.ts";
 import type { ExecutionContext, StepExecutor } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 import { parseAiSuggest, type ReportSpec } from "./aiSuggest.ts";
@@ -9,8 +6,7 @@ import { collectEvidence, type Evidence } from "./evidence.ts";
 import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./build.ts";
 import { testExceptionsOf } from "../workflow/executors/builtin.ts";
 import { languagePolicy, outputLocale } from "../agent/language.ts";
-import { agentProvider } from "../agent/provider.ts";
-import { cursorComplete } from "../agent/cursor/run.ts";
+import { completeForRun } from "../agent/complete.ts";
 
 /**
  * Task Result Report executor.
@@ -48,17 +44,10 @@ export const claudeReportReasoner: ReportReasoner = async (ctx, spec, evidence) 
     JSON.stringify(evidence.map((e) => ({ id: e.id, kind: e.kind, title: e.title, detail: e.detail, passed: e.passed, image: e.image, stale: e.stale, before_fix: e.before_fix, attached_to: e.requirement_id })), null, 1).slice(0, 120_000),
     "</untrusted_input>",
   ].join("\n");
-  const m = newMetrics(config.model || "default");
-  let out = "";
-  if (agentProvider(ctx.run) === "cursor") {
-    out = await cursorComplete(prompt, ctx.signal);
-    await ctx.recordMetrics({ provider: "cursor", model: null, model_source: "cursor account default", cost_usd: null, tokens: null });
-  } else
-  for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
-    accumulateMetrics(m, msg);
-    if (msg.type === "result" && msg.subtype === "success") out = msg.result;
-  }
-  await ctx.recordMetrics(m as unknown as Record<string, unknown>);
+  // The run's provider answers (a Codex or Cursor run never calls Claude here); metrics are real or null.
+  const done = await completeForRun(ctx.run, prompt, ctx.signal);
+  await ctx.recordMetrics({ ...done.metrics, sessions: 1 });
+  const out = done.text;
   const json = out.match(/\{[\s\S]*\}/)?.[0];
   if (!json) throw new Error("report reasoner returned no JSON");
   return JSON.parse(json) as Proposal;

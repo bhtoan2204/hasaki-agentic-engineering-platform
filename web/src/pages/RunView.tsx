@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { agentKey } from "../agentProvider.tsx";
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import {
   Activity, AlertTriangle, CalendarClock, ChevronRight, ClipboardList, FileDiff, FolderGit2, GitBranch, GitPullRequest, Hand, Hourglass,
@@ -110,7 +111,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span className="rv-name">{run.title || run.definition_key}</span>
                 <Badge s={run.status} label />
                 <ProfileBadge profile={run.profile} title={(run.profile_decision?.reasons ?? []).join("\n")} />
-                <span className="pill" title={t("run.agentHint")}>{t("run.agent")}: {t(run.agent_provider === "cursor" ? "run.agent.cursor" : "run.agent.claude")}</span>
+                <span className="pill" title={t("run.agentHint")}>{t("run.agent")}: {t(agentKey(run.agent_provider))}</span>
                 <span className="pill" title={run.output_locale ? t("run.outputCurrent") : t("run.outputLegacyHint")}>
                   {t("run.outputCurrent")}: {run.output_locale === "en" ? t("lang.en") : run.output_locale === "vi" ? t("lang.vi") : t("run.outputLegacy")}
                 </span>
@@ -367,7 +368,7 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
         <div className="rv-mini"><span>{t("rv.humanWait")}</span><b>{fmtS(totals.human_ms)}</b></div>
       </div>
       <div className="rv-kv">
-        <span>Claude</span><span>{t("rv.claudeLine", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns, cost: totals.cost_usd.toFixed(3) })}</span>
+        <span>{t(agentKey(data.agent_provider, true))}</span><span>{totals.cost_unknown ? t("rv.agentLineNoCost", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns }) : t("rv.claudeLine", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns, cost: totals.cost_usd.toFixed(3) })}</span>
         <span>{t("common.tokens")}</span><span>{t("rv.tokens", { inn: num(totals.input_tokens), out: num(totals.output_tokens), cache: num(totals.cache_read_tokens) })}</span>
         <span>{t("common.tools")}</span><span>{t("rv.tools", { calls: totals.tool_calls, tool: fmtS(totals.tool_ms), command: fmtS(totals.command_ms), integration: totals.integration_calls, skills: totals.skills_loaded })}</span>
         <span>{t("rv.retries")}</span><span>{data.bottleneck ? t("rv.retrySlow", { retries: totals.retries, failed: totals.failed, step: data.bottleneck }) : t("rv.retryLine", { retries: totals.retries, failed: totals.failed })}</span>

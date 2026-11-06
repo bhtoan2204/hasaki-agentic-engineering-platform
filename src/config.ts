@@ -79,6 +79,13 @@ export interface Config {
     /** Cursor CLI binary. Empty uses `agent` on PATH. Claude model ids are never sent to it. */
     cursorBin?: string;
     /**
+     * OpenAI Codex CLI (provider "codex"). Runs as the Codex login of the WORKER machine (`codex login`, e.g. a ChatGPT
+     * account); the platform never reads auth.json and never switches to an API key on its own. Claude model ids are
+     * never sent to it: Codex has its own model / effort / routing. Env overrides: CODEX_BIN, CODEX_TIMEOUT_MS,
+     * CODEX_MODEL, CODEX_REASONING_EFFORT.
+     */
+    codex?: CodexConfig;
+    /**
      * Optional model routing, e.g. { "FAST": { "agent": "<model>" }, "DEEP": { "verifier": "<model>" }, "*": { "coding_agent": "<model>" } }.
      * Keys: profile (or "*") → step type, or "verifier" for independent verification steps. Resolution order:
      * step config.model → models[profile][role] → models["*"][role] → config.model → SDK default. No model ids in code.
@@ -219,6 +226,32 @@ export function positiveInt(name: string, raw: unknown): number {
   const n = typeof raw === "number" ? raw : Number(raw.trim());
   if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
   return n;
+}
+
+export interface CodexConfig {
+  /** Executable. Empty uses `codex` on PATH. */
+  bin?: string;
+  /** Hard limit for one Codex turn (process). Default 45 minutes. */
+  timeoutMs?: number;
+  /** Codex model slug (see `codex debug models`). Empty = the Codex account default. */
+  model?: string;
+  /** model_reasoning_effort, e.g. low | medium | high | xhigh. Empty = the model default. */
+  reasoningEffort?: string;
+  /** Same shape as agent.models (profile or "*" → step type or "verifier"), with Codex model slugs only. */
+  models?: Record<string, Record<string, string>>;
+}
+
+/** Codex settings with env overrides applied. Read at call time so tests and operators can change env. */
+export function codexConfig(): Required<Pick<CodexConfig, "bin" | "timeoutMs" | "model" | "reasoningEffort">> & { models: Record<string, Record<string, string>> } {
+  const c = config.agent.codex ?? {};
+  const timeout = Number(process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
+  return {
+    bin: process.env.CODEX_BIN || c.bin || "codex",
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model: process.env.CODEX_MODEL ?? c.model ?? "",
+    reasoningEffort: process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
+    models: c.models ?? {},
+  };
 }
 
 export const config = load();

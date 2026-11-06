@@ -3,10 +3,13 @@ import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { config } from "../config.ts";
+import { codexConfig, config } from "../config.ts";
 import { languagePolicy, outputLocale } from "./language.ts";
-import { agentProvider } from "./provider.ts";
-import { cursorAgentTurn, cursorCapabilities, cursorComplete } from "./cursor/run.ts";
+import { agentProvider, type AgentProvider } from "./provider.ts";
+import { cursorAgentTurn, cursorCapabilities } from "./cursor/run.ts";
+import { codexAgentTurn, codexCapabilities } from "./codex/run.ts";
+import { completeForRun } from "./complete.ts";
+import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { taskDir } from "../git.ts";
 import { workspaceKey, workspacesOf } from "../git/provider.ts";
@@ -32,7 +35,7 @@ export interface AgentMetrics {
   duration_ms: number;
   /** Null when the provider does not report a cost. Never invent 0. */
   cost_usd: number | null;
-  tokens: { input: number; output: number; cache_read: number; cache_creation: number } | null;
+  tokens: { input: number; output: number; cache_read: number; cache_creation: number; reasoning_output?: number } | null;
   tool_calls: Record<string, number>;
   tool_errors: number;
   denied: Array<{ tool: string; reason: string; subagent?: string }>;
@@ -41,6 +44,10 @@ export interface AgentMetrics {
   verification?: Record<string, unknown>;
   /** Where the model came from: step config / routing / global default. */
   model_source?: string;
+  /** Agent provider that produced these metrics (claude | cursor | codex). */
+  provider?: string;
+  /** Codex model_reasoning_effort, when one was configured. */
+  reasoning_effort?: string;
   /** Verdict of an independent verification step (see independentReview.ts). */
   independent_verification?: Record<string, unknown>;
   knowledge_searches: string[];
@@ -203,7 +210,7 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
 }
 
 /** Find a Claude session that can be resumed safely for this attempt (same step, same upstream context). */
-async function resumableSession(ctx: ExecutionContext, cwd: string, provider: "claude" | "cursor"): Promise<{ sessionId: string; fromAttempt?: number } | null> {
+export async function resumableSession(ctx: ExecutionContext, cwd: string, provider: AgentProvider): Promise<{ sessionId: string; fromAttempt?: number } | null> {
   const resume = ctx.input.pending?.resume;
   const candidates = await q<{ session_id: string; attempt_id: number; snapshot: any }>(
     pool,
@@ -234,15 +241,25 @@ async function progressNotes(fromAttempt?: number) {
   return rows.map((r) => String(r.data?.note ?? "")).filter(Boolean);
 }
 
+/** Provider failures that a rebuilt prompt or an automatic retry cannot fix (and must not hide). */
+const TERMINAL_FAILURES = new Set(["quota", "auth", "model", "policy", "canceled", "timeout"]);
+
+/**
+ * The agent step executor for every provider (name kept for existing imports). Provider-specific parts are the turn
+ * runner (Claude Agent SDK in-process, Cursor CLI, Codex CLI); prompts, session resume/repair, verification, independent
+ * review and platform tools are shared.
+ */
 export const claudeExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const provider = agentProvider(ctx.run);
-    if (provider === "cursor") {
+    if (provider !== "claude") {
+      const label = provider === "codex" ? "OpenAI Codex" : "This Cursor CLI";
+      // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
       if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
-        return { kind: "failed", error: "This Cursor CLI cannot enforce the platform's read-only subagent policy. Disable delegation on the step, or create the run with Claude.", retryable: false };
-      const cap = await cursorCapabilities();
-      if (!cap.ok) return { kind: "failed", error: cap.error || "Cursor CLI is not usable", retryable: false };
+        return { kind: "failed", error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`, retryable: false };
+      const cap = provider === "codex" ? await codexCapabilities() : await cursorCapabilities();
+      if (!cap.ok) return { kind: "failed", error: cap.error || `${label} is not usable`, retryable: false };
     }
     const ws = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
     const delegationCfg = ctx.step.config.delegation as { enabled?: boolean; agents?: string[] } | undefined;
@@ -264,10 +281,14 @@ export const claudeExecutor: StepExecutor = {
           .map((n) => [n, { ...SUBAGENTS[n], prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`, tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS] }]),
       )
       : undefined;
-    const routed = provider === "cursor" ? { model: "", source: "cursor account default" } : modelFor(ctx.step, ctx.run.profile);
-    const metrics = newMetrics(routed.model || (provider === "cursor" ? "" : "default"));
+    // Each provider resolves its own model: a Claude model id is never sent to Cursor or Codex.
+    const routed: { model: string; source: string; effort?: string } =
+      provider === "cursor" ? { model: "", source: "cursor account default" } : provider === "codex" ? codexModelFor(ctx.step, ctx.run.profile) : modelFor(ctx.step, ctx.run.profile);
+    const metrics = newMetrics(routed.model || (provider === "claude" ? "default" : ""));
     metrics.model_source = routed.source;
-    if (provider === "cursor") {
+    metrics.provider = provider;
+    if (routed.effort) metrics.reasoning_effort = routed.effort;
+    if (provider !== "claude") {
       metrics.cost_usd = null;
       metrics.tokens = null;
     }
@@ -340,12 +361,19 @@ export const claudeExecutor: StepExecutor = {
       return d.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: d.reason };
     };
 
-    const run = async (prompt: string, resumeId?: string) => {
-      await ctx.log("prompt", prompt, { resume_session: resumeId ?? null, provider });
+    const run = async (prompt: string, resumeId?: string): Promise<{ isError: boolean; text: string; assistantTurns: number; failure?: string }> => {
+      await ctx.log("prompt", prompt, { resume_session: resumeId ?? null, provider, model: routed.model || null });
       if (provider === "cursor") {
         const result = await cursorAgentTurn({ ctx, mode, policy, cwd, prompt: `${systemAppend}\n\n${prompt}`, resumeId });
         if (result.submitted) submitted = result.submitted;
         return { isError: result.isError, text: result.text, assistantTurns: result.assistantTurns };
+      }
+      if (provider === "codex") {
+        // A resumed thread already holds the system instructions; a fresh one gets them in front of the prompt.
+        const full = resumeId ? prompt : `${systemAppend}\n\n${codexEnvironmentNotes(mode)}\n\n${prompt}`;
+        const result = await codexAgentTurn({ ctx, mode, policy, cwd, prompt: full, metrics, model: routed.model || undefined, effort: routed.effort || undefined, resumeId });
+        if (result.submitted) submitted = result.submitted;
+        return { isError: result.isError, text: result.text, assistantTurns: result.assistantTurns, failure: result.failure };
       }
       const ac = new AbortController();
       const onAbort = () => ac.abort();
@@ -407,10 +435,10 @@ export const claudeExecutor: StepExecutor = {
           if (ctx.signal.aborted) throw e;
           result = { isError: true, text: (e as Error).message, assistantTurns: 0 };
         }
-        if (result.isError && result.assistantTurns === 0) {
-          // Session missing or not resumable: rebuild from durable artifacts instead.
+        if (result.isError && result.assistantTurns === 0 && !TERMINAL_FAILURES.has(result.failure ?? "")) {
+          // Session missing or not resumable: rebuild from durable artifacts instead (answers and progress notes included).
           await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1 AND provider = $2", [resume.sessionId, provider]);
-          await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history`);
+          await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history (${ctx.input.answers.length} answer(s), checkpoint notes of attempt ${resume.fromAttempt ?? "-"})`, { provider, session_id: resume.sessionId, recovery: "rebuild_from_checkpoint" });
           result = await run(buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
         }
       } else {
@@ -427,8 +455,14 @@ export const claudeExecutor: StepExecutor = {
       const session = await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [ctx.attempt.id]);
       return { kind: "waiting_input", checkpoint: { session_id: session?.session_id ?? null, cwd, workspaces: policy.workspaces, mode, last_message: lastText.slice(0, 4000), ...(rounds.length ? { verification: { rounds } } : {}) } };
     };
-    if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: true };
+    if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: !TERMINAL_FAILURES.has(result.failure ?? "") };
     if (await openQuestions()) return pause(result.text);
+    if (provider === "codex" && !independent) {
+      // A Codex turn that exits 0 or says "done" is not a result: the step needs submit_result matching its contract.
+      if (!submitted) return { kind: "failed", error: "Codex finished the turn without calling submit_result; no step output was recorded.", retryable: true };
+      const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
+      if (missing.length) return { kind: "failed", error: `Codex submitted an output that does not match the step's output contract (missing: ${missing.join(", ")}).`, retryable: true, details: { submitted } };
+    }
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
 
     if (independent) {
@@ -485,16 +519,19 @@ export const claudeExecutor: StepExecutor = {
           const sid = (await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1", [ctx.attempt.id, provider]))?.session_id;
           const msg = repairPrompt(failed, n, vcfg, outputLocale(ctx.run));
           submitted = undefined;
-          let r = sid
+          let r: Awaited<ReturnType<typeof run>> | null = sid
             ? await run(msg, sid).catch((e) => {
               if (ctx.signal.aborted) throw e;
               return { isError: true, text: (e as Error).message, assistantTurns: 0 };
             })
             : null;
           // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
-          if (!r || (r.isError && r.assistantTurns === 0)) r = await run(`${freshPrompt()}\n\n${msg}`);
+          if (!r || (r.isError && r.assistantTurns === 0 && !TERMINAL_FAILURES.has(r.failure ?? ""))) {
+            if (sid) await ctx.log("system", `repair could not continue ${provider} session ${sid}; rebuilding context from persisted step history`, { provider, recovery: "rebuild_from_checkpoint" });
+            r = await run(`${freshPrompt()}\n\n${msg}`);
+          }
           if (submitted) accepted = submitted;
-          if (r.isError) return { kind: "failed", error: `repair ${n} failed: ${r.text || "agent run failed"}`, retryable: true };
+          if (r.isError) return { kind: "failed", error: `repair ${n} failed: ${r.text || "agent run failed"}`, retryable: !TERMINAL_FAILURES.has(r.failure ?? "") };
           if (await openQuestions()) return pause(r.text);
           return undefined;
         },
@@ -538,13 +575,9 @@ export async function rankRepositoriesWithClaude(ctx: ExecutionContext, ranked: 
     JSON.stringify(Object.fromEntries(Object.entries(ctx.input.upstream).map(([k, u]) => [k, u.output]))).slice(0, 8000),
     "</untrusted_input>",
   ].join("\n");
-  let out = "";
-  if (agentProvider(ctx.run) === "cursor") {
-    out = await cursorComplete(prompt, ctx.signal);
-  } else
-  for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
-    if (msg.type === "result" && msg.subtype === "success") out = msg.result;
-  }
+  const done = await completeForRun(ctx.run, prompt, ctx.signal);
+  await ctx.recordMetrics({ ranking: done.metrics }).catch(() => {});
+  const out = done.text;
   const json = out.match(/\[[\s\S]*\]/)?.[0];
   if (!json) throw new Error("no JSON in ranking reply");
   const allowed = new Set(repos.map((r) => r.name));
@@ -552,6 +585,37 @@ export async function rankRepositoriesWithClaude(ctx: ExecutionContext, ranked: 
     .filter((r) => allowed.has(r.repo))
     .map((r) => ({ repo: r.repo, score: Number(r.score) || 0, reasons: (r.reasons ?? []).map(String) }))
     .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Codex model for a step. Never reads step.config.model (a Claude id): step config.codex_model → agent.codex.models
+ * [profile|*][role] → agent.codex.model → "" (the worker's Codex account default). Effort: step config
+ * codex_reasoning_effort → agent.codex.reasoningEffort → model default.
+ */
+export function codexModelFor(step: { type: string; config: Record<string, any> }, profile?: string | null): { model: string; source: string; effort: string } {
+  const c = codexConfig();
+  const effort = typeof step.config.codex_reasoning_effort === "string" && step.config.codex_reasoning_effort ? step.config.codex_reasoning_effort : c.reasoningEffort;
+  if (typeof step.config.codex_model === "string" && step.config.codex_model) return { model: step.config.codex_model, source: "step config (codex_model)", effort };
+  const role = step.config.independent === true ? "verifier" : step.type;
+  for (const [scope, label] of [[profile ?? "", `codex routing ${profile}/${role}`], ["*", `codex routing */${role}`]] as const) {
+    const m = scope ? c.models[scope]?.[role] : undefined;
+    if (m) return { model: m, source: label, effort };
+  }
+  return { model: c.model, source: c.model ? "agent.codex.model" : "codex account default", effort };
+}
+
+/** What differs for a Codex agent compared with the shared step instructions. */
+function codexEnvironmentNotes(mode: ToolMode): string {
+  return [
+    "## Execution environment (OpenAI Codex on the platform worker)",
+    "- The platform tools are on the MCP server named `platform` (ask_user, post_update, submit_result, read_knowledge, search_knowledge, read_step_output, list_tools, describe_tool, call_tool" + (mode === "coding" ? ", prepare_branch, commit_changes" : "") + "). Where these instructions say mcp__platform__<tool>, call that tool on the `platform` server.",
+    "- Every command and file edit is checked by the platform before it runs; a denied call returns the reason. Do not retry a denied call in another form.",
+    mode === "coding"
+      ? "- You can write only inside the worktrees returned by prepare_branch. `.git` is read-only in your sandbox: do NOT run git add/commit; commit with the platform tool commit_changes (repo, message). The network is disabled."
+      : "- This step is read-only: no file edits, no state-changing commands.",
+    "- After ask_user, end your turn immediately: do not edit files or call other tools while the developer has not answered.",
+    "- Finish by calling submit_result with the step's output object. A final chat message alone does not complete the step.",
+  ].join("\n");
 }
 
 /** Model for a step: explicit step config → profile/role routing → global default (see config.agent.models). */

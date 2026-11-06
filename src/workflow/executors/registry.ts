@@ -1,6 +1,7 @@
 import { pool, q, one, json } from "../../db/pool.ts";
 import { runEvents } from "../events.ts";
 import type { ResolvedContext, StepInput } from "../context.ts";
+import type { AgentProvider } from "../../agent/provider.ts";
 import type { AttemptRow, ExecResult, RunRow, StepRow, StepType } from "../types.ts";
 
 /** What an executor gets. Side-effect helpers are bound to the current run/step/attempt. */
@@ -16,7 +17,7 @@ export interface ExecutionContext {
   artifact(kind: string, name: string, content: string, data?: unknown): Promise<number>;
   /** Persist questions against this attempt immediately (used by the ask_user MCP tool). */
   ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;
-  recordSession(sessionId: string, cwd: string, model?: string, provider?: "claude" | "cursor"): Promise<void>;
+  recordSession(sessionId: string, cwd: string, model?: string, provider?: AgentProvider): Promise<void>;
   /** Observability: tokens, cost, tool usage, skills loaded, integration calls, subagents (merged into attempt.metrics). */
   recordMetrics(metrics: Record<string, unknown>): Promise<void>;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { agentKey, type AgentProvider } from "../agentProvider.tsx";
 import {
   AlertTriangle, ArrowRight, Bot, Brain, CheckCircle2, CornerDownLeft, FolderSearch, Layers, ListFilter, MessageSquare, Pencil, ScrollText, Send,
   SquareTerminal, Wrench, XCircle, type LucideIcon,
@@ -47,9 +48,9 @@ function toolHint(input: any = {}) {
  * Claude Code execution viewer for one attempt: streamed from the backend (SSE-triggered incremental fetches of
  * /api/attempts/:id/transcript). Shows only what the SDK returned; "reasoning" is the summarised thinking the API exposes.
  */
-export function Transcript({ attemptId, live, tick, provider = "claude" }: { attemptId: number; live: boolean; tick: number; provider?: "claude" | "cursor" }) {
+export function Transcript({ attemptId, live, tick, provider = "claude" }: { attemptId: number; live: boolean; tick: number; provider?: AgentProvider }) {
   const { t } = useI18n();
-  const agent = t(provider === "cursor" ? "run.agentShort.cursor" : "run.agentShort.claude");
+  const agent = t(agentKey(provider, true));
   const [events, setEvents] = useState<Ev[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [follow, setFollow] = useState(true);

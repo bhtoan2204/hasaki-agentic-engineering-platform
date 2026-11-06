@@ -1,4 +1,3 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../../config.ts";
 import { ancestors } from "../graph.ts";
 import { parseGoTest } from "./baseline.ts";
@@ -6,7 +5,7 @@ import type { ExecutionContext } from "./registry.ts";
 import type { ExecResult } from "../types.ts";
 import { languagePolicy, outputLocale, type OutputLocale } from "../../agent/language.ts";
 import { agentProvider, type AgentProvider } from "../../agent/provider.ts";
-import { cursorComplete } from "../../agent/cursor/run.ts";
+import { completeForRun } from "../../agent/complete.ts";
 
 /**
  * Human-in-the-loop handling of a failed test step (after automatic retries are exhausted):
@@ -41,7 +40,7 @@ export interface Diagnosis {
   counts: Record<Category, number>;
   all_pre_existing: boolean;
   summary: string;
-  explanation?: { text: string; suggestion: string; by: "claude" | "cursor" | "rules" };
+  explanation?: { text: string; suggestion: string; by: AgentProvider | "rules" };
 }
 
 const ENV = /dial tcp|connection refused|connection (setup )?timed out|no such host|i\/o timeout|tls handshake|network is unreachable|failed to initialize database|context deadline exceeded|could not connect|ECONNREFUSED|ETIMEDOUT/i;
@@ -166,16 +165,11 @@ export function setTestFailureAdvisor(a: TestFailureAdvisor | null) {
   advisor = a;
 }
 
+/** The run's provider answers (completeForRun): a Codex or Cursor run never asks Claude here. */
 async function askClaude(prompt: string, ctx?: ExecutionContext, provider: AgentProvider = "claude"): Promise<any> {
-  let out = "";
-  if (provider === "cursor") {
-    out = await cursorComplete(prompt, ctx?.signal);
-    if (ctx) await ctx.recordMetrics({ provider: "cursor", advisor_cost_usd: null, cost_usd: null, tokens: null }).catch(() => {});
-  } else
-  for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
-    if (msg.type === "result" && msg.subtype === "success") out = msg.result;
-    if (msg.type === "result" && ctx && (msg as any).total_cost_usd != null) await ctx.recordMetrics({ advisor_cost_usd: (msg as any).total_cost_usd }).catch(() => {});
-  }
+  const done = await completeForRun({ agent_provider: provider }, prompt, ctx?.signal);
+  if (ctx) await ctx.recordMetrics({ advisor: done.metrics, advisor_cost_usd: done.metrics.cost_usd }).catch(() => {});
+  const out = done.text;
   const j = out.match(/\{[\s\S]*\}/)?.[0];
   if (!j) throw new Error("no JSON from advisor");
   return JSON.parse(j);

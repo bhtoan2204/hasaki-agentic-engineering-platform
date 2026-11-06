@@ -37,8 +37,8 @@ export async function runMetrics(runId: number) {
     (byTool[t.name] ??= { calls: 0, ms: 0 }).calls++;
     byTool[t.name].ms += Number(t.ms);
   }
-  const run = (await q(pool, "SELECT created_at, started_at, finished_at, status, profile, profile_decision FROM workflow_runs WHERE id = $1", [runId]))[0];
-  const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0 };
+  const run = (await q(pool, "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1", [runId]))[0];
+  const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0, cost_unknown: 0 };
   const perStep: Record<string, { type: string; attempts: number; exec_ms: number; queue_ms: number; human_ms: number; claude_ms: number; turns: number }> = {};
   for (const a of attempts) {
     const m = a.metrics ?? {};
@@ -51,6 +51,8 @@ export async function runMetrics(runId: number) {
     totals.tool_ms += a.tool_ms;
     if (a.step_type === "command") totals.command_ms += Number(a.exec_ms);
     totals.cost_usd += m.cost_usd ?? 0;
+    // Codex (ChatGPT plan) and Cursor report no price: count those attempts instead of pretending they cost $0.
+    if (m.sessions && m.cost_usd == null) totals.cost_unknown++;
     totals.input_tokens += m.tokens?.input ?? 0;
     totals.output_tokens += m.tokens?.output ?? 0;
     totals.cache_read_tokens += m.tokens?.cache_read ?? 0;
@@ -76,6 +78,7 @@ export async function runMetrics(runId: number) {
   return {
     run_id: runId,
     profile: run?.profile,
+    agent_provider: run?.agent_provider ?? "claude",
     wall_ms,
     totals,
     per_step: perStep,

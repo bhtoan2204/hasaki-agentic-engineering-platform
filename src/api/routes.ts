@@ -1,6 +1,7 @@
 import { config } from "../config.ts";
 import { resolveOutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider } from "../agent/provider.ts";
+import { agentProviderStatus } from "../agent/providerStatus.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { events as legacyEvents, inbox, prs as legacyPrs, questions as legacyQuestions, tasks as legacyTasks } from "../db.ts";
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
@@ -205,6 +206,7 @@ export const routes: Route[] = [
 
   // ------------------------------------------------------------ runs
   ["GET", /^\/api\/scheduler$/, () => schedulerStatus()],
+  ["GET", /^\/api\/agent-providers$/, (c) => agentProviderStatus(c.url.searchParams.get("refresh") === "1")],
   ["GET", /^\/api\/metrics\/summary$/, (c) => metricsSummary(Number(c.url.searchParams.get("days") ?? 30), mine(c))],
   ["GET", /^\/api\/metrics\/runs\/(\d+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runMetrics(num(c.p[0])))],
   ["GET", /^\/api\/tools$/, ({ url }) => listTools(url.searchParams.get("q") ?? undefined, { mode: "coding" }).map((t) => ({ ...t, ...describeTool(t.name) }))],

@@ -16,6 +16,7 @@ import {
   Play, Plus, Repeat, Rocket, Save, Settings2, ShieldCheck, SlidersHorizontal, StepForward, Trash2, Workflow, X, type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
 import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
@@ -747,7 +748,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   const [inputs, setInputs] = useState("{}");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
-  const [agentProvider, setAgentProvider] = useState<"claude" | "cursor">("claude");
+  const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
   const start = async (mode: "start" | "step" | "pending") => {
     let parsed;
     try {
@@ -800,12 +801,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
               <option value="en">{t("lang.en")}</option>
             </select>
           </Field>
-          <Field label={t("run.agent")} hint={t("run.agentHint")}>
-            <select value={agentProvider} onChange={(e) => setAgentProvider(e.target.value as "claude" | "cursor")}>
-              <option value="claude">{t("run.agent.claude")}</option>
-              <option value="cursor">{t("run.agent.cursor")}</option>
-            </select>
-          </Field>
+          <AgentProviderField value={agentProvider} onChange={setAgentProvider} />
         </Section>
         <Section icon={Workflow} title={t("wfe.profile")}>
           <ProfilePreview workflow={wfKey} workItemId={wi ? Number(wi) : null} repositories={sel} inputs={(() => { try { return JSON.parse(inputs || "{}"); } catch { return {}; } })()} value={profile} onChange={setProfile} />

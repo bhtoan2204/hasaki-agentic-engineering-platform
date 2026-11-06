@@ -24,7 +24,14 @@
   },
   "model": "",
   "agent": {
-    "cursorBin": "agent"
+    "cursorBin": "agent",
+    "codex": {
+      "bin": "codex",
+      "timeoutMs": 2700000,
+      "model": "",
+      "reasoningEffort": "",
+      "models": {}
+    }
   },
   "maxConcurrent": 1,
   "maxTurns": 300,
