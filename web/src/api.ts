@@ -48,11 +48,20 @@ async function fetchRetrying(url: string, init: RequestInit, retries: number): P
   }
 }
 
+/** Random key; crypto.getRandomValues also works on plain-HTTP LAN installs where randomUUID is unavailable. */
+function idempotencyKey() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   const scoped = withScope(path);
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (body !== undefined && csrf) headers["X-CSRF-Token"] = csrf;
+  // One key per user action: the server replays the first response for create-type routes (no duplicate runs).
+  if (body !== undefined) headers["Idempotency-Key"] = idempotencyKey();
   const isGet = body === undefined;
   const r = await fetchRetrying(scoped, { method: isGet ? "GET" : "POST", headers, body: isGet ? undefined : JSON.stringify(body), credentials: "include" }, isGet ? 3 : 0);
   const j = await r.json().catch(() => ({}));

@@ -249,8 +249,40 @@ export function toast(msg: string, kind: "ok" | "err" = "err") {
   setTimeout(() => el.remove(), kind === "ok" ? 2500 : 7000);
 }
 
-/** Wrap an async UI action: disables nothing by itself, reports errors as toasts, returns success. */
+/**
+ * The button the user just activated (mouse, touch or keyboard all dispatch `click`). Remembered for the rest of the
+ * current task only, so `act()` called from that click handler — also after a synchronous confirm() — knows its trigger.
+ */
+let trigger: HTMLElement | null = null;
+if (typeof document !== "undefined")
+  document.addEventListener(
+    "click",
+    (e) => {
+      const el = (e.target as Element | null)?.closest?.("button, [role='button']") as HTMLElement | null;
+      if (!el) return;
+      trigger = el;
+      setTimeout(() => {
+        if (trigger === el) trigger = null;
+      }, 0);
+    },
+    true,
+  );
+
+/**
+ * Wrap an async UI action: reports errors as toasts and returns success. The button that started it is disabled and
+ * shows a spinner until the request settles, so a slow call (remote database) reads as "working", never as a missed
+ * click, and a second click cannot send the action twice. A click on a button that is still busy is ignored.
+ */
 export async function act<T>(fn: () => Promise<T>, ok?: string): Promise<T | undefined> {
+  const el = trigger;
+  trigger = null;
+  if (el?.getAttribute("aria-busy") === "true") return undefined;
+  const wasDisabled = el instanceof HTMLButtonElement ? el.disabled : false;
+  if (el) {
+    el.setAttribute("aria-busy", "true");
+    el.classList.add("is-busy");
+    if (el instanceof HTMLButtonElement) el.disabled = true;
+  }
   try {
     const r = await fn();
     if (ok) toast(ok, "ok");
@@ -258,6 +290,12 @@ export async function act<T>(fn: () => Promise<T>, ok?: string): Promise<T | und
   } catch (e) {
     toast((e as Error).message);
     return undefined;
+  } finally {
+    if (el) {
+      el.removeAttribute("aria-busy");
+      el.classList.remove("is-busy");
+      if (el instanceof HTMLButtonElement && el.isConnected) el.disabled = wasDisabled;
+    }
   }
 }
 

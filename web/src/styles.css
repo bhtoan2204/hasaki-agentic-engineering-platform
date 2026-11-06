@@ -76,6 +76,13 @@ button.quiet:hover, .btn.quiet:hover { background: var(--sel); color: var(--bran
 button.warn { background: var(--st-wait) } button.danger { background: var(--st-err) } button.ok { background: var(--st-ok) }
 button.warn:hover { filter: brightness(.95); background: var(--st-wait) } button.danger:hover { filter: brightness(.95); background: var(--st-err) } button.ok:hover { filter: brightness(.95); background: var(--st-ok) }
 button:disabled { opacity: .45; cursor: default; transform: none }
+/* act(): the button whose request is in flight — stays readable, shows a spinner, ignores further clicks. */
+button.is-busy, [role="button"].is-busy { position: relative; opacity: .85; cursor: progress; pointer-events: none }
+button.is-busy::after, [role="button"].is-busy::after {
+  content: ""; width: 12px; height: 12px; margin-left: 6px; flex: none; display: inline-block; vertical-align: -2px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { button.is-busy::after, [role="button"].is-busy::after { animation-duration: 2s } }
 button.sm, .btn.sm { padding: 5px 11px; font-size: 12.5px } button.xs, .btn.xs { padding: 2px 8px; font-size: 11.5px; border-radius: 6px }
 button.icon, .btn.icon { padding: 7px; width: 34px; height: 34px; justify-content: center }
 button.linkish { background: none; color: var(--brand); padding: 0; border: 0; box-shadow: none; font: inherit; text-decoration: underline }

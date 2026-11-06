@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { pool } from "../db/pool.ts";
 import { errorStatus, routes } from "../api/routes.ts";
+import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
 import { HttpError } from "./error.ts";
 import { messages as uiMessages } from "../../web/src/i18n/messages.ts";
 import { handleStream } from "../api/stream.ts";
@@ -124,8 +125,18 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const m = url.pathname.match(pattern);
       if (!m || routeMethod !== method) continue;
       const body = method === "POST" ? await readJson(req) : {};
-      const out = await handler({ p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor });
-      return send(res, 200, out ?? null);
+      // Create-type POSTs with an Idempotency-Key: a repeat replays the first response instead of creating twice.
+      const idemKey = req.headers["idempotency-key"];
+      const claim = typeof idemKey === "string" && needsIdempotency(method, url.pathname) ? await claimIdempotency(actor.id, idemKey, url.pathname, body) : null;
+      if (claim && claim.kind !== "run") return send(res, claim.status, claim.body, claim.kind === "replay" ? { "Idempotent-Replayed": "true" } : undefined);
+      try {
+        const out = await handler({ p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor });
+        if (claim) await claim.finish(200, out ?? null);
+        return send(res, 200, out ?? null);
+      } catch (e) {
+        if (claim) await claim.finish(errorStatus(e), { error: (e as Error).message, details: (e as { errors?: unknown }).errors }).catch(() => claim.release().catch(() => {}));
+        throw e;
+      }
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {
