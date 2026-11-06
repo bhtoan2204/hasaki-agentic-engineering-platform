@@ -34,5 +34,8 @@ export const localJobs = {
   abort(jobId: number) {
     handles.get(jobId)?.abort();
   },
+  abortAll() {
+    for (const ac of handles.values()) ac.abort();
+  },
   size: () => handles.size,
 };

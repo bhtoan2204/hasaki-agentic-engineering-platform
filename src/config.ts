@@ -1,9 +1,14 @@
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 
 export interface Config {
   port: number;
+  /**
+   * This platform instance (one per developer machine sharing the database). Runs created here are pinned to it and
+   * only its workers execute them. PLATFORM_INSTANCE overrides; default is the machine's hostname.
+   */
+  instanceId: string;
   /** Where the real repo checkouts live (oms-api, oms-background, ...). */
   reposRoot: string;
   /** Platform data: worktrees, downloaded task files, Chromium profile. */
@@ -129,6 +134,7 @@ const defaults: Config = {
   port: 4545,
   reposRoot: join(homedir(), "src"),
   dataDir: join(homedir(), ".claude-task-platform"),
+  instanceId: "",
   baseBranch: "release/prod",
   projects: {
     OMS: [
@@ -207,6 +213,7 @@ function load(): Config {
   };
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
+  cfg.instanceId = process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId || hostname();
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
     poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),

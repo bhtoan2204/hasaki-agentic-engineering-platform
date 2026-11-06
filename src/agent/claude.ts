@@ -382,6 +382,10 @@ export const claudeExecutor: StepExecutor = {
         yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: "" };
       }
       const result = { isError: false, text: "", assistantTurns: 0 };
+      // Startup diagnostics: how long until the CLI reports `init`, and what it printed meanwhile (stderr tail).
+      const startedAt = Date.now();
+      let initSeen = false;
+      const stderrTail: string[] = [];
       try {
         for await (const msg of query({
           prompt: input(),
@@ -402,8 +406,18 @@ export const claudeExecutor: StepExecutor = {
             canUseTool,
             hooks: { PreToolUse: [{ hooks: [preToolUse] }], SubagentStart: [{ hooks: [subagentStart] }], SubagentStop: [{ hooks: [subagentStop] }] },
             disallowedTools: ["AskUserQuestion"],
+            stderr: (d: string) => {
+              stderrTail.push(...d.split("\n").filter(Boolean).map((l) => `[+${((Date.now() - startedAt) / 1000).toFixed(1)}s] ${l.slice(0, 300)}`));
+              if (stderrTail.length > 40) stderrTail.splice(0, stderrTail.length - 40);
+            },
           },
         })) {
+          if (!initSeen && msg.type === "system" && (msg as { subtype?: string }).subtype === "init") {
+            initSeen = true;
+            const ms = Date.now() - startedAt;
+            if (ms > 10_000)
+              await ctx.log("system", `Claude CLI took ${(ms / 1000).toFixed(1)}s to start (normally < 1s)`, { startup_ms: ms, stderr_tail: stderrTail.slice() });
+          }
           await recordTranscript(ctx, msg, cwd);
           accumulateMetrics(metrics, msg);
           if (msg.type === "assistant") result.assistantTurns++;

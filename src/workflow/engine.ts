@@ -329,9 +329,9 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider, r.ownerId],
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider, r.ownerId, config.instanceId],
     );
     const order = topoOrder(graph.steps);
     for (const s of graph.steps) {
@@ -366,6 +366,7 @@ export async function startPendingRun(runId: number, repositoriesOverride?: stri
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PENDING") throw new EngineError(`run ${runId} is ${run.status}, not PENDING`);
+    await adoptRun(c, runId);
     if (repositoriesOverride) await setSelectedRepositories(c, run, repositoriesOverride);
     await setRunStatus(c, run, "RUNNING");
     if (stepMode) await setRunStatus(c, run, "PAUSED");
@@ -387,6 +388,7 @@ export async function resumeRun(runId: number) {
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PAUSED") throw new EngineError(`run ${runId} is ${run.status}, not PAUSED`);
+    await adoptRun(c, runId);
     await setRunStatus(c, run, "RUNNING");
     await advance(c, runId, afterCommit);
     return getRun(runId, c);
@@ -498,6 +500,7 @@ export async function reexecuteStep(runId: number, stepKey: string, opts: { inpu
     if (unknown.length) throw new EngineError(`unknown skill(s): ${unknown.join(", ")}`, 400);
     const reexecute = feedback || pinned.length ? { instructions: feedback ?? null, skills: pinned, requested_by: opts.by ?? "", at: new Date().toISOString() } : null;
     const pending = feedback || opts.input || reexecute ? { ...(opts.input ?? {}), ...(feedback ? { feedback } : {}), ...(reexecute ? { reexecute } : {}) } : null;
+    await adoptRun(c, runId);
     const why = reexecute ? `re-executed with ${[feedback && "instructions", pinned.length && `skills ${pinned.map((p) => `${p.key}@v${p.version}`).join(", ")}`].filter(Boolean).join(" + ")}` : "re-executed by user";
     await reexecuteTx(c, run, stepKey, pending, afterCommit, why);
     if (feedback) await runEvents.add(c, runId, "user", feedback);
@@ -524,6 +527,7 @@ export async function runStepNow(runId: number, stepKey: string) {
   return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     if (run.status !== "PAUSED") throw new EngineError(`run is ${run.status}: "run step" is for paused runs (step mode); running runs schedule steps automatically`);
+    await adoptRun(c, runId);
     await advance(c, runId, afterCommit);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
@@ -898,6 +902,42 @@ export async function finishAttempt(jobId: number, token: number, attemptId: num
     await applyResult(c, run, step, attempt, jobId, result, afterCommit);
     return { applied: true };
   });
+}
+
+/**
+ * Graceful shutdown: hand a job this worker is executing back to the queue instead of failing it. The attempt is
+ * marked STALE (interrupted) and does NOT count against the step's retry budget; any worker may pick the job up again.
+ * Returns false when the job is no longer ours (fenced out, canceled, re-executed): then nothing is changed.
+ */
+export async function releaseAttempt(jobId: number, token: number, attemptId: number, reason: string) {
+  return withTx(async (c) => {
+    const attempt0 = await one<AttemptRow>(c, "SELECT run_id FROM workflow_step_attempts WHERE id = $1", [attemptId]);
+    if (!attempt0) return false;
+    const run = await lockRun(c, attempt0.run_id);
+    const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 FOR UPDATE", [jobId]);
+    const attempt = (await one<AttemptRow>(c, "SELECT * FROM workflow_step_attempts WHERE id = $1 FOR UPDATE", [attemptId]))!;
+    if (attempt.status !== "RUNNING" || !j || j.status !== "running" || j.fencing_token !== token) return false;
+    const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [attempt.step_id]))!;
+    await q(c, "UPDATE workflow_step_attempts SET status = 'STALE', error = $2, finished_at = now() WHERE id = $1", [attempt.id, json({ message: reason, interrupted: true })]);
+    if (step.current_attempt_id !== attempt.id || step.generation !== attempt.generation || step.status !== "RUNNING") return false;
+    await setStepStatus(c, step, "READY", { attempt_count: Math.max(0, step.attempt_count - 1), error: null }, `attempt #${attempt.number} interrupted: ${reason}; requeued (not counted as a retry)`);
+    await q(
+      c,
+      `UPDATE workflow_jobs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, fencing_token = fencing_token + 1,
+              available_at = now(), last_error = $2, updated_at = now() WHERE id = $1`,
+      [j.id, `interrupted: ${reason}`],
+    );
+    await runEvents.add(c, run.id, "system", `${step.key}: attempt #${attempt.number} interrupted (${reason}); the step is queued again without using a retry`, step.id, attempt.id);
+    return true;
+  });
+}
+
+/**
+ * Pin a run to the platform instance (machine) acting on it, so only that machine's workers execute its steps: the
+ * repositories, worktrees and agent login live on that machine. Called when a user (re)starts work on a run.
+ */
+async function adoptRun(c: Db, runId: number) {
+  await q(c, "UPDATE workflow_runs SET worker_instance = $2 WHERE id = $1 AND worker_instance IS DISTINCT FROM $2", [runId, config.instanceId]);
 }
 
 /**

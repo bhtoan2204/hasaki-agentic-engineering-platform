@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q } from "../db/pool.ts";
-import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases } from "./engine.ts";
+import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
 import type { ExecResult, JobRow } from "./types.ts";
@@ -25,6 +25,9 @@ export interface SchedulerOptions {
 
 const processId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
+/** Set while the server shuts down: interrupted jobs are handed back to the queue instead of being failed. */
+let draining: string | null = null;
+
 /** Step types that finish in seconds (no long agent session or command). */
 export const LIGHT_STEP_TYPES = ["human_input", "human_approval", "condition", "integration", "git_pull_request"];
 
@@ -40,10 +43,11 @@ export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes
          WHERE j2.status = 'queued' AND j2.available_at <= now()
            AND (r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') OR (r.status = 'PAUSED' AND j2.force))
            AND ($3::text[] IS NULL OR s.type = ANY($3))
+           AND (r.worker_instance IS NULL OR r.worker_instance = $4)
          ORDER BY j2.available_at, j2.id
          FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
       RETURNING j.*`,
-    [workerId, leaseSeconds, onlyTypes ?? null],
+    [workerId, leaseSeconds, onlyTypes ?? null, config.instanceId],
   );
 }
 
@@ -59,11 +63,11 @@ export async function schedulerStatus() {
   );
   const queued = await q(
     pool,
-    `SELECT j.id AS job_id, j.run_id, s.key AS step_key, s.type AS step_type, j.available_at
+    `SELECT j.id AS job_id, j.run_id, s.key AS step_key, s.type AS step_type, j.available_at, r.worker_instance
        FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
       WHERE j.status = 'queued' AND r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') ORDER BY j.available_at, j.id`,
   );
-  return { workers: config.scheduler.workers, light_workers: config.scheduler.lightWorkers ?? 1, light_step_types: LIGHT_STEP_TYPES, running, queued };
+  return { instance: config.instanceId, workers: config.scheduler.workers, light_workers: config.scheduler.lightWorkers ?? 1, light_step_types: LIGHT_STEP_TYPES, running, queued };
 }
 
 /** Execute one claimed job end to end. */
@@ -92,6 +96,9 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
+  // Shutting down: a step that failed because the server is stopping (its agent/command was killed) goes back to the
+  // queue without using a retry. A step that finished on its own is still recorded normally.
+  if (draining && result.kind === "failed" && (await releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining))) return;
   await finishAttempt(job.id, job.fencing_token, begun.attempt.id, result);
 }
 
@@ -143,6 +150,15 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
       stopped = true;
       clearInterval(reaper);
       await Promise.all(loops);
+    },
+    /** Graceful shutdown: stop claiming, interrupt running steps and hand them back to the queue (no retry used). */
+    async drain(reason = "server shutting down") {
+      draining = reason;
+      stopped = true;
+      clearInterval(reaper);
+      localJobs.abortAll();
+      await Promise.all(loops);
+      draining = null;
     },
   };
 }

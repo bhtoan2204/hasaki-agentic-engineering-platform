@@ -92,6 +92,8 @@ export interface RunRow {
   agent_provider?: "claude" | "cursor" | "codex";
   /** Null only for unassigned legacy rows, which are not runnable. */
   owner_id?: number | null;
+  /** Platform instance (machine) whose workers execute this run; null = any instance (legacy rows). */
+  worker_instance?: string | null;
 }
 
 export interface StepRow {

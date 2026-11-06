@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { config } from "./config.ts";
 import { handle } from "./http/app.ts";
 import { migrate } from "./db/migrate.ts";
@@ -36,20 +37,64 @@ await loadKafkaCookie();
 await loadVaultToken();
 registerDefaultExecutors();
 await startEventStream();
+
+// Bind the port BEFORE starting workers: a second copy of the server (port already taken) must exit without having
+// claimed any job — otherwise it claims work, dies, and the job later fails with "worker lease expired".
+const server = createServer(handle);
+await new Promise<void>((resolve, reject) => {
+  server.once("error", reject);
+  // One shared installation. HOST=0.0.0.0 exposes it on the central machine; the default stays loopback.
+  server.listen(config.port, process.env.HOST ?? "127.0.0.1", () => resolve());
+}).catch((e: NodeJS.ErrnoException) => {
+  console.error(e.code === "EADDRINUSE" ? `port ${config.port} is already in use: another platform server is running. Not starting.` : `cannot listen: ${e.message}`);
+  process.exit(1);
+});
+console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
+
 // Durable scheduler: in-flight work resumes from PostgreSQL (expired leases are reaped and retried).
 const scheduler = startScheduler();
 startPolling();
 startProdErrorSchedule();
 
-// One shared installation. HOST=0.0.0.0 exposes it on the central machine; the default stays loopback.
-const server = createServer(handle).listen(config.port, process.env.HOST ?? "127.0.0.1", () => console.log(`workflow platform on ${config.publicUrl}`));
+// Graceful shutdown: running steps are interrupted and handed back to the queue (no retry used), so restarting the
+// server never fails a step. A second Ctrl+C exits immediately.
+let shuttingDown = false;
+async function shutdown(reason: string, code: number) {
+  if (shuttingDown) {
+    console.log("forced exit");
+    process.exit(code || 1);
+  }
+  shuttingDown = true;
+  console.log(`${reason}: stopping workers; running steps are handed back to the queue (Ctrl+C again to force)`);
+  server.close();
+  childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
+  // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.
+  setTimeout(() => process.exit(code), 30_000).unref();
+  try {
+    await scheduler.drain(reason);
+  } catch (e) {
+    console.error("shutdown:", (e as Error).message);
+  }
+  process.exit(code);
+}
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => void shutdown(sig, 0));
 
-for (const sig of ["SIGINT", "SIGTERM"] as const)
-  process.on(sig, async () => {
-    console.log(`${sig}: stopping workers (in-flight attempts finish or are reaped after their lease)`);
-    server.close();
-    childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
-    setTimeout(() => process.exit(0), 3000).unref();
-    await scheduler.stop();
-    process.exit(0);
-  });
+// A stray rejected promise (typically a database timeout in fire-and-forget code) must not kill the server and
+// every step running in it. Log it with a timestamp so it can be traced.
+process.on("unhandledRejection", (reason) => {
+  console.error(`[${new Date().toISOString()}] unhandled rejection (server kept running):`, reason instanceof Error ? reason.stack : reason);
+});
+// A thrown exception leaves the process in an unknown state: log it, hand running steps back, then exit.
+process.on("uncaughtException", (e) => {
+  console.error(`[${new Date().toISOString()}] uncaught exception:`, e.stack ?? e);
+  void shutdown("uncaught exception", 1);
+});
+
+// Event-loop stalls freeze everything at once (heartbeats, agent sessions, HTTP): report them when they happen.
+const loopDelay = monitorEventLoopDelay({ resolution: 50 });
+loopDelay.enable();
+setInterval(() => {
+  const maxMs = loopDelay.max / 1e6;
+  if (maxMs > 2000) console.warn(`[${new Date().toISOString()}] event loop blocked for up to ${(maxMs / 1000).toFixed(1)}s in the last minute`);
+  loopDelay.reset();
+}, 60_000).unref();

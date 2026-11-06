@@ -27,7 +27,7 @@ import {
   sendFeedback,
   startRun,
 } from "../src/workflow/engine.ts";
-import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus, runOnce } from "../src/workflow/scheduler.ts";
+import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus, runOnce, startScheduler } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -1692,4 +1692,51 @@ test("e2e: verification never judges uncommitted work; optional (opted-out) veri
   assert.equal((await stepOf(run2.id, "review")).config.independent, false);
   assert.equal((await stepOf(run2.id, "pr")).status, "COMPLETED");
   assert.equal(pushed.length, 1);
+});
+
+test("graceful shutdown: an interrupted step is requeued without using a retry, then completes", async () => {
+  const { config } = await import("../src/config.ts");
+  const key = await customWorkflow([{ key: "long", type: "agent", max_attempts: 1 }]);
+  let started = false;
+  scripts.long = (ctx) =>
+    new Promise<ExecResult>((resolve) => {
+      started = true;
+      ctx.signal.addEventListener("abort", () => resolve({ kind: "failed", error: "agent process killed", retryable: true }));
+    });
+  const run = await startRun({ definitionKey: key });
+  assert.equal((await getRun(run.id)).worker_instance, config.instanceId, "a new run is pinned to the instance that created it");
+  const sched = startScheduler({ workers: 1, lightWorkers: 0, leaseSeconds: 30, heartbeatSeconds: 5, pollMs: 50 });
+  for (let i = 0; i < 100 && !started; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(started, "the step is running");
+  await sched.drain("test shutdown");
+  const st = await stepOf(run.id, "long");
+  assert.equal(st.status, "READY", "handed back to the queue, not FAILED");
+  assert.equal(st.attempt_count, 0, "the interrupted attempt does not count against max_attempts");
+  const [a] = await attemptsOf(run.id, "long");
+  assert.equal(a.status, "STALE");
+  assert.equal(a.error.interrupted, true);
+  const job = await one(pool, "SELECT status, lease_owner FROM workflow_jobs WHERE step_id = $1", [st.id]);
+  assert.deepEqual(job, { status: "queued", lease_owner: null });
+  scripts.long = () => ({ kind: "completed", output: { ok: true } });
+  await drain();
+  assert.equal((await stepOf(run.id, "long")).status, "COMPLETED", "max_attempts=1 still allows the real attempt");
+});
+
+test("worker affinity: only the instance a run is pinned to claims its jobs; restarting work adopts the run", async () => {
+  const { config } = await import("../src/config.ts");
+  const key = await customWorkflow([{ key: "only", type: "agent" }]);
+  scripts.only = () => ({ kind: "completed", output: { ok: true } });
+  const run = await startRun({ definitionKey: key });
+  await q(pool, "UPDATE workflow_runs SET worker_instance = 'teammate-laptop' WHERE id = $1", [run.id]);
+  assert.equal(await claimJob("w-affinity", 30), undefined, "another machine's run is not claimed here");
+  await pauseRun(run.id);
+  await resumeRun(run.id); // the developer restarts work from this machine
+  assert.equal((await getRun(run.id)).worker_instance, config.instanceId);
+  await drain();
+  assert.equal((await stepOf(run.id, "only")).status, "COMPLETED");
+  await q(pool, "UPDATE workflow_runs SET worker_instance = NULL WHERE id = $1", [run.id]);
+  const legacy = await startRun({ definitionKey: key });
+  await q(pool, "UPDATE workflow_runs SET worker_instance = NULL WHERE id = $1", [legacy.id]);
+  await drain();
+  assert.equal((await stepOf(legacy.id, "only")).status, "COMPLETED", "legacy runs (no instance) are claimed by anyone");
 });

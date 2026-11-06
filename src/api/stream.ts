@@ -45,7 +45,7 @@ export async function startEventStream() {
     c.on("error", (e) => {
       console.error("event stream listener:", e.message);
       listener = null;
-      setTimeout(() => connect().catch(() => {}), 2000);
+      setTimeout(() => connect().catch(() => { }), 2000);
     });
     await c.connect();
     await c.query("LISTEN workflow_events");
@@ -70,15 +70,22 @@ export async function handleStream(req: IncomingMessage, res: ServerResponse, ur
   const client: Client = { res, runId, userId: actor.id, role: actor.role, support };
   clients.add(client);
   const ping = setInterval(() => {
-    void sessionFromRequest(req).then((session) => {
-      if (!session || session.id !== actor.id) {
-        clearInterval(ping);
-        clients.delete(client);
-        res.end();
-        return;
-      }
-      res.write(": ping\n\n");
-    });
+    sessionFromRequest(req)
+      .then((session) => {
+        if (!session || session.id !== actor.id) {
+          clearInterval(ping);
+          clients.delete(client);
+          res.end();
+          return;
+        }
+        res.write(": ping\n\n");
+      })
+      // A database hiccup (e.g. a connection timeout over VPN) must not become an unhandled rejection: that would
+      // terminate the whole server and every step running in it. Keep the stream; the next ping re-checks the session.
+      .catch((e) => {
+        console.error("event stream session check:", (e as Error).message);
+        res.write(": ping\n\n");
+      });
   }, 20_000);
   req.on("close", () => {
     clearInterval(ping);
