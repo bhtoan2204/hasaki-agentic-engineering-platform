@@ -92,10 +92,23 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
   const [comment, setComment] = useState("");
   const [repos, setRepos] = useState<string[]>(req?.recommended ?? run.selected_repositories ?? []);
   const [branch, setBranch] = useState<string>(req?.branch ?? "");
+  const [branches, setBranches] = useState<Record<string, string>>(() => ({ ...(req?.branches ?? {}) }));
+  // "payment-fiserv: Nhánh split/8-channel-splitting  payment_gateway_global: Nhánh split/6-channel-splitting" pasted
+  // into the common field fills the per-repository fields instead.
+  const onCommon = (v: string) => {
+    const names: string[] = (req?.candidates ?? []).map((c: any) => c.repo);
+    const found: Record<string, string> = {};
+    for (const m of v.matchAll(/([A-Za-z0-9._-]+)\s*:\s*(?:nhánh|branch)?\s*([A-Za-z0-9][A-Za-z0-9._\/-]*)/gi)) if (names.includes(m[1])) found[m[1]] = m[2];
+    if (Object.keys(found).length) {
+      setBranches((b) => ({ ...b, ...found }));
+      setRepos((r) => [...new Set([...r, ...Object.keys(found)])]);
+      setBranch("");
+    } else setBranch(v);
+  };
   const send = async (approve: boolean) => {
     const body: any = { comment };
     if (approve && req?.select_repositories) body.repositories = repos;
-    if (approve && req?.ask_branch) body.data = { branch: branch.trim() };
+    if (approve && req?.ask_branch) body.data = { branch: branch.trim(), branches: Object.fromEntries(repos.map((r) => [r, (branches[r] ?? "").trim()])) };
     const r = await act(() => api(`/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`, body), approve ? t("si.approved") : t("si.rejected"));
     if (r) onDone();
   };
@@ -131,11 +144,21 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
           ))}
           <div className="muted small">{t("si.allowed", { list: (req.allowed ?? run.allowed_repositories).join(", ") })}</div>
           {req.ask_branch && (
-            <label className="si-branch">
+            <div className="si-branch">
               <span className="small" style={{ fontWeight: 600, color: "var(--ink-2)" }}>{t("si.branch")}</span>
-              <input className="mono" value={branch} placeholder="HSK-XXXXXXXX" onChange={(e) => setBranch(e.target.value)} />
+              <input className="mono" value={branch} placeholder={t("si.branchCommonPh")} onChange={(e) => onCommon(e.target.value)} />
+              {repos.length > 0 && (
+                <div className="si-branch-grid">
+                  {repos.map((r) => (
+                    <label key={r} className="si-branch-row">
+                      <span className="mono small">{r}</span>
+                      <input className="mono" value={branches[r] ?? ""} placeholder={branch.trim() || t("si.branchBase")} onChange={(e) => setBranches((b) => ({ ...b, [r]: e.target.value }))} />
+                    </label>
+                  ))}
+                </div>
+              )}
               <span className="muted small">{t("si.branchHint")}</span>
-            </label>
+            </div>
           )}
         </div>
       )}

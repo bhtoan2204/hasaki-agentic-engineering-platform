@@ -82,10 +82,10 @@ export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path
  * Main checkouts of `repos` that have `origin/<branch>`, after refreshing that one remote ref (a fetch only updates
  * refs; the working tree is never touched). Repositories without the branch are left out.
  */
-export async function reviewedBranchTargets(repos: string[], branch: string) {
+export async function reviewedBranchTargets(targets: Array<{ repo: string; branch: string }>) {
   const { repositories, repoPath } = await import("../repos/service.ts");
   const out: Array<{ repo: string; path: string; to: string }> = [];
-  for (const repo of repos) {
+  for (const { repo, branch } of targets) {
     const reg = await repositories.get(repo);
     const dir = reg ? repoPath(reg) : "";
     if (!dir || !existsSync(dir)) continue;

@@ -1867,3 +1867,27 @@ test("code review → fix: branch chosen with the repositories, fixes approved w
   const fix = (await getRunSummary(run.id)).steps.find((x) => x.key === "fix")!;
   assert.deepEqual(fix.lists.map((l) => l.items[0]), ["nil deref (a.go) → guard nil", "naming — low severity"]);
 });
+
+test("code review: a different branch per repository (and none = base) for review, OCR targets and fixes", async () => {
+  const { branchFor } = await import("../src/workflow/branches.ts");
+  for (const k of ["analyze", "architecture", "security"]) scripts[k] = () => ({ kind: "completed", output: { findings: [], summary: "ok" } });
+  const run = await startRun({ definitionKey: "code-review", inputs: { focus: "split" } });
+  await drain();
+  const candidates = ((await stepOf(run.id, "select")).approval?.request?.candidates ?? []).map((c: any) => c.repo);
+  assert.ok(candidates.length >= 3, `need three candidate repositories, got ${candidates}`);
+  const [a, b, c] = candidates;
+  await assert.rejects(approveStep(run.id, "select", { repositories: [a, b], data: { branches: { [a]: "release/prod" } } }), /base branch/, "per-repo values are validated too");
+  await approveStep(run.id, "select", { repositories: [a, b, c], data: { branch: "", branches: { [a]: "origin/split/8-channel-splitting", [b]: "split/6-channel-splitting", [c]: "" } } });
+  const r = await getRun(run.id);
+  assert.deepEqual(r.inputs.branches, { [a]: "split/8-channel-splitting", [b]: "split/6-channel-splitting" }, "only repositories with a branch");
+  assert.equal(r.inputs.branch, null, "no single common branch");
+  assert.deepEqual(branchFor(r, a), { branch: "split/8-channel-splitting", existing: true });
+  assert.deepEqual(branchFor(r, b), { branch: "split/6-channel-splitting", existing: true });
+  assert.equal(branchFor(r, c).existing, false, "no branch → the run's own branch (review on base)");
+
+  // the common field fills repositories left empty
+  const run2 = await startRun({ definitionKey: "code-review", inputs: { focus: "x" } });
+  await drain();
+  await approveStep(run2.id, "select", { repositories: [a, b], data: { branch: "HSK-1", branches: { [b]: "HSK-2" } } });
+  assert.deepEqual((await getRun(run2.id)).inputs.branches, { [a]: "HSK-1", [b]: "HSK-2" });
+});

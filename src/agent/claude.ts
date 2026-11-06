@@ -24,6 +24,7 @@ import { dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
 import { runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
+import { branchFor } from "../workflow/branches.ts";
 import { OCR_REVIEW_INSTRUCTIONS, openCodeReviewGuide, reviewedBranchTargets } from "./openCodeReview.ts";
 import { collectEvidence, enforceVerdict, evidenceDrift, hasTestEvidence, isIndependent, normalizeVerdict, repairTargetFor } from "./independentReview.ts";
 import { diffTestsAgainstBase, repairPrompt, verificationLoop, verificationSummary, verifyConfig, verifyWorkspaces, type VerificationRound, type VerifyDeps } from "./verify.ts";
@@ -328,13 +329,13 @@ export const claudeExecutor: StepExecutor = {
       });
     // Review steps with `open_code_review: true`: Alibaba OpenCodeReview (delegation mode) picks the reviewable files and
     // the per-language rules; this agent does the review with them. Skipped quietly when the ocr binary is not installed.
-    // Without worktrees (a read-only code review run), OCR reads the branch under review from the main checkouts.
-    const reviewed = typeof ctx.run.inputs?.branch === "string" ? ctx.run.inputs.branch.trim().replace(/^origin\//, "") : "";
-    const ocrTargets = ws.length
-      ? ws.map((w) => ({ repo: w.repo, path: w.path }))
-      : reviewed
-        ? await reviewedBranchTargets(ctx.run.selected_repositories, reviewed)
-        : [];
+    // Without worktrees (a read-only code review run), OCR reads each repository's branch under review (per-repo
+    // `inputs.branches`, else `inputs.branch`) from the main checkouts.
+    const reviewed = ctx.run.selected_repositories
+      .map((repo) => ({ repo, ...branchFor(ctx.run, repo) }))
+      .filter((x) => x.existing)
+      .map((x) => ({ repo: x.repo, branch: x.branch.replace(/^origin\//, "") }));
+    const ocrTargets = ws.length ? ws.map((w) => ({ repo: w.repo, path: w.path })) : reviewed.length ? await reviewedBranchTargets(reviewed) : [];
     if (ctx.step.config.open_code_review === true && !ocrTargets.length)
       await ctx.log("system", "OpenCodeReview skipped: no worktree and no branch to review (set the branch when selecting repositories)");
     if (ctx.step.config.open_code_review === true && ocrTargets.length) {

@@ -240,3 +240,6 @@ body.rv-resizing .react-flow { pointer-events: none }
 .si-body > .tabs { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); padding-right: 24px }
 
 .si-branch { display: flex; flex-direction: column; gap: 4px; margin-top: 10px }
+.si-branch-grid { display: grid; gap: 6px; margin-top: 2px }
+.si-branch-row { display: grid; grid-template-columns: minmax(120px, 38%) 1fr; gap: 8px; align-items: center }
+.si-branch-row span { overflow-wrap: anywhere }

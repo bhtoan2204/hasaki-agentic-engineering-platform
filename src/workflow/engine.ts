@@ -658,17 +658,30 @@ export async function approveStep(runId: number, stepKey: string, opts: { commen
         if (!repos?.length) throw new EngineError("select at least one repository", 400);
         await setSelectedRepositories(c, run, repos);
       }
-      // Branch to review (and to commit fixes on), entered with the repositories. Empty = review the base branch.
-      const branch = typeof (opts.data as any)?.branch === "string" ? String((opts.data as any).branch).trim().replace(/^origin\//, "") : null;
-      if (s.config.ask_branch && branch !== null) {
-        if (branch) {
-          try {
-            normalizeBranchMap({ "*": branch }, config.baseBranch);
-          } catch (e) {
-            throw new EngineError((e as Error).message, 400);
-          }
+      // Branches to review (and to commit fixes on), entered with the repositories: one per repository (`branches`),
+      // and/or one for all the others (`branch`). A repository without one is reviewed on the base branch.
+      if (s.config.ask_branch && opts.data && typeof opts.data === "object") {
+        const d = opts.data as { branch?: unknown; branches?: Record<string, unknown> };
+        const clean = (v: unknown) => (typeof v === "string" ? v.trim().replace(/^origin\//, "") : "");
+        const common = clean(d.branch);
+        const chosen = repos ?? run.selected_repositories;
+        const perRepo: Record<string, string> = {};
+        for (const r of chosen) {
+          const b = clean(d.branches?.[r]) || common;
+          if (b) perRepo[r] = b;
         }
-        await q(c, "UPDATE workflow_runs SET inputs = coalesce(inputs, '{}'::jsonb) || jsonb_build_object('branch', $2::text), updated_at = now() WHERE id = $1", [runId, branch || null]);
+        try {
+          normalizeBranchMap(perRepo, config.baseBranch);
+        } catch (e) {
+          throw new EngineError((e as Error).message, 400);
+        }
+        const distinct = [...new Set(Object.values(perRepo))];
+        const single = distinct.length === 1 && Object.keys(perRepo).length === chosen.length ? distinct[0] : null;
+        await q(
+          c,
+          `UPDATE workflow_runs SET inputs = coalesce(inputs, '{}'::jsonb) || jsonb_build_object('branch', $2::text, 'branches', $3::jsonb), updated_at = now() WHERE id = $1`,
+          [runId, single, Object.keys(perRepo).length ? json(perRepo) : null],
+        );
       }
       const output = { approved: true, comment: decision.comment, by: decision.by, ...(repos ? { repositories: repos } : {}) };
       if (s.current_attempt_id)

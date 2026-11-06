@@ -192,8 +192,9 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["select"],
           config: {
             instructions:
-              "Review the selected repositories (read-only). If inputs.branch is set, review `git diff origin/$BASE_BRANCH...origin/<branch>`; " +
-              "otherwise review the areas named in inputs.focus. Report correctness and maintainability issues.",
+              "Review the selected repositories (read-only). Each repository's branch under review is inputs.branches[<repo>] " +
+              "(else inputs.branch): review `git diff origin/$BASE_BRANCH...origin/<that branch>` in that repository. A repository " +
+              "without a branch: review the areas named in inputs.focus on the base branch. Report correctness and maintainability issues.",
             output_contract: "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
             open_code_review: true,
           },
