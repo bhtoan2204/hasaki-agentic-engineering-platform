@@ -6,7 +6,7 @@ import { pool, q } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
 import { writeFileSync } from "node:fs";
-import { repositories, syncRepositoriesFromConfig, repoPath } from "../src/repos/service.ts";
+import { repositories, syncRepositoriesFromConfig, repoPath, projectScope } from "../src/repos/service.ts";
 import { frontmatter, importFromRepositories, looksSecret } from "../src/knowledge/importer.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 
@@ -41,6 +41,33 @@ test("shared registry: a repo missing on this machine stays enabled; a known pro
   } finally {
     for (const n of ["oms-api", "oms-background"]) await repositories.upsert(n, { enabled: true });
     await q(pool, "DELETE FROM repositories WHERE name IN ('elsewhere-only', 'unrelated-tool')");
+  }
+});
+
+test("projectScope: related projects link both ways, one hop, case-insensitive", () => {
+  const related = { OMS: ["Payment", "Payment (New)"], Payment: ["Ledger"] };
+  assert.deepEqual(projectScope("OMS", related).sort(), ["oms", "payment", "payment (new)"]);
+  assert.deepEqual(projectScope("payment (new)", related).sort(), ["oms", "payment (new)"], "reverse direction");
+  assert.deepEqual(projectScope("Payment", related).sort(), ["ledger", "oms", "payment"]);
+  assert.ok(!projectScope("OMS", related).includes("ledger"), "one hop only: Payment's links are not OMS's");
+  assert.deepEqual(projectScope("Other", related), ["other"]);
+  assert.deepEqual(projectScope("  ", related), []);
+});
+
+test("allowedFor: a run for a project also sees the repositories of its related projects", async () => {
+  await repositories.upsert("payment-core", { path: "payment-src/payment-core", projects: ["Payment"] });
+  const saved = config.relatedProjects;
+  try {
+    config.relatedProjects = {};
+    assert.ok(!(await repositories.allowedFor("Payment")).includes("oms-api"), "unlinked: OMS repos stay out of a Payment run");
+    config.relatedProjects = { OMS: ["Payment"] };
+    const forPayment = await repositories.allowedFor("Payment");
+    assert.ok(forPayment.includes("payment-core") && forPayment.includes("oms-api") && forPayment.includes("oms-background"));
+    assert.ok((await repositories.allowedFor("oms")).includes("payment-core"), "link works from the other side too");
+    assert.ok(!(await repositories.allowedFor("Payment")).includes("unrelated-tool"));
+  } finally {
+    config.relatedProjects = saved;
+    await q(pool, "DELETE FROM repositories WHERE name = 'payment-core'");
   }
 });
 

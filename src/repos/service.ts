@@ -50,19 +50,37 @@ export const repositories = {
   },
 
   /**
-   * Enabled repositories allowed to perform `action` for a project: those mapped to the project,
-   * or every such repository when the project has no mapping.
+   * Enabled repositories allowed to perform `action` for a project: those mapped to the project or to a project
+   * linked with it in config.relatedProjects, or every such repository when the project has no mapping.
    */
   async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
     const all = await q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
     const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action));
     const p = project.trim().toLowerCase();
-    const maps = (r: RepositoryRow) => r.projects.some((x) => x.toLowerCase() === p);
+    const scope = new Set(projectScope(project));
+    const maps = (r: RepositoryRow) => r.projects.some((x) => scope.has(x.toLowerCase()));
     // A known project never widens to every repository, even when all of its repositories are disabled right now.
     if (p && all.some(maps)) return rows.filter(maps).map((r) => r.name);
     return rows.map((r) => r.name);
   },
 };
+
+/**
+ * Lower-cased project names whose repositories a run for `project` may use: the project itself plus every project
+ * linked with it in config.relatedProjects, in either direction, one hop only. Empty project → [].
+ */
+export function projectScope(project: string, related: Record<string, string[]> = config.relatedProjects ?? {}): string[] {
+  const p = project.trim().toLowerCase();
+  if (!p) return [];
+  const scope = new Set([p]);
+  for (const [from, tos] of Object.entries(related)) {
+    const f = from.trim().toLowerCase();
+    const t = (tos ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    if (f === p) t.forEach((x) => scope.add(x));
+    else if (t.includes(p)) scope.add(f);
+  }
+  return [...scope];
+}
 
 export const repoPath = (r: Pick<RepositoryRow, "name" | "path">) => join(config.reposRoot, r.path || r.name);
 const isGit = (rel: string) => existsSync(join(config.reposRoot, rel, ".git"));
@@ -157,9 +175,17 @@ export function rankRepositories(repos: RepositoryRow[], request: { text: string
     .map((r) => {
       let score = 0;
       const reasons: string[] = [];
-      if (request.project && r.projects.some((p) => p.toLowerCase() === request.project!.toLowerCase())) {
+      const own = !!request.project && r.projects.some((p) => p.toLowerCase() === request.project!.toLowerCase());
+      if (own) {
         score += 2;
         reasons.push(`mapped to project ${request.project}`);
+      }
+      // A request that names another project a repo belongs to ("lỗi phía OMS" in a Payment ticket) points at that
+      // repo. Repos of the run's own project already got the mapping bonus above.
+      const named = own ? undefined : r.projects.find((p) => tokens(p).length > 0 && tokens(p).every((t) => words.has(t)));
+      if (named) {
+        score += 3;
+        reasons.push(`request mentions project ${named}`);
       }
       const fields: Array<[string, string[], number]> = [
         ["name", tokens(r.name.replace(/[-_]/g, " ")), 3],

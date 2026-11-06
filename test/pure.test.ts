@@ -629,3 +629,12 @@ test("tool policy: `go -C <worktree>` / `git -C <worktree>` run there even when 
   ])
     assert.equal(decideBash(cmd, ctx, P).allow, false, cmd);
 });
+
+test("repository ranking: a request naming a related project boosts that project's repos", () => {
+  const repos = [repo("oms-api", { projects: ["OMS"] }), repo("payment", { projects: ["Payment", "Payment (New)"] }), repo("tool", { projects: ["Other"] })];
+  const ranked = rankRepositories(repos, { text: "Duplicate balance payment ở luồng bảo hành phía OMS", project: "Payment (New)" });
+  const oms = ranked.find((r) => r.repo === "oms-api")!;
+  assert.ok(oms.reasons.includes("request mentions project OMS"));
+  assert.ok(!ranked.find((r) => r.repo === "payment")!.reasons.some((r) => r.startsWith("request mentions")), "own project gets the mapping bonus, not this one");
+  assert.equal(ranked.find((r) => r.repo === "tool")!.score, 0);
+});

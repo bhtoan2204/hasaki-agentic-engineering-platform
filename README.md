@@ -232,6 +232,8 @@ tokens; crashed workers' jobs are reaped and retried. Several processes may shar
   run's worktrees; `git push`, `reset --hard`, `clean`, `rm -rf`, checking out `release/prod` are always denied.
 - Code is edited only in worktrees under `~/.claude-task-platform/worktrees/<branch>/<repo>`; the primary checkout is never used.
 - Repositories outside a run's allowed set (project mapping in the registry) are rejected at selection, at `prepare_branch` and at PR time.
+  The allowed set is the work item's project plus the projects linked with it in `config.relatedProjects`
+  (both directions, one hop): `{ "OMS": ["Payment"] }` lets an OMS run use Payment repos and vice versa.
 - Task text and earlier agent output are passed as `<untrusted_input>`; platform rules and curated knowledge go in the system prompt.
 - PRs are opened by the `git_pull_request` step (`auto | approval | draft | none`), idempotent per repo/branch. Nothing is merged or deployed.
 - The API has no auth — it listens on loopback only.

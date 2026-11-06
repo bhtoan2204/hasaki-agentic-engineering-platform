@@ -17,6 +17,12 @@ export interface Config {
   baseBranch: string;
   /** Task project name -> repository paths or group folders under reposRoot. Synced into the repository registry. */
   projects: Record<string, string[]>;
+  /**
+   * Projects that integrate tightly (e.g. OMS calls Payment): a run for one may need to change the other. Each entry
+   * links both ways and one hop only — `{ "OMS": ["Payment"] }` lets an OMS run see Payment repos AND a Payment run
+   * see OMS repos; projects linked to Payment are not pulled into OMS. Names match config.projects (case-insensitive).
+   */
+  relatedProjects: Record<string, string[]>;
   /** Prefix to turn task note_files ("task/26/10/30/...png") into a downloadable URL. Empty = don't download. */
   fileBaseUrl: string;
   bitbucket: {
@@ -147,6 +153,7 @@ const defaults: Config = {
       "oms-open-gateway",
     ],
   },
+  relatedProjects: {},
   fileBaseUrl: "",
   bitbucket: { workspace: "hasaki-tech", user: "", token: "", reviewers: [] },
   notifyWebhook: "",

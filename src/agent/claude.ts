@@ -592,10 +592,14 @@ export const claudeExecutor: StepExecutor = {
 /** AI-assisted repository ranking: may only reorder/explain repositories from the deterministic candidate list. */
 export async function rankRepositoriesWithClaude(ctx: ExecutionContext, ranked: RankedRepository[], repos: RepositoryRow[]): Promise<RankedRepository[]> {
   const meta = repos.map((r) => ({ name: r.name, description: r.description, services: r.services, tags: r.tags, projects: r.projects, dependencies: r.dependencies }));
+  const project = ctx.context?.project || ctx.input.work_item?.project || "";
   const prompt = [
     languagePolicy(outputLocale(ctx.run)),
     "",
     "Rank these repositories by how likely they must change for the engineering request. Use ONLY the listed repository names.",
+    ...(project ? [`The request belongs to project "${project}"; repositories of related projects are listed too because those projects integrate with it.`] : []),
+    "Consider the whole flow across project boundaries: when the request names a system (e.g. \"phía OMS\") or the defect sits in a call between systems " +
+      "(duplicate or missing calls, retries, wrong payloads), rank the caller/producer side as well as the callee — the fix is often on the side that initiates the call.",
     'Reply with JSON only: [{"repo": "...", "score": 0-10, "reasons": ["why this repo is relevant"]}]. Each reason is natural language and follows the output language above.',
     "",
     "Repositories:",
