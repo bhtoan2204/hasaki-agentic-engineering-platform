@@ -1,7 +1,5 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { readdir, readFile, access } from "node:fs/promises";
-import { join } from "node:path";
 import { pool, one, q } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config, codeIntelligenceEnabled } from "../src/config.ts";
@@ -28,20 +26,17 @@ import {
   defaultScoring,
   aggregateResults,
   compareResults,
-  PolicySchema,
   type Evidence,
 } from "../src/eval/scoring.ts";
 import {
   startPendingRun,
   approveStep,
   answerQuestions,
-  getRun,
   reapExpiredLeases,
   beginAttempt,
 } from "../src/workflow/engine.ts";
 import { runOnce, claimJob } from "../src/workflow/scheduler.ts";
 import { registerDefaultExecutors } from "../src/workflow/executors/index.ts";
-import { sandboxIdentity } from "../src/eval/isolation.ts";
 import { repositories } from "../src/repos/service.ts";
 let suite: any, owner: any, other: any;
 const evidence = (): Evidence => ({

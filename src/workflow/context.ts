@@ -90,7 +90,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
     ? await one(c, "SELECT id, code, title, description, project, source, payload FROM work_items WHERE id = $1", [run.work_item_id])
     : null;
   const anc = ancestors(run.graph.steps, step.key);
-  const upstream: StepInput["upstream"] = {};
+  let upstream: StepInput["upstream"] = {};
   if (anc.size) {
     for (const s of await q<StepRow>(c, "SELECT key, status, current_attempt_id, output FROM workflow_steps WHERE run_id = $1 AND key = ANY($2)", [
       run.id,
@@ -99,11 +99,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
       upstream[s.key] = { status: s.status, attempt_id: s.current_attempt_id, output: s.output };
   }
   // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
-  if (isIndependent(step.config)) {
-    const filtered = independentUpstream(run.graph.steps, upstream);
-    for (const k of Object.keys(upstream)) if (!(k in filtered)) delete upstream[k];
-    Object.assign(upstream, filtered);
-  }
+  if (isIndependent(step.config)) upstream = independentUpstream(run.graph.steps, upstream);
   const answers = await q(
     c,
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",

@@ -33,7 +33,7 @@ import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
 import { repositoryRemote } from "../repos/remote.ts";
 import { prepareRepository, workspaceStatus, testRepositoryConnection } from "../repos/workspaces.ts";
-import { rankRepositories, repositories, isAmbiguous } from "../repos/service.ts";
+import { repositories, isAmbiguous } from "../repos/service.ts";
 import { definitions } from "../workflow/definitions.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { runEvents } from "../workflow/events.ts";

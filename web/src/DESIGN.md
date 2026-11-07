@@ -15,7 +15,7 @@ dark theme is token-driven (`:root[data-theme="dark"]`). Vietnamese UI copy (kee
 ## Components (web/src/ui.tsx — import, don't re-implement)
 - `PageHeader({ icon, title, subtitle, crumbs, actions })` — every page starts with it. `crumbs`: `[["Overview", "#/overview"], ["Runs"]]`.
 - `StatCard({ icon, label, value, hint, tone: "brand"|"run"|"wait"|"ok"|"err", onClick })`.
-- `Badge({ s, label? })` — status pill with dot (pulses for live statuses); `label` shows Vietnamese name. `STATUS_LABELS`, `STATUS_COLORS`, `LIVE_STATUSES` in api.ts.
+- `Badge({ s, label? })` — status pill with dot (pulses for live statuses); `label` shows the localized name from `i18n/messages.ts`. `STATUS_COLORS` and `LIVE_STATUSES` live in api.ts.
 - `EmptyState({ icon, title, children, action })`, `Loading({ label })`, `Skeleton`, `SkeletonRows`, `ErrorBox`.
 - `Segmented({ options, value, onChange })`, `SearchInput({ value, onChange, placeholder })`, `Tabs`, `Field`, `Drawer({ title, onClose })`.
 - `Markdown`, `Json`, `JsonBlock`, `Copy`, `toast`, `act`, `navigate`, `time`, `ago`, `dur` — unchanged behaviour.

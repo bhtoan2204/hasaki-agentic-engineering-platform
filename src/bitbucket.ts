@@ -21,9 +21,9 @@ export async function resolveBitbucket() {
   return null;
 }
 
-async function call(path: string, init: RequestInit = {}) {
-  const creds = await resolveBitbucket();
-  if (!creds) throw new Error("No Bitbucket credentials for this account");
+type BitbucketCredentials = NonNullable<Awaited<ReturnType<typeof resolveBitbucket>>>;
+
+async function call(creds: BitbucketCredentials, path: string, init: RequestInit = {}) {
   const res = await fetch(API + path, {
     ...init,
     headers: { Authorization: "Basic " + Buffer.from(`${creds.user}:${creds.token}`).toString("base64"), "Content-Type": "application/json", Accept: "application/json" },
@@ -33,24 +33,29 @@ async function call(path: string, init: RequestInit = {}) {
   return body;
 }
 
+function repositoryReference(repo: string, workspace: string) {
+  const parts = repo.split("/");
+  const ws = parts.length === 2 ? parts[0] : workspace;
+  const slug = parts.at(-1)!;
+  if (![ws, slug].every((x) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(x))) throw new Error("Invalid Bitbucket repository reference");
+  return { ws, slug };
+}
+
 /**
  * Open (or update) the PR for branch -> baseBranch.
  * Without credentials we can't call the API, so return Bitbucket's "new PR" link for a human to click.
  */
 export async function openPullRequest(repo: string, branch: string, title: string, description: string, opts: { draft?: boolean; dest?: string } = {}) {
   const creds = await resolveBitbucket();
-  const parts = repo.split("/");
-  const ws = parts.length === 2 ? parts[0] : creds?.workspace || config.bitbucket.workspace;
-  repo = parts.at(-1)!;
-  if (![ws, repo].every((x) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(x))) throw new Error("Invalid Bitbucket repository reference");
+  const { ws, slug } = repositoryReference(repo, creds?.workspace || config.bitbucket.workspace);
   const dest = opts.dest ?? config.baseBranch;
   if (!creds) {
-    const url = `https://bitbucket.org/${ws}/${repo}/pull-requests/new?source=${encodeURIComponent(branch)}&dest=${encodeURIComponent(dest)}`;
+    const url = `https://bitbucket.org/${ws}/${slug}/pull-requests/new?source=${encodeURIComponent(branch)}&dest=${encodeURIComponent(dest)}`;
     return { url, created: false, note: "No Bitbucket credentials configured: open this link to create the PR." };
   }
 
   const q = encodeURIComponent(`source.branch.name="${branch}" AND destination.branch.name="${dest}" AND state="OPEN"`);
-  const existing = await call(`/repositories/${ws}/${repo}/pullrequests?q=${q}`);
+  const existing = await call(creds, `/repositories/${ws}/${slug}/pullrequests?q=${q}`);
   const body = JSON.stringify({
     title,
     description,
@@ -63,10 +68,10 @@ export async function openPullRequest(repo: string, branch: string, title: strin
 
   if (existing.values?.length) {
     const pr = existing.values[0];
-    await call(`/repositories/${ws}/${repo}/pullrequests/${pr.id}`, { method: "PUT", body });
+    await call(creds, `/repositories/${ws}/${slug}/pullrequests/${pr.id}`, { method: "PUT", body });
     return { url: pr.links.html.href as string, created: false, note: "Existing PR updated." };
   }
-  const pr = await call(`/repositories/${ws}/${repo}/pullrequests`, { method: "POST", body });
+  const pr = await call(creds, `/repositories/${ws}/${slug}/pullrequests`, { method: "POST", body });
   return { url: pr.links.html.href as string, created: true, note: "PR created." };
 }
 
@@ -74,12 +79,9 @@ export async function openPullRequest(repo: string, branch: string, title: strin
 export async function listPullRequests(repo: string, opts: { branch?: string; state?: string } = {}) {
   const creds = await resolveBitbucket();
   if (!creds) throw new Error("No Bitbucket credentials for this account");
-  const parts = repo.split("/");
-  const ws = parts.length === 2 ? parts[0] : creds.workspace;
-  repo = parts.at(-1)!;
-  if (![ws, repo].every((x) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(x))) throw new Error("Invalid Bitbucket repository reference");
+  const { ws, slug } = repositoryReference(repo, creds.workspace);
   const filters = [`state="${(opts.state ?? "OPEN").toUpperCase()}"`, ...(opts.branch ? [`source.branch.name="${opts.branch.replace(/"/g, "")}"`] : [])];
-  const body = await call(`/repositories/${ws}/${repo}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
+  const body = await call(creds, `/repositories/${ws}/${slug}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
   return (body.values ?? []).map((p: any) => ({
     id: p.id,
     title: p.title,

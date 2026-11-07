@@ -1,5 +1,5 @@
 /**
- * Preloaded with `node --import ./test/setup.ts --test`. Creates a fresh `platform_test` database on the
+ * Preloaded with `node --import ./test/setup.ts --test`. Creates a uniquely named `platform_test_<uuid>` database on the
  * PostgreSQL from docker-compose (override with TEST_DATABASE_ADMIN_URL) and an isolated config, BEFORE any
  * platform module is imported (config and pool are created at import time).
  */
@@ -7,14 +7,14 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 
 const admin = process.env.TEST_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
 const adminUrl = new URL(admin);
 if (!["localhost", "127.0.0.1", "[::1]"].includes(adminUrl.hostname)) throw new Error("Tests require a local isolated PostgreSQL; remote database refused.");
-const dbName = "platform_test";
+const dbName = `platform_test_${randomUUID().replaceAll("-", "")}`;
 const c = new pg.Client({ connectionString: admin });
 await c.connect();
-await c.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
 await c.query(`CREATE DATABASE ${dbName}`);
 await c.end();
 

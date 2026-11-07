@@ -30,9 +30,9 @@ import {
 } from "../src/codeIntelligence/search.ts";
 import { changes, readSource, safePath } from "../src/codeIntelligence/git.ts";
 import { definitions } from "../src/workflow/definitions.ts";
-import { startRun, cancelRun } from "../src/workflow/engine.ts";
+import { startRun } from "../src/workflow/engine.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
-import { effectiveSql, publish } from "../src/codeIntelligence/store.ts";
+import { publish } from "../src/codeIntelligence/store.ts";
 import { parserVersion } from "../src/codeIntelligence/parser.ts";
 
 const env = {

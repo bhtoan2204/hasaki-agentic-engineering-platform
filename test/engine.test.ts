@@ -1,5 +1,6 @@
-import { test, before, after, beforeEach } from "node:test";
+import { test, before, after, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
+import pg from "pg";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -1732,7 +1733,6 @@ test("graceful shutdown: an interrupted step is requeued without using a retry, 
 });
 
 test("worker affinity: resume never adopts another machine; unassigned legacy runs require an administrator", async () => {
-  const { config } = await import("../src/config.ts");
   const key = await customWorkflow([{ key: "only", type: "agent" }]);
   scripts.only = () => ({ kind: "completed", output: { ok: true } });
   const run = await startRun({ definitionKey: key });
@@ -1894,4 +1894,28 @@ test("code review: a different branch per repository (and none = base) for revie
   await drain();
   await approveStep(run2.id, "select", { repositories: [a, b], data: { branch: "HSK-1", branches: { [b]: "HSK-2" } } });
   assert.deepEqual((await getRun(run2.id)).inputs.branches, { [a]: "HSK-1", [b]: "HSK-2" });
+});
+
+
+test("answering multiple questions keeps one transactional update and resumes the step once", async () => {
+  const key = await customWorkflow([{ key: "ask", type: "human_input", config: {
+    questions: [{ question: "Deploy window?" }, { question: "Approver?" }],
+  } }]);
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  const questions = await q(pool, "SELECT id FROM workflow_questions WHERE run_id=$1 AND status='open' ORDER BY id", [run.id]);
+  assert.equal(questions.length, 2);
+  const spy = mock.method(pg.Client.prototype, "query");
+  try {
+    const result = await answerQuestions({ [questions[0].id]: "  night  ", [questions[1].id]: "  owner  " }, "reviewer");
+    assert.equal(result.answered, 2);
+    const updates = spy.mock.calls.filter((call) => /^UPDATE workflow_questions\b/.test(String(call.arguments[0]).trim()));
+    assert.equal(updates.length, 1, "one round trip for the batch, within the existing transaction");
+  } finally { spy.mock.restore(); }
+  const saved = await q(pool, "SELECT status,answer,answered_by,answered_at FROM workflow_questions WHERE run_id=$1 ORDER BY id", [run.id]);
+  assert.deepEqual(saved.map((r) => [r.status, r.answer, r.answered_by]), [["answered", "night", "reviewer"], ["answered", "owner", "reviewer"]]);
+  assert.equal(saved[0].answered_at.getTime(), saved[1].answered_at.getTime());
+  assert.equal((await stepOf(run.id, "ask")).status, "COMPLETED");
+  assert.equal((await attemptsOf(run.id, "ask")).length, 1);
+  await assert.rejects(answerQuestions({ [questions[0].id]: "again" }), /no open questions/);
 });

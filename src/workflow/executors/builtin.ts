@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import { gitProvider, workspacesOf } from "../../git/provider.ts";
-import { repositoryReference, repositoryBaseBranch, isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
+import { repositoryReference, repositoryBaseBranch, isAmbiguous, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";

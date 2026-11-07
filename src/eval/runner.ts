@@ -1,5 +1,5 @@
 import { ownsInstance } from "../instances.ts";
-import { mkdir, writeFile, rm, readFile, access } from "node:fs/promises";
+import { mkdir, writeFile, rm, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join, relative } from "node:path";
 import { config } from "../config.ts";

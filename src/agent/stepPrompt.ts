@@ -1,4 +1,3 @@
-import { config } from "../config.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
 import { verifyConfig } from "./verify.ts";
 import { branchFor } from "../workflow/branches.ts";

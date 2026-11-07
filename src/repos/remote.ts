@@ -11,3 +11,7 @@ export function repositoryBranch(value: unknown): string {
   if (typeof value !== "string" || !value || value.startsWith("-") || /[\s~^:?*\[\\\x00-\x1f]/.test(value) || value.includes("..") || value.includes("@{") || value.split("/").some((p) => !p || p.startsWith(".") || p.endsWith(".") || p.endsWith(".lock"))) throw new Error("Invalid Git branch name");
   return value;
 }
+
+/** Translate the exact legacy SSH origin form; registration still uses the strict HTTPS validator above. */
+export const legacyBitbucketHttpsUrl = (value: string) =>
+  value.replace(/^git@bitbucket\.org:([^/]+)\/([^/]+)$/, "https://bitbucket.org/$1/$2");

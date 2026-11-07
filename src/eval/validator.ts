@@ -1,5 +1,5 @@
 import { readFile, writeFile, lstat, readdir } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { join } from "node:path";
 import { extract } from "../codeIntelligence/parser.ts";
 import type { BenchmarkCase } from "./dataset.ts";
 import { containerRun, IsolationUnavailable } from "./isolation.ts";

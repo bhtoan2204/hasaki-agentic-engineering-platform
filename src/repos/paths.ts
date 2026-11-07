@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import { repositoryRemote } from "./remote.ts";
+import { legacyBitbucketHttpsUrl, repositoryRemote } from "./remote.ts";
 import { config } from "../config.ts";
 
 const exec = promisify(execFile);
@@ -49,7 +49,7 @@ export async function validateCheckout(repo: LocalRepository, persistedPath?: st
   try { remote = (await exec("git", ["-C", path, "config", "--no-includes", "--get", "remote.origin.url"])).stdout.trim(); } catch { /* No origin: local-only fixture/checkout. */ }
   if (repo.repository_url) {
     let actual: string;
-    try { actual = repositoryRemote(persistedPath ? remote.replace(/^git@bitbucket\.org:([^/]+)\/([^/]+)$/, "https://bitbucket.org/$1/$2") : remote).url; } catch { throw new Error(`Repository ${repo.name} remote mismatch`); }
+    try { actual = repositoryRemote(persistedPath ? legacyBitbucketHttpsUrl(remote) : remote).url; } catch { throw new Error(`Repository ${repo.name} remote mismatch`); }
     if (actual !== repositoryRemote(repo.repository_url).url) throw new Error(`Repository ${repo.name} remote mismatch`);
     const root = realpathSync(persistedPath ? config.repositories?.[repo.name] || config.reposRoot : config.dataDir);
     const rel = relative(root, realpathSync(path));

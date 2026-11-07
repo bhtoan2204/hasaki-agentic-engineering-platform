@@ -60,18 +60,17 @@ export interface Workspace {
 /** Create (or reuse) the run's isolated worktree for `repo` and record it. Never touches reposRoot checkouts. */
 export async function prepareWorkspace(run: { id: number; branch: string; inputs?: Record<string, any> | null }, repo: string, checkLive?: () => Promise<void>): Promise<Workspace> {
   await checkLive?.();
-  const owner = await one(pool, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [run.id]);
+  const owner = await one(pool, "SELECT worker_instance,allowed_repositories,owner_id FROM workflow_runs WHERE id = $1", [run.id]);
   if (owner?.worker_instance !== config.instanceId) throw new Error("Workspaces may only be prepared by the assigned instance");
   const reg = await repositories.get(repo);
   if (!reg?.enabled || !reg.allowed_actions.includes("write")) throw new Error("Repository write permission required");
-  const authorized = await one(pool, "SELECT allowed_repositories,owner_id FROM workflow_runs WHERE id=$1", [run.id]);
-  if (!authorized?.allowed_repositories.includes(repo)) throw new Error("Repository outside run scope");
+  if (!owner.allowed_repositories.includes(repo)) throw new Error("Repository outside run scope");
   const principal = execution.getStore();
-  if (principal && authorized.owner_id !== principal.userId) throw new Error("Run owner mismatch");
+  if (principal && owner.owner_id !== principal.userId) throw new Error("Run owner mismatch");
   const checkout = await prepareRepository(reg, true, await checkoutForRun(reg, run.id));
   const target = branchFor(run, repo);
   // Preserve persisted workspaces for resumable runs. New remote workspaces use stable IDs.
-  const saved = (await workspacesOf(run.id)).find((w) => w.repo === repo);
+  const saved = await one<{ path: string }>(pool, "SELECT path FROM execution_workspaces WHERE run_id=$1 AND repo=$2", [run.id, repo]);
   const workspacePath = saved?.path ?? (reg.repository_url ? join(config.dataDir, "worktrees", instanceDirectory(config.instanceId), String(run.id), String(reg.id)) : undefined);
   if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
   const b = await repositoryLock(reg, async () => {

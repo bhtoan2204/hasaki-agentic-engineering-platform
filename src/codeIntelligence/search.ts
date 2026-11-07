@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config, codeIntelligenceEnabled } from "../config.ts";
-import { pool, one, q } from "../db/pool.ts";
+import { pool, q } from "../db/pool.ts";
 import {
   rankRepositories,
   type RepositoryRow,

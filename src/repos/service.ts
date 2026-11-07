@@ -53,7 +53,6 @@ export const repositories = {
       patch.provider = "bitbucket";
     }
     if (patch.default_branch) repositoryBranch(patch.default_branch);
-    let cols = EDITABLE.filter((k) => patch[k] !== undefined);
     const existing = await repositories.get(name, db);
     if (existing?.repository_url && patch.repository_url !== undefined && patch.repository_url !== existing.repository_url) {
       const active = await one(db, "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1", [name]);
@@ -63,8 +62,8 @@ export const repositories = {
       const remote = repositoryRemote(existing.repository_url);
       patch.remote_slug = `${remote.workspace}/${remote.slug}`;
       patch.provider = "bitbucket";
-      cols = EDITABLE.filter((k) => patch[k] !== undefined);
     }
+    const cols = EDITABLE.filter((k) => patch[k] !== undefined);
     if (!existing) {
       await q(
         db,

@@ -1,5 +1,3 @@
-import { config } from "./config.ts";
-
 /** Pull the fields that matter out of the raw task API payload. Accepts {data:{...}} or the bare data object. */
 export function normalizeTask(raw: any) {
   const d = raw?.data && raw.data.code ? raw.data : raw;

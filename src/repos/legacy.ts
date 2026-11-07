@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { repositories } from "./service.ts";
 import { resolveRepoPath } from "./paths.ts";
-import { repositoryRemote } from "./remote.ts";
+import { legacyBitbucketHttpsUrl, repositoryRemote } from "./remote.ts";
 import { pool, q } from "../db/pool.ts";
 
 const exec = promisify(execFile);
@@ -18,7 +18,7 @@ export async function migrateLegacyRepositories(apply = false) {
       result.existing_local_path = path;
       const raw = (await exec("git", ["-C", path, "config", "--no-includes", "--get", "remote.origin.url"], { timeout: 5000 })).stdout.trim();
       // Migration may translate the exact Bitbucket SSH syntax; new registration remains HTTPS only.
-      const candidate = raw.replace(/^git@bitbucket\.org:([^/]+)\/([^/]+)$/, "https://bitbucket.org/$1/$2");
+      const candidate = legacyBitbucketHttpsUrl(raw);
       const remote = repositoryRemote(candidate);
       result.detected_remote_url = remote.url;
       result.proposed_canonical_url = remote.url;

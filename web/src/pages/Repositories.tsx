@@ -26,14 +26,13 @@ function Actions({ items }: { items?: string[] }) {
     </span>
   );
 }
-const repoDir = (r: any) => r.repository_url || tLegacy(r);
-const tLegacy = (r: any) => r.path || r.name;
+const repoDir = (r: any) => r.repository_url || r.path || r.name;
 
 export function RepositoriesPage({ name }: { name?: string }) {
   const { t } = useI18n();
   const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
-  const index = useApi<{ enabled: boolean; repositories: any[] }>("/api/repositories/index-status");
-  const workspace = useApi<any>(name ? `/api/repositories/${encodeURIComponent(name)}/workspace` : "");
+  const index = useApi<{ enabled: boolean; repositories: any[] }>(name ? "/api/repositories/index-status" : null);
+  const workspace = useApi<any>(name ? `/api/repositories/${encodeURIComponent(name)}/workspace` : null);
   const [form, setForm] = useState<any>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
   const [ranked, setRanked] = useState<any>(null);

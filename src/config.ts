@@ -71,8 +71,6 @@ export interface Config {
   maxTurns: number;
   hasakiWork: {
     apiUrl: string;
-    /** Deprecated: browser connections use HASAKI_WORK_CHROME_PATH and explicit local mode. */
-    chromiumPath: string;
     /** Poll the task list every N minutes and auto-pick new tasks. 0 = only when you click "Lấy task". */
     pollMinutes: number;
     /** wshr API paths (relative to apiUrl). Check ~/.claude-task-platform/work-api.log if Hasaki changes them. */
@@ -210,7 +208,6 @@ const defaults: Config = {
   maxTurns: 300,
   hasakiWork: {
     apiUrl: "https://wshr.hasaki.vn/api",
-    chromiumPath: "",
     pollMinutes: 0,
     listPath: "hr/projects/mytasks-es",
     detailPath: "hr/projects/task-input/{id}",

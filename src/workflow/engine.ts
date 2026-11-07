@@ -601,13 +601,11 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
     await withTx(async (c, afterCommit) => {
       await lockRun(c, runId);
       const qs = await q(c, "SELECT * FROM workflow_questions WHERE run_id = $1 AND id = ANY($2) AND status = 'open' FOR UPDATE", [runId, ids]);
-      for (const x of qs) {
-        await q(c, "UPDATE workflow_questions SET status = 'answered', answer = $2, answered_by = $3, answered_at = now() WHERE id = $1", [
-          x.id,
-          String(answers[x.id]).trim(),
-          answeredBy,
-        ]);
-        answered++;
+      if (qs.length) {
+        await q(c, `UPDATE workflow_questions q SET status='answered',answer=a.answer,answered_by=$3,answered_at=now()
+          FROM unnest($1::bigint[],$2::text[]) AS a(id,answer) WHERE q.id=a.id`,
+          [qs.map((x) => x.id), qs.map((x) => String(answers[x.id]).trim()), answeredBy]);
+        answered += qs.length;
       }
       for (const stepId of new Set(qs.map((x) => x.step_id as number))) {
         const s = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1", [stepId]))!;

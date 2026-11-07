@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { remoteGit } from "./repos/git.ts";
-import { repositoryBranch } from "./repos/remote.ts";
+import { legacyBitbucketHttpsUrl, repositoryBranch } from "./repos/remote.ts";
 import { resolveRepoPath, unsafeRelativePath } from "./repos/paths.ts";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
@@ -11,7 +11,7 @@ const exec = promisify(execFile);
 
 async function git(cwd: string, ...args: string[]) {
   if (["fetch", "push"].includes(args[0])) {
-    const remote = (await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])).stdout.trim().replace(/^git@bitbucket\.org:([^/]+)\/([^/]+)$/, "https://bitbucket.org/$1/$2");
+    const remote = legacyBitbucketHttpsUrl((await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])).stdout.trim());
     if (remote.startsWith("https://bitbucket.org/")) {
       // Use the validated explicit URL, not mutable pushurl or URL rewrite configuration.
       const safe = args.map((a) => a === "origin" ? remote : a);

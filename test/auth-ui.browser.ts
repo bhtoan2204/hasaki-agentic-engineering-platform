@@ -15,7 +15,7 @@ import { seedTemplates } from "../src/workflow/definitions.ts";
 import { seedKnowledge } from "../src/knowledge/service.ts";
 
 assert.equal(process.env.PLATFORM_TEST, "1");
-assert.equal(new URL(process.env.DATABASE_URL!).pathname, "/platform_test");
+assert.match(new URL(process.env.DATABASE_URL!).pathname, /^\/platform_test_[a-f0-9]{32}$/);
 await migrate();
 await seedTemplates(); await seedKnowledge();
 const server = createServer(handle);

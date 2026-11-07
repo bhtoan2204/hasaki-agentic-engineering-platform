@@ -487,7 +487,7 @@ test("session lookup never crosses provider, step or user", async () => {
   const stepB = await stepOf(b.id, "plan");
   const att = await one<{ id: number }>(pool, "INSERT INTO workflow_step_attempts (run_id, step_id, number, status, generation) VALUES ($1, $2, 1, 'COMPLETED', $3) RETURNING id", [a.id, stepA.id, stepA.generation]);
   await pool.query("INSERT INTO agent_sessions (attempt_id, session_id, cwd, model, provider) VALUES ($1, 'claude-sess', '/cwd', '', 'claude'), ($1, 'codex-sess', '/cwd', '', 'codex')", [att!.id]);
-  const ctx = (step: any, provider: string) => ({ step, input: { pending: { feedback: "again" } }, context: { snapshot_id: null } }) as any;
+  const ctx = (step: any, _provider: string) => ({ step, input: { pending: { feedback: "again" } }, context: { snapshot_id: null } }) as any;
   assert.equal((await resumableSession(ctx(stepA, "codex"), "/cwd", "codex"))?.sessionId, "codex-sess");
   assert.equal((await resumableSession(ctx(stepA, "claude"), "/cwd", "claude"))?.sessionId, "claude-sess");
   assert.equal(await resumableSession(ctx(stepB, "codex"), "/cwd", "codex"), null, "another run (another user) never sees it");

@@ -1,7 +1,7 @@
 import { effectiveSql } from "../src/codeIntelligence/store.ts";
 /** Run ONLY with test/setup.ts: never benchmarks or migrates a production database. */
 import { performance } from "node:perf_hooks";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { config } from "../src/config.ts";

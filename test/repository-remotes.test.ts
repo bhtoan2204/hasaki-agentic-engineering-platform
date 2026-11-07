@@ -1,4 +1,4 @@
-import { test, before, after } from "node:test";
+import { test, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync } from "node:fs";
@@ -223,6 +223,16 @@ test("new agent working directories are per run and retained sessions resume the
   const a = await runWorkingDirectory(runA.id), b = await runWorkingDirectory(runB.id);
   assert.notEqual(a,b); assert.equal(await runWorkingDirectory(runA.id),a);
   assert.ok(a.endsWith(join(String(runA.id),"agent")));
+  const legacy = join(config.dataDir, "worktrees", "retained-session");
+  mkdirSync(legacy, { recursive: true });
+  const step = await one(pool, "SELECT id,generation FROM workflow_steps WHERE run_id=$1 ORDER BY position LIMIT 1", [runB.id]);
+  const attempt = await one(pool, "INSERT INTO workflow_step_attempts(run_id,step_id,number,status,generation) VALUES($1,$2,1,'COMPLETED',$3) RETURNING id", [runB.id, step.id, step.generation]);
+  await q(pool, "INSERT INTO agent_sessions(attempt_id,session_id,cwd,model) VALUES($1,'retained-session',$2,'fixture')", [attempt.id, legacy]);
+  const spy = mock.method(pool, "query");
+  try {
+    assert.equal(await runWorkingDirectory(runB.id), legacy, "persisted sessions keep their original cwd");
+    assert.equal(spy.mock.calls.length, 1, "assignment and session are resolved in one query");
+  } finally { spy.mock.restore(); }
   await q(pool,"UPDATE workflow_runs SET worker_instance='foreign' WHERE id=$1",[runA.id]);
   await assert.rejects(runWorkingDirectory(runA.id),/Assigned worker/);
 });
@@ -332,4 +342,34 @@ test("authenticated publication uses the canonical workspace and registered defa
     const result=await asA(()=>openPullRequest(repositoryReference(repo),workspace.branch,"Changes","Description",{dest:repo.default_branch}));
     assert.equal(result.created,true); assert.equal(calls.length,2);
   } finally {globalThis.fetch=originalFetch;config.bitbucket.workspace=oldWorkspace;}
+});
+
+
+test("Bitbucket resolves one owner's credential pair once per operation and observes rotation on the next call", async () => {
+  const { openPullRequest, listPullRequests } = await import("../src/bitbucket.ts");
+  const originalFetch = globalThis.fetch;
+  const authorization: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    authorization.push((init?.headers as Record<string, string>).Authorization);
+    return new Response(JSON.stringify(init?.method === "POST"
+      ? { links: { html: { href: "https://bitbucket.org/team/repo/pull-requests/1" } } }
+      : { values: [] }));
+  };
+  const spy = mock.method(pool, "query");
+  const secretReads = () => spy.mock.calls.filter((call) => String(call.arguments[0]).includes("FROM user_secrets")).length;
+  try {
+    await asA(() => openPullRequest("team/repo", "feature", "Title", "Body", { dest: "main" }));
+    assert.equal(secretReads(), 2, "one read per secret, shared by lookup and creation requests");
+    assert.equal(authorization.length, 2);
+    assert.equal(authorization[0], authorization[1]);
+    await putUserSecret(userA, "bitbucket_token", "rotated-fixture-token");
+    spy.mock.resetCalls();
+    await asA(() => listPullRequests("team/repo"));
+    assert.equal(secretReads(), 2);
+    assert.equal(authorization[2], "Basic " + Buffer.from("person@example.com:rotated-fixture-token").toString("base64"));
+  } finally {
+    spy.mock.restore();
+    globalThis.fetch = originalFetch;
+    await putUserSecret(userA, "bitbucket_token", "private-token-a");
+  }
 });

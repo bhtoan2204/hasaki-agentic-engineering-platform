@@ -40,7 +40,6 @@ const Link = ({ href }: { href: string }) => (
   <a href={href} target="_blank" rel="noreferrer">{href.replace(/^https?:\/\//, "")} <ExternalLink size={11} /></a>
 );
 const Steps = ({ children }: { children: ReactNode }) => <ol className="ig-steps small">{children}</ol>;
-const Mono = ({ children }: { children: ReactNode }) => <span className="mono">{children}</span>;
 
 /** Paste-a-secret form shared by Argo CD, Kafka UI and Splunk. */
 function PasteForm({ label, placeholder, busyLabel, onSave, extra }: { label: string; placeholder: string; busyLabel?: string; onSave: (v: string) => Promise<unknown>; extra?: ReactNode }) {

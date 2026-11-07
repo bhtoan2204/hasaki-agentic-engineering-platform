@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { repositoryBaseBranch } from "../repos/service.ts";
-import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { prDescription, prFields, testExceptionsOf, verificationNotesOf } from "../workflow/executors/builtin.ts";
 import { workspacesOf } from "./provider.ts";

@@ -8,7 +8,6 @@ import {
 } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { config } from "../config.ts";
 import {
   fixtureTrees,
@@ -18,7 +17,6 @@ import {
   FIXTURE_VERSION,
   type BenchmarkSuite,
 } from "./dataset.ts";
-const exec = promisify(execFile);
 export const fixtureNamespace = sha256(JSON.stringify(fixtureTrees)).slice(
   0,
   12,

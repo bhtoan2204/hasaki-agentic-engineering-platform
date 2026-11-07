@@ -47,7 +47,6 @@ export const ConfigurationSchema = z
         message: "Symbol context requires code intelligence",
       });
   });
-export type EvaluationConfiguration = z.infer<typeof ConfigurationSchema>;
 export async function publishBuiltinSuite() {
   return withTx(async (c) => {
     await q(c, "SELECT pg_advisory_xact_lock($1)", [727_027]);

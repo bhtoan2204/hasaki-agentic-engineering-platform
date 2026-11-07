@@ -1,6 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
-import { accumulateMetrics, newMetrics } from "./claude.ts";
+import { accumulateMetrics, newMetrics } from "./metrics.ts";
 import { codexComplete } from "./codex/run.ts";
 import { cursorComplete } from "./cursor/run.ts";
 import { agentProvider, type AgentProvider } from "./provider.ts";

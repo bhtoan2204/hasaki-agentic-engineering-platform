@@ -13,9 +13,6 @@ export function setSupportView(on: boolean) {
   open();
   broadcast();
 }
-export function supportViewOn() {
-  return supportView;
-}
 export function setAuthed(on: boolean) {
   authed = on;
   if (!on) {
@@ -213,20 +210,4 @@ export const STATUS_COLORS: Record<string, string> = {
   SKIPPED: "var(--st-idle)",
 };
 
-/** Human labels for statuses (Vietnamese UI). */
-export const STATUS_LABELS: Record<string, string> = {
-  PENDING: "Chờ",
-  READY: "Sẵn sàng",
-  RUNNING: "Đang chạy",
-  RETRYING: "Thử lại",
-  WAITING: "Chờ bạn",
-  WAITING_INPUT: "Cần trả lời",
-  WAITING_APPROVAL: "Cần duyệt",
-  PAUSED: "Tạm dừng",
-  COMPLETED: "Hoàn thành",
-  FAILED: "Lỗi",
-  STALE: "Cũ",
-  CANCELED: "Đã huỷ",
-  SKIPPED: "Bỏ qua",
-};
 export const LIVE_STATUSES = new Set(["RUNNING", "RETRYING", "WAITING", "WAITING_INPUT", "WAITING_APPROVAL"]);

@@ -37,3 +37,12 @@ Benchmark repositories retain their existing explicit `provider: benchmark` fixt
 The repository detail page exposes connection testing, clone/preparation, refresh and local status. Status includes only the current instance identity and repository ID, never a private local path. The availability check performs no network request. Clone activity/errors are process-local observations; after restart availability is reconstructed from disk. Git errors exposed to users contain actionable guidance and no raw subprocess output.
 
 Separate directories provide application isolation, not OS security boundaries. Workers and agent CLIs running as one OS user can read that user's files. Use distinct OS accounts or isolated worker hosts for mutually untrusted members. Do not share dataDir or an instance ID across live installations.
+
+
+## Compatibility retained during production cleanup
+
+A read-only inspection during cleanup found 26 registry rows with `repository_url IS NULL`. Legacy layout hints, local overrides, configured-source discovery, the explicit migration CLI, fixture paths and persisted worktree recovery therefore remain supported. Nothing in cleanup applies repository migrations or rewrites shared identity. See the [cleanup evidence and blockers](../validation/production-cleanup.md).
+
+The exact legacy Bitbucket SSH-to-HTTPS translation now lives in `src/repos/remote.ts` and is reused by Git, origin validation and explicit migration. New registration still requires strict HTTPS validation. Clone/fetch authentication remains centralized in `src/repos/git.ts`; personal/shared credential resolution remains in `src/bitbucket.ts`. A PR operation resolves its principal's credentials once for its HTTP requests; the next operation rereads rotated credentials. No credentials are cached across operations.
+
+Run authorization and the saved repository workspace are resolved in one database lookup. Preparation retains the separate post-provisioning authorization and fencing checks, origin checks, containment checks and repository locks. The repository list does not request detail-only index status; the detail view retains all existing controls and localization.

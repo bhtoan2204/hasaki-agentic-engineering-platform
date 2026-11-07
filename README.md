@@ -66,7 +66,7 @@ accounts per user are not included. Agents share one OS user, so this is applica
 team, not a sandbox: tools are checked against the run owner, but a process on the host can still read the disk.
 
 Development: `npm run dev` (backend with --watch) + `npm run dev:web` (Vite hot reload on http://localhost:5173,
-proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` uses a throwaway `platform_test` database.
+proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` creates a fresh, uniquely named `platform_test_<uuid>` database per test process on local PostgreSQL. It never drops or resets an existing database. Generated test databases are retained for inspection.
 
 The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a free client
 (`database.poolMax` / `database.connectionTimeoutMillis` in config.json, or `DATABASE_POOL_MAX` / `DATABASE_CONNECTION_TIMEOUT_MS`).
@@ -282,7 +282,7 @@ There is no confirmed official OAuth callback integration in this repository; no
 
 Chrome is detected on Linux/macOS/Windows, including Windows Chrome under WSL. Optionally set
 `HASAKI_WORK_CHROME_PATH` to the official Chrome executable; a missing explicit path never falls back.
-`hasakiWork.chromiumPath` is deprecated and not used. Bundled Chromium is never selected.
+Old config files may still contain `hasakiWork.chromiumPath`; it is ignored and has been removed from the configuration type and defaults. Use `HASAKI_WORK_CHROME_PATH` with explicit local mode. Bundled Chromium is never selected.
 On WSL, a Windows PowerShell stdio bridge connects Windows Chrome loopback to a temporary WSL loopback listener.
 Mirrored networking is not required. Chrome opens the login URL immediately. Both endpoints stay on 127.0.0.1;
 no DevTools port is exposed to the LAN. The bridge is closed with its connection session. If company policy blocks debugging or SSO rejects connected Chrome, use personal token paste.
@@ -313,7 +313,7 @@ Set `codeIntelligence.enabled` to `true` in the **local** `PLATFORM_CONFIG` (def
 
 Existing scheduler workers index registered repositories while idle. The repository detail page shows status, commit, counts, progress and sanitized errors; administrators can queue reindexing or cancel it. Discovery and Claude/Cursor/Codex prompts use validated snapshots with metadata/direct-search fallback. The read-only `code_intelligence.search` integration tool exposes symbols, definitions, references, bounded dependencies and exact search within the run's allowed repositories.
 
-See [architecture, extraction coverage and operational limits](docs/architecture/code-intelligence.md) and [measured fixture benchmark](docs/architecture/code-intelligence-benchmark.json). To reproduce on an isolated **local test database**, run `npm run bench:code-intelligence`; it uses the existing test database setup, which recreates `platform_test`. Use `TEST_DATABASE_ADMIN_URL` for a different local test PostgreSQL. The benchmark never accepts a remote database.
+See [architecture, extraction coverage and operational limits](docs/architecture/code-intelligence.md) and [measured fixture benchmark](docs/architecture/code-intelligence-benchmark.json). To reproduce on an isolated **local test database**, run `npm run bench:code-intelligence`; it uses the existing test database setup, which creates a unique `platform_test_<uuid>` database without resetting an existing one. Use `TEST_DATABASE_ADMIN_URL` for a different local test PostgreSQL. The benchmark never accepts a remote database.
 
 Development finalization results, real-repository measurements, startup verification, and remaining limits: [P1 validation report](docs/validation/p1-finalization.md). Re-run the authorized development check with `npm run validate:code-intelligence -- <development-database-name>`; it indexes the three registered OMS checkouts and removes its disposable worktrees.
 
@@ -338,3 +338,6 @@ Administrators add `https://bitbucket.org/<workspace>/<repository>.git` and a de
 Existing paths remain deprecated legacy hints; IDs, knowledge, dependencies and historical runs are preserved by migration 028. Review legacy evidence with `npm run repositories:migrate`; use `-- --apply` only after reviewing the report. Missing or ambiguous remotes remain unresolved rather than being guessed from repository names.
 
 Read the [repository architecture](docs/architecture/repositories.md), [migration guide](docs/architecture/repository-migration.md), [multi-instance development guide](docs/architecture/multi-instance-development.md) and [Bitbucket credential guide](docs/architecture/bitbucket-credentials.md). Separate directories preserve application ownership; workers sharing an OS account do not provide OS security isolation.
+
+
+Cleanup and compatibility decisions, baseline/final validation and query-count evidence are recorded in the [production cleanup report](docs/validation/production-cleanup.md). Typechecking now rejects unused local declarations and parameters in the backend, frontend and tests. All historical SQL migrations and validation reports remain unchanged.

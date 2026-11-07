@@ -269,3 +269,10 @@ Empty by default (no behaviour change, no model ids in code).
 Measured over all recorded attempts: Grep 242 calls / 0.04 s avg / 0.2 min total, Read 186 / 0.02 s / 0.1 min, vs
 Bash (builds/tests) 50.5 min. Retrieval is not a measurable bottleneck, so no symbol index or embeddings were added;
 the existing file-reference handoff between steps stays.
+
+
+## Shared metrics and execution boundaries
+
+`src/agent/metrics.ts` owns the per-attempt metrics shape, initialization and Claude message folding. Both agent orchestration and auxiliary completions import this module, removing the completion-to-orchestrator runtime import cycle. The existing metrics exports from `claude.ts` remain compatible. Provider-specific streams, timeouts, cancellation, approval policies, sandbox settings and credential-environment rules remain in their respective adapters; they are not interchangeable.
+
+Worker assignment and the latest persisted agent session directory are read together before preparing an agent working directory. Existing session directories are retained on their assigned instance. Workflow question answers are updated as one batch per locked run within the existing transaction; step completion/resume, old-attempt checks, audit history and post-commit notifications follow the existing engine flow.

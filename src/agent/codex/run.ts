@@ -9,7 +9,7 @@ import { pool, one } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
-import type { AgentMetrics } from "../claude.ts";
+import type { AgentMetrics } from "../metrics.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "./broker.ts";
 import { classifyCodexError, failureMessage, JsonlStream, type CodexEvent, type CodexFailureKind, type CodexItem } from "./stream.ts";
