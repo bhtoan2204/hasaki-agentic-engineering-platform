@@ -13,12 +13,11 @@ import { codexAgentTurn, codexCapabilities } from "./codex/run.ts";
 import { completeForRun } from "./complete.ts";
 import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
-import { taskDir } from "../git.ts";
 import { workspaceKey, workspacesOf } from "../git/provider.ts";
 import type { ExecutionContext, StepExecutor } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
-import { repositories, type RankedRepository, type RepositoryRow } from "../repos/service.ts";
-import { validateCheckout } from "../repos/paths.ts";
+import { repositoryBaseBranch, workspaceBaseBranch, repositories, type RankedRepository, type RepositoryRow } from "../repos/service.ts";
+import { prepareRepository, checkoutForRun, runWorkingDirectory } from "../repos/workspaces.ts";
 import { downloadAttachments } from "./attachments.ts";
 import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "./stepPrompt.ts";
 import { decide, toolsFor, SUBAGENT_PLATFORM_TOOLS, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
@@ -110,10 +109,11 @@ const execP = promisify(execFile);
 async function worktreeState(workspaces: Array<{ repo: string; path: string }>): Promise<string> {
   const out: string[] = [];
   for (const w of workspaces) {
+    const baseBranch = await repositoryBaseBranch(w.repo);
     if (!existsSync(w.path)) continue;
     const g = (...a: string[]) => execP("git", ["-C", w.path, ...a], { maxBuffer: 4 * 1024 * 1024 }).then((r) => r.stdout.trim()).catch((e) => `(git ${a[0]} failed: ${String(e.message).split("\n")[0]})`);
-    const [status, log, stat] = await Promise.all([g("status", "--porcelain"), g("log", "--oneline", "-n", "15", `origin/${config.baseBranch}..HEAD`), g("diff", "--stat", `origin/${config.baseBranch}...HEAD`)]);
-    out.push(`### ${w.repo} (${w.path})`, `commits ahead of ${config.baseBranch}:\n${log || "(none)"}`, `uncommitted:\n${status || "(clean)"}`, `diff stat vs ${config.baseBranch}:\n${stat.split("\n").slice(-25).join("\n") || "(none)"}`);
+    const [status, log, stat] = await Promise.all([g("status", "--porcelain"), g("log", "--oneline", "-n", "15", `origin/${baseBranch}..HEAD`), g("diff", "--stat", `origin/${baseBranch}...HEAD`)]);
+    out.push(`### ${w.repo} (${w.path})`, `commits ahead of ${baseBranch}:\n${log || "(none)"}`, `uncommitted:\n${status || "(clean)"}`, `diff stat vs ${baseBranch}:\n${stat.split("\n").slice(-25).join("\n") || "(none)"}`);
   }
   return out.join("\n");
 }
@@ -258,12 +258,12 @@ export const claudeExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const provider = agentProvider(ctx.run);
-    if (mode === "coding") {
+    {
       for (const name of ctx.run.selected_repositories) {
         const repo = await repositories.get(name);
         try {
-          if (!repo) throw new Error(`Repository ${name} is not registered`);
-          await validateCheckout(repo);
+          if (!repo?.enabled || !repo.allowed_actions.includes(mode === "coding" ? "write" : "read")) throw new Error(`Repository ${name} is unavailable or unauthorized`);
+          await prepareRepository(repo, false, await checkoutForRun(repo, ctx.run.id));
         } catch (e) {
           const en = outputLocale(ctx.run) === "en";
           return { kind: "waiting_input", questions: [{
@@ -315,7 +315,7 @@ export const claudeExecutor: StepExecutor = {
     }
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
     for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
-    const cwd = taskDir(workspaceKey(ctx.run.branch));
+    const cwd = await runWorkingDirectory(ctx.run.id);
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
@@ -332,13 +332,13 @@ export const claudeExecutor: StepExecutor = {
             ? "Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy."
             : "Strict verification requires real test evidence from an upstream test step, and none ran.",
         }, { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} });
-      evidence = await collectEvidence(ws.map((w) => ({ repo: w.repo, path: w.path })), config.baseBranch);
+      evidence = await collectEvidence(await Promise.all(ws.map(async (w) => ({ repo: w.repo, path: w.path, baseBranch: await repositoryBaseBranch(w.repo) }))), config.baseBranch);
       // A verdict must bind to exact commits: never verify uncommitted or unreadable state (the PR could not match it).
       if (evidence.problems.length)
         return enforceVerdict({ verdict: "BLOCKED", findings: [], summary: "", blocked_reason: `the code under review is not bound to a commit: ${evidence.problems.join("; ")}` }, { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} });
       if (!ws.length) evidence.text = "(no worktree: the coding step changed no code)";
     }
-    const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload) : [];
+    const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload, cwd) : [];
     const reexec = ctx.input.pending?.reexecute || ctx.input.pending?.feedback;
     const extras = mode === "coding" && (reexec || ctx.input.pending?.resume) && ws.length ? [{ title: "Current worktree state (inspect it first; never reset or discard these changes)", body: await worktreeState(ws) }] : [];
     if (codeIntelligenceEnabled() && !independent) {
@@ -366,7 +366,7 @@ export const claudeExecutor: StepExecutor = {
     if (ctx.step.config.open_code_review === true && !ocrTargets.length)
       await ctx.log("system", "OpenCodeReview skipped: no worktree and no branch to review (set the branch when selecting repositories)");
     if (ctx.step.config.open_code_review === true && ocrTargets.length) {
-      const guide = await openCodeReviewGuide(ocrTargets, config.baseBranch);
+      const guide = await openCodeReviewGuide(await Promise.all(ocrTargets.map(async (w) => ({ ...w, baseBranch: await repositoryBaseBranch(w.repo) }))), config.baseBranch);
       if (guide.available && guide.text) {
         extras.push({ title: `OpenCodeReview (alibaba/open-code-review): review scope and rules. ${OCR_REVIEW_INSTRUCTIONS}`, body: guide.text });
         await ctx.log("system", `OpenCodeReview rules loaded: ${guide.repos.map((r) => `${r.repo} ${r.error ? `(failed: ${r.error})` : `${r.files} file(s)`}`).join(", ")}`, { open_code_review: guide.repos });
@@ -560,11 +560,11 @@ export const claudeExecutor: StepExecutor = {
       }
       const env = { BASE_BRANCH: config.baseBranch, RUN_ID: String(ctx.run.id) };
       const deps: VerifyDeps = {
-        run: runCommand,
+        run: async (cmd, cwd, vars, ...args) => runCommand(cmd, cwd, { ...vars, BASE_BRANCH: await workspaceBaseBranch(cwd) }, ...args),
         knownFailures: (p) => knownBaseFailures(p),
         baseline: async (repo, failing) =>
-          (await goBaseline(repo.path, failing, (cmd, dir) => runCommand(cmd, dir, { ...env, REPO: repo.repo }, vcfg.timeoutMs, ctx.signal, (c) => void ctx.log("log", c, { repo: repo.repo, baseline: true })))).report,
-        diffTests: (p) => diffTestsAgainstBase(p, config.baseBranch),
+          (await goBaseline(repo.path, failing, async (cmd, dir) => runCommand(cmd, dir, { ...env, REPO: repo.repo, BASE_BRANCH: await repositoryBaseBranch(repo.repo) }, vcfg.timeoutMs, ctx.signal, (c) => void ctx.log("log", c, { repo: repo.repo, baseline: true })))).report,
+        diffTests: async (p) => diffTestsAgainstBase(p, await workspaceBaseBranch(p)),
         artifact: (name, content, data) => ctx.artifact("log", name, content, { ...data, verification: true }),
         log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
       };

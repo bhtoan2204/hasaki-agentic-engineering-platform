@@ -131,8 +131,8 @@ async function changesOf(runId: number): Promise<RepoChange[]> {
   const out: RepoChange[] = [];
   for (const w of ws) {
     const reg = await repositories.get(w.repo);
-    const dir = [reg ? repoPath(reg) : "", w.path].find((d) => d && existsSync(d));
-    const base = `origin/${config.baseBranch}`;
+    const dir = [w.path, reg ? repoPath(reg) : ""].find((d) => d && existsSync(d));
+    const base = `origin/${reg?.default_branch || config.baseBranch}`;
     const change: RepoChange = { repo: w.repo, branch: w.branch, base, commits: [], files: [], additions: 0, deletions: 0 };
     if (!dir) {
       out.push({ ...change, note: "repository not available on this machine" });

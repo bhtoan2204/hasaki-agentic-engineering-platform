@@ -199,7 +199,7 @@ export function repairTargetFor(graph: { feedback_step?: string; steps: Array<Pi
  * what makes the evidence unbindable to a commit (unreadable HEAD, uncommitted changes): a verdict on it would not
  * describe what the PR publishes, so the executor blocks instead of verifying.
  */
-export async function collectEvidence(workspaces: Array<{ repo: string; path: string }>, baseBranch: string, maxChars = 60_000) {
+export async function collectEvidence(workspaces: Array<{ repo: string; path: string; baseBranch?: string }>, baseBranch: string, maxChars = 60_000) {
   const heads: Record<string, string> = {};
   const problems: string[] = [];
   const parts: string[] = [];
@@ -213,9 +213,9 @@ export async function collectEvidence(workspaces: Array<{ repo: string; path: st
     }
     heads[w.repo] = head;
     if (dirty) problems.push(`${w.repo}: uncommitted changes in ${w.path} — the coding step must commit before verification:\n${dirty.slice(0, 2000)}`);
-    const stat = (await exec("git", ["-C", w.path, "diff", "--stat", `origin/${baseBranch}...HEAD`], { maxBuffer: 8 << 20 }).catch(() => ({ stdout: "(diff unavailable)" }))).stdout.trim();
-    let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", `origin/${baseBranch}...HEAD`], { maxBuffer: 64 << 20 }).catch(() => ({ stdout: "" }))).stdout;
-    if (diff.length > budget) diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff origin/${baseBranch}...HEAD in ${w.path} for the rest`;
+    const stat = (await exec("git", ["-C", w.path, "diff", "--stat", `origin/${w.baseBranch || baseBranch}...HEAD`], { maxBuffer: 8 << 20 }).catch(() => ({ stdout: "(diff unavailable)" }))).stdout.trim();
+    let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", `origin/${w.baseBranch || baseBranch}...HEAD`], { maxBuffer: 64 << 20 }).catch(() => ({ stdout: "" }))).stdout;
+    if (diff.length > budget) diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff origin/${w.baseBranch || baseBranch}...HEAD in ${w.path} for the rest`;
     budget -= diff.length;
     parts.push(`### ${w.repo} @ ${head.slice(0, 12)} (worktree ${w.path})\n${stat}\n\n${diff}`);
   }

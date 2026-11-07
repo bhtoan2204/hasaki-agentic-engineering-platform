@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
+import { repositoryBaseBranch } from "../repos/service.ts";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { prDescription, prFields, testExceptionsOf, verificationNotesOf } from "../workflow/executors/builtin.ts";
@@ -29,11 +30,12 @@ export async function runChanges(runId: number) {
   const steps = await q(pool, "SELECT key, type, status, config, output FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);
   const prStep = steps.find((s) => s.type === "git_pull_request");
   const source = prStep ? (steps.find((s) => s.key === prStep.config?.content_from)?.output ?? steps.find((s) => s.output?.pull_requests)?.output ?? {}) : {};
-  const base = `origin/${config.baseBranch}`;
   const testExceptions = await testExceptionsOf(runId);
   const verificationNotes = await verificationNotesOf(runId);
   const repos = [];
   for (const w of await workspacesOf(runId)) {
+    const destination = await repositoryBaseBranch(w.repo);
+    const base = `origin/${destination}`;
     if (!existsSync(w.path)) {
       repos.push({ ...w, exists: false });
       continue;
@@ -65,7 +67,7 @@ export async function runChanges(runId: number) {
       uncommitted_diff: capped(uncommitted),
       pr_preview: {
         title: f.title,
-        target: config.baseBranch,
+        target: destination,
         description: prDescription({ code: run.work_item_code ?? undefined, runId, summary: f.summary, decisions: f.decisions, commits: commitList.map((c) => `${c.hash} ${c.subject}`).join("\n"), testExceptions, verificationNotes }),
         will_open: run.selected_repositories.includes(w.repo) && commitList.length > 0 && !status.trim(),
       },

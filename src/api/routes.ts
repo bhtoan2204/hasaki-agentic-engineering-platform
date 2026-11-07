@@ -31,6 +31,8 @@ const metricsSwr = new StaleWhileRevalidate<Awaited<ReturnType<typeof metricsSum
 import { summarizeEval } from "../eval/summary.ts";
 import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
+import { repositoryRemote } from "../repos/remote.ts";
+import { prepareRepository, workspaceStatus, testRepositoryConnection } from "../repos/workspaces.ts";
 import { rankRepositories, repositories, isAmbiguous } from "../repos/service.ts";
 import { definitions } from "../workflow/definitions.ts";
 import { validateSpec } from "../workflow/graph.ts";
@@ -417,10 +419,19 @@ export const routes: Route[] = [
   }],
 
   // ------------------------------------------------------------ repositories
+  ["POST", /^\/api\/repositories\/validate-url$/, ({ body }) => repositoryRemote(body.repository_url)],
+  ["GET", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/workspace$/, async ({ p }) => workspaceStatus(must(await repositories.get(p[0]), "Repository"))],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/(test-connection|prepare|refresh)$/, async ({ p }) => {
+    const repo = must(await repositories.get(p[0]), "Repository");
+    if (!repo.enabled || !repo.allowed_actions.includes("read")) throw new HttpError(403, "Repository read permission required");
+    if (p[1] === "test-connection") return testRepositoryConnection(repo);
+    await prepareRepository(repo, p[1] === "refresh");
+    return workspaceStatus(repo);
+  }],
   ["GET", /^\/api\/repositories\/index-status$/, async () => ({ enabled: config.codeIntelligence.enabled, repositories: config.codeIntelligence.enabled ? await codeIndexStatus() : [] })],
   ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/reindex$/, async ({ p, actor }) => { requireAdmin(actor); return { enabled: config.codeIntelligence.enabled, job: await enqueueCodeIndex(p[0]) }; }],
   ["POST", /^\/api\/repositories\/index-runs\/(\d+)\/cancel$/, async ({ p, actor }) => { requireAdmin(actor); await q(pool, "UPDATE code_intelligence.runs SET status='canceled', fencing_token=fencing_token+1,updated_at=now() WHERE id=$1 AND instance_id=$2 AND status IN ('queued','running')", [num(p[0]), config.instanceId]); return { ok: true }; }],
-  ["GET", /^\/api\/repositories$/, () => repositories.list()],
+  ["GET", /^\/api\/repositories$/, async () => (await repositories.list()).map(publicRepository)],
   [
     "POST",
     /^\/api\/repositories\/rank$/,
@@ -430,7 +441,14 @@ export const routes: Route[] = [
       return { ranked, ambiguous: isAmbiguous(ranked) };
     },
   ],
-  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)$/, ({ p, body, actor }) => (requireAdmin(actor), repositories.upsert(p[0], body))],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)$/, async ({ p, body, actor }) => {
+    requireAdmin(actor);
+    if (!(await repositories.get(p[0]))) {
+      if (body.provider && body.provider !== "bitbucket") throw new HttpError(400, "Only Bitbucket HTTPS repositories can be registered");
+      repositoryRemote(body.repository_url);
+    }
+    return publicRepository(must(await repositories.upsert(p[0], body), "Repository"));
+  }],
 
   // ------------------------------------------------------------ Hasaki Work (unchanged endpoints; pick = import only)
   ["GET", /^\/api\/work\/status$/, ({ actor }) => authStatus(actor.id)],
@@ -585,4 +603,15 @@ export function errorStatus(e: unknown) {
   if (code === "23505") return 409; // unique violation
   if (code === "23503" || code === "23514" || code === "22P02") return 400;
   return 400;
+}
+
+/** Legacy rows may contain another developer's absolute layout; never return it to members. */
+function publicRepository(repo: import("../repos/service.ts").RepositoryRow) {
+  const path = /^(?:[\\/]|[A-Za-z]:|~)/.test(repo.path) ? "" : repo.path;
+  let remote_slug = repo.remote_slug;
+  if (!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/.test(remote_slug)) {
+    try { const remote = repositoryRemote(remote_slug); remote_slug = `${remote.workspace}/${remote.slug}`; }
+    catch { remote_slug = ""; }
+  }
+  return { ...repo, path, remote_slug };
 }

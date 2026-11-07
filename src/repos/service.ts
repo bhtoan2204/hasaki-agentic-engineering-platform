@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveRepoPath } from "./paths.ts";
+import { repositoryRemote, repositoryBranch } from "./remote.ts";
 import { config } from "../config.ts";
 import { pool, q, one, inTx, txWrote, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
@@ -12,6 +13,8 @@ export interface RepositoryRow {
   path: string;
   provider: string;
   remote_slug: string;
+  repository_url?: string | null;
+  default_branch?: string;
   description: string;
   projects: string[];
   services: string[];
@@ -30,7 +33,7 @@ function allRepositories(db: Db): Promise<RepositoryRow[]> {
   return inTx(db) && txWrote(db, "repositories") ? load() : repoCache.get("all", load);
 }
 
-const EDITABLE = ["path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
+const EDITABLE = ["repository_url", "default_branch", "path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
 
 export const repositories = {
   list(db: Db = pool) {
@@ -40,10 +43,28 @@ export const repositories = {
     return (await allRepositories(db)).find((r) => r.name === name);
   },
   async upsert(name: string, patch: Partial<RepositoryRow>, db: Db = pool) {
-    if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`invalid repository name "${name}"`);
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || [".", ".."].includes(name)) throw new Error(`invalid repository name "${name}"`);
     if (patch.path && (isAbsolute(patch.path) || patch.path.split(/[\\/]/).includes(".."))) throw new Error("Shared repository path must be a relative layout hint; use local repositories overrides for absolute paths");
-    const cols = EDITABLE.filter((k) => patch[k] !== undefined);
+    patch = { ...patch };
+    if (patch.repository_url != null) {
+      const remote = repositoryRemote(patch.repository_url);
+      patch.repository_url = remote.url;
+      patch.remote_slug = `${remote.workspace}/${remote.slug}`;
+      patch.provider = "bitbucket";
+    }
+    if (patch.default_branch) repositoryBranch(patch.default_branch);
+    let cols = EDITABLE.filter((k) => patch[k] !== undefined);
     const existing = await repositories.get(name, db);
+    if (existing?.repository_url && patch.repository_url !== undefined && patch.repository_url !== existing.repository_url) {
+      const active = await one(db, "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1", [name]);
+      if (active) throw new Error("Repository remote cannot change while runs are active");
+    }
+    if (existing?.repository_url && patch.repository_url === undefined) {
+      const remote = repositoryRemote(existing.repository_url);
+      patch.remote_slug = `${remote.workspace}/${remote.slug}`;
+      patch.provider = "bitbucket";
+      cols = EDITABLE.filter((k) => patch[k] !== undefined);
+    }
     if (!existing) {
       await q(
         db,
@@ -221,4 +242,19 @@ export function rankRepositories(repos: RepositoryRow[], request: { text: string
 export function isAmbiguous(ranked: RankedRepository[]) {
   if (!ranked.length || ranked[0].score === 0) return true;
   return ranked.length > 1 && ranked[1].score >= ranked[0].score * 0.75;
+}
+
+/** Registry branch with the installation default retained for legacy/local fixtures. */
+export async function repositoryBaseBranch(name: string): Promise<string> {
+  return (await repositories.get(name))?.default_branch || config.baseBranch;
+}
+export async function workspaceBaseBranch(path: string): Promise<string> {
+  const row = await one(pool, "SELECT r.default_branch FROM repositories r JOIN execution_workspaces w ON r.name=w.repo WHERE w.path=$1 LIMIT 1", [path]);
+  return row?.default_branch || config.baseBranch;
+}
+
+export function repositoryReference(repo: Pick<RepositoryRow, "repository_url" | "remote_slug" | "name">): string {
+  if (!repo.repository_url) return repo.remote_slug || repo.name;
+  const remote = repositoryRemote(repo.repository_url);
+  return `${remote.workspace}/${remote.slug}`;
 }

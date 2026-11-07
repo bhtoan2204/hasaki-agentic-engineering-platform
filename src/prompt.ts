@@ -37,7 +37,7 @@ export function buildTaskPrompt(d: any, repos: string[], files: string[]) {
         ].join("\n")
       : "",
     "",
-    `## Repos you may change (under ${config.reposRoot})`,
+    `## Repositories you may change (resolve paths through platform tools)`,
     repos.map((r) => `- ${r}`).join("\n"),
   ];
   return lines.filter((l) => l !== "").join("\n");

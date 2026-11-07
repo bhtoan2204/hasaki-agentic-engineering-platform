@@ -11,7 +11,7 @@ import { appPods, argoStatus, listApps, podLogs } from "../integrations/argocd.t
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
 import { vaultConnected, vaultExpired, vaultKeys, vaultList } from "../integrations/vault.ts";
 import { consumerGroupDetail, consumerGroups, kafkaConnected, kafkaExpired, listTopics, readMessages } from "../integrations/kafka.ts";
-import { rankRepositories, repositories, tokens } from "../repos/service.ts";
+import { repositoryReference, repositories, tokens } from "../repos/service.ts";
 import { runChanges } from "../git/changes.ts";
 
 /**
@@ -308,10 +308,11 @@ export function registerBuiltinTools() {
     description: "Read-only. Bitbucket Cloud pull requests of `repo` (repository registry name; must be in the run's allowed set). state: OPEN | MERGED | DECLINED | SUPERSEDED (default OPEN).",
     input: z.object({ repo: z.string(), branch: z.string().optional(), state: z.enum(["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]).optional() }),
     readOnly: true,
-    available: () => (config.bitbucket.user && config.bitbucket.token ? true : "Bitbucket credentials not configured"),
+    available: () => true,
     handler: async ({ repo, branch, state }, ctx) => {
       allowedRepo(repo, ctx);
-      const slug = (await repositories.get(repo))?.remote_slug || repo;
+      const registry = await repositories.get(repo);
+      const slug = registry ? repositoryReference(registry) : repo;
       return listPullRequests(slug, { branch, state });
     },
   });

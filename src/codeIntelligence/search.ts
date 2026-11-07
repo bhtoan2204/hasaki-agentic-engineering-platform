@@ -25,6 +25,8 @@ export interface SearchScope {
   repositories: string[];
   allowed: string[];
   runId?: number;
+  /** Metadata ranking may inspect existing sources but must never provision or schedule clones. */
+  provision?: boolean;
 }
 export interface Hit {
   repository: string;
@@ -58,7 +60,7 @@ export const queryTerms = (text: string) =>
   );
 export async function fresh(repoName: string, runId?: number) {
   const local = await localScope(repoName, runId);
-  const base = await baseCommit(local.primary);
+  const base = await baseCommit(local.primary, local.repo.default_branch || config.baseBranch);
   const baseline = await snapshot(local.repo.id, `base:${base}`);
   if (!baseline) return { ...local, index: null, base };
   if (!runId) return { ...local, index: baseline, base };
@@ -101,7 +103,7 @@ export async function searchSymbols(
       const f = await fresh(repo, run);
       if (!f.index) {
         fallback_count++;
-        await enqueue(repo, run).catch(() => {});
+        if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
         hits.push(
           ...(await searchCodeExact(
             terms[0],
@@ -131,7 +133,7 @@ export async function searchSymbols(
       const recheck = await fresh(repo, run);
       if (recheck.index?.id !== f.index.id) {
         fallback_count++;
-        await enqueue(repo, run).catch(() => {});
+        if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
         continue;
       }
       if (!rows.length && !edges.length) {
@@ -311,7 +313,7 @@ export async function searchCodeExact(
   const hits: Hit[] = [];
   for (const name of scope.repositories) {
     const run = await scopeRun(name, scope);
-    const { root } = await localScope(name, run);
+    const { root } = await localScope(name, run, scope.provision !== false);
     const before = await changes(
       root,
       (await git(root, ["rev-parse", "HEAD"])).trim(),
@@ -431,6 +433,7 @@ export async function hybridRank(
     const scope = {
       repositories: repos.map((r) => r.name).slice(0, 30),
       allowed: repos.map((r) => r.name),
+      provision: false,
     };
     const found = await searchSymbols(
       [request.text, ...(request.keywords ?? [])].join(" "),

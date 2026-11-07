@@ -1,14 +1,24 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
-import { resolveRepoPath } from "./repos/paths.ts";
+import { remoteGit } from "./repos/git.ts";
+import { repositoryBranch } from "./repos/remote.ts";
+import { resolveRepoPath, unsafeRelativePath } from "./repos/paths.ts";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
 
 const exec = promisify(execFile);
 
 async function git(cwd: string, ...args: string[]) {
-  const { stdout } = await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 });
+  if (["fetch", "push"].includes(args[0])) {
+    const remote = (await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])).stdout.trim().replace(/^git@bitbucket\.org:([^/]+)\/([^/]+)$/, "https://bitbucket.org/$1/$2");
+    if (remote.startsWith("https://bitbucket.org/")) {
+      // Use the validated explicit URL, not mutable pushurl or URL rewrite configuration.
+      const safe = args.map((a) => a === "origin" ? remote : a);
+      return remoteGit(remote, safe, cwd);
+    }
+  }
+  const { stdout } = await exec("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 });
   return stdout.trim();
 }
 
@@ -26,7 +36,7 @@ export function taskDir(code: string) {
   const dir = join(config.dataDir, "worktrees", code);
   mkdirSync(dir, { recursive: true });
   const rel = relative(realpathSync(config.dataDir), realpathSync(dir));
-  if (rel === ".." || rel.startsWith("../")) throw new Error("Worktree root escapes local dataDir; fix symlinks manually");
+  if (unsafeRelativePath(rel)) throw new Error("Worktree root escapes local dataDir; fix symlinks manually");
   return dir;
 }
 
@@ -47,22 +57,27 @@ export interface PreparedBranch {
  *
  * `relPath`: repo location relative to reposRoot when it differs from its name (e.g. "oms-src/oms-api").
  */
-export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo, opts: { mustExist?: boolean } = {}): Promise<PreparedBranch> {
-  const repoPath = resolveRepoPath({ name: repo, path: relPath });
+export async function prepareBranch(code: string, repo: string, branch = code, relPath = repo, opts: { mustExist?: boolean; checkoutPath?: string; workspacePath?: string; defaultBranch?: string; skipFetch?: boolean } = {}): Promise<PreparedBranch> {
+  repositoryBranch(branch);
+  const baseBranch = repositoryBranch(opts.defaultBranch || config.baseBranch);
+  const repoPath = opts.checkoutPath ?? resolveRepoPath({ name: repo, path: relPath });
   if (!existsSync(join(repoPath, ".git"))) throw new Error(`repo not found: ${repoPath}`);
-  const wt = join(taskDir(code), repo);
+  const wt = opts.workspacePath ?? join(taskDir(code), repo);
+  mkdirSync(join(wt, ".."), { recursive: true });
+  const parent = relative(realpathSync(config.dataDir), realpathSync(join(wt, "..")));
+  if (unsafeRelativePath(parent)) throw new Error("Worktree parent escapes local dataDir");
 
   if (existsSync(wt)) {
     const current = await git(wt, "branch", "--show-current");
     const inside = relative(realpathSync(config.dataDir), realpathSync(wt));
-    if (inside === ".." || inside.startsWith("../")) throw new Error("Worktree escapes local dataDir");
+    if (unsafeRelativePath(inside)) throw new Error("Worktree escapes local dataDir");
     const primaryGit = await git(repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir");
     const worktreeGit = await git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir");
     if (primaryGit !== worktreeGit || current !== branch) throw new Error(`Existing worktree conflicts with ${repo}/${branch}; inspect it manually. No changes were made.`);
     return { repo, branch, path: wt, createdFrom: "existing worktree" };
   }
 
-  await git(repoPath, "fetch", "origin", "--prune");
+  if (!opts.skipFetch) await git(repoPath, "fetch", "origin", "--prune");
   // Keep stale worktree registrations for explicit reconciliation; never prune during recovery.
 
   if (await refExists(repoPath, `refs/heads/${branch}`)) {
@@ -80,17 +95,19 @@ export async function prepareBranch(code: string, repo: string, branch = code, r
   }
   // An explicitly requested existing branch is never invented from the base.
   if (opts.mustExist) throw new Error(`${repo}: branch ${branch} does not exist locally or on origin — check the name (it is never created from ${config.baseBranch})`);
-  const base = `origin/${config.baseBranch}`;
+  const base = `origin/${baseBranch}`;
   if (!(await refExists(repoPath, base))) throw new Error(`${repo}: base branch ${base} not found`);
   await git(repoPath, "worktree", "add", "--no-track", "-b", branch, wt, base);
   return { repo, branch, path: wt, createdFrom: base };
 }
 
-export async function pushBranch(path: string, branch: string) {
+export async function pushBranch(path: string, branch: string, baseBranch = config.baseBranch) {
+  repositoryBranch(branch);
+  repositoryBranch(baseBranch);
   const dirty = await git(path, "status", "--porcelain");
   if (dirty) throw new Error(`uncommitted changes in ${path}, commit them first:\n${dirty}`);
-  const ahead = await git(path, "rev-list", "--count", `origin/${config.baseBranch}..${branch}`);
-  if (ahead === "0") throw new Error(`${branch} has no commits ahead of ${config.baseBranch}`);
+  const ahead = await git(path, "rev-list", "--count", `origin/${baseBranch}..${branch}`);
+  if (ahead === "0") throw new Error(`${branch} has no commits ahead of ${baseBranch}`);
   let note: string | undefined;
   try {
     await git(path, "push", "-u", "origin", branch);
@@ -98,7 +115,7 @@ export async function pushBranch(path: string, branch: string) {
     if (!/non-fast-forward|fetch first|\[rejected\]/.test((e as Error).message)) throw e;
     note = await rewriteOwnBranch(path, branch, e as Error);
   }
-  return { commits: await git(path, "log", "--format=%h %s", `origin/${config.baseBranch}..${branch}`), note };
+  return { commits: await git(path, "log", "--format=%h %s", `origin/${baseBranch}..${branch}`), note };
 }
 
 /**

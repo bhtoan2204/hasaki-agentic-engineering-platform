@@ -4,10 +4,10 @@ import { config } from "../config.ts";
 import { taskDir } from "../git.ts";
 
 /** Download Hasaki task attachments (note_files) next to the worktrees. Moved unchanged from the old agent.ts. */
-export async function downloadAttachments(dirKey: string, d: any): Promise<string[]> {
+export async function downloadAttachments(dirKey: string, d: any, workspace?: string): Promise<string[]> {
   const files: string[] = d?.note_files ?? [];
   if (!files.length || !config.fileBaseUrl) return files.map((f) => `${f} (not downloaded: fileBaseUrl not configured)`);
-  const dir = join(taskDir(dirKey), "_attachments");
+  const dir = join(workspace ?? taskDir(dirKey), "_attachments");
   mkdirSync(dir, { recursive: true });
   const out: string[] = [];
   for (const f of files) {

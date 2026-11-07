@@ -53,6 +53,8 @@ export interface Config {
   /** Prefix to turn task note_files ("task/26/10/30/...png") into a downloadable URL. Empty = don't download. */
   fileBaseUrl: string;
   bitbucket: {
+    /** Explicit process service account may be used when no personal credential exists. */
+    allowSharedCredentials?: boolean;
     workspace: string;
     /** Atlassian account email (API token) or Bitbucket username (app password). Empty = no API, return a "create PR" link instead. */
     user: string;

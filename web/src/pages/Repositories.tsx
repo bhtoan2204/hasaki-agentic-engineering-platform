@@ -26,12 +26,14 @@ function Actions({ items }: { items?: string[] }) {
     </span>
   );
 }
-const repoDir = (r: any) => r.path || r.name;
+const repoDir = (r: any) => r.repository_url || tLegacy(r);
+const tLegacy = (r: any) => r.path || r.name;
 
 export function RepositoriesPage({ name }: { name?: string }) {
   const { t } = useI18n();
   const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
   const index = useApi<{ enabled: boolean; repositories: any[] }>("/api/repositories/index-status");
+  const workspace = useApi<any>(name ? `/api/repositories/${encodeURIComponent(name)}/workspace` : "");
   const [form, setForm] = useState<any>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
   const [ranked, setRanked] = useState<any>(null);
@@ -44,7 +46,7 @@ export function RepositoriesPage({ name }: { name?: string }) {
     setForm(
       r
         ? { ...r, ...Object.fromEntries(LISTS.map((k) => [k, r[k].join(", ")])) }
-        : { name: "", description: "", architecture: "", enabled: true, ...Object.fromEntries(LISTS.map((k) => [k, k === "allowed_actions" ? "read, write, pull_request" : ""])) },
+        : { name: "", provider: "bitbucket", repository_url: "", default_branch: "", description: "", architecture: "", enabled: true, ...Object.fromEntries(LISTS.map((k) => [k, k === "allowed_actions" ? "read, write, pull_request" : ""])) },
     );
   }, [data, name]);
   const shown = useMemo(() => {
@@ -52,13 +54,14 @@ export function RepositoriesPage({ name }: { name?: string }) {
     return (data ?? []).filter(
       (r) =>
         (filter === "all" || (filter === "on" ? r.enabled : !r.enabled)) &&
-        (!n || [r.name, r.description, r.path, r.remote_slug, ...r.projects, ...r.services, ...r.tags].some((x) => String(x ?? "").toLowerCase().includes(n))),
+        (!n || [r.name, r.description, r.repository_url, r.path, r.remote_slug, ...r.projects, ...r.services, ...r.tags].some((x) => String(x ?? "").toLowerCase().includes(n))),
     );
   }, [data, q, filter]);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const save = async () => {
-    const body = { ...form, ...Object.fromEntries(LISTS.map((k) => [k, String(form[k]).split(",").map((x: string) => x.trim()).filter(Boolean)])) };
+    const { path: _legacyPath, remote_slug: _legacySlug, ...metadata } = form;
+    const body = { ...metadata, ...Object.fromEntries(LISTS.map((k) => [k, String(form[k]).split(",").map((x: string) => x.trim()).filter(Boolean)])) };
     if (await act(() => api(`/api/repositories/${encodeURIComponent(form.name)}`, body), t("repo.saved"))) (reload(), setCreating(false), navigate(`/repositories/${form.name}`));
   };
   const startNew = () => {
@@ -105,12 +108,21 @@ export function RepositoriesPage({ name }: { name?: string }) {
                   {r.enabled ? <Badge s="COMPLETED">{t("kn.enabled")}</Badge> : <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                 </div>
                 <dl className="repo-kv">
-                  <div><dt>{t("repo.dir")}</dt><dd className="mono">{repoDir(r)}{!r.path && <span className="muted small"> {t("repo.equalsName")}</span>}</dd></div>
+                  <div><dt>{t(r.repository_url ? "repo.url" : "repo.legacyLayout")}</dt><dd className="mono">{repoDir(r)}{!r.repository_url && !r.path && <span className="muted small"> {t("repo.equalsName")}</span>}</dd></div>
                   <div><dt>{t("repo.provider")}</dt><dd>{r.provider || <span className="muted">—</span>}</dd></div>
-                  <div><dt>{t("repo.remote")}</dt><dd className="mono">{r.remote_slug || <span className="muted">—</span>}</dd></div>
+                  <div><dt>{t("repo.defaultBranch")}</dt><dd className="mono">{r.default_branch || <span className="muted">{t("repo.instanceDefault")}</span>}</dd></div>
                 </dl>
               </div>
 
+              <section className="card">
+                <div className="card-head"><FolderGit2 size={16} /><h4>{t("repo.workspace")}</h4></div>
+                <p>{t(`repo.workspace.${workspace.data?.status ?? "remote_configured"}`)}</p>
+                <p className="muted small">{workspace.data?.instance_id}</p>
+                <div className="row" style={{ flexWrap: "wrap" }}>
+                {(["test-connection", "prepare", "refresh"] as const).map((action) => <button key={action} className="ghost sm" onClick={async () => { if (await act(() => api(`/api/repositories/${encodeURIComponent(r.name)}/${action}`, {}), t("repo.saved"))) workspace.reload(); }}>{t(`repo.${action}`)}</button>)}
+                <button className="ghost sm" onClick={workspace.reload}>{t("repo.workspaceStatus")}</button>
+                </div>
+              </section>
               <section className="card">
                 <div className="card-head"><Network size={16} color="var(--brand)" /><h4>Code intelligence</h4></div>
                 {index.error ? <ErrorBox error={index.error} onRetry={index.reload} /> : !index.data?.enabled ? <span className="muted small">Disabled on this instance</span> : (() => {
@@ -221,7 +233,7 @@ export function RepositoriesPage({ name }: { name?: string }) {
                     <span className="repo-card-icon"><FolderGit2 size={17} /></span>
                     <div className="repo-card-title">
                       <b className="mono">{r.name}</b>
-                      <span className="repo-card-path mono">{r.remote_slug || repoDir(r)}</span>
+                      <span className="repo-card-path mono">{r.repository_url || r.remote_slug || repoDir(r)}</span>
                     </div>
                     {!r.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                   </div>
@@ -289,6 +301,10 @@ function RepoForm({ form, setForm, isNew, onSave, bare }: { form: any; setForm: 
   const body = (
     <>
       <Field label={t("repo.name")}><input value={form.name} disabled={!isNew} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+      <Field label={t("repo.provider")}><select value={form.provider || "bitbucket"} onChange={(e) => setForm({ ...form, provider: e.target.value })}><option value="bitbucket">Bitbucket</option></select></Field>
+      <Field label={t("repo.url")}><input value={form.repository_url ?? ""} placeholder="https://bitbucket.org/workspace/repository.git" onChange={(e) => setForm({ ...form, repository_url: e.target.value })} /></Field>
+      <button className="ghost sm" onClick={async () => { const result = await act(() => api<any>("/api/repositories/validate-url", { repository_url: form.repository_url }), t("repo.urlValid")); if (result) setForm({ ...form, repository_url: result.url }); }}>{t("repo.validateUrl")}</button>
+      <Field label={t("repo.defaultBranch")}><input value={form.default_branch ?? ""} onChange={(e) => setForm({ ...form, default_branch: e.target.value })} /></Field>
       <Field label={t("repo.desc")}><textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
       <div className="repo-form-grid">
         {LISTS.map((k) => (

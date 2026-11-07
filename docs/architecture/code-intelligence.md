@@ -1,5 +1,7 @@
 # P1 architecture audit (main, Phase 1)
 
+URL registry update (migration 028): see [repository architecture](repositories.md). Metadata ranking never provisions or schedules clones. Explicit exact-source search and scheduled indexing can prepare a worker-local source, with index jobs retaining their requesting principal.
+
 The registry and explainable metadata ranking are in `src/repos/service.ts`. Local checkout overrides and origin validation live in `src/repos/paths.ts`; shared registry paths are layout hints, never machine authority. `src/git.ts` and `src/git/provider.ts` create isolated, instance-owned execution workspaces. Phase 1 adds instance fencing, owner-scoped execution, durable job leases, progressive knowledge/upstream context budgeting, provider-neutral prompts and verification. These boundaries must remain intact.
 
 The DAG already has task analysis, `integration/repository_discovery`, repository approval, coding, command verification and resume. `src/workflow/scheduler.ts` claims PostgreSQL jobs with SKIP LOCKED and fences workflow attempts. Its worker loop can also service optional indexing work; a separate daemon or DAG engine is unnecessary. `src/workflow/background.ts` is only an in-process post-commit helper and is not restart-safe enough to own indexing jobs.

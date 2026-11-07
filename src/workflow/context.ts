@@ -193,7 +193,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   const memoryStates: Array<{ key: string; trust: string | null; state: string; reason: string }> = [];
   const memoryItems = res.applied.filter((k) => k.category === "task_memory");
   if (memoryItems.length) {
-    const repoRows = await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
+    const repoRows = await q<import("../repos/service.ts").RepositoryRow>(c, "SELECT * FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
     for (const k of memoryItems) {
       const m = (k.metadata as any)?.memory;
       const trusted = m && (m.trust === "verified" || m.trust === "approved");
@@ -263,7 +263,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   ]);
   const names = repositories.length ? repositories : run.allowed_repositories;
   const repoPaths = names.length
-    ? (await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
+    ? (await q<import("../repos/service.ts").RepositoryRow>(c, "SELECT * FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
     : [];
   return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs, repoPaths };
 }

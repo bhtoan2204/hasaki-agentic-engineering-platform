@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import { gitProvider, workspacesOf } from "../../git/provider.ts";
-import { isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
+import { repositoryReference, repositoryBaseBranch, isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
@@ -161,16 +161,17 @@ export const commandExecutor: StepExecutor = {
     const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number; baseline?: any; passed?: boolean }> = [];
     const outputs: Record<string, string> = {};
     for (const t of targets) {
+      const baseBranch = await repositoryBaseBranch(t.repo);
       await ctx.log("system", `▶ ${t.repo}: running command in ${t.path}`);
       const started = Date.now();
       // Skipping known base failures continues past them without confirmation: opt-in in interactive mode.
       const skipKnown = cfg.skip_known_base_failures ?? !interactive;
       const known = cfg.baseline_compare === "go" && skipKnown ? await knownBaseFailures(t.path) : null;
-      if (known?.skipRegex) await ctx.log("system", `skipping ${known.tests.length} test(s) known to fail on ${config.baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`, { skipped_known_failures: known.tests });
+      if (known?.skipRegex) await ctx.log("system", `skipping ${known.tests.length} test(s) known to fail on ${baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`, { skipped_known_failures: known.tests });
       const r = await runCommand(
         String(cfg.command),
         t.path,
-        { BASE_BRANCH: config.baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}), ...((cfg.env as Record<string, string>) ?? {}) },
+        { BASE_BRANCH: baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}), ...((cfg.env as Record<string, string>) ?? {}) },
         timeoutMs,
         ctx.signal,
         (chunk) => void ctx.log("log", chunk, { repo: t.repo }),
@@ -205,15 +206,16 @@ export const commandExecutor: StepExecutor = {
 
 /** Re-run the failing Go packages on origin/<base>; failures present there too are pre-existing, not regressions. */
 async function compareWithBaseline(ctx: ExecutionContext, t: { repo: string; path: string }, output: string, timeoutMs: number) {
+  const baseBranch = await repositoryBaseBranch(t.repo);
   const branch = parseGoTest(output);
   const failing = Object.entries(branch).filter(([, p]) => p.status === "fail").map(([k]) => k);
   if (!failing.length) {
     await ctx.log("system", `baseline: no parseable go test failure in ${t.repo} (e.g. go build failed); not comparing`);
     return { note: "no go test failure to compare (build or script error)" };
   }
-  await ctx.log("system", `◆ ${t.repo}: comparing ${failing.length} failing package(s) with origin/${config.baseBranch}…`);
+  await ctx.log("system", `◆ ${t.repo}: comparing ${failing.length} failing package(s) with origin/${baseBranch}…`);
   try {
-    const base = await goBaseline(t.path, failing, (command, cwd) => runCommand(command, cwd, { BASE_BRANCH: config.baseBranch, REPO: t.repo }, timeoutMs, ctx.signal, (chunk) => void ctx.log("log", chunk, { repo: t.repo, baseline: true })));
+    const base = await goBaseline(t.path, failing, (command, cwd) => runCommand(command, cwd, { BASE_BRANCH: baseBranch, REPO: t.repo }, timeoutMs, ctx.signal, (chunk) => void ctx.log("log", chunk, { repo: t.repo, baseline: true })));
     const c = classify(branch, base.report);
     await ctx.log(
       "system",
@@ -450,8 +452,10 @@ export const pullRequestExecutor: StepExecutor = {
         return { kind: "failed", error: `${w.repo}: push failed: ${msg}`, retryable: true };
       }
       const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits, testExceptions: await testExceptionsOf(ctx.run.id), verificationNotes: await verificationNotesOf(ctx.run.id) });
-      const slug = (await repositories.get(w.repo))?.remote_slug || w.repo;
-      const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
+      const registry = await repositories.get(w.repo);
+      const slug = registry ? repositoryReference(registry) : w.repo;
+      const destination = registry?.default_branch || config.baseBranch;
+      const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: destination, title, description, draft: mode === "draft" });
       await q(
         pool,
         `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id)
@@ -459,7 +463,7 @@ export const pullRequestExecutor: StepExecutor = {
          ON CONFLICT (provider, repo, source_branch, target_branch) DO UPDATE SET url = excluded.url, title = excluded.title, summary = excluded.summary,
            decisions = excluded.decisions, draft = excluded.draft, created = pull_requests.created OR excluded.created,
            run_id = excluded.run_id, step_id = excluded.step_id, work_item_id = COALESCE(excluded.work_item_id, pull_requests.work_item_id), updated_at = now()`,
-        [provider.name, w.repo, w.branch, config.baseBranch, pr.url, title, summary, JSON.stringify(decisions), mode === "draft", pr.created, ctx.run.work_item_id, ctx.run.id, ctx.step.id],
+        [provider.name, w.repo, w.branch, destination, pr.url, title, summary, JSON.stringify(decisions), mode === "draft", pr.created, ctx.run.work_item_id, ctx.run.id, ctx.step.id],
       );
       await ctx.log("system", `PR ${w.repo}: ${pr.url} (${pr.note})`);
       out.push({ repo: w.repo, url: pr.url, created: pr.created, note: pr.note, draft: mode === "draft" });

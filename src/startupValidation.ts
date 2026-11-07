@@ -12,7 +12,7 @@ export async function validateLocalConfiguration(probe = (bin: string) => !spawn
   const legacy = await q(pool, "SELECT key FROM settings WHERE key = ANY($1) AND value <> ''", [["argocd_token", "splunk_cookie", "kafka_ui_cookie", "vault_token"]]);
   if (legacy.length) warnings.push("Legacy global browser credentials have no verified owner and are no longer loaded. Each user must reconnect Argo/Splunk/Kafka/Vault in Integrations; old rows are preserved for administrator review.");
   for (const repo of await repositories.list()) {
-    if (!repo.enabled) continue;
+    if (!repo.enabled || repo.repository_url) continue;
     try { await validateCheckout(repo); } catch (e) { warnings.push((e as Error).message); }
   }
   for (const [provider, bin] of [["Claude", process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin || "claude"], ["Codex", codexConfig().bin], ["Cursor", process.env.CURSOR_AGENT_BIN || config.agent.cursorBin || "agent"]]) {

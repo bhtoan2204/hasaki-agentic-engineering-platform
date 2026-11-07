@@ -131,11 +131,13 @@ export async function bitbucketStatus(userId?: number) {
   const personalUser = userId ? await getUserSecret(userId, "bitbucket_user") : null;
   const personalToken = userId ? await getUserSecret(userId, "bitbucket_token") : null;
   const personal = !!(personalUser && personalToken);
-  const user = personal ? personalUser : config.bitbucket.user;
-  const token = personal ? personalToken! : config.bitbucket.token;
+  const personalAttempt = !!(personalUser || personalToken);
+  const sharedAllowed = config.bitbucket.allowSharedCredentials !== false;
+  const user = personalAttempt ? personalUser ?? "" : sharedAllowed ? config.bitbucket.user : "";
+  const token = personalAttempt ? personalToken ?? "" : sharedAllowed ? config.bitbucket.token : "";
   return {
     configured: !!(user && token),
-    source: personal ? "user" : user || token ? "shared" : "none",
+    source: personalAttempt ? "user" : user || token ? "shared" : "none",
     personal,
     envAvailable: !!(fromEnv.bitbucket.user && fromEnv.bitbucket.token),
     user: user || null,

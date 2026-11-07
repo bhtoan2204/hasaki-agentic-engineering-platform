@@ -171,7 +171,10 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   const editable = env.selected.length ? env.selected : env.allowed;
   if (!editable.includes(repo)) return `Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`;
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [env.runId]);
-  const w = await prepareWorkspace(run, repo);
+  const w = await prepareWorkspace(run, repo, async () => {
+    const live = await attemptIsLive(env.attemptId, env.fencingToken);
+    if (!live.ok) throw new Error(live.reason);
+  });
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;
@@ -190,7 +193,10 @@ async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
   if (!message) return "ERROR: commit_changes needs a commit message";
   const w = (await workspacesOf(env.runId)).find((x) => x.repo === repo);
   if (!w) return `ERROR: no worktree for "${repo}" in this run. Call prepare_branch first.`;
-  if (isInside(w.path, [config.reposRoot])) return "ERROR: refusing to commit in a primary checkout";
+  const registered = await repositories.get(repo);
+  if (registered && (!registered.enabled || !registered.allowed_actions.includes("write"))) return "ERROR: repository write permission required";
+  const primaryRoots = [config.reposRoot, ...(registered ? [repoPath(registered)] : [])];
+  if (isInside(w.path, primaryRoots)) return "ERROR: refusing to commit in a primary checkout";
   const paths = Array.isArray(args?.paths) ? args.paths.map(String).filter(Boolean) : [];
   for (const p of paths) {
     const abs = isAbsolute(p) ? resolve(p) : resolve(w.path, p);

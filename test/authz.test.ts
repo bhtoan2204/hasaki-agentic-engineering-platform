@@ -266,3 +266,24 @@ test("P2 suites and evaluation results require authentication and preserve evalu
   assert.equal((await a.call(`/api/evaluation-runs/${evaluation.body.id}/cancel`,{})).status,200);
  }finally{config.evaluation.enabled=previous;}
 });
+
+test("repository URL administration is admin-only, members share identity and local status never exposes paths", async () => {
+  const admin = client(), member = client();
+  await admin.login("admin", "admin-password"); await member.login("membera", "member-a-password");
+  const definition = { repository_url: "https://bitbucket.org/portable-team/shared", default_branch: "main", projects: ["Portable"], provider: "bitbucket" };
+  assert.equal((await member.call("/api/repositories/url-registry", definition)).status, 403);
+  const created = await admin.call("/api/repositories/url-registry", definition);
+  assert.equal(created.status, 200); assert.equal(created.body.repository_url, definition.repository_url + ".git");
+  assert.equal((await admin.call("/api/repositories/url-registry-duplicate", definition)).status, 409);
+  assert.equal((await admin.call("/api/repositories/no-url", { description: "old registration" })).status, 400);
+  const rows = await member.call("/api/repositories");
+  assert.equal(rows.status, 200); assert.equal(rows.body.find((r:any)=>r.name==='url-registry').id,created.body.id);
+  const status = await member.call("/api/repositories/url-registry/workspace");
+  assert.equal(status.status,200); assert.equal(status.body.status,"not_cloned"); assert.ok(!status.text.includes(config.dataDir));
+  const connection = await member.call("/api/repositories/url-registry/test-connection", {});
+  assert.equal(connection.status,400); assert.match(connection.body.error,/authentication required/);
+  await repositories.upsert("url-registry",{enabled:false});
+  assert.equal((await member.call("/api/repositories/url-registry/prepare", {})).status,403);
+  const invalid = await member.call("/api/repositories/validate-url", {repository_url:"https://person:private-token@bitbucket.org/team/repo"});
+  assert.equal(invalid.status,400); assert.ok(!invalid.text.includes("private-token"));
+});

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { workspaceBaseBranch } from "../../repos/service.ts";
 import { config } from "../../config.ts";
 import { pool, q, json } from "../../db/pool.ts";
 
@@ -120,7 +121,7 @@ export async function goBaseline(
   packages: string[],
   run: (command: string, cwd: string) => Promise<{ code: number | null; output: string; timedOut: boolean }>,
 ): Promise<{ sha: string; report: GoTestReport; cached: string[] }> {
-  const sha = await git(workspace, "rev-parse", `origin/${config.baseBranch}`);
+  const sha = await git(workspace, "rev-parse", `origin/${await workspaceBaseBranch(workspace)}`);
   const repoKey = await git(workspace, "rev-parse", "--git-common-dir");
   const report: GoTestReport = {};
   const cached: string[] = [];
@@ -168,7 +169,7 @@ export async function goBaseline(
  */
 export async function knownBaseFailures(workspace: string): Promise<{ sha: string; tests: string[]; skipRegex: string | null }> {
   try {
-    const sha = await git(workspace, "rev-parse", `origin/${config.baseBranch}`);
+    const sha = await git(workspace, "rev-parse", `origin/${await workspaceBaseBranch(workspace)}`);
     const repoKey = await git(workspace, "rev-parse", "--git-common-dir");
     const rows = await q<{ report: GoPackageResult }>(pool, "SELECT report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2", [repoKey, sha]);
     const tests = [...new Set(rows.flatMap((r) => (r.report.status === "fail" && !r.report.buildErrors.length ? r.report.tests : [])).map((t) => t.split("/")[0]))].sort();

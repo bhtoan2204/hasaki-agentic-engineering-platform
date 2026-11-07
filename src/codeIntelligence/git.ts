@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { lstat, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
+import { unsafeRelativePath } from "../repos/paths.ts";
 import { config } from "../config.ts";
 
 const exec = promisify(execFile);
@@ -44,8 +45,7 @@ export function safePath(root: string, p: string) {
   if (
     !p ||
     isAbsolute(p) ||
-    rel === ".." ||
-    rel.startsWith("../") ||
+    unsafeRelativePath(rel) ||
     p.includes("\0")
   )
     throw new Error("Unsafe source path");
@@ -80,11 +80,11 @@ export async function readSource(root: string, p: string) {
     await fd.close();
   }
 }
-export async function baseCommit(root: string) {
+export async function baseCommit(root: string, defaultBranch = config.baseBranch) {
   for (const ref of [
+    `refs/remotes/origin/${defaultBranch}`,
+    `refs/heads/${defaultBranch}`,
     "refs/remotes/origin/HEAD",
-    `refs/remotes/origin/${config.baseBranch}`,
-    `refs/heads/${config.baseBranch}`,
   ]) {
     try {
       return (

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
+import { repositoryBaseBranch } from "../repos/service.ts";
 import { knowledge } from "./service.ts";
 
 /**
@@ -49,6 +50,7 @@ export function buildMemoryItems(x: {
   workItem: string | null;
   repo: string;
   sha: string;
+  baseBranch?: string;
   files: string[];
   verification?: any;
   independentVerdict?: string | null;
@@ -56,7 +58,7 @@ export function buildMemoryItems(x: {
   conclusions: Array<{ step: string; text: string }>;
 }) {
   const now = new Date().toISOString();
-  const base = { run_id: x.runId, work_item: x.workItem, repo: x.repo, commit_sha: x.sha, base_branch: config.baseBranch, files: x.files.slice(0, 50), extracted_at: now };
+  const base = { run_id: x.runId, work_item: x.workItem, repo: x.repo, commit_sha: x.sha, base_branch: x.baseBranch || config.baseBranch, files: x.files.slice(0, 50), extracted_at: now };
   const keyBase = `memory.run-${x.runId}.${slug(x.repo)}`;
   const facts = [
     `Task ${x.workItem ?? `run #${x.runId}`}: ${x.title}`,
@@ -109,9 +111,10 @@ export async function extractRunMemory(runId: number) {
     if (!existsSync(w.path)) continue;
     const sha = await git(w.path, "rev-parse", "HEAD").catch(() => "");
     if (!sha) continue;
-    const files = (await git(w.path, "diff", "--name-only", `origin/${config.baseBranch}...HEAD`).catch(() => "")).split("\n").filter(Boolean);
+    const baseBranch = await repositoryBaseBranch(w.repo);
+    const files = (await git(w.path, "diff", "--name-only", `origin/${baseBranch}...HEAD`).catch(() => "")).split("\n").filter(Boolean);
     const items = buildMemoryItems({
-      runId, title: run.title, workItem: run.wi_code, repo: w.repo, sha, files,
+      runId, title: run.title, workItem: run.wi_code, repo: w.repo, sha, files, baseBranch,
       verification: coding[0]?.output?.verification, independentVerdict: verdict, testsPassed, conclusions,
     });
     for (const it of items) {

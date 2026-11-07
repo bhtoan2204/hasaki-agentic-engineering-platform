@@ -8,7 +8,7 @@ const API = "https://api.bitbucket.org/2.0";
  * Personal credentials belong to the run owner. The process config is the explicit shared
  * service account, never another user's saved token.
  */
-async function resolveBitbucket() {
+export async function resolveBitbucket() {
   const userId = currentUserId();
   if (userId) {
     const user = await getUserSecret(userId, "bitbucket_user");
@@ -17,7 +17,7 @@ async function resolveBitbucket() {
     if (user || token) throw new Error("This account's Bitbucket credentials are incomplete");
   }
   const shared = config.bitbucket;
-  if (shared.user && shared.token) return { user: shared.user, token: shared.token, workspace: shared.workspace, reviewers: shared.reviewers };
+  if (shared.allowSharedCredentials !== false && shared.user && shared.token) return { user: shared.user, token: shared.token, workspace: shared.workspace, reviewers: shared.reviewers };
   return null;
 }
 
@@ -29,7 +29,7 @@ async function call(path: string, init: RequestInit = {}) {
     headers: { Authorization: "Basic " + Buffer.from(`${creds.user}:${creds.token}`).toString("base64"), "Content-Type": "application/json", Accept: "application/json" },
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Bitbucket ${res.status}: ${JSON.stringify(body?.error ?? body)}`);
+  if (!res.ok) throw new Error(`Bitbucket ${res.status}: check credentials and repository permissions in Integrations`);
   return body;
 }
 
@@ -39,7 +39,10 @@ async function call(path: string, init: RequestInit = {}) {
  */
 export async function openPullRequest(repo: string, branch: string, title: string, description: string, opts: { draft?: boolean; dest?: string } = {}) {
   const creds = await resolveBitbucket();
-  const ws = creds?.workspace || config.bitbucket.workspace;
+  const parts = repo.split("/");
+  const ws = parts.length === 2 ? parts[0] : creds?.workspace || config.bitbucket.workspace;
+  repo = parts.at(-1)!;
+  if (![ws, repo].every((x) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(x))) throw new Error("Invalid Bitbucket repository reference");
   const dest = opts.dest ?? config.baseBranch;
   if (!creds) {
     const url = `https://bitbucket.org/${ws}/${repo}/pull-requests/new?source=${encodeURIComponent(branch)}&dest=${encodeURIComponent(dest)}`;
@@ -71,8 +74,12 @@ export async function openPullRequest(repo: string, branch: string, title: strin
 export async function listPullRequests(repo: string, opts: { branch?: string; state?: string } = {}) {
   const creds = await resolveBitbucket();
   if (!creds) throw new Error("No Bitbucket credentials for this account");
+  const parts = repo.split("/");
+  const ws = parts.length === 2 ? parts[0] : creds.workspace;
+  repo = parts.at(-1)!;
+  if (![ws, repo].every((x) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(x))) throw new Error("Invalid Bitbucket repository reference");
   const filters = [`state="${(opts.state ?? "OPEN").toUpperCase()}"`, ...(opts.branch ? [`source.branch.name="${opts.branch.replace(/"/g, "")}"`] : [])];
-  const body = await call(`/repositories/${creds.workspace}/${repo}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
+  const body = await call(`/repositories/${ws}/${repo}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`);
   return (body.values ?? []).map((p: any) => ({
     id: p.id,
     title: p.title,

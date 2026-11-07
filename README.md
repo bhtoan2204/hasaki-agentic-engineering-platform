@@ -14,15 +14,15 @@ Architecture: [`docs/architecture/agent-architecture.md`](docs/architecture/agen
 
 ## Run
 
-One centrally hosted backend and worker, used from browsers. Sharing the PostgreSQL database does **not** make
-local repositories, worktrees or Claude/Cursor sessions portable: those live on the machine that runs the worker.
+Run one instance per developer, or one centrally hosted backend and worker. Instances can share PostgreSQL repository metadata; each worker provisions its own checkouts from registered Bitbucket URLs. Local worktrees and agent sessions stay on the assigned instance.
 `HOST=0.0.0.0` exposes that one installation. The default listen address stays loopback.
 
 ```bash
 docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
 npm install
-cp config.example.json config.json    # reposRoot, projects, bitbucket, ...
+cp config.example.json config.json    # database, dataDir; register remote URLs in Repositories
 export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # optional shared service account, not a personal token
+# For a permitted shared account, also set bitbucket.allowSharedCredentials=true in config.json.
 # Keep the existing AUTH_SECRET in the git-ignored .env; never regenerate it on restart.
 # For a NEW install only, generate a cryptographically random secret and save it privately in .env.
 # Localhost HTTP works automatically. Set COOKIE_SECURE=1 behind HTTPS.
@@ -189,7 +189,7 @@ new thread.
 
 The previous vanilla UI is still served at `/classic`.
 
-Node ≥ 22.18 (runs `.ts` directly), `claude` logged in, SSH key that can push to Bitbucket.
+Node ≥ 22.18 (runs `.ts` directly), the selected agent CLI logged in, Git, and personal Bitbucket credentials saved in Integrations.
 
 ## Telegram notifications (optional)
 
@@ -330,3 +330,11 @@ EVAL_REPORT=/tmp/p2-report.json npm run bench -- --suite=backend-v1 --repetition
 The CLI accepts only local PostgreSQL, creates or reuses `platform_bench` without dropping its results, and keeps synthetic Git repositories under `${TMPDIR:-/tmp}/hasaki-p2-benchmark`. It uses the existing local container runtime/image, never pulls an image, and blocks if network, resource and lifetime isolation cannot be verified. The current adapter requires Linux/Nix and Podman-compatible `docker --timeout`; see the [P2 architecture and operating limits](docs/architecture/p2-evaluation.md). Human answers in this CLI are explicitly scripted fixture controls; use `--answer-fixtures=false` to pause for manual handling. Live model execution is blocked until a connector can enforce isolation and hard spending limits.
 
 See the [P2 validation report](docs/validation/p2-finalization.md), [measured paired results](docs/validation/p2-benchmark.json), and [dashboard evidence](docs/validation/p2-dashboard.png). Fixture scores do not establish live-agent quality or token savings.
+
+## URL-based repository registry
+
+Administrators add `https://bitbucket.org/<workspace>/<repository>.git` and a default branch on **Repositories**, preserving project mappings and repository permissions. Members use that shared registration with their own Bitbucket credentials. Each assigned instance automatically clones into its dataDir, then creates an isolated run worktree for Claude/Codex/Cursor. No source-path mapping is needed for new repositories. Connection testing, preparation, refresh and workspace status are available on the repository detail page.
+
+Existing paths remain deprecated legacy hints; IDs, knowledge, dependencies and historical runs are preserved by migration 028. Review legacy evidence with `npm run repositories:migrate`; use `-- --apply` only after reviewing the report. Missing or ambiguous remotes remain unresolved rather than being guessed from repository names.
+
+Read the [repository architecture](docs/architecture/repositories.md), [migration guide](docs/architecture/repository-migration.md), [multi-instance development guide](docs/architecture/multi-instance-development.md) and [Bitbucket credential guide](docs/architecture/bitbucket-credentials.md). Separate directories preserve application ownership; workers sharing an OS account do not provide OS security isolation.

@@ -56,14 +56,14 @@ export interface OcrGuide {
  * Scope + rules for each target vs `origin/<base>`, as one prompt section (bounded in size). A target is a run worktree
  * (`to` = HEAD), or a repository's main checkout with `to` = the remote branch under review (read-only: only refs).
  */
-export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path: string; to?: string }>, baseBranch: string): Promise<OcrGuide> {
+export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path: string; to?: string; baseBranch?: string }>, baseBranch: string): Promise<OcrGuide> {
   const bin = ocrBinary();
   if (!bin) return { available: false, text: "", repos: [] };
   const parts: string[] = [];
   const repos: OcrGuide["repos"] = [];
   for (const w of workspaces) {
     try {
-      const preview = await ocr(bin, w.path, ["delegate", "preview", "--from", `origin/${baseBranch}`, "--to", w.to ?? "HEAD"]);
+      const preview = await ocr(bin, w.path, ["delegate", "preview", "--from", `origin/${w.baseBranch || baseBranch}`, "--to", w.to ?? "HEAD"]);
       const files = parsePreview(preview).slice(0, MAX_FILES);
       repos.push({ repo: w.repo, files: files.length });
       parts.push(`### ${w.repo}\n\n${preview.trim()}`);
@@ -83,13 +83,17 @@ export async function openCodeReviewGuide(workspaces: Array<{ repo: string; path
  * refs; the working tree is never touched). Repositories without the branch are left out.
  */
 export async function reviewedBranchTargets(targets: Array<{ repo: string; branch: string }>) {
-  const { repositories, repoPath } = await import("../repos/service.ts");
+  const { repositories } = await import("../repos/service.ts");
   const out: Array<{ repo: string; path: string; to: string }> = [];
   for (const { repo, branch } of targets) {
     const reg = await repositories.get(repo);
-    const dir = reg ? repoPath(reg) : "";
+    if (!reg?.enabled || !reg.allowed_actions.includes("read")) continue;
+    const { prepareRepository } = await import("../repos/workspaces.ts");
+    const dir = await prepareRepository(reg, !!reg.repository_url);
     if (!dir || !existsSync(dir)) continue;
-    await exec("git", ["-C", dir, "fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { timeout: 60_000 }).catch(() => {});
+    const { repositoryBranch } = await import("../repos/remote.ts");
+    repositoryBranch(branch);
+    if (!reg.repository_url) await exec("git", ["-C", dir, "-c", "core.hooksPath=/dev/null", "fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { timeout: 60_000 }).catch(() => {});
     const has = await exec("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]).then(() => true, () => false);
     if (has) out.push({ repo, path: dir, to: `origin/${branch}` });
   }

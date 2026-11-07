@@ -1,6 +1,8 @@
+import { execution, currentUserId } from "../auth/execution.ts";
 import { config, codeIntelligenceEnabled } from "../config.ts";
 import { repositories } from "../repos/service.ts";
 import { validateCheckout } from "../repos/paths.ts";
+import { prepareRepository, checkoutForRun } from "../repos/workspaces.ts";
 import { workspacesOf } from "../git/provider.ts";
 import { ownsInstance } from "../instances.ts";
 import { pool, one, q } from "../db/pool.ts";
@@ -43,21 +45,23 @@ export async function enqueue(repoName: string, runId?: number) {
   }
   return one(
     pool,
-    `INSERT INTO code_intelligence.runs(repository_id,instance_id,run_id,scope_key) VALUES($1,$2,$3,$4)
-    ON CONFLICT(repository_id,instance_id,scope_key) WHERE status IN ('queued','running') DO UPDATE SET requested_at=now() RETURNING id,status`,
+    `INSERT INTO code_intelligence.runs(repository_id,instance_id,run_id,scope_key,requested_by) VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT(repository_id,instance_id,scope_key) WHERE status IN ('queued','running') DO UPDATE SET requested_at=now(),requested_by=excluded.requested_by RETURNING id,status`,
     [
       repo.id,
       config.instanceId,
       runId ?? null,
       runId ? `run:${runId}` : "base",
+      currentUserId(),
     ],
   );
 }
-export async function localScope(repoName: string, runId?: number) {
+export async function localScope(repoName: string, runId?: number, provision = false) {
   const repo = await repositories.get(repoName);
   if (!repo?.enabled || !repo.allowed_actions.includes("read"))
     throw new Error("Repository unavailable or unauthorized");
-  const primary = await validateCheckout(repo);
+  const existing = runId ? await checkoutForRun(repo, runId) : undefined;
+  const primary = provision ? await prepareRepository(repo, false, existing) : await validateCheckout(repo, existing);
   if (!runId) return { repo, root: primary, primary };
   const run = await one(
     pool,
@@ -101,7 +105,7 @@ export async function indexRepository(
     parse_failures: 0,
     index_cache_hits: 0,
   };
-  const scope = await localScope(repoName, runId);
+  const scope = await localScope(repoName, runId, true);
   const progress = async (processed: number, total: number) => {
     if (!fence) return;
     const row = await one(
@@ -120,7 +124,7 @@ export async function indexRepository(
     );
     if (!row) throw new Error("Index lease lost");
   };
-  const base = await baseCommit(scope.primary);
+  const base = await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch);
   let baseline = await snapshot(scope.repo.id, `base:${base}`);
   const check = () => {
     signal?.throwIfAborted();
@@ -295,12 +299,10 @@ export async function runIndexOnce(signal?: AbortSignal) {
     const repo = await one(pool, "SELECT name FROM repositories WHERE id=$1", [
       job.repository_id,
     ]);
-    const out = await indexRepository(
-      repo!.name,
-      job.run_id ?? undefined,
-      ac.signal,
-      { id: job.id, token: job.fencing_token },
-    );
+    const owner = job.run_id ? (await one(pool, "SELECT owner_id FROM workflow_runs WHERE id=$1", [job.run_id]))?.owner_id : job.requested_by;
+    if (owner && !(await one(pool, "SELECT id FROM users WHERE id=$1 AND active", [owner]))) throw new Error("Index requester is inactive");
+    const execute = () => indexRepository(repo!.name, job.run_id ?? undefined, ac.signal, { id: job.id, token: job.fencing_token });
+    const out = owner ? await execution.run({ userId: Number(owner), kind: job.run_id ? "run" : "user", runId: job.run_id ?? undefined }, execute) : await execute();
     await q(
       pool,
       `UPDATE code_intelligence.runs SET status=CASE WHEN requested_at>$5::timestamptz THEN 'queued' ELSE 'done' END,attempts=CASE WHEN requested_at>$5::timestamptz THEN 0 ELSE attempts END,snapshot_id=$3,metrics=$4,error=NULL,updated_at=now() WHERE id=$1 AND fencing_token=$2 AND status='running'`,
