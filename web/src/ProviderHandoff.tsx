@@ -113,7 +113,7 @@ export function ProviderHandoff({
                   setConfirmed(false);
                 }}
               >
-                {["claude", "codex", "cursor"].map((p) => (
+                {["claude", "codex", "cursor", "antigravity"].map((p) => (
                   <option key={p} value={p}>
                     {p}
                     {options?.find((o) => o.provider === p)?.ok ? " ✓" : " · ?"}

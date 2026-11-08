@@ -26,7 +26,7 @@ export function StepAgentFields({
     <>
       {allowVerification && <details><summary>{en?"Provider fallback policy":"Chính sách agent dự phòng"}</summary>
         <Field label={en?"Fallback mode":"Chế độ dự phòng"}><select value={value.fallback?.mode??"manual"} onChange={e=>set("fallback",{...value.fallback,mode:e.target.value})}>{["disabled","manual","automatic"].map(m=><option key={m}>{m}</option>)}</select></Field>
-        <Field label={en?"Fallback provider order":"Thứ tự agent dự phòng"}><input value={(value.fallback?.providers??["claude","codex","cursor"]).join(", ")} onChange={e=>set("fallback",{...value.fallback,providers:e.target.value.split(",").map(v=>v.trim()).filter(Boolean)})}/></Field>
+        <Field label={en?"Fallback provider order":"Thứ tự agent dự phòng"}><input value={(value.fallback?.providers??["claude","codex","cursor","antigravity"]).join(", ")} onChange={e=>set("fallback",{...value.fallback,providers:e.target.value.split(",").map(v=>v.trim()).filter(Boolean)})}/></Field>
         <Field label={en?"Maximum switches":"Số lần chuyển tối đa"}><input type="number" min={0} max={10} value={value.fallback?.max_switches??2} onChange={e=>set("fallback",{...value.fallback,max_switches:Number(e.target.value)})}/></Field>
         <label><input type="checkbox" checked={value.fallback?.allow_unknown_cost??false} onChange={e=>set("fallback",{...value.fallback,allow_unknown_cost:e.target.checked})}/>{en?"Allow automatic continuation when cost is unknown":"Cho phép tự động tiếp tục khi chưa rõ chi phí"}</label>
         <label><input type="checkbox" checked={value.fallback?.allow_budget_failure??false} onChange={e=>set("fallback",{...value.fallback,allow_budget_failure:e.target.checked})}/>{en?"Allow automatic continuation after a budget/billing failure":"Cho phép tự động tiếp tục sau lỗi ngân sách/thanh toán"}</label>
@@ -45,6 +45,7 @@ export function StepAgentFields({
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
             <option value="cursor">Cursor</option>
+            <option value="antigravity">Antigravity</option>
           </select>
         </Field>
         <Field

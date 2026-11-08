@@ -24,6 +24,8 @@ export interface BrokerDeps {
   cwd: string;
   /** Cursor shares the authenticated worker transport without Codex-specific hook requirements. */
   requireHooks?: boolean;
+  /** Custom hook decision logic (defaults to codexHookDecision). */
+  decideHook?: (payload: any, policy: PolicyContext, cwd: string) => Decision;
   /** Platform tool dispatch, bound to the attempt (envFromExecution). */
   dispatch(name: string, args: unknown): Promise<string>;
   onDenied?(tool: string, reason: string): void | Promise<void>;
@@ -60,16 +62,23 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
   };
 
   const handle = async (msg: any): Promise<unknown> => {
-    if (!msg || !authorized(msg.token)) return { ok: false, error: "unauthorized" };
+    if (!msg || !authorized(msg.token))
+      return { ok: false, error: "unauthorized" };
     if (msg.kind === "hook") {
       hookCalls++;
       const payload = (msg.payload ?? {}) as CodexHookPayload;
-      if (typeof payload.model === "string" && payload.model) deps.onModel?.(payload.model);
+      if (typeof payload.model === "string" && payload.model)
+        deps.onModel?.(payload.model);
       let decision: Decision;
       try {
-        decision = codexHookDecision(payload, deps.policy, deps.cwd);
+        decision = deps.decideHook
+          ? deps.decideHook(payload, deps.policy, deps.cwd)
+          : codexHookDecision(payload, deps.policy, deps.cwd);
       } catch (e) {
-        decision = { allow: false, reason: `policy check failed: ${(e as Error).message}` };
+        decision = {
+          allow: false,
+          reason: `policy check failed: ${(e as Error).message}`,
+        };
       }
       const tool = String(payload.tool_name ?? payload.hook_event_name ?? "");
       if (decision.allow) {
@@ -79,8 +88,16 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
     }
     if (msg.kind === "tool") {
       const name = String(msg.name ?? "");
-      if (deps.requireHooks !== false && hookCalls === 0) return { ok: true, text: "ERROR: refused: the platform's pre-execution hooks are not active in this Codex session" };
-      if (CODING_ONLY.has(name) && deps.policy.mode !== "coding") return { ok: true, text: `ERROR: ${name} is only available in coding steps` };
+      if (deps.requireHooks !== false && hookCalls === 0)
+        return {
+          ok: true,
+          text: "ERROR: refused: the platform's pre-execution hooks are not active in this Codex session",
+        };
+      if (CODING_ONLY.has(name) && deps.policy.mode !== "coding")
+        return {
+          ok: true,
+          text: `ERROR: ${name} is only available in coding steps`,
+        };
       return { ok: true, text: await deps.dispatch(name, msg.args ?? {}) };
     }
     return { ok: false, error: "unknown request" };

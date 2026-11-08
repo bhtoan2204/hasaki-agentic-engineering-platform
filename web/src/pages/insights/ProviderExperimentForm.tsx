@@ -3,7 +3,7 @@ import { api, useApi } from "../../api.ts";
 import { act, Field, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, Notice } from "./shared.tsx";
-const plans = ["claude", "codex", "cursor", "claude,codex", "codex,claude", "claude,codex,cursor"];
+const plans = ["claude", "codex", "cursor", "antigravity", "claude,codex", "codex,claude", "claude,antigravity", "claude,codex,cursor"];
 export function ProviderExperimentForm({ admin, onCreated }: { admin: boolean; onCreated: () => void }) {
   const { locale } = useI18n();
   const en = locale === "en";

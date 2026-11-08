@@ -706,7 +706,7 @@ function AttemptMetrics({ m }: { m: any }) {
   const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
   return (
     <div className="rv-card">
-      <div className="rv-card-head"><h4><Cpu size={16} /> {t("si.metrics")}</h4><span className="mono muted small" title={m.model_source ?? ""}>{[m.provider ? t(agentKey(m.provider, true)) : null, m.model || (m.provider && m.provider !== "claude" ? t("run.codex.defaultModel") : null), m.reasoning_effort].filter(Boolean).join(" · ")}</span></div>
+      <div className="rv-card-head"><h4><Cpu size={16} /> {t("si.metrics")}</h4><span className="mono muted small" title={m.model_source ?? ""}>{[m.provider ? t(agentKey(m.provider, true)) : null, m.model || (m.provider && m.provider !== "claude" ? t(m.provider === "antigravity" ? "run.antigravity.defaultModel" : "run.codex.defaultModel") : null), m.reasoning_effort].filter(Boolean).join(" · ")}</span></div>
       <div className="rv-minis" style={{ marginBottom: 10 }}>
         <div className="rv-mini"><span>{t("si.cost")}</span><b>{m.cost_usd == null ? "—" : `$${Number(m.cost_usd).toFixed(4)}`}</b></div>
         <div className="rv-mini"><span>{t("si.turns")}</span><b>{m.turns ?? "—"}</b></div>

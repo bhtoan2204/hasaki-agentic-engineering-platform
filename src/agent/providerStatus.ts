@@ -1,17 +1,34 @@
-import { codexConfig } from "../config.ts";
+import { codexConfig, antigravityConfig } from "../config.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
+import { antigravityCapabilities } from "./antigravity/capabilities.ts";
 
 /**
  * Readiness of each agent provider on this worker, for the run forms. Probes the installed CLIs only (version, flags,
  * login status, model catalog); no model is called, nothing is billed, and no credential is read or returned.
  */
 export async function agentProviderStatus(refresh = false) {
-  const [cursor, codex] = await Promise.all([cursorCapabilities(refresh).catch((e) => ({ ok: false, error: String(e?.message ?? e) })), codexCapabilities(refresh).catch((e) => ({ ok: false, error: String(e?.message ?? e) }) as const)]);
+  const [cursor, codex, antigravity] = await Promise.all([
+    cursorCapabilities(refresh).catch((e) => ({
+      ok: false,
+      error: String(e?.message ?? e),
+    })),
+    codexCapabilities(refresh).catch(
+      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
+    ),
+    antigravityCapabilities(refresh).catch(
+      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
+    ),
+  ]);
   const cfg = codexConfig();
+  const agyCfg = antigravityConfig();
   return [
     { id: "claude", ok: true },
-    { id: "cursor", ok: cursor.ok, error: cursor.ok ? undefined : cursor.error },
+    {
+      id: "cursor",
+      ok: cursor.ok,
+      error: cursor.ok ? undefined : cursor.error,
+    },
     {
       id: "codex",
       ok: codex.ok,
@@ -23,6 +40,20 @@ export async function agentProviderStatus(refresh = false) {
       model: cfg.model || null,
       reasoning_effort: cfg.reasoningEffort || null,
       models: "models" in codex ? codex.models?.map((m) => m.slug) : undefined,
+    },
+    {
+      id: "antigravity",
+      ok: antigravity.ok,
+      error: antigravity.ok ? undefined : antigravity.error,
+      kind: "kind" in antigravity ? antigravity.kind : undefined,
+      version: "version" in antigravity ? antigravity.version : undefined,
+      auth: "auth" in antigravity ? antigravity.auth : undefined,
+      model: agyCfg.model || null,
+      reasoning_effort: agyCfg.effort || null,
+      models:
+        "models" in antigravity
+          ? antigravity.models?.map((m) => m.slug)
+          : undefined,
     },
   ];
 }

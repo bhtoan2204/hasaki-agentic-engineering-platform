@@ -3,7 +3,13 @@ import { StepAgentConfig, validateAgentOptions } from "../agent/stepAgent.ts";
 export const ConfigurationSchema = z
   .object({
     provider_sequence: z
-      .array(StepAgentConfig.pick({ provider: true, model: true, reasoning_effort: true }).required({ provider: true }))
+      .array(
+        StepAgentConfig.pick({
+          provider: true,
+          model: true,
+          reasoning_effort: true,
+        }).required({ provider: true }),
+      )
       .min(1)
       .max(3)
       .optional(),
@@ -11,8 +17,12 @@ export const ConfigurationSchema = z
     allowed_tools: StepAgentConfig.shape.allowed_tools.optional(),
     context_tokens: z.number().int().min(2000).max(64000).default(24000),
     mode: z.enum(["fixture", "dry_run", "live"]).default("fixture"),
-    adapter: z.enum(["baseline", "reference", "agent_fixture", "provider_fixture"]).default("baseline"),
-    provider: z.enum(["fixture", "claude", "codex", "cursor"]).default("fixture"),
+    adapter: z
+      .enum(["baseline", "reference", "agent_fixture", "provider_fixture"])
+      .default("baseline"),
+    provider: z
+      .enum(["fixture", "claude", "codex", "cursor", "antigravity"])
+      .default("fixture"),
     model: z.string().max(100).nullable().default(null),
     prompt_version: z.enum(["p2-task-v1", "p2-task-v2"]).default("p2-task-v1"),
     workflow_version: z.literal("p2-workflow-v1").default("p2-workflow-v1"),
@@ -30,12 +40,14 @@ export const ConfigurationSchema = z
       if (c.adapter !== "provider_fixture" && c.mode !== "live")
         ctx.addIssue({
           code: "custom",
-          message: "Provider sequences require the provider_fixture adapter or live mode",
+          message:
+            "Provider sequences require the provider_fixture adapter or live mode",
         });
       if (!c.context_variant)
         ctx.addIssue({
           code: "custom",
-          message: "Provider sequences require an explicit minimal, pack, or tools context variant",
+          message:
+            "Provider sequences require an explicit minimal, pack, or tools context variant",
         });
       for (const agent of c.provider_sequence) {
         try {
@@ -45,7 +57,10 @@ export const ConfigurationSchema = z
         }
       }
     } else if (c.adapter === "provider_fixture")
-      ctx.addIssue({ code: "custom", message: "provider_fixture requires provider_sequence" });
+      ctx.addIssue({
+        code: "custom",
+        message: "provider_fixture requires provider_sequence",
+      });
 
     if (c.mode !== "live" && c.provider !== "fixture")
       ctx.addIssue({

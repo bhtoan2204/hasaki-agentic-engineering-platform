@@ -20,13 +20,29 @@ export interface CodeIntelligenceConfig {
   excludes: string[];
   /** Both use the bundled SQL grammar; unsupported dialect syntax is skipped, never translated. */
   sqlDialect: "postgresql" | "generic";
-  weights: { exact: number; qualified: number; path: number; dependency: number; text: number; cap: number };
+  weights: {
+    exact: number;
+    qualified: number;
+    path: number;
+    dependency: number;
+    text: number;
+    cap: number;
+  };
 }
 
 export interface Config {
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
-  evaluation: { enabled: boolean; maxCases: number; maxRepetitions: number; maxCaseSeconds: number; maxTokens: number; maxCostUsd: number; sandboxImage: string; maxLiveAgents: number };
+  evaluation: {
+    enabled: boolean;
+    maxCases: number;
+    maxRepetitions: number;
+    maxCaseSeconds: number;
+    maxTokens: number;
+    maxCostUsd: number;
+    sandboxImage: string;
+    maxLiveAgents: number;
+  };
   port: number;
   /**
    * This platform instance (one per developer machine sharing the database). Runs created here are pinned to it and
@@ -90,7 +106,12 @@ export interface Config {
    * DATABASE_POOL_MIN / DATABASE_IDLE_TIMEOUT_MS. The defaults favour a remote database (shared RDS over VPN): a new
    * TLS connection costs several round trips, so a handful of clients stay open instead of closing after 10 s idle.
    */
-  database: { poolMax: number; poolMin: number; connectionTimeoutMillis: number; idleTimeoutMillis: number };
+  database: {
+    poolMax: number;
+    poolMin: number;
+    connectionTimeoutMillis: number;
+    idleTimeoutMillis: number;
+  };
   /** Organization name used for ORGANIZATION-scoped knowledge. */
   organization: string;
   /** Durable workflow scheduler. */
@@ -130,8 +151,8 @@ export interface Config {
     knowledgeIndexSize: number;
     /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
     upstreamTokens: number;
-    /** Cursor CLI binary. Empty uses `agent` on PATH. Claude model ids are never sent to it. */
-    defaultProvider?: "claude" | "codex" | "cursor";
+    /** Default agent provider. */
+    defaultProvider?: "claude" | "codex" | "cursor" | "antigravity";
     cursorBin?: string;
     claudeBin?: string;
     /**
@@ -141,6 +162,12 @@ export interface Config {
      * CODEX_MODEL, CODEX_REASONING_EFFORT.
      */
     codex?: CodexConfig;
+    /**
+     * Google Antigravity CLI (provider "antigravity"). Runs as the authenticated account of the WORKER machine.
+     * Env overrides: AGY_BIN / ANTIGRAVITY_BIN, AGY_TIMEOUT_MS / ANTIGRAVITY_TIMEOUT_MS,
+     * AGY_MODEL / ANTIGRAVITY_MODEL, AGY_EFFORT / ANTIGRAVITY_EFFORT.
+     */
+    antigravity?: AntigravityConfig;
     /**
      * Optional model routing, e.g. { "FAST": { "agent": "<model>" }, "DEEP": { "verifier": "<model>" }, "*": { "coding_agent": "<model>" } }.
      * Keys: profile (or "*") → step type, or "verifier" for independent verification steps. Resolution order:
@@ -159,8 +186,20 @@ export interface Config {
   /** Kafka UI (kafbat, QC). Session cookie pasted in the UI. cluster: empty = the only online cluster. */
   /** Vault (QC). Token pasted in the UI; values are never returned to agents. */
   vault: { baseUrl: string };
-  kafka: { baseUrl: string; cluster: string; maxMessages: number; timeoutSeconds: number };
-  splunk: { baseUrl: string; locale: string; allowedIndexes: string[]; maxMinutes: number; maxResults: number; timeoutSeconds: number };
+  kafka: {
+    baseUrl: string;
+    cluster: string;
+    maxMessages: number;
+    timeoutSeconds: number;
+  };
+  splunk: {
+    baseUrl: string;
+    locale: string;
+    allowedIndexes: string[];
+    maxMinutes: number;
+    maxResults: number;
+    timeoutSeconds: number;
+  };
   /** Daily production error scan over Splunk (page "Lỗi production"). */
   prodErrors: {
     /** LOCAL explicit actor for the existing scheduled scan. Unset = manual scans only. */
@@ -182,8 +221,39 @@ export interface Config {
 }
 
 const defaults: Config = {
-  codeIntelligence: { enabled: false, includeGenerated: false, includeDependencies: false, maxFileBytes: 512 * 1024, maxFiles: 20000, maxScanBytes: 128 * 1024 * 1024, maxSymbols: 2000, concurrency: 1, timeoutMs: 120000, contextTokens: 2000, retentionDays: 7, excludes: [], sqlDialect: "postgresql", weights: { exact: 2, qualified: 2, path: 0.5, dependency: 0.5, text: 0.25, cap: 3 } },
-  evaluation: { enabled: false, maxCases: 20, maxRepetitions: 3, maxCaseSeconds: 30, maxTokens: 20000, maxCostUsd: 2, sandboxImage: "docker.io/library/postgres:17-alpine", maxLiveAgents: 1 },
+  codeIntelligence: {
+    enabled: false,
+    includeGenerated: false,
+    includeDependencies: false,
+    maxFileBytes: 512 * 1024,
+    maxFiles: 20000,
+    maxScanBytes: 128 * 1024 * 1024,
+    maxSymbols: 2000,
+    concurrency: 1,
+    timeoutMs: 120000,
+    contextTokens: 2000,
+    retentionDays: 7,
+    excludes: [],
+    sqlDialect: "postgresql",
+    weights: {
+      exact: 2,
+      qualified: 2,
+      path: 0.5,
+      dependency: 0.5,
+      text: 0.25,
+      cap: 3,
+    },
+  },
+  evaluation: {
+    enabled: false,
+    maxCases: 20,
+    maxRepetitions: 3,
+    maxCaseSeconds: 30,
+    maxTokens: 20000,
+    maxCostUsd: 2,
+    sandboxImage: "docker.io/library/postgres:17-alpine",
+    maxLiveAgents: 1,
+  },
   port: 4545,
   reposRoot: join(homedir(), "src"),
   dataDir: join(homedir(), ".claude-task-platform"),
@@ -215,19 +285,47 @@ const defaults: Config = {
     pollMinutes: 0,
     listPath: "hr/projects/mytasks-es",
     detailPath: "hr/projects/task-input/{id}",
-    listQuery: { option: "my-task", status: "_00_01", limit: "100", offset: "0" },
+    listQuery: {
+      option: "my-task",
+      status: "_00_01",
+      limit: "100",
+      offset: "0",
+    },
     autoPick: false,
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
-  database: { poolMax: 10, poolMin: 4, connectionTimeoutMillis: 15000, idleTimeoutMillis: 300000 },
+  database: {
+    poolMax: 10,
+    poolMin: 4,
+    connectionTimeoutMillis: 15000,
+    idleTimeoutMillis: 300000,
+  },
   organization: "hasaki",
-  scheduler: { workers: 0, lightWorkers: 1, leaseSeconds: 120, heartbeatSeconds: 10, pollMs: 1000 },
+  scheduler: {
+    workers: 0,
+    lightWorkers: 1,
+    leaseSeconds: 120,
+    heartbeatSeconds: 10,
+    pollMs: 1000,
+  },
   jira: { baseUrl: "", user: "", token: "" },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
   vault: { baseUrl: "https://vault-qc-v2.hasaki.dev" },
-  kafka: { baseUrl: "https://kafka-ui-qc-v2.hasaki.dev", cluster: "", maxMessages: 200, timeoutSeconds: 60 },
-  splunk: { baseUrl: "https://siem.hasaki.work", locale: "en-US", allowedIndexes: [], maxMinutes: 7 * 24 * 60, maxResults: 500, timeoutSeconds: 60 },
+  kafka: {
+    baseUrl: "https://kafka-ui-qc-v2.hasaki.dev",
+    cluster: "",
+    maxMessages: 200,
+    timeoutSeconds: 60,
+  },
+  splunk: {
+    baseUrl: "https://siem.hasaki.work",
+    locale: "en-US",
+    allowedIndexes: [],
+    maxMinutes: 7 * 24 * 60,
+    maxResults: 500,
+    timeoutSeconds: 60,
+  },
   telegram: { botToken: "", chatId: "", apiBase: "https://api.telegram.org" },
   prodErrors: {
     index: "k8s_prod",
@@ -239,20 +337,41 @@ const defaults: Config = {
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 300,
   },
-  learning: { detectChanges: true, maxRulesInPrompt: 20, maxSourceChars: 6000, evolveSkills: true },
-  agent: { contextTokens: 24000, contextToolTimeoutMs: 10000, settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
+  learning: {
+    detectChanges: true,
+    maxRulesInPrompt: 20,
+    maxSourceChars: 6000,
+    evolveSkills: true,
+  },
+  agent: {
+    contextTokens: 24000,
+    contextToolTimeoutMs: 10000,
+    settingSources: [],
+    inlineKnowledgeTokens: 8000,
+    knowledgeIndexSize: 12,
+    upstreamTokens: 12000,
+  },
 };
 
 export let instanceIdentityExplicit = false;
 
 function load(): Config {
   const file = resolve(process.env.PLATFORM_CONFIG ?? "config.json");
-  const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const fromFile = existsSync(file)
+    ? JSON.parse(readFileSync(file, "utf8"))
+    : {};
   const cfg: Config = {
     ...defaults,
     ...fromFile,
     evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
-    codeIntelligence: { ...defaults.codeIntelligence, ...(fromFile.codeIntelligence ?? {}), weights: { ...defaults.codeIntelligence.weights, ...(fromFile.codeIntelligence?.weights ?? {}) } },
+    codeIntelligence: {
+      ...defaults.codeIntelligence,
+      ...(fromFile.codeIntelligence ?? {}),
+      weights: {
+        ...defaults.codeIntelligence.weights,
+        ...(fromFile.codeIntelligence?.weights ?? {}),
+      },
+    },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
@@ -267,11 +386,38 @@ function load(): Config {
     learning: { ...defaults.learning, ...(fromFile.learning ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
   };
-  for (const k of ["maxCases", "maxRepetitions", "maxCaseSeconds", "maxTokens", "maxLiveAgents"] as const) cfg.evaluation[k] = positiveInt(`evaluation.${k}`, cfg.evaluation[k]);
-  if (!Number.isFinite(cfg.evaluation.maxCostUsd) || cfg.evaluation.maxCostUsd < 0) throw new Error("evaluation.maxCostUsd must be nonnegative");
-  for (const k of ["maxFileBytes", "maxFiles", "maxScanBytes", "maxSymbols", "concurrency", "timeoutMs", "contextTokens", "retentionDays"] as const) cfg.codeIntelligence[k] = positiveInt(`codeIntelligence.${k}`, cfg.codeIntelligence[k]);
-  for (const v of Object.values(cfg.codeIntelligence.weights)) if (!Number.isFinite(v) || v < 0) throw new Error("Invalid code intelligence weight");
-  if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect)) throw new Error("Unsupported SQL dialect");
+  for (const k of [
+    "maxCases",
+    "maxRepetitions",
+    "maxCaseSeconds",
+    "maxTokens",
+    "maxLiveAgents",
+  ] as const)
+    cfg.evaluation[k] = positiveInt(`evaluation.${k}`, cfg.evaluation[k]);
+  if (
+    !Number.isFinite(cfg.evaluation.maxCostUsd) ||
+    cfg.evaluation.maxCostUsd < 0
+  )
+    throw new Error("evaluation.maxCostUsd must be nonnegative");
+  for (const k of [
+    "maxFileBytes",
+    "maxFiles",
+    "maxScanBytes",
+    "maxSymbols",
+    "concurrency",
+    "timeoutMs",
+    "contextTokens",
+    "retentionDays",
+  ] as const)
+    cfg.codeIntelligence[k] = positiveInt(
+      `codeIntelligence.${k}`,
+      cfg.codeIntelligence[k],
+    );
+  for (const v of Object.values(cfg.codeIntelligence.weights))
+    if (!Number.isFinite(v) || v < 0)
+      throw new Error("Invalid code intelligence weight");
+  if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
+    throw new Error("Unsupported SQL dialect");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
   cfg.telegram = {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
@@ -282,22 +428,61 @@ function load(): Config {
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.dataDir = resolve(cfg.dataDir);
   cfg.reposRoot = resolve(cfg.reposRoot);
-  instanceIdentityExplicit = !!(process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
-  cfg.instanceId = persistentInstanceId(cfg.dataDir, process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
-  cfg.instance.heartbeatSeconds = positiveInt("instance.heartbeatSeconds", cfg.instance.heartbeatSeconds);
-  cfg.instance.offlineSeconds = positiveInt("instance.offlineSeconds", cfg.instance.offlineSeconds);
-  if (cfg.instance.offlineSeconds <= cfg.instance.heartbeatSeconds * 2) throw new Error("instance.offlineSeconds must exceed twice heartbeatSeconds");
-  for (const key of ["workers", "leaseSeconds", "heartbeatSeconds", "pollMs"] as const) cfg.scheduler[key] = positiveInt(`scheduler.${key}`, cfg.scheduler[key]);
-  if (cfg.scheduler.heartbeatSeconds >= cfg.scheduler.leaseSeconds) throw new Error("scheduler heartbeat must be shorter than lease");
-  if (!Number.isInteger(cfg.scheduler.lightWorkers) || cfg.scheduler.lightWorkers < 0) throw new Error("scheduler.lightWorkers must be nonnegative");
+  instanceIdentityExplicit = !!(
+    process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId
+  );
+  cfg.instanceId = persistentInstanceId(
+    cfg.dataDir,
+    process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId,
+  );
+  cfg.instance.heartbeatSeconds = positiveInt(
+    "instance.heartbeatSeconds",
+    cfg.instance.heartbeatSeconds,
+  );
+  cfg.instance.offlineSeconds = positiveInt(
+    "instance.offlineSeconds",
+    cfg.instance.offlineSeconds,
+  );
+  if (cfg.instance.offlineSeconds <= cfg.instance.heartbeatSeconds * 2)
+    throw new Error(
+      "instance.offlineSeconds must exceed twice heartbeatSeconds",
+    );
+  for (const key of [
+    "workers",
+    "leaseSeconds",
+    "heartbeatSeconds",
+    "pollMs",
+  ] as const)
+    cfg.scheduler[key] = positiveInt(`scheduler.${key}`, cfg.scheduler[key]);
+  if (cfg.scheduler.heartbeatSeconds >= cfg.scheduler.leaseSeconds)
+    throw new Error("scheduler heartbeat must be shorter than lease");
+  if (
+    !Number.isInteger(cfg.scheduler.lightWorkers) ||
+    cfg.scheduler.lightWorkers < 0
+  )
+    throw new Error("scheduler.lightWorkers must be nonnegative");
   const dbUrl = new URL(process.env.DATABASE_URL ?? cfg.databaseUrl);
-  if (!["postgres:", "postgresql:"].includes(dbUrl.protocol)) throw new Error("databaseUrl must use PostgreSQL");
+  if (!["postgres:", "postgresql:"].includes(dbUrl.protocol))
+    throw new Error("databaseUrl must use PostgreSQL");
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
-    poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),
-    poolMin: Math.max(0, Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0),
-    connectionTimeoutMillis: positiveInt("database.connectionTimeoutMillis", process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? cfg.database.connectionTimeoutMillis),
-    idleTimeoutMillis: positiveInt("database.idleTimeoutMillis", process.env.DATABASE_IDLE_TIMEOUT_MS ?? cfg.database.idleTimeoutMillis),
+    poolMax: positiveInt(
+      "database.poolMax",
+      process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax,
+    ),
+    poolMin: Math.max(
+      0,
+      Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0,
+    ),
+    connectionTimeoutMillis: positiveInt(
+      "database.connectionTimeoutMillis",
+      process.env.DATABASE_CONNECTION_TIMEOUT_MS ??
+        cfg.database.connectionTimeoutMillis,
+    ),
+    idleTimeoutMillis: positiveInt(
+      "database.idleTimeoutMillis",
+      process.env.DATABASE_IDLE_TIMEOUT_MS ?? cfg.database.idleTimeoutMillis,
+    ),
   };
   cfg.database.poolMin = Math.min(cfg.database.poolMin, cfg.database.poolMax);
   // Secrets may come from env so config.json can be committed.
@@ -312,9 +497,11 @@ function load(): Config {
 
 /** Positive integer from config.json or the environment. NaN, fractions, and values below 1 are rejected. */
 export function positiveInt(name: string, raw: unknown): number {
-  if (typeof raw !== "number" && typeof raw !== "string") throw new Error(`${name} must be a positive integer`);
+  if (typeof raw !== "number" && typeof raw !== "string")
+    throw new Error(`${name} must be a positive integer`);
   const n = typeof raw === "number" ? raw : Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
+  if (!Number.isInteger(n) || n < 1)
+    throw new Error(`${name} must be a positive integer`);
   return n;
 }
 
@@ -332,15 +519,118 @@ export interface CodexConfig {
 }
 
 /** Codex settings with env overrides applied. Read at call time so tests and operators can change env. */
-export function codexConfig(): Required<Pick<CodexConfig, "bin" | "timeoutMs" | "model" | "reasoningEffort">> & { models: Record<string, Record<string, string>> } {
-  if (execution.getStore()?.evaluation?.fixtureAgent) return { bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-codex.mjs"), timeoutMs: 15000, model: "gpt-test", reasoningEffort: "low", models: {} };
+export function codexConfig(): Required<
+  Pick<CodexConfig, "bin" | "timeoutMs" | "model" | "reasoningEffort">
+> & { models: Record<string, Record<string, string>> } {
+  if (execution.getStore()?.evaluation?.fixtureAgent)
+    return {
+      bin: join(
+        import.meta.dirname,
+        "..",
+        "test",
+        "fixtures",
+        "fake-codex.mjs",
+      ),
+      timeoutMs: 15000,
+      model: "gpt-test",
+      reasoningEffort: "low",
+      models: {},
+    };
   const c = config.agent.codex ?? {};
-  const timeout = Number(process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
+  const timeout = Number(
+    process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000,
+  );
   return {
     bin: process.env.CODEX_BIN || c.bin || "codex",
-    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    timeoutMs:
+      Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
     model: process.env.CODEX_MODEL ?? c.model ?? "",
-    reasoningEffort: process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
+    reasoningEffort:
+      process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
+    models: c.models ?? {},
+  };
+}
+
+export interface AntigravityConfig {
+  /** Executable. Empty uses `agy` on PATH. */
+  bin?: string;
+  /** Hard limit for one Antigravity turn (process). Default 45 minutes. */
+  timeoutMs?: number;
+  /** Antigravity model slug (e.g. gemini-3.8-flash-high). Empty = the agy default. */
+  model?: string;
+  /** Reasoning effort, e.g. low | medium | high | xhigh | max. Empty = model default. */
+  effort?: string;
+  /** Max concurrent Antigravity turns on this worker (default 1). */
+  maxConcurrent?: number;
+  /** Allow subagents (default false). */
+  allowSubagents?: boolean;
+  /** Run in a sandbox with terminal restrictions enabled (default true). */
+  sandbox?: boolean;
+  /** Same shape as agent.models (profile or "*" → step type or "verifier"), with Antigravity model slugs only. */
+  models?: Record<string, Record<string, string>>;
+}
+
+/** Antigravity settings with env overrides applied. */
+export function antigravityConfig(): Required<
+  Pick<
+    AntigravityConfig,
+    | "bin"
+    | "timeoutMs"
+    | "model"
+    | "effort"
+    | "maxConcurrent"
+    | "allowSubagents"
+    | "sandbox"
+  >
+> & { models: Record<string, Record<string, string>> } {
+  if (execution.getStore()?.evaluation?.fixtureAgent)
+    return {
+      bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-agy.mjs"),
+      timeoutMs: 15000,
+      model: "gemini-test",
+      effort: "medium",
+      maxConcurrent: 1,
+      allowSubagents: false,
+      sandbox: true,
+      models: {},
+    };
+  const c = config.agent.antigravity ?? {};
+  const timeout = Number(
+    process.env.AGY_TIMEOUT_MS ||
+      process.env.ANTIGRAVITY_TIMEOUT_MS ||
+      c.timeoutMs ||
+      45 * 60 * 1000,
+  );
+  const maxConcurrent = Number(
+    process.env.AGY_MAX_CONCURRENT ||
+      process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+      c.maxConcurrent ||
+      1,
+  );
+  return {
+    bin: process.env.AGY_BIN || process.env.ANTIGRAVITY_BIN || c.bin || "agy",
+    timeoutMs:
+      Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model:
+      process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? "",
+    effort:
+      process.env.AGY_EFFORT ??
+      process.env.ANTIGRAVITY_EFFORT ??
+      c.effort ??
+      "",
+    maxConcurrent:
+      Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
+    allowSubagents:
+      (process.env.AGY_ALLOW_SUBAGENTS ??
+      process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
+        ? process.env.AGY_ALLOW_SUBAGENTS === "true" ||
+          process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
+        : (c.allowSubagents ?? false),
+    sandbox:
+      (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
+        ? process.env.AGY_SANDBOX === "true" ||
+          process.env.ANTIGRAVITY_SANDBOX === "true"
+        : (c.sandbox ?? true),
     models: c.models ?? {},
   };
 }
@@ -348,4 +638,9 @@ export function codexConfig(): Required<Pick<CodexConfig, "bin" | "timeoutMs" | 
 export const config = load();
 
 /** Evaluation overrides are per async execution, never shared mutable flags. */
-export function codeIntelligenceEnabled() { return execution.getStore()?.evaluation?.codeIntelligence ?? config.codeIntelligence.enabled; }
+export function codeIntelligenceEnabled() {
+  return (
+    execution.getStore()?.evaluation?.codeIntelligence ??
+    config.codeIntelligence.enabled
+  );
+}
