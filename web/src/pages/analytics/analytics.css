@@ -1,9 +1,8 @@
 .an {
   min-width: 0;
 }
-.an .tabs {
-  overflow-x: auto;
-  white-space: nowrap;
+.an > .tabs {
+  min-width: 0;
 }
 .an-filter {
   margin-bottom: var(--sp-4);
@@ -217,4 +216,15 @@
   .an-pagination > span {
     flex-basis: 100%;
   }
+}
+
+/* Column priorities collapse only optional metrics; every metric has an explicit reveal control. */
+.data-table { min-width: 0; container-type: inline-size; }
+.data-table .table-column-toggle { display: none; margin-bottom: var(--sp-2); }
+.data-table th { white-space: normal; overflow-wrap: normal; line-height: 1.5; }
+.data-table td { vertical-align: middle; line-height: 1.5; }
+@container (max-width: 900px) {
+  .data-table .table-column-toggle { display: inline-flex; }
+  .data-table[data-expanded="false"] .prioritised-table [data-priority="secondary"] { display: none; }
+  .data-table .prioritised-table { min-width: 0; }
 }

@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Search, X, type LucideIcon } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Search, X, LoaderCircle, type LucideIcon } from "lucide-react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { marked } from "marked";
 import { LIVE_STATUSES, STATUS_COLORS } from "./api.ts";
@@ -161,7 +162,7 @@ export function PageHeader({ icon: I, title, subtitle, crumbs, actions, children
 export type Tone = "brand" | "run" | "wait" | "ok" | "err";
 export function StatCard({ icon: I, label, value, hint, tone = "brand", onClick }: { icon?: LucideIcon; label: string; value: ReactNode; hint?: ReactNode; tone?: Tone; onClick?: () => void }) {
   return (
-    <div className={`stat tone-${tone}`} onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}>
+    <div className={`stat tone-${tone}`} onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} onKeyDown={onClick ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}>
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value ?? "—"}</div>
       {hint && <div className="stat-hint">{hint}</div>}
@@ -178,11 +179,29 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
   );
 }
 
+export type ControlSize = "xs" | "sm" | "md" | "lg";
+export function Button({ variant = "primary", size = "md", icon, loading = false, children, className = "", disabled, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "secondary" | "quiet" | "danger"; size?: ControlSize; icon?: ReactNode; loading?: boolean;
+}) {
+  const appearance = { primary: "", secondary: "ghost", quiet: "quiet", danger: "danger" }[variant];
+  return <button type="button" {...props} className={`ui-button ${appearance} ${size} ${className}`} disabled={disabled || loading} aria-busy={loading || undefined}>
+    {loading ? <LoaderCircle className="button-spinner" size={16} aria-hidden="true"/> : icon}{children}
+  </button>;
+}
+
+/** Labels and controls share a baseline without toolbar-specific offsets. */
+export function FilterField({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="filter-field"><span>{label}</span>{children}</label>;
+}
+export function FilterToolbar({ children, secondary, className = "" }: { children: ReactNode; secondary?: ReactNode; className?: string }) {
+  return <div className={`filter-toolbar ${className}`}><div className="filter-toolbar-primary">{children}</div>{secondary && <div className="filter-toolbar-secondary">{secondary}</div>}</div>;
+}
+
 export function SearchInput({ value, onChange, placeholder, width = 260 }: { value: string; onChange: (v: string) => void; placeholder?: string; width?: number | string }) {
   const { t } = useI18n();
   const text = placeholder ?? t("common.search");
   return (
-    <label className="search" style={{ width }}>
+    <label className="search" style={{ maxWidth: width }}>
       <Search size={15} />
       <input type="search" name="workspace-search" autoComplete="off" autoCapitalize="none" spellCheck={false} data-lpignore="true" data-1p-ignore="true" value={value} placeholder={text} onChange={(e) => onChange(e.target.value)} aria-label={text} />
     </label>
@@ -192,21 +211,37 @@ export function SearchInput({ value, onChange, placeholder, width = 260 }: { val
 /** Side drawer with scrim; Escape closes. */
 export function Drawer({ title, onClose, children, width }: { title: ReactNode; onClose: () => void; children: ReactNode; width?: number }) {
   const { t } = useI18n();
+  const ref = useRef<HTMLElement>(null);
+  const titleId = useId();
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.focus({ preventScroll: true });
+    return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+  }, []);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      if (e.key !== "Tab") return;
+      const items = [...(ref.current?.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]') ?? [])].filter(el => el.getClientRects().length > 0);
+      const first = items[0], last = items.at(-1);
+      if (!first) { e.preventDefault(); ref.current?.focus(); }
+      else if (e.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { e.preventDefault(); last?.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || !ref.current?.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
   }, [onClose]);
-  return (
+  return createPortal(
     <>
       <div className="scrim" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-modal="true" style={width ? { width: `min(${width}px, 100vw)` } : undefined}>
-        <div className="drawer-head"><h4>{title}</h4><button className="quiet icon" onClick={onClose} aria-label={t("common.close")}><X size={18} /></button></div>
+      <aside ref={ref} tabIndex={-1} className="drawer" role="dialog" aria-modal="true" aria-labelledby={titleId} style={width ? { width: `min(${width}px, 100vw)` } : undefined}>
+        <div className="drawer-head"><h4 id={titleId}>{title}</h4><button type="button" className="quiet icon" onClick={onClose} aria-label={t("common.close")}><X size={18} /></button></div>
         <div className="drawer-body">{children}</div>
       </aside>
-    </>
+    </>, document.body,
   );
 }
+
 export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => void }) {
   const { t } = useI18n();
   return (
@@ -219,9 +254,9 @@ export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => vo
 
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: Array<[T, ReactNode]>; value: T; onChange: (t: T) => void }) {
   return (
-    <div className="tabs">
+    <div className="tabs" role="group">
       {tabs.map(([k, label]) => (
-        <button key={k} className={k === value ? "tab on" : "tab"} onClick={() => onChange(k)}>{label}</button>
+        <button key={k} type="button" aria-pressed={k === value} className={k === value ? "tab on" : "tab"} onClick={() => onChange(k)}>{label}</button>
       ))}
     </div>
   );

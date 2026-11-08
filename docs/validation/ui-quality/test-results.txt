@@ -1,0 +1,44 @@
+UI Quality System validation
+
+Typecheck: PASS
+Build: PASS
+
+Targeted tests:
+# tests 31
+# suites 0
+# pass 31
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2645.763913
+
+Full suite:
+1..485
+# tests 496
+# suites 3
+# pass 496
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 339053.183492
+
+Existing analytics browser smoke:
+PASS legacy Health redirect, ten KPI metrics, all existing charts, active Production Errors sidebar
+PASS services comparisons, service and fingerprint drilldowns, one service request, return filters, browser back/forward
+PASS operational Incidents, URL list search, scanner status and schedule/notification settings
+PASS both fingerprint bookmarks, legacy service bookmark, unsafe return URL rejection
+PASS all six production views in VI/EN at 1440, 1280, 1024, 768 and 390px
+PASS manual scan controls, namespace and range choices, progress UI with simulated Splunk connection; scanner range is independent of analytics
+PASS Insights defaults to Usage, contains no Health tab, retains usage/performance/workflows, evaluation and quality navigation
+PASS applied production filters, deterministic event/share values, no scan triggered by analytics
+PASS unmatched-filter empty state and HTTP error recovery
+PASS no full-page refresh flicker or browser errors
+
+UI quality browser:
+
+> claude-task-platform@0.1.0 smoke:ui-quality
+> node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts
+
+after: audited 17 pages; 640 measurements

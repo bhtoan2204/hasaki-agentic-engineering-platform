@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bug, CalendarClock, ChevronRight, Eye, EyeOff, GitPullRequest, Link2, PlayCircle, RefreshCw, Siren, TrendingDown, TrendingUp, Unlink } from "lucide-react";
 import { api, useApi } from "../api.ts";
-import { act, ago, Copy, EmptyState, ErrorBox, Field, Loading, SearchInput, Segmented, navigate, toast } from "../ui.tsx";
+import { act, ago, Copy, EmptyState, ErrorBox, Field, Loading, SearchInput, Segmented, FilterToolbar, FilterField, navigate, toast } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ScanProgressCard, type Progress } from "./ScanProgress.tsx";
 import "./ProdErrors.css";
@@ -201,7 +201,7 @@ function GroupRow({ g, open, onToggle, reload }: { g: Group; open: boolean; onTo
       <button className="pe-head" aria-expanded={open} onClick={onToggle}>
         <ChevronRight size={16} strokeWidth={2} className="pe-chev" />
         <span className={`pe-sev pe-${g.severity}`}>{t(`pe.sev.${g.severity}`)}</span>
-        <span className="pe-svc" title={g.namespace}>{g.service}</span>
+        <span className="pe-svc" title={`${g.namespace} / ${g.service}`}>{g.service}</span>
         <span className="pe-sig mono" title={g.signature}>{g.signature}</span>
         <span className="pe-num" title={t("pe.todayCount")}>{g.today_count.toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB")}</span>
         <span className="pe-trend"><Trend count={g.today_count} yesterday={g.yesterday_count} /></span>
@@ -383,17 +383,18 @@ export function ProdErrorsPage({ focus, settings = false, query: appliedQuery = 
 
           {!settings && <>
 
-          <div className="row pe-filters">
-            <Segmented label={t("pe.system")} value={ns} onChange={setNs} options={[["all", t("pe.all")], ...data.namespaces.map((n) => [n.namespace, n.project] as [string, string])]} />
-            <label className="pe-list-filter">{t("an.severity")}<select aria-label={t("an.severity")} value={sev} onChange={e => setSev(e.target.value)}>
+          <FilterToolbar className="pe-filters" secondary={<>
+            <SearchInput value={query} onChange={setQuery} placeholder={t("pe.search")} width="100%"/>
+            <label className="row tight small muted"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t("pe.showIgnored", { n: data.ignored })}</label>
+          </>}>
+            <FilterField label={t("pe.system")}><select aria-label={t("pe.system")} value={ns} onChange={e=>setNs(e.target.value)}><option value="all">{t("pe.all")}</option>{data.namespaces.map(n=><option key={n.namespace} value={n.namespace}>{n.project}</option>)}</select></FilterField>
+            <FilterField label={t("an.severity")}><select aria-label={t("an.severity")} value={sev} onChange={e => setSev(e.target.value)}>
               <option value="attention">{t("pe.attention", { n: counts.critical + counts.high })}</option><option value="all">{t("an.all")}</option>
               {(["critical","high","medium","low"] as const).map(k => <option key={k} value={k}>{t(`pe.sev.${k}`)}</option>)}
-            </select></label>
-            <label className="pe-list-filter">{t("an.service")}<select aria-label={t("an.service")} value={service} onChange={e => setFilter("list_service",e.target.value)}><option value="">{t("an.all")}</option>{[...new Set(data.groups.filter(g => ns === "all" || g.namespace === ns).map(g => g.service))].map(v => <option key={v}>{v}</option>)}</select></label>
-            <label className="pe-list-filter">{t("an.incident_status")}<select aria-label={t("an.incident_status")} value={incidentStatus} onChange={e => setFilter("list_status",e.target.value)}><option value="">{t("an.all")}</option>{["open","acknowledged","resolved"].map(v => <option key={v} value={v}>{t(`an.${v}`)}</option>)}</select></label>
-            <SearchInput value={query} onChange={setQuery} placeholder={t("pe.search")} />
-            <label className="row tight small muted"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t("pe.showIgnored", { n: data.ignored })}</label>
-          </div>
+            </select></FilterField>
+            <FilterField label={t("an.service")}><select aria-label={t("an.service")} value={service} onChange={e => setFilter("list_service",e.target.value)}><option value="">{t("an.all")}</option>{[...new Set(data.groups.filter(g => ns === "all" || g.namespace === ns).map(g => g.service))].map(v => <option key={v}>{v}</option>)}</select></FilterField>
+            <FilterField label={t("an.incident_status")}><select aria-label={t("an.incident_status")} value={incidentStatus} onChange={e => setFilter("list_status",e.target.value)}><option value="">{t("an.all")}</option>{["open","acknowledged","resolved"].map(v => <option key={v} value={v}>{t(`an.${v}`)}</option>)}</select></FilterField>
+          </FilterToolbar>
 
           {groups.length === 0 ? (
             <EmptyState icon={Siren} title={data.groups.length ? t("pe.noMatch") : last ? t("pe.none") : t("pe.noData")}>

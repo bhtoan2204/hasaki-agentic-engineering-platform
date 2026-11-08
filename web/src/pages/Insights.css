@@ -6,9 +6,8 @@
 .ins-stats .stat-label { grid-column: 1; min-height: 34px; align-self: center; overflow-wrap: anywhere }
 .ins-stats .stat-icon { position: static; grid-column: 2; grid-row: 1 }
 .ins-stats .stat-value, .ins-stats .stat-hint { grid-column: 1 / -1 }
-.ins-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); align-items: start }
+ .ins-grid { margin-bottom: var(--sp-3); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); align-items: start }
 .ins-grid > .ins-panel { margin-bottom: 0 }
-.ins-grid { margin-bottom: var(--sp-3) }
 
 /* panel */
 .ins-panel { min-width: 0; padding: var(--sp-4) var(--sp-5) var(--sp-5) }
@@ -124,4 +123,4 @@
 }
 
 .ins-tab-count { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: var(--r-pill); background: var(--st-err-bg); color: var(--st-err); font-size: 11px; line-height: 18px; text-align: center }
-.ins .tabs { position: sticky; top: 0; z-index: 2; background: var(--bg); margin-bottom: var(--sp-4) }
+.ins > .tabs { margin-bottom: var(--sp-4) }

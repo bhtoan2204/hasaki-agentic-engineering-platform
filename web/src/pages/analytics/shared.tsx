@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, Info } from "lucide-react";
 import { EmptyState, Skeleton, SkeletonRows, StatCard, time } from "../../ui.tsx";
 import { uiLocale, useI18n } from "../../i18n/index.tsx";
@@ -78,6 +78,11 @@ export interface Column {
   label: string;
   render?: (row: Row) => ReactNode;
   style?: "number" | "usd" | "ms" | "pct";
+  align?: "left" | "right" | "center";
+  width?: string;
+  minWidth?: string;
+  maxWidth?: string;
+  responsivePriority?: "primary" | "secondary";
 }
 export function DataTable({
   rows,
@@ -94,15 +99,22 @@ export function DataTable({
 }) {
   const { t } = useI18n();
   const count = total ?? Number(rows[0]?.total_rows ?? rows.length);
+  const [expanded, setExpanded] = useState(false);
+  const tableId = useId();
+  const prioritised = columns.some(c => c.responsivePriority === "secondary");
+  const cellStyle = (c: Column): CSSProperties => ({ textAlign: c.align ?? (c.style ? "right" : "left"), width: c.width, minWidth: c.minWidth, maxWidth: c.maxWidth });
   return (
     <>
       {rows.length ? (
-        <div className="table-wrap">
-          <table className="ins-table">
+        <div className="data-table" data-expanded={expanded}>
+          {prioritised && <button type="button" className="ghost sm table-column-toggle" aria-expanded={expanded} aria-controls={tableId} onClick={() => setExpanded(v => !v)}>{t(expanded ? "an.summaryColumns" : "an.allColumns")}</button>}
+          <div className="table-wrap" tabIndex={0} role="region" aria-label={t("an.tableScroll")}>
+          <table id={tableId} className={`ins-table${prioritised ? " prioritised-table" : ""}`}>
+            <colgroup>{columns.map(c => <col key={c.key} style={{width:c.width}} data-priority={c.responsivePriority}/>)}</colgroup>
             <thead>
               <tr>
                 {columns.map((c) => (
-                  <th key={c.key}>{t(`an.${c.label}`)}</th>
+                  <th scope="col" key={c.key} style={cellStyle(c)} data-priority={c.responsivePriority}>{t(`an.${c.label}`)}</th>
                 ))}
               </tr>
             </thead>
@@ -110,7 +122,7 @@ export function DataTable({
               {rows.map((r, i) => (
                 <tr key={i}>
                   {columns.map((c) => (
-                    <td key={c.key}>
+                    <td key={c.key} style={cellStyle(c)} className={c.style || c.align === "right" ? "numeric-cell" : undefined} data-priority={c.responsivePriority}>
                       {c.render ? (
                         c.render(r)
                       ) : c.style ? (
@@ -126,6 +138,7 @@ export function DataTable({
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         <EmptyState title={t("an.empty")}>{t("an.emptyHint")}</EmptyState>

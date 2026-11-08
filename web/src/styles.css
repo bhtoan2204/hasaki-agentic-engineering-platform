@@ -11,7 +11,7 @@
 
 :root {
   /* brand — the official Hasaki logo green + black */
-  --brand: #2f6b4f; --brand-600: #24563f; --brand-700: #183d2c; --brand-400: #4f9474; --brand-100: #d9ebe1; --brand-50: #eef6f1;
+  --on-warning: #201606; --on-brand: #ffffff; --brand: #2f6b4f; --brand-600: #24563f; --brand-700: #183d2c; --brand-400: #4f9474; --brand-100: #d9ebe1; --brand-50: #eef6f1;
   --blush: #e3f0e8; --peach: #eef3e6; --cream: #f6f7f4; --rose-ink: #24563f;
   --black: #111513; --black-2: #1b201d; --black-3: #262d29;
   /* neutrals */
@@ -39,7 +39,7 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --brand: #5cc28f; --brand-600: #7fd3a8; --brand-700: #b3e8cb; --brand-400: #46a878; --brand-100: #16301f; --brand-50: #0f2218;
+  --on-brand: #082014; --brand: #5cc28f; --brand-600: #7fd3a8; --brand-700: #b3e8cb; --brand-400: #46a878; --brand-100: #16301f; --brand-50: #0f2218;
   --blush: #142a1d; --peach: #1b2a1f; --cream: #0e1210; --rose-ink: #8fdcb5;
   --black: #070908; --black-2: #0f1311; --black-3: #1a201c;
   --bg: #0b0e0c; --surface: #141916; --surface-2: #111512; --surface-3: #1d241f; --ink: #eef3ef; --ink-2: #c4cec7; --muted: #8d9891;
@@ -65,8 +65,8 @@ pre { background: var(--code); padding: 10px 12px; border-radius: var(--r-sm); o
 
 /* ---------------------------------------------------------------- primitives: buttons */
 button, .btn {
-  min-height: var(--control-h-md); font: 600 var(--fs-sm)/1.2 var(--font); border: 1px solid transparent; border-radius: var(--r-sm); padding: 8px 14px; cursor: pointer; white-space: nowrap;
-  background: var(--brand); color: #fff; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+  min-height: var(--control-h-md); font: 600 var(--fs-sm)/1.4 var(--font); border: 1px solid transparent; border-radius: var(--r-sm); padding: 8px 14px; cursor: pointer; white-space: nowrap;
+  background: var(--brand); color: var(--on-brand); display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none;
   box-shadow: 0 1px 0 rgba(255,255,255,.16) inset, 0 1px 2px rgba(17, 40, 28, .28); transition: background .15s, box-shadow .15s, transform .05s, border-color .15s;
 }
 button:hover, .btn:hover { background: var(--brand-600); text-decoration: none }
@@ -75,7 +75,7 @@ button.ghost, .btn.ghost { background: var(--surface); color: var(--ink); border
 button.ghost:hover, .btn.ghost:hover { background: var(--surface-2); border-color: var(--brand-400); color: var(--brand-700) }
 button.quiet, .btn.quiet { background: transparent; color: var(--ink-2); box-shadow: none; border-color: transparent }
 button.quiet:hover, .btn.quiet:hover { background: var(--sel); color: var(--brand-700) }
-button.warn { background: var(--st-wait) } button.danger { background: var(--st-err) } button.ok { background: var(--st-ok) }
+button.warn { background: var(--st-wait); color: var(--on-warning) } button.danger { background: var(--st-err) } button.ok { background: var(--st-ok) }
 button.warn:hover { filter: brightness(.95); background: var(--st-wait) } button.danger:hover { filter: brightness(.95); background: var(--st-err) } button.ok:hover { filter: brightness(.95); background: var(--st-ok) }
 button:disabled { opacity: .45; cursor: default; transform: none }
 /* act(): the button whose request is in flight — stays readable, shows a spinner, ignores further clicks. */
@@ -86,26 +86,54 @@ button.is-busy::after, [role="button"].is-busy::after {
 }
 @media (prefers-reduced-motion: reduce) { button.is-busy::after, [role="button"].is-busy::after { animation-duration: 2s } }
 button.sm, .btn.sm { min-height: var(--control-h-sm); padding: 5px 11px; font-size: 12.5px } button.xs, .btn.xs { min-height: var(--control-h-xs); padding: 2px 8px; font-size: 11.5px; border-radius: 6px }
-button.icon, .btn.icon { min-height: 34px; padding: 7px; width: 34px; height: 34px; justify-content: center }
+button.lg, .btn.lg { min-height: var(--control-h-lg); padding: 8px 16px }
+button.icon, .btn.icon { min-height: var(--control-h-md); padding: 7px; width: var(--control-h-md); height: var(--control-h-md); justify-content: center }
+button.icon.xs, .btn.icon.xs { width: var(--control-h-xs); height: var(--control-h-xs); min-height: var(--control-h-xs); padding: var(--sp-1) }
+button.icon.sm, .btn.icon.sm { width: var(--control-h-sm); height: var(--control-h-sm); min-height: var(--control-h-sm); padding: var(--sp-1) }
+button.icon.lg, .btn.icon.lg { width: var(--control-h-lg); height: var(--control-h-lg); min-height: var(--control-h-lg); padding: var(--sp-2) }
 button.linkish { min-height: 28px; justify-content: center; background: none; color: var(--brand); padding: 2px 0; border: 0; box-shadow: none; font: inherit; text-decoration: underline; line-height: 1.25 }
+
+/* Text actions are links, not primary CTA surfaces. Full text remains available. */
+button.link-button { min-height: var(--control-h-xs); max-width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--brand-700); box-shadow: none; font: inherit; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; text-align: left; justify-content: flex-start; }
+button.link-button:hover { background: transparent; color: var(--brand-600); text-decoration: underline; text-underline-offset: 3px; }
+.ui-button > svg, button > svg, .btn > svg { flex-shrink: 0; }
+.button-spinner { animation: spin .7s linear infinite; }
 
 /* ---------------------------------------------------------------- primitives: inputs */
 input, select, textarea {
-  min-height: var(--control-h-md); font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 8px 11px; width: 100%;
+  min-height: var(--control-h-md); font: 400 var(--fs-md)/1.4 var(--font); color: inherit; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 8px 11px; width: 100%;
   transition: border-color .15s, box-shadow .15s;
 }
 input:hover, select:hover, textarea:hover { border-color: var(--brand-400) }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus) }
 textarea { resize: vertical } textarea.code { font-family: var(--mono); font-size: 12px }
-input[type=checkbox], input[type=radio] { width: auto; min-height: auto; accent-color: var(--brand) }
+input[type=checkbox], input[type=radio] { width: auto; min-height: auto; padding: 0; accent-color: var(--brand) }
 .field { display: block; margin: 10px 0 } .field > span { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); margin-bottom: 5px; letter-spacing: .01em }
-.search { position: relative; display: flex; align-items: center } .search svg { position: absolute; left: 10px; color: var(--muted); pointer-events: none } .search input { padding-left: 34px }
+.search { position: relative; display: flex; align-items: center; width: 100%; min-width: 0 } .search svg { position: absolute; left: 10px; color: var(--muted); pointer-events: none } .search input { padding-left: 34px }
+
+/* Layout primitives: shrinkable fields, one baseline per toolbar row. */
+.filter-toolbar { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.filter-toolbar-primary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: var(--sp-3); }
+.filter-field { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.filter-field > span:first-child { line-height: 1.5; }
+.filter-field input, .filter-field select { height: var(--control-h-md); min-width: 0; }
+.filter-toolbar-secondary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.filter-toolbar-secondary .search { flex: 1 1 240px; }
+.filter-toolbar-secondary input[type="search"] { height: var(--control-h-md); }
+@media (max-width: 1100px) { .filter-toolbar-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .filter-toolbar-primary { grid-template-columns: minmax(0, 1fr); } }
+
+/* Shared identity and numeric cells: readable full values, no primary-action chrome. */
+.service-identity { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; white-space: normal; }
+.service-identity .service-identity-name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; line-height: 1.5; }
+.service-identity small { display: block; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.numeric-cell { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---------------------------------------------------------------- primitives: surfaces */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-3); box-shadow: var(--shadow-1) }
 .card.flat { box-shadow: none } .card.hero { border: 0; box-shadow: var(--shadow-2) } .card.tight { padding: var(--sp-3) var(--sp-4) }
 .card-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3) } .card-head h4 { margin: 0; flex: 1 } .card-head .sub { color: var(--muted); font-size: var(--fs-sm) }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3) } .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3) } .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3) }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3) } .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3) } .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3) }
 .stack { display: flex; flex-direction: column; gap: var(--sp-3) }
 .row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-top: var(--sp-2) } .row.tight { margin-top: 0 } .grow { flex: 1 }
 .muted { color: var(--muted) } .small { font-size: var(--fs-sm) } .err { color: var(--st-err) } .okc { color: var(--st-ok) }
@@ -126,7 +154,7 @@ th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--li
 tr:last-child td { border-bottom: 0 }
 th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; background: var(--surface-2); white-space: nowrap }
 tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { background: var(--brand-50) }
-.table-wrap { overflow-x: auto; border-radius: var(--r-lg) }
+.table-wrap { max-width: 100%; min-width: 0; overflow-x: auto; border-radius: var(--r-lg) }
 
 /* ---------------------------------------------------------------- primitives: badges / status / pills */
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 9px 2px 7px; border-radius: var(--r-pill); white-space: nowrap; line-height: 18px; background: color-mix(in srgb, currentColor 12%, transparent); letter-spacing: .02em }
@@ -143,10 +171,10 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 
 /* ---------------------------------------------------------------- primitives: tabs / segmented */
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 12px; flex-wrap: wrap }
-.tab { background: transparent; color: var(--muted); border-radius: 0; border: 0; border-bottom: 2px solid transparent; padding: 9px 12px; font-size: 13px; font-weight: 600; box-shadow: none }
+.tab { background: transparent; color: var(--muted); border-radius: 0; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font-size: 13px; font-weight: 600; box-shadow: none }
 .tab:hover { background: transparent; color: var(--ink) } .tab.on { color: var(--brand-700); border-bottom-color: var(--brand) }
 .segmented { display: inline-flex; background: var(--surface-3); border-radius: var(--r-sm); padding: 3px; gap: 2px }
-.segmented button { background: transparent; color: var(--ink-2); box-shadow: none; padding: 5px 11px; font-size: 12.5px; border-radius: 6px }
+.segmented button { min-height: var(--control-h-sm); background: transparent; color: var(--ink-2); box-shadow: none; padding: 5px 11px; font-size: 12.5px; border-radius: 6px }
 .segmented button:hover { background: var(--surface); color: var(--ink) } .segmented button.on { background: var(--surface); color: var(--brand-700); box-shadow: var(--shadow-1) }
 
 /* ---------------------------------------------------------------- feedback: empty / error / skeleton / toast / spinner */
@@ -201,7 +229,7 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-4) }
 
 /* ---------------------------------------------------------------- app shell */
-.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100% }
+.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100dvh; min-height: 0 }
 .sidebar { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; z-index: 60 }
 .sb-brand { display: flex; align-items: center; gap: 11px; padding: 18px 18px 14px; text-decoration: none !important; color: var(--ink) }
 .sb-brand-text { line-height: 1.15; min-width: 0 } .sb-brand-name { font-weight: 700; font-size: 15px; letter-spacing: -.01em } .sb-brand-sub { font-size: 11px; color: var(--muted) }
@@ -229,7 +257,7 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .menu-btn { display: none }
 .page { padding: 26px 32px 48px; max-width: 1360px; width: 100%; margin: 0 auto; overflow: auto; flex: 1; min-height: 0 }
 .page-scroll { overflow: auto; flex: 1; min-height: 0 }
-.page.full { max-width: none; padding: 0; display: flex; flex-direction: column; overflow: hidden }
+.page.full { container-type: inline-size; max-width: none; padding: 0; display: flex; flex-direction: column; overflow: hidden }
 
 /* ---------------------------------------------------------------- json / markdown (unchanged behaviour) */
 details > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin: 4px 0 }
@@ -279,7 +307,7 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; mar
 /* editor (legacy) */
 .palette { display: flex; gap: 6px; flex-wrap: wrap }
 .palette button { font-size: 12px; padding: 4px 10px }
-.kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px } .kv > :nth-child(odd) { color: var(--muted) }
+.kv { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 12px; font-size: 13px } .kv > :nth-child(odd) { color: var(--muted) }
 
 /* ---------------------------------------------------------------- responsive shell */
 @media (max-width: 1100px) { .grid4 { grid-template-columns: repeat(2, 1fr) } }
@@ -295,7 +323,7 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 12.5px; mar
   .canvas { min-height: 45vh }
   .ph-title { font-size: var(--fs-xl) }
   .live-pill b { display: none }
-  table { display: block; overflow-x: auto }
+  table:not(.ins-table) { display: block; overflow-x: auto }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important } }
 

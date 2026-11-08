@@ -3,7 +3,6 @@
 .pe-schedule { margin-bottom: var(--sp-3) }
 .pe-schedule summary { cursor: pointer; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px }
 .pe-schedule-body { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); margin-top: var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); max-width: 640px }
-.pe-filters { margin-bottom: var(--sp-3) }
 
 .pe-list { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); overflow: hidden }
 .pe-cols, .pe-head {
@@ -109,7 +108,7 @@
 
 /* Scan options: projects + time window */
 .pe-scanpanel { display: flex; flex-direction: column; gap: var(--sp-3) }
-.pe-opt { display: grid; grid-template-columns: 130px 1fr; gap: var(--sp-3); align-items: center }
+.pe-opt { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: var(--sp-3); align-items: center }
 .pe-opt-label { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2) }
 .pe-opt-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2) }
 .pe-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 999px; cursor: pointer; font-size: var(--fs-sm); user-select: none }
@@ -120,4 +119,6 @@
 .pe-opt-range input { width: auto }
 .pe-opt-foot { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap }
 .pe-shown { color: var(--ink-2) }
-@media (max-width: 640px) { .pe-opt { grid-template-columns: 1fr; gap: 6px } }
+@media (max-width: 640px) { .pe-opt { grid-template-columns: minmax(0, 1fr); gap: 6px } }
+
+.pe-opt .segmented { flex-wrap: wrap; min-width: 0; max-width: 100%; }

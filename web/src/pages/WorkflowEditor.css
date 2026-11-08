@@ -154,13 +154,13 @@ button.wfe-on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 30%, trans
 .wfe-run-actions { display: flex; flex-wrap: wrap; gap: 8px }
 
 /* ---------------------------------------------------------------- responsive */
-@media (max-width: 1280px) {
+@container (max-width: 1280px) {
   .wfe-palette { width: 200px }
   .wfe-pal-text small { display: none }
   .wfe .wfe-inspector { width: 380px }
   .wfe-lbl { display: none }
 }
-@media (max-width: 1024px) {
+@container (max-width: 1024px) {
   .wfe-palette { width: 64px; padding: 12px 8px }
   .wfe-pal-head, .wfe-pal-label, .wfe-pal-text, .wfe-pal-plus { display: none }
   .wfe-pal-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line) }
@@ -169,7 +169,7 @@ button.wfe-on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 30%, trans
   .wfe .wfe-inspector { width: 360px; max-width: 45vw }
   .wfe-hint { display: none }
 }
-@media (max-width: 900px) {
+@container (max-width: 900px) {
   .wfe { overflow-y: auto }
   .wfe-top { padding: 12px 14px; gap: 10px }
   .wfe-actions { width: 100% }
@@ -184,7 +184,7 @@ button.wfe-on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 30%, trans
   .wfe .wfe-inspector { width: auto; max-width: none; max-height: none; overflow: visible }
   .wfe-insp-head { position: static }
 }
-@media (max-width: 520px) {
+@container (max-width: 520px) {
   .wfe-errors { max-height: 55% }
   .wfe-version { flex: 1 1 100% }
   .wfe-version select { flex: 1; max-width: none }

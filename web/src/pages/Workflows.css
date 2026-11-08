@@ -50,6 +50,6 @@
 
 @media (max-width: 640px) {
   .wfs-toolbar { flex-direction: column; align-items: stretch }
-  .wfs-toolbar .search { width: 100% !important }
+  .wfs-toolbar .search { max-width: none }
   .wfs-card { padding: var(--sp-4) }
 }

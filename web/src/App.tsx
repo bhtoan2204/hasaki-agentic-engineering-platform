@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, ShieldCheck, UserRound, Users, X, BookOpen, Building2, ClipboardList, FolderGit2, Inbox, LayoutDashboard, LineChart, Menu, Moon, PlayCircle, PlugZap, Siren, Sun, Workflow, type LucideIcon } from "lucide-react";
 import { api, setAuthed, setCsrf, setSupportView, useLive, type LiveState } from "./api.ts";
 import { AccountMenu, AccountPage } from "./pages/Account.tsx";
@@ -97,6 +97,7 @@ export function App() {
   const sidebar = useRef<HTMLElement>(null);
   const mobileTrigger = useRef<HTMLButtonElement>(null);
   const pageRef = useRef<HTMLElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
   const [openQuestions, setOpenQuestions] = useState(0);
   const [me, setMe] = useState<SessionUser | null | undefined>(undefined);
   const [support, setSupport] = useState(false);
@@ -116,7 +117,19 @@ export function App() {
   }, [me]);
   useEffect(() => { if (me) void refreshCount(); }, [me]);
   useEffect(() => { if (me?.role === "member" && hash.startsWith("/users")) location.hash = "/overview"; }, [me, hash]);
-  useEffect(() => { setNavOpen(false); pageRef.current?.focus(); }, [hash]);
+  useEffect(() => { setNavOpen(false); }, [hash]);
+  useEffect(() => {
+    const previous = history.scrollRestoration;
+    history.scrollRestoration = "manual";
+    return () => { history.scrollRestoration = previous; };
+  }, []);
+  // Each route owns its page scroll; query/filter edits retain position and input focus.
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    page.scrollTop = scrollPositions.current.get(pathPart) ?? 0;
+    page.focus({ preventScroll: true });
+  }, [pathPart, me?.id, support]);
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 901px)");
     const resize = () => { if (desktop.matches) setNavOpen(false); };
@@ -260,7 +273,7 @@ export function App() {
             </button>
           </div>
         </header>
-        <main ref={pageRef} tabIndex={-1} className={full ? "page full" : "page"} key={`${me.id}:${support}`}>
+        <main ref={pageRef} onScroll={e => scrollPositions.current.set(pathPart, e.currentTarget.scrollTop)} tabIndex={-1} className={full ? "page full" : "page"} key={`${me.id}:${support}`}>
           {page}
         </main>
       </div>

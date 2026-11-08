@@ -26,7 +26,8 @@
     "smoke:provider-evaluation": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/provider-evaluation.smoke.ts",
     "smoke:handoff": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/provider-handoff.smoke.ts",
     "smoke:orchestration": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/step-agent.smoke.ts",
-    "smoke:run-view": "node --disable-warning=ExperimentalWarning test/run-view.smoke.ts"
+    "smoke:run-view": "node --disable-warning=ExperimentalWarning test/run-view.smoke.ts",
+    "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "1.13.6",
