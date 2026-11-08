@@ -1,3 +1,4 @@
+import { createBinding, disconnect as disconnectTelegram, savePreferences } from "../telegram/store.ts";
 import { evaluationAnalytics } from "../eval/analytics.ts";
 import { createRecommendation } from "../eval/recommendations.ts";
 import { saveOptimizationPolicy,optimizationPolicies } from "../eval/optimization.ts";
@@ -517,8 +518,11 @@ export const routes: Route[] = [
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/investigate$/, ({ p, actor }) => investigate(p[0], actor.id)],
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/link$/, ({ p, body, actor }) => linkWorkItem(p[0], String(body.work_item ?? ""), actor.id)],
   // Telegram + Bitbucket credentials (saved in the platform instead of .env; secrets never returned)
-  ["GET", /^\/api\/integrations\/telegram$/, ({ actor }) => telegramStatus(actor.id)],
+  ["GET", /^\/api\/integrations\/telegram$/, ({ actor }) => telegramStatus(actor.id, actor.role === "admin")],
   ["POST", /^\/api\/integrations\/telegram$/, ({ body, actor }) => (requireAdmin(actor), setTelegram(body))],
+  ["POST", /^\/api\/integrations\/telegram\/connect$/, ({ actor }) => createBinding(actor.id)],
+  ["POST", /^\/api\/integrations\/telegram\/disconnect$/, ({ actor }) => disconnectTelegram(actor.id)],
+  ["POST", /^\/api\/integrations\/telegram\/preferences$/, ({ actor, body }) => savePreferences(actor.id, body)],
   ["POST", /^\/api\/integrations\/telegram\/destination$/, ({ body, actor }) => setTelegramDestination(actor.id, String(body.chatId ?? body.chat_id ?? ""))],
   ["POST", /^\/api\/integrations\/telegram\/chats$/, ({ body, actor }) => (requireAdmin(actor), telegramChats(body))],
   ["POST", /^\/api\/integrations\/telegram\/test$/, ({ actor }) => testTelegram(actor.id, actor.role === "admin")],

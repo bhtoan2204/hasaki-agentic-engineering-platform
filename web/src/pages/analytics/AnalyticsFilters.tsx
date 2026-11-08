@@ -142,96 +142,114 @@ export function AnalyticsFilters({
               <option value="hour">{t("an.hour")}</option>
             </select>
           </label>
-          {domain === "insights" && <>{select(
-            "provider",
-            ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
+          {domain === "insights" && (
+            <>
+              {select(
+                "provider",
+                ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
+              )}
+              <label>
+                {t("an.model")}
+                <input
+                  value={draft.model}
+                  onChange={(e) => set("model", e.target.value)}
+                  placeholder={t("an.all")}
+                />
+              </label>
+              {select(
+                "user",
+                (options?.users ?? []).map((u: Row) => [
+                  String(u.id),
+                  u.username,
+                ]),
+              )}
+              {(["workflow", "repository", "project"] as const).map((k) =>
+                select(
+                  k,
+                  (
+                    options?.[
+                      {
+                        workflow: "workflows",
+                        repository: "repositories",
+                        project: "projects",
+                      }[k]
+                    ] ?? []
+                  ).map((v: string) => [v, v]),
+                ),
+              )}
+            </>
           )}
-          <label>
-            {t("an.model")}
-            <input
-              value={draft.model}
-              onChange={(e) => set("model", e.target.value)}
-              placeholder={t("an.all")}
-            />
-          </label>
-          {select(
-            "user",
-            (options?.users ?? []).map((u: Row) => [String(u.id), u.username]),
+          {domain === "production" && (
+            <>
+              {select(
+                "namespace",
+                (options?.namespaces ?? []).map((v: string) => [v, v]),
+              )}
+              {select(
+                "environment",
+                (options?.environments ?? []).map((v: string) => [v, v]),
+              )}
+              {select(
+                "severity",
+                ["critical", "high", "medium", "low", "unknown"].map((v) => [
+                  v,
+                  v,
+                ]),
+              )}
+              {select(
+                "incident_status",
+                ["open", "acknowledged", "resolved", "recurring"].map((v) => [
+                  v,
+                  t(
+                    `an.${v === "recurring" ? "recurringIncidents" : v === "open" ? "openIncidents" : v === "acknowledged" ? "acknowledgedIncidents" : "resolvedIncidents"}`,
+                  ),
+                ]),
+              )}
+              <label>
+                {t("an.service")}
+                <select
+                  value={
+                    draft.service
+                      ? `${draft.namespace || "*"}\u001f${draft.service}`
+                      : ""
+                  }
+                  onChange={(e) => {
+                    const [namespace, service] = e.target.value.split("\u001f");
+                    setDraft((d) => ({
+                      ...d,
+                      service: service ?? "",
+                      ...(namespace && namespace !== "*" ? { namespace } : {}),
+                    }));
+                  }}
+                  aria-label={t("an.service")}
+                >
+                  <option value="">{t("an.all")}</option>
+                  {(options?.services ?? [])
+                    .filter(
+                      (v: Row) =>
+                        !draft.namespace || v.namespace === draft.namespace,
+                    )
+                    .map((v: Row) => (
+                      <option
+                        key={`${v.namespace}\u001f${v.service}`}
+                        value={`${v.namespace}\u001f${v.service}`}
+                      >
+                        {v.service} · {v.namespace}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </>
           )}
-          {(["workflow", "repository", "project"] as const).map((k) =>
-            select(
-              k,
-              (
-                options?.[
-                  {
-                    workflow: "workflows",
-                    repository: "repositories",
-                    project: "projects",
-                  }[k]
-                ] ?? []
-              ).map((v: string) => [v, v]),
-            ),
-          )}
-          </>}
-          {domain === "production" && <>{select(
-            "namespace",
-            (options?.namespaces ?? []).map((v: string) => [v, v]),
-          )}
-          {select(
-            "environment",
-            (options?.environments ?? []).map((v: string) => [v, v]),
-          )}
-          {select(
-            "severity",
-            ["critical", "high", "medium", "low", "unknown"].map((v) => [v, v]),
-          )}
-          {select(
-            "incident_status",
-            ["open", "acknowledged", "resolved", "recurring"].map((v) => [
-              v,
-              t(
-                `an.${v === "recurring" ? "recurringIncidents" : v === "open" ? "openIncidents" : v === "acknowledged" ? "acknowledgedIncidents" : "resolvedIncidents"}`,
-              ),
-            ]),
-          )}
-          <label>
-            {t("an.service")}
-            <select
-              value={
-                draft.service
-                  ? `${draft.namespace || "*"}\u001f${draft.service}`
-                  : ""
-              }
-              onChange={(e) => {
-                const [namespace, service] = e.target.value.split("\u001f");
-                setDraft((d) => ({
-                  ...d,
-                  service: service ?? "",
-                  ...(namespace && namespace !== "*" ? { namespace } : {}),
-                }));
-              }}
-              aria-label={t("an.service")}
-            >
-              <option value="">{t("an.all")}</option>
-              {(options?.services ?? [])
-                .filter(
-                  (v: Row) =>
-                    !draft.namespace || v.namespace === draft.namespace,
-                )
-                .map((v: Row) => (
-                  <option
-                    key={`${v.namespace}\u001f${v.service}`}
-                    value={`${v.namespace}\u001f${v.service}`}
-                  >
-                    {v.service} · {v.namespace}
-                  </option>
-                ))}
-            </select>
-          </label>
-          </>}
         </div>
         <div className="an-filter-footer">
-          <p className="muted small">{t(domain === "production" ? "an.productionFilterHint" : "an.scopeHint")}</p>
+          <p className="muted small">
+            {t(
+              domain === "production"
+                ? "an.productionFilterHint"
+                : "an.scopeHint",
+            )}
+          </p>
           <button
             className="ghost sm"
             type="button"

@@ -24,7 +24,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "nav.aria": "Điều hướng chính",
     "nav.menu": "Mở menu",
     "nav.questionsWaiting": "{n} câu hỏi đang chờ",
-    "live.tip": "Cập nhật trực tiếp qua Server-Sent Events từ PostgreSQL LISTEN/NOTIFY",
+    "live.tip":
+      "Cập nhật trực tiếp qua Server-Sent Events từ PostgreSQL LISTEN/NOTIFY",
     "live.sse": "Trực tiếp",
     "live.polling": "Đang hỏi lại",
     "live.connecting": "Đang kết nối",
@@ -59,16 +60,19 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "common.all": "Tất cả",
     "common.search": "Tìm…",
     "run.outputLanguage": "Ngôn ngữ kết quả AI",
-    "run.outputHint": "Mặc định theo ngôn ngữ giao diện. Run đang chạy không đổi khi bạn đổi giao diện.",
+    "run.outputHint":
+      "Mặc định theo ngôn ngữ giao diện. Run đang chạy không đổi khi bạn đổi giao diện.",
     "run.outputLegacy": "Không ghi nhận",
-    "run.outputLegacyHint": "Run cũ không có ngôn ngữ đã chọn. Nội dung đã lưu giữ nguyên và không được dịch. Câu trả lời mới dùng tiếng Việt.",
+    "run.outputLegacyHint":
+      "Run cũ không có ngôn ngữ đã chọn. Nội dung đã lưu giữ nguyên và không được dịch. Câu trả lời mới dùng tiếng Việt.",
     "run.outputCurrent": "Ngôn ngữ kết quả",
     "run.start": "Chạy",
     "run.step": "Từng bước",
     "run.pending": "Tạo (cấu hình trước)",
     "run.analyze": "Chỉ phân tích",
     "run.launch": "Chạy workflow",
-    "run.launchHint": "Chọn workflow, profile và ngôn ngữ kết quả, rồi bắt đầu.",
+    "run.launchHint":
+      "Chọn workflow, profile và ngôn ngữ kết quả, rồi bắt đầu.",
     "graph.questions": "Câu hỏi đang chờ",
     "graph.approval": "Cần duyệt trước khi chạy",
     "graph.condition": "Chạy có điều kiện",
@@ -95,12 +99,15 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "companion.messageApproval": "Run #{n} đang chờ bạn duyệt.",
     "companion.messageQuestion": "Run #{n} cần câu trả lời của bạn.",
     "companion.messageHandoff": "Run #{n} đang chờ bàn giao agent.",
-    "companion.messageProviderUnavailable": "{provider} không thể tiếp tục Run #{n}. Bạn có thể xem các lựa chọn bàn giao.",
-    "companion.messageFailed": "Run #{n} gặp lỗi. Bạn có thể mở run để xem chi tiết.",
+    "companion.messageProviderUnavailable":
+      "{provider} không thể tiếp tục Run #{n}. Bạn có thể xem các lựa chọn bàn giao.",
+    "companion.messageFailed":
+      "Run #{n} gặp lỗi. Bạn có thể mở run để xem chi tiết.",
     "companion.messageSuccess": "Run #{n} vừa hoàn thành.",
     "companion.messageWaiting": "Run #{n} đang tạm chờ.",
     "companion.messageWorking": "{provider} đang xử lý bước: {step}.",
-    "companion.messageSleeping": "Chưa có workflow đang hoạt động. Mình nghỉ một chút nhé.",
+    "companion.messageSleeping":
+      "Chưa có workflow đang hoạt động. Mình nghỉ một chút nhé.",
     "companion.loading": "Đang tải trạng thái workflow…",
     "companion.agent": "Agent",
     "companion.activeStep": "bước hiện tại",
@@ -121,7 +128,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "companion.minimize": "Thu gọn bảng",
     "companion.hide": "Ẩn trợ lý",
     "companion.announce": "Run #{n}: {state}",
-    "companion.conceptNote": "Tên riêng tuỳ chỉnh; đây không phải mascot chính thức của công ty.",
+    "companion.conceptNote":
+      "Tên riêng tuỳ chỉnh; đây không phải mascot chính thức của công ty.",
     "office.pick": "Chọn run",
     "office.auto": "Tự chọn run đang chạy",
     "office.none": "Không có run nào đang chạy",
@@ -131,7 +139,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.preview": "Preview Office (dữ liệu mẫu)",
     "office.graph": "Graph của run #{n}",
     "office.liveTip": "Cập nhật từ PostgreSQL LISTEN/NOTIFY qua SSE",
-    "office.previewTip": "Mô phỏng mọi animation bằng dữ liệu mẫu — không tạo task, không chạy Claude",
+    "office.previewTip":
+      "Mô phỏng mọi animation bằng dữ liệu mẫu — không tạo task, không chạy Claude",
     "office.wide": "Rộng",
     "office.compact": "Gọn",
     "office.fullscreen": "Toàn màn hình",
@@ -139,7 +148,7 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.act.file": "file",
     "office.act.folder": "thư mục",
     "office.act.read": "Đọc {file}",
-    "office.act.grep": "Tìm \"{q}\"",
+    "office.act.grep": 'Tìm "{q}"',
     "office.act.glob": "Dò {q}",
     "office.act.edit": "Sửa {file}",
     "office.act.test": "Chạy test",
@@ -173,16 +182,19 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.bubble.noWork": "chưa có việc",
     "office.role.analyst.title": "Analyst",
     "office.role.analyst.does": "Đọc yêu cầu, phân tích, đặt câu hỏi",
-    "office.role.analyst.personality": "Tỉ mỉ, luôn hỏi “tại sao?” trước khi bắt tay vào việc",
+    "office.role.analyst.personality":
+      "Tỉ mỉ, luôn hỏi “tại sao?” trước khi bắt tay vào việc",
     "office.role.architect.title": "Architect",
     "office.role.architect.does": "Lên kế hoạch và thiết kế giải pháp",
-    "office.role.architect.personality": "Nghĩ bằng sơ đồ, không rời cây bút dạ",
+    "office.role.architect.personality":
+      "Nghĩ bằng sơ đồ, không rời cây bút dạ",
     "office.role.developer.title": "Developer",
     "office.role.developer.does": "Viết code trong worktree của run",
     "office.role.developer.personality": "Đeo tai nghe, gõ phím như rap",
     "office.role.tester.title": "Tester",
     "office.role.tester.does": "Chạy test và so với baseline",
-    "office.role.tester.personality": "Không tin bất cứ thứ gì chưa có test xanh",
+    "office.role.tester.personality":
+      "Không tin bất cứ thứ gì chưa có test xanh",
     "office.role.reviewer.title": "Reviewer",
     "office.role.reviewer.does": "Review diff, bảo mật, kiến trúc",
     "office.role.reviewer.personality": "Đọc từng dòng diff, gật gù khi ổn",
@@ -208,7 +220,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "nav.aria": "Main navigation",
     "nav.menu": "Open menu",
     "nav.questionsWaiting": "{n} open questions",
-    "live.tip": "Live updates via Server-Sent Events from PostgreSQL LISTEN/NOTIFY",
+    "live.tip":
+      "Live updates via Server-Sent Events from PostgreSQL LISTEN/NOTIFY",
     "live.sse": "Live",
     "live.polling": "Polling",
     "live.connecting": "Connecting",
@@ -243,16 +256,19 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "common.all": "All",
     "common.search": "Search…",
     "run.outputLanguage": "AI output language",
-    "run.outputHint": "Defaults to the interface language. Switching the interface does not change a run that already exists.",
+    "run.outputHint":
+      "Defaults to the interface language. Switching the interface does not change a run that already exists.",
     "run.outputLegacy": "Not recorded",
-    "run.outputLegacyHint": "This run has no stored output language. Saved text is left as written and is not translated. New answers use Vietnamese.",
+    "run.outputLegacyHint":
+      "This run has no stored output language. Saved text is left as written and is not translated. New answers use Vietnamese.",
     "run.outputCurrent": "Output language",
     "run.start": "Start",
     "run.step": "Step mode",
     "run.pending": "Create (configure first)",
     "run.analyze": "Analyze only",
     "run.launch": "Run workflow",
-    "run.launchHint": "Choose a workflow, profile, and output language, then start.",
+    "run.launchHint":
+      "Choose a workflow, profile, and output language, then start.",
     "graph.questions": "Open questions",
     "graph.approval": "Approval required before this step runs",
     "graph.condition": "Conditional step",
@@ -279,12 +295,15 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "companion.messageApproval": "Run #{n} is waiting for your approval.",
     "companion.messageQuestion": "Run #{n} needs an answer from you.",
     "companion.messageHandoff": "Run #{n} is waiting for an agent handoff.",
-    "companion.messageProviderUnavailable": "{provider} cannot continue Run #{n}. Review the available handoff options.",
-    "companion.messageFailed": "Run #{n} has an error. Open the run to inspect it.",
+    "companion.messageProviderUnavailable":
+      "{provider} cannot continue Run #{n}. Review the available handoff options.",
+    "companion.messageFailed":
+      "Run #{n} has an error. Open the run to inspect it.",
     "companion.messageSuccess": "Run #{n} just completed.",
     "companion.messageWaiting": "Run #{n} is paused for now.",
     "companion.messageWorking": "{provider} is working on: {step}.",
-    "companion.messageSleeping": "No active workflow right now. I’m taking a short break.",
+    "companion.messageSleeping":
+      "No active workflow right now. I’m taking a short break.",
     "companion.loading": "Loading workflow status…",
     "companion.agent": "Agent",
     "companion.activeStep": "the current step",
@@ -305,7 +324,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "companion.minimize": "Minimize panel",
     "companion.hide": "Hide companion",
     "companion.announce": "Run #{n}: {state}",
-    "companion.conceptNote": "Personal nickname; this is not an officially approved company mascot.",
+    "companion.conceptNote":
+      "Personal nickname; this is not an officially approved company mascot.",
     "office.pick": "Choose a run",
     "office.auto": "Follow the active run",
     "office.none": "No run is active",
@@ -315,7 +335,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.preview": "Preview Office (sample data)",
     "office.graph": "Graph of run #{n}",
     "office.liveTip": "Updates from PostgreSQL LISTEN/NOTIFY over SSE",
-    "office.previewTip": "Play every animation with sample data — no task is created and Claude does not run",
+    "office.previewTip":
+      "Play every animation with sample data — no task is created and Claude does not run",
     "office.wide": "Wide",
     "office.compact": "Compact",
     "office.fullscreen": "Full screen",
@@ -323,7 +344,7 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.act.file": "a file",
     "office.act.folder": "a folder",
     "office.act.read": "Reading {file}",
-    "office.act.grep": "Searching \"{q}\"",
+    "office.act.grep": 'Searching "{q}"',
     "office.act.glob": "Scanning {q}",
     "office.act.edit": "Editing {file}",
     "office.act.test": "Running tests",
@@ -356,11 +377,14 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.bubble.skipped": "Skipped",
     "office.bubble.noWork": "no work yet",
     "office.role.analyst.title": "Analyst",
-    "office.role.analyst.does": "Reads the request, analyses it, and asks questions",
-    "office.role.analyst.personality": "Careful, and always asks why before starting",
+    "office.role.analyst.does":
+      "Reads the request, analyses it, and asks questions",
+    "office.role.analyst.personality":
+      "Careful, and always asks why before starting",
     "office.role.architect.title": "Architect",
     "office.role.architect.does": "Plans and designs the solution",
-    "office.role.architect.personality": "Thinks in diagrams and keeps a marker handy",
+    "office.role.architect.personality":
+      "Thinks in diagrams and keeps a marker handy",
     "office.role.developer.title": "Developer",
     "office.role.developer.does": "Writes code in the run worktree",
     "office.role.developer.personality": "Headphones on, typing in rhythm",
@@ -371,25 +395,62 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "office.role.reviewer.does": "Reviews the diff, security, and architecture",
     "office.role.reviewer.personality": "Reads every line of the diff",
     "office.role.pr.title": "PR Agent",
-    "office.role.pr.does": "Packages the change, opens the PR, and writes the report",
-    "office.role.pr.personality": "Packs the change as neatly as a Hasaki order",
+    "office.role.pr.does":
+      "Packages the change, opens the PR, and writes the report",
+    "office.role.pr.personality":
+      "Packs the change as neatly as a Hasaki order",
   },
 };
 
 export const messages: Record<UiLocale, Record<string, string>> = {
-  vi: { "optimization.provenance": "Nguồn gốc quyết định tối ưu", "optimization.evidence": "Bằng chứng khuyến nghị", "an.agentEvaluation": "Đánh giá agent", "handoff.paused":"Tạm dừng agent", "handoff.review":"Xem bàn giao", "agent.inherit":"Theo lượt chạy", "agent.effective":"Agent của lần thử", "agent.modelDefault":"Mặc định nhà cung cấp / chưa báo cáo", ...baseMessages.vi, ...catalog.vi, ...analyticsMessages.vi },
-  en: { "optimization.provenance": "Optimization decision provenance", "optimization.evidence": "Recommendation evidence", "an.agentEvaluation": "Agent Evaluation", "handoff.paused":"Provider paused", "handoff.review":"Review handoff", "agent.inherit":"Run default", "agent.effective":"Attempt agent", "agent.modelDefault":"Provider default / unreported", ...baseMessages.en, ...catalog.en, ...analyticsMessages.en },
+  vi: {
+    "optimization.provenance": "Nguồn gốc quyết định tối ưu",
+    "optimization.evidence": "Bằng chứng khuyến nghị",
+    "an.agentEvaluation": "Đánh giá agent",
+    "handoff.paused": "Tạm dừng agent",
+    "handoff.review": "Xem bàn giao",
+    "agent.inherit": "Theo lượt chạy",
+    "agent.effective": "Agent của lần thử",
+    "agent.modelDefault": "Mặc định nhà cung cấp / chưa báo cáo",
+    ...baseMessages.vi,
+    ...catalog.vi,
+    ...analyticsMessages.vi,
+  },
+  en: {
+    "optimization.provenance": "Optimization decision provenance",
+    "optimization.evidence": "Recommendation evidence",
+    "an.agentEvaluation": "Agent Evaluation",
+    "handoff.paused": "Provider paused",
+    "handoff.review": "Review handoff",
+    "agent.inherit": "Run default",
+    "agent.effective": "Attempt agent",
+    "agent.modelDefault": "Provider default / unreported",
+    ...baseMessages.en,
+    ...catalog.en,
+    ...analyticsMessages.en,
+  },
 };
 
-export function translate(locale: UiLocale, key: string, params?: Record<string, string | number>): string {
+export function translate(
+  locale: UiLocale,
+  key: string,
+  params?: Record<string, string | number>,
+): string {
   let lookup = key;
   if (params && params.n != null) {
     const form = Number(params.n) === 1 ? `${key}.one` : `${key}.other`;
     if (messages.vi[form]) lookup = form;
   }
-  const raw = messages[locale][lookup] ?? messages.vi[lookup] ?? messages[locale][key] ?? messages.vi[key] ?? key;
+  const raw =
+    messages[locale][lookup] ??
+    messages.vi[lookup] ??
+    messages[locale][key] ??
+    messages.vi[key] ??
+    key;
   if (!params) return raw;
-  return raw.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? `{${name}}` : String(params[name])));
+  return raw.replace(/\{(\w+)\}/g, (_, name) =>
+    params[name] == null ? `{${name}}` : String(params[name]),
+  );
 }
 
 export function statusLabel(locale: UiLocale, code: string): string {
@@ -403,6 +464,9 @@ export function readUiLocale(get: (key: string) => string | null): UiLocale {
   return v === "en" || v === "vi" ? v : "vi";
 }
 
-export function writeUiLocale(set: (key: string, value: string) => void, locale: UiLocale) {
+export function writeUiLocale(
+  set: (key: string, value: string) => void,
+  locale: UiLocale,
+) {
   set(UI_KEY, locale);
 }

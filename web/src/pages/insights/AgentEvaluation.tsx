@@ -3,7 +3,10 @@ import { FlaskConical, RefreshCw } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { PageHeader, ErrorBox, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.tsx";
+import {
+  AnalyticsFilters,
+  defaultFilters,
+} from "../analytics/AnalyticsFilters.tsx";
 import { Notice, AnalyticsSkeleton, fmt } from "../analytics/shared.tsx";
 import { EvaluationScorecards } from "./EvaluationScorecards.tsx";
 import { EvaluationDimensions } from "./EvaluationDimensions.tsx";

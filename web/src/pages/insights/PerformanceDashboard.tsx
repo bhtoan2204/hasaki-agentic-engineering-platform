@@ -1,6 +1,23 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { BreakdownBars, DataTable, Metric, Notice, Panel, ratio, runLink, type Row } from "../analytics/shared.tsx";
-export function PerformanceDashboard({ data, page, onPage }: { data: Row; page: number; onPage: (n: number) => void }) {
+import {
+  BreakdownBars,
+  DataTable,
+  Metric,
+  Notice,
+  Panel,
+  ratio,
+  runLink,
+  type Row,
+} from "../analytics/shared.tsx";
+export function PerformanceDashboard({
+  data,
+  page,
+  onPage,
+}: {
+  data: Row;
+  page: number;
+  onPage: (n: number) => void;
+}) {
   const { t, status } = useI18n();
   const s = data.summary ?? {};
   return (
@@ -9,7 +26,11 @@ export function PerformanceDashboard({ data, page, onPage }: { data: Row; page: 
       <div className="ins-stats">
         <Metric label="runs" value={s.runs} />
         <Metric label="attempts" value={s.attempts} />
-        <Metric label="completion" value={ratio(s.completed_runs, s.runs)} style="pct" />
+        <Metric
+          label="completion"
+          value={ratio(s.completed_runs, s.runs)}
+          style="pct"
+        />
         <Metric
           label="verified"
           value={ratio(s.verified_runs, s.evaluated_runs)}
@@ -17,18 +38,30 @@ export function PerformanceDashboard({ data, page, onPage }: { data: Row; page: 
           hint={t("an.verifiedHint")}
         />
         <Metric label="verifiedTasks" value={s.verified_tasks} />
-        <Metric label="retry" value={ratio(s.retried_attempts, s.attempts)} style="pct" />
+        <Metric
+          label="retry"
+          value={ratio(s.retried_attempts, s.attempts)}
+          style="pct"
+        />
         <Metric label="executionP50" value={s.execution_p50_ms} style="ms" />
         <Metric label="executionP95" value={s.execution_p95_ms} style="ms" />
         <Metric label="workflowP95" value={s.workflow_p95_ms} style="ms" />
         <Metric label="queue" value={s.queue_ms} style="ms" />
         <Metric label="human" value={s.human_wait_ms} style="ms" />
         <Metric label="tools" value={s.tool_ms} style="ms" />
-        <Metric label="toolError" value={ratio(s.tool_failures, s.tool_calls)} style="pct" />
+        <Metric
+          label="toolError"
+          value={ratio(s.tool_failures, s.tool_calls)}
+          style="pct"
+        />
       </div>
       <div className="ins-grid">
         <Panel title={t("an.failures")}>
-          <BreakdownBars rows={data.failures ?? []} field="attempts" labelKey="category" />
+          <BreakdownBars
+            rows={data.failures ?? []}
+            field="attempts"
+            labelKey="category"
+          />
         </Panel>
         <Panel title={t("an.coverage")}>
           <DataTable

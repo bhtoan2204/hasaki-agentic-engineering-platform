@@ -1,29 +1,160 @@
 /* Authentication layouts use the shared components and design tokens. */
-.auth-login { min-height: 100dvh; overflow: auto; padding: var(--sp-6); display: grid; place-items: center; background: radial-gradient(ellipse at top, var(--brand-50), var(--bg) 65%) }
-.auth-login-inner { width: min(100%, 440px) }
-.auth-login-tools { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-bottom: var(--sp-6) }
-.auth-login .brand-lockup { margin-bottom: var(--sp-6) }
-.auth-login .card { padding: var(--sp-8) }
-.auth-login .ph-title { font-size: var(--fs-xl) }
-.auth-login .ph-main { min-width: 0 }
-.auth-submit { width: 100%; justify-content: center; margin-top: var(--sp-4); min-height: 42px }
-.auth-password { position: relative }
-.auth-password input { padding-right: 46px }
-.auth-password button { position: absolute; right: 4px; top: 50%; transform: translateY(-50%) }
-.auth-feedback { margin: var(--sp-3) 0 }
-.auth-detail { max-width: 700px }
-.auth-detail dl { display: grid; grid-template-columns: minmax(100px, 1fr) 2fr; gap: var(--sp-4); margin: 0 }
-.auth-detail dt { color: var(--muted) }
-.auth-detail dd { margin: 0; overflow-wrap: anywhere }
-.auth-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--sp-5) }
-.auth-user { display: flex; align-items: center; gap: var(--sp-3); min-width: 160px }
-.auth-users td:last-child { width: 1%; white-space: nowrap }
-.auth-users .toolbar { justify-content: space-between }
-.auth-users .search { max-width: 100% }
-.auth-users .badge { white-space: nowrap }
-.auth-notice { padding: var(--sp-3); border-radius: var(--r-sm); background: var(--brand-50); color: var(--brand-700) }
-.auth-command { overflow-wrap: anywhere; white-space: pre-wrap }
-@media (max-width: 600px) { .auth-login { padding: var(--sp-4) } .auth-login .card { padding: var(--sp-5) } .auth-detail dl { grid-template-columns: 1fr; gap: var(--sp-2) } .auth-detail dd { margin-bottom: var(--sp-3) } }
+.auth-login {
+    min-height: 100dvh;
+    overflow: auto;
+    padding: var(--sp-6);
+    display: grid;
+    place-items: center;
+    background: radial-gradient(ellipse at top, var(--brand-50), var(--bg) 65%)
+}
 
-.auth-password + small { display: block; margin-top: var(--sp-1) }
-.auth-login label, .auth-detail label, .ui-dialog .field > label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); margin-bottom: var(--sp-1) }
+.auth-login-inner {
+    width: min(100%, 440px)
+}
+
+.auth-login-tools {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-6)
+}
+
+.auth-login .brand-lockup {
+    margin-bottom: var(--sp-6)
+}
+
+.auth-login .card {
+    padding: var(--sp-8)
+}
+
+.auth-login .ph-title {
+    font-size: var(--fs-xl)
+}
+
+.auth-login .ph-main {
+    min-width: 0
+}
+
+.auth-submit {
+    width: 100%;
+    justify-content: center;
+    margin-top: var(--sp-4);
+    min-height: 42px
+}
+
+.auth-password {
+    position: relative
+}
+
+.auth-password input {
+    padding-right: 46px
+}
+
+.auth-password button {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%)
+}
+
+.auth-feedback {
+    margin: var(--sp-3) 0
+}
+
+.auth-detail {
+    max-width: 700px
+}
+
+.auth-detail dl {
+    display: grid;
+    grid-template-columns: minmax(100px, 1fr) 2fr;
+    gap: var(--sp-4);
+    margin: 0
+}
+
+.auth-detail dt {
+    color: var(--muted)
+}
+
+.auth-detail dd {
+    margin: 0;
+    overflow-wrap: anywhere
+}
+
+.auth-actions {
+    display: flex;
+    gap: var(--sp-2);
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin-top: var(--sp-5)
+}
+
+.auth-user {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-width: 160px
+}
+
+.auth-users td:last-child {
+    width: 1%;
+    white-space: nowrap
+}
+
+.auth-users .toolbar {
+    justify-content: space-between
+}
+
+.auth-users .search {
+    max-width: 100%
+}
+
+.auth-users .badge {
+    white-space: nowrap
+}
+
+.auth-notice {
+    padding: var(--sp-3);
+    border-radius: var(--r-sm);
+    background: var(--brand-50);
+    color: var(--brand-700)
+}
+
+.auth-command {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap
+}
+
+@media (max-width: 600px) {
+    .auth-login {
+        padding: var(--sp-4)
+    }
+
+    .auth-login .card {
+        padding: var(--sp-5)
+    }
+
+    .auth-detail dl {
+        grid-template-columns: 1fr;
+        gap: var(--sp-2)
+    }
+
+    .auth-detail dd {
+        margin-bottom: var(--sp-3)
+    }
+}
+
+.auth-password+small {
+    display: block;
+    margin-top: var(--sp-1)
+}
+
+.auth-login label,
+.auth-detail label,
+.ui-dialog .field>label {
+    display: block;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--ink-2);
+    margin-bottom: var(--sp-1)
+}

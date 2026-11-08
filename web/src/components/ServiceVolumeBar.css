@@ -1,17 +1,71 @@
 /* Each row uses identical tracks; metric lengths cannot shift bar origins. */
-.an-health-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); container-type: inline-size; }
-.service-volume-bar {
-  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) 5ch 6ch;
-  align-items: center; gap: var(--sp-3); width: 100%; min-width: 0; min-height: var(--control-h-lg);
-  padding: var(--sp-2); border: 1px solid transparent; background: transparent; color: var(--ink);
-  box-shadow: none; white-space: normal; text-align: left; font-size: var(--fs-sm); line-height: 1.5;
+.an-health-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+  container-type: inline-size;
 }
-.service-volume-bar:hover { background: var(--surface-2); border-color: var(--line); }
-.service-volume-track { display: block; height: 10px; min-width: 0; background: var(--surface-3); border-radius: var(--r-pill); overflow: hidden; }
-.service-volume-track > span { display: block; height: 100%; border-radius: inherit; }
-.service-volume-value, .service-volume-share { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.service-volume-share { color: var(--muted); font-size: var(--fs-xs); }
+
+.service-volume-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) 5ch 6ch;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-h-lg);
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+  white-space: normal;
+  text-align: left;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.service-volume-bar:hover {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+.service-volume-track {
+  display: block;
+  height: 10px;
+  min-width: 0;
+  background: var(--surface-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+
+.service-volume-track>span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.service-volume-value,
+.service-volume-share {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.service-volume-share {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
 @container (max-width: 420px) {
-  .service-volume-bar { grid-template-columns: minmax(0, 1fr) 5ch 6ch; gap: var(--sp-2); }
-  .service-volume-bar .service-identity { grid-column: 1 / -1; }
+  .service-volume-bar {
+    grid-template-columns: minmax(0, 1fr) 5ch 6ch;
+    gap: var(--sp-2);
+  }
+
+  .service-volume-bar .service-identity {
+    grid-column: 1 / -1;
+  }
 }

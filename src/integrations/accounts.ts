@@ -1,3 +1,7 @@
+import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
+import { botKey } from "../telegram/client.ts";
+import { pool, one } from "../db/pool.ts";
+import { HttpError } from "../http/error.ts";
 import { config } from "../config.ts";
 import { settings } from "../db.ts";
 import { deleteUserSecret, getUserSecret, putUserSecret, getSharedSecret, putSharedSecret } from "../auth/secrets.ts";
@@ -55,13 +59,15 @@ async function telegramApi(token: string, method: string, body?: unknown) {
     throw new Error(`không gọi được Telegram: ${e.name === "TimeoutError" ? "timeout" : e.message.split(token).join("***")}`);
   });
   const j: any = await res.json().catch(() => ({}));
-  if (!res.ok || !j.ok) throw new Error(`Telegram ${method}: ${j.description ?? `HTTP ${res.status}`}`);
+  if (!res.ok || !j.ok) throw new Error(`Telegram ${method}: ${String(j.description ?? `HTTP ${res.status}`).split(token).join("***")}`);
   return j.result;
 }
 
-export async function telegramStatus(userId?: number) {
+export async function telegramStatus(userId?: number, canManage = false) {
   return {
-    configured: !!(config.telegram.botToken && config.telegram.chatId),
+    configured: !!config.telegram.botToken,
+    canManage,
+    ...(userId ? await bindingStatus(userId) : {}),
     /** Where THIS user's step notifications (question / approval) go. Without it they are not sent at all. */
     myChatId: userId ? await getUserSecret(userId, "telegram_chat") : null,
     source: saved.telegram ? "platform" : fromEnv.telegram.botToken || fromEnv.telegram.chatId ? "env" : "none",
@@ -77,7 +83,7 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
   const chatId = String(input.chatId ?? "").trim();
   if (!botToken) throw new Error("cần bot token (lấy từ @BotFather)");
   if (!/^\d+:[\w-]{20,}$/.test(botToken)) throw new Error("bot token không đúng dạng <số>:<chuỗi> của @BotFather");
-  if (!/^-?\d+$/.test(chatId) && !/^@\w{4,}$/.test(chatId)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
+  if (chatId && !/^-?\d+$/.test(chatId) && !/^@\w{4,}$/.test(chatId)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
   const me = await telegramApi(botToken, "getMe");
   saved.telegram = { botToken, chatId };
   await putSharedSecret("telegram", JSON.stringify(saved.telegram));
@@ -89,7 +95,17 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
 export async function telegramChats(input: { botToken?: string }) {
   const token = (input.botToken ?? "").trim() || config.telegram.botToken;
   if (!token) throw new Error("nhập bot token trước, rồi nhắn /start cho bot");
-  const updates: any[] = await telegramApi(token, "getUpdates");
+  const key = botKey(token), client = await pool.connect();
+  let updates: any[];
+  const locked = (await client.query("SELECT pg_try_advisory_lock($1::int) AS ok",[advisoryKey(key)])).rows[0].ok;
+  try {
+    const active = await one(client,"SELECT bot_key FROM telegram_consumers WHERE bot_key=$1 AND lease_until>now()",[key]);
+    if (!locked || active || config.telegram.mode !== "off") return observedChats(key);
+    updates = await telegramApi(token,"getUpdates");
+  } finally {
+    if(locked) await client.query("SELECT pg_advisory_unlock($1::int)",[advisoryKey(key)]).catch(()=>{});
+    client.release();
+  }
   const chats = new Map<string, { id: string; name: string; type: string }>();
   for (const u of updates) {
     const c = u.message?.chat ?? u.channel_post?.chat ?? u.my_chat_member?.chat ?? u.edited_message?.chat;
@@ -190,6 +206,8 @@ export async function adoptEnv(which: "telegram" | "bitbucket", userId?: number)
 /** The chat that receives this user's private run notifications. The shared bot token is unchanged. */
 export async function setTelegramDestination(userId: number, chatId: string) {
   const id = String(chatId ?? "").trim();
+  const binding = await one(pool,"SELECT chat_id FROM telegram_bindings WHERE user_id=$1",[userId]);
+  if(binding && binding.chat_id!==id) throw new HttpError(409,"Disconnect Telegram before changing its verified destination");
   if (!id) {
     await deleteUserSecret(userId, "telegram_chat");
     return { chatId: null };

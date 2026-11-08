@@ -1,3 +1,4 @@
+import { startTelegramTransport } from "./telegram/transport.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
 import { background } from "./workflow/background.ts";
@@ -73,6 +74,7 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 const scheduler = startScheduler();
+const telegram = startTelegramTransport();
 if (config.codeIntelligence.enabled) background("code intelligence startup", async () => {
   for (const repo of await repositories.list()) if (repo.provider !== "benchmark" && repo.enabled && repo.allowed_actions.includes("read")) await enqueueCodeIndex(repo.name).catch(() => {});
 });
@@ -93,6 +95,7 @@ async function shutdown(reason: string, code: number) {
   // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.
   setTimeout(() => process.exit(code), 30_000).unref();
   try {
+    await telegram.stop();
     await scheduler.drain(reason);
   } catch (e) {
     console.error("shutdown:", (e as Error).message);

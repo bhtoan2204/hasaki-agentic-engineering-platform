@@ -191,22 +191,13 @@ The previous vanilla UI is still served at `/classic`.
 
 Node ≥ 22.18 (runs `.ts` directly), the selected agent CLI logged in, Git, and personal Bitbucket credentials saved in Integrations.
 
-## Telegram notifications (optional)
+## Telegram notifications and interactive workflows (optional)
 
-When a step starts waiting for you (WAITING_INPUT: questions, WAITING_APPROVAL: approval / report review / approval gate)
-the platform sends one Telegram message with the task, run, step and reason, plus a link that opens the run with that
-step selected (`#/runs/<id>/<step>`). One-way only: you answer/approve in the app.
+Telegram can now approve/reject workflow gates and answer questions from verified private accounts, using the existing workflow engine. Connect your own account in **Integrations → Telegram** through the short-lived bot link; manually entered chat IDs never authorize actions.
 
-1. Send any message (e.g. `/start`) to your bot, then get your chat id:
-   `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":[-0-9]*'`
-2. `cp .env.example .env` and set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (`.env` is git-ignored;
-   `npm start`, `npm run dev` and `npm run serve` load it with `node --env-file-if-exists=.env`).
-   Exported shell variables work too.
-3. Restart. Without both variables nothing is sent. Links use `publicUrl`: an `https://` publicUrl becomes a
-   "Mở bước cần xử lý" button; a local URL (default `http://localhost:4545`) is sent as a text link.
+Use `TELEGRAM_MODE=polling` for local/WSL installations without a public endpoint, or `TELEGRAM_MODE=webhook` with HTTPS and a webhook secret. The default `off` retains legacy one-way notifications. Existing shared scan summaries and private notification destinations remain supported.
 
-Sending is fire-and-forget with a 5 s timeout (Telegram and the webhook POST). Failures are logged without the token
-and never affect the workflow. Run-level "WAITING" goes to the webhook only, so Telegram gets one message per waiting step.
+See [Interactive Telegram setup, security and recovery](docs/integrations/interactive-telegram.md) for configuration, binding, transport exclusivity, message behavior and mocked tests. Do not run another `getUpdates` consumer against an active platform bot.
 
 ## Concepts
 

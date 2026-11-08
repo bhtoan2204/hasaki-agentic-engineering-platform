@@ -626,7 +626,12 @@ export function ProductionOverview({
                 />
               ),
             },
-            { key: "events", label: "events", style: "number", minWidth: "4rem" },
+            {
+              key: "events",
+              label: "events",
+              style: "number",
+              minWidth: "4rem",
+            },
             {
               key: "error_share_pct",
               label: "errorShare",

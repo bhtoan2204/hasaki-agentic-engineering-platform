@@ -18,18 +18,26 @@ export function TipLayer() {
   const tipRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const described = { el: null as HTMLElement | null, prev: null as string | null };
+    const described = {
+      el: null as HTMLElement | null,
+      prev: null as string | null,
+    };
     const shown = { el: null as HTMLElement | null };
     const clearDescribed = () => {
       if (described.el) {
-        if (described.prev == null) described.el.removeAttribute("aria-describedby");
+        if (described.prev == null)
+          described.el.removeAttribute("aria-describedby");
         else described.el.setAttribute("aria-describedby", described.prev);
       }
       described.el = null;
       described.prev = null;
     };
     const pick = () => {
-      const el = hover.current?.isConnected ? hover.current : focus.current?.isConnected ? focus.current : null;
+      const el = hover.current?.isConnected
+        ? hover.current
+        : focus.current?.isConnected
+          ? focus.current
+          : null;
       const value = el?.getAttribute("data-tip")?.trim() ?? "";
       const next = el && value ? el : null;
       if (next === shown.el) return;
@@ -45,13 +53,19 @@ export function TipLayer() {
         clearDescribed();
         described.el = next;
         described.prev = next.getAttribute("aria-describedby");
-        next.setAttribute("aria-describedby", [described.prev, "app-tip"].filter(Boolean).join(" "));
+        next.setAttribute(
+          "aria-describedby",
+          [described.prev, "app-tip"].filter(Boolean).join(" "),
+        );
       }
       setAnchor(next);
       setText(value);
       setBox(null);
     };
-    const fromEvent = (target: EventTarget | null) => (target instanceof Element ? target.closest<HTMLElement>("[data-tip]") : null);
+    const fromEvent = (target: EventTarget | null) =>
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-tip]")
+        : null;
     const onOver = (e: MouseEvent) => {
       hover.current = fromEvent(e.target);
       pick();
@@ -123,7 +137,8 @@ export function TipLayer() {
       let top = !fitsAbove || a.top < t.height + GAP + MARGIN ? below : above;
       if (!fitsBelow && fitsAbove) top = above;
       if (top < MARGIN) top = MARGIN;
-      if (top + t.height > vh - MARGIN) top = Math.max(MARGIN, vh - MARGIN - t.height);
+      if (top + t.height > vh - MARGIN)
+        top = Math.max(MARGIN, vh - MARGIN - t.height);
       const coversAnchor = top < a.bottom && top + t.height > a.top;
       if (coversAnchor && below + t.height <= vh - MARGIN) top = below;
       let left = a.left + a.width / 2 - t.width / 2;
@@ -150,7 +165,17 @@ export function TipLayer() {
 
   if (!text) return null;
   return createPortal(
-    <div id="app-tip" ref={tipRef} className="app-tip" role="tooltip" style={{ top: box?.top ?? 0, left: box?.left ?? 0, visibility: box ? "visible" : "hidden" }}>
+    <div
+      id="app-tip"
+      ref={tipRef}
+      className="app-tip"
+      role="tooltip"
+      style={{
+        top: box?.top ?? 0,
+        left: box?.left ?? 0,
+        visibility: box ? "visible" : "hidden",
+      }}
+    >
       {text}
     </div>,
     document.body,

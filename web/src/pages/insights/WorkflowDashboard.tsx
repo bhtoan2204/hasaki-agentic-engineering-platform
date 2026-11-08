@@ -1,6 +1,24 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { BreakdownBars, DataTable, Metric, Notice, Panel, Trend, dateCell, runLink, type Row } from "../analytics/shared.tsx";
-export function WorkflowDashboard({ data, page, onPage }: { data: Row; page: number; onPage: (n: number) => void }) {
+import {
+  BreakdownBars,
+  DataTable,
+  Metric,
+  Notice,
+  Panel,
+  Trend,
+  dateCell,
+  runLink,
+  type Row,
+} from "../analytics/shared.tsx";
+export function WorkflowDashboard({
+  data,
+  page,
+  onPage,
+}: {
+  data: Row;
+  page: number;
+  onPage: (n: number) => void;
+}) {
   const { t, status } = useI18n();
   const e = data.evidence ?? {};
   return (
@@ -13,7 +31,11 @@ export function WorkflowDashboard({ data, page, onPage }: { data: Row; page: num
           hint={t("an.labeled", { n: e.labeled_repositories ?? 0 })}
         />
         <Metric label="switching" value={e.agent_switches} />
-        <Metric label="missing" value={e.missing_context} hint={t("an.contextHint")} />
+        <Metric
+          label="missing"
+          value={e.missing_context}
+          hint={t("an.contextHint")}
+        />
       </div>
       <div className="ins-grid">
         <Panel title={t("an.throughput")}>
@@ -97,9 +119,16 @@ export function WorkflowDashboard({ data, page, onPage }: { data: Row; page: num
             {
               key: "verified",
               label: "verification",
-              render: (r) => (r.verified == null ? "—" : t(r.verified ? "an.passed" : "an.notPassed")),
+              render: (r) =>
+                r.verified == null
+                  ? "—"
+                  : t(r.verified ? "an.passed" : "an.notPassed"),
             },
-            { key: "created_at", label: "firstSeen", render: (r) => dateCell(r.created_at) },
+            {
+              key: "created_at",
+              label: "firstSeen",
+              render: (r) => dateCell(r.created_at),
+            },
           ]}
         />
       </Panel>

@@ -2,7 +2,10 @@ import { z } from "zod";
 import { q, one, withTx, type Db } from "../db/pool.ts";
 import { pool } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
-import { RECOMMENDATION_VERSION, recommendationDetail } from "./recommendations.ts";
+import {
+  RECOMMENDATION_VERSION,
+  recommendationDetail,
+} from "./recommendations.ts";
 import { resolveStepAgent } from "../agent/stepAgent.ts";
 import { handoffReadiness } from "../agent/handoff.ts";
 import type { WorkflowSpec } from "../workflow/types.ts";
@@ -18,7 +21,11 @@ const Policy = z
 export async function saveOptimizationPolicy(owner: number, raw: unknown) {
   const input = Policy.parse(raw),
     rec = await recommendationDetail(input.recommendation_id, owner);
-  if (input.category !== rec.category) throw new HttpError(400, "Policy category must match recommendation evidence");
+  if (input.category !== rec.category)
+    throw new HttpError(
+      400,
+      "Policy category must match recommendation evidence",
+    );
   if (
     input.enabled &&
     (rec.version !== RECOMMENDATION_VERSION ||
@@ -27,13 +34,23 @@ export async function saveOptimizationPolicy(owner: number, raw: unknown) {
       rec.decision.plan?.length !== 1 ||
       new Date(rec.expires_at).getTime() <= Date.now())
   )
-    throw new HttpError(409, "Only current, supported single-provider recommendations may influence future defaults");
+    throw new HttpError(
+      409,
+      "Only current, supported single-provider recommendations may influence future defaults",
+    );
   return withTx(async (c) => {
     const row = await one(
       c,
       `INSERT INTO agent_optimization_policies(owner_id,category,step_type,recommendation_id,enabled,allow_unknown_cost) VALUES($1,$2,$3,$4,$5,$6)
  ON CONFLICT(owner_id,category,step_type) DO UPDATE SET recommendation_id=excluded.recommendation_id,enabled=excluded.enabled,allow_unknown_cost=excluded.allow_unknown_cost,updated_at=now() RETURNING *`,
-      [owner, input.category, input.step_type, input.recommendation_id, input.enabled, input.allow_unknown_cost],
+      [
+        owner,
+        input.category,
+        input.step_type,
+        input.recommendation_id,
+        input.enabled,
+        input.allow_unknown_cost,
+      ],
     );
     await q(
       c,
@@ -44,7 +61,11 @@ export async function saveOptimizationPolicy(owner: number, raw: unknown) {
   });
 }
 export async function optimizationPolicies(owner: number) {
-  return q(pool, "SELECT * FROM agent_optimization_policies WHERE owner_id=$1 ORDER BY id", [owner]);
+  return q(
+    pool,
+    "SELECT * FROM agent_optimization_policies WHERE owner_id=$1 ORDER BY id",
+    [owner],
+  );
 }
 /** New-run defaults only. Explicit run/step/model choices and all permission/verification settings remain authoritative. */
 export async function applyOptimizationDefaults(
@@ -55,7 +76,8 @@ export async function applyOptimizationDefaults(
   explicitProvider: boolean,
   profile: "FAST" | "STANDARD" | "DEEP" = "STANDARD",
 ) {
-  const category = typeof inputs.task_category === "string" ? inputs.task_category : null;
+  const category =
+    typeof inputs.task_category === "string" ? inputs.task_category : null;
   const graph = structuredClone(spec);
   const decisions: any[] = [];
   if (!category || explicitProvider) return { graph, decisions };
@@ -66,7 +88,8 @@ export async function applyOptimizationDefaults(
   );
   for (const step of graph.steps) {
     const original = step.config as Record<string, any>;
-    if (original.agent?.provider || original.model || original.codex_model) continue;
+    if (original.agent?.provider || original.model || original.codex_model)
+      continue;
     const p = policies.find((p) => p.step_type === step.type);
     if (!p) continue;
     const provenance: any = {
@@ -98,9 +121,14 @@ export async function applyOptimizationDefaults(
           reasoning_effort: agent.reasoning_effort ?? null,
         },
       };
-      const effective = resolveStepAgent({ agent_provider: "claude", profile }, { ...step, config: cfg })!;
+      const effective = resolveStepAgent(
+        { agent_provider: "claude", profile },
+        { ...step, config: cfg },
+      )!;
       if (agent.provider !== "claude" && original.delegation?.enabled)
-        throw new Error("Delegation permission cannot be enforced by target provider");
+        throw new Error(
+          "Delegation permission cannot be enforced by target provider",
+        );
       const ready = await handoffReadiness(effective);
       if (!ready.ok) throw new Error(ready.error ?? "Provider unavailable");
       provenance.applied = true;

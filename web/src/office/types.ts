@@ -1,19 +1,61 @@
 /** Agent Office: view types. Pure data — no React, so the mapper can be unit-tested under node. */
 
 /** The exact step status model of the backend (src/workflow/types.ts STEP_STATUSES). */
-export type StepStatus = "PENDING" | "READY" | "RUNNING" | "WAITING_INPUT" | "WAITING_APPROVAL" | "COMPLETED" | "FAILED" | "RETRYING" | "CANCELED" | "SKIPPED";
+export type StepStatus =
+  | "PENDING"
+  | "READY"
+  | "RUNNING"
+  | "WAITING_INPUT"
+  | "WAITING_APPROVAL"
+  | "COMPLETED"
+  | "FAILED"
+  | "RETRYING"
+  | "CANCELED"
+  | "SKIPPED";
 
 /** Logical workflow responsibilities (one character each). Not independent AI workers. */
-export type Role = "analyst" | "architect" | "developer" | "tester" | "reviewer" | "pr";
+export type Role =
+  | "analyst"
+  | "architect"
+  | "developer"
+  | "tester"
+  | "reviewer"
+  | "pr";
 
 /** What the character's body does — derived from step status only. */
 /** "greet" is decorative only (Overview mascot) — the mapper never produces it. */
-export type Pose = "idle" | "prepare" | "work" | "ask" | "approval" | "celebrate" | "done" | "frustrated" | "stopped" | "skipped" | "greet";
+export type Pose =
+  | "idle"
+  | "prepare"
+  | "work"
+  | "ask"
+  | "approval"
+  | "celebrate"
+  | "done"
+  | "frustrated"
+  | "stopped"
+  | "skipped"
+  | "greet";
 
 /** What the character's hands do while working — derived from real tool calls / step type. */
 export type Activity =
-  | "reading" | "searching" | "typing" | "thinking" | "writing" | "testing" | "terminal" | "git" | "browsing"
-  | "delegating" | "planning" | "asking" | "submitting" | "sketching" | "reviewing" | "packaging" | "knowledge";
+  | "reading"
+  | "searching"
+  | "typing"
+  | "thinking"
+  | "writing"
+  | "testing"
+  | "terminal"
+  | "git"
+  | "browsing"
+  | "delegating"
+  | "planning"
+  | "asking"
+  | "submitting"
+  | "sketching"
+  | "reviewing"
+  | "packaging"
+  | "knowledge";
 
 export interface StepLite {
   key: string;

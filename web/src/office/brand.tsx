@@ -13,9 +13,20 @@ const MARK = [
   "wwrwwwrww",
   ".wwwwwww.",
 ];
-export function HasakiMark({ x, y, scale = 1 }: { x: number; y: number; scale?: number }) {
+export function HasakiMark({
+  x,
+  y,
+  scale = 1,
+}: {
+  x: number;
+  y: number;
+  scale?: number;
+}) {
   return (
-    <g transform={`translate(${x} ${y}) scale(${scale})`} aria-label="Hasaki (placeholder mark)">
+    <g
+      transform={`translate(${x} ${y}) scale(${scale})`}
+      aria-label="Hasaki (placeholder mark)"
+    >
       <Px rows={MARK} pal={{ w: "#ffffff", r: "#2f6b4f" }} />
     </g>
   );

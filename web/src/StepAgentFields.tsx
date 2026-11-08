@@ -13,7 +13,9 @@ export function StepAgentFields({
   onChange: (v: Record<string, any>) => void;
 }) {
   const { locale } = useI18n();
-  const { data: providers } = useApi<Array<{ id: string; models?: string[] }>>("/api/agent-providers");
+  const { data: providers } = useApi<Array<{ id: string; models?: string[] }>>(
+    "/api/agent-providers",
+  );
   const en = locale === "en";
   const set = (key: string, val: unknown) => {
     const next = { ...value };
@@ -24,13 +26,92 @@ export function StepAgentFields({
   const provider = value.provider;
   return (
     <>
-      {allowVerification && <details><summary>{en?"Provider fallback policy":"Chính sách agent dự phòng"}</summary>
-        <Field label={en?"Fallback mode":"Chế độ dự phòng"}><select value={value.fallback?.mode??"manual"} onChange={e=>set("fallback",{...value.fallback,mode:e.target.value})}>{["disabled","manual","automatic"].map(m=><option key={m}>{m}</option>)}</select></Field>
-        <Field label={en?"Fallback provider order":"Thứ tự agent dự phòng"}><input value={(value.fallback?.providers??["claude","codex","cursor","antigravity"]).join(", ")} onChange={e=>set("fallback",{...value.fallback,providers:e.target.value.split(",").map(v=>v.trim()).filter(Boolean)})}/></Field>
-        <Field label={en?"Maximum switches":"Số lần chuyển tối đa"}><input type="number" min={0} max={10} value={value.fallback?.max_switches??2} onChange={e=>set("fallback",{...value.fallback,max_switches:Number(e.target.value)})}/></Field>
-        <label><input type="checkbox" checked={value.fallback?.allow_unknown_cost??false} onChange={e=>set("fallback",{...value.fallback,allow_unknown_cost:e.target.checked})}/>{en?"Allow automatic continuation when cost is unknown":"Cho phép tự động tiếp tục khi chưa rõ chi phí"}</label>
-        <label><input type="checkbox" checked={value.fallback?.allow_budget_failure??false} onChange={e=>set("fallback",{...value.fallback,allow_budget_failure:e.target.checked})}/>{en?"Allow automatic continuation after a budget/billing failure":"Cho phép tự động tiếp tục sau lỗi ngân sách/thanh toán"}</label>
-      </details>}
+      {allowVerification && (
+        <details>
+          <summary>
+            {en ? "Provider fallback policy" : "Chính sách agent dự phòng"}
+          </summary>
+          <Field label={en ? "Fallback mode" : "Chế độ dự phòng"}>
+            <select
+              value={value.fallback?.mode ?? "manual"}
+              onChange={(e) =>
+                set("fallback", { ...value.fallback, mode: e.target.value })
+              }
+            >
+              {["disabled", "manual", "automatic"].map((m) => (
+                <option key={m}>{m}</option>
+              ))}
+            </select>
+          </Field>
+          <Field
+            label={en ? "Fallback provider order" : "Thứ tự agent dự phòng"}
+          >
+            <input
+              value={(
+                value.fallback?.providers ?? [
+                  "claude",
+                  "codex",
+                  "cursor",
+                  "antigravity",
+                ]
+              ).join(", ")}
+              onChange={(e) =>
+                set("fallback", {
+                  ...value.fallback,
+                  providers: e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </Field>
+          <Field label={en ? "Maximum switches" : "Số lần chuyển tối đa"}>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={value.fallback?.max_switches ?? 2}
+              onChange={(e) =>
+                set("fallback", {
+                  ...value.fallback,
+                  max_switches: Number(e.target.value),
+                })
+              }
+            />
+          </Field>
+          <label>
+            <input
+              type="checkbox"
+              checked={value.fallback?.allow_unknown_cost ?? false}
+              onChange={(e) =>
+                set("fallback", {
+                  ...value.fallback,
+                  allow_unknown_cost: e.target.checked,
+                })
+              }
+            />
+            {en
+              ? "Allow automatic continuation when cost is unknown"
+              : "Cho phép tự động tiếp tục khi chưa rõ chi phí"}
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={value.fallback?.allow_budget_failure ?? false}
+              onChange={(e) =>
+                set("fallback", {
+                  ...value.fallback,
+                  allow_budget_failure: e.target.checked,
+                })
+              }
+            />
+            {en
+              ? "Allow automatic continuation after a budget/billing failure"
+              : "Cho phép tự động tiếp tục sau lỗi ngân sách/thanh toán"}
+          </label>
+        </details>
+      )}
 
       <div className="grid2">
         <Field label={en ? "Agent provider" : "Nhà cung cấp agent"}>
@@ -38,10 +119,17 @@ export function StepAgentFields({
             aria-label={en ? "Agent provider" : "Nhà cung cấp agent"}
             value={provider ?? ""}
             onChange={(e) =>
-              onChange({ ...value, provider: e.target.value || undefined, model: null, reasoning_effort: null })
+              onChange({
+                ...value,
+                provider: e.target.value || undefined,
+                model: null,
+                reasoning_effort: null,
+              })
             }
           >
-            <option value="">{en ? "Inherit run default" : "Theo mặc định lượt chạy"}</option>
+            <option value="">
+              {en ? "Inherit run default" : "Theo mặc định lượt chạy"}
+            </option>
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
             <option value="cursor">Cursor</option>
@@ -76,9 +164,13 @@ export function StepAgentFields({
         <Field label={en ? "Execution profile" : "Hồ sơ thực thi"}>
           <select
             value={value.execution_profile ?? ""}
-            onChange={(e) => set("execution_profile", e.target.value || undefined)}
+            onChange={(e) =>
+              set("execution_profile", e.target.value || undefined)
+            }
           >
-            <option value="">{en ? "Run default" : "Mặc định lượt chạy"}</option>
+            <option value="">
+              {en ? "Run default" : "Mặc định lượt chạy"}
+            </option>
             {["FAST", "STANDARD", "DEEP"].map((v) => (
               <option key={v}>{v}</option>
             ))}
@@ -90,7 +182,9 @@ export function StepAgentFields({
             value={value.reasoning_effort ?? ""}
             onChange={(e) => set("reasoning_effort", e.target.value || null)}
           >
-            <option value="">{en ? "Provider default" : "Mặc định nhà cung cấp"}</option>
+            <option value="">
+              {en ? "Provider default" : "Mặc định nhà cung cấp"}
+            </option>
             {(provider === "codex"
               ? ["none", "minimal", "low", "medium", "high", "xhigh"]
               : ["low", "medium", "high", "xhigh", "max"]
@@ -105,7 +199,12 @@ export function StepAgentFields({
             min={1000}
             max={86400000}
             value={value.timeout_ms ?? ""}
-            onChange={(e) => set("timeout_ms", e.target.value ? Number(e.target.value) : undefined)}
+            onChange={(e) =>
+              set(
+                "timeout_ms",
+                e.target.value ? Number(e.target.value) : undefined,
+              )
+            }
           />
         </Field>
         <Field label={en ? "Context token budget" : "Ngân sách token ngữ cảnh"}>
@@ -114,7 +213,12 @@ export function StepAgentFields({
             min={2000}
             max={64000}
             value={value.context_tokens ?? ""}
-            onChange={(e) => set("context_tokens", e.target.value ? Number(e.target.value) : undefined)}
+            onChange={(e) =>
+              set(
+                "context_tokens",
+                e.target.value ? Number(e.target.value) : undefined,
+              )
+            }
           />
         </Field>
         <Field label={en ? "Retry attempts" : "Số lần thử tối đa"}>
@@ -124,18 +228,30 @@ export function StepAgentFields({
             max={10}
             value={value.retry?.max_attempts ?? ""}
             onChange={(e) =>
-              set("retry", e.target.value ? { ...value.retry, max_attempts: Number(e.target.value) } : undefined)
+              set(
+                "retry",
+                e.target.value
+                  ? { ...value.retry, max_attempts: Number(e.target.value) }
+                  : undefined,
+              )
             }
           />
         </Field>
-        <Field label={en ? "Retry backoff (s)" : "Thời gian chờ thử lại (giây)"}>
+        <Field
+          label={en ? "Retry backoff (s)" : "Thời gian chờ thử lại (giây)"}
+        >
           <input
             type="number"
             min={0}
             max={3600}
             disabled={!value.retry}
             value={value.retry?.backoff_seconds ?? ""}
-            onChange={(e) => set("retry", { ...value.retry, backoff_seconds: Number(e.target.value) })}
+            onChange={(e) =>
+              set("retry", {
+                ...value.retry,
+                backoff_seconds: Number(e.target.value),
+              })
+            }
           />
         </Field>
       </div>
@@ -151,7 +267,12 @@ export function StepAgentFields({
           <input
             value={value.verification?.command ?? ""}
             onChange={(e) =>
-              set("verification", e.target.value ? { ...value.verification, command: e.target.value } : undefined)
+              set(
+                "verification",
+                e.target.value
+                  ? { ...value.verification, command: e.target.value }
+                  : undefined,
+              )
             }
           />
         </Field>

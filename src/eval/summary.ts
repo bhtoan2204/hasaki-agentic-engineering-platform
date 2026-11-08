@@ -20,8 +20,12 @@ export interface EvalRow {
   tokens: number | string | null;
 }
 
-const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
-const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 100) / 100 : null);
+const pct = (a: number, b: number) =>
+  b ? Math.round((a / b) * 1000) / 10 : null;
+const avg = (xs: number[]) =>
+  xs.length
+    ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 100) / 100
+    : null;
 
 export function summarizeEval(rows: EvalRow[]) {
   const groups = new Map<string, EvalRow[]>();
@@ -32,25 +36,64 @@ export function summarizeEval(rows: EvalRow[]) {
   return [...groups.entries()].map(([group, rs]) => {
     const graded = rs.filter((r) => r.correct !== null);
     const judged = graded.filter((r) => r.verdict);
-    const truePass = judged.filter((r) => r.verdict === "PASS" && r.correct).length;
-    const falsePass = judged.filter((r) => r.verdict === "PASS" && !r.correct).length;
-    const trueCatch = judged.filter((r) => r.verdict !== "PASS" && !r.correct).length;
-    const falseAlarm = judged.filter((r) => r.verdict !== "PASS" && r.correct).length;
+    const truePass = judged.filter(
+      (r) => r.verdict === "PASS" && r.correct,
+    ).length;
+    const falsePass = judged.filter(
+      (r) => r.verdict === "PASS" && !r.correct,
+    ).length;
+    const trueCatch = judged.filter(
+      (r) => r.verdict !== "PASS" && !r.correct,
+    ).length;
+    const falseAlarm = judged.filter(
+      (r) => r.verdict !== "PASS" && r.correct,
+    ).length;
     const repaired = rs.filter((r) => r.repairs > 0);
     const regChecked = rs.filter((r) => r.regression !== null);
     return {
       group,
       runs: rs.length,
       completed: rs.filter((r) => r.status === "COMPLETED").length,
-      success_rate_pct: pct(graded.filter((r) => r.correct).length, graded.length),
+      success_rate_pct: pct(
+        graded.filter((r) => r.correct).length,
+        graded.length,
+      ),
       graded: graded.length,
-      regression_rate_pct: pct(regChecked.filter((r) => r.regression).length, regChecked.length),
-      verifier: judged.length ? { judged: judged.length, accuracy_pct: pct(truePass + trueCatch, judged.length), false_pass: falsePass, false_alarm: falseAlarm, true_pass: truePass, true_catch: trueCatch } : null,
-      repair_success_pct: pct(repaired.filter((r) => r.correct).length, repaired.filter((r) => r.correct !== null).length),
-      human_intervention_pct: pct(rs.filter((r) => r.human_gates > 0).length, rs.length),
-      avg_wall_s: avg(rs.map((r) => r.wall_s).filter((x): x is number => x != null)),
-      avg_cost_usd: avg(rs.map((r) => Number(r.cost_usd)).filter((x) => Number.isFinite(x) && x > 0)),
-      avg_tokens: avg(rs.map((r) => Number(r.tokens)).filter((x) => Number.isFinite(x) && x > 0)),
+      regression_rate_pct: pct(
+        regChecked.filter((r) => r.regression).length,
+        regChecked.length,
+      ),
+      verifier: judged.length
+        ? {
+            judged: judged.length,
+            accuracy_pct: pct(truePass + trueCatch, judged.length),
+            false_pass: falsePass,
+            false_alarm: falseAlarm,
+            true_pass: truePass,
+            true_catch: trueCatch,
+          }
+        : null,
+      repair_success_pct: pct(
+        repaired.filter((r) => r.correct).length,
+        repaired.filter((r) => r.correct !== null).length,
+      ),
+      human_intervention_pct: pct(
+        rs.filter((r) => r.human_gates > 0).length,
+        rs.length,
+      ),
+      avg_wall_s: avg(
+        rs.map((r) => r.wall_s).filter((x): x is number => x != null),
+      ),
+      avg_cost_usd: avg(
+        rs
+          .map((r) => Number(r.cost_usd))
+          .filter((x) => Number.isFinite(x) && x > 0),
+      ),
+      avg_tokens: avg(
+        rs
+          .map((r) => Number(r.tokens))
+          .filter((x) => Number.isFinite(x) && x > 0),
+      ),
     };
   });
 }

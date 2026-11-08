@@ -1,5 +1,14 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { DataTable, Metric, Notice, Panel, Trend, fmt, runLink, type Row } from "../analytics/shared.tsx";
+import {
+  DataTable,
+  Metric,
+  Notice,
+  Panel,
+  Trend,
+  fmt,
+  runLink,
+  type Row,
+} from "../analytics/shared.tsx";
 const fields: Array<[string, string]> = [
   ["input_tokens", "input"],
   ["output_tokens", "output"],
@@ -36,8 +45,18 @@ export function UsageDashboard({
             hint={t("an.missingCount") + ": " + fmt(s[`missing_${k}`])}
           />
         ))}
-        <Metric label="costSuccess" value={s.cost_per_successful_run} style="usd" hint={t("an.subtotalHint")} />
-        <Metric label="costVerified" value={s.cost_per_verified_task} style="usd" hint={t("an.subtotalHint")} />
+        <Metric
+          label="costSuccess"
+          value={s.cost_per_successful_run}
+          style="usd"
+          hint={t("an.subtotalHint")}
+        />
+        <Metric
+          label="costVerified"
+          value={s.cost_per_verified_task}
+          style="usd"
+          hint={t("an.subtotalHint")}
+        />
         <Metric label="invocations" value={s.invocations} />
       </div>
       <div className="ins-grid">
@@ -54,7 +73,8 @@ export function UsageDashboard({
           <DataTable
             rows={fields.map(([k, label]) => ({
               label: t(`an.${label}`),
-              reported: Number(s.invocations ?? 0) - Number(s[`missing_${k}`] ?? 0),
+              reported:
+                Number(s.invocations ?? 0) - Number(s[`missing_${k}`] ?? 0),
               missing: s[`missing_${k}`],
             }))}
             columns={[
@@ -68,8 +88,19 @@ export function UsageDashboard({
       <Panel title={t("an.usageBreakdown")} hint={t("an.subtotalHint")}>
         <label className="an-inline-label">
           {t("an.group")}
-          <select aria-label={t("an.group")} value={group} onChange={(e) => onGroup(e.target.value)}>
-            {["provider", "model", "user", "workflow", "repository", "project"].map((k) => (
+          <select
+            aria-label={t("an.group")}
+            value={group}
+            onChange={(e) => onGroup(e.target.value)}
+          >
+            {[
+              "provider",
+              "model",
+              "user",
+              "workflow",
+              "repository",
+              "project",
+            ].map((k) => (
               <option key={k} value={k}>
                 {t(`an.${k}`)}
               </option>
@@ -87,9 +118,15 @@ export function UsageDashboard({
             ...fields.map(([key, label]) => ({
               key,
               label,
-              style: (key === "reported_cost_usd" ? "usd" : "number") as "usd" | "number",
+              style: (key === "reported_cost_usd" ? "usd" : "number") as
+                | "usd"
+                | "number",
             })),
-            { key: "missing_reported_cost_usd", label: "missingCount", style: "number" },
+            {
+              key: "missing_reported_cost_usd",
+              label: "missingCount",
+              style: "number",
+            },
           ]}
         />
       </Panel>
@@ -109,7 +146,12 @@ export function UsageDashboard({
             {
               key: "token_anomaly",
               label: "anomaly",
-              render: (r) => (r.token_anomaly ? <span className="pill an-warning">{t("an.anomaly")}</span> : "—"),
+              render: (r) =>
+                r.token_anomaly ? (
+                  <span className="pill an-warning">{t("an.anomaly")}</span>
+                ) : (
+                  "—"
+                ),
             },
           ]}
         />

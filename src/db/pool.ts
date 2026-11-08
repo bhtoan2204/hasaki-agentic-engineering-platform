@@ -15,7 +15,9 @@ export const pool = new pg.Pool({
   keepAliveInitialDelayMillis: 30000,
 });
 // Idle clients can error after a restart or network blip. Log the message only — never the connection string.
-pool.on("error", (err) => console.error("postgres idle client error:", err.message));
+pool.on("error", (err) =>
+  console.error("postgres idle client error:", err.message),
+);
 
 /** A pool or a client inside a transaction: every repository function accepts either. */
 export type Db = pg.Pool | pg.PoolClient;
@@ -27,8 +29,27 @@ export type Db = pg.Pool | pg.PoolClient;
 export function isTransientDbError(e: unknown) {
   const err = e as { code?: string; message?: string } | undefined;
   if (!err) return false;
-  if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "ENETUNREACH", "EHOSTUNREACH", "EAI_AGAIN", "57P01", "57P02", "57P03", "08000", "08003", "08006"].includes(err.code ?? "")) return true;
-  return /Connection terminated|connection timeout|timeout exceeded when trying to connect|Client has encountered a connection error|socket hang up/i.test(err.message ?? "");
+  if (
+    [
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "ETIMEDOUT",
+      "EPIPE",
+      "ENETUNREACH",
+      "EHOSTUNREACH",
+      "EAI_AGAIN",
+      "57P01",
+      "57P02",
+      "57P03",
+      "08000",
+      "08003",
+      "08006",
+    ].includes(err.code ?? "")
+  )
+    return true;
+  return /Connection terminated|connection timeout|timeout exceeded when trying to connect|Client has encountered a connection error|socket hang up/i.test(
+    err.message ?? "",
+  );
 }
 
 /**
@@ -36,13 +57,19 @@ export function isTransientDbError(e: unknown) {
  * Only for operations that are safe to repeat: inserts of log rows, idempotent updates, or transactions that
  * re-check their own state first (finishAttempt / releaseAttempt return early when already applied).
  */
-export async function retryTransient<T>(fn: () => Promise<T>, label: string, delaysMs = [500, 1500, 4000, 8000]): Promise<T> {
+export async function retryTransient<T>(
+  fn: () => Promise<T>,
+  label: string,
+  delaysMs = [500, 1500, 4000, 8000],
+): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await fn();
     } catch (e) {
       if (!isTransientDbError(e) || i >= delaysMs.length) throw e;
-      console.warn(`${label}: database connection dropped (${(e as Error).message}); retrying in ${delaysMs[i]}ms`);
+      console.warn(
+        `${label}: database connection dropped (${(e as Error).message}); retrying in ${delaysMs[i]}ms`,
+      );
       await new Promise((r) => setTimeout(r, delaysMs[i]));
     }
   }
@@ -56,7 +83,8 @@ export async function retryTransient<T>(fn: () => Promise<T>, label: string, del
  * through q()/one(), which spot `INSERT INTO | UPDATE | DELETE FROM <table>`: inside withTx the tables are reported
  * after COMMIT (a rollback reports nothing), outside a transaction right after the statement.
  */
-const WRITE_RE = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)/i;
+const WRITE_RE =
+  /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)/i;
 const writeListeners: Array<(tables: Set<string>) => void> = [];
 const txWrites = new WeakMap<object, Set<string>>();
 export function onCommittedWrite(fn: (tables: Set<string>) => void) {
@@ -73,7 +101,8 @@ function emitWrites(tables: Set<string>) {
   }
 }
 /** Did this transaction (still open) write `table`? Caches bypass themselves then: the tx must see its own writes. */
-export const txWrote = (db: Db, table: string) => txWrites.get(db)?.has(table) ?? false;
+export const txWrote = (db: Db, table: string) =>
+  txWrites.get(db)?.has(table) ?? false;
 export const inTx = (db: Db) => txWrites.has(db);
 
 async function run(db: Db, sql: string, params: unknown[]) {
@@ -88,11 +117,19 @@ async function run(db: Db, sql: string, params: unknown[]) {
   return r;
 }
 
-export async function q<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
+export async function q<T = any>(
+  db: Db,
+  sql: string,
+  params: unknown[] = [],
+): Promise<T[]> {
   return (await run(db, sql, params)).rows as T[];
 }
 
-export async function one<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T | undefined> {
+export async function one<T = any>(
+  db: Db,
+  sql: string,
+  params: unknown[] = [],
+): Promise<T | undefined> {
   return (await run(db, sql, params)).rows[0] as T | undefined;
 }
 
@@ -102,16 +139,29 @@ export async function one<T = any>(db: Db, sql: string, params: unknown[] = []):
  * state transition writes several events. Same transaction, same order, same triggers (FOR EACH ROW still fires per
  * row); outside withTx the insert happens immediately.
  */
-const buffered = new WeakMap<object, Map<string, { table: string; columns: string[]; rows: unknown[][] }>>();
+const buffered = new WeakMap<
+  object,
+  Map<string, { table: string; columns: string[]; rows: unknown[][] }>
+>();
 
-export async function insertDeferred(db: Db, table: string, columns: string[], values: unknown[]) {
+export async function insertDeferred(
+  db: Db,
+  table: string,
+  columns: string[],
+  values: unknown[],
+) {
   const buf = buffered.get(db);
   if (!buf) {
-    await db.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})`, values);
+    await db.query(
+      `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})`,
+      values,
+    );
     return;
   }
   const k = `${table}(${columns.join(",")})`;
-  (buf.get(k) ?? buf.set(k, { table, columns, rows: [] }).get(k)!).rows.push(values);
+  (buf.get(k) ?? buf.set(k, { table, columns, rows: [] }).get(k)!).rows.push(
+    values,
+  );
 }
 
 async function flushDeferred(c: pg.PoolClient) {
@@ -123,8 +173,14 @@ async function flushDeferred(c: pg.PoolClient) {
     for (let i = 0; i < rows.length; i += per) {
       const chunk = rows.slice(i, i + per);
       const params: unknown[] = [];
-      const tuples = chunk.map((r) => `(${r.map((v) => (params.push(v), `$${params.length}`)).join(", ")})`);
-      await c.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES ${tuples.join(", ")}`, params);
+      const tuples = chunk.map(
+        (r) =>
+          `(${r.map((v) => (params.push(v), `$${params.length}`)).join(", ")})`,
+      );
+      await c.query(
+        `INSERT INTO ${table} (${columns.join(", ")}) VALUES ${tuples.join(", ")}`,
+        params,
+      );
     }
   }
   buf.clear();
@@ -137,7 +193,13 @@ async function flushDeferred(c: pg.PoolClient) {
  * and does not fail the caller or roll back work that already committed. A failed COMMIT or a throw inside `fn`
  * rolls back (when a transaction is still open) and skips callbacks.
  */
-export async function withTx<T>(fn: (c: pg.PoolClient, afterCommit: (cb: () => unknown) => void) => Promise<T>, db: pg.Pool = pool): Promise<T> {
+export async function withTx<T>(
+  fn: (
+    c: pg.PoolClient,
+    afterCommit: (cb: () => unknown) => void,
+  ) => Promise<T>,
+  db: pg.Pool = pool,
+): Promise<T> {
   const c = await db.connect();
   const after: Array<() => unknown> = [];
   let committed = false;
@@ -177,4 +239,5 @@ export async function withTx<T>(fn: (c: pg.PoolClient, afterCommit: (cb: () => u
   return out;
 }
 
-export const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
+export const json = (v: unknown) =>
+  v === undefined ? null : JSON.stringify(v);

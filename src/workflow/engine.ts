@@ -12,6 +12,7 @@ import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/l
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
+import { isEvaluationRun as isEvaluationTelegramRun } from "../eval/scope.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
@@ -74,6 +75,8 @@ export class EngineError extends Error {
   }
 }
 
+export type WorkflowActionGuard = (db: Db) => Promise<void>;
+
 type AfterCommit = (cb: () => unknown) => void;
 
 // ---------------------------------------------------------------- low-level helpers
@@ -123,6 +126,9 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "WAITING")) {
     const icon = { COMPLETED: "✅", FAILED: "❌", WAITING: "⏸️" }[to];
     afterCommit(() => background(`notify run ${run.id}`, () => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`)));
+    if (to === "COMPLETED" || to === "FAILED") afterCommit(() => background(`private Telegram run ${run.id}`, async () => {
+      if (!await isEvaluationTelegramRun(run.id)) await (await import("../telegram/workflow.ts")).notifyTelegramRun(run.id,to);
+    }));
     // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
     if (to === "COMPLETED") afterCommit(() => background(`memory extraction for run ${run.id}`, () => extractRunMemory(run.id)));
     // Continuous learning: human decisions of this run → reviewable knowledge-change proposals (never auto-applied).
@@ -616,7 +622,7 @@ export async function skipStep(runId: number, stepKey: string, reason = "skipped
  * Save answers. When a step has no open question left: a `human_input` step completes with the answers as
  * output; an agent step goes back to READY and its next attempt resumes from the persisted checkpoint.
  */
-export async function answerQuestions(answers: Record<string, string>, answeredBy = "") {
+export async function answerQuestions(answers: Record<string, string>, answeredBy = "", guard?: WorkflowActionGuard) {
   const ids = Object.entries(answers)
     .filter(([, a]) => String(a ?? "").trim())
     .map(([id]) => Number(id));
@@ -630,6 +636,7 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
   for (const runId of runIds) {
     await withTx(async (c, afterCommit) => {
       await lockRun(c, runId);
+      await guard?.(c);
       const qs = await q(c, "SELECT * FROM workflow_questions WHERE run_id = $1 AND id = ANY($2) AND status = 'open' FOR UPDATE", [runId, ids]);
       if (qs.length) {
         await q(c, `UPDATE workflow_questions q SET status='answered',answer=a.answer,answered_by=$3,answered_at=now()
@@ -678,9 +685,10 @@ export async function answerQuestions(answers: Record<string, string>, answeredB
   return { answered, resumed, stillOpen };
 }
 
-export async function approveStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; repositories?: string[]; data?: unknown } = {}) {
+export async function approveStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; repositories?: string[]; data?: unknown; guard?: WorkflowActionGuard } = {}) {
   return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
+    await opts.guard?.(c);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
     if (s.status !== "WAITING_APPROVAL") throw new EngineError(`step "${stepKey}" is ${s.status}, not WAITING_APPROVAL`);
@@ -734,9 +742,10 @@ export async function approveStep(runId: number, stepKey: string, opts: { commen
   });
 }
 
-export async function rejectStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; reexecute?: string } = {}) {
+export async function rejectStep(runId: number, stepKey: string, opts: { comment?: string; by?: string; reexecute?: string; guard?: WorkflowActionGuard } = {}) {
   return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
+    await opts.guard?.(c);
     const s = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, stepKey]);
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
     if (s.status !== "WAITING_APPROVAL") throw new EngineError(`step "${stepKey}" is ${s.status}, not WAITING_APPROVAL`);

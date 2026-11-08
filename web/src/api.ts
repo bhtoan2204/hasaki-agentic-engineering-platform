@@ -24,7 +24,12 @@ export function setAuthed(on: boolean) {
 }
 
 function withScope(path: string) {
-  if (!supportView || path.startsWith("/api/auth") || path.startsWith("/api/ui-messages")) return path;
+  if (
+    !supportView ||
+    path.startsWith("/api/auth") ||
+    path.startsWith("/api/ui-messages")
+  )
+    return path;
   return path + (path.includes("?") ? "&" : "?") + "scope=all";
 }
 
@@ -35,7 +40,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * while Wi-Fi re-keys or the VPN (Cloudflare WARP) reconnects. GETs are safe to repeat, so they are retried a few
  * times with a short backoff; POSTs are not (the server may already have applied them).
  */
-async function fetchRetrying(url: string, init: RequestInit, retries: number): Promise<Response> {
+async function fetchRetrying(
+  url: string,
+  init: RequestInit,
+  retries: number,
+): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fetch(url, init);
@@ -61,13 +70,26 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   // One key per user action: the server replays the first response for create-type routes (no duplicate runs).
   if (body !== undefined) headers["Idempotency-Key"] = idempotencyKey();
   const isGet = body === undefined;
-  const r = await fetchRetrying(scoped, { method: isGet ? "GET" : "POST", headers, body: isGet ? undefined : JSON.stringify(body), credentials: "include" }, isGet ? 3 : 0);
+  const r = await fetchRetrying(
+    scoped,
+    {
+      method: isGet ? "GET" : "POST",
+      headers,
+      body: isGet ? undefined : JSON.stringify(body),
+      credentials: "include",
+    },
+    isGet ? 3 : 0,
+  );
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && !path.startsWith("/api/auth/login")) {
     setAuthed(false);
     window.dispatchEvent(new Event("auth:lost"));
   }
-  if (!r.ok) throw new Error((j.error || `HTTP ${r.status}`) + (j.details ? "\n" + j.details.join("\n") : ""));
+  if (!r.ok)
+    throw new Error(
+      (j.error || `HTTP ${r.status}`) +
+        (j.details ? "\n" + j.details.join("\n") : ""),
+    );
   return j as T;
 }
 
@@ -100,7 +122,9 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
   const scopedKey = path ? withScope(path) : null;
   const cached = scopedKey ? apiCache.get(scopedKey) : undefined;
 
-  const [data, setDataState] = useState<T | null>(() => (cached ? (cached.data as T) : null));
+  const [data, setDataState] = useState<T | null>(() =>
+    cached ? (cached.data as T) : null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(!cached && !!path);
   const [refreshing, setRefreshing] = useState<boolean>(!!cached && !!path);
@@ -186,7 +210,11 @@ export type LiveState = "sse" | "polling" | "connecting";
  * one stream per component across a few tabs used them all and every fetch hung). The stream is closed while the tab is
  * hidden and reopened (with a refresh) when it becomes visible again. Falls back to polling when SSE is unavailable.
  */
-type Sub = { runId: number | null; cb: (p?: any) => void; setState: (s: LiveState) => void };
+type Sub = {
+  runId: number | null;
+  cb: (p?: any) => void;
+  setState: (s: LiveState) => void;
+};
 const subs = new Set<Sub>();
 let es: EventSource | null = null;
 let state: LiveState = "connecting";
@@ -202,18 +230,21 @@ function broadcast(p?: any) {
   });
 }
 function stopPolling() {
-  if (poll) clearInterval(poll), (poll = null);
+  if (poll) (clearInterval(poll), (poll = null));
 }
 function startPolling() {
   setShared("polling");
   if (!poll) poll = setInterval(() => broadcast(), 3000);
 }
 function open() {
-  if (!authed || es || !subs.size || document.visibilityState === "hidden") return;
+  if (!authed || es || !subs.size || document.visibilityState === "hidden")
+    return;
   try {
     es = new EventSource(supportView ? "/api/stream?scope=all" : "/api/stream");
     es.addEventListener("hello", () => (stopPolling(), setShared("sse")));
-    es.addEventListener("change", (e) => broadcast(JSON.parse((e as MessageEvent).data)));
+    es.addEventListener("change", (e) =>
+      broadcast(JSON.parse((e as MessageEvent).data)),
+    );
     es.onerror = () => {
       startPolling(); // EventSource reconnects by itself; poll meanwhile
       // After a network change the browser may give up for good (CLOSED): open a fresh stream shortly.
@@ -247,7 +278,11 @@ if (typeof document !== "undefined")
   });
 
 /** Calls `onChange` (debounced) when an event for `runId` (or any run when null) is written to PostgreSQL. */
-export function useLive(runId: number | null, onChange: (payload?: any) => void, enabled = true) {
+export function useLive(
+  runId: number | null,
+  onChange: (payload?: any) => void,
+  enabled = true,
+) {
   const [live, setLive] = useState<LiveState>(state);
   const cb = useRef(onChange);
   cb.current = onChange;
@@ -290,4 +325,10 @@ export const STATUS_COLORS: Record<string, string> = {
   SKIPPED: "var(--st-idle)",
 };
 
-export const LIVE_STATUSES = new Set(["RUNNING", "RETRYING", "WAITING", "WAITING_INPUT", "WAITING_APPROVAL"]);
+export const LIVE_STATUSES = new Set([
+  "RUNNING",
+  "RETRYING",
+  "WAITING",
+  "WAITING_INPUT",
+  "WAITING_APPROVAL",
+]);

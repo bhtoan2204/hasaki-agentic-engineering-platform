@@ -1,34 +1,152 @@
 /* Shell navigation additions; existing sidebar palette and shared tokens. */
-.sb-account { width: 100%; display: flex; text-align: left; gap: var(--sp-3); padding: var(--sp-2); background: transparent; box-shadow: none; border: 1px solid transparent; white-space: normal }
-.sb-account:hover { background: var(--black-3) }
-.sb-account .sb-ws { flex: 1; overflow: hidden }
-.sb-account .sb-ws b { overflow: hidden; text-overflow: ellipsis }
-.sb-account-chevron { flex: none; color: var(--brand-400) }
-.sb-foot { flex-shrink: 0 }
-button.sb-link { width: 100%; text-align: left; background: transparent; border: 0; box-shadow: none; white-space: normal }
-.sb-support small { display: block; margin-top: var(--sp-1); color: var(--brand-400) }
-.sb-toggle { margin: 0 var(--sp-3) var(--sp-2) }
-.account-menu { position: fixed; z-index: 100; width: min(280px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; margin: 0 }
-.account-menu .btn, .account-menu button { width: 100%; justify-content: flex-start; padding: var(--sp-3); white-space: normal; text-align: left }
-.account-menu .divider { margin: var(--sp-2) 0 }
-.account-menu .account-logout { color: var(--st-err) }
-.sb-close { display: none }
+.sb-account {
+  width: 100%;
+  display: flex;
+  text-align: left;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid transparent;
+  white-space: normal
+}
+
+.sb-account:hover {
+  background: var(--black-3)
+}
+
+.sb-account .sb-ws {
+  flex: 1;
+  overflow: hidden
+}
+
+.sb-account .sb-ws b {
+  overflow: hidden;
+  text-overflow: ellipsis
+}
+
+.sb-account-chevron {
+  flex: none;
+  color: var(--brand-400)
+}
+
+.sb-foot {
+  flex-shrink: 0
+}
+
+button.sb-link {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  white-space: normal
+}
+
+.sb-support small {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--brand-400)
+}
+
+.sb-toggle {
+  margin: 0 var(--sp-3) var(--sp-2)
+}
+
+.account-menu {
+  position: fixed;
+  z-index: 100;
+  width: min(280px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  margin: 0
+}
+
+.account-menu .btn,
+.account-menu button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: var(--sp-3);
+  white-space: normal;
+  text-align: left
+}
+
+.account-menu .divider {
+  margin: var(--sp-2) 0
+}
+
+.account-menu .account-logout {
+  color: var(--st-err)
+}
+
+.sb-close {
+  display: none
+}
+
 @media (min-width: 901px) {
-  .app.sidebar-collapsed { --sidebar-w: 76px }
-  .sidebar-collapsed .sb-brand { justify-content: center; padding: var(--sp-5) var(--sp-2) }
-  .sidebar-collapsed .sb-brand .brand-text, .sidebar-collapsed .sb-link > span, .sidebar-collapsed .sb-group, .sidebar-collapsed .sb-ws, .sidebar-collapsed .sb-account-chevron { display: none }
-  .sidebar-collapsed .sb-link { justify-content: center; padding: var(--sp-3) }
-  .sidebar-collapsed .sb-nav > div + div { border-top: 1px solid var(--black-3); padding-top: var(--sp-2); margin-top: var(--sp-2) }
-  .sidebar-collapsed .sb-foot { padding: var(--sp-2) }
-  .sidebar-collapsed .sb-account { justify-content: center }
+  .app.sidebar-collapsed {
+    --sidebar-w: 76px
+  }
+
+  .sidebar-collapsed .sb-brand {
+    justify-content: center;
+    padding: var(--sp-5) var(--sp-2)
+  }
+
+  .sidebar-collapsed .sb-brand .brand-text,
+  .sidebar-collapsed .sb-link>span,
+  .sidebar-collapsed .sb-group,
+  .sidebar-collapsed .sb-ws,
+  .sidebar-collapsed .sb-account-chevron {
+    display: none
+  }
+
+  .sidebar-collapsed .sb-link {
+    justify-content: center;
+    padding: var(--sp-3)
+  }
+
+  .sidebar-collapsed .sb-nav>div+div {
+    border-top: 1px solid var(--black-3);
+    padding-top: var(--sp-2);
+    margin-top: var(--sp-2)
+  }
+
+  .sidebar-collapsed .sb-foot {
+    padding: var(--sp-2)
+  }
+
+  .sidebar-collapsed .sb-account {
+    justify-content: center
+  }
 }
+
 @media (max-width: 900px) {
-  .sb-toggle { display: none }
-  .sb-close { display: inline-flex; align-self: flex-end; margin: var(--sp-2) }
-  .app:not(.nav-open) .sidebar { visibility: hidden }
+  .sb-toggle {
+    display: none
+  }
+
+  .sb-close {
+    display: inline-flex;
+    align-self: flex-end;
+    margin: var(--sp-2)
+  }
+
+  .app:not(.nav-open) .sidebar {
+    visibility: hidden
+  }
 }
 
-.sb-account.on { background: var(--black-3); border-color: var(--brand-400) }
-.sb-support > span { min-width: 0; overflow-wrap: anywhere }
+.sb-account.on {
+  background: var(--black-3);
+  border-color: var(--brand-400)
+}
 
-.sidebar .sb-toggle { width: calc(100% - 2 * var(--sp-3)) }
+.sb-support>span {
+  min-width: 0;
+  overflow-wrap: anywhere
+}
+
+.sidebar .sb-toggle {
+  width: calc(100% - 2 * var(--sp-3))
+}

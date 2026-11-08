@@ -2,7 +2,12 @@ import { z } from "zod";
 import { pool, q, one } from "../db/pool.ts";
 import { wilson } from "./scoring.ts";
 import { sha256 } from "./dataset.ts";
-import { evaluationFilters, evaluationParams, evaluationSamplesCte, type EvaluationFilters } from "./analytics.ts";
+import {
+  evaluationFilters,
+  evaluationParams,
+  evaluationSamplesCte,
+  type EvaluationFilters,
+} from "./analytics.ts";
 import { handoffReadiness } from "../agent/handoff.ts";
 import { resolveStepAgent } from "../agent/stepAgent.ts";
 import { HttpError } from "../http/error.ts";
@@ -28,7 +33,13 @@ export interface RecommendationSample {
 /** Conservative clustered-sample thresholds; repeated tasks do not inflate independent task support. */
 export function chooseRecommendation(rows: RecommendationSample[]) {
   const eligible = rows
-    .filter((r) => r.samples >= 30 && r.tasks >= 10 && r.evaluations >= 2 && r.repetitions >= 2)
+    .filter(
+      (r) =>
+        r.samples >= 30 &&
+        r.tasks >= 10 &&
+        r.evaluations >= 2 &&
+        r.repetitions >= 2,
+    )
     .map((r) => ({ ...r, interval: wilson(r.stable_task_successes, r.tasks) }));
   // A distinct task succeeds only if every observed repetition passed the objective hard gates.
   const cohorts = new Map<string, typeof eligible>();
@@ -41,7 +52,10 @@ export function chooseRecommendation(rows: RecommendationSample[]) {
     if (group.length < 2) continue;
     group.sort((a, b) => b.successes / b.samples - a.successes / a.samples);
     const [best, ...others] = group;
-    if (best.interval && others.every((r) => r.interval && best.interval!.low > r.interval.high))
+    if (
+      best.interval &&
+      others.every((r) => r.interval && best.interval!.low > r.interval.high)
+    )
       conclusions.push(best);
   }
   if (conclusions.length !== 1)
@@ -71,14 +85,22 @@ export function chooseRecommendation(rows: RecommendationSample[]) {
     distinct_tasks: best.tasks,
     success_rate: best.successes / best.samples,
     median_ms: best.median_ms,
-    cost_availability: !best.cost_known ? "Unknown" : best.cost_known < best.samples ? "Partial" : "Known",
+    cost_availability: !best.cost_known
+      ? "Unknown"
+      : best.cost_known < best.samples
+        ? "Partial"
+        : "Known",
     cost_per_verified_success:
-      best.cost_known === best.samples && best.successes ? Number(best.cost_usd) / best.successes : null,
+      best.cost_known === best.samples && best.successes
+        ? Number(best.cost_usd) / best.successes
+        : null,
     interval: best.interval,
     evidence: rows,
   };
 }
-export async function recommendationEvidence(f: EvaluationFilters): Promise<RecommendationSample[]> {
+export async function recommendationEvidence(
+  f: EvaluationFilters,
+): Promise<RecommendationSample[]> {
   const rows = await q(
     pool,
     `${evaluationSamplesCte}
@@ -107,9 +129,12 @@ export const RecommendationRequest = z
   .strict();
 export async function createRecommendation(actor: Actor, raw: unknown) {
   const input = RecommendationRequest.parse(raw);
-  const url = new URL("http://local/?category=" + encodeURIComponent(input.category));
+  const url = new URL(
+    "http://local/?category=" + encodeURIComponent(input.category),
+  );
   if (input.cohort) url.searchParams.set("cohort", input.cohort);
-  for (const key of ["from", "to", "timezone"] as const) if (input[key]) url.searchParams.set(key, input[key]);
+  for (const key of ["from", "to", "timezone"] as const)
+    if (input[key]) url.searchParams.set(key, input[key]);
   const filters = evaluationFilters(actor, url);
   const evidence = await recommendationEvidence(filters);
   let decision: any = chooseRecommendation(evidence);
@@ -119,11 +144,20 @@ export async function createRecommendation(actor: Actor, raw: unknown) {
         try {
           const a = resolveStepAgent(
             { agent_provider: agent.provider },
-            { type: "coding_agent", config: { agent: { ...agent, allowed_tools: decision.required_tools } } },
+            {
+              type: "coding_agent",
+              config: {
+                agent: { ...agent, allowed_tools: decision.required_tools },
+              },
+            },
           )!;
           return { provider: agent.provider, ...(await handoffReadiness(a)) };
         } catch (error) {
-          return { provider: agent.provider, ok: false, error: (error as Error).message };
+          return {
+            provider: agent.provider,
+            ok: false,
+            error: (error as Error).message,
+          };
         }
       }),
     );
@@ -151,7 +185,11 @@ export async function createRecommendation(actor: Actor, raw: unknown) {
   );
 }
 export async function recommendationDetail(id: number, owner: number) {
-  const row = await one(pool, "SELECT * FROM agent_recommendations WHERE id=$1 AND owner_id=$2", [id, owner]);
+  const row = await one(
+    pool,
+    "SELECT * FROM agent_recommendations WHERE id=$1 AND owner_id=$2",
+    [id, owner],
+  );
   if (!row) throw new HttpError(404, "Recommendation not found");
   return row;
 }

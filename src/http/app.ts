@@ -1,3 +1,4 @@
+import { acceptWebhook } from "../telegram/transport.ts";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
@@ -45,9 +46,10 @@ function serveStatic(url: URL, res: ServerResponse) {
   return true;
 }
 
-async function readJson(req: IncomingMessage): Promise<any> {
+async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<any> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let bytes=0;
+  for await (const c of req) { bytes+=(c as Buffer).length; if(bytes>maxBytes)throw new HttpError(413,"Body too large"); chunks.push(c as Buffer); }
   const raw = Buffer.concat(chunks).toString("utf8");
   try {
     return raw ? JSON.parse(raw) : {};
@@ -66,6 +68,12 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
   const method = req.method ?? "GET";
   const key = `${method} ${url.pathname}`;
   try {
+    if (key === "POST /api/telegram/webhook") {
+      // Verify BEFORE reading a body or bypassing session/CSRF for this single authenticated transport route.
+      const { validWebhookSecret } = await import("../telegram/client.ts");
+      if (!validWebhookSecret(req.headers["x-telegram-bot-api-secret-token"])) throw new HttpError(403,"Invalid Telegram webhook authentication");
+      return send(res,200,await acceptWebhook(req.headers["x-telegram-bot-api-secret-token"],await readJson(req,262144)));
+    }
     if (key === "GET /api/health") return send(res, 200, { ok: true });
     if (key === "GET /api/ui-messages") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });

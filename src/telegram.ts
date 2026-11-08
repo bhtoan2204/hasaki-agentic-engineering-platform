@@ -60,6 +60,13 @@ const sent = new Map<string, number>(); // dedupe key → time (guards against d
 
 export async function sendTelegramStepWaiting(w: StepWaiting, dedupeKey: string) {
   const botToken = config.telegram.botToken;
+  if (botToken && w.ownerId) {
+    const { sendInteractiveWaiting } = await import("./telegram/workflow.ts");
+    if (await sendInteractiveWaiting(w,dedupeKey)) return { ok: true };
+    const { preferences } = await import("./telegram/store.ts");
+    const prefs = await preferences(w.ownerId);
+    if (!(w.status === "WAITING_APPROVAL" ? prefs.approvals : prefs.questions)) return { skipped: "not configured" as const };
+  }
   const chatId = w.ownerId ? await getUserSecret(w.ownerId, "telegram_chat") : null;
   if (!botToken || !chatId) return { skipped: "not configured" as const };
   if (sent.has(dedupeKey)) return { skipped: "duplicate" as const };
@@ -87,7 +94,7 @@ async function postMessage(message: Record<string, unknown>, chatId = config.tel
     });
     if (!res.ok) {
       const body: any = await res.json().catch(() => ({}));
-      console.error(`telegram sendMessage failed: HTTP ${res.status} ${String(body?.description ?? "").slice(0, 200)}`);
+      console.error(`telegram sendMessage failed: HTTP ${res.status} ${String(body?.description ?? "").split(botToken).join("***").slice(0, 200)}`);
       return { ok: false };
     }
     return { ok: true };

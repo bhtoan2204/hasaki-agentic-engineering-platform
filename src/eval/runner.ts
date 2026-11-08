@@ -5,13 +5,22 @@ import { join, relative } from "node:path";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, withTx } from "../db/pool.ts";
-import { fixtureGit, fixtureRoot, fixtureName, harnessHash } from "./fixtures.ts";
+import {
+  fixtureGit,
+  fixtureRoot,
+  fixtureName,
+  harnessHash,
+} from "./fixtures.ts";
 import { CaseSchema, referencePatches } from "./dataset.ts";
 import { scoreEvidence, type Evidence } from "./scoring.ts";
 import { IsolationUnavailable } from "./isolation.ts";
 import { validateSource } from "./validator.ts";
 import { rankRepositories, repositories } from "../repos/service.ts";
-import { hybridRank, buildCodeContext, searchCodeExact } from "../codeIntelligence/search.ts";
+import {
+  hybridRank,
+  buildCodeContext,
+  searchCodeExact,
+} from "../codeIntelligence/search.ts";
 import { indexRepository } from "../codeIntelligence/indexer.ts";
 import { recordWorkspace } from "../git/provider.ts";
 import { claudeExecutor } from "../agent/claude.ts";
@@ -47,15 +56,24 @@ function emptyEvidence(seconds: number): Evidence {
     details: {},
   };
 }
-export async function executeBenchmarkCase(ctx: ExecutionContext): Promise<ExecResult> {
+export async function executeBenchmarkCase(
+  ctx: ExecutionContext,
+): Promise<ExecResult> {
   const cr = await one(
     pool,
     `SELECT cr.*,c.definition,c.task_id,e.configuration,e.scoring,e.owner_id,e.workflow_run_id,e.configuration_hash,s.content_hash AS suite_hash,s.suite_key,s.version,s.manifest
  FROM evaluation_case_runs cr JOIN benchmark_cases c ON c.id=cr.case_id JOIN evaluation_runs e ON e.id=cr.evaluation_id JOIN benchmark_suites s ON s.id=e.suite_id WHERE cr.id=$1 AND e.workflow_run_id=$2 AND e.owner_id=$3`,
     [ctx.step.config.case_run_id, ctx.run.id, ctx.run.owner_id],
   );
-  if (!cr) throw new Error("Benchmark step is not linked to its owner-scoped evaluation");
-  const prior = await one(pool, "SELECT id,status,quality_score FROM eval_results WHERE case_run_id=$1", [cr.id]);
+  if (!cr)
+    throw new Error(
+      "Benchmark step is not linked to its owner-scoped evaluation",
+    );
+  const prior = await one(
+    pool,
+    "SELECT id,status,quality_score FROM eval_results WHERE case_run_id=$1",
+    [cr.id],
+  );
   if (prior)
     return {
       kind: "completed",
@@ -105,7 +123,8 @@ export async function executeBenchmarkCase(ctx: ExecutionContext): Promise<ExecR
     };
   }
   const principal = execution.getStore();
-  if (!principal) throw new Error("Benchmark execution requires an authenticated owner");
+  if (!principal)
+    throw new Error("Benchmark execution requires an authenticated owner");
   return execution.run(
     {
       ...principal,
@@ -138,12 +157,15 @@ async function executeIsolated(
     [ctx.step.id, ctx.attempt.id],
   ))!.n;
   e.clarification_required = !!task.clarification;
-  e.human_interventions = ctx.input.answers.length + (ctx.input.approval?.granted ? 1 : 0);
+  e.human_interventions =
+    ctx.input.answers.length + (ctx.input.approval?.granted ? 1 : 0);
   e.clarification_passed =
     !!task.clarification &&
     !!ctx.input.approval?.granted &&
     ctx.input.answers.some(
-      (a) => a.question === task.clarification!.question && a.answer === task.clarification!.answer,
+      (a) =>
+        a.question === task.clarification!.question &&
+        a.answer === task.clarification!.answer,
     ) &&
     ctx.input.pending?.resume?.checkpoint?.edits_before_question === 0;
   const root = join(
@@ -161,7 +183,8 @@ async function executeIsolated(
   const signal = AbortSignal.any([ctx.signal, deadline]);
   const timings: Record<string, number | null> = {
     first_meaningful_action_ms: ctx.input.pending?.resume?.checkpoint?.asked_at
-      ? new Date(ctx.input.pending.resume.checkpoint.asked_at).getTime() - totalStart
+      ? new Date(ctx.input.pending.resume.checkpoint.asked_at).getTime() -
+        totalStart
       : null,
     first_modification_ms: null,
     implementation_ms: null,
@@ -169,12 +192,19 @@ async function executeIsolated(
     first_correct_file_ms: null,
   };
   try {
-    if (!config.evaluation.enabled) throw new IsolationUnavailable("Evaluation framework disabled on this worker");
+    if (!config.evaluation.enabled)
+      throw new IsolationUnavailable(
+        "Evaluation framework disabled on this worker",
+      );
     if (cfg.blocked) throw new IsolationUnavailable(cfg.blocked);
     if (cfg.harness_hash !== (await harnessHash()))
-      throw new IsolationUnavailable("Harness source differs from the frozen suite; publish a new version");
+      throw new IsolationUnavailable(
+        "Harness source differs from the frozen suite; publish a new version",
+      );
     if (cfg.mode === "dry_run")
-      throw new IsolationUnavailable("Dry run: execution and validation intentionally not performed");
+      throw new IsolationUnavailable(
+        "Dry run: execution and validation intentionally not performed",
+      );
     const expired = await q(
       pool,
       "SELECT id FROM workflow_step_attempts WHERE step_id=$1 AND id<>$2 AND status IN ('FAILED','STALE','CANCELED')",
@@ -204,7 +234,8 @@ async function executeIsolated(
       const primary = fixtureRoot(fixtureName(logical)),
         sha = cr.manifest.repositories[logical].commit,
         path = join(workspace, logical);
-      if (!/^[a-f0-9]{40}$/.test(sha)) throw new IsolationUnavailable("Fixture commit not pinned");
+      if (!/^[a-f0-9]{40}$/.test(sha))
+        throw new IsolationUnavailable("Fixture commit not pinned");
       if ((await fixtureGit(primary, ["rev-parse", `${sha}^{commit}`])) !== sha)
         throw new IsolationUnavailable("Pinned fixture commit unavailable");
       await fixtureGit(primary, ["worktree", "add", "--detach", path, sha]);
@@ -215,13 +246,16 @@ async function executeIsolated(
         branch: "HEAD",
         created_from: sha,
       });
-      if (cfg.code_intelligence) await indexRepository(fixtureName(logical), ctx.run.id, signal);
+      if (cfg.code_intelligence)
+        await indexRepository(fixtureName(logical), ctx.run.id, signal);
     }
     e.environment = true;
     e.authorized_changes = true;
     e.side_effects_blocked = true;
     const names = task.repositories.map(fixtureName),
-      registry = (await repositories.list()).filter((r) => names.includes(r.name));
+      registry = (await repositories.list()).filter((r) =>
+        names.includes(r.name),
+      );
     const query = task.validation.export_name ?? task.description;
     const ranked = cfg.code_intelligence
       ? await hybridRank(registry, { text: query })
@@ -244,11 +278,14 @@ async function executeIsolated(
     e.details = {
       mode: cfg.mode,
       adapter: cfg.adapter,
-      usage_provenance: "No paid provider invoked; fixture usage is not a live token measurement",
+      usage_provenance:
+        "No paid provider invoked; fixture usage is not a live token measurement",
       selected_repository: selected,
       ranking: ranked,
       context_size: context.body.length,
-      context_relevance: context.body ? context.body.includes(task.validation.path) : null,
+      context_relevance: context.body
+        ? context.body.includes(task.validation.path)
+        : null,
       context_fallbacks: context.metrics.fallback_count,
       retrieval_metrics: context.metrics,
       source_commits: cr.manifest.repositories,
@@ -267,7 +304,9 @@ async function executeIsolated(
         phases.length !== cfg.provider_sequence.length ||
         phases.some((p) => p.status !== "COMPLETED" || p.output?.blocked)
       )
-        throw new IsolationUnavailable("Provider phase is incomplete or unsupported");
+        throw new IsolationUnavailable(
+          "Provider phase is incomplete or unsupported",
+        );
       plannedPatches = phases.flatMap((p) => p.output?.patches ?? []);
       e.details.provider_phases = phases.map((p) => ({
         provider: p.provider,
@@ -287,21 +326,36 @@ async function executeIsolated(
     }
     if (cfg.adapter === "reference" || cfg.adapter === "provider_fixture") {
       for (const patch of plannedPatches) {
-        if (!task.allowed_changes.some((a) => a.repository === patch.repository && a.path === patch.path))
+        if (
+          !task.allowed_changes.some(
+            (a) => a.repository === patch.repository && a.path === patch.path,
+          )
+        )
           throw new Error("Harness attempted an unauthorized fixture patch");
         if (typeof patch.content !== "string" || patch.content.length > 64000)
           throw new Error("Unbounded benchmark patch");
-        if (timings.first_modification_ms === null) timings.first_modification_ms = Date.now() - totalStart;
+        if (timings.first_modification_ms === null)
+          timings.first_modification_ms = Date.now() - totalStart;
         if (
           timings.first_correct_file_ms === null &&
           patch.repository === task.repository &&
           patch.path === task.validation.path
         )
           timings.first_correct_file_ms = Date.now() - totalStart;
-        await writeFile(join(workspace, patch.repository, patch.path), patch.content);
+        await writeFile(
+          join(workspace, patch.repository, patch.path),
+          patch.content,
+        );
       }
     } else if (cfg.adapter === "agent_fixture") {
-      const bin = join(import.meta.dirname, "..", "..", "test", "fixtures", "fake-codex.mjs");
+      const bin = join(
+        import.meta.dirname,
+        "..",
+        "..",
+        "test",
+        "fixtures",
+        "fake-codex.mjs",
+      );
       await access(bin, constants.X_OK);
       const prompt =
         cfg.prompt_version === "p2-task-v1"
@@ -348,19 +402,48 @@ async function executeIsolated(
     timings.implementation_ms = Date.now() - totalStart;
     let diff = "";
     for (const w of created) {
-      const paths = (await fixtureGit(w.path, ["diff", "--name-only", "--no-renames", "-z", "HEAD", "--"]))
+      const paths = (
+        await fixtureGit(w.path, [
+          "diff",
+          "--name-only",
+          "--no-renames",
+          "-z",
+          "HEAD",
+          "--",
+        ])
+      )
         .split("\0")
         .filter(Boolean);
-      const untracked = (await fixtureGit(w.path, ["ls-files", "--others", "--exclude-standard", "-z"]))
+      const untracked = (
+        await fixtureGit(w.path, [
+          "ls-files",
+          "--others",
+          "--exclude-standard",
+          "-z",
+        ])
+      )
         .split("\0")
         .filter(Boolean);
       e.authorized_changes =
         e.authorized_changes &&
         [...paths, ...untracked].every((path) =>
-          task.allowed_changes.some((a) => a.repository === w.logical && a.path === path),
+          task.allowed_changes.some(
+            (a) => a.repository === w.logical && a.path === path,
+          ),
         );
-      diff += (await fixtureGit(w.path, ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"])).slice(0, 16000);
-      if ((await fixtureGit(w.path, ["rev-parse", "HEAD"])) !== cr.manifest.repositories[w.logical].commit)
+      diff += (
+        await fixtureGit(w.path, [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "HEAD",
+          "--",
+        ])
+      ).slice(0, 16000);
+      if (
+        (await fixtureGit(w.path, ["rev-parse", "HEAD"])) !==
+        cr.manifest.repositories[w.logical].commit
+      )
         e.authorized_changes = false;
     }
     if (task.validation.type === "freshness") {
@@ -380,21 +463,33 @@ async function executeIsolated(
         };
       }
       e.details.updated_context_size = context.body.length;
-      e.details.fresh_context = context.body.includes('"new"') && !context.body.includes('"old"');
+      e.details.fresh_context =
+        context.body.includes('"new"') && !context.body.includes('"old"');
     }
-    const validation = await validateSource(task, workspace, validatorRoot, cfg.sandbox.image, signal);
-    e.details.build_passed = "build_passed" in validation ? validation.build_passed : null;
+    const validation = await validateSource(
+      task,
+      workspace,
+      validatorRoot,
+      cfg.sandbox.image,
+      signal,
+    );
+    e.details.build_passed =
+      "build_passed" in validation ? validation.build_passed : null;
     e.syntax = validation.syntax;
     e.security = validation.security;
     diagnostic = validation.diagnostic ?? diagnostic;
-    const required = validation.checks.filter((c) => c.name.startsWith("required:")),
+    const required = validation.checks.filter((c) =>
+        c.name.startsWith("required:"),
+      ),
       hidden = validation.checks.filter((c) => c.name.startsWith("hidden:"));
     e.required_passed = required.filter((c) => c.passed).length;
     e.required_failed = required.filter((c) => !c.passed).length;
     e.hidden_passed = hidden.filter((c) => c.passed).length;
     e.hidden_failed = hidden.filter((c) => !c.passed).length;
     e.regression_failed =
-      e.required_failed + hidden.filter((c) => !c.passed && c.name.startsWith("hidden:regression:")).length;
+      e.required_failed +
+      hidden.filter((c) => !c.passed && c.name.startsWith("hidden:regression:"))
+        .length;
     e.expected_total = validation.checks.length;
     e.expected_passed = validation.checks.filter((c) => c.passed).length;
     if (task.validation.type === "navigation") {
@@ -405,9 +500,11 @@ async function executeIsolated(
       e.expected_total++;
       if (e.details.fresh_context) e.expected_passed++;
     }
-    if (!e.syntax || e.expected_passed < e.expected_total) e.failure_class = "validation_failure";
+    if (!e.syntax || e.expected_passed < e.expected_total)
+      e.failure_class = "validation_failure";
     if (!e.clarification_passed && task.clarification)
-      diagnostic = "Expected relevant clarification and existing checkpoint resume were not observed";
+      diagnostic =
+        "Expected relevant clarification and existing checkpoint resume were not observed";
     e.details.validation_checks = validation.checks;
     e.details.validation_scope =
       "Objective fixture assertions; SQL/proto checks are structural, not database/protoc semantic compilation";
@@ -448,14 +545,22 @@ async function executeIsolated(
     e.details.diagnostic = diagnostic;
   } finally {
     if (created.length)
-      await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path=ANY($2::text[])", [
-        ctx.run.id,
-        created.map((w) => w.path),
+      await q(
+        pool,
+        "DELETE FROM execution_workspaces WHERE run_id=$1 AND path=ANY($2::text[])",
+        [ctx.run.id, created.map((w) => w.path)],
+      ).catch(() => {});
+    for (const w of created)
+      await fixtureGit(w.primary, [
+        "worktree",
+        "remove",
+        "--force",
+        w.path,
       ]).catch(() => {});
-    for (const w of created) await fixtureGit(w.primary, ["worktree", "remove", "--force", w.path]).catch(() => {});
     // Only this attempt's generated directory can be removed; stale attempts never own another attempt's workspace.
     const rel = relative(join(config.dataDir, "evaluation-work"), root);
-    if (rel && !rel.startsWith("..")) await rm(root, { recursive: true, force: true }).catch(() => {});
+    if (rel && !rel.startsWith(".."))
+      await rm(root, { recursive: true, force: true }).catch(() => {});
   }
   e.duration_ms = Date.now() - totalStart;
   e.details.timings = timings;
@@ -480,13 +585,21 @@ async function executeIsolated(
     cost_usd: cfg.provider_sequence ? null : 0,
   });
   const saved = await withTx(async (c) => {
-    const run = await one(c, "SELECT status FROM workflow_runs WHERE id=$1 FOR SHARE", [ctx.run.id]);
+    const run = await one(
+      c,
+      "SELECT status FROM workflow_runs WHERE id=$1 FOR SHARE",
+      [ctx.run.id],
+    );
     const lease = await one(
       c,
       "SELECT id FROM workflow_jobs WHERE id=$1 AND status='running' AND fencing_token=$2 AND lease_expires_at>clock_timestamp() FOR SHARE",
       [ctx.attempt.job_id, ctx.attempt.fencing_token],
     );
-    await q(c, "SELECT instance_id FROM platform_instances WHERE instance_id=$1 FOR SHARE", [config.instanceId]);
+    await q(
+      c,
+      "SELECT instance_id FROM platform_instances WHERE instance_id=$1 FOR SHARE",
+      [config.instanceId],
+    );
     if (!lease || !(await ownsInstance(c))) return null;
     const active = await one(
       c,

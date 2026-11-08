@@ -2,7 +2,10 @@
 const copy: Record<string, [string, string]> = {
   allColumns: ["Xem tất cả chỉ số", "Show all metrics"],
   summaryColumns: ["Xem chỉ số chính", "Show key metrics"],
-  tableScroll: ["Bảng dữ liệu, cuộn ngang để xem thêm cột", "Data table, scroll horizontally for more columns"],
+  tableScroll: [
+    "Bảng dữ liệu, cuộn ngang để xem thêm cột",
+    "Data table, scroll horizontally for more columns",
+  ],
   "productionTab.overview": ["Tổng quan", "Overview"],
   "productionTab.incidents": ["Danh sách lỗi", "Incidents"],
   "productionTab.services": ["Theo dịch vụ", "Services"],

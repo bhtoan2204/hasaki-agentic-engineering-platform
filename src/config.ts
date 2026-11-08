@@ -176,7 +176,14 @@ export interface Config {
     models?: Record<string, Record<string, string>>;
   };
   /** Optional one-way Telegram notifications (env TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID; never put the token in config.json). */
-  telegram: { botToken: string; chatId: string; apiBase: string };
+  telegram: {
+    botToken: string;
+    chatId: string;
+    apiBase: string;
+    mode: "off" | "polling" | "webhook";
+    webhookSecret: string;
+    webhookUrl: string;
+  };
   /** Argo CD (QC) for reading pod logs during bug investigation. The token is pasted in the UI (Integrations), never in config. */
   argocd: { baseUrl: string };
   /**
@@ -326,7 +333,14 @@ const defaults: Config = {
     maxResults: 500,
     timeoutSeconds: 60,
   },
-  telegram: { botToken: "", chatId: "", apiBase: "https://api.telegram.org" },
+  telegram: {
+    botToken: "",
+    chatId: "",
+    apiBase: "https://api.telegram.org",
+    mode: "off",
+    webhookSecret: "",
+    webhookUrl: "",
+  },
   prodErrors: {
     index: "k8s_prod",
     namespaces: [
@@ -423,7 +437,20 @@ function load(): Config {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
     chatId: process.env.TELEGRAM_CHAT_ID ?? "",
     apiBase: process.env.TELEGRAM_API_BASE ?? defaults.telegram.apiBase,
+    mode: (process.env.TELEGRAM_MODE ?? "off") as "off" | "polling" | "webhook",
+    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? "",
+    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL ?? "",
   };
+  if (!["off", "polling", "webhook"].includes(cfg.telegram.mode))
+    throw new Error("Invalid TELEGRAM_MODE");
+  if (
+    cfg.telegram.mode === "webhook" &&
+    (!/^https:\/\//.test(cfg.telegram.webhookUrl) ||
+      !/^[A-Za-z0-9_-]{16,256}$/.test(cfg.telegram.webhookSecret))
+  )
+    throw new Error(
+      "Telegram webhook needs HTTPS TELEGRAM_WEBHOOK_URL and a 16-256 character TELEGRAM_WEBHOOK_SECRET",
+    );
   cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.dataDir = resolve(cfg.dataDir);

@@ -1,11 +1,21 @@
 import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, Info } from "lucide-react";
-import { EmptyState, Skeleton, SkeletonRows, StatCard, time } from "../../ui.tsx";
+import {
+  EmptyState,
+  Skeleton,
+  SkeletonRows,
+  StatCard,
+  time,
+} from "../../ui.tsx";
 import { uiLocale, useI18n } from "../../i18n/index.tsx";
 
 export type Row = Record<string, any>;
-export const number = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
-export const fmt = (v: unknown, style: "number" | "usd" | "ms" | "pct" = "number") => {
+export const number = (v: unknown) =>
+  v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+export const fmt = (
+  v: unknown,
+  style: "number" | "usd" | "ms" | "pct" = "number",
+) => {
   const n = number(v);
   if (n == null) return "—";
   const locale = uiLocale() === "vi" ? "vi-VN" : "en-GB";
@@ -13,14 +23,24 @@ export const fmt = (v: unknown, style: "number" | "usd" | "ms" | "pct" = "number
     return n >= 60000
       ? `${(n / 60000).toLocaleString(locale, { maximumFractionDigits: 1 })} min`
       : `${(n / 1000).toLocaleString(locale, { maximumFractionDigits: 2 })} s`;
-  if (style === "pct") return `${(n * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
+  if (style === "pct")
+    return `${(n * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
   return n.toLocaleString(locale, {
     maximumFractionDigits: style === "usd" ? 4 : 1,
     ...(style === "usd" ? { style: "currency", currency: "USD" } : {}),
   });
 };
-export const ratio = (a: unknown, b: unknown) => (number(a) != null && Number(b) > 0 ? Number(a) / Number(b) : null);
-export function Panel({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+export const ratio = (a: unknown, b: unknown) =>
+  number(a) != null && Number(b) > 0 ? Number(a) / Number(b) : null;
+export function Panel({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <section className="card ins-panel an-panel">
       <div className="ins-panel-head">
@@ -49,7 +69,15 @@ export function Metric({
   tone?: "brand" | "err" | "wait" | "ok" | "run";
 }) {
   const { t } = useI18n();
-  return <StatCard icon={Activity} label={t(`an.${label}`)} value={fmt(value, style)} hint={hint} tone={tone} />;
+  return (
+    <StatCard
+      icon={Activity}
+      label={t(`an.${label}`)}
+      value={fmt(value, style)}
+      hint={hint}
+      tone={tone}
+    />
+  );
 }
 export function Notice({ children }: { children: ReactNode }) {
   return (
@@ -101,43 +129,90 @@ export function DataTable({
   const count = total ?? Number(rows[0]?.total_rows ?? rows.length);
   const [expanded, setExpanded] = useState(false);
   const tableId = useId();
-  const prioritised = columns.some(c => c.responsivePriority === "secondary");
-  const cellStyle = (c: Column): CSSProperties => ({ textAlign: c.align ?? (c.style ? "right" : "left"), width: c.width, minWidth: c.minWidth, maxWidth: c.maxWidth });
+  const prioritised = columns.some((c) => c.responsivePriority === "secondary");
+  const cellStyle = (c: Column): CSSProperties => ({
+    textAlign: c.align ?? (c.style ? "right" : "left"),
+    width: c.width,
+    minWidth: c.minWidth,
+    maxWidth: c.maxWidth,
+  });
   return (
     <>
       {rows.length ? (
         <div className="data-table" data-expanded={expanded}>
-          {prioritised && <button type="button" className="ghost sm table-column-toggle" aria-expanded={expanded} aria-controls={tableId} onClick={() => setExpanded(v => !v)}>{t(expanded ? "an.summaryColumns" : "an.allColumns")}</button>}
-          <div className="table-wrap" tabIndex={0} role="region" aria-label={t("an.tableScroll")}>
-          <table id={tableId} className={`ins-table${prioritised ? " prioritised-table" : ""}`}>
-            <colgroup>{columns.map(c => <col key={c.key} style={{width:c.width}} data-priority={c.responsivePriority}/>)}</colgroup>
-            <thead>
-              <tr>
+          {prioritised && (
+            <button
+              type="button"
+              className="ghost sm table-column-toggle"
+              aria-expanded={expanded}
+              aria-controls={tableId}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {t(expanded ? "an.summaryColumns" : "an.allColumns")}
+            </button>
+          )}
+          <div
+            className="table-wrap"
+            tabIndex={0}
+            role="region"
+            aria-label={t("an.tableScroll")}
+          >
+            <table
+              id={tableId}
+              className={`ins-table${prioritised ? " prioritised-table" : ""}`}
+            >
+              <colgroup>
                 {columns.map((c) => (
-                  <th scope="col" key={c.key} style={cellStyle(c)} data-priority={c.responsivePriority}>{t(`an.${c.label}`)}</th>
+                  <col
+                    key={c.key}
+                    style={{ width: c.width }}
+                    data-priority={c.responsivePriority}
+                  />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}>
+              </colgroup>
+              <thead>
+                <tr>
                   {columns.map((c) => (
-                    <td key={c.key} style={cellStyle(c)} className={c.style || c.align === "right" ? "numeric-cell" : undefined} data-priority={c.responsivePriority}>
-                      {c.render ? (
-                        c.render(r)
-                      ) : c.style ? (
-                        fmt(r[c.key], c.style)
-                      ) : r[c.key] == null ? (
-                        <span className="muted">—</span>
-                      ) : (
-                        String(r[c.key])
-                      )}
-                    </td>
+                    <th
+                      scope="col"
+                      key={c.key}
+                      style={cellStyle(c)}
+                      data-priority={c.responsivePriority}
+                    >
+                      {t(`an.${c.label}`)}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    {columns.map((c) => (
+                      <td
+                        key={c.key}
+                        style={cellStyle(c)}
+                        className={
+                          c.style || c.align === "right"
+                            ? "numeric-cell"
+                            : undefined
+                        }
+                        data-priority={c.responsivePriority}
+                      >
+                        {c.render ? (
+                          c.render(r)
+                        ) : c.style ? (
+                          fmt(r[c.key], c.style)
+                        ) : r[c.key] == null ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          String(r[c.key])
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       ) : (
@@ -148,10 +223,18 @@ export function DataTable({
           <span className="muted">
             {t("an.rows", { n: count })} · {t("an.page", { n: page ?? 1 })}
           </span>
-          <button className="ghost sm" disabled={(page ?? 1) <= 1} onClick={() => onPage((page ?? 1) - 1)}>
+          <button
+            className="ghost sm"
+            disabled={(page ?? 1) <= 1}
+            onClick={() => onPage((page ?? 1) - 1)}
+          >
             {t("an.previous")}
           </button>
-          <button className="ghost sm" disabled={(page ?? 1) * 25 >= count} onClick={() => onPage((page ?? 1) + 1)}>
+          <button
+            className="ghost sm"
+            disabled={(page ?? 1) * 25 >= count}
+            onClick={() => onPage((page ?? 1) + 1)}
+          >
             {t("an.next")}
           </button>
         </div>
@@ -209,7 +292,12 @@ export function Trend({
             >
               <div
                 className={n == null ? "an-trend-missing" : "an-trend-bar"}
-                style={{ height: n == null ? "8px" : `${max > 0 ? Math.max(1, (n / max) * 100) : 1}%` }}
+                style={{
+                  height:
+                    n == null
+                      ? "8px"
+                      : `${max > 0 ? Math.max(1, (n / max) * 100) : 1}%`,
+                }}
               />
             </div>
           );
@@ -225,7 +313,11 @@ export function Trend({
           rows={rows}
           columns={[
             { key: "bucket", label: "from" },
-            { key: field, label: currency ? "cost" : "events", style: currency ? "usd" : "number" },
+            {
+              key: field,
+              label: currency ? "cost" : "events",
+              style: currency ? "usd" : "number",
+            },
           ]}
         />
       </details>
@@ -250,7 +342,10 @@ export function BreakdownBars({
         <li className="ins-bar" key={i}>
           <span className="mono">{r[labelKey] ?? t("an.unknown")}</span>
           <div className="ins-bar-track" aria-hidden>
-            <span className="ins-bar-fill" style={{ width: `${(100 * Number(r[field] ?? 0)) / max}%` }} />
+            <span
+              className="ins-bar-fill"
+              style={{ width: `${(100 * Number(r[field] ?? 0)) / max}%` }}
+            />
           </div>
           <span>{fmt(r[field])}</span>
         </li>
