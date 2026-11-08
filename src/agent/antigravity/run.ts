@@ -87,6 +87,7 @@ function releaseSlot(max: number) {
 
 /** Pure helper to build argv for `agy` execution. */
 export function buildAntigravityArgs(opts: {
+  prompt?: string;
   promptFile?: string;
   model?: string;
   effort?: string;
@@ -95,8 +96,8 @@ export function buildAntigravityArgs(opts: {
   conversationId?: string;
   additionalDirs?: string[];
 }): string[] {
+  // Move --output-format elsewhere on the command line, away from -p
   const args = [
-    "-p",
     "--output-format",
     "stream-json",
     "--input-format",
@@ -116,6 +117,12 @@ export function buildAntigravityArgs(opts: {
     for (const d of opts.additionalDirs) {
       if (d) args.push("--add-dir", d);
     }
+  }
+  // Attach the prompt directly to the -p flag: -p=prompt
+  if (opts.prompt != null) {
+    args.push(`-p=${opts.prompt}`);
+  } else {
+    args.push("-p");
   }
   return args;
 }
@@ -207,6 +214,7 @@ export async function antigravityAgentTurn(
     const timeoutSec = Math.floor(timeoutMs / 1000);
 
     const args = buildAntigravityArgs({
+      prompt: input.prompt,
       model: input.model || undefined,
       effort: input.effort || undefined,
       sandbox: cfg.sandbox,
@@ -266,8 +274,7 @@ export async function antigravityAgentTurn(
       onAbort();
     }, timeoutMs);
 
-    // Write prompt to child stdin
-    child.stdin?.write(input.prompt);
+    // Close child stdin since prompt is attached to -p flag
     child.stdin?.end();
 
     const parser = new AntigravityStream();
@@ -460,16 +467,12 @@ export async function antigravityComplete(
     );
   }
 
-  const args = [
-    "-p",
-    "--output-format",
-    "stream-json",
-    "--input-format",
-    "text",
-    "--dangerously-skip-permissions",
-  ];
-  if (cfg.model) args.push("--model", cfg.model);
-  if (cfg.effort) args.push("--effort", cfg.effort);
+  const args = buildAntigravityArgs({
+    prompt,
+    model: cfg.model || undefined,
+    effort: cfg.effort || undefined,
+    sandbox: false,
+  });
 
   const env = antigravityEnv(process.env);
   const child = spawn(cfg.bin, args, { env, stdio: ["pipe", "pipe", "pipe"] });
@@ -482,7 +485,6 @@ export async function antigravityComplete(
   };
   opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
-  child.stdin?.write(prompt);
   child.stdin?.end();
 
   let text = "";

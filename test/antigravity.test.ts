@@ -337,14 +337,19 @@ test("workspace config writes .agents/hooks.json and .agents/mcp_config.json, an
 
 test("buildAntigravityArgs builds correct noninteractive arguments without credentials", () => {
   const args = buildAntigravityArgs({
+    prompt: "inspect database",
     model: "gemini-3.8-flash-high",
     effort: "high",
     conversationId: "conv-123",
     sandbox: true,
   });
-  assert.ok(args.includes("-p"));
+  assert.ok(args.includes("-p=inspect database"));
   assert.ok(args.includes("--output-format"));
   assert.ok(args.includes("stream-json"));
+  // Ensure -p is not followed by --output-format
+  const pIdx = args.findIndex((a) => a === "-p" || a.startsWith("-p="));
+  const outIdx = args.indexOf("--output-format");
+  assert.notEqual(pIdx + 1, outIdx, "-p must not take --output-format as its value");
   assert.ok(args.includes("--model"));
   assert.ok(args.includes("gemini-3.8-flash-high"));
   assert.ok(args.includes("--effort"));

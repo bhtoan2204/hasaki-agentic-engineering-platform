@@ -53,15 +53,47 @@ gpt-oss-120b-medium`);
 }
 
 // Must be headless print mode
-if (!argv.includes("-p") && !argv.includes("--print")) {
+const printArg = argv.find(
+  (a) => a === "-p" || a.startsWith("-p=") || a === "--print" || a.startsWith("--print="),
+);
+if (!printArg) {
   console.error("Unknown command or missing -p flag: " + argv.join(" "));
   process.exit(2);
 }
 
+// Validate that -p did not take "--output-format" as prompt
+const pIndex = argv.indexOf("-p");
+if (pIndex >= 0 && argv[pIndex + 1] === "--output-format") {
+  console.error(
+    'Error: -p took "--output-format" as its prompt, so the intended prompt was left as an argument and ignored. Attach the prompt to the flag (-p=\'your prompt\') and move --output-format elsewhere on the command line.',
+  );
+  process.exit(2);
+}
+
 let prompt = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (c) => (prompt += c));
-await new Promise((r) => process.stdin.on("end", r));
+if (printArg.startsWith("-p=")) {
+  prompt = printArg.slice(3);
+} else if (printArg.startsWith("--print=")) {
+  prompt = printArg.slice(8);
+}
+
+// Strip outer quotes if any
+if (
+  (prompt.startsWith("'") && prompt.endsWith("'")) ||
+  (prompt.startsWith('"') && prompt.endsWith('"'))
+) {
+  prompt = prompt.slice(1, -1);
+}
+
+if (!prompt && process.stdin.readable) {
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (c) => (prompt += c));
+  await new Promise((r) => {
+    if (process.stdin.readableEnded) return r();
+    process.stdin.on("end", r);
+    setTimeout(r, 20);
+  });
+}
 
 let resumeId = null;
 const convIdx = argv.indexOf("--conversation");
