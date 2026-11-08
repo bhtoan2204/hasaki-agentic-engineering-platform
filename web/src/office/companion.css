@@ -1,0 +1,93 @@
+.global-companion {
+  --companion-accent: var(--brand);
+  position: fixed; z-index: 80; display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  width: min(310px, calc(100vw - 24px)); pointer-events: none; font-size: var(--fs-sm);
+}
+.global-companion * { pointer-events: auto }
+.companion-stage { position: relative; width: 76px; height: 86px; align-self: flex-end; }
+.companion-avatar {
+  position: absolute; inset: 0; width: 76px; height: 86px; padding: 0; border: 0; background: transparent; box-shadow: none;
+  border-radius: 22px; cursor: grab; touch-action: none; overflow: visible;
+}
+.companion-avatar:hover, .companion-avatar:focus-visible { background: transparent; box-shadow: none; transform: none }
+.companion-avatar:active { cursor: grabbing; transform: none }
+.companion-art { width: 76px; height: 86px; overflow: visible; position: relative; z-index: 1; filter: drop-shadow(0 5px 4px rgba(25, 42, 31, .19)); }
+.hc-shadow { fill: rgba(20, 35, 27, .16) }
+.hc-character { transform-box: fill-box; transform-origin: 50% 96%; animation: hc-breathe 3.8s ease-in-out infinite; }
+.global-companion[data-visible="false"] .hc-character, .global-companion[data-visible="false"] .hc-head-group, .global-companion[data-visible="false"] .hc-eyes { animation-play-state: paused; }
+.hc-head-group { transform-box: fill-box; transform-origin: 50% 92%; animation: hc-head-idle 7.5s ease-in-out infinite; }
+.hc-eyes { transform-box: fill-box; transform-origin: center; animation: hc-blink 5.5s step-end infinite; }
+.hc-work-prop, .hc-checklist, .hc-clock, .hc-thought, .hc-handoff, .hc-confetti, .hc-zzz { opacity: 0; transition: opacity .25s ease; }
+.hc-raised-hand { opacity: 0; transform-box: fill-box; transform-origin: 0% 100%; transition: opacity .2s ease; }
+.hc-work-prop { opacity: 1 }
+.companion-art[data-companion-state="SLEEPING"] .hc-eyes, .companion-art[data-companion-state="WAITING"] .hc-eyes { animation: none; transform: scaleY(.16); }
+.companion-art[data-companion-state="SLEEPING"] .hc-zzz, .companion-art[data-companion-state="WAITING"] .hc-clock { opacity: 1 }
+.companion-art[data-companion-state="THINKING"] .hc-thought { opacity: 1 }
+.companion-art[data-companion-state="THINKING"] .hc-head-group, .companion-art[data-companion-state="RESEARCHING"] .hc-head-group, .companion-art[data-companion-state="REVIEWING"] .hc-head-group { animation: hc-think 2.4s ease-in-out infinite alternate; }
+.companion-art[data-companion-state="TESTING"] .hc-work-prop { opacity: 0 }
+.companion-art[data-companion-state="TESTING"] .hc-checklist { opacity: 1 }
+.companion-art[data-companion-state="REVIEWING"] .hc-thought, .companion-art[data-companion-state="RESEARCHING"] .hc-thought { opacity: 1 }
+.companion-art[data-companion-state="APPROVAL_REQUIRED"] .hc-raised-hand, .companion-art[data-companion-state="ASKING"] .hc-raised-hand { opacity: 1; animation: hc-raise 1.2s ease-in-out infinite alternate; }
+.companion-art[data-companion-state="APPROVAL_REQUIRED"] .hc-body { transform: translateY(-2px) rotate(-2deg) }
+.companion-art[data-companion-state="HANDOFF"] .hc-handoff { opacity: 1 }
+.companion-art[data-companion-state="FAILED"] .hc-mouth { transform: translateY(2px) rotate(180deg); transform-origin: center; }
+.companion-art[data-companion-state="FAILED"] .hc-brows { transform: translateY(2px) }
+.companion-art[data-companion-state="CELEBRATING"] .hc-confetti, .companion-art[data-companion-state="SUCCESS"] .hc-confetti { opacity: 1; animation: hc-sparkle 1.2s ease-in-out 3; }
+.companion-art[data-companion-state="CELEBRATING"] .hc-character { animation: hc-celebrate .3s ease-in-out 4; }
+.companion-art[data-companion-state="CODING"] .hc-body, .companion-art[data-companion-state="WORKING"] .hc-body, .companion-art[data-companion-state="RETRYING"] .hc-body { animation: hc-type .38s ease-in-out infinite alternate; }
+.companion-orbit { position: absolute; z-index: 0; left: 8px; right: 8px; bottom: 4px; height: 13px; border-radius: 50%; background: color-mix(in srgb, var(--brand-100) 72%, transparent); }
+.intensity-subtle .hc-character { animation-duration: 7s }
+.intensity-playful .hc-character { animation-duration: 2.6s }
+.intensity-off .hc-character, .intensity-off .hc-head-group, .intensity-off .hc-eyes, .intensity-off .hc-confetti, .intensity-off .hc-body, .intensity-off .hc-raised-hand { animation: none !important }
+.companion-collapse { position: absolute; z-index: 2; right: -1px; bottom: 1px; width: 21px; min-width: 21px; height: 21px; min-height: 21px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-2); box-shadow: var(--shadow-1); align-items: center; justify-content: center; }
+.companion-collapse:hover { background: var(--surface-2); color: var(--ink) }
+.companion-panel { width: 100%; max-height: min(70vh, 540px); overflow: auto; border: 1px solid var(--line); border-radius: 17px; padding: 13px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-3); animation: companion-in .16s ease-out both; }
+.companion-panel-head { display: flex; align-items: center; gap: 9px; min-width: 0 }
+.companion-heading { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.35 }
+.companion-heading strong { color: var(--ink); font-size: var(--fs-md) }
+.companion-heading span { color: var(--muted); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.companion-status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--st-idle); box-shadow: 0 0 0 3px var(--st-idle-bg); flex: 0 0 auto }
+.companion-status-dot[data-state="CODING"], .companion-status-dot[data-state="WORKING"], .companion-status-dot[data-state="TESTING"], .companion-status-dot[data-state="RESEARCHING"], .companion-status-dot[data-state="REVIEWING"] { background: var(--st-run); box-shadow: 0 0 0 3px var(--st-run-bg) }
+.companion-status-dot[data-state="ASKING"], .companion-status-dot[data-state="WAITING"], .companion-status-dot[data-state="APPROVAL_REQUIRED"], .companion-status-dot[data-state="HANDOFF"] { background: var(--st-wait); box-shadow: 0 0 0 3px var(--st-wait-bg) }
+.companion-status-dot[data-state="SUCCESS"], .companion-status-dot[data-state="CELEBRATING"] { background: var(--st-ok); box-shadow: 0 0 0 3px var(--st-ok-bg) }
+.companion-status-dot[data-state="FAILED"] { background: var(--st-err); box-shadow: 0 0 0 3px var(--st-err-bg) }
+.companion-message { margin: 11px 0; color: var(--ink-2); line-height: 1.5 }
+.companion-run-card { padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); min-width: 0 }
+.companion-run-title, .companion-meta { display: flex; gap: 7px; align-items: center; min-width: 0 }
+.companion-run-title b { color: var(--brand); flex: 0 0 auto }
+.companion-run-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600 }
+.companion-meta { justify-content: space-between; margin-top: 5px; color: var(--muted); font-size: var(--fs-xs) }
+.companion-meta span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.companion-run-status { flex: 0 0 auto; color: var(--ink-2); font-weight: 600 }
+.companion-provider { margin-top: 5px; color: var(--brand); font: 500 var(--fs-xs)/1.4 var(--mono); overflow-wrap: anywhere }
+.companion-panel-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px }
+.companion-panel-actions .btn { min-height: 34px; justify-content: center; font-size: var(--fs-xs); padding: 7px 9px }
+.companion-settings { display: grid; gap: 9px; padding: 10px 0 0 }
+.companion-settings label { display: grid; gap: 4px; font-size: var(--fs-xs); color: var(--muted) }
+.companion-settings input, .companion-settings select { min-height: 34px; padding: 5px 8px; font-size: var(--fs-sm) }
+.companion-panel-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; border-top: 1px solid var(--line); margin-top: 11px; padding-top: 9px }
+.companion-panel-foot .linkish { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px; font-size: var(--fs-xs); min-height: 28px }
+.companion-restore { position: fixed; z-index: 80; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); display: flex; gap: 6px; align-items: center; min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); background: var(--surface); box-shadow: var(--shadow-2); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0 }
+@keyframes hc-breathe { 0%,100% { transform: translateY(0) scale(1) } 50% { transform: translateY(-1px) scale(1.012) } }
+@keyframes hc-head-idle { 0%, 42%, 46%, 100% { transform: rotate(0) } 44% { transform: rotate(2deg) } }
+@keyframes hc-think { from { transform: rotate(-2deg) } to { transform: rotate(2deg) } }
+@keyframes hc-raise { from { transform: rotate(-2deg) } to { transform: rotate(5deg) } }
+@keyframes hc-celebrate { 0%,100% { transform: translateY(0) rotate(0) } 50% { transform: translateY(-5px) rotate(2deg) } }
+@keyframes hc-blink { 0%, 5%, 100% { transform: scaleY(1) } 2.5% { transform: scaleY(.08) } }
+@keyframes hc-type { from { transform: translateY(0) } to { transform: translateY(1px) } }
+@keyframes hc-sparkle { 0%,100% { transform: scale(.96); opacity: .65 } 50% { transform: scale(1.08); opacity: 1 } }
+@keyframes companion-in { from { opacity: 0; transform: translateY(7px) scale(.985) } to { opacity: 1; transform: translateY(0) scale(1) } }
+@media (max-width: 600px) {
+  .global-companion { width: min(280px, calc(100vw - 16px)); }
+  .companion-stage { width: 62px; height: 70px }
+  .companion-avatar { width: 62px; height: 70px }
+  .companion-art { width: 62px; height: 70px }
+  .companion-collapse { right: -3px; bottom: -1px }
+  .companion-panel { padding: 11px; max-height: min(68vh, 480px) }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-character, .hc-head-group, .hc-eyes, .hc-confetti, .hc-body, .hc-raised-hand { animation: none !important }
+  .companion-panel { animation: none }
+  .companion-art * { transition: none !important }
+}

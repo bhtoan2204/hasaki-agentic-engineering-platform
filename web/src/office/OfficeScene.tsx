@@ -39,7 +39,7 @@ function useWalking(pos: Record<Role, { x: number; y: number }>, still: boolean)
   const [walking, setWalking] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const changed: string[] = [];
-    for (const [role, p] of Object.entries(pos)) {
+    for (const [role, p] of Object.entries(pos ?? {})) {
       const k = `${p.x},${p.y}`;
       if (prev.current[role] && prev.current[role] !== k) changed.push(role);
       prev.current[role] = k;

@@ -17,6 +17,7 @@ import { KnowledgePage } from "./pages/Knowledge.tsx";
 import { RepositoriesPage } from "./pages/Repositories.tsx";
 import { InsightsPage } from "./pages/Insights.tsx";
 import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
+import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
 import { ProdErrorsPage } from "./pages/ProdErrors.tsx";
@@ -199,6 +200,7 @@ export function App() {
 
   return (
     <div className={`app${navOpen ? " nav-open" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
+      <GlobalChibiCompanion section={section} />
       <aside ref={sidebar} id="main-sidebar" role={navOpen ? "dialog" : undefined} aria-modal={navOpen || undefined} className="sidebar" aria-label={t("nav.aria")}>
         <button className="quiet icon sb-close" onClick={() => { setNavOpen(false); requestAnimationFrame(() => mobileTrigger.current?.focus()); }} aria-label={t("common.close")}><X size={18} /></button>
         <a className="sb-brand" href="#/overview" aria-label={`${BRAND.product} — Overview`}>

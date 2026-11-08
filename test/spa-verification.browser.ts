@@ -5,6 +5,8 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { handle } from "../src/http/app.ts";
 import { pool } from "../src/db/pool.ts";
@@ -23,9 +25,13 @@ const browser = await chromium.launch({
 });
 
 const pageErrors: string[] = [];
+const screenshotDir = resolve("docs/validation/chibi-companion");
+mkdirSync(screenshotDir, { recursive: true });
+let companionScenario: "working" | "approval" | "success" = "working";
 
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   page.on("pageerror", (e) => {
     pageErrors.push(e.message);
     console.log("PAGEERROR:", e.message, e.stack);
@@ -85,6 +91,9 @@ try {
         },
       });
     }
+    if (path.startsWith("/api/metrics/runs/")) {
+      return route.fulfill({ json: { run_id: 42, wall_ms: 1000, totals: { exec_ms: 800, queue_ms: 100, human_ms: 100, cost_unknown: 1, turns: 0, claude_sessions: 0, claude_ms: 0, tool_calls: 0, tool_ms: 0, command_ms: 0, integration_calls: 0, skills_loaded: 0, retries: 0, failed: 0 }, per_step: {}, by_tool: {}, bottleneck: null } });
+    }
 
     if (path === "/api/work/status") {
       return route.fulfill({ json: { browserMode: "hosted", connectionState: "idle", loggedIn: false } });
@@ -131,6 +140,11 @@ try {
 
     if (path.startsWith("/api/analytics/")) {
       const tab = path.replace("/api/analytics/", "");
+      if (tab === "health") return route.fulfill({ json: {
+        tab, filters: { timezone: "Asia/Ho_Chi_Minh", bucket: "day" }, range: { from: "2026-11-01T00:00:00Z", to: "2026-11-08T00:00:00Z" },
+        freshness: { status: "never", window_coverage_ms: 0, successful_scans_in_range: 0, scans_in_range: 0, data_source: "Splunk" },
+        summary: {}, services: [], serviceTrends: [], trend: [], previousTrend: [], severity: [], lifecycle: { statuses: [] }, remediation: {}, semantics: {}, topFingerprints: [], details: [],
+      } });
       return route.fulfill({
         json: {
           tab,
@@ -161,23 +175,32 @@ try {
       });
     }
 
+    if (path.startsWith("/api/prod-errors")) {
+      return route.fulfill({ json: { day: "2026-11-09", today: "2026-11-09", scanning: false, progress: null, lastScan: null, lastOk: null, ignored: 0, settings: { schedule: [], notify: false }, splunk: { connected: false, expired: false }, namespaces: [], shown: null, maxCustomHours: 24, groups: [] } });
+    }
+
     if (path === "/api/workflows") {
       return route.fulfill({
         json: [{ key: "feature-impl", name: "Feature Implementation", latest_version: 1, description: "Standard workflow" }],
       });
     }
 
+    if (path.startsWith("/api/runs/") && path.endsWith("/events")) {
+      return route.fulfill({ json: [] });
+    }
     if (path.startsWith("/api/runs/")) {
+      const stepStatus = companionScenario === "approval" ? "WAITING_APPROVAL" : companionScenario === "success" ? "COMPLETED" : "RUNNING";
+      const runStatus = companionScenario === "approval" ? "WAITING" : companionScenario === "success" ? "COMPLETED" : "RUNNING";
       return route.fulfill({
         json: {
           id: 42,
           title: "Run #42",
-          status: "RUNNING",
+          status: runStatus,
           profile: "STANDARD",
           agent_provider: "claude",
           graph: { steps: [{ key: "s1", name: "Step 1", type: "agent", depends_on: [] }] },
-          steps: [{ key: "s1", name: "Step 1", status: "RUNNING", type: "agent" }],
-          attempts: [],
+          steps: [{ key: "s1", name: "Implement payment fix", status: stepStatus, type: "coding_agent", current_attempt_id: 420 }],
+          attempts: [{ id: 420, step_key: "s1", number: 1, status: stepStatus, provider: "codex", model: "gpt-5-codex", finished_at: companionScenario === "success" ? new Date(Date.now() - 1500).toISOString() : null }],
           questions: [],
           pull_requests: [],
           workspaces: [],
@@ -193,7 +216,13 @@ try {
   // 1. Initial Page Load (Overview)
   await page.goto(`${baseUrl}/#/overview`);
   await page.waitForTimeout(2000);
-  console.log("BODY HTML:\n", await page.locator('body').innerHTML());
+  await page.locator(".companion-avatar").waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, "01-overview-en.png"), fullPage: true });
+  const avatarNode = await page.locator(".companion-avatar").evaluate((node) => { (window as any).__companionNode = node; return true; });
+  assert.equal(avatarNode, true);
+  await page.locator(".companion-avatar").click();
+  await page.getByText("codex · gpt-5-codex", { exact: true }).waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, "02-companion-working.png"), fullPage: true });
 
   // Mark the window object to verify no full-document reload occurs
   await page.evaluate(() => {
@@ -204,6 +233,9 @@ try {
   console.log("Checking navigation: Overview -> Work Items...");
   await page.click('a[href="#/work-items"]');
   await page.waitForSelector(".wi-page", { timeout: 5000 });
+  assert.equal(await page.locator(".global-companion").count(), 1, "companion remains mounted between routes");
+  assert.equal(await page.locator(".companion-avatar").evaluate((node) => node === (window as any).__companionNode), true, "companion avatar node is not remounted on navigation");
+  await page.screenshot({ path: resolve(screenshotDir, "03-work-items-en.png"), fullPage: true });
 
   // Document marker must still be present (no browser document reload!)
   const markerAfterNav1 = await page.evaluate(() => (window as any).__spaWindowMarker);
@@ -271,6 +303,74 @@ try {
     await viButton.click();
     await page.waitForTimeout(200);
   }
+
+  // A real shell mount reacts to recorded approval and completion signals, without generating mock chat text.
+  if (!(await page.locator(".companion-panel").count())) await page.locator(".companion-avatar").click();
+  await page.locator(".companion-panel-foot button").filter({ hasText: /Tuỳ chỉnh|Preferences/ }).click();
+  await page.locator(".companion-settings input").fill("Mika");
+  await page.locator(".companion-settings select").selectOption("subtle");
+  assert.ok((await page.evaluate(() => localStorage.getItem("hasaki.companion.preferences.v1")))?.includes('"name":"Mika"'));
+  assert.ok(!(await page.evaluate(() => localStorage.getItem("hasaki.companion.preferences.v1")))?.includes("Run #42"), "preferences do not persist workflow data");
+  const beforeDrag = await page.evaluate(() => JSON.parse(localStorage.getItem("hasaki.companion.preferences.v1")!).position.right);
+  const avatarBox = await page.locator(".companion-avatar").boundingBox();
+  assert.ok(avatarBox);
+  await page.mouse.move(avatarBox.x + 20, avatarBox.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(avatarBox.x + 52, avatarBox.y + 5, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForTimeout(50);
+  const afterDrag = await page.evaluate(() => JSON.parse(localStorage.getItem("hasaki.companion.preferences.v1")!).position.right);
+  assert.notEqual(afterDrag, beforeDrag, "dragging saves a new position");
+  await page.locator(".companion-panel-foot button").filter({ hasText: /Ẩn trợ lý|Hide companion/ }).click();
+  await page.locator(".companion-restore").click();
+  await page.locator(".companion-avatar").waitFor();
+  companionScenario = "approval";
+  await page.evaluate(() => localStorage.setItem("hasaki.uiLocale", "en"));
+  await page.reload();
+  if (!(await page.locator(".companion-panel").count())) await page.locator(".companion-avatar").click();
+  await page.getByText("Run #42 is waiting for your approval.").waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, "04-approval-required.png"), fullPage: true });
+  await page.goto(`${baseUrl}/#/runs/42`);
+  await page.locator(".global-companion").waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, "05-run-view.png"), fullPage: true });
+  await page.goto(`${baseUrl}/#/office/42`);
+  await page.locator(".office-stage").waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, "06-agent-office.png"), fullPage: true });
+  await page.goto(`${baseUrl}/#/workflows`);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: resolve(screenshotDir, "09-workflow-studio.png"), fullPage: true });
+  await page.goto(`${baseUrl}/#/prod-errors`);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: resolve(screenshotDir, "10-production-errors.png"), fullPage: true });
+  await page.goto(`${baseUrl}/#/insights/health`);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: resolve(screenshotDir, "11-insights.png"), fullPage: true });
+  companionScenario = "success";
+  await page.reload();
+  if (!(await page.locator(".companion-panel").count())) await page.locator(".companion-avatar").click();
+  await page.getByText("Run #42 just completed.").waitFor();
+  await page.screenshot({ path: resolve(screenshotDir, "07-success-reaction.png"), fullPage: true });
+  assert.equal(await page.locator(".hc-character").evaluate((node) => getComputedStyle(node).animationName), "none", "reduced-motion preference stops character animation");
+  await page.locator(".companion-avatar").focus();
+  const beforeKeyboardMove = await page.evaluate(() => JSON.parse(localStorage.getItem("hasaki.companion.preferences.v1")!).position.right);
+  await page.keyboard.press("ArrowLeft");
+  const afterKeyboardMove = await page.evaluate(() => JSON.parse(localStorage.getItem("hasaki.companion.preferences.v1")!).position.right);
+  assert.notEqual(afterKeyboardMove, beforeKeyboardMove, "keyboard arrows reposition the companion");
+  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
+  for (const width of [1440, 1280, 1024, 768, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `no horizontal overflow at ${width}px`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "mobile companion and office have no page overflow");
+  await page.screenshot({ path: resolve(screenshotDir, "08-mobile-companion.png"), fullPage: true });
+  await page.getByRole("button", { name: "VI", exact: true }).click();
+  await page.goto(`${baseUrl}/#/overview`);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: resolve(screenshotDir, "12-overview-vi.png"), fullPage: true });
+  companionScenario = "working";
 
   // 6. Verify No Unhandled Errors
   assert.equal(pageErrors.length, 0, `Unexpected page errors in browser: ${pageErrors.join("; ")}`);
