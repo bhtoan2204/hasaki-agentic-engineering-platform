@@ -1,3 +1,4 @@
+import type { AgentMetrics } from "../metrics.ts";
 import { spawn, execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -76,6 +77,9 @@ function finish(c: CursorCapability): CursorCapability {
 }
 
 export interface CursorTurnInput {
+  metrics?: AgentMetrics;
+  invocationId?: string;
+  onTelemetry?: (error?: unknown) => Promise<void>;
   ctx: ExecutionContext;
   mode: ToolMode;
   policy: PolicyContext;
@@ -163,10 +167,19 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   let toolErrors = 0;
   const denied: Array<{ tool: string; reason: string }> = [];
 
+  const seenTools = new Set<string>();
   const handle = async (ev: CursorEvent) => {
+    const eventKey = `${ev.subtype}:${ev.call_id}`;
+    if (ev.type === "tool_call" && ev.call_id) {
+      if (seenTools.has(eventKey)) return;
+      seenTools.add(eventKey);
+    }
+    const toolId = ev.call_id ? `${input.invocationId ?? input.ctx.attempt.id}:${ev.call_id}` : undefined;
     if (ev.type === "system" && ev.subtype === "init" && ev.session_id) {
       sessionId = ev.session_id;
       model = ev.model || "";
+      if (input.metrics && model) input.metrics.model = model;
+      await input.onTelemetry?.();
       await input.ctx.recordSession(ev.session_id, input.cwd, model, "cursor");
       await input.ctx.log("system", `Cursor session ${ev.session_id} started${model ? ` (model ${model})` : ""}`, { provider: "cursor", session_id: ev.session_id, model: model || null });
     } else if (ev.type === "thinking" && ev.text?.trim()) {
@@ -181,7 +194,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       const shape = toolCallShape(ev.tool_call);
       const name = shape?.name ?? "tool";
       toolCalls[name] = (toolCalls[name] ?? 0) + 1;
-      await input.ctx.log("tool", `${name}`, { provider: "cursor", call_id: ev.call_id, tool_call: ev.tool_call });
+      await input.ctx.log("tool", `${name}`, { provider: "cursor", call_id: ev.call_id, id: toolId, name, tool_call: ev.tool_call });
       const ws = (await workspacesOf(input.ctx.run.id)).map((w) => w.path);
       const policy = { ...input.policy, workspaces: [...new Set([...input.policy.workspaces, ...ws])] };
       const decision = cursorToolDecision(ev.tool_call, policy, input.cwd);
@@ -197,12 +210,14 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     } else if (ev.type === "tool_call" && ev.subtype === "completed") {
       const failed = JSON.stringify(ev.tool_call ?? {}).includes('"error"');
       if (failed) toolErrors++;
-      await input.ctx.log("tool_result", JSON.stringify(ev.tool_call ?? {}).slice(0, 4000), { provider: "cursor", call_id: ev.call_id, is_error: failed });
+      await input.ctx.log("tool_result", JSON.stringify(ev.tool_call ?? {}).slice(0, 4000), { provider: "cursor", call_id: ev.call_id, tool_use_id: toolId, is_error: failed });
     } else if (ev.type === "result") {
+      if (sawResult) return;
       sawResult = true;
       isError = ev.is_error === true || ev.subtype === "error";
       if (typeof ev.result === "string") text = ev.result;
       if (typeof ev.duration_ms === "number") duration = ev.duration_ms;
+      await input.onTelemetry?.(isError ? ev.raw : undefined);
     }
   };
 
@@ -240,8 +255,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   rmSync(promptFile, { force: true });
   rmSync(join(input.cwd, ".cursor", "cli.json"), { force: true });
 
-  if (input.ctx.signal.aborted) return { isError: true, text: "canceled", assistantTurns };
-  if (violation) return { isError: true, text: `Cursor tool blocked by platform policy: ${violation}`, assistantTurns: Math.max(assistantTurns, 1) };
+
 
   const submittedRow = await one<{ data: { output?: Record<string, unknown> } }>(
     pool,
@@ -250,18 +264,18 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   );
   const submitted = submittedRow?.data?.output;
 
-  await input.ctx.recordMetrics({
-    provider: "cursor",
-    model: model || null,
-    model_source: "cursor account default",
-    sessions: sessionId ? 1 : 0,
-    duration_ms: duration,
-    cost_usd: null,
-    tokens: null,
-    tool_calls: toolCalls,
-    tool_errors: toolErrors,
-    denied,
-  });
+  if (input.metrics) {
+    input.metrics.model = model || input.metrics.model;
+    input.metrics.sessions += sessionId ? 1 : 0;
+    input.metrics.duration_ms += duration ?? 0;
+    input.metrics.turns += assistantTurns;
+    for (const [name, count] of Object.entries(toolCalls)) input.metrics.tool_calls[name] = (input.metrics.tool_calls[name] ?? 0) + count;
+    input.metrics.tool_errors += toolErrors;
+    input.metrics.denied.push(...denied);
+  }
+
+  if (input.ctx.signal.aborted) return { isError: true, text: "canceled", assistantTurns };
+  if (violation) return { isError: true, text: `Cursor tool blocked by platform policy: ${violation}`, assistantTurns: Math.max(assistantTurns, 1) };
 
   const ws = (await workspacesOf(input.ctx.run.id)).map((w) => w.path);
   for (const p of ws) if (!input.policy.workspaces.includes(p)) input.policy.workspaces.push(p);

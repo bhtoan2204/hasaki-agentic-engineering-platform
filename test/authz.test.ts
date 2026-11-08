@@ -287,3 +287,29 @@ test("repository URL administration is admin-only, members share identity and lo
   const invalid = await member.call("/api/repositories/validate-url", {repository_url:"https://person:private-token@bitbucket.org/team/repo"});
   assert.equal(invalid.status,400); assert.ok(!invalid.text.includes("private-token"));
 });
+
+test("metrics use owner scope; explicit admin support access is audited including cache hits", async () => {
+  const a = client();
+  const b = client();
+  const admin = client();
+  await a.login("membera", "member-a-password");
+  await b.login("memberb", "member-b-password");
+  await admin.login("admin", "admin-password");
+  const run = (await b.call("/api/runs", { workflow: "bug-investigation", title: "private telemetry", start: false })).body;
+  const step = await one(pool, "SELECT id FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1", [run.id]);
+  await q(pool, `INSERT INTO workflow_step_attempts (run_id,step_id,number,generation,status,metrics)
+    VALUES ($1,$2,1,1,'COMPLETED','{"provider":"codex","model":"private-model","tokens":{"input":6789}}')`, [run.id, step.id]);
+  assert.equal((await a.call(`/api/metrics/runs/${run.id}`)).status, 404);
+  assert.equal((await admin.call(`/api/metrics/runs/${run.id}`)).status, 404);
+  assert.equal((await admin.call(`/api/metrics/runs/${run.id}?scope=all`)).status, 200);
+  const own = await a.call("/api/metrics/summary?days=3&scope=all");
+  assert.equal(own.status, 200);
+  assert.ok(!own.body.telemetry.by_model.some((r: any) => r.key === "codex/private-model"));
+  for (let i = 0; i < 2; i++) {
+    const all = await admin.call("/api/metrics/summary?days=3&scope=all");
+    assert.equal(all.status, 200);
+    assert.ok(all.body.telemetry.by_model.some((r: any) => r.key === "codex/private-model"));
+  }
+  const log = await one(pool, "SELECT count(*)::int AS n FROM audit_log WHERE action = 'support.list' AND resource_type = 'metrics'");
+  assert.equal(log.n, 2);
+});

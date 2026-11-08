@@ -244,9 +244,10 @@ export const routes: Route[] = [
   ["GET", /^\/api\/scheduler$/, () => schedulerStatus()],
   ["GET", /^\/api\/agent-providers$/, (c) => agentProviderStatus(c.url.searchParams.get("refresh") === "1")],
   // Expensive 30-day aggregates: fresh for 30 s, then served stale (≤ 10 min) while one refresh runs in the background.
-  ["GET", /^\/api\/metrics\/summary$/, (c) => {
-    const days = Number(c.url.searchParams.get("days") ?? 30);
+  ["GET", /^\/api\/metrics\/summary$/, async (c) => {
+    const days = Math.max(1, Math.min(366, Math.floor(Number(c.url.searchParams.get("days") ?? 30)) || 30));
     const scope = mine(c);
+    if (scope.all) await audit(c.actor.id, "support.list", "metrics", "*", { days });
     return metricsSwr.get(`${days}|${scope.ownerId}|${scope.all}`, () => metricsSummary(days, scope));
   }],
   ["GET", /^\/api\/metrics\/runs\/(\d+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runMetrics(num(c.p[0])))],

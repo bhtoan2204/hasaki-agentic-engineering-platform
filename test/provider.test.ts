@@ -165,3 +165,23 @@ test("cancellation kills a hung Cursor process", async () => {
   assert.equal(result.isError, true);
   assert.ok(Date.now() - started < 5000);
 });
+
+test("Cursor shares the attempt collector across invocations without overwriting tools or inventing usage", async () => {
+  const { newMetrics } = await import("../src/agent/metrics.ts");
+  const metrics = newMetrics("");
+  metrics.provider = "cursor";
+  process.env.CURSOR_AGENT_BIN = fakeAgent("partial");
+  delete process.env.CURSOR_AGENT_TIMEOUT_MS;
+  for (let i = 0; i < 2; i++) {
+    const dir = mkdtempSync(join(tmpdir(), "cursor-metrics-"));
+    await cursorAgentTurn({ ctx: fakeCtx(new AbortController().signal).ctx, metrics, invocationId: `invocation-${i}`,
+      mode: "coding", policy: { mode: "coding", workspaces: [dir], baseBranch: "release/prod", protectedRoots: [] }, cwd: dir, prompt: "work" });
+  }
+  assert.equal(metrics.provider, "cursor");
+  assert.equal(metrics.model, "Auto");
+  assert.equal(metrics.sessions, 2);
+  assert.equal(metrics.denied.length, 2);
+  assert.equal(Object.values(metrics.tool_calls).reduce((a, b) => a + b, 0), 2);
+  assert.equal(metrics.tokens, null);
+  assert.equal(metrics.cost_usd, null);
+});

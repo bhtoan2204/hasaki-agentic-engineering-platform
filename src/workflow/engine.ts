@@ -1,3 +1,4 @@
+import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts";
 import type pg from "pg";
 import { config } from "../config.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
@@ -805,6 +806,9 @@ export async function insertQuestions(c: Db, step: StepRow, attemptId: number, q
 }
 
 async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt: AttemptRow, jobId: number | null, result: ExecResult, afterCommit: AfterCommit) {
+  if (result.kind === "failed") await q(c, `UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+    [attempt.id, json({ normalized_failure_category: normalizeProviderFailure(result.error), failure_diagnostics: safeDiagnostics(result.error) })]);
+
   const now = new Date();
   const closeJob = (status: "done" | "failed", err: string | null = null) =>
     jobId ? q(c, "UPDATE workflow_jobs SET status = $2, last_error = $3, lease_expires_at = NULL, updated_at = now() WHERE id = $1", [jobId, status, err]) : null;

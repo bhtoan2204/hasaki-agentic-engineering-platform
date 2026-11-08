@@ -9,7 +9,7 @@ import { pool, one } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
-import type { AgentMetrics } from "../metrics.ts";
+import { addUsage, newMetrics, type AgentMetrics } from "../metrics.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "./broker.ts";
 import { classifyCodexError, failureMessage, JsonlStream, type CodexEvent, type CodexFailureKind, type CodexItem } from "./stream.ts";
@@ -247,6 +247,8 @@ export interface CodexTurnInput {
   cwd: string;
   prompt: string;
   metrics: AgentMetrics;
+  invocationId?: string;
+  onTelemetry?: (error?: unknown) => Promise<void>;
   model?: string;
   effort?: string;
   resumeId?: string;
@@ -291,6 +293,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       onModel(m) {
         if (m !== actualModel) {
           actualModel = m;
+          metrics.model = m;
           void ctx.log("system", `Codex model in use: ${m}`, { provider: "codex", model: m });
         }
       },
@@ -336,7 +339,12 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   const errors: string[] = [];
   const started = Date.now();
 
+  const seenItems = new Set<string>();
   const onItem = async (type: string, item: CodexItem) => {
+    const eventKey = `${type}:${item.id}`;
+    if (item.id && seenItems.has(eventKey)) return;
+    if (item.id) seenItems.add(eventKey);
+    const toolId = `${input.invocationId ?? ctx.attempt.id}:${item.id}`;
     const toolish = item.type === "command_execution" || item.type === "file_change" || item.type === "mcp_tool_call";
     if (toolish && type === "item.started" && broker.hookCalls === 0) {
       violation = "Codex started a tool without running the platform's pre-execution hook; the run was stopped";
@@ -359,32 +367,32 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       case "command_execution":
         if (type === "item.started") {
           metrics.tool_calls.shell = (metrics.tool_calls.shell ?? 0) + 1;
-          await ctx.log("tool", `shell ${String(item.command ?? "").slice(0, 300)}`, { provider: "codex", item_id: item.id, name: "shell", input: { command: item.command } });
+          await ctx.log("tool", `shell ${String(item.command ?? "").slice(0, 300)}`, { provider: "codex", item_id: item.id, name: "shell", id: toolId, input: { command: item.command } });
         } else {
           const failed = item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0);
           if (failed) metrics.tool_errors++;
-          await ctx.log("tool_result", String(item.aggregated_output ?? "").slice(-30_000) || `(exit ${item.exit_code ?? "?"})`, { provider: "codex", item_id: item.id, exit_code: item.exit_code ?? null, is_error: failed });
+          await ctx.log("tool_result", String(item.aggregated_output ?? "").slice(-30_000) || `(exit ${item.exit_code ?? "?"})`, { provider: "codex", item_id: item.id, tool_use_id: toolId, exit_code: item.exit_code ?? null, is_error: failed });
         }
         break;
       case "file_change":
         if (type === "item.started") {
           metrics.tool_calls.apply_patch = (metrics.tool_calls.apply_patch ?? 0) + 1;
-          await ctx.log("tool", `apply_patch ${(item.changes ?? []).map((c) => `${c.kind} ${c.path}`).join(", ").slice(0, 300)}`, { provider: "codex", item_id: item.id, name: "apply_patch", input: { changes: item.changes } });
+          await ctx.log("tool", `apply_patch ${(item.changes ?? []).map((c) => `${c.kind} ${c.path}`).join(", ").slice(0, 300)}`, { provider: "codex", item_id: item.id, name: "apply_patch", id: toolId, input: { changes: item.changes } });
         } else {
           const failed = item.status === "failed";
           if (failed) metrics.tool_errors++;
-          await ctx.log("tool_result", failed ? "patch failed" : `${(item.changes ?? []).length} file(s) changed`, { provider: "codex", item_id: item.id, is_error: failed });
+          await ctx.log("tool_result", failed ? "patch failed" : `${(item.changes ?? []).length} file(s) changed`, { provider: "codex", item_id: item.id, tool_use_id: toolId, is_error: failed });
         }
         break;
       case "mcp_tool_call": {
         const name = `mcp__${item.server ?? "?"}__${item.tool ?? "?"}`;
         if (type === "item.started") {
           metrics.tool_calls[name] = (metrics.tool_calls[name] ?? 0) + 1;
-          await ctx.log("tool", `${name} ${JSON.stringify(item.arguments ?? {}).slice(0, 300)}`, { provider: "codex", item_id: item.id, name, input: item.arguments ?? null });
+          await ctx.log("tool", `${name} ${JSON.stringify(item.arguments ?? {}).slice(0, 300)}`, { provider: "codex", item_id: item.id, id: toolId, name, input: item.arguments ?? null });
         } else {
           const failed = item.status === "failed" || !!item.error;
           if (failed) metrics.tool_errors++;
-          await ctx.log("tool_result", JSON.stringify(item.error ?? item.result ?? "").slice(0, 30_000), { provider: "codex", item_id: item.id, is_error: failed });
+          await ctx.log("tool_result", JSON.stringify(item.error ?? item.result ?? "").slice(0, 30_000), { provider: "codex", item_id: item.id, tool_use_id: toolId, is_error: failed });
         }
         break;
       }
@@ -404,6 +412,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   const handle = async (ev: CodexEvent) => {
     switch (ev.type) {
       case "thread.started":
+        if (threadId === ev.thread_id) break;
         threadId = ev.thread_id;
         metrics.sessions++;
         await ctx.recordSession(ev.thread_id, input.cwd, input.model || "", "codex");
@@ -412,23 +421,22 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       case "turn.started":
         break;
       case "turn.completed":
+        if (completed) break;
         completed = true;
         metrics.turns++;
         if (ev.usage) {
-          if (!metrics.tokens) metrics.tokens = { input: 0, output: 0, cache_read: 0, cache_creation: 0 };
-          metrics.tokens.input += ev.usage.input_tokens;
-          metrics.tokens.output += ev.usage.output_tokens;
-          metrics.tokens.cache_read += ev.usage.cached_input_tokens;
-          metrics.tokens.cache_creation += ev.usage.cache_write_input_tokens ?? 0;
-          metrics.tokens.reasoning_output = (metrics.tokens.reasoning_output ?? 0) + ev.usage.reasoning_output_tokens;
+          addUsage(metrics, { ...ev.usage, cache_read_input_tokens: ev.usage.cached_input_tokens, cache_creation_input_tokens: ev.usage.cache_write_input_tokens });
         }
+        await input.onTelemetry?.();
         break;
       case "turn.failed":
         failedMsg = ev.message;
+        await input.onTelemetry?.(ev.raw);
         await ctx.log("system", `Codex turn failed: ${ev.message}`, { provider: "codex" });
         break;
       case "error":
         errors.push(ev.message);
+        await input.onTelemetry?.(ev.raw);
         await ctx.log("system", `Codex error: ${ev.message}`, { provider: "codex" });
         break;
       case "unknown":
@@ -483,7 +491,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
 
   const stopped = stopReason as string;
   if (stopped === "canceled" || ctx.signal.aborted) return { ...base, isError: true, text: "canceled", failure: "canceled" };
-  if (stopped === "timeout") return { ...base, isError: true, text: `Codex turn exceeded the ${Math.round(codexConfig().timeoutMs / 60000)} minute limit and was stopped`, failure: "timeout" };
+  if (stopped === "timeout") return { ...base, isError: true, text: `Codex execution timeout: turn exceeded the ${Math.round(codexConfig().timeoutMs / 60000)} minute limit and was stopped`, failure: "timeout" };
   if (violation) return { ...base, isError: true, assistantTurns: Math.max(assistantTurns, 1), text: `Codex blocked by platform policy: ${violation}`, failure: "policy" };
   const detail = failedMsg || errors.at(-1) || "";
   if (failedMsg || (!completed && (errors.length || exitCode !== 0))) {
@@ -557,17 +565,13 @@ export async function codexComplete(prompt: string, opts: { signal?: AbortSignal
   let done = false;
   let fail = "";
   let lastError = "";
-  const tokens = { input: 0, output: 0, cache_read: 0, cache_creation: 0, reasoning_output: 0 };
+  const usageMetrics = newMetrics(model || "");
   for (const ev of events) {
     if (ev.type === "item.completed" && ev.item.type === "agent_message" && ev.item.text) text = ev.item.text;
     else if (ev.type === "turn.completed") {
       done = true;
       if (ev.usage) {
-        tokens.input += ev.usage.input_tokens;
-        tokens.output += ev.usage.output_tokens;
-        tokens.cache_read += ev.usage.cached_input_tokens;
-        tokens.cache_creation += ev.usage.cache_write_input_tokens ?? 0;
-        tokens.reasoning_output += ev.usage.reasoning_output_tokens;
+        addUsage(usageMetrics, { ...ev.usage, cache_read_input_tokens: ev.usage.cached_input_tokens, cache_creation_input_tokens: ev.usage.cache_write_input_tokens });
       }
     } else if (ev.type === "turn.failed") fail = ev.message;
     else if (ev.type === "error") lastError = ev.message;
@@ -577,6 +581,6 @@ export async function codexComplete(prompt: string, opts: { signal?: AbortSignal
     throw new Error(failureMessage(classifyCodexError(`${detail}\n${stderr}`), detail));
   }
   if (!text.trim()) throw new Error("Codex text completion returned no message");
-  return { text, tokens, model: model || "" };
+  return { text, tokens: usageMetrics.tokens, model: model || "" };
 }
 

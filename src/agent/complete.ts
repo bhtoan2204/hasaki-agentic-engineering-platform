@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
 import { accumulateMetrics, newMetrics } from "./metrics.ts";
@@ -17,18 +18,21 @@ import { agentProvider, type AgentProvider } from "./provider.ts";
 export interface Completion {
   text: string;
   provider: AgentProvider;
-  metrics: { provider: AgentProvider; model: string | null; model_source: string; cost_usd: number | null; tokens: Record<string, number> | null };
+  metrics: { telemetry_id: string; provider_execution_ms: number; provider: AgentProvider; model: string | null; model_source: string; cost_usd: number | null; tokens: Record<string, number | null | undefined> | null };
 }
 
 export async function completeForRun(run: { agent_provider?: string | null } | null | undefined, prompt: string, signal?: AbortSignal): Promise<Completion> {
   const provider = agentProvider(run);
+  const telemetryId = randomUUID();
+  const started = Date.now();
+  const metadata = () => ({ telemetry_id: telemetryId, provider_execution_ms: Date.now() - started });
   if (provider === "codex") {
     const r = await codexComplete(prompt, { signal });
-    return { text: r.text, provider, metrics: { provider, model: r.model || null, model_source: r.model ? "agent.codex.model" : "codex account default", cost_usd: null, tokens: r.tokens } };
+    return { text: r.text, provider, metrics: { ...metadata(), provider, model: r.model || null, model_source: r.model ? "agent.codex.model" : "codex account default", cost_usd: null, tokens: r.tokens } };
   }
   if (provider === "cursor") {
     const text = await cursorComplete(prompt, signal);
-    return { text, provider, metrics: { provider, model: null, model_source: "cursor account default", cost_usd: null, tokens: null } };
+    return { text, provider, metrics: { ...metadata(), provider, model: null, model_source: "cursor account default", cost_usd: null, tokens: null } };
   }
   const m = newMetrics(config.model || "default");
   let text = "";
@@ -43,5 +47,5 @@ export async function completeForRun(run: { agent_provider?: string | null } | n
   } finally {
     signal?.removeEventListener("abort", onAbort);
   }
-  return { text, provider, metrics: { provider, model: m.model, model_source: config.model ? "global default" : "sdk default", cost_usd: m.cost_usd, tokens: m.tokens } };
+  return { text, provider, metrics: { ...metadata(), provider, model: m.model, model_source: config.model ? "global default" : "sdk default", cost_usd: m.cost_usd, tokens: m.tokens } };
 }

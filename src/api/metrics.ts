@@ -1,3 +1,4 @@
+import { usageSummary } from "../agent/telemetry.ts";
 import { pool, q, one } from "../db/pool.ts";
 
 /** Observability queries over workflow_step_attempts.metrics (+ timestamps for every step type). */
@@ -11,7 +12,7 @@ import { pool, q, one } from "../db/pool.ts";
  *   cost_usd  SDK estimate (not a bill)
  */
 export async function runMetrics(runId: number) {
-  const [attempts, toolRows, [run]] = await Promise.all([q(
+  const [attempts, toolRows, [run], telemetry] = await Promise.all([q(
     pool,
     `SELECT a.id, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
             (extract(epoch FROM (COALESCE(a.finished_at, now()) - a.started_at)) * 1000)::bigint AS exec_ms,
@@ -31,6 +32,7 @@ export async function runMetrics(runId: number) {
     [runId],
   ),
   q(pool, "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1", [runId]),
+  q(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1 ORDER BY attempt_id", [runId]),
   ]);
   const toolMs = new Map<number, number>();
   const byTool: Record<string, { calls: number; ms: number }> = {};
@@ -39,7 +41,7 @@ export async function runMetrics(runId: number) {
     (byTool[t.name] ??= { calls: 0, ms: 0 }).calls++;
     byTool[t.name].ms += Number(t.ms);
   }
-  const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0, cost_unknown: 0 };
+  const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: null as number | null, input_tokens: null as number | null, output_tokens: null as number | null, cache_read_tokens: null as number | null, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0, cost_unknown: 0 };
   const perStep: Record<string, { type: string; attempts: number; exec_ms: number; queue_ms: number; human_ms: number; claude_ms: number; turns: number }> = {};
   for (const a of attempts) {
     const m = a.metrics ?? {};
@@ -51,12 +53,12 @@ export async function runMetrics(runId: number) {
     totals.claude_ms += m.duration_ms ?? 0;
     totals.tool_ms += a.tool_ms;
     if (a.step_type === "command") totals.command_ms += Number(a.exec_ms);
-    totals.cost_usd += m.cost_usd ?? 0;
+    if (m.cost_usd != null) totals.cost_usd = (totals.cost_usd ?? 0) + m.cost_usd;
     // Codex (ChatGPT plan) and Cursor report no price: count those attempts instead of pretending they cost $0.
-    if (m.sessions && m.cost_usd == null) totals.cost_unknown++;
-    totals.input_tokens += m.tokens?.input ?? 0;
-    totals.output_tokens += m.tokens?.output ?? 0;
-    totals.cache_read_tokens += m.tokens?.cache_read ?? 0;
+    if (m.cost_usd == null) totals.cost_unknown++;
+    if (m.tokens?.input != null) totals.input_tokens = (totals.input_tokens ?? 0) + m.tokens.input;
+    if (m.tokens?.output != null) totals.output_tokens = (totals.output_tokens ?? 0) + m.tokens.output;
+    if (m.tokens?.cache_read != null) totals.cache_read_tokens = (totals.cache_read_tokens ?? 0) + m.tokens.cache_read;
     totals.turns += m.turns ?? 0;
     totals.claude_sessions += m.sessions ?? 0;
     totals.tool_calls += Object.values<number>(m.tool_calls ?? {}).reduce((x, y) => x + y, 0);
@@ -73,10 +75,11 @@ export async function runMetrics(runId: number) {
     ps.turns += m.turns ?? 0;
   }
   totals.retries = Object.values(perStep).reduce((n, s) => n + Math.max(0, s.attempts - 1), 0);
-  totals.cost_usd = Math.round(totals.cost_usd * 1e4) / 1e4;
+  if (totals.cost_usd != null) totals.cost_usd = Math.round(totals.cost_usd * 1e4) / 1e4;
   const wall_ms = run?.started_at ? new Date(run.finished_at ?? Date.now()).getTime() - new Date(run.started_at).getTime() : 0;
   const bottleneck = Object.entries(perStep).sort((a, b) => b[1].exec_ms + b[1].queue_ms - (a[1].exec_ms + a[1].queue_ms))[0]?.[0] ?? null;
   return {
+    telemetry: { attempts: telemetry, ...telemetryGroups(telemetry) },
     run_id: runId,
     profile: run?.profile,
     agent_provider: run?.agent_provider ?? "claude",
@@ -85,13 +88,15 @@ export async function runMetrics(runId: number) {
     per_step: perStep,
     by_tool: byTool,
     bottleneck,
-    measured: ["wall_ms", "exec_ms", "queue_ms", "human_ms", "tool_ms (event granularity)", "claude_ms (SDK)", "turns", "tokens", "tool_calls"],
+    measured: ["wall_ms", "exec_ms", "queue_ms", "human_ms", "tool_ms (event granularity)", "tool_calls"],
+    provider_reported: ["claude_ms (legacy all-provider duration)", "turns", "tokens"],
     estimated: ["cost_usd (SDK estimate)"],
     attempts,
   };
 }
 
 export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?: boolean }) {
+  days = Math.max(1, Math.min(366, Math.floor(Number(days)) || 30));
   const since = `now() - make_interval(days => ${Number(days) || 30})`;
   const own = !scope ? "" : scope.all ? "AND r.owner_id IS NOT NULL" : `AND r.owner_id = ${Number(scope.ownerId)}`;
   const attemptOwn = !scope ? "" : scope.all ? "AND a.run_id IN (SELECT id FROM workflow_runs WHERE owner_id IS NOT NULL)" : `AND a.run_id IN (SELECT id FROM workflow_runs WHERE owner_id = ${Number(scope.ownerId)})`;
@@ -101,7 +106,7 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
     `SELECT r.profile, count(DISTINCT r.id)::int AS runs, count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
             round(avg(extract(epoch FROM (r.finished_at - r.started_at))) FILTER (WHERE r.finished_at IS NOT NULL)::numeric / 60, 1) AS avg_wall_min,
             round(COALESCE(sum((a.metrics->>'turns')::numeric), 0) / NULLIF(count(DISTINCT r.id), 0), 1) AS turns_per_run,
-            round(COALESCE(sum((a.metrics->>'cost_usd')::numeric), 0) / NULLIF(count(DISTINCT r.id), 0), 3) AS cost_per_run,
+            round(sum((a.metrics->>'cost_usd')::numeric) / NULLIF(count(DISTINCT r.id), 0), 3) AS cost_per_run,
             round(count(a.id) FILTER (WHERE a.metrics ? 'turns')::numeric / NULLIF(count(DISTINCT r.id), 0), 1) AS claude_attempts_per_run
        FROM workflow_runs r LEFT JOIN workflow_step_attempts a ON a.run_id = r.id
       WHERE r.created_at > ${since} ${own} GROUP BY 1 ORDER BY 1`,
@@ -112,13 +117,13 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
     q(pool, `SELECT r.definition_key, count(DISTINCT r.id)::int AS runs,
                     count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
                     count(DISTINCT r.id) FILTER (WHERE r.status = 'FAILED')::int AS failed,
-                    round(COALESCE(sum((a.metrics->>'cost_usd')::numeric), 0), 4) AS cost_usd,
-                    COALESCE(sum((a.metrics->'tokens'->>'input')::bigint + (a.metrics->'tokens'->>'output')::bigint), 0)::bigint AS tokens
+                    round(sum((a.metrics->>'cost_usd')::numeric), 4) AS cost_usd,
+                    sum((a.metrics->'tokens'->>'input')::bigint + (a.metrics->'tokens'->>'output')::bigint)::bigint AS tokens
                FROM workflow_runs r LEFT JOIN workflow_step_attempts a ON a.run_id = r.id
               WHERE r.created_at > ${since} ${own} GROUP BY 1 ORDER BY runs DESC`),
     q(pool, `SELECT s.type, count(*)::int AS attempts, count(*) FILTER (WHERE a.status = 'FAILED')::int AS failed,
                     round(avg(extract(epoch FROM (a.finished_at - a.started_at)))::numeric, 1) AS avg_seconds,
-                    round(COALESCE(sum((a.metrics->>'cost_usd')::numeric), 0), 4) AS cost_usd
+                    round(sum((a.metrics->>'cost_usd')::numeric), 4) AS cost_usd
                FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
               WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1 ORDER BY attempts DESC`),
     q(pool, `SELECT t.key AS tool, sum(t.value::int)::int AS calls, count(DISTINCT a.id)::int AS attempts
@@ -138,7 +143,8 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
                FROM workflow_step_attempts a, jsonb_array_elements(COALESCE(a.metrics->'denied', '[]'::jsonb)) d
               WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1, 2 ORDER BY times DESC LIMIT 25`),
   ]);
-  return { days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation };
+  const telemetry = await q(pool, `SELECT t.* FROM execution_attempt_telemetry t JOIN workflow_runs r ON r.id = t.run_id WHERE t.start_time > ${since} ${own}`);
+  return { telemetry: telemetryGroups(telemetry), days, by_profile: byProfile, by_workflow: byWorkflow, by_step_type: byStepType, tools, integrations, skills, failures, denied, evaluation };
 }
 
 /**
@@ -186,5 +192,30 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
     verification: { ...verification, pass_rate_pct: pct(verification.passed, verification.verified), first_try_pass_rate_pct: pct(verification.passed_first_try, verification.verified) },
     repeated_failures: patterns,
     human_intervention: { ...human, rate_pct: pct(human.with_human, human.runs) },
+  };
+}
+
+/** Each invocation retains its provider/model even if a later session resolves a different model. */
+export function telemetryGroups(attempts: any[]) {
+  const sessions = attempts.flatMap(a => {
+    const values = Object.values(a.provider_sessions ?? {}) as any[];
+    return values.length ? values.map(s => ({ ...a, provider: s.provider, model: s.model, reported_cost_usd: s.reported_cost_usd,
+      input_tokens: s.tokens?.input ?? null, output_tokens: s.tokens?.output ?? null, cache_read_tokens: s.tokens?.cache_read ?? null,
+      cache_creation_tokens: s.tokens?.cache_creation ?? null, reasoning_tokens: s.tokens?.reasoning_output ?? null,
+      normalized_failure_category: s.normalized_failure_category ?? null,
+      provider_execution_ms: s.provider_execution_ms, wall_duration_ms: null, tool_execution_ms: null, provider_sessions: {},
+    })) : [a];
+  });
+  const group = (rows: any[], key: (r: any) => string): Array<Record<string, any>> => {
+    const groups: Record<string, any[]> = {};
+    for (const r of rows) (groups[key(r)] ??= []).push(r);
+    return Object.entries(groups).map(([key, rows]) => ({ key, ...usageSummary(rows) }));
+  };
+  return {
+    totals: usageSummary(attempts),
+    by_provider: group(sessions, r => r.provider ?? "unknown"),
+    by_model: group(sessions, r => `${r.provider ?? "unknown"}/${r.model ?? "unknown"}`),
+    daily: group(attempts, r => new Date(r.start_time).toISOString().slice(0, 10)),
+    by_step: group(attempts, r => String(r.step_id)),
   };
 }

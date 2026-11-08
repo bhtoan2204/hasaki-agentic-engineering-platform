@@ -269,7 +269,10 @@ test("Scenario C: failed implementation is retried without repeating analysis; h
     { key: "pr", type: "git_pull_request", depends_on: ["implement"] },
   ]);
   let broken = true;
-  scripts.implement = async (ctx, n) => (broken ? { kind: "failed", error: `missing GOPRIVATE (call ${n})` } : codingDone(ctx, n));
+  scripts.implement = async (ctx, n) => {
+    await ctx.recordMetrics({ provider: "claude", model: "retry-model", tokens: { input: 10 }, cost_usd: 0.1 });
+    return broken ? { kind: "failed", error: `missing GOPRIVATE (call ${n})` } : codingDone(ctx, n);
+  };
   const run = await startRun({ definitionKey: key, inputs: { project: "OMS" }, repositories: ["oms-api"] });
   await drain();
   let st = await stepOf(run.id, "implement");
@@ -287,6 +290,9 @@ test("Scenario C: failed implementation is retried without repeating analysis; h
   assert.deepEqual(history.map((a) => a.status), ["FAILED", "FAILED", "COMPLETED"]);
   assert.ok(history[0].invalidated_at && history[1].invalidated_at && !history[2].invalidated_at);
   assert.equal(history[2].generation, history[0].generation + 1);
+  const usage = await q(pool, "SELECT input_tokens, reported_cost_usd FROM execution_attempt_telemetry WHERE step_id = $1", [history[0].step_id]);
+  assert.equal(usage.reduce((n, a) => n + a.input_tokens, 0), 30);
+  assert.ok(Math.abs(usage.reduce((n, a) => n + a.reported_cost_usd, 0) - 0.3) < 1e-9);
 });
 
 test("Scenario D: code review workflow without a work item stores findings, no PR", async () => {
@@ -1918,4 +1924,89 @@ test("answering multiple questions keeps one transactional update and resumes th
   assert.equal((await stepOf(run.id, "ask")).status, "COMPLETED");
   assert.equal((await attemptsOf(run.id, "ask")).length, 1);
   await assert.rejects(answerQuestions({ [questions[0].id]: "again" }), /no open questions/);
+});
+
+test("telemetry snapshots are idempotent; recovery fences stale writers and retains partial usage", async () => {
+  const { makeContext } = await import("../src/workflow/executors/registry.ts");
+  const { runMetrics } = await import("../src/api/metrics.ts");
+  const key = await customWorkflow([{ key: "telemetry", type: "agent", max_attempts: 2, retry_backoff_seconds: 0 }]);
+  const run = await startRun({ definitionKey: key, agentProvider: "codex" });
+  const job = (await claimJob("telemetry-worker", 30))!;
+  const begun = (await beginAttempt(job, "telemetry-worker"))!;
+  const ctx = makeContext({ ...begun, signal: new AbortController().signal });
+  const snapshot = { provider: "codex", model: "gpt-test", provider_sessions: {
+    first: { provider: "codex", model: "gpt-test", tokens: { input: 7, cache_read: 2 }, reported_cost_usd: null, provider_execution_ms: 100, complete: true },
+    partial: { provider: "codex", model: "gpt-other", tokens: null, reported_cost_usd: null, provider_execution_ms: 20, complete: false },
+  } };
+  await ctx.recordMetrics(snapshot);
+  await ctx.recordMetrics(snapshot);
+  const first = (await runMetrics(run.id)).telemetry;
+  assert.equal(first.totals.input_tokens, 7);
+  assert.equal(first.totals.cache_read_tokens, 2);
+  assert.equal(first.totals.coverage.input_tokens.partial, 1);
+  assert.equal(first.attempts[0].model, null, "mixed models retain session attribution");
+  await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
+  await reapExpiredLeases();
+  await ctx.recordMetrics({ provider_sessions: {}, tokens: { input: 999 } });
+  const question = await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1 AND status = 'open'", [run.id]);
+  await answerQuestions({ [question.id]: "Reconciled — continue" });
+  await drain();
+  const recovered = (await runMetrics(run.id)).telemetry;
+  assert.equal(recovered.totals.input_tokens, 7);
+  assert.equal(recovered.attempts.length, 2);
+  assert.equal(recovered.attempts[0].provider, "codex");
+  assert.equal(recovered.attempts[1].input_tokens, null);
+  assert.ok(recovered.attempts[0].human_wait_ms >= 0);
+});
+
+test("cancellation keeps reported usage and rejects late metrics", async () => {
+  const { makeContext } = await import("../src/workflow/executors/registry.ts");
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  const run = await startRun({ definitionKey: key });
+  const job = (await claimJob("cancel-metrics", 30))!;
+  const begun = (await beginAttempt(job, "cancel-metrics"))!;
+  const ctx = makeContext({ ...begun, signal: new AbortController().signal });
+  await ctx.recordMetrics({ tokens: { input: 3 }, provider: "claude" });
+  await cancelRun(run.id);
+  await ctx.recordMetrics({ tokens: { input: 999 } });
+  const row = await one(pool, "SELECT * FROM execution_attempt_telemetry WHERE attempt_id = $1", [begun.attempt.id]);
+  assert.equal(row.input_tokens, 3);
+  assert.equal(row.normalized_failure_category, "CANCELED");
+});
+
+test("tool clocks union overlapping events and use invocation IDs; failure codes remain normalized", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent", max_attempts: 1 }]);
+  scripts.a = async (ctx) => {
+    await ctx.recordMetrics({ provider: "cursor", tokens: null, cost_usd: null });
+    await pool.query(`INSERT INTO workflow_events (run_id,step_id,attempt_id,kind,content,data,created_at) VALUES
+      ($1,$2,$3,'tool','a','{"id":"session1:call1","name":"shell"}', now() - interval '10 seconds'),
+      ($1,$2,$3,'tool','b','{"id":"session1:call2","name":"shell"}', now() - interval '8 seconds'),
+      ($1,$2,$3,'tool_result','a','{"tool_use_id":"session1:call1"}', now() - interval '4 seconds'),
+      ($1,$2,$3,'tool_result','a replay','{"tool_use_id":"session1:call1"}', now() - interval '3 seconds'),
+      ($1,$2,$3,'tool_result','b','{"tool_use_id":"session1:call2"}', now() - interval '2 seconds')`, [ctx.run.id, ctx.step.id, ctx.attempt.id]);
+    return { kind: "failed", error: "request timed out", retryable: false };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  const row = await one(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1", [run.id]);
+  assert.equal(row.tool_execution_ms, 8000);
+  assert.equal(row.normalized_failure_category, "EXECUTION_TIMEOUT");
+  assert.equal(row.reported_cost_usd, null);
+  assert.equal(row.cost_availability, "unavailable");
+});
+
+test("canceling a waiting run caps its human and wall clocks without changing attempt history", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  scripts.a = async ctx => {
+    await ctx.ask([{ question: "continue?" }]);
+    return { kind: "waiting_input", checkpoint: {} };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  await cancelRun(run.id);
+  const row = await one(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1", [run.id]);
+  assert.equal(row.terminal_status, "CANCELED");
+  assert.equal(row.normalized_failure_category, "CANCELED");
+  assert.ok(row.human_wait_ms >= 0);
+  assert.ok(row.end_time);
 });

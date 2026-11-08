@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { normalizeProviderFailure, safeDiagnostics } from "./telemetry.ts";
 import { buildCodeContext } from "../codeIntelligence/search.ts";
 import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import { query, tool, createSdkMcpServer, type SDKUserMessage, type HookCallback, type CanUseTool, type SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
@@ -11,7 +13,7 @@ import { agentProvider, type AgentProvider } from "./provider.ts";
 import { cursorAgentTurn, cursorCapabilities } from "./cursor/run.ts";
 import { codexAgentTurn, codexCapabilities } from "./codex/run.ts";
 import { completeForRun } from "./complete.ts";
-import { accumulateMetrics, newMetrics, type AgentMetrics } from "./metrics.ts";
+import { addUsage, accumulateMetrics, newMetrics, type AgentMetrics } from "./metrics.ts";
 import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { workspaceKey, workspacesOf } from "../git/provider.ts";
@@ -359,17 +361,17 @@ export const claudeExecutor: StepExecutor = {
       return d.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: d.reason };
     };
 
-    const run = async (prompt: string, resumeId?: string): Promise<{ isError: boolean; text: string; assistantTurns: number; failure?: string }> => {
+    const runTurn = async (prompt: string, resumeId?: string): Promise<{ isError: boolean; text: string; assistantTurns: number; failure?: string }> => {
       await ctx.log("prompt", prompt, { resume_session: resumeId ?? null, provider, model: routed.model || null });
       if (provider === "cursor") {
-        const result = await cursorAgentTurn({ ctx, mode, policy, cwd, prompt: `${systemAppend}\n\n${prompt}`, resumeId });
+        const result = await cursorAgentTurn({ ctx, metrics, invocationId: sessionKey, onTelemetry: persistSession, mode, policy, cwd, prompt: `${systemAppend}\n\n${prompt}`, resumeId });
         if (result.submitted) submitted = result.submitted;
         return { isError: result.isError, text: result.text, assistantTurns: result.assistantTurns };
       }
       if (provider === "codex") {
         // A resumed thread already holds the system instructions; a fresh one gets them in front of the prompt.
         const full = resumeId ? prompt : `${systemAppend}\n\n${codexEnvironmentNotes(mode)}\n\n${prompt}`;
-        const result = await codexAgentTurn({ ctx, mode, policy, cwd, prompt: full, metrics, model: routed.model || undefined, effort: routed.effort || undefined, resumeId });
+        const result = await codexAgentTurn({ ctx, mode, policy, cwd, prompt: full, metrics, invocationId: sessionKey, onTelemetry: persistSession, model: routed.model || undefined, effort: routed.effort || undefined, resumeId });
         if (result.submitted) submitted = result.submitted;
         return { isError: result.isError, text: result.text, assistantTurns: result.assistantTurns, failure: result.failure };
       }
@@ -419,6 +421,8 @@ export const claudeExecutor: StepExecutor = {
           }
           await recordTranscript(ctx, msg, cwd);
           accumulateMetrics(metrics, msg);
+          if (msg.type === "result") await persistSession(msg.is_error ? msg : undefined);
+          else if (msg.type === "system" && msg.subtype === "init") await persistSession();
           if (msg.type === "assistant") result.assistantTurns++;
           else if (msg.type === "result") {
             result.isError = msg.is_error;
@@ -429,6 +433,54 @@ export const claudeExecutor: StepExecutor = {
         ctx.signal.removeEventListener("abort", onAbort);
       }
       return result;
+    };
+
+    const providerSessions: Record<string, any> = {};
+    let sessionKey = "";
+    let sessionStart = 0;
+    const writeTelemetry = async (snapshot: Record<string, unknown>) => {
+      try { await ctx.recordMetrics(snapshot); }
+      catch (error) { console.error(`attempt ${ctx.attempt.id}: telemetry persistence failed: ${safeDiagnostics(error)}`); }
+    };
+    const persistSession = async (error?: unknown) => {
+      if (!sessionKey) return;
+      providerSessions[sessionKey] = {
+        ...providerSessions[sessionKey],
+        complete: false, provider, model: metrics.model && metrics.model !== "default" ? metrics.model : null, start_time: new Date(sessionStart).toISOString(),
+        provider_execution_ms: Date.now() - sessionStart, tokens: metrics.tokens, reported_cost_usd: metrics.cost_usd,
+        cost_source: metrics.cost_usd == null ? "unavailable" : "provider_reported",
+        cost_availability: metrics.cost_usd == null ? "unavailable" : "reported",
+        ...(error ? { normalized_failure_category: (providerSessions[sessionKey]?.normalized_failure_category && providerSessions[sessionKey].normalized_failure_category !== "UNKNOWN" ? providerSessions[sessionKey].normalized_failure_category : normalizeProviderFailure(error)), diagnostics: safeDiagnostics(error) } : {}),
+      };
+      await writeTelemetry({ provider_sessions: providerSessions });
+    };
+    const run: typeof runTurn = async (prompt, resumeId) => {
+      sessionKey = randomUUID();
+      sessionStart = Date.now();
+      metrics.model = routed.model || (provider === "claude" ? "default" : "");
+      metrics.tokens = null;
+      metrics.cost_usd = null;
+      await persistSession();
+      try {
+        const result = await runTurn(prompt, resumeId);
+        await persistSession(result.isError ? result.text : undefined);
+        return result;
+      } catch (error) {
+        await persistSession(error);
+        throw error;
+      } finally {
+        providerSessions[sessionKey].end_time = new Date().toISOString();
+        providerSessions[sessionKey].complete = true;
+        await writeTelemetry({ provider_sessions: providerSessions });
+        // Legacy Insights fields remain known subtotals; canonical API carries coverage.
+        metrics.tokens = null;
+        metrics.cost_usd = null;
+        for (const session of Object.values(providerSessions)) {
+          const t = session.tokens;
+          addUsage(metrics, t ? { input_tokens: t.input, output_tokens: t.output, cache_read_input_tokens: t.cache_read, cache_creation_input_tokens: t.cache_creation, reasoning_output_tokens: t.reasoning_output } : null, session.reported_cost_usd);
+        }
+        await writeTelemetry(metrics as unknown as Record<string, unknown>);
+      }
     };
 
     await ctx.log("system_prompt", systemAppend, {

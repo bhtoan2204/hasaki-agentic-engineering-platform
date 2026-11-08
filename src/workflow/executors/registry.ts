@@ -40,6 +40,7 @@ export function getExecutor(type: StepType): StepExecutor {
 
 export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "ask" | "recordSession" | "recordMetrics">): ExecutionContext {
   const { run, step, attempt } = base;
+  let hasProviderSessions = false;
   return {
     ...base,
     // A transcript line is never worth failing the step: retry over a dropped connection, then give up quietly.
@@ -73,7 +74,26 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
       return questions.length;
     },
     async recordMetrics(m) {
-      await q(pool, "UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || $2::jsonb WHERE id = $1", [attempt.id, json(m)]);
+      if (m.provider_sessions) hasProviderSessions = true;
+      const auxiliary: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(m)) {
+        const v = value as any;
+        if (v && typeof v === "object" && typeof v.provider === "string" && ("tokens" in v || "cost_usd" in v)) {
+          auxiliary[`aux:${key}:${v.telemetry_id ?? "snapshot"}`] = { provider: v.provider, model: v.model ?? null, tokens: v.tokens ?? null,
+            reported_cost_usd: v.cost_usd ?? null, provider_execution_ms: v.provider_execution_ms ?? null, complete: true };
+        }
+      }
+      if (!hasProviderSessions && typeof m.provider === "string" && ("tokens" in m || "cost_usd" in m)) {
+        auxiliary[`executor:${m.telemetry_id ?? "snapshot"}`] = { provider: m.provider, model: m.model ?? null, tokens: m.tokens ?? null,
+          reported_cost_usd: m.cost_usd ?? null, provider_execution_ms: m.provider_execution_ms ?? null, complete: true };
+      }
+      if (Object.keys(auxiliary).length) m = { ...m, provider_sessions: { ...(m.provider_sessions as object ?? {}), ...auxiliary } };
+      await retryTransient(() => q(pool, `UPDATE workflow_step_attempts a SET metrics = COALESCE(a.metrics, '{}'::jsonb) || $2::jsonb ||
+          CASE WHEN $2::jsonb ? 'provider_sessions' THEN jsonb_build_object('provider_sessions',
+            COALESCE(a.metrics->'provider_sessions', '{}'::jsonb) || ($2::jsonb->'provider_sessions')) ELSE '{}'::jsonb END
+        WHERE a.id = $1 AND a.status = 'RUNNING' AND a.fencing_token = $3
+          AND EXISTS (SELECT 1 FROM workflow_jobs j WHERE j.id = a.job_id AND j.fencing_token = $3 AND j.status = 'running' AND j.lease_expires_at > now())`,
+        [attempt.id, json(m), attempt.fencing_token]), `metrics ${attempt.id}`);
     },
     async recordSession(sessionId, cwd, model = "", provider = "claude") {
       await q(pool, "UPDATE workflow_step_attempts SET agent_session_id = $2 WHERE id = $1", [attempt.id, sessionId]);

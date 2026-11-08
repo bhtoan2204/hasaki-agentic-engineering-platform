@@ -14,11 +14,11 @@
 import { StringDecoder } from "node:string_decoder";
 
 export interface CodexUsage {
-  input_tokens: number;
-  cached_input_tokens: number;
-  output_tokens: number;
-  reasoning_output_tokens: number;
-  cache_write_input_tokens?: number;
+  input_tokens: number | null;
+  cached_input_tokens: number | null;
+  output_tokens: number | null;
+  reasoning_output_tokens: number | null;
+  cache_write_input_tokens?: number | null;
 }
 
 export interface CodexItem {
@@ -92,7 +92,7 @@ export class JsonlStream {
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
-const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
 
 function errorText(v: unknown): string {
   if (typeof v === "string") return v;
