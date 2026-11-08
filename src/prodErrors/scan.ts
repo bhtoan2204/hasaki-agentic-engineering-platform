@@ -513,6 +513,51 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   };
 }
 
+/** Historical incident detail for analytics drilldowns; linked records are redacted at the API boundary. */
+export async function getIncidentDetail(fingerprint: string) {
+  if (!/^[0-9a-f]{20}$/.test(fingerprint)) throw Object.assign(new Error("invalid fingerprint"), { status: 400 });
+  const [group, observations, lifecycle] = await Promise.all([
+    one(pool, `SELECT g.*,g.day::text AS day,w.owner_id AS work_item_owner_id,w.code AS work_item_code,
+      w.title AS work_item_title,w.status AS work_item_status,
+      COALESCE(g.first_at,(SELECT min(first_at) FROM prod_error_observations o WHERE o.fingerprint=g.fingerprint)) AS observed_first_at,
+      COALESCE(g.last_at,(SELECT max(last_at) FROM prod_error_observations o WHERE o.fingerprint=g.fingerprint)) AS observed_last_at,
+      EXISTS(SELECT 1 FROM prod_error_observations o WHERE o.fingerprint=g.fingerprint AND o.baseline_count>0) AS observed_recurring,
+      (SELECT id FROM workflow_runs WHERE work_item_id=g.work_item_id ORDER BY id DESC LIMIT 1) AS run_id,
+      (SELECT status FROM workflow_runs WHERE work_item_id=g.work_item_id ORDER BY id DESC LIMIT 1) AS run_status,
+      (SELECT COALESCE(json_agg(json_build_object('repo',p.repo,'url',p.url,'title',p.title) ORDER BY p.id),'[]')
+       FROM pull_requests p WHERE p.work_item_id=g.work_item_id) AS pull_requests
+      FROM prod_error_groups g LEFT JOIN work_items w ON w.id=g.work_item_id WHERE g.fingerprint=$1`, [fingerprint]),
+    q(pool, `WITH raw AS MATERIALIZED (
+      SELECT o.scan_id,o.event_count,o.baseline_count,o.first_at,o.last_at,o.severity,o.hourly,
+        s.window_start,s.window_end,s.trigger,s.ok,s.finished_at
+      FROM prod_error_observations o JOIN prod_error_scans s ON s.id=o.scan_id
+      WHERE o.fingerprint=$1 AND s.ok
+    ), hourly AS (
+      SELECT (h->>'hour')::timestamptz AS window_start,(h->>'hour')::timestamptz+interval '1 hour' AS window_end,
+        (h->>'count')::bigint AS event_count,r.severity,r.trigger,r.scan_id,
+        least(r.window_end,(h->>'hour')::timestamptz+interval '1 hour')-greatest(r.window_start,(h->>'hour')::timestamptz) AS coverage
+      FROM raw r CROSS JOIN LATERAL jsonb_array_elements(r.hourly) h
+    ), dedup_hourly AS (
+      SELECT DISTINCT ON(window_start) window_start,window_end,event_count,severity,trigger,scan_id
+      FROM hourly ORDER BY window_start,coverage DESC,scan_id DESC
+    ), legacy AS (
+      SELECT DISTINCT ON(window_start,window_end) window_start,window_end,event_count,baseline_count,severity,trigger,scan_id
+      FROM raw WHERE jsonb_array_length(hourly)=0
+      ORDER BY window_start,window_end,(window_end-window_start) DESC,scan_id DESC
+    )
+    SELECT window_start,window_end,event_count,NULL::bigint AS baseline_count,severity,trigger,scan_id
+    FROM dedup_hourly
+    UNION ALL
+    SELECT window_start,window_end,event_count,baseline_count,severity,trigger,scan_id FROM legacy
+    WHERE NOT EXISTS(SELECT 1 FROM dedup_hourly)
+    ORDER BY window_start DESC LIMIT 500`, [fingerprint]),
+    q(pool, `SELECT e.action,e.evidence,e.created_at,u.username FROM prod_error_lifecycle_events e
+      LEFT JOIN users u ON u.id=e.actor_id WHERE e.fingerprint=$1 ORDER BY e.id DESC LIMIT 100`, [fingerprint]),
+  ]);
+  if (!group) throw Object.assign(new Error("incident not found"), { status: 404 });
+  return { group, observations, lifecycle };
+}
+
 async function getGroup(fp: string) {
   const g = await one<GroupRow>(pool, "SELECT *, day::text AS day FROM prod_error_groups WHERE fingerprint = $1", [fp]);
   if (!g) throw Object.assign(new Error("không có nhóm lỗi này"), { status: 404 });

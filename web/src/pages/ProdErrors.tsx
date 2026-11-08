@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bug, CalendarClock, ChevronRight, Eye, EyeOff, GitPullRequest, Link2, PlayCircle, RefreshCw, Siren, TrendingDown, TrendingUp, Unlink } from "lucide-react";
+import { Bug, CalendarClock, ChevronRight, Eye, EyeOff, GitPullRequest, LineChart, Link2, PlayCircle, RefreshCw, Siren, TrendingDown, TrendingUp, Unlink } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { act, ago, Copy, EmptyState, ErrorBox, Field, Loading, PageHeader, SearchInput, Segmented, navigate, toast } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
@@ -338,9 +338,10 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
         title={t("pe.title")}
         subtitle={t("pe.subtitle", { projects: data?.namespaces.length ? new Intl.ListFormat(uiLocale() === "vi" ? "vi" : "en", { type: "conjunction" }).format(data.namespaces.map((n) => n.project)) : t("pe.projectsFallback") })}
         actions={
+          <><a className="btn ghost sm" href="#/insights/health"><LineChart size={14}/>{t("an.healthAnalytics")}</a>
           <button disabled={!data || data.scanning || !data.splunk.connected} onClick={() => setPanel((v) => !v)} aria-expanded={panel} title={data && !data.splunk.connected ? t("pe.connectFirst") : undefined}>
             <RefreshCw size={15} strokeWidth={2} className={data?.scanning ? "spin" : ""} />{data?.scanning ? t("pe.scanning") : t("pe.scanNow")}
-          </button>
+          </button></>
         }
       />
       {error && <ErrorBox error={error} onRetry={reload} />}

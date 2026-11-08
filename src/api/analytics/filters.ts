@@ -15,6 +15,10 @@ export interface AnalyticsFilters {
   repository: string | null;
   project: string | null;
   service: string | null;
+  namespace: string | null;
+  severity: string | null;
+  incidentStatus: string | null;
+  environment: string | null;
   groupBy: Dimension;
   page: number;
   pageSize: number;
@@ -67,6 +71,12 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
   if (bucket === "hour" && span > 31 * 86400000) bad("Hourly ranges are limited to 31 days");
   const groupBy = p.get("group_by") || "provider";
   if (!(DIMENSIONS as readonly string[]).includes(groupBy)) bad("Invalid group_by");
+  const severity = text("severity");
+  if (severity && !["critical", "high", "medium", "low", "unknown"].includes(severity)) bad("Invalid severity");
+  const incidentStatus = text("incident_status");
+  if (incidentStatus && !["open", "acknowledged", "resolved", "recurring"].includes(incidentStatus)) bad("Invalid incident_status");
+  const environment = text("environment");
+  if (environment && environment !== "production") bad("Invalid environment; production is the only configured production-error environment");
   return {
     from,
     to,
@@ -79,6 +89,10 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
     repository: text("repository"),
     project: text("project"),
     service: text("service"),
+    namespace: text("namespace"),
+    severity,
+    incidentStatus,
+    environment,
     groupBy: groupBy as Dimension,
     page: integer("page", 1, 10000),
     pageSize: integer("page_size", 25, 100),

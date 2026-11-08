@@ -5,7 +5,7 @@ import { pool, one } from "../src/db/pool.ts";
 import { analyticsFixtures } from "./analytics.fixtures.ts";
 import { parseAnalyticsFilters } from "../src/api/analytics/filters.ts";
 import { usageAnalytics, performanceAnalytics, workflowAnalytics } from "../src/api/analytics/execution.ts";
-import { healthAnalytics, updateIncidentLifecycle } from "../src/api/analytics/health.ts";
+import { healthAnalytics, healthServiceAnalytics, updateIncidentLifecycle } from "../src/api/analytics/health.ts";
 import { handle } from "../src/http/app.ts";
 let fixture: Awaited<ReturnType<typeof analyticsFixtures>>;
 let server: Server, base: string;
@@ -98,6 +98,44 @@ test("health deduplicates repeated scans, preserves unknown lifecycle and protec
   assert.equal(h.details.find((r) => r.fingerprint === fixture.fingerprint)?.runs[0].status, "COMPLETED");
   assert.equal(h.details.find((r) => r.fingerprint === fixture.fingerprint)?.lifecycle_status, "open");
 });
+test("service partitions preserve unknown attribution, namespace identity, shares, filters and previous-period semantics", async () => {
+  const base = Date.now().toString(16).padStart(18, "0").slice(-18), fp = `${base}01`, fp2 = `${base}02`, scanIds: number[] = [];
+  try {
+    await pool.query(`INSERT INTO prod_error_groups(fingerprint,namespace,service,level,signature,day,today_count,yesterday_count,severity,first_seen_at)
+      VALUES($1,'test-ns','','ERROR','unknown-service fixture','2026-11-01',6,0,'critical','2026-11-01T02:00:00Z')`, [fp]);
+    const scan = await one(pool, `INSERT INTO prod_error_scans(trigger,ok,finished_at,window_start,window_end)
+      VALUES('manual',true,now(),'2026-11-01T00:00:00Z','2026-11-01T03:00:00Z') RETURNING id`);
+    scanIds.push(scan.id);
+    await pool.query(`INSERT INTO prod_error_observations(scan_id,fingerprint,event_count,baseline_count,first_at,last_at,severity,hourly)
+      VALUES($1,$2,6,0,'2026-11-01T02:01:00Z','2026-11-01T02:59:00Z','critical',$3)`,
+      [scan.id, fp, JSON.stringify([{hour:"2026-11-01T02:00:00Z",count:6}])]);
+    await pool.query(`INSERT INTO prod_error_groups(fingerprint,namespace,service,level,signature,day,today_count,yesterday_count,severity,first_seen_at)
+      VALUES($1,'test-ns','oms-api','ERROR','same service in another namespace','2026-11-01',3,0,'medium','2026-11-01T02:00:00Z')`, [fp2]);
+    await pool.query(`INSERT INTO prod_error_observations(scan_id,fingerprint,event_count,baseline_count,first_at,last_at,severity,hourly)
+      VALUES($1,$2,3,0,'2026-11-01T02:01:00Z','2026-11-01T02:59:00Z','medium',$3)`,
+      [scan.id, fp2, JSON.stringify([{hour:"2026-11-01T02:00:00Z",count:3}])]);
+    const h = await healthAnalytics(filters(), scope());
+    assert.equal(Number(h.summary.total_errors), 33);
+    assert.equal(h.services.reduce((n: number,r: any)=>n+Number(r.events),0),Number(h.summary.total_errors));
+    assert.ok(Math.abs(h.services.reduce((n:number,r:any)=>n+Number(r.error_share_pct),0)-100)<0.001);
+    assert.ok(h.services.some((r:any)=>r.namespace==="test-ns"&&r.service==="unknown"&&Number(r.events)===6));
+    assert.equal(h.services.filter((r:any)=>r.service==="oms-api").length,2);
+    assert.ok(h.services.some((r:any)=>r.namespace==="oms"&&r.service==="oms-api"&&Number(r.events)===24));
+    const service = await healthServiceAnalytics(filters("&service=unknown&namespace=test-ns"),scope());
+    assert.equal(service.services.length,1);
+    assert.equal(Number(service.services[0].events),6);
+    const critical = await healthAnalytics(filters("&severity=critical"),scope());
+    assert.equal(Number(critical.summary.total_errors),6);
+    assert.equal(critical.services.length,1);
+    const previous = await healthAnalytics(filters("&from=2026-11-01T00:00:00Z&to=2026-11-01T03:00:00Z&bucket=hour"),scope());
+    assert.equal(previous.summary.comparisons.total_errors.current,33);
+    assert.equal(previous.summary.comparisons.total_errors.previous,null);
+  } finally {
+    await pool.query("DELETE FROM prod_error_observations WHERE fingerprint=ANY($1::text[])",[[fp,fp2]]);
+    await pool.query("DELETE FROM prod_error_groups WHERE fingerprint=ANY($1::text[])",[[fp,fp2]]);
+    if(scanIds.length) await pool.query("DELETE FROM prod_error_scans WHERE id=ANY($1::bigint[])",[scanIds]);
+  }
+});
 test("pagination and invalid filters are bounded", async () => {
   const p = await usageAnalytics(filters("&page_size=1&page=2"), scope());
   assert.equal(p.details.length, 1);
@@ -108,6 +146,9 @@ test("pagination and invalid filters are bounded", async () => {
     "group_by=drop_table",
     "timezone=Bad/Zone",
     "provider=wrong",
+    "severity=urgent",
+    "incident_status=unknown",
+    "environment=staging",
     "from=2026-02-30",
     "from=2025-01-01&to=2026-11-01",
     "from=2026-01-01&to=2026-04-01&bucket=hour",
@@ -146,6 +187,10 @@ test("HTTP analytics enforces owner scope and audits explicit admin team reads i
     assert.ok(!data.includes("private-model"));
     assert.ok(!data.includes('"reported_cost_usd":99'));
   }
+  const service = await a(`/api/analytics/health-service?${params}&service=oms-api&namespace=oms`);
+  assert.equal(service.status,200);
+  assert.equal(service.body.services.length,1);
+  assert.ok(!JSON.stringify(service.body).includes('"reported_cost_usd":99'));
   const first = await admin(`/api/analytics/usage?${params}&scope=all`);
   assert.equal(first.status, 200);
   assert.equal(Number(first.body.summary.reported_cost_usd), 99.4);
@@ -160,6 +205,17 @@ test("HTTP analytics enforces owner scope and audits explicit admin team reads i
     2,
   );
   assert.equal((await admin(`/api/analytics/usage?${params}`)).body.summary.invocations, 0);
+});
+test("incident drilldown enforces owner-scoped related records", async () => {
+  const a = await client("analytics-a");
+  const owned = await a(`/api/prod-errors/${fixture.fingerprint}`);
+  const foreign = await a(`/api/prod-errors/${fixture.foreignFingerprint}`);
+  assert.equal(owned.status,200);
+  assert.equal(owned.body.group.work_item_id,fixture.claude.work_item_id);
+  assert.equal(owned.body.observations.length,2);
+  assert.equal(foreign.status,200);
+  assert.equal(foreign.body.group.work_item_id,null);
+  assert.deepEqual(foreign.body.group.pull_requests,[]);
 });
 test("only explicit audited operator status resolves a production incident", async () => {
   const member = await client("analytics-a");
@@ -204,6 +260,14 @@ test("production partial-hour ranges do not reuse entire snapshot counts", async
   const h = await healthAnalytics(f, scope());
   assert.equal(h.summary.total_errors, null);
   assert.deepEqual(h.trend, []);
+});
+test("no scan coverage stays unknown instead of becoming zero error events", async () => {
+  const f = parseAnalyticsFilters(new URLSearchParams("from=2026-10-30T00:00:00Z&to=2026-10-30T01:00:00Z&timezone=UTC&bucket=hour"));
+  const h = await healthAnalytics(f,scope());
+  assert.equal(h.summary.total_errors,null);
+  assert.deepEqual(h.trend,[]);
+  assert.equal(h.freshness.scans_in_range,0);
+  assert.equal(h.freshness.status,"partial");
 });
 test("explicitly reported zero remains distinct from unknown cost", async () => {
   const old = (await one(pool, "SELECT metrics FROM workflow_step_attempts WHERE id=$1", [fixture.codex.attempt_id]))

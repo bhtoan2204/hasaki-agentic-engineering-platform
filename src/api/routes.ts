@@ -23,7 +23,7 @@ import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd
 import { clearSplunkCookie, setSplunkCookie, splunkStatus } from "../integrations/splunk.ts";
 import { clearKafkaCookie, kafkaStatus, setKafkaCookie } from "../integrations/kafka.ts";
 import { clearVaultToken, setVaultToken, vaultStatus } from "../integrations/vault.ts";
-import { groupsForWorkItem, investigate, linkWorkItem, listGroups, saveSettings as saveProdErrorSettings, setIgnored, startScan } from "../prodErrors/scan.ts";
+import { getIncidentDetail, groupsForWorkItem, investigate, linkWorkItem, listGroups, saveSettings as saveProdErrorSettings, setIgnored, startScan } from "../prodErrors/scan.ts";
 import { adoptEnv, bitbucketStatus, clearBitbucket, clearTelegram, setBitbucket, setTelegram, setTelegramDestination, telegramChats, telegramStatus, testTelegram } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
 import { assertQuestionsAccessible, audit, requireAdmin, requireArtifact, requireAttempt, requireOwner, requireRun, requireSnapshot, requireWorkItem, wantsSupport, type Actor } from "../authz/access.ts";
@@ -174,7 +174,7 @@ export const routes: Route[] = [
     if(!Number.isInteger(offset)||offset<0||offset>100000)throw new HttpError(400,"Invalid context evidence offset");
     return attemptContext(id,offset);
   }],
-  ["GET", /^\/api\/analytics\/(health|usage|performance|workflows|options)$/, c => engineeringAnalytics(c.actor,c.url,c.p[0])],
+  ["GET", /^\/api\/analytics\/(health|health-service|usage|performance|workflows|options)$/, c => engineeringAnalytics(c.actor,c.url,c.p[0])],
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/lifecycle$/, c => updateIncidentLifecycle(c.actor,c.p[0],c.body)],
   // ------------------------------------------------------------ meta
   [
@@ -498,6 +498,10 @@ export const routes: Route[] = [
   ["GET", /^\/api\/prod-errors$/, async (c) => {
     const data = await listGroups({ day: c.url.searchParams.get("day") ?? undefined, all: c.url.searchParams.get("all") === "1" });
     return { ...data, groups: (data.groups ?? []).map((g: any) => redactGroup(g, c.actor, support(c))) };
+  }],
+  ["GET", /^\/api\/prod-errors\/([0-9a-f]{20})$/, async (c) => {
+    const data = await getIncidentDetail(c.p[0]);
+    return { ...data, group: redactGroup(data.group, c.actor, support(c)) };
   }],
   ["POST", /^\/api\/prod-errors\/scan$/, ({ actor, body }) => (
     requireAdmin(actor),

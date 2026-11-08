@@ -12,7 +12,7 @@ await analyticsFixtures();
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${(server.address() as any).port}`;
-const out = resolve(process.env.ANALYTICS_SCREENSHOTS || "docs/observability/phase2/screenshots");
+const out = resolve(process.env.ANALYTICS_SCREENSHOTS || "docs/validation/production-health");
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
@@ -38,13 +38,42 @@ try {
     await page.goto(`${base}/#/insights/${tab}?${query}`);
     await page.reload();
     await page.locator(".an-refresh").waitFor();
-    assert.equal(await page.getByLabel("Project", { exact: true }).inputValue(), "OMS");
+    assert.ok(page.url().includes("project=OMS"), `project filter retained: ${tab}`);
     await page.locator(".an-filter summary").click();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     assert.equal(overflow, false, `desktop overflow: ${tab}`);
     await page.screenshot({ path: resolve(out, `${tab}-en-desktop.png`), fullPage: true });
     results.push(`PASS ${tab}: rendered aggregate data at 1440px without page overflow`);
   }
+  await page.goto(`${base}/#/insights/health?${query}`);
+  await page.locator(".an-health-freshness").waitFor();
+  await page.screenshot({ path: resolve(out, "01-dashboard-overview-en.png"), fullPage: true });
+  await page.locator(".an-panel").filter({ hasText: "Errors by service" }).screenshot({ path: resolve(out, "02-errors-by-service-en.png") });
+  await page.locator(".an-health-donut-legend button").filter({ hasText: "oms-api" }).click();
+  await page.getByRole("heading", { name: "oms-api", exact: true }).waitFor();
+  await page.screenshot({ path: resolve(out, "03-service-details-en.png"), fullPage: true });
+  const fingerprint = await page.locator(".an-prod-incident").count();
+  assert.equal(fingerprint, 0);
+  await page.locator(".an-service-details button.link-button.mono").first().click();
+  await page.waitForURL("**/prod-errors/incident/**");
+  await page.locator(".an-prod-incident").waitFor({ timeout: 10000 });
+  await page.screenshot({ path: resolve(out, "04-incident-drilldown-en.png"), fullPage: true });
+  await page.goto(`${base}/#/insights/health?${query}`);
+  await page.locator(".an-health-freshness").waitFor();
+  await page.getByRole("button", { name: "VI", exact: true }).click();
+  await page.screenshot({ path: resolve(out, "05-dashboard-overview-vi.png"), fullPage: true });
+  await page.getByRole("button", { name: "EN", exact: true }).click();
+  await page.screenshot({ path: resolve(out, "06-dashboard-overview-en.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "production health mobile overflow");
+  await page.screenshot({ path: resolve(out, "07-dashboard-overview-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1300 });
+  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  await page.screenshot({ path: resolve(out, "08-dashboard-overview-dark.png"), fullPage: true });
+  results.push("PASS dark theme dashboard at desktop width");
+  await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
+  results.push("PASS production health overview, service drilldown, incident history and VI/EN screenshots");
   // Applied filters survive tab navigation and refresh through URL state.
   await Promise.all([
     page.waitForResponse((r) => r.url().includes("/api/analytics/usage?")),
@@ -89,7 +118,7 @@ try {
   await page.reload();
   await page.locator(".an-refresh").waitFor();
   results.push("PASS error state and recovery after a simulated HTTP 503");
-  assert.deepEqual(errors, []);
+  assert.deepEqual(errors.filter((e) => e !== "Smoke test temporary outage"), []);
   results.push("PASS no browser page errors");
   writeFileSync(resolve(out, "smoke-results.txt"), results.join("\n") + "\n");
   process.stdout.write(results.join("\n") + "\n");

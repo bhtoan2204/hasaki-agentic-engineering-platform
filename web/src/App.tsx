@@ -20,6 +20,7 @@ import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
 import { ProdErrorsPage } from "./pages/ProdErrors.tsx";
+import { ProductionIncident } from "./pages/insights/ProductionIncident.tsx";
 import { useI18n } from "./i18n/index.tsx";
 import type { UiLocale } from "./i18n/messages.ts";
 
@@ -168,7 +169,9 @@ export function App() {
       page = <RepositoriesPage name={parts[1]} query={queryPart} />;
       break;
     case "prod-errors":
-      page = <ProdErrorsPage focus={parts[1]} />;
+      page = parts[1] === "incident" && parts[2]
+        ? <ProductionIncident fingerprint={parts[2]} query={queryPart} />
+        : <ProdErrorsPage focus={parts[1]} />;
       break;
     case "integrations":
       page = <IntegrationsPage />;
