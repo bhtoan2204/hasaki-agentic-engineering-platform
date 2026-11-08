@@ -48,6 +48,8 @@ export interface StepLike {
   ui?: { x: number; y: number };
   run_if?: unknown;
   requires_approval?: boolean;
+  config?: Record<string, any>;
+  effective_agent?: {provider?: string; model?: string | null};
 }
 
 /** Vertical layered layout by longest-path depth (later steps below); used when a definition has no saved node positions. */
@@ -122,6 +124,8 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
   const cls = ["node", "gn", status ? "has-status" : "no-status", data.selected && "selected", blocked && "blocked", status === "RUNNING" && "running", data.invalid && "invalid"]
     .filter(Boolean)
     .join(" ");
+  const isAgent = ["agent","coding_agent"].includes(step.type);
+  const provider = step.effective_agent?.provider ?? step.config?.agent?.provider;
   const TypeIcon = stepTypeIcon(step.type);
   const StIcon = statusIcon(status);
   const merged: string[] = Array.isArray((step as any).config?.merged_from) ? (step as any).config.merged_from : [];
@@ -141,8 +145,9 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
           </span>
         )}
       </div>
-      {(status || !!data.attempts || !!data.openQuestions || step.requires_approval || !!step.run_if || merged.length > 0) && (
+      {(isAgent || status || !!data.attempts || !!data.openQuestions || step.requires_approval || !!step.run_if || merged.length > 0) && (
         <div className="flags">
+          {isAgent && <span className="gn-pill" title={step.effective_agent?.model ?? step.config?.agent?.model ?? undefined}>{provider ? (({claude:"Claude",codex:"Codex",cursor:"Cursor"} as Record<string,string>)[provider] ?? provider) : t("agent.inherit")}</span>}
           {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
           {!!data.attempts && <span className="gn-pill" title={t("graph.attempts", { n: data.attempts })}><RotateCcw size={10} strokeWidth={2.4} />{data.attempts}</span>}
           {!!data.openQuestions && <span className="gn-pill gn-pill-wait" title={t("graph.questions")}><MessageCircleQuestion size={10} strokeWidth={2.4} />{data.openQuestions}</span>}

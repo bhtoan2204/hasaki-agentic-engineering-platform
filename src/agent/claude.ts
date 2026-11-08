@@ -1,3 +1,5 @@
+import { resolveStepAgent } from "./stepAgent.ts";
+export { modelFor, codexModelFor } from "./stepAgent.ts";
 import { agentEnvironment } from "./environment.ts";
 import { ensureContextPack, ContextBudgetError, contextPackFailure } from "../context/pack.ts";
 import { captureContextContinuity } from "../context/continuity.ts";
@@ -11,9 +13,9 @@ import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { codexConfig, config, codeIntelligenceEnabled } from "../config.ts";
+import { config, codeIntelligenceEnabled } from "../config.ts";
 import { languagePolicy, outputLocale } from "./language.ts";
-import { agentProvider, type AgentProvider } from "./provider.ts";
+import { type AgentProvider } from "./provider.ts";
 import { cursorAgentTurn, cursorCapabilities } from "./cursor/run.ts";
 import { codexAgentTurn, codexCapabilities } from "./codex/run.ts";
 import { completeForRun } from "./complete.ts";
@@ -178,8 +180,8 @@ export async function resumableSession(ctx: ExecutionContext, cwd: string, provi
     pool,
     `SELECT s.session_id, s.attempt_id, cs.content AS snapshot
        FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id LEFT JOIN context_snapshots cs ON cs.id = a.context_snapshot_id
-      WHERE a.step_id = $1 AND s.resumable AND s.cwd = $2 AND s.provider = $3 ORDER BY s.id DESC LIMIT 5`,
-    [ctx.step.id, cwd, provider],
+      WHERE a.step_id = $1 AND s.resumable AND s.cwd = $2 AND s.provider = $3 AND (a.effective_agent IS NOT DISTINCT FROM $4::jsonb) ORDER BY s.id DESC LIMIT 5`,
+    [ctx.step.id, cwd, provider, ctx.attempt?.effective_agent ? JSON.stringify(ctx.attempt.effective_agent) : null],
   );
   if (!candidates.length) return null;
   const current = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [ctx.context.snapshot_id]);
@@ -214,7 +216,8 @@ const TERMINAL_FAILURES = new Set(["quota", "auth", "model", "policy", "canceled
 const agentExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
-    const provider = agentProvider(ctx.run);
+    const effective = ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
+    const provider = effective.provider;
     {
       for (const name of ctx.run.selected_repositories) {
         const repo = await repositories.get(name);
@@ -236,7 +239,7 @@ const agentExecutor: StepExecutor = {
       // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
       if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
         return { kind: "failed", error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`, retryable: false };
-      const cap = provider === "codex" ? await codexCapabilities() : await cursorCapabilities();
+      const cap = provider === "codex" ? await codexCapabilities(false,{model:effective.model ?? "",effort:effective.reasoning_effort ?? ""}) : await cursorCapabilities();
       if (!cap.ok) return { kind: "failed", error: cap.error || `${label} is not usable`, retryable: false };
     }
     const ws = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
@@ -251,7 +254,8 @@ const agentExecutor: StepExecutor = {
       isReadOnlyIntegration: (name) => integrationTools().find((t) => t.name === name)?.readOnly === true,
     };
     const settingSources = config.agent.settingSources;
-    const nativeTools = toolsFor(mode, { delegation, claudeSkills: settingSources.length > 0 });
+    policy.allowedTools = effective.allowed_tools;
+    const nativeTools = toolsFor(mode, { delegation, claudeSkills: settingSources.length > 0 }).filter(t => effective.allowed_tools == null || effective.allowed_tools.includes(t));
     const agents = delegation
       ? Object.fromEntries(
         (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
@@ -261,7 +265,7 @@ const agentExecutor: StepExecutor = {
       : undefined;
     // Each provider resolves its own model: a Claude model id is never sent to Cursor or Codex.
     const routed: { model: string; source: string; effort?: string } =
-      provider === "cursor" ? { model: "", source: "cursor account default" } : provider === "codex" ? codexModelFor(ctx.step, ctx.run.profile) : modelFor(ctx.step, ctx.run.profile);
+      { model: effective.model ?? "", source: effective.source, effort: effective.reasoning_effort ?? undefined };
     const metrics = newMetrics(routed.model || (provider === "claude" ? "default" : ""));
     metrics.model_source = routed.source;
     metrics.provider = provider;
@@ -272,7 +276,7 @@ const agentExecutor: StepExecutor = {
     }
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
     for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
-    const cwd = await runWorkingDirectory(ctx.run.id);
+    const cwd = await runWorkingDirectory(ctx.run.id, ctx.step.id);
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
@@ -370,9 +374,10 @@ const agentExecutor: StepExecutor = {
     };
 
     const runTurn = async (prompt: string, resumeId?: string): Promise<{ isError: boolean; text: string; assistantTurns: number; failure?: string }> => {
+      if (ctx.signal.aborted) return {isError:true,text:"canceled",assistantTurns:0,failure:"canceled"};
       await ctx.log("prompt", prompt, { resume_session: resumeId ?? null, provider, model: routed.model || null });
       if (provider === "cursor") {
-        const result = await cursorAgentTurn({ ctx, metrics, invocationId: sessionKey, onTelemetry: persistSession, mode, policy, cwd, prompt: `${systemAppend}\n\n${prompt}`, resumeId });
+        const result = await cursorAgentTurn({ ctx, metrics, invocationId: sessionKey, onTelemetry: persistSession, mode, policy, cwd, model: routed.model || undefined, prompt: `${systemAppend}\n\n${prompt}`, resumeId });
         if (result.submitted) submitted = result.submitted;
         return { isError: result.isError, text: result.text, assistantTurns: result.assistantTurns };
       }
@@ -403,6 +408,7 @@ const agentExecutor: StepExecutor = {
             ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin } : {}),
             additionalDirectories: [config.reposRoot, ...(ctx.context.repoPaths ?? []).map((r) => r.path)],
             resume: resumeId,
+            ...(effective.reasoning_effort ? { effort: effective.reasoning_effort as "low" | "medium" | "high" | "xhigh" | "max" } : {}),
             abortController: ac,
             model: routed.model || undefined,
             maxTurns: Number(ctx.step.config.max_turns ?? config.maxTurns),
@@ -671,18 +677,6 @@ export async function rankRepositoriesWithClaude(ctx: ExecutionContext, ranked: 
  * [profile|*][role] → agent.codex.model → "" (the worker's Codex account default). Effort: step config
  * codex_reasoning_effort → agent.codex.reasoningEffort → model default.
  */
-export function codexModelFor(step: { type: string; config: Record<string, any> }, profile?: string | null): { model: string; source: string; effort: string } {
-  const c = codexConfig();
-  const effort = typeof step.config.codex_reasoning_effort === "string" && step.config.codex_reasoning_effort ? step.config.codex_reasoning_effort : c.reasoningEffort;
-  if (typeof step.config.codex_model === "string" && step.config.codex_model) return { model: step.config.codex_model, source: "step config (codex_model)", effort };
-  const role = step.config.independent === true ? "verifier" : step.type;
-  for (const [scope, label] of [[profile ?? "", `codex routing ${profile}/${role}`], ["*", `codex routing */${role}`]] as const) {
-    const m = scope ? c.models[scope]?.[role] : undefined;
-    if (m) return { model: m, source: label, effort };
-  }
-  return { model: c.model, source: c.model ? "agent.codex.model" : "codex account default", effort };
-}
-
 /** What differs for a Codex agent compared with the shared step instructions. */
 function codexEnvironmentNotes(mode: ToolMode): string {
   return [
@@ -695,18 +689,6 @@ function codexEnvironmentNotes(mode: ToolMode): string {
     "- After ask_user, end your turn immediately: do not edit files or call other tools while the developer has not answered.",
     "- Finish by calling submit_result with the step's output object. A final chat message alone does not complete the step.",
   ].join("\n");
-}
-
-/** Model for a step: explicit step config → profile/role routing → global default (see config.agent.models). */
-export function modelFor(step: { type: string; config: Record<string, any> }, profile?: string | null): { model: string; source: string } {
-  if (typeof step.config.model === "string" && step.config.model) return { model: step.config.model, source: "step config" };
-  const role = step.config.independent === true ? "verifier" : step.type;
-  const routes = config.agent.models ?? {};
-  for (const [scope, label] of [[profile ?? "", `routing ${profile}/${role}`], ["*", `routing */${role}`]] as const) {
-    const m = scope ? routes[scope]?.[role] : undefined;
-    if (m) return { model: m, source: label };
-  }
-  return { model: config.model ?? "", source: config.model ? "global default" : "sdk default" };
 }
 
 /** All three provider paths share the same durable context and continuity capture. */

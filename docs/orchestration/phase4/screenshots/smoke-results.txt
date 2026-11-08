@@ -1,0 +1,4 @@
+PASS Studio: Claude, Codex and Cursor DAG labels; provider/model controls persist to a validated draft.
+PASS Run inspector: owner saves pending Cursor override without starting a job.
+PASS Vietnamese: provider controls and attempt labels render in the existing locale system.
+PASS Browser: no uncaught page errors.

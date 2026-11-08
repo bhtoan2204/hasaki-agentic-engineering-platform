@@ -13,7 +13,7 @@ export async function validateToolBinding(env: PlatformToolEnv) {
     throw new Error("Authenticated principal does not own this run");
   const row = await one(
     pool,
-    `SELECT a.run_id,a.step_id,a.status,a.fencing_token,a.generation AS attempt_generation,s.generation AS step_generation,s.type,s.current_attempt_id,s.status AS step_status,
+    `SELECT a.effective_agent,a.run_id,a.step_id,a.status,a.fencing_token,a.generation AS attempt_generation,s.generation AS step_generation,s.type,s.current_attempt_id,s.status AS step_status,
     r.owner_id,r.worker_instance,r.status AS run_status,r.allowed_repositories,u.active,
     j.status AS job_status,j.fencing_token AS job_token,j.lease_expires_at>clock_timestamp() AS live,
     EXISTS(SELECT 1 FROM platform_instances i WHERE i.instance_id=r.worker_instance AND (i.session_id<>$2 OR i.stopped_at IS NOT NULL)) AS replaced
@@ -45,6 +45,8 @@ export async function validateToolBinding(env: PlatformToolEnv) {
     Number(row.fencing_token) !== Number(env.fencingToken)
   )
     throw new Error("Attempt inactive, fenced, worker replaced or lease expired");
+  env.attemptAllowedTools = row.effective_agent?.allowed_tools;
+  if (env.policy) env.policy.allowedTools = env.attemptAllowedTools;
   if (env.mode === "coding" && row.type !== "coding_agent")
     throw new Error("Coding permission is not authorized by this workflow step");
   if (

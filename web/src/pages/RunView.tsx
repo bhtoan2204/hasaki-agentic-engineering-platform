@@ -94,12 +94,16 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
+      const latestAttempt = [...run.attempts].reverse().find((a: any) => a.step_key === s.key);
+      const effectiveAgent = latestAttempt
+        ? { provider: latestAttempt.agent_provider ?? latestAttempt.metrics?.provider ?? run.agent_provider, model: latestAttempt.agent_model ?? null }
+        : { provider: row?.agent_override?.provider ?? s.config?.agent?.provider ?? run.agent_provider, model: row?.agent_override?.model ?? s.config?.agent?.model };
       return {
         id: s.key,
         type: "step",
         position: s.ui ?? pos[s.key],
         data: {
-          step: { ...s, name: row?.name ?? s.name, requires_approval: row?.requires_approval ?? s.requires_approval },
+          step: { ...s, effective_agent: effectiveAgent, name: row?.name ?? s.name, requires_approval: row?.requires_approval ?? s.requires_approval },
           status: row?.status,
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],

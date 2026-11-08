@@ -1,3 +1,4 @@
+import { resolveStepAgent, effectiveStepConfig, StepAgentOverrideConfig } from "../agent/stepAgent.ts";
 import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts";
 import type pg from "pg";
 import { config } from "../config.ts";
@@ -209,7 +210,7 @@ export interface StartRunInput {
   profile?: ProfileChoice;
   /** Language of summaries, questions and reports. Omitted → vi. Invalid values are rejected. */
   outputLocale?: "vi" | "en";
-  /** Agent implementation. Omitted → claude. Resolved once; retries keep the stored value. */
+  /** Run default provider. Omitted → platform default (Claude unless configured). Agent steps can override it. */
   agentProvider?: AgentProvider | string;
   /** Authenticated creator. A run started from a work item always uses that item's owner. */
   ownerId?: number;
@@ -315,7 +316,7 @@ export async function startRun(input: StartRunInput) {
   let agent_provider: AgentProvider;
   try {
     output_locale = resolveOutputLocale(input.outputLocale);
-    agent_provider = resolveAgentProvider(input.agentProvider);
+    agent_provider = resolveAgentProvider(input.agentProvider ?? config.agent.defaultProvider);
   } catch (e) {
     throw new EngineError((e as Error).message, 400);
   }
@@ -335,6 +336,8 @@ export async function startRun(input: StartRunInput) {
       if (Object.keys(detected).length) Object.assign(inputs, { branches: detected, branches_source: "work item description" });
     }
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
+    try { for (const step of graph.steps) resolveStepAgent({agent_provider,profile:r.decision.profile},step); }
+    catch(error) { throw new EngineError((error as Error).message,400); }
     const resolvedGraph = { ...graph, profile: r.decision.profile, profile_changes: r.changes };
     await q(
       c,
@@ -766,6 +769,17 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       else await q(c, "UPDATE workflow_jobs SET status = 'canceled', last_error = 'stale job', updated_at = now() WHERE id = $1", [j.id]);
       return null;
     }
+    // Run lock makes this a durable reader/writer gate over the existing shared run worktrees.
+    const consumers = ["agent", "coding_agent", "command", "git_pull_request"];
+    const writers = ["coding_agent", "command", "git_pull_request"];
+    if (consumers.includes(step.type) && await one(c, `SELECT a.id FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id
+      WHERE a.run_id=$1 AND (a.status='RUNNING' OR a.job_id=ANY($5::bigint[])) AND s.type=ANY($2::text[])
+      AND ($3::boolean OR s.type=ANY($4::text[])) LIMIT 1`, [run.id, consumers, writers.includes(step.type), writers, localJobs.activeIds()])) {
+      await q(c, "UPDATE workflow_jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL, available_at=now()+interval '1 second', updated_at=now() WHERE id=$1", [j.id]);
+      return null;
+    }
+    const effective = resolveStepAgent(run, step);
+    step.config = effectiveStepConfig(step.config, effective);
     const { n } = (await one<{ n: number }>(c, "SELECT COALESCE(max(number), 0)::int + 1 AS n FROM workflow_step_attempts WHERE step_id = $1", [step.id]))!;
     const contextPreparationStarted = performance.now();
     const input = await buildStepInput(c, run, step);
@@ -773,9 +787,9 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     const contextPreparationMs = performance.now() - contextPreparationStarted;
     const attempt = (await one<AttemptRow>(
       c,
-      `INSERT INTO workflow_step_attempts (step_id, run_id, number, generation, status, job_id, fencing_token, worker, input, context_snapshot_id, metrics)
-       VALUES ($1, $2, $3, $4, 'RUNNING', $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [step.id, run.id, n, step.generation, j.id, j.fencing_token, worker, json(input), context.snapshot_id, json({ context_preparation_ms: contextPreparationMs })],
+      `INSERT INTO workflow_step_attempts (step_id, run_id, number, generation, status, job_id, fencing_token, worker, input, context_snapshot_id, metrics, agent_provider, agent_model, effective_agent)
+       VALUES ($1, $2, $3, $4, 'RUNNING', $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [step.id, run.id, n, step.generation, j.id, j.fencing_token, worker, json(input), context.snapshot_id, json({ context_preparation_ms: contextPreparationMs }), effective?.provider ?? null, effective?.model ?? null, effective ? json(effective) : null],
     ))!;
     await setStepStatus(c, step, "RUNNING", { current_attempt_id: attempt.id, attempt_count: step.attempt_count + 1, started_at: new Date(), error: null }, `attempt #${n}`);
     return { run, step, attempt, input, context };
@@ -879,7 +893,7 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       return;
     }
     case "failed": {
-      const decision = classifyFailure(result.error, { executorRetryable: result.retryable, attempt: step.attempt_count, maxAttempts: step.max_attempts, baseBackoff: step.retry_backoff_s });
+      const decision = classifyFailure(result.error, { executorRetryable: result.retryable, attempt: step.attempt_count, maxAttempts: attempt.effective_agent?.retry?.max_attempts ?? step.max_attempts, baseBackoff: attempt.effective_agent?.retry?.backoff_seconds ?? step.retry_backoff_s });
       await closeAttempt("FAILED", null, { message: result.error, details: result.details ?? null, failure: decision });
       if (decision.action === "human") {
         // Pause instead of failing: the developer resolves the cause and answers; the step then runs again.
@@ -997,7 +1011,7 @@ async function recoverInterrupted(c: pg.PoolClient, run: RunRow, step: StepRow, 
   if (step.current_attempt_id !== attempt.id || step.generation !== attempt.generation || step.status !== "RUNNING") return;
   const safe = safeRecovery(step);
   const cp = await one(c, "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [attempt.id]);
-  const session = await one(c, "SELECT session_id, cwd FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1", [attempt.id, run.agent_provider]);
+  const session = await one(c, "SELECT session_id, cwd FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1", [attempt.id, attempt.agent_provider ?? run.agent_provider]);
   const checkpoint = { ...(cp?.data ?? {}), ...(session ?? {}), recovery: { kind: safe ? "SAFE_RETRY" : "REQUIRES_RECONCILIATION", reason, from_attempt_id: attempt.id, question_id: null as number | null } };
   await q(c, "UPDATE workflow_step_attempts SET status = $2, error = $3, finished_at = now() WHERE id = $1", [attempt.id, safe ? "STALE" : "WAITING_INPUT", json({ message: reason, interrupted: true })]);
   const pending = { ...(step.pending_input ?? {}), resume: { from_attempt_id: attempt.id, checkpoint }, recovery: checkpoint.recovery };
@@ -1148,4 +1162,25 @@ export function answeredQuestions(limit = 100, db: Db = pool, scope?: { ownerId?
       WHERE q.status = 'answered' ${extra} ORDER BY q.answered_at DESC LIMIT $1`,
     [limit],
   );
+}
+
+/** Caller must pass through requireRun; config is server-owned, never read from pending input. */
+export async function setStepAgent(runId: number, key: string, value: unknown, actorId: number) {
+  return withTx(async c => {
+    const run = await lockRun(c, runId);
+    const step = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id=$1 AND key=$2 FOR UPDATE", [runId,key]);
+    if (!step || !["agent","coding_agent"].includes(step.type)) throw new EngineError("Agent step required",400);
+    if (!["PENDING","READY","RETRYING","FAILED","CANCELED","WAITING_INPUT"].includes(step.status) || run.status === "CANCELED") throw new EngineError("Only pending or retryable agent steps can be changed",409);
+    let override;
+    let effective;
+    try {
+      override = value === null ? null : StepAgentOverrideConfig.parse(value);
+      const baselineTools = step.config.agent?.allowed_tools;
+      if (baselineTools != null && override && Object.hasOwn(override,"allowed_tools") && (override.allowed_tools == null || override.allowed_tools.some(t => !baselineTools.includes(t)))) throw new Error("Manual tool permissions must be a subset of the workflow's allowed_tools");
+      effective = resolveStepAgent(run, {...step, agent_override: override});
+    } catch(error) { throw new EngineError((error as Error).message,400); }
+    await q(c,"UPDATE workflow_steps SET agent_override=$2 WHERE id=$1",[step.id,override == null ? null : json(override)]);
+    await q(c,`INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail) VALUES($1,'step.agent_override','run',$2,$3)`,[actorId,String(runId),json({step:key,previous:step.agent_override ?? null,override,effective})]);
+    return {agent_override:override,effective_agent:effective};
+  });
 }

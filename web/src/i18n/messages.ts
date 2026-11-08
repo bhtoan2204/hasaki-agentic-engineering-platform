@@ -283,8 +283,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
 };
 
 export const messages: Record<UiLocale, Record<string, string>> = {
-  vi: { ...baseMessages.vi, ...catalog.vi, ...analyticsMessages.vi },
-  en: { ...baseMessages.en, ...catalog.en, ...analyticsMessages.en },
+  vi: { "agent.inherit":"Theo lượt chạy", "agent.effective":"Agent của lần thử", "agent.modelDefault":"Mặc định nhà cung cấp / chưa báo cáo", ...baseMessages.vi, ...catalog.vi, ...analyticsMessages.vi },
+  en: { "agent.inherit":"Run default", "agent.effective":"Attempt agent", "agent.modelDefault":"Provider default / unreported", ...baseMessages.en, ...catalog.en, ...analyticsMessages.en },
 };
 
 export function translate(locale: UiLocale, key: string, params?: Record<string, string | number>): string {

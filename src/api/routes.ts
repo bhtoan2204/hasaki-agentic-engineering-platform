@@ -1,3 +1,4 @@
+import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext } from "./agentContext.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
 import { updateIncidentLifecycle } from "./analytics/health.ts";
@@ -309,6 +310,7 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/cancel$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), cancelRun(num(c.p[0]), c.body.reason || "canceled by user"))],
   ["POST", /^\/api\/runs\/(\d+)\/repositories$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), selectRepositories(num(c.p[0]), c.body.repositories ?? []))],
   ["POST", /^\/api\/runs\/(\d+)\/feedback$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), sendFeedback(num(c.p[0]), String(c.body.message ?? "").trim() || fail("empty message")))],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/agent$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), setStepAgent(num(c.p[0]), c.p[1], c.body.agent, c.actor.id))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/retry$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), retryStep(num(c.p[0]), c.p[1], c.body.input))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), reexecuteStep(num(c.p[0]), c.p[1], { feedback: c.body.feedback, input: c.body.input, skills: c.body.skills, by: c.actor.username }))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/approve$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), approveStep(num(c.p[0]), c.p[1], { comment: c.body.comment, by: c.actor.username, repositories: c.body.repositories, data: c.body.data }))],

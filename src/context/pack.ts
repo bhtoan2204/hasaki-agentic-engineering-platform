@@ -346,6 +346,7 @@ export async function ensureContextPack(
         metrics,
         () => {},
       );
+      env.contextPreparation = true; // Trusted server retrieval, never supplied by a provider.
       let retrievalCalls = 0,
         retrievalFailures = 0;
       const retrieve = async (name: string, args: unknown, section: ContextEntry["section"], priority: number) => {

@@ -1,3 +1,4 @@
+import { toolAllowed } from "./toolPolicy.ts";
 import {
   contextTool,
   CONTEXT_TOOLS,
@@ -30,6 +31,8 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
  * After ask_user has open questions, further mutations are refused until the engine resumes.
  */
 export interface PlatformToolEnv {
+  contextPreparation?: boolean;
+  attemptAllowedTools?: string[] | null;
   runId: number;
   snapshotId?: number;
   recordMetrics?: (m: Record<string, unknown>) => Promise<void>;
@@ -150,6 +153,8 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
           ? describeToolSafe(String(args?.name ?? ""))?.read_only === true
           : !MUTATING.has(name) && name !== "ask_user" && name !== "post_update");
       try {
+        const target = native?.logicalName ?? (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
+        if (!env.contextPreparation && !toolAllowed(target,env.attemptAllowedTools)) throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
         if (["read_knowledge", "search_knowledge"].includes(name) && !native)
           env = { ...env, knowledge: await visibleSnapshotKnowledge(env) };
         if (JSON.stringify(args ?? {}).length > 128000) throw new Error("Tool arguments exceed 128000 characters");
@@ -559,6 +564,7 @@ export async function envFromDatabase(
     upstream: input.upstream ?? {},
     stepType: step.type,
     policy: {
+      allowedTools: attempt.effective_agent?.allowed_tools,
       mode,
       workspaces: ws.map((w: { path: string }) => w.path),
       baseBranch: config.baseBranch,

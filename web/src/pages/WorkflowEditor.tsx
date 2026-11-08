@@ -1,3 +1,4 @@
+import { StepAgentFields } from "../StepAgentFields.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
@@ -611,8 +612,8 @@ function StepForm({ step, spec, knowledge, updateStep, renameStep, removeStep, o
                 <Check title={t("wfe.delegateTip")} checked={!!cfg.delegation?.enabled} onChange={(c) => setCfg("delegation", c ? { enabled: true, agents: ["explorer", "reviewer"] } : undefined)}>
                   {t("wfe.delegate")}
                 </Check>
+                <StepAgentFields value={cfg.agent ?? {}} onChange={v => setCfg("agent",v)} />
                 <div className="grid2">
-                  <Field label={t("wfe.model")}><input value={cfg.model ?? ""} onChange={(e) => setCfg("model", e.target.value)} /></Field>
                   <Field label={t("wfe.maxTurns")}><input type="number" value={cfg.max_turns ?? ""} onChange={(e) => setCfg("max_turns", e.target.value ? Number(e.target.value) : undefined)} /></Field>
                 </div>
               </>

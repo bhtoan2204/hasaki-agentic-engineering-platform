@@ -29,6 +29,7 @@ export interface CursorTurnResult {
 }
 
 export interface CursorCapability {
+  supportsModel?: boolean;
   ok: boolean;
   bin: string;
   error?: string;
@@ -72,7 +73,7 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
       return finish({ ok: false, bin, error: `Cursor CLI authentication check failed: ${String(e?.stderr || e?.message || e).split("\n")[0]}. Run \`agent login\` or set CURSOR_API_KEY. The platform will not fall back to Claude.` });
     }
   }
-  return finish({ ok: true, bin });
+  return finish({ ok: true, bin, supportsModel: help.includes("--model") });
 }
 
 function finish(c: CursorCapability): CursorCapability {
@@ -81,6 +82,7 @@ function finish(c: CursorCapability): CursorCapability {
 }
 
 export interface CursorTurnInput {
+  model?: string;
   metrics?: AgentMetrics;
   invocationId?: string;
   onTelemetry?: (error?: unknown) => Promise<void>;
@@ -132,6 +134,10 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   ];
   if (input.mode === "analysis") args.push("--mode", "ask");
   else args.push("--force");
+  if (input.model) {
+    if (!cap.supportsModel) throw new Error("This Cursor CLI does not support --model");
+    args.push("--model",input.model);
+  }
   if (input.resumeId) args.push("--resume", input.resumeId);
   for (const dir of extraDirs(input)) args.push("--add-dir", dir);
   args.push(`Follow the task in ${promptFile}. Do not print or copy .cursor/mcp.json. Use the platform MCP tools for questions, progress, knowledge, and submit_result.`);

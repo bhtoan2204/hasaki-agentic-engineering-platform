@@ -156,6 +156,9 @@ export function applyProfile(spec: WorkflowSpec, profile: Profile): { spec: Work
   const merged = spec.steps.filter((s) => anc.has(s.key) && s.type === "agent");
   const planApprovals = spec.steps.filter((s) => anc.has(s.key) && s.type === "human_approval" && !s.config.select_repositories);
   const reviews = spec.steps.filter((s) => downstream(spec.steps, coding.key).has(s.key) && s.type === "agent");
+  // A configured agent boundary carries provider, permissions and verification semantics that cannot be folded away.
+  const configured = [...merged, ...reviews].find(s => s.config.agent != null && Object.keys(s.config.agent as object).length > 0);
+  if (configured) throw new ProfileNotApplicable(`step "${configured.key}" has explicit agent configuration; preserve its execution boundary`);
   const removed = new Set([...merged, ...planApprovals, ...reviews].map((s) => s.key));
   // A remaining step that branches on (run_if / condition path) a removed step's output would change behaviour: refuse.
   for (const s of spec.steps) {

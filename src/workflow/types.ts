@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { StepAgentConfig, validateAgentOptions, type EffectiveAgent } from "../agent/stepAgent.ts";
 
 export const STEP_TYPES = [
   "agent",
@@ -53,6 +54,11 @@ export const StepSpec = z.object({
   retry_backoff_seconds: z.number().int().min(0).max(3600).default(5),
   /** Editor-only: node position in the visual builder. */
   ui: z.object({ x: z.number(), y: z.number() }).optional(),
+}).superRefine((step, ctx) => {
+  if (step.config.agent === undefined) return;
+  if (!["agent", "coding_agent"].includes(step.type)) { ctx.addIssue({ code: "custom", path: ["config", "agent"], message: "agent configuration requires an agent step" }); return; }
+  try { validateAgentOptions(StepAgentConfig.parse(step.config.agent)); }
+  catch (e) { ctx.addIssue({ code: "custom", path: ["config", "agent"], message: (e as Error).message }); }
 });
 export type StepSpec = z.infer<typeof StepSpec>;
 
@@ -90,7 +96,7 @@ export interface RunRow {
   profile_decision?: unknown;
   /** User-facing prose language for this run. NULL on rows created before the column existed. */
   output_locale?: "vi" | "en" | null;
-  /** claude (default, including rows from before the column), cursor or codex. Fixed for the life of the run. */
+  /** claude (default, including rows from before the column), cursor or codex. Run default; effective agent settings are pinned per attempt. */
   agent_provider?: "claude" | "cursor" | "codex";
   /** Null only for unassigned legacy rows, which are not runnable. */
   owner_id?: number | null;
@@ -115,6 +121,7 @@ export interface StepRow {
   generation: number;
   attempt_count: number;
   current_attempt_id: number | null;
+  agent_override?: unknown;
   output: any;
   pending_input: any;
   approval: any;
@@ -132,6 +139,9 @@ export interface AttemptRow {
   fencing_token: number | null;
   input: any;
   output: any;
+  agent_provider?: "claude" | "codex" | "cursor" | null;
+  agent_model?: string | null;
+  effective_agent?: EffectiveAgent | null;
   context_snapshot_id: number | null;
   agent_session_id: string | null;
   error: any;

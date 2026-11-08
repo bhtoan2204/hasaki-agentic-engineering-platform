@@ -1,3 +1,4 @@
+import { StepAgentOverride } from "../StepAgentOverride.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { agentKey, asProvider, type AgentProvider } from "../agentProvider.tsx";
 import {
@@ -223,6 +224,8 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs } = data;
   const isAgent = AGENT_TYPES.includes(step.type);
   const attempt = attempts.find((a: any) => a.id === attemptId) ?? attempts.find((a: any) => a.id === step.current_attempt_id) ?? attempts[attempts.length - 1];
+  const effectiveProvider = attempt ? attempt.agent_provider ?? attempt.metrics?.provider ?? run.agent_provider : step.agent_override?.provider ?? step.config?.agent?.provider ?? run.agent_provider;
+  const effectiveModel = attempt?.metrics?.model || attempt?.agent_model || (attempt ? null : step.agent_override?.model ?? step.config?.agent?.model);
   const snapshot = snapshots.find((s: any) => s.id === attempt?.context_snapshot_id);
   const open = questions.filter((q: any) => q.status === "open");
   const live = step.status === "RUNNING" && attempt?.id === step.current_attempt_id;
@@ -248,7 +251,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
   const tabs: Array<[Tab, React.ReactNode]> = [
     ...(step.type === "task_result_report" ? ([["report", <TabLabel icon={ClipboardList}>{t("si.tab.report")}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ["overview", <TabLabel icon={Info}>{t("si.tab.overview")}</TabLabel>],
-    ...(isAgent ? ([["execution", <TabLabel icon={Bot}>{t(agentKey(run.agent_provider, true))} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
+    ...(isAgent ? ([["execution", <TabLabel icon={Bot}>{t(agentKey(effectiveProvider, true))} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ...(step.type === "command" ? ([["execution", <TabLabel icon={SquareTerminal}>{t("si.tab.live")} {live && <span className="spinner" />}</TabLabel>]] as Array<[Tab, React.ReactNode]>) : []),
     ["input", <TabLabel icon={LogIn}>{t("si.tab.input")}</TabLabel>],
     ["output", <TabLabel icon={LogOut}>{t("si.tab.output")}</TabLabel>],
@@ -299,7 +302,10 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       </div>
 
       <div className="si-body">
-        {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} provider={asProvider(run.agent_provider)} />}
+        {isAgent && <div className="small muted" style={{padding:12}}>{t("agent.effective")}: {effectiveProvider} · {effectiveModel || t("agent.modelDefault")}</div>}
+        {isAgent && runActive && ["PENDING","READY","RETRYING","FAILED","CANCELED","WAITING_INPUT"].includes(step.status) && <StepAgentOverride key={`${step.id}:${JSON.stringify(step.agent_override)}`} value={step.agent_override} save={agent => action("agent",{agent})}/>}
+
+        {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} provider={asProvider(effectiveProvider)} />}
         {step.status === "WAITING_APPROVAL" && step.type !== "task_result_report" && <ApprovalPanel run={run} step={step} onDone={refresh} />}
         {step.type === "task_result_report" && step.status === "WAITING_APPROVAL" && tab !== "report" && (
           <div className="rv-attn" style={{ padding: "12px 16px" }}>
@@ -359,7 +365,7 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
             )}
           </div>
         )}
-        {tab === "execution" && (!attempt ? <Empty>{t("si.notStarted")}</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} provider={asProvider(run.agent_provider)} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
+        {tab === "execution" && (!attempt ? <Empty>{t("si.notStarted")}</Empty> : isAgent ? <Transcript attemptId={attempt.id} live={live} tick={tick} provider={asProvider(effectiveProvider)} /> : <CommandLog attemptId={attempt.id} live={live} tick={tick} startedAt={attempt.started_at} />)}
         {tab === "input" && (attempt ? <JsonBlock value={attempt.input} title={t("si.resolvedInput", { n: attempt.number })} /> : <Empty>{t("si.inputLater")}</Empty>)}
         {tab === "output" && (
           <div>

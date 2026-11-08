@@ -67,8 +67,8 @@ async function run(bin: string, args: string[], timeout = 20_000) {
  * Probe the installed CLI without calling a model: version, required flags, login status (`codex login status`),
  * and the model catalog (`codex debug models`) to validate the configured model and reasoning effort.
  */
-export async function codexCapabilities(force = false): Promise<CodexCapability> {
-  const cfg = codexConfig();
+export async function codexCapabilities(force = false, selection?: {model:string;effort:string}): Promise<CodexCapability> {
+  const cfg = {...codexConfig(), ...(selection ? {model:selection.model,reasoningEffort:selection.effort} : {})};
   const key = `${cfg.bin}\u0000${cfg.model}\u0000${cfg.reasoningEffort}`;
   if (!force && capCache && capCache.key === key && Date.now() - capCache.at < 5 * 60_000) return capCache.value;
   const value = await probe(cfg.bin, cfg.model, cfg.reasoningEffort);
@@ -260,7 +260,7 @@ export interface CodexTurnResult {
 
 export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnResult> {
   const { ctx, metrics } = input;
-  const cap = await codexCapabilities();
+  const cap = await codexCapabilities(false,{model:input.model ?? "",effort:input.effort ?? ""});
   if (!cap.ok) return { isError: true, text: cap.error || "Codex CLI is not usable", assistantTurns: 0, failure: cap.kind === "model" ? "model" : cap.kind === "auth" ? "auth" : "error" };
   if (input.policy.delegation)
     return { isError: true, text: `Codex runs cannot enforce the platform's read-only subagent policy. Disable delegation on the step, or create the run with Claude. ${NO_FALLBACK}`, assistantTurns: 0, failure: "policy" };

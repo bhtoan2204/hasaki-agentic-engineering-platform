@@ -108,7 +108,7 @@ export function codexHookDecision(payload: CodexHookPayload, policy: PolicyConte
     }
     return { allow: true };
   }
-  if (HARMLESS.has(lower)) return { allow: true };
+  if (HARMLESS.has(lower)) return decide(lower === "view_image" ? "Read" : lower === "write_stdin" ? "Bash" : "TodoWrite", {}, policy, workdir);
   if (lower === "spawn_agent" || lower.includes("subagent") || lower === "send_input" || lower === "wait_agent")
     return deny("delegation to Codex subagents is not supported by the platform policy for this provider");
   return deny(`tool ${tool || "(unnamed)"} is not allowed in workflow steps`);

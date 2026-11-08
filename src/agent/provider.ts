@@ -1,7 +1,6 @@
 /**
- * Agent implementation for a run. Separate from the model id: Claude model strings are never sent to Cursor or Codex,
- * and each provider resolves its own model. Resolved once when the run is created; retries, resume, repair and
- * re-execution keep it. NULL is not used — rows from before this column default to claude.
+ * The run default remains fixed for historical compatibility. Agent steps resolve their own provider and model
+ * into an immutable attempt snapshot. Historical rows without the run column default to Claude.
  */
 export const AGENT_PROVIDERS = ["claude", "cursor", "codex"] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];

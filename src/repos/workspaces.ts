@@ -109,14 +109,14 @@ export async function checkoutForRun(repo: LocalRepository, runId: number): Prom
   return primary;
 }
 
-/** All agent providers share the same run-local working directory. Retain recorded session cwd on resume. */
-export async function runWorkingDirectory(runId: number): Promise<string> {
+/** Agent session directories are isolated by step. Repository worktrees remain run-local and coordinated by the engine. */
+export async function runWorkingDirectory(runId: number, stepId?: number): Promise<string> {
   const run = await one(pool, `SELECT r.worker_instance,
     (SELECT s.cwd FROM agent_sessions s JOIN workflow_step_attempts a ON a.id=s.attempt_id
-      WHERE a.run_id=r.id AND r.worker_instance=$2 ORDER BY s.id DESC LIMIT 1) AS cwd
-    FROM workflow_runs r WHERE r.id=$1`, [runId, config.instanceId]);
+      WHERE a.run_id=r.id AND r.worker_instance=$2 AND ($3::bigint IS NULL OR (a.step_id=$3 AND a.effective_agent IS NOT NULL)) ORDER BY s.id DESC LIMIT 1) AS cwd
+    FROM workflow_runs r WHERE r.id=$1`, [runId, config.instanceId, stepId ?? null]);
   if (run?.worker_instance !== config.instanceId) throw new Error("Assigned worker required for agent workspace");
-  const path = run.cwd ?? join(config.dataDir, "worktrees", instanceDirectory(config.instanceId), String(runId), "agent");
+  const path = run.cwd ?? join(config.dataDir, "worktrees", instanceDirectory(config.instanceId), String(runId), stepId == null ? "agent" : `agent-${stepId}`);
   const intended = relative(config.dataDir, path);
   if (unsafeRelativePath(intended)) throw new Error("Agent workspace belongs to a different local layout");
   await mkdir(path, { recursive: true, mode: 0o700 });

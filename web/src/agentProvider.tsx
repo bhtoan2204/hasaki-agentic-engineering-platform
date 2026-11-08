@@ -2,7 +2,7 @@ import { useApi } from "./api.ts";
 import { useI18n } from "./i18n/index.tsx";
 import { Field } from "./ui.tsx";
 
-/** Agent providers a run can be created with. Fixed for the life of the run (retry, resume, repair keep it). */
+/** Default agent providers a run can be created with. Agent steps can override this default. */
 export const AGENT_PROVIDERS = ["claude", "cursor", "codex"] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 

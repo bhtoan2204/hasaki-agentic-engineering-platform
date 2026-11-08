@@ -22,7 +22,8 @@
     "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
     "validate:code-intelligence": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/validate-code-intelligence.ts",
     "repositories:migrate": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/migrate-repositories.ts",
-    "smoke:analytics": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/analytics.smoke.ts"
+    "smoke:analytics": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/analytics.smoke.ts",
+    "smoke:orchestration": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/step-agent.smoke.ts"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "1.13.6",

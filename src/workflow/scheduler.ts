@@ -91,9 +91,15 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
       console.error(`heartbeat job ${job.id}:`, (e as Error).message);
     }
   }, opts.heartbeatSeconds * 1000);
+  const executionAbort = new AbortController();
+  const forwardAbort = () => executionAbort.abort();
+  ac.signal.addEventListener("abort", forwardAbort, {once:true});
+  const timeoutMs = begun.attempt.effective_agent?.timeout_ms;
+  let timedOut = false;
+  const deadline = timeoutMs ? setTimeout(() => { timedOut=true; executionAbort.abort(); },timeoutMs) : null;
   let result: ExecResult;
   try {
-    const ctx = makeContext({ ...begun, signal: ac.signal });
+    const ctx = makeContext({ ...begun, signal: executionAbort.signal });
     const ownerId = Number(begun.run.owner_id);
     result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });
   } catch (e) {
@@ -101,9 +107,12 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }
       : { kind: "failed", error: (e as Error)?.message ?? String(e), retryable: true, details: (e as Error)?.stack };
   } finally {
+    if (deadline) clearTimeout(deadline);
+    ac.signal.removeEventListener("abort",forwardAbort);
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
+  if (timedOut && !ac.signal.aborted) result = {kind:"failed",error:`execution timeout after ${timeoutMs}ms`,retryable:true};
   // Shutdown or heartbeat interruption uses the same recovery policy as lease expiry, without spending a retry.
   // A step that finished on its own is still recorded normally.
   // Both re-check the attempt's state inside their transaction, so repeating them after a dropped connection is safe:

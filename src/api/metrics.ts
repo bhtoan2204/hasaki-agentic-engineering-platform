@@ -14,7 +14,7 @@ import { pool, q, one } from "../db/pool.ts";
 export async function runMetrics(runId: number) {
   const [attempts, toolRows, [run], telemetry] = await Promise.all([q(
     pool,
-    `SELECT a.id, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
+    `SELECT a.id, a.agent_provider, a.agent_model, a.effective_agent, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
             (extract(epoch FROM (COALESCE(a.finished_at, now()) - a.started_at)) * 1000)::bigint AS exec_ms,
             GREATEST(0, (extract(epoch FROM (a.started_at - GREATEST(j.available_at, j.created_at))) * 1000))::bigint AS queue_ms,
             CASE WHEN a.status IN ('WAITING_INPUT', 'WAITING_APPROVAL') OR a.resolved_at IS NOT NULL

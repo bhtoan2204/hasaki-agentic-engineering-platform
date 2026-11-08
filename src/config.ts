@@ -131,6 +131,7 @@ export interface Config {
     /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
     upstreamTokens: number;
     /** Cursor CLI binary. Empty uses `agent` on PATH. Claude model ids are never sent to it. */
+    defaultProvider?: "claude" | "codex" | "cursor";
     cursorBin?: string;
     claudeBin?: string;
     /**
