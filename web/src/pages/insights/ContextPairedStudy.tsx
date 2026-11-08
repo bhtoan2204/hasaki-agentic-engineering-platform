@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, useApi } from "../../api.ts";
 import { act, Field } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { Panel, fmt } from "./shared.tsx";
+import { Panel, fmt } from "../analytics/shared.tsx";
 export function ContextPairedStudy() {
   const { locale } = useI18n();
   const en = locale === "en";

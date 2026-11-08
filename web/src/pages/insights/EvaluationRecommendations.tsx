@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, useApi } from "../../api.ts";
 import { act, ErrorBox, Field } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { Panel, fmt } from "./shared.tsx";
+import { Panel, fmt } from "../analytics/shared.tsx";
 export function EvaluationRecommendations() {
   const { locale } = useI18n();
   const en = locale === "en";

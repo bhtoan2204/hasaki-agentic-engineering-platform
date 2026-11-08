@@ -200,7 +200,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
   return (
     <div className="ins">
       {header}
-      <a className="btn ghost sm" href="#/insights/health">{t("an.title")}</a>
+      <a className="btn ghost sm" href="#/insights/usage">{t("an.title")}</a>
       {error && <ErrorBox error={error} onRetry={reload} />}
 
       <div className="ins-stats">

@@ -1,13 +1,14 @@
+import { trustedProductionReturn } from "./routes.ts";
 import { ArrowLeft, ExternalLink, RefreshCw } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { EmptyState, ErrorBox } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { DataTable, dateCell, fmt, Panel, type Row } from "./shared.tsx";
+import { DataTable, dateCell, fmt, Panel, type Row } from "../analytics/shared.tsx";
 
 export function ProductionIncident({ fingerprint, query }: { fingerprint: string; query: string }) {
   const { t } = useI18n();
   const params = new URLSearchParams(query);
-  const returnTo = params.get("return_to") || "/prod-errors";
+  const returnTo = trustedProductionReturn(params.get("return_to"));
   const { data, error, loading, refreshing, reload } = useApi<Row>(`/api/prod-errors/${fingerprint}`);
   if (loading && !data) return <div className="an-health-service-loading"><div/><div/><div/></div>;
   if (error) return <ErrorBox error={error} onRetry={reload}/>;
@@ -25,6 +26,7 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
       <div><span>{t("an.lastSeen")}</span><b>{dateCell(g.observed_last_at ?? rows[0]?.window_end)}</b></div>
       <div><span>{t("an.recurringIncidents")}</span><b>{rows.length ? g.observed_recurring ? t("an.yes") : t("an.no") : "—"}</b></div>
     </div>
+    <a className="btn ghost sm" href={`#/prod-errors/incidents?${new URLSearchParams({...Object.fromEntries(params), list_focus: fingerprint})}`}>{t("an.operationalErrors")}</a>
     <Panel title={t("an.incidentEvidence")}>
       <div className="an-incident-diagnostics"><p>{g.sample}</p>{g.detail?.err&&<pre>{g.detail.err}</pre>}{g.detail?.stack&&<details><summary>{t("an.stackTrace")}</summary><pre>{g.detail.stack}</pre></details>}</div>
       <DataTable rows={rows} columns={[

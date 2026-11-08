@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { Panel, fmt, BreakdownBars } from "./shared.tsx";
+import { Panel, fmt, BreakdownBars } from "../analytics/shared.tsx";
 import { EvaluationTable } from "./EvaluationTable.tsx";
 export function EvaluationEvidence({ data, onPage }: { data: any; onPage: (page: number) => void }) {
   const { locale } = useI18n();

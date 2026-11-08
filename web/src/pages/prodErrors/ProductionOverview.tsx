@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, Info, RefreshCw } from "lucide-react";
 import { useI18n } from "../../i18n/index.tsx";
-import { BreakdownBars, DataTable, dateCell, fmt, number, Panel, type Row } from "./shared.tsx";
+import { BreakdownBars, DataTable, dateCell, fmt, number, Panel, type Row } from "../analytics/shared.tsx";
 
 const COLORS = ["#28a5a0", "#3973c6", "#ab69b6", "#db8842", "#7b8fa8", "#71a84b", "#dd6f75", "#7f6bc0", "#be9e37", "#46717c"];
 const idOf = (r: Row) => `${r.namespace ?? "unknown"}\u001f${r.service ?? "unknown"}`;
@@ -93,8 +93,8 @@ function ServiceDonut({ rows, onSelect }: { rows: Row[]; onSelect: (r: Row) => v
   </div>;
 }
 
-export function HealthDashboard({ data, page, onPage, query, onChange }: {
-  data: Row; page: number; onPage: (n: number) => void; query: string; onChange:(p:URLSearchParams)=>void;
+export function ProductionOverview({ data, page, onPage, query, onChange, servicesOnly = false }: {
+  servicesOnly?: boolean; data: Row; page: number; onPage: (n: number) => void; query: string; onChange:(p:URLSearchParams)=>void;
 }) {
   const { t } = useI18n();
   const s = data.summary ?? {};
@@ -114,6 +114,7 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
     p.set("namespace", r.namespace); p.set("service", r.service); p.delete("page");
     const returnQuery = new URLSearchParams(query);
     p.set("view", "service"); p.set("return_query", returnQuery.toString());
+    p.set("return_tab", servicesOnly ? "services" : "overview");
     onChange(p);
   };
   const allServiceRows: Row[] = data.services ?? [];
@@ -124,7 +125,7 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
   const serviceTrendRows = (data.serviceTrends ?? []).filter((r:Row)=>serviceTrendKeys.includes(`${r.namespace}\u001f${r.service}`)).map((r:Row)=>({...r,series:`${r.namespace}\u001f${r.service}`}));
   const severityField = severityMetric === "events" ? "events" : "fingerprints";
   const freshness = data.freshness ?? {};
-  const openIncident = (fp:string) => { const ret = encodeURIComponent(`/insights/health?${query}`); location.hash = `/prod-errors/incident/${fp}?return_to=${ret}`; };
+  const openIncident = (fp:string) => { const ret = encodeURIComponent(`/prod-errors/${servicesOnly ? "services" : "overview"}?${query}`); location.hash = `/prod-errors/incident/${fp}?return_to=${ret}`; };
   return <>
     {data.refreshing && <div className="an-refreshing"><RefreshCw size={13} className="spin"/>{t("an.retrying")}</div>}
     <div className="an-health-freshness" data-state={freshness.status}>
@@ -138,7 +139,7 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
       {freshness.latest_scan?.error && <span className="an-freshness-error">{freshness.latest_scan.error}</span>}
     </div>
     {!canCompareCoverage && <div className="an-notice an-health-coverage-warning"><Info size={15}/>{t("an.coverageWarning")}</div>}
-    <div className="ins-stats an-health-kpis">
+    {!servicesOnly && <><div className="ins-stats an-health-kpis">
       <CompareMetric row={compare.total_errors ?? {current:s.total_errors}} label={t("an.totalErrorEvents")} caution={!canCompareCoverage}/>
       <CompareMetric row={compare.fingerprints ?? {current:s.fingerprints}} label={t("an.uniqueIncidents")} caution={!canCompareCoverage}/>
       <CompareMetric row={compare.new_incidents ?? {current:s.new_incidents}} label={t("an.newIncidents")} caution={!canCompareCoverage}/>
@@ -151,6 +152,7 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
       <CompareMetric row={compare.resolve_ms ?? {current:s.resolve_ms}} label={t("an.resolve")} style="ms" caution={!canCompareCoverage}/>
     </div>
     <div className="an-notice"><Info size={15}/>{t("an.healthHint")} {t("an.partialObservations", {n:s.snapshots_missing_hourly??0,p:s.partial_hours??0})}</div>
+    </>}
     <div className="ins-grid">
       <Panel title={t("an.errorsByService")} hint={t("an.errorShare")}>
       <ServiceDonut rows={allServiceRows} onSelect={serviceSelect}/>
@@ -178,7 +180,7 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
         {key:"last_observed_error",label:"lastObservedError",render:(r)=>dateCell(r.last_observed_error)},
       ]}/>
     </Panel>
-    <Panel title={t("an.productionTrend")} hint={data.semantics?.event_count}>
+    {!servicesOnly && <><Panel title={t("an.productionTrend")} hint={data.semantics?.event_count}>
       <ObservedTrend rows={data.trend??[]} previous={data.previousTrend??[]} from={data.range.from} to={data.range.to} bucket={data.filters.bucket} timezone={data.filters.timezone}/>
     </Panel>
     <div className="ins-grid">
@@ -196,13 +198,14 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
         <div className="an-chart-legend">{t("an.recurringIncidents")}: {fmt(data.lifecycle?.recurring_incidents)} · {t("an.reopenedIncidents")}: {fmt(data.lifecycle?.reopened_incidents)}</div>
       </Panel>
     </div>
+    </>}
     <Panel title={t("an.serviceErrorTrends")}>
       <div className="an-health-toggle an-service-select" role="group" aria-label={t("an.serviceErrorTrends")}>
         {serviceTrendKeys.map((key:string,i:number)=>{const row=(data.services??[]).find((r:Row)=>idOf(r)===key);const hidden=hiddenServices.includes(key);return <button key={key} className={hidden?"muted":"on"} onClick={()=>setHiddenServices((s)=>hidden?s.filter(x=>x!==key):[...s,key])}><i style={{background:COLORS[i%COLORS.length]}}/>{row?.service} · {row?.namespace}</button>;})}
       </div>
       <ObservedTrend rows={serviceTrendRows} from={data.range.from} to={data.range.to} bucket={data.filters.bucket} timezone={data.filters.timezone} seriesMode hidden={hiddenServices} serviceColors={serviceColors}/>
     </Panel>
-    <Panel title={t("an.remediationOutcomes")} hint={data.semantics?.remediation}>
+    {!servicesOnly && <><Panel title={t("an.remediationOutcomes")} hint={data.semantics?.remediation}>
       <div className="an-remediation-grid">{[["linkedIncidents",data.remediation?.linked_incidents],["workItemsWithRuns",data.remediation?.work_items_with_runs],["completedRuns",data.remediation?.completed_runs],["verifiedFixes",data.remediation?.fixes_verified],["prsCreated",data.remediation?.prs_created],["prsMerged",data.remediation?.merged_prs]].map(([key,value])=><div key={String(key)}><span>{t(`an.${key}`)}</span><b>{value==null?"—":fmt(value)}</b>{key==="prsCreated"&&value!=null&&<small>{t("an.resolutionInferredNo")}</small>}</div>)}</div>
     </Panel>
     <Panel title={t("an.topFingerprints")}>
@@ -220,6 +223,7 @@ export function HealthDashboard({ data, page, onPage, query, onChange }: {
         {key:"links",label:"evidence",render:(r)=><IncidentLinks row={r} onOpen={()=>openIncident(r.fingerprint)}/>},
       ]}/>
     </Panel>
+    </>}
   </>;
 }
 

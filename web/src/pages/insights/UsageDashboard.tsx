@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { DataTable, Metric, Notice, Panel, Trend, fmt, runLink, type Row } from "./shared.tsx";
+import { DataTable, Metric, Notice, Panel, Trend, fmt, runLink, type Row } from "../analytics/shared.tsx";
 const fields: Array<[string, string]> = [
   ["input_tokens", "input"],
   ["output_tokens", "output"],

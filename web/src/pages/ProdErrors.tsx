@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bug, CalendarClock, ChevronRight, Eye, EyeOff, GitPullRequest, LineChart, Link2, PlayCircle, RefreshCw, Siren, TrendingDown, TrendingUp, Unlink } from "lucide-react";
+import { Bug, CalendarClock, ChevronRight, Eye, EyeOff, GitPullRequest, Link2, PlayCircle, RefreshCw, Siren, TrendingDown, TrendingUp, Unlink } from "lucide-react";
 import { api, useApi } from "../api.ts";
-import { act, ago, Copy, EmptyState, ErrorBox, Field, Loading, PageHeader, SearchInput, Segmented, navigate, toast } from "../ui.tsx";
+import { act, ago, Copy, EmptyState, ErrorBox, Field, Loading, SearchInput, Segmented, navigate, toast } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ScanProgressCard, type Progress } from "./ScanProgress.tsx";
 import "./ProdErrors.css";
@@ -23,6 +23,7 @@ interface Group {
   severity: Sev;
   reasons: string[];
   status: "open" | "ignored";
+  lifecycle_status?: string;
   work_item_id: number | null;
   work_item_code: string | null;
   work_item_title: string | null;
@@ -218,6 +219,7 @@ function GroupRow({ g, open, onToggle, reload }: { g: Group; open: boolean; onTo
       {open && (
         <div className="pe-body">
           {g.reasons.length > 0 && <div>{g.reasons.map((r) => <span key={r} className="pill">{reasonText(t, r)}</span>)}</div>}
+          <a className="btn ghost sm" href={`#/prod-errors/incident/${g.fingerprint}?return_to=${encodeURIComponent(location.hash.slice(1))}`}>{t("an.openIncident")}</a>
           <FixRef g={g} busy={busy} onInvestigate={investigate} reload={reload} />
           <dl className="pe-meta small">
             <dt>Service</dt><dd className="mono">{g.namespace} / {g.service}</dd>
@@ -273,13 +275,21 @@ function Schedule({ s, reload }: { s: Data["settings"]; reload: () => void }) {
 }
 
 /** `focus`: a group fingerprint from the URL (#/prod-errors/<fingerprint>) to open and scroll to. */
-export function ProdErrorsPage({ focus }: { focus?: string }) {
+export function ProdErrorsPage({ focus, settings = false, query: appliedQuery = "" }: { focus?: string; settings?: boolean; query?: string }) {
   const { t } = useI18n();
-  const [all, setAll] = useState(false);
+  const url = new URLSearchParams(appliedQuery);
+  const setFilter = (key: string, value: string) => { const p = new URLSearchParams(appliedQuery); value ? p.set(key, value) : p.delete(key); if (key === "list_namespace") p.delete("list_service"); navigate(`/prod-errors/incidents?${p}`); };
+  const all = url.get("list_ignored") === "1";
+  const setAll = (v: boolean) => setFilter("list_ignored", v ? "1" : "");
   const { data, error, loading, reload } = useApi<Data>(`/api/prod-errors${all ? "?all=1" : ""}`);
-  const [ns, setNs] = useState("all");
-  const [sev, setSev] = useState<"attention" | "all">("attention");
-  const [query, setQuery] = useState("");
+  const ns = url.get("list_namespace") || "all";
+  const setNs = (v: string) => setFilter("list_namespace", v);
+  const sev = url.get("list_severity") || "attention";
+  const setSev = (v: string) => setFilter("list_severity", v);
+  const service = url.get("list_service") || "";
+  const incidentStatus = url.get("list_status") || "";
+  const query = url.get("list_search") || "";
+  const setQuery = (v: string) => setFilter("list_search", v);
   const [open, setOpen] = useState<string | null>(focus ?? null);
   // a deep link may point at an ignored or medium/low group: widen the filters so it is visible, then scroll to it
   const focused = useRef(false);
@@ -316,10 +326,12 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
     return (data?.groups ?? []).filter(
       (g) =>
         (ns === "all" || g.namespace === ns) &&
-        (sev === "all" || g.severity === "critical" || g.severity === "high" || g.work_item_id) &&
+        (sev === "all" || (sev === "attention" ? g.severity === "critical" || g.severity === "high" || g.work_item_id : g.severity === sev)) &&
+        (!service || g.service === service) &&
+        (!incidentStatus || g.lifecycle_status === incidentStatus) &&
         (!qq || `${g.service} ${g.signature} ${g.caller} ${g.sample}`.toLowerCase().includes(qq)),
     );
-  }, [data, ns, sev, query]);
+  }, [data, ns, sev, query, service, incidentStatus]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -333,22 +345,14 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
 
   return (
     <>
-      <PageHeader
-        icon={Siren}
-        title={t("pe.title")}
-        subtitle={t("pe.subtitle", { projects: data?.namespaces.length ? new Intl.ListFormat(uiLocale() === "vi" ? "vi" : "en", { type: "conjunction" }).format(data.namespaces.map((n) => n.project)) : t("pe.projectsFallback") })}
-        actions={
-          <><a className="btn ghost sm" href="#/insights/health"><LineChart size={14}/>{t("an.healthAnalytics")}</a>
-          <button disabled={!data || data.scanning || !data.splunk.connected} onClick={() => setPanel((v) => !v)} aria-expanded={panel} title={data && !data.splunk.connected ? t("pe.connectFirst") : undefined}>
-            <RefreshCw size={15} strokeWidth={2} className={data?.scanning ? "spin" : ""} />{data?.scanning ? t("pe.scanning") : t("pe.scanNow")}
-          </button></>
-        }
-      />
+      {settings && <div className="pe-scan-actions"><button disabled={!data || data.scanning || !data.splunk.connected} onClick={() => setPanel((v) => !v)} aria-expanded={panel}>
+        <RefreshCw size={15} className={data?.scanning ? "spin" : ""}/>{data?.scanning ? t("pe.scanning") : t("pe.scanNow")}
+      </button></div>}
       {error && <ErrorBox error={error} onRetry={reload} />}
       {!data && loading && <Loading />}
       {data && (
         <>
-          {panel && !data.scanning && <ScanPanel data={data} onStarted={reload} onClose={() => setPanel(false)} />}
+          {settings && panel && !data.scanning && <ScanPanel data={data} onStarted={reload} onClose={() => setPanel(false)} />}
           {data.scanning && <ScanProgressCard progress={data.progress} startedAt={last?.started_at} typicalSeconds={secs(lastOk?.started_at, lastOk?.finished_at)} />}
           <div className="pe-status small">
             {!data.splunk.connected && (
@@ -368,18 +372,25 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
             {data.shown ? (
               <span className="pe-shown">
                 {t("pe.shown", {
-                  window: t(`pe.preset.${data.shown.preset}`),
+                  window: t(`pe.preset.${data.shown.preset || "custom"}`),
                   range: `${dt(data.shown.window_start)} – ${dt(data.shown.window_end)}`,
-                  projects: data.namespaces.filter((n) => data.shown!.namespaces.includes(n.namespace)).map((n) => n.project).join(", ") || "—",
+                  projects: data.namespaces.filter((n) => (data.shown!.namespaces ?? []).includes(n.namespace)).map((n) => n.project).join(", ") || "—",
                 })}
               </span>
             ) : data.day !== data.today && last && <span className="pe-warn">{t("pe.oldDay", { day: data.day })}</span>}
           </div>
-          <Schedule s={data.settings} reload={reload} />
+          {settings && <Schedule s={data.settings} reload={reload} />}
+
+          {!settings && <>
 
           <div className="row pe-filters">
             <Segmented label={t("pe.system")} value={ns} onChange={setNs} options={[["all", t("pe.all")], ...data.namespaces.map((n) => [n.namespace, n.project] as [string, string])]} />
-            <Segmented label={t("pe.level")} value={sev} onChange={setSev} options={[["attention", t("pe.attention", { n: counts.critical + counts.high })], ["all", t("pe.allCount", { n: counts.critical + counts.high + counts.medium + counts.low })]]} />
+            <label className="pe-list-filter">{t("an.severity")}<select aria-label={t("an.severity")} value={sev} onChange={e => setSev(e.target.value)}>
+              <option value="attention">{t("pe.attention", { n: counts.critical + counts.high })}</option><option value="all">{t("an.all")}</option>
+              {(["critical","high","medium","low"] as const).map(k => <option key={k} value={k}>{t(`pe.sev.${k}`)}</option>)}
+            </select></label>
+            <label className="pe-list-filter">{t("an.service")}<select aria-label={t("an.service")} value={service} onChange={e => setFilter("list_service",e.target.value)}><option value="">{t("an.all")}</option>{[...new Set(data.groups.filter(g => ns === "all" || g.namespace === ns).map(g => g.service))].map(v => <option key={v}>{v}</option>)}</select></label>
+            <label className="pe-list-filter">{t("an.incident_status")}<select aria-label={t("an.incident_status")} value={incidentStatus} onChange={e => setFilter("list_status",e.target.value)}><option value="">{t("an.all")}</option>{["open","acknowledged","resolved"].map(v => <option key={v} value={v}>{t(`an.${v}`)}</option>)}</select></label>
             <SearchInput value={query} onChange={setQuery} placeholder={t("pe.search")} />
             <label className="row tight small muted"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t("pe.showIgnored", { n: data.ignored })}</label>
           </div>
@@ -398,6 +409,7 @@ export function ProdErrorsPage({ focus }: { focus?: string }) {
               ))}
             </div>
           )}
+          </>}
         </>
       )}
     </>

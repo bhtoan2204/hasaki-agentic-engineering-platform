@@ -20,8 +20,8 @@ import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
-import { ProdErrorsPage } from "./pages/ProdErrors.tsx";
-import { ProductionIncident } from "./pages/insights/ProductionIncident.tsx";
+import { ProductionErrorsPage } from "./pages/prodErrors/ProductionErrorsPage.tsx";
+import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
 import { useI18n } from "./i18n/index.tsx";
 import type { UiLocale } from "./i18n/messages.ts";
 
@@ -80,7 +80,15 @@ const LABEL = { ...Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.k
 export function App() {
   const { t, locale, setLocale } = useI18n();
   const hash = useHash();
-  const [pathPart, queryPart] = hash.split("?");
+  const split = hash.indexOf("?");
+  const originalPath = split < 0 ? hash : hash.slice(0, split);
+  const originalQuery = split < 0 ? "" : hash.slice(split + 1);
+  const redirect = legacyProductionRoute(originalPath, originalQuery);
+  useEffect(() => { if (redirect) location.replace(`#${redirect}`); }, [redirect]);
+  const effective = redirect ?? hash;
+  const boundary = effective.indexOf("?");
+  const pathPart = boundary < 0 ? effective : effective.slice(0, boundary);
+  const queryPart = boundary < 0 ? "" : effective.slice(boundary + 1);
   const parts = pathPart.split("/").filter(Boolean);
   const [theme, setTheme] = useTheme();
   const [navOpen, setNavOpen] = useState(false);
@@ -170,9 +178,7 @@ export function App() {
       page = <RepositoriesPage name={parts[1]} query={queryPart} />;
       break;
     case "prod-errors":
-      page = parts[1] === "incident" && parts[2]
-        ? <ProductionIncident fingerprint={parts[2]} query={queryPart} />
-        : <ProdErrorsPage focus={parts[1]} />;
+      page = <ProductionErrorsPage route={parts[1]} fingerprint={parts[2]} query={queryPart} />;
       break;
     case "integrations":
       page = <IntegrationsPage />;

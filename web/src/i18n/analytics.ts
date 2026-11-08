@@ -1,9 +1,22 @@
 /** Engineering analytics copy is kept in the shared bilingual dictionary. */
 const copy: Record<string, [string, string]> = {
+  "productionTab.overview": ["Tổng quan", "Overview"],
+  "productionTab.incidents": ["Danh sách lỗi", "Incidents"],
+  "productionTab.services": ["Theo dịch vụ", "Services"],
+  "productionTab.settings": ["Quét & Cấu hình", "Scan & Settings"],
+  incident_status: ["Trạng thái sự cố", "Incident status"],
+  productionWorkspace: [
+    "Quan sát, phân tích, điều tra và xử lý lỗi production",
+    "Production observability, analytics, investigation and remediation",
+  ],
+  productionFilterHint: [
+    "Khoảng thời gian phân tích dữ liệu đã quan sát. Không khởi động quét Splunk. Bộ lọc danh sách lỗi và cấu hình quét được lưu riêng.",
+    "Analytics uses observed data. Changing filters does not start a Splunk scan. Incident list filters and scan configuration are separate.",
+  ],
   title: ["Engineering Insights", "Engineering Insights"],
   subtitle: [
-    "Sức khỏe production, hiệu quả kỹ thuật và mức sử dụng AI",
-    "Production health, engineering outcomes and AI usage",
+    "Mức sử dụng AI, chi phí, hiệu suất agent và workflow",
+    "AI usage, cost, agent performance and workflows",
   ],
   health: ["Sức khỏe production", "Production health"],
   productionAnalytics: [
@@ -28,7 +41,10 @@ const copy: Record<string, [string, string]> = {
     "Mức nghiêm trọng / cao",
     "Critical / high incidents",
   ],
-  criticalHighErrors: ["Sự kiện lỗi nghiêm trọng / cao", "Critical / high error events"],
+  criticalHighErrors: [
+    "Sự kiện lỗi nghiêm trọng / cao",
+    "Critical / high error events",
+  ],
   affectedServices: ["Dịch vụ bị ảnh hưởng", "Affected services"],
   currentPeriod: ["Kỳ hiện tại", "Current period"],
   previousPeriod: ["Kỳ trước", "Previous period"],
@@ -42,7 +58,7 @@ const copy: Record<string, [string, string]> = {
     "Không phải tỷ lệ request thất bại",
     "Not a request failure rate",
   ],
-  errorEvents: ["Sự kiện lỗi", "Error events"],
+  errorEvents: ["Lượt phát sinh lỗi", "Error Events"],
   fingerprintsMetric: ["Fingerprint duy nhất", "Unique fingerprints"],
   otherServices: ["Dịch vụ khác", "Other services"],
   unknownService: ["Không xác định dịch vụ", "Unknown service"],
@@ -91,7 +107,10 @@ const copy: Record<string, [string, string]> = {
     "Độ phủ scan khác nhau giữa hai kỳ; không thể quy kết giảm số lỗi là cải thiện.",
     "Scan coverage differs between periods; lower counts cannot be interpreted as improvement.",
   ],
-  serviceCoverageChangeUnknown: ["Không hiển thị thay đổi dịch vụ vì độ phủ giữa hai kỳ khác nhau.", "Service change is unavailable because period coverage differs."],
+  serviceCoverageChangeUnknown: [
+    "Không hiển thị thay đổi dịch vụ vì độ phủ giữa hai kỳ khác nhau.",
+    "Service change is unavailable because period coverage differs.",
+  ],
   partialObservations: [
     "{n} snapshot thiếu số đếm theo giờ; {p} giờ không được quan sát đầy đủ.",
     "{n} snapshots lack hourly counts; {p} hours are only partially observed.",
@@ -104,16 +123,28 @@ const copy: Record<string, [string, string]> = {
     "Không có dữ liệu dịch vụ trong phạm vi này.",
     "No service data in this scope.",
   ],
-  noIncidents: ["Không có sự cố quan sát được trong phạm vi này.", "No observed incidents in this scope."],
+  noIncidents: [
+    "Không có sự cố quan sát được trong phạm vi này.",
+    "No observed incidents in this scope.",
+  ],
   incidentsForService: ["Sự cố của dịch vụ", "Service incidents"],
-  incidentEvidence: ["Chi tiết và lịch sử quan sát", "Incident details and observation history"],
+  incidentEvidence: [
+    "Chi tiết và lịch sử quan sát",
+    "Incident details and observation history",
+  ],
   incidentLifecycleHistory: ["Lịch sử vòng đời", "Incident lifecycle history"],
   relatedWork: ["Công việc liên quan", "Related work"],
-  noRelatedWork: ["Chưa có work item, run hoặc PR liên kết.", "No linked work item, run, or PR."],
+  noRelatedWork: [
+    "Chưa có work item, run hoặc PR liên kết.",
+    "No linked work item, run, or PR.",
+  ],
   stackTrace: ["Stack trace", "Stack trace"],
   yes: ["Có", "Yes"],
   no: ["Không", "No"],
-  resolutionInferredNo: ["Tạo PR không đồng nghĩa lỗi production đã được xử lý.", "PR creation does not mean the production issue is resolved."],
+  resolutionInferredNo: [
+    "Tạo PR không đồng nghĩa lỗi production đã được xử lý.",
+    "PR creation does not mean the production issue is resolved.",
+  ],
   openIncident: ["Mở sự cố", "Open incident"],
   topFingerprints: ["Fingerprint lỗi hàng đầu", "Top error fingerprints"],
   lastObservedError: ["Lỗi ghi nhận gần nhất", "Last observed error"],

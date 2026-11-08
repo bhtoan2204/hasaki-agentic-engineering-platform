@@ -342,7 +342,7 @@ try {
   await page.goto(`${baseUrl}/#/prod-errors`);
   await page.waitForTimeout(250);
   await page.screenshot({ path: resolve(screenshotDir, "10-production-errors.png"), fullPage: true });
-  await page.goto(`${baseUrl}/#/insights/health`);
+  await page.goto(`${baseUrl}/#/insights/usage`);
   await page.waitForTimeout(400);
   await page.screenshot({ path: resolve(screenshotDir, "11-insights.png"), fullPage: true });
   companionScenario = "success";

@@ -1,0 +1,10 @@
+PASS legacy Health redirect, ten KPI metrics, all existing charts, active Production Errors sidebar
+PASS services comparisons, service and fingerprint drilldowns, one service request, return filters, browser back/forward
+PASS operational Incidents, URL list search, scanner status and schedule/notification settings
+PASS both fingerprint bookmarks, legacy service bookmark, unsafe return URL rejection
+PASS all six production views in VI/EN at 1440, 1280, 1024, 768 and 390px
+PASS manual scan controls, namespace and range choices, progress UI with simulated Splunk connection; scanner range is independent of analytics
+PASS Insights defaults to Usage, contains no Health tab, retains usage/performance/workflows, evaluation and quality navigation
+PASS applied production filters, deterministic event/share values, no scan triggered by analytics
+PASS unmatched-filter empty state and HTTP error recovery
+PASS no full-page refresh flicker or browser errors

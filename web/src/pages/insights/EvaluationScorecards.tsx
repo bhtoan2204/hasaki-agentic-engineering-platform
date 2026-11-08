@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { Panel, fmt } from "./shared.tsx";
+import { Panel, fmt } from "../analytics/shared.tsx";
 import { EvaluationTable } from "./EvaluationTable.tsx";
 function EvaluationQualityPlot({ rows, cost = false }: { rows: any[]; cost?: boolean }) {
   const { locale } = useI18n();

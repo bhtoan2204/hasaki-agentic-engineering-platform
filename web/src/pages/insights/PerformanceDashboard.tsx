@@ -1,5 +1,5 @@
 import { useI18n } from "../../i18n/index.tsx";
-import { BreakdownBars, DataTable, Metric, Notice, Panel, ratio, runLink, type Row } from "./shared.tsx";
+import { BreakdownBars, DataTable, Metric, Notice, Panel, ratio, runLink, type Row } from "../analytics/shared.tsx";
 export function PerformanceDashboard({ data, page, onPage }: { data: Row; page: number; onPage: (n: number) => void }) {
   const { t, status } = useI18n();
   const s = data.summary ?? {};

@@ -3,14 +3,14 @@ import { FlaskConical, RefreshCw } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { PageHeader, ErrorBox, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { AnalyticsFilters, defaultFilters } from "./AnalyticsFilters.tsx";
-import { Notice, AnalyticsSkeleton, fmt } from "./shared.tsx";
+import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.tsx";
+import { Notice, AnalyticsSkeleton, fmt } from "../analytics/shared.tsx";
 import { EvaluationScorecards } from "./EvaluationScorecards.tsx";
 import { EvaluationDimensions } from "./EvaluationDimensions.tsx";
 import { EvaluationEvidence } from "./EvaluationEvidence.tsx";
 import { ProviderExperimentForm } from "./ProviderExperimentForm.tsx";
 import { EvaluationRecommendations } from "./EvaluationRecommendations.tsx";
-import "./analytics.css";
+import "../analytics/analytics.css";
 export function AgentEvaluation() {
   const { locale } = useI18n();
   const en = locale === "en";

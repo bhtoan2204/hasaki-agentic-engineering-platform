@@ -30,7 +30,9 @@ export function AnalyticsFilters({
   query,
   options,
   onApply,
+  domain = "insights",
 }: {
+  domain?: "insights" | "production";
   query: string;
   options: Row | null;
   onApply: (params: URLSearchParams) => void;
@@ -46,7 +48,7 @@ export function AnalyticsFilters({
   const [draft, setDraft] = useState(initial);
   useEffect(() => {
     setDraft(initial());
-  }, [query]); // URL is the applied filter state shared by all four tabs.
+  }, [query]); // URL is the applied filter state shared by the domain dashboards.
   const set = (k: string, v: string) =>
     setDraft((d) => ({
       ...d,
@@ -66,7 +68,7 @@ export function AnalyticsFilters({
       } else p.set(k, v);
     }
     if (old.has("group_by")) p.set("group_by", old.get("group_by")!);
-    for (const key of ["view", "return_query"])
+    for (const key of ["view", "return_query", "return_tab", "scope"])
       if (old.has(key)) p.set(key, old.get(key)!);
     onApply(p);
   };
@@ -140,7 +142,7 @@ export function AnalyticsFilters({
               <option value="hour">{t("an.hour")}</option>
             </select>
           </label>
-          {select(
+          {domain === "insights" && <>{select(
             "provider",
             ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
           )}
@@ -170,7 +172,8 @@ export function AnalyticsFilters({
               ).map((v: string) => [v, v]),
             ),
           )}
-          {select(
+          </>}
+          {domain === "production" && <>{select(
             "namespace",
             (options?.namespaces ?? []).map((v: string) => [v, v]),
           )}
@@ -225,9 +228,10 @@ export function AnalyticsFilters({
                 ))}
             </select>
           </label>
+          </>}
         </div>
         <div className="an-filter-footer">
-          <p className="muted small">{t("an.scopeHint")}</p>
+          <p className="muted small">{t(domain === "production" ? "an.productionFilterHint" : "an.scopeHint")}</p>
           <button
             className="ghost sm"
             type="button"
