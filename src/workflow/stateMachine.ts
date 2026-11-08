@@ -11,11 +11,11 @@ export const STEP_TRANSITIONS: Record<StepStatus, readonly StepStatus[]> = {
   // SKIPPED: the developer chose "skip this step" while it was waiting (skipStep allows it from these states).
   WAITING_INPUT: ["READY", "COMPLETED", "CANCELED", "PENDING", "FAILED", "SKIPPED"],
   WAITING_APPROVAL: ["COMPLETED", "READY", "FAILED", "CANCELED", "PENDING", "SKIPPED"],
-  RETRYING: ["RUNNING", "READY", "FAILED", "CANCELED", "PENDING"],
-  FAILED: ["READY", "SKIPPED", "CANCELED", "PENDING"],
+  RETRYING: ["RUNNING", "READY", "FAILED", "CANCELED", "PENDING", "WAITING_INPUT"],
+  FAILED: ["READY", "SKIPPED", "CANCELED", "PENDING", "WAITING_INPUT"],
   COMPLETED: ["READY", "PENDING"],
   SKIPPED: ["READY", "PENDING"],
-  CANCELED: ["READY", "PENDING"],
+  CANCELED: ["READY", "PENDING", "WAITING_INPUT"],
 };
 
 export class TransitionError extends Error {

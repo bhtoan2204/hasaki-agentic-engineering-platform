@@ -103,7 +103,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         type: "step",
         position: s.ui ?? pos[s.key],
         data: {
-          step: { ...s, effective_agent: effectiveAgent, name: row?.name ?? s.name, requires_approval: row?.requires_approval ?? s.requires_approval },
+          step: { ...s, handoff: row?.status === "WAITING_INPUT" ? row?.pending_input?.provider_handoff : undefined, effective_agent: effectiveAgent, name: row?.name ?? s.name, requires_approval: row?.requires_approval ?? s.requires_approval },
           status: row?.status,
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],
@@ -215,6 +215,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         )}
       </header>
 
+      {run.steps.filter((s:any) => s.status === "WAITING_INPUT" && s.pending_input?.provider_handoff).map((s:any) => <div key={s.id} className="rv-banner wait"><b>{t("handoff.paused")}: {s.name} · {s.pending_input.provider_handoff.failure_category ?? ""}</b> <button className="ghost xs" onClick={() => navigate(`/runs/${id}/${s.key}`)}>{t("handoff.review")}</button></div>)}
       {blocked.length > 0 && (
         <div className="rv-banner wait" role="status">
           <Hand size={16} />

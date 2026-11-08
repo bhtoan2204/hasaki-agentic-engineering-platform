@@ -30,6 +30,9 @@ test("provider taxonomy prioritizes codes and redacts diagnostics", () => {
   for (const [code, expected] of Object.entries(cases)) assert.equal(normalizeProviderFailure({ code }), expected);
   assert.equal(normalizeProviderFailure({ code: "rate_limit_error", message: "quota exceeded" }), "RATE_LIMIT");
   assert.equal(normalizeProviderFailure("arbitrary request timed out"), "EXECUTION_TIMEOUT");
+  assert.equal(normalizeProviderFailure({type:"result",subtype:"error_during_execution",errors:["You've hit your limit · resets 5am"]}),"QUOTA_EXHAUSTED");
+  assert.equal(normalizeProviderFailure("You've hit your usage limit. Upgrade to Pro or try again later."),"QUOTA_EXHAUSTED");
+  assert.equal(normalizeProviderFailure({error:"authentication_failed",message:"Login required"}),"AUTHENTICATION");
   assert.doesNotMatch(safeDiagnostics({ message: "api_key=supersecret Bearer abcdefghijklmnop sk-abcdefghijklmnop" }), /supersecret|abcdefghijklmnop/);
 });
 

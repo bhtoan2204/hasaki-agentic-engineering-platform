@@ -1,3 +1,4 @@
+import { requestProviderHandoff, resumeProviderHandoff, providerHandoffOptions } from "../workflow/engine.ts";
 import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext } from "./agentContext.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
@@ -310,6 +311,10 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/cancel$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), cancelRun(num(c.p[0]), c.body.reason || "canceled by user"))],
   ["POST", /^\/api\/runs\/(\d+)\/repositories$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), selectRepositories(num(c.p[0]), c.body.repositories ?? []))],
   ["POST", /^\/api\/runs\/(\d+)\/feedback$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), sendFeedback(num(c.p[0]), String(c.body.message ?? "").trim() || fail("empty message")))],
+  ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff-providers$/,async c=>(await requireRun(c.actor,num(c.p[0]),support(c)),providerHandoffOptions(num(c.p[0]),c.p[1]))],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff$/, async c => (await requireRun(c.actor,num(c.p[0]),support(c)),requestProviderHandoff(num(c.p[0]),c.p[1],c.body,c.actor.id))],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff-resume$/, async c => (await requireRun(c.actor,num(c.p[0]),support(c)),resumeProviderHandoff(num(c.p[0]),c.p[1],c.body,c.actor.id))],
+  ["GET", /^\/api\/runs\/(\d+)\/handoffs$/, async c => (await requireRun(c.actor,num(c.p[0]),support(c)),q(pool,"SELECT * FROM provider_handoff_metrics WHERE run_id=$1 ORDER BY id",[num(c.p[0])]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/agent$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), setStepAgent(num(c.p[0]), c.p[1], c.body.agent, c.actor.id))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/retry$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), retryStep(num(c.p[0]), c.p[1], c.body.input))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), reexecuteStep(num(c.p[0]), c.p[1], { feedback: c.body.feedback, input: c.body.input, skills: c.body.skills, by: c.actor.username }))],

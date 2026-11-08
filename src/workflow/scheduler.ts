@@ -5,7 +5,7 @@ import { config } from "../config.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
-import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt } from "./engine.ts";
+import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
 import { settleBackground } from "./background.ts";
@@ -39,6 +39,7 @@ export const LIGHT_STEP_TYPES = ["human_input", "human_approval", "condition", "
 
 /** `onlyTypes`: restrict the claim to these step types (light lane). */
 export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes?: string[]): Promise<JobRow | undefined> {
+  await processAutomaticHandoff();
   return one<JobRow>(
     pool,
     `UPDATE workflow_jobs j
@@ -85,7 +86,7 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
     try {
-      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds))) ac.abort();
+      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) || await one(pool,"SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'",[begun.attempt.id])) ac.abort();
     } catch (e) {
       ac.abort();
       console.error(`heartbeat job ${job.id}:`, (e as Error).message);
@@ -106,19 +107,20 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
     result = ac.signal.aborted
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }
       : { kind: "failed", error: (e as Error)?.message ?? String(e), retryable: true, details: (e as Error)?.stack };
+  }
+  try {
+    if (deadline) clearTimeout(deadline);
+    if (timedOut && !ac.signal.aborted) result = {kind:"failed",error:`execution timeout after ${timeoutMs}ms`,retryable:true,details:{provider_error:{code:"execution_timeout",message:`execution timeout after ${timeoutMs}ms`}}};
+    await retryTransient(()=>q(pool,"UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2",[begun.attempt.id,job.fencing_token]),`record executor termination ${job.id}`);
+    const handoff=await prepareProviderPause(begun,result);
+    if (!handoff && (draining || ac.signal.aborted) && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining || "worker interrupted: heartbeat unavailable or lease lost"), `release job ${job.id}`))) return;
+    await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result,handoff), `finish job ${job.id}`);
   } finally {
     if (deadline) clearTimeout(deadline);
     ac.signal.removeEventListener("abort",forwardAbort);
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
-  if (timedOut && !ac.signal.aborted) result = {kind:"failed",error:`execution timeout after ${timeoutMs}ms`,retryable:true};
-  // Shutdown or heartbeat interruption uses the same recovery policy as lease expiry, without spending a retry.
-  // A step that finished on its own is still recorded normally.
-  // Both re-check the attempt's state inside their transaction, so repeating them after a dropped connection is safe:
-  // a step that ran for an hour is not thrown away because the network blinked while its result was being saved.
-  if ((draining || ac.signal.aborted) && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining || "worker interrupted: heartbeat unavailable or lease lost"), `release job ${job.id}`))) return;
-  await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result), `finish job ${job.id}`);
 }
 
 /** Claim and execute at most one job. Returns false when the queue had nothing runnable. Used by tests. */

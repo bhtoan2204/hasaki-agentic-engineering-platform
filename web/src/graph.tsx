@@ -49,6 +49,7 @@ export interface StepLike {
   run_if?: unknown;
   requires_approval?: boolean;
   config?: Record<string, any>;
+  handoff?: {failure_category?:string;status?:string};
   effective_agent?: {provider?: string; model?: string | null};
 }
 
@@ -148,6 +149,7 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
       {(isAgent || status || !!data.attempts || !!data.openQuestions || step.requires_approval || !!step.run_if || merged.length > 0) && (
         <div className="flags">
           {isAgent && <span className="gn-pill" title={step.effective_agent?.model ?? step.config?.agent?.model ?? undefined}>{provider ? (({claude:"Claude",codex:"Codex",cursor:"Cursor"} as Record<string,string>)[provider] ?? provider) : t("agent.inherit")}</span>}
+          {step.handoff && <span className="gn-pill gn-pill-wait" title={step.handoff.failure_category}>{t("handoff.paused")}</span>}
           {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
           {!!data.attempts && <span className="gn-pill" title={t("graph.attempts", { n: data.attempts })}><RotateCcw size={10} strokeWidth={2.4} />{data.attempts}</span>}
           {!!data.openQuestions && <span className="gn-pill gn-pill-wait" title={t("graph.questions")}><MessageCircleQuestion size={10} strokeWidth={2.4} />{data.openQuestions}</span>}

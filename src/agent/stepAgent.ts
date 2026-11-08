@@ -2,8 +2,21 @@ import { z } from "zod";
 import { config, codexConfig } from "../config.ts";
 import { agentProvider, AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
 
+export const FallbackPolicy = z.object({
+  mode:z.enum(["disabled","manual","automatic"]).default("manual"),
+  providers:z.array(z.enum(AGENT_PROVIDERS)).min(1).max(3).refine(v=>new Set(v).size===v.length,"Duplicate fallback provider").default(["claude","codex","cursor"]),
+  max_switches:z.number().int().min(0).max(10).default(2),
+  allow_unknown_cost:z.boolean().default(false),
+  allow_budget_failure:z.boolean().default(false),
+  max_reported_cost_usd:z.number().nonnegative().optional(),
+  max_reported_tokens:z.number().int().nonnegative().optional(),
+}).strict();
+export type FallbackPolicy = z.infer<typeof FallbackPolicy>;
+export const fallbackPolicy = (step:{config:Record<string,any>}) => FallbackPolicy.parse(step.config.agent?.fallback ?? step.config.fallback ?? {});
+
 export const StepAgentConfig = z
   .object({
+    fallback: FallbackPolicy.optional(),
     provider: z.enum(AGENT_PROVIDERS).optional(),
     model: z
       .string()
@@ -42,7 +55,7 @@ export const StepAgentConfig = z
   })
   .strict();
 /** Verification commands remain trusted definition data, never a run-owner override. */
-export const StepAgentOverrideConfig = StepAgentConfig.omit({ verification: true });
+export const StepAgentOverrideConfig = StepAgentConfig.omit({ verification: true, fallback:true });
 export type StepAgentConfig = z.infer<typeof StepAgentConfig>;
 export interface EffectiveAgent extends StepAgentConfig {
   provider: AgentProvider;

@@ -1,3 +1,4 @@
+import { ProviderHandoff } from "../ProviderHandoff.tsx";
 import { StepAgentOverride } from "../StepAgentOverride.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { agentKey, asProvider, type AgentProvider } from "../agentProvider.tsx";
@@ -302,8 +303,9 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
       </div>
 
       <div className="si-body">
+        {isAgent && (attempts.length>0 || data.handoffs?.length>0) && <ProviderHandoff active={runActive} key={step.id} runId={run.id} step={step} attempts={attempts} handoffs={data.handoffs} action={action}/>}
         {isAgent && <div className="small muted" style={{padding:12}}>{t("agent.effective")}: {effectiveProvider} · {effectiveModel || t("agent.modelDefault")}</div>}
-        {isAgent && runActive && ["PENDING","READY","RETRYING","FAILED","CANCELED","WAITING_INPUT"].includes(step.status) && <StepAgentOverride key={`${step.id}:${JSON.stringify(step.agent_override)}`} value={step.agent_override} save={agent => action("agent",{agent})}/>}
+        {isAgent && !step.pending_input?.provider_handoff && runActive && ["PENDING","READY","RETRYING","FAILED","CANCELED","WAITING_INPUT"].includes(step.status) && <StepAgentOverride key={`${step.id}:${JSON.stringify(step.agent_override)}`} value={step.agent_override} save={agent => action("agent",{agent})}/>}
 
         {step.status === "WAITING_INPUT" && <QuestionsForm questions={open} onDone={refresh} provider={asProvider(effectiveProvider)} />}
         {step.status === "WAITING_APPROVAL" && step.type !== "task_result_report" && <ApprovalPanel run={run} step={step} onDone={refresh} />}

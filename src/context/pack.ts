@@ -141,6 +141,8 @@ export async function ensureContextPack(
           provenance,
           trust,
         });
+      const handoff = await one(pool,"SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",[ctx.attempt.id,ctx.run.id,ctx.step.id]);
+      if(handoff) add("provider_handoff","continuity",{handoff_id:handoff.id,source_attempt_id:handoff.source_attempt_id,summary:summarizeValue(handoff.package,10000),details:"Retrieve the full handoff through platform.get_run_context"},100,true,source(`provider_handoff:${handoff.id}`,1,String(handoff.ready_at),"owner","confirmed stable provider-neutral checkpoint","historical"));
       const input = ctx.input,
         independent = ctx.step.config.independent === true;
       const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id=$1 AND run_id=$2 AND step_id=$3", [

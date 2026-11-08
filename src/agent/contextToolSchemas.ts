@@ -67,6 +67,10 @@ export const CONTEXT_TOOLS = [
           "repositories",
         ])
         .default("all"),
+      handoff_workspace: z.boolean().default(false),
+      handoff_source_pack: z.boolean().default(false),
+      handoff_offset: z.number().int().min(0).max(1000000).default(0),
+      handoff_limit: z.number().int().min(100).max(12000).default(6000),
       offset: z.number().int().min(0).max(1000).default(0),
       limit,
     },

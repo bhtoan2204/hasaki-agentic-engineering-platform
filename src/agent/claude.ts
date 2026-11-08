@@ -206,7 +206,7 @@ async function progressNotes(fromAttempt?: number) {
 }
 
 /** Provider failures that a rebuilt prompt or an automatic retry cannot fix (and must not hide). */
-const TERMINAL_FAILURES = new Set(["quota", "auth", "model", "policy", "canceled", "timeout"]);
+const TERMINAL_FAILURES = new Set(["QUOTA_EXHAUSTED", "AUTHENTICATION", "CONTEXT_LIMIT", "CANCELED", "AGENT_ERROR", "quota", "auth", "model", "policy", "canceled", "timeout"]);
 
 /**
  * The agent step executor for every provider (name kept for existing imports). Provider-specific parts are the turn
@@ -240,7 +240,7 @@ const agentExecutor: StepExecutor = {
       if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
         return { kind: "failed", error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`, retryable: false };
       const cap = provider === "codex" ? await codexCapabilities(false,{model:effective.model ?? "",effort:effective.reasoning_effort ?? ""}) : await cursorCapabilities();
-      if (!cap.ok) return { kind: "failed", error: cap.error || `${label} is not usable`, retryable: false };
+      if (!cap.ok) return { kind: "failed", error: cap.error || `${label} is not usable`, retryable: false, details:{provider_error:{code:normalizeProviderFailure(cap.error)==="AUTHENTICATION"?"authentication":"agent_error",message:cap.error}} };
     }
     const ws = (await workspacesOf(ctx.run.id)).filter((w) => !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo));
     const delegationCfg = ctx.step.config.delegation as { enabled?: boolean; agents?: string[] } | undefined;
@@ -394,7 +394,7 @@ const agentExecutor: StepExecutor = {
       async function* input(): AsyncGenerator<SDKUserMessage> {
         yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: "" };
       }
-      const result = { isError: false, text: "", assistantTurns: 0 };
+      const result: {isError:boolean;text:string;assistantTurns:number;failure?:string} = { isError: false, text: "", assistantTurns: 0 };
       // Startup diagnostics: how long until the CLI reports `init`, and what it printed meanwhile (stderr tail).
       const startedAt = Date.now();
       let initSeen = false;
@@ -441,7 +441,8 @@ const agentExecutor: StepExecutor = {
           if (msg.type === "assistant") result.assistantTurns++;
           else if (msg.type === "result") {
             result.isError = msg.is_error;
-            result.text = msg.subtype === "success" ? msg.result : msg.subtype;
+            result.text = msg.subtype === "success" ? msg.result : msg.errors?.join("\n") || msg.subtype;
+            if(msg.is_error) result.failure=normalizeProviderFailure(msg);
           }
         }
       } finally {
@@ -536,7 +537,7 @@ const agentExecutor: StepExecutor = {
       const session = await one(pool, "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1", [ctx.attempt.id]);
       return { kind: "waiting_input", checkpoint: { session_id: session?.session_id ?? null, cwd, workspaces: policy.workspaces, mode, last_message: lastText.slice(0, 4000), ...(rounds.length ? { verification: { rounds } } : {}) } };
     };
-    if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: !TERMINAL_FAILURES.has(result.failure ?? "") };
+    if (result.isError) return { kind: "failed", error: result.text || "agent run failed", retryable: !TERMINAL_FAILURES.has(result.failure ?? ""), details: {provider_error:{code:({quota:"quota_exhausted",auth:"authentication",rate_limit:"rate_limit",timeout:"timeout",canceled:"canceled",model:"agent_error",policy:"agent_error"} as Record<string,string>)[result.failure ?? ""] ?? result.failure ?? "",message:result.text}} };
     if (await openQuestions()) return pause(result.text);
     if (provider === "codex" && !independent) {
       // A Codex turn that exits 0 or says "done" is not a result: the step needs submit_result matching its contract.

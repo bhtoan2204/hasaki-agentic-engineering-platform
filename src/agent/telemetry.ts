@@ -6,10 +6,10 @@ export type FailureCategory = typeof FAILURE_CATEGORIES[number];
 /** Structured codes take priority. A timeout is never evidence of depleted quota. */
 export function normalizeProviderFailure(error: unknown): FailureCategory {
   const e = error as any;
-  const code = String(e?.code ?? e?.error?.code ?? e?.error?.type ?? e?.status ?? e?.type ?? "").toLowerCase();
+  const code = String(e?.code ?? (typeof e?.error === "string" ? e.error : e?.error?.code) ?? e?.error?.type ?? e?.status ?? e?.type ?? "").toLowerCase();
   const text = String(e?.message ?? e?.error?.message ?? e?.errors?.join?.(" ") ?? e?.result ?? error ?? "").toLowerCase();
   const classify = (s: string): FailureCategory | null => {
-    if (/insufficient_quota|quota_exhausted|usage_limit_reached|billing_hard_limit|credit balance|exceeded your current quota|quota limit reached|quota exceeded|usage limit reached|purchase more credits/.test(s)) return "QUOTA_EXHAUSTED";
+    if (/insufficient_quota|quota_exhausted|usage_limit_reached|billing_hard_limit|credit balance|exceeded your current quota|quota limit reached|quota exceeded|usage limit reached|you(?:'|’)ve hit your (?:usage )?limit|you have hit your (?:usage )?limit|purchase more credits/.test(s)) return "QUOTA_EXHAUSTED";
     if (/rate_limit|rate limit|too many requests|\b429\b/.test(s)) return "RATE_LIMIT";
     if (/authentication|not authenticated|not logged in|login required|unauthorized|invalid_api_key|\b401\b/.test(s)) return "AUTHENTICATION";
     if (/context_length|context limit|context window|prompt is too long/.test(s)) return "CONTEXT_LIMIT";

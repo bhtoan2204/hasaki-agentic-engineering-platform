@@ -1,0 +1,3 @@
+PASS English: quota pause, original provider, handoff checkpoint and availability; confirmation disabled until review acknowledged.
+PASS Vietnamese: explicit confirmation resumes one Codex attempt in the same run; provider history renders.
+PASS Browser: no uncaught page errors. Fixture adapters only; no paid calls.

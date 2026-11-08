@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { StepAgentConfig, validateAgentOptions, type EffectiveAgent } from "../agent/stepAgent.ts";
+import { StepAgentConfig, validateAgentOptions, FallbackPolicy, type EffectiveAgent } from "../agent/stepAgent.ts";
 
 export const STEP_TYPES = [
   "agent",
@@ -55,6 +55,7 @@ export const StepSpec = z.object({
   /** Editor-only: node position in the visual builder. */
   ui: z.object({ x: z.number(), y: z.number() }).optional(),
 }).superRefine((step, ctx) => {
+  if(step.config.fallback !== undefined){const f=FallbackPolicy.safeParse(step.config.fallback);if(!f.success)ctx.addIssue({code:"custom",path:["config","fallback"],message:f.error.message});}
   if (step.config.agent === undefined) return;
   if (!["agent", "coding_agent"].includes(step.type)) { ctx.addIssue({ code: "custom", path: ["config", "agent"], message: "agent configuration requires an agent step" }); return; }
   try { validateAgentOptions(StepAgentConfig.parse(step.config.agent)); }
@@ -142,6 +143,7 @@ export interface AttemptRow {
   agent_provider?: "claude" | "codex" | "cursor" | null;
   agent_model?: string | null;
   effective_agent?: EffectiveAgent | null;
+  executor_stopped_at?: string | null;
   context_snapshot_id: number | null;
   agent_session_id: string | null;
   error: any;
