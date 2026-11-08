@@ -304,6 +304,19 @@ export function StepInspector({ run, stepKey, tick, onChanged }: { run: any; ste
 
       <div className="si-body">
         {isAgent && (attempts.length>0 || data.handoffs?.length>0) && <ProviderHandoff active={runActive} key={step.id} runId={run.id} step={step} attempts={attempts} handoffs={data.handoffs} action={action}/>}
+        {step.config.optimization_decision && (
+          <details className="card" style={{ margin: 12, padding: 12 }}>
+            <summary>{t("optimization.provenance")}</summary>
+            <pre className="small" style={{ whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(step.config.optimization_decision, null, 2)}
+            </pre>
+            <a
+              href={`/api/agent-recommendations/${step.config.optimization_decision.recommendation_id}`}
+            >
+              {t("optimization.evidence")}
+            </a>
+          </details>
+        )}
         {isAgent && <div className="small muted" style={{padding:12}}>{t("agent.effective")}: {effectiveProvider} · {effectiveModel || t("agent.modelDefault")}</div>}
         {isAgent && !step.pending_input?.provider_handoff && runActive && ["PENDING","READY","RETRYING","FAILED","CANCELED","WAITING_INPUT"].includes(step.status) && <StepAgentOverride key={`${step.id}:${JSON.stringify(step.agent_override)}`} value={step.agent_override} save={agent => action("agent",{agent})}/>}
 

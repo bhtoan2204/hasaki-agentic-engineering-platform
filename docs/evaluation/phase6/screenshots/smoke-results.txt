@@ -1,0 +1,5 @@
+PASS scorecards: mixed provider routes are fixture controls; missing cost is not $0; no horizontal page overflow.
+PASS recommendations: fixture-only data yields Insufficient evidence, with an immutable evidence snapshot.
+PASS detailed evidence: server pagination survives URL navigation.
+PASS Vietnamese configuration: queues Claude → Codex → Cursor with the selected context variant through existing evaluation APIs.
+PASS browser: no uncaught page errors; no paid provider execution.

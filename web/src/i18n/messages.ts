@@ -283,8 +283,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
 };
 
 export const messages: Record<UiLocale, Record<string, string>> = {
-  vi: { "handoff.paused":"Tạm dừng agent", "handoff.review":"Xem bàn giao", "agent.inherit":"Theo lượt chạy", "agent.effective":"Agent của lần thử", "agent.modelDefault":"Mặc định nhà cung cấp / chưa báo cáo", ...baseMessages.vi, ...catalog.vi, ...analyticsMessages.vi },
-  en: { "handoff.paused":"Provider paused", "handoff.review":"Review handoff", "agent.inherit":"Run default", "agent.effective":"Attempt agent", "agent.modelDefault":"Provider default / unreported", ...baseMessages.en, ...catalog.en, ...analyticsMessages.en },
+  vi: { "optimization.provenance": "Nguồn gốc quyết định tối ưu", "optimization.evidence": "Bằng chứng khuyến nghị", "an.agentEvaluation": "Đánh giá agent", "handoff.paused":"Tạm dừng agent", "handoff.review":"Xem bàn giao", "agent.inherit":"Theo lượt chạy", "agent.effective":"Agent của lần thử", "agent.modelDefault":"Mặc định nhà cung cấp / chưa báo cáo", ...baseMessages.vi, ...catalog.vi, ...analyticsMessages.vi },
+  en: { "optimization.provenance": "Optimization decision provenance", "optimization.evidence": "Recommendation evidence", "an.agentEvaluation": "Agent Evaluation", "handoff.paused":"Provider paused", "handoff.review":"Review handoff", "agent.inherit":"Run default", "agent.effective":"Attempt agent", "agent.modelDefault":"Provider default / unreported", ...baseMessages.en, ...catalog.en, ...analyticsMessages.en },
 };
 
 export function translate(locale: UiLocale, key: string, params?: Record<string, string | number>): string {

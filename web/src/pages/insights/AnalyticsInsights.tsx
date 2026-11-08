@@ -74,9 +74,9 @@ export function AnalyticsInsights({ tabParam }: { tabParam?: string }) {
         title={t("an.title")}
         subtitle={t("an.subtitle")}
         actions={
-          <a className="btn ghost sm" href="#/insights/quality">
+          <><a className="btn ghost sm" href="#/insights/evaluation">{t("an.agentEvaluation")}</a><a className="btn ghost sm" href="#/insights/quality">
             {t("an.advanced")}
-          </a>
+          </a></>
         }
       />
       <Tabs<Tab>

@@ -122,7 +122,7 @@ export async function materializeSuite(): Promise<BenchmarkSuite> {
   }
   return SuiteSchema.parse({
     key: "backend-v1",
-    version: 3,
+    version: 4,
     title: "Synthetic backend engineering and P1 navigation",
     fixture_version: FIXTURE_VERSION,
     harness_hash: await harnessHash(),
@@ -147,6 +147,10 @@ export async function harnessHash() {
           "validator.ts",
           "scoring.ts",
           "runner.ts",
+          "configuration.ts",
+          "providerPhase.ts",
+          "controls.ts",
+          "contextEffect.ts",
         ].map((p) => readFile(new URL(p, import.meta.url), "utf8")),
       )
     ).join("\n"),

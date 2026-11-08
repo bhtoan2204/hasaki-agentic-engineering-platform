@@ -21,6 +21,7 @@ export async function validateSource(
   signal?: AbortSignal,
 ) {
   const sources: string[] = [];
+  let buildPassed: boolean | null = null;
   let syntax = true,
     security = true;
   for (const logical of c.repositories) {
@@ -36,23 +37,14 @@ export async function validateSource(
       const text = await readFile(file, "utf8");
       if (
         path.endsWith(".ts") &&
-        /\b(?:import|require|eval|Function|process|globalThis|constructor|__proto__|fetch|WebSocket)\b/.test(
-          text,
-        )
+        /\b(?:import|require|eval|Function|process|globalThis|constructor|__proto__|fetch|WebSocket)\b/.test(text)
       )
         security = false;
-      const parsed = await extract(
-        path,
-        path.endsWith(".sql") ? text.replace(/\$\d+/g, "0") : text,
-        signal,
-      );
+      const parsed = await extract(path, path.endsWith(".sql") ? text.replace(/\$\d+/g, "0") : text, signal);
       syntax = syntax && !!parsed && parsed.parse_errors === 0;
       if (
         path.endsWith(".ts") &&
-        (path === c.validation.path ||
-          c.allowed_changes.some(
-            (a) => a.repository === logical && a.path === path,
-          ))
+        (path === c.validation.path || c.allowed_changes.some((a) => a.repository === logical && a.path === path))
       )
         sources.push(`/workspace/${logical}/${path}`);
     }
@@ -90,38 +82,24 @@ export async function validateSource(
           { source: workspace, target: "/workspace" },
           { source: validatorRoot, target: "/validator" },
           {
-            source: join(
-              import.meta.dirname,
-              "..",
-              "..",
-              "node_modules",
-              "typescript",
-            ),
+            source: join(import.meta.dirname, "..", "..", "node_modules", "typescript"),
             target: "/compiler/node_modules/typescript",
           },
           {
-            source: join(
-              import.meta.dirname,
-              "..",
-              "..",
-              "node_modules",
-              "@typescript",
-            ),
+            source: join(import.meta.dirname, "..", "..", "node_modules", "@typescript"),
             target: "/compiler/node_modules/@typescript",
           },
         ],
-        [
-          "/compiler/node_modules/typescript/lib/tsc.js",
-          "--project",
-          "/validator/tsconfig.json",
-        ],
+        ["/compiler/node_modules/typescript/lib/tsc.js", "--project", "/validator/tsconfig.json"],
         c.validation.timeout_seconds * 1000,
         signal,
       );
+      buildPassed = true;
     } catch (error) {
       if (error instanceof IsolationUnavailable || signal?.aborted) throw error;
       return {
         syntax: false,
+        build_passed: false,
         security,
         checks,
         diagnostic: "Isolated TypeScript build/typecheck failed",
@@ -142,11 +120,11 @@ export async function validateSource(
       signal,
     );
     const parsed = JSON.parse(result.stdout.trim());
-    if (!Array.isArray(parsed.checks))
-      throw new Error("Invalid validation result");
+    if (!Array.isArray(parsed.checks)) throw new Error("Invalid validation result");
     return {
       syntax,
       security,
+      build_passed: buildPassed,
       checks: parsed.checks as typeof checks,
       diagnostic: null,
     };
@@ -163,6 +141,7 @@ export async function validateSource(
         return {
           syntax,
           security,
+          build_passed: buildPassed,
           checks: parsed.checks as typeof checks,
           diagnostic: "Required or hidden assertions failed",
         };
@@ -171,9 +150,7 @@ export async function validateSource(
       syntax,
       security,
       checks: [{ name: "hidden:validator", passed: false }],
-      diagnostic: (e as any).killed
-        ? "Validation timeout"
-        : "Validation process failed",
+      diagnostic: (e as any).killed ? "Validation timeout" : "Validation process failed",
     };
   }
 }

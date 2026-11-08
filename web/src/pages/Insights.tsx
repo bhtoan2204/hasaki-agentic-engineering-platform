@@ -1,3 +1,4 @@
+import { AgentEvaluation } from "./insights/AgentEvaluation.tsx";
 import { AnalyticsInsights, ANALYTICS_TABS } from "./insights/AnalyticsInsights.tsx";
 import { EvaluationBenchmarks } from "./EvaluationBenchmarks.tsx";
 import { useState, type ReactNode } from "react";
@@ -131,6 +132,7 @@ const TAB_KEYS: InsightsTab[] = ["overview", "quality", "tools", "failures", "re
 
 /** `tab` comes from the URL (#/insights/<tab>) so a tab can be linked and survives reloads. */
 export function InsightsPage({ tab }: { tab?: string }) {
+  if(tab?.split("?")[0]==="evaluation")return <AgentEvaluation/>;
   if (!tab || ANALYTICS_TABS.includes(tab.split("?")[0] as typeof ANALYTICS_TABS[number])) return <AnalyticsInsights tabParam={tab}/>;
   return <LegacyInsightsPage tab={tab}/>;
 }

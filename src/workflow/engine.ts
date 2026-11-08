@@ -1,3 +1,4 @@
+import { applyOptimizationDefaults } from "../eval/optimization.ts";
 import { z } from "zod";
 import { execution } from "../auth/execution.ts";
 import { buildHandoffPackage, providerFailure, PAUSABLE_FAILURES, AUTOMATIC_FAILURES, handoffReadiness, inspectHandoffWorkspace } from "../agent/handoff.ts";
@@ -339,10 +340,18 @@ export async function startRun(input: StartRunInput) {
       const detected = detectBranchDirectives([wi.title, wi.description, wi.payload?.note].filter(Boolean).join("\n"), repoNames, config.baseBranch);
       if (Object.keys(detected).length) Object.assign(inputs, { branches: detected, branches_source: "work item description" });
     }
+    const optimized = await applyOptimizationDefaults(
+      c,
+      r.ownerId!,
+      graph,
+      inputs,
+      input.agentProvider != null,
+      r.decision.profile,
+    );
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
-    try { for (const step of graph.steps) resolveStepAgent({agent_provider,profile:r.decision.profile},step); }
+    try { for (const step of optimized.graph.steps) resolveStepAgent({agent_provider,profile:r.decision.profile},step); }
     catch(error) { throw new EngineError((error as Error).message,400); }
-    const resolvedGraph = { ...graph, profile: r.decision.profile, profile_changes: r.changes };
+    const resolvedGraph = { ...optimized.graph, profile: r.decision.profile, profile_changes: r.changes };
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
@@ -350,8 +359,20 @@ export async function startRun(input: StartRunInput) {
        VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider, r.ownerId, config.instanceId],
     );
-    const order = topoOrder(graph.steps);
-    for (const s of graph.steps) {
+    for (const decision of optimized.decisions)
+      await q(
+        c,
+        "INSERT INTO agent_optimization_decisions(run_id,step_key,recommendation_id,policy_id,provenance) VALUES($1,$2,$3,$4,$5)",
+        [
+          id,
+          decision.step_key,
+          decision.recommendation_id,
+          decision.policy_id,
+          json(decision),
+        ],
+      );
+    const order = topoOrder(optimized.graph.steps);
+    for (const s of optimized.graph.steps) {
       const requiresApproval = s.requires_approval || (s.type === "git_pull_request" && s.config.mode === "approval");
       await q(
         c,

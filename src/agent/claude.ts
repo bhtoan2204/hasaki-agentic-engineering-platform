@@ -215,6 +215,10 @@ const TERMINAL_FAILURES = new Set(["QUOTA_EXHAUSTED", "AUTHENTICATION", "CONTEXT
  */
 const agentExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
+    if (ctx.step.config?.evaluation_phase) {
+      const { executeProviderPhase } = await import("../eval/providerPhase.ts");
+      return executeProviderPhase(ctx);
+    }
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const effective = ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
     const provider = effective.provider;

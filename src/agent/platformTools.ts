@@ -154,6 +154,21 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
           : !MUTATING.has(name) && name !== "ask_user" && name !== "post_update");
       try {
         const target = native?.logicalName ?? (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
+        const experiment = execution.getStore()?.evaluation;
+        if (!env.contextPreparation && experiment?.contextMode) {
+          const control = [
+            "platform.submit_result",
+            "platform.ask_user",
+            "platform.request_clarification",
+            "platform.post_update",
+          ].includes(target);
+          if (!control && experiment.contextMode !== "tools")
+            throw new Error(
+              "Platform tools are disabled by the frozen benchmark context variant",
+            );
+          if (!toolAllowed(target, experiment.allowedTools))
+            throw new Error("Tool excluded by frozen benchmark permissions");
+        }
         if (!env.contextPreparation && !toolAllowed(target,env.attemptAllowedTools)) throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
         if (["read_knowledge", "search_knowledge"].includes(name) && !native)
           env = { ...env, knowledge: await visibleSnapshotKnowledge(env) };

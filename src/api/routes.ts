@@ -1,3 +1,6 @@
+import { evaluationAnalytics } from "../eval/analytics.ts";
+import { createRecommendation } from "../eval/recommendations.ts";
+import { saveOptimizationPolicy,optimizationPolicies } from "../eval/optimization.ts";
 import { requestProviderHandoff, resumeProviderHandoff, providerHandoffOptions } from "../workflow/engine.ts";
 import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext } from "./agentContext.ts";
@@ -409,6 +412,12 @@ export const routes: Route[] = [
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/reject$/, async (c) => reviewMemory(c.p[0], "reject", c.actor.username, (await readableKnowledge(c, c.p[0])).owner_id ?? null)],
   ["GET", /^\/api\/benchmark-suites$/, () => listSuites()],
   ["POST", /^\/api\/benchmark-suites\/publish$/, async ({ actor }) => { requireAdmin(actor); if (!config.evaluation.enabled) throw new HttpError(409, "Evaluation framework disabled"); const row=await publishBuiltinSuite(); return {id:row.id,key:row.suite_key,version:row.version}; }],
+  ["GET", /^\/api\/agent-evaluation$/,c=>evaluationAnalytics(c.actor,c.url)],
+  ["POST", /^\/api\/agent-recommendations$/,c=>createRecommendation(c.actor,c.body)],
+  ["GET", /^\/api\/agent-recommendations\/(\d+)$/,async c=>{const row=await one(pool,"SELECT * FROM agent_recommendations WHERE id=$1",[num(c.p[0])]);if(!row)throw new HttpError(404,"Recommendation not found");await requireOwner(c.actor,row.owner_id,support(c),"agent_recommendation",String(row.id));return row;}],
+  ["GET", /^\/api\/agent-recommendations$/,c=>q(pool,"SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50",[c.actor.id])],
+  ["POST", /^\/api\/agent-optimization$/,c=>saveOptimizationPolicy(c.actor.id,c.body)],
+  ["GET", /^\/api\/agent-optimization$/,c=>optimizationPolicies(c.actor.id)],
   ["GET", /^\/api\/evaluation-runs$/, async ({ actor }) => ({enabled:config.evaluation.enabled,runs:await evaluationList(actor.id)})],
   ["POST", /^\/api\/evaluation-runs$/, ({actor,body}) => createEvaluation(actor.id,body,actor.role==="admin")],
   ["GET", /^\/api\/evaluation-runs\/(\d+)$/, ({actor,p}) => evaluationDetail(num(p[0]),actor.id)],
