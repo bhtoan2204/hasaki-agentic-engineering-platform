@@ -1,9 +1,13 @@
+import { startBroker } from "../codex/broker.ts";
+import { agentEnvironment } from "../environment.ts";
+import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
+import { newMetrics } from "../metrics.ts";
 import type { AgentMetrics } from "../metrics.ts";
 import { spawn, execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../../config.ts";
 import { pool, one } from "../../db/pool.ts";
@@ -42,7 +46,7 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
   const bin = cursorBinary();
   let help = "";
   try {
-    const out = await exec(bin, ["--help"], { timeout: 20_000, maxBuffer: 1024 * 1024 });
+    const out = await exec(bin, ["--help"], { env:scrubEnv(process.env), timeout: 20_000, maxBuffer: 1024 * 1024 });
     help = `${out.stdout}\n${out.stderr}`;
   } catch (e: any) {
     const missing = e?.code === "ENOENT";
@@ -60,7 +64,7 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
   }
   if (!process.env.CURSOR_API_KEY) {
     try {
-      const st = await exec(bin, ["status"], { timeout: 20_000, maxBuffer: 256 * 1024 });
+      const st = await exec(bin, ["status"], { env:scrubEnv(process.env), timeout: 20_000, maxBuffer: 256 * 1024 });
       const body = `${st.stdout}\n${st.stderr}`;
       if (!/logged in/i.test(body))
         return finish({ ok: false, bin, error: "Cursor CLI is not authenticated. Run `agent login` on this machine, or set CURSOR_API_KEY. The platform will not fall back to Claude." });
@@ -99,20 +103,17 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       assistantTurns: 0,
     };
   mkdirSync(input.cwd, { recursive: true });
-  const token = randomBytes(24).toString("hex");
+  const toolEnv=envFromExecution(input.ctx,input.mode,input.policy,input.metrics??newMetrics(""),()=>{});
+  const broker=await startBroker({policy:input.policy,cwd:input.cwd,requireHooks:false,dispatch:(name,args)=>dispatchPlatformTool(name,args,toolEnv)});
+  try {
   const promptFile = join(input.cwd, ".cursor", "task-prompt.txt");
   mkdirSync(join(input.cwd, ".cursor"), { recursive: true });
   writeFileSync(promptFile, input.prompt);
   writeCursorPolicy(input.cwd, { reposRoot: config.reposRoot, protectedRoots: input.policy.protectedRoots, workspaces: [...input.policy.workspaces] });
   writeMcpConfig(input.cwd, process.execPath, [join(import.meta.dirname, "bridge.ts")], {
-    PLATFORM_BRIDGE_TOKEN: token,
-    PLATFORM_INSTANCE: config.instanceId,
-    PLATFORM_CONFIG: resolve(process.env.PLATFORM_CONFIG ?? "config.json"),
-    PLATFORM_RUN_ID: String(input.ctx.run.id),
-    PLATFORM_STEP_ID: String(input.ctx.step.id),
-    PLATFORM_ATTEMPT_ID: String(input.ctx.attempt.id),
-    PLATFORM_MODE: input.mode,
-    DATABASE_URL: process.env.DATABASE_URL || config.databaseUrl,
+    PLATFORM_BROKER_SOCKET:broker.socketPath,
+    PLATFORM_BROKER_TOKEN:broker.token,
+    PLATFORM_MODE:input.mode,
   });
   const gitDir = join(input.cwd, ".git");
   if (existsSync(gitDir)) excludeFromGit(gitDir);
@@ -191,6 +192,8 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         await input.ctx.log("agent", ev.text, { provider: "cursor" });
       }
     } else if (ev.type === "tool_call" && ev.subtype === "started") {
+      const pending=await one<{n:number}>(pool,"SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'",[input.ctx.attempt.id]);
+      if(pending?.n){violation="This attempt is waiting for clarification; stop native tools until it resumes";kill();return;}
       const shape = toolCallShape(ev.tool_call);
       const name = shape?.name ?? "tool";
       toolCalls[name] = (toolCalls[name] ?? 0) + 1;
@@ -288,6 +291,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   }
   if (exitCode !== 0 || isError) return { isError: true, text: text || stderr.trim().slice(0, 500) || `Cursor exited ${exitCode}`, assistantTurns, submitted };
   return { isError: false, text, assistantTurns, submitted };
+  } finally { await broker.close(); rmSync(join(input.cwd,".cursor","mcp.json"),{force:true}); }
 }
 
 function extraDirs(input: CursorTurnInput): string[] {
@@ -296,11 +300,7 @@ function extraDirs(input: CursorTurnInput): string[] {
   return [...dirs].filter((d) => d && existsSync(d));
 }
 
-function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env };
-  delete out.PLATFORM_BRIDGE_TOKEN;
-  return out;
-}
+function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv { return agentEnvironment(env,"cursor"); }
 
 /** One-shot text completion for auxiliary calls (ranking, report, test explanation). No tools that mutate. */
 export async function cursorComplete(prompt: string, signal?: AbortSignal): Promise<string> {

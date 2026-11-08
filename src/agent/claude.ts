@@ -1,3 +1,7 @@
+import { agentEnvironment } from "./environment.ts";
+import { ensureContextPack, ContextBudgetError, contextPackFailure } from "../context/pack.ts";
+import { captureContextContinuity } from "../context/continuity.ts";
+import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { randomUUID } from "node:crypto";
 import { normalizeProviderFailure, safeDiagnostics } from "./telemetry.ts";
 import { buildCodeContext } from "../codeIntelligence/search.ts";
@@ -146,13 +150,14 @@ function platformServer(ctx: ExecutionContext, mode: ToolMode, policy: PolicyCon
     ),
     tool("post_update", `Post a short progress note in ${prose} to the platform timeline.`, { message: z.string().describe(`progress note in ${prose}`) }, call("post_update")),
     tool("submit_result", "Submit this step's output (an object matching the step's output contract). Call once, at the end.", { output: z.record(z.string(), z.any()).describe("the step output object") }, call("submit_result")),
-    tool("read_knowledge", "Read the full text of a skill, business rule or reference doc listed in your system prompt (by key).", { key: z.string() }, call("read_knowledge")),
-    tool("search_knowledge", "Search the skills, business rules and reference docs that apply to this step (including ones not listed in the prompt). Returns keys to load with read_knowledge.", { query: z.string().min(2), limit: z.number().int().min(1).max(20).optional() }, call("search_knowledge")),
+    tool("read_knowledge", "Read the full text of a skill, business rule or reference doc listed in your system prompt (by key).", { key: z.string(),offset:z.number().int().min(0).max(1000000).optional(),limit:z.number().int().min(1).max(24000).optional() }, call("read_knowledge")),
+
     tool("read_step_output", "Read the FULL output of an earlier step of this run (the prompt may only contain a summary). `attempt` = attempt number for a historical/invalidated output.", { step_key: z.string(), attempt: z.number().int().positive().optional() }, call("read_step_output")),
     tool("list_tools", "Discover domain integration tools (Hasaki Work, Jira, Bitbucket, repository registry, this run's history/changes). Optional query ranks by relevance.", { query: z.string().optional() }, call("list_tools")),
     tool("describe_tool", "Full description and input schema of an integration tool (load before the first call).", { name: z.string() }, call("describe_tool")),
     tool("call_tool", "Call an integration tool by name with arguments matching its schema (see describe_tool).", { name: z.string(), arguments: z.record(z.string(), z.any()).optional() }, call("call_tool")),
   ];
+  tools.push(...CONTEXT_TOOLS.map(t=>tool(t.name,t.description,t.input.shape,call(t.logicalName))));
   if (mode === "coding") {
     tools.unshift(
       tool(
@@ -206,7 +211,7 @@ const TERMINAL_FAILURES = new Set(["quota", "auth", "model", "policy", "canceled
  * runner (Claude Agent SDK in-process, Cursor CLI, Codex CLI); prompts, session resume/repair, verification, independent
  * review and platform tools are shared.
  */
-export const claudeExecutor: StepExecutor = {
+const agentExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const provider = agentProvider(ctx.run);
@@ -271,6 +276,8 @@ export const claudeExecutor: StepExecutor = {
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
+    try { ctx.context.contextPack = await ensureContextPack(ctx,metrics,policy); }
+    catch(error) { if(error instanceof ContextBudgetError)return {kind:"failed",error:error.message,retryable:false}; throw error; }
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
     const resume = independent ? null : await resumableSession(ctx, cwd, provider);
     let evidence: { heads: Record<string, string>; problems: string[]; text: string } | null = null;
@@ -293,7 +300,7 @@ export const claudeExecutor: StepExecutor = {
     const files = ctx.input.work_item?.payload?.note_files ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload, cwd) : [];
     const reexec = ctx.input.pending?.reexecute || ctx.input.pending?.feedback;
     const extras = mode === "coding" && (reexec || ctx.input.pending?.resume) && ws.length ? [{ title: "Current worktree state (inspect it first; never reset or discard these changes)", body: await worktreeState(ws) }] : [];
-    if (codeIntelligenceEnabled() && !independent) {
+    if (codeIntelligenceEnabled() && !independent && !ctx.context.contextPack) {
       try {
         const names = ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories;
         const code = await buildCodeContext(ctx.context.requestText, { repositories: names.slice(0, 30), allowed: ctx.run.allowed_repositories, runId: ctx.run.id });
@@ -325,7 +332,7 @@ export const claudeExecutor: StepExecutor = {
       } else if (!guide.available) await ctx.log("system", "OpenCodeReview not installed on this worker (npm i @alibaba-group/open-code-review); reviewing without its rules");
     }
     const savedNotes = await progressNotes(ctx.input.pending?.resume?.from_attempt_id);
-    const freshPrompt = () => buildUserPrompt(ctx.input, files, savedNotes, ctx.context.upstream, ctx.context.fileRefs, extras);
+    const freshPrompt = () => buildUserPrompt(ctx.input, files, savedNotes, ctx.context.upstream, ctx.context.fileRefs, extras, ctx.context.contextPack);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode);
 
     // The PreToolUse hook sees the shell's real cwd; canUseTool (called afterwards for the same call) does not.
@@ -333,7 +340,8 @@ export const claudeExecutor: StepExecutor = {
     const hookAllowed = new Set<string>();
     const callKey = (name: string, input: unknown) => `${name}\u0000${JSON.stringify(input ?? {})}`;
     const preToolUse: HookCallback = async (input: any) => {
-      const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, policy, input.cwd, input.agent_id);
+      const waiting=await one<{n:number}>(pool,"SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'",[ctx.attempt.id]);
+      const d = decide(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>, waiting?.n?{...policy,mode:"analysis"}:policy, input.cwd, input.agent_id);
       if (d.allow) {
         hookAllowed.add(callKey(input.tool_name, input.tool_input));
         if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
@@ -391,6 +399,7 @@ export const claudeExecutor: StepExecutor = {
           prompt: input(),
           options: {
             cwd,
+            env: agentEnvironment(process.env,"claude"),
             ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin } : {}),
             additionalDirectories: [config.reposRoot, ...(ctx.context.repoPaths ?? []).map((r) => r.path)],
             resume: resumeId,
@@ -495,7 +504,7 @@ export const claudeExecutor: StepExecutor = {
       if (resume && existsSync(cwd)) {
         await ctx.log("system", `resuming ${provider} session ${resume.sessionId}`, { provider });
         try {
-          result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras, outputLocale(ctx.run)), resume.sessionId);
+          result = await run(buildResumeMessage(ctx.input, resume.fromAttempt, extras, outputLocale(ctx.run), ctx.context.contextPack), resume.sessionId);
         } catch (e) {
           if (ctx.signal.aborted) throw e;
           result = { isError: true, text: (e as Error).message, assistantTurns: 0 };
@@ -504,10 +513,10 @@ export const claudeExecutor: StepExecutor = {
           // Session missing or not resumable: rebuild from durable artifacts instead (answers and progress notes included).
           await q(pool, "UPDATE agent_sessions SET resumable = false WHERE session_id = $1 AND provider = $2", [resume.sessionId, provider]);
           await ctx.log("system", `session resume failed (${result.text}); rebuilding context from persisted step history (${ctx.input.answers.length} answer(s), checkpoint notes of attempt ${resume.fromAttempt ?? "-"})`, { provider, session_id: resume.sessionId, recovery: "rebuild_from_checkpoint" });
-          result = await run(buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras));
+          result = await run(buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras, ctx.context.contextPack));
         }
       } else {
-        result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras) : freshPrompt());
+        result = await run(resume ? buildUserPrompt(ctx.input, files, await progressNotes(resume.fromAttempt), ctx.context.upstream, ctx.context.fileRefs, extras, ctx.context.contextPack) : freshPrompt());
       }
     } finally {
       if (codeIntelligenceEnabled()) for (const w of await workspacesOf(ctx.run.id).catch(() => [])) await enqueueIndex(w.repo, ctx.run.id).catch(() => {});
@@ -699,3 +708,12 @@ export function modelFor(step: { type: string; config: Record<string, any> }, pr
   }
   return { model: config.model ?? "", source: config.model ? "global default" : "sdk default" };
 }
+
+/** All three provider paths share the same durable context and continuity capture. */
+export const claudeExecutor: StepExecutor = {
+  async execute(ctx) {
+    let result:ExecResult|undefined;
+    try { result=await agentExecutor.execute(ctx); return result; }
+    finally { await captureContextContinuity(ctx,result).catch(error=>console.error(`context continuity persistence failed: ${contextPackFailure(error)}`)); }
+  }
+};

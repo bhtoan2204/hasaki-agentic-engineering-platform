@@ -58,8 +58,8 @@ export const queryTerms = (text: string) =>
     0,
     24,
   );
-export async function fresh(repoName: string, runId?: number) {
-  const local = await localScope(repoName, runId);
+export async function fresh(repoName: string, runId?: number, provision = false) {
+  const local = await localScope(repoName, runId, provision);
   const base = await baseCommit(local.primary, local.repo.default_branch || config.baseBranch);
   const baseline = await snapshot(local.repo.id, `base:${base}`);
   if (!baseline) return { ...local, index: null, base };
@@ -100,7 +100,7 @@ export async function searchSymbols(
   for (const repo of scope.repositories) {
     try {
       const run = await scopeRun(repo, scope);
-      const f = await fresh(repo, run);
+      const f = await fresh(repo, run, scope.provision === true);
       if (!f.index) {
         fallback_count++;
         if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
@@ -130,7 +130,7 @@ export async function searchSymbols(
         ORDER BY f.file_path,r.line,r.id LIMIT 8`,
         [f.index.id, terms],
       );
-      const recheck = await fresh(repo, run);
+      const recheck = await fresh(repo, run, scope.provision === true);
       if (recheck.index?.id !== f.index.id) {
         fallback_count++;
         if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
@@ -232,7 +232,7 @@ export async function findDependencies(
     for (const repo of scope.repositories) {
       try {
         const run = await scopeRun(repo, scope);
-        const f = await fresh(repo, run);
+        const f = await fresh(repo, run, scope.provision === true);
         if (!f.index) continue;
         const rows = await q(
           pool,
@@ -524,6 +524,7 @@ export async function buildCodeContext(text: string, scope: SearchScope) {
     .slice(0, config.codeIntelligence.contextTokens * 4);
   return {
     body,
+    hits: primary.slice(0,10),
     metrics: {
       search_latency: result.search_latency,
       context_latency: Date.now() - start,

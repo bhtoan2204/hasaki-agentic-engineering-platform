@@ -1,3 +1,4 @@
+import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
 import { q, one, json, type Db } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
@@ -30,6 +31,7 @@ export interface StepInput {
 }
 
 export interface ResolvedContext {
+  contextPack?: ContextPack;
   snapshot_id: number;
   hash: string;
   project: string;
@@ -176,9 +178,9 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   for (const p of pinned) {
     const v = await one(
       c,
-      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, v.version, v.content, v.applicability, v.metadata
-         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = $2 WHERE i.key = $1`,
-      [p.key, p.version],
+      `SELECT i.id, i.owner_id, i.updated_at, i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, v.version, v.content, v.applicability, v.metadata
+         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = $2 WHERE i.key = $1 AND (i.owner_id IS NULL OR i.owner_id = $3) AND i.enabled AND v.version <= i.current_version ORDER BY i.owner_id NULLS LAST LIMIT 1`,
+      [p.key, p.version, run.owner_id],
     );
     res.applied = res.applied.filter((k) => k.key !== p.key);
     if (v) res.applied.push({ ...v, reason: `selected for this re-execution (v${p.version})` });
@@ -234,6 +236,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     answers: input.answers.length,
     input_hash: hashOf(input),
     knowledge: res.applied.map((k) => ({
+      id: k.id, owner_id: k.owner_id ?? null, updated_at: k.updated_at,
       key: k.key,
       version: k.version,
       category: k.category,

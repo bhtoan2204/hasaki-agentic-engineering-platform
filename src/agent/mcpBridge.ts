@@ -1,3 +1,5 @@
+import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
+import { z } from "zod";
 /**
  * Stdio MCP server core shared by the CLI providers' per-run bridges (Cursor: cursor/bridge.ts, Codex: codex/bridge.ts).
  * It is not a network service. Each bridge supplies how a tool call is executed; the platform tools themselves live in
@@ -15,7 +17,7 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
   { name: "post_update", description: "Post a short progress note to the platform timeline.", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } },
   { name: "submit_result", description: "Submit this step's output (an object matching the step's output contract) once, at the end.", inputSchema: { type: "object", properties: { output: { type: "object" } }, required: ["output"] } },
   { name: "prepare_branch", description: "Create or reuse the run branch for a repo in an isolated git worktree and return its path. Coding steps only.", inputSchema: { type: "object", properties: { repo: { type: "string" } }, required: ["repo"] } },
-  { name: "read_knowledge", description: "Read the full text of a skill, business rule or reference doc by key.", inputSchema: { type: "object", properties: { key: { type: "string" } }, required: ["key"] } },
+  { name: "read_knowledge", description: "Read the full text of a skill, business rule or reference doc by key.", inputSchema: { type: "object", properties: { key: { type: "string" },offset:{type:"integer",minimum:0,maximum:1000000},limit:{type:"integer",minimum:1,maximum:24000} }, required: ["key"] } },
   { name: "search_knowledge", description: "Search the skills, business rules and reference docs that apply to this step.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
   { name: "read_step_output", description: "Read the full output of an earlier step of this run.", inputSchema: { type: "object", properties: { step_key: { type: "string" }, attempt: { type: "number" } }, required: ["step_key"] } },
   { name: "list_tools", description: "Discover domain integration tools (Hasaki Work, Jira, Bitbucket, repository registry, run history).", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
@@ -31,7 +33,9 @@ export const COMMIT_TOOL: BridgeTool = {
 };
 
 export function bridgeToolsFor(mode: string, opts: { commit?: boolean } = {}): BridgeTool[] {
-  const base = mode === "coding" ? PLATFORM_BRIDGE_TOOLS : PLATFORM_BRIDGE_TOOLS.filter((t) => t.name !== "prepare_branch");
+  const nativeNames=new Set(CONTEXT_TOOLS.map(t=>t.name));
+  const all=[...PLATFORM_BRIDGE_TOOLS.filter(t=>!nativeNames.has(t.name)),...CONTEXT_TOOLS.map(t=>({name:t.name,description:t.description,inputSchema:z.toJSONSchema(t.input)}))];
+  const base = mode === "coding" ? all : all.filter((t) => t.name !== "prepare_branch");
   return mode === "coding" && opts.commit ? [...base, COMMIT_TOOL] : base;
 }
 
@@ -82,7 +86,7 @@ export function serveStdio(opts: StdioBridgeOptions) {
           send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `ERROR: unknown platform tool ${name}` }], isError: true } }, lined);
           return;
         }
-        const text = await opts.call(name, msg.params?.arguments ?? {});
+        const text = await opts.call(CONTEXT_TOOLS.some(t=>t.name===name)?`platform.${name}`:name, msg.params?.arguments ?? {});
         send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }], isError: text.startsWith("ERROR:") } }, lined);
         return;
       }
@@ -95,6 +99,7 @@ export function serveStdio(opts: StdioBridgeOptions) {
   let buf = Buffer.alloc(0);
   input.on("data", (chunk: Buffer | string) => {
     buf = Buffer.concat([buf, typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk]);
+    if(buf.length>1024*1024){buf=Buffer.alloc(0);return;}
     for (;;) {
       const headerEnd = buf.indexOf("\r\n\r\n");
       if (headerEnd >= 0 && buf.subarray(0, headerEnd).toString("utf8").toLowerCase().includes("content-length")) {
@@ -105,6 +110,7 @@ export function serveStdio(opts: StdioBridgeOptions) {
           continue;
         }
         const len = Number(m[1]);
+        if(len>1024*1024){buf=Buffer.alloc(0);return;}
         const start = headerEnd + 4;
         if (buf.length < start + len) return;
         const body = buf.subarray(start, start + len).toString("utf8");

@@ -41,6 +41,9 @@ export interface Applicability {
 }
 
 export interface KnowledgeCandidate {
+  id?: number;
+  owner_id?: number | null;
+  updated_at?: string | Date;
   key: string;
   title: string;
   category: Category;

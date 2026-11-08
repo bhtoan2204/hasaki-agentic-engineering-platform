@@ -1,3 +1,4 @@
+import { agentEnvironment } from "./environment.ts";
 import { randomUUID } from "node:crypto";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
@@ -40,7 +41,7 @@ export async function completeForRun(run: { agent_provider?: string | null } | n
   const onAbort = () => ac.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false, abortController: ac } })) {
+    for await (const msg of query({ prompt, options: { env:agentEnvironment(process.env,"claude"), tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false, abortController: ac } })) {
       accumulateMetrics(m, msg);
       if (msg.type === "result" && msg.subtype === "success") text = msg.result;
     }

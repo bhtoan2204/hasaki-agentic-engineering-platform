@@ -22,6 +22,8 @@ import { codexHookDecision, type CodexHookPayload } from "./policy.ts";
 export interface BrokerDeps {
   policy: PolicyContext;
   cwd: string;
+  /** Cursor shares the authenticated worker transport without Codex-specific hook requirements. */
+  requireHooks?: boolean;
   /** Platform tool dispatch, bound to the attempt (envFromExecution). */
   dispatch(name: string, args: unknown): Promise<string>;
   onDenied?(tool: string, reason: string): void | Promise<void>;
@@ -77,7 +79,7 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
     }
     if (msg.kind === "tool") {
       const name = String(msg.name ?? "");
-      if (hookCalls === 0) return { ok: true, text: "ERROR: refused: the platform's pre-execution hooks are not active in this Codex session" };
+      if (deps.requireHooks !== false && hookCalls === 0) return { ok: true, text: "ERROR: refused: the platform's pre-execution hooks are not active in this Codex session" };
       if (CODING_ONLY.has(name) && deps.policy.mode !== "coding") return { ok: true, text: `ERROR: ${name} is only available in coding steps` };
       return { ok: true, text: await deps.dispatch(name, msg.args ?? {}) };
     }

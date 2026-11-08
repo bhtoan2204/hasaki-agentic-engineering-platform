@@ -151,7 +151,7 @@ export const knowledge = {
     }
     return q<KnowledgeCandidate>(
       db,
-      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at,
+      `SELECT i.id, i.owner_id, i.updated_at, i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at,
               v.version, v.content, v.applicability, v.metadata, v.effective_from, s.key AS superseded_by
          FROM knowledge_items i
          JOIN LATERAL (
@@ -183,7 +183,7 @@ async function loadCandidateSet(db: Db, ownerId: number | null): Promise<Candida
   const loadedAt = Date.now();
   const items = await q(
     db,
-    `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at, s.key AS superseded_by,
+    `SELECT i.id, i.owner_id, i.updated_at, i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, i.expires_at, s.key AS superseded_by,
             (SELECT json_agg(json_build_object('version', v.version, 'content', v.content, 'applicability', v.applicability, 'metadata', v.metadata,
                                                'effective_from', v.effective_from) ORDER BY v.version DESC)
                FROM knowledge_versions v

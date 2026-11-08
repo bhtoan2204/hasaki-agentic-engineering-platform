@@ -1,3 +1,4 @@
+import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve, sep } from "node:path";
@@ -24,7 +25,7 @@ export const toolsFor = (mode: ToolMode, opts: { delegation?: boolean; claudeSki
 ];
 
 /** Platform tools a subagent may use: read-only ones. */
-export const SUBAGENT_PLATFORM_TOOLS = ["read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool"].map((t) => `mcp__platform__${t}`);
+export const SUBAGENT_PLATFORM_TOOLS = ["read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool", ...CONTEXT_TOOLS.filter(t=>t.readOnly).map(t=>t.name)].map((t) => `mcp__platform__${t}`);
 
 export interface PolicyContext {
   mode: ToolMode;

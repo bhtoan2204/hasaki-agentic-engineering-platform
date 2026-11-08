@@ -1,3 +1,4 @@
+import { agentEnvironment } from "../environment.ts";
 import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -53,13 +54,7 @@ let capCache: { key: string; at: number; value: CodexCapability } | null = null;
 
 /** Environment for every Codex child: no platform secrets, no API keys (no silent switch to API billing). */
 export function codexEnv(base: NodeJS.ProcessEnv, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = {};
-  const drop = /^(DATABASE_URL|AUTH_SECRET|PG[A-Z]*|OPENAI_API_KEY|CODEX_API_KEY|AZURE_OPENAI_API_KEY|ANTHROPIC_[A-Z_]*|CURSOR_API_KEY|PLATFORM_[A-Z_]*|NOTIFY_WEBHOOK|TELEGRAM_[A-Z_]*|BITBUCKET_[A-Z_]*|JIRA_[A-Z_]*|TEST_DATABASE_[A-Z_]*)$/;
-  const secretish = /(SECRET|PASSWORD|PASSWD|TOKEN|CREDENTIAL|COOKIE|PRIVATE_KEY|_API_KEY)$/i;
-  for (const [k, v] of Object.entries(base)) {
-    if (v === undefined || drop.test(k) || secretish.test(k)) continue;
-    out[k] = v;
-  }
+  const out = agentEnvironment(base,"codex");
   if (execution.getStore()?.evaluation?.fixtureAgent) { for (const k of Object.keys(out)) if (k.startsWith("FAKE_CODEX_")) delete out[k]; out.FAKE_CODEX_MODE = "ok"; }
   return { ...out, ...extra };
 }
@@ -287,7 +282,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       cwd: input.cwd,
       async dispatch(name, args) {
         const text = await dispatchPlatformTool(name, args, toolEnv);
-        if (name === "ask_user" && !text.startsWith("ERROR")) paused = true;
+        if (["ask_user","request_clarification","platform.request_clarification"].includes(name) && !text.startsWith("ERROR")) paused = true;
         return text;
       },
       onModel(m) {

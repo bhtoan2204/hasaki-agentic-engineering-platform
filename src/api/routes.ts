@@ -1,3 +1,4 @@
+import { attemptContext } from "./agentContext.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
 import { updateIncidentLifecycle } from "./analytics/health.ts";
 import { publishBuiltinSuite, listSuites, createEvaluation, evaluationList, evaluationDetail, cancelEvaluation, createComparison, comparisonDetail } from "../eval/service.ts";
@@ -162,6 +163,12 @@ function redactGroup(group: any, actor: Actor, showAll: boolean) {
 const latestRun = (workItemId: number) => one<{ id: number; status: string }>(pool, "SELECT id, status FROM workflow_runs WHERE work_item_id = $1 ORDER BY id DESC LIMIT 1", [workItemId]);
 
 export const routes: Route[] = [
+  ["GET", /^\/api\/attempts\/(\d+)\/context$/, async c => {
+    const id=num(c.p[0]);await requireAttempt(c.actor,id,support(c));
+    const offset=Number(c.url.searchParams.get("offset")??0);
+    if(!Number.isInteger(offset)||offset<0||offset>100000)throw new HttpError(400,"Invalid context evidence offset");
+    return attemptContext(id,offset);
+  }],
   ["GET", /^\/api\/analytics\/(health|usage|performance|workflows|options)$/, c => engineeringAnalytics(c.actor,c.url,c.p[0])],
   ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/lifecycle$/, c => updateIncidentLifecycle(c.actor,c.p[0],c.body)],
   // ------------------------------------------------------------ meta

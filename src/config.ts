@@ -116,6 +116,9 @@ export interface Config {
     evolveSkills: boolean;
   };
   agent: {
+    /** Bound retrieved context, using a documented character-based token estimate; provider usage remains separate. */
+    contextTokens?: number;
+    contextToolTimeoutMs?: number;
     /**
      * Claude Code settings layers loaded by agent steps. Default [] so skills come from ONE place, the platform
      * knowledge registry (imported from repos and ~/.claude/skills), instead of also being auto-loaded by Claude Code.
@@ -236,7 +239,7 @@ const defaults: Config = {
     timeoutSeconds: 300,
   },
   learning: { detectChanges: true, maxRulesInPrompt: 20, maxSourceChars: 6000, evolveSkills: true },
-  agent: { settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
+  agent: { contextTokens: 24000, contextToolTimeoutMs: 10000, settingSources: [], inlineKnowledgeTokens: 8000, knowledgeIndexSize: 12, upstreamTokens: 12000 },
 };
 
 export let instanceIdentityExplicit = false;
