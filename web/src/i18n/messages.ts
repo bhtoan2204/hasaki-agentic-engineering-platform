@@ -1,3 +1,4 @@
+import { analyticsMessages } from "./analytics.ts";
 /** UI strings. Keys must exist in both locales. Status codes and routes are not keys here. */
 import { catalog } from "./catalog.ts";
 
@@ -282,8 +283,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
 };
 
 export const messages: Record<UiLocale, Record<string, string>> = {
-  vi: { ...baseMessages.vi, ...catalog.vi },
-  en: { ...baseMessages.en, ...catalog.en },
+  vi: { ...baseMessages.vi, ...catalog.vi, ...analyticsMessages.vi },
+  en: { ...baseMessages.en, ...catalog.en, ...analyticsMessages.en },
 };
 
 export function translate(locale: UiLocale, key: string, params?: Record<string, string | number>): string {

@@ -1,3 +1,4 @@
+import { AnalyticsInsights, ANALYTICS_TABS } from "./insights/AnalyticsInsights.tsx";
 import { EvaluationBenchmarks } from "./EvaluationBenchmarks.tsx";
 import { useState, type ReactNode } from "react";
 import {
@@ -129,10 +130,15 @@ type InsightsTab = "overview" | "quality" | "tools" | "failures" | "registry";
 const TAB_KEYS: InsightsTab[] = ["overview", "quality", "tools", "failures", "registry"];
 
 /** `tab` comes from the URL (#/insights/<tab>) so a tab can be linked and survives reloads. */
-export function InsightsPage({ tab: tabParam }: { tab?: string }) {
+export function InsightsPage({ tab }: { tab?: string }) {
+  if (!tab || ANALYTICS_TABS.includes(tab.split("?")[0] as typeof ANALYTICS_TABS[number])) return <AnalyticsInsights tabParam={tab}/>;
+  return <LegacyInsightsPage tab={tab}/>;
+}
+
+function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
   const { t } = useI18n();
   const tab: InsightsTab = TAB_KEYS.includes(tabParam as InsightsTab) ? (tabParam as InsightsTab) : "overview";
-  const setTab = (t: InsightsTab) => navigate(t === "overview" ? "/insights" : `/insights/${t}`);
+  const setTab = (t: InsightsTab) => navigate(`/insights/${t}`);
   const [days, setDays] = useState(30);
   const { data, error, loading, reload } = useApi<any>(`/api/metrics/summary?days=${days}`, [days]);
   const { data: tools } = useApi<any[]>("/api/tools");
@@ -192,6 +198,7 @@ export function InsightsPage({ tab: tabParam }: { tab?: string }) {
   return (
     <div className="ins">
       {header}
+      <a className="btn ghost sm" href="#/insights/health">{t("an.title")}</a>
       {error && <ErrorBox error={error} onRetry={reload} />}
 
       <div className="ins-stats">

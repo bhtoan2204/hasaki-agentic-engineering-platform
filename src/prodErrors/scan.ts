@@ -148,7 +148,10 @@ export function buildScanSpl(w: ScanWindow, namespaces = config.prodErrors.names
     `where lv IN (${LEVELS.map((l) => `"${l}"`).join(",")}) OR (isnull(lv) AND match(msg,"^(panic:|fatal error:)"))`,
     `eval day=if(${inWindow},"t","y")`,
     String.raw`eval sig=substr(msg . if(isnull(err), "", " :: " . err), 1, 400), sig=replace(sig,"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}","<uuid>"), sig=replace(sig,"\\b[0-9a-fA-F]{16,}\\b","<hex>"), sig=replace(sig,"\\b[A-Za-z0-9_-]*[0-9][A-Za-z0-9_-]*\\b","<n>"), sig=replace(sig,"\\s+"," "), sig=substr(sig,1,200)`,
-    `stats count(eval(day="t")) as today count(eval(day="y")) as yesterday min(eval(if(day="t",_time,null()))) as first max(_time) as last latest(msg) as sample latest(err) as err latest(caller) as caller latest(kubernetes.container_image) as image latest(request_id) as request_id latest(stacktrace) as stack latest(kubernetes.pod_name) as pod by ns svc lv sig`,
+    `eval analytics_hour=floor(_time/3600)*3600`,
+    `eventstats count AS analytics_hour_count by ns svc lv sig day analytics_hour`,
+    `eval analytics_hour_point=if(day="t", tostring(analytics_hour).":".tostring(analytics_hour_count), null())`,
+    `stats values(analytics_hour_point) as analytics_hourly count(eval(day="t")) as today count(eval(day="y")) as yesterday min(eval(if(day="t",_time,null()))) as first max(_time) as last latest(msg) as sample latest(err) as err latest(caller) as caller latest(kubernetes.container_image) as image latest(request_id) as request_id latest(stacktrace) as stack latest(kubernetes.pod_name) as pod by ns svc lv sig`,
     `where today>0`,
     `sort - today`,
     `head 300`,
@@ -210,6 +213,13 @@ export function toGroups(rows: any[], day: string) {
       signature,
       sample,
       detail: { err: str(r.err, 1000) || undefined, image: str(r.image, 300) || undefined, request_id: str(r.request_id, 100) || undefined, stack: str(r.stack, 2500) || undefined, pod: str(r.pod, 100) || undefined },
+      hourly: (Array.isArray(r.analytics_hourly) ? r.analytics_hourly : r.analytics_hourly ? [r.analytics_hourly] : []).flatMap((point: unknown) => {
+        const match = /^(\d+):(\d+)$/.exec(String(point));
+        if (!match) return [];
+        const epoch = Number(match[1]) * 1000, count = Number(match[2]);
+        if (!Number.isFinite(epoch) || epoch > 8.64e15 || !Number.isSafeInteger(count)) return [];
+        return [{ hour: new Date(epoch).toISOString(), count }];
+      }),
       day,
       today_count: today,
       yesterday_count: yesterday,
@@ -273,7 +283,7 @@ export async function runScan(trigger: "manual" | "schedule", now = new Date(), 
     const groups = toGroups(r.results, w.day);
     setPhase("save", 95);
     await withTx(async (c) => {
-      for (const g of groups)
+      for (const g of groups) {
         await q(
           c,
           `INSERT INTO prod_error_groups (fingerprint, namespace, service, level, caller, signature, sample, detail, day, today_count, yesterday_count, first_at, last_at, severity, score, reasons, last_scan_id)
@@ -283,6 +293,10 @@ export async function runScan(trigger: "manual" | "schedule", now = new Date(), 
              severity = excluded.severity, score = excluded.score, reasons = excluded.reasons, updated_at = now()`,
           [g.fingerprint, g.namespace, g.service, g.level, g.caller, g.signature, g.sample, json(g.detail), g.day, g.today_count, g.yesterday_count, g.first_at, g.last_at, g.severity, g.score, json(g.reasons), scan.id],
         );
+        await q(c, `INSERT INTO prod_error_observations(scan_id,fingerprint,event_count,baseline_count,first_at,last_at,severity,hourly)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(scan_id,fingerprint) DO NOTHING`,
+          [scan.id,g.fingerprint,g.today_count,g.yesterday_count,g.first_at,g.last_at,g.severity,json(g.hourly)]);
+      }
     });
     const warnings = (r.messages ?? []).filter((m: string) => !/^INFO/.test(m)).join("; ") || null;
     setPhase("notify", 98);

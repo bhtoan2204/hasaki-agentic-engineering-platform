@@ -767,13 +767,15 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       return null;
     }
     const { n } = (await one<{ n: number }>(c, "SELECT COALESCE(max(number), 0)::int + 1 AS n FROM workflow_step_attempts WHERE step_id = $1", [step.id]))!;
+    const contextPreparationStarted = performance.now();
     const input = await buildStepInput(c, run, step);
     const context = await resolveContext(c, run, step, input);
+    const contextPreparationMs = performance.now() - contextPreparationStarted;
     const attempt = (await one<AttemptRow>(
       c,
-      `INSERT INTO workflow_step_attempts (step_id, run_id, number, generation, status, job_id, fencing_token, worker, input, context_snapshot_id)
-       VALUES ($1, $2, $3, $4, 'RUNNING', $5, $6, $7, $8, $9) RETURNING *`,
-      [step.id, run.id, n, step.generation, j.id, j.fencing_token, worker, json(input), context.snapshot_id],
+      `INSERT INTO workflow_step_attempts (step_id, run_id, number, generation, status, job_id, fencing_token, worker, input, context_snapshot_id, metrics)
+       VALUES ($1, $2, $3, $4, 'RUNNING', $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [step.id, run.id, n, step.generation, j.id, j.fencing_token, worker, json(input), context.snapshot_id, json({ context_preparation_ms: contextPreparationMs })],
     ))!;
     await setStepStatus(c, step, "RUNNING", { current_attempt_id: attempt.id, attempt_count: step.attempt_count + 1, started_at: new Date(), error: null }, `attempt #${n}`);
     return { run, step, attempt, input, context };

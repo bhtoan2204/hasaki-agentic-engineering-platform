@@ -1,3 +1,5 @@
+import { engineeringAnalytics } from "./analytics/index.ts";
+import { updateIncidentLifecycle } from "./analytics/health.ts";
 import { publishBuiltinSuite, listSuites, createEvaluation, evaluationList, evaluationDetail, cancelEvaluation, createComparison, comparisonDetail } from "../eval/service.ts";
 import { status as codeIndexStatus, enqueue as enqueueCodeIndex } from "../codeIntelligence/indexer.ts";
 import { hybridRank } from "../codeIntelligence/search.ts";
@@ -160,6 +162,8 @@ function redactGroup(group: any, actor: Actor, showAll: boolean) {
 const latestRun = (workItemId: number) => one<{ id: number; status: string }>(pool, "SELECT id, status FROM workflow_runs WHERE work_item_id = $1 ORDER BY id DESC LIMIT 1", [workItemId]);
 
 export const routes: Route[] = [
+  ["GET", /^\/api\/analytics\/(health|usage|performance|workflows|options)$/, c => engineeringAnalytics(c.actor,c.url,c.p[0])],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/lifecycle$/, c => updateIncidentLifecycle(c.actor,c.p[0],c.body)],
   // ------------------------------------------------------------ meta
   [
     "GET",
