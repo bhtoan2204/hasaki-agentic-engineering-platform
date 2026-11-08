@@ -9,6 +9,7 @@ export interface AntigravityTokens {
   output?: number | null;
   reasoning?: number | null;
   cache_read?: number | null;
+  cache_creation?: number | null;
 }
 
 export interface AntigravityEvent {
@@ -20,6 +21,10 @@ export interface AntigravityEvent {
   toolResult?: unknown;
   conversationId?: string;
   tokens?: AntigravityTokens;
+  /** Terminal result.usage is cumulative for the whole CLI session. */
+  cumulativeUsage?: boolean;
+  status?: string;
+  turns?: number;
   error?: string;
   raw: unknown;
 }
@@ -32,6 +37,7 @@ export interface AntigravityParseError {
 export class AntigravityStream {
   private decoder = new StringDecoder("utf8");
   private buf = "";
+  private readonly maxLineBytes = 16 * 1024 * 1024;
 
   push(chunk: Buffer | string): {
     events: AntigravityEvent[];
@@ -63,9 +69,17 @@ export class AntigravityStream {
 
     let nl = this.buf.indexOf("\n");
     while (nl >= 0) {
-      take(this.buf.slice(0, nl).replace(/\r$/, ""));
+      const line = this.buf.slice(0, nl).replace(/\r$/, "");
+      if (Buffer.byteLength(line) > this.maxLineBytes)
+        errors.push({ line: line.slice(0, 500), error: "NDJSON event exceeds the 16 MiB limit" });
+      else take(line);
       this.buf = this.buf.slice(nl + 1);
       nl = this.buf.indexOf("\n");
+    }
+
+    if (Buffer.byteLength(this.buf) > this.maxLineBytes) {
+      errors.push({ line: this.buf.slice(0, 500), error: "NDJSON event exceeds the 16 MiB limit" });
+      this.buf = "";
     }
 
     if (final && this.buf.trim()) {
@@ -93,11 +107,18 @@ function parseAntigravityLine(
     return { error: { line: line.slice(0, 500), error: "event has no type" } };
   }
 
-  const type = String(raw.type ?? raw.event_type ?? raw.kind ?? "message");
+  const protocolEvent = typeof raw.event === "string" ? raw.event : "";
+  const payload = protocolEvent === "step_update" ? raw.step_update ?? {} : protocolEvent === "result" ? raw.result ?? {} : raw;
+  const type = protocolEvent === "step_update"
+    ? `step_update.${String(payload.step_type ?? "unknown")}`
+    : protocolEvent || String(raw.type ?? raw.event_type ?? raw.kind ?? "message");
   let text: string | undefined = undefined;
   let thinking: string | undefined = undefined;
 
-  if (typeof raw.text === "string") text = raw.text;
+  if (typeof payload.text_delta === "string") text = payload.text_delta;
+  else if (typeof payload.response === "string") text = payload.response;
+  else if (typeof payload.text === "string") text = payload.text;
+  else if (typeof raw.text === "string") text = raw.text;
   else if (typeof raw.content === "string") text = raw.content;
   else if (typeof raw.delta?.text === "string") text = raw.delta.text;
   else if (typeof raw.message?.content === "string") text = raw.message.content;
@@ -108,11 +129,14 @@ function parseAntigravityLine(
     if (parts.length) text = parts.join("");
   }
 
-  if (typeof raw.thinking === "string") thinking = raw.thinking;
+  if (typeof payload.thinking === "string") thinking = payload.thinking;
+  else if (typeof raw.thinking === "string") thinking = raw.thinking;
   else if (typeof raw.delta?.thinking === "string")
     thinking = raw.delta.thinking;
 
   const conversationId =
+    payload.conversationId ??
+    payload.conversation_id ??
     raw.conversationId ??
     raw.conversation_id ??
     raw.sessionId ??
@@ -121,6 +145,7 @@ function parseAntigravityLine(
   // Extract usage / tokens
   let tokens: AntigravityTokens | undefined = undefined;
   const usage =
+    payload.usage ??
     raw.usage ??
     raw.metrics?.tokens ??
     raw.tokens ??
@@ -140,15 +165,19 @@ function parseAntigravityLine(
       cache_read: num(
         usage.cache_read_tokens ?? usage.cached_tokens ?? usage.cache_read,
       ),
+      cache_creation: num(usage.cache_creation_tokens ?? usage.cache_creation),
     };
   }
 
-  const error = raw.error
-    ? typeof raw.error === "string"
-      ? raw.error
-      : raw.error.message
-        ? String(raw.error.message)
-        : JSON.stringify(raw.error)
+  const rawError = payload.error ?? raw.error;
+  const error = protocolEvent === "result" && payload.status === "ERROR"
+    ? (typeof rawError === "string" ? rawError : String(rawError?.message ?? "Antigravity returned ERROR"))
+    : rawError
+    ? typeof rawError === "string"
+      ? rawError
+      : rawError.message
+        ? String(rawError.message)
+        : JSON.stringify(rawError)
     : undefined;
 
   return {
@@ -159,10 +188,12 @@ function parseAntigravityLine(
       conversationId:
         typeof conversationId === "string" ? conversationId : undefined,
       tokens,
-      tool: raw.toolCall?.name ?? raw.tool_call?.name ?? raw.tool ?? undefined,
-      toolArgs:
-        raw.toolCall?.args ?? raw.tool_call?.args ?? raw.args ?? undefined,
-      toolResult: raw.result ?? raw.toolResult ?? undefined,
+      cumulativeUsage: protocolEvent === "result",
+      status: typeof payload.status === "string" ? payload.status : undefined,
+      turns: num(payload.num_turns) ?? undefined,
+      tool: payload.tool_info?.name ?? payload.tool_info?.tool_name ?? raw.toolCall?.name ?? raw.tool_call?.name ?? raw.tool ?? undefined,
+      toolArgs: payload.tool_info?.parameters ?? raw.toolCall?.args ?? raw.tool_call?.args ?? raw.args ?? undefined,
+      toolResult: payload.tool_info ?? raw.result ?? raw.toolResult ?? undefined,
       error,
       raw,
     },

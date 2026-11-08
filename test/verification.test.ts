@@ -34,7 +34,7 @@ test("context isolation: the verifier never sees the author's claims, only requi
 
 test("verdicts: structured, legacy approved mapped, malformed or unactionable never silently pass", () => {
   assert.equal(normalizeVerdict({ verdict: "pass", findings: [] }).verdict, "PASS");
-  assert.equal(normalizeVerdict({ approved: false, findings: [{ severity: "high", file: "a.go", line: 3, issue: "bug" }] }).verdict, "FAIL");
+  assert.equal(normalizeVerdict({ approved: false, findings: [{ severity: "high", file: "a.go", line: 3, issue: "bug", suggestion: "correct the validation" }] }).verdict, "FAIL");
   assert.equal(normalizeVerdict({ approved: true }).verdict, "PASS");
   const junk = normalizeVerdict({ summary: "looks fine" });
   assert.equal(junk.verdict, "BLOCKED", "no verdict → BLOCKED, not PASS");
@@ -44,12 +44,13 @@ test("verdicts: structured, legacy approved mapped, malformed or unactionable ne
 });
 
 test("verdicts: a FAIL is never converted into a PASS; low-severity-only findings have explicit handling", () => {
-  const lowFail = normalizeVerdict({ verdict: "FAIL", findings: [{ severity: "low", file: "a.go", line: 4, explanation: "naming" }] });
+  const lowFail = normalizeVerdict({ verdict: "FAIL", findings: [{ severity: "low", file: "a.go", line: 4, explanation: "naming", evidence: "the exported name does not match the package convention" }] });
   assert.equal(lowFail.verdict, "FAIL", "the verifier's FAIL stands even when every finding is low");
   assert.match(findingsFeedback(lowFail, 1, 2), /\[low\] a\.go:4 — naming/, "low-only FAIL repair feedback lists those findings (not an empty request)");
   const lowPass = normalizeVerdict({ verdict: "PASS", findings: [{ severity: "low", file: "a.go", explanation: "nit" }] });
   assert.deepEqual([lowPass.verdict, lowPass.findings.length], ["PASS", 1], "PASS with low findings: advisory notes kept");
   for (const v of ["FAIL", "fail", "BLOCKED"]) assert.notEqual(normalizeVerdict({ verdict: v, findings: [{ severity: "low", file: "x" }] }).verdict, "PASS");
+  assert.equal(normalizeVerdict({ verdict: "FAIL", findings: [{ severity: "high", file: "a.go", issue: "bug" }] }).verdict, "BLOCKED", "findings without evidence or a repair suggestion cannot trigger code changes");
 });
 
 test("verdicts: malformed or contradictory verifier output is BLOCKED, never success", () => {
@@ -157,7 +158,23 @@ test("profiles: STANDARD makes reviews independent (opt-out respected), DEEP req
   assert.deepEqual([r.independent, r.strict], [true, true]);
   assert.ok(deep.changes.some((x) => x.step === "review" && /required/.test(x.detail)));
   assert.equal(applyProfile(fi, "FAST").spec.steps.some((s) => s.key === "review"), false);
-  assert.equal(fi.steps.find((s) => s.key === "review")!.config.independent, undefined, "the stored definition is not mutated");
+  assert.equal(fi.steps.find((s) => s.key === "review")!.config.independent, true, "profile application leaves the explicitly published setting unchanged");
+});
+
+test("published feature template enables a bounded independent review repair loop; review-only templates stay read-only", () => {
+  const feature = validateSpec(TEMPLATES.find((t) => t.key === "feature-implementation")!.spec);
+  const review = feature.steps.find((s) => s.key === "review")!;
+  assert.equal(review.config.independent, true);
+  assert.equal(review.config.max_repairs, 2);
+  assert.equal(feature.feedback_step, "implement");
+
+  for (const key of ["bug-investigation", "refactoring", "code-review"]) {
+    const spec = validateSpec(TEMPLATES.find((t) => t.key === key)!.spec);
+    const verifiers = spec.steps.filter((s) => s.config.independent === true);
+    assert.deepEqual(verifiers, [], `${key} must not get an implicit repair loop`);
+  }
+  const codeReview = validateSpec(TEMPLATES.find((t) => t.key === "code-review")!.spec);
+  assert.ok(codeReview.steps.some((s) => s.type === "human_approval"), "code-review fixes remain behind explicit approval");
 });
 
 test("model routing: step config > profile/role routing > '*' > global default; verifiers route separately", async () => {

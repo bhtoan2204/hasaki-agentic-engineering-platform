@@ -57,10 +57,13 @@ const FIX_FROM_REVIEW = {
 };
 
 const REVIEW = {
+  independent: true,
+  max_repairs: 2,
   instructions:
     "Review the diff of every workspace branch against origin/$BASE_BRANCH (git diff, read-only). Check correctness, the " +
-    "approved plan, coding standards and security policies in your context. Report findings; do not modify code.",
-  output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, suggestion }], summary }",
+    "approved plan, coding standards and security policies in your context. For every finding include a precise file/line, " +
+    "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. Report findings; do not modify code.",
+  output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
   workspace_read: true,
   // Scope + curated per-language rules from Alibaba OpenCodeReview (delegation mode, no extra model/API key).
   open_code_review: true,

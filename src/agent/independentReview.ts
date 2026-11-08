@@ -89,6 +89,10 @@ export function normalizeVerdict(raw: any): VerdictOutput {
     return blocked(`contradictory verifier output: verdict ${verdict} but approved=${o.approved}`, findings);
   if (!verdict && typeof o.approved === "boolean") verdict = o.approved ? "PASS" : "FAIL";
   if (!verdict) return blocked("the verifier returned no PASS/FAIL/BLOCKED verdict", findings);
+  if (verdict === "FAIL") {
+    const insufficient = findings.find((f) => !f.file.trim() || !f.explanation.trim() || !f.evidence.trim());
+    if (insufficient) return blocked("FAIL findings must include a file, an explanation, and concrete evidence or a repair suggestion", findings);
+  }
   const serious = findings.filter((f) => f.severity !== "low");
   if (verdict === "PASS" && serious.length) return blocked(`contradictory verifier output: PASS with ${serious.length} high/medium finding(s)`, findings);
   if (verdict === "FAIL" && !findings.length) return blocked("FAIL without any finding — nothing to repair", findings);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Fake `agy` CLI for deterministic unit and integration tests.
 // Behaves like Google Antigravity CLI for capabilities discovery (--version, --help, models)
-// and headless execution (-p / --output-format stream-json).
+// and headless execution through the documented stream-json stdin protocol.
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,11 +25,10 @@ if (argv.includes("--help") && !argv.includes("-p") && !argv.includes("--print")
 Options:
   -p, --print                    Run in non-interactive print mode
   --output-format <format>       Output format: text, json, stream-json
-  --input-format <format>        Input format: text, json
+  --input-format <format>        Input format: text, stream-json
   --model <model>                Model identifier to use
   --effort <effort>              Reasoning effort: low, medium, high, xhigh, max
   --sandbox                      Run inside sandbox isolation
-  --dangerously-skip-permissions Automatically approve all tool permissions
   --conversation <id>            Resume existing conversation session
   --print-timeout <ms>           Maximum print execution timeout in milliseconds
   --add-dir <path>               Add workspace directory
@@ -52,47 +51,24 @@ gpt-oss-120b-medium`);
   process.exit(0);
 }
 
-// Must be headless print mode
-const printArg = argv.find(
-  (a) => a === "-p" || a.startsWith("-p=") || a === "--print" || a.startsWith("--print="),
-);
-if (!printArg) {
-  console.error("Unknown command or missing -p flag: " + argv.join(" "));
+if (!argv.includes("--input-format") || argv[argv.indexOf("--input-format") + 1] !== "stream-json" ||
+    !argv.includes("--output-format") || argv[argv.indexOf("--output-format") + 1] !== "stream-json") {
+  console.error("Expected --input-format stream-json and --output-format stream-json");
   process.exit(2);
 }
-
-// Validate that -p did not take "--output-format" as prompt
-const pIndex = argv.indexOf("-p");
-if (pIndex >= 0 && argv[pIndex + 1] === "--output-format") {
-  console.error(
-    'Error: -p took "--output-format" as its prompt, so the intended prompt was left as an argument and ignored. Attach the prompt to the flag (-p=\'your prompt\') and move --output-format elsewhere on the command line.',
-  );
-  process.exit(2);
-}
-
+if (mode === "epipe") process.exit(0);
+let stdinText = "";
+for await (const chunk of process.stdin) stdinText += chunk.toString("utf8");
 let prompt = "";
-if (printArg.startsWith("-p=")) {
-  prompt = printArg.slice(3);
-} else if (printArg.startsWith("--print=")) {
-  prompt = printArg.slice(8);
-}
-
-// Strip outer quotes if any
-if (
-  (prompt.startsWith("'") && prompt.endsWith("'")) ||
-  (prompt.startsWith('"') && prompt.endsWith('"'))
-) {
-  prompt = prompt.slice(1, -1);
-}
-
-if (!prompt && process.stdin.readable) {
-  process.stdin.setEncoding("utf8");
-  process.stdin.on("data", (c) => (prompt += c));
-  await new Promise((r) => {
-    if (process.stdin.readableEnded) return r();
-    process.stdin.on("end", r);
-    setTimeout(r, 20);
-  });
+try {
+  const rows = stdinText.trimEnd().split("\n");
+  if (rows.length !== 1) throw new Error("expected exactly one NDJSON input event");
+  const input = JSON.parse(rows[0]);
+  if (input.event !== "user" || typeof input.message?.content !== "string") throw new Error("invalid user event");
+  prompt = input.message.content;
+} catch (e) {
+  console.error(`invalid stream-json stdin: ${e.message}`);
+  process.exit(2);
 }
 
 let resumeId = null;
@@ -112,6 +88,7 @@ log({
     DATABASE_URL: !!process.env.DATABASE_URL,
     AUTH_SECRET: !!process.env.AUTH_SECRET,
     BROKER: !!process.env.PLATFORM_BROKER_TOKEN,
+    containsPrompt: Object.values(process.env).some((v) => v === prompt || (prompt.length > 1000 && v?.includes(prompt.slice(0, 1000)))),
   },
 });
 

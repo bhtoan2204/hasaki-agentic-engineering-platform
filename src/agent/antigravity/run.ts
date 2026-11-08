@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { redactSecrets } from "../../integrations/redact.ts";
 import { antigravityConfig } from "../../config.ts";
 import { pool, one, q } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
@@ -48,6 +49,106 @@ export interface AntigravityTurnInput {
   resumeId?: string;
 }
 
+const PROMPT_CHUNK_CHARS = 16 * 1024;
+const MAX_RESPONSE_CHARS = 8 * 1024 * 1024;
+
+function processError(message: string) {
+  return Object.assign(new Error(message), { code: "AGY_INPUT_CLOSED" });
+}
+
+function waitForDrain(child: ChildProcess, signal?: AbortSignal): Promise<void> {
+  const stdin = child.stdin;
+  if (!stdin) return Promise.reject(processError("Antigravity stdin is unavailable"));
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stdin.removeListener("drain", drained);
+      stdin.removeListener("error", failed);
+      stdin.removeListener("close", closed);
+      child.removeListener("close", exited);
+      signal?.removeEventListener("abort", aborted);
+    };
+    const done = (error?: Error) => {
+      cleanup();
+      error ? reject(error) : resolve();
+    };
+    const drained = () => done();
+    const failed = (error: Error) => done(error);
+    const closed = () => done(processError("Antigravity closed stdin before the prompt was sent"));
+    const exited = () => done(processError("Antigravity exited before the prompt was sent"));
+    const aborted = () => done(processError("Antigravity prompt write was aborted"));
+    stdin.once("drain", drained);
+    stdin.once("error", failed);
+    stdin.once("close", closed);
+    child.once("close", exited);
+    signal?.addEventListener("abort", aborted, { once: true });
+    if (signal?.aborted) aborted();
+  });
+}
+
+async function writeAntigravityPrompt(child: ChildProcess, prompt: string, signal?: AbortSignal) {
+  const stdin = child.stdin;
+  if (!stdin) throw processError("Antigravity stdin is unavailable");
+  let inputFailure: Error | undefined;
+  // Always observe EPIPE, including writes that do not reach the backpressure path.
+  stdin.once("error", (error) => { inputFailure = error; });
+  const write = async (chunk: string) => {
+    if (inputFailure) throw inputFailure;
+    if (signal?.aborted) throw processError("Antigravity prompt write was aborted");
+    if (stdin.destroyed || child.exitCode !== null || child.signalCode !== null)
+      throw processError("Antigravity exited before the prompt was sent");
+    if (!stdin.write(chunk)) await waitForDrain(child, signal);
+  };
+
+  // Stream JSON escaping in bounded pieces so the full serialized prompt is never duplicated in memory.
+  await write('{"event":"user","message":{"content":"');
+  for (let offset = 0; offset < prompt.length; offset += PROMPT_CHUNK_CHARS) {
+    const piece = prompt.slice(offset, offset + PROMPT_CHUNK_CHARS);
+    await write(JSON.stringify(piece).slice(1, -1));
+  }
+  await write('"}}\n');
+  if (signal?.aborted) throw processError("Antigravity prompt write was aborted");
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      stdin.removeListener("finish", finished);
+      stdin.removeListener("error", failed);
+      stdin.removeListener("close", closed);
+      child.removeListener("close", exited);
+      signal?.removeEventListener("abort", aborted);
+    };
+    const done = (error?: Error) => {
+      cleanup();
+      error ? reject(error) : resolve();
+    };
+    const finished = () => done();
+    const failed = (error: Error) => done(error);
+    const closed = () => done(processError("Antigravity closed stdin before the prompt was flushed"));
+    const exited = () => done(processError("Antigravity exited before the prompt was flushed"));
+    const aborted = () => done(processError("Antigravity prompt write was aborted"));
+    stdin.once("finish", finished);
+    stdin.once("error", failed);
+    stdin.once("close", closed);
+    child.once("close", exited);
+    signal?.addEventListener("abort", aborted, { once: true });
+    if (signal?.aborted) return aborted();
+    stdin.end();
+  });
+}
+
+function killAntigravity(child: ChildProcess) {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    try { child.kill("SIGTERM"); } catch {}
+  }
+  const force = setTimeout(() => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} }
+  }, 5000);
+  force.unref();
+  child.once("close", () => clearTimeout(force));
+}
+
 let activeRuns = 0;
 const waitingQueue: Array<() => void> = [];
 
@@ -87,8 +188,6 @@ function releaseSlot(max: number) {
 
 /** Pure helper to build argv for `agy` execution. */
 export function buildAntigravityArgs(opts: {
-  prompt?: string;
-  promptFile?: string;
   model?: string;
   effort?: string;
   sandbox?: boolean;
@@ -96,19 +195,17 @@ export function buildAntigravityArgs(opts: {
   conversationId?: string;
   additionalDirs?: string[];
 }): string[] {
-  // Move --output-format elsewhere on the command line, away from -p
   const args = [
     "--output-format",
     "stream-json",
     "--input-format",
-    "text",
-    "--dangerously-skip-permissions",
+    "stream-json",
   ];
   if (opts.model) args.push("--model", opts.model);
   if (opts.effort) args.push("--effort", opts.effort);
   if (opts.sandbox !== false) args.push("--sandbox");
   if (opts.timeoutSeconds && opts.timeoutSeconds > 0) {
-    args.push("--print-timeout", `${opts.timeoutSeconds}s`);
+    args.push("--print-timeout", String(opts.timeoutSeconds * 1000));
   }
   if (opts.conversationId) {
     args.push("--conversation", opts.conversationId);
@@ -117,12 +214,6 @@ export function buildAntigravityArgs(opts: {
     for (const d of opts.additionalDirs) {
       if (d) args.push("--add-dir", d);
     }
-  }
-  // Attach the prompt directly to the -p flag: -p=prompt
-  if (opts.prompt != null) {
-    args.push(`-p=${opts.prompt}`);
-  } else {
-    args.push("-p");
   }
   return args;
 }
@@ -214,7 +305,6 @@ export async function antigravityAgentTurn(
     const timeoutSec = Math.floor(timeoutMs / 1000);
 
     const args = buildAntigravityArgs({
-      prompt: input.prompt,
       model: input.model || undefined,
       effort: input.effort || undefined,
       sandbox: cfg.sandbox,
@@ -236,6 +326,10 @@ export async function antigravityAgentTurn(
       resume_session: conversationId ?? null,
     });
 
+    if (input.ctx.signal.aborted) {
+      return { isError: true, text: "canceled", assistantTurns: 0, failure: "CANCELED" };
+    }
+
     child = spawn(cfg.bin, args, {
       cwd: input.cwd,
       env,
@@ -245,41 +339,13 @@ export async function antigravityAgentTurn(
 
     if (child.pid) childGroups.add(child.pid);
 
-    const onAbort = () => {
-      if (child?.pid) {
-        try {
-          process.kill(-child.pid, "SIGTERM");
-        } catch {
-          try {
-            child.kill("SIGTERM");
-          } catch {}
-        }
-        setTimeout(() => {
-          if (child?.pid) {
-            try {
-              process.kill(-child.pid, "SIGKILL");
-            } catch {
-              try {
-                child.kill("SIGKILL");
-              } catch {}
-            }
-          }
-        }, 5000).unref();
-      }
-    };
-
-    input.ctx.signal.addEventListener("abort", onAbort, { once: true });
-
-    timer = setTimeout(() => {
-      onAbort();
-    }, timeoutMs);
-
-    // Close child stdin since prompt is attached to -p flag
-    child.stdin?.end();
-
     const parser = new AntigravityStream();
     let pendingLogs = Promise.resolve();
     let stderr = "";
+    let streamError: Error | undefined;
+    let spawnError: Error | undefined;
+    let timedOut = false;
+    let inputError: Error | undefined;
 
     const handleEvent = async (ev: AntigravityEvent) => {
       if (ev.conversationId && ev.conversationId !== conversationId) {
@@ -297,10 +363,14 @@ export async function antigravityAgentTurn(
         ).catch(() => {});
       }
 
-      if (ev.text) {
-        assistantTurns++;
-        fullText += ev.text;
-        await input.ctx.log("agent", ev.text, {
+      if (ev.type === "result") {
+        assistantTurns = ev.turns ?? 1;
+        if (ev.text != null) fullText = ev.text.slice(0, MAX_RESPONSE_CHARS);
+      } else if (ev.text) {
+        if (!ev.type.startsWith("step_update.")) assistantTurns++;
+        const remaining = MAX_RESPONSE_CHARS - fullText.length;
+        if (remaining > 0) fullText += ev.text.slice(0, remaining);
+        await input.ctx.log("agent", ev.text.slice(0, Math.max(0, remaining)), {
           provider: "antigravity",
           model,
         });
@@ -327,42 +397,43 @@ export async function antigravityAgentTurn(
       if (ev.tokens && input.metrics) {
         if (!input.metrics.tokens) {
           input.metrics.tokens = {
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_creation: 0,
-            reasoning_output: 0,
+            input: null,
+            output: null,
+            cache_read: null,
+            cache_creation: null,
+            reasoning_output: null,
           };
         }
         const tok = input.metrics.tokens;
-        if (ev.tokens.input != null)
-          tok.input = (tok.input ?? 0) + ev.tokens.input;
-        if (ev.tokens.output != null)
-          tok.output = (tok.output ?? 0) + ev.tokens.output;
-        if (ev.tokens.reasoning != null)
-          tok.reasoning_output =
-            (tok.reasoning_output ?? 0) + ev.tokens.reasoning;
-        if (ev.tokens.cache_read != null)
-          tok.cache_read = (tok.cache_read ?? 0) + ev.tokens.cache_read;
+        const update = (key: "input" | "output" | "reasoning_output" | "cache_read" | "cache_creation", value: number | null | undefined) => {
+          if (value == null) return;
+          tok[key] = ev.cumulativeUsage ? value : (tok[key] ?? 0) + value;
+        };
+        update("input", ev.tokens.input);
+        update("output", ev.tokens.output);
+        update("reasoning_output", ev.tokens.reasoning);
+        update("cache_read", ev.tokens.cache_read);
+        update("cache_creation", ev.tokens.cache_creation);
       }
 
-      if (ev.error) {
-        lastError = ev.error;
-      }
+      if (ev.error || ev.status === "ERROR") lastError = ev.error || "Antigravity returned ERROR";
     };
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      // Keep provider output bounded by the stream's high-water mark while async audit logs flush.
+      child?.stdout?.pause();
       const { events, errors } = parser.push(chunk);
       for (const ev of events) {
-        pendingLogs = pendingLogs.then(() => handleEvent(ev));
+        pendingLogs = pendingLogs.then(() => handleEvent(ev)).catch((error) => { streamError ??= error as Error; });
       }
       for (const err of errors) {
         pendingLogs = pendingLogs.then(() =>
           input.ctx.log("system", `Antigravity stream: ${err.error}`, {
             provider: "antigravity",
           }),
-        );
+        ).catch((error) => { streamError ??= error as Error; });
       }
+      pendingLogs = pendingLogs.finally(() => child?.stdout?.resume());
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -370,27 +441,34 @@ export async function antigravityAgentTurn(
       if (stderr.length > 16000) stderr = stderr.slice(-16000);
     });
 
-    const exitCode = await new Promise<number | null>((resolve) => {
-      child?.on("error", (e) => {
-        stderr += `\n${e.message}`;
-        pendingLogs.then(() => resolve(null));
-      });
-      child?.on("close", (code) => {
-        pendingLogs.then(() => resolve(code));
-      });
+    const onAbort = () => { if (child) killAntigravity(child); };
+    input.ctx.signal.addEventListener("abort", onAbort, { once: true });
+    timer = setTimeout(() => { timedOut = true; onAbort(); }, timeoutMs);
+    if (input.ctx.signal.aborted) onAbort();
+
+    child.on("error", (error) => { spawnError = error; });
+    const exitPromise = new Promise<number | null>((resolve) => {
+      child!.once("close", resolve);
+      child!.once("error", (error) => { spawnError = error; resolve(null); });
     });
+    const writePromise = writeAntigravityPrompt(child, input.prompt, input.ctx.signal).catch((error) => {
+      inputError = error as Error;
+      if (!input.ctx.signal.aborted && !timedOut) onAbort();
+    });
+    const exitCode = await exitPromise;
+    await writePromise;
+    await pendingLogs;
 
     if (timer) clearTimeout(timer);
     input.ctx.signal.removeEventListener("abort", onAbort);
     if (child?.pid) childGroups.remove(child.pid);
 
     const tail = parser.flush();
-    for (const ev of tail.events) {
-      await handleEvent(ev);
-    }
+    for (const ev of tail.events) await handleEvent(ev);
+    for (const err of tail.errors) await input.ctx.log("system", `Antigravity stream: ${err.error}`, { provider: "antigravity" });
 
     if (stderr.trim()) {
-      await input.ctx.log("log", stderr.trim().slice(0, 4000), {
+      await input.ctx.log("log", redactSecrets(stderr.trim()).slice(0, 4000), {
         provider: "antigravity",
         stream: "stderr",
       });
@@ -422,7 +500,20 @@ export async function antigravityAgentTurn(
       };
     }
 
-    if (exitCode !== 0) {
+    if (timedOut) return { isError: true, text: "Antigravity timed out", assistantTurns, failure: "EXECUTION_TIMEOUT", submitted };
+
+    if (spawnError) return { isError: true, text: `Unable to start Antigravity: ${spawnError.message}`, assistantTurns, failure: "AGENT_ERROR", submitted };
+
+    if (inputError) {
+      const detail = inputError.message.includes("EPIPE") || inputError.message.includes("stdin")
+        ? `Antigravity exited before the prompt was fully sent (${inputError.message})`
+        : inputError.message;
+      return { isError: true, text: detail, assistantTurns, failure: classifyAntigravityError(detail), submitted };
+    }
+
+    if (streamError) return { isError: true, text: `Antigravity output handling failed: ${streamError.message}`, assistantTurns, failure: "AGENT_ERROR", submitted };
+
+    if (lastError || exitCode !== 0) {
       const errDetail =
         lastError || stderr.trim() || `agy exited with code ${exitCode}`;
       const failureCat = classifyAntigravityError(errDetail);
@@ -460,6 +551,7 @@ export async function antigravityComplete(
   tokens: Record<string, number | null> | null;
 }> {
   const cfg = antigravityConfig();
+  if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
   const cap = await antigravityCapabilities(false);
   if (!cap.ok) {
     throw new Error(
@@ -468,7 +560,6 @@ export async function antigravityComplete(
   }
 
   const args = buildAntigravityArgs({
-    prompt,
     model: cfg.model || undefined,
     effort: cfg.effort || undefined,
     sandbox: false,
@@ -478,14 +569,11 @@ export async function antigravityComplete(
   const child = spawn(cfg.bin, args, { env, stdio: ["pipe", "pipe", "pipe"] });
   if (child.pid) childGroups.add(child.pid);
 
-  const onAbort = () => {
-    try {
-      child.kill("SIGKILL");
-    } catch {}
-  };
+  const onAbort = () => killAntigravity(child);
   opts?.signal?.addEventListener("abort", onAbort, { once: true });
-
-  child.stdin?.end();
+  const timeoutMs = cfg.timeoutMs;
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; onAbort(); }, timeoutMs);
 
   let text = "";
   let stderr = "";
@@ -495,7 +583,9 @@ export async function antigravityComplete(
   child.stdout?.on("data", (chunk: Buffer) => {
     const { events } = parser.push(chunk);
     for (const ev of events) {
-      if (ev.text) text += ev.text;
+      if (ev.type === "result") {
+        if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
+      } else if (ev.text && text.length < MAX_RESPONSE_CHARS) text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
       if (ev.tokens) {
         tokens = {
           input: ev.tokens.input ?? null,
@@ -508,25 +598,37 @@ export async function antigravityComplete(
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString("utf8");
+    stderr = (stderr + chunk.toString("utf8")).slice(-16000);
   });
 
+  child.once("error", () => {});
+  const writePromise = writeAntigravityPrompt(child, prompt, opts?.signal).catch((error) => {
+    if (!opts?.signal?.aborted && !timedOut) onAbort();
+    return error as Error;
+  });
   const exitCode = await new Promise<number | null>((resolve) => {
     child.on("close", resolve);
     child.on("error", () => resolve(null));
   });
+  const inputError = await writePromise;
+  clearTimeout(timer);
 
   opts?.signal?.removeEventListener("abort", onAbort);
   if (child.pid) childGroups.remove(child.pid);
 
   const tail = parser.flush();
   for (const ev of tail.events) {
-    if (ev.text) text += ev.text;
+    if (ev.type === "result") {
+      if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
+    } else if (ev.text && text.length < MAX_RESPONSE_CHARS) text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
   }
 
+  if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
+  if (timedOut) throw new Error("Antigravity auxiliary completion timed out");
+  if (inputError) throw new Error(`Antigravity prompt delivery failed: ${inputError.message}`);
   if (exitCode !== 0) {
     throw new Error(
-      stderr.trim() ||
+      redactSecrets(stderr.trim()) ||
         `Antigravity auxiliary completion failed with exit code ${exitCode}`,
     );
   }

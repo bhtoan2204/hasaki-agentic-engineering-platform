@@ -29,10 +29,10 @@ export interface AntigravityCapability {
 const REQUIRED_FLAGS = [
   "--print",
   "--output-format",
+  "--input-format",
   "--model",
   "--effort",
   "--sandbox",
-  "--dangerously-skip-permissions",
   "--conversation",
 ];
 const NO_FALLBACK =

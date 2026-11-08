@@ -208,6 +208,25 @@ test("AntigravityStream handles split chunks, UTF-8 boundaries, and malformed li
   assert.equal(chunk3.events[1].tokens?.reasoning, 2);
 });
 
+test("AntigravityStream parses split documented stream-json events and cumulative result usage", () => {
+  const stream = new AntigravityStream();
+  const wire = [
+    JSON.stringify({ event: "init", conversation_id: "conv-stream" }),
+    JSON.stringify({ event: "step_update", step_update: { step_type: "agent_message", text_delta: "hello " } }),
+    JSON.stringify({ event: "step_update", step_update: { step_type: "agent_message", text_delta: "world" } }),
+    JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "hello world", num_turns: 1, usage: { input_tokens: 11, output_tokens: 7, cache_read_tokens: 3 } } }),
+  ].join("\n") + "\n";
+  const bytes = Buffer.from(wire);
+  const a = stream.push(bytes.subarray(0, 29));
+  const b = stream.push(bytes.subarray(29));
+  const events = [...a.events, ...b.events];
+  assert.equal(events[0].conversationId, "conv-stream");
+  assert.deepEqual(events.slice(1, 3).map((e) => e.text), ["hello ", "world"]);
+  assert.equal(events[3].type, "result");
+  assert.equal(events[3].cumulativeUsage, true);
+  assert.deepEqual(events[3].tokens, { input: 11, output: 7, reasoning: null, cache_read: 3, cache_creation: null });
+});
+
 test("classifyAntigravityError accurately identifies error classes", () => {
   assert.equal(classifyAntigravityError("Resource has been exhausted (quota limit reached)"), "QUOTA_EXHAUSTED");
   assert.equal(classifyAntigravityError("Google login required or expired credentials"), "AUTHENTICATION");
@@ -337,25 +356,20 @@ test("workspace config writes .agents/hooks.json and .agents/mcp_config.json, an
 
 test("buildAntigravityArgs builds correct noninteractive arguments without credentials", () => {
   const args = buildAntigravityArgs({
-    prompt: "inspect database",
     model: "gemini-3.8-flash-high",
     effort: "high",
     conversationId: "conv-123",
     sandbox: true,
   });
-  assert.ok(args.includes("-p=inspect database"));
   assert.ok(args.includes("--output-format"));
-  assert.ok(args.includes("stream-json"));
-  // Ensure -p is not followed by --output-format
-  const pIdx = args.findIndex((a) => a === "-p" || a.startsWith("-p="));
-  const outIdx = args.indexOf("--output-format");
-  assert.notEqual(pIdx + 1, outIdx, "-p must not take --output-format as its value");
+  assert.deepEqual(args.slice(0, 4), ["--output-format", "stream-json", "--input-format", "stream-json"]);
+  assert.ok(args.every((a) => !a.includes("inspect database")));
   assert.ok(args.includes("--model"));
   assert.ok(args.includes("gemini-3.8-flash-high"));
   assert.ok(args.includes("--effort"));
   assert.ok(args.includes("high"));
   assert.ok(args.includes("--sandbox"));
-  assert.ok(args.includes("--dangerously-skip-permissions"));
+  assert.ok(!args.includes("--dangerously-skip-permissions"), "unrestricted permission mode is never enabled by default");
   assert.ok(args.includes("--conversation"));
   assert.ok(args.includes("conv-123"));
 
@@ -418,7 +432,7 @@ function fakeCtx(signal: AbortSignal) {
   };
 }
 
-const turn = (mode: "analysis" | "coding", signal = new AbortController().signal) => {
+const turn = (mode: "analysis" | "coding", signal = new AbortController().signal, prompt = "Analyze requirements and produce contract", resumeId?: string) => {
   const dir = mkdtempSync(join(tmpdir(), "agy-turn-"));
   const f = fakeCtx(signal);
   const metrics = newMetrics("gemini-3.8-flash-high");
@@ -432,11 +446,45 @@ const turn = (mode: "analysis" | "coding", signal = new AbortController().signal
         mode,
         policy: mode === "analysis" ? analysisPolicy : codingPolicy,
         cwd: dir,
-        prompt: "Analyze requirements and produce contract",
+        prompt,
         metrics,
+        resumeId,
       }),
   };
 };
+
+test("Antigravity sends small and Unicode prompts through stdin only", async () => {
+  process.env.FAKE_AGY_MODE = "ok";
+  const prompt = "Tạo PR\n" + JSON.stringify({ escaped: "\"\\", emoji: "🧪" });
+  const t = turn("analysis", new AbortController().signal, prompt);
+  const result = await t.run();
+  assert.equal(result.isError, false);
+  const invocation = fakeLog().find((e) => Array.isArray(e.argv));
+  assert.equal(invocation.prompt, prompt);
+  assert.ok(!invocation.argv.some((arg: string) => arg.includes(prompt)));
+  assert.equal(invocation.env.containsPrompt, false);
+});
+
+test("Antigravity streams prompts larger than 128 KiB without argv growth", async () => {
+  process.env.FAKE_AGY_MODE = "ok";
+  const prompt = "large-🧪-prompt\n".repeat(12_000);
+  const t = turn("analysis", new AbortController().signal, prompt);
+  const result = await t.run();
+  assert.equal(result.isError, false);
+  const invocation = fakeLog().find((e) => Array.isArray(e.argv));
+  assert.equal(invocation.prompt, prompt);
+  assert.ok(invocation.argv.every((arg: string) => Buffer.byteLength(arg) < 4096));
+  assert.equal(invocation.env.containsPrompt, false);
+});
+
+test("Antigravity resume keeps the conversation ID while sending the continuation on stdin", async () => {
+  const t = turn("analysis", new AbortController().signal, "continue from checkpoint", "conv-existing");
+  const result = await t.run();
+  assert.equal(result.isError, false);
+  const invocation = fakeLog().find((e) => Array.isArray(e.argv));
+  assert.equal(invocation.resumeId, "conv-existing");
+  assert.ok(!invocation.argv.some((arg: string) => arg.includes("continue from checkpoint")));
+});
 
 test("antigravityAgentTurn successfully completes turn, collects tokens and does not invent cost", async () => {
   process.env.FAKE_AGY_MODE = "ok";
@@ -468,6 +516,37 @@ test("antigravityAgentTurn handles quota exhaustion with clear message", async (
   assert.match(r.text, /Google Gemini quota exhausted/);
 });
 
+test("Antigravity handles premature stdin close without duplicate invocation", async () => {
+  process.env.FAKE_AGY_MODE = "epipe";
+  const t = turn("analysis", new AbortController().signal, "x".repeat(300_000));
+  const r = await t.run();
+  assert.equal(r.isError, true);
+  assert.match(r.text, /prompt|stdin|exited/i);
+  assert.equal(fakeLog().filter((e) => Array.isArray(e.argv)).length, 0, "no second invocation is scheduled");
+});
+
+test("Antigravity aborts and times out a running CLI, and reports a missing CLI", async () => {
+  process.env.FAKE_AGY_MODE = "hang";
+  const aborter = new AbortController();
+  const aborted = turn("analysis", aborter.signal);
+  const abortRun = aborted.run();
+  setTimeout(() => aborter.abort(), 100);
+  const cancel = await abortRun;
+  assert.equal(cancel.failure, "CANCELED");
+
+  process.env.AGY_TIMEOUT_MS = "100";
+  const timed = await turn("analysis").run();
+  assert.equal(timed.failure, "EXECUTION_TIMEOUT");
+
+  process.env.AGY_BIN = "/definitely/missing/agy";
+  resetCapabilitiesCache();
+  const missing = await turn("analysis").run();
+  assert.equal(missing.isError, true);
+  assert.match(missing.text, /not found/i);
+  process.env.AGY_BIN = FAKE;
+  resetCapabilitiesCache();
+});
+
 test("antigravityAgentTurn handles user clarification (ask_user) through MCP bridge", async () => {
   process.env.FAKE_AGY_MODE = "ask";
   const t = turn("analysis");
@@ -485,6 +564,10 @@ test("antigravityComplete produces auxiliary completions and integrates with com
   const res = await antigravityComplete("Summarize this context");
   assert.equal(res.text, '{"summary": "quick evaluation result"}');
   assert.equal(res.tokens?.input, 25);
+  const auxInvocation = fakeLog().find((e) => Array.isArray(e.argv));
+  assert.equal(auxInvocation.prompt, "Summarize this context");
+  assert.ok(!auxInvocation.argv.some((arg: string) => arg.includes("Summarize this context")));
+  assert.equal(auxInvocation.env.containsPrompt, false);
 
   const runRes = await completeForRun(
     { agent_provider: "antigravity" } as any,
