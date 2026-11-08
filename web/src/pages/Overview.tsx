@@ -30,7 +30,8 @@ export function OverviewPage() {
     return () => clearInterval(t);
   }, [reloadM]);
 
-  const list = runs ?? [];
+  const list = Array.isArray(runs) ? runs : [];
+  const qList = Array.isArray(questions) ? questions : [];
   const active = list.filter((r) => ACTIVE.includes(r.status));
   const officeRun = active[0]?.id ?? null;
   const counts = {
@@ -42,11 +43,11 @@ export function OverviewPage() {
 
   return (
     <div className="ov">
-      <Hero active={active.length} waiting={(questions ?? []).length} />
+      <Hero active={active.length} waiting={qList.length} />
 
       <section aria-label={t("ov.activity")} className="grid4 ov-stats">
         <StatCard icon={Activity} tone="run" label={t("status.RUNNING")} value={runs ? counts.running : null} hint={active.length ? t("ov.activeRuns", { n: active.length }) : t("office.none")} onClick={() => navigate("/runs")} />
-        <StatCard icon={Inbox} tone="wait" label={t("ov.waitingYou")} value={runs ? counts.waiting : null} hint={t("ov.openQuestions", { n: (questions ?? []).length })} onClick={() => navigate("/questions")} />
+        <StatCard icon={Inbox} tone="wait" label={t("ov.waitingYou")} value={runs ? counts.waiting : null} hint={t("ov.openQuestions", { n: qList.length })} onClick={() => navigate("/questions")} />
         <StatCard icon={CheckCircle2} tone="ok" label={t("status.COMPLETED")} value={runs ? counts.completed : null} hint={t("ov.ofRecent", { n: list.length })} onClick={() => navigate("/runs")} />
         <StatCard icon={XCircle} tone="err" label={t("status.FAILED")} value={runs ? counts.failed : null} hint={t("ov.needsReview")} onClick={() => navigate("/runs")} />
       </section>
@@ -54,7 +55,7 @@ export function OverviewPage() {
       <div className="ov-main">
         <MiniOffice runId={officeRun} />
         <div className="stack">
-          <ActionInbox questions={questions ?? []} />
+          <ActionInbox questions={qList} />
           <HarnessHealth m={metrics} />
         </div>
       </div>
@@ -122,8 +123,9 @@ function MiniOffice({ runId }: { runId: number | null }) {
 
 function ActionInbox({ questions }: { questions: any[] }) {
   const { t } = useI18n();
+  const qList = Array.isArray(questions) ? questions : [];
   const byStep = new Map<string, any[]>();
-  for (const q of questions) byStep.set(`${q.run_id}/${q.step_key}`, [...(byStep.get(`${q.run_id}/${q.step_key}`) ?? []), q]);
+  for (const q of qList) byStep.set(`${q.run_id}/${q.step_key}`, [...(byStep.get(`${q.run_id}/${q.step_key}`) ?? []), q]);
   return (
     <section className="card ov-inbox">
       <div className="card-head"><Inbox size={18} color="var(--st-wait)" /><h4>{t("inbox.tip")}</h4><a className="small" href="#/questions">{t("ov.seeAll")}</a></div>
@@ -183,16 +185,17 @@ function HarnessHealth({ m }: { m: any }) {
 
 function RecentRuns({ runs }: { runs: any[] }) {
   const { t } = useI18n();
+  const runList = Array.isArray(runs) ? runs : [];
   return (
     <section className="card">
       <div className="card-head"><PlayCircle size={18} color="var(--brand)" /><h4>{t("ov.recent")}</h4><a className="small" href="#/runs">{t("ov.allRuns")}</a></div>
-      {!runs.length ? (
+      {!runList.length ? (
         <EmptyState title={t("runs.emptyTitle")} action={<a className="btn sm" href="#/work-items">{t("ov.start")}</a>}>{t("ov.firstRun")}</EmptyState>
       ) : (
         <ul className="ov-list">
-          {runs.map((r) => {
-            const steps = (r.steps ?? []) as Array<{ status: string }>;
-            const done = steps.filter((s) => ["COMPLETED", "SKIPPED"].includes(s.status)).length;
+          {runList.map((r) => {
+            const steps = (Array.isArray(r?.steps) ? r.steps : []) as Array<{ status: string }>;
+            const done = steps.filter((s) => ["COMPLETED", "SKIPPED"].includes(s?.status)).length;
             return (
               <li key={r.id}>
                 <a href={`#/runs/${r.id}`}>
@@ -218,11 +221,12 @@ function RecentRuns({ runs }: { runs: any[] }) {
 /** Verification outcomes of the coding attempts in the latest runs (from attempt metrics; real data only). */
 function RecentVerification({ runs }: { runs: any[] }) {
   const { t } = useI18n();
-  const ids = runs.map((r) => r.id).join(",");
+  const runList = Array.isArray(runs) ? runs : [];
+  const ids = runList.map((r) => r.id).join(",");
   const [rows, setRows] = useState<any[] | null>(null);
   useEffect(() => {
     let alive = true;
-    Promise.all(runs.slice(0, 6).map((r) => api<any>(`/api/runs/${r.id}`).catch(() => null))).then((details) => {
+    Promise.all(runList.slice(0, 6).map((r) => api<any>(`/api/runs/${r.id}`).catch(() => null))).then((details) => {
       if (!alive) return;
       const out: any[] = [];
       for (const d of details) {

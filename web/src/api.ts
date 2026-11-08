@@ -18,6 +18,7 @@ export function setAuthed(on: boolean) {
   if (!on) {
     csrf = "";
     supportView = false;
+    clearApiCache();
     close();
   }
 }
@@ -70,33 +71,112 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   return j as T;
 }
 
-/** Fetch data, refetch on demand. Keeps the previous data while reloading (no flicker). */
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+const apiCache = new Map<string, CacheEntry<any>>();
+const inFlight = new Map<string, Promise<any>>();
+
+export function clearApiCache() {
+  apiCache.clear();
+  inFlight.clear();
+}
+
+export function invalidateCache(prefix?: string) {
+  if (!prefix) {
+    apiCache.clear();
+    return;
+  }
+  for (const key of apiCache.keys()) {
+    if (key.includes(prefix)) {
+      apiCache.delete(key);
+    }
+  }
+}
+
+/** Fetch data, refetch on demand. Stale-while-revalidate: keeps previous data during background reload (no flicker). */
 export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null);
+  const scopedKey = path ? withScope(path) : null;
+  const cached = scopedKey ? apiCache.get(scopedKey) : undefined;
+
+  const [data, setDataState] = useState<T | null>(() => (cached ? (cached.data as T) : null));
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(!cached && !!path);
+  const [refreshing, setRefreshing] = useState<boolean>(!!cached && !!path);
   const seq = useRef(0);
+
+  // Sync cache when path/scopedKey changes
+  useEffect(() => {
+    if (scopedKey) {
+      const entry = apiCache.get(scopedKey);
+      if (entry) {
+        setDataState(entry.data as T);
+        setLoading(false);
+        setRefreshing(true);
+      } else {
+        setDataState((prev) => {
+          if (!prev) setLoading(true);
+          return prev;
+        });
+        setRefreshing(true);
+      }
+    } else {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [scopedKey]);
+
+  const setData = useCallback(
+    (d: T | null) => {
+      setDataState(d);
+      if (scopedKey && d !== null) {
+        apiCache.set(scopedKey, { data: d, timestamp: Date.now() });
+      }
+    },
+    [scopedKey],
+  );
+
   const reload = useCallback(async () => {
     if (!path) return;
+    const key = withScope(path);
     const n = ++seq.current;
+
+    setDataState((prev) => {
+      if (prev === null) setLoading(true);
+      else setRefreshing(true);
+      return prev;
+    });
+
     try {
-      const d = await api<T>(path);
+      let p = inFlight.get(key);
+      if (!p) {
+        p = api<T>(path);
+        inFlight.set(key, p);
+        p.finally(() => inFlight.delete(key));
+      }
+      const d = await p;
       if (n === seq.current) {
-        setData(d);
+        apiCache.set(key, { data: d, timestamp: Date.now() });
+        setDataState(d);
         setError(null);
       }
     } catch (e) {
       if (n === seq.current) setError((e as Error).message);
     } finally {
-      if (n === seq.current) setLoading(false);
+      if (n === seq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [path]);
+
   useEffect(() => {
-    setLoading(true);
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, ...deps]);
-  return { data, error, loading, reload, setData };
+
+  return { data, error, loading, refreshing, reload, setData };
 }
 
 export type LiveState = "sse" | "polling" | "connecting";

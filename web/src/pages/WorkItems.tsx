@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronRight, CircleHelp, Clock, Download, FileJson, FileText, FolderGit2, GitPullRequest, History, KeyRound, ListTodo, LogIn, PenLine, Pencil, Play, Plus,
   RefreshCw, ScanSearch, Settings2, Sparkles, StepForward, Workflow, Zap, Siren, ClipboardList, CheckCircle2, XCircle, AlertTriangle, GitCommit,
@@ -126,18 +126,45 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
   );
 }
 
-export function WorkItemsPage() {
+export function WorkItemsPage({ query }: { query?: string } = {}) {
   const { t } = useI18n();
-  const [source, setSource] = useState("");
-  const { data, error, loading, reload } = useApi<any[]>(`/api/work-items${source ? `?source=${source}` : ""}`, [source]);
+  const initParams = useMemo(() => new URLSearchParams(query || (location.hash.includes("?") ? location.hash.split("?")[1] : "")), [query]);
+  const [source, setSourceState] = useState(() => initParams.get("source") || "");
+  const [q, setQState] = useState(() => initParams.get("q") || "");
+  const [statusF, setStatusFState] = useState(() => initParams.get("status") || "");
+
+  const syncUrl = useCallback((newSource: string, newStatus: string, newQ: string) => {
+    const p = new URLSearchParams();
+    if (newSource) p.set("source", newSource);
+    if (newStatus) p.set("status", newStatus);
+    if (newQ.trim()) p.set("q", newQ.trim());
+    const qs = p.toString();
+    const newHash = `#/work-items${qs ? `?${qs}` : ""}`;
+    if (location.hash !== newHash) {
+      history.replaceState(null, "", newHash);
+    }
+  }, []);
+
+  const setSource = (s: string) => {
+    setSourceState(s);
+    syncUrl(s, statusF, q);
+  };
+  const setStatusF = (st: string) => {
+    setStatusFState(st);
+    syncUrl(source, st, q);
+  };
+  const setQ = (queryText: string) => {
+    setQState(queryText);
+    syncUrl(source, statusF, queryText);
+  };
+
+  const { data, error, loading, refreshing, reload } = useApi<any[]>(`/api/work-items${source ? `?source=${source}` : ""}`, [source]);
   const { data: meta } = useApi<any>("/api/meta");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
   const [form, setForm] = useState({ title: "", project: "", description: "" });
   const [paste, setPaste] = useState("");
   const [jiraKey, setJiraKey] = useState("");
   const [panel, setPanel] = useState<"" | "create" | "import">("");
-  const [q, setQ] = useState("");
-  const [statusF, setStatusF] = useState("");
   const importJson = async (src: string) => {
     let payload;
     try {
@@ -168,7 +195,7 @@ export function WorkItemsPage() {
         crumbs={[[t("nav.overview"), "#/overview"], [t("wi.title")]]}
         actions={
           <>
-            <button className="ghost icon" aria-label={t("wi.refreshList")} title={t("wi.refresh")} onClick={reload}><RefreshCw size={16} strokeWidth={2} /></button>
+            <button className="ghost icon" aria-label={t("wi.refreshList")} title={t("wi.refresh")} onClick={reload}><RefreshCw size={16} strokeWidth={2} className={refreshing ? "wi-spin" : undefined} /></button>
             <button className="ghost" onClick={() => setPanel("import")}><FileJson size={15} strokeWidth={2} />{t("wi.importBtn")}</button>
             <button onClick={() => setPanel("create")}><Plus size={16} strokeWidth={2.2} />{t("wi.new")}</button>
           </>

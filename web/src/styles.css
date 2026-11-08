@@ -162,6 +162,22 @@ tr.click { cursor: pointer; transition: background .12s } tr.click:hover td { ba
 .toast.err { background: var(--st-err) } .toast.ok { background: var(--st-ok) }
 @keyframes toastin { from { transform: translateY(8px); opacity: 0 } }
 .loading-screen { display: grid; place-items: center; padding: 60px 0; color: var(--muted); gap: 10px }
+.updating-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand), transparent);
+  background-size: 200% 100%;
+  animation: updating-shimmer 1.5s infinite linear;
+  z-index: 10;
+  pointer-events: none;
+}
+@keyframes updating-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
 
 /* ---------------------------------------------------------------- overlays: drawer / dialog / tooltip */
 .scrim { position: fixed; inset: 0; background: rgba(8, 12, 10, .45); backdrop-filter: blur(2px); z-index: 90; animation: fadein .15s }

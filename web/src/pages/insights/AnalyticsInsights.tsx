@@ -90,7 +90,7 @@ export function AnalyticsInsights({ tabParam }: { tabParam?: string }) {
       />
       {optionsError && <ErrorBox error={optionsError} onRetry={reloadOptions} />}
       <AnalyticsFilters query={query} options={options} onApply={change} />
-      <DashboardBody key={`${tab}?${query}`} tab={tab} query={query} onChange={change} />
+      <DashboardBody key={tab} tab={tab} query={query} onChange={change} />
     </div>
   );
 }

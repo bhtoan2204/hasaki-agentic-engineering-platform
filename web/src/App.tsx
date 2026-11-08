@@ -78,7 +78,8 @@ const LABEL = { ...Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.k
 export function App() {
   const { t, locale, setLocale } = useI18n();
   const hash = useHash();
-  const parts = hash.split("/").filter(Boolean);
+  const [pathPart, queryPart] = hash.split("?");
+  const parts = pathPart.split("/").filter(Boolean);
   const [theme, setTheme] = useTheme();
   const [navOpen, setNavOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -149,7 +150,7 @@ export function App() {
       } else page = <RunsPage />;
       break;
     case "work-items":
-      page = parts[1] ? <WorkItemDetail id={Number(parts[1])} /> : <WorkItemsPage />;
+      page = parts[1] ? <WorkItemDetail id={Number(parts[1])} /> : <WorkItemsPage query={queryPart} />;
       break;
     case "questions":
       page = <QuestionsPage />;
@@ -164,7 +165,7 @@ export function App() {
       page = <KnowledgePage itemKey={parts[1]} subKey={parts[2]} />;
       break;
     case "repositories":
-      page = <RepositoriesPage name={parts[1]} />;
+      page = <RepositoriesPage name={parts[1]} query={queryPart} />;
       break;
     case "prod-errors":
       page = <ProdErrorsPage focus={parts[1]} />;
@@ -248,7 +249,7 @@ export function App() {
             </button>
           </div>
         </header>
-        <main ref={pageRef} tabIndex={-1} className={full ? "page full" : "page"} key={`${me.id}:${support}:${parts.slice(0, 2).join("/")}`}>
+        <main ref={pageRef} tabIndex={-1} className={full ? "page full" : "page"} key={`${me.id}:${support}`}>
           {page}
         </main>
       </div>

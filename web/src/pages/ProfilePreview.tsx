@@ -42,8 +42,8 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
     };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const { nodes, edges } = useMemo(() => {
-    if (!data) return { nodes: [], edges: [] };
-    const steps = data.graph.steps;
+    const steps = Array.isArray(data?.graph?.steps) ? data.graph.steps : [];
+    if (!steps.length) return { nodes: [], edges: [] };
     const pos = autoLayout(steps);
     const nodes: Node<StepNodeData>[] = steps.map((s: any) => ({ id: s.key, type: "step", position: pos[s.key], data: { step: s } }));
     return { nodes, edges: toEdges(steps) };
@@ -68,15 +68,15 @@ export function ProfilePreview({ workflow, workItemId, repositories, inputs, val
       {data && (
         <div style={{ marginTop: 10 }}>
           <div className="small rv-chipline">
-            <ArrowRight size={13} color="var(--muted)" /> <ProfileBadge profile={data.profile.profile} /> <span className="muted">({t("pp.confidence", { n: data.profile.confidence })})</span> · {t("pp.steps", { n: data.graph.steps.length, total: data.published_steps })}
+            <ArrowRight size={13} color="var(--muted)" /> <ProfileBadge profile={data.profile?.profile} /> <span className="muted">({t("pp.confidence", { n: data.profile?.confidence })})</span> · {t("pp.steps", { n: data.graph?.steps?.length ?? 0, total: data.published_steps ?? 0 })}
             {data.report_step && t("pp.report")}
-            {data.reused_repositories && <> · {t("pp.reuse")} <b>{data.selected_repositories.join(", ")}</b></>}
+            {data.reused_repositories && <> · {t("pp.reuse")} <b>{(data.selected_repositories ?? []).join(", ")}</b></>}
           </div>
-          <ul className="small" style={{ margin: "4px 0", paddingLeft: 18 }}>{data.profile.reasons.map((r: string) => <li key={r}>{r}</li>)}</ul>
-          {data.profile.warnings.map((w: string) => <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}><AlertTriangle size={13} />{w}</div>)}
-          {data.changes.length > 0 && (
+          <ul className="small" style={{ margin: "4px 0", paddingLeft: 18 }}>{(data.profile?.reasons ?? []).map((r: string) => <li key={r}>{r}</li>)}</ul>
+          {(data.profile?.warnings ?? []).map((w: string) => <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}><AlertTriangle size={13} />{w}</div>)}
+          {(data.changes ?? []).length > 0 && (
             <div className="pp-changes">
-              {data.changes.map((c: any) => (
+              {(data.changes ?? []).map((c: any) => (
                 <div key={c.step + c.action}>
                   {c.action === "merged_into" ? <GitMerge size={13} /> : c.action === "removed" ? <Ban size={13} /> : <PenLine size={13} />} <span className="mono">{c.step}</span>{" "}
                   {c.action === "merged_into" ? <>{t("pp.merged")} <span className="mono">{c.into}</span></> : c.action === "removed" ? t("pp.removed") : t("pp.adjusted")} — <span className="muted">{c.detail}</span>

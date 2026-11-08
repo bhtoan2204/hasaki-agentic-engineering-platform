@@ -28,7 +28,7 @@ function Actions({ items }: { items?: string[] }) {
 }
 const repoDir = (r: any) => r.repository_url || r.path || r.name;
 
-export function RepositoriesPage({ name }: { name?: string }) {
+export function RepositoriesPage({ name, query }: { name?: string; query?: string } = {}) {
   const { t } = useI18n();
   const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
   const index = useApi<{ enabled: boolean; repositories: any[] }>(name ? "/api/repositories/index-status" : null);
@@ -37,8 +37,30 @@ export function RepositoriesPage({ name }: { name?: string }) {
   const [rank, setRank] = useState({ text: "", project: "" });
   const [ranked, setRanked] = useState<any>(null);
   const [creating, setCreating] = useState(false);
-  const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<"all" | "on" | "off">("all");
+  const initParams = useMemo(() => new URLSearchParams(query || (location.hash.includes("?") ? location.hash.split("?")[1] : "")), [query]);
+  const [q, setQState] = useState(() => initParams.get("q") || "");
+  const [filter, setFilterState] = useState<"all" | "on" | "off">(() => (initParams.get("filter") as "all" | "on" | "off") || "all");
+
+  const syncUrl = (newFilter: string, newQ: string) => {
+    if (name) return;
+    const p = new URLSearchParams();
+    if (newFilter && newFilter !== "all") p.set("filter", newFilter);
+    if (newQ.trim()) p.set("q", newQ.trim());
+    const qs = p.toString();
+    const newHash = `#/repositories${qs ? `?${qs}` : ""}`;
+    if (location.hash !== newHash) {
+      history.replaceState(null, "", newHash);
+    }
+  };
+
+  const setFilter = (f: "all" | "on" | "off") => {
+    setFilterState(f);
+    syncUrl(f, q);
+  };
+  const setQ = (queryText: string) => {
+    setQState(queryText);
+    syncUrl(filter, queryText);
+  };
   useEffect(() => {
     if (!data) return;
     const r = name ? data.find((x) => x.name === name) : null;

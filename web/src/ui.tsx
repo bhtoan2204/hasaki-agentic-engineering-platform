@@ -123,6 +123,10 @@ export function Loading({ label }: { label?: string }) {
     </div>
   );
 }
+export function UpdatingBar({ active }: { active?: boolean }) {
+  if (!active) return null;
+  return <div className="updating-bar" role="progressbar" aria-label="Updating" />;
+}
 export function Skeleton({ h = 14, w = "100%", r }: { h?: number; w?: number | string; r?: number }) {
   return <div className="skeleton" style={{ height: h, width: w, borderRadius: r }} aria-hidden />;
 }

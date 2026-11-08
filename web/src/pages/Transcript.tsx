@@ -138,7 +138,16 @@ export function Transcript({ attemptId, live, tick, provider = "claude" }: { att
         <span className="grow" />
         <label className="small muted" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t("tr.follow")}</label>
       </div>
-      <div ref={box} className="tr-feed">
+      <div
+        ref={box}
+        className="tr-feed"
+        onScroll={() => {
+          if (!box.current) return;
+          const isNearBottom = box.current.scrollHeight - box.current.scrollTop - box.current.clientHeight < 50;
+          if (!isNearBottom && follow) setFollow(false);
+          else if (isNearBottom && !follow) setFollow(true);
+        }}
+      >
         {visible.map((e) => <Entry key={e.id} e={e} result={e.kind === "tool" ? results[e.data?.id] : undefined} live={live} agent={agent} />)}
         {!events.length && <div className="muted small">{t("tr.empty")}</div>}
         {live && (
