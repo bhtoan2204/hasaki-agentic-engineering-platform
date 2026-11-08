@@ -436,7 +436,7 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) return null;
   const totals = data.totals;
-  const num = (n: number) => n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
+  const num = (n: number | null | undefined) => n == null ? "—" : n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
   const steps = Object.entries<any>(data.per_step);
   const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
   const C = { queue: "var(--st-idle)", claude: "var(--brand)", command: "var(--st-wait)", other: "var(--st-ok)", human: "color-mix(in srgb, var(--st-wait) 40%, transparent)" };
@@ -450,7 +450,7 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
         <div className="rv-mini"><span>{t("rv.humanWait")}</span><b>{fmtS(totals.human_ms)}</b></div>
       </div>
       <div className="rv-kv">
-        <span>{t(agentKey(data.agent_provider, true))}</span><span>{totals.cost_unknown ? t("rv.agentLineNoCost", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns }) : t("rv.claudeLine", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns, cost: totals.cost_usd.toFixed(3) })}</span>
+        <span>{t(agentKey(data.agent_provider, true))}</span><span>{totals.cost_unknown || totals.cost_usd == null ? t("rv.agentLineNoCost", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns }) : t("rv.claudeLine", { sessions: totals.claude_sessions, time: fmtS(totals.claude_ms), turns: totals.turns, cost: totals.cost_usd.toFixed(3) })}</span>
         <span>{t("common.tokens")}</span><span>{t("rv.tokens", { inn: num(totals.input_tokens), out: num(totals.output_tokens), cache: num(totals.cache_read_tokens) })}</span>
         <span>{t("common.tools")}</span><span>{t("rv.tools", { calls: totals.tool_calls, tool: fmtS(totals.tool_ms), command: fmtS(totals.command_ms), integration: totals.integration_calls, skills: totals.skills_loaded })}</span>
         <span>{t("rv.retries")}</span><span>{data.bottleneck ? t("rv.retrySlow", { retries: totals.retries, failed: totals.failed, step: data.bottleneck }) : t("rv.retryLine", { retries: totals.retries, failed: totals.failed })}</span>
