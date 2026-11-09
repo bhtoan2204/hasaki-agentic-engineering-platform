@@ -12,6 +12,7 @@ import {
 } from "./telemetry.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { summarizeValue } from "../context/plan.ts";
+import { evidenceSummary } from "./evidence.ts";
 import { config } from "../config.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
@@ -248,8 +249,30 @@ export async function buildHandoffPackage(
       JSON.stringify({ fingerprint: workspace.fingerprint }),
     ],
   );
+  // Verified context the next provider reuses instead of re-investigating: approved scope, evidence summary (high-risk
+  // items first), tests already executed and whether they still match the workspace, and what is still unverified.
+  const runSteps = await q<{ key: string; type: string; status: string; output: any; independent: boolean }>(
+    pool,
+    "SELECT key, type, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
+    [run.id],
+  );
+  const heads = Object.fromEntries(workspace.workspaces.map((w) => [w.repository, w.head]));
+  const approvedScope = [...runSteps].reverse().find((x) => x.status === "COMPLETED" && x.output?.approved_scope)?.output.approved_scope ?? null;
+  const testsExecuted = runSteps
+    .filter((x) => x.output?.tested_heads && (Array.isArray(x.output?.results) || x.output?.verification))
+    .map((x) => ({ step: x.key, passed: x.output.passed ?? x.output.verification?.passed ?? null, tested_heads: x.output.tested_heads, matches_current_workspace: Object.entries(heads).every(([r, h]) => x.output.tested_heads[r] === h) }));
+  const missing: string[] = [];
+  if (!testsExecuted.some((t) => t.passed === true && t.matches_current_workspace)) missing.push("no passing test run on the current workspace commits");
+  for (const v of runSteps.filter((x) => x.independent))
+    if (!(v.status === "COMPLETED" && v.output?.verdict === "PASS" && Object.entries(heads).every(([r, h]) => v.output?.verified_heads?.[r] === h))) missing.push(`independent verification "${v.key}" has no PASS on the current commits`);
+  if (workspace.workspaces.some((w) => w.status.trim())) missing.push("uncommitted changes in the workspace (not tested or reviewed as committed state)");
+  const evidence = evidenceSummary(Object.fromEntries(runSteps.map((x) => [x.key, { output: x.output, status: x.status }])));
   const content = redactContextValue({
     version: 1,
+    approved_scope: approvedScope ? { proposal_hash: approvedScope.proposal_hash, summary: approvedScope.summary, changes: approvedScope.changes, risk: approvedScope.risk } : null,
+    evidence_summary: evidence ? summarizeValue(evidence, 6000) : null,
+    tests_already_executed: testsExecuted,
+    missing_verification: missing,
     workspace_artifact_id: artifact.id,
     workflow_definition_key: run.definition_key,
     definition_version_id: run.definition_version_id,

@@ -74,6 +74,9 @@ import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
 import { getRunSummary } from "../report/runSummary.ts";
 import { parseBudget, runCost, withCosts, workItemCost } from "../report/cost.ts";
+import { recordRunOutcome, syncPullRequestStates } from "../learning/outcomes.ts";
+import { providerPerformance } from "../learning/providerPerformance.ts";
+import { proposeImprovements, proposeRegressionCase, qualityPatterns, regressionCases, reviewRegressionCase } from "../learning/patterns.ts";
 import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
@@ -321,6 +324,19 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/start$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), startPendingRun(num(c.p[0]), c.body.repositories, !!c.body.step_mode))],
   ["GET", /^\/api\/runs\/(\d+)\/changes$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runChanges(num(c.p[0])))],
   // Cost: totals, tokens, by step / model, wasted cost and budget; budget_usd null clears the run's own budget.
+  // Verified outcome ladder (proven states only) + deterministic failure categories; refresh=1 recomputes, sync_pr=1
+  // first asks the git provider for the PR lifecycle state (read-only).
+  ["GET", /^\/api\/runs\/(\d+)\/outcome$/, async (c) => {
+    const id = num(c.p[0]);
+    await requireRun(c.actor, id, support(c));
+    if (c.url.searchParams.get("sync_pr") === "1") await syncPullRequestStates({ runId: id });
+    if (c.url.searchParams.get("refresh") === "1" || c.url.searchParams.get("sync_pr") === "1") return (await recordRunOutcome(id)) ?? { pending: true, reason: "the run has not finished" };
+    return (await one(pool, "SELECT outcome FROM workflow_runs WHERE id = $1", [id]))?.outcome ?? (await recordRunOutcome(id)) ?? { pending: true, reason: "the run has not finished" };
+  }],
+  ["POST", /^\/api\/runs\/(\d+)\/regression-case$/, async (c) => {
+    await requireRun(c.actor, num(c.p[0]), support(c));
+    return proposeRegressionCase(num(c.p[0]), c.actor.id);
+  }],
   ["GET", /^\/api\/runs\/(\d+)\/cost$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runCost(num(c.p[0])))],
   ["POST", /^\/api\/runs\/(\d+)\/budget$/, async (c) => {
     await requireRun(c.actor, num(c.p[0]), support(c));
@@ -367,6 +383,20 @@ export const routes: Route[] = [
     return knowledge.create({ ...body, ownerId: shared ? null : actor.id, created_by: actor.username });
   }],
   // Knowledge evolution: change proposals (detected from runs, skill updates, repository conflicts) and their review.
+  // Continuous quality loop: patterns (own runs; support scope = all), reviewed proposals, regression candidates.
+  ["GET", /^\/api\/quality\/patterns$/, (c) => qualityPatterns({ days: Number(c.url.searchParams.get("days") ?? 30), ownerId: support(c) ? null : c.actor.id })],
+  ["GET", /^\/api\/quality\/providers$/, (c) => providerPerformance({ days: Number(c.url.searchParams.get("days") ?? 30), ownerId: support(c) ? null : c.actor.id })],
+  ["POST", /^\/api\/quality\/proposals$/, (c) => (requireAdmin(c.actor), proposeImprovements({ days: Number(c.body.days ?? 30), minRuns: c.body.min_runs, minTasks: c.body.min_tasks, ownerId: null, by: c.actor.username }))],
+  ["POST", /^\/api\/quality\/sync-pull-requests$/, (c) => (requireAdmin(c.actor), syncPullRequestStates({ limit: Number(c.body.limit ?? 50) }))],
+  ["GET", /^\/api\/regression-cases$/, (c) => regressionCases(support(c) ? null : c.actor.id)],
+  ["POST", /^\/api\/regression-cases\/(\d+)\/(accept|reject)$/, async (c) => {
+    requireAdmin(c.actor);
+    try {
+      return await reviewRegressionCase(num(c.p[0]), c.p[1] === "accept" ? "accepted" : "rejected", c.actor.username, c.body);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+  }],
   ["GET", /^\/api\/knowledge-proposals$/, (c) =>
     listProposals({
       ownerId: c.actor.id,

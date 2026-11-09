@@ -4,6 +4,7 @@ import {
   ANALYTICS_TABS,
 } from "./insights/AnalyticsInsights.tsx";
 import { EvaluationBenchmarks } from "./EvaluationBenchmarks.tsx";
+import { QualityLoop } from "./insights/QualityLoop.tsx";
 import { useState, type ReactNode } from "react";
 import {
   Activity,
@@ -762,6 +763,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
       )}
       {tab === "failures" && (
         <>
+          <QualityLoop />
           <Panel
             icon={AlertTriangle}
             title={t("ins.recent")}

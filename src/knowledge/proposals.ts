@@ -69,7 +69,7 @@ export interface ProposalInput {
   evidence: Evidence[];
   impacts?: Record<string, unknown>;
   validation?: { passed: boolean; checks: Array<{ name: string; passed: boolean; detail: string }> } | null;
-  sourceKind?: "workflow" | "skill_evolution" | "repository_import" | "manual";
+  sourceKind?: "workflow" | "skill_evolution" | "repository_import" | "manual" | "failure_pattern";
   sourceRunId?: number | null;
   createdBy?: string;
 }

@@ -84,6 +84,34 @@ export function classifyProfile(s: ProfileSignals, requested: ProfileChoice = "A
   return { profile: "STANDARD", requested, confidence: "low", reasons, warnings, signals };
 }
 
+export const COMPLEXITY_CLASSES = ["TRIVIAL", "STANDARD", "COMPLEX", "HIGH_RISK"] as const;
+export type ComplexityClass = (typeof COMPLEXITY_CLASSES)[number];
+export interface ComplexityDecision {
+  class: ComplexityClass;
+  source: "derived" | "user_override";
+  reasons: string[];
+  /** Always shown: a class is an execution hint from request signals, not a guarantee of the real task complexity. */
+  disclaimer: string;
+}
+
+/**
+ * Deterministic execution class for a run (no model call): request signals from the profile decision plus the work
+ * item's verified history (repeated failure categories in earlier outcomes). A user override wins and is recorded.
+ * HIGH_RISK keeps strict verification and human approval whatever the cost; TRIVIAL only marks work that the
+ * deterministic platform steps can carry with minimal agent context.
+ */
+export function classifyComplexity(d: Pick<ProfileDecision, "profile" | "confidence" | "signals">, history: { priorFailureRuns: number } = { priorFailureRuns: 0 }, override?: unknown): ComplexityDecision {
+  const disclaimer = "classification from request signals and history; not a guarantee of actual task complexity";
+  const o = String(override ?? "").toUpperCase();
+  if ((COMPLEXITY_CLASSES as readonly string[]).includes(o)) return { class: o as ComplexityClass, source: "user_override", reasons: [`set by the user: ${o}`], disclaimer };
+  const sig = d.signals as any;
+  if (sig.high_risk_term || sig.declared_risk === "high") return { class: "HIGH_RISK", source: "derived", reasons: [sig.high_risk_term ? `high-risk business area "${sig.high_risk_term}"` : "risk declared high"], disclaimer };
+  if (d.profile === "DEEP") return { class: "COMPLEX", source: "derived", reasons: ["deep profile: several repositories or a large change"], disclaimer };
+  if (history.priorFailureRuns >= 2) return { class: "COMPLEX", source: "derived", reasons: [`${history.priorFailureRuns} earlier runs of this work item had verified failure categories`], disclaimer };
+  if (d.profile === "FAST" && d.confidence === "high") return { class: "TRIVIAL", source: "derived", reasons: ["one known repository, narrow low-risk change"], disclaimer };
+  return { class: "STANDARD", source: "derived", reasons: ["no high-risk, multi-repository or narrow-change signal"], disclaimer };
+}
+
 export interface ProfileChange {
   step: string;
   action: "merged_into" | "removed" | "modified";

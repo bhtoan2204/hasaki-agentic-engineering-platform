@@ -1,3 +1,4 @@
+import { config } from "../config.ts";
 import { z } from "zod";
 import { q, one, withTx, type Db } from "../db/pool.ts";
 import { pool } from "../db/pool.ts";
@@ -75,6 +76,7 @@ export async function applyOptimizationDefaults(
   inputs: Record<string, unknown>,
   explicitProvider: boolean,
   profile: "FAST" | "STANDARD" | "DEEP" = "STANDARD",
+  complexity: string | null = null,
 ) {
   const category =
     typeof inputs.task_category === "string" ? inputs.task_category : null;
@@ -112,6 +114,9 @@ export async function applyOptimizationDefaults(
       if (p.decision.cost_availability !== "Known" && !p.allow_unknown_cost)
         throw new Error("Unknown cost not authorized by optimization policy");
       const agent = p.decision.plan[0];
+      // Sensitive (HIGH_RISK) work is only routed to providers with an approved security policy.
+      if (complexity === "HIGH_RISK" && !config.routing.sensitiveProviders.includes(agent.provider))
+        throw new Error(`HIGH_RISK task: provider ${agent.provider} has no approved security policy for sensitive work (allowed: ${config.routing.sensitiveProviders.join(", ")})`);
       const cfg = {
         ...original,
         agent: {

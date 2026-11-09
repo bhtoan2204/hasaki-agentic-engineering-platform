@@ -179,6 +179,10 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.equal(h.failure_category, "QUOTA_EXHAUSTED");
   assert.equal((await getRun(r.id)).status, "WAITING");
   assert.ok(h.package.repository_state[0].diff_hash);
+  // Verified context travels with the handoff so the next provider does not re-investigate from scratch.
+  assert.ok(Array.isArray(h.package.tests_already_executed));
+  assert.ok(Array.isArray(h.package.missing_verification) && h.package.missing_verification.includes("no passing test run on the current workspace commits"), "unverified state is explicit");
+  assert.ok("approved_scope" in h.package && "evidence_summary" in h.package);
   assert.ok(!JSON.stringify(h).includes("supersecretvalue"));
   assert.equal(
     (await one(pool, "SELECT status,lease_owner,lease_expires_at FROM workflow_jobs WHERE id=$1", [job.id]))

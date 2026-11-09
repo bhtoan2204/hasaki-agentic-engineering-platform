@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
@@ -166,6 +167,27 @@ export const commandExecutor: StepExecutor = {
       await ctx.log("system", "skipped: this run has no worktree (no code was changed), so there is nothing to run the command in");
       return { kind: "completed", output: { skipped: true, passed: true, reason: "no code changes in this run (no worktree)", results: [] } };
     }
+    // Reusable test evidence: the exact same command + config on exactly the same, clean commits already PASSED in an
+    // earlier attempt of this step → do not rerun the suite. Never reused: dirty worktrees (tests saw uncommitted content),
+    // any failure or human-accepted exception (baseline handling cannot hide a regression), a resume/decision flow, or
+    // an explicit human re-run.
+    const commandHash = createHash("sha256").update(JSON.stringify([cfg.command, cfg.cwd ?? null, cfg.baseline_compare ?? null, cfg.timeout_seconds ?? null, cfg.env ?? null])).digest("hex").slice(0, 16);
+    const nowHeads: Record<string, string> = {};
+    let clean = !cfg.cwd;
+    for (const t of targets)
+      if (t.repo !== "(cwd)") {
+        nowHeads[t.repo] = await headOf(t.path).catch(() => "");
+        if (!nowHeads[t.repo] || (await dirtyOf(t.path))) clean = false;
+      }
+    const humanRerun = !!(ctx.input.pending?.reexecute || ctx.input.pending?.feedback || resumed || decision);
+    if (clean && !humanRerun && cfg.reuse_test_evidence !== false) {
+      const prior = await q<{ id: number; output: any }>(pool, "SELECT id, output FROM workflow_step_attempts WHERE step_id = $1 AND status = 'COMPLETED' AND output->>'command_hash' = $2 ORDER BY id DESC LIMIT 5", [ctx.step.id, commandHash]);
+      const same = prior.find((p) => p.output?.passed === true && !p.output?.decision && p.output?.tested_clean === true && JSON.stringify(Object.entries(p.output?.tested_heads ?? {}).sort()) === JSON.stringify(Object.entries(nowHeads).sort()));
+      if (same) {
+        await ctx.log("system", `tests not re-run: attempt #${same.id} already passed "${String(cfg.command).slice(0, 120)}" on exactly these clean commits (${Object.entries(nowHeads).map(([r, h]) => `${r}@${h.slice(0, 12)}`).join(", ")})`);
+        return { kind: "completed", output: { ...same.output, reused_from_attempt: same.id, reused_at: new Date().toISOString() } };
+      }
+    }
     const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number; baseline?: any; passed?: boolean }> = [];
     const outputs: Record<string, string> = {};
     for (const t of targets) {
@@ -197,7 +219,7 @@ export const commandExecutor: StepExecutor = {
     // The exact commits the tests ran on: the PR gate refuses to publish anything else.
     const tested_heads: Record<string, string> = {};
     for (const t of targets) if (t.repo !== "(cwd)") tested_heads[t.repo] = await headOf(t.path).catch(() => "");
-    const output = { results, passed: failed.length === 0, ...(Object.keys(tested_heads).length ? { tested_heads } : {}), ...(decision ? { decision } : {}) };
+    const output = { results, passed: failed.length === 0, command_hash: commandHash, tested_clean: clean, ...(Object.keys(tested_heads).length ? { tested_heads } : {}), ...(decision ? { decision } : {}) };
     if (failed.length && !cfg.allow_failure && interactive) {
       // Automatic retries first (max_attempts); when they are exhausted, diagnose and ask the developer.
       if (ctx.step.attempt_count < ctx.step.max_attempts) return { kind: "failed", error: `tests failed (attempt ${ctx.step.attempt_count}/${ctx.step.max_attempts}); retrying`, retryable: true, details: output };

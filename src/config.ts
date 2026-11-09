@@ -105,7 +105,12 @@ export interface Config {
    * override these. Checked after every attempt: `warnPct` logs a warning, 100% pauses the run when action = "pause".
    * Env: COST_BUDGET_RUN_USD / COST_BUDGET_WORK_ITEM_USD / COST_BUDGET_WARN_PCT / COST_BUDGET_ACTION.
    */
-  costBudget: { runUsd: number | null; workItemUsd: number | null; warnPct: number; action: "pause" | "warn" };
+  costBudget: { runUsd: number | null; workItemUsd: number | null; warnPct: number; action: "pause" | "warn"; unknownEstimate: "warn" | "pause" };
+  /**
+   * Routing guard rails. `sensitiveProviders`: providers with an approved security policy for HIGH_RISK work
+   * (ROUTING_SENSITIVE_PROVIDERS, comma-separated; default: the platform's default provider only).
+   */
+  routing: { sensitiveProviders: string[] };
   /**
    * Local PostgreSQL pool. Default 10 clients is enough for one user and a few workflows.
    * Override in config.json (`database`) or with DATABASE_POOL_MAX / DATABASE_CONNECTION_TIMEOUT_MS /
@@ -308,7 +313,8 @@ const defaults: Config = {
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
-  costBudget: { runUsd: null, workItemUsd: null, warnPct: 0.8, action: "pause" },
+  costBudget: { runUsd: null, workItemUsd: null, warnPct: 0.8, action: "pause", unknownEstimate: "warn" },
+  routing: { sensitiveProviders: [] },
   database: {
     poolMax: 10,
     poolMin: 4,
@@ -519,6 +525,8 @@ function load(): Config {
     ),
   };
   cfg.database.poolMin = Math.min(cfg.database.poolMin, cfg.database.poolMax);
+  const sensitive = (process.env.ROUTING_SENSITIVE_PROVIDERS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  cfg.routing = { sensitiveProviders: sensitive.length ? sensitive : cfg.routing?.sensitiveProviders?.length ? cfg.routing.sensitiveProviders : [cfg.agent?.defaultProvider ?? "claude"] };
   const usd = (v: unknown) => (v == null || v === "" ? null : Number(v) > 0 ? Number(v) : null);
   const cb = { ...defaults.costBudget, ...(cfg.costBudget ?? {}) };
   cfg.costBudget = {
@@ -526,6 +534,7 @@ function load(): Config {
     workItemUsd: usd(process.env.COST_BUDGET_WORK_ITEM_USD ?? cb.workItemUsd),
     warnPct: Math.min(1, Math.max(0.1, Number(process.env.COST_BUDGET_WARN_PCT ?? cb.warnPct) || 0.8)),
     action: (process.env.COST_BUDGET_ACTION ?? cb.action) === "warn" ? "warn" : "pause",
+    unknownEstimate: (process.env.COST_BUDGET_UNKNOWN ?? cb.unknownEstimate) === "pause" ? "pause" : "warn",
   };
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;

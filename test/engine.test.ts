@@ -40,7 +40,9 @@ import {
   pullRequestExecutor,
   setAiRepositoryRanker,
 } from "../src/workflow/executors/builtin.ts";
-import { recordWorkspace, setGitProvider, workspacesOf } from "../src/git/provider.ts";
+import { gitProvider, recordWorkspace, setGitProvider, workspacesOf } from "../src/git/provider.ts";
+import { recordRunOutcome, syncPullRequestStates } from "../src/learning/outcomes.ts";
+import { proposeImprovements, proposeRegressionCase, qualityPatterns, reviewRegressionCase } from "../src/learning/patterns.ts";
 import { collectEvidence, enforceVerdict, evidenceDrift, normalizeVerdict, repairTargetFor } from "../src/agent/independentReview.ts";
 import { repositories } from "../src/repos/service.ts";
 import { knowledge } from "../src/knowledge/service.ts";
@@ -343,13 +345,16 @@ test("cost budget: warning is logged once; exceeding pauses the run once, resume
   // 0.6 after analyze (< 80% of 1), 1.2 after plan: run budget exceeded → paused before implement.
   assert.equal((await getRun(run.id)).status, "PAUSED");
   assert.equal(calls.implement ?? 0, 0);
-  const events = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' ORDER BY id", [run.id]);
+  const events = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND NOT data ? 'key' ORDER BY id", [run.id]);
   // Work item: 1.2 of 2 = 60% — below the warning threshold so far.
   assert.deepEqual(events.map((e) => `${e.data.scope}:${e.data.level}`), ["run:exceeded"]);
   await resumeRun(run.id);
   await drain();
   assert.equal((await getRun(run.id)).status, "COMPLETED", "resume acknowledges the budget: not paused again");
-  const after = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' ORDER BY id", [run.id]);
+  const after = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND NOT data ? 'key' ORDER BY id", [run.id]);
+  const preflight = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data ? 'key' ORDER BY id", [run.id]);
+  assert.deepEqual(preflight.map((e) => `${e.data.scope}:${e.data.level}:${e.data.step}`), ["run:preflight_unknown_estimate:implement"], "cost uncertainty near the limit is visible, but the acknowledged budget does not pause again");
+  assert.equal(preflight[0].data.provider_hard_limit, false);
   // 1.8 of the work item's 2 = 90%: a warning (not a pause); the run alert is not repeated.
   assert.deepEqual(after.map((e) => `${e.data.scope}:${e.data.level}`), ["run:exceeded", "work_item:warning"]);
   const wc = (await workItemCost(wi.id))!;
@@ -2221,4 +2226,151 @@ test("hardening: duplicate completion of one attempt applies exactly once", asyn
   assert.equal(results.filter((r) => r.applied).length, 1, "one completion wins, the other is rejected");
   const attempts = await q(pool, "SELECT status FROM workflow_step_attempts WHERE step_id = $1", [begun.attempt.step_id]);
   assert.deepEqual(attempts.map((a) => a.status), ["COMPLETED"]);
+});
+
+// ---------------------------------------------------------------- phase 4: verified outcomes and the quality loop
+test("quality loop: outcome ladder, PR merge sync, reviewed improvement proposals and regression candidates", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "pr", type: "git_pull_request", depends_on: ["implement"], config: { mode: "auto", content_from: "implement" } },
+  ]);
+  const runFor = async (title: string, outOfScope: boolean) => {
+    const wi = await workItems.createManual({ title, description: `Refund twice for customer a.b@example.com — ${title}`, project: "OMS" });
+    scripts.implement = async (ctx) => {
+      const path = scopedWorktree("oms-api", ctx.run.branch);
+      const head = commitFile(path, "refund.go", "package app // fixed\n", "fix refund");
+      await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+      return { kind: "completed", output: { summary: "fully tested, trust me", commits: { "oms-api": head }, tested_heads: { "oms-api": head }, verification: { passed: true, repairs: 0 }, ...(outOfScope ? { scope_check: { out_of_scope_files: ["oms-api:app/ledger.go"], unauthorized_repos: [], requires_reapproval: true, reapproved: { revision: "r" } } } : {}) } };
+    };
+    const run = await startRun({ definitionKey: key, workItemId: wi.id, title, repositories: ["oms-api"] } as any);
+    await drain();
+    return { run, wi };
+  };
+  const { run } = await runFor("refund fix", true);
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  const stamped = await one(pool, "SELECT policy_versions FROM workflow_runs WHERE id = $1", [run.id]);
+  assert.match(stamped.policy_versions.prompt_template, /^[0-9a-f]{12}$/, "every run records the policy versions it used");
+  const outcome = (await recordRunOutcome(run.id))!;
+  assert.equal(outcome.ladder.tests_passed.state, "proven");
+  assert.equal(outcome.ladder.review_passed.state, "unknown", "no verifier in this workflow: nothing to prove");
+  assert.equal(outcome.ladder.pr_merged.state, "unknown");
+  assert.deepEqual(outcome.failure_categories.map((c) => c.category), ["out_of_scope_change"]);
+
+  // The provider reports the merge → proven; nothing else ever marks a PR merged.
+  const fake = gitProvider();
+  setGitProvider({ ...fake, pullRequestState: async () => ({ state: "MERGED", merged_at: "2026-11-09T10:00:00Z", merge_commit: "c".repeat(40) }) });
+  try {
+    const synced = await syncPullRequestStates({ runId: run.id });
+    assert.deepEqual([synced.checked, synced.updated], [1, 1]);
+  } finally {
+    setGitProvider(fake);
+  }
+  const after = (await one(pool, "SELECT outcome FROM workflow_runs WHERE id = $1", [run.id])).outcome;
+  assert.equal(after.ladder.pr_merged.state, "proven");
+  assert.equal(after.ladder.deployed.state, "unknown");
+
+  // One task repeating a failure is not a pattern; three runs over three tasks are — proposed for review, never applied.
+  const below = await proposeImprovements({ days: 1, by: "admin" });
+  assert.equal(below.results.find((r) => r.category === "out_of_scope_change")?.status, "below_threshold");
+  for (const t of ["second fix", "third fix"]) await recordRunOutcome((await runFor(t, true)).run.id);
+  const proposed = await proposeImprovements({ days: 1, by: "admin" });
+  const r = proposed.results.find((x) => x.category === "out_of_scope_change")!;
+  assert.equal(r.status, "proposed");
+  const proposal = await one(pool, "SELECT status, source_kind, proposed FROM knowledge_proposals WHERE id = $1", [r.proposal_id]);
+  assert.deepEqual([proposal.status, proposal.source_kind], ["pending", "failure_pattern"]);
+  assert.equal(await knowledge.get(proposal.proposed.key), undefined, "nothing reaches shared knowledge without human approval");
+  const again = await proposeImprovements({ days: 1, by: "admin" });
+  assert.equal(again.results.find((x) => x.category === "out_of_scope_change")?.proposal_id, r.proposal_id, "repeat analysis folds into the same open proposal");
+  const patterns = await qualityPatterns({ days: 1 });
+  assert.ok(patterns.by_policy_version.length >= 1);
+  assert.ok(patterns.verified_levels.tests_passed >= 1, "no verifier ran, so the verified level stops below the merge even though the PR merged");
+  assert.equal(patterns.verified_levels.pr_merged, 0);
+
+  // Regression candidate: pinned, sanitized, and only accepted with human acceptance criteria.
+  const cand = await proposeRegressionCase(run.id, null);
+  assert.equal(cand.refused, null);
+  const row = await one(pool, "SELECT * FROM regression_case_candidates WHERE run_id = $1", [run.id]);
+  assert.match(row.base_commit, /^[0-9a-f]{40}$/);
+  assert.doesNotMatch(row.requirement, /example\.com/);
+  assert.equal(row.acceptance.independent_ground_truth, false, "the run's own tests are agent-authored");
+  await assert.rejects(reviewRegressionCase(Number(row.id), "accepted", "admin", {}), /human-written acceptance criteria/);
+  const accepted = await reviewRegressionCase(Number(row.id), "accepted", "admin", { acceptance_criteria: "Refunding an installment order twice returns the second request as a no-op." });
+  assert.deepEqual([accepted.status, accepted.acceptance.independent_ground_truth], ["accepted", true]);
+  const unmerged = await runFor("unaccepted fix", false);
+  await recordRunOutcome(unmerged.run.id);
+  assert.match(String((await proposeRegressionCase(unmerged.run.id, null)).refused), /no human acceptance/);
+});
+
+test("cost preflight: a retry projected over the budget pauses BEFORE the attempt; resume proceeds; soft pause is labelled", async () => {
+  const key = await customWorkflow([{ key: "implement", type: "agent", max_attempts: 3, retry_backoff_seconds: 0 }]);
+  let n = 0;
+  scripts.implement = async (ctx) => {
+    await ctx.recordMetrics({ provider: "claude", model: "m", cost_usd: 0.6 });
+    return ++n === 1 ? { kind: "failed", error: "ECONNRESET while calling the provider" } : { kind: "completed", output: { summary: "ok" } };
+  };
+  const run = await startRun({ definitionKey: key, inputs: { project: "OMS" }, repositories: ["oms-api"], start: false });
+  await q(pool, "UPDATE workflow_runs SET budget_usd = 1 WHERE id = $1", [run.id]);
+  await startPendingRun(run.id);
+  await drain();
+  // First attempt spent 0.6; the retry would cost ~0.6 more (max of earlier attempts) → 1.2 > 1: paused before it ran.
+  assert.equal((await getRun(run.id)).status, "PAUSED");
+  assert.equal(n, 1, "the second attempt never started");
+  const ev = await one(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data->>'level' = 'preflight_projected'", [run.id]);
+  assert.deepEqual([ev.data.estimate_usd, ev.data.attempt, ev.data.enforcement, ev.data.provider_hard_limit], [0.6, 2, "platform_soft_pause", false]);
+  await resumeRun(run.id);
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED", "resume acknowledges the projected overrun");
+  assert.equal(n, 2);
+});
+
+test("smart verification: an identical passing test on the same clean commit is reused; any new commit reruns it", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "test", type: "command", depends_on: ["implement"], config: { command: "echo ran >> \"$TMPDIR_RUNS\"; true" } },
+  ]);
+  const counter = join(mkdtempSync(join(process.env.TEST_ROOT!, "runs-")), "count");
+  writeFileSync(counter, "");
+  process.env.TMPDIR_RUNS = counter;
+  let path = "";
+  let change = false;
+  scripts.implement = async (ctx) => {
+    if (!path) {
+      path = scopedWorktree("oms-api", ctx.run.branch);
+      commitFile(path, "a.go", "package a\n", "first");
+      await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+    } else if (change) commitFile(path, "a.go", "package a // v2\n", "second");
+    return { kind: "completed", output: { summary: "done" } };
+  };
+  const runs = () => execFileSync("cat", [counter], { encoding: "utf8" }).split("\n").filter(Boolean).length;
+  const run = await startRun({ definitionKey: key, title: "reuse", repositories: ["oms-api"] } as any);
+  await drain();
+  assert.equal(runs(), 1);
+  await reexecuteStep(run.id, "implement"); // same commit afterwards
+  await drain();
+  assert.equal(runs(), 1, "unchanged commit: the passing suite is not rerun");
+  assert.ok((await stepOf(run.id, "test")).output.reused_from_attempt);
+  change = true;
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  assert.equal(runs(), 2, "a new commit always reruns the tests");
+  assert.equal((await stepOf(run.id, "test")).output.reused_from_attempt, undefined);
+});
+
+test("routing guard rails: HIGH_RISK refuses FAST, records the class; provider report never ranks small samples", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "review", type: "agent", name: "Code Review", depends_on: ["implement"] },
+  ]);
+  const run = await startRun({ definitionKey: key, title: "Refund amount wrong for installment orders", repositories: ["oms-api"], profile: "FAST", start: false } as any);
+  const decision = (await one(pool, "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1", [run.id]));
+  assert.equal(decision.profile_decision.complexity.class, "HIGH_RISK");
+  assert.equal(decision.profile, "STANDARD", "the independent review of a high-risk task is kept");
+  assert.match(decision.profile_decision.warnings.join(" "), /FAST refused/);
+  const overridden = await startRun({ definitionKey: key, title: "Refund amount wrong", repositories: ["oms-api"], profile: "FAST", inputs: { complexity: "TRIVIAL" }, start: false } as any);
+  const od = await one(pool, "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1", [overridden.id]);
+  assert.deepEqual([od.profile_decision.complexity.source, od.profile], ["user_override", "FAST"], "an explicit user override is honoured and recorded");
+  const { providerPerformance } = await import("../src/learning/providerPerformance.ts");
+  const perf = await providerPerformance({ days: 1, minSamples: 1000 });
+  assert.ok(perf.groups.every((g) => g.sample_ok === false));
+  assert.ok(perf.leaders.every((l) => l.leader === null), "no provider is recommended below the minimum sample size");
 });

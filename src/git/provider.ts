@@ -7,7 +7,7 @@ import { instanceDirectory } from "../repos/paths.ts";
 import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
-import { openPullRequest } from "../bitbucket.ts";
+import { openPullRequest, pullRequestState } from "../bitbucket.ts";
 import { prepareBranch, pushBranch } from "../git.ts";
 import { validateCheckout } from "../repos/paths.ts";
 import { branchFor } from "../workflow/branches.ts";
@@ -26,6 +26,8 @@ export interface GitProvider {
     created: boolean;
     note: string;
   }>;
+  /** Read-only lifecycle state of an existing PR (null: not a PR, e.g. a create-PR link). */
+  pullRequestState?(pr: { repo: string; url: string }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
 }
 
 export const bitbucketProvider: GitProvider = {
@@ -38,6 +40,7 @@ export const bitbucketProvider: GitProvider = {
     return repositoryLock(row, () => pushBranch(path, branch, row.default_branch || config.baseBranch));
   },
   openOrUpdatePullRequest: (pr) => openPullRequest(pr.repo, pr.source, pr.title, pr.description, { draft: pr.draft, dest: pr.target }),
+  pullRequestState: (pr) => pullRequestState(pr.repo, pr.url),
 };
 
 let current: GitProvider = bitbucketProvider;

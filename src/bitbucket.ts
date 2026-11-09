@@ -78,6 +78,18 @@ export async function openPullRequest(repo: string, branch: string, title: strin
   return { url: pr.links.html.href as string, created: true, note: "PR created." };
 }
 
+/** Read-only: lifecycle state of one PR (OPEN / MERGED / DECLINED / SUPERSEDED) from its URL — the proof of a merge. */
+export async function pullRequestState(repo: string, url: string): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null> {
+  const id = url.match(/\/pull-requests\/(\d+)(?:[/?#]|$)/)?.[1];
+  if (!id) return null; // a "create PR" link, not a PR
+  const creds = await resolveBitbucket();
+  if (!creds) throw new Error("No Bitbucket credentials for this account");
+  const { ws, slug } = repositoryReference(repo, creds.workspace);
+  const pr = await call(creds, `/repositories/${ws}/${slug}/pullrequests/${id}`);
+  const state = String(pr.state ?? "").toUpperCase();
+  return { state, merged_at: state === "MERGED" ? (pr.updated_on ?? null) : null, merge_commit: pr.merge_commit?.hash ?? null };
+}
+
 /** Read-only: pull requests of a repository (optionally filtered by source branch / state). */
 export async function listPullRequests(repo: string, opts: { branch?: string; state?: string } = {}) {
   const creds = await resolveBitbucket();

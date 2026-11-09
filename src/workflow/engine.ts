@@ -8,6 +8,8 @@ import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts
 import type pg from "pg";
 import { config } from "../config.ts";
 import { budgetsForRun } from "../report/cost.ts";
+import { executionPolicyVersions } from "../learning/policyVersions.ts";
+import { recordRunOutcome } from "../learning/outcomes.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
@@ -30,7 +32,7 @@ import { assertRunTransition, assertStepTransition, deriveRunStatus, DONE, RETRY
 import { buildStepInput, resolveContext, type ResolvedContext, type StepInput } from "./context.ts";
 import type { AttemptRow, ExecResult, JobRow, QuestionInput, RunRow, RunStatus, StepRow, StepStatus, WorkflowSpec } from "./types.ts";
 import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
-import { applyProfile, classifyProfile, ProfileNotApplicable, type ProfileChange, type ProfileChoice, type ProfileDecision } from "./profiles.ts";
+import { applyProfile, classifyComplexity, classifyProfile, ProfileNotApplicable, type ProfileChange, type ProfileChoice, type ProfileDecision } from "./profiles.ts";
 
 export const REPORT_STEP_KEY = "task_result_report";
 
@@ -137,6 +139,8 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
   }
   // "What did this run do?" snapshot for the work item page (factual, from the run's own records; never throws).
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => background(`run ${run.id} summary`, () => storeRunSummary(run.id)));
+  // Verified outcome ladder + deterministic failure categories (no model call; proven states only).
+  if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => background(`run ${run.id} outcome`, () => recordRunOutcome(run.id)));
 }
 
 async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
@@ -202,7 +206,13 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
       changed = true;
     }
   }
-  if (run.status !== "PAUSED") for (const s of steps) if (s.status === "READY") await ensureJob(c, s);
+  if (run.status !== "PAUSED")
+    for (const s of steps)
+      if (s.status === "READY") {
+        // Cost preflight before an (expensive) agent attempt is scheduled; may pause the run instead.
+        if ((s.type === "agent" || s.type === "coding_agent") && !(await budgetPreflight(c, run, s))) break;
+        await ensureJob(c, s);
+      }
   await setRunStatus(c, run, deriveRunStatus(run.status, steps), afterCommit);
   return run;
 }
@@ -296,7 +306,15 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
     },
     input.profile ?? "AUTO",
   );
-  let decision = { ...decision0, signals: { ...decision0.signals, reused_repositories: reusedRepositories } };
+  const priorFailureRuns = wi
+    ? Number((await one<{ n: number }>(c, "SELECT count(*)::int AS n FROM (SELECT outcome FROM workflow_runs WHERE work_item_id = $1 AND outcome IS NOT NULL ORDER BY id DESC LIMIT 5) r WHERE jsonb_array_length(COALESCE(r.outcome->'failure_categories', '[]'::jsonb)) > 0", [wi.id]))?.n ?? 0)
+    : 0;
+  const complexity = classifyComplexity(decision0, { priorFailureRuns }, inputs.complexity);
+  let decision: ProfileDecision & { complexity: typeof complexity } = { ...decision0, signals: { ...decision0.signals, reused_repositories: reusedRepositories }, complexity };
+  // High-risk verification stays mandatory: FAST would drop the independent review, so it is refused for HIGH_RISK
+  // unless the user explicitly re-classified the task (recorded as an override).
+  if (complexity.class === "HIGH_RISK" && decision.profile === "FAST")
+    decision = { ...decision, profile: "STANDARD", warnings: [...decision.warnings, "FAST refused: HIGH_RISK tasks keep the independent review and approvals (override the complexity class to change this)"] };
   let resolved: { spec: WorkflowSpec; changes: ProfileChange[] };
   try {
     resolved = applyProfile(dv.spec, decision.profile);
@@ -354,6 +372,7 @@ export async function startRun(input: StartRunInput) {
       inputs,
       input.agentProvider != null,
       r.decision.profile,
+      (r.decision as any).complexity?.class ?? null,
     );
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     try { for (const step of optimized.graph.steps) resolveStepAgent({ agent_provider, profile: r.decision.profile }, step); }
@@ -362,9 +381,9 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider, r.ownerId, config.instanceId],
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance, policy_versions)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+      [id, dv.id, dv.key, wi?.id ?? null, title, json(inputs), json(resolvedGraph), allowed, selected, branch, r.decision.profile, json(r.decision), output_locale, agent_provider, r.ownerId, config.instanceId, json(executionPolicyVersions())],
     );
     for (const decision of optimized.decisions)
       await q(
@@ -980,6 +999,8 @@ async function applyResult(c: pg.PoolClient, run: RunRow, step: StepRow, attempt
       if (decision.action === "retry") {
         await setStepStatus(c, step, "RETRYING", { error: result.error }, `attempt ${step.attempt_count}/${step.max_attempts} failed (${decision.class}); retry in ${decision.delay_s}s`);
         await closeJob("done", result.error);
+        // Automatic retries are budget-checked too: a projected overrun pauses the run (the queued job waits for resume).
+        if (step.type === "agent" || step.type === "coding_agent") await budgetPreflight(c, run, step);
         await ensureJob(c, step, decision.delay_s);
       } else {
         await setStepStatus(c, step, "FAILED", { error: result.error, finished_at: now });
@@ -1033,6 +1054,68 @@ export async function finishAttempt(jobId: number, token: number, attemptId: num
     }
     return { applied: true };
   });
+}
+
+/**
+ * Budget preflight, BEFORE an agent attempt is queued. Projects run / work-item spend with an upper-bound estimate of
+ * the next attempt (max of this step's earlier attempts in the run, else the historical median of the same step, else
+ * unknown) and pauses the run when the projection exceeds a budget (once per step attempt; resuming acknowledges it).
+ * Unknown estimates warn (or pause with COST_BUDGET_UNKNOWN=pause). This is a platform soft pause: no provider here
+ * enforces a hard spending cap, and the events say so. Returns false when the run was paused.
+ */
+async function budgetPreflight(c: Db, run: RunRow, s: StepRow): Promise<boolean> {
+  if (await one(c, "SELECT 1 FROM workflow_jobs WHERE step_id = $1 AND status IN ('queued','running')", [s.id])) return true;
+  const b = await budgetsForRun(run.id, c).catch(() => null);
+  if (!b || (b.run.limit_usd == null && !b.work_item?.limit_usd)) return true;
+  const prior = await one<{ max: number | null }>(c, "SELECT max(reported_cost_usd) AS max FROM execution_attempt_telemetry WHERE step_id = $1", [s.id]);
+  let estimate: number | null = prior?.max != null ? Number(prior.max) : null;
+  let basis = estimate != null ? "max of this step's earlier attempts" : "";
+  if (estimate == null) {
+    const h = await one<{ median: number | null; n: number }>(
+      c,
+      `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY t.reported_cost_usd) AS median, count(*)::int AS n FROM (
+         SELECT x.reported_cost_usd FROM execution_attempt_telemetry x JOIN workflow_steps st ON st.id = x.step_id JOIN workflow_runs r ON r.id = x.run_id
+          WHERE r.definition_key = $1 AND st.key = $2 AND x.reported_cost_usd IS NOT NULL ORDER BY x.attempt_id DESC LIMIT 50) t`,
+      [run.definition_key, s.key],
+    ).catch(() => null);
+    if (h && Number(h.n) >= 5 && h.median != null) {
+      estimate = Number(h.median);
+      basis = `historical median of step "${s.key}" (${h.n} attempts)`;
+    }
+  }
+  const events = await q<{ k: string | null; scope: string; level: string }>(c, "SELECT data->>'key' AS k, data->>'scope' AS scope, data->>'level' AS level FROM workflow_events WHERE run_id = $1 AND kind = 'budget'", [run.id]);
+  const fired = new Set(events.map((e) => e.k).filter(Boolean));
+  // A scope whose budget already paused this run was acknowledged by the resume: warn from now on, never pause again.
+  const acknowledged = new Set(events.filter((e) => e.level === "exceeded" || e.level === "preflight_projected").map((e) => e.scope));
+  const nextAttempt = Number(s.attempt_count ?? 0) + 1;
+  let pause = false;
+  for (const [scope, line] of [["run", b.run], ["work_item", b.work_item]] as const) {
+    if (!line || line.limit_usd == null) continue;
+    const projected = line.used_usd + (estimate ?? 0);
+    // Uncertainty only matters once the budget is mostly spent; earlier unknown estimates are not noise-worthy.
+    const unknown = estimate == null && line.used_usd >= line.limit_usd * config.costBudget.warnPct;
+    const over = estimate != null && projected > line.limit_usd;
+    if (!over && !unknown) continue;
+    const level = over ? "preflight_projected" : "preflight_unknown_estimate";
+    const key = `${scope}:${level}:${s.key}:${nextAttempt}`;
+    if (fired.has(key)) continue;
+    const willPause = config.costBudget.action === "pause" && !acknowledged.has(scope) && (over || config.costBudget.unknownEstimate === "pause");
+    await runEvents.add(
+      c, run.id, "budget",
+      over
+        ? `cost preflight (${scope === "run" ? "run" : "work item"}): next "${s.key}" attempt may cost ~$${estimate!.toFixed(3)} (${basis}); $${line.used_usd} spent of $${line.limit_usd} → projected $${projected.toFixed(3)}${willPause ? " — run paused before the attempt; resume to proceed" : " — warning only"}`
+        : `cost preflight (${scope === "run" ? "run" : "work item"}): no cost estimate for "${s.key}" yet; $${line.used_usd} spent of $${line.limit_usd}${willPause ? " — run paused (unknown-cost policy)" : " — proceeding (cost uncertainty)"}`,
+      s.id, null,
+      { key, scope, level, step: s.key, attempt: nextAttempt, estimate_usd: estimate, estimate_basis: basis || "unknown", used_usd: line.used_usd, limit_usd: line.limit_usd, enforcement: "platform_soft_pause", provider_hard_limit: false },
+    );
+    if (willPause) pause = true;
+  }
+  if (!pause) return true;
+  if (run.status === "RUNNING" || run.status === "WAITING") {
+    await setRunStatus(c, run, "PAUSED");
+    return false;
+  }
+  return true;
 }
 
 /**
