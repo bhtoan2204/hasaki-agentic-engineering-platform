@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   mkdirSync,
   writeFileSync,
+  rmSync,
   unlinkSync,
   renameSync,
   symlinkSync,
@@ -23,6 +24,7 @@ import {
   findReferences,
   findDependencies,
   searchCodeExact,
+  findDefinitions,
   hybridRank,
   applyEvidence,
   buildCodeContext,
@@ -161,6 +163,22 @@ test("Stale overlay returns bounded live fallback, never old indexed symbols; co
       (h) => h.snapshot.id === null,
     ),
   );
+  // A stale index never yields "no definition" silently: text matches are surfaced as unresolved candidates.
+  const defs = await findDefinitions("Committed", scope(runA));
+  assert.equal(defs.fallback_count, 1);
+  assert.equal(defs.hits.length, 0, "text matches are not definitions");
+  assert.ok(defs.text_candidates.length >= 1 && defs.text_candidates.every((h) => h.match_type === "text"));
+  const report = { unavailable: [] as string[] };
+  await findDependencies("Committed", scope(runA), 1, "out", report);
+  assert.deepEqual(report.unavailable, [name], "a repository without a fresh index is reported, not skipped silently");
+  // Exact text search reaches config files outside the indexed languages, never secret files.
+  writeFileSync(join(wtA, "app.yaml"), "payment_timeout: 30s\n");
+  writeFileSync(join(wtA, ".env"), "payment_timeout=leaked\n");
+  const cfgHits = await searchCodeExact("payment_timeout", scope(runA), 10, { anyFile: true });
+  assert.deepEqual(cfgHits.map((h) => h.file_path), ["app.yaml"]);
+  assert.deepEqual(await searchCodeExact("payment_timeout", scope(runA), 10), [], "code fallback stays on indexed languages");
+  rmSync(join(wtA, "app.yaml"));
+  rmSync(join(wtA, ".env"));
   await indexRepository(name, runA);
   const code = await buildCodeContext("Committed Added", scope(runA));
   assert.match(code.body, /commit=/);

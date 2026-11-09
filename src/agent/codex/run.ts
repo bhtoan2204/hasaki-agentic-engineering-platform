@@ -10,7 +10,8 @@ import { pool, one } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
-import { addUsage, newMetrics, type AgentMetrics } from "../metrics.ts";
+import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
+import { CONTEXT_TOOLS } from "../contextToolSchemas.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "./broker.ts";
 import { classifyCodexError, failureMessage, JsonlStream, type CodexEvent, type CodexFailureKind, type CodexItem } from "./stream.ts";
@@ -153,7 +154,10 @@ const toml = (v: unknown): string => {
 };
 
 const DISABLED_FEATURES = ["multi_agent", "multi_agent_v2", "apps", "plugins", "browser_use", "browser_use_external", "computer_use", "image_generation", "goals", "memories", "in_app_browser"];
-const PLATFORM_TOOL_NAMES = ["ask_user", "post_update", "submit_result", "prepare_branch", "commit_changes", "read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool"];
+/** Native context tools (search_code, get_symbol, find_dependencies, …) are exposed by the bridge: allow them too, or
+ * Codex can never use code intelligence and falls back to whole-repository shell scans. */
+const PLATFORM_TOOL_NAMES = [...new Set(["ask_user", "post_update", "submit_result", "prepare_branch", "commit_changes", "read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool", ...CONTEXT_TOOLS.map((t) => t.name)])];
+export const codexEnabledTools = (mode: ToolMode) => (mode === "coding" ? PLATFORM_TOOL_NAMES : PLATFORM_TOOL_NAMES.filter((t) => t !== "prepare_branch" && t !== "commit_changes"));
 
 export interface CodexInvocation {
   mode: ToolMode;
@@ -189,7 +193,7 @@ export function codexArgs(inv: CodexInvocation): string[] {
     ["mcp_servers.platform.required", true],
     ["mcp_servers.platform.startup_timeout_sec", 30],
     ["mcp_servers.platform.tool_timeout_sec", 1800],
-    ["mcp_servers.platform.enabled_tools", inv.mode === "coding" ? PLATFORM_TOOL_NAMES : PLATFORM_TOOL_NAMES.filter((t) => t !== "prepare_branch" && t !== "commit_changes")],
+    ["mcp_servers.platform.enabled_tools", codexEnabledTools(inv.mode)],
     ["mcp_servers.platform.default_tools_approval_mode", "approve"],
   ];
   if (inv.model) cfg.push(["model", inv.model]);
@@ -383,6 +387,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
         const name = `mcp__${item.server ?? "?"}__${item.tool ?? "?"}`;
         if (type === "item.started") {
           metrics.tool_calls[name] = (metrics.tool_calls[name] ?? 0) + 1;
+          noteToolUse(metrics, name, item.arguments ?? null);
           await ctx.log("tool", `${name} ${JSON.stringify(item.arguments ?? {}).slice(0, 300)}`, { provider: "codex", item_id: item.id, id: toolId, name, input: item.arguments ?? null });
         } else {
           const failed = item.status === "failed" || !!item.error;

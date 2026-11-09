@@ -62,6 +62,7 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
       ]
       : []),
     `- Be economical with tools: start from the code locations listed in the prompt, use Grep with a path/glob and Read with offset/limit instead of scanning whole repositories, run independent reads in parallel, and do not re-read files whose content you already have.`,
+    `- Pick the cheapest tool that can answer: a symbol's definition → platform get_symbol; who calls / depends on what (across repositories) → platform find_dependencies; symbol-based discovery → platform search_code (operation "symbols"); exact strings, config keys, log messages, unsupported languages → platform search_code operation "exact" (bounded ripgrep) or Grep with a path/glob; then confirm with a targeted Read (offset/limit) of the live file. Index results are syntax candidates: a "warning"/"index_fallback"/"unavailable_repositories" in a result means the index was stale or missing — treat those hits as unverified text matches and verify in the file. Scan a whole repository only when these narrower searches failed.`,
     `- When done, call mcp__platform__submit_result exactly once with the step output object, then end your turn.`,
     "",
     "## Step instructions",

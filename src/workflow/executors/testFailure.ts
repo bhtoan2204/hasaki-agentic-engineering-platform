@@ -250,7 +250,9 @@ export async function askAboutFailure(ctx: ExecutionContext, input: Parameters<t
   const locale = outputLocale(ctx.run);
   const d = diagnose(input);
   try {
-    d.explanation = advisor ? { ...(await advisor.explain(d, locale, agentProvider(ctx.run))), by: agentProvider(ctx.run) } : undefined;
+    // Every failure also fails on the baseline: the deterministic diagnosis is conclusive — no model call to restate it.
+    const conclusive = d.all_pre_existing === true && d.failures.length > 0;
+    d.explanation = advisor && !conclusive ? { ...(await advisor.explain(d, locale, agentProvider(ctx.run))), by: agentProvider(ctx.run) } : undefined;
   } catch (e) {
     await ctx.log("system", `test failure explanation unavailable: ${(e as Error).message}`);
   }

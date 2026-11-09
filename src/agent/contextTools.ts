@@ -97,6 +97,27 @@ export async function visibleSnapshotKnowledge(env: PlatformToolEnv) {
     ),
   );
 }
+/** Per-attempt code-intelligence usage (index hit / fallback rate, latency), persisted as metrics.code_intelligence_usage. */
+export interface CodeIntelligenceUsage {
+  calls: Record<string, number>;
+  index_hits: number;
+  fallbacks: number;
+  ripgrep_exact: number;
+  empty_results: number;
+  unavailable_repos: string[];
+  latency_ms_total: number;
+  latency_ms_max: number;
+}
+const usage = new Map<unknown, CodeIntelligenceUsage>();
+function usageOf(env: { attemptId?: number | null }) {
+  const k = env.attemptId ?? env; // one accumulator per attempt, whichever bridge builds the env
+  let u = usage.get(k);
+  if (!u) {
+    if (usage.size > 500) usage.delete(usage.keys().next().value);
+    usage.set(k, (u = { calls: {}, index_hits: 0, fallbacks: 0, ripgrep_exact: 0, empty_results: 0, unavailable_repos: [], latency_ms_total: 0, latency_ms_max: 0 }));
+  }
+  return u;
+}
 export async function executeContextTool(name: string, args: any, env: PlatformToolEnv): Promise<unknown> {
   switch (name) {
     case "search_code":
@@ -106,27 +127,65 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
       if (!codeIntelligenceEnabled())
         return { supported: false, reason: "Code intelligence disabled on this worker", hits: [] };
       const scope = { repositories: rows.map((r) => r.name), allowed: env.allowed, runId: env.runId, provision: false };
+      const started = Date.now();
+      const op = name === "search_code" ? `search_code:${args.operation ?? "symbols"}` : name;
+      const note = async (r: { fallback: number; unavailable?: string[]; empty: boolean; ripgrep?: boolean }) => {
+        const u = usageOf(env);
+        u.calls[op] = (u.calls[op] ?? 0) + 1;
+        if (r.ripgrep) u.ripgrep_exact++;
+        else if (r.fallback || r.unavailable?.length) u.fallbacks++;
+        else u.index_hits++;
+        if (r.empty) u.empty_results++;
+        for (const x of r.unavailable ?? []) if (!u.unavailable_repos.includes(x) && u.unavailable_repos.length < 20) u.unavailable_repos.push(x);
+        const ms = Date.now() - started;
+        u.latency_ms_total += ms;
+        u.latency_ms_max = Math.max(u.latency_ms_max, ms);
+        await env.recordMetrics?.({ code_intelligence_usage: u }).catch(() => {});
+      };
       if (name === "search_code" && args.operation === "context") {
         const context = await buildCodeContext(args.query, scope);
         await env.recordMetrics?.({ code_intelligence: context.metrics });
+        await note({ fallback: Number((context.metrics as any)?.fallback_count ?? 0), empty: !(context as any).hits?.length && !(context as any).entries?.length });
         return context;
       }
-      if (name === "get_symbol")
+      if (name === "get_symbol") {
+        const r = await findDefinitions(args.symbol, scope);
+        const definitions = r.hits.slice(0, args.limit);
+        await note({ fallback: r.fallback_count, empty: !definitions.length });
         return {
-          definitions: (await findDefinitions(args.symbol, scope)).hits.slice(0, args.limit),
+          definitions,
+          ...(r.fallback_count
+            ? {
+                index_fallback: { repositories_without_fresh_index: r.fallback_count, text_candidates: r.text_candidates },
+                warning: "the symbol index was stale or unavailable for some repositories: text matches are listed as candidates only — they are NOT resolved definitions; verify in live files",
+              }
+            : {}),
           uncertainty: "syntax candidates; check live files and snapshot freshness",
         };
-      if (name === "find_dependencies")
+      }
+      if (name === "find_dependencies") {
+        const report = { unavailable: [] as string[] };
+        const dependencies = await findDependencies(args.symbol, scope, args.depth, "out", report);
+        await note({ fallback: 0, unavailable: report.unavailable, empty: !dependencies.length });
         return {
-          dependencies: await findDependencies(args.symbol, scope, args.depth),
+          dependencies,
+          ...(report.unavailable.length
+            ? { unavailable_repositories: report.unavailable, warning: "no fresh dependency index for these repositories: their edges are missing from this result (not proof of no dependency) — fall back to search_code exact / targeted reads" }
+            : {}),
           uncertainty: "candidate edges are not semantic resolution",
         };
-      if (args.operation === "exact")
-        return {
-          hits: (await searchCodeExact(args.query, scope)).slice(0, args.limit),
-          uncertainty: "text matches are not semantic proof",
-        };
-      return searchSymbols(args.query, scope, args.limit);
+      }
+      if (args.operation === "exact") {
+        // Exact strings, config and logs: bounded ripgrep over any non-secret file (never forced through Tree-sitter).
+        const hits = (await searchCodeExact(args.query, scope, args.limit, { anyFile: true })).slice(0, args.limit);
+        await note({ fallback: 0, empty: !hits.length, ripgrep: true });
+        return { hits, uncertainty: "text matches are not semantic proof" };
+      }
+      const r = await searchSymbols(args.query, scope, args.limit);
+      await note({ fallback: r.fallback_count, empty: !r.hits.length });
+      return r.fallback_count
+        ? { ...r, warning: "index stale/unavailable for some repositories: those hits are bounded live text matches (match_type text), not indexed symbols" }
+        : r;
     }
     case "search_knowledge":
     case "get_business_rules":

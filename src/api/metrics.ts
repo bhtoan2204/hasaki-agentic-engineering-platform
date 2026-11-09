@@ -41,7 +41,11 @@ export async function runMetrics(runId: number) {
     (byTool[t.name] ??= { calls: 0, ms: 0 }).calls++;
     byTool[t.name].ms += Number(t.ms);
   }
-  const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: null as number | null, input_tokens: null as number | null, output_tokens: null as number | null, cache_read_tokens: null as number | null, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0, cost_unknown: 0 };
+  const totals = { attempts: attempts.length, retries: 0, failed: 0, cost_usd: null as number | null, input_tokens: null as number | null, output_tokens: null as number | null, cache_read_tokens: null as number | null, turns: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, tool_ms: 0, command_ms: 0, tool_calls: 0, integration_calls: 0, skills_loaded: 0, subagents: 0, denied: 0, claude_sessions: 0, cost_unknown: 0,
+    // Measured from tool events / platform tool calls (null = no attempt reported it — never invented).
+    code_intelligence: { index_hits: 0, fallbacks: 0, ripgrep_exact: 0, empty_results: 0, latency_ms_total: 0, calls: 0 },
+    repeats: { duplicate_calls: 0, repeated_file_reads: 0, file_reads: 0 },
+    first_useful_location_ms: null as number | null };
   const perStep: Record<string, { type: string; attempts: number; exec_ms: number; queue_ms: number; human_ms: number; claude_ms: number; turns: number }> = {};
   for (const a of attempts) {
     const m = a.metrics ?? {};
@@ -66,6 +70,13 @@ export async function runMetrics(runId: number) {
     totals.skills_loaded += (m.skills_loaded ?? []).length;
     totals.subagents += (m.subagents ?? []).length;
     totals.denied += (m.denied ?? []).length;
+    const ci = m.code_intelligence_usage;
+    if (ci) {
+      for (const k of ["index_hits", "fallbacks", "ripgrep_exact", "empty_results", "latency_ms_total"] as const) totals.code_intelligence[k] += Number(ci[k] ?? 0);
+      totals.code_intelligence.calls += Object.values<number>(ci.calls ?? {}).reduce((x, y) => x + y, 0);
+    }
+    if (m.tool_repeats) for (const k of ["duplicate_calls", "repeated_file_reads", "file_reads"] as const) totals.repeats[k] += Number(m.tool_repeats[k] ?? 0);
+    if (typeof m.first_useful_location_ms === "number") totals.first_useful_location_ms = totals.first_useful_location_ms == null ? m.first_useful_location_ms : Math.min(totals.first_useful_location_ms, m.first_useful_location_ms);
     const ps = (perStep[a.step_key] ??= { type: a.step_type, attempts: 0, exec_ms: 0, queue_ms: 0, human_ms: 0, claude_ms: 0, turns: 0 });
     ps.attempts++;
     ps.exec_ms += Number(a.exec_ms);

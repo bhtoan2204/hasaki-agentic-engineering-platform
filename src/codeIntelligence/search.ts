@@ -207,11 +207,12 @@ export async function searchSymbols(
 }
 export async function findDefinitions(symbol: string, scope: SearchScope) {
   const result = await searchSymbols(symbol, scope);
+  const isDefinition = (h: Hit) => h.symbol_name === symbol || h.qualified_name === symbol;
   return {
     ...result,
-    hits: result.hits.filter(
-      (h) => h.symbol_name === symbol || h.qualified_name === symbol,
-    ),
+    hits: result.hits.filter(isDefinition),
+    // Text matches from a stale/unavailable index are never presented as definitions — but never hidden either.
+    text_candidates: result.fallback_count ? result.hits.filter((h) => !isDefinition(h) && h.match_type === "text").slice(0, 10) : [],
   };
 }
 /** Syntax edges are preserved as candidates. Name equality never promotes them to resolved calls. */
@@ -220,6 +221,7 @@ export async function findDependencies(
   scope: SearchScope,
   depth = 1,
   direction: "out" | "in" = "out",
+  report?: { unavailable: string[] },
 ) {
   authorize(scope);
   if (!codeIntelligenceEnabled()) return [];
@@ -233,7 +235,10 @@ export async function findDependencies(
       try {
         const run = await scopeRun(repo, scope);
         const f = await fresh(repo, run, scope.provision === true);
-        if (!f.index) continue;
+        if (!f.index) {
+          if (report && !report.unavailable.includes(repo)) report.unavailable.push(repo);
+          continue;
+        }
         const rows = await q(
           pool,
           `WITH f AS (${effectiveSql}) SELECT f.file_path,r.*,e.content_hash FROM f JOIN code_intelligence.relations r ON r.extraction_id=f.extraction_id JOIN code_intelligence.extractions e ON e.id=f.extraction_id
@@ -250,7 +255,10 @@ export async function findDependencies(
               : frontier,
           ],
         );
-        if ((await fresh(repo, run)).index?.id !== f.index.id) continue;
+        if ((await fresh(repo, run)).index?.id !== f.index.id) {
+          if (report && !report.unavailable.includes(repo)) report.unavailable.push(`${repo} (index changed during the query)`);
+          continue;
+        }
         for (const r of rows) {
           const key = `${repo}:${r.file_path}:${r.id}`;
           if (seen.has(key)) continue;
@@ -267,8 +275,9 @@ export async function findDependencies(
           next.push(direction === "out" ? r.target_name : r.source_name);
           if (result.length >= 100) return result;
         }
-      } catch {
-        /* unavailable repositories are not allowed to interrupt navigation */
+      } catch (e) {
+        /* unavailable repositories are not allowed to interrupt navigation — but are reported */
+        if (report && !report.unavailable.includes(repo)) report.unavailable.push(`${repo} (${(e as Error).message.split("\n")[0].slice(0, 120)})`);
       }
     }
     frontier = [...new Set(next)].slice(0, 24);
@@ -302,10 +311,26 @@ export async function findDependencies(
 }
 export const findReferences = (symbol: string, scope: SearchScope) =>
   findDependencies(symbol, scope, 1, "in");
+/** Files an exact text search may read outside the indexed languages (config, logs, docs) — never secret material. */
+const SECRET_FILE = /(?:^|\/)\.env(?:\.[^/]*)?$|\.(?:pem|key|p12|pfx|jks|keystore)$|(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)|(?:^|\/)[^/]*secret[^/]*$|(?:^|\/)\.npmrc$|(?:^|\/)\.netrc$/i;
+export function eligibleText(p: string) {
+  const parts = p.split("/");
+  return (
+    !SECRET_FILE.test(p) &&
+    !parts.some((s) => /^(?:\.git|dist|build|coverage)$/.test(s)) &&
+    (config.codeIntelligence.includeDependencies || !parts.some((s) => /^(?:node_modules|vendor)$/.test(s))) &&
+    !config.codeIntelligence.excludes.some((x) => p.includes(x))
+  );
+}
+/**
+ * Bounded ripgrep. Default: the indexed languages only (code fallback). `anyFile`: exact text / config / log search in
+ * any non-secret file — Tree-sitter is never forced on strings or unsupported languages.
+ */
 export async function searchCodeExact(
   pattern: string,
   scope: SearchScope,
   limit = 20,
+  opts: { anyFile?: boolean } = {},
 ): Promise<Hit[]> {
   authorize(scope);
   if (!pattern || pattern.length > 256 || pattern.includes("\n"))
@@ -331,8 +356,9 @@ export async function searchCodeExact(
             "5",
             "--max-filesize",
             String(config.codeIntelligence.maxFileBytes),
-            "--glob",
-            "*.{go,ts,tsx,proto,sql}",
+            ...(opts.anyFile
+              ? ["--glob", "!**/.env*", "--glob", "!**/*.{pem,key,p12,pfx,jks,keystore}", "--glob", "!**/*secret*", "--glob", "!**/node_modules/**", "--glob", "!**/vendor/**"]
+              : ["--glob", "*.{go,ts,tsx,proto,sql}"]),
             "--",
             pattern,
             ".",
@@ -359,7 +385,7 @@ export async function searchCodeExact(
       const row = JSON.parse(line);
       if (row.type !== "match") continue;
       const p = row.data.path.text?.replace(/^\.\//, "");
-      if (!p || !eligible(p)) continue;
+      if (!p || !(opts.anyFile ? eligibleText(p) : eligible(p))) continue;
       safePath(root, p);
       // Read via the same symlink/size checks as indexing; rg never follows symlinks by default.
       const source = await readSource(root, p);

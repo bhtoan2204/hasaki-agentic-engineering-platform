@@ -36,6 +36,7 @@ import { completeForRun } from "./complete.ts";
 import {
   addUsage,
   accumulateMetrics,
+  firstUsefulLocationMs,
   newMetrics,
   type AgentMetrics,
 } from "./metrics.ts";
@@ -1653,6 +1654,12 @@ const agentExecutor: StepExecutor = {
       const state = await collectScopeState(
         await Promise.all(all.map(async (w) => ({ repo: w.repo, path: w.path, base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}` }))),
       );
+      // Time to the first useful code location: first read/edit of a file the step finally changed (measured events).
+      const changed = Object.values(state.files).flat();
+      if (changed.length) {
+        metrics.first_useful_location_ms = firstUsefulLocationMs(metrics, changed);
+        await ctx.recordMetrics({ first_useful_location_ms: metrics.first_useful_location_ms }).catch(() => {});
+      }
       if (Object.keys(state.heads).length) {
         output = { ...output, commits: state.heads };
         // The harness tested exactly this state (nothing changes after the last verification round).

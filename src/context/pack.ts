@@ -12,6 +12,14 @@ import type { AgentMetrics } from "../agent/metrics.ts";
 import type { PolicyContext } from "../agent/toolPolicy.ts";
 import { source } from "../agent/contextTools.ts";
 import { evidenceSummary } from "../agent/evidence.ts";
+import { workspacesOf } from "../git/provider.ts";
+import { repositoryBaseBranch } from "../repos/service.ts";
+import { worktreeFingerprint } from "../agent/scopeGuard.ts";
+import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const gitTip = async (path: string, ref: string) => (await promisify(execFile)("git", ["-C", path, "rev-parse", ref])).stdout.trim();
 
 export interface ContextEntry {
   id: string;
@@ -49,8 +57,37 @@ export interface ContextPack {
   retrieval_calls: number;
   retrieval_failures: number;
   preparation_ms: number;
+  /** Why this budget: explicit step config, the role default, or the global default (fallback). */
+  budget_source?: "step_config" | "role" | "global";
+  /** Redacted raw code-retrieval results + their deterministic key (never rendered into the prompt). */
+  retrieval_cache?: { key: string; entries: Record<string, string>; reused_from_pack?: number | null };
 }
 export class ContextBudgetError extends Error { }
+
+/**
+ * Role-based default budgets (tokens, estimate): a step that does not set `context_tokens` gets context sized for its
+ * job instead of the same large pack for everyone. Required entries are never cut: if they do not fit the role budget
+ * the global budget is used instead. Omitted optional entries stay retrievable through platform tools.
+ */
+export function roleBudget(step: { type: string; config: Record<string, any> }): number | null {
+  const c = step.config ?? {};
+  if (c.independent === true) return 16000; // reviewer: the diff + requirements + test/risk evidence come separately
+  if (step.type === "coding_agent") return 20000; // approved scope, targeted code, rules, tests
+  const role = String(c.evidence?.role ?? c.evidence_role ?? "");
+  if (role === "analysis") return 16000;
+  if (role === "fix_proposal") return 20000;
+  return null; // root cause and other agents keep the global default
+}
+
+/**
+ * Deterministic key for reusing expensive code retrievals across attempts of the same step: owner, authorization
+ * scope, query, exact repository state (HEAD + uncommitted fingerprint + base tip) and the code-index version.
+ * Any change → a different key → fresh retrieval.
+ */
+export function codeRetrievalKey(input: { ownerId: number; runId: number; stepId: number; allowed: string[]; query: string; repos: Record<string, string>; indexVersion: string }) {
+  const repos = Object.keys(input.repos).sort().map((k) => [k, input.repos[k]]);
+  return hashOf({ v: 1, owner: input.ownerId, run: input.runId, step: input.stepId, allowed: [...input.allowed].sort(), query: input.query, repos, index: input.indexVersion });
+}
 /** The estimate includes provenance and summaries. Required constraints are never silently shortened or dropped. */
 export function budgetContextPack(
   base: Omit<ContextPack, "entries" | "estimated_tokens" | "omitted">,
@@ -122,9 +159,12 @@ export async function ensureContextPack(
       }
       const started = performance.now(),
         at = new Date().toISOString();
-      const budget = Number(ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000);
-      if (!Number.isInteger(budget) || budget < 2000 || budget > 64000)
+      const globalBudget = Number(ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000);
+      if (!Number.isInteger(globalBudget) || globalBudget < 2000 || globalBudget > 64000)
         throw new ContextBudgetError("context_tokens must be an integer between 2000 and 64000");
+      const role = ctx.step.config.context_tokens == null ? roleBudget(ctx.step) : null;
+      const budget = role != null && role < globalBudget ? role : globalBudget;
+      const budgetSource: ContextPack["budget_source"] = ctx.step.config.context_tokens != null ? "step_config" : budget !== globalBudget ? "role" : "global";
       const entries: ContextEntry[] = [];
       const add = (
         id: string,
@@ -406,16 +446,43 @@ export async function ensureContextPack(
         85,
       );
       await retrieve("get_production_errors", { limit: 8 }, "production", 40);
+      let retrievalCache: ContextPack["retrieval_cache"] | undefined;
       if (!independent) {
-        await retrieve(
-          "search_code",
-          { query: ctx.context.requestText.slice(0, 512), operation: "context", limit: 8 },
-          "code",
-          65,
-        );
-        const first = entries.find((e) => e.id === "search_code");
-        const symbol = first && JSON.parse(first.body)?.hits?.[0]?.qualified_name;
-        if (symbol) await retrieve("find_dependencies", { symbol: String(symbol).slice(0, 512), depth: 1 }, "code", 55);
+        const query = ctx.context.requestText.slice(0, 512);
+        const repoState: Record<string, string> = {};
+        let keyable = true;
+        for (const w of await workspacesOf(ctx.run.id).catch(() => [])) {
+          try {
+            const fp = await worktreeFingerprint(w.path);
+            const base = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);
+            const tip = await gitTip(w.path, `origin/${base}`);
+            repoState[w.repo] = `${fp.fingerprint}:${tip}`;
+          } catch {
+            keyable = false; // unreadable state: never reuse
+          }
+        }
+        const key = keyable ? codeRetrievalKey({ ownerId: ctx.run.owner_id!, runId: ctx.run.id, stepId: ctx.step.id, allowed: ctx.run.allowed_repositories, query, repos: repoState, indexVersion: INDEX_VERSION }) : null;
+        const prior = key
+          ? await one<{ id: number; cache: any }>(
+              pool,
+              "SELECT id, content->'retrieval_cache' AS cache FROM agent_context_packs WHERE run_id=$1 AND step_id=$2 AND owner_id=$3 AND content->'retrieval_cache'->>'key'=$4 ORDER BY id DESC LIMIT 1",
+              [ctx.run.id, ctx.step.id, ctx.run.owner_id, key],
+            )
+          : null;
+        const cached = prior?.cache?.entries && typeof prior.cache.entries === "object" ? (prior.cache.entries as Record<string, string>) : null;
+        if (cached && cached.search_code) {
+          for (const [id, body] of Object.entries(cached))
+            entries.push({ id, section: "code", body, priority: id === "search_code" ? 65 : 55, required: false, trust: "untrusted_evidence", provenance: source(id, null, at, "owner", `reused from context pack ${prior!.id}: identical owner, authorization, query, repository state and index version`, "observed") });
+          retrievalCache = { key: key!, entries: cached, reused_from_pack: prior!.id };
+        } else {
+          await retrieve("search_code", { query, operation: "context", limit: 8 }, "code", 65);
+          const first = entries.find((e) => e.id === "search_code");
+          const symbol = first && JSON.parse(first.body)?.hits?.[0]?.qualified_name;
+          if (symbol) await retrieve("find_dependencies", { symbol: String(symbol).slice(0, 512), depth: 1 }, "code", 55);
+          // Cache only successful, already-redacted results; failures are never reused.
+          const ok = Object.fromEntries(entries.filter((e) => e.id === "search_code" || e.id === "find_dependencies").map((e) => [e.id, e.body]));
+          if (key && ok.search_code) retrievalCache = { key, entries: ok, reused_from_pack: null };
+        }
       }
       const parents = await q(
         pool,
@@ -429,16 +496,17 @@ export async function ensureContextPack(
           ],
         ],
       );
-      const pack = budgetContextPack(
+      const build = (b: number, src: ContextPack["budget_source"]) => budgetContextPack(
         {
+          budget_source: src,
           version: 1,
           run_id: ctx.run.id,
           step_id: ctx.step.id,
           attempt_id: ctx.attempt.id,
-          owner_id: ctx.run.owner_id,
+          owner_id: ctx.run.owner_id!, // checked above ("Owned context snapshot required")
           snapshot_id: ctx.context.snapshot_id,
           created_at: at,
-          budget_tokens: budget,
+          budget_tokens: b,
           token_measurement: "character_estimate_not_provider_usage",
           parent_pack_ids: parents.map((p) => p.id),
           retrieval_calls: retrievalCalls,
@@ -447,6 +515,16 @@ export async function ensureContextPack(
         },
         entries,
       );
+      let pack: ContextPack;
+      try {
+        pack = build(budget, budgetSource);
+      } catch (e) {
+        // The role default is a target, never a reason to fail: required context that does not fit gets the global budget.
+        if (!(e instanceof ContextBudgetError) || budgetSource !== "role") throw e;
+        pack = build(globalBudget, "global");
+      }
+      // Attached after budgeting: the cache is stored with the pack but is neither rendered nor counted as context.
+      if (retrievalCache) pack = { ...pack, retrieval_cache: retrievalCache };
       const row = await one(
         pool,
         `INSERT INTO agent_context_packs(attempt_id,run_id,step_id,owner_id,snapshot_id,content_hash,content)
@@ -476,11 +554,14 @@ export async function ensureContextPack(
           id: persisted.id,
           snapshot_id: pack.snapshot_id,
           estimated_tokens: pack.estimated_tokens,
-          estimated_bytes: Buffer.byteLength(JSON.stringify(pack)),
+          estimated_bytes: Buffer.byteLength(JSON.stringify({ ...pack, retrieval_cache: undefined })),
           preparation_ms: pack.preparation_ms,
           retrieval_calls: retrievalCalls,
           retrieval_failures: retrievalFailures,
           reused: false,
+          budget_tokens: pack.budget_tokens,
+          budget_source: pack.budget_source,
+          code_retrieval_reused_from_pack: pack.retrieval_cache?.reused_from_pack ?? null,
         },
       });
       return { ...pack, id: persisted.id };

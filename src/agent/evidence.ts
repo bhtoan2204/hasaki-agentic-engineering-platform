@@ -465,16 +465,31 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
   let fix: { risk: FixRisk; gate: EvidenceGate | null; from: string; invariants: FixAssessment["business_invariants"] } | null = null;
   let scope: (ApprovedScope & { approved_by?: string; approved_at?: string; comment?: string }) | null = null;
   let dropped = 0;
-  const push = (arr: string[], s: string, max = 12) => {
+  const highRisk = new WeakMap<string[], number>(); // count of high-risk items kept at the front of each list
+  const unresolvedScope: string[] = [];
+  // High-risk items (contradicted evidence, unresolved scope violations) are never dropped to save tokens: they go to
+  // the front of their list and are exempt from the per-list cap (bounded separately, and truncation is reported).
+  const push = (arr: string[], s: string, max = 12, risky = false) => {
     const k = norm(s);
     if (!k || seen.has(k)) return;
     seen.add(k);
-    if (arr.length >= max) return void dropped++;
+    const n = highRisk.get(arr) ?? 0;
+    if (risky) {
+      if (n >= 40) return void dropped++;
+      arr.splice(n, 0, clip(s, 240));
+      highRisk.set(arr, n + 1);
+      return;
+    }
+    if (arr.length >= Math.max(max, n + 1)) return void dropped++;
     arr.push(clip(s, 240));
   };
   for (const [key, u] of Object.entries(upstream)) {
     const o = u?.output;
-    if (!o || typeof o !== "object" || (u.status && u.status !== "COMPLETED")) continue;
+    if (!o || typeof o !== "object") continue;
+    // Unresolved scope violations matter whatever the step's status (a step waiting for re-approval is exactly that case).
+    if (o.scope_check?.requires_reapproval === true && !o.scope_check?.reapproved)
+      for (const r of (Array.isArray(o.scope_check.reasons) ? o.scope_check.reasons : []).slice(0, 20)) unresolvedScope.push(clip(`${key}: ${r}`, 240));
+    if (u.status && u.status !== "COMPLETED") continue;
     if (o.approved_scope) scope = o.approved_scope;
     const isInvestigation = Array.isArray(o.claims) || o.root_cause_assessment || o.fix_assessment || Array.isArray(o.missing_evidence);
     if (!isInvestigation) continue;
@@ -483,8 +498,9 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
     const claims = normalizeClaims(o.claims, []);
     for (const c of claims) {
       const ref = [c.source_type, c.source_ref, c.file_path && `${c.repository ?? ""}/${c.file_path}${c.line_range ? `:${c.line_range}` : ""}${c.commit ? `@${c.commit.slice(0, 10)}` : ""}`].filter(Boolean).join(" ");
-      if (isVerifiedFact(c)) push(facts, `[${c.classification}] ${c.claim} (${ref || "no ref"}; ${key})`);
-      else if (c.verification_status === "contradicted") push(unverified, `[CONTRADICTED] ${c.claim} (${key})`);
+      const prov = c.provenance ? `; provenance ${c.provenance.status}${c.provenance.verifies ? ` (${c.provenance.verifies} only)` : ""}` : "";
+      if (isVerifiedFact(c)) push(facts, `[${c.classification}] ${c.claim} (${ref || "no ref"}; ${key}${prov})`);
+      else if (c.verification_status === "contradicted") push(unverified, `[CONTRADICTED] ${c.claim} (${key}${c.provenance?.reason ? `; ${c.provenance.reason}` : ""})`, 12, true);
       else if (c.classification === "HYPOTHESIS" || c.classification === "CONFIRMED_ROOT_CAUSE" || c.classification === "ASSUMPTION") push(hyps, `[${c.classification}] ${c.claim} (${key})`);
       else push(unverified, `[${c.classification}, unverified] ${c.claim} (${key})`);
     }
@@ -496,13 +512,14 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
       root = { status: a.status, confidence: a.confidence ?? null, explanation: clip(a.explanation, 300), supporting_claims: a.supporting_claims ?? [], from: key };
     if (o.fix_assessment?.risk) fix = { risk: o.fix_assessment.risk, gate: o.evidence_gate ?? null, from: key, invariants: o.fix_assessment.business_invariants ?? null };
   }
-  if (!refs.length && !scope) return null;
+  if (!refs.length && !scope && !unresolvedScope.length) return null;
   for (const h of hyps) prohibited.length < 20 && prohibited.push(`Do not implement as fact: ${h.replace(/^\[[A-Z_]+\]\s*/, "").slice(0, 200)}`);
   return {
     verified_facts: facts,
     open_hypotheses: hyps,
     unverified_or_contradicted: unverified,
     missing_evidence: missing,
+    ...(unresolvedScope.length ? { unresolved_scope_violations: unresolvedScope } : {}),
     root_cause: root,
     fix,
     approved_scope: scope

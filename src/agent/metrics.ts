@@ -28,6 +28,10 @@ export interface AgentMetrics {
   subagents: Array<{ type: string; id: string; started_at: string; ended_at?: string }>;
   disclosure: { inline: number; index: number; search: number };
   upstream: { full: number; summary: number };
+  /** Repeated work inside the attempt (measured from the provider's tool_use events). */
+  tool_repeats?: { calls: number; duplicate_calls: number; file_reads: number; repeated_file_reads: number; distinct_files_read: number };
+  /** ms from the attempt's first event to the first read/edit of a file the step finally changed (coding steps). */
+  first_useful_location_ms?: number | null;
 }
 
 export function newMetrics(model: string): AgentMetrics {
@@ -35,6 +39,46 @@ export function newMetrics(model: string): AgentMetrics {
 }
 
 const seenMessages = new WeakMap<AgentMetrics, Set<string>>();
+/** Side state for repetition / first-touch measurement (not persisted itself). */
+const toolState = new WeakMap<AgentMetrics, { sigs: Set<string>; reads: Set<string>; firstTouch: Map<string, number>; t0: number }>();
+const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+function stableJson(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
+  return `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as any)[k])}`).join(",")}}`;
+}
+
+/** Count tool calls, exact duplicates and repeated file reads; remember when each file was first touched. */
+export function noteToolUse(m: AgentMetrics, name: string, input: unknown, now = Date.now()) {
+  let st = toolState.get(m);
+  if (!st) toolState.set(m, (st = { sigs: new Set(), reads: new Set(), firstTouch: new Map(), t0: now }));
+  const r = (m.tool_repeats ??= { calls: 0, duplicate_calls: 0, file_reads: 0, repeated_file_reads: 0, distinct_files_read: 0 });
+  r.calls++;
+  const sig = `${name}:${stableJson(input)}`;
+  if (st.sigs.has(sig)) r.duplicate_calls++;
+  else if (st.sigs.size < 5000) st.sigs.add(sig);
+  const file = typeof (input as any)?.file_path === "string" ? String((input as any).file_path) : null;
+  if (file && FILE_TOOLS.has(name)) {
+    if (!st.firstTouch.has(file) && st.firstTouch.size < 1000) st.firstTouch.set(file, now - st.t0);
+    if (name === "Read") {
+      r.file_reads++;
+      if (st.reads.has(file)) r.repeated_file_reads++;
+      else st.reads.add(file);
+      r.distinct_files_read = st.reads.size;
+    }
+  }
+}
+
+/** Earliest first touch of any file whose path ends with one of `changed` (repo-relative paths). */
+export function firstUsefulLocationMs(m: AgentMetrics, changed: string[]): number | null {
+  const st = toolState.get(m);
+  if (!st || !changed.length) return null;
+  let best: number | null = null;
+  for (const [file, ms] of st.firstTouch)
+    if (changed.some((c) => file === c || file.endsWith(`/${c}`))) best = best == null ? ms : Math.min(best, ms);
+  return best;
+}
 
 /** Fold one SDK message into the metrics (pure; unit-tested). */
 export function accumulateMetrics(m: AgentMetrics, msg: any) {
@@ -50,7 +94,11 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
     if (typeof msg.model === "string" && msg.model) m.model = msg.model;
   }
   else if (msg.type === "assistant") {
-    for (const b of msg.message?.content ?? []) if (b.type === "tool_use") m.tool_calls[b.name] = (m.tool_calls[b.name] ?? 0) + 1;
+    for (const b of msg.message?.content ?? [])
+      if (b.type === "tool_use") {
+        m.tool_calls[b.name] = (m.tool_calls[b.name] ?? 0) + 1;
+        noteToolUse(m, b.name, b.input);
+      }
   } else if (msg.type === "user" && Array.isArray(msg.message?.content)) {
     for (const b of msg.message.content) if (b.type === "tool_result" && b.is_error) m.tool_errors++;
   } else if (msg.type === "result") {
