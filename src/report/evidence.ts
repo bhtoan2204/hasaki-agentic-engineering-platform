@@ -88,7 +88,7 @@ export async function collectEvidence(runId: number, reportStepId: number): Prom
         add({ kind: "file_change", title: `${r.repo}/${f.path} (+${f.additions ?? "bin"} −${f.deletions ?? "bin"})`, detail: clip(diff, 1500), ref: { repo: r.repo, path: f.path } });
       }
     }
-  } catch {}
+  } catch { }
 
   // Artifacts of current (non-invalidated) attempts: command logs, review reports.
   for (const a of await q(

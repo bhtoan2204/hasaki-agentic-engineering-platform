@@ -42,12 +42,108 @@ const IMPLEMENT = {
   output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }",
 };
 
+/** Code review follow-up: fix what the review found, on the reviewed branch. */
+const FIX_FROM_REVIEW = {
+  instructions:
+    "Fix the findings of this run's code review. Read the full outputs of the analyze, architecture and security steps with " +
+    "read_step_output. The approval comment on this step (if any) says which findings to fix or skip; without one, fix the " +
+    "high and medium severity findings and leave low ones as not done. Verify each finding in the code before changing it: " +
+    "if it is not real, do not change code, list it under not_fixed with the reason. Call prepare_branch for each repository " +
+    "you change: when the run reviewed a branch, you get that branch and commit on top of it (never rewrite its history). " +
+    "Make the smallest correct change, add or update a test where it proves the fix, run the relevant build/tests, commit with " +
+    "the platform commit convention. Do not push: a later step opens the pull request. Finish by calling submit_result with " +
+    "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }.",
+  output_contract: "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { [repo]: { title, summary, decisions } }, verification }",
+};
+
 const REVIEW = {
+  independent: true,
+  max_repairs: 2,
   instructions:
     "Review the diff of every workspace branch against origin/$BASE_BRANCH (git diff, read-only). Check correctness, the " +
-    "approved plan, coding standards and security policies in your context. Report findings; do not modify code.",
-  output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, suggestion }], summary }",
+    "approved plan or fix proposal, coding standards and security policies in your context. For every finding include a precise file/line, " +
+    "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. Report findings; do not modify code.",
+  output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
   workspace_read: true,
+  // Scope + curated per-language rules from Alibaba OpenCodeReview (delegation mode, no extra model/API key).
+  open_code_review: true,
+};
+
+/**
+ * Evidence-gated investigation (src/agent/evidence.ts). The platform normalizes these fields deterministically: claims
+ * without usable provenance are downgraded, root-cause status is capped by verified evidence and never rises between
+ * steps without new evidence, and fix risk has a detected floor. Steps opt in with config.evidence.
+ */
+const CLAIMS_CONTRACT =
+  "claims: [{ id, claim, classification: 'OBSERVED_FACT'|'CODE_FACT'|'HYPOTHESIS'|'ASSUMPTION'|'CONFIRMED_ROOT_CAUSE', source_type, source_ref, repository, commit, file_path, line_range, confidence: 'low'|'medium'|'high', verification_status: 'verified'|'unverified'|'missing'|'contradicted', supports?: string[], contradicts?: string[] }]";
+const EVIDENCE_RULES =
+  "Evidence rules: classify every critical claim. OBSERVED_FACT needs an observable source (production_log, api_response, database, test_output, screenshot, user_report…) and a source_ref you actually saw; " +
+  "CODE_FACT needs repository, file_path, line_range and the commit you read. Earlier agent outputs are opinions, not evidence: repeating a hypothesis never makes it a fact. " +
+  "If a source (logs/Splunk, database, external API docs) was not available to you, list it under missing_evidence and do not claim it was inspected. " +
+  "Never copy secrets or raw customer payloads into claims; cite a reference instead. Use low/medium/high, never numeric confidence.";
+const ROOT_CAUSE_CONTRACT = "root_cause_assessment: { status: 'CONFIRMED'|'PROBABLE'|'UNCONFIRMED'|'INSUFFICIENT_EVIDENCE', confidence: 'low'|'medium'|'high', explanation, supporting_claims: string[] }";
+
+const BUG_ANALYZE = {
+  evidence: "analysis",
+  instructions:
+    "Analyse the reported problem: symptoms, expected vs actual behaviour, reproduction hints, affected flows. Read attachments (screenshots often hold the actual error). " +
+    "Report coverage explicitly: verified observations, code paths inspected, hypotheses, missing evidence, an impact assessment (do not infer an exact blast radius from one log event), " +
+    "suggestions for collecting the missing evidence, and safe next actions. " +
+    EVIDENCE_RULES,
+  output_contract:
+    "{ symptoms, expected, actual, keywords: string[], reproduction: string[], unknowns: string[], verified_observations?: string[], code_paths_inspected?: string[], hypotheses?: string[], " +
+    "missing_evidence?: string[], impact_assessment?: { summary, scope: 'known'|'estimated'|'unknown', exact: boolean }, evidence_suggestions?: string[], safe_next_actions?: string[], " +
+    CLAIMS_CONTRACT.replace("claims:", "claims?:") + " }",
+};
+
+const BUG_ROOT_CAUSE = {
+  evidence: "root_cause",
+  instructions:
+    "Find the root cause with evidence (file:line at a known commit, logs, data flow). List competing hypotheses and how each was confirmed or ruled out. " +
+    "Assess the root cause separately from any fix: CONFIRMED only when a CONFIRMED_ROOT_CAUSE claim rests on verified facts; PROBABLE when verified facts point to it but alternatives remain; " +
+    "UNCONFIRMED when it is a plausible hypothesis; INSUFFICIENT_EVIDENCE when the needed data was not available. Explain the assessment in one or two sentences. " +
+    "Do not raise the status of an earlier step's conclusion unless you cite NEW verified evidence. " +
+    EVIDENCE_RULES,
+  output_contract: "{ root_cause, evidence: string[], hypotheses: [{ hypothesis, verdict, evidence }], missing_evidence?: string[], " + ROOT_CAUSE_CONTRACT + ", " + CLAIMS_CONTRACT + " }",
+};
+
+const BUG_FIX_PROPOSAL = {
+  evidence: "fix_proposal",
+  instructions:
+    "Propose the smallest correct fix and a regression test. Fix confidence is separate from root-cause confidence: a LOW-risk change (diagnostic logs, richer error messages, input validation, " +
+    "non-invasive tests, error classification without behaviour change) may proceed with an unconfirmed root cause when its correctness is independently supported. " +
+    "MEDIUM risk (retry, timeout, fallback, idempotency, error handling with business effect) needs side_effects and rollback. " +
+    "HIGH risk (order/shipment/payment/refund states or amounts, inventory, reconciliation, marking an external operation successful without confirmation, skipping transitions or checks) " +
+    "needs every business_invariants field answered from the authoritative source of truth — 'unknown' is not an answer — and must not rest on a hypothesis. " +
+    "Never infer that an external operation succeeded from the mere presence of an identifier. Prefer a LOW-risk change when the root cause is not confirmed. " +
+    "Keep the root_cause_assessment of the root-cause step unless you have new verified evidence. List assumptions the implementation must NOT treat as fact under prohibited_assumptions. " +
+    EVIDENCE_RULES,
+  output_contract:
+    "{ summary, changes: [{ repo, files, description }], regression_tests: string[], required_tests?: string[], risks: string[], missing_evidence?: string[], prohibited_assumptions?: string[], " +
+    ROOT_CAUSE_CONTRACT + ", fix_assessment: { risk: 'LOW'|'MEDIUM'|'HIGH', confidence: 'low'|'medium'|'high', explanation, side_effects, rollback, business_invariants?: { current_state, target_state, source_of_truth, preconditions, external_contract, idempotency, retry_behavior, side_effects, concurrency, failure_handling, regression_tests } }, " +
+    CLAIMS_CONTRACT + " }",
+};
+
+const BUG_IMPLEMENT = {
+  ...IMPLEMENT,
+  instructions:
+    IMPLEMENT.instructions +
+    " Implement ONLY the approved change scope in evidence_summary.approved_scope; optional or speculative ideas are not requirements, and open hypotheses or prohibited assumptions must not be coded as facts. " +
+    "If you must change anything outside the approved scope, list it in scope_deviations with its risk: a deviation riskier than the approved risk pauses for renewed approval.",
+  output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification, scope_deviations?: [{ description, files, risk: 'LOW'|'MEDIUM'|'HIGH', reason }] }",
+};
+
+const BUG_REVIEW = {
+  ...REVIEW,
+  scope_review: true,
+  instructions:
+    REVIEW.instructions +
+    " Also judge the diff against the APPROVED scope (evidence_summary.approved_scope and the approval output), not against a rewritten proposal: is every change inside it; was any open hypothesis or prohibited assumption implemented as fact; " +
+    "are business invariants preserved; are external API assumptions supported by evidence; does the change add state transitions nobody approved; do the tests exercise failure paths, not only the happy path; " +
+    "does the code/commit still describe the diagnosis as uncertain when the root cause is not CONFIRMED. Passing unit tests do not make a speculative business-state change acceptable: " +
+    "FAIL with findings for fixable defects, BLOCKED when evidence or human approval is missing.",
+  output_contract:
+    "{ verdict: 'PASS'|'FAIL'|'BLOCKED', findings: [{ severity, file, line, explanation, evidence }], summary, blocked_reason?, scope_check: { in_scope: boolean, unsupported_assumptions: string[], unintended_state_transitions: string[], invariants_preserved: boolean|null, tests_cover_failure_paths: boolean, diagnosis_uncertainty_preserved: boolean|null } }",
 };
 
 export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = [
@@ -102,20 +198,10 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "bug-investigation",
     spec: {
       name: "Bug Investigation",
-      description: "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → PR",
+      description: "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → code review → PR",
       feedback_step: "implement",
       steps: [
-        {
-          key: "analyze",
-          type: "agent",
-          name: "Problem Analysis",
-          config: {
-            instructions:
-              "Analyse the reported problem: symptoms, expected vs actual behaviour, reproduction hints, affected flows. " +
-              "Read attachments (screenshots often hold the actual error).",
-            output_contract: "{ symptoms, expected, actual, keywords: string[], reproduction: string[], unknowns: string[] }",
-          },
-        },
+        { key: "analyze", type: "agent", name: "Problem Analysis", config: BUG_ANALYZE },
         { key: "discover", type: "integration", name: "Repository Discovery", depends_on: ["analyze"], config: DISCOVER },
         { key: "confirm_repos", type: "human_approval", name: "Confirm Repositories", depends_on: ["discover"], config: { ...CONFIRM_REPOS, auto_approve_unambiguous: true } },
         {
@@ -123,31 +209,26 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "agent",
           name: "Root Cause Investigation",
           depends_on: ["confirm_repos"],
-          config: {
-            instructions: "Find the root cause with evidence (file:line, logs, data flow). List competing hypotheses and how each was confirmed or ruled out.",
-            output_contract: "{ root_cause, evidence: string[], hypotheses: [{ hypothesis, verdict, evidence }] }",
-          },
+          config: BUG_ROOT_CAUSE,
         },
         {
           key: "fix_proposal",
           type: "agent",
           name: "Fix Proposal",
           depends_on: ["root_cause"],
-          config: {
-            instructions: "Propose the smallest correct fix and a regression test. State risks and what cannot be verified locally.",
-            output_contract: "{ summary, changes: [{ repo, files, description }], regression_tests: string[], risks: string[] }",
-          },
+          config: BUG_FIX_PROPOSAL,
         },
         {
           key: "approve_fix",
           type: "human_approval",
           name: "Approve Fix",
           depends_on: ["fix_proposal"],
-          config: { show_outputs: ["root_cause", "fix_proposal"], on_reject: { reexecute: "fix_proposal" } },
+          config: { show_outputs: ["root_cause", "fix_proposal"], approve_scope_from: "fix_proposal", on_reject: { reexecute: "fix_proposal" } },
         },
-        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_fix"], config: IMPLEMENT, max_attempts: 2 },
+        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_fix"], config: BUG_IMPLEMENT, max_attempts: 2 },
         { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
-        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["regression_test"], config: { mode: "approval", content_from: "implement" } },
+        { key: "review", type: "agent", name: "Code Review", depends_on: ["regression_test"], config: BUG_REVIEW },
+        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["review"], config: { mode: "approval", content_from: "implement" } },
       ],
     },
   },
@@ -155,14 +236,20 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "code-review",
     spec: {
       name: "Code Review",
-      description: "Repository / branch selection → code analysis → architecture validation → security review → review report (no PR)",
+      description: "Repository / branch selection → code analysis (OpenCodeReview rules) → architecture → security → review report → optional: fix the findings on the reviewed branch → tests → PR",
       inputs: {
-        repositories: { description: "repositories to review", required: true },
-        branch: { description: "branch to review against the base branch (empty = review the base branch itself)", required: false },
+        repositories: { description: "repositories to review (optional: when empty, the run asks you to pick them)", required: false },
+        branch: { description: "branch to review against the base branch (empty = review the base branch itself); fixes are committed on it", required: false },
         focus: { description: "what to focus on", required: false },
       },
       steps: [
-        { key: "select", type: "integration", name: "Repository / PR Selection", config: { action: "select_repositories" } },
+        // Asks which repositories to review unless the run was started with them (then it passes straight through).
+        {
+          key: "select",
+          type: "human_approval",
+          name: "Repository / PR Selection",
+          config: { message: "Chọn repo và branch cần review cho lần chạy này.", select_repositories: true, ask_branch: true, auto_approve_preselected: true },
+        },
         {
           key: "analyze",
           type: "agent",
@@ -170,9 +257,11 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["select"],
           config: {
             instructions:
-              "Review the selected repositories (read-only). If inputs.branch is set, review `git diff origin/$BASE_BRANCH...origin/<branch>`; " +
-              "otherwise review the areas named in inputs.focus. Report correctness and maintainability issues.",
+              "Review the selected repositories (read-only). Each repository's branch under review is inputs.branches[<repo>] " +
+              "(else inputs.branch): review `git diff origin/$BASE_BRANCH...origin/<that branch>` in that repository. A repository " +
+              "without a branch: review the areas named in inputs.focus on the base branch. Report correctness and maintainability issues.",
             output_contract: "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
+            open_code_review: true,
           },
         },
         {
@@ -203,6 +292,11 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["architecture", "security"],
           config: { action: "publish_report", from: ["analyze", "architecture", "security"], title: "Code review report" },
         },
+        // Optional follow-up: approve to let the agent fix the review findings (the approval comment says which ones);
+        // skip it to end with the report only — tests and PR then have nothing to do and finish without changes.
+        { key: "fix", type: "coding_agent", name: "Fix Review Findings", depends_on: ["report"], requires_approval: true, config: FIX_FROM_REVIEW },
+        { key: "fix_test", type: "command", name: "Testing", depends_on: ["fix"], run_if: { step: "fix", status: "COMPLETED" }, config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
+        { key: "fix_pr", type: "git_pull_request", name: "Pull Request", depends_on: ["fix_test"], run_if: { step: "fix", status: "COMPLETED" }, config: { mode: "approval", content_from: "fix" } },
       ],
     },
   },

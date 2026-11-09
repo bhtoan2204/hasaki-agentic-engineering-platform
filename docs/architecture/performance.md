@@ -108,3 +108,92 @@ the run #3 audit), and the effect of the file-reference handoff on STANDARD runs
   not as a shared session.
 * Integration tests that need unreachable infrastructure are still paid once per new base commit (then cached).
 * Claude cold start and prompt caching are outside the platform's control; cache-read tokens dominate token volume.
+
+## Remote database latency (round trips)
+
+Measured from a developer machine to the shared RDS (ap-southeast-1): **`SELECT 1` p50 ≈ 100 ms** (max ≈ 220 ms),
+**new TLS connection ≈ 720 ms**; local PostgreSQL ≈ 0.24 ms. Query cost is negligible next to the network: what makes
+pages and buttons slow is the number of *sequential* statements per request.
+
+Bench (`scratchpad` harness: real HTTP server on an isolated local database with 100 ms injected before every
+statement):
+
+| Request | Before | After |
+|---|---|---|
+| `GET /api/runs/:id` (run page) | 620 ms, 11 queries | 105–210 ms, 9 queries |
+| `GET /api/runs/:id/steps/:key` | 408 ms | 108 ms |
+| `GET /api/runs/:id/events` | 312 ms | 106 ms |
+| `GET /api/metrics/runs/:id` | 511 ms | 105 ms |
+| `GET /api/metrics/summary` | 424 ms | 210 ms |
+| `GET /api/knowledge`, `/api/questions` | 205 ms | 105 ms |
+| `POST …/approve` (one state transition) | 1 930 ms, 19 statements | 1 330 ms, 14 statements |
+
+Changes:
+
+| Change | Where | Saves |
+|---|---|---|
+| Session lookup cached ≤ 10 s (`SESSION_CACHE_MS`, 0 disables); dropped at once in this process on login, logout, password change, deactivation | `auth/sessionCache.ts`, `auth/sessions.ts`, `auth/users.ts` | 1 round trip on every request |
+| Run owner cached (a run's owner never changes once set) | `requireRun` in `authz/access.ts` | 1 on every run route |
+| Run detail, step detail, run metrics, metrics summary, `getRun`: independent reads issued together | `engine.ts`, `api/metrics.ts` | 1–4 per request |
+| Event rows written inside a transaction are buffered and inserted with one multi-row INSERT before COMMIT (triggers still fire per row) | `insertDeferred` in `db/pool.ts`, `runEvents.add` | (events − 1) per transaction |
+| Engine actions return the run read after COMMIT, in parallel, instead of two sequential reads inside the transaction | `txThenRun` in `engine.ts` | 1 per action, shorter lock |
+
+Not changed: the statements of a state transition itself (lock, step/attempt updates, promotion, job, run status) stay
+sequential inside one transaction — correctness first.
+
+**The structural fix is placement.** At ~100 ms per round trip every remaining statement still costs a tenth of a
+second. A server/worker in the same AWS region/VPC as the database (~1 ms) makes all of the above ~100× faster.
+Also check whether the VPN path adds latency (100 ms Vietnam → Singapore is high; ~30–40 ms is typical).
+
+## Click feedback and duplicate submissions
+
+* `act()` (`web/src/ui.tsx`) disables the button that started the action and shows a spinner (`.is-busy`,
+  `aria-busy`) until the request settles; clicks on a busy button are ignored. This applies to every `act(…)` call site
+  without per-button code.
+* `api()` sends an `Idempotency-Key` with every POST. Create-type routes (`IDEMPOTENT_ROUTES` in
+  `http/idempotency.ts`: work items, start run, analyze, import, evidence, Hasaki pick, prod-error scan/investigate)
+  store the first response per (user, key) in `http_idempotency` (migration 023):
+  * a repeat with the same key replays that response (`Idempotent-Replayed: true`);
+  * a repeat while the first request is still running gets 409;
+  * the same key with a different body gets 422;
+  * a 5xx releases the key so the action can be retried.
+
+  Rows are pruned after a day.
+* State transitions (approve, answer, re-execute, stop, cancel) are not keyed. The run row lock plus status checks
+  already make a repeat a no-op that answers 409.
+
+## In-process caches (`src/cache/index.ts`)
+
+| Strategy | Used for | Invalidation |
+|---|---|---|
+| Cache-aside + per-key singleflight + generation check (no stale write-back) | `knowledge.candidates` per owner (every step attempt), repository registry (run start, discovery, PR, authz), published workflow definition versions (run start) | write in this process → cleared after COMMIT (`onCommittedWrite` in `db/pool.ts`, rollback clears nothing); write in another process → DB trigger `NOTIFY cache_invalidate` (migration 024) → listener; TTL 60 s / 5 min backstop |
+| Stale-while-revalidate | `/api/metrics/summary` | fresh 30 s, then stale ≤ 10 min while one background refresh runs |
+| Singleflight | identical concurrent GETs of one user (`http/app.ts`) | none (nothing stored) |
+
+**Safety rules**
+
+* The listener is started by the server. While it is disconnected (VPN drop, restart), every cache is flushed and
+  **bypassed**: notifications sent meanwhile are lost, so nothing cached may be trusted. When it reconnects it flushes
+  again before serving from cache. Processes without a listener (tests, CLI) rely on local invalidation only.
+* A transaction that wrote a cached table bypasses that cache for the rest of the transaction, so it sees its own
+  writes.
+* Cached values are returned as structured clones.
+* The knowledge cache keeps, per item, the version in effect plus newer future-dated versions, and selects by
+  `effective_from` in memory. An instant earlier than the load falls back to the database query.
+* Writes to cached tables must go through `q()`/`one()`. A raw `client.query` write is still caught by the trigger
+  (cross-process path), only later.
+* `CACHE=off` disables the cache-aside and SWR caches.
+
+**Measured** (100 ms injected per statement):
+
+| Request | No cache | Warm cache |
+|---|---|---|
+| start run | 1 727 ms (18 statements) | 1 320 ms (14) |
+| resolve context per step attempt | 508 ms | 408 ms |
+| metrics summary | 205 ms | 1 ms |
+| 3 tabs refetching one run | 24 statements | 8 statements |
+
+**Not cached on purpose**
+
+* Run and step detail. They change on every step, and the page already costs a single round trip.
+* Write paths. Write-through makes writes no faster, and write-behind would lose durable engine state.

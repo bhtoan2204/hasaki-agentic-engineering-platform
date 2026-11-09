@@ -37,7 +37,7 @@ test("Telegram: env values are the fallback, UI values win and persist, clearing
   Object.assign(config.telegram, { botToken: "999:ENVTOKENxxxxxxxxxxxxxxxxx", chatId: "7" }); // as if from .env
   const acc = await import(`../src/integrations/accounts.ts?${Date.now()}`); // captures the env fallback now
   await acc.loadAccountSettings();
-  assert.equal(acc.telegramStatus().source, "env");
+  assert.equal((await acc.telegramStatus()).source, "env");
 
   await assert.rejects(acc.setTelegram({ botToken: "nope", chatId: "42" }), /BotFather/);
   await assert.rejects(acc.setTelegram({ botToken: TOKEN, chatId: "abc" }), /chat id/);
@@ -54,8 +54,18 @@ test("Telegram: env values are the fallback, UI values win and persist, clearing
   await acc.setTelegram({ chatId: "-1001" }); // empty token keeps the saved one
   assert.equal(config.telegram.botToken, TOKEN);
   assert.equal(config.telegram.chatId, "-1001");
-  await acc.testTelegram();
+  await acc.testTelegram(undefined, true); // admin without a personal chat: the shared chat
   assert.equal(sent.at(-1).chat_id, "-1001");
+  // Step notifications use the user's OWN chat: settable from the UI, shown in the status, used by "send a test".
+  const { ensureTestOwner } = await import("../src/auth/testOwner.ts");
+  const uid = await ensureTestOwner();
+  await assert.rejects(acc.testTelegram(uid, false), /chat nhận thông báo/, "a member without a chat gets a clear error");
+  await acc.setTelegramDestination(uid, "555");
+  assert.equal((await acc.telegramStatus(uid)).myChatId, "555");
+  await acc.testTelegram(uid, false);
+  assert.equal(sent.at(-1).chat_id, "555");
+  await acc.setTelegramDestination(uid, "");
+  assert.equal((await acc.telegramStatus(uid)).myChatId, null, "empty clears it");
 
   Object.assign(config.telegram, { botToken: "", chatId: "" });
   await acc.loadAccountSettings(); // restart: reloaded from the settings table

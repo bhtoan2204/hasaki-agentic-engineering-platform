@@ -84,6 +84,34 @@ export function classifyProfile(s: ProfileSignals, requested: ProfileChoice = "A
   return { profile: "STANDARD", requested, confidence: "low", reasons, warnings, signals };
 }
 
+export const COMPLEXITY_CLASSES = ["TRIVIAL", "STANDARD", "COMPLEX", "HIGH_RISK"] as const;
+export type ComplexityClass = (typeof COMPLEXITY_CLASSES)[number];
+export interface ComplexityDecision {
+  class: ComplexityClass;
+  source: "derived" | "user_override";
+  reasons: string[];
+  /** Always shown: a class is an execution hint from request signals, not a guarantee of the real task complexity. */
+  disclaimer: string;
+}
+
+/**
+ * Deterministic execution class for a run (no model call): request signals from the profile decision plus the work
+ * item's verified history (repeated failure categories in earlier outcomes). A user override wins and is recorded.
+ * HIGH_RISK keeps strict verification and human approval whatever the cost; TRIVIAL only marks work that the
+ * deterministic platform steps can carry with minimal agent context.
+ */
+export function classifyComplexity(d: Pick<ProfileDecision, "profile" | "confidence" | "signals">, history: { priorFailureRuns: number } = { priorFailureRuns: 0 }, override?: unknown): ComplexityDecision {
+  const disclaimer = "classification from request signals and history; not a guarantee of actual task complexity";
+  const o = String(override ?? "").toUpperCase();
+  if ((COMPLEXITY_CLASSES as readonly string[]).includes(o)) return { class: o as ComplexityClass, source: "user_override", reasons: [`set by the user: ${o}`], disclaimer };
+  const sig = d.signals as any;
+  if (sig.high_risk_term || sig.declared_risk === "high") return { class: "HIGH_RISK", source: "derived", reasons: [sig.high_risk_term ? `high-risk business area "${sig.high_risk_term}"` : "risk declared high"], disclaimer };
+  if (d.profile === "DEEP") return { class: "COMPLEX", source: "derived", reasons: ["deep profile: several repositories or a large change"], disclaimer };
+  if (history.priorFailureRuns >= 2) return { class: "COMPLEX", source: "derived", reasons: [`${history.priorFailureRuns} earlier runs of this work item had verified failure categories`], disclaimer };
+  if (d.profile === "FAST" && d.confidence === "high") return { class: "TRIVIAL", source: "derived", reasons: ["one known repository, narrow low-risk change"], disclaimer };
+  return { class: "STANDARD", source: "derived", reasons: ["no high-risk, multi-repository or narrow-change signal"], disclaimer };
+}
+
 export interface ProfileChange {
   step: string;
   action: "merged_into" | "removed" | "modified";
@@ -103,7 +131,7 @@ function removeStep(steps: StepSpec[], key: string): StepSpec[] {
  * Resolve the execution graph for a profile. Returns the original spec (same object) when nothing changes; throws
  * `ProfileNotApplicable` when FAST would break the workflow (the caller then falls back to STANDARD).
  */
-export class ProfileNotApplicable extends Error {}
+export class ProfileNotApplicable extends Error { }
 
 export function applyProfile(spec: WorkflowSpec, profile: Profile): { spec: WorkflowSpec; changes: ProfileChange[] } {
   const changes: ProfileChange[] = [];
@@ -149,10 +177,16 @@ export function applyProfile(spec: WorkflowSpec, profile: Profile): { spec: Work
   const order = topoOrder(spec.steps);
   const coding = order.map((k) => spec.steps.find((s) => s.key === k)!).find((s) => s.type === "coding_agent");
   if (!coding) throw new ProfileNotApplicable("workflow has no coding step to fold analysis into");
+  // An approval-gated coding step is an optional follow-up (e.g. "fix the review findings"): the analysis before it is
+  // the workflow's purpose, not a preamble FAST may fold away.
+  if (coding.requires_approval) throw new ProfileNotApplicable(`coding step "${coding.key}" is an optional, approval-gated follow-up; its upstream analysis is the workflow's purpose`);
   const anc = ancestors(spec.steps, coding.key);
   const merged = spec.steps.filter((s) => anc.has(s.key) && s.type === "agent");
   const planApprovals = spec.steps.filter((s) => anc.has(s.key) && s.type === "human_approval" && !s.config.select_repositories);
   const reviews = spec.steps.filter((s) => downstream(spec.steps, coding.key).has(s.key) && s.type === "agent");
+  // A configured agent boundary carries provider, permissions and verification semantics that cannot be folded away.
+  const configured = [...merged, ...reviews].find(s => s.config.agent != null && Object.keys(s.config.agent as object).length > 0);
+  if (configured) throw new ProfileNotApplicable(`step "${configured.key}" has explicit agent configuration; preserve its execution boundary`);
   const removed = new Set([...merged, ...planApprovals, ...reviews].map((s) => s.key));
   // A remaining step that branches on (run_if / condition path) a removed step's output would change behaviour: refuse.
   for (const s of spec.steps) {

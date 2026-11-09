@@ -145,7 +145,7 @@ test("metrics accumulate tokens, cost, tool usage and errors across sessions", (
   assert.equal(m.sessions, 2);
   assert.equal(m.turns, 5);
   assert.equal(m.cost_usd, 0.15);
-  assert.deepEqual(m.tokens, { input: 11, output: 22, cache_read: 5, cache_creation: 0 });
+  assert.deepEqual(m.tokens, { input: 11, output: 22, cache_read: 5, cache_creation: null });
   assert.deepEqual(m.tool_calls, { Read: 2, mcp__platform__read_knowledge: 1 });
   assert.equal(m.tool_errors, 1);
 });

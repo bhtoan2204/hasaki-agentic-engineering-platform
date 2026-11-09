@@ -12,7 +12,8 @@ export const BRAND = {
   tagline: "Your Intelligent Engineering Headquarters",
   company: "Hasaki",
   logoUrl: "/brand/hasaki-logo.png",
-  logoSource: "Official Hasaki logo from the internal oms-frontend repository (public/hasaki-logo.png), unmodified",
+  logoSource:
+    "Official Hasaki logo from the internal oms-frontend repository (public/hasaki-logo.png), unmodified",
   /** UI accent = logo green. */
   green: "#2f6b4f",
   black: "#111513",

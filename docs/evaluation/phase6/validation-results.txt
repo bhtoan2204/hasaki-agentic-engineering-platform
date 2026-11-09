@@ -1,0 +1,10 @@
+Baseline: 2cd4dc1 (latest main fetched; HEAD and origin/main matched)
+Typecheck: PASS (server and web)
+Production build: PASS
+Full regression: PASS — 460 tests, 3 suites, 460 passed, 0 failed, 0 skipped
+Full regression elapsed: 423447.430339 ms
+New provider evaluation tests: 11 passed within the full regression
+Browser smoke: 5 checks passed; see screenshots/smoke-results.txt
+Diff whitespace validation: PASS
+Environment: isolated local PostgreSQL, Docker deterministic validators, Chromium browser
+No live or paid provider calls. No production migration or deployment.

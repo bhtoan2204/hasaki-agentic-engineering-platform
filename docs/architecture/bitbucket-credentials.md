@@ -1,0 +1,13 @@
+# Bitbucket credentials
+
+Use Integrations → Bitbucket to save each member's account email and Bitbucket API token. The existing `user_secrets` store encrypts values with `AUTH_SECRET`. Keep that encryption secret stable and private. Credential rotation updates the saved token, without changing repository definitions or remote URLs.
+
+The resolver uses only the current execution principal (the persisted owner for workflow execution). A partial personal credential is an error. A revoked personal token fails; it never retries as another member or as the service account. If no personal credential exists, an explicitly configured process service account (`BITBUCKET_USER`/`BITBUCKET_TOKEN` or config) is the existing authorized fallback. Set `bitbucket.allowSharedCredentials: false` to forbid that fallback. Repository records never contain tokens.
+
+The existing integration uses Basic authentication for REST with account email/API token (or the legacy username/app-password configuration). Git uses `x-bitbucket-api-token-auth` for an account email/API token and the configured username for the legacy form. These are not assumed interchangeable with OAuth or repository access tokens. See Atlassian's [API token usage documentation](https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/).
+
+Authenticated Git uses execFile argument arrays, a short-lived private askpass helper directory and child-only credential environment variables. Helper files contain no credentials and are removed in finally blocks. Neither the URL nor argv contains a token. Git credential helpers/global configuration are disabled, repository hooks are disabled for platform Git operations, TLS verification remains enabled and redirects/alternate protocols are refused. Suspicious local network configuration (URL rewrites, includes, filters, credential/http overrides) is rejected. Raw subprocess failures are never persisted or sent to the UI. The platform does not install a persistent plaintext credential helper.
+
+Use Test Bitbucket Connection before preparing a repository. Missing credentials, revoked tokens, insufficient access and network failures direct the member to Integrations and repository permissions. Connection testing uses Git read access; write and PR scopes are additionally required when publishing. PR API workspace/slug come from the canonical remote, not an installation-wide workspace setting.
+
+Credentials are short-lived child process environment values, so an administrator or process with the same OS account can inspect them. Separate worker directories do not protect secrets from a hostile process under the same OS account. Use separate OS accounts or machines when that boundary matters.

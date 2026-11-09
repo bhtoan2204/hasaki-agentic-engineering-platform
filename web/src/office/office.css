@@ -1,265 +1,1586 @@
 /* ============================================================ Agent Office
    Scene palette (day = light theme, night = dark theme, like the rest of the app). */
 .office {
-  --o-wall: #f5f4ee; --o-wall-line: #ebeae2; --o-wainscot: #e1e6dc; --o-trim: #b98b62; --o-trim-dark: #8a6342;
-  --o-hasaki-stripe: #2f6b4f; --o-floor: #d7a974; --o-floor-line: #b8864f; --o-floor-grain: #c99862;
-  --o-wood: #a8714a; --o-wood-top: #c88e5f; --o-wood-dark: #7a4f30; --o-chair: #3d4458; --o-chair-in: #4d5670;
-  --o-sky: #9fd3ff; --o-skyline: #c9d9ea; --o-skyline-win: #ffffff; --o-rug: #1c211e; --o-rug-in: #e4efe8;
-  --o-pot: #1c211e; --o-pot-rim: #2e3632; --o-screen: #0f172a; --o-steam: rgba(255,255,255,.75); --o-glow: rgba(255, 214, 120, .35);
-  --o-bubble: #ffffff; --o-ink: #111513; --o-stage-edge: #dfe6e0; --o-sign: #fffaf0;
-  --o-red: #2f6b4f; --o-shelf-back: #e7ece4; --o-lamp-cone: rgba(255, 220, 150, .16);
-  display: flex; flex-direction: column; height: 100%; overflow: auto; background: var(--bg);
+  --o-wall: #f5f4ee;
+  --o-wall-line: #ebeae2;
+  --o-wainscot: #e1e6dc;
+  --o-trim: #b98b62;
+  --o-trim-dark: #8a6342;
+  --o-hasaki-stripe: #2f6b4f;
+  --o-floor: #d7a974;
+  --o-floor-line: #b8864f;
+  --o-floor-grain: #c99862;
+  --o-wood: #a8714a;
+  --o-wood-top: #c88e5f;
+  --o-wood-dark: #7a4f30;
+  --o-chair: #3d4458;
+  --o-chair-in: #4d5670;
+  --o-sky: #9fd3ff;
+  --o-skyline: #c9d9ea;
+  --o-skyline-win: #ffffff;
+  --o-rug: #1c211e;
+  --o-rug-in: #e4efe8;
+  --o-pot: #1c211e;
+  --o-pot-rim: #2e3632;
+  --o-screen: #0f172a;
+  --o-steam: rgba(255, 255, 255, .75);
+  --o-glow: rgba(255, 214, 120, .35);
+  --o-bubble: #ffffff;
+  --o-ink: #111513;
+  --o-stage-edge: #dfe6e0;
+  --o-sign: #fffaf0;
+  --o-red: #2f6b4f;
+  --o-shelf-back: #e7ece4;
+  --o-lamp-cone: rgba(255, 220, 150, .16);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  background: var(--bg);
 }
+
 @media all {
   :root[data-theme="dark"] .office {
-    --o-wall: #2a2733; --o-wall-line: #2f2c39; --o-wainscot: #34303f; --o-trim: #6b5240; --o-trim-dark: #4e3a2c;
-    --o-floor: #5a4130; --o-floor-line: #46321f; --o-floor-grain: #50392a; --o-wood: #6e4a32; --o-wood-top: #8a5f40; --o-wood-dark: #4a3020;
-    --o-chair: #232838; --o-chair-in: #2d3449; --o-sky: #1a2246; --o-skyline: #2c3560; --o-skyline-win: #ffd76b;
-    --o-rug-in: #3b2f35; --o-screen: #0b1020; --o-sign: #efe2cb; --o-shelf-back: #3a2f36; --o-lamp-cone: rgba(255, 200, 110, .22); --o-glow: rgba(255, 196, 90, .5); --o-bubble: #fff8ee; --o-stage-edge: #3a3444;
+    --o-wall: #2a2733;
+    --o-wall-line: #2f2c39;
+    --o-wainscot: #34303f;
+    --o-trim: #6b5240;
+    --o-trim-dark: #4e3a2c;
+    --o-floor: #5a4130;
+    --o-floor-line: #46321f;
+    --o-floor-grain: #50392a;
+    --o-wood: #6e4a32;
+    --o-wood-top: #8a5f40;
+    --o-wood-dark: #4a3020;
+    --o-chair: #232838;
+    --o-chair-in: #2d3449;
+    --o-sky: #1a2246;
+    --o-skyline: #2c3560;
+    --o-skyline-win: #ffd76b;
+    --o-rug-in: #3b2f35;
+    --o-screen: #0b1020;
+    --o-sign: #efe2cb;
+    --o-shelf-back: #3a2f36;
+    --o-lamp-cone: rgba(255, 200, 110, .22);
+    --o-glow: rgba(255, 196, 90, .5);
+    --o-bubble: #fff8ee;
+    --o-stage-edge: #3a3444;
   }
 }
-.office .o-night { display: none }
-:root[data-theme="dark"] .office .o-day { display: none } :root[data-theme="dark"] .office .o-night { display: inline }
 
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
+.office .o-night {
+  display: none
+}
+
+:root[data-theme="dark"] .office .o-day {
+  display: none
+}
+
+:root[data-theme="dark"] .office .o-night {
+  display: inline
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap
+}
 
 /* ---------------------------------------------------------------- layout */
-.office-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; position: sticky; top: 0; z-index: 5 }
-.office-toolbar .office-runpick select { min-width: 280px; max-width: 520px }
-.office-toolbar button.is-on { background: color-mix(in srgb, var(--o-red) 12%, transparent); border-color: var(--o-red); color: var(--text) }
-.office-live { font-size: 12px; color: var(--muted) } .office-live.is-sse { color: var(--ok) }
-.office-preview-ribbon {
-  background: repeating-linear-gradient(-45deg, #fff4d6 0 14px, #ffe8a8 14px 28px); color: #5b3b00; border-bottom: 2px solid #f0b429;
-  padding: 7px 16px; font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline;
+.office-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 5
 }
-.office-preview-ribbon b { letter-spacing: .08em; color: var(--o-red) }
-.office-caption { margin-left: auto; font-weight: 600 }
-.office-body { display: flex; gap: 16px; padding: 14px 16px 24px; align-items: flex-start; flex: 1; min-height: 0 }
-.office-main { flex: 1; min-width: 0; max-width: 1280px; margin: 0 auto }
-.office--compact .office-main { max-width: 760px }
-.office-runline { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap }
-.office-runtitle { color: var(--muted); max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.office-runstatus { font-size: 11px; padding: 0 7px; border-radius: 9px; border: 1px solid currentColor; color: var(--muted) }
-.office-runstatus.s-RUNNING { color: var(--accent) } .office-runstatus.s-WAITING { color: var(--warn) } .office-runstatus.s-COMPLETED { color: var(--ok) } .office-runstatus.s-FAILED { color: var(--err) }
-.office-stats { display: flex; gap: 6px; font-size: 12px }
-.office-stats span { padding: 1px 8px; border-radius: 10px; font-weight: 600 }
-.st-run { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent) }
-.st-wait { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn) }
-.st-fail { background: color-mix(in srgb, var(--err) 15%, transparent); color: var(--err) }
+
+.office-toolbar .office-runpick select {
+  min-width: 280px;
+  max-width: 520px
+}
+
+.office-toolbar button.is-on {
+  background: color-mix(in srgb, var(--o-red) 12%, transparent);
+  border-color: var(--o-red);
+  color: var(--text)
+}
+
+.office-live {
+  font-size: 12px;
+  color: var(--muted)
+}
+
+.office-live.is-sse {
+  color: var(--ok)
+}
+
+.office-preview-ribbon {
+  background: repeating-linear-gradient(-45deg, #fff4d6 0 14px, #ffe8a8 14px 28px);
+  color: #5b3b00;
+  border-bottom: 2px solid #f0b429;
+  padding: 7px 16px;
+  font-size: 13px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.office-preview-ribbon b {
+  letter-spacing: .08em;
+  color: var(--o-red)
+}
+
+.office-caption {
+  margin-left: auto;
+  font-weight: 600
+}
+
+.office-body {
+  display: flex;
+  gap: 16px;
+  padding: 14px 16px 24px;
+  align-items: flex-start;
+  flex: 1;
+  min-height: 0
+}
+
+.office-main {
+  flex: 1;
+  min-width: 0;
+  max-width: 1280px;
+  margin: 0 auto
+}
+
+.office--compact .office-main {
+  max-width: 760px
+}
+
+.office-runline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap
+}
+
+.office-runtitle {
+  color: var(--muted);
+  max-width: 560px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap
+}
+
+.office-runstatus {
+  font-size: 11px;
+  padding: 0 7px;
+  border-radius: 9px;
+  border: 1px solid currentColor;
+  color: var(--muted)
+}
+
+.office-runstatus.s-RUNNING {
+  color: var(--accent)
+}
+
+.office-runstatus.s-WAITING {
+  color: var(--warn)
+}
+
+.office-runstatus.s-COMPLETED {
+  color: var(--ok)
+}
+
+.office-runstatus.s-FAILED {
+  color: var(--err)
+}
+
+.office-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 12px
+}
+
+.office-stats span {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-weight: 600
+}
+
+.st-run {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent)
+}
+
+.st-wait {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn)
+}
+
+.st-fail {
+  background: color-mix(in srgb, var(--err) 15%, transparent);
+  color: var(--err)
+}
 
 /* ---------------------------------------------------------------- stage */
 .office-stage {
-  position: relative; border-radius: 14px; overflow: hidden; background: var(--o-wall);
-  box-shadow: 0 0 0 4px var(--o-stage-edge), 0 18px 40px -18px rgba(60, 30, 10, .45), inset 0 0 0 1px rgba(0,0,0,.05);
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--o-wall);
+  box-shadow: 0 0 0 4px var(--o-stage-edge), 0 18px 40px -18px rgba(60, 30, 10, .45), inset 0 0 0 1px rgba(0, 0, 0, .05);
 }
-.office-svg { display: block; width: 100%; height: auto; image-rendering: pixelated }
-.office--fs { background: #120f16 } .office--fs .office-main { max-width: none }
-.office--fs .office-stage { max-height: calc(100vh - 140px); aspect-ratio: 16 / 9; margin: 0 auto; width: min(100%, calc((100vh - 140px) * 16 / 9)) }
-.o-brand-text { font: 700 7px/1 ui-rounded, "Nunito", system-ui, sans-serif; fill: #fff; letter-spacing: .02em }
-.o-brand-sub { font: 700 3.2px/1 ui-monospace, monospace; fill: #d9ebe1; letter-spacing: .14em }
-.o-sign-text { font: 700 4.2px/1 ui-monospace, monospace; fill: var(--o-ink) }
-.o-sign-sub { font: 3.4px/1 ui-monospace, monospace; fill: #7a5a40 }
-.o-tiny { font: 700 4px/1 ui-monospace, monospace; fill: #fff }
+
+.office-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated
+}
+
+.office--fs {
+  background: #120f16
+}
+
+.office--fs .office-main {
+  max-width: none
+}
+
+.office--fs .office-stage {
+  max-height: calc(100vh - 140px);
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  width: min(100%, calc((100vh - 140px) * 16 / 9))
+}
+
+.o-brand-text {
+  font: 700 7px/1 ui-rounded, "Nunito", system-ui, sans-serif;
+  fill: #fff;
+  letter-spacing: .02em
+}
+
+.o-brand-sub {
+  font: 700 3.2px/1 ui-monospace, monospace;
+  fill: #d9ebe1;
+  letter-spacing: .14em
+}
+
+.o-sign-text {
+  font: 700 4.2px/1 ui-monospace, monospace;
+  fill: var(--o-ink)
+}
+
+.o-sign-sub {
+  font: 3.4px/1 ui-monospace, monospace;
+  fill: #7a5a40
+}
+
+.o-tiny {
+  font: 700 4px/1 ui-monospace, monospace;
+  fill: #fff
+}
 
 /* characters: interaction */
-.chibi { transition: transform 1.6s linear; cursor: pointer; outline: none }
-.chibi-hit:focus-visible .c-hit, .chibi.is-selected .c-hit { stroke: var(--o-red); stroke-width: .6; stroke-dasharray: 1.5 1; rx: 3 }
-.chibi:hover .c-head { filter: brightness(1.06) }
-.c-shadow { fill: rgba(40, 20, 10, .22) }
-.c-armL, .c-armR, .c-head, .c-eyes, .c-legL, .c-legR, .c-torso, .c-jump { transform-box: fill-box }
-.c-armL, .c-armR { transform-origin: 50% 6% }
-.c-head { transform-origin: 50% 90% }
-.c-eyes { transform-origin: 50% 60% }
+.chibi {
+  transition: transform 1.6s linear;
+  cursor: pointer;
+  outline: none
+}
+
+.chibi-hit:focus-visible .c-hit,
+.chibi.is-selected .c-hit {
+  stroke: var(--o-red);
+  stroke-width: .6;
+  stroke-dasharray: 1.5 1;
+  rx: 3
+}
+
+.chibi:hover .c-head {
+  filter: brightness(1.06)
+}
+
+.c-shadow {
+  fill: rgba(40, 20, 10, .22)
+}
+
+.c-armL,
+.c-armR,
+.c-head,
+.c-eyes,
+.c-legL,
+.c-legR,
+.c-torso,
+.c-jump {
+  transform-box: fill-box
+}
+
+.c-armL,
+.c-armR {
+  transform-origin: 50% 6%
+}
+
+.c-head {
+  transform-origin: 50% 90%
+}
+
+.c-eyes {
+  transform-origin: 50% 60%
+}
 
 /* speech bubbles + hover card (HTML overlay, follow the character with the same transition) */
 .o-bubble {
-  position: absolute; transform: translate(-50%, -100%); max-width: min(170px, 30%); pointer-events: none;
-  background: var(--o-bubble); color: #2b1d1a; border: 2px solid var(--o-ink); border-radius: 4px;
-  padding: 2px 7px; font: 600 11px/1.3 ui-rounded, "Nunito", system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  box-shadow: 2px 2px 0 rgba(43, 29, 26, .35); transition: left 1.6s linear, top 1.6s linear; z-index: 2;
+  position: absolute;
+  transform: translate(-50%, -100%);
+  max-width: min(170px, 30%);
+  pointer-events: none;
+  background: var(--o-bubble);
+  color: #2b1d1a;
+  border: 2px solid var(--o-ink);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font: 600 11px/1.3 ui-rounded, "Nunito", system-ui, sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 2px 2px 0 rgba(43, 29, 26, .35);
+  transition: left 1.6s linear, top 1.6s linear;
+  z-index: 2;
 }
-.o-bubble::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 6px; height: 6px; background: var(--o-bubble); border-right: 2px solid var(--o-ink); border-bottom: 2px solid var(--o-ink); transform: translateX(-50%) rotate(45deg) }
-.o-bubble.is-em { background: #fff1c7; z-index: 3 } .o-bubble.is-em::after { background: #fff1c7 }
-.o-bubble.pose-frustrated { background: #ffe1df } .o-bubble.pose-frustrated::after { background: #ffe1df }
-.o-bubble.pose-celebrate, .o-bubble.pose-done { background: #e6f9ec } .o-bubble.pose-celebrate::after, .o-bubble.pose-done::after { background: #e6f9ec }
-.o-bubble.pose-done, .o-bubble.pose-idle, .o-bubble.pose-stopped { opacity: .72; font-weight: 500; font-size: 10px; border-width: 1.5px; box-shadow: none }
-.o-bubble-text { overflow: hidden; text-overflow: ellipsis }
-.o-bubble-count { margin-left: 5px; background: var(--o-red); color: #fff; border-radius: 6px; padding: 0 4px; font-size: 10px }
-.office--compact .o-bubble:not(.is-em) { display: none }
+
+.o-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 6px;
+  height: 6px;
+  background: var(--o-bubble);
+  border-right: 2px solid var(--o-ink);
+  border-bottom: 2px solid var(--o-ink);
+  transform: translateX(-50%) rotate(45deg)
+}
+
+.o-bubble.is-em {
+  background: #fff1c7;
+  z-index: 3
+}
+
+.o-bubble.is-em::after {
+  background: #fff1c7
+}
+
+.o-bubble.pose-frustrated {
+  background: #ffe1df
+}
+
+.o-bubble.pose-frustrated::after {
+  background: #ffe1df
+}
+
+.o-bubble.pose-celebrate,
+.o-bubble.pose-done {
+  background: #e6f9ec
+}
+
+.o-bubble.pose-celebrate::after,
+.o-bubble.pose-done::after {
+  background: #e6f9ec
+}
+
+.o-bubble.pose-done,
+.o-bubble.pose-idle,
+.o-bubble.pose-stopped {
+  opacity: .72;
+  font-weight: 500;
+  font-size: 10px;
+  border-width: 1.5px;
+  box-shadow: none
+}
+
+.o-bubble-text {
+  overflow: hidden;
+  text-overflow: ellipsis
+}
+
+.o-bubble-count {
+  margin-left: 5px;
+  background: var(--o-red);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0 4px;
+  font-size: 10px
+}
+
+.office--compact .o-bubble:not(.is-em) {
+  display: none
+}
+
 .office-hovercard {
-  position: absolute; transform: translate(-50%, 6px); z-index: 4; pointer-events: none; min-width: 180px; max-width: 280px;
-  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 12.5px;
-  box-shadow: 0 10px 24px -10px rgba(0,0,0,.4);
+  position: absolute;
+  transform: translate(-50%, 6px);
+  z-index: 4;
+  pointer-events: none;
+  min-width: 180px;
+  max-width: 280px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  box-shadow: 0 10px 24px -10px rgba(0, 0, 0, .4);
 }
 
 /* roster + notes */
-.office-roster { list-style: none; padding: 0; margin: 12px 0 0; display: flex; gap: 6px; flex-wrap: wrap }
-.office-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px; padding: 4px 11px 4px 8px; font-size: 12.5px }
-.office-chip:hover { border-color: var(--o-red) } .office-chip.is-sel { border-color: var(--o-red); box-shadow: 0 0 0 2px color-mix(in srgb, var(--o-red) 25%, transparent) }
-.office-chip-dot { width: 9px; height: 9px; border-radius: 3px; background: var(--muted) }
-.office-chip.pose-work .office-chip-dot { background: var(--accent) } .office-chip.pose-ask .office-chip-dot, .office-chip.pose-approval .office-chip-dot { background: var(--warn) }
-.office-chip.pose-celebrate .office-chip-dot, .office-chip.pose-done .office-chip-dot { background: var(--ok) } .office-chip.pose-frustrated .office-chip-dot { background: var(--err) }
-.office-chip-state { font: 10.5px ui-monospace, monospace; color: var(--muted) }
-.office-note { margin-top: 10px; max-width: 900px }
-.office-idle-card { margin-top: 12px; background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 14px; font-size: 13px }
-.office-idle-runs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12.5px }
-button.linkish { background: none; color: var(--accent); padding: 0; border: 0; font: inherit; text-decoration: underline }
+.office-roster {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap
+}
+
+.office-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 4px 11px 4px 8px;
+  font-size: 12.5px
+}
+
+.office-chip:hover {
+  border-color: var(--o-red)
+}
+
+.office-chip.is-sel {
+  border-color: var(--o-red);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--o-red) 25%, transparent)
+}
+
+.office-chip-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--muted)
+}
+
+.office-chip.pose-work .office-chip-dot {
+  background: var(--accent)
+}
+
+.office-chip.pose-ask .office-chip-dot,
+.office-chip.pose-approval .office-chip-dot {
+  background: var(--warn)
+}
+
+.office-chip.pose-celebrate .office-chip-dot,
+.office-chip.pose-done .office-chip-dot {
+  background: var(--ok)
+}
+
+.office-chip.pose-frustrated .office-chip-dot {
+  background: var(--err)
+}
+
+.office-chip-state {
+  font: 10.5px ui-monospace, monospace;
+  color: var(--muted)
+}
+
+.office-note {
+  margin-top: 10px;
+  max-width: 900px
+}
+
+.office-idle-card {
+  margin-top: 12px;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px
+}
+
+.office-idle-runs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 12.5px
+}
+
+button.linkish {
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  border: 0;
+  font: inherit;
+  text-decoration: underline
+}
 
 /* details panel */
-.office-panel { width: 380px; flex: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; position: sticky; top: 64px; max-height: calc(100vh - 90px); overflow: auto }
-.office-panel-head { display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px }
-.office-portrait { width: 56px; height: 60px; background: color-mix(in srgb, var(--o-red) 10%, var(--panel2)); border-radius: 10px; image-rendering: pixelated }
-.office-panel-name { font-weight: 700; font-size: 15px }
-.office-panel-now { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px }
-.office-panel-activity { margin: 6px 0 2px; font-weight: 600 }
-.office-panel-cta { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid var(--warn); border-radius: 8px; padding: 8px 10px }
-.o-btn { display: inline-block; background: var(--o-red); color: #fff !important; border-radius: 6px; padding: 5px 12px; font-size: 13px; font-weight: 600; text-decoration: none !important; align-self: flex-start }
-.o-btn:hover { filter: brightness(1.08) }
-.office-events { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px }
-.office-events li { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; font-size: 12px; align-items: baseline; padding: 3px 0; border-bottom: 1px dashed var(--line) }
-.office-ev-text { font-family: ui-monospace, monospace; font-size: 11.5px; word-break: break-word }
-.office-ev-time { color: var(--muted); font-size: 11px }
-.office-steps { padding-left: 18px; margin: 4px 0; font-size: 13px } .office-steps li { margin: 3px 0 }
+.office-panel {
+  width: 380px;
+  flex: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  position: sticky;
+  top: 64px;
+  max-height: calc(100vh - 90px);
+  overflow: auto
+}
+
+.office-panel-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+  margin-bottom: 10px
+}
+
+.office-portrait {
+  width: 56px;
+  height: 60px;
+  background: color-mix(in srgb, var(--o-red) 10%, var(--panel2));
+  border-radius: 10px;
+  image-rendering: pixelated
+}
+
+.office-panel-name {
+  font-weight: 700;
+  font-size: 15px
+}
+
+.office-panel-now {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px
+}
+
+.office-panel-activity {
+  margin: 6px 0 2px;
+  font-weight: 600
+}
+
+.office-panel-cta {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 8px 10px
+}
+
+.o-btn {
+  display: inline-block;
+  background: var(--o-red);
+  color: #fff !important;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none !important;
+  align-self: flex-start
+}
+
+.o-btn:hover {
+  filter: brightness(1.08)
+}
+
+.office-events {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px
+}
+
+.office-events li {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 6px;
+  font-size: 12px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--line)
+}
+
+.office-ev-text {
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  word-break: break-word
+}
+
+.office-ev-time {
+  color: var(--muted);
+  font-size: 11px
+}
+
+.office-steps {
+  padding-left: 18px;
+  margin: 4px 0;
+  font-size: 13px
+}
+
+.office-steps li {
+  margin: 3px 0
+}
 
 @media (max-width: 1000px) {
-  .office-body { flex-direction: column; align-items: stretch }
-  .office-panel { width: auto; position: static; max-height: none }
-  .office-toolbar .office-runpick select { min-width: 0; width: 100% }
-  .office-toolbar .office-runpick { flex: 1 1 100% }
-  .office-caption { margin-left: 0 }
+  .office-body {
+    flex-direction: column;
+    align-items: stretch
+  }
+
+  .office-panel {
+    width: auto;
+    position: static;
+    max-height: none
+  }
+
+  .office-toolbar .office-runpick select {
+    min-width: 0;
+    width: 100%
+  }
+
+  .office-toolbar .office-runpick {
+    flex: 1 1 100%
+  }
+
+  .office-caption {
+    margin-left: 0
+  }
 }
 
 /* ================================================================ animations
    Discrete steps for a pixel-art feel. All keyed on data-pose / data-act from the mapper. */
-@keyframes o-breathe { 0%, 49% { transform: translateY(0) } 50%, 100% { transform: translateY(-.6px) } }
-@keyframes o-blink { 0%, 95%, 100% { transform: scaleY(1) } 96%, 99% { transform: scaleY(.12) } }
-@keyframes o-tapA { 0%, 49% { transform: translateY(0) } 50%, 100% { transform: translateY(-1.4px) } }
-@keyframes o-tapB { 0%, 49% { transform: translateY(-1.4px) } 50%, 100% { transform: translateY(0) } }
-@keyframes o-bob { 0%, 49% { transform: translateY(0) } 50%, 100% { transform: translateY(-1px) } }
-@keyframes o-tilt { 0%, 40% { transform: rotate(0) } 50%, 90% { transform: rotate(-4deg) } }
-@keyframes o-nod { 0%, 70% { transform: rotate(0) } 80% { transform: rotate(5deg) } 90% { transform: rotate(0) } }
-@keyframes o-jump { 0%, 100% { transform: translateY(0) } 30% { transform: translateY(-5px) } 60% { transform: translateY(-2px) } }
-@keyframes o-shake { 0%, 100% { transform: translateX(0) } 25% { transform: translateX(-1px) } 75% { transform: translateX(1px) } }
-@keyframes o-wave { 0%, 100% { transform: rotate(-168deg) } 50% { transform: rotate(-192deg) } }
-@keyframes o-sketch { 0%, 100% { transform: rotate(104deg) } 50% { transform: rotate(122deg) } }
-@keyframes o-sip-arm { 0%, 78%, 100% { transform: rotate(0) } 84%, 94% { transform: rotate(-140deg) } }
-@keyframes o-sip-mug { 0%, 78%, 100% { transform: translate(0, 0) } 84%, 94% { transform: translate(9px, -10px) } }
-@keyframes o-glass { 0%, 100% { transform: translateX(0) } 50% { transform: translateX(-5px) } }
-@keyframes o-float { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-2px) } }
-@keyframes o-bulb { 0%, 60% { opacity: 1 } 70%, 80% { opacity: .35 } 90%, 100% { opacity: 1 } }
-@keyframes o-plane { 0% { transform: translate(0, 0); opacity: 1 } 80% { transform: translate(26px, -22px); opacity: 1 } 100% { transform: translate(30px, -26px); opacity: 0 } }
-@keyframes o-confetti { 0% { transform: translateY(0); opacity: 1 } 100% { transform: translateY(14px); opacity: 0 } }
-@keyframes o-walkA { 0%, 49% { transform: translateY(0) } 50%, 100% { transform: translateY(-1.5px) } }
-@keyframes o-walkB { 0%, 49% { transform: translateY(-1.5px) } 50%, 100% { transform: translateY(0) } }
-@keyframes o-stretchA { 0%, 100% { transform: rotate(0) } 50% { transform: rotate(-22deg) } }
-@keyframes o-stretchB { 0%, 100% { transform: rotate(0) } 50% { transform: rotate(22deg) } }
-@keyframes o-blinkfast { 0%, 49% { opacity: 1 } 50%, 100% { opacity: .2 } }
-@keyframes o-zzz { 0% { transform: translate(0, 0); opacity: 0 } 30% { opacity: 1 } 100% { transform: translate(3px, -6px); opacity: 0 } }
+@keyframes o-breathe {
 
-.chibi .c-torso { animation: o-breathe 2.6s linear infinite }
-.chibi .c-eyes { animation: o-blink 4.6s linear infinite }
+  0%,
+  49% {
+    transform: translateY(0)
+  }
+
+  50%,
+  100% {
+    transform: translateY(-.6px)
+  }
+}
+
+@keyframes o-blink {
+
+  0%,
+  95%,
+  100% {
+    transform: scaleY(1)
+  }
+
+  96%,
+  99% {
+    transform: scaleY(.12)
+  }
+}
+
+@keyframes o-tapA {
+
+  0%,
+  49% {
+    transform: translateY(0)
+  }
+
+  50%,
+  100% {
+    transform: translateY(-1.4px)
+  }
+}
+
+@keyframes o-tapB {
+
+  0%,
+  49% {
+    transform: translateY(-1.4px)
+  }
+
+  50%,
+  100% {
+    transform: translateY(0)
+  }
+}
+
+@keyframes o-bob {
+
+  0%,
+  49% {
+    transform: translateY(0)
+  }
+
+  50%,
+  100% {
+    transform: translateY(-1px)
+  }
+}
+
+@keyframes o-tilt {
+
+  0%,
+  40% {
+    transform: rotate(0)
+  }
+
+  50%,
+  90% {
+    transform: rotate(-4deg)
+  }
+}
+
+@keyframes o-nod {
+
+  0%,
+  70% {
+    transform: rotate(0)
+  }
+
+  80% {
+    transform: rotate(5deg)
+  }
+
+  90% {
+    transform: rotate(0)
+  }
+}
+
+@keyframes o-jump {
+
+  0%,
+  100% {
+    transform: translateY(0)
+  }
+
+  30% {
+    transform: translateY(-5px)
+  }
+
+  60% {
+    transform: translateY(-2px)
+  }
+}
+
+@keyframes o-shake {
+
+  0%,
+  100% {
+    transform: translateX(0)
+  }
+
+  25% {
+    transform: translateX(-1px)
+  }
+
+  75% {
+    transform: translateX(1px)
+  }
+}
+
+@keyframes o-wave {
+
+  0%,
+  100% {
+    transform: rotate(-168deg)
+  }
+
+  50% {
+    transform: rotate(-192deg)
+  }
+}
+
+@keyframes o-sketch {
+
+  0%,
+  100% {
+    transform: rotate(104deg)
+  }
+
+  50% {
+    transform: rotate(122deg)
+  }
+}
+
+@keyframes o-sip-arm {
+
+  0%,
+  78%,
+  100% {
+    transform: rotate(0)
+  }
+
+  84%,
+  94% {
+    transform: rotate(-140deg)
+  }
+}
+
+@keyframes o-sip-mug {
+
+  0%,
+  78%,
+  100% {
+    transform: translate(0, 0)
+  }
+
+  84%,
+  94% {
+    transform: translate(9px, -10px)
+  }
+}
+
+@keyframes o-glass {
+
+  0%,
+  100% {
+    transform: translateX(0)
+  }
+
+  50% {
+    transform: translateX(-5px)
+  }
+}
+
+@keyframes o-float {
+
+  0%,
+  100% {
+    transform: translateY(0)
+  }
+
+  50% {
+    transform: translateY(-2px)
+  }
+}
+
+@keyframes o-bulb {
+
+  0%,
+  60% {
+    opacity: 1
+  }
+
+  70%,
+  80% {
+    opacity: .35
+  }
+
+  90%,
+  100% {
+    opacity: 1
+  }
+}
+
+@keyframes o-plane {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1
+  }
+
+  80% {
+    transform: translate(26px, -22px);
+    opacity: 1
+  }
+
+  100% {
+    transform: translate(30px, -26px);
+    opacity: 0
+  }
+}
+
+@keyframes o-confetti {
+  0% {
+    transform: translateY(0);
+    opacity: 1
+  }
+
+  100% {
+    transform: translateY(14px);
+    opacity: 0
+  }
+}
+
+@keyframes o-walkA {
+
+  0%,
+  49% {
+    transform: translateY(0)
+  }
+
+  50%,
+  100% {
+    transform: translateY(-1.5px)
+  }
+}
+
+@keyframes o-walkB {
+
+  0%,
+  49% {
+    transform: translateY(-1.5px)
+  }
+
+  50%,
+  100% {
+    transform: translateY(0)
+  }
+}
+
+@keyframes o-stretchA {
+
+  0%,
+  100% {
+    transform: rotate(0)
+  }
+
+  50% {
+    transform: rotate(-22deg)
+  }
+}
+
+@keyframes o-stretchB {
+
+  0%,
+  100% {
+    transform: rotate(0)
+  }
+
+  50% {
+    transform: rotate(22deg)
+  }
+}
+
+@keyframes o-blinkfast {
+
+  0%,
+  49% {
+    opacity: 1
+  }
+
+  50%,
+  100% {
+    opacity: .2
+  }
+}
+
+@keyframes o-zzz {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0
+  }
+
+  30% {
+    opacity: 1
+  }
+
+  100% {
+    transform: translate(3px, -6px);
+    opacity: 0
+  }
+}
+
+.chibi .c-torso {
+  animation: o-breathe 2.6s linear infinite
+}
+
+.chibi .c-eyes {
+  animation: o-blink 4.6s linear infinite
+}
 
 /* idle: coffee sips */
 /* each role sips on its own rhythm (--o-delay set per role), so the office never moves in lockstep */
-.chibi[data-pose="idle"] .c-armL { animation: o-sip-arm 7s linear infinite; animation-delay: var(--o-delay, 0s) }
-.chibi[data-pose="idle"] .p-mug { animation: o-sip-mug 7s linear infinite; animation-delay: var(--o-delay, 0s) }
-.chibi .c-torso, .chibi .c-eyes { animation-delay: var(--o-delay, 0s) }
+.chibi[data-pose="idle"] .c-armL {
+  animation: o-sip-arm 7s linear infinite;
+  animation-delay: var(--o-delay, 0s)
+}
+
+.chibi[data-pose="idle"] .p-mug {
+  animation: o-sip-mug 7s linear infinite;
+  animation-delay: var(--o-delay, 0s)
+}
+
+.chibi .c-torso,
+.chibi .c-eyes {
+  animation-delay: var(--o-delay, 0s)
+}
+
 /* ready: stretching, preparing the desk */
-.chibi[data-pose="prepare"] .c-armL { animation: o-stretchA 1.4s steps(4) infinite }
-.chibi[data-pose="prepare"] .c-armR { animation: o-stretchB 1.4s steps(4) infinite }
+.chibi[data-pose="prepare"] .c-armL {
+  animation: o-stretchA 1.4s steps(4) infinite
+}
+
+.chibi[data-pose="prepare"] .c-armR {
+  animation: o-stretchB 1.4s steps(4) infinite
+}
+
 /* working */
-.chibi[data-act="typing"] .c-armL, .chibi[data-act="terminal"] .c-armL, .chibi[data-act="git"] .c-armL { animation: o-tapA .28s linear infinite }
-.chibi[data-act="typing"] .c-armR, .chibi[data-act="terminal"] .c-armR, .chibi[data-act="git"] .c-armR { animation: o-tapB .28s linear infinite }
-.chibi[data-act="testing"] .c-armL, .chibi[data-act="browsing"] .c-armL { animation: o-tapA .6s linear infinite }
-.chibi[data-act="testing"] .c-armR, .chibi[data-act="browsing"] .c-armR { animation: o-tapB .6s linear infinite }
-.chibi[data-act="typing"] .c-head, .chibi[data-act="terminal"] .c-head { animation: o-bob 1.1s linear infinite }
-.chibi[data-act="testing"] .c-head { animation: o-tilt 3s steps(2) infinite }
-.chibi[data-act="reading"] .c-armL, .chibi[data-act="writing"] .c-armL, .chibi[data-act="knowledge"] .c-armL, .chibi[data-act="packaging"] .c-armL, .chibi[data-act="planning"] .c-armL { transform: rotate(-28deg) }
-.chibi[data-act="reading"] .c-armR, .chibi[data-act="writing"] .c-armR, .chibi[data-act="knowledge"] .c-armR, .chibi[data-act="packaging"] .c-armR, .chibi[data-act="planning"] .c-armR { transform: rotate(28deg) }
-.chibi[data-act="reading"] .c-head, .chibi[data-act="knowledge"] .c-head { animation: o-tilt 3.4s steps(2) infinite }
-.chibi[data-act="reading"] .p-paper, .chibi[data-act="writing"] .p-paper { animation: o-bob 1.8s linear infinite }
-.chibi[data-act="writing"] .c-armR { animation: o-tapA .4s linear infinite }
-.chibi[data-act="thinking"] .c-armR { transform: rotate(160deg) }
-.chibi[data-act="thinking"] .c-head { transform: rotate(-5deg) }
-.chibi .p-bulb { animation: o-bulb 1.6s linear infinite, o-float 2s steps(2) infinite }
-.chibi[data-act="searching"] .c-armR, .chibi[data-act="reviewing"] .c-armR { transform: rotate(-35deg) }
-.chibi[data-act="searching"] .p-glass, .chibi[data-act="reviewing"] .p-glass { animation: o-glass 2.2s steps(5) infinite }
-.chibi[data-act="reviewing"] .c-head { animation: o-nod 2.6s linear infinite }
-.chibi[data-act="sketching"] .c-armL { animation: o-sketch 1.1s steps(3) infinite }
-.chibi[data-act="sketching"] .c-head { transform: rotate(-6deg) }
-.chibi[data-act="packaging"] .p-box { animation: o-bob .7s linear infinite }
-.chibi[data-act="delegating"] .c-armR { animation: o-stretchB 1s steps(2) infinite; transform-origin: 50% 6% }
-.chibi[data-act="submitting"] .c-armL { transform: rotate(150deg) } .chibi[data-act="submitting"] .c-armR { transform: rotate(-150deg) }
-.chibi .p-plane { animation: o-plane 1.8s linear infinite }
-.chibi .p-float, .chibi .p-check { animation: o-float 1.6s steps(2) infinite }
-.chibi[data-retry] .p-determined { animation: o-blinkfast .5s linear infinite }
-.chibi[data-retry] .c-armL, .chibi[data-retry] .c-armR { animation-duration: .2s }
+.chibi[data-act="typing"] .c-armL,
+.chibi[data-act="terminal"] .c-armL,
+.chibi[data-act="git"] .c-armL {
+  animation: o-tapA .28s linear infinite
+}
+
+.chibi[data-act="typing"] .c-armR,
+.chibi[data-act="terminal"] .c-armR,
+.chibi[data-act="git"] .c-armR {
+  animation: o-tapB .28s linear infinite
+}
+
+.chibi[data-act="testing"] .c-armL,
+.chibi[data-act="browsing"] .c-armL {
+  animation: o-tapA .6s linear infinite
+}
+
+.chibi[data-act="testing"] .c-armR,
+.chibi[data-act="browsing"] .c-armR {
+  animation: o-tapB .6s linear infinite
+}
+
+.chibi[data-act="typing"] .c-head,
+.chibi[data-act="terminal"] .c-head {
+  animation: o-bob 1.1s linear infinite
+}
+
+.chibi[data-act="testing"] .c-head {
+  animation: o-tilt 3s steps(2) infinite
+}
+
+.chibi[data-act="reading"] .c-armL,
+.chibi[data-act="writing"] .c-armL,
+.chibi[data-act="knowledge"] .c-armL,
+.chibi[data-act="packaging"] .c-armL,
+.chibi[data-act="planning"] .c-armL {
+  transform: rotate(-28deg)
+}
+
+.chibi[data-act="reading"] .c-armR,
+.chibi[data-act="writing"] .c-armR,
+.chibi[data-act="knowledge"] .c-armR,
+.chibi[data-act="packaging"] .c-armR,
+.chibi[data-act="planning"] .c-armR {
+  transform: rotate(28deg)
+}
+
+.chibi[data-act="reading"] .c-head,
+.chibi[data-act="knowledge"] .c-head {
+  animation: o-tilt 3.4s steps(2) infinite
+}
+
+.chibi[data-act="reading"] .p-paper,
+.chibi[data-act="writing"] .p-paper {
+  animation: o-bob 1.8s linear infinite
+}
+
+.chibi[data-act="writing"] .c-armR {
+  animation: o-tapA .4s linear infinite
+}
+
+.chibi[data-act="thinking"] .c-armR {
+  transform: rotate(160deg)
+}
+
+.chibi[data-act="thinking"] .c-head {
+  transform: rotate(-5deg)
+}
+
+.chibi .p-bulb {
+  animation: o-bulb 1.6s linear infinite, o-float 2s steps(2) infinite
+}
+
+.chibi[data-act="searching"] .c-armR,
+.chibi[data-act="reviewing"] .c-armR {
+  transform: rotate(-35deg)
+}
+
+.chibi[data-act="searching"] .p-glass,
+.chibi[data-act="reviewing"] .p-glass {
+  animation: o-glass 2.2s steps(5) infinite
+}
+
+.chibi[data-act="reviewing"] .c-head {
+  animation: o-nod 2.6s linear infinite
+}
+
+.chibi[data-act="sketching"] .c-armL {
+  animation: o-sketch 1.1s steps(3) infinite
+}
+
+.chibi[data-act="sketching"] .c-head {
+  transform: rotate(-6deg)
+}
+
+.chibi[data-act="packaging"] .p-box {
+  animation: o-bob .7s linear infinite
+}
+
+.chibi[data-act="delegating"] .c-armR {
+  animation: o-stretchB 1s steps(2) infinite;
+  transform-origin: 50% 6%
+}
+
+.chibi[data-act="submitting"] .c-armL {
+  transform: rotate(150deg)
+}
+
+.chibi[data-act="submitting"] .c-armR {
+  transform: rotate(-150deg)
+}
+
+.chibi .p-plane {
+  animation: o-plane 1.8s linear infinite
+}
+
+.chibi .p-float,
+.chibi .p-check {
+  animation: o-float 1.6s steps(2) infinite
+}
+
+.chibi[data-retry] .p-determined {
+  animation: o-blinkfast .5s linear infinite
+}
+
+.chibi[data-retry] .c-armL,
+.chibi[data-retry] .c-armR {
+  animation-duration: .2s
+}
+
 /* waiting for a human: raise a hand / hold the approval clipboard */
-.chibi[data-pose="ask"] .c-armR { animation: o-wave .9s steps(2) infinite }
-.chibi[data-pose="ask"] .p-q, .chibi[data-pose="approval"] .p-q { animation: o-float 1s steps(2) infinite }
-.chibi[data-pose="approval"] .c-armL { transform: rotate(-24deg) } .chibi[data-pose="approval"] .c-armR { transform: rotate(24deg) }
-.chibi[data-pose="approval"] .c-head { animation: o-nod 2s linear infinite }
+.chibi[data-pose="ask"] .c-armR {
+  animation: o-wave .9s steps(2) infinite
+}
+
+.chibi[data-pose="ask"] .p-q,
+.chibi[data-pose="approval"] .p-q {
+  animation: o-float 1s steps(2) infinite
+}
+
+.chibi[data-pose="approval"] .c-armL {
+  transform: rotate(-24deg)
+}
+
+.chibi[data-pose="approval"] .c-armR {
+  transform: rotate(24deg)
+}
+
+.chibi[data-pose="approval"] .c-head {
+  animation: o-nod 2s linear infinite
+}
+
 /* outcomes */
-.chibi[data-pose="celebrate"] .c-jump { animation: o-jump .7s steps(4) infinite }
-.chibi[data-pose="celebrate"] .c-armL { transform: rotate(150deg) } .chibi[data-pose="celebrate"] .c-armR { transform: rotate(-150deg) }
-.chibi .p-confetti rect { animation: o-confetti 1.2s linear infinite }
-.chibi[data-pose="frustrated"] .c-head { animation: o-shake .45s steps(2) infinite }
-.chibi[data-pose="frustrated"] .c-armR { transform: rotate(168deg) }
-.chibi[data-pose="frustrated"] .p-sweat { animation: o-float 1.2s steps(2) infinite }
-.chibi[data-pose="stopped"] .c-torso { animation: none; transform: translateY(1px) }
-.chibi[data-pose="stopped"] .c-eyes { animation: none; transform: scaleY(.35) }
-.chibi[data-pose="stopped"] .p-zzz { animation: o-zzz 2.4s linear infinite }
-.chibi[data-pose="skipped"] { opacity: .55; filter: grayscale(.85) }
+.chibi[data-pose="celebrate"] .c-jump {
+  animation: o-jump .7s steps(4) infinite
+}
+
+.chibi[data-pose="celebrate"] .c-armL {
+  transform: rotate(150deg)
+}
+
+.chibi[data-pose="celebrate"] .c-armR {
+  transform: rotate(-150deg)
+}
+
+.chibi .p-confetti rect {
+  animation: o-confetti 1.2s linear infinite
+}
+
+.chibi[data-pose="frustrated"] .c-head {
+  animation: o-shake .45s steps(2) infinite
+}
+
+.chibi[data-pose="frustrated"] .c-armR {
+  transform: rotate(168deg)
+}
+
+.chibi[data-pose="frustrated"] .p-sweat {
+  animation: o-float 1.2s steps(2) infinite
+}
+
+.chibi[data-pose="stopped"] .c-torso {
+  animation: none;
+  transform: translateY(1px)
+}
+
+.chibi[data-pose="stopped"] .c-eyes {
+  animation: none;
+  transform: scaleY(.35)
+}
+
+.chibi[data-pose="stopped"] .p-zzz {
+  animation: o-zzz 2.4s linear infinite
+}
+
+.chibi[data-pose="skipped"] {
+  opacity: .55;
+  filter: grayscale(.85)
+}
+
 /* walking between desk and the Hỏi & Duyệt counter */
-.chibi[data-walking] .c-legL { animation: o-walkA .32s linear infinite }
-.chibi[data-walking] .c-legR { animation: o-walkB .32s linear infinite }
-.chibi[data-walking] .c-torso { animation: o-bob .32s linear infinite }
-.chibi[data-walking] .c-armL { animation: o-tapA .32s linear infinite; transform: none }
-.chibi[data-walking] .c-armR { animation: o-tapB .32s linear infinite; transform: none }
+.chibi[data-walking] .c-legL {
+  animation: o-walkA .32s linear infinite
+}
+
+.chibi[data-walking] .c-legR {
+  animation: o-walkB .32s linear infinite
+}
+
+.chibi[data-walking] .c-torso {
+  animation: o-bob .32s linear infinite
+}
+
+.chibi[data-walking] .c-armL {
+  animation: o-tapA .32s linear infinite;
+  transform: none
+}
+
+.chibi[data-walking] .c-armR {
+  animation: o-tapB .32s linear infinite;
+  transform: none
+}
 
 /* screens, board, decor */
-@keyframes o-scroll { 0% { transform: translateY(0) } 100% { transform: translateY(-20px) } }
-@keyframes o-progress { 0% { transform: scaleX(0) } 90%, 100% { transform: scaleX(1) } }
-@keyframes o-scan { 0% { transform: translateY(0) } 100% { transform: translateY(12px) } }
-@keyframes o-saver { 0%, 100% { transform: translate(-3px, -2px) } 50% { transform: translate(3px, 2px) } }
-@keyframes o-draw { 0% { stroke-dashoffset: 60 } 70%, 100% { stroke-dashoffset: 0 } }
-@keyframes o-sway { 0%, 100% { transform: rotate(0) } 50% { transform: rotate(2deg) } }
-@keyframes o-steam { 0% { transform: translateY(0); opacity: .9 } 100% { transform: translateY(-3px); opacity: 0 } }
-@keyframes o-twinkle { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
-@keyframes o-ring { 0%, 70%, 100% { transform: rotate(0) } 75% { transform: rotate(-12deg) } 85% { transform: rotate(12deg) } }
-@keyframes o-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
-.s-scroll { animation: o-scroll 2.4s steps(10) infinite }
-.s-progress { transform-box: fill-box; transform-origin: 0 50%; animation: o-progress 2.8s steps(14) infinite }
-.s-dot { animation: o-blinkfast 1.4s linear infinite }
-.s-scan { animation: o-scan 2.2s steps(6) infinite alternate }
-.s-saver { animation: o-saver 6s steps(6) infinite }
-.s-blink { animation: o-blinkfast 1s linear infinite }
-.s-boot rect { animation: o-blinkfast .9s linear infinite } .s-boot rect:nth-child(2) { animation-delay: .3s } .s-boot rect:nth-child(3) { animation-delay: .6s }
-.o-board .b-line { stroke-dasharray: 60; stroke-dashoffset: 0; opacity: .3 }
-.o-board[data-mode="work"] .b-line { opacity: 1; animation: o-draw 3.4s steps(12) infinite }
-.o-board[data-mode="ok"] .b-line, .o-board[data-mode="fail"] .b-line, .o-board[data-mode="wait"] .b-line { opacity: 1 }
-.o-sway { transform-box: fill-box; transform-origin: 50% 100%; animation: o-sway 5s steps(3) infinite }
-.o-steam rect { animation: o-steam 1.6s linear infinite } .o-steam rect:nth-child(2) { animation-delay: .8s }
-.o-star { animation: o-twinkle 2.6s steps(2) infinite } .o-star:nth-child(2n) { animation-delay: 1.1s }
-.o-glow { animation: o-pulse 3s steps(3) infinite }
-.o-bell { transform-box: fill-box; transform-origin: 50% 100%; animation: o-ring 1.6s linear infinite }
-.o-sign-on { animation: o-pulse 1.2s steps(2) infinite }
+@keyframes o-scroll {
+  0% {
+    transform: translateY(0)
+  }
+
+  100% {
+    transform: translateY(-20px)
+  }
+}
+
+@keyframes o-progress {
+  0% {
+    transform: scaleX(0)
+  }
+
+  90%,
+  100% {
+    transform: scaleX(1)
+  }
+}
+
+@keyframes o-scan {
+  0% {
+    transform: translateY(0)
+  }
+
+  100% {
+    transform: translateY(12px)
+  }
+}
+
+@keyframes o-saver {
+
+  0%,
+  100% {
+    transform: translate(-3px, -2px)
+  }
+
+  50% {
+    transform: translate(3px, 2px)
+  }
+}
+
+@keyframes o-draw {
+  0% {
+    stroke-dashoffset: 60
+  }
+
+  70%,
+  100% {
+    stroke-dashoffset: 0
+  }
+}
+
+@keyframes o-sway {
+
+  0%,
+  100% {
+    transform: rotate(0)
+  }
+
+  50% {
+    transform: rotate(2deg)
+  }
+}
+
+@keyframes o-steam {
+  0% {
+    transform: translateY(0);
+    opacity: .9
+  }
+
+  100% {
+    transform: translateY(-3px);
+    opacity: 0
+  }
+}
+
+@keyframes o-twinkle {
+
+  0%,
+  100% {
+    opacity: 1
+  }
+
+  50% {
+    opacity: .25
+  }
+}
+
+@keyframes o-ring {
+
+  0%,
+  70%,
+  100% {
+    transform: rotate(0)
+  }
+
+  75% {
+    transform: rotate(-12deg)
+  }
+
+  85% {
+    transform: rotate(12deg)
+  }
+}
+
+@keyframes o-pulse {
+
+  0%,
+  100% {
+    opacity: 1
+  }
+
+  50% {
+    opacity: .55
+  }
+}
+
+.s-scroll {
+  animation: o-scroll 2.4s steps(10) infinite
+}
+
+.s-progress {
+  transform-box: fill-box;
+  transform-origin: 0 50%;
+  animation: o-progress 2.8s steps(14) infinite
+}
+
+.s-dot {
+  animation: o-blinkfast 1.4s linear infinite
+}
+
+.s-scan {
+  animation: o-scan 2.2s steps(6) infinite alternate
+}
+
+.s-saver {
+  animation: o-saver 6s steps(6) infinite
+}
+
+.s-blink {
+  animation: o-blinkfast 1s linear infinite
+}
+
+.s-boot rect {
+  animation: o-blinkfast .9s linear infinite
+}
+
+.s-boot rect:nth-child(2) {
+  animation-delay: .3s
+}
+
+.s-boot rect:nth-child(3) {
+  animation-delay: .6s
+}
+
+.o-board .b-line {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 0;
+  opacity: .3
+}
+
+.o-board[data-mode="work"] .b-line {
+  opacity: 1;
+  animation: o-draw 3.4s steps(12) infinite
+}
+
+.o-board[data-mode="ok"] .b-line,
+.o-board[data-mode="fail"] .b-line,
+.o-board[data-mode="wait"] .b-line {
+  opacity: 1
+}
+
+.o-sway {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: o-sway 5s steps(3) infinite
+}
+
+.o-steam rect {
+  animation: o-steam 1.6s linear infinite
+}
+
+.o-steam rect:nth-child(2) {
+  animation-delay: .8s
+}
+
+.o-star {
+  animation: o-twinkle 2.6s steps(2) infinite
+}
+
+.o-star:nth-child(2n) {
+  animation-delay: 1.1s
+}
+
+.o-glow {
+  animation: o-pulse 3s steps(3) infinite
+}
+
+.o-bell {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: o-ring 1.6s linear infinite
+}
+
+.o-sign-on {
+  animation: o-pulse 1.2s steps(2) infinite
+}
 
 /* animations off (toolbar toggle; defaults off with prefers-reduced-motion) */
-.office--still *, .office--still *::before, .office--still *::after { animation: none !important; transition: none !important }
-@media (prefers-reduced-motion: reduce) { .office .chibi, .office .o-bubble { transition: none } }
+.office--still *,
+.office--still *::before,
+.office--still *::after {
+  animation: none !important;
+  transition: none !important
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .office .chibi,
+  .office .o-bubble {
+    transition: none
+  }
+}
 
 /* Office 2.0: beauty retail details */
-.o-bar-text { font: 700 4.6px/1 var(--font, ui-sans-serif); fill: #ffffff; letter-spacing: .18em }
-@keyframes o-cone { 0%, 100% { opacity: .85 } 50% { opacity: 1 } }
-.o-cone { animation: o-cone 5s ease-in-out infinite }
-@keyframes o-sparkle { 0%, 70%, 100% { opacity: 0 } 80% { opacity: 1 } }
-.o-sparkle rect { animation: o-sparkle 3.6s steps(2) infinite } .o-sparkle rect:nth-child(2) { animation-delay: 1.7s }
-@keyframes o-beam { 0%, 100% { opacity: .9 } 50% { opacity: .2 } }
-.o-scan-beam, .o-scan-led { animation: o-beam .5s steps(2) infinite }
+.o-bar-text {
+  font: 700 4.6px/1 var(--font, ui-sans-serif);
+  fill: #ffffff;
+  letter-spacing: .18em
+}
+
+@keyframes o-cone {
+
+  0%,
+  100% {
+    opacity: .85
+  }
+
+  50% {
+    opacity: 1
+  }
+}
+
+.o-cone {
+  animation: o-cone 5s ease-in-out infinite
+}
+
+@keyframes o-sparkle {
+
+  0%,
+  70%,
+  100% {
+    opacity: 0
+  }
+
+  80% {
+    opacity: 1
+  }
+}
+
+.o-sparkle rect {
+  animation: o-sparkle 3.6s steps(2) infinite
+}
+
+.o-sparkle rect:nth-child(2) {
+  animation-delay: 1.7s
+}
+
+@keyframes o-beam {
+
+  0%,
+  100% {
+    opacity: .9
+  }
+
+  50% {
+    opacity: .2
+  }
+}
+
+.o-scan-beam,
+.o-scan-led {
+  animation: o-beam .5s steps(2) infinite
+}
+
 /* greeting mascot pose (Overview) */
-.chibi[data-pose="greet"] .c-armR { animation: o-wave .9s steps(2) infinite }
-.office-verify { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px }
-.office-verify-repo { border-top: 1px dashed var(--line); padding-top: 5px }
-.office-history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px }
-.office-history li { border-left: 2px solid var(--line); padding-left: 8px }
+.chibi[data-pose="greet"] .c-armR {
+  animation: o-wave .9s steps(2) infinite
+}
+
+.office-verify {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px
+}
+
+.office-verify-repo {
+  border-top: 1px dashed var(--line);
+  padding-top: 5px
+}
+
+.office-history {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px
+}
+
+.office-history li {
+  border-left: 2px solid var(--line);
+  padding-left: 8px
+}

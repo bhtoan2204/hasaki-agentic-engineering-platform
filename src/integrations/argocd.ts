@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import { settings } from "../db.ts";
+import { personalSettings as settings, PersonalSession } from "./personal.ts";
 import { redactSecrets } from "./redact.ts";
 
 /**
@@ -12,7 +12,7 @@ import { redactSecrets } from "./redact.ts";
  */
 
 const SETTING = "argocd_token";
-let token: { value: string; exp: number; user: string } | null = null;
+const login = new PersonalSession<{ value: string; exp: number; user: string }>();
 
 const baseUrl = () => config.argocd.baseUrl.replace(/\/$/, "");
 
@@ -35,16 +35,17 @@ export function parseArgoToken(raw: string): string {
 
 export async function loadArgoToken() {
   const saved = await settings.get(SETTING);
+  if (!saved) { if (login.current) login.current = null; return; }
   if (saved) {
     const c = jwtClaims(saved);
-    token = { value: saved, exp: Number(c.exp) || 0, user: String(c.email ?? c.preferred_username ?? c.sub ?? "") };
+    login.current = { value: saved, exp: Number(c.exp) || 0, user: String(c.email ?? c.preferred_username ?? c.sub ?? "") };
   }
 }
 
 export function argoStatus() {
   const now = Date.now() / 1000;
-  const valid = !!token && (token.exp === 0 || token.exp - 30 > now);
-  return { baseUrl: baseUrl(), loggedIn: valid, user: token?.user || null, expiresAt: token?.exp ? new Date(token.exp * 1000).toISOString() : null, expired: !!token && !valid };
+  const valid = !!login.current && (login.current.exp === 0 || login.current.exp - 30 > now);
+  return { baseUrl: baseUrl(), loggedIn: valid, user: login.current?.user || null, expiresAt: login.current?.exp ? new Date(login.current.exp * 1000).toISOString() : null, expired: !!login.current && !valid };
 }
 
 /** Validate against Argo CD (session/userinfo) before saving, so a wrong or expired paste is reported immediately. */
@@ -55,13 +56,13 @@ export async function setArgoToken(raw: string) {
   if (c.exp && c.exp * 1000 < Date.now()) throw new Error(`token đã hết hạn lúc ${new Date(c.exp * 1000).toLocaleString("vi-VN")} — đăng nhập lại Argo CD rồi copy cookie mới`);
   const info: any = await rawGet("/api/v1/session/userinfo", value);
   if (!info?.loggedIn) throw new Error("Argo CD không chấp nhận token này (session/userinfo: loggedIn=false)");
-  token = { value, exp: Number(c.exp) || 0, user: String(info.username ?? c.email ?? c.sub ?? "") };
+  login.current = { value, exp: Number(c.exp) || 0, user: String(info.username ?? c.email ?? c.sub ?? "") };
   await settings.set(SETTING, value);
   return argoStatus();
 }
 
 export async function clearArgoToken() {
-  token = null;
+  login.current = null;
   await settings.set(SETTING, "");
   return argoStatus();
 }
@@ -74,7 +75,7 @@ function requireToken(): string {
         ? "Token Argo CD đã hết hạn — người dùng cần dán token mới ở trang Integrations của platform (hỏi họ qua ask_user nếu cần log QC)."
         : "Chưa kết nối Argo CD — người dùng cần dán token argocd.token ở trang Integrations của platform.",
     );
-  return token!.value;
+  return login.current!.value;
 }
 
 async function rawGet(path: string, bearer: string, params?: Record<string, string | number | boolean | undefined>): Promise<unknown> {
@@ -83,7 +84,7 @@ async function rawGet(path: string, bearer: string, params?: Record<string, stri
   const res = await fetch(url, { headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
   const text = await res.text();
   if (res.status === 401 || res.status === 403) {
-    if (token && bearer === token.value && res.status === 401) token = { ...token, exp: 1 }; // mark expired: the UI shows it
+    if (login.current && bearer === login.current.value && res.status === 401) login.current = { ...login.current, exp: 1 }; // mark expired: the UI shows it
     throw new Error(`Argo CD ${res.status} ${path}: ${res.status === 401 ? "token hết hạn hoặc không hợp lệ" : "không có quyền (RBAC)"}`);
   }
   if (!res.ok) throw new Error(`Argo CD ${res.status} ${path}: ${text.slice(0, 300)}`);

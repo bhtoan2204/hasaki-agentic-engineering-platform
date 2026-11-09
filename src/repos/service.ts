@@ -1,7 +1,10 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { resolveRepoPath } from "./paths.ts";
+import { repositoryRemote, repositoryBranch } from "./remote.ts";
 import { config } from "../config.ts";
-import { pool, q, one, type Db } from "../db/pool.ts";
+import { pool, q, one, inTx, txWrote, type Db } from "../db/pool.ts";
+import { CacheAside } from "../cache/index.ts";
 
 export interface RepositoryRow {
   id: number;
@@ -10,6 +13,8 @@ export interface RepositoryRow {
   path: string;
   provider: string;
   remote_slug: string;
+  repository_url?: string | null;
+  default_branch?: string;
   description: string;
   projects: string[];
   services: string[];
@@ -21,23 +26,48 @@ export interface RepositoryRow {
   enabled: boolean;
 }
 
-const EDITABLE = ["path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
+/** The registry is small and read on every run start, discovery, PR and authorization check. */
+const repoCache = new CacheAside<RepositoryRow[]>("repositories", ["repositories"], 60_000, 1);
+function allRepositories(db: Db): Promise<RepositoryRow[]> {
+  const load = () => q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+  return inTx(db) && txWrote(db, "repositories") ? load() : repoCache.get("all", load);
+}
+
+const EDITABLE = ["repository_url", "default_branch", "path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
 
 export const repositories = {
   list(db: Db = pool) {
-    return q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+    return allRepositories(db);
   },
-  get(name: string, db: Db = pool) {
-    return one<RepositoryRow>(db, "SELECT * FROM repositories WHERE name = $1", [name]);
+  async get(name: string, db: Db = pool) {
+    return (await allRepositories(db)).find((r) => r.name === name);
   },
   async upsert(name: string, patch: Partial<RepositoryRow>, db: Db = pool) {
-    if (!/^[A-Za-z0-9._-]+$/.test(name)) throw new Error(`invalid repository name "${name}"`);
-    const cols = EDITABLE.filter((k) => patch[k] !== undefined);
+    if (!/^[A-Za-z0-9._-]+$/.test(name) || [".", ".."].includes(name)) throw new Error(`invalid repository name "${name}"`);
+    if (patch.path && (isAbsolute(patch.path) || patch.path.split(/[\\/]/).includes(".."))) throw new Error("Shared repository path must be a relative layout hint; use local repositories overrides for absolute paths");
+    patch = { ...patch };
+    if (patch.repository_url != null) {
+      const remote = repositoryRemote(patch.repository_url);
+      patch.repository_url = remote.url;
+      patch.remote_slug = `${remote.workspace}/${remote.slug}`;
+      patch.provider = "bitbucket";
+    }
+    if (patch.default_branch) repositoryBranch(patch.default_branch);
     const existing = await repositories.get(name, db);
+    if (existing?.repository_url && patch.repository_url !== undefined && patch.repository_url !== existing.repository_url) {
+      const active = await one(db, "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1", [name]);
+      if (active) throw new Error("Repository remote cannot change while runs are active");
+    }
+    if (existing?.repository_url && patch.repository_url === undefined) {
+      const remote = repositoryRemote(existing.repository_url);
+      patch.remote_slug = `${remote.workspace}/${remote.slug}`;
+      patch.provider = "bitbucket";
+    }
+    const cols = EDITABLE.filter((k) => patch[k] !== undefined);
     if (!existing) {
       await q(
         db,
-        `INSERT INTO repositories (name, ${cols.join(", ")}) VALUES ($1${cols.map((_, i) => `, $${i + 2}`).join("")})`,
+        `INSERT INTO repositories (name${cols.length ? ", " + cols.join(", ") : ""}) VALUES ($1${cols.map((_, i) => `, $${i + 2}`).join("")}) ON CONFLICT (name) DO NOTHING`,
         [name, ...cols.map((k) => patch[k])],
       );
     } else if (cols.length) {
@@ -50,42 +80,59 @@ export const repositories = {
   },
 
   /**
-   * Enabled repositories allowed to perform `action` for a project: those mapped to the project,
-   * or every such repository when the project has no mapping.
+   * Enabled repositories allowed to perform `action` for a project: those mapped to the project or to a project
+   * linked with it in config.relatedProjects, or every such repository when the project has no mapping.
    */
   async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
-    const rows = await q<RepositoryRow>(db, "SELECT * FROM repositories WHERE enabled AND $1 = ANY(allowed_actions) ORDER BY name", [action]);
+    const all = await allRepositories(db);
+    const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action) && (r.provider !== "benchmark" || (project.startsWith("__benchmark:") && r.projects.includes(project))));
     const p = project.trim().toLowerCase();
-    const mapped = rows.filter((r) => r.projects.some((x) => x.toLowerCase() === p));
-    return (p && mapped.length ? mapped : rows).map((r) => r.name);
+    const scope = new Set(projectScope(project));
+    const maps = (r: RepositoryRow) => r.projects.some((x) => scope.has(x.toLowerCase()));
+    // A known project never widens to every repository, even when all of its repositories are disabled right now.
+    if (p && all.some(maps)) return rows.filter(maps).map((r) => r.name);
+    return rows.map((r) => r.name);
   },
 };
 
-export const repoPath = (r: Pick<RepositoryRow, "name" | "path">) => join(config.reposRoot, r.path || r.name);
-const isGit = (rel: string) => existsSync(join(config.reposRoot, rel, ".git"));
-/** A standalone repository: its own .git directory (a submodule or linked worktree has a .git file instead). */
-const isOwnGitDir = (rel: string) => {
-  try {
-    return statSync(join(config.reposRoot, rel, ".git")).isDirectory();
-  } catch {
-    return false;
+/**
+ * Lower-cased project names whose repositories a run for `project` may use: the project itself plus every project
+ * linked with it in config.relatedProjects, in either direction, one hop only. Empty project → [].
+ */
+export function projectScope(project: string, related: Record<string, string[]> = config.relatedProjects ?? {}): string[] {
+  const p = project.trim().toLowerCase();
+  if (!p) return [];
+  const scope = new Set([p]);
+  for (const [from, tos] of Object.entries(related)) {
+    const f = from.trim().toLowerCase();
+    const t = (tos ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    if (f === p) t.forEach((x) => scope.add(x));
+    else if (t.includes(p)) scope.add(f);
   }
+  return [...scope];
+}
+
+export const repoPath = resolveRepoPath;
+const isGit = (rel: string) => {
+  const marker = join(config.reposRoot, rel, ".git");
+  if (!existsSync(marker)) return false;
+  // Linked worktrees are another checkout of an existing logical repository, not new registry entries.
+  // Submodules also have a .git file but do not have a commondir marker, so keep discovering them.
+  try {
+    if (statSync(marker).isFile()) {
+      const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(marker, "utf8"))?.[1];
+      if (gitdir && existsSync(join(resolve(dirname(marker), gitdir.trim()), "commondir"))) return false;
+    }
+  } catch { return false; }
+  return true;
 };
 
 /**
  * Expand a reposRoot-relative entry into git repositories: the entry itself if it is a repo, otherwise its direct
- * sub-folders that are repos (a "group" folder such as oms-src/ holding oms-api, oms-background, ...). A repo that is
- * itself a group (old-inside/ versions only .claude/ and holds hasaki-inside-ws, ... as separate repos) yields both
- * the repo and its nested standalone repos; submodules are not listed separately.
+ * sub-folders that are repos (a "group" folder such as oms-src/ holding oms-api, oms-background, ...).
  */
 export function expandRepoEntry(rel: string): string[] {
-  if (isGit(rel)) {
-    try {
-      return [rel, ...readdirSync(join(config.reposRoot, rel)).filter((d) => isOwnGitDir(join(rel, d))).map((d) => join(rel, d))];
-    } catch {
-      return [rel];
-    }
-  }
+  if (isGit(rel)) return [rel];
   const dir = join(config.reposRoot, rel);
   if (!existsSync(dir)) {
     // A bare repo name ("oms-api") may live inside a group folder ("oms-src/oms-api").
@@ -100,8 +147,11 @@ export function expandRepoEntry(rel: string): string[] {
 }
 
 /**
- * Register git repositories from config.projects (entries may be repos or group folders) and from reposRoot (one level,
- * plus group folders). Never overwrites user edits; entries that are not git repositories are disabled, not deleted.
+ * Register git repositories from config.projects only (entries may be repos or group folders). Other checkouts under
+ * reposRoot (tools, plugins, personal projects) are never registered. Never overwrites user edits.
+ *
+ * The registry lives in a database that several machines may share, each with its own reposRoot. A repository missing
+ * from THIS machine is left alone. Local discovery only bootstraps absent entries; metadata edits are explicit.
  */
 export async function syncRepositoriesFromConfig() {
   const found = new Map<string, Set<string>>(); // relative path -> projects
@@ -110,7 +160,6 @@ export async function syncRepositoriesFromConfig() {
     if (project) s.add(project);
   };
   for (const [project, entries] of Object.entries(config.projects)) for (const e of entries) for (const rel of expandRepoEntry(e)) add(rel, project);
-  if (existsSync(config.reposRoot)) for (const d of readdirSync(config.reposRoot)) for (const rel of expandRepoEntry(d)) add(rel);
   const taken = new Map<string, string>();
   for (const [rel, projects] of found) {
     let name = rel.split("/").pop()!;
@@ -119,19 +168,9 @@ export async function syncRepositoriesFromConfig() {
     const existing = await repositories.get(name);
     const path = rel === name ? "" : rel;
     if (!existing) await repositories.upsert(name, { path, projects: [...projects], remote_slug: name });
-    else {
-      const merged = [...new Set([...existing.projects, ...projects])];
-      const patch: Partial<RepositoryRow> = {};
-      if (merged.length !== existing.projects.length) patch.projects = merged;
-      if (!existing.path && path) patch.path = path;
-      if (Object.keys(patch).length) await repositories.upsert(name, patch);
-    }
   }
-  for (const r of await repositories.list())
-    if (r.enabled && !isGit(r.path || r.name)) {
-      await repositories.upsert(r.name, { enabled: false, description: r.description || `disabled: ${r.path || r.name} is not a git repository under reposRoot` });
-      console.log(`repository ${r.name}: ${r.path || r.name} is not a git repository — disabled`);
-    }
+  // Existing shared entries are never changed based on this installation's config or filesystem.
+
 }
 
 // ---------------------------------------------------------------- ranking
@@ -167,9 +206,17 @@ export function rankRepositories(repos: RepositoryRow[], request: { text: string
     .map((r) => {
       let score = 0;
       const reasons: string[] = [];
-      if (request.project && r.projects.some((p) => p.toLowerCase() === request.project!.toLowerCase())) {
+      const own = !!request.project && r.projects.some((p) => p.toLowerCase() === request.project!.toLowerCase());
+      if (own) {
         score += 2;
         reasons.push(`mapped to project ${request.project}`);
+      }
+      // A request that names another project a repo belongs to ("lỗi phía OMS" in a Payment ticket) points at that
+      // repo. Repos of the run's own project already got the mapping bonus above.
+      const named = own ? undefined : r.projects.find((p) => tokens(p).length > 0 && tokens(p).every((t) => words.has(t)));
+      if (named) {
+        score += 3;
+        reasons.push(`request mentions project ${named}`);
       }
       const fields: Array<[string, string[], number]> = [
         ["name", tokens(r.name.replace(/[-_]/g, " ")), 3],
@@ -194,4 +241,19 @@ export function rankRepositories(repos: RepositoryRow[], request: { text: string
 export function isAmbiguous(ranked: RankedRepository[]) {
   if (!ranked.length || ranked[0].score === 0) return true;
   return ranked.length > 1 && ranked[1].score >= ranked[0].score * 0.75;
+}
+
+/** Registry branch with the installation default retained for legacy/local fixtures. */
+export async function repositoryBaseBranch(name: string): Promise<string> {
+  return (await repositories.get(name))?.default_branch || config.baseBranch;
+}
+export async function workspaceBaseBranch(path: string): Promise<string> {
+  const row = await one(pool, "SELECT r.default_branch FROM repositories r JOIN execution_workspaces w ON r.name=w.repo WHERE w.path=$1 LIMIT 1", [path]);
+  return row?.default_branch || config.baseBranch;
+}
+
+export function repositoryReference(repo: Pick<RepositoryRow, "repository_url" | "remote_slug" | "name">): string {
+  if (!repo.repository_url) return repo.remote_slug || repo.name;
+  const remote = repositoryRemote(repo.repository_url);
+  return `${remote.workspace}/${remote.slug}`;
 }

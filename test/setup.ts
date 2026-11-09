@@ -1,5 +1,5 @@
 /**
- * Preloaded with `node --import ./test/setup.ts --test`. Creates a fresh `platform_test` database on the
+ * Preloaded with `node --import ./test/setup.ts --test`. Creates a uniquely named `platform_test_<uuid>` database on the
  * PostgreSQL from docker-compose (override with TEST_DATABASE_ADMIN_URL) and an isolated config, BEFORE any
  * platform module is imported (config and pool are created at import time).
  */
@@ -7,12 +7,14 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 
 const admin = process.env.TEST_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
-const dbName = "platform_test";
+const adminUrl = new URL(admin);
+if (!["localhost", "127.0.0.1", "[::1]"].includes(adminUrl.hostname)) throw new Error("Tests require a local isolated PostgreSQL; remote database refused.");
+const dbName = `platform_test_${randomUUID().replaceAll("-", "")}`;
 const c = new pg.Client({ connectionString: admin });
 await c.connect();
-await c.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
 await c.query(`CREATE DATABASE ${dbName}`);
 await c.end();
 
@@ -33,7 +35,14 @@ const u = new URL(admin);
 u.pathname = "/" + dbName;
 process.env.DATABASE_URL = u.toString();
 process.env.PLATFORM_CONFIG = cfgPath;
+process.env.PLATFORM_TEST = "1";
+process.env.AUTH_SECRET = "test-auth-secret-not-for-production";
+process.env.COOKIE_SECURE = "0";
 delete process.env.NOTIFY_WEBHOOK;
 process.env.TEST_ROOT = root;
 mkdirSync(join(root, "empty-user-skills"));
 process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never read the developer's real ~/.claude
+
+// Tests must never inherit a developer's live Telegram bot or receiver settings. Individual Telegram tests
+// explicitly point config at their local mocked Bot API after the isolated database is ready.
+for (const key of ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_MODE", "TELEGRAM_API_BASE", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_WEBHOOK_SECRET"]) delete process.env[key];

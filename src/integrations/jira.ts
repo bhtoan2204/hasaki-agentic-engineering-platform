@@ -1,5 +1,17 @@
 import { config } from "../config.ts";
+import { getUserSecret } from "../auth/secrets.ts";
 import { workItems } from "../workitems/service.ts";
+
+async function jiraCreds(ownerId?: number) {
+  if (ownerId) {
+    const user = await getUserSecret(ownerId, "jira_user");
+    const token = await getUserSecret(ownerId, "jira_token");
+    if (user && token) return { user, token };
+    if (user || token) throw new Error("This account's Jira credentials are incomplete");
+  }
+  if (config.jira.user && config.jira.token) return { user: config.jira.user, token: config.jira.token };
+  return null;
+}
 
 /** Flatten Atlassian Document Format (Jira Cloud v3 description) into plain text. */
 export function adfToText(node: any): string {
@@ -27,18 +39,19 @@ export function normalizeJiraIssue(issue: any) {
 }
 
 /** Fetch an issue from Jira Cloud REST v3 and import it as a work item (no execution). */
-export async function importJiraIssue(key: string) {
-  if (!config.jira.baseUrl || !config.jira.user || !config.jira.token) throw new Error("Jira is not configured (jira.baseUrl, JIRA_USER, JIRA_TOKEN)");
+export async function importJiraIssue(key: string, ownerId?: number) {
+  const creds = await jiraCreds(ownerId);
+  if (!config.jira.baseUrl || !creds) throw new Error("Jira is not configured for this account");
   if (!/^[A-Z][A-Z0-9_]+-\d+$/.test(key)) throw new Error(`invalid Jira key "${key}"`);
   const res = await fetch(`${config.jira.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,description,project,status,issuetype,priority,labels`, {
-    headers: { Authorization: "Basic " + Buffer.from(`${config.jira.user}:${config.jira.token}`).toString("base64"), Accept: "application/json" },
+    headers: { Authorization: "Basic " + Buffer.from(`${creds.user}:${creds.token}`).toString("base64"), Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Jira ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const n = normalizeJiraIssue(await res.json());
-  return workItems.upsertImported({ source: "jira", ...n });
+  return workItems.upsertImported({ source: "jira", ...n, ownerId });
 }
 
 /** Import from a pasted issue JSON (no credentials needed). */
-export function importJiraPayload(issue: unknown) {
-  return workItems.upsertImported({ source: "jira", ...normalizeJiraIssue(issue) });
+export function importJiraPayload(issue: unknown, ownerId?: number) {
+  return workItems.upsertImported({ source: "jira", ...normalizeJiraIssue(issue), ownerId });
 }

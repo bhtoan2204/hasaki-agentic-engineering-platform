@@ -1,5 +1,10 @@
+import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
+import { botKey } from "../telegram/client.ts";
+import { pool, one } from "../db/pool.ts";
+import { HttpError } from "../http/error.ts";
 import { config } from "../config.ts";
 import { settings } from "../db.ts";
+import { deleteUserSecret, getUserSecret, putUserSecret, getSharedSecret, putSharedSecret } from "../auth/secrets.ts";
 
 /**
  * Telegram and Bitbucket credentials managed from the Integrations page instead of environment variables.
@@ -21,7 +26,7 @@ let saved: { telegram: TelegramSaved | null; bitbucket: BitbucketSaved | null } 
 
 const mask = (s: string) => (!s ? "" : s.length <= 8 ? "••••" : `••••${s.slice(-4)}`);
 const readJson = async <T>(key: string): Promise<T | null> => {
-  const v = await settings.get(key);
+  const v = key === "telegram" ? (await getSharedSecret("telegram")) ?? await settings.get(key) : await settings.get(key);
   if (!v) return null;
   try {
     return JSON.parse(v) as T;
@@ -34,11 +39,19 @@ function apply() {
   const t = saved.telegram ?? fromEnv.telegram;
   config.telegram.botToken = t.botToken;
   config.telegram.chatId = t.chatId;
-  const b = saved.bitbucket;
-  config.bitbucket.user = b?.user ?? fromEnv.bitbucket.user;
-  config.bitbucket.token = b?.token ?? fromEnv.bitbucket.token;
-  config.bitbucket.workspace = b?.workspace || fromEnv.bitbucket.workspace;
-  config.bitbucket.reviewers = b?.reviewers ?? fromEnv.bitbucket.reviewers;
+  // Bitbucket in config stays the shared service account from startup. Personal tokens are not copied onto it.
+}
+
+/**
+ * Re-read the administrator-managed bot credentials (shared, encrypted) so a token saved or cleared on another
+ * instance reaches this process. A no-op while nothing changed, so in-process overrides stay untouched.
+ */
+export async function refreshTelegramSettings() {
+  const next = await readJson<TelegramSaved>("telegram");
+  if (JSON.stringify(next) === JSON.stringify(saved.telegram)) return false;
+  saved.telegram = next;
+  apply();
+  return true;
 }
 
 export async function loadAccountSettings() {
@@ -58,13 +71,17 @@ async function telegramApi(token: string, method: string, body?: unknown) {
     throw new Error(`không gọi được Telegram: ${e.name === "TimeoutError" ? "timeout" : e.message.split(token).join("***")}`);
   });
   const j: any = await res.json().catch(() => ({}));
-  if (!res.ok || !j.ok) throw new Error(`Telegram ${method}: ${j.description ?? `HTTP ${res.status}`}`);
+  if (!res.ok || !j.ok) throw new Error(`Telegram ${method}: ${String(j.description ?? `HTTP ${res.status}`).split(token).join("***")}`);
   return j.result;
 }
 
-export function telegramStatus() {
+export async function telegramStatus(userId?: number, canManage = false) {
   return {
-    configured: !!(config.telegram.botToken && config.telegram.chatId),
+    configured: !!config.telegram.botToken,
+    canManage,
+    ...(userId ? await bindingStatus(userId) : {}),
+    /** Where THIS user's step notifications (question / approval) go. Without it they are not sent at all. */
+    myChatId: userId ? await getUserSecret(userId, "telegram_chat") : null,
     source: saved.telegram ? "platform" : fromEnv.telegram.botToken || fromEnv.telegram.chatId ? "env" : "none",
     envAvailable: !!(fromEnv.telegram.botToken && fromEnv.telegram.chatId),
     chatId: config.telegram.chatId || null,
@@ -78,19 +95,29 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
   const chatId = String(input.chatId ?? "").trim();
   if (!botToken) throw new Error("cần bot token (lấy từ @BotFather)");
   if (!/^\d+:[\w-]{20,}$/.test(botToken)) throw new Error("bot token không đúng dạng <số>:<chuỗi> của @BotFather");
-  if (!/^-?\d+$/.test(chatId) && !/^@\w{4,}$/.test(chatId)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
+  if (chatId && !/^-?\d+$/.test(chatId) && !/^@\w{4,}$/.test(chatId)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
   const me = await telegramApi(botToken, "getMe");
   saved.telegram = { botToken, chatId };
-  await settings.set("telegram", JSON.stringify(saved.telegram));
+  await putSharedSecret("telegram", JSON.stringify(saved.telegram));
   apply();
-  return { ...telegramStatus(), bot: me?.username ? `@${me.username}` : null };
+  return { ...(await telegramStatus()), bot: me?.username ? `@${me.username}` : null };
 }
 
 /** Recent chats that wrote to the bot (getUpdates), to pick the chat id without curl. */
 export async function telegramChats(input: { botToken?: string }) {
   const token = (input.botToken ?? "").trim() || config.telegram.botToken;
   if (!token) throw new Error("nhập bot token trước, rồi nhắn /start cho bot");
-  const updates: any[] = await telegramApi(token, "getUpdates");
+  const key = botKey(token), client = await pool.connect();
+  let updates: any[];
+  const locked = (await client.query("SELECT pg_try_advisory_lock($1::int) AS ok", [advisoryKey(key)])).rows[0].ok;
+  try {
+    const active = await one(client, "SELECT bot_key FROM telegram_consumers WHERE bot_key=$1 AND lease_until>now()", [key]);
+    if (!locked || active || config.telegram.mode !== "off") return observedChats(key);
+    updates = await telegramApi(token, "getUpdates");
+  } finally {
+    if (locked) await client.query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)]).catch(() => { });
+    client.release();
+  }
   const chats = new Map<string, { id: string; name: string; type: string }>();
   for (const u of updates) {
     const c = u.message?.chat ?? u.channel_post?.chat ?? u.my_chat_member?.chat ?? u.edited_message?.chat;
@@ -99,15 +126,19 @@ export async function telegramChats(input: { botToken?: string }) {
   return [...chats.values()];
 }
 
-export async function testTelegram() {
-  if (!config.telegram.botToken || !config.telegram.chatId) throw new Error("Telegram chưa cấu hình");
-  await telegramApi(config.telegram.botToken, "sendMessage", { chat_id: config.telegram.chatId, text: "✅ Claude Task Platform: kết nối Telegram hoạt động." });
-  return { ok: true };
+/** Test the user's own destination when set (what step notifications use); otherwise the shared chat (admin only). */
+export async function testTelegram(userId?: number, isAdmin = false) {
+  if (!config.telegram.botToken) throw new Error("Telegram chưa cấu hình");
+  const mine = userId ? await getUserSecret(userId, "telegram_chat") : null;
+  const chatId = mine ?? (isAdmin ? config.telegram.chatId : "");
+  if (!chatId) throw new Error("chưa có chat nhận thông báo của bạn");
+  await telegramApi(config.telegram.botToken, "sendMessage", { chat_id: chatId, text: mine ? "✅ Claude Task Platform: thông báo bước (câu hỏi / duyệt) của bạn sẽ gửi vào chat này." : "✅ Claude Task Platform: kết nối Telegram hoạt động (chat chung)." });
+  return { ok: true, chat: mine ? "mine" : "shared" };
 }
 
 export async function clearTelegram() {
   saved.telegram = null;
-  await settings.set("telegram", "");
+  await putSharedSecret("telegram", "null");
   apply();
   return telegramStatus();
 }
@@ -124,16 +155,23 @@ async function bbGet(user: string, token: string, path: string) {
   return { status: res.status, ok: res.ok, body: j };
 }
 
-export function bitbucketStatus() {
-  const b = config.bitbucket;
+export async function bitbucketStatus(userId?: number) {
+  const personalUser = userId ? await getUserSecret(userId, "bitbucket_user") : null;
+  const personalToken = userId ? await getUserSecret(userId, "bitbucket_token") : null;
+  const personal = !!(personalUser && personalToken);
+  const personalAttempt = !!(personalUser || personalToken);
+  const sharedAllowed = config.bitbucket.allowSharedCredentials !== false;
+  const user = personalAttempt ? personalUser ?? "" : sharedAllowed ? config.bitbucket.user : "";
+  const token = personalAttempt ? personalToken ?? "" : sharedAllowed ? config.bitbucket.token : "";
   return {
-    configured: !!(b.user && b.token),
-    source: saved.bitbucket ? "platform" : fromEnv.bitbucket.user || fromEnv.bitbucket.token ? "env" : "none",
+    configured: !!(user && token),
+    source: personalAttempt ? "user" : user || token ? "shared" : "none",
+    personal,
     envAvailable: !!(fromEnv.bitbucket.user && fromEnv.bitbucket.token),
-    user: b.user || null,
-    token: mask(b.token),
-    workspace: b.workspace,
-    reviewers: b.reviewers,
+    user: user || null,
+    token: mask(token),
+    workspace: config.bitbucket.workspace,
+    reviewers: config.bitbucket.reviewers,
   };
 }
 
@@ -141,37 +179,52 @@ export function bitbucketStatus() {
  * Save; an empty token keeps the current one. Checked against the workspace (list one repository) before saving —
  * the token needs read and write access to pull requests and read access to repositories.
  */
-export async function setBitbucket(input: { user?: string; token?: string; workspace?: string; reviewers?: string[] | string }) {
+export async function setBitbucket(input: { user?: string; token?: string; workspace?: string; reviewers?: string[] | string }, userId?: number) {
   const user = String(input.user ?? "").trim();
-  const token = String(input.token ?? "").trim() || config.bitbucket.token;
+  const token = String(input.token ?? "").trim() || (userId ? (await getUserSecret(userId, "bitbucket_token")) ?? "" : "");
   const workspace = String(input.workspace ?? "").trim() || config.bitbucket.workspace;
   const reviewers = (Array.isArray(input.reviewers) ? input.reviewers : String(input.reviewers ?? "").split(/[\s,]+/)).map((r) => r.trim()).filter(Boolean);
   if (!user || !token) throw new Error("cần user (email Atlassian hoặc username Bitbucket) và token");
   const bad = reviewers.find((r) => !/^\{[0-9a-f-]{36}\}$/i.test(r));
   if (bad) throw new Error(`reviewer "${bad}" không phải UUID Bitbucket dạng {xxxxxxxx-xxxx-…}`);
+  if (!userId) throw new Error("Bitbucket credentials are saved per user");
   const repos = await bbGet(user, token, `/repositories/${encodeURIComponent(workspace)}?pagelen=1`);
   if (repos.status === 401) throw new Error("Bitbucket 401: user/token sai (API token Atlassian: user là email; app password: user là username)");
   if (!repos.ok) throw new Error(`Bitbucket ${repos.status} khi đọc workspace ${workspace}: ${repos.body?.error?.message ?? "không có quyền"}`);
   const me = await bbGet(user, token, "/user").catch(() => null);
-  saved.bitbucket = { user, token, workspace, reviewers };
-  await settings.set("bitbucket", JSON.stringify(saved.bitbucket));
-  apply();
-  return { ...bitbucketStatus(), account: me?.ok ? (me.body.display_name ?? me.body.username ?? null) : null };
+  await putUserSecret(userId, "bitbucket_user", user);
+  await putUserSecret(userId, "bitbucket_token", token);
+  return { ...(await bitbucketStatus(userId)), account: me?.ok ? (me.body.display_name ?? me.body.username ?? null) : null };
 }
 
-export async function clearBitbucket() {
-  saved.bitbucket = null;
-  await settings.set("bitbucket", "");
-  apply();
-  return bitbucketStatus();
+export async function clearBitbucket(userId?: number) {
+  if (userId) {
+    await deleteUserSecret(userId, "bitbucket_user");
+    await deleteUserSecret(userId, "bitbucket_token");
+  }
+  return bitbucketStatus(userId);
 }
 
 /** Copy what .env provides into the platform (after which the variables can be removed from .env). */
-export async function adoptEnv(which: "telegram" | "bitbucket") {
+export async function adoptEnv(which: "telegram" | "bitbucket", userId?: number) {
   if (which === "telegram") {
     if (!fromEnv.telegram.botToken || !fromEnv.telegram.chatId) throw new Error(".env không có TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID");
     return setTelegram(fromEnv.telegram);
   }
   if (!fromEnv.bitbucket.user || !fromEnv.bitbucket.token) throw new Error(".env không có BITBUCKET_USER và BITBUCKET_TOKEN");
-  return setBitbucket(fromEnv.bitbucket);
+  return setBitbucket(fromEnv.bitbucket, userId);
+}
+
+/** The chat that receives this user's private run notifications. The shared bot token is unchanged. */
+export async function setTelegramDestination(userId: number, chatId: string) {
+  const id = String(chatId ?? "").trim();
+  const binding = await one(pool, "SELECT chat_id FROM telegram_bindings WHERE user_id=$1", [userId]);
+  if (binding && binding.chat_id !== id) throw new HttpError(409, "Disconnect Telegram before changing its verified destination");
+  if (!id) {
+    await deleteUserSecret(userId, "telegram_chat");
+    return { chatId: null };
+  }
+  if (!/^-?\d+$/.test(id) && !/^@\w{4,}$/.test(id)) throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
+  await putUserSecret(userId, "telegram_chat", id);
+  return { chatId: id };
 }

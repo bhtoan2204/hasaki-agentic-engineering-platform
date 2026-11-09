@@ -12,6 +12,8 @@ import { registerExecutor } from "./registry.ts";
 import { registerBuiltinTools } from "../../agent/toolRegistry.ts";
 import { claudeReportReasoner, setReportReasoner, taskResultReportExecutor } from "../../report/executor.ts";
 import { claudeTestFailureAdvisor, setTestFailureAdvisor } from "./testFailure.ts";
+import { setKnowledgeChangeAnalyzer, setSkillDrafter } from "../../knowledge/learning.ts";
+import { modelChangeAnalyzer, modelSkillDrafter } from "../../agent/learningModel.ts";
 
 /** StepExecutorRegistry defaults. Tests replace individual entries with registerExecutor(). */
 export function registerDefaultExecutors() {
@@ -28,4 +30,7 @@ export function registerDefaultExecutors() {
   registerExecutor("task_result_report", taskResultReportExecutor);
   setReportReasoner(claudeReportReasoner);
   setTestFailureAdvisor(claudeTestFailureAdvisor);
+  // Continuous learning (knowledge/learning.ts): change detection and skill drafting through the run's provider.
+  setKnowledgeChangeAnalyzer(modelChangeAnalyzer);
+  setSkillDrafter(modelSkillDrafter);
 }

@@ -1,0 +1,212 @@
+{
+  "generated_at": "2026-11-06T16:07:16.010Z",
+  "repositories": [
+    {
+      "name": "oms-api",
+      "index_wall_ms": 8306.725999999999,
+      "job": {
+        "status": "done",
+        "metrics": {
+          "indexed_files": 523,
+          "skipped_files": 53,
+          "index_duration": 6359,
+          "parse_failures": 1,
+          "index_cache_hits": 0
+        },
+        "error": null,
+        "snapshot_id": 1
+      },
+      "languages": [
+        {
+          "language": "go",
+          "files": 514
+        },
+        {
+          "language": "proto",
+          "files": 7
+        },
+        {
+          "language": "sql",
+          "files": 2
+        }
+      ],
+      "sample": {
+        "file_path": "app/auth_middleware.go",
+        "symbol_name": "NewAuthHandlerMap",
+        "qualified_name": "app.NewAuthHandlerMap",
+        "symbol_kind": "function"
+      },
+      "search_ms": 243.7296609999994,
+      "relations": 0,
+      "metadata_ms": 1.6446690000011586,
+      "hybrid_ms": 221.33627200000046,
+      "metadata_score": 0,
+      "hybrid_score": 2,
+      "context_chars": 1643,
+      "context_ms": 795.3450200000007,
+      "warm_reindex_ms": 90.51970400000027
+    },
+    {
+      "name": "oms-frontend",
+      "index_wall_ms": 10792.873366999998,
+      "job": {
+        "status": "done",
+        "metrics": {
+          "indexed_files": 608,
+          "skipped_files": 64,
+          "index_duration": 4742,
+          "parse_failures": 0,
+          "index_cache_hits": 1
+        },
+        "error": null,
+        "snapshot_id": 2
+      },
+      "languages": [
+        {
+          "language": "tsx",
+          "files": 334
+        },
+        {
+          "language": "typescript",
+          "files": 274
+        }
+      ],
+      "sample": {
+        "file_path": "src/apis/auth/getMe.ts",
+        "symbol_name": "useGetMe",
+        "qualified_name": "useGetMe",
+        "symbol_kind": "function"
+      },
+      "search_ms": 271.8937969999988,
+      "relations": 2,
+      "metadata_ms": 0.22951299999840558,
+      "hybrid_ms": 260.09956500000044,
+      "metadata_score": 0,
+      "hybrid_score": 2.5,
+      "context_chars": 4169,
+      "context_ms": 4424.382183999998,
+      "warm_reindex_ms": 108.3913930000017
+    },
+    {
+      "name": "oms-background",
+      "index_wall_ms": 11817.630024000002,
+      "job": {
+        "status": "done",
+        "metrics": {
+          "indexed_files": 591,
+          "skipped_files": 50,
+          "index_duration": 8293,
+          "parse_failures": 0,
+          "index_cache_hits": 37
+        },
+        "error": null,
+        "snapshot_id": 3
+      },
+      "languages": [
+        {
+          "language": "go",
+          "files": 588
+        },
+        {
+          "language": "proto",
+          "files": 3
+        }
+      ],
+      "sample": {
+        "file_path": "app/delivery/http/app.go",
+        "symbol_name": "handleErr",
+        "qualified_name": "http.handleErr",
+        "symbol_kind": "function"
+      },
+      "search_ms": 294.4484650000013,
+      "relations": 2,
+      "metadata_ms": 1.262564000000566,
+      "hybrid_ms": 325.83634600000005,
+      "metadata_score": 0,
+      "hybrid_score": 2,
+      "context_chars": 671,
+      "context_ms": 1580.2762729999959,
+      "warm_reindex_ms": 121.54348999999638
+    }
+  ],
+  "overlays": {
+    "concurrent_worktrees": 2,
+    "modified": "PASS",
+    "renamed": "PASS",
+    "deleted": "PASS",
+    "stale_fallback": "PASS",
+    "base_unaffected": "PASS",
+    "primary_checkout_unchanged": "PASS",
+    "snapshot_ids": [
+      5,
+      4
+    ]
+  },
+  "live_ai_tokens": "NOT VERIFIED: no paid provider invoked",
+  "database": {
+    "database": "claude_task_platform",
+    "server": "172.31.30.93/32"
+  },
+  "migrations": [],
+  "instance_lease": "normal registration acquired",
+  "disable": "PASS",
+  "status": [
+    {
+      "name": "oms-api",
+      "commit_sha": "e626320e952bb9973882e2d82ccf385c9637882e",
+      "indexed_files": 523,
+      "symbol_count": 6192,
+      "relation_count": 37023,
+      "last_indexed_at": "2026-11-06T16:07:24.004Z",
+      "indexing_run_id": 1,
+      "status": "done",
+      "last_indexing_error": null,
+      "metrics": {
+        "indexed_files": 523,
+        "skipped_files": 53,
+        "index_duration": 6359,
+        "parse_failures": 1,
+        "index_cache_hits": 0
+      },
+      "updated_at": "2026-11-06T16:07:24.454Z"
+    },
+    {
+      "name": "oms-background",
+      "commit_sha": "f5cb56ca6e0c432ec69ce0042659babc5a248e87",
+      "indexed_files": 591,
+      "symbol_count": 6719,
+      "relation_count": 44557,
+      "last_indexed_at": "2026-11-06T16:07:45.448Z",
+      "indexing_run_id": 3,
+      "status": "done",
+      "last_indexing_error": null,
+      "metrics": {
+        "indexed_files": 591,
+        "skipped_files": 50,
+        "index_duration": 8293,
+        "parse_failures": 0,
+        "index_cache_hits": 37
+      },
+      "updated_at": "2026-11-06T16:07:46.013Z"
+    },
+    {
+      "name": "oms-frontend",
+      "commit_sha": "9ac71aca48e38e85e5ca9d43b67091678e81b560",
+      "indexed_files": 608,
+      "symbol_count": 1740,
+      "relation_count": 18120,
+      "last_indexed_at": "2026-11-06T16:07:30.939Z",
+      "indexing_run_id": 2,
+      "status": "done",
+      "last_indexing_error": null,
+      "metrics": {
+        "indexed_files": 608,
+        "skipped_files": 64,
+        "index_duration": 4742,
+        "parse_failures": 0,
+        "index_cache_hits": 1
+      },
+      "updated_at": "2026-11-06T16:07:31.385Z"
+    }
+  ]
+}

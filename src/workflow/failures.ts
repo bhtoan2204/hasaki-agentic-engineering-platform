@@ -50,7 +50,9 @@ export function classifyFailure(error: string, ctx: { executorRetryable?: boolea
     case "missing_requirements":
       return { class: cls, action: "human", delay_s: 0, reason: "the task needs information only a human can give" };
     case "rate_limit":
-      // Rate limits get at least 3 attempts even on max_attempts=1 steps, with a longer base delay.
+      // Rate limits get at least 3 attempts even on max_attempts=1 steps, with a longer base delay — unless the executor
+      // marked the failure non-replayable (an external side effect may already have happened: reconcile, never replay).
+      if (ctx.executorRetryable === false) return { class: cls, action: "stop", delay_s: 0, reason: "rate limited, but the executor marked the failure non-retryable (possible side effect) — reconcile before retrying" };
       return ctx.attempt < Math.max(ctx.maxAttempts, 3)
         ? { class: cls, action: "retry", delay_s: backoff(Math.max(30, ctx.baseBackoff), ctx.attempt), reason: "provider rate limit — retrying with exponential backoff" }
         : { class: cls, action: "stop", delay_s: 0, reason: "rate limit persisted across retries" };

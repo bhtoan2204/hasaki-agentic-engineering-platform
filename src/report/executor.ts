@@ -1,13 +1,12 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { config } from "../config.ts";
 import { pool, one } from "../db/pool.ts";
-import { accumulateMetrics, newMetrics } from "../agent/claude.ts";
 import type { ExecutionContext, StepExecutor } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 import { parseAiSuggest, type ReportSpec } from "./aiSuggest.ts";
 import { collectEvidence, type Evidence } from "./evidence.ts";
 import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./build.ts";
 import { testExceptionsOf } from "../workflow/executors/builtin.ts";
+import { languagePolicy, outputLocale } from "../agent/language.ts";
+import { completeForRun } from "../agent/complete.ts";
 
 /**
  * Task Result Report executor.
@@ -32,6 +31,7 @@ export const claudeReportReasoner: ReportReasoner = async (ctx, spec, evidence) 
     "screenshots, logs or test results. A code change does not prove a business outcome. A screenshot requirement needs an",
     "actual image item. Failed tests do not verify. Task attachments show the original problem, not the fix.",
     "For each requirement return status VERIFIED (evidence supports it), PARTIAL (some support, incomplete) or MISSING.",
+    languagePolicy(spec.language === "en" ? "en" : "vi"),
     `Write "summary" (3–5 sentences, what was actually done) and explanations in ${vi ? "Vietnamese" : "English"}.`,
     'Reply with JSON only: {"summary": "...", "requirements": [{"id": "S1.R1", "status": "...", "evidence_ids": ["E3"], "explanation": "..."}], "limitations": ["..."]}',
     "",
@@ -44,13 +44,10 @@ export const claudeReportReasoner: ReportReasoner = async (ctx, spec, evidence) 
     JSON.stringify(evidence.map((e) => ({ id: e.id, kind: e.kind, title: e.title, detail: e.detail, passed: e.passed, image: e.image, stale: e.stale, before_fix: e.before_fix, attached_to: e.requirement_id })), null, 1).slice(0, 120_000),
     "</untrusted_input>",
   ].join("\n");
-  const m = newMetrics(config.model || "default");
-  let out = "";
-  for await (const msg of query({ prompt, options: { tools: [], maxTurns: 1, model: config.model || undefined, settingSources: [], persistSession: false } })) {
-    accumulateMetrics(m, msg);
-    if (msg.type === "result" && msg.subtype === "success") out = msg.result;
-  }
-  await ctx.recordMetrics(m as unknown as Record<string, unknown>);
+  // The run's provider answers (a Codex or Cursor run never calls Claude here); metrics are real or null.
+  const done = await completeForRun(ctx.run, prompt, ctx.signal);
+  await ctx.recordMetrics({ ...done.metrics, sessions: 1 });
+  const out = done.text;
   const json = out.match(/\{[\s\S]*\}/)?.[0];
   if (!json) throw new Error("report reasoner returned no JSON");
   return JSON.parse(json) as Proposal;
@@ -84,7 +81,9 @@ async function finalize(ctx: ExecutionContext): Promise<ExecResult> {
 
 export const taskResultReportExecutor: StepExecutor = {
   async execute(ctx) {
-    const spec = reportSpecFor(ctx);
+    const parsed = reportSpecFor(ctx);
+    // The task text may be in any language. Report prose follows the run's output locale, not that detection.
+    const spec = parsed ? { ...parsed, language: outputLocale(ctx.run) } : null;
     if (!spec) return { kind: "completed", output: { skipped: true, reason: "work item has no ai_suggest.report" } };
     if (ctx.input.approval?.granted && ctx.input.approval.generation === ctx.step.generation) return finalize(ctx);
 

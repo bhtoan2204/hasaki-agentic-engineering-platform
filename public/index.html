@@ -85,6 +85,11 @@
       margin-left: 4px
     }
 
+    #classic-account { position: relative; margin-left: auto; padding: 8px }
+    #classic-account summary { cursor: pointer }
+    #classic-account nav { position: fixed; right: 16px; max-height: calc(100dvh - 160px); overflow-y: auto; width: min(280px, calc(100vw - 32px)); display: grid; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px #0002 }
+    #classic-account nav a { padding: 10px; border: 0 }
+    #classic-account nav button { margin-top: 12px; color: var(--err) }
     main {
       padding: 20px 28px;
       max-width: 1280px;
@@ -467,6 +472,8 @@
       }
     }
 
+    #modal { max-width: 1280px; margin: 0 auto; padding: 0 28px 24px }
+    #modal:empty { display: none }
     .convo { max-height: 640px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 4px }
     .msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 13px }
     .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 4px }
@@ -485,16 +492,21 @@
 <body>
   <header>
     <b>⚙︎ Workflow Platform</b>
-    <a href="#/work-items" data-nav="work-items">Work Items</a>
-    <a href="#/runs" data-nav="runs">Runs</a>
-    <a href="#/questions" data-nav="questions">Questions<span id="qcount"></span></a>
-    <a href="#/workflows" data-nav="workflows">Workflows</a>
-    <a href="#/knowledge" data-nav="knowledge">Knowledge</a>
-    <a href="#/repositories" data-nav="repositories">Repositories</a>
+    <a href="#/work-items" data-nav="work-items" data-key="nav.workItems">Work Items</a>
+    <a href="#/runs" data-nav="runs" data-key="nav.runs">Runs</a>
+    <a href="#/questions" data-nav="questions" data-key="nav.questions">Câu hỏi & duyệt<span id="qcount"></span></a>
+    <a href="#/workflows" data-nav="workflows" data-key="nav.workflows">Workflows</a>
+    <a href="#/knowledge" data-nav="knowledge" data-key="nav.knowledge">Knowledge</a>
+    <a href="#/repositories" data-nav="repositories" data-key="nav.repositories">Repositories</a>
+    <span id="lang" style="margin-left:auto;display:inline-flex;gap:4px;padding:8px 0">
+      <button type="button" data-lang="vi" onclick="setUiLocale('vi')">VI</button>
+      <button type="button" data-lang="en" onclick="setUiLocale('en')">EN</button>
+    </span>
   </header>
   <main id="view">
-    <div class="empty">Loading…</div>
+    <div class="empty" data-key="cl.loading">Đang tải…</div>
   </main>
+  <div id="modal"></div>
   <script src="/app.js"></script>
 </body>
 

@@ -85,6 +85,7 @@ test("FAST not applicable: no coding step, or a branch depends on a removed step
 
 test("STANDARD is the identity; DEEP removes auto-approval and enables AI discovery", () => {
   const spec = tpl("bug-investigation");
+  assert.deepEqual(spec.steps.find((s) => s.key === "pr")!.depends_on, ["review"], "bug fixes are code-reviewed before the PR");
   assert.equal(applyProfile(spec, "STANDARD").spec, spec);
   const deep = applyProfile(spec, "DEEP");
   assert.equal(deep.spec.steps.find((s) => s.key === "confirm_repos")!.config.auto_approve_unambiguous, undefined);

@@ -1,10 +1,14 @@
-import { hostname } from "node:os";
+import { runIndexOnce } from "../codeIntelligence/indexer.ts";
 import { randomUUID } from "node:crypto";
+import { instanceSession } from "../instances.ts";
 import { config } from "../config.ts";
-import { pool, one, q } from "../db/pool.ts";
-import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases } from "./engine.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
+import { execution } from "../auth/execution.ts";
+import { pool, one, q, retryTransient } from "../db/pool.ts";
+import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
+import { settleBackground } from "./background.ts";
 import type { ExecResult, JobRow } from "./types.ts";
 
 /**
@@ -22,13 +26,20 @@ export interface SchedulerOptions {
   pollMs: number;
 }
 
-const processId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
+// Starts with the instance id: the database (migration 019) only lets the run's own instance take its jobs.
+const processId = `${config.instanceId}:${process.pid}:${randomUUID().slice(0, 8)}`;
+/** Lease owner as stored: always `<instance>:...`, also for ad-hoc worker ids (tests, CLI). */
+const leaseOwner = (workerId: string) => (workerId.startsWith(`${config.instanceId}:`) ? workerId : `${config.instanceId}:${workerId}`);
+
+/** Set while the server shuts down: interrupted jobs are handed back to the queue instead of being failed. */
+let draining: string | null = null;
 
 /** Step types that finish in seconds (no long agent session or command). */
 export const LIGHT_STEP_TYPES = ["human_input", "human_approval", "condition", "integration", "git_pull_request"];
 
 /** `onlyTypes`: restrict the claim to these step types (light lane). */
 export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes?: string[]): Promise<JobRow | undefined> {
+  await processAutomaticHandoff();
   return one<JobRow>(
     pool,
     `UPDATE workflow_jobs j
@@ -39,10 +50,12 @@ export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes
          WHERE j2.status = 'queued' AND j2.available_at <= now()
            AND (r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') OR (r.status = 'PAUSED' AND j2.force))
            AND ($3::text[] IS NULL OR s.type = ANY($3))
+           AND r.worker_instance = $4
+           AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))
          ORDER BY j2.available_at, j2.id
          FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
       RETURNING j.*`,
-    [workerId, leaseSeconds, onlyTypes ?? null],
+    [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId, instanceSession],
   );
 }
 
@@ -58,11 +71,11 @@ export async function schedulerStatus() {
   );
   const queued = await q(
     pool,
-    `SELECT j.id AS job_id, j.run_id, s.key AS step_key, s.type AS step_type, j.available_at
+    `SELECT j.id AS job_id, j.run_id, s.key AS step_key, s.type AS step_type, j.available_at, r.worker_instance
        FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
       WHERE j.status = 'queued' AND r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') ORDER BY j.available_at, j.id`,
   );
-  return { workers: config.scheduler.workers, light_workers: config.scheduler.lightWorkers ?? 1, light_step_types: LIGHT_STEP_TYPES, running, queued };
+  return { instance: config.instanceId, workers: config.scheduler.workers, light_workers: config.scheduler.lightWorkers ?? 1, light_step_types: LIGHT_STEP_TYPES, running, queued };
 }
 
 /** Execute one claimed job end to end. */
@@ -73,43 +86,63 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
     try {
-      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds))) ac.abort();
+      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) || await one(pool, "SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'", [begun.attempt.id])) ac.abort();
     } catch (e) {
+      ac.abort();
       console.error(`heartbeat job ${job.id}:`, (e as Error).message);
     }
   }, opts.heartbeatSeconds * 1000);
+  const executionAbort = new AbortController();
+  const forwardAbort = () => executionAbort.abort();
+  ac.signal.addEventListener("abort", forwardAbort, { once: true });
+  const timeoutMs = begun.attempt.effective_agent?.timeout_ms;
+  let timedOut = false;
+  const deadline = timeoutMs ? setTimeout(() => { timedOut = true; executionAbort.abort(); }, timeoutMs) : null;
   let result: ExecResult;
   try {
-    const ctx = makeContext({ ...begun, signal: ac.signal });
-    result = await getExecutor(begun.step.type).execute(ctx);
+    const ctx = makeContext({ ...begun, signal: executionAbort.signal });
+    const ownerId = Number(begun.run.owner_id);
+    result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });
   } catch (e) {
     result = ac.signal.aborted
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }
       : { kind: "failed", error: (e as Error)?.message ?? String(e), retryable: true, details: (e as Error)?.stack };
+  }
+  try {
+    if (deadline) clearTimeout(deadline);
+    if (timedOut && !ac.signal.aborted) result = { kind: "failed", error: `execution timeout after ${timeoutMs}ms`, retryable: true, details: { provider_error: { code: "execution_timeout", message: `execution timeout after ${timeoutMs}ms` } } };
+    await retryTransient(() => q(pool, "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2", [begun.attempt.id, job.fencing_token]), `record executor termination ${job.id}`);
+    const handoff = await prepareProviderPause(begun, result);
+    if (!handoff && (draining || ac.signal.aborted) && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining || "worker interrupted: heartbeat unavailable or lease lost"), `release job ${job.id}`))) return;
+    await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff), `finish job ${job.id}`);
   } finally {
+    if (deadline) clearTimeout(deadline);
+    ac.signal.removeEventListener("abort", forwardAbort);
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
-  await finishAttempt(job.id, job.fencing_token, begun.attempt.id, result);
 }
 
 /** Claim and execute at most one job. Returns false when the queue had nothing runnable. Used by tests. */
 export async function runOnce(workerId = `${processId}:once`, opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds"> = config.scheduler) {
   const job = await claimJob(workerId, opts.leaseSeconds);
-  if (!job) return false;
+  if (!job) return runIndexOnce();
   await processJob(job, workerId, opts);
   return true;
 }
 
-/** Run jobs until the queue is empty (tests / CLI). */
+/** Run jobs until the queue is empty (tests / CLI), then wait for their post-commit side effects. */
 export async function drain(maxJobs = 200) {
   let n = 0;
+  await settleBackground();
   while (n < maxJobs && (await runOnce())) n++;
+  await settleBackground();
   return n;
 }
 
 export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   let stopped = false;
+  const indexAbort = new AbortController();
   const loops: Promise<void>[] = [];
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const lanes = [
@@ -124,6 +157,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
           try {
             const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
             if (job) await processJob(job, workerId, opts);
+            else if (!lane.types && await runIndexOnce(indexAbort.signal)) { /* optional idle indexing */ }
             else await sleep(opts.pollMs);
           } catch (e) {
             console.error(`worker ${workerId}:`, (e as Error).message);
@@ -134,13 +168,24 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     );
   }
   const reaper = setInterval(() => reapExpiredLeases().catch((e) => console.error("reaper:", e.message)), Math.max(5, opts.leaseSeconds / 2) * 1000);
-  void reapExpiredLeases().catch(() => {});
+  void reapExpiredLeases().catch(() => { });
   console.log(`scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`);
   return {
     async stop() {
       stopped = true;
+      indexAbort.abort();
       clearInterval(reaper);
       await Promise.all(loops);
+    },
+    /** Stop claiming and reconcile interrupted steps (safe retry or human review, no retry budget used). */
+    async drain(reason = "server shutting down") {
+      draining = reason;
+      stopped = true;
+      indexAbort.abort();
+      clearInterval(reaper);
+      localJobs.abortAll();
+      await Promise.all(loops);
+      draining = null;
     },
   };
 }

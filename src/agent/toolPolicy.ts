@@ -1,3 +1,4 @@
+import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve, sep } from "node:path";
@@ -24,10 +25,11 @@ export const toolsFor = (mode: ToolMode, opts: { delegation?: boolean; claudeSki
 ];
 
 /** Platform tools a subagent may use: read-only ones. */
-export const SUBAGENT_PLATFORM_TOOLS = ["read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool"].map((t) => `mcp__platform__${t}`);
+export const SUBAGENT_PLATFORM_TOOLS = ["read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool", ...CONTEXT_TOOLS.filter(t => t.readOnly).map(t => t.name)].map((t) => `mcp__platform__${t}`);
 
 export interface PolicyContext {
   mode: ToolMode;
+  allowedTools?: string[] | null;
   /** Absolute worktree paths the step may edit. */
   workspaces: string[];
   baseBranch: string;
@@ -597,7 +599,17 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
  * `agentId` is set by the PreToolUse hook when a subagent makes the call. Subagents inherit the step's restrictions and
  * are additionally read-only: analysis policy, read-only platform tools, no nested delegation.
  */
+/** Workflow control remains available so a restricted step can finish or ask for help. */
+export function toolAllowed(tool: string, allowed?: string[] | null): boolean {
+  const logical = tool.startsWith("mcp__platform__") ? `platform.${tool.slice(15)}` : tool;
+  if (["platform.submit_result", "platform.ask_user", "platform.request_clarification", "platform.post_update"].includes(logical)) return true;
+  // Dispatchers enforce the actual target, including call_tool aliases, after validating the attempt binding.
+  if (["platform.call_tool", "platform.list_tools", "platform.describe_tool"].includes(logical)) return true;
+  return allowed == null || allowed.includes(logical);
+}
+
 export function decide(tool: string, input: Record<string, unknown>, ctx: PolicyContext, cwd?: string, agentId?: string): Decision {
+  if (!toolAllowed(tool, ctx.allowedTools)) return deny(`tool ${tool} is excluded by this attempt's allowed_tools`);
   if (agentId) {
     if (tool.startsWith("mcp__platform__")) {
       if (!SUBAGENT_PLATFORM_TOOLS.includes(tool)) return deny(`subagents are read-only: ${tool.replace("mcp__platform__", "")} is reserved for the main agent`);

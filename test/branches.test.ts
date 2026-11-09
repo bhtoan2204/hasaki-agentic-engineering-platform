@@ -70,3 +70,9 @@ test("prepareBranch: a requested existing branch is checked out (tracking origin
   const fresh = await prepareBranch("HSK-FRESH", name, "HSK-FRESH", name);
   assert.equal(fresh.createdFrom, `origin/${config.baseBranch}`);
 });
+
+test("branch directive: filler words after 'branch' are skipped — the branch-like name is taken (run #53 regression)", () => {
+  assert.deepEqual(detectBranchDirectives("Tiếp tục từ branch task cha: HSK-OO04123R\n\nThêm một API ...", ["oms-background"], "release/prod"), { "*": "HSK-OO04123R" });
+  assert.deepEqual(detectBranchDirectives("keep working on the existing branch task", ["oms-background"], "release/prod"), {}, "a plain word is never taken as a branch");
+  assert.deepEqual(detectBranchDirectives("reuse branch `develop` for this", ["oms-background"], "release/prod"), { "*": "develop" }, "a quoted plain name is explicit");
+});

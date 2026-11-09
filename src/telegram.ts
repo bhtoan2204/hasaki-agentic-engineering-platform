@@ -1,4 +1,6 @@
 import { config } from "./config.ts";
+import type { OutputLocale } from "./agent/language.ts";
+import { getUserSecret } from "./auth/secrets.ts";
 
 /**
  * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without TELEGRAM_BOT_TOKEN and
@@ -12,6 +14,10 @@ export interface StepWaiting {
   status: "WAITING_INPUT" | "WAITING_APPROVAL";
   /** Why the step waits, in a few words (e.g. "2 câu hỏi cần trả lời"). */
   detail: string;
+  /** Run output locale. Omitted keeps the original Vietnamese template (legacy callers). */
+  locale?: OutputLocale;
+  /** Private notifications go to this user's destination, never the shared team chat. */
+  ownerId?: number | null;
 }
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
@@ -24,44 +30,71 @@ export const telegramUrl = (url: string) => url.replace(/^(https?:\/\/)localhost
 /** Telegram only accepts public http(s) URLs in inline buttons; local links are sent as a text link. */
 export const isPublicHttps = (url: string) => /^https:\/\//i.test(url) && !/^https:\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(url);
 
+export const RULE = "━━━━━━━━━━━━━━━━";
+const attr = (s: string) => esc(s).replace(/"/g, "&quot;");
+
+/** Call-to-action footer: an inline button for public https links, otherwise a short text link. */
+export function linkFooter(url: string, label: string) {
+  const u = telegramUrl(url);
+  return isPublicHttps(u) ? { text: "", reply_markup: { inline_keyboard: [[{ text: label, url: u }]] } } : { text: `👉 <a href="${attr(u)}">${esc(label)}</a>`, reply_markup: undefined };
+}
+
 export function buildStepMessage(w: StepWaiting) {
-  const url = telegramUrl(stepLink(w.runId, w.stepKey));
-  const reason = w.status === "WAITING_INPUT" ? "❓ Cần bạn trả lời câu hỏi" : "✋ Cần bạn duyệt";
-  const button = isPublicHttps(url);
+  const input = w.status === "WAITING_INPUT";
+  const en = w.locale === "en";
+  const footer = linkFooter(stepLink(w.runId, w.stepKey), input ? (en ? "Open to answer" : "Mở để trả lời") : (en ? "Open to approve" : "Mở để duyệt"));
   const text = [
-    `<b>${reason}</b>`,
-    `Task: ${esc(w.runTitle)}`,
-    `Run: #${w.runId}`,
-    `Bước: ${esc(w.stepName)} (<code>${esc(w.stepKey)}</code>)`,
-    `Lý do: ${esc(w.detail)}`,
-    ...(button ? [] : ["", `Mở bước cần xử lý: <a href="${esc(url).replace(/"/g, "&quot;")}">${esc(url)}</a>`]),
+    input ? (en ? "❓ <b>NEEDS YOUR ANSWER</b>" : "❓ <b>CẦN BẠN TRẢ LỜI</b>") : (en ? "✋ <b>NEEDS YOUR APPROVAL</b>" : "✋ <b>CẦN BẠN DUYỆT</b>"),
+    RULE,
+    `📋 <b>${esc(w.runTitle)}</b>`,
+    "",
+    `▸ ${en ? "Step" : "Bước"}: <b>${esc(w.stepName)}</b> · <code>${esc(w.stepKey)}</code>`,
+    `▸ Run: #${w.runId}`,
+    `▸ ${en ? "Reason" : "Lý do"}: <i>${esc(w.detail)}</i>`,
+    ...(footer.text ? ["", footer.text] : []),
   ].join("\n");
-  return {
-    text,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-    ...(button ? { reply_markup: { inline_keyboard: [[{ text: "Mở bước cần xử lý", url }]] } } : {}),
-  };
+  return { text, parse_mode: "HTML", disable_web_page_preview: true, ...(footer.reply_markup ? { reply_markup: footer.reply_markup } : {}) };
 }
 
 const sent = new Map<string, number>(); // dedupe key → time (guards against double emission of one transition)
 
 export async function sendTelegramStepWaiting(w: StepWaiting, dedupeKey: string) {
-  const { botToken, chatId, apiBase } = config.telegram;
+  const botToken = config.telegram.botToken;
+  if (botToken && w.ownerId) {
+    const { sendInteractiveWaiting } = await import("./telegram/workflow.ts");
+    if (await sendInteractiveWaiting(w, dedupeKey)) return { ok: true };
+    const { preferences } = await import("./telegram/store.ts");
+    const prefs = await preferences(w.ownerId);
+    if (!(w.status === "WAITING_APPROVAL" ? prefs.approvals : prefs.questions)) return { skipped: "not configured" as const };
+  }
+  const chatId = w.ownerId ? await getUserSecret(w.ownerId, "telegram_chat") : null;
   if (!botToken || !chatId) return { skipped: "not configured" as const };
   if (sent.has(dedupeKey)) return { skipped: "duplicate" as const };
   sent.set(dedupeKey, Date.now());
   if (sent.size > 2000) for (const k of [...sent.keys()].slice(0, 1000)) sent.delete(k);
+  return postMessage(buildStepMessage(w), chatId);
+}
+
+export const escapeHtml = esc;
+
+/** Send an HTML message (already escaped by the caller) to the configured chat. Never throws. */
+export async function sendTelegramHtml(html: string, replyMarkup?: unknown) {
+  if (!config.telegram.botToken || !config.telegram.chatId) return { skipped: "not configured" as const };
+  return postMessage({ text: html, parse_mode: "HTML", disable_web_page_preview: true, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) });
+}
+
+async function postMessage(message: Record<string, unknown>, chatId = config.telegram.chatId) {
+  const { botToken, apiBase } = config.telegram;
   try {
     const res = await fetch(`${apiBase.replace(/\/$/, "")}/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, ...buildStepMessage(w) }),
+      body: JSON.stringify({ chat_id: chatId, ...message }),
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) {
       const body: any = await res.json().catch(() => ({}));
-      console.error(`telegram sendMessage failed: HTTP ${res.status} ${String(body?.description ?? "").slice(0, 200)}`);
+      console.error(`telegram sendMessage failed: HTTP ${res.status} ${String(body?.description ?? "").split(botToken).join("***").slice(0, 200)}`);
       return { ok: false };
     }
     return { ok: true };

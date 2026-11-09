@@ -1,30 +1,51 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import pg from "pg";
 import { config } from "../config.ts";
+import { pool } from "../db/pool.ts";
+import { sessionFromRequest } from "../auth/sessions.ts";
+import type { Actor } from "../authz/access.ts";
 
 /**
- * Server-Sent Events relay for LISTEN/NOTIFY on `workflow_events` (see migration 005). Browsers subscribe to one run
- * (`?run_id=`) or to everything; each notification is forwarded as `event: change` so the UI refetches real data.
+ * Server-Sent Events relay for LISTEN/NOTIFY on `workflow_events`. Each subscriber is authenticated.
+ * Payloads are filtered by the viewer's access before they are written. A revoked session closes the stream.
  */
-type Client = { res: ServerResponse; runId: number | null };
+type Client = { res: ServerResponse; runId: number | null; userId: number; role: Actor["role"]; support: boolean };
 const clients = new Set<Client>();
 let listener: pg.Client | null = null;
 
+function visible(client: Client, runId: number, ownerId: number | null) {
+  if (client.runId !== null && client.runId !== runId) return false;
+  if (ownerId == null) return false;
+  if (ownerId === client.userId) return true;
+  return client.support && client.role === "admin";
+}
+
+/** One owner lookup per notification (not per subscriber): every lookup is a full round trip to the database. */
+async function fanOut(payload: string, runId: number | null) {
+  if (runId == null || !clients.size) return;
+  const row = (await pool.query("SELECT owner_id FROM workflow_runs WHERE id = $1", [runId])).rows[0];
+  const ownerId = row?.owner_id == null ? null : Number(row.owner_id);
+  for (const cl of clients) if (visible(cl, runId, ownerId)) cl.res.write(`event: change\ndata: ${payload}\n\n`);
+}
+
 export async function startEventStream() {
   const connect = async () => {
-    const c = new pg.Client({ connectionString: config.databaseUrl });
+    // keepAlive: this LISTEN connection is idle between events; without it a VPN/NAT hop can drop it silently.
+    const c = new pg.Client({ connectionString: config.databaseUrl, keepAlive: true, keepAliveInitialDelayMillis: 30000 });
     c.on("notification", (n) => {
       if (!n.payload) return;
       let runId: number | null = null;
       try {
         runId = JSON.parse(n.payload).run_id ?? null;
-      } catch {}
-      for (const cl of clients) if (cl.runId === null || cl.runId === runId) cl.res.write(`event: change\ndata: ${n.payload}\n\n`);
+      } catch {
+        return;
+      }
+      fanOut(n.payload, runId).catch((e) => console.error("event stream fan-out:", e.message));
     });
     c.on("error", (e) => {
       console.error("event stream listener:", e.message);
       listener = null;
-      setTimeout(() => connect().catch(() => {}), 2000);
+      setTimeout(() => connect().catch(() => { }), 2000);
     });
     await c.connect();
     await c.query("LISTEN workflow_events");
@@ -33,13 +54,39 @@ export async function startEventStream() {
   await connect();
 }
 
-export function handleStream(req: IncomingMessage, res: ServerResponse, url: URL) {
+export async function handleStream(req: IncomingMessage, res: ServerResponse, url: URL, actor: Actor, support: boolean) {
   const runId = url.searchParams.get("run_id") ? Number(url.searchParams.get("run_id")) : null;
+  if (runId != null) {
+    const row = (await pool.query("SELECT owner_id FROM workflow_runs WHERE id = $1", [runId])).rows[0];
+    const ownerId = row?.owner_id == null ? null : Number(row.owner_id);
+    const allowed = ownerId != null && (ownerId === actor.id || (support && actor.role === "admin"));
+    if (!allowed) {
+      res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+  }
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
   res.write(`event: hello\ndata: ${JSON.stringify({ live: !!listener })}\n\n`);
-  const client = { res, runId };
+  const client: Client = { res, runId, userId: actor.id, role: actor.role, support };
   clients.add(client);
-  const ping = setInterval(() => res.write(": ping\n\n"), 20_000);
+  const ping = setInterval(() => {
+    sessionFromRequest(req)
+      .then((session) => {
+        if (!session || session.id !== actor.id) {
+          clearInterval(ping);
+          clients.delete(client);
+          res.end();
+          return;
+        }
+        res.write(": ping\n\n");
+      })
+      // A database hiccup (e.g. a connection timeout over VPN) must not become an unhandled rejection: that would
+      // terminate the whole server and every step running in it. Keep the stream; the next ping re-checks the session.
+      .catch((e) => {
+        console.error("event stream session check:", (e as Error).message);
+        res.write(": ping\n\n");
+      });
+  }, 20_000);
   req.on("close", () => {
     clearInterval(ping);
     clients.delete(client);

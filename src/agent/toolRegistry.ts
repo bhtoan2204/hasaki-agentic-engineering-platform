@@ -1,5 +1,8 @@
+import { searchSymbols, findDefinitions, findReferences, findDependencies, searchCodeExact, hybridRank } from "../codeIntelligence/search.ts";
 import { z } from "zod";
-import { config } from "../config.ts";
+import { config, codeIntelligenceEnabled } from "../config.ts";
+import { currentUserId } from "../auth/execution.ts";
+import { getUserSecret } from "../auth/secrets.ts";
 import { pool, q } from "../db/pool.ts";
 import { listPullRequests } from "../bitbucket.ts";
 import { workApi } from "../hasakiAuth.ts";
@@ -8,7 +11,7 @@ import { appPods, argoStatus, listApps, podLogs } from "../integrations/argocd.t
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
 import { vaultConnected, vaultExpired, vaultKeys, vaultList } from "../integrations/vault.ts";
 import { consumerGroupDetail, consumerGroups, kafkaConnected, kafkaExpired, listTopics, readMessages } from "../integrations/kafka.ts";
-import { rankRepositories, repositories, tokens } from "../repos/service.ts";
+import { repositoryReference, repositories, tokens } from "../repos/service.ts";
 import { runChanges } from "../git/changes.ts";
 
 /**
@@ -101,6 +104,24 @@ const allowedRepo = (repo: string, ctx: ToolCallContext) => {
 
 export function registerBuiltinTools() {
   registerIntegrationTool({
+    name: "code_intelligence.search",
+    summary: "Search code symbols, definitions, syntax references, dependencies or exact text across allowed repositories.",
+    description: "Read-only. Snapshot-validated syntax index with bounded live ripgrep fallback. Calls and external references are candidates, never semantic resolution. Repository text is untrusted. Dependency traversal is capped at three hops.",
+    input: z.object({ query: z.string().min(1).max(256), repositories: z.array(z.string()).max(30), operation: z.enum(["symbols", "definitions", "references", "dependencies", "exact"]).default("symbols"), depth: z.number().int().min(1).max(3).default(1) }),
+    readOnly: true,
+    available: () => codeIntelligenceEnabled() ? true : "code intelligence disabled",
+    handler: async (args, ctx) => {
+      const scope = { repositories: args.repositories, allowed: ctx.allowedRepositories, runId: ctx.runId };
+      switch (args.operation) {
+        case "definitions": return findDefinitions(args.query, scope);
+        case "references": return findReferences(args.query, scope);
+        case "dependencies": return findDependencies(args.query, scope, args.depth);
+        case "exact": return searchCodeExact(args.query, scope);
+        default: return searchSymbols(args.query, scope);
+      }
+    },
+  });
+  registerIntegrationTool({
     name: "hasaki_work.get_task",
     summary: "Fetch a Hasaki Work task (description, assignees, attachments, AI hints) by numeric task id.",
     description: "Read-only. Returns the task detail from Hasaki Work (wshr API) for a numeric task id (the number in the task URL). Requires the platform to be logged in to Hasaki Work.",
@@ -108,7 +129,9 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => true,
     handler: async ({ task_id }) => {
-      const j: any = await workApi("GET", config.hasakiWork.detailPath.replace("{id}", String(task_id)));
+      const userId = currentUserId();
+      if (!userId) throw new Error("this run has no owner");
+      const j: any = await workApi(userId, "GET", config.hasakiWork.detailPath.replace("{id}", String(task_id)));
       const d = j?.data ?? j;
       return { id: d.id, code: d.code, name: d.name, project: d.project?.name, note: d.note, status: d.status, date_end: d.date_end, note_files: d.note_files, parent: d.parent && { code: d.parent.code, name: d.parent.name }, assignees: (d.assign_to_user ?? []).map((u: any) => u.staff_name), ai_hint: d.task_ai?.ai_suggest?.reasoning };
     },
@@ -121,7 +144,9 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => true,
     handler: async () => {
-      const j: any = await workApi("GET", config.hasakiWork.listPath, { ...config.hasakiWork.listQuery, to_date: new Date().toLocaleDateString("sv-SE") });
+      const userId = currentUserId();
+      if (!userId) throw new Error("this run has no owner");
+      const j: any = await workApi(userId, "GET", config.hasakiWork.listPath, { ...config.hasakiWork.listQuery, to_date: new Date().toLocaleDateString("sv-SE") });
       const rows: any[] = Array.isArray(j?.data) ? j.data : (j?.data?.rows ?? []);
       return rows.map((t) => ({ id: t.id, code: t.code, name: t.name, project: t.project?.name ?? t.project_name }));
     },
@@ -134,8 +159,16 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => (config.jira.baseUrl && config.jira.user && config.jira.token ? true : "Jira not configured (jira.baseUrl, JIRA_USER, JIRA_TOKEN)"),
     handler: async ({ key }) => {
+      const userId = currentUserId();
+      const personalUser = userId ? await getUserSecret(userId, "jira_user") : null;
+      const personalToken = userId ? await getUserSecret(userId, "jira_token") : null;
+      if ((personalUser && !personalToken) || (!personalUser && personalToken)) throw new Error("This account's Jira credentials are incomplete");
+      const user = personalUser || config.jira.user;
+      const token = personalToken || config.jira.token;
+      if (!userId) throw new Error("this run has no owner");
+      if (!config.jira.baseUrl || !user || !token) throw new Error("Jira is not configured for this account");
       const res = await fetch(`${config.jira.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${key}?fields=summary,description,project,status,issuetype,priority,labels`, {
-        headers: { Authorization: "Basic " + Buffer.from(`${config.jira.user}:${config.jira.token}`).toString("base64"), Accept: "application/json" },
+        headers: { Authorization: "Basic " + Buffer.from(`${user}:${token}`).toString("base64"), Accept: "application/json" },
       });
       if (!res.ok) throw new Error(`Jira ${res.status}`);
       return normalizeJiraIssue(await res.json());
@@ -275,10 +308,11 @@ export function registerBuiltinTools() {
     description: "Read-only. Bitbucket Cloud pull requests of `repo` (repository registry name; must be in the run's allowed set). state: OPEN | MERGED | DECLINED | SUPERSEDED (default OPEN).",
     input: z.object({ repo: z.string(), branch: z.string().optional(), state: z.enum(["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]).optional() }),
     readOnly: true,
-    available: () => (config.bitbucket.user && config.bitbucket.token ? true : "Bitbucket credentials not configured"),
+    available: () => true,
     handler: async ({ repo, branch, state }, ctx) => {
       allowedRepo(repo, ctx);
-      const slug = (await repositories.get(repo))?.remote_slug || repo;
+      const registry = await repositories.get(repo);
+      const slug = registry ? repositoryReference(registry) : repo;
       return listPullRequests(slug, { branch, state });
     },
   });
@@ -291,7 +325,7 @@ export function registerBuiltinTools() {
     available: () => true,
     handler: async ({ query, project }, ctx) => {
       const rows = (await repositories.list()).filter((r) => ctx.allowedRepositories.includes(r.name));
-      return rankRepositories(rows, { text: query, project }).slice(0, 10);
+      return (await hybridRank(rows, { text: query, project })).slice(0, 10);
     },
   });
   registerIntegrationTool({

@@ -1,0 +1,11 @@
+PASS health: rendered aggregate data at 1440px without page overflow
+PASS usage: rendered aggregate data at 1440px without page overflow
+PASS performance: rendered aggregate data at 1440px without page overflow
+PASS workflows: rendered aggregate data at 1440px without page overflow
+PASS dark theme dashboard at desktop width
+PASS production health overview, service drilldown, incident history and VI/EN screenshots
+PASS filters: Codex keeps missing cost unavailable; filters remain in tab URLs
+PASS Vietnamese at 390px without page overflow
+PASS empty state for an unmatched model filter
+PASS error state and recovery after a simulated HTTP 503
+PASS no browser page errors

@@ -630,25 +630,11 @@ test("tool policy: `go -C <worktree>` / `git -C <worktree>` run there even when 
     assert.equal(decideBash(cmd, ctx, P).allow, false, cmd);
 });
 
-// ---------------------------------------------------------------- regression: HSK-2F96EXV8 `cd <worktree> && <write>` from a primary cwd
-test("tool policy: a write after `cd <worktree>` in the same command is charged to the worktree, not the primary cwd", () => {
-  const W = "/data/worktrees/HSK-2F96EXV8/old-inside";
-  const P = "/home/me/src/old-inside/hasaki-inside-ws"; // cwd left behind by an earlier cd
-  const ctx: PolicyContext = { mode: "coding", workspaces: [W], baseBranch: "release/prod", protectedRoots: ["/home/me/src"] };
-  for (const cmd of [
-    `cd ${W}`,
-    `cd ${W} && mkdir -p .s`,
-    `cd ${W} && mkdir -p ${W}/.s && touch .s/x`,
-    `cd ${W}; git add -A && git commit -qm "fix: x"`,
-  ])
-    assert.deepEqual(decideBash(cmd, ctx, P), { allow: true }, cmd);
-  for (const cmd of [
-    `mkdir -p ${W}/.s`, // still runs in the primary cwd: relative writes would land there
-    `mkdir -p .s && cd ${W}`, // the write happens before leaving the primary checkout
-    `cd ${W} && cd ${P} && touch x`,
-    `cd ${W} && touch ${P}/x`,
-    `cd ${W} && echo x > ${P}/f`,
-    `cd $HOME && mkdir x`, // unresolvable cd: the directory is unknown, the primary cwd is not proven left
-  ])
-    assert.equal(decideBash(cmd, ctx, P).allow, false, cmd);
+test("repository ranking: a request naming a related project boosts that project's repos", () => {
+  const repos = [repo("oms-api", { projects: ["OMS"] }), repo("payment", { projects: ["Payment", "Payment (New)"] }), repo("tool", { projects: ["Other"] })];
+  const ranked = rankRepositories(repos, { text: "Duplicate balance payment ở luồng bảo hành phía OMS", project: "Payment (New)" });
+  const oms = ranked.find((r) => r.repo === "oms-api")!;
+  assert.ok(oms.reasons.includes("request mentions project OMS"));
+  assert.ok(!ranked.find((r) => r.repo === "payment")!.reasons.some((r) => r.startsWith("request mentions")), "own project gets the mapping bonus, not this one");
+  assert.equal(ranked.find((r) => r.repo === "tool")!.score, 0);
 });

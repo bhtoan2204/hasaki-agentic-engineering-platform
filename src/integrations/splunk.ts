@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import { settings } from "../db.ts";
+import { personalSettings as settings, PersonalSession } from "./personal.ts";
 import { redactPii } from "./redact.ts";
 import { cookiePairs } from "./curl.ts";
 
@@ -16,7 +16,7 @@ import { cookiePairs } from "./curl.ts";
  */
 
 const SETTING = "splunk_cookie";
-let session: { cookie: string; formKey: string; user: string; roles: string[]; checkedAt: number; valid: boolean } | null = null;
+const login = new PersonalSession<{ cookie: string; formKey: string; user: string; roles: string[]; checkedAt: number; valid: boolean }>();
 
 const base = () => `${config.splunk.baseUrl.replace(/\/$/, "")}/${config.splunk.locale}/splunkd/__raw`;
 
@@ -39,11 +39,12 @@ export function parseSplunkCookie(raw: string): { cookie: string; formKey: strin
   return { cookie: pairs.join("; "), formKey };
 }
 
-async function call(method: "GET" | "POST", path: string, s: { cookie: string; formKey: string }, form?: Record<string, string>) {
+async function call(method: "GET" | "POST", path: string, s: { cookie: string; formKey: string }, form?: Record<string, string>, timeoutSeconds = config.splunk.timeoutSeconds) {
   const res = await fetch(`${base()}${path}`, {
     method,
     redirect: "manual",
-    signal: AbortSignal.timeout(config.splunk.timeoutSeconds * 1000),
+    // a little longer than the search's own max_time, so Splunk finalizes and answers first
+    signal: AbortSignal.timeout((timeoutSeconds + 15) * 1000),
     headers: {
       Cookie: s.cookie,
       Accept: "application/json",
@@ -54,13 +55,13 @@ async function call(method: "GET" | "POST", path: string, s: { cookie: string; f
   });
   const text = await res.text();
   if (res.status === 401 || (res.status >= 300 && res.status < 400)) {
-    if (session && s.cookie === session.cookie) session.valid = false;
+    if (login.current && s.cookie === login.current.cookie) login.current.valid = false;
     throw new Error("phiên Splunk hết hạn hoặc không hợp lệ — người dùng cần dán cookie mới ở trang Integrations (hỏi qua ask_user nếu cần log prod)");
   }
   let json: any = null;
   try {
     json = text ? JSON.parse(text) : null;
-  } catch {}
+  } catch { }
   if (!res.ok) {
     const msg = json?.messages?.map((m: any) => m.text).join("; ") || text.slice(0, 300);
     throw new Error(`Splunk ${res.status}: ${msg}`);
@@ -77,31 +78,31 @@ async function whoami(s: { cookie: string; formKey: string }) {
 
 export async function loadSplunkCookie() {
   const saved = await settings.get(SETTING);
-  if (!saved) return;
+  if (!saved) { if (login.current) login.current = null; return; }
   try {
     const { cookie, formKey, user, roles } = JSON.parse(saved);
-    session = { cookie, formKey, user, roles: roles ?? [], checkedAt: 0, valid: true };
-  } catch {}
+    login.current = { cookie, formKey, user, roles: roles ?? [], checkedAt: 0, valid: true };
+  } catch { }
 }
 
 /** Status; re-checks the session with Splunk at most once a minute (sessions expire after inactivity). */
 export async function splunkStatus(check = false) {
-  if (session && (check || Date.now() - session.checkedAt > 60_000)) {
+  if (login.current && (check || Date.now() - login.current.checkedAt > 60_000)) {
     try {
-      await whoami(session);
-      session.valid = true;
+      await whoami(login.current);
+      login.current.valid = true;
     } catch {
-      session.valid = false;
+      login.current.valid = false;
     }
-    session.checkedAt = Date.now();
+    login.current.checkedAt = Date.now();
   }
   return {
     baseUrl: config.splunk.baseUrl,
-    connected: !!session?.valid,
-    expired: !!session && !session.valid,
-    user: session?.user ?? null,
-    roles: session?.roles ?? [],
-    checkedAt: session?.checkedAt ? new Date(session.checkedAt).toISOString() : null,
+    connected: !!login.current?.valid,
+    expired: !!login.current && !login.current.valid,
+    user: login.current?.user ?? null,
+    roles: login.current?.roles ?? [],
+    checkedAt: login.current?.checkedAt ? new Date(login.current.checkedAt).toISOString() : null,
     limits: { maxMinutes: config.splunk.maxMinutes, maxResults: config.splunk.maxResults, allowedIndexes: config.splunk.allowedIndexes },
   };
 }
@@ -109,19 +110,19 @@ export async function splunkStatus(check = false) {
 export async function setSplunkCookie(raw: string) {
   const parsed = parseSplunkCookie(raw);
   const who = await whoami(parsed);
-  session = { ...parsed, ...who, checkedAt: Date.now(), valid: true };
+  login.current = { ...parsed, ...who, checkedAt: Date.now(), valid: true };
   await settings.set(SETTING, JSON.stringify({ cookie: parsed.cookie, formKey: parsed.formKey, user: who.user, roles: who.roles }));
   return splunkStatus();
 }
 
 export async function clearSplunkCookie() {
-  session = null;
+  login.current = null;
   await settings.set(SETTING, "");
   return splunkStatus();
 }
 
-export const splunkConnected = () => !!session?.valid;
-export const splunkExpired = () => !!session && !session.valid;
+export const splunkConnected = () => !!login.current?.valid;
+export const splunkExpired = () => !!login.current && !login.current.valid;
 
 // ---------------------------------------------------------------- SPL guard rails
 
@@ -147,29 +148,73 @@ export function checkSpl(raw: string): string {
   return spl;
 }
 
+async function searchJob(s: { cookie: string; formKey: string }, params: Record<string, string>, count: number, timeout: number, onProgress: (p: SearchProgress) => void) {
+  const job = await call("POST", "/services/search/jobs", s, { ...params, exec_mode: "normal" }, 30);
+  const sid = job?.sid;
+  if (!sid) throw new Error("Splunk không trả về search id");
+  const path = `/services/search/jobs/${encodeURIComponent(sid)}`;
+  const deadline = Date.now() + (timeout + 30) * 1000;
+  let messages: any[] = [];
+  for (; ;) {
+    const c = (await call("GET", `${path}?output_mode=json`, s, undefined, 30))?.entry?.[0]?.content ?? {};
+    const state = String(c.dispatchState ?? "QUEUED");
+    const done = c.isDone === true || c.isDone === "1" || state === "DONE";
+    onProgress({ state, pct: done ? 100 : Math.max(0, Math.min(99, Math.round(Number(c.doneProgress ?? 0) * 100))), scanned: Number(c.scanCount ?? 0), matched: Number(c.eventCount ?? 0) });
+    messages = Array.isArray(c.messages) ? c.messages : [];
+    if (state === "FAILED") throw new Error(`Splunk search lỗi: ${messages.map((m: any) => m.text ?? m).join("; ") || "FAILED"}`);
+    if (done) break;
+    if (Date.now() > deadline) {
+      await call("POST", `${path}/control`, s, { action: "cancel" }, 15).catch(() => { });
+      throw new Error(`Splunk search quá ${timeout}s, đã huỷ`);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  const res = await call("GET", `${path}/results?output_mode=json&count=${count}`, s, undefined, 60);
+  return { results: res?.results ?? [], messages: [...(res?.messages ?? []), ...messages.filter((m: any) => m?.type && m?.text)] };
+}
+
 export interface SplunkQuery {
   query: string;
   since_minutes?: number;
   until_minutes?: number;
   max_results?: number;
+  /** platform-internal (scheduled scans); agents use the configured limit */
+  timeout_seconds?: number;
 }
 
-export async function splunkSearch(q: SplunkQuery) {
-  if (!session?.valid) throw new Error(session ? "phiên Splunk hết hạn — người dùng cần dán cookie mới ở trang Integrations" : "chưa kết nối Splunk — người dùng dán cookie ở trang Integrations");
+export interface SearchProgress {
+  /** Splunk dispatch state: QUEUED, PARSING, RUNNING, FINALIZING, DONE */
+  state: string;
+  /** 0–100 */
+  pct: number;
+  /** events read from the index so far */
+  scanned: number;
+  /** events matching the search so far */
+  matched: number;
+}
+
+/**
+ * Without `onProgress`: one blocking "oneshot" request (agent tool). With it: an asynchronous job polled for progress
+ * (done %, events scanned), cancelled if it outlives the timeout — used by the long production error scan.
+ */
+export async function splunkSearch(q: SplunkQuery, onProgress?: (p: SearchProgress) => void) {
+  if (!login.current?.valid) throw new Error(login.current ? "phiên Splunk hết hạn — người dùng cần dán cookie mới ở trang Integrations" : "chưa kết nối Splunk — người dùng dán cookie ở trang Integrations");
   const spl = checkSpl(q.query);
   const since = Math.min(q.since_minutes ?? 60, config.splunk.maxMinutes);
   const until = Math.max(0, Math.min(q.until_minutes ?? 0, since - 1));
   const count = Math.min(q.max_results ?? 100, config.splunk.maxResults);
-  const j = await call("POST", "/services/search/jobs", session, {
+  const timeout = q.timeout_seconds ?? config.splunk.timeoutSeconds;
+  const params = {
     search: spl,
-    exec_mode: "oneshot",
     earliest_time: `-${Math.round(since)}m`,
     latest_time: until ? `-${Math.round(until)}m` : "now",
-    count: String(count),
     output_mode: "json",
-    max_time: String(config.splunk.timeoutSeconds),
-  });
-  session.checkedAt = Date.now();
+    max_time: String(timeout),
+  };
+  const j = onProgress
+    ? await searchJob(login.current, params, count, timeout, onProgress)
+    : await call("POST", "/services/search/jobs", login.current, { ...params, exec_mode: "oneshot", count: String(count) }, timeout);
+  login.current.checkedAt = Date.now();
   const rows: any[] = j?.results ?? [];
   const mask = (v: unknown): unknown => (typeof v === "string" ? redactPii(v) : Array.isArray(v) ? v.map(mask) : v);
   const results = rows.map((r) => {

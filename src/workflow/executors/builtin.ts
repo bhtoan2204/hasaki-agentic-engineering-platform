@@ -1,13 +1,18 @@
+import { createHash } from "node:crypto";
+import { approvedScopeFrom } from "../../agent/evidence.ts";
+import { executeBenchmarkCase } from "../../eval/runner.ts";
+import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
-import { config } from "../../config.ts";
+import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import { gitProvider, workspacesOf } from "../../git/provider.ts";
-import { isAmbiguous, rankRepositories, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
+import { repositoryReference, repositoryBaseBranch, isAmbiguous, repositories, type RankedRepository, type RepositoryRow } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
 import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
 import { dirtyOf, headOf, verificationGate, type PublishState } from "../../agent/independentReview.ts";
+import { collectScopeState, prePublishProblems } from "../../agent/scopeGuard.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -29,9 +34,26 @@ export const humanApprovalExecutor: StepExecutor = {
     const cfg = ctx.step.config;
     const shown = Object.fromEntries(((cfg.show_outputs as string[]) ?? []).map((k) => [k, ctx.input.upstream[k]?.output ?? null]));
     const request: Record<string, unknown> = { message: cfg.message ?? `Approve "${ctx.step.name}"?`, outputs: shown };
+    // Evidence-gated approval: freeze the exact proposal being approved (hash + changes + risk + assumptions) in the
+    // request, so the decision records what was approved even if the proposal is re-executed later.
+    if (typeof cfg.approve_scope_from === "string") {
+      const scope = approvedScopeFrom(cfg.approve_scope_from, ctx.input.upstream[cfg.approve_scope_from]?.output);
+      if (scope) Object.assign(request, { scope, requires_risk_acknowledgement: scope.gate ? !scope.gate.satisfied : scope.risk === "HIGH" });
+    }
     if (cfg.select_repositories) {
       const discovery = Object.values(ctx.input.upstream).find((u) => Array.isArray(u.output?.candidates))?.output;
-      const recommended: string[] = discovery?.recommended ?? ctx.run.selected_repositories;
+      // Repositories already chosen for the run: selected at creation, or passed as the `repositories` run input
+      // (an array, or a comma-separated string from the API); only ones the run is allowed to touch.
+      const raw = ctx.input.run.inputs?.repositories;
+      const fromInput = (Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? raw.split(",") : []).map((r) => r.trim()).filter(Boolean);
+      const preselected = (ctx.run.selected_repositories.length ? ctx.run.selected_repositories : fromInput).filter((r) => ctx.run.allowed_repositories.includes(r));
+      if (cfg.auto_approve_preselected && preselected.length)
+        return { kind: "completed", output: { approved: true, auto: true, repositories: preselected, selected_repositories: preselected } };
+      const recommended: string[] = discovery?.recommended ?? preselected;
+      if (cfg.ask_branch) {
+        const inputs = ctx.input.run.inputs ?? {};
+        Object.assign(request, { ask_branch: true, branch: typeof inputs.branch === "string" ? inputs.branch : "", branches: inputs.branches && typeof inputs.branches === "object" ? inputs.branches : {} });
+      }
       Object.assign(request, {
         select_repositories: true,
         candidates: discovery?.candidates ?? ctx.run.allowed_repositories.map((r) => ({ repo: r, score: 0, reasons: [] })),
@@ -82,7 +104,7 @@ export function runCommand(command: string, cwd: string, env: Record<string, str
     const killTree = () => {
       try {
         if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {}
+      } catch { }
     };
     signal.addEventListener("abort", killTree, { once: true });
     if (child.pid) childGroups.add(child.pid);
@@ -145,19 +167,41 @@ export const commandExecutor: StepExecutor = {
       await ctx.log("system", "skipped: this run has no worktree (no code was changed), so there is nothing to run the command in");
       return { kind: "completed", output: { skipped: true, passed: true, reason: "no code changes in this run (no worktree)", results: [] } };
     }
+    // Reusable test evidence: the exact same command + config on exactly the same, clean commits already PASSED in an
+    // earlier attempt of this step → do not rerun the suite. Never reused: dirty worktrees (tests saw uncommitted content),
+    // any failure or human-accepted exception (baseline handling cannot hide a regression), a resume/decision flow, or
+    // an explicit human re-run.
+    const commandHash = createHash("sha256").update(JSON.stringify([cfg.command, cfg.cwd ?? null, cfg.baseline_compare ?? null, cfg.timeout_seconds ?? null, cfg.env ?? null])).digest("hex").slice(0, 16);
+    const nowHeads: Record<string, string> = {};
+    let clean = !cfg.cwd;
+    for (const t of targets)
+      if (t.repo !== "(cwd)") {
+        nowHeads[t.repo] = await headOf(t.path).catch(() => "");
+        if (!nowHeads[t.repo] || (await dirtyOf(t.path))) clean = false;
+      }
+    const humanRerun = !!(ctx.input.pending?.reexecute || ctx.input.pending?.feedback || resumed || decision);
+    if (clean && !humanRerun && cfg.reuse_test_evidence !== false) {
+      const prior = await q<{ id: number; output: any }>(pool, "SELECT id, output FROM workflow_step_attempts WHERE step_id = $1 AND status = 'COMPLETED' AND output->>'command_hash' = $2 ORDER BY id DESC LIMIT 5", [ctx.step.id, commandHash]);
+      const same = prior.find((p) => p.output?.passed === true && !p.output?.decision && p.output?.tested_clean === true && JSON.stringify(Object.entries(p.output?.tested_heads ?? {}).sort()) === JSON.stringify(Object.entries(nowHeads).sort()));
+      if (same) {
+        await ctx.log("system", `tests not re-run: attempt #${same.id} already passed "${String(cfg.command).slice(0, 120)}" on exactly these clean commits (${Object.entries(nowHeads).map(([r, h]) => `${r}@${h.slice(0, 12)}`).join(", ")})`);
+        return { kind: "completed", output: { ...same.output, reused_from_attempt: same.id, reused_at: new Date().toISOString() } };
+      }
+    }
     const results: Array<{ repo: string; exit_code: number | null; timed_out: boolean; artifact_id: number; baseline?: any; passed?: boolean }> = [];
     const outputs: Record<string, string> = {};
     for (const t of targets) {
+      const baseBranch = await repositoryBaseBranch(t.repo);
       await ctx.log("system", `▶ ${t.repo}: running command in ${t.path}`);
       const started = Date.now();
       // Skipping known base failures continues past them without confirmation: opt-in in interactive mode.
       const skipKnown = cfg.skip_known_base_failures ?? !interactive;
       const known = cfg.baseline_compare === "go" && skipKnown ? await knownBaseFailures(t.path) : null;
-      if (known?.skipRegex) await ctx.log("system", `skipping ${known.tests.length} test(s) known to fail on ${config.baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`, { skipped_known_failures: known.tests });
+      if (known?.skipRegex) await ctx.log("system", `skipping ${known.tests.length} test(s) known to fail on ${baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`, { skipped_known_failures: known.tests });
       const r = await runCommand(
         String(cfg.command),
         t.path,
-        { BASE_BRANCH: config.baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}), ...((cfg.env as Record<string, string>) ?? {}) },
+        { BASE_BRANCH: baseBranch, REPO: t.repo, BRANCH: t.branch, RUN_ID: String(ctx.run.id), ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}), ...((cfg.env as Record<string, string>) ?? {}) },
         timeoutMs,
         ctx.signal,
         (chunk) => void ctx.log("log", chunk, { repo: t.repo }),
@@ -172,7 +216,10 @@ export const commandExecutor: StepExecutor = {
       results.push(entry);
     }
     const failed = results.filter((r) => !r.passed);
-    const output = { results, passed: failed.length === 0, ...(decision ? { decision } : {}) };
+    // The exact commits the tests ran on: the PR gate refuses to publish anything else.
+    const tested_heads: Record<string, string> = {};
+    for (const t of targets) if (t.repo !== "(cwd)") tested_heads[t.repo] = await headOf(t.path).catch(() => "");
+    const output = { results, passed: failed.length === 0, command_hash: commandHash, tested_clean: clean, ...(Object.keys(tested_heads).length ? { tested_heads } : {}), ...(decision ? { decision } : {}) };
     if (failed.length && !cfg.allow_failure && interactive) {
       // Automatic retries first (max_attempts); when they are exhausted, diagnose and ask the developer.
       if (ctx.step.attempt_count < ctx.step.max_attempts) return { kind: "failed", error: `tests failed (attempt ${ctx.step.attempt_count}/${ctx.step.max_attempts}); retrying`, retryable: true, details: output };
@@ -192,20 +239,21 @@ export const commandExecutor: StepExecutor = {
 
 /** Re-run the failing Go packages on origin/<base>; failures present there too are pre-existing, not regressions. */
 async function compareWithBaseline(ctx: ExecutionContext, t: { repo: string; path: string }, output: string, timeoutMs: number) {
+  const baseBranch = await repositoryBaseBranch(t.repo);
   const branch = parseGoTest(output);
   const failing = Object.entries(branch).filter(([, p]) => p.status === "fail").map(([k]) => k);
   if (!failing.length) {
     await ctx.log("system", `baseline: no parseable go test failure in ${t.repo} (e.g. go build failed); not comparing`);
     return { note: "no go test failure to compare (build or script error)" };
   }
-  await ctx.log("system", `◆ ${t.repo}: comparing ${failing.length} failing package(s) with origin/${config.baseBranch}…`);
+  await ctx.log("system", `◆ ${t.repo}: comparing ${failing.length} failing package(s) with origin/${baseBranch}…`);
   try {
-    const base = await goBaseline(t.path, failing, (command, cwd) => runCommand(command, cwd, { BASE_BRANCH: config.baseBranch, REPO: t.repo }, timeoutMs, ctx.signal, (chunk) => void ctx.log("log", chunk, { repo: t.repo, baseline: true })));
+    const base = await goBaseline(t.path, failing, (command, cwd) => runCommand(command, cwd, { BASE_BRANCH: baseBranch, REPO: t.repo }, timeoutMs, ctx.signal, (chunk) => void ctx.log("log", chunk, { repo: t.repo, baseline: true })));
     const c = classify(branch, base.report);
     await ctx.log(
       "system",
       `◆ ${t.repo}: baseline ${base.sha.slice(0, 9)} → ${c.regressions.length} regression(s), ${c.pre_existing.length} package(s) with pre-existing failures` +
-        (base.cached.length ? ` (cached: ${base.cached.length})` : ""),
+      (base.cached.length ? ` (cached: ${base.cached.length})` : ""),
       { repo: t.repo, ...c },
     );
     return { base_sha: base.sha, ...c };
@@ -230,7 +278,9 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   if (!rows.length) return { kind: "failed", error: "no repositories are allowed for this run (check the repository registry / project mapping)", retryable: false };
   const keywords = Object.values(ctx.input.upstream).flatMap((u) => (Array.isArray(u.output?.keywords) ? u.output.keywords : []));
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");
-  let ranked = rankRepositories(rows, { text, keywords, project: ctx.context.project });
+  const rankingStarted = Date.now();
+  let ranked = await hybridRank(rows, { text, keywords, project: ctx.context.project });
+  if (codeIntelligenceEnabled()) await ctx.recordMetrics({ code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted } }).catch(() => { });
   let method = "deterministic";
   // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
   if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false) {
@@ -297,6 +347,8 @@ async function publishReport(ctx: ExecutionContext): Promise<ExecResult> {
 export const integrationExecutor: StepExecutor = {
   async execute(ctx) {
     switch (ctx.step.config.action) {
+      case "benchmark_case":
+        return executeBenchmarkCase(ctx);
       case "repository_discovery":
         return repositoryDiscovery(ctx);
       case "select_repositories":
@@ -337,13 +389,13 @@ export function prDescription(x: { code?: string; runId: number; summary: string
     "",
     ...(exc.length
       ? [
-          "## Test exceptions (accepted by the developer — test result remains FAILED)",
-          ...exc.flatMap((e) => [
-            `- ${e.step}: failures that also fail on the base branch${e.exception.base_sha ? ` (${String(e.exception.base_sha).slice(0, 9)})` : ""}:`,
-            ...e.exception.failures.map((f: any) => `  - ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}`.trimEnd()),
-          ]),
-          "",
-        ]
+        "## Test exceptions (accepted by the developer — test result remains FAILED)",
+        ...exc.flatMap((e) => [
+          `- ${e.step}: failures that also fail on the base branch${e.exception.base_sha ? ` (${String(e.exception.base_sha).slice(0, 9)})` : ""}:`,
+          ...e.exception.failures.map((f: any) => `  - ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}`.trimEnd()),
+        ]),
+        "",
+      ]
       : []),
     ...(vn.length
       ? ["## Verification notes (automated checks were not conclusive — please review)", ...vn.flatMap((n) => [`- ${n.step} (${n.status}):`, ...n.lines.map((l) => `  - ${l}`)]), ""]
@@ -399,25 +451,39 @@ export const pullRequestExecutor: StepExecutor = {
     const provider = gitProvider();
     const code = ctx.input.work_item?.code;
     const out: any[] = [];
-    // Independent verification gate. Steps marked `independent: true` make verification REQUIRED: every one must hold
-    // a valid PASS covering every published repo at exactly the commit that would be pushed, from a clean worktree.
-    // Workflows without such a step (opted out, FAST profile) keep verification optional.
-    const verifiers = await q<{ key: string; status: string; output: any }>(pool, "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 AND config->>'independent' = 'true' ORDER BY position", [ctx.run.id]);
-    if (verifiers.length) {
-      const publish: Record<string, PublishState> = {};
-      for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo)))
-        publish[w.repo] = { head: await headOf(w.path).catch(() => ""), branchTip: await revParse(w.path, `refs/heads/${w.branch}`), dirty: await dirtyOf(w.path) };
-      const problems = verificationGate(verifiers, publish);
-      if (problems.length) {
-        await ctx.log("system", `PR blocked by the verification gate:\n- ${problems.join("\n- ")}`);
-        return { kind: "failed", error: `independent verification gate: ${problems.join("; ")} — re-run the verification step (or the coding step) before opening the PR`, retryable: false };
-      }
+    // Pre-publish gate, always on (deterministic, re-read from git right now — after any approval of this step):
+    //  - every published repo is clean and its HEAD is the tip of the pushed branch;
+    //  - every test record bound to commits (coding verification, test steps) ran on exactly the commit to publish;
+    //  - the actual diff still fits the approved scope, or a renewed approval names this exact revision.
+    // Then the independent verification gate: steps marked `independent: true` make verification REQUIRED — every one
+    // must hold a valid PASS covering every published repo at exactly that commit. A BLOCKED verdict stays blocking.
+    const publish: Record<string, PublishState> = {};
+    for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo)))
+      publish[w.repo] = { head: await headOf(w.path).catch(() => ""), branchTip: await revParse(w.path, `refs/heads/${w.branch}`), dirty: await dirtyOf(w.path) };
+    const steps = await q<{ key: string; status: string; output: any; independent: boolean }>(
+      pool,
+      "SELECT key, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
+      [ctx.run.id],
+    );
+    const scope = [...steps].reverse().find((x) => x.status === "COMPLETED" && x.output?.approved_scope?.proposal_hash)?.output.approved_scope ?? null;
+    const state = scope
+      ? await collectScopeState(await Promise.all(workspaces.map(async (w) => ({ repo: w.repo, path: w.path, base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}` }))))
+      : null;
+    const renewedRevision = steps.map((x) => x.output?.scope_check?.reapproved?.revision).filter(Boolean).at(-1) ?? null;
+    const tested = steps.filter((x) => x.status === "COMPLETED" && x.output?.tested_heads && typeof x.output.tested_heads === "object").map((x) => ({ step: x.key, heads: x.output.tested_heads }));
+    const verifiers = steps.filter((x) => x.independent);
+    const problems = [...new Set([...prePublishProblems({ publish, scope, state, renewedRevision, tested }), ...(verifiers.length ? verificationGate(verifiers, publish) : [])])];
+    if (problems.length) {
+      await ctx.log("system", `PR blocked by the pre-publish gate:\n- ${problems.join("\n- ")}`);
+      return { kind: "failed", error: `pre-publish gate: ${problems.join("; ")} — fix the cause (re-run the coding / test / verification step, or renew the scope approval) before opening the PR`, retryable: false };
     }
     for (const w of workspaces) {
       if (!ctx.run.selected_repositories.includes(w.repo)) {
         await ctx.log("system", `skip PR for ${w.repo}: not in the run's selected repositories`);
         continue;
       }
+      // A fenced-out / canceled attempt must not start another external action.
+      if (ctx.signal.aborted) return { kind: "failed", error: `PR step interrupted before publishing ${w.repo}: ${String(ctx.signal.reason ?? "aborted")}`, retryable: false };
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {
@@ -433,8 +499,11 @@ export const pullRequestExecutor: StepExecutor = {
         return { kind: "failed", error: `${w.repo}: push failed: ${msg}`, retryable: true };
       }
       const description = prDescription({ code, runId: ctx.run.id, summary, decisions, commits, testExceptions: await testExceptionsOf(ctx.run.id), verificationNotes: await verificationNotesOf(ctx.run.id) });
-      const slug = (await repositories.get(w.repo))?.remote_slug || w.repo;
-      const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: config.baseBranch, title, description, draft: mode === "draft" });
+      const registry = await repositories.get(w.repo);
+      const slug = registry ? repositoryReference(registry) : w.repo;
+      const destination = registry?.default_branch || config.baseBranch;
+      if (ctx.signal.aborted) return { kind: "failed", error: `PR step interrupted after pushing ${w.repo} (no PR call made; a retry reconciles by looking up the open PR)`, retryable: false };
+      const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: destination, title, description, draft: mode === "draft" });
       await q(
         pool,
         `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id)
@@ -442,7 +511,7 @@ export const pullRequestExecutor: StepExecutor = {
          ON CONFLICT (provider, repo, source_branch, target_branch) DO UPDATE SET url = excluded.url, title = excluded.title, summary = excluded.summary,
            decisions = excluded.decisions, draft = excluded.draft, created = pull_requests.created OR excluded.created,
            run_id = excluded.run_id, step_id = excluded.step_id, work_item_id = COALESCE(excluded.work_item_id, pull_requests.work_item_id), updated_at = now()`,
-        [provider.name, w.repo, w.branch, config.baseBranch, pr.url, title, summary, JSON.stringify(decisions), mode === "draft", pr.created, ctx.run.work_item_id, ctx.run.id, ctx.step.id],
+        [provider.name, w.repo, w.branch, destination, pr.url, title, summary, JSON.stringify(decisions), mode === "draft", pr.created, ctx.run.work_item_id, ctx.run.id, ctx.step.id],
       );
       await ctx.log("system", `PR ${w.repo}: ${pr.url} (${pr.note})`);
       out.push({ repo: w.repo, url: pr.url, created: pr.created, note: pr.note, draft: mode === "draft" });

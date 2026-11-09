@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import { settings } from "../db.ts";
+import { personalSettings as settings, PersonalSession } from "./personal.ts";
 import { redactSecrets } from "./redact.ts";
 import { cookiePairs } from "./curl.ts";
 
@@ -12,7 +12,7 @@ import { cookiePairs } from "./curl.ts";
  */
 
 const SETTING = "kafka_ui_cookie";
-let session: { cookie: string; user: string | null; checkedAt: number; valid: boolean } | null = null;
+const login = new PersonalSession<{ cookie: string; user: string | null; checkedAt: number; valid: boolean }>();
 
 const baseUrl = () => config.kafka.baseUrl.replace(/\/$/, "");
 const MAX_CONTENT = 4000;
@@ -31,14 +31,14 @@ async function get(path: string, cookie: string, params?: Record<string, string 
   const res = await fetch(url, { method: "GET", redirect: "manual", headers: { Cookie: cookie, Accept: accept }, signal: AbortSignal.timeout(config.kafka.timeoutSeconds * 1000) });
   const text = await res.text();
   if (res.status === 401 || (res.status >= 300 && res.status < 400)) {
-    if (session && cookie === session.cookie) session.valid = false;
+    if (login.current && cookie === login.current.cookie) login.current.valid = false;
     throw new Error("phiên Kafka UI hết hạn hoặc không hợp lệ — người dùng cần dán cookie mới ở trang Integrations (hỏi qua ask_user nếu cần)");
   }
   if (!res.ok) {
     let msg = text.slice(0, 300);
     try {
       msg = JSON.parse(text).message ?? msg;
-    } catch {}
+    } catch { }
     throw new Error(`Kafka UI ${res.status} ${path}: ${msg}`);
   }
   return text;
@@ -46,9 +46,9 @@ async function get(path: string, cookie: string, params?: Record<string, string 
 const getJson = async (path: string, cookie: string, params?: Record<string, string | number | boolean | undefined>) => JSON.parse((await get(path, cookie, params)) || "null");
 
 function requireCookie(): string {
-  if (!session?.valid)
-    throw new Error(session ? "phiên Kafka UI hết hạn — người dùng cần dán cookie mới ở trang Integrations" : "chưa kết nối Kafka UI — người dùng dán cookie ở trang Integrations");
-  return session.cookie;
+  if (!login.current?.valid)
+    throw new Error(login.current ? "phiên Kafka UI hết hạn — người dùng cần dán cookie mới ở trang Integrations" : "chưa kết nối Kafka UI — người dùng dán cookie ở trang Integrations");
+  return login.current.cookie;
 }
 
 async function check(cookie: string) {
@@ -58,36 +58,36 @@ async function check(cookie: string) {
   try {
     const a = await getJson("/api/authorization", cookie);
     user = a?.userInfo?.username ?? null;
-  } catch {}
+  } catch { }
   return { clusters: clusters.map((c: any) => ({ name: c.name, status: c.status, brokers: c.brokerCount, topics: c.topicCount })), user };
 }
 
 export async function loadKafkaCookie() {
   const saved = await settings.get(SETTING);
-  if (!saved) return;
+  if (!saved) { if (login.current) login.current = null; return; }
   try {
     const { cookie, user } = JSON.parse(saved);
-    session = { cookie, user: user ?? null, checkedAt: 0, valid: true };
-  } catch {}
+    login.current = { cookie, user: user ?? null, checkedAt: 0, valid: true };
+  } catch { }
 }
 
 export async function kafkaStatus(force = false) {
   let clusters: Array<{ name: string; status: string; brokers: number; topics: number }> = [];
-  if (session && (force || Date.now() - session.checkedAt > 60_000)) {
+  if (login.current && (force || Date.now() - login.current.checkedAt > 60_000)) {
     try {
-      clusters = (await check(session.cookie)).clusters;
-      session.valid = true;
+      clusters = (await check(login.current.cookie)).clusters;
+      login.current.valid = true;
     } catch {
-      session.valid = false;
+      login.current.valid = false;
     }
-    session.checkedAt = Date.now();
+    login.current.checkedAt = Date.now();
   }
   return {
     baseUrl: baseUrl(),
-    connected: !!session?.valid,
-    expired: !!session && !session.valid,
-    user: session?.user ?? null,
-    checkedAt: session?.checkedAt ? new Date(session.checkedAt).toISOString() : null,
+    connected: !!login.current?.valid,
+    expired: !!login.current && !login.current.valid,
+    user: login.current?.user ?? null,
+    checkedAt: login.current?.checkedAt ? new Date(login.current.checkedAt).toISOString() : null,
     ...(clusters.length ? { clusters } : {}),
   };
 }
@@ -95,19 +95,19 @@ export async function kafkaStatus(force = false) {
 export async function setKafkaCookie(raw: string) {
   const cookie = parseKafkaCookie(raw);
   const { user } = await check(cookie);
-  session = { cookie, user, checkedAt: Date.now(), valid: true };
+  login.current = { cookie, user, checkedAt: Date.now(), valid: true };
   await settings.set(SETTING, JSON.stringify({ cookie, user }));
   return kafkaStatus(true);
 }
 
 export async function clearKafkaCookie() {
-  session = null;
+  login.current = null;
   await settings.set(SETTING, "");
   return kafkaStatus();
 }
 
-export const kafkaConnected = () => !!session?.valid;
-export const kafkaExpired = () => !!session && !session.valid;
+export const kafkaConnected = () => !!login.current?.valid;
+export const kafkaExpired = () => !!login.current && !login.current.valid;
 
 // ---------------------------------------------------------------- read-only operations used by the agent tools
 

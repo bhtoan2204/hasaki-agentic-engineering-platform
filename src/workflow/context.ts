@@ -1,3 +1,4 @@
+import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
 import { q, one, json, type Db } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
@@ -10,12 +11,13 @@ import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
 import { createHash } from "node:crypto";
 import { hashOf } from "./definitions.ts";
+import { outputLocale } from "../agent/language.ts";
 import { ancestors } from "./graph.ts";
 import type { RunRow, StepRow } from "./types.ts";
 
 /** Everything a step attempt receives. Persisted as the attempt's input snapshot. */
 export interface StepInput {
-  run: { id: number; title: string; inputs: Record<string, any>; branch: string; definition_key: string; selected_repositories: string[]; allowed_repositories: string[] };
+  run: { id: number; title: string; inputs: Record<string, any>; branch: string; definition_key: string; selected_repositories: string[]; allowed_repositories: string[]; output_locale?: "vi" | "en" | null };
   work_item: { id: number; code: string; title: string; description: string; project: string; source: string; payload: any } | null;
   /** Outputs of every ancestor step, keyed by step key, with the attempt that produced them. */
   upstream: Record<string, { status: string; attempt_id: number | null; output: any }>;
@@ -29,6 +31,7 @@ export interface StepInput {
 }
 
 export interface ResolvedContext {
+  contextPack?: ContextPack;
   snapshot_id: number;
   hash: string;
   project: string;
@@ -89,7 +92,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
     ? await one(c, "SELECT id, code, title, description, project, source, payload FROM work_items WHERE id = $1", [run.work_item_id])
     : null;
   const anc = ancestors(run.graph.steps, step.key);
-  const upstream: StepInput["upstream"] = {};
+  let upstream: StepInput["upstream"] = {};
   if (anc.size) {
     for (const s of await q<StepRow>(c, "SELECT key, status, current_attempt_id, output FROM workflow_steps WHERE run_id = $1 AND key = ANY($2)", [
       run.id,
@@ -98,11 +101,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
       upstream[s.key] = { status: s.status, attempt_id: s.current_attempt_id, output: s.output };
   }
   // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
-  if (isIndependent(step.config)) {
-    const filtered = independentUpstream(run.graph.steps, upstream);
-    for (const k of Object.keys(upstream)) if (!(k in filtered)) delete upstream[k];
-    Object.assign(upstream, filtered);
-  }
+  if (isIndependent(step.config)) upstream = independentUpstream(run.graph.steps, upstream);
   const answers = await q(
     c,
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",
@@ -111,11 +110,11 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
   const reexec = step.pending_input?.reexecute || step.pending_input?.feedback;
   const previous_attempt = reexec
     ? ((await one(
-        c,
-        `SELECT number, generation, status, output, error FROM workflow_step_attempts
+      c,
+      `SELECT number, generation, status, output, error FROM workflow_step_attempts
           WHERE step_id = $1 AND generation < $2 AND (output IS NOT NULL OR error IS NOT NULL) ORDER BY number DESC LIMIT 1`,
-        [step.id, step.generation],
-      )) ?? null)
+      [step.id, step.generation],
+    )) ?? null)
     : null;
   return {
     previous_attempt,
@@ -127,6 +126,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
       definition_key: run.definition_key,
       selected_repositories: run.selected_repositories,
       allowed_repositories: run.allowed_repositories,
+      output_locale: outputLocale(run),
     },
     work_item: wi ?? null,
     upstream,
@@ -161,7 +161,9 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     ...(run.graph.knowledge ?? []),
   ];
   const pinned: Array<{ key: string; version: number }> = input.pending?.reexecute?.skills ?? [];
-  const res = resolveKnowledge(await knowledge.candidates(c), {
+  // One instant for version selection (effective dates) and expiry, recorded in the snapshot for reproducibility.
+  const at = new Date();
+  const res = resolveKnowledge(await knowledge.candidates(c, run.owner_id, at), {
     organization: config.organization,
     project,
     repositories,
@@ -170,14 +172,15 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     stepType: step.type,
     text: requestText(input),
     explicit,
+    now: at,
   });
   // Skills selected for this re-execution, at the exact version pinned when it was requested.
   for (const p of pinned) {
     const v = await one(
       c,
-      `SELECT i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, v.version, v.content, v.applicability, v.metadata
-         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = $2 WHERE i.key = $1`,
-      [p.key, p.version],
+      `SELECT i.id, i.owner_id, i.updated_at, i.key, i.title, i.category, i.scope_type, i.scope_ref, i.conflict_key, i.priority, i.enforced, v.version, v.content, v.applicability, v.metadata
+         FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = $2 WHERE i.key = $1 AND (i.owner_id IS NULL OR i.owner_id = $3) AND i.enabled AND v.version <= i.current_version ORDER BY i.owner_id NULLS LAST LIMIT 1`,
+      [p.key, p.version, run.owner_id],
     );
     res.applied = res.applied.filter((k) => k.key !== p.key);
     if (v) res.applied.push({ ...v, reason: `selected for this re-execution (v${p.version})` });
@@ -188,7 +191,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   const memoryStates: Array<{ key: string; trust: string | null; state: string; reason: string }> = [];
   const memoryItems = res.applied.filter((k) => k.category === "task_memory");
   if (memoryItems.length) {
-    const repoRows = await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
+    const repoRows = await q<import("../repos/service.ts").RepositoryRow>(c, "SELECT * FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
     for (const k of memoryItems) {
       const m = (k.metadata as any)?.memory;
       const trusted = m && (m.trust === "verified" || m.trust === "approved");
@@ -233,6 +236,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
     answers: input.answers.length,
     input_hash: hashOf(input),
     knowledge: res.applied.map((k) => ({
+      id: k.id, owner_id: k.owner_id ?? null, updated_at: k.updated_at,
       key: k.key,
       version: k.version,
       category: k.category,
@@ -242,11 +246,14 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
       reason: k.reason,
       content: k.content,
       metadata: k.metadata,
+      ...(k.effective_from ? { effective_from: k.effective_from } : {}),
     })),
     overridden: res.overridden,
     missing_explicit: explicit.filter((k) => !res.applied.some((a) => a.key === k)),
   };
   const hash = hashOf(content);
+  // The resolution instant decides which versions were in effect; it is recorded but not part of the content hash.
+  Object.assign(content, { resolved_at: at.toISOString() });
   const row = await one(c, "INSERT INTO context_snapshots (run_id, step_id, hash, content) VALUES ($1, $2, $3, $4) RETURNING id", [
     run.id,
     step.id,
@@ -255,7 +262,7 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   ]);
   const names = repositories.length ? repositories : run.allowed_repositories;
   const repoPaths = names.length
-    ? (await q<{ name: string; path: string }>(c, "SELECT name, path FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
+    ? (await q<import("../repos/service.ts").RepositoryRow>(c, "SELECT * FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
     : [];
   return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs, repoPaths };
 }

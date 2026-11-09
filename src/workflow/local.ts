@@ -17,7 +17,7 @@ export const childGroups = {
     for (const g of groups) {
       try {
         process.kill(-g, "SIGKILL");
-      } catch {}
+      } catch { }
     }
     groups.clear();
   },
@@ -34,5 +34,9 @@ export const localJobs = {
   abort(jobId: number) {
     handles.get(jobId)?.abort();
   },
+  abortAll() {
+    for (const ac of handles.values()) ac.abort();
+  },
+  activeIds: () => [...handles.keys()],
   size: () => handles.size,
 };

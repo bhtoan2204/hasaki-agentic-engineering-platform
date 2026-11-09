@@ -1,5 +1,3 @@
-import { config } from "./config.ts";
-
 /** Pull the fields that matter out of the raw task API payload. Accepts {data:{...}} or the bare data object. */
 export function normalizeTask(raw: any) {
   const d = raw?.data && raw.data.code ? raw.data : raw;
@@ -31,13 +29,13 @@ export function buildTaskPrompt(d: any, repos: string[], files: string[]) {
     files.length ? "## Attachments (read them with the Read tool — screenshots often hold the actual error)\n" + files.map((f) => `- ${f}`).join("\n") : "",
     ai
       ? [
-          "## Task-system AI hints (may be wrong; reporting guidance — never a reason to change what you implement)",
-          ai.object ? `- Object: ${ai.object} = ${ai.object_value}` : "",
-          ai.readiness_reasoning ? `- ${ai.readiness_reasoning}` : "",
-        ].join("\n")
+        "## Task-system AI hints (may be wrong; reporting guidance — never a reason to change what you implement)",
+        ai.object ? `- Object: ${ai.object} = ${ai.object_value}` : "",
+        ai.readiness_reasoning ? `- ${ai.readiness_reasoning}` : "",
+      ].join("\n")
       : "",
     "",
-    `## Repos you may change (under ${config.reposRoot})`,
+    `## Repositories you may change (resolve paths through platform tools)`,
     repos.map((r) => `- ${r}`).join("\n"),
   ];
   return lines.filter((l) => l !== "").join("\n");

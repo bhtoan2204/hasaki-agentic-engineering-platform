@@ -1,6 +1,7 @@
-import { test, before, after, beforeEach } from "node:test";
+import { test, before, after, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import pg from "pg";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { pool, q, one } from "../src/db/pool.ts";
@@ -24,10 +25,11 @@ import {
   startPendingRun,
   stepDetail,
   stopStep,
+  skipStep,
   sendFeedback,
   startRun,
 } from "../src/workflow/engine.ts";
-import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus, runOnce } from "../src/workflow/scheduler.ts";
+import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus, runOnce, startScheduler } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -38,7 +40,9 @@ import {
   pullRequestExecutor,
   setAiRepositoryRanker,
 } from "../src/workflow/executors/builtin.ts";
-import { recordWorkspace, setGitProvider, workspacesOf } from "../src/git/provider.ts";
+import { gitProvider, recordWorkspace, setGitProvider, workspacesOf } from "../src/git/provider.ts";
+import { recordRunOutcome, syncPullRequestStates } from "../src/learning/outcomes.ts";
+import { proposeImprovements, proposeRegressionCase, qualityPatterns, reviewRegressionCase } from "../src/learning/patterns.ts";
 import { collectEvidence, enforceVerdict, evidenceDrift, normalizeVerdict, repairTargetFor } from "../src/agent/independentReview.ts";
 import { repositories } from "../src/repos/service.ts";
 import { knowledge } from "../src/knowledge/service.ts";
@@ -48,6 +52,7 @@ import type { ExecResult } from "../src/workflow/types.ts";
 import { setReportReasoner, taskResultReportExecutor } from "../src/report/executor.ts";
 import { withReportStep, REPORT_STEP_KEY, previewRun } from "../src/workflow/engine.ts";
 import { addEvidence } from "../src/report/evidenceStore.ts";
+import { costTotalsForRuns, runCost, workItemCost } from "../src/report/cost.ts";
 import { OPTIONS, setTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
 import { testExceptionsOf, prDescription } from "../src/workflow/executors/builtin.ts";
 
@@ -184,7 +189,7 @@ test("Scenario A: manual request through Feature Implementation to a Bitbucket P
   // STANDARD (auto) makes the review an independent verifier: the PR needs its PASS on the exact pushed commits.
   scripts.review = liveVerifier(() => ({ approved: true, findings: [] }));
   const run = await startRun({ definitionKey: "feature-implementation", workItemId: wi.id });
-  assert.equal(run.branch, wi.code);
+  assert.equal(run.branch, `u${run.owner_id}-${wi.code}`);
   assert.deepEqual(run.allowed_repositories.sort(), ["oms-api", "oms-background"]);
 
   await drain();
@@ -215,7 +220,7 @@ test("Scenario A: manual request through Feature Implementation to a Bitbucket P
   assert.deepEqual(final.selected_repositories, ["oms-api"]);
   assert.equal(final.pull_requests.length, 1);
   assert.equal(final.pull_requests[0].repo, "oms-api");
-  assert.equal(final.pull_requests[0].source_branch, wi.code);
+  assert.equal(final.pull_requests[0].source_branch, final.branch);
   assert.equal(final.pull_requests[0].target_branch, "release/prod");
   assert.ok(final.artifacts.some((a: any) => a.kind === "log"), "test command log stored");
   for (const a of final.attempts) assert.ok(a.context_snapshot_id, "every attempt has a context snapshot");
@@ -267,7 +272,10 @@ test("Scenario C: failed implementation is retried without repeating analysis; h
     { key: "pr", type: "git_pull_request", depends_on: ["implement"] },
   ]);
   let broken = true;
-  scripts.implement = async (ctx, n) => (broken ? { kind: "failed", error: `missing GOPRIVATE (call ${n})` } : codingDone(ctx, n));
+  scripts.implement = async (ctx, n) => {
+    await ctx.recordMetrics({ provider: "claude", model: "retry-model", tokens: { input: 10 }, cost_usd: 0.1 });
+    return broken ? { kind: "failed", error: `missing GOPRIVATE (call ${n})` } : codingDone(ctx, n);
+  };
   const run = await startRun({ definitionKey: key, inputs: { project: "OMS" }, repositories: ["oms-api"] });
   await drain();
   let st = await stepOf(run.id, "implement");
@@ -285,6 +293,75 @@ test("Scenario C: failed implementation is retried without repeating analysis; h
   assert.deepEqual(history.map((a) => a.status), ["FAILED", "FAILED", "COMPLETED"]);
   assert.ok(history[0].invalidated_at && history[1].invalidated_at && !history[2].invalidated_at);
   assert.equal(history[2].generation, history[0].generation + 1);
+  const usage = await q(pool, "SELECT input_tokens, reported_cost_usd FROM execution_attempt_telemetry WHERE step_id = $1", [history[0].step_id]);
+  assert.equal(usage.reduce((n, a) => n + a.input_tokens, 0), 30);
+  assert.ok(Math.abs(usage.reduce((n, a) => n + a.reported_cost_usd, 0) - 0.3) < 1e-9);
+});
+
+test("cost read model: totals, by step / model, failed retries counted as wasted", async () => {
+  const key = await customWorkflow([
+    { key: "analyze", type: "agent" },
+    { key: "implement", type: "coding_agent", depends_on: ["analyze"], max_attempts: 2, retry_backoff_seconds: 0 },
+  ]);
+  scripts.analyze = async (ctx) => (await ctx.recordMetrics({ provider: "claude", model: "m-a", tokens: { input: 100, output: 10 }, cost_usd: 0.25 }), { kind: "completed", output: { summary: "ok" } });
+  let n = 0;
+  scripts.implement = async (ctx, k) => {
+    await ctx.recordMetrics({ provider: "codex", model: "m-b", tokens: { input: 50, output: 5 }, cost_usd: 0.5 });
+    return ++n === 1 ? { kind: "failed", error: "flaky" } : codingDone(ctx, k);
+  };
+  const run = await startRun({ definitionKey: key, inputs: { project: "OMS" }, repositories: ["oms-api"] });
+  await drain();
+  const c = await runCost(run.id);
+  assert.equal(c.total.cost_usd, 1.25);
+  assert.equal(c.availability, "complete");
+  assert.deepEqual(c.total.tokens.input, 200);
+  assert.equal(c.wasted.cost_usd, 0.5);
+  assert.deepEqual(c.wasted.by_reason, { failed: 0.5 });
+  assert.equal(c.wasted.pct, 40);
+  const impl = c.by_step.find((s) => s.step_key === "implement")!;
+  assert.equal(impl.attempts, 2);
+  assert.equal(impl.cost_usd, 1);
+  assert.equal(impl.wasted_usd, 0.5);
+  assert.deepEqual(c.by_model.map((m) => `${m.model}=${m.cost_usd}`), ["m-b=1", "m-a=0.25"], "most expensive model first");
+  assert.equal(c.budget!.run.status, "none");
+  const listed = await costTotalsForRuns([run.id]);
+  assert.equal(listed.get(run.id)!.cost_usd, 1.25);
+});
+
+test("cost budget: warning is logged once; exceeding pauses the run once, resume continues past it", async () => {
+  const key = await customWorkflow([
+    { key: "analyze", type: "agent" },
+    { key: "plan", type: "agent", depends_on: ["analyze"] },
+    { key: "implement", type: "agent", depends_on: ["plan"] },
+  ]);
+  for (const k of ["analyze", "plan", "implement"])
+    scripts[k] = async (ctx) => (await ctx.recordMetrics({ provider: "claude", model: "m", cost_usd: 0.6 }), { kind: "completed", output: { summary: k } });
+  const wi = await workItems.createManual({ title: "budgeted", description: "", project: "OMS" });
+  const run = await startRun({ definitionKey: key, workItemId: wi.id, inputs: { project: "OMS" }, repositories: ["oms-api"], start: false });
+  await q(pool, "UPDATE workflow_runs SET budget_usd = 1 WHERE id = $1", [run.id]);
+  await q(pool, "UPDATE work_items SET budget_usd = 2 WHERE id = $1", [wi.id]);
+  await startPendingRun(run.id);
+  await drain();
+  // 0.6 after analyze (< 80% of 1), 1.2 after plan: run budget exceeded → paused before implement.
+  assert.equal((await getRun(run.id)).status, "PAUSED");
+  assert.equal(calls.implement ?? 0, 0);
+  const events = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND NOT data ? 'key' ORDER BY id", [run.id]);
+  // Work item: 1.2 of 2 = 60% — below the warning threshold so far.
+  assert.deepEqual(events.map((e) => `${e.data.scope}:${e.data.level}`), ["run:exceeded"]);
+  await resumeRun(run.id);
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED", "resume acknowledges the budget: not paused again");
+  const after = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND NOT data ? 'key' ORDER BY id", [run.id]);
+  const preflight = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data ? 'key' ORDER BY id", [run.id]);
+  assert.deepEqual(preflight.map((e) => `${e.data.scope}:${e.data.level}:${e.data.step}`), ["run:preflight_unknown_estimate:implement"], "cost uncertainty near the limit is visible, but the acknowledged budget does not pause again");
+  assert.equal(preflight[0].data.provider_hard_limit, false);
+  // 1.8 of the work item's 2 = 90%: a warning (not a pause); the run alert is not repeated.
+  assert.deepEqual(after.map((e) => `${e.data.scope}:${e.data.level}`), ["run:exceeded", "work_item:warning"]);
+  const wc = (await workItemCost(wi.id))!;
+  assert.equal(wc.total.cost_usd, 1.8);
+  assert.equal(wc.run_count, 1);
+  assert.equal(wc.budget.status, "warning");
+  assert.equal(wc.budget.source, "own");
 });
 
 test("Scenario D: code review workflow without a work item stores findings, no PR", async () => {
@@ -293,10 +370,14 @@ test("Scenario D: code review workflow without a work item stores findings, no P
   scripts.security = () => ({ kind: "completed", output: { summary: "1 issue", findings: [{ severity: "high", repo: "oms-api", file: "b.go", line: 9, issue: "SQL injection", suggestion: "bind params" }] } });
   const run = await startRun({ definitionKey: "code-review", repositories: ["oms-api"], inputs: { focus: "refund" } });
   assert.equal(run.work_item_id, null);
-  assert.equal(run.branch, `wf/run-${run.id}`);
+  assert.equal(run.branch, `u${run.owner_id}-run-${run.id}`);
+  await drain();
+  assert.equal((await stepOf(run.id, "fix")).status, "WAITING_APPROVAL", "after the report the run offers to fix the findings");
+  await skipStep(run.id, "fix", "report only");
   await drain();
   const d = await runDetail(run.id);
-  assert.equal(d.status, "COMPLETED");
+  assert.equal(d.status, "COMPLETED", "skipping the fix ends the run with the report only");
+  assert.deepEqual(["fix_test", "fix_pr"].map((k) => d.steps.find((x) => x.key === k)!.status), ["SKIPPED", "SKIPPED"], "no test/PR questions when nothing was fixed");
   const report = d.steps.find((s) => s.key === "report")!;
   assert.equal(report.output.findings_count, 2);
   const art = await one(pool, "SELECT * FROM workflow_artifacts WHERE id = $1", [report.output.report_artifact_id]);
@@ -383,7 +464,9 @@ test("crashed worker: expired lease is reaped, step retried, zombie result rejec
   assert.equal(await claimJob("w-other", 30), undefined);
   await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
   assert.equal(await reapExpiredLeases(), 1);
-  assert.equal((await stepOf(run.id, "a")).status, "RETRYING");
+  assert.equal((await stepOf(run.id, "a")).status, "WAITING_INPUT");
+  const question = (await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1 AND status = 'open'", [run.id]))!;
+  await answerQuestions({ [question.id]: "Reconciled — continue" });
   const zombie = await finishAttempt(job.id, job.fencing_token, begun.attempt.id, { kind: "completed", output: { zombie: true } });
   assert.equal(zombie.applied, false);
   await drain();
@@ -391,7 +474,7 @@ test("crashed worker: expired lease is reaped, step retried, zombie result rejec
   assert.equal(a.status, "COMPLETED");
   assert.notEqual(a.output?.zombie, true);
   const hist = await attemptsOf(run.id, "a");
-  assert.equal(hist[0].status, "FAILED");
+  assert.equal(hist[0].status, "WAITING_INPUT");
   assert.match(hist[0].error.message, /lease expired/);
 });
 
@@ -866,13 +949,13 @@ test("report: a worker crash while generating is recovered from PostgreSQL (leas
   assert.equal(begun.step.key, REPORT_STEP_KEY);
   await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
   await reapExpiredLeases();
-  assert.equal((await stepOf(run.id, REPORT_STEP_KEY)).status, "RETRYING");
+  assert.equal((await stepOf(run.id, REPORT_STEP_KEY)).status, "READY");
   await pool.query("UPDATE workflow_jobs SET available_at = now() WHERE run_id = $1 AND status = 'queued'", [run.id]); // skip the 5s backoff
   await drain();
   const rep = await stepOf(run.id, REPORT_STEP_KEY);
   assert.equal(rep.status, "WAITING_APPROVAL");
   const persisted = await q(pool, "SELECT a.status FROM workflow_step_attempts a WHERE a.step_id = $1 ORDER BY a.number", [rep.id]);
-  assert.deepEqual(persisted.map((a) => a.status), ["WAITING_APPROVAL", "FAILED", "WAITING_APPROVAL"], "history kept: first draft, crashed attempt, new draft");
+  assert.deepEqual(persisted.map((a) => a.status), ["WAITING_APPROVAL", "STALE", "WAITING_APPROVAL"], "history kept: first draft, crashed attempt, new draft");
 });
 
 // ---------------------------------------------------------------- execution profiles & reuse
@@ -908,7 +991,7 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
   const wi = await zipItem();
   const std = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-api"], profile: "STANDARD", start: false });
   assert.equal(std.profile, "STANDARD");
-  assert.equal(std.steps.length, 9);
+  assert.equal(std.steps.length, 10);
   const pay = (await importHasakiTask({ data: { id: 9800 + ++reportSeq, code: `PAY-${reportSeq}`, name: "[Bug] Refund field mapping sai", project: { name: "OMS" } } })).item;
   const p = await startRun({ definitionKey: "bug-investigation", workItemId: pay.id, repositories: ["oms-api"], start: false });
   assert.equal(p.profile, "STANDARD");
@@ -1030,6 +1113,9 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
   const saved = { ...config.telegram, publicUrl: config.publicUrl };
   Object.assign(config.telegram, { botToken: "TEST:TOKEN", chatId: "42", apiBase: `http://127.0.0.1:${port}` });
   config.publicUrl = "http://localhost:4545";
+  const { ensureTestOwner } = await import("../src/auth/testOwner.ts");
+  const { putUserSecret } = await import("../src/auth/secrets.ts");
+  await putUserSecret(await ensureTestOwner(), "telegram_chat", "42");
   try {
     const key = await customWorkflow([
       { key: "ask", type: "human_input", name: "Hỏi rule", config: { questions: [{ question: "COD?" }, { question: "Refund?" }] } },
@@ -1041,16 +1127,16 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     assert.equal(msgs.length, 1, "WAITING_INPUT → exactly one message (no extra run-level WAITING message)");
     assert.equal(msgs[0].path, "/botTEST:TOKEN/sendMessage");
     assert.equal(msgs[0].chat_id, "42");
-    assert.match(msgs[0].text, /Cần bạn trả lời câu hỏi/);
-    assert.match(msgs[0].text, /Task: HSK-1: Thiếu &lt;ZIP&gt;/, "HTML-escaped task name");
+    assert.match(msgs[0].text, /CẦN BẠN TRẢ LỜI/);
+    assert.match(msgs[0].text, /<b>HSK-1: Thiếu &lt;ZIP&gt;<\/b>/, "HTML-escaped task name");
     assert.match(msgs[0].text, new RegExp(`Run: #${run.id}`));
-    assert.match(msgs[0].text, /Bước: Hỏi rule \(<code>ask<\/code>\)/);
+    assert.match(msgs[0].text, /Bước: <b>Hỏi rule<\/b> · <code>ask<\/code>/);
     assert.match(msgs[0].text, /2 câu hỏi cần trả lời/);
     assert.equal(msgs[0].reply_markup, undefined, "local publicUrl → no URL button");
     assert.ok(msgs[0].text.includes(`/#/runs/${run.id}/ask`), "local link as text");
     // Telegram drops localhost links; 127.0.0.1 stays clickable, as an <a href>
     const local = `http://127.0.0.1:4545/#/runs/${run.id}/ask`;
-    assert.ok(msgs[0].text.includes(`<a href="${local}">${local}</a>`), msgs[0].text);
+    assert.ok(msgs[0].text.includes(`<a href="${local}">Mở để trả lời</a>`), msgs[0].text);
     assert.ok(!msgs[0].text.includes("localhost"));
     // HTTPS publicUrl → inline URL button
     config.publicUrl = "https://platform.example.com";
@@ -1058,10 +1144,10 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     await answerQuestions(Object.fromEntries(qs.map((x) => [x.id, "ok"])));
     await drain();
     assert.equal(msgs.length, 2, "WAITING_APPROVAL → one more message");
-    assert.match(msgs[1].text, /Cần bạn duyệt/);
+    assert.match(msgs[1].text, /CẦN BẠN DUYỆT/);
     assert.match(msgs[1].text, /Duyệt kế hoạch fix/);
-    assert.deepEqual(msgs[1].reply_markup.inline_keyboard[0][0], { text: "Mở bước cần xử lý", url: `https://platform.example.com/#/runs/${run.id}/approve` });
-    assert.ok(!msgs[1].text.includes("Mở bước cần xử lý:"), "no duplicate text link when the button exists");
+    assert.deepEqual(msgs[1].reply_markup.inline_keyboard[0][0], { text: "Mở để duyệt", url: `https://platform.example.com/#/runs/${run.id}/approve` });
+    assert.ok(!msgs[1].text.includes("<a href"), "no duplicate text link when the button exists");
     // Telegram failing (HTTP 400) must not affect the workflow; the approval gate still notifies
     status = 400;
     await approveStep(run.id, "approve");
@@ -1335,7 +1421,7 @@ test("existing-branch directive in the work item description lands in run.inputs
   const r = await getRun(run.id);
   assert.deepEqual(r.inputs.branches, { "oms-background": "HSK-QA679L33" });
   assert.equal(r.inputs.branches_source, "work item description");
-  assert.equal(r.branch, wi.code, "the run keeps its own branch name for every other repository");
+  assert.equal(r.branch, `u${r.owner_id}-${wi.code}`, "the run keeps its own branch name for every other repository");
   const explicit = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "oms-background": "HSK-OTHER" } } });
   assert.deepEqual((await getRun(explicit.id)).inputs.branches, { "oms-background": "HSK-OTHER" });
   await assert.rejects(startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-background"], inputs: { branches: { "*": "release/prod" } } }), /base branch/);
@@ -1522,8 +1608,9 @@ test("cross-task memory: a COMPLETED run with a worktree yields verified facts +
   await drain();
   assert.equal((await getRun(run.id)).status, "COMPLETED");
   await extractRunMemory(run.id); // idempotent with the afterCommit hook
-  const facts = await knowledge.get(`memory.run-${run.id}.oms-api.facts`);
-  const concl = await knowledge.get(`memory.run-${run.id}.oms-api.conclusions`);
+  const facts = await knowledge.get(`memory.run-${run.id}.oms-api.facts`, pool, run.owner_id);
+  const concl = await knowledge.get(`memory.run-${run.id}.oms-api.conclusions`, pool, run.owner_id);
+  assert.equal(await knowledge.get(`memory.run-${run.id}.oms-api.facts`), undefined, "task memory is not shared");
   assert.ok(facts && concl, "both items written");
   assert.equal(facts.enabled, true);
   assert.deepEqual(facts.versions[0].metadata.memory.files, ["a.go"]);
@@ -1688,4 +1775,615 @@ test("e2e: verification never judges uncommitted work; optional (opted-out) veri
   assert.equal((await stepOf(run2.id, "review")).config.independent, false);
   assert.equal((await stepOf(run2.id, "pr")).status, "COMPLETED");
   assert.equal(pushed.length, 1);
+});
+
+test("graceful shutdown: an interrupted step is requeued without using a retry, then completes", async () => {
+  const { config } = await import("../src/config.ts");
+  const key = await customWorkflow([{ key: "long", type: "agent", max_attempts: 1 }]);
+  let started = false;
+  scripts.long = (ctx) =>
+    new Promise<ExecResult>((resolve) => {
+      started = true;
+      ctx.signal.addEventListener("abort", () => resolve({ kind: "failed", error: "agent process killed", retryable: true }));
+    });
+  const run = await startRun({ definitionKey: key });
+  assert.equal((await getRun(run.id)).worker_instance, config.instanceId, "a new run is pinned to the instance that created it");
+  const sched = startScheduler({ workers: 1, lightWorkers: 0, leaseSeconds: 30, heartbeatSeconds: 5, pollMs: 50 });
+  for (let i = 0; i < 100 && !started; i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(started, "the step is running");
+  await sched.drain("test shutdown");
+  const st = await stepOf(run.id, "long");
+  assert.equal(st.status, "WAITING_INPUT", "interrupted agent requires reconciliation");
+  assert.equal(st.attempt_count, 0, "the interrupted attempt does not count against max_attempts");
+  const [a] = await attemptsOf(run.id, "long");
+  assert.equal(a.status, "WAITING_INPUT");
+  assert.equal(a.error.interrupted, true);
+  const job = await one(pool, "SELECT status, lease_owner FROM workflow_jobs WHERE step_id = $1", [st.id]);
+  assert.deepEqual(job, { status: "done", lease_owner: null });
+  const question = (await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1 AND status = 'open'", [run.id]))!;
+  await answerQuestions({ [question.id]: "Reconciled — continue" });
+  scripts.long = () => ({ kind: "completed", output: { ok: true } });
+  await drain();
+  assert.equal((await stepOf(run.id, "long")).status, "COMPLETED", "max_attempts=1 still allows the real attempt");
+});
+
+test("worker affinity: resume never adopts another machine; unassigned legacy runs require an administrator", async () => {
+  const key = await customWorkflow([{ key: "only", type: "agent" }]);
+  scripts.only = () => ({ kind: "completed", output: { ok: true } });
+  const run = await startRun({ definitionKey: key });
+  await q(pool, "UPDATE workflow_runs SET worker_instance = 'teammate-laptop' WHERE id = $1", [run.id]);
+  assert.equal(await claimJob("w-affinity", 30), undefined, "another machine's run is not claimed here");
+  // An instance on OLD code claims without the worker_instance filter: the database itself refuses (migration 019).
+  const stale = await q(pool, `UPDATE workflow_jobs SET status = 'running', lease_owner = 'zzz:70324:205ac1a3:w1', lease_expires_at = now() + interval '60 seconds'
+                               WHERE run_id = $1 AND status = 'queued' RETURNING id`, [run.id]);
+  assert.equal(stale.length, 0, "a claim by another instance is skipped by the trigger");
+  assert.equal((await one(pool, "SELECT status FROM workflow_jobs WHERE run_id = $1", [run.id])).status, "queued");
+  await pauseRun(run.id);
+  await assert.rejects(resumeRun(run.id), /belongs to teammate-laptop/);
+  assert.equal((await getRun(run.id)).worker_instance, "teammate-laptop");
+  const legacy = await startRun({ definitionKey: key });
+  await q(pool, "UPDATE workflow_runs SET worker_instance = NULL WHERE id = $1", [legacy.id]);
+  assert.equal(await claimJob("legacy", 30), undefined);
+  await pauseRun(legacy.id);
+  await assert.rejects(resumeRun(legacy.id), /administrator/);
+  await cancelRun(run.id);
+  await cancelRun(legacy.id);
+});
+
+test("dropped database connections mid-step (Wi-Fi/VPN blip) do not fail the step", async () => {
+  const { isTransientDbError, retryTransient } = await import("../src/db/pool.ts");
+  assert.ok(isTransientDbError(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })));
+  assert.ok(isTransientDbError(new Error("Connection terminated unexpectedly")));
+  assert.ok(!isTransientDbError(Object.assign(new Error("duplicate key"), { code: "23505" })), "SQL errors are not retried");
+  let calls = 0;
+  assert.equal(await retryTransient(async () => (++calls < 3 ? Promise.reject(new Error("Connection terminated unexpectedly")) : "ok"), "t", [1, 1, 1]), "ok");
+  assert.equal(calls, 3);
+
+  const key = await customWorkflow([{ key: "blip", type: "agent", max_attempts: 1 }]);
+  scripts.blip = async (ctx) => {
+    await ctx.log("agent", "before the network drop");
+    // What a VPN reconnect does: every open connection to the database is killed at once.
+    await q(pool, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend'");
+    await ctx.log("agent", "after the network drop");
+    return { kind: "completed", output: { ok: true } };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  assert.equal((await stepOf(run.id, "blip")).status, "COMPLETED");
+  const logs = await q(pool, "SELECT content FROM workflow_events WHERE run_id = $1 AND kind = 'agent' ORDER BY id", [run.id]);
+  assert.deepEqual(logs.map((l: any) => l.content), ["before the network drop", "after the network drop"]);
+});
+
+test("run summary: built from the run's own records and stored when the run finishes", async () => {
+  const { getRunSummary } = await import("../src/report/runSummary.ts");
+  const key = await customWorkflow([
+    { key: "investigate", type: "agent", max_attempts: 2 },
+    { key: "ask", type: "agent", depends_on: ["investigate"] },
+  ]);
+  scripts.investigate = (_ctx, n) =>
+    n === 1
+      ? { kind: "failed", error: "ECONNRESET talking to the provider", retryable: true }
+      : { kind: "completed", output: { summary: "Found the empty CDC payload path.", findings: [{ file: "kafka/consumer.go", line: 148, issue: "tombstone not skipped", severity: "high" }], risks: ["more topics may emit tombstones"] } };
+  scripts.ask = (_ctx, n) => (n === 1 ? { kind: "waiting_input", questions: [{ question: "Skip tombstones or log them?" }] } : { kind: "completed", output: { summary: "Will skip tombstones." } });
+  const run = await startRun({ definitionKey: key });
+  await q(pool, "UPDATE workflow_steps SET retry_backoff_s = 0 WHERE run_id = $1", [run.id]);
+  await drain();
+  await q(pool, "UPDATE workflow_jobs SET available_at = now() WHERE run_id = $1 AND status = 'queued'", [run.id]);
+  await drain();
+  const qn = await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1", [run.id]);
+  await answerQuestions({ [qn.id]: "Skip them" }, "toan");
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+
+  const stored = (await one(pool, "SELECT summary FROM workflow_runs WHERE id = $1", [run.id])).summary;
+  assert.ok(stored, "snapshot stored when the run finished");
+  const s = await getRunSummary(run.id);
+  assert.equal(s.run.status, "COMPLETED");
+  const inv = s.steps.find((x) => x.key === "investigate")!;
+  assert.equal(inv.summary, "Found the empty CDC payload path.");
+  assert.equal(inv.attempts, 2);
+  assert.deepEqual(inv.lists.map((l) => l.items[0]), ["[high] tombstone not skipped (kafka/consumer.go:148)", "more topics may emit tombstones"]);
+  assert.equal(s.totals.retries, 1);
+  assert.ok(s.problems.some((p) => p.step === "investigate" && /ECONNRESET/.test(p.message)), "the failed attempt is listed");
+  assert.deepEqual(s.decisions.map((d) => [d.question, d.answer, d.by]), [["Skip tombstones or log them?", "Skip them", "toan"]]);
+  assert.match(s.markdown, /Found the empty CDC payload path\./);
+  assert.match(s.markdown, /Skip tombstones or log them\?/);
+});
+
+test("code-review without repositories asks which to review (instead of failing); with them it passes through", async () => {
+  for (const k of ["analyze", "architecture", "security"]) scripts[k] = () => ({ kind: "completed", output: { findings: [], summary: "ok" } });
+  const run = await startRun({ definitionKey: "code-review", inputs: { focus: "history detail" } });
+  await drain();
+  let sel = await stepOf(run.id, "select");
+  assert.equal(sel.status, "WAITING_APPROVAL", "the run waits for the developer to pick repositories");
+  assert.equal(sel.approval?.request?.select_repositories, true);
+  assert.ok((sel.approval?.request?.candidates ?? []).some((c: any) => c.repo === "oms-api"), "the project's repositories are offered");
+  await assert.rejects(approveStep(run.id, "select", {}), /select at least one repository/);
+  await approveStep(run.id, "select", { repositories: ["oms-api"], by: "toan" });
+  await drain();
+  assert.deepEqual((await getRun(run.id)).selected_repositories, ["oms-api"]);
+  assert.equal((await stepOf(run.id, "analyze")).status, "COMPLETED", "review continues with the picked repository");
+
+  const given = await startRun({ definitionKey: "code-review", inputs: { repositories: "oms-api" } }); // e.g. from the API, as a string
+  await drain();
+  sel = await stepOf(given.id, "select");
+  assert.equal(sel.status, "COMPLETED", "repositories passed at start: no question");
+  assert.equal(sel.output.auto, true);
+  assert.deepEqual((await getRun(given.id)).selected_repositories, ["oms-api"]);
+});
+
+
+test("code review → fix: branch chosen with the repositories, fixes approved with a note, committed on the reviewed branch", async () => {
+  const { branchFor } = await import("../src/workflow/branches.ts");
+  scripts.analyze = () => ({ kind: "completed", output: { summary: "2 issues", findings: [{ severity: "high", repo: "oms-api", file: "a.go", line: 3, issue: "nil deref", suggestion: "check" }, { severity: "low", repo: "oms-api", file: "b.go", line: 1, issue: "naming", suggestion: "rename" }] } });
+  scripts.architecture = () => ({ kind: "completed", output: { summary: "fine", violations: [] } });
+  scripts.security = () => ({ kind: "completed", output: { summary: "none", findings: [] } });
+  let seenNote = "", seenBranch = "";
+  scripts.fix = (ctx) => {
+    seenNote = String(ctx.input.approval?.comment ?? "");
+    seenBranch = branchFor(ctx.run, "oms-api").branch;
+    return { kind: "completed", output: { summary: "fixed the nil deref", fixed: [{ finding: "nil deref", repo: "oms-api", file: "a.go", change: "guard nil" }], not_fixed: [{ finding: "naming", reason: "low severity" }] } };
+  };
+  const run = await startRun({ definitionKey: "code-review", inputs: { focus: "history" } });
+  await drain();
+  const sel = await stepOf(run.id, "select");
+  assert.equal(sel.approval?.request?.ask_branch, true, "the selection also asks for the branch to review");
+  await assert.rejects(approveStep(run.id, "select", { repositories: ["oms-api"], data: { branch: "release/prod" } }), /base branch/);
+  await approveStep(run.id, "select", { repositories: ["oms-api"], data: { branch: "origin/HSK-G391U53I" } });
+  assert.equal((await getRun(run.id)).inputs.branch, "HSK-G391U53I", "origin/ prefix stripped, stored as the reviewed branch");
+  await drain();
+  assert.equal((await stepOf(run.id, "fix")).status, "WAITING_APPROVAL");
+  await approveStep(run.id, "fix", { comment: "chỉ sửa finding nil deref" });
+  await drain();
+  assert.equal(seenNote, "chỉ sửa finding nil deref", "the approval note reaches the fixing agent");
+  assert.equal(seenBranch, "HSK-G391U53I", "fixes are committed on the reviewed branch, not a new one");
+  assert.equal((await stepOf(run.id, "fix_pr")).status, "WAITING_APPROVAL", "the PR still needs the developer's approval");
+  await approveStep(run.id, "fix_pr", {});
+  await drain();
+  const d = await runDetail(run.id);
+  assert.equal(d.status, "COMPLETED");
+  const { getRunSummary } = await import("../src/report/runSummary.ts");
+  const fix = (await getRunSummary(run.id)).steps.find((x) => x.key === "fix")!;
+  assert.deepEqual(fix.lists.map((l) => l.items[0]), ["nil deref (a.go) → guard nil", "naming — low severity"]);
+});
+
+test("code review: a different branch per repository (and none = base) for review, OCR targets and fixes", async () => {
+  const { branchFor } = await import("../src/workflow/branches.ts");
+  for (const k of ["analyze", "architecture", "security"]) scripts[k] = () => ({ kind: "completed", output: { findings: [], summary: "ok" } });
+  const run = await startRun({ definitionKey: "code-review", inputs: { focus: "split" } });
+  await drain();
+  const candidates = ((await stepOf(run.id, "select")).approval?.request?.candidates ?? []).map((c: any) => c.repo);
+  assert.ok(candidates.length >= 3, `need three candidate repositories, got ${candidates}`);
+  const [a, b, c] = candidates;
+  await assert.rejects(approveStep(run.id, "select", { repositories: [a, b], data: { branches: { [a]: "release/prod" } } }), /base branch/, "per-repo values are validated too");
+  await approveStep(run.id, "select", { repositories: [a, b, c], data: { branch: "", branches: { [a]: "origin/split/8-channel-splitting", [b]: "split/6-channel-splitting", [c]: "" } } });
+  const r = await getRun(run.id);
+  assert.deepEqual(r.inputs.branches, { [a]: "split/8-channel-splitting", [b]: "split/6-channel-splitting" }, "only repositories with a branch");
+  assert.equal(r.inputs.branch, null, "no single common branch");
+  assert.deepEqual(branchFor(r, a), { branch: "split/8-channel-splitting", existing: true });
+  assert.deepEqual(branchFor(r, b), { branch: "split/6-channel-splitting", existing: true });
+  assert.equal(branchFor(r, c).existing, false, "no branch → the run's own branch (review on base)");
+
+  // the common field fills repositories left empty
+  const run2 = await startRun({ definitionKey: "code-review", inputs: { focus: "x" } });
+  await drain();
+  await approveStep(run2.id, "select", { repositories: [a, b], data: { branch: "HSK-1", branches: { [b]: "HSK-2" } } });
+  assert.deepEqual((await getRun(run2.id)).inputs.branches, { [a]: "HSK-1", [b]: "HSK-2" });
+});
+
+
+test("answering multiple questions keeps one transactional update and resumes the step once", async () => {
+  const key = await customWorkflow([{ key: "ask", type: "human_input", config: {
+    questions: [{ question: "Deploy window?" }, { question: "Approver?" }],
+  } }]);
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  const questions = await q(pool, "SELECT id FROM workflow_questions WHERE run_id=$1 AND status='open' ORDER BY id", [run.id]);
+  assert.equal(questions.length, 2);
+  const spy = mock.method(pg.Client.prototype, "query");
+  try {
+    const result = await answerQuestions({ [questions[0].id]: "  night  ", [questions[1].id]: "  owner  " }, "reviewer");
+    assert.equal(result.answered, 2);
+    const updates = spy.mock.calls.filter((call) => /^UPDATE workflow_questions\b/.test(String(call.arguments[0]).trim()));
+    assert.equal(updates.length, 1, "one round trip for the batch, within the existing transaction");
+  } finally { spy.mock.restore(); }
+  const saved = await q(pool, "SELECT status,answer,answered_by,answered_at FROM workflow_questions WHERE run_id=$1 ORDER BY id", [run.id]);
+  assert.deepEqual(saved.map((r) => [r.status, r.answer, r.answered_by]), [["answered", "night", "reviewer"], ["answered", "owner", "reviewer"]]);
+  assert.equal(saved[0].answered_at.getTime(), saved[1].answered_at.getTime());
+  assert.equal((await stepOf(run.id, "ask")).status, "COMPLETED");
+  assert.equal((await attemptsOf(run.id, "ask")).length, 1);
+  await assert.rejects(answerQuestions({ [questions[0].id]: "again" }), /no open questions/);
+});
+
+test("telemetry snapshots are idempotent; recovery fences stale writers and retains partial usage", async () => {
+  const { makeContext } = await import("../src/workflow/executors/registry.ts");
+  const { runMetrics } = await import("../src/api/metrics.ts");
+  const key = await customWorkflow([{ key: "telemetry", type: "agent", max_attempts: 2, retry_backoff_seconds: 0 }]);
+  const run = await startRun({ definitionKey: key, agentProvider: "codex" });
+  const job = (await claimJob("telemetry-worker", 30))!;
+  const begun = (await beginAttempt(job, "telemetry-worker"))!;
+  const ctx = makeContext({ ...begun, signal: new AbortController().signal });
+  const snapshot = { provider: "codex", model: "gpt-test", provider_sessions: {
+    first: { provider: "codex", model: "gpt-test", tokens: { input: 7, cache_read: 2 }, reported_cost_usd: null, provider_execution_ms: 100, complete: true },
+    partial: { provider: "codex", model: "gpt-other", tokens: null, reported_cost_usd: null, provider_execution_ms: 20, complete: false },
+  } };
+  await ctx.recordMetrics(snapshot);
+  await ctx.recordMetrics(snapshot);
+  const first = (await runMetrics(run.id)).telemetry;
+  assert.equal(first.totals.input_tokens, 7);
+  assert.equal(first.totals.cache_read_tokens, 2);
+  assert.equal(first.totals.coverage.input_tokens.partial, 1);
+  assert.equal(first.attempts[0].model, null, "mixed models retain session attribution");
+  await pool.query("UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1", [job.id]);
+  await reapExpiredLeases();
+  await ctx.recordMetrics({ provider_sessions: {}, tokens: { input: 999 } });
+  const question = await one(pool, "SELECT id FROM workflow_questions WHERE run_id = $1 AND status = 'open'", [run.id]);
+  await answerQuestions({ [question.id]: "Reconciled — continue" });
+  await drain();
+  const recovered = (await runMetrics(run.id)).telemetry;
+  assert.equal(recovered.totals.input_tokens, 7);
+  assert.equal(recovered.attempts.length, 2);
+  assert.equal(recovered.attempts[0].provider, "codex");
+  assert.equal(recovered.attempts[1].input_tokens, null);
+  assert.ok(recovered.attempts[0].human_wait_ms >= 0);
+});
+
+test("cancellation keeps reported usage and rejects late metrics", async () => {
+  const { makeContext } = await import("../src/workflow/executors/registry.ts");
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  const run = await startRun({ definitionKey: key });
+  const job = (await claimJob("cancel-metrics", 30))!;
+  const begun = (await beginAttempt(job, "cancel-metrics"))!;
+  const ctx = makeContext({ ...begun, signal: new AbortController().signal });
+  await ctx.recordMetrics({ tokens: { input: 3 }, provider: "claude" });
+  await cancelRun(run.id);
+  await ctx.recordMetrics({ tokens: { input: 999 } });
+  const row = await one(pool, "SELECT * FROM execution_attempt_telemetry WHERE attempt_id = $1", [begun.attempt.id]);
+  assert.equal(row.input_tokens, 3);
+  assert.equal(row.normalized_failure_category, "CANCELED");
+});
+
+test("tool clocks union overlapping events and use invocation IDs; failure codes remain normalized", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent", max_attempts: 1 }]);
+  scripts.a = async (ctx) => {
+    await ctx.recordMetrics({ provider: "cursor", tokens: null, cost_usd: null });
+    await pool.query(`INSERT INTO workflow_events (run_id,step_id,attempt_id,kind,content,data,created_at) VALUES
+      ($1,$2,$3,'tool','a','{"id":"session1:call1","name":"shell"}', now() - interval '10 seconds'),
+      ($1,$2,$3,'tool','b','{"id":"session1:call2","name":"shell"}', now() - interval '8 seconds'),
+      ($1,$2,$3,'tool_result','a','{"tool_use_id":"session1:call1"}', now() - interval '4 seconds'),
+      ($1,$2,$3,'tool_result','a replay','{"tool_use_id":"session1:call1"}', now() - interval '3 seconds'),
+      ($1,$2,$3,'tool_result','b','{"tool_use_id":"session1:call2"}', now() - interval '2 seconds')`, [ctx.run.id, ctx.step.id, ctx.attempt.id]);
+    return { kind: "failed", error: "request timed out", retryable: false };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  const row = await one(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1", [run.id]);
+  assert.equal(row.tool_execution_ms, 8000);
+  assert.equal(row.normalized_failure_category, "EXECUTION_TIMEOUT");
+  assert.equal(row.reported_cost_usd, null);
+  assert.equal(row.cost_availability, "unavailable");
+});
+
+test("canceling a waiting run caps its human and wall clocks without changing attempt history", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  scripts.a = async ctx => {
+    await ctx.ask([{ question: "continue?" }]);
+    return { kind: "waiting_input", checkpoint: {} };
+  };
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  await cancelRun(run.id);
+  const row = await one(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1", [run.id]);
+  assert.equal(row.terminal_status, "CANCELED");
+  assert.equal(row.normalized_failure_category, "CANCELED");
+  assert.ok(row.human_wait_ms >= 0);
+  assert.ok(row.end_time);
+});
+
+test("Evidence-gated approval: exact scope frozen, unmet HIGH-risk gate needs acknowledgement, history kept on re-execution", async () => {
+  const { normalizeInvestigationOutput } = await import("../src/agent/evidence.ts");
+  const key = await customWorkflow([
+    { key: "fix_proposal", type: "agent", config: { evidence: "fix_proposal" } },
+    { key: "approve_fix", type: "human_approval", depends_on: ["fix_proposal"], config: { show_outputs: ["fix_proposal"], approve_scope_from: "fix_proposal", on_reject: { reexecute: "fix_proposal" } } },
+    { key: "implement", type: "agent", depends_on: ["approve_fix"] },
+  ]);
+  const high = {
+    summary: "Mark the package as shipped when TrackingNo is set",
+    changes: [{ repo: "oms-api", files: ["app/rts.go"], description: "If TrackingNo is not empty, treat the package as successfully shipped and update the business state." }],
+    root_cause_assessment: { status: "UNCONFIRMED", explanation: "provider state not checked" },
+    fix_assessment: { risk: "LOW", explanation: "avoids the error" },
+  };
+  const low = {
+    summary: "Enrich the error; reject an empty package id",
+    changes: [{ repo: "oms-api", files: ["app/client.go"], description: "Enrich the error message and return a validation error for an empty package_id" }],
+    root_cause_assessment: { status: "UNCONFIRMED", explanation: "provider reason unknown" },
+    fix_assessment: { risk: "LOW", explanation: "correct whatever the root cause" },
+  };
+  scripts.fix_proposal = async (_ctx, n) => ({ kind: "completed", output: normalizeInvestigationOutput("fix_proposal", n === 1 ? high : low) });
+  const run = await startRun({ definitionKey: key, inputs: { project: "OMS" } });
+  await drain();
+  let approval = await stepOf(run.id, "approve_fix");
+  assert.equal(approval.status, "WAITING_APPROVAL");
+  const req = approval.approval.request;
+  assert.equal(req.scope.risk, "HIGH", "declared LOW, detected HIGH");
+  assert.equal(req.requires_risk_acknowledgement, true);
+  await assert.rejects(approveStep(run.id, "approve_fix", { comment: "ok" }), /explicit risk acknowledgement/);
+  await assert.rejects(approveStep(run.id, "approve_fix", { data: { acknowledge_risk: true } }), /requires a comment/);
+  assert.equal((await stepOf(run.id, "approve_fix")).status, "WAITING_APPROVAL", "a refused approval changes nothing");
+
+  // Reject → the proposal is re-executed (now LOW); the HIGH proposal stays in the attempt history untouched.
+  await rejectStep(run.id, "approve_fix", { comment: "do not infer shipped from TrackingNo" });
+  await drain();
+  approval = await stepOf(run.id, "approve_fix");
+  assert.equal(approval.approval.request.scope.risk, "LOW");
+  assert.equal(approval.approval.request.requires_risk_acknowledgement, false);
+  const history = await attemptsOf(run.id, "fix_proposal");
+  assert.equal(history.length, 2);
+  assert.equal(history[0].output.fix_assessment.risk, "HIGH", "historical results are not rewritten");
+  await approveStep(run.id, "approve_fix", { comment: "diagnostic only", by: "dev" });
+  await drain();
+  const out = (await stepOf(run.id, "approve_fix")).output;
+  assert.notEqual(out.approved_scope.proposal_hash, req.scope.proposal_hash, "the approval binds the re-executed proposal, not the rejected one");
+  assert.deepEqual([out.approved_scope.approved_by, out.approved_scope.comment, out.approved_scope.risk_acknowledged], ["dev", "diagnostic only", false]);
+  // Persisted: the next step (and any resumed/re-run attempt) reads the approved scope from the database.
+  const impl = seen.implement.at(-1)!;
+  assert.equal(impl.input.upstream.approve_fix.output.approved_scope.proposal_hash, out.approved_scope.proposal_hash);
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+});
+
+// ---------------------------------------------------------------- phase 1 hardening: deterministic pre-publish gate
+/** A worktree whose base is published as origin/release/prod, so the platform diffs it like a real checkout. */
+function scopedWorktree(repo: string, branch: string) {
+  const path = mkdtempSync(join(process.env.TEST_ROOT!, `wt-${repo}-`));
+  execFileSync("git", ["init", "-q", "-b", branch, path], { env: GIT_ENV });
+  commitFile(path, "README.md", "base\n", "base");
+  gitIn(path, "update-ref", "refs/remotes/origin/release/prod", "HEAD");
+  return path;
+}
+function writeIn(path: string, file: string, content: string) {
+  mkdirSync(join(path, file, ".."), { recursive: true });
+  writeFileSync(join(path, file), content);
+}
+const APPROVED_SCOPE = {
+  source_step: "approve",
+  proposal_hash: "p-hardening-1",
+  summary: "Fix the refund amount in app/refund.go",
+  changes: [{ repo: "oms-api", files: ["app/refund.go"], description: "fix refund" }],
+  risk: "LOW",
+  required_tests: [],
+};
+
+test("hardening: an undeclared out-of-scope change blocks the PR even when the reviewer returns PASS", async () => {
+  const key = await customWorkflow(
+    [
+      { key: "approve", type: "agent" },
+      { key: "implement", type: "coding_agent", depends_on: ["approve"] },
+      { key: "review", type: "agent", name: "Code Review", depends_on: ["implement"] },
+      { key: "pr", type: "git_pull_request", depends_on: ["review"], config: { mode: "auto", content_from: "implement" } },
+    ],
+    { feedback_step: "implement" },
+  );
+  scripts.approve = () => ({ kind: "completed", output: { approved: true, approved_scope: APPROVED_SCOPE } });
+  scripts.implement = async (ctx) => {
+    const path = scopedWorktree("oms-api", ctx.run.branch);
+    writeIn(path, "app/refund.go", "package app // fixed\n");
+    writeIn(path, "app/settlement.go", "package app // silently changed, never declared\n");
+    writeIn(path, "app/settlement_test.go", "package app // a test next to an unapproved file\n");
+    gitIn(path, "add", "-A");
+    gitIn(path, "commit", "-qm", "fix refund");
+    await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+    return { kind: "completed", output: { summary: "fixed refund only", scope_deviations: [] } };
+  };
+  scripts.review = liveVerifier(() => ({ verdict: "PASS", findings: [], summary: "looks good" }));
+  const run = await startRun({ definitionKey: key, title: "scoped fix", profile: "STANDARD", repositories: ["oms-api"] } as any);
+  await drain();
+  assert.equal((await stepOf(run.id, "review")).output?.verdict, "PASS", "the reviewer (falsely) passed it");
+  const pr = await stepOf(run.id, "pr");
+  assert.equal(pr.status, "FAILED");
+  assert.match(String(pr.error), /scope drift/);
+  assert.match(String(pr.error), /oms-api:app\/settlement\.go is outside the approved scope/);
+  assert.match(String(pr.error), /oms-api:app\/settlement_test\.go is outside the approved scope/, "no blanket test exemption");
+  assert.doesNotMatch(String(pr.error), /app\/refund\.go is outside/);
+  assert.equal(pushed.length + prCalls.length, 0, "nothing was published");
+});
+
+test("hardening: a PR is never published from a commit other than the tested one, nor with untracked files", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "pr", type: "git_pull_request", depends_on: ["implement"], config: { mode: "auto", content_from: "implement" } },
+  ]);
+  let leaveUntracked = false;
+  scripts.implement = async (ctx) => {
+    const path = scopedWorktree("oms-api", ctx.run.branch);
+    const tested = commitFile(path, "a.go", "package a\n", "tested change");
+    if (leaveUntracked) writeIn(path, "notes.txt", "scratch\n");
+    else commitFile(path, "a.go", "package a // edited after the tests ran\n", "untested follow-up");
+    await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+    return { kind: "completed", output: { summary: "done", tested_heads: { "oms-api": tested } } };
+  };
+  const run = await startRun({ definitionKey: key, title: "untested", repositories: ["oms-api"] } as any);
+  await drain();
+  const pr = await stepOf(run.id, "pr");
+  assert.equal(pr.status, "FAILED");
+  assert.match(String(pr.error), /tests in "implement" ran on [0-9a-f]{12}, but [0-9a-f]{12} would be published/);
+  assert.equal(pushed.length, 0);
+
+  leaveUntracked = true;
+  const run2 = await startRun({ definitionKey: key, title: "untracked", repositories: ["oms-api"] } as any);
+  await drain();
+  const pr2 = await stepOf(run2.id, "pr");
+  assert.equal(pr2.status, "FAILED");
+  assert.match(String(pr2.error), /uncommitted or untracked changes/);
+  assert.equal(pushed.length, 0);
+});
+
+test("hardening: duplicate completion of one attempt applies exactly once", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  await startRun({ definitionKey: key });
+  const job = (await claimJob("w-dup", 30))!;
+  const begun = (await beginAttempt(job, "w-dup"))!;
+  const results = await Promise.all([1, 2].map((n) => finishAttempt(job.id, job.fencing_token, begun.attempt.id, { kind: "completed", output: { n } })));
+  assert.equal(results.filter((r) => r.applied).length, 1, "one completion wins, the other is rejected");
+  const attempts = await q(pool, "SELECT status FROM workflow_step_attempts WHERE step_id = $1", [begun.attempt.step_id]);
+  assert.deepEqual(attempts.map((a) => a.status), ["COMPLETED"]);
+});
+
+// ---------------------------------------------------------------- phase 4: verified outcomes and the quality loop
+test("quality loop: outcome ladder, PR merge sync, reviewed improvement proposals and regression candidates", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "pr", type: "git_pull_request", depends_on: ["implement"], config: { mode: "auto", content_from: "implement" } },
+  ]);
+  const runFor = async (title: string, outOfScope: boolean) => {
+    const wi = await workItems.createManual({ title, description: `Refund twice for customer a.b@example.com — ${title}`, project: "OMS" });
+    scripts.implement = async (ctx) => {
+      const path = scopedWorktree("oms-api", ctx.run.branch);
+      const head = commitFile(path, "refund.go", "package app // fixed\n", "fix refund");
+      await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+      return { kind: "completed", output: { summary: "fully tested, trust me", commits: { "oms-api": head }, tested_heads: { "oms-api": head }, verification: { passed: true, repairs: 0 }, ...(outOfScope ? { scope_check: { out_of_scope_files: ["oms-api:app/ledger.go"], unauthorized_repos: [], requires_reapproval: true, reapproved: { revision: "r" } } } : {}) } };
+    };
+    const run = await startRun({ definitionKey: key, workItemId: wi.id, title, repositories: ["oms-api"] } as any);
+    await drain();
+    return { run, wi };
+  };
+  const { run } = await runFor("refund fix", true);
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  const stamped = await one(pool, "SELECT policy_versions FROM workflow_runs WHERE id = $1", [run.id]);
+  assert.match(stamped.policy_versions.prompt_template, /^[0-9a-f]{12}$/, "every run records the policy versions it used");
+  const outcome = (await recordRunOutcome(run.id))!;
+  assert.equal(outcome.ladder.tests_passed.state, "proven");
+  assert.equal(outcome.ladder.review_passed.state, "unknown", "no verifier in this workflow: nothing to prove");
+  assert.equal(outcome.ladder.pr_merged.state, "unknown");
+  assert.deepEqual(outcome.failure_categories.map((c) => c.category), ["out_of_scope_change"]);
+
+  // The provider reports the merge → proven; nothing else ever marks a PR merged.
+  const fake = gitProvider();
+  setGitProvider({ ...fake, pullRequestState: async () => ({ state: "MERGED", merged_at: "2026-11-09T10:00:00Z", merge_commit: "c".repeat(40) }) });
+  try {
+    const synced = await syncPullRequestStates({ runId: run.id });
+    assert.deepEqual([synced.checked, synced.updated], [1, 1]);
+  } finally {
+    setGitProvider(fake);
+  }
+  const after = (await one(pool, "SELECT outcome FROM workflow_runs WHERE id = $1", [run.id])).outcome;
+  assert.equal(after.ladder.pr_merged.state, "proven");
+  assert.equal(after.ladder.deployed.state, "unknown");
+
+  // One task repeating a failure is not a pattern; three runs over three tasks are — proposed for review, never applied.
+  const below = await proposeImprovements({ days: 1, by: "admin" });
+  assert.equal(below.results.find((r) => r.category === "out_of_scope_change")?.status, "below_threshold");
+  for (const t of ["second fix", "third fix"]) await recordRunOutcome((await runFor(t, true)).run.id);
+  const proposed = await proposeImprovements({ days: 1, by: "admin" });
+  const r = proposed.results.find((x) => x.category === "out_of_scope_change")!;
+  assert.equal(r.status, "proposed");
+  const proposal = await one(pool, "SELECT status, source_kind, proposed FROM knowledge_proposals WHERE id = $1", [r.proposal_id]);
+  assert.deepEqual([proposal.status, proposal.source_kind], ["pending", "failure_pattern"]);
+  assert.equal(await knowledge.get(proposal.proposed.key), undefined, "nothing reaches shared knowledge without human approval");
+  const again = await proposeImprovements({ days: 1, by: "admin" });
+  assert.equal(again.results.find((x) => x.category === "out_of_scope_change")?.proposal_id, r.proposal_id, "repeat analysis folds into the same open proposal");
+  const patterns = await qualityPatterns({ days: 1 });
+  assert.ok(patterns.by_policy_version.length >= 1);
+  assert.ok(patterns.verified_levels.tests_passed >= 1, "no verifier ran, so the verified level stops below the merge even though the PR merged");
+  assert.equal(patterns.verified_levels.pr_merged, 0);
+
+  // Regression candidate: pinned, sanitized, and only accepted with human acceptance criteria.
+  const cand = await proposeRegressionCase(run.id, null);
+  assert.equal(cand.refused, null);
+  const row = await one(pool, "SELECT * FROM regression_case_candidates WHERE run_id = $1", [run.id]);
+  assert.match(row.base_commit, /^[0-9a-f]{40}$/);
+  assert.doesNotMatch(row.requirement, /example\.com/);
+  assert.equal(row.acceptance.independent_ground_truth, false, "the run's own tests are agent-authored");
+  await assert.rejects(reviewRegressionCase(Number(row.id), "accepted", "admin", {}), /human-written acceptance criteria/);
+  const accepted = await reviewRegressionCase(Number(row.id), "accepted", "admin", { acceptance_criteria: "Refunding an installment order twice returns the second request as a no-op." });
+  assert.deepEqual([accepted.status, accepted.acceptance.independent_ground_truth], ["accepted", true]);
+  const unmerged = await runFor("unaccepted fix", false);
+  await recordRunOutcome(unmerged.run.id);
+  assert.match(String((await proposeRegressionCase(unmerged.run.id, null)).refused), /no human acceptance/);
+});
+
+test("cost preflight: a retry projected over the budget pauses BEFORE the attempt; resume proceeds; soft pause is labelled", async () => {
+  const key = await customWorkflow([{ key: "implement", type: "agent", max_attempts: 3, retry_backoff_seconds: 0 }]);
+  let n = 0;
+  scripts.implement = async (ctx) => {
+    await ctx.recordMetrics({ provider: "claude", model: "m", cost_usd: 0.6 });
+    return ++n === 1 ? { kind: "failed", error: "ECONNRESET while calling the provider" } : { kind: "completed", output: { summary: "ok" } };
+  };
+  const run = await startRun({ definitionKey: key, inputs: { project: "OMS" }, repositories: ["oms-api"], start: false });
+  await q(pool, "UPDATE workflow_runs SET budget_usd = 1 WHERE id = $1", [run.id]);
+  await startPendingRun(run.id);
+  await drain();
+  // First attempt spent 0.6; the retry would cost ~0.6 more (max of earlier attempts) → 1.2 > 1: paused before it ran.
+  assert.equal((await getRun(run.id)).status, "PAUSED");
+  assert.equal(n, 1, "the second attempt never started");
+  const ev = await one(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data->>'level' = 'preflight_projected'", [run.id]);
+  assert.deepEqual([ev.data.estimate_usd, ev.data.attempt, ev.data.enforcement, ev.data.provider_hard_limit], [0.6, 2, "platform_soft_pause", false]);
+  await resumeRun(run.id);
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED", "resume acknowledges the projected overrun");
+  assert.equal(n, 2);
+});
+
+test("smart verification: an identical passing test on the same clean commit is reused; any new commit reruns it", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "test", type: "command", depends_on: ["implement"], config: { command: "echo ran >> \"$TMPDIR_RUNS\"; true" } },
+  ]);
+  const counter = join(mkdtempSync(join(process.env.TEST_ROOT!, "runs-")), "count");
+  writeFileSync(counter, "");
+  process.env.TMPDIR_RUNS = counter;
+  let path = "";
+  let change = false;
+  scripts.implement = async (ctx) => {
+    if (!path) {
+      path = scopedWorktree("oms-api", ctx.run.branch);
+      commitFile(path, "a.go", "package a\n", "first");
+      await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+    } else if (change) commitFile(path, "a.go", "package a // v2\n", "second");
+    return { kind: "completed", output: { summary: "done" } };
+  };
+  const runs = () => execFileSync("cat", [counter], { encoding: "utf8" }).split("\n").filter(Boolean).length;
+  const run = await startRun({ definitionKey: key, title: "reuse", repositories: ["oms-api"] } as any);
+  await drain();
+  assert.equal(runs(), 1);
+  await reexecuteStep(run.id, "implement"); // same commit afterwards
+  await drain();
+  assert.equal(runs(), 1, "unchanged commit: the passing suite is not rerun");
+  assert.ok((await stepOf(run.id, "test")).output.reused_from_attempt);
+  change = true;
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  assert.equal(runs(), 2, "a new commit always reruns the tests");
+  assert.equal((await stepOf(run.id, "test")).output.reused_from_attempt, undefined);
+});
+
+test("routing guard rails: HIGH_RISK refuses FAST, records the class; provider report never ranks small samples", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "review", type: "agent", name: "Code Review", depends_on: ["implement"] },
+  ]);
+  const run = await startRun({ definitionKey: key, title: "Refund amount wrong for installment orders", repositories: ["oms-api"], profile: "FAST", start: false } as any);
+  const decision = (await one(pool, "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1", [run.id]));
+  assert.equal(decision.profile_decision.complexity.class, "HIGH_RISK");
+  assert.equal(decision.profile, "STANDARD", "the independent review of a high-risk task is kept");
+  assert.match(decision.profile_decision.warnings.join(" "), /FAST refused/);
+  const overridden = await startRun({ definitionKey: key, title: "Refund amount wrong", repositories: ["oms-api"], profile: "FAST", inputs: { complexity: "TRIVIAL" }, start: false } as any);
+  const od = await one(pool, "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1", [overridden.id]);
+  assert.deepEqual([od.profile_decision.complexity.source, od.profile], ["user_override", "FAST"], "an explicit user override is honoured and recorded");
+  const { providerPerformance } = await import("../src/learning/providerPerformance.ts");
+  const perf = await providerPerformance({ days: 1, minSamples: 1000 });
+  assert.ok(perf.groups.every((g) => g.sample_ok === false));
+  assert.ok(perf.leaders.every((l) => l.leader === null), "no provider is recommended below the minimum sample size");
+});
+
+test("run #53 regression: the branch is detected from 'branch task cha: <code>', and can be corrected before a worktree exists", async () => {
+  const { setRunBranches } = await import("../src/workflow/engine.ts");
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  const wi = await workItems.createManual({ title: "auto change stock API", description: "Tiếp tục từ branch task cha: HSK-OO04123R\n\nThêm một API ...", project: "OMS" });
+  const run = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-api"], start: false });
+  assert.deepEqual((await getRun(run.id)).inputs.branches, { "*": "HSK-OO04123R" });
+  await assert.rejects(setRunBranches(run.id, { "*": "../evil" }, "dev"), /invalid branch name/);
+  const fixed = await setRunBranches(run.id, { "*": "HSK-OO04123S" }, "dev");
+  assert.deepEqual([fixed.inputs.branches, fixed.inputs.branches_source], [{ "*": "HSK-OO04123S" }, "set by dev"]);
+  await recordWorkspace(run.id, { repo: "oms-api", branch: "HSK-OO04123S", path: gitWorktree("oms-api", "HSK-OO04123S"), created_from: "test" });
+  await assert.rejects(setRunBranches(run.id, { "*": "other-1" }, "dev"), /worktree already prepared for oms-api/);
 });

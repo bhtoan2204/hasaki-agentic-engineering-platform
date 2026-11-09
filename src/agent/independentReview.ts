@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type { ExecResult, StepSpec } from "../workflow/types.ts";
+import { approvedScopeIn } from "./evidence.ts";
 
 /**
  * Independent verification of a coding step's result.
@@ -28,6 +30,8 @@ export interface VerdictOutput {
   findings: Finding[];
   summary: string;
   blocked_reason?: string;
+  /** Scope review (evidence-gated workflows): the verifier's check of the diff against the approved scope. */
+  scope_check?: Record<string, unknown>;
 }
 
 export const isIndependent = (cfg: Record<string, any> | undefined) => cfg?.independent === true;
@@ -49,7 +53,9 @@ export function independentUpstream<T extends { output: any }>(graph: Array<Pick
   const out: Record<string, T> = {};
   for (const [key, u] of Object.entries(upstream)) {
     if (coding.has(key)) {
-      out[key] = { ...u, output: u.output?.verification ? { verification: u.output.verification, note: "coding agent's own summary/decisions withheld (independent verification)" } : { note: "coding agent output withheld (independent verification)" } };
+      // scope_check is platform-computed (files vs approved scope) plus deviations the author admitted: evidence, not claims of success.
+      const scope = u.output?.scope_check ? { scope_check: u.output.scope_check } : {};
+      out[key] = { ...u, output: u.output?.verification ? { verification: u.output.verification, ...scope, note: "coding agent's own summary/decisions withheld (independent verification)" } : { ...scope, note: "coding agent output withheld (independent verification)" } };
       continue;
     }
     if (afterCoding.has(key) && (type.get(key) === "agent" || type.get(key) === "coding_agent")) continue;
@@ -89,11 +95,40 @@ export function normalizeVerdict(raw: any): VerdictOutput {
     return blocked(`contradictory verifier output: verdict ${verdict} but approved=${o.approved}`, findings);
   if (!verdict && typeof o.approved === "boolean") verdict = o.approved ? "PASS" : "FAIL";
   if (!verdict) return blocked("the verifier returned no PASS/FAIL/BLOCKED verdict", findings);
+  if (verdict === "FAIL") {
+    const insufficient = findings.find((f) => !f.file.trim() || !f.explanation.trim() || !f.evidence.trim());
+    if (insufficient) return blocked("FAIL findings must include a file, an explanation, and concrete evidence or a repair suggestion", findings);
+  }
   const serious = findings.filter((f) => f.severity !== "low");
   if (verdict === "PASS" && serious.length) return blocked(`contradictory verifier output: PASS with ${serious.length} high/medium finding(s)`, findings);
   if (verdict === "FAIL" && !findings.length) return blocked("FAIL without any finding — nothing to repair", findings);
   if (verdict === "BLOCKED") return blocked(String(o.blocked_reason ?? "").trim() || "verifier could not decide", findings);
   return { verdict, findings, summary };
+}
+
+/**
+ * Scope review (evidence-gated workflows): a PASS must also say the diff stays inside the approved scope, implements no
+ * unverified hypothesis as fact, adds no unintended state transition and preserves the business invariants. Fail-closed
+ * like normalizeVerdict: a PASS that is missing the check, or contradicts it, becomes BLOCKED — passing unit tests never
+ * turn a speculative business-state change into a PASS. Without an approved scope upstream (legacy runs) nothing changes.
+ */
+export function enforceScopeReview(v: VerdictOutput, raw: any, upstream: Record<string, { output: any; status?: string }>): VerdictOutput {
+  const scope = approvedScopeIn(upstream);
+  if (!scope) return v;
+  const c = raw && typeof raw === "object" ? raw : null;
+  const coding = Object.values(upstream).map((u) => u.output?.scope_check).find(Boolean);
+  const out: VerdictOutput = { ...v, scope_check: c ?? undefined } as VerdictOutput;
+  if (v.verdict !== "PASS") return out;
+  const blocked = (reason: string): VerdictOutput => ({ ...out, verdict: "BLOCKED", blocked_reason: reason });
+  if (!c) return blocked("scope review missing: a PASS must include scope_check against the approved proposal");
+  const listed = (k: string) => (Array.isArray(c[k]) ? c[k].filter((x: unknown) => String(x ?? "").trim()) : []);
+  if (c.in_scope !== true) return blocked("the verifier did not confirm that the diff stays inside the approved scope");
+  if (listed("unsupported_assumptions").length) return blocked(`PASS with unsupported assumptions implemented as fact: ${listed("unsupported_assumptions").slice(0, 3).join("; ")}`);
+  if (listed("unintended_state_transitions").length) return blocked(`PASS with unintended state transitions: ${listed("unintended_state_transitions").slice(0, 3).join("; ")}`);
+  if (c.invariants_preserved === false || (scope.risk === "HIGH" && c.invariants_preserved !== true))
+    return blocked("business invariants of the HIGH-risk change were not confirmed preserved");
+  if (coding?.requires_reapproval && !coding?.reapproved) return blocked(`the implementation deviates from the approved scope without renewed approval: ${(coding.reasons ?? []).join("; ")}`);
+  return out;
 }
 
 export function findingsFeedback(v: VerdictOutput, round: number, max: number) {
@@ -199,7 +234,7 @@ export function repairTargetFor(graph: { feedback_step?: string; steps: Array<Pi
  * what makes the evidence unbindable to a commit (unreadable HEAD, uncommitted changes): a verdict on it would not
  * describe what the PR publishes, so the executor blocks instead of verifying.
  */
-export async function collectEvidence(workspaces: Array<{ repo: string; path: string }>, baseBranch: string, maxChars = 60_000) {
+export async function collectEvidence(workspaces: Array<{ repo: string; path: string; baseBranch?: string }>, baseBranch: string, maxChars = 60_000) {
   const heads: Record<string, string> = {};
   const problems: string[] = [];
   const parts: string[] = [];
@@ -213,9 +248,9 @@ export async function collectEvidence(workspaces: Array<{ repo: string; path: st
     }
     heads[w.repo] = head;
     if (dirty) problems.push(`${w.repo}: uncommitted changes in ${w.path} — the coding step must commit before verification:\n${dirty.slice(0, 2000)}`);
-    const stat = (await exec("git", ["-C", w.path, "diff", "--stat", `origin/${baseBranch}...HEAD`], { maxBuffer: 8 << 20 }).catch(() => ({ stdout: "(diff unavailable)" }))).stdout.trim();
-    let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", `origin/${baseBranch}...HEAD`], { maxBuffer: 64 << 20 }).catch(() => ({ stdout: "" }))).stdout;
-    if (diff.length > budget) diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff origin/${baseBranch}...HEAD in ${w.path} for the rest`;
+    const stat = (await exec("git", ["-C", w.path, "diff", "--stat", `origin/${w.baseBranch || baseBranch}...HEAD`], { maxBuffer: 8 << 20 }).catch(() => ({ stdout: "(diff unavailable)" }))).stdout.trim();
+    let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", `origin/${w.baseBranch || baseBranch}...HEAD`], { maxBuffer: 64 << 20 }).catch(() => ({ stdout: "" }))).stdout;
+    if (diff.length > budget) diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff origin/${w.baseBranch || baseBranch}...HEAD in ${w.path} for the rest`;
     budget -= diff.length;
     parts.push(`### ${w.repo} @ ${head.slice(0, 12)} (worktree ${w.path})\n${stat}\n\n${diff}`);
   }
@@ -241,4 +276,50 @@ export async function evidenceDrift(workspaces: Array<{ repo: string; path: stri
 /** Real test evidence among upstream outputs (command steps with results). */
 export function hasTestEvidence(upstream: Record<string, { output: any }>) {
   return Object.values(upstream).some((u) => Array.isArray(u.output?.results) && u.output.results.length > 0);
+}
+
+/**
+ * Bump when the verification rules change (normalizeVerdict / gates / review prompt contract): a PASS recorded under an
+ * older policy is never reused.
+ */
+export const REVIEW_POLICY_VERSION = "2026-11-09.1";
+
+/** Test evidence among upstream outputs, reduced to what a verdict depends on (results + the commits they ran on). */
+export function testDigestOf(upstream: Record<string, { output: any }>) {
+  return Object.entries(upstream)
+    .filter(([, u]) => Array.isArray(u.output?.results) || u.output?.tested_heads || u.output?.verification)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, u]) => [k, u.output?.results ?? null, u.output?.tested_heads ?? null, u.output?.verification?.passed ?? null]);
+}
+
+/**
+ * Identity of everything a verdict depends on: the exact commits, the base they are compared with, the diff shown to the
+ * reviewer, the test evidence, the approved scope (incl. a renewed approval's revision) and the review policy (rules
+ * version, step configuration, provider). Same key ⇒ the same review would be repeated; any change ⇒ a new review.
+ */
+export function verificationKey(input: {
+  heads: Record<string, string>;
+  baseTips: Record<string, string>;
+  diffText: string;
+  tests: unknown;
+  scope: unknown;
+  stepConfig: unknown;
+  provider: string;
+}) {
+  const sorted = (o: Record<string, string>) => Object.keys(o).sort().map((k) => [k, o[k]]);
+  return createHash("sha256")
+    .update(JSON.stringify([REVIEW_POLICY_VERSION, sorted(input.heads), sorted(input.baseTips), createHash("sha256").update(input.diffText).digest("hex"), input.tests, input.scope, input.stepConfig, input.provider]))
+    .digest("hex");
+}
+
+/** A prior PASS may be reused only for the identical key AND identical verified commits. */
+export function reusablePass(prior: { output: any } | null | undefined, key: string, heads: Record<string, string>) {
+  const o = prior?.output;
+  if (!o || o.verdict !== "PASS" || o.approved !== true || o.independent !== true || o.verification_key !== key) return false;
+  return staleVerification(o.verified_heads, heads).length === 0 && Object.keys(o.verified_heads ?? {}).length === Object.keys(heads).length;
+}
+
+/** Deterministic scope results recorded by coding steps that still lack a renewed approval. A PASS cannot override them. */
+export function unresolvedScope(rows: Array<{ key: string; sc: any }>) {
+  return rows.filter((r) => r.sc?.requires_reapproval === true && !r.sc?.reapproved).map((r) => `${r.key}: ${(r.sc.reasons ?? []).slice(0, 3).join("; ") || "scope violation"}`);
 }
