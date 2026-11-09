@@ -11,6 +11,7 @@ import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline
 import { childGroups } from "../local.ts";
 import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
 import { dirtyOf, headOf, verificationGate, type PublishState } from "../../agent/independentReview.ts";
+import { collectScopeState, prePublishProblems } from "../../agent/scopeGuard.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -193,7 +194,10 @@ export const commandExecutor: StepExecutor = {
       results.push(entry);
     }
     const failed = results.filter((r) => !r.passed);
-    const output = { results, passed: failed.length === 0, ...(decision ? { decision } : {}) };
+    // The exact commits the tests ran on: the PR gate refuses to publish anything else.
+    const tested_heads: Record<string, string> = {};
+    for (const t of targets) if (t.repo !== "(cwd)") tested_heads[t.repo] = await headOf(t.path).catch(() => "");
+    const output = { results, passed: failed.length === 0, ...(Object.keys(tested_heads).length ? { tested_heads } : {}), ...(decision ? { decision } : {}) };
     if (failed.length && !cfg.allow_failure && interactive) {
       // Automatic retries first (max_attempts); when they are exhausted, diagnose and ask the developer.
       if (ctx.step.attempt_count < ctx.step.max_attempts) return { kind: "failed", error: `tests failed (attempt ${ctx.step.attempt_count}/${ctx.step.max_attempts}); retrying`, retryable: true, details: output };
@@ -425,25 +429,39 @@ export const pullRequestExecutor: StepExecutor = {
     const provider = gitProvider();
     const code = ctx.input.work_item?.code;
     const out: any[] = [];
-    // Independent verification gate. Steps marked `independent: true` make verification REQUIRED: every one must hold
-    // a valid PASS covering every published repo at exactly the commit that would be pushed, from a clean worktree.
-    // Workflows without such a step (opted out, FAST profile) keep verification optional.
-    const verifiers = await q<{ key: string; status: string; output: any }>(pool, "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 AND config->>'independent' = 'true' ORDER BY position", [ctx.run.id]);
-    if (verifiers.length) {
-      const publish: Record<string, PublishState> = {};
-      for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo)))
-        publish[w.repo] = { head: await headOf(w.path).catch(() => ""), branchTip: await revParse(w.path, `refs/heads/${w.branch}`), dirty: await dirtyOf(w.path) };
-      const problems = verificationGate(verifiers, publish);
-      if (problems.length) {
-        await ctx.log("system", `PR blocked by the verification gate:\n- ${problems.join("\n- ")}`);
-        return { kind: "failed", error: `independent verification gate: ${problems.join("; ")} — re-run the verification step (or the coding step) before opening the PR`, retryable: false };
-      }
+    // Pre-publish gate, always on (deterministic, re-read from git right now — after any approval of this step):
+    //  - every published repo is clean and its HEAD is the tip of the pushed branch;
+    //  - every test record bound to commits (coding verification, test steps) ran on exactly the commit to publish;
+    //  - the actual diff still fits the approved scope, or a renewed approval names this exact revision.
+    // Then the independent verification gate: steps marked `independent: true` make verification REQUIRED — every one
+    // must hold a valid PASS covering every published repo at exactly that commit. A BLOCKED verdict stays blocking.
+    const publish: Record<string, PublishState> = {};
+    for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo)))
+      publish[w.repo] = { head: await headOf(w.path).catch(() => ""), branchTip: await revParse(w.path, `refs/heads/${w.branch}`), dirty: await dirtyOf(w.path) };
+    const steps = await q<{ key: string; status: string; output: any; independent: boolean }>(
+      pool,
+      "SELECT key, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
+      [ctx.run.id],
+    );
+    const scope = [...steps].reverse().find((x) => x.status === "COMPLETED" && x.output?.approved_scope?.proposal_hash)?.output.approved_scope ?? null;
+    const state = scope
+      ? await collectScopeState(await Promise.all(workspaces.map(async (w) => ({ repo: w.repo, path: w.path, base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}` }))))
+      : null;
+    const renewedRevision = steps.map((x) => x.output?.scope_check?.reapproved?.revision).filter(Boolean).at(-1) ?? null;
+    const tested = steps.filter((x) => x.status === "COMPLETED" && x.output?.tested_heads && typeof x.output.tested_heads === "object").map((x) => ({ step: x.key, heads: x.output.tested_heads }));
+    const verifiers = steps.filter((x) => x.independent);
+    const problems = [...new Set([...prePublishProblems({ publish, scope, state, renewedRevision, tested }), ...(verifiers.length ? verificationGate(verifiers, publish) : [])])];
+    if (problems.length) {
+      await ctx.log("system", `PR blocked by the pre-publish gate:\n- ${problems.join("\n- ")}`);
+      return { kind: "failed", error: `pre-publish gate: ${problems.join("; ")} — fix the cause (re-run the coding / test / verification step, or renew the scope approval) before opening the PR`, retryable: false };
     }
     for (const w of workspaces) {
       if (!ctx.run.selected_repositories.includes(w.repo)) {
         await ctx.log("system", `skip PR for ${w.repo}: not in the run's selected repositories`);
         continue;
       }
+      // A fenced-out / canceled attempt must not start another external action.
+      if (ctx.signal.aborted) return { kind: "failed", error: `PR step interrupted before publishing ${w.repo}: ${String(ctx.signal.reason ?? "aborted")}`, retryable: false };
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {
@@ -462,6 +480,7 @@ export const pullRequestExecutor: StepExecutor = {
       const registry = await repositories.get(w.repo);
       const slug = registry ? repositoryReference(registry) : w.repo;
       const destination = registry?.default_branch || config.baseBranch;
+      if (ctx.signal.aborted) return { kind: "failed", error: `PR step interrupted after pushing ${w.repo} (no PR call made; a retry reconciles by looking up the open PR)`, retryable: false };
       const pr = await provider.openOrUpdatePullRequest({ repo: slug, source: w.branch, target: destination, title, description, draft: mode === "draft" });
       await q(
         pool,

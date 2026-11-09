@@ -42,6 +42,8 @@ import {
 import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { workspaceKey, workspacesOf } from "../git/provider.ts";
+import { collectScopeState, renewedApprovalFor, scopeRevision, SCOPE_REVISION_TAG } from "./scopeGuard.ts";
+import { runProvenanceEnv, withProvenance } from "./provenance.ts";
 import type {
   ExecutionContext,
   StepExecutor,
@@ -95,6 +97,11 @@ import {
   enforceScopeReview,
   normalizeVerdict,
   repairTargetFor,
+  REVIEW_POLICY_VERSION,
+  reusablePass,
+  testDigestOf,
+  unresolvedScope,
+  verificationKey,
 } from "./independentReview.ts";
 import {
   approvedScopeIn,
@@ -619,6 +626,7 @@ const agentExecutor: StepExecutor = {
     const resume = independent
       ? null
       : await resumableSession(ctx, cwd, provider);
+    let reviewKey: string | null = null;
     let evidence: {
       heads: Record<string, string>;
       problems: string[];
@@ -664,6 +672,34 @@ const agentExecutor: StepExecutor = {
         );
       if (!ws.length)
         evidence.text = "(no worktree: the coding step changed no code)";
+      // Skip a redundant review only when the exact commits, base, diff, test evidence, approved scope and review policy
+      // already produced a PASS; any relevant change yields a new key and a fresh review.
+      const baseTips: Record<string, string> = {};
+      for (const w of ws) {
+        const base = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);
+        baseTips[w.repo] = (await execP("git", ["-C", w.path, "rev-parse", `origin/${base}`]).then((r) => r.stdout.trim()).catch(() => ""));
+      }
+      const scopeNow = approvedScopeIn(ctx.input.upstream);
+      reviewKey = verificationKey({
+        heads: evidence.heads,
+        baseTips,
+        diffText: evidence.text,
+        tests: testDigestOf(ctx.input.upstream),
+        scope: scopeNow ? [scopeNow.proposal_hash, Object.values(ctx.input.upstream).map((u: any) => u.output?.scope_check?.reapproved?.revision ?? null)] : null,
+        stepConfig: ctx.step.config,
+        provider,
+      });
+      const prior = await one<{ id: number; output: any }>(
+        pool,
+        "SELECT id, output FROM workflow_step_attempts WHERE step_id = $1 AND status = 'COMPLETED' AND output->>'verification_key' = $2 ORDER BY id DESC LIMIT 1",
+        [ctx.step.id, reviewKey],
+      );
+      // A human asking for a fresh review (feedback / re-execute) always gets one.
+      const humanAsked = !!(ctx.input.pending?.feedback || ctx.input.pending?.reexecute);
+      if (!humanAsked && reusablePass(prior, reviewKey, evidence.heads)) {
+        await ctx.log("system", `independent verification: PASS reused from attempt #${prior!.id} — same commits, diff, tests, scope and review policy`);
+        return { kind: "completed", output: { ...prior!.output, reused_from_attempt: prior!.id, reused_at: new Date().toISOString() } };
+      }
     }
     const files = ctx.input.work_item?.payload?.note_files
       ? await downloadAttachments(
@@ -1327,6 +1363,10 @@ const agentExecutor: StepExecutor = {
     // Evidence-gated investigation: normalize claims/root cause/fix risk (only ever lowers certainty, notes every change).
     const role = independent ? null : evidenceRole(ctx.step.config);
     if (role) {
+      // Platform provenance first (repo/commit/file/lines/staleness, this run's tool calls and artifacts): it may only
+      // lower a claim's status, so the root-cause caps and the evidence gate below never rest on fake or stale citations.
+      if (Array.isArray((output as any).claims))
+        output = { ...output, claims: await withProvenance((output as any).claims, await runProvenanceEnv(ctx.run as any)) };
       output = normalizeInvestigationOutput(
         role,
         output,
@@ -1345,40 +1385,16 @@ const agentExecutor: StepExecutor = {
       };
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
     }
-    // Approved scope integrity: compare the coding change with what a human approved; escalations need re-approval.
-    const scope = mode === "coding" && !independent ? approvedScopeIn(ctx.input.upstream) : null;
-    if (scope) {
-      const files: Record<string, string[]> = {};
-      for (const w of await workspacesOf(ctx.run.id).catch(() => [])) {
-        const base = `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}`;
-        const names = await execP("git", ["-C", w.path, "diff", "--name-only", `${base}...HEAD`]).then((r) => r.stdout.split("\n").filter(Boolean)).catch(() => []);
-        if (names.length) files[w.repo] = names;
-      }
-      const check = scopeCheck(scope, files, (output as any).scope_deviations);
-      const reapproved = ctx.input.answers.find((a: any) => String(a.question).startsWith(SCOPE_REAPPROVAL_QUESTION) && /^\s*(approve|duyệt|đồng ý)/i.test(String(a.answer)));
-      output = { ...output, scope_check: { ...check, reapproved: reapproved ? { answer: String(reapproved.answer).slice(0, 500) } : null } };
-      await ctx.log("system", `scope check vs approved proposal ${check.approved_proposal_hash}: ${check.out_of_scope_files.length} out-of-scope file(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? " — renewed approval required" : ""}`, { scope_check: check });
-      if (check.requires_reapproval && !reapproved)
-        return {
-          kind: "waiting_input",
-          output,
-          questions: [
-            {
-              question: `${SCOPE_REAPPROVAL_QUESTION}: ${check.reasons.join("; ")}`,
-              context: `Approved (${check.approved_risk}): ${scope.summary}`.slice(0, 1500),
-              options: [
-                "Approve the deviation (recorded as a renewed approval)",
-                "Reject: revert the deviation and stay inside the approved scope",
-              ],
-            },
-          ],
-        } as any;
-    }
-
     if (independent) {
       let v = normalizeVerdict(submitted ?? {});
       if (ctx.step.config.scope_review === true)
         v = enforceScopeReview(v, (submitted as any)?.scope_check, ctx.input.upstream);
+      // Deterministic scope violations without a renewed approval: a reviewer PASS never overrides them.
+      const unresolved = unresolvedScope(
+        await q<{ key: string; sc: any }>(pool, "SELECT key, output->'scope_check' AS sc FROM workflow_steps WHERE run_id = $1 AND output ? 'scope_check'", [ctx.run.id]),
+      );
+      if (unresolved.length && v.verdict === "PASS")
+        v = { ...v, verdict: "BLOCKED", blocked_reason: `deterministic scope violation without renewed approval: ${unresolved.join(" | ")}` };
       const drift = await evidenceDrift(
         ws.map((w) => ({ repo: w.repo, path: w.path })),
         evidence?.heads ?? {},
@@ -1413,12 +1429,15 @@ const agentExecutor: StepExecutor = {
         `independent verification: ${v.verdict}${v.findings.length ? ` (${v.findings.length} finding(s))` : ""}`,
         { verdict: v.verdict },
       );
-      return enforceVerdict(v, {
+      const decided = enforceVerdict(v, {
         repairsUsed,
         maxRepairs,
         repairTarget: repairTargetFor(ctx.run.graph, ctx.step.key),
         heads: evidence?.heads ?? {},
       });
+      if (decided.kind === "completed" && reviewKey)
+        (decided as any).output = { ...(decided as any).output, verification_key: reviewKey, review_policy_version: REVIEW_POLICY_VERSION };
+      return decided;
     }
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
@@ -1625,6 +1644,47 @@ const agentExecutor: StepExecutor = {
           { verification: "needs_review" },
         );
       output = { ...accepted, verification: summary };
+    }
+    // Approved scope integrity, deterministic: what git says changed (committed, staged, unstaged, untracked — after the
+    // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact
+    // revision; the PR step re-validates it. The agent's own deviation report is recorded but never relied on.
+    if (mode === "coding" && !independent) {
+      const all = await workspacesOf(ctx.run.id).catch(() => []);
+      const state = await collectScopeState(
+        await Promise.all(all.map(async (w) => ({ repo: w.repo, path: w.path, base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}` }))),
+      );
+      if (Object.keys(state.heads).length) {
+        output = { ...output, commits: state.heads };
+        // The harness tested exactly this state (nothing changes after the last verification round).
+        if ((output as any).verification?.passed === true) output = { ...output, tested_heads: state.heads };
+      }
+      const scope = approvedScopeIn(ctx.input.upstream);
+      if (scope) {
+        const revision = scopeRevision(scope.proposal_hash, state.files, state.states);
+        const check = scopeCheck(scope, state.files, (output as any).scope_deviations, revision);
+        if (state.unreadable.length) {
+          check.requires_reapproval = true;
+          check.reasons.unshift(...state.unreadable);
+        }
+        const reapproved = check.requires_reapproval ? renewedApprovalFor(ctx.input.answers, SCOPE_REAPPROVAL_QUESTION, revision) : null;
+        output = { ...output, scope_check: { ...check, reapproved } };
+        await ctx.log("system", `scope check vs approved proposal ${check.approved_proposal_hash} (revision ${revision}): ${check.out_of_scope_files.length} out-of-scope file(s), ${check.invalid_paths.length} invalid path(s), ${check.unauthorized_repos.length} unauthorized repo(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? (reapproved ? " — renewed approval on record for this revision" : " — renewed approval required") : ""}`, { scope_check: check });
+        if (check.requires_reapproval && !reapproved)
+          return {
+            kind: "waiting_input",
+            output,
+            questions: [
+              {
+                question: `${SCOPE_REAPPROVAL_QUESTION} ${SCOPE_REVISION_TAG(revision)}: ${check.reasons.join("; ")}`.slice(0, 4000),
+                context: `Approved (${check.approved_risk}): ${scope.summary}`.slice(0, 1500),
+                options: [
+                  "Approve this exact change set (recorded as a renewed approval for this revision only)",
+                  "Reject: revert the out-of-scope changes and stay inside the approved scope",
+                ],
+              },
+            ],
+          } as any;
+      }
     }
     return { kind: "completed", output };
   },

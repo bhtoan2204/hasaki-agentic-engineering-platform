@@ -183,7 +183,8 @@ test("approval scope preservation: frozen hash, deviations recorded, riskier dev
   const ok = scopeCheck(scope, { svc: ["app/client.go", "app/client_test.go"] }, []);
   assert.deepEqual([ok.out_of_scope_files, ok.requires_reapproval], [[], false]);
   const drift = scopeCheck(scope, { svc: ["app/client.go", "app/rts.go"], other: ["x.go"] }, [{ description: "Mark package shipped when TrackingNo is set", risk: "LOW" }]);
-  assert.deepEqual(drift.out_of_scope_files, ["svc:app/rts.go", "other:x.go", "other:* (repository not in the approved scope)"]);
+  assert.deepEqual(drift.out_of_scope_files, ["svc:app/rts.go", "other:x.go"]);
+  assert.deepEqual(drift.unauthorized_repos, ["other"]);
   assert.equal(drift.deviations[0].risk, "HIGH");
   assert.equal(drift.requires_reapproval, true);
   assert.equal(approvedScopeIn({ approve_fix: { output: { approved: true, approved_scope: scope }, status: "COMPLETED" } })?.proposal_hash, scope.proposal_hash);

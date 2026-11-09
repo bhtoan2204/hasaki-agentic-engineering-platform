@@ -24,7 +24,10 @@ export async function resolveBitbucket() {
 type BitbucketCredentials = NonNullable<Awaited<ReturnType<typeof resolveBitbucket>>>;
 
 async function call(creds: BitbucketCredentials, path: string, init: RequestInit = {}) {
+  // Bounded: a hung API call must not hold the step (and its lease) forever. A timed-out create may still have
+  // succeeded remotely — the caller reconciles by looking up the open PR before creating another.
   const res = await fetch(API + path, {
+    signal: AbortSignal.timeout(30_000),
     ...init,
     headers: { Authorization: "Basic " + Buffer.from(`${creds.user}:${creds.token}`).toString("base64"), "Content-Type": "application/json", Accept: "application/json" },
   });

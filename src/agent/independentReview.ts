@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type { ExecResult, StepSpec } from "../workflow/types.ts";
 import { approvedScopeIn } from "./evidence.ts";
@@ -275,4 +276,50 @@ export async function evidenceDrift(workspaces: Array<{ repo: string; path: stri
 /** Real test evidence among upstream outputs (command steps with results). */
 export function hasTestEvidence(upstream: Record<string, { output: any }>) {
   return Object.values(upstream).some((u) => Array.isArray(u.output?.results) && u.output.results.length > 0);
+}
+
+/**
+ * Bump when the verification rules change (normalizeVerdict / gates / review prompt contract): a PASS recorded under an
+ * older policy is never reused.
+ */
+export const REVIEW_POLICY_VERSION = "2026-11-09.1";
+
+/** Test evidence among upstream outputs, reduced to what a verdict depends on (results + the commits they ran on). */
+export function testDigestOf(upstream: Record<string, { output: any }>) {
+  return Object.entries(upstream)
+    .filter(([, u]) => Array.isArray(u.output?.results) || u.output?.tested_heads || u.output?.verification)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, u]) => [k, u.output?.results ?? null, u.output?.tested_heads ?? null, u.output?.verification?.passed ?? null]);
+}
+
+/**
+ * Identity of everything a verdict depends on: the exact commits, the base they are compared with, the diff shown to the
+ * reviewer, the test evidence, the approved scope (incl. a renewed approval's revision) and the review policy (rules
+ * version, step configuration, provider). Same key ⇒ the same review would be repeated; any change ⇒ a new review.
+ */
+export function verificationKey(input: {
+  heads: Record<string, string>;
+  baseTips: Record<string, string>;
+  diffText: string;
+  tests: unknown;
+  scope: unknown;
+  stepConfig: unknown;
+  provider: string;
+}) {
+  const sorted = (o: Record<string, string>) => Object.keys(o).sort().map((k) => [k, o[k]]);
+  return createHash("sha256")
+    .update(JSON.stringify([REVIEW_POLICY_VERSION, sorted(input.heads), sorted(input.baseTips), createHash("sha256").update(input.diffText).digest("hex"), input.tests, input.scope, input.stepConfig, input.provider]))
+    .digest("hex");
+}
+
+/** A prior PASS may be reused only for the identical key AND identical verified commits. */
+export function reusablePass(prior: { output: any } | null | undefined, key: string, heads: Record<string, string>) {
+  const o = prior?.output;
+  if (!o || o.verdict !== "PASS" || o.approved !== true || o.independent !== true || o.verification_key !== key) return false;
+  return staleVerification(o.verified_heads, heads).length === 0 && Object.keys(o.verified_heads ?? {}).length === Object.keys(heads).length;
+}
+
+/** Deterministic scope results recorded by coding steps that still lack a renewed approval. A PASS cannot override them. */
+export function unresolvedScope(rows: Array<{ key: string; sc: any }>) {
+  return rows.filter((r) => r.sc?.requires_reapproval === true && !r.sc?.reapproved).map((r) => `${r.key}: ${(r.sc.reasons ?? []).slice(0, 3).join("; ") || "scope violation"}`);
 }

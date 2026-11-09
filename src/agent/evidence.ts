@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { evaluateScope, scopeViolations } from "./scopeGuard.ts";
 import { redactContextText } from "../context/redact.ts";
 import { estimateTokens } from "../context/plan.ts";
 
@@ -44,6 +45,8 @@ export interface Claim {
   supports?: string[];
   contradicts?: string[];
   notes?: string[];
+  /** Set by the platform (provenance.ts) — agent-supplied values are stripped before normalization. */
+  provenance?: { by: "platform"; status: "VERIFIED_BY_PLATFORM" | "AGENT_REPORTED" | "UNVERIFIED" | "CONTRADICTED"; verifies: "location" | "source_record" | null; reason: string | null; stale?: boolean };
 }
 
 export interface RootCauseAssessment {
@@ -124,6 +127,9 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
       verification_status: (["verified", "unverified", "missing", "contradicted"] as const).find((s) => s === String(r?.verification_status ?? "").toLowerCase()) ?? "unverified",
       supports: Array.isArray(r?.supports) ? r.supports.map((x: unknown) => String(x)).slice(0, 10) : undefined,
       contradicts: Array.isArray(r?.contradicts) ? r.contradicts.map((x: unknown) => String(x)).slice(0, 10) : undefined,
+      ...(r?.provenance?.by === "platform" && ["VERIFIED_BY_PLATFORM", "AGENT_REPORTED", "UNVERIFIED", "CONTRADICTED"].includes(r.provenance.status)
+        ? { provenance: { by: "platform" as const, status: r.provenance.status, verifies: r.provenance.verifies ?? null, reason: r.provenance.reason ?? null, ...(r.provenance.stale ? { stale: true } : {}) } }
+        : {}),
     };
     const local: string[] = [];
     if (!(CLAIM_CLASSES as readonly string[]).includes(cls)) local.push(`unknown classification "${cls || "(none)"}" treated as HYPOTHESIS`);
@@ -401,19 +407,15 @@ export function approvedScopeFrom(stepKey: string, proposal: any): ApprovedScope
   };
 }
 
-const TEST_FILE = /(?:^|\/)(?:tests?|__tests__|spec|testdata|fixtures?)\/|[._-](?:test|spec)\.[a-z0-9]+$|_test\.go$/i;
-
 /**
- * Compare what the coding step changed with the approved scope. `files` = changed paths per repo (platform-collected);
- * `declared` = deviations the coding agent reported itself. Out-of-scope source files are recorded; a declared deviation
- * whose risk exceeds the approved risk requires renewed approval.
+ * Compare what the coding step changed with the approved scope. `files` = changed paths per repo, collected by the
+ * platform from git (committed, staged, unstaged, untracked — see scopeGuard.ts); `declared` = deviations the coding
+ * agent reported itself (recorded, but never needed to detect a violation). Every out-of-scope, unauthorized-repository
+ * or invalid path — and every declared deviation riskier than the approved risk — requires renewed approval, bound to
+ * `revision` (the exact changed-file set and code state; see scopeRevision).
  */
-export function scopeCheck(scope: ApprovedScope, files: Record<string, string[]>, declared: unknown) {
-  const allowed = new Set(scope.changes.flatMap((c) => c.files.map((f) => `${c.repo}:${f.replace(/:\d+(?:-\d+)?$/, "")}`)));
-  const allowedRepos = new Set(scope.changes.map((c) => c.repo));
-  const out_of_scope_files = Object.entries(files).flatMap(([repo, paths]) =>
-    paths.filter((p) => !TEST_FILE.test(p) && !allowed.has(`${repo}:${p}`) && ![...allowed].some((a) => a.startsWith(`${repo}:`) && p.endsWith(a.slice(repo.length + 1)))).map((p) => `${repo}:${p}`),
-  ).concat(Object.keys(files).filter((r) => scope.changes.length && !allowedRepos.has(r) && files[r].length).map((r) => `${r}:* (repository not in the approved scope)`));
+export function scopeCheck(scope: ApprovedScope, files: Record<string, string[]>, declared: unknown, revision: string | null = null) {
+  const ev = evaluateScope(scope, files);
   const deviations = (Array.isArray(declared) ? declared : []).slice(0, 10).map((d: any) => {
     const description = clip(typeof d === "string" ? d : d?.description, 400);
     const declaredRisk = (RISKS as readonly string[]).includes(String(d?.risk ?? "").toUpperCase()) ? (String(d.risk).toUpperCase() as FixRisk) : "LOW";
@@ -422,13 +424,22 @@ export function scopeCheck(scope: ApprovedScope, files: Record<string, string[]>
   });
   const approvedRisk = scope.risk ?? "LOW";
   const escalations = deviations.filter((d) => rank(RISKS, d.risk) > rank(RISKS, approvedRisk));
+  const violations = scopeViolations(ev);
   return {
     approved_proposal_hash: scope.proposal_hash,
     approved_risk: approvedRisk,
-    out_of_scope_files: [...new Set(out_of_scope_files)].slice(0, 30),
+    revision,
+    out_of_scope_files: [...new Set(ev.out_of_scope_files)].slice(0, 30),
+    out_of_scope_tests: ev.out_of_scope_tests.slice(0, 30),
+    invalid_paths: ev.invalid_paths.slice(0, 30),
+    unauthorized_repos: ev.unauthorized_repos,
     deviations,
-    requires_reapproval: escalations.length > 0,
-    reasons: escalations.map((d) => `deviation "${d.description.slice(0, 120)}" is ${d.risk} risk, above the approved ${approvedRisk}`),
+    requires_reapproval: escalations.length > 0 || violations.length > 0,
+    reasons: [
+      ...violations.slice(0, 12),
+      ...(violations.length > 12 ? [`… ${violations.length - 12} more scope violation(s)`] : []),
+      ...escalations.map((d) => `deviation "${d.description.slice(0, 120)}" is ${d.risk} risk, above the approved ${approvedRisk}`),
+    ],
   };
 }
 

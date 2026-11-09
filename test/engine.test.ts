@@ -1,7 +1,7 @@
 import { test, before, after, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { pool, q, one } from "../src/db/pool.ts";
@@ -2124,4 +2124,101 @@ test("Evidence-gated approval: exact scope frozen, unmet HIGH-risk gate needs ac
   const impl = seen.implement.at(-1)!;
   assert.equal(impl.input.upstream.approve_fix.output.approved_scope.proposal_hash, out.approved_scope.proposal_hash);
   assert.equal((await getRun(run.id)).status, "COMPLETED");
+});
+
+// ---------------------------------------------------------------- phase 1 hardening: deterministic pre-publish gate
+/** A worktree whose base is published as origin/release/prod, so the platform diffs it like a real checkout. */
+function scopedWorktree(repo: string, branch: string) {
+  const path = mkdtempSync(join(process.env.TEST_ROOT!, `wt-${repo}-`));
+  execFileSync("git", ["init", "-q", "-b", branch, path], { env: GIT_ENV });
+  commitFile(path, "README.md", "base\n", "base");
+  gitIn(path, "update-ref", "refs/remotes/origin/release/prod", "HEAD");
+  return path;
+}
+function writeIn(path: string, file: string, content: string) {
+  mkdirSync(join(path, file, ".."), { recursive: true });
+  writeFileSync(join(path, file), content);
+}
+const APPROVED_SCOPE = {
+  source_step: "approve",
+  proposal_hash: "p-hardening-1",
+  summary: "Fix the refund amount in app/refund.go",
+  changes: [{ repo: "oms-api", files: ["app/refund.go"], description: "fix refund" }],
+  risk: "LOW",
+  required_tests: [],
+};
+
+test("hardening: an undeclared out-of-scope change blocks the PR even when the reviewer returns PASS", async () => {
+  const key = await customWorkflow(
+    [
+      { key: "approve", type: "agent" },
+      { key: "implement", type: "coding_agent", depends_on: ["approve"] },
+      { key: "review", type: "agent", name: "Code Review", depends_on: ["implement"] },
+      { key: "pr", type: "git_pull_request", depends_on: ["review"], config: { mode: "auto", content_from: "implement" } },
+    ],
+    { feedback_step: "implement" },
+  );
+  scripts.approve = () => ({ kind: "completed", output: { approved: true, approved_scope: APPROVED_SCOPE } });
+  scripts.implement = async (ctx) => {
+    const path = scopedWorktree("oms-api", ctx.run.branch);
+    writeIn(path, "app/refund.go", "package app // fixed\n");
+    writeIn(path, "app/settlement.go", "package app // silently changed, never declared\n");
+    writeIn(path, "app/settlement_test.go", "package app // a test next to an unapproved file\n");
+    gitIn(path, "add", "-A");
+    gitIn(path, "commit", "-qm", "fix refund");
+    await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+    return { kind: "completed", output: { summary: "fixed refund only", scope_deviations: [] } };
+  };
+  scripts.review = liveVerifier(() => ({ verdict: "PASS", findings: [], summary: "looks good" }));
+  const run = await startRun({ definitionKey: key, title: "scoped fix", profile: "STANDARD", repositories: ["oms-api"] } as any);
+  await drain();
+  assert.equal((await stepOf(run.id, "review")).output?.verdict, "PASS", "the reviewer (falsely) passed it");
+  const pr = await stepOf(run.id, "pr");
+  assert.equal(pr.status, "FAILED");
+  assert.match(String(pr.error), /scope drift/);
+  assert.match(String(pr.error), /oms-api:app\/settlement\.go is outside the approved scope/);
+  assert.match(String(pr.error), /oms-api:app\/settlement_test\.go is outside the approved scope/, "no blanket test exemption");
+  assert.doesNotMatch(String(pr.error), /app\/refund\.go is outside/);
+  assert.equal(pushed.length + prCalls.length, 0, "nothing was published");
+});
+
+test("hardening: a PR is never published from a commit other than the tested one, nor with untracked files", async () => {
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "pr", type: "git_pull_request", depends_on: ["implement"], config: { mode: "auto", content_from: "implement" } },
+  ]);
+  let leaveUntracked = false;
+  scripts.implement = async (ctx) => {
+    const path = scopedWorktree("oms-api", ctx.run.branch);
+    const tested = commitFile(path, "a.go", "package a\n", "tested change");
+    if (leaveUntracked) writeIn(path, "notes.txt", "scratch\n");
+    else commitFile(path, "a.go", "package a // edited after the tests ran\n", "untested follow-up");
+    await recordWorkspace(ctx.run.id, { repo: "oms-api", branch: ctx.run.branch, path, created_from: "test" });
+    return { kind: "completed", output: { summary: "done", tested_heads: { "oms-api": tested } } };
+  };
+  const run = await startRun({ definitionKey: key, title: "untested", repositories: ["oms-api"] } as any);
+  await drain();
+  const pr = await stepOf(run.id, "pr");
+  assert.equal(pr.status, "FAILED");
+  assert.match(String(pr.error), /tests in "implement" ran on [0-9a-f]{12}, but [0-9a-f]{12} would be published/);
+  assert.equal(pushed.length, 0);
+
+  leaveUntracked = true;
+  const run2 = await startRun({ definitionKey: key, title: "untracked", repositories: ["oms-api"] } as any);
+  await drain();
+  const pr2 = await stepOf(run2.id, "pr");
+  assert.equal(pr2.status, "FAILED");
+  assert.match(String(pr2.error), /uncommitted or untracked changes/);
+  assert.equal(pushed.length, 0);
+});
+
+test("hardening: duplicate completion of one attempt applies exactly once", async () => {
+  const key = await customWorkflow([{ key: "a", type: "agent" }]);
+  await startRun({ definitionKey: key });
+  const job = (await claimJob("w-dup", 30))!;
+  const begun = (await beginAttempt(job, "w-dup"))!;
+  const results = await Promise.all([1, 2].map((n) => finishAttempt(job.id, job.fencing_token, begun.attempt.id, { kind: "completed", output: { n } })));
+  assert.equal(results.filter((r) => r.applied).length, 1, "one completion wins, the other is rejected");
+  const attempts = await q(pool, "SELECT status FROM workflow_step_attempts WHERE step_id = $1", [begun.attempt.step_id]);
+  assert.deepEqual(attempts.map((a) => a.status), ["COMPLETED"]);
 });
