@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { api, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
+import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
 import {
   autoLayout,
@@ -635,6 +636,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <ReportCard run={run} />
               <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
+              <CostPanel kind="run" id={id} tick={tick} />
               {run.status === "PENDING" && (
                 <RepoPicker run={run} onDone={reload} />
               )}

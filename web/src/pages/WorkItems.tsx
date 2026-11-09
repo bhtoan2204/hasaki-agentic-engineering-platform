@@ -54,6 +54,7 @@ import {
 import { RunsTable } from "./Runs.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
+import { CostCell, CostPanel } from "../components/Cost.tsx";
 import type { UiLocale } from "../i18n/messages.ts";
 import "./WorkItems.css";
 
@@ -558,6 +559,11 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
                       </span>
                       {w.last_run_status && (
                         <Badge s={w.last_run_status} label />
+                      )}
+                      {w.cost?.cost_usd != null && (
+                        <span className="small">
+                          <CostCell cost={w.cost} />
+                        </span>
                       )}
                     </div>
                     <span className="muted small wi-row-time">
@@ -1128,6 +1134,8 @@ export function WorkItemDetail({ id }: { id: number }) {
           <ProdErrorRefs rows={w.prod_errors} />
 
           <RunSummaryCard runs={w.runs} />
+
+          {w.runs?.length > 0 && <CostPanel kind="work_item" id={id} />}
 
           <section className="wi-section">
             <div className="wi-section-head">

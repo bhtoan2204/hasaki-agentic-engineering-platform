@@ -7,6 +7,7 @@ import { resolveStepAgent, effectiveStepConfig, StepAgentOverrideConfig } from "
 import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts";
 import type pg from "pg";
 import { config } from "../config.ts";
+import { budgetsForRun } from "../report/cost.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
@@ -1010,9 +1011,42 @@ export async function finishAttempt(jobId: number, token: number, attemptId: num
     if (request && attempt.executor_stopped_at && !handoff) handoff = { blocked: "Switch request arrived after checkpoint preparation; reinspect the stopped executor's preserved state" };
     if (handoff && attempt.executor_stopped_at && (request || handoff.failure)) {
       await persistProviderPause(c, run, step, attempt, j!, result, handoff, request, afterCommit);
-    } else await applyResult(c, run, step, attempt, jobId, result, afterCommit);
+    } else {
+      await applyResult(c, run, step, attempt, jobId, result, afterCommit);
+      await enforceBudget(c, run, step.id, attempt.id);
+    }
     return { applied: true };
   });
+}
+
+/**
+ * Cost budget gate, after every applied attempt (see report/cost.ts). Each (scope, level) alert fires once per run:
+ * reaching warnPct logs a warning; reaching 100% logs and — with action "pause" — pauses an active run. Resuming is the
+ * acknowledgement: the run is not paused again for the same budget. A failing check never blocks the workflow.
+ */
+async function enforceBudget(c: Db, run: RunRow, stepId: number, attemptId: number) {
+  const b = await budgetsForRun(run.id, c).catch(() => null);
+  if (!b) return;
+  const fired = new Set((await q<{ k: string }>(c, "SELECT (data->>'scope') || ':' || (data->>'level') AS k FROM workflow_events WHERE run_id = $1 AND kind = 'budget'", [run.id])).map((r) => r.k));
+  let pause = false;
+  for (const [scope, line] of [["run", b.run], ["work_item", b.work_item]] as const) {
+    if (!line || (line.status !== "warning" && line.status !== "exceeded")) continue;
+    if (fired.has(`${scope}:${line.status}`)) continue;
+    const over = line.status === "exceeded";
+    const willPause = over && config.costBudget.action === "pause";
+    await runEvents.add(
+      c, run.id, "budget",
+      `cost budget ${over ? "exceeded" : "warning"} (${scope === "run" ? "run" : "work item"}): $${line.used_usd} of $${line.limit_usd} (${line.pct}%)${willPause ? " — run paused; resume to continue past the budget" : ""}`,
+      stepId, attemptId, { scope, level: line.status, limit_usd: line.limit_usd, used_usd: line.used_usd, pct: line.pct, source: line.source },
+    );
+    if (willPause) pause = true;
+  }
+  if (!pause) return;
+  const cur = await one<{ status: RunStatus }>(c, "SELECT status FROM workflow_runs WHERE id = $1", [run.id]);
+  if (cur && (cur.status === "RUNNING" || cur.status === "WAITING")) {
+    run.status = cur.status;
+    await setRunStatus(c, run, "PAUSED");
+  }
 }
 
 /**

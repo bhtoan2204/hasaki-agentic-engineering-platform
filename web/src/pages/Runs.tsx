@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useApi, useLive, STATUS_COLORS } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
+import { CostCell } from "../components/Cost.tsx";
 import {
   ago,
   Badge,
@@ -89,6 +90,7 @@ export function RunsTable({ runs }: { runs: any[] }) {
             <th>{t("runs.col.progress")}</th>
             <th>{t("runs.col.waiting")}</th>
             <th>{t("runs.col.duration")}</th>
+            <th>{t("runs.col.cost")}</th>
             <th>{t("runs.col.updated")}</th>
           </tr>
         </thead>
@@ -144,6 +146,9 @@ export function RunsTable({ runs }: { runs: any[] }) {
                 )}
               </td>
               <td className="muted small">{runDuration(r) || "—"}</td>
+              <td className="small">
+                <CostCell cost={r.cost} />
+              </td>
               <td className="muted small runs-ago" title={r.updated_at}>
                 <Clock size={12} strokeWidth={2} />
                 {t("common.ago", { when: ago(r.updated_at) })}

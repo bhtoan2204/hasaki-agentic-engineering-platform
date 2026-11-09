@@ -101,6 +101,12 @@ export interface Config {
   };
   databaseUrl: string;
   /**
+   * Default cost budgets in USD (provider-reported cost). null = no budget. A run's own budget, then its work item's,
+   * override these. Checked after every attempt: `warnPct` logs a warning, 100% pauses the run when action = "pause".
+   * Env: COST_BUDGET_RUN_USD / COST_BUDGET_WORK_ITEM_USD / COST_BUDGET_WARN_PCT / COST_BUDGET_ACTION.
+   */
+  costBudget: { runUsd: number | null; workItemUsd: number | null; warnPct: number; action: "pause" | "warn" };
+  /**
    * Local PostgreSQL pool. Default 10 clients is enough for one user and a few workflows.
    * Override in config.json (`database`) or with DATABASE_POOL_MAX / DATABASE_CONNECTION_TIMEOUT_MS /
    * DATABASE_POOL_MIN / DATABASE_IDLE_TIMEOUT_MS. The defaults favour a remote database (shared RDS over VPN): a new
@@ -302,6 +308,7 @@ const defaults: Config = {
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
+  costBudget: { runUsd: null, workItemUsd: null, warnPct: 0.8, action: "pause" },
   database: {
     poolMax: 10,
     poolMin: 4,
@@ -512,6 +519,14 @@ function load(): Config {
     ),
   };
   cfg.database.poolMin = Math.min(cfg.database.poolMin, cfg.database.poolMax);
+  const usd = (v: unknown) => (v == null || v === "" ? null : Number(v) > 0 ? Number(v) : null);
+  const cb = { ...defaults.costBudget, ...(cfg.costBudget ?? {}) };
+  cfg.costBudget = {
+    runUsd: usd(process.env.COST_BUDGET_RUN_USD ?? cb.runUsd),
+    workItemUsd: usd(process.env.COST_BUDGET_WORK_ITEM_USD ?? cb.workItemUsd),
+    warnPct: Math.min(1, Math.max(0.1, Number(process.env.COST_BUDGET_WARN_PCT ?? cb.warnPct) || 0.8)),
+    action: (process.env.COST_BUDGET_ACTION ?? cb.action) === "warn" ? "warn" : "pause",
+  };
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
   cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;

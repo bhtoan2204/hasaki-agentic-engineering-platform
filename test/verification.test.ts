@@ -161,14 +161,22 @@ test("profiles: STANDARD makes reviews independent (opt-out respected), DEEP req
   assert.equal(fi.steps.find((s) => s.key === "review")!.config.independent, true, "profile application leaves the explicitly published setting unchanged");
 });
 
-test("published feature template enables a bounded independent review repair loop; review-only templates stay read-only", () => {
+test("published feature and bug templates enable a bounded independent review repair loop; review-only templates stay read-only", () => {
   const feature = validateSpec(TEMPLATES.find((t) => t.key === "feature-implementation")!.spec);
   const review = feature.steps.find((s) => s.key === "review")!;
   assert.equal(review.config.independent, true);
   assert.equal(review.config.max_repairs, 2);
   assert.equal(feature.feedback_step, "implement");
 
-  for (const key of ["bug-investigation", "refactoring", "code-review"]) {
+  // Bug fixes get the same bounded review → repair loop as features before the PR.
+  const bug = validateSpec(TEMPLATES.find((t) => t.key === "bug-investigation")!.spec);
+  const bugReview = bug.steps.find((s) => s.key === "review")!;
+  assert.equal(bugReview.config.independent, true);
+  assert.equal(bugReview.config.max_repairs, 2);
+  assert.deepEqual(bugReview.depends_on, ["regression_test"]);
+  assert.equal(bug.feedback_step, "implement");
+
+  for (const key of ["refactoring", "code-review"]) {
     const spec = validateSpec(TEMPLATES.find((t) => t.key === key)!.spec);
     const verifiers = spec.steps.filter((s) => s.config.independent === true);
     assert.deepEqual(verifiers, [], `${key} must not get an implicit repair loop`);

@@ -50,6 +50,7 @@ import type { ExecResult } from "../src/workflow/types.ts";
 import { setReportReasoner, taskResultReportExecutor } from "../src/report/executor.ts";
 import { withReportStep, REPORT_STEP_KEY, previewRun } from "../src/workflow/engine.ts";
 import { addEvidence } from "../src/report/evidenceStore.ts";
+import { costTotalsForRuns, runCost, workItemCost } from "../src/report/cost.ts";
 import { OPTIONS, setTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
 import { testExceptionsOf, prDescription } from "../src/workflow/executors/builtin.ts";
 
@@ -293,6 +294,69 @@ test("Scenario C: failed implementation is retried without repeating analysis; h
   const usage = await q(pool, "SELECT input_tokens, reported_cost_usd FROM execution_attempt_telemetry WHERE step_id = $1", [history[0].step_id]);
   assert.equal(usage.reduce((n, a) => n + a.input_tokens, 0), 30);
   assert.ok(Math.abs(usage.reduce((n, a) => n + a.reported_cost_usd, 0) - 0.3) < 1e-9);
+});
+
+test("cost read model: totals, by step / model, failed retries counted as wasted", async () => {
+  const key = await customWorkflow([
+    { key: "analyze", type: "agent" },
+    { key: "implement", type: "coding_agent", depends_on: ["analyze"], max_attempts: 2, retry_backoff_seconds: 0 },
+  ]);
+  scripts.analyze = async (ctx) => (await ctx.recordMetrics({ provider: "claude", model: "m-a", tokens: { input: 100, output: 10 }, cost_usd: 0.25 }), { kind: "completed", output: { summary: "ok" } });
+  let n = 0;
+  scripts.implement = async (ctx, k) => {
+    await ctx.recordMetrics({ provider: "codex", model: "m-b", tokens: { input: 50, output: 5 }, cost_usd: 0.5 });
+    return ++n === 1 ? { kind: "failed", error: "flaky" } : codingDone(ctx, k);
+  };
+  const run = await startRun({ definitionKey: key, inputs: { project: "OMS" }, repositories: ["oms-api"] });
+  await drain();
+  const c = await runCost(run.id);
+  assert.equal(c.total.cost_usd, 1.25);
+  assert.equal(c.availability, "complete");
+  assert.deepEqual(c.total.tokens.input, 200);
+  assert.equal(c.wasted.cost_usd, 0.5);
+  assert.deepEqual(c.wasted.by_reason, { failed: 0.5 });
+  assert.equal(c.wasted.pct, 40);
+  const impl = c.by_step.find((s) => s.step_key === "implement")!;
+  assert.equal(impl.attempts, 2);
+  assert.equal(impl.cost_usd, 1);
+  assert.equal(impl.wasted_usd, 0.5);
+  assert.deepEqual(c.by_model.map((m) => `${m.model}=${m.cost_usd}`), ["m-b=1", "m-a=0.25"], "most expensive model first");
+  assert.equal(c.budget!.run.status, "none");
+  const listed = await costTotalsForRuns([run.id]);
+  assert.equal(listed.get(run.id)!.cost_usd, 1.25);
+});
+
+test("cost budget: warning is logged once; exceeding pauses the run once, resume continues past it", async () => {
+  const key = await customWorkflow([
+    { key: "analyze", type: "agent" },
+    { key: "plan", type: "agent", depends_on: ["analyze"] },
+    { key: "implement", type: "agent", depends_on: ["plan"] },
+  ]);
+  for (const k of ["analyze", "plan", "implement"])
+    scripts[k] = async (ctx) => (await ctx.recordMetrics({ provider: "claude", model: "m", cost_usd: 0.6 }), { kind: "completed", output: { summary: k } });
+  const wi = await workItems.createManual({ title: "budgeted", description: "", project: "OMS" });
+  const run = await startRun({ definitionKey: key, workItemId: wi.id, inputs: { project: "OMS" }, repositories: ["oms-api"], start: false });
+  await q(pool, "UPDATE workflow_runs SET budget_usd = 1 WHERE id = $1", [run.id]);
+  await q(pool, "UPDATE work_items SET budget_usd = 2 WHERE id = $1", [wi.id]);
+  await startPendingRun(run.id);
+  await drain();
+  // 0.6 after analyze (< 80% of 1), 1.2 after plan: run budget exceeded → paused before implement.
+  assert.equal((await getRun(run.id)).status, "PAUSED");
+  assert.equal(calls.implement ?? 0, 0);
+  const events = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' ORDER BY id", [run.id]);
+  // Work item: 1.2 of 2 = 60% — below the warning threshold so far.
+  assert.deepEqual(events.map((e) => `${e.data.scope}:${e.data.level}`), ["run:exceeded"]);
+  await resumeRun(run.id);
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED", "resume acknowledges the budget: not paused again");
+  const after = await q(pool, "SELECT data FROM workflow_events WHERE run_id = $1 AND kind = 'budget' ORDER BY id", [run.id]);
+  // 1.8 of the work item's 2 = 90%: a warning (not a pause); the run alert is not repeated.
+  assert.deepEqual(after.map((e) => `${e.data.scope}:${e.data.level}`), ["run:exceeded", "work_item:warning"]);
+  const wc = (await workItemCost(wi.id))!;
+  assert.equal(wc.total.cost_usd, 1.8);
+  assert.equal(wc.run_count, 1);
+  assert.equal(wc.budget.status, "warning");
+  assert.equal(wc.budget.source, "own");
 });
 
 test("Scenario D: code review workflow without a work item stores findings, no PR", async () => {
@@ -922,7 +986,7 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
   const wi = await zipItem();
   const std = await startRun({ definitionKey: "bug-investigation", workItemId: wi.id, repositories: ["oms-api"], profile: "STANDARD", start: false });
   assert.equal(std.profile, "STANDARD");
-  assert.equal(std.steps.length, 9);
+  assert.equal(std.steps.length, 10);
   const pay = (await importHasakiTask({ data: { id: 9800 + ++reportSeq, code: `PAY-${reportSeq}`, name: "[Bug] Refund field mapping sai", project: { name: "OMS" } } })).item;
   const p = await startRun({ definitionKey: "bug-investigation", workItemId: pay.id, repositories: ["oms-api"], start: false });
   assert.equal(p.profile, "STANDARD");

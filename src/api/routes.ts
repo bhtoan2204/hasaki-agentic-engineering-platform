@@ -73,6 +73,7 @@ import {
 import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
 import { getRunSummary } from "../report/runSummary.ts";
+import { parseBudget, runCost, withCosts, workItemCost } from "../report/cost.ts";
 import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
@@ -85,6 +86,13 @@ export type Ctx = { p: string[]; body: any; url: URL; actor: Actor };
 export type Route = [method: string, pattern: RegExp, handler: (c: Ctx) => unknown];
 
 const support = (c: Ctx) => wantsSupport(c.actor, c.url.searchParams.get("scope"));
+const budgetOf = (body: any) => {
+  try {
+    return parseBudget(body?.budget_usd);
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
+};
 const mine = (c: Ctx) => ({ ownerId: c.actor.id, all: support(c) });
 
 const num = (s: string) => {
@@ -196,7 +204,7 @@ export const routes: Route[] = [
   // ------------------------------------------------------------ work items
   ["GET", /^\/api\/work-items$/, async (c) => {
     if (support(c)) await audit(c.actor.id, "support.list", "work_item", "*");
-    return workItems.list({ source: c.url.searchParams.get("source") ?? undefined, status: c.url.searchParams.get("status") ?? undefined, ...mine(c) });
+    return withCosts(await workItems.list({ source: c.url.searchParams.get("source") ?? undefined, status: c.url.searchParams.get("status") ?? undefined, ...mine(c) }), "work_item");
   }],
   ["POST", /^\/api\/work-items$/, ({ body, actor }) => workItems.createManual({ title: body.title, description: body.description, project: body.project, code: body.code, ownerId: actor.id })],
   [
@@ -215,6 +223,12 @@ export const routes: Route[] = [
     /^\/api\/work-items\/(\d+)\/runs$/,
     async (c) => (await requireWorkItem(c.actor, num(c.p[0]), support(c)), startRun({ definitionKey: String(c.body.workflow ?? ""), version: c.body.version, workItemId: num(c.p[0]), inputs: c.body.inputs, repositories: c.body.repositories, title: c.body.title, start: c.body.start, profile: c.body.profile, outputLocale: localeOf(c.body), agentProvider: providerOf(c.body), ownerId: c.actor.id })),
   ],
+  ["GET", /^\/api\/work-items\/(\d+)\/cost$/, async (c) => (await requireWorkItem(c.actor, num(c.p[0]), support(c)), must(await workItemCost(num(c.p[0])), "work item"))],
+  ["POST", /^\/api\/work-items\/(\d+)\/budget$/, async (c) => {
+    await requireWorkItem(c.actor, num(c.p[0]), support(c));
+    await q(pool, "UPDATE work_items SET budget_usd = $2, updated_at = now() WHERE id = $1", [num(c.p[0]), budgetOf(c.body)]);
+    return must(await workItemCost(num(c.p[0])), "work item");
+  }],
   ["POST", /^\/api\/work-items\/(\d+)\/analyze$/, async (c) => (await requireWorkItem(c.actor, num(c.p[0]), support(c)), startRun({ definitionKey: "work-item-analysis", workItemId: num(c.p[0]), outputLocale: localeOf(c.body), agentProvider: providerOf(c.body), ownerId: c.actor.id }))],
 
   // ------------------------------------------------------------ workflow definitions
@@ -271,7 +285,7 @@ export const routes: Route[] = [
   ["GET", /^\/api\/tools$/, ({ url }) => listTools(url.searchParams.get("q") ?? undefined, { mode: "coding" }).map((t) => ({ ...t, ...describeTool(t.name) }))],
   ["GET", /^\/api\/runs$/, async (c) => {
     if (support(c)) await audit(c.actor.id, "support.list", "run", "*");
-    return listRuns({ status: c.url.searchParams.get("status") ?? undefined, workItemId: c.url.searchParams.get("work_item_id") ? Number(c.url.searchParams.get("work_item_id")) : undefined, ...mine(c) });
+    return withCosts(await listRuns({ status: c.url.searchParams.get("status") ?? undefined, workItemId: c.url.searchParams.get("work_item_id") ? Number(c.url.searchParams.get("work_item_id")) : undefined, ...mine(c) }), "run");
   }],
   [
     "POST",
@@ -306,6 +320,13 @@ export const routes: Route[] = [
   ["GET", /^\/api\/runs\/(\d+)\/events$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runEvents.list(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0)))],
   ["POST", /^\/api\/runs\/(\d+)\/start$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), startPendingRun(num(c.p[0]), c.body.repositories, !!c.body.step_mode))],
   ["GET", /^\/api\/runs\/(\d+)\/changes$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runChanges(num(c.p[0])))],
+  // Cost: totals, tokens, by step / model, wasted cost and budget; budget_usd null clears the run's own budget.
+  ["GET", /^\/api\/runs\/(\d+)\/cost$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runCost(num(c.p[0])))],
+  ["POST", /^\/api\/runs\/(\d+)\/budget$/, async (c) => {
+    await requireRun(c.actor, num(c.p[0]), support(c));
+    await q(pool, "UPDATE workflow_runs SET budget_usd = $2, updated_at = now() WHERE id = $1", [num(c.p[0]), budgetOf(c.body)]);
+    return runCost(num(c.p[0]));
+  }],
   ["GET", /^\/api\/runs\/(\d+)\/summary$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), getRunSummary(num(c.p[0]), c.url.searchParams.get("refresh") === "1"))],
   ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), stepDetail(num(c.p[0]), c.p[1]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/run$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runStepNow(num(c.p[0]), c.p[1]))],
