@@ -9,7 +9,10 @@
  */
 
 const INTENT = /(làm tiếp|tiếp tục|dùng lại|không\s+(checkout|tạo|cắt)[^.\n]*branch\s+mới|continue|keep working|reuse|work on (the )?existing|based on (the )?existing)/i;
-const BRANCH = /\b(?:branch|nhánh)\s+[`'"“]?([A-Za-z0-9][A-Za-z0-9._\/-]{2,80})/gi;
+const KEYWORD = /\b(?:branch|nhánh)\b/gi;
+/** Words that follow "branch" in prose but are never the branch itself. */
+const FILLER = /^(task|cha|con|của|gốc|mẹ|parent|child|base|the|this|that|current|hiện|tại|này|đó|từ|from|of|là|tên|name|named|existing|có|sẵn)$/i;
+const BRANCH_LIKE = /[\/_-]|\d/;
 
 export type BranchMap = Record<string, string>;
 
@@ -17,7 +20,20 @@ export function detectBranchDirectives(text: string, repoNames: string[], baseBr
   const out: BranchMap = {};
   for (const sentence of text.split(/[\n.!?;]+/)) {
     if (!INTENT.test(sentence)) continue;
-    const names = [...sentence.matchAll(BRANCH)].map((m) => m[1].replace(/[`'"”,)]+$/, "")).filter((b) => b !== baseBranch && !/^(mới|new|khác)$/i.test(b));
+    // Look at up to four words after "branch"/"nhánh" ("branch task cha: HSK-1", "nhánh của task HSK-1"): the first
+    // one that is quoted or looks like a branch name (separator or digit) wins; filler words are skipped.
+    const names = [...sentence.matchAll(KEYWORD)]
+      .flatMap((m) => {
+        const words = sentence.slice(m.index! + m[0].length).split(/\s+/).filter(Boolean).slice(0, 4);
+        for (const raw of words) {
+          const quoted = /^[`'"“]/.test(raw);
+          const w = raw.replace(/^[`'"“]+|[`'"”,:;.)]+$/g, "");
+          if (!w || FILLER.test(w)) continue;
+          if (/^[A-Za-z0-9][A-Za-z0-9._\/-]{2,80}$/.test(w) && (quoted || BRANCH_LIKE.test(w))) return [w];
+        }
+        return [];
+      })
+      .filter((b) => b !== baseBranch && !/^(mới|new|khác)$/i.test(b));
     if (!names.length) continue;
     const repos = repoNames.filter((r) => new RegExp(`(^|[^\\w-])${r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w-]|$)`, "i").test(sentence));
     for (const repo of repos.length ? repos : ["*"]) if (!out[repo]) out[repo] = names[0];

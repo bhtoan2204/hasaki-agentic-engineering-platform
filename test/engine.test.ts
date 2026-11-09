@@ -2374,3 +2374,16 @@ test("routing guard rails: HIGH_RISK refuses FAST, records the class; provider r
   assert.ok(perf.groups.every((g) => g.sample_ok === false));
   assert.ok(perf.leaders.every((l) => l.leader === null), "no provider is recommended below the minimum sample size");
 });
+
+test("run #53 regression: the branch is detected from 'branch task cha: <code>', and can be corrected before a worktree exists", async () => {
+  const { setRunBranches } = await import("../src/workflow/engine.ts");
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  const wi = await workItems.createManual({ title: "auto change stock API", description: "Tiếp tục từ branch task cha: HSK-OO04123R\n\nThêm một API ...", project: "OMS" });
+  const run = await startRun({ definitionKey: key, workItemId: wi.id, repositories: ["oms-api"], start: false });
+  assert.deepEqual((await getRun(run.id)).inputs.branches, { "*": "HSK-OO04123R" });
+  await assert.rejects(setRunBranches(run.id, { "*": "../evil" }, "dev"), /invalid branch name/);
+  const fixed = await setRunBranches(run.id, { "*": "HSK-OO04123S" }, "dev");
+  assert.deepEqual([fixed.inputs.branches, fixed.inputs.branches_source], [{ "*": "HSK-OO04123S" }, "set by dev"]);
+  await recordWorkspace(run.id, { repo: "oms-api", branch: "HSK-OO04123S", path: gitWorktree("oms-api", "HSK-OO04123S"), created_from: "test" });
+  await assert.rejects(setRunBranches(run.id, { "*": "other-1" }, "dev"), /worktree already prepared for oms-api/);
+});

@@ -9,6 +9,7 @@ import type pg from "pg";
 import { config } from "../config.ts";
 import { budgetsForRun } from "../report/cost.ts";
 import { executionPolicyVersions } from "../learning/policyVersions.ts";
+import { workspacesOf } from "../git/provider.ts";
 import { recordRunOutcome } from "../learning/outcomes.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
@@ -436,6 +437,38 @@ export async function startPendingRun(runId: number, repositoriesOverride?: stri
     if (stepMode) await setRunStatus(c, run, "PAUSED");
     await advance(c, runId, afterCommit);
     return;
+  });
+}
+
+/**
+ * Correct the existing-branch directive of a run (e.g. a wrongly detected branch name) before its worktree exists.
+ * `branches` = { repo | "*": branch }; an empty value removes the entry (the run then cuts its own branch). Repositories
+ * that already have a worktree keep their branch (changing it under a prepared worktree would be unsafe).
+ */
+export async function setRunBranches(runId: number, branches: unknown, by: string) {
+  return withTx(async (c) => {
+    const run = await lockRun(c, runId);
+    if (run.status === "COMPLETED" || run.status === "CANCELED") throw new EngineError(`run ${runId} is ${run.status}`, 409);
+    const raw = branches && typeof branches === "object" && !Array.isArray(branches) ? (branches as Record<string, unknown>) : null;
+    if (!raw) throw new EngineError("branches must be an object { repo | \"*\": branch }", 400);
+    let next: Record<string, string> | null;
+    try {
+      next = normalizeBranchMap(Object.fromEntries(Object.entries(raw).filter(([, v]) => String(v ?? "").trim())), config.baseBranch);
+    } catch (e) {
+      throw new EngineError((e as Error).message, 400);
+    }
+    const prepared = (await workspacesOf(run.id, c)).map((w) => w.repo);
+    const touched = Object.keys(raw).flatMap((k) => (k === "*" ? prepared : prepared.includes(k) ? [k] : []));
+    if (touched.length) throw new EngineError(`worktree already prepared for ${touched.join(", ")}: its branch cannot change in this run`, 409);
+    const inputs = { ...(run.inputs ?? {}) } as Record<string, any>;
+    if (next) Object.assign(inputs, { branches: next, branches_source: `set by ${by}` });
+    else {
+      delete inputs.branches;
+      delete inputs.branches_source;
+    }
+    await q(c, "UPDATE workflow_runs SET inputs = $2, updated_at = now() WHERE id = $1", [run.id, json(inputs)]);
+    await runEvents.add(c, run.id, "system", `existing-branch directive ${next ? `set to ${JSON.stringify(next)}` : "removed"} by ${by}`);
+    return getRun(run.id, c);
   });
 }
 

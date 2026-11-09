@@ -1360,6 +1360,15 @@ const agentExecutor: StepExecutor = {
         };
     }
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
+    // A coding step that produced nothing — no submitted result AND no workspace — is blocked, not done (e.g. the
+    // branch it must continue from does not exist). Completing it would send an empty diff to review and burn repair
+    // rounds; a legitimate "no change needed" outcome is reported through submit_result.
+    if (mode === "coding" && !independent && !submitted && !(await workspacesOf(ctx.run.id).catch(() => [])).length)
+      return {
+        kind: "failed",
+        error: `coding step ended without a submitted result and without a workspace (no code was changed): ${String(result.text ?? "").replace(/\s+/g, " ").slice(0, 600)}`,
+        retryable: false,
+      };
 
     // Evidence-gated investigation: normalize claims/root cause/fix risk (only ever lowers certainty, notes every change).
     const role = independent ? null : evidenceRole(ctx.step.config);

@@ -2,7 +2,7 @@ import { createBinding, disconnect as disconnectTelegram, savePreferences } from
 import { evaluationAnalytics } from "../eval/analytics.ts";
 import { createRecommendation } from "../eval/recommendations.ts";
 import { saveOptimizationPolicy, optimizationPolicies } from "../eval/optimization.ts";
-import { requestProviderHandoff, resumeProviderHandoff, providerHandoffOptions } from "../workflow/engine.ts";
+import { setRunBranches, requestProviderHandoff, resumeProviderHandoff, providerHandoffOptions } from "../workflow/engine.ts";
 import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext } from "./agentContext.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
@@ -347,6 +347,7 @@ export const routes: Route[] = [
   ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), stepDetail(num(c.p[0]), c.p[1]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/run$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runStepNow(num(c.p[0]), c.p[1]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/stop$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), stopStep(num(c.p[0]), c.p[1], c.body.reason || "stopped by user"))],
+  ["POST", /^\/api\/runs\/(\d+)\/branches$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), setRunBranches(num(c.p[0]), c.body.branches, c.actor.username))],
   ["POST", /^\/api\/runs\/(\d+)\/pause$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), pauseRun(num(c.p[0])))],
   ["POST", /^\/api\/runs\/(\d+)\/resume$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), resumeRun(num(c.p[0])))],
   ["POST", /^\/api\/runs\/(\d+)\/cancel$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), cancelRun(num(c.p[0]), c.body.reason || "canceled by user"))],

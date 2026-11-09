@@ -341,6 +341,19 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     <GitBranch size={12} />{" "}
                     {repo === "*" ? t("rv.allRepos") : repo} →{" "}
                     <span className="mono">{b}</span> ({t("rv.continueOn")})
+                    {run.status !== "COMPLETED" && run.status !== "CANCELED" && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        title={t("rv.editBranch")}
+                        onClick={() => {
+                          const next = prompt(t("rv.editBranchPrompt", { repo: repo === "*" ? t("rv.allRepos") : repo }), b);
+                          if (next !== null && next.trim() !== b) void runAction("branches", { branches: { ...(run.inputs?.branches ?? {}), [repo]: next.trim() } });
+                        }}
+                      >
+                        ✎
+                      </button>
+                    )}
                   </span>
                 ))}
                 {run.work_item && (
