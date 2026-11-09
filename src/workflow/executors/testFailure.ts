@@ -6,6 +6,7 @@ import type { ExecResult } from "../types.ts";
 import { languagePolicy, outputLocale, type OutputLocale } from "../../agent/language.ts";
 import { agentProvider, type AgentProvider } from "../../agent/provider.ts";
 import { completeForRun } from "../../agent/complete.ts";
+import { TEST_POLICY } from "../templates.ts";
 
 /**
  * Human-in-the-loop handling of a failed test step (after automatic retries are exhausted):
@@ -185,7 +186,9 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
         languagePolicy(locale),
         "Explain this test failure to a developer briefly (max 5 sentences): what failed, based on which evidence",
         "(cite test names / log lines), and the suggested next action. Respect the given categories: never call a failure",
-        "pre-existing unless its category is pre_existing. Reply JSON only: {\"text\": \"...\", \"suggestion\": \"...\"}.",
+        "pre-existing unless its category is pre_existing. When a failure comes from a test reaching a real DB, Elasticsearch or other",
+        "remote infrastructure, suggest “Fix then retest” so the test is rewritten with mocks or deleted, not a plain rerun.",
+        "Reply JSON only: {\"text\": \"...\", \"suggestion\": \"...\"}.",
         "<untrusted_input source=\"test_output\">",
         compact(d),
         "</untrusted_input>",
@@ -261,8 +264,8 @@ export async function askAboutFailure(ctx: ExecutionContext, input: Parameters<t
       by: "rules",
       text: d.summary,
       suggestion: locale === "en"
-        ? d.counts.new ? "Read the logs of the new failures, then choose “Fix then retest” with specific instructions." : d.all_pre_existing ? "Every failure exists on the baseline; you can continue with an exception if you confirm it." : "Check the environment (DB/network), then rerun."
-        : d.counts.new ? "Xem log các lỗi mới, rồi chọn “Sửa rồi test lại” với chỉ dẫn cụ thể." : d.all_pre_existing ? "Các lỗi đều có trên baseline; có thể tiếp tục với ngoại lệ nếu bạn xác nhận." : "Kiểm tra môi trường (DB/network) rồi chạy lại.",
+        ? d.counts.new ? "Read the logs of the new failures, then choose “Fix then retest” with specific instructions." : d.all_pre_existing ? "Every failure exists on the baseline; you can continue with an exception if you confirm it." : "These tests reach real DB/ES/network. Choose “Fix then retest” so the coding step rewrites them with mocks or deletes them — unit tests must not depend on remote infrastructure."
+        : d.counts.new ? "Xem log các lỗi mới, rồi chọn “Sửa rồi test lại” với chỉ dẫn cụ thể." : d.all_pre_existing ? "Các lỗi đều có trên baseline; có thể tiếp tục với ngoại lệ nếu bạn xác nhận." : "Các test này gọi thẳng DB/ES/network thật. Chọn “Sửa rồi test lại” để bước code viết lại bằng mock hoặc xóa chúng — unit test không được phụ thuộc infra từ xa.",
     };
   await ctx.log("system", d.summary, { diagnosis: d.counts });
   return {
@@ -334,6 +337,7 @@ export async function handleDecision(ctx: ExecutionContext, d: Diagnosis, fromAt
         `Tests failed in "${ctx.step.name}". Developer instructions: ${p.instructions}`,
         `Failure diagnosis: ${d.summary}`,
         ...d.failures.filter((f) => f.category !== "pre_existing").slice(0, 10).map((f) => `- [${f.category}] ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}: ${f.log.split("\n").slice(-6).join(" | ").slice(0, 400)}`),
+        TEST_POLICY,
       ].join("\n");
       return { result: { kind: "reexecute", target, feedback, output: { test_status: "FAILED", passed: false, diagnosis: d, decision: { ...decision, target } } }, decision };
     }

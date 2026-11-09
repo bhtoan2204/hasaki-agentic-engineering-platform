@@ -18,6 +18,18 @@ else
   echo "no test runner detected"
 fi`;
 
+/**
+ * Test policy for every coding step: unit tests validate business flow only. A test that reaches a real DB, Elasticsearch,
+ * Redis, Kafka, queue or HTTP service that is not local to the test process hangs or fails on whoever runs it, so the
+ * agent rewrites it against a mock/fake/in-memory double, or deletes it when it only exercised the infrastructure.
+ */
+export const TEST_POLICY =
+  "Test policy: unit tests validate business flow only. A test (new, changed, or one in a package you run) that connects to a real database, " +
+  "Elasticsearch, Redis, Kafka, a queue or any HTTP/gRPC service that is not started locally by the test itself must be fixed or removed: " +
+  "rewrite it to use mocks, fakes or in-memory doubles behind the existing interfaces so it asserts the business logic, or delete it when " +
+  "it only exercised the infrastructure and has no business assertion left. Never add a new test that needs remote infrastructure. " +
+  "List every rewritten or deleted test with the reason under verification.";
+
 const ANALYZE = {
   instructions:
     "Analyse the engineering request. Restate the goal, list functional requirements, acceptance criteria, " +
@@ -38,7 +50,8 @@ const IMPLEMENT = {
     "Implement the approved plan. Call prepare_branch for each repository before editing and edit ONLY inside the returned " +
     "worktree paths. Make the smallest correct change, run the relevant build/tests, commit with the platform commit convention. " +
     "Do not push: a later workflow step opens the pull request. Finish by calling submit_result with " +
-    "{ summary, pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }.",
+    "{ summary, pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }. " +
+    TEST_POLICY,
   output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }",
 };
 
@@ -52,7 +65,8 @@ const FIX_FROM_REVIEW = {
     "you change: when the run reviewed a branch, you get that branch and commit on top of it (never rewrite its history). " +
     "Make the smallest correct change, add or update a test where it proves the fix, run the relevant build/tests, commit with " +
     "the platform commit convention. Do not push: a later step opens the pull request. Finish by calling submit_result with " +
-    "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }.",
+    "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }. " +
+    TEST_POLICY,
   output_contract: "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { [repo]: { title, summary, decisions } }, verification }",
 };
 
