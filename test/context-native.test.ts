@@ -157,6 +157,49 @@ test("mandatory constraints cannot be silently shortened when budget is exhauste
   };
   assert.throws(() => budgetContextPack(base, [entry]), ContextBudgetError);
 });
+test("many omitted optional entries never push a small required set over the budget", () => {
+  // Regression: the omitted index was trimmed to <= budget, then +8 was added and the pack was rejected.
+  const optional: ContextEntry[] = Array.from({ length: 60 }, (_, i) => ({
+    id: `knowledge:doc-${i}:v1`,
+    section: "knowledge",
+    trust: "curated_rule",
+    required: false,
+    priority: 80,
+    body: JSON.stringify({ content: "lorem ipsum ".repeat(2000 + i) }),
+    provenance: source(`knowledge:doc-${i}`, 1, null, "shared", "GLOBAL scope; relevance"),
+  }));
+  const request: ContextEntry = {
+    id: "request",
+    section: "requirements",
+    trust: "untrusted_evidence",
+    required: true,
+    priority: 1000,
+    body: JSON.stringify({ title: "Small request" }),
+    provenance: source("snapshot:1:request", "h", null, "owner", "exact run request"),
+  };
+  for (let budget = 2000; budget <= 2600; budget++) {
+    const pack = budgetContextPack(
+      {
+        version: 1,
+        run_id: 1,
+        step_id: 1,
+        attempt_id: 1,
+        owner_id: 1,
+        snapshot_id: 1,
+        created_at: new Date().toISOString(),
+        budget_tokens: budget,
+        token_measurement: "character_estimate_not_provider_usage",
+        parent_pack_ids: [],
+        retrieval_calls: 0,
+        retrieval_failures: 0,
+        preparation_ms: 0,
+      },
+      [request, ...optional],
+    );
+    assert.ok(pack.estimated_tokens <= budget, `budget ${budget}: ${pack.estimated_tokens}`);
+    assert.ok(pack.entries.some((e) => e.id === "request"));
+  }
+});
 test("pinned private knowledge from another owner is not resolved on reexecution", async () => {
   const { ctx } = await live("claude", { reexecute: { skills: [{ key: "foreign-rule", version: 1 }] } });
   assert.ok(!ctx.context.knowledge.some((k) => k.key === "foreign-rule"));

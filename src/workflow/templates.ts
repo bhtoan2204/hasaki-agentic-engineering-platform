@@ -61,7 +61,7 @@ const REVIEW = {
   max_repairs: 2,
   instructions:
     "Review the diff of every workspace branch against origin/$BASE_BRANCH (git diff, read-only). Check correctness, the " +
-    "approved plan, coding standards and security policies in your context. For every finding include a precise file/line, " +
+    "approved plan or fix proposal, coding standards and security policies in your context. For every finding include a precise file/line, " +
     "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. Report findings; do not modify code.",
   output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
   workspace_read: true,
@@ -121,7 +121,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "bug-investigation",
     spec: {
       name: "Bug Investigation",
-      description: "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → PR",
+      description: "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → code review → PR",
       feedback_step: "implement",
       steps: [
         {
@@ -166,7 +166,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
         },
         { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_fix"], config: IMPLEMENT, max_attempts: 2 },
         { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
-        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["regression_test"], config: { mode: "approval", content_from: "implement" } },
+        { key: "review", type: "agent", name: "Code Review", depends_on: ["regression_test"], config: REVIEW },
+        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["review"], config: { mode: "approval", content_from: "implement" } },
       ],
     },
   },

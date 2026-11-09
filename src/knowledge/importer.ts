@@ -306,11 +306,14 @@ export async function scanRepositories(): Promise<{ candidates: ImportCandidate[
 }
 
 /** Create/update registry items from the scan. Unchanged files create no new version. */
-export async function importFromRepositories(opts: { dryRun?: boolean } = {}): Promise<ImportReport> {
-  const { candidates, skipped, scanned } = await scanRepositories();
+export async function importFromRepositories(opts: { dryRun?: boolean; only?: string } = {}): Promise<ImportReport> {
+  const scan = await scanRepositories();
+  const { skipped, scanned } = scan;
+  // `only`: import just the items whose key starts with this prefix; nothing else is touched (no retirement pass).
+  const candidates = opts.only ? scan.candidates.filter((c) => c.key.startsWith(opts.only!)) : scan.candidates;
   const report: ImportReport = { candidates: [], skipped, created: 0, updated: 0, unchanged: 0, retired: 0, conflicts: 0 };
   // Repositories without a description get the opening paragraph of their CLAUDE.md (improves discovery ranking).
-  if (!opts.dryRun)
+  if (!opts.dryRun && !opts.only)
     for (const c of candidates.filter((x) => x.category === "repository_convention" && x.scope_type === "REPOSITORY" && /\.claude$/.test(x.key))) {
       const repo = await repositories.get(c.scope_ref!);
       const desc = String((c.metadata as any)?.description ?? "").slice(0, 400);
@@ -378,6 +381,7 @@ export async function importFromRepositories(opts: { dryRun?: boolean } = {}): P
 
   // Retire imported items whose source files are gone from repositories that were scanned (moved/deleted docs).
   // Only items owned by the import (metadata.imported_from_repository) and only when every source repo was on disk.
+  if (opts.only) return report;
   const produced = new Set(candidates.map((c) => c.key));
   const scannedSet = new Set(scanned);
   for (const it of (await knowledge.list()) as any[]) {

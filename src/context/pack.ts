@@ -62,8 +62,10 @@ export function budgetContextPack(
   const optional = candidates
     .filter((e) => !e.required)
     .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
+  // Same measure as the final estimate below, so a pack that passes these checks cannot fail at the end.
+  const finalEstimate = () => estimateTokens(JSON.stringify(pack)) + 8;
   pack.entries = required;
-  if (estimateTokens(JSON.stringify(pack)) > base.budget_tokens)
+  if (finalEstimate() > base.budget_tokens)
     throw new ContextBudgetError(
       "Required requirements, decisions and enforced rules exceed context_tokens. Increase the context budget or explicitly narrow the requirements; no provider was called.",
     );
@@ -79,8 +81,8 @@ export function budgetContextPack(
     }
   }
   // The list of omissions is also bounded. Constraints are in the complete required entries, not in this index.
-  while (estimateTokens(JSON.stringify(pack)) > base.budget_tokens && pack.omitted.length) pack.omitted.pop();
-  pack.estimated_tokens = estimateTokens(JSON.stringify(pack)) + 8;
+  while (finalEstimate() > base.budget_tokens && pack.omitted.length) pack.omitted.pop();
+  pack.estimated_tokens = finalEstimate();
   if (pack.estimated_tokens > base.budget_tokens)
     throw new ContextBudgetError("Context metadata exceeds the configured token budget");
   return pack;
