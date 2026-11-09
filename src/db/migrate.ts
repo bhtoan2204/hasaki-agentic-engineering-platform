@@ -76,7 +76,7 @@ export async function migrate(
     }
     return done;
   } finally {
-    await c.query("SELECT pg_advisory_unlock($1)", [LOCK_ID]).catch(() => {});
+    await c.query("SELECT pg_advisory_unlock($1)", [LOCK_ID]).catch(() => { });
     c.release();
   }
 }

@@ -103,7 +103,7 @@ export async function auditToolDenial(env: PlatformToolEnv, name: string, error:
     `INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail)
     SELECT id,'platform_tool.denied','attempt',$2,$3 FROM users WHERE id=$1`,
     [env.ownerId ?? null, String(env.attemptId), JSON.stringify({ tool: name, reason: safeDiagnostics(error) })],
-  ).catch(() => {});
+  ).catch(() => { });
 }
 export async function postClarification(
   env: PlatformToolEnv,

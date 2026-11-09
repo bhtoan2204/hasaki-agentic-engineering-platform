@@ -139,11 +139,11 @@ function killAntigravity(child: ChildProcess) {
   try {
     process.kill(-child.pid, "SIGTERM");
   } catch {
-    try { child.kill("SIGTERM"); } catch {}
+    try { child.kill("SIGTERM"); } catch { }
   }
   const force = setTimeout(() => {
     if (child.exitCode !== null || child.signalCode !== null) return;
-    try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} }
+    try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { } }
   }, 5000);
   force.unref();
   child.once("close", () => clearTimeout(force));
@@ -294,7 +294,7 @@ export async function antigravityAgentTurn(
     for (const w of workspaces) {
       try {
         excludeFromGit(join(w.path, ".git"));
-      } catch {}
+      } catch { }
     }
 
     const additionalDirs = workspaces
@@ -360,7 +360,7 @@ export async function antigravityAgentTurn(
             model,
             "antigravity",
           ],
-        ).catch(() => {});
+        ).catch(() => { });
       }
 
       if (ev.type === "result") {
@@ -601,7 +601,7 @@ export async function antigravityComplete(
     stderr = (stderr + chunk.toString("utf8")).slice(-16000);
   });
 
-  child.once("error", () => {});
+  child.once("error", () => { });
   const writePromise = writeAntigravityPrompt(child, prompt, opts?.signal).catch((error) => {
     if (!opts?.signal?.aborted && !timedOut) onAbort();
     return error as Error;
@@ -629,7 +629,7 @@ export async function antigravityComplete(
   if (exitCode !== 0) {
     throw new Error(
       redactSecrets(stderr.trim()) ||
-        `Antigravity auxiliary completion failed with exit code ${exitCode}`,
+      `Antigravity auxiliary completion failed with exit code ${exitCode}`,
     );
   }
 

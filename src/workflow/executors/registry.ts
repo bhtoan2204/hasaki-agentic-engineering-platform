@@ -79,13 +79,17 @@ export function makeContext(base: Omit<ExecutionContext, "log" | "artifact" | "a
       for (const [key, value] of Object.entries(m)) {
         const v = value as any;
         if (v && typeof v === "object" && typeof v.provider === "string" && ("tokens" in v || "cost_usd" in v)) {
-          auxiliary[`aux:${key}:${v.telemetry_id ?? "snapshot"}`] = { provider: v.provider, model: v.model ?? null, tokens: v.tokens ?? null,
-            reported_cost_usd: v.cost_usd ?? null, provider_execution_ms: v.provider_execution_ms ?? null, complete: true };
+          auxiliary[`aux:${key}:${v.telemetry_id ?? "snapshot"}`] = {
+            provider: v.provider, model: v.model ?? null, tokens: v.tokens ?? null,
+            reported_cost_usd: v.cost_usd ?? null, provider_execution_ms: v.provider_execution_ms ?? null, complete: true
+          };
         }
       }
       if (!hasProviderSessions && typeof m.provider === "string" && ("tokens" in m || "cost_usd" in m)) {
-        auxiliary[`executor:${m.telemetry_id ?? "snapshot"}`] = { provider: m.provider, model: m.model ?? null, tokens: m.tokens ?? null,
-          reported_cost_usd: m.cost_usd ?? null, provider_execution_ms: m.provider_execution_ms ?? null, complete: true };
+        auxiliary[`executor:${m.telemetry_id ?? "snapshot"}`] = {
+          provider: m.provider, model: m.model ?? null, tokens: m.tokens ?? null,
+          reported_cost_usd: m.cost_usd ?? null, provider_execution_ms: m.provider_execution_ms ?? null, complete: true
+        };
       }
       if (Object.keys(auxiliary).length) m = { ...m, provider_sessions: { ...(m.provider_sessions as object ?? {}), ...auxiliary } };
       await retryTransient(() => q(pool, `UPDATE workflow_step_attempts a SET metrics = COALESCE(a.metrics, '{}'::jsonb) || $2::jsonb ||

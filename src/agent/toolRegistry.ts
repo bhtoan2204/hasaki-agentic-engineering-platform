@@ -112,7 +112,7 @@ export function registerBuiltinTools() {
     available: () => codeIntelligenceEnabled() ? true : "code intelligence disabled",
     handler: async (args, ctx) => {
       const scope = { repositories: args.repositories, allowed: ctx.allowedRepositories, runId: ctx.runId };
-      switch(args.operation) {
+      switch (args.operation) {
         case "definitions": return findDefinitions(args.query, scope);
         case "references": return findReferences(args.query, scope);
         case "dependencies": return findDependencies(args.query, scope, args.depth);

@@ -157,10 +157,10 @@ export async function indexRepository(
       );
       const sources = pending.length
         ? await readBlobs(
-            scope.primary,
-            pending.map((f) => f.blob),
-            signal,
-          )
+          scope.primary,
+          pending.map((f) => f.blob),
+          signal,
+        )
         : [];
       const ids = await extractionBatch(
         pending.map((f, i) => ({ path: f.path, source: sources[i] })),

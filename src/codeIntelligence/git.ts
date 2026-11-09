@@ -22,7 +22,7 @@ export async function git(root: string, args: string[], signal?: AbortSignal) {
 }
 export const languageOf = (p: string) =>
   ({ go: "go", ts: "typescript", tsx: "tsx", proto: "proto", sql: "sql" })[
-    p.split(".").pop() ?? ""
+  p.split(".").pop() ?? ""
   ];
 export function eligible(p: string) {
   const parts = p.split("/");

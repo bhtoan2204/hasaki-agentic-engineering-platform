@@ -110,11 +110,11 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
   const reexec = step.pending_input?.reexecute || step.pending_input?.feedback;
   const previous_attempt = reexec
     ? ((await one(
-        c,
-        `SELECT number, generation, status, output, error FROM workflow_step_attempts
+      c,
+      `SELECT number, generation, status, output, error FROM workflow_step_attempts
           WHERE step_id = $1 AND generation < $2 AND (output IS NOT NULL OR error IS NOT NULL) ORDER BY number DESC LIMIT 1`,
-        [step.id, step.generation],
-      )) ?? null)
+      [step.id, step.generation],
+    )) ?? null)
     : null;
   return {
     previous_attempt,

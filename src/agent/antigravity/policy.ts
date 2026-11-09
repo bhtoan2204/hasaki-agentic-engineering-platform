@@ -184,7 +184,7 @@ export function excludeFromGit(gitDir: string) {
   let cur = "";
   try {
     cur = readFileSync(exclude, "utf8");
-  } catch {}
+  } catch { }
   const lines = [".agents/hooks.json", ".agents/mcp_config.json"];
   let added = false;
   for (const line of lines) {

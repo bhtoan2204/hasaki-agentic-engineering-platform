@@ -65,13 +65,13 @@ export function summarizeEval(rows: EvalRow[]) {
       ),
       verifier: judged.length
         ? {
-            judged: judged.length,
-            accuracy_pct: pct(truePass + trueCatch, judged.length),
-            false_pass: falsePass,
-            false_alarm: falseAlarm,
-            true_pass: truePass,
-            true_catch: trueCatch,
-          }
+          judged: judged.length,
+          accuracy_pct: pct(truePass + trueCatch, judged.length),
+          false_pass: falsePass,
+          false_alarm: falseAlarm,
+          true_pass: truePass,
+          true_catch: trueCatch,
+        }
         : null,
       repair_success_pct: pct(
         repaired.filter((r) => r.correct).length,

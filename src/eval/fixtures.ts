@@ -84,7 +84,7 @@ export async function materializeSuite(): Promise<BenchmarkSuite> {
     try {
       await access(join(root, ".git"));
       existing = true;
-    } catch {}
+    } catch { }
     if (!existing) {
       await fixtureGit(root, [
         "init",

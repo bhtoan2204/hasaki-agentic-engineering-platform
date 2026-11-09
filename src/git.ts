@@ -86,7 +86,7 @@ export async function prepareBranch(code: string, repo: string, branch = code, r
     if (mainBranch === branch) return { repo, branch, path: repoPath, createdFrom: "developer's own checkout" };
     await git(repoPath, "worktree", "add", wt, branch);
     // Continuing an existing branch: catch up with origin when the local copy is only behind (never rewrites history).
-    if (opts.mustExist && (await refExists(repoPath, `refs/remotes/origin/${branch}`))) await git(wt, "merge", "--ff-only", `origin/${branch}`).catch(() => {});
+    if (opts.mustExist && (await refExists(repoPath, `refs/remotes/origin/${branch}`))) await git(wt, "merge", "--ff-only", `origin/${branch}`).catch(() => { });
     return { repo, branch, path: wt, createdFrom: "existing local branch" };
   }
   if (await refExists(repoPath, `refs/remotes/origin/${branch}`)) {

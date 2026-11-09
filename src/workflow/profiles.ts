@@ -103,7 +103,7 @@ function removeStep(steps: StepSpec[], key: string): StepSpec[] {
  * Resolve the execution graph for a profile. Returns the original spec (same object) when nothing changes; throws
  * `ProfileNotApplicable` when FAST would break the workflow (the caller then falls back to STANDARD).
  */
-export class ProfileNotApplicable extends Error {}
+export class ProfileNotApplicable extends Error { }
 
 export function applyProfile(spec: WorkflowSpec, profile: Profile): { spec: WorkflowSpec; changes: ProfileChange[] } {
   const changes: ProfileChange[] = [];

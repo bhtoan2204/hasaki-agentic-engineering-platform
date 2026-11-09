@@ -65,8 +65,8 @@ try {
   );
   assert.ok(
     !applied ||
-      applied.checksum ===
-        loadMigrations().find((m) => m.version === 26)!.checksum,
+    applied.checksum ===
+    loadMigrations().find((m) => m.version === 26)!.checksum,
     "Migration checksum mismatch",
   );
   report.migrations = await migrate();
@@ -327,12 +327,12 @@ try {
       pool,
       "UPDATE code_intelligence.runs SET status='canceled',fencing_token=fencing_token+1,updated_at=now() WHERE instance_id=$1 AND run_id=ANY($2::bigint[]) AND status IN ('queued','running')",
       [config.instanceId, created.map((w) => w.run)],
-    ).catch(() => {});
+    ).catch(() => { });
   for (const w of created) {
     await git(w.root, ["worktree", "remove", "--force", w.path]).catch(
-      () => {},
+      () => { },
     );
-    await cancelRun(w.run).catch(() => {});
+    await cancelRun(w.run).catch(() => { });
   }
   await heartbeat?.stop();
   await pool.end();

@@ -169,7 +169,7 @@ const MAX_RESULT_CHARS = 30_000;
 const cap = (t: string) =>
   t.length > MAX_RESULT_CHARS
     ? t.slice(0, MAX_RESULT_CHARS) +
-      `\n… (${t.length - MAX_RESULT_CHARS} more chars)`
+    `\n… (${t.length - MAX_RESULT_CHARS} more chars)`
     : t;
 
 function toolResultText(content: unknown): string {
@@ -501,15 +501,15 @@ const agentExecutor: StepExecutor = {
       const cap =
         provider === "codex"
           ? await codexCapabilities(false, {
-              model: effective.model ?? "",
-              effort: effective.reasoning_effort ?? "",
-            })
+            model: effective.model ?? "",
+            effort: effective.reasoning_effort ?? "",
+          })
           : provider === "cursor"
             ? await cursorCapabilities()
             : await antigravityCapabilities(false, {
-                model: effective.model ?? "",
-                effort: effective.reasoning_effort ?? "",
-              });
+              model: effective.model ?? "",
+              effort: effective.reasoning_effort ?? "",
+            });
       if (!cap.ok)
         return {
           kind: "failed",
@@ -558,23 +558,23 @@ const agentExecutor: StepExecutor = {
     );
     const agents = delegation
       ? Object.fromEntries(
-          (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
-            .filter((n) => SUBAGENTS[n])
-            .map((n) => [
-              n,
-              {
-                ...SUBAGENTS[n],
-                prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`,
-                tools: [
-                  "Read",
-                  "Grep",
-                  "Glob",
-                  "Bash",
-                  ...SUBAGENT_PLATFORM_TOOLS,
-                ],
-              },
-            ]),
-        )
+        (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
+          .filter((n) => SUBAGENTS[n])
+          .map((n) => [
+            n,
+            {
+              ...SUBAGENTS[n],
+              prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`,
+              tools: [
+                "Read",
+                "Grep",
+                "Glob",
+                "Bash",
+                ...SUBAGENT_PLATFORM_TOOLS,
+              ],
+            },
+          ]),
+      )
       : undefined;
     // Each provider resolves its own model: a Claude model id is never sent to Cursor or Codex.
     const routed: { model: string; source: string; effort?: string } = {
@@ -658,21 +658,21 @@ const agentExecutor: StepExecutor = {
     }
     const files = ctx.input.work_item?.payload?.note_files
       ? await downloadAttachments(
-          workspaceKey(ctx.run.branch),
-          ctx.input.work_item.payload,
-          cwd,
-        )
+        workspaceKey(ctx.run.branch),
+        ctx.input.work_item.payload,
+        cwd,
+      )
       : [];
     const reexec = ctx.input.pending?.reexecute || ctx.input.pending?.feedback;
     const extras =
       mode === "coding" && (reexec || ctx.input.pending?.resume) && ws.length
         ? [
-            {
-              title:
-                "Current worktree state (inspect it first; never reset or discard these changes)",
-              body: await worktreeState(ws),
-            },
-          ]
+          {
+            title:
+              "Current worktree state (inspect it first; never reset or discard these changes)",
+            body: await worktreeState(ws),
+          },
+        ]
         : [];
     if (codeIntelligenceEnabled() && !independent && !ctx.context.contextPack) {
       try {
@@ -692,11 +692,11 @@ const agentExecutor: StepExecutor = {
           });
         await ctx
           .recordMetrics({ code_intelligence: code.metrics })
-          .catch(() => {});
+          .catch(() => { });
       } catch {
         await ctx
           .recordMetrics({ code_intelligence: { fallback_count: 1 } })
-          .catch(() => {});
+          .catch(() => { });
       }
     }
     if (evidence)
@@ -965,10 +965,10 @@ const agentExecutor: StepExecutor = {
             env: agentEnvironment(process.env, "claude"),
             ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
               ? {
-                  pathToClaudeCodeExecutable:
-                    process.env.CLAUDE_CODE_EXECUTABLE ||
-                    config.agent.claudeBin,
-                }
+                pathToClaudeCodeExecutable:
+                  process.env.CLAUDE_CODE_EXECUTABLE ||
+                  config.agent.claudeBin,
+              }
               : {}),
             additionalDirectories: [
               config.reposRoot,
@@ -977,13 +977,13 @@ const agentExecutor: StepExecutor = {
             resume: resumeId,
             ...(effective.reasoning_effort
               ? {
-                  effort: effective.reasoning_effort as
-                    | "low"
-                    | "medium"
-                    | "high"
-                    | "xhigh"
-                    | "max",
-                }
+                effort: effective.reasoning_effort as
+                  | "low"
+                  | "medium"
+                  | "high"
+                  | "xhigh"
+                  | "max",
+              }
               : {}),
             abortController: ac,
             model: routed.model || undefined,
@@ -1095,14 +1095,14 @@ const agentExecutor: StepExecutor = {
           metrics.cost_usd == null ? "unavailable" : "reported",
         ...(error
           ? {
-              normalized_failure_category:
-                providerSessions[sessionKey]?.normalized_failure_category &&
+            normalized_failure_category:
+              providerSessions[sessionKey]?.normalized_failure_category &&
                 providerSessions[sessionKey].normalized_failure_category !==
-                  "UNKNOWN"
-                  ? providerSessions[sessionKey].normalized_failure_category
-                  : normalizeProviderFailure(error),
-              diagnostics: safeDiagnostics(error),
-            }
+                "UNKNOWN"
+                ? providerSessions[sessionKey].normalized_failure_category
+                : normalizeProviderFailure(error),
+            diagnostics: safeDiagnostics(error),
+          }
           : {}),
       };
       await writeTelemetry({ provider_sessions: providerSessions });
@@ -1134,12 +1134,12 @@ const agentExecutor: StepExecutor = {
             metrics,
             t
               ? {
-                  input_tokens: t.input,
-                  output_tokens: t.output,
-                  cache_read_input_tokens: t.cache_read,
-                  cache_creation_input_tokens: t.cache_creation,
-                  reasoning_output_tokens: t.reasoning_output,
-                }
+                input_tokens: t.input,
+                output_tokens: t.output,
+                cache_read_input_tokens: t.cache_read,
+                cache_creation_input_tokens: t.cache_creation,
+                reasoning_output_tokens: t.reasoning_output,
+              }
               : null,
             session.reported_cost_usd,
           );
@@ -1218,24 +1218,24 @@ const agentExecutor: StepExecutor = {
         result = await run(
           resume
             ? buildUserPrompt(
-                ctx.input,
-                files,
-                await progressNotes(resume.fromAttempt),
-                ctx.context.upstream,
-                ctx.context.fileRefs,
-                extras,
-                ctx.context.contextPack,
-              )
+              ctx.input,
+              files,
+              await progressNotes(resume.fromAttempt),
+              ctx.context.upstream,
+              ctx.context.fileRefs,
+              extras,
+              ctx.context.contextPack,
+            )
             : freshPrompt(),
         );
       }
     } finally {
       if (codeIntelligenceEnabled())
         for (const w of await workspacesOf(ctx.run.id).catch(() => []))
-          await enqueueIndex(w.repo, ctx.run.id).catch(() => {});
+          await enqueueIndex(w.repo, ctx.run.id).catch(() => { });
       await ctx
         .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => {});
+        .catch(() => { });
     }
 
     // Verification rounds from before a pause (questions asked during a repair) keep counting against the budget.
@@ -1345,7 +1345,7 @@ const agentExecutor: StepExecutor = {
       };
       await ctx
         .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => {});
+        .catch(() => { });
       await ctx.log(
         "system",
         `independent verification: ${v.verdict}${v.findings.length ? ` (${v.findings.length} finding(s))` : ""}`,
@@ -1375,7 +1375,7 @@ const agentExecutor: StepExecutor = {
       };
       await ctx
         .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => {});
+        .catch(() => { });
       output = {
         ...output,
         verification: { outcome: "disabled", status: "disabled", passed: null },
@@ -1399,7 +1399,7 @@ const agentExecutor: StepExecutor = {
         };
         await ctx
           .recordMetrics(metrics as unknown as Record<string, unknown>)
-          .catch(() => {});
+          .catch(() => { });
         return {
           kind: "completed",
           output: {
@@ -1490,13 +1490,13 @@ const agentExecutor: StepExecutor = {
           submitted = undefined;
           let r: Awaited<ReturnType<typeof run>> | null = sid
             ? await run(msg, sid).catch((e) => {
-                if (ctx.signal.aborted) throw e;
-                return {
-                  isError: true,
-                  text: (e as Error).message,
-                  assistantTurns: 0,
-                };
-              })
+              if (ctx.signal.aborted) throw e;
+              return {
+                isError: true,
+                text: (e as Error).message,
+                assistantTurns: 0,
+              };
+            })
             : null;
           // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
           if (
@@ -1528,7 +1528,7 @@ const agentExecutor: StepExecutor = {
       metrics.verification = summary;
       await ctx
         .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => {});
+        .catch(() => { });
       if (loop.outcome === "canceled") throw new Error("verification canceled");
       if (loop.stop) return loop.stop;
       if (loop.outcome === "error")
@@ -1589,11 +1589,11 @@ export async function rankRepositoriesWithClaude(
     "Rank these repositories by how likely they must change for the engineering request. Use ONLY the listed repository names.",
     ...(project
       ? [
-          `The request belongs to project "${project}"; repositories of related projects are listed too because those projects integrate with it.`,
-        ]
+        `The request belongs to project "${project}"; repositories of related projects are listed too because those projects integrate with it.`,
+      ]
       : []),
     'Consider the whole flow across project boundaries: when the request names a system (e.g. "phía OMS") or the defect sits in a call between systems ' +
-      "(duplicate or missing calls, retries, wrong payloads), rank the caller/producer side as well as the callee — the fix is often on the side that initiates the call.",
+    "(duplicate or missing calls, retries, wrong payloads), rank the caller/producer side as well as the callee — the fix is often on the side that initiates the call.",
     'Reply with JSON only: [{"repo": "...", "score": 0-10, "reasons": ["why this repo is relevant"]}]. Each reason is natural language and follows the output language above.',
     "",
     "Repositories:",
@@ -1612,7 +1612,7 @@ export async function rankRepositoriesWithClaude(
     "</untrusted_input>",
   ].join("\n");
   const done = await completeForRun(ctx.run, prompt, ctx.signal);
-  await ctx.recordMetrics({ ranking: done.metrics }).catch(() => {});
+  await ctx.recordMetrics({ ranking: done.metrics }).catch(() => { });
   const out = done.text;
   const json = out.match(/\[[\s\S]*\]/)?.[0];
   if (!json) throw new Error("no JSON in ranking reply");
@@ -1637,8 +1637,8 @@ function codexEnvironmentNotes(mode: ToolMode): string {
   return [
     "## Execution environment (OpenAI Codex on the platform worker)",
     "- The platform tools are on the MCP server named `platform` (ask_user, post_update, submit_result, read_knowledge, search_knowledge, read_step_output, list_tools, describe_tool, call_tool" +
-      (mode === "coding" ? ", prepare_branch, commit_changes" : "") +
-      "). Where these instructions say mcp__platform__<tool>, call that tool on the `platform` server.",
+    (mode === "coding" ? ", prepare_branch, commit_changes" : "") +
+    "). Where these instructions say mcp__platform__<tool>, call that tool on the `platform` server.",
     "- Every command and file edit is checked by the platform before it runs; a denied call returns the reason. Do not retry a denied call in another form.",
     mode === "coding"
       ? "- You can write only inside the worktrees returned by prepare_branch. `.git` is read-only in your sandbox: do NOT run git add/commit; commit with the platform tool commit_changes (repo, message). The network is disabled."

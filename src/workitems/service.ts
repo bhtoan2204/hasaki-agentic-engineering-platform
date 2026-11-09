@@ -86,17 +86,17 @@ export const workItems = {
     ]);
     const legacy = wi.legacy_task_code
       ? {
-          questions: await q(
-            pool,
-            "SELECT * FROM questions WHERE task_code = $1 ORDER BY id",
-            [wi.legacy_task_code],
-          ),
-          events: await q(
-            pool,
-            "SELECT * FROM events WHERE task_code = $1 ORDER BY id DESC LIMIT 200",
-            [wi.legacy_task_code],
-          ),
-        }
+        questions: await q(
+          pool,
+          "SELECT * FROM questions WHERE task_code = $1 ORDER BY id",
+          [wi.legacy_task_code],
+        ),
+        events: await q(
+          pool,
+          "SELECT * FROM events WHERE task_code = $1 ORDER BY id DESC LIMIT 200",
+          [wi.legacy_task_code],
+        ),
+      }
       : null;
     return { ...wi, runs, pull_requests: prs, legacy };
   },

@@ -295,7 +295,7 @@ export async function runScan(trigger: "manual" | "schedule", now = new Date(), 
         );
         await q(c, `INSERT INTO prod_error_observations(scan_id,fingerprint,event_count,baseline_count,first_at,last_at,severity,hourly)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(scan_id,fingerprint) DO NOTHING`,
-          [scan.id,g.fingerprint,g.today_count,g.yesterday_count,g.first_at,g.last_at,g.severity,json(g.hourly)]);
+          [scan.id, g.fingerprint, g.today_count, g.yesterday_count, g.first_at, g.last_at, g.severity, json(g.hourly)]);
       }
     });
     const warnings = (r.messages ?? []).filter((m: string) => !/^INFO/.test(m)).join("; ") || null;

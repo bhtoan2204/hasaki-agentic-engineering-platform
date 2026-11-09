@@ -263,10 +263,10 @@ export function resolveStepAgent(
   const model = merged.model ?? routed.model ?? null;
   const reasoning_effort =
     merged.reasoning_effort === undefined &&
-    (provider === "codex" || provider === "antigravity")
+      (provider === "codex" || provider === "antigravity")
       ? (provider === "codex"
-          ? codexModelFor(legacy, profile).effort
-          : antigravityModelFor(legacy, profile).effort) || null
+        ? codexModelFor(legacy, profile).effort
+        : antigravityModelFor(legacy, profile).effort) || null
       : merged.reasoning_effort;
   validateAgentOptions(
     {

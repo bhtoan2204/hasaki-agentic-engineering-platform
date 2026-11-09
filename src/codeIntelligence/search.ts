@@ -103,7 +103,7 @@ export async function searchSymbols(
       const f = await fresh(repo, run, scope.provision === true);
       if (!f.index) {
         fallback_count++;
-        if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
+        if (scope.provision !== false) await enqueue(repo, run).catch(() => { });
         hits.push(
           ...(await searchCodeExact(
             terms[0],
@@ -133,7 +133,7 @@ export async function searchSymbols(
       const recheck = await fresh(repo, run, scope.provision === true);
       if (recheck.index?.id !== f.index.id) {
         fallback_count++;
-        if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
+        if (scope.provision !== false) await enqueue(repo, run).catch(() => { });
         continue;
       }
       if (!rows.length && !edges.length) {
@@ -195,7 +195,7 @@ export async function searchSymbols(
         (a, b) =>
           b.confidence - a.confidence ||
           Number(b.match_type === "qualified") -
-            Number(a.match_type === "qualified") ||
+          Number(a.match_type === "qualified") ||
           a.repository.localeCompare(b.repository) ||
           a.file_path.localeCompare(b.file_path) ||
           a.line_range[0] - b.line_range[0],
@@ -242,11 +242,11 @@ export async function findDependencies(
             f.index.id,
             direction === "in"
               ? [
-                  ...new Set([
-                    ...frontier,
-                    ...frontier.map((n) => n.split(".").pop()!),
-                  ]),
-                ]
+                ...new Set([
+                  ...frontier,
+                  ...frontier.map((n) => n.split(".").pop()!),
+                ]),
+              ]
               : frontier,
           ],
         );
@@ -403,21 +403,21 @@ export function applyEvidence(
       const bonus = Math.min(
         w.cap,
         (kinds.has("exact_symbol") ? w.exact : 0) +
-          (kinds.has("qualified") ? w.qualified : 0) +
-          (kinds.has("path") ? w.path : 0) +
-          (kinds.has("text") ? w.text : 0) +
-          (dependencyRepos.has(r.repo) || kinds.has("dependency")
-            ? w.dependency
-            : 0),
+        (kinds.has("qualified") ? w.qualified : 0) +
+        (kinds.has("path") ? w.path : 0) +
+        (kinds.has("text") ? w.text : 0) +
+        (dependencyRepos.has(r.repo) || kinds.has("dependency")
+          ? w.dependency
+          : 0),
       );
       return {
         ...r,
         score: r.score + bonus,
         reasons: bonus
           ? [
-              ...r.reasons,
-              `code evidence +${bonus}: ${[...kinds].sort().join(", ")}${dependencyRepos.has(r.repo) ? ", import/dependency candidate" : ""}`,
-            ]
+            ...r.reasons,
+            `code evidence +${bonus}: ${[...kinds].sort().join(", ")}${dependencyRepos.has(r.repo) ? ", import/dependency candidate" : ""}`,
+          ]
           : r.reasons,
       };
     })
@@ -524,7 +524,7 @@ export async function buildCodeContext(text: string, scope: SearchScope) {
     .slice(0, config.codeIntelligence.contextTokens * 4);
   return {
     body,
-    hits: primary.slice(0,10),
+    hits: primary.slice(0, 10),
     metrics: {
       search_latency: result.search_latency,
       context_latency: Date.now() - start,

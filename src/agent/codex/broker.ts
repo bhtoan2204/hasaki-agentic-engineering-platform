@@ -106,7 +106,7 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
   const server: Server = createServer((sock) => {
     sockets.add(sock);
     sock.on("close", () => sockets.delete(sock));
-    sock.on("error", () => {});
+    sock.on("error", () => { });
     let buf = "";
     sock.setEncoding("utf8");
     sock.on("data", (chunk: string) => {

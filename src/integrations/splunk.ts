@@ -61,7 +61,7 @@ async function call(method: "GET" | "POST", path: string, s: { cookie: string; f
   let json: any = null;
   try {
     json = text ? JSON.parse(text) : null;
-  } catch {}
+  } catch { }
   if (!res.ok) {
     const msg = json?.messages?.map((m: any) => m.text).join("; ") || text.slice(0, 300);
     throw new Error(`Splunk ${res.status}: ${msg}`);
@@ -82,7 +82,7 @@ export async function loadSplunkCookie() {
   try {
     const { cookie, formKey, user, roles } = JSON.parse(saved);
     login.current = { cookie, formKey, user, roles: roles ?? [], checkedAt: 0, valid: true };
-  } catch {}
+  } catch { }
 }
 
 /** Status; re-checks the session with Splunk at most once a minute (sessions expire after inactivity). */
@@ -155,7 +155,7 @@ async function searchJob(s: { cookie: string; formKey: string }, params: Record<
   const path = `/services/search/jobs/${encodeURIComponent(sid)}`;
   const deadline = Date.now() + (timeout + 30) * 1000;
   let messages: any[] = [];
-  for (;;) {
+  for (; ;) {
     const c = (await call("GET", `${path}?output_mode=json`, s, undefined, 30))?.entry?.[0]?.content ?? {};
     const state = String(c.dispatchState ?? "QUEUED");
     const done = c.isDone === true || c.isDone === "1" || state === "DONE";
@@ -164,7 +164,7 @@ async function searchJob(s: { cookie: string; formKey: string }, params: Record<
     if (state === "FAILED") throw new Error(`Splunk search lỗi: ${messages.map((m: any) => m.text ?? m).join("; ") || "FAILED"}`);
     if (done) break;
     if (Date.now() > deadline) {
-      await call("POST", `${path}/control`, s, { action: "cancel" }, 15).catch(() => {});
+      await call("POST", `${path}/control`, s, { action: "cancel" }, 15).catch(() => { });
       throw new Error(`Splunk search quá ${timeout}s, đã huỷ`);
     }
     await new Promise((r) => setTimeout(r, 1500));

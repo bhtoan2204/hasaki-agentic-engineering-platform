@@ -168,7 +168,7 @@ export function setTestFailureAdvisor(a: TestFailureAdvisor | null) {
 /** The run's provider answers (completeForRun): a Codex or Cursor run never asks Claude here. */
 async function askClaude(prompt: string, ctx?: ExecutionContext, provider: AgentProvider = "claude"): Promise<any> {
   const done = await completeForRun({ agent_provider: provider }, prompt, ctx?.signal);
-  if (ctx) await ctx.recordMetrics({ advisor: done.metrics, advisor_cost_usd: done.metrics.cost_usd }).catch(() => {});
+  if (ctx) await ctx.recordMetrics({ advisor: done.metrics, advisor_cost_usd: done.metrics.cost_usd }).catch(() => { });
   const out = done.text;
   const j = out.match(/\{[\s\S]*\}/)?.[0];
   if (!j) throw new Error("no JSON from advisor");

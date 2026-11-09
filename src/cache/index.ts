@@ -162,7 +162,7 @@ export async function startCacheInvalidation(connectionString = config.databaseU
     flushAllCaches();
     if (stopped) return;
     console.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
-    setTimeout(() => void startCacheInvalidation(connectionString).catch(() => {}), retryMs);
+    setTimeout(() => void startCacheInvalidation(connectionString).catch(() => { }), retryMs);
     retryMs = Math.min(30_000, retryMs * 2);
   };
   c.on("notification", (n) => n.channel === "cache_invalidate" && n.payload && invalidateTables([n.payload]));
@@ -178,7 +178,7 @@ export async function startCacheInvalidation(connectionString = config.databaseU
     retryMs = 1000;
   } catch (e) {
     lost((e as Error).message);
-    c.end().catch(() => {});
+    c.end().catch(() => { });
   }
 }
 
@@ -187,7 +187,7 @@ export async function stopCacheInvalidation() {
   const c = client;
   client = null;
   listener = "none";
-  await c?.end().catch(() => {});
+  await c?.end().catch(() => { });
 }
 
 export const cacheListenerState = () => listener;

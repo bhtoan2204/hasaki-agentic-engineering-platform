@@ -158,9 +158,9 @@ function parseAntigravityLine(
       ),
       reasoning: num(
         usage.thinking_output_tokens ??
-          usage.reasoning_tokens ??
-          usage.thinking_tokens ??
-          usage.reasoning,
+        usage.reasoning_tokens ??
+        usage.thinking_tokens ??
+        usage.reasoning,
       ),
       cache_read: num(
         usage.cache_read_tokens ?? usage.cached_tokens ?? usage.cache_read,
@@ -173,12 +173,12 @@ function parseAntigravityLine(
   const error = protocolEvent === "result" && payload.status === "ERROR"
     ? (typeof rawError === "string" ? rawError : String(rawError?.message ?? "Antigravity returned ERROR"))
     : rawError
-    ? typeof rawError === "string"
-      ? rawError
-      : rawError.message
-        ? String(rawError.message)
-        : JSON.stringify(rawError)
-    : undefined;
+      ? typeof rawError === "string"
+        ? rawError
+        : rawError.message
+          ? String(rawError.message)
+          : JSON.stringify(rawError)
+      : undefined;
 
   return {
     event: {
@@ -206,10 +206,10 @@ const num = (v: unknown): number | null =>
 export function classifyAntigravityError(err: unknown): FailureCategory {
   const text = String(
     (err as any)?.message ??
-      (err as any)?.error?.message ??
-      (err as any)?.error ??
-      err ??
-      "",
+    (err as any)?.error?.message ??
+    (err as any)?.error ??
+    err ??
+    "",
   ).toLowerCase();
   if (/quota|resource has been exhausted|rate_limit|too many requests|429/.test(text)) {
     if (/quota|credit|billing|exhausted/.test(text)) return "QUOTA_EXHAUSTED";

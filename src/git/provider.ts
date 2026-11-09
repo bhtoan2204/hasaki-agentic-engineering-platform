@@ -86,7 +86,7 @@ export async function prepareWorkspace(run: { id: number; branch: string; inputs
   await checkLive?.();
   if (b.path === checkout) throw new Error(`${repo}: branch is checked out in the primary checkout; switch it before continuing`);
   await recordWorkspace(run.id, { repo, branch: b.branch, path: b.path, created_from: b.createdFrom });
-  if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => {});
+  if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => { });
   return { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
 }
 

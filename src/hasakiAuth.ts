@@ -36,7 +36,7 @@ export async function setToken(raw: string, userId: number, valid = () => true) 
 }
 
 export async function authStatus(userId: number) {
-  await getToken(userId).catch(() => {});
+  await getToken(userId).catch(() => { });
   const token = userId ? tokens.get(userId) : undefined;
   const now = Date.now() / 1000;
   const valid = !!token && (token.exp === 0 || token.exp - 30 > now);
@@ -94,7 +94,7 @@ export async function workApi(userId: number, method: string, path: string, para
   if (res.status === 404)
     throw new Error(
       `Hasaki Work ${method} ${url.pathname}: HTTP 404 — endpoint không tồn tại. Mở work.hasaki.vn/tasks, DevTools > Network, ` +
-        `tìm request lấy danh sách task tới ${config.hasakiWork.apiUrl} rồi sửa hasakiWork.listPath / detailPath / listQuery trong config.json.`,
+      `tìm request lấy danh sách task tới ${config.hasakiWork.apiUrl} rồi sửa hasakiWork.listPath / detailPath / listQuery trong config.json.`,
     );
   if (!res.ok || !json) throw new Error(`Hasaki Work ${method} ${path}: HTTP ${res.status}`);
   return json;

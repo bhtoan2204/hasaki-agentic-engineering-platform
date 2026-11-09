@@ -15,14 +15,14 @@ import { source } from "../agent/contextTools.ts";
 export interface ContextEntry {
   id: string;
   section:
-    | "requirements"
-    | "knowledge"
-    | "code"
-    | "decisions"
-    | "continuity"
-    | "production"
-    | "verification"
-    | "repositories";
+  | "requirements"
+  | "knowledge"
+  | "code"
+  | "decisions"
+  | "continuity"
+  | "production"
+  | "verification"
+  | "repositories";
   trust: "curated_rule" | "untrusted_evidence" | "platform_constraint";
   required: boolean;
   priority: number;
@@ -49,7 +49,7 @@ export interface ContextPack {
   retrieval_failures: number;
   preparation_ms: number;
 }
-export class ContextBudgetError extends Error {}
+export class ContextBudgetError extends Error { }
 /** The estimate includes provenance and summaries. Required constraints are never silently shortened or dropped. */
 export function budgetContextPack(
   base: Omit<ContextPack, "entries" | "estimated_tokens" | "omitted">,
@@ -91,7 +91,7 @@ export async function ensureContextPack(
   policy: PolicyContext,
 ): Promise<ContextPack> {
   await validateToolBinding(
-    envFromExecution(ctx, ctx.step.type === "coding_agent" ? "coding" : "analysis", policy, metrics, () => {}),
+    envFromExecution(ctx, ctx.step.type === "coding_agent" ? "coding" : "analysis", policy, metrics, () => { }),
   );
   return singleflight(
     `context-pack:${ctx.run.owner_id}:${ctx.run.id}:${ctx.step.id}:${ctx.attempt.id}:${ctx.attempt.fencing_token}:${ctx.context.snapshot_id}`,
@@ -141,8 +141,8 @@ export async function ensureContextPack(
           provenance,
           trust,
         });
-      const handoff = await one(pool,"SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",[ctx.attempt.id,ctx.run.id,ctx.step.id]);
-      if(handoff) add("provider_handoff","continuity",{handoff_id:handoff.id,source_attempt_id:handoff.source_attempt_id,summary:summarizeValue(handoff.package,10000),details:"Retrieve the full handoff through platform.get_run_context"},100,true,source(`provider_handoff:${handoff.id}`,1,String(handoff.ready_at),"owner","confirmed stable provider-neutral checkpoint","historical"));
+      const handoff = await one(pool, "SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'", [ctx.attempt.id, ctx.run.id, ctx.step.id]);
+      if (handoff) add("provider_handoff", "continuity", { handoff_id: handoff.id, source_attempt_id: handoff.source_attempt_id, summary: summarizeValue(handoff.package, 10000), details: "Retrieve the full handoff through platform.get_run_context" }, 100, true, source(`provider_handoff:${handoff.id}`, 1, String(handoff.ready_at), "owner", "confirmed stable provider-neutral checkpoint", "historical"));
       const input = ctx.input,
         independent = ctx.step.config.independent === true;
       const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id=$1 AND run_id=$2 AND step_id=$3", [
@@ -159,16 +159,16 @@ export async function ensureContextPack(
           inputs: input.run.inputs,
           work_item: input.work_item
             ? {
-                id: input.work_item.id,
-                code: input.work_item.code,
-                title: input.work_item.title,
-                description: input.work_item.description || input.work_item.payload?.note || "",
-                project: input.work_item.project,
-                business_requirements:
-                  input.work_item.payload?.business_requirements ??
-                  input.work_item.payload?.acceptance_criteria ??
-                  null,
-              }
+              id: input.work_item.id,
+              code: input.work_item.code,
+              title: input.work_item.title,
+              description: input.work_item.description || input.work_item.payload?.note || "",
+              project: input.work_item.project,
+              business_requirements:
+                input.work_item.payload?.business_requirements ??
+                input.work_item.payload?.acceptance_criteria ??
+                null,
+            }
             : null,
         },
         1000,
@@ -237,8 +237,8 @@ export async function ensureContextPack(
         if (u.status === "COMPLETED") {
           const critical = Boolean(
             u.output &&
-              typeof u.output === "object" &&
-              ["requirements", "acceptance_criteria", "constraints", "business_rules"].some((k) => k in u.output),
+            typeof u.output === "object" &&
+            ["requirements", "acceptance_criteria", "constraints", "business_rules"].some((k) => k in u.output),
           );
           const { requirements, acceptance_criteria, constraints, business_rules, ...rest } =
             u.output && typeof u.output === "object" && !Array.isArray(u.output) ? u.output : {};
@@ -346,7 +346,7 @@ export async function ensureContextPack(
         ctx.step.type === "coding_agent" ? "coding" : "analysis",
         policy,
         metrics,
-        () => {},
+        () => { },
       );
       env.contextPreparation = true; // Trusted server retrieval, never supplied by a provider.
       let retrievalCalls = 0,

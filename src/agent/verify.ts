@@ -301,7 +301,7 @@ export async function verificationLoop<S>(opts: {
   repair: (failed: VerificationRound, repairNo: number) => Promise<S | undefined>;
 }): Promise<LoopResult<S>> {
   const rounds = [...(opts.prior ?? [])];
-  for (;;) {
+  for (; ;) {
     if (opts.signal.aborted) return { outcome: "canceled", rounds, repairs: Math.max(0, rounds.length - 1) };
     let r: VerificationRound;
     try {

@@ -12,7 +12,7 @@ export function persistentInstanceId(dataDir: string, explicit?: string): string
   if (explicit?.trim()) return validateInstanceId(explicit.trim());
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   let dir = realpathSync(dataDir);
-  for (;;) {
+  for (; ;) {
     if (existsSync(join(dir, ".git"))) throw new Error("dataDir must be outside the Git repository to persist instance identity.");
     const parent = dirname(dir);
     if (parent === dir) break;

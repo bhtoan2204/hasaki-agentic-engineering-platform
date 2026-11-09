@@ -221,10 +221,10 @@ export async function buildHandoffPackage(
     ),
     run.work_item_id
       ? one(
-          pool,
-          "SELECT id,title,description FROM work_items WHERE id=$1 AND owner_id=$2",
-          [run.work_item_id, run.owner_id],
-        )
+        pool,
+        "SELECT id,title,description FROM work_items WHERE id=$1 AND owner_id=$2",
+        [run.work_item_id, run.owner_id],
+      )
       : null,
     one(pool, "SELECT output,metrics FROM workflow_step_attempts WHERE id=$1", [
       attempt.id,
@@ -305,8 +305,8 @@ export async function buildHandoffPackage(
 /** Readiness checks do not invoke a model or change credentials. Unknown quota/billing is never called available. */
 let testReadiness:
   | ((
-      a: EffectiveAgent,
-    ) => Promise<{ ok: boolean; error?: string; quota: string; cost: string }>)
+    a: EffectiveAgent,
+  ) => Promise<{ ok: boolean; error?: string; quota: string; cost: string }>)
   | undefined;
 export function setHandoffReadinessForTests(value: typeof testReadiness) {
   if (process.env.PLATFORM_TEST !== "1")

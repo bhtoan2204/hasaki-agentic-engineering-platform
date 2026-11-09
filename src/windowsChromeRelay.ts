@@ -18,7 +18,7 @@ export async function windowsChromeRelay(port: number, powershell: string) {
     child.stdin!.on("error", () => socket.destroy());
     child.on("error", () => socket.destroy());
     child.on("exit", () => { children.delete(child); socket.destroy(); });
-    socket.on("error", () => {});
+    socket.on("error", () => { });
     socket.on("close", () => { sockets.delete(socket); child.kill(); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });

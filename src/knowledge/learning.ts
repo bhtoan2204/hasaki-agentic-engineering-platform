@@ -115,9 +115,9 @@ export function changeAnalysisPrompt(x: AnalyzerInput): string {
     "",
     "Reply with JSON only:",
     '{"candidates":[{"change_type":"UPDATE|SUPERSEDE|DEPRECATE|CREATE","existing_key":"<listed key or null>","title":"short rule name","proposed_rule":"the complete new rule text, standalone",' +
-      '"domain":"e.g. refund","scope":{"type":"GLOBAL|ORGANIZATION|PROJECT|REPOSITORY","ref":"<project or repository, empty for GLOBAL>"},"applicability":{"keywords":["…"]},' +
-      '"effective_from":"YYYY-MM-DD or null","evidence":[{"source_id":"<id of a source below>","quote":"<exact words copied from that source>"}],' +
-      '"confidence":0.0,"uncertainty":"what a reviewer must confirm","impacted_skills":["<listed skill keys that teach the old rule>"]}]}',
+    '"domain":"e.g. refund","scope":{"type":"GLOBAL|ORGANIZATION|PROJECT|REPOSITORY","ref":"<project or repository, empty for GLOBAL>"},"applicability":{"keywords":["…"]},' +
+    '"effective_from":"YYYY-MM-DD or null","evidence":[{"source_id":"<id of a source below>","quote":"<exact words copied from that source>"}],' +
+    '"confidence":0.0,"uncertainty":"what a reviewer must confirm","impacted_skills":["<listed skill keys that teach the old rule>"]}]}',
     "Each evidence quote must be copied verbatim from the cited source (it is checked). Use only listed rule and skill keys.",
     "",
     `Run #${x.run.id}: ${x.run.title} — project "${x.run.project || "-"}", workflow ${x.run.workflow}, repositories ${x.run.repositories.join(", ") || "-"}`,

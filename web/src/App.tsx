@@ -433,7 +433,11 @@ export function App() {
                 className={`sb-link sb-support${support ? " on" : ""}`}
                 aria-pressed={support}
                 aria-label={`${t("auth.support")}: ${t(support ? "auth.scopeOn" : "auth.scopeOff")}`}
-                data-tip={t(support ? "auth.scopeOn" : "auth.scopeOff")}
+                data-tip={
+                  collapsed
+                    ? `${t("auth.support")} · ${t(support ? "auth.scopeOn" : "auth.scopeOff")}`
+                    : undefined
+                }
                 onClick={() => {
                   setSupportView(!support);
                   setSupport(!support);

@@ -62,7 +62,7 @@ export async function sendTelegramStepWaiting(w: StepWaiting, dedupeKey: string)
   const botToken = config.telegram.botToken;
   if (botToken && w.ownerId) {
     const { sendInteractiveWaiting } = await import("./telegram/workflow.ts");
-    if (await sendInteractiveWaiting(w,dedupeKey)) return { ok: true };
+    if (await sendInteractiveWaiting(w, dedupeKey)) return { ok: true };
     const { preferences } = await import("./telegram/store.ts");
     const prefs = await preferences(w.ownerId);
     if (!(w.status === "WAITING_APPROVAL" ? prefs.approvals : prefs.questions)) return { skipped: "not configured" as const };

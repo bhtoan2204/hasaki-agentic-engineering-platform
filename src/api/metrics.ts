@@ -199,7 +199,8 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
 export function telemetryGroups(attempts: any[]) {
   const sessions = attempts.flatMap(a => {
     const values = Object.values(a.provider_sessions ?? {}) as any[];
-    return values.length ? values.map(s => ({ ...a, provider: s.provider, model: s.model, reported_cost_usd: s.reported_cost_usd,
+    return values.length ? values.map(s => ({
+      ...a, provider: s.provider, model: s.model, reported_cost_usd: s.reported_cost_usd,
       input_tokens: s.tokens?.input ?? null, output_tokens: s.tokens?.output ?? null, cache_read_tokens: s.tokens?.cache_read ?? null,
       cache_creation_tokens: s.tokens?.cache_creation ?? null, reasoning_tokens: s.tokens?.reasoning_output ?? null,
       normalized_failure_category: s.normalized_failure_category ?? null,

@@ -116,7 +116,7 @@ export async function executeProviderPhase(
         ctx.context.contextPack = pack;
       }
       if (cfg.context_variant === "tools") {
-        const env = envFromExecution(ctx, mode, policy, metrics, () => {});
+        const env = envFromExecution(ctx, mode, policy, metrics, () => { });
         retrieval = await dispatchPlatformTool(
           "get_run_context",
           { section: "all", offset: 0, limit: 5 },

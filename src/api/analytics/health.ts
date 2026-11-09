@@ -56,21 +56,21 @@ function paramsFor(f: AnalyticsFilters, scope: AnalyticsScope) {
   return [...filterParams(f, scope), projectMap(), f.severity, f.incidentStatus, f.namespace, f.environment];
 }
 function boundaryInstant(value: string, timezone: string) {
-    if (value.length !== 10) return Date.parse(value);
-    const target = Date.parse(`${value}T00:00:00Z`);
-    let candidate = target;
-    const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
-    for (let i = 0; i < 4; i++) {
-      const parts = Object.fromEntries(fmt.formatToParts(new Date(candidate)).map((x) => [x.type,x.value]));
-      const represented = Date.UTC(Number(parts.year), Number(parts.month)-1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
-      const delta = target - represented;
-      candidate += delta;
-      if (!delta) break;
-    }
-    return candidate;
+  if (value.length !== 10) return Date.parse(value);
+  const target = Date.parse(`${value}T00:00:00Z`);
+  let candidate = target;
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+  for (let i = 0; i < 4; i++) {
+    const parts = Object.fromEntries(fmt.formatToParts(new Date(candidate)).map((x) => [x.type, x.value]));
+    const represented = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+    const delta = target - represented;
+    candidate += delta;
+    if (!delta) break;
+  }
+  return candidate;
 }
 function previousPeriod(f: AnalyticsFilters): AnalyticsFilters {
-  const lo = boundaryInstant(f.from,f.timezone), hi = boundaryInstant(f.to,f.timezone), width = hi - lo;
+  const lo = boundaryInstant(f.from, f.timezone), hi = boundaryInstant(f.to, f.timezone), width = hi - lo;
   return { ...f, from: new Date(lo - width).toISOString(), to: new Date(lo).toISOString() };
 }
 
@@ -153,7 +153,7 @@ async function healthSet(f: AnalyticsFilters, scope: AnalyticsScope, includeDeta
       (SELECT count(*)::int FROM prod_error_scans s WHERE s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS scans_in_range,
       (SELECT count(*)::int FROM prod_error_scans s WHERE s.ok AND s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS successful_scans_in_range,
       (SELECT count(*)::int FROM prod_error_scans s WHERE s.ok IS FALSE AND s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS failed_scans_in_range,
-      (SELECT window_coverage_ms FROM coverage) AS window_coverage_ms`, [f.from,f.to,f.timezone,f.bucket]),
+      (SELECT window_coverage_ms FROM coverage) AS window_coverage_ms`, [f.from, f.to, f.timezone, f.bucket]),
   ] as const;
   const [summary, trend, severity, serviceTrends, services, lifecycle, details, topFingerprints, remediation, freshness] = await Promise.all(jobs);
   return { summary, trend, severity, serviceTrends, services, lifecycle, details, topFingerprints, remediation, freshness };
@@ -179,59 +179,70 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
     f.service ? healthSet({ ...prev, service: null }, scope, false) : Promise.resolve(null),
   ]);
   const markEmptyPartialUnknown = (set: any, period: AnalyticsFilters) => {
-    const width = boundaryInstant(period.to,period.timezone)-boundaryInstant(period.from,period.timezone);
+    const width = boundaryInstant(period.to, period.timezone) - boundaryInstant(period.from, period.timezone);
     if (Number(set.summary.total_errors) === 0 && Number(set.freshness.window_coverage_ms ?? 0) < width) {
-      for (const key of ["total_errors","fingerprints","new_incidents","active_incidents","resolved_incidents","critical_high_incidents","recurring_incidents","affected_services"])
+      for (const key of ["total_errors", "fingerprints", "new_incidents", "active_incidents", "resolved_incidents", "critical_high_incidents", "recurring_incidents", "affected_services"])
         if (Number(set.summary[key] ?? 0) === 0) set.summary[key] = null;
     }
   };
-  markEmptyPartialUnknown(current,f);
-  markEmptyPartialUnknown(previous,prev);
+  markEmptyPartialUnknown(current, f);
+  markEmptyPartialUnknown(previous, prev);
   const oldServices = new Map((previousServices ?? previous).services.map((s: any) => [`${s.namespace}\0${s.service}`, s]));
-  const serviceCoverageComparable = sameCoverage((currentServices ?? current).freshness,(previousServices ?? previous).freshness);
+  const serviceCoverageComparable = sameCoverage((currentServices ?? current).freshness, (previousServices ?? previous).freshness);
   const services = (currentServices ?? current).services
     .filter((s: any) => !f.service || s.service === f.service)
     .filter((s: any) => !f.namespace || s.namespace === f.namespace)
     .map((s: any) => {
       const old: any = oldServices.get(`${s.namespace}\0${s.service}`);
-      return { ...s, previous_events: old?.events ?? null, change_events: serviceCoverageComparable ? comparable(s.events, old?.events).delta : null,
+      return {
+        ...s, previous_events: old?.events ?? null, change_events: serviceCoverageComparable ? comparable(s.events, old?.events).delta : null,
         change_pct: serviceCoverageComparable ? comparable(s.events, old?.events).delta_pct : null, change_comparable: serviceCoverageComparable,
-        environment: "production", service_key: `${s.namespace}\u001f${s.service}` };
+        environment: "production", service_key: `${s.namespace}\u001f${s.service}`
+      };
     });
-  const summary = { ...current.summary, comparisons: Object.fromEntries([
-    ["total_errors", comparable(current.summary.total_errors, previous.summary.total_errors)],
-    ["fingerprints", comparable(current.summary.fingerprints, previous.summary.fingerprints)],
-    ["new_incidents", comparable(current.summary.new_incidents, previous.summary.new_incidents)],
-    ["active_incidents", comparable(current.summary.active_incidents, previous.summary.active_incidents)],
-    ["resolved_incidents", comparable(current.summary.resolved_incidents, previous.summary.resolved_incidents)],
-    ["critical_high_incidents", comparable(current.summary.critical_high_incidents, previous.summary.critical_high_incidents)],
-    ["recurring_incidents", comparable(current.summary.recurring_incidents, previous.summary.recurring_incidents)],
-    ["affected_services", comparable(current.summary.affected_services, previous.summary.affected_services)],
-    ["acknowledge_ms", comparable(current.summary.acknowledge_ms, previous.summary.acknowledge_ms)],
-    ["resolve_ms", comparable(current.summary.resolve_ms, previous.summary.resolve_ms)],
-  ]), previous_coverage: previous.freshness, current_coverage: current.freshness };
+  const summary = {
+    ...current.summary, comparisons: Object.fromEntries([
+      ["total_errors", comparable(current.summary.total_errors, previous.summary.total_errors)],
+      ["fingerprints", comparable(current.summary.fingerprints, previous.summary.fingerprints)],
+      ["new_incidents", comparable(current.summary.new_incidents, previous.summary.new_incidents)],
+      ["active_incidents", comparable(current.summary.active_incidents, previous.summary.active_incidents)],
+      ["resolved_incidents", comparable(current.summary.resolved_incidents, previous.summary.resolved_incidents)],
+      ["critical_high_incidents", comparable(current.summary.critical_high_incidents, previous.summary.critical_high_incidents)],
+      ["recurring_incidents", comparable(current.summary.recurring_incidents, previous.summary.recurring_incidents)],
+      ["affected_services", comparable(current.summary.affected_services, previous.summary.affected_services)],
+      ["acknowledge_ms", comparable(current.summary.acknowledge_ms, previous.summary.acknowledge_ms)],
+      ["resolve_ms", comparable(current.summary.resolve_ms, previous.summary.resolve_ms)],
+    ]), previous_coverage: previous.freshness, current_coverage: current.freshness
+  };
   const denom = (currentServices ?? current).summary.total_errors;
-  const lifecycleMap = new Map(current.lifecycle.map((x: any) => [x.status,x.incidents]));
-  const effectiveFrom = boundaryInstant(f.from,f.timezone), effectiveTo = boundaryInstant(f.to,f.timezone), rangeMs = effectiveTo-effectiveFrom;
-  const latestScan = current.freshness.latest_scan ? { ...current.freshness.latest_scan,
-    error: current.freshness.latest_scan.error ? safeDiagnostics(String(current.freshness.latest_scan.error)) : null } : null;
-  const freshness = { ...current.freshness, latest_scan: latestScan,
+  const lifecycleMap = new Map(current.lifecycle.map((x: any) => [x.status, x.incidents]));
+  const effectiveFrom = boundaryInstant(f.from, f.timezone), effectiveTo = boundaryInstant(f.to, f.timezone), rangeMs = effectiveTo - effectiveFrom;
+  const latestScan = current.freshness.latest_scan ? {
+    ...current.freshness.latest_scan,
+    error: current.freshness.latest_scan.error ? safeDiagnostics(String(current.freshness.latest_scan.error)) : null
+  } : null;
+  const freshness = {
+    ...current.freshness, latest_scan: latestScan,
     status: !latestScan ? "never" : latestScan.ok == null && !latestScan.finished_at ? "scanning" :
       !current.freshness.last_successful_scan ? "never" : !latestScan.ok ? "latest_scan_failed" :
-      Date.now() - new Date(current.freshness.last_successful_scan.finished_at).getTime() > 24*3600_000 ? "stale" :
-      Number(current.freshness.window_coverage_ms ?? 0) < effectiveTo-effectiveFrom ? "partial" : "current",
+        Date.now() - new Date(current.freshness.last_successful_scan.finished_at).getTime() > 24 * 3600_000 ? "stale" :
+          Number(current.freshness.window_coverage_ms ?? 0) < effectiveTo - effectiveFrom ? "partial" : "current",
     data_source: "Splunk production index", environment: "production", latest_observation_at: current.freshness.latest_observation_at ?? null,
   };
-  const remediation = { ...current.remediation, fixes_verified: current.remediation.verified_runs,
-    merged_prs: null, merged_prs_available: false, resolution_inferred_from_agent: false };
+  const remediation = {
+    ...current.remediation, fixes_verified: current.remediation.verified_runs,
+    merged_prs: null, merged_prs_available: false, resolution_inferred_from_agent: false
+  };
   const trend = current.trend;
   const previousTrend = previous.trend.map((r: any) => ({ ...r, bucket: new Date(new Date(r.bucket).getTime() + rangeMs).toISOString(), period: "previous" }));
   return {
-    summary: { ...summary, new_errors: summary.new_incidents, resolved: summary.resolved_incidents,
-      unresolved: summary.active_incidents, recurring: summary.recurring_incidents },
+    summary: {
+      ...summary, new_errors: summary.new_incidents, resolved: summary.resolved_incidents,
+      unresolved: summary.active_incidents, recurring: summary.recurring_incidents
+    },
     trend, previousTrend, serviceTrends: current.serviceTrends, severity: current.severity.map((s: any) => ({ ...s, incidents: s.fingerprints })),
     services: services.map((s: any) => ({ ...s, error_share_pct: denom > 0 ? Number(s.events) * 100 / Number(denom) : null })),
-    lifecycle: { statuses: ["open","acknowledged","resolved"].map((status) => ({ status, incidents: lifecycleMap.get(status) ?? 0 })), recurring_incidents: current.summary.recurring_incidents, reopened_incidents: lifecycleMap.get("reopened") ?? 0 },
+    lifecycle: { statuses: ["open", "acknowledged", "resolved"].map((status) => ({ status, incidents: lifecycleMap.get(status) ?? 0 })), recurring_incidents: current.summary.recurring_incidents, reopened_incidents: lifecycleMap.get("reopened") ?? 0 },
     details: current.details, topFingerprints: current.topFingerprints, remediation, freshness,
     filters: { namespace: f.namespace, severity: f.severity, incident_status: f.incidentStatus },
     range: { from: new Date(effectiveFrom).toISOString(), to: new Date(effectiveTo).toISOString() },

@@ -95,7 +95,7 @@ export function runCommand(command: string, cwd: string, env: Record<string, str
     const killTree = () => {
       try {
         if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {}
+      } catch { }
     };
     signal.addEventListener("abort", killTree, { once: true });
     if (child.pid) childGroups.add(child.pid);
@@ -220,7 +220,7 @@ async function compareWithBaseline(ctx: ExecutionContext, t: { repo: string; pat
     await ctx.log(
       "system",
       `◆ ${t.repo}: baseline ${base.sha.slice(0, 9)} → ${c.regressions.length} regression(s), ${c.pre_existing.length} package(s) with pre-existing failures` +
-        (base.cached.length ? ` (cached: ${base.cached.length})` : ""),
+      (base.cached.length ? ` (cached: ${base.cached.length})` : ""),
       { repo: t.repo, ...c },
     );
     return { base_sha: base.sha, ...c };
@@ -247,7 +247,7 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");
   const rankingStarted = Date.now();
   let ranked = await hybridRank(rows, { text, keywords, project: ctx.context.project });
-  if (codeIntelligenceEnabled()) await ctx.recordMetrics({ code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted } }).catch(() => {});
+  if (codeIntelligenceEnabled()) await ctx.recordMetrics({ code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted } }).catch(() => { });
   let method = "deterministic";
   // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
   if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false) {
@@ -356,13 +356,13 @@ export function prDescription(x: { code?: string; runId: number; summary: string
     "",
     ...(exc.length
       ? [
-          "## Test exceptions (accepted by the developer — test result remains FAILED)",
-          ...exc.flatMap((e) => [
-            `- ${e.step}: failures that also fail on the base branch${e.exception.base_sha ? ` (${String(e.exception.base_sha).slice(0, 9)})` : ""}:`,
-            ...e.exception.failures.map((f: any) => `  - ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}`.trimEnd()),
-          ]),
-          "",
-        ]
+        "## Test exceptions (accepted by the developer — test result remains FAILED)",
+        ...exc.flatMap((e) => [
+          `- ${e.step}: failures that also fail on the base branch${e.exception.base_sha ? ` (${String(e.exception.base_sha).slice(0, 9)})` : ""}:`,
+          ...e.exception.failures.map((f: any) => `  - ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}`.trimEnd()),
+        ]),
+        "",
+      ]
       : []),
     ...(vn.length
       ? ["## Verification notes (automated checks were not conclusive — please review)", ...vn.flatMap((n) => [`- ${n.step} (${n.status}):`, ...n.lines.map((l) => `  - ${l}`)]), ""]

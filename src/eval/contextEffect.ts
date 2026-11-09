@@ -88,10 +88,10 @@ export function compareContextEffect(a: any, b: any) {
       improved > regressed && qualityP != null && qualityP < 0.025
         ? "MEASURABLE_QUALITY_GAIN"
         : regressed === 0 &&
-            verifiedTimingTasks >= 10 &&
-            faster > slower &&
-            latencyP != null &&
-            latencyP < 0.025
+          verifiedTimingTasks >= 10 &&
+          faster > slower &&
+          latencyP != null &&
+          latencyP < 0.025
           ? "MEASURABLE_LATENCY_GAIN"
           : "NO_MEASURABLE_BENEFIT";
   }

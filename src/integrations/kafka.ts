@@ -38,7 +38,7 @@ async function get(path: string, cookie: string, params?: Record<string, string 
     let msg = text.slice(0, 300);
     try {
       msg = JSON.parse(text).message ?? msg;
-    } catch {}
+    } catch { }
     throw new Error(`Kafka UI ${res.status} ${path}: ${msg}`);
   }
   return text;
@@ -58,7 +58,7 @@ async function check(cookie: string) {
   try {
     const a = await getJson("/api/authorization", cookie);
     user = a?.userInfo?.username ?? null;
-  } catch {}
+  } catch { }
   return { clusters: clusters.map((c: any) => ({ name: c.name, status: c.status, brokers: c.brokerCount, topics: c.topicCount })), user };
 }
 
@@ -68,7 +68,7 @@ export async function loadKafkaCookie() {
   try {
     const { cookie, user } = JSON.parse(saved);
     login.current = { cookie, user: user ?? null, checkedAt: 0, valid: true };
-  } catch {}
+  } catch { }
 }
 
 export async function kafkaStatus(force = false) {

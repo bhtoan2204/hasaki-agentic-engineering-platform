@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { config } from "../config.ts";
 import { randomUUID, createHash } from "node:crypto";
 const exec = promisify(execFile);
-export class IsolationUnavailable extends Error {}
+export class IsolationUnavailable extends Error { }
 let closure: Promise<string[]> | undefined;
 async function nodeClosure() {
   if (!closure)
@@ -189,6 +189,6 @@ export async function containerRun(
     await exec("docker", ["rm", "--force", name], {
       timeout: 5000,
       maxBuffer: 8192,
-    }).catch(() => {});
+    }).catch(() => { });
   }
 }

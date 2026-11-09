@@ -93,7 +93,7 @@ export async function reviewedBranchTargets(targets: Array<{ repo: string; branc
     if (!dir || !existsSync(dir)) continue;
     const { repositoryBranch } = await import("../repos/remote.ts");
     repositoryBranch(branch);
-    if (!reg.repository_url) await exec("git", ["-C", dir, "-c", "core.hooksPath=/dev/null", "fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { timeout: 60_000 }).catch(() => {});
+    if (!reg.repository_url) await exec("git", ["-C", dir, "-c", "core.hooksPath=/dev/null", "fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { timeout: 60_000 }).catch(() => { });
     const has = await exec("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]).then(() => true, () => false);
     if (has) out.push({ repo, path: dir, to: `origin/${branch}` });
   }

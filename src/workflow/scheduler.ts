@@ -86,7 +86,7 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
     try {
-      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) || await one(pool,"SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'",[begun.attempt.id])) ac.abort();
+      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) || await one(pool, "SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'", [begun.attempt.id])) ac.abort();
     } catch (e) {
       ac.abort();
       console.error(`heartbeat job ${job.id}:`, (e as Error).message);
@@ -94,10 +94,10 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   }, opts.heartbeatSeconds * 1000);
   const executionAbort = new AbortController();
   const forwardAbort = () => executionAbort.abort();
-  ac.signal.addEventListener("abort", forwardAbort, {once:true});
+  ac.signal.addEventListener("abort", forwardAbort, { once: true });
   const timeoutMs = begun.attempt.effective_agent?.timeout_ms;
   let timedOut = false;
-  const deadline = timeoutMs ? setTimeout(() => { timedOut=true; executionAbort.abort(); },timeoutMs) : null;
+  const deadline = timeoutMs ? setTimeout(() => { timedOut = true; executionAbort.abort(); }, timeoutMs) : null;
   let result: ExecResult;
   try {
     const ctx = makeContext({ ...begun, signal: executionAbort.signal });
@@ -110,14 +110,14 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   }
   try {
     if (deadline) clearTimeout(deadline);
-    if (timedOut && !ac.signal.aborted) result = {kind:"failed",error:`execution timeout after ${timeoutMs}ms`,retryable:true,details:{provider_error:{code:"execution_timeout",message:`execution timeout after ${timeoutMs}ms`}}};
-    await retryTransient(()=>q(pool,"UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2",[begun.attempt.id,job.fencing_token]),`record executor termination ${job.id}`);
-    const handoff=await prepareProviderPause(begun,result);
+    if (timedOut && !ac.signal.aborted) result = { kind: "failed", error: `execution timeout after ${timeoutMs}ms`, retryable: true, details: { provider_error: { code: "execution_timeout", message: `execution timeout after ${timeoutMs}ms` } } };
+    await retryTransient(() => q(pool, "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2", [begun.attempt.id, job.fencing_token]), `record executor termination ${job.id}`);
+    const handoff = await prepareProviderPause(begun, result);
     if (!handoff && (draining || ac.signal.aborted) && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining || "worker interrupted: heartbeat unavailable or lease lost"), `release job ${job.id}`))) return;
-    await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result,handoff), `finish job ${job.id}`);
+    await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff), `finish job ${job.id}`);
   } finally {
     if (deadline) clearTimeout(deadline);
-    ac.signal.removeEventListener("abort",forwardAbort);
+    ac.signal.removeEventListener("abort", forwardAbort);
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
@@ -168,7 +168,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     );
   }
   const reaper = setInterval(() => reapExpiredLeases().catch((e) => console.error("reaper:", e.message)), Math.max(5, opts.leaseSeconds / 2) * 1000);
-  void reapExpiredLeases().catch(() => {});
+  void reapExpiredLeases().catch(() => { });
   console.log(`scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`);
   return {
     async stop() {

@@ -38,7 +38,7 @@ export async function claimIdempotency(actorId: number, key: string, route: stri
   const hash = createHash("sha256").update(`${route}\n${JSON.stringify(body ?? null)}`).digest("hex");
   if (Date.now() - lastPrune > 3600_000) {
     lastPrune = Date.now();
-    void q(pool, "DELETE FROM http_idempotency WHERE created_at < now() - interval '1 day'").catch(() => {});
+    void q(pool, "DELETE FROM http_idempotency WHERE created_at < now() - interval '1 day'").catch(() => { });
   }
   const inserted = await one(
     pool,

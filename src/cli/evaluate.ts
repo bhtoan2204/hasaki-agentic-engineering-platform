@@ -19,7 +19,7 @@ if (args.live === "true" || args.mode === "live")
   );
 const url = new URL(
   process.env.BENCH_DATABASE_ADMIN_URL ??
-    "postgres://platform:platform@localhost:55432/platform",
+  "postgres://platform:platform@localhost:55432/platform",
 );
 if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
   throw new Error(
@@ -111,7 +111,7 @@ try {
     });
     await startPendingRun(evaluation.workflow_run_id);
     const deadline = Date.now() + 30 * 60 * 1000;
-    for (;;) {
+    for (; ;) {
       if (Date.now() > deadline)
         throw new Error("Benchmark CLI wall time exceeded");
       const detail = await evaluationDetail(evaluation.id, owner.id);

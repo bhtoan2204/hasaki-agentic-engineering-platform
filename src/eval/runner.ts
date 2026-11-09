@@ -169,12 +169,12 @@ async function executeIsolated(
     ) &&
     ctx.input.pending?.resume?.checkpoint?.edits_before_question === 0;
   const root = join(
-      config.dataDir,
-      "evaluation-work",
-      String(cr.evaluation_id),
-      String(cr.id),
-      `attempt-${ctx.attempt.id}`,
-    ),
+    config.dataDir,
+    "evaluation-work",
+    String(cr.evaluation_id),
+    String(cr.id),
+    `attempt-${ctx.attempt.id}`,
+  ),
     workspace = join(root, "workspaces"),
     validatorRoot = join(root, "validator");
   const created: Array<{ primary: string; path: string; logical: string }> = [];
@@ -184,7 +184,7 @@ async function executeIsolated(
   const timings: Record<string, number | null> = {
     first_meaningful_action_ms: ctx.input.pending?.resume?.checkpoint?.asked_at
       ? new Date(ctx.input.pending.resume.checkpoint.asked_at).getTime() -
-        totalStart
+      totalStart
       : null,
     first_modification_ms: null,
     implementation_ms: null,
@@ -224,8 +224,8 @@ async function executeIsolated(
           "remove",
           "--force",
           join(staleRoot, "workspaces", logical),
-        ]).catch(() => {});
-      await rm(staleRoot, { recursive: true, force: true }).catch(() => {});
+        ]).catch(() => { });
+      await rm(staleRoot, { recursive: true, force: true }).catch(() => { });
     }
     await mkdir(workspace, { recursive: true, mode: 0o755 });
     await mkdir(validatorRoot, { recursive: true, mode: 0o755 });
@@ -479,8 +479,8 @@ async function executeIsolated(
     e.security = validation.security;
     diagnostic = validation.diagnostic ?? diagnostic;
     const required = validation.checks.filter((c) =>
-        c.name.startsWith("required:"),
-      ),
+      c.name.startsWith("required:"),
+    ),
       hidden = validation.checks.filter((c) => c.name.startsWith("hidden:"));
     e.required_passed = required.filter((c) => c.passed).length;
     e.required_failed = required.filter((c) => !c.passed).length;
@@ -549,18 +549,18 @@ async function executeIsolated(
         pool,
         "DELETE FROM execution_workspaces WHERE run_id=$1 AND path=ANY($2::text[])",
         [ctx.run.id, created.map((w) => w.path)],
-      ).catch(() => {});
+      ).catch(() => { });
     for (const w of created)
       await fixtureGit(w.primary, [
         "worktree",
         "remove",
         "--force",
         w.path,
-      ]).catch(() => {});
+      ]).catch(() => { });
     // Only this attempt's generated directory can be removed; stale attempts never own another attempt's workspace.
     const rel = relative(join(config.dataDir, "evaluation-work"), root);
     if (rel && !rel.startsWith(".."))
-      await rm(root, { recursive: true, force: true }).catch(() => {});
+      await rm(root, { recursive: true, force: true }).catch(() => { });
   }
   e.duration_ms = Date.now() - totalStart;
   e.details.timings = timings;

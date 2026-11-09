@@ -185,9 +185,9 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
       );
       return row
         ? {
-            ...row,
-            provenance: source(`work_item:${row.id}`, null, row.updated_at, "owner", "current run's work item"),
-          }
+          ...row,
+          provenance: source(`work_item:${row.id}`, null, row.updated_at, "owner", "current run's work item"),
+        }
         : { available: false, reason: "Run has no accessible linked work item" };
     }
     case "get_step_output": {
@@ -228,13 +228,13 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
         entries: entries.slice(args.offset, args.offset + args.limit),
         total: entries.length,
         omitted: pack.content.omitted,
-        provider_handoff: args.section === "all" || args.section === "continuity" ? await (async()=>{
-          const h=await one(pool,"SELECT id,source_attempt_id,package FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",[env.attemptId,env.runId,env.stepId]);
-          if(!h)return null;
-          const details=args.handoff_workspace&&h.package?.workspace_artifact_id ? await one(pool,"SELECT content FROM workflow_artifacts WHERE id=$1 AND run_id=$2 AND kind='provider_handoff'",[h.package.workspace_artifact_id,env.runId]) : null;
-          const original=args.handoff_source_pack ? await one(pool,"SELECT content FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",[h.source_attempt_id,env.runId,env.stepId,env.ownerId]) : null;
-          const text=original ? JSON.stringify(original.content) : details?.content??JSON.stringify(h.package),offset=args.handoff_offset??0,limit=args.handoff_limit??6000;
-          return {id:h.id,content:text.slice(offset,offset+limit),total_chars:text.length,next_offset:offset+limit<text.length?offset+limit:null};
+        provider_handoff: args.section === "all" || args.section === "continuity" ? await (async () => {
+          const h = await one(pool, "SELECT id,source_attempt_id,package FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'", [env.attemptId, env.runId, env.stepId]);
+          if (!h) return null;
+          const details = args.handoff_workspace && h.package?.workspace_artifact_id ? await one(pool, "SELECT content FROM workflow_artifacts WHERE id=$1 AND run_id=$2 AND kind='provider_handoff'", [h.package.workspace_artifact_id, env.runId]) : null;
+          const original = args.handoff_source_pack ? await one(pool, "SELECT content FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4", [h.source_attempt_id, env.runId, env.stepId, env.ownerId]) : null;
+          const text = original ? JSON.stringify(original.content) : details?.content ?? JSON.stringify(h.package), offset = args.handoff_offset ?? 0, limit = args.handoff_limit ?? 6000;
+          return { id: h.id, content: text.slice(offset, offset + limit), total_chars: text.length, next_offset: offset + limit < text.length ? offset + limit : null };
         })() : null,
         capabilities: CONTEXT_TOOLS.map((t) => ({
           name: t.logicalName,

@@ -67,7 +67,7 @@ await new Promise<void>((resolve, reject) => {
   server.listen(config.port, process.env.HOST ?? "127.0.0.1", () => resolve());
 }).catch(async (e: NodeJS.ErrnoException) => {
   console.error(e.code === "EADDRINUSE" ? `port ${config.port} is already in use: another platform server is running. Not starting.` : `cannot listen: ${e.message}`);
-  await instanceHeartbeat.stop().catch(() => {});
+  await instanceHeartbeat.stop().catch(() => { });
   process.exit(1);
 });
 console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
@@ -76,7 +76,7 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 if (config.codeIntelligence.enabled) background("code intelligence startup", async () => {
-  for (const repo of await repositories.list()) if (repo.provider !== "benchmark" && repo.enabled && repo.allowed_actions.includes("read")) await enqueueCodeIndex(repo.name).catch(() => {});
+  for (const repo of await repositories.list()) if (repo.provider !== "benchmark" && repo.enabled && repo.allowed_actions.includes("read")) await enqueueCodeIndex(repo.name).catch(() => { });
 });
 startPolling();
 startProdErrorSchedule();

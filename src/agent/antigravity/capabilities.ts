@@ -146,7 +146,7 @@ async function probe(
   let hasToken = false;
   try {
     hasToken = existsSync(tokenFile) && statSync(tokenFile).size > 0;
-  } catch {}
+  } catch { }
 
   const models = await modelCatalog(bin);
   if (!models && !execution.getStore()?.evaluation?.fixtureAgent) {

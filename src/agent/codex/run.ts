@@ -54,7 +54,7 @@ let capCache: { key: string; at: number; value: CodexCapability } | null = null;
 
 /** Environment for every Codex child: no platform secrets, no API keys (no silent switch to API billing). */
 export function codexEnv(base: NodeJS.ProcessEnv, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const out = agentEnvironment(base,"codex");
+  const out = agentEnvironment(base, "codex");
   if (execution.getStore()?.evaluation?.fixtureAgent) { for (const k of Object.keys(out)) if (k.startsWith("FAKE_CODEX_")) delete out[k]; out.FAKE_CODEX_MODE = "ok"; }
   return { ...out, ...extra };
 }
@@ -67,8 +67,8 @@ async function run(bin: string, args: string[], timeout = 20_000) {
  * Probe the installed CLI without calling a model: version, required flags, login status (`codex login status`),
  * and the model catalog (`codex debug models`) to validate the configured model and reasoning effort.
  */
-export async function codexCapabilities(force = false, selection?: {model:string;effort:string}): Promise<CodexCapability> {
-  const cfg = {...codexConfig(), ...(selection ? {model:selection.model,reasoningEffort:selection.effort} : {})};
+export async function codexCapabilities(force = false, selection?: { model: string; effort: string }): Promise<CodexCapability> {
+  const cfg = { ...codexConfig(), ...(selection ? { model: selection.model, reasoningEffort: selection.effort } : {}) };
   const key = `${cfg.bin}\u0000${cfg.model}\u0000${cfg.reasoningEffort}`;
   if (!force && capCache && capCache.key === key && Date.now() - capCache.at < 5 * 60_000) return capCache.value;
   const value = await probe(cfg.bin, cfg.model, cfg.reasoningEffort);
@@ -214,7 +214,7 @@ export function killTree(child: ChildProcess) {
         const stat = readFileSync(`/proc/${d}/stat`, "utf8");
         const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
         parent.set(Number(d), ppid);
-      } catch {}
+      } catch { }
     }
     let grew = true;
     descendants.add(pid);
@@ -227,11 +227,11 @@ export function killTree(child: ChildProcess) {
   }
   try {
     process.kill(-pid, "SIGKILL");
-  } catch {}
+  } catch { }
   for (const p of descendants) {
     try {
       process.kill(p, "SIGKILL");
-    } catch {}
+    } catch { }
   }
 }
 
@@ -260,7 +260,7 @@ export interface CodexTurnResult {
 
 export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnResult> {
   const { ctx, metrics } = input;
-  const cap = await codexCapabilities(false,{model:input.model ?? "",effort:input.effort ?? ""});
+  const cap = await codexCapabilities(false, { model: input.model ?? "", effort: input.effort ?? "" });
   if (!cap.ok) return { isError: true, text: cap.error || "Codex CLI is not usable", assistantTurns: 0, failure: cap.kind === "model" ? "model" : cap.kind === "auth" ? "auth" : "error" };
   if (input.policy.delegation)
     return { isError: true, text: `Codex runs cannot enforce the platform's read-only subagent policy. Disable delegation on the step, or create the run with Claude. ${NO_FALLBACK}`, assistantTurns: 0, failure: "policy" };
@@ -282,7 +282,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       cwd: input.cwd,
       async dispatch(name, args) {
         const text = await dispatchPlatformTool(name, args, toolEnv);
-        if (["ask_user","request_clarification","platform.request_clarification"].includes(name) && !text.startsWith("ERROR")) paused = true;
+        if (["ask_user", "request_clarification", "platform.request_clarification"].includes(name) && !text.startsWith("ERROR")) paused = true;
         return text;
       },
       onModel(m) {
@@ -321,7 +321,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   ctx.signal.addEventListener("abort", onAbort, { once: true });
   if (ctx.signal.aborted) stop("canceled");
   const timer = setTimeout(() => stop("timeout"), codexConfig().timeoutMs);
-  child.stdin?.on("error", () => {});
+  child.stdin?.on("error", () => { });
   child.stdin?.end(input.prompt);
 
   const parser = new JsonlStream();
@@ -470,7 +470,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   await pending;
   for (const b of tail.errors) await ctx.log("system", `Codex stream: malformed line (${b.error})`, { provider: "codex", line: b.line });
   for (const ev of tail.events) await handle(ev);
-  await broker.close().catch(() => {});
+  await broker.close().catch(() => { });
   rmSync(scratch, { recursive: true, force: true });
 
   metrics.duration_ms += Date.now() - started;
@@ -538,7 +538,7 @@ export async function codexComplete(prompt: string, opts: { signal?: AbortSignal
   const kill = () => killTree(child);
   opts.signal?.addEventListener("abort", kill, { once: true });
   const timer = setTimeout(kill, Math.min(cfg.timeoutMs, 10 * 60_000));
-  child.stdin?.on("error", () => {});
+  child.stdin?.on("error", () => { });
   child.stdin?.end(`${prompt}\n\nReply with the requested text only. Do not run commands or modify files.`);
   const parser = new JsonlStream();
   const events: CodexEvent[] = [];

@@ -154,7 +154,7 @@ const SCENARIOS: Record<string, { name: string; workflow: string; task: Record<s
 async function drive(runId: number, timeoutMs: number) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    while (await runOnce()) {}
+    while (await runOnce()) { }
     const run = await getRun(runId);
     if (["COMPLETED", "FAILED", "CANCELED"].includes(run.status)) return run.status;
     for (const s of run.steps) {
@@ -254,7 +254,7 @@ if (live || args.candidate) {
   } catch (e) {
     console.log(`could not persist eval results (run migrations on the main database first): ${(e as Error).message}`);
   } finally {
-    await main.end().catch(() => {});
+    await main.end().catch(() => { });
   }
 }
 console.log("\n" + ["scenario", "requested", "profile", "steps", "ai_steps", ...(live ? ["status", "correct", "verify", "repairs", "human", "worktrees", "questions", "prs", "wall_s", "claude_s", "test_s", "claude_sessions", "turns", "tool_calls", "out_tok", "cost≈$"] : [])].join(" | "));
@@ -269,6 +269,6 @@ if (live) {
 }
 console.log(`\nresults: ${join(root, "bench-results.json")}`);
 await pool.end();
-const cleanup = new pg.Client({connectionString:admin});
+const cleanup = new pg.Client({ connectionString: admin });
 try { await cleanup.connect(); await cleanup.query(`DROP DATABASE ${db} WITH (FORCE)`); } finally { await cleanup.end(); }
 process.exit(0);

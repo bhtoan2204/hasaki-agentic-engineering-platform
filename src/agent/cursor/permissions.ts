@@ -53,7 +53,7 @@ export function excludeFromGit(gitDir: string) {
   let cur = "";
   try {
     cur = readFileSync(exclude, "utf8");
-  } catch {}
+  } catch { }
   const line = ".cursor/mcp.json\n.cursor/cli.json\n";
   if (!cur.includes(".cursor/mcp.json")) writeFileSync(exclude, cur + (cur.endsWith("\n") || !cur ? "" : "\n") + line);
 }

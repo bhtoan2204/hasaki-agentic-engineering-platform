@@ -174,9 +174,9 @@ export interface ResultLike {
 const sd = (xs: number[]) =>
   xs.length > 1
     ? Math.sqrt(
-        xs.reduce((s, x) => s + (x - (mean(xs) ?? 0)) ** 2, 0) /
-          (xs.length - 1),
-      )
+      xs.reduce((s, x) => s + (x - (mean(xs) ?? 0)) ** 2, 0) /
+      (xs.length - 1),
+    )
     : null;
 export function aggregateResults(rows: ResultLike[], expected: number) {
   const completed = rows.filter(
@@ -247,10 +247,10 @@ export function aggregateResults(rows: ResultLike[], expected: number) {
       : null,
     repository_accuracy:
       nums("duration_ms").length &&
-      evidence.some((e) => typeof e.repository_correct === "boolean")
+        evidence.some((e) => typeof e.repository_correct === "boolean")
         ? evidence.filter((e) => e.repository_correct === true).length /
-          evidence.filter((e) => typeof e.repository_correct === "boolean")
-            .length
+        evidence.filter((e) => typeof e.repository_correct === "boolean")
+          .length
         : null,
     blocked: rows.filter((r) => r.status === "BLOCKED").length,
   };

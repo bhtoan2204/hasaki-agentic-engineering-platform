@@ -156,7 +156,7 @@ export async function goBaseline(
         }
       }
     } finally {
-      await git(workspace, "worktree", "remove", "--force", dir).catch(() => {});
+      await git(workspace, "worktree", "remove", "--force", dir).catch(() => { });
     }
   }
   return { sha, report, cached };

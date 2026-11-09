@@ -14,7 +14,7 @@ const sessions = new Map<number, Session>();
 export const localChromeEnabled = () => process.env.HASAKI_WORK_BROWSER_MODE === "local" && (!process.env.HOST || ["localhost", "127.0.0.1", "::1"].includes(process.env.HOST));
 export function chromePath() {
   if (process.env.HASAKI_WORK_CHROME_PATH) { if (!existsSync(process.env.HASAKI_WORK_CHROME_PATH)) throw new Error("chrome_missing"); return process.env.HASAKI_WORK_CHROME_PATH; }
-  const candidates = [ "/opt/google/chrome/google-chrome", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", join(process.env.PROGRAMFILES ?? "C:/Program Files", "Google/Chrome/Application/chrome.exe"), "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe", "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"];
+  const candidates = ["/opt/google/chrome/google-chrome", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", join(process.env.PROGRAMFILES ?? "C:/Program Files", "Google/Chrome/Application/chrome.exe"), "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe", "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"];
   const path = candidates.find((p) => p && existsSync(p));
   if (!path) throw new Error("chrome_missing");
   return path;
@@ -42,7 +42,7 @@ async function finish(s: Session, state: ConnectionState, error?: string) {
   clearTimeout(s.timer);
   const stop = s.stop; s.stop = undefined;
   if (s.external) { s.relay?.close(); s.relay = undefined; }
-  await Promise.race([s.external ? Promise.resolve() : s.browser?.close().catch(() => {}), new Promise((r) => setTimeout(r, 2000).unref())]);
+  await Promise.race([s.external ? Promise.resolve() : s.browser?.close().catch(() => { }), new Promise((r) => setTimeout(r, 2000).unref())]);
   s.relay?.close();
   stop?.();
   s.releaseProfile?.(); s.releaseProfile = undefined;
@@ -68,50 +68,50 @@ export async function openChrome(id: number, accept: (token: string, valid: () =
         if (tabs.length !== 1) throw new Error("chrome_existing_tab");
         personalPage = tabs[0];
       } else {
-      const installation = installationId();
-      let profile = chromeProfilePath(join(config.dataDir, "work-chrome"), installation, id);
-      let nativeProfile = profile;
-      const windows = executable.startsWith("/mnt/") && executable.endsWith(".exe");
-      const powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-      if (windows) {
-        const temp = execFileSync(powershell, ["-NoProfile", "-Command", "$env:LOCALAPPDATA"], { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).trim();
-        nativeProfile = `${temp}\\HasakiWorkChrome\\${installation}\\${id}\\profile`;
-        profile = execFileSync("wslpath", ["-u", nativeProfile], { encoding: "utf8" }).trim();
+        const installation = installationId();
+        let profile = chromeProfilePath(join(config.dataDir, "work-chrome"), installation, id);
+        let nativeProfile = profile;
+        const windows = executable.startsWith("/mnt/") && executable.endsWith(".exe");
+        const powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+        if (windows) {
+          const temp = execFileSync(powershell, ["-NoProfile", "-Command", "$env:LOCALAPPDATA"], { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+          nativeProfile = `${temp}\\HasakiWorkChrome\\${installation}\\${id}\\profile`;
+          profile = execFileSync("wslpath", ["-u", nativeProfile], { encoding: "utf8" }).trim();
+        }
+        if (s.state !== "waiting") return;
+        mkdirSync(profile, { recursive: true, mode: 0o700 });
+        const lock = join(profile, ".platform-connection-lock");
+        try { mkdirSync(lock, { mode: 0o700 }); } catch { throw new Error("chrome_profile_busy"); }
+        s.releaseProfile = () => { try { rmdirSync(lock); } catch { } };
+        let previousEndpoint = "";
+        try { previousEndpoint = readFileSync(join(profile, "DevToolsActivePort"), "utf8"); } catch { }
+        const args = [`--user-data-dir=${nativeProfile}`, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", "https://work.hasaki.vn/auth/login"];
+        if (windows) {
+          const quote = (v: string) => "'" + v.replaceAll("'", "''") + "'";
+          const script = `$p=Start-Process -FilePath ${quote(executable.replace(/^\/mnt\/([a-z])\//, (_, d) => d.toUpperCase() + ":/").replaceAll("/", "\\"))} -ArgumentList @(${args.map((a) => quote('"' + a + '"')).join(",")}) -PassThru; $p.Id`;
+          const pid = Number(execFileSync(powershell, ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "ignore"] }).trim());
+          if (!Number.isInteger(pid) || pid <= 0) throw new Error("chrome_start");
+          s.stop = () => { try { execFileSync(powershell, ["-NoProfile", "-Command", `taskkill /PID ${pid} /T /F 2>$null | Out-Null`], { stdio: "ignore", timeout: 5000 }); } catch { } };
+        } else {
+          const child = spawn(executable, args, { stdio: "ignore" });
+          s.stop = () => { child.kill(); };
+          child.on("error", () => { if (s.state === "waiting") void finish(s, "error", "chrome_start"); });
+          child.on("exit", () => { if (s.state === "waiting") void finish(s, "cancelled"); });
+        }
+        for (let i = 0; i < 60 && s.state === "waiting" && !s.browser; i++) {
+          await new Promise((r) => setTimeout(r, 250));
+          try {
+            const endpoint = readFileSync(join(profile, "DevToolsActivePort"), "utf8");
+            if (endpoint === previousEndpoint) continue;
+            const [port, socket] = endpoint.trim().split("\n");
+            if (!/^\d+$/.test(port) || !socket?.startsWith("/devtools/browser/")) continue;
+            if (windows && !s.relay) s.relay = await windowsChromeRelay(Number(port), powershell);
+            if (s.state !== "waiting") { s.relay?.close(); break; }
+            s.browser = await chromium.connectOverCDP(`ws://127.0.0.1:${s.relay?.port ?? port}${socket}`, { timeout: windows ? 5000 : 700 });
+          } catch { }
+        }
       }
-      if (s.state !== "waiting") return;
-      mkdirSync(profile, { recursive: true, mode: 0o700 });
-      const lock = join(profile, ".platform-connection-lock");
-      try { mkdirSync(lock, { mode: 0o700 }); } catch { throw new Error("chrome_profile_busy"); }
-      s.releaseProfile = () => { try { rmdirSync(lock); } catch {} };
-      let previousEndpoint = "";
-      try { previousEndpoint = readFileSync(join(profile, "DevToolsActivePort"), "utf8"); } catch {}
-      const args = [`--user-data-dir=${nativeProfile}`, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", "https://work.hasaki.vn/auth/login"];
-      if (windows) {
-        const quote = (v: string) => "'" + v.replaceAll("'", "''") + "'";
-        const script = `$p=Start-Process -FilePath ${quote(executable.replace(/^\/mnt\/([a-z])\//, (_, d) => d.toUpperCase()+":/").replaceAll("/", "\\"))} -ArgumentList @(${args.map((a) => quote('"'+a+'"')).join(",")}) -PassThru; $p.Id`;
-        const pid = Number(execFileSync(powershell, ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "ignore"] }).trim());
-        if (!Number.isInteger(pid) || pid <= 0) throw new Error("chrome_start");
-        s.stop = () => { try { execFileSync(powershell, ["-NoProfile", "-Command", `taskkill /PID ${pid} /T /F 2>$null | Out-Null`], { stdio: "ignore", timeout: 5000 }); } catch {} };
-      } else {
-        const child = spawn(executable, args, { stdio: "ignore" });
-        s.stop = () => { child.kill(); };
-        child.on("error", () => { if (s.state === "waiting") void finish(s, "error", "chrome_start"); });
-        child.on("exit", () => { if (s.state === "waiting") void finish(s, "cancelled"); });
-      }
-      for (let i = 0; i < 60 && s.state === "waiting" && !s.browser; i++) {
-        await new Promise((r) => setTimeout(r, 250));
-        try {
-          const endpoint = readFileSync(join(profile, "DevToolsActivePort"), "utf8");
-          if (endpoint === previousEndpoint) continue;
-          const [port, socket] = endpoint.trim().split("\n");
-          if (!/^\d+$/.test(port) || !socket?.startsWith("/devtools/browser/")) continue;
-          if (windows && !s.relay) s.relay = await windowsChromeRelay(Number(port), powershell);
-          if (s.state !== "waiting") { s.relay?.close(); break; }
-          s.browser = await chromium.connectOverCDP(`ws://127.0.0.1:${s.relay?.port ?? port}${socket}`, { timeout: windows ? 5000 : 700 });
-        } catch {}
-      }
-      }
-      if (s.state !== "waiting") { if (!s.external) await s.browser?.close().catch(() => {}); s.relay?.close(); s.stop?.(); return; }
+      if (s.state !== "waiting") { if (!s.external) await s.browser?.close().catch(() => { }); s.relay?.close(); s.stop?.(); return; }
       if (!s.browser) throw new Error(executable.startsWith("/mnt/") ? "chrome_wsl_loopback" : "chrome_debugging");
       const context = s.browser.contexts()[0];
       const api = new URL(config.hasakiWork.apiUrl);

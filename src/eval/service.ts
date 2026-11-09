@@ -173,14 +173,14 @@ export async function createEvaluation(
         sandbox,
         ...(cfg.provider_sequence
           ? {
-              controlled_version: "provider-benchmark-v1",
-              context_inventory_hash: inventory,
-              mode: cfg.mode,
-              adapter: cfg.adapter,
-              prompt: cfg.prompt_version,
-              tools: cfg.allowed_tools ?? null,
-              context_tokens: cfg.context_tokens,
-            }
+            controlled_version: "provider-benchmark-v1",
+            context_inventory_hash: inventory,
+            mode: cfg.mode,
+            adapter: cfg.adapter,
+            prompt: cfg.prompt_version,
+            tools: cfg.allowed_tools ?? null,
+            context_tokens: cfg.context_tokens,
+          }
           : {}),
       }),
     );
@@ -370,7 +370,7 @@ export async function createComparison(
     if (
       a.configuration.context_variant !== b.configuration.context_variant &&
       JSON.stringify(a.configuration.provider_sequence) !==
-        JSON.stringify(b.configuration.provider_sequence)
+      JSON.stringify(b.configuration.provider_sequence)
     )
       throw new HttpError(
         409,

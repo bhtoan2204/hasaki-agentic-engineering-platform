@@ -109,13 +109,13 @@ export async function telegramChats(input: { botToken?: string }) {
   if (!token) throw new Error("nhập bot token trước, rồi nhắn /start cho bot");
   const key = botKey(token), client = await pool.connect();
   let updates: any[];
-  const locked = (await client.query("SELECT pg_try_advisory_lock($1::int) AS ok",[advisoryKey(key)])).rows[0].ok;
+  const locked = (await client.query("SELECT pg_try_advisory_lock($1::int) AS ok", [advisoryKey(key)])).rows[0].ok;
   try {
-    const active = await one(client,"SELECT bot_key FROM telegram_consumers WHERE bot_key=$1 AND lease_until>now()",[key]);
+    const active = await one(client, "SELECT bot_key FROM telegram_consumers WHERE bot_key=$1 AND lease_until>now()", [key]);
     if (!locked || active || config.telegram.mode !== "off") return observedChats(key);
-    updates = await telegramApi(token,"getUpdates");
+    updates = await telegramApi(token, "getUpdates");
   } finally {
-    if(locked) await client.query("SELECT pg_advisory_unlock($1::int)",[advisoryKey(key)]).catch(()=>{});
+    if (locked) await client.query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)]).catch(() => { });
     client.release();
   }
   const chats = new Map<string, { id: string; name: string; type: string }>();
@@ -218,8 +218,8 @@ export async function adoptEnv(which: "telegram" | "bitbucket", userId?: number)
 /** The chat that receives this user's private run notifications. The shared bot token is unchanged. */
 export async function setTelegramDestination(userId: number, chatId: string) {
   const id = String(chatId ?? "").trim();
-  const binding = await one(pool,"SELECT chat_id FROM telegram_bindings WHERE user_id=$1",[userId]);
-  if(binding && binding.chat_id!==id) throw new HttpError(409,"Disconnect Telegram before changing its verified destination");
+  const binding = await one(pool, "SELECT chat_id FROM telegram_bindings WHERE user_id=$1", [userId]);
+  if (binding && binding.chat_id !== id) throw new HttpError(409, "Disconnect Telegram before changing its verified destination");
   if (!id) {
     await deleteUserSecret(userId, "telegram_chat");
     return { chatId: null };

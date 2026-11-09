@@ -49,7 +49,7 @@ export function usageSummary(rows: any[]) {
   }
   for (const r of rows) if (r.normalized_failure_category) result.failures[r.normalized_failure_category] = (result.failures[r.normalized_failure_category] ?? 0) + 1;
   const percentiles = (field: string) => {
-    const times = rows.map(r => r[field]).filter(v => typeof v === "number" && Number.isFinite(v)).sort((a,b) => a-b);
+    const times = rows.map(r => r[field]).filter(v => typeof v === "number" && Number.isFinite(v)).sort((a, b) => a - b);
     return Object.fromEntries([50, 95, 99].map(p => [`p${p}`, times.length ? times[Math.max(0, Math.ceil(times.length * p / 100) - 1)] : null]));
   };
   result.latency_ms = percentiles("wall_duration_ms");

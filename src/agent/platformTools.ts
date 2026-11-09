@@ -169,7 +169,7 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
           if (!toolAllowed(target, experiment.allowedTools))
             throw new Error("Tool excluded by frozen benchmark permissions");
         }
-        if (!env.contextPreparation && !toolAllowed(target,env.attemptAllowedTools)) throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
+        if (!env.contextPreparation && !toolAllowed(target, env.attemptAllowedTools)) throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
         if (["read_knowledge", "search_knowledge"].includes(name) && !native)
           env = { ...env, knowledge: await visibleSnapshotKnowledge(env) };
         if (JSON.stringify(args ?? {}).length > 128000) throw new Error("Tool arguments exceed 128000 characters");
@@ -199,11 +199,11 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
             }
             const value = readOnly
               ? await Promise.race([
-                  operation,
-                  new Promise((_, reject) => {
-                    timer = setTimeout(() => reject(new Error("Context tool deadline exceeded")), timeout);
-                  }),
-                ])
+                operation,
+                new Promise((_, reject) => {
+                  timer = setTimeout(() => reject(new Error("Context tool deadline exceeded")), timeout);
+                }),
+              ])
               : await operation;
             if (readOnly) await validateToolBinding(env);
             result = boundedContextJson(value);
@@ -284,14 +284,14 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
         return JSON.stringify(
           native
             ? {
-                name: native.logicalName,
-                description: native.description,
-                read_only: native.readOnly,
-                available:
-                  !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
-                  codeIntelligenceEnabled(),
-                input_schema: z.toJSONSchema(native.input),
-              }
+              name: native.logicalName,
+              description: native.description,
+              read_only: native.readOnly,
+              available:
+                !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
+                codeIntelligenceEnabled(),
+              input_schema: z.toJSONSchema(native.input),
+            }
             : describeTool(String(args?.name ?? "")),
           null,
           2,

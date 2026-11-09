@@ -171,7 +171,7 @@ export async function validateSource(
           checks: parsed.checks as typeof checks,
           diagnostic: "Required or hidden assertions failed",
         };
-    } catch {}
+    } catch { }
     return {
       syntax,
       security,

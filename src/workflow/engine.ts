@@ -127,7 +127,7 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
     const icon = { COMPLETED: "✅", FAILED: "❌", WAITING: "⏸️" }[to];
     afterCommit(() => background(`notify run ${run.id}`, () => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`)));
     if (to === "COMPLETED" || to === "FAILED") afterCommit(() => background(`private Telegram run ${run.id}`, async () => {
-      if (!await isEvaluationTelegramRun(run.id)) await (await import("../telegram/workflow.ts")).notifyTelegramRun(run.id,to);
+      if (!await isEvaluationTelegramRun(run.id)) await (await import("../telegram/workflow.ts")).notifyTelegramRun(run.id, to);
     }));
     // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
     if (to === "COMPLETED") afterCommit(() => background(`memory extraction for run ${run.id}`, () => extractRunMemory(run.id)));
@@ -355,8 +355,8 @@ export async function startRun(input: StartRunInput) {
       r.decision.profile,
     );
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
-    try { for (const step of optimized.graph.steps) resolveStepAgent({agent_provider,profile:r.decision.profile},step); }
-    catch(error) { throw new EngineError((error as Error).message,400); }
+    try { for (const step of optimized.graph.steps) resolveStepAgent({ agent_provider, profile: r.decision.profile }, step); }
+    catch (error) { throw new EngineError((error as Error).message, 400); }
     const resolvedGraph = { ...optimized.graph, profile: r.decision.profile, profile_changes: r.changes };
     await q(
       c,
@@ -392,9 +392,9 @@ export async function startRun(input: StartRunInput) {
       id,
       "system",
       `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""} · agent ${agent_provider} · profile ${r.decision.profile} (${r.decision.reasons.join("; ")})` +
-        (r.changes.length ? ` · ${r.changes.length} graph change(s)` : "") +
-        (r.reportAdded ? " · Task Result Report step added (ai_suggest.report)" : "") +
-        (r.reusedRepositories ? ` · reused repositories ${selected.join(", ")}` : ""),
+      (r.changes.length ? ` · ${r.changes.length} graph change(s)` : "") +
+      (r.reportAdded ? " · Task Result Report step added (ai_suggest.report)" : "") +
+      (r.reusedRepositories ? ` · reused repositories ${selected.join(", ")}` : ""),
     );
     if (wi) await q(c, "UPDATE work_items SET status = 'in_progress', updated_at = now() WHERE id = $1 AND status = 'open'", [wi.id]);
     const run = (await one<RunRow>(c, "SELECT * FROM workflow_runs WHERE id = $1", [id]))!;
@@ -490,7 +490,7 @@ async function reexecuteTx(c: Db, run: RunRow, stepKey: string, pending: Record<
   const byKey = new Map(steps.map((s) => [s.key, s]));
   const target = byKey.get(stepKey);
   if (!target) throw new EngineError(`step "${stepKey}" not found`, 404);
-  if (target.pending_input?.provider_handoff?.source_attempt_id === target.current_attempt_id) throw new EngineError("Review and confirm the pending provider handoff",409);
+  if (target.pending_input?.provider_handoff?.source_attempt_id === target.current_attempt_id) throw new EngineError("Review and confirm the pending provider handoff", 409);
   if (!RETRYABLE.includes(target.status)) throw new EngineError(`step "${stepKey}" is ${target.status}; only ${RETRYABLE.join("/")} steps can be re-executed`);
   const blocked = target.depends_on.filter((d) => !DONE.includes(byKey.get(d)!.status));
   if (blocked.length) throw new EngineError(`upstream steps not complete: ${blocked.join(", ")}`);
@@ -828,8 +828,8 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       [step.id, run.id, n, step.generation, j.id, j.fencing_token, worker, json(input), context.snapshot_id, json({ context_preparation_ms: contextPreparationMs }), effective?.provider ?? null, effective?.model ?? null, effective ? json(effective) : null],
     ))!;
     if (step.pending_input?.provider_handoff?.id) {
-      const linked = await q(c, "UPDATE provider_handoffs SET target_attempt_id=$2 WHERE id=$1 AND status='RESUMED' AND target_attempt_id IS NULL AND step_id=$3 AND generation=$4 RETURNING id", [step.pending_input.provider_handoff.id,attempt.id,step.id,step.generation]);
-      if (!linked.length && !await one(c,"SELECT id FROM provider_handoffs WHERE id=$1 AND step_id=$2 AND generation=$3 AND status='RESUMED' AND target_attempt_id IS NOT NULL",[step.pending_input.provider_handoff.id,step.id,step.generation])) throw new EngineError("Handoff continuation stale",409);
+      const linked = await q(c, "UPDATE provider_handoffs SET target_attempt_id=$2 WHERE id=$1 AND status='RESUMED' AND target_attempt_id IS NULL AND step_id=$3 AND generation=$4 RETURNING id", [step.pending_input.provider_handoff.id, attempt.id, step.id, step.generation]);
+      if (!linked.length && !await one(c, "SELECT id FROM provider_handoffs WHERE id=$1 AND step_id=$2 AND generation=$3 AND status='RESUMED' AND target_attempt_id IS NOT NULL", [step.pending_input.provider_handoff.id, step.id, step.generation])) throw new EngineError("Handoff continuation stale", 409);
     }
     await setStepStatus(c, step, "RUNNING", { current_attempt_id: attempt.id, attempt_count: step.attempt_count + 1, started_at: new Date(), error: null }, `attempt #${n}`);
     return { run, step, attempt, input, context };
@@ -1005,11 +1005,11 @@ export async function finishAttempt(jobId: number, token: number, attemptId: num
       await runEvents.add(c, run.id, "system", `${step.key}: attempt #${attempt.number} result discarded: ${reason}`, step.id, attempt.id);
       return { applied: false, reason };
     }
-    const request = await one(c,"SELECT * FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING' FOR UPDATE",[attempt.id]);
+    const request = await one(c, "SELECT * FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING' FOR UPDATE", [attempt.id]);
     // A request may commit after the scheduler inspected the result. Keep that race fail-closed.
-    if(request && attempt.executor_stopped_at && !handoff) handoff={blocked:"Switch request arrived after checkpoint preparation; reinspect the stopped executor's preserved state"};
+    if (request && attempt.executor_stopped_at && !handoff) handoff = { blocked: "Switch request arrived after checkpoint preparation; reinspect the stopped executor's preserved state" };
     if (handoff && attempt.executor_stopped_at && (request || handoff.failure)) {
-      await persistProviderPause(c,run,step,attempt,j!,result,handoff,request,afterCommit);
+      await persistProviderPause(c, run, step, attempt, j!, result, handoff, request, afterCommit);
     } else await applyResult(c, run, step, attempt, jobId, result, afterCommit);
     return { applied: true };
   });
@@ -1060,8 +1060,8 @@ async function recoverInterrupted(c: pg.PoolClient, run: RunRow, step: StepRow, 
   const checkpoint = { ...(cp?.data ?? {}), ...(session ?? {}), recovery: { kind: safe ? "SAFE_RETRY" : "REQUIRES_RECONCILIATION", reason, from_attempt_id: attempt.id, question_id: null as number | null } };
   await q(c, "UPDATE workflow_step_attempts SET status = $2, error = $3, finished_at = now() WHERE id = $1", [attempt.id, safe ? "STALE" : "WAITING_INPUT", json({ message: reason, interrupted: true })]);
   const pending = { ...(step.pending_input ?? {}), resume: { from_attempt_id: attempt.id, checkpoint }, recovery: checkpoint.recovery };
-  const handoff=await one(c,"UPDATE provider_handoffs SET status='BLOCKED',blocked_reason='Worker interrupted before termination could be confirmed' WHERE source_attempt_id=$1 AND status='STOPPING' RETURNING id",[attempt.id]);
-  if(handoff) (pending as any).provider_handoff={id:handoff.id,source_attempt_id:attempt.id,status:"BLOCKED"};
+  const handoff = await one(c, "UPDATE provider_handoffs SET status='BLOCKED',blocked_reason='Worker interrupted before termination could be confirmed' WHERE source_attempt_id=$1 AND status='STOPPING' RETURNING id", [attempt.id]);
+  if (handoff) (pending as any).provider_handoff = { id: handoff.id, source_attempt_id: attempt.id, status: "BLOCKED" };
   if (!safe) {
     const en = outputLocale(run) === "en";
     const question = {
@@ -1166,7 +1166,7 @@ export async function runDetail(runId: number) {
   const worker = await instanceHealth(row.worker_instance ?? null);
   const recovery = steps.some((s) => s.status === "WAITING_INPUT" && s.pending_input?.recovery)
     ? "NEEDS_ATTENTION" : steps.some((s) => ["READY", "RUNNING"].includes(s.status) && s.pending_input?.recovery)
-    ? "RECOVERING" : !["COMPLETED", "CANCELED", "FAILED"].includes(row.status) && worker.health !== "ONLINE" ? "WAITING_FOR_WORKER" : null;
+      ? "RECOVERING" : !["COMPLETED", "CANCELED", "FAILED"].includes(row.status) && worker.health !== "ONLINE" ? "WAITING_FOR_WORKER" : null;
   return { ...row, worker: { ...worker, local: row.worker_instance === config.instanceId, available: worker.health === "ONLINE", recovery }, steps, work_item, attempts, questions, artifacts, pull_requests: prs, workspaces, checkpoints };
 }
 
@@ -1184,7 +1184,7 @@ export async function stepDetail(runId: number, stepKey: string) {
     q(pool, `SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = ${sid} ORDER BY s.id`, args),
     q(pool, `SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`, args),
     q(pool, `SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = ${sid} ORDER BY id DESC LIMIT 10`, args),
-    q(pool, `SELECT h.*,m.previous_attempt_duration_ms,m.handoff_duration_ms,m.new_attempt_duration_ms,m.retry_count,m.reported_cost_usd,m.final_verification_result FROM provider_handoffs h LEFT JOIN provider_handoff_metrics m ON m.id=h.id WHERE h.step_id=${sid} ORDER BY h.id`,args),
+    q(pool, `SELECT h.*,m.previous_attempt_duration_ms,m.handoff_duration_ms,m.new_attempt_duration_ms,m.retry_count,m.reported_cost_usd,m.final_verification_result FROM provider_handoffs h LEFT JOIN provider_handoff_metrics m ON m.id=h.id WHERE h.step_id=${sid} ORDER BY h.id`, args),
   ]);
   if (!step) throw new EngineError(`step "${stepKey}" not found`, 404);
   return { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs, handoffs };
@@ -1216,20 +1216,20 @@ export function answeredQuestions(limit = 100, db: Db = pool, scope?: { ownerId?
 export async function setStepAgent(runId: number, key: string, value: unknown, actorId: number) {
   return withTx(async c => {
     const run = await lockRun(c, runId);
-    const step = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id=$1 AND key=$2 FOR UPDATE", [runId,key]);
-    if (!step || !["agent","coding_agent"].includes(step.type)) throw new EngineError("Agent step required",400);
-    if (!["PENDING","READY","RETRYING","FAILED","CANCELED","WAITING_INPUT"].includes(step.status) || run.status === "CANCELED") throw new EngineError("Only pending or retryable agent steps can be changed",409);
+    const step = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id=$1 AND key=$2 FOR UPDATE", [runId, key]);
+    if (!step || !["agent", "coding_agent"].includes(step.type)) throw new EngineError("Agent step required", 400);
+    if (!["PENDING", "READY", "RETRYING", "FAILED", "CANCELED", "WAITING_INPUT"].includes(step.status) || run.status === "CANCELED") throw new EngineError("Only pending or retryable agent steps can be changed", 409);
     let override;
     let effective;
     try {
       override = value === null ? null : StepAgentOverrideConfig.parse(value);
       const baselineTools = step.config.agent?.allowed_tools;
-      if (baselineTools != null && override && Object.hasOwn(override,"allowed_tools") && (override.allowed_tools == null || override.allowed_tools.some(t => !baselineTools.includes(t)))) throw new Error("Manual tool permissions must be a subset of the workflow's allowed_tools");
-      effective = resolveStepAgent(run, {...step, agent_override: override});
-    } catch(error) { throw new EngineError((error as Error).message,400); }
-    await q(c,"UPDATE workflow_steps SET agent_override=$2 WHERE id=$1",[step.id,override == null ? null : json(override)]);
-    await q(c,`INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail) VALUES($1,'step.agent_override','run',$2,$3)`,[actorId,String(runId),json({step:key,previous:step.agent_override ?? null,override,effective})]);
-    return {agent_override:override,effective_agent:effective};
+      if (baselineTools != null && override && Object.hasOwn(override, "allowed_tools") && (override.allowed_tools == null || override.allowed_tools.some(t => !baselineTools.includes(t)))) throw new Error("Manual tool permissions must be a subset of the workflow's allowed_tools");
+      effective = resolveStepAgent(run, { ...step, agent_override: override });
+    } catch (error) { throw new EngineError((error as Error).message, 400); }
+    await q(c, "UPDATE workflow_steps SET agent_override=$2 WHERE id=$1", [step.id, override == null ? null : json(override)]);
+    await q(c, `INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail) VALUES($1,'step.agent_override','run',$2,$3)`, [actorId, String(runId), json({ step: key, previous: step.agent_override ?? null, override, effective })]);
+    return { agent_override: override, effective_agent: effective };
   });
 }
 
@@ -1252,11 +1252,11 @@ export async function prepareProviderPause(b: BegunAttempt, result: ExecResult):
   const retry =
     result.kind === "failed"
       ? classifyFailure(result.error, {
-          executorRetryable: result.retryable,
-          attempt: b.step.attempt_count,
-          maxAttempts: b.attempt.effective_agent?.retry?.max_attempts ?? b.step.max_attempts,
-          baseBackoff: b.step.retry_backoff_s,
-        })
+        executorRetryable: result.retryable,
+        attempt: b.step.attempt_count,
+        maxAttempts: b.attempt.effective_agent?.retry?.max_attempts ?? b.step.max_attempts,
+        baseBackoff: b.step.retry_backoff_s,
+      })
       : null;
   const reported = await one(
     pool,

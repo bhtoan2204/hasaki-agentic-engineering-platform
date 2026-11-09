@@ -21,8 +21,8 @@ export async function repositoryLock<T>(repo: LocalRepository, action: () => Pro
     await c.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [key]);
     return await action();
   } finally {
-    await c.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [key]).catch(() => {});
-    await c.query("RESET lock_timeout").catch(() => {});
+    await c.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [key]).catch(() => { });
+    await c.query("RESET lock_timeout").catch(() => { });
     c.release();
   }
 }

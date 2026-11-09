@@ -1,7 +1,7 @@
 import { createBinding, disconnect as disconnectTelegram, savePreferences } from "../telegram/store.ts";
 import { evaluationAnalytics } from "../eval/analytics.ts";
 import { createRecommendation } from "../eval/recommendations.ts";
-import { saveOptimizationPolicy,optimizationPolicies } from "../eval/optimization.ts";
+import { saveOptimizationPolicy, optimizationPolicies } from "../eval/optimization.ts";
 import { requestProviderHandoff, resumeProviderHandoff, providerHandoffOptions } from "../workflow/engine.ts";
 import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext } from "./agentContext.ts";
@@ -170,13 +170,13 @@ const latestRun = (workItemId: number) => one<{ id: number; status: string }>(po
 
 export const routes: Route[] = [
   ["GET", /^\/api\/attempts\/(\d+)\/context$/, async c => {
-    const id=num(c.p[0]);await requireAttempt(c.actor,id,support(c));
-    const offset=Number(c.url.searchParams.get("offset")??0);
-    if(!Number.isInteger(offset)||offset<0||offset>100000)throw new HttpError(400,"Invalid context evidence offset");
-    return attemptContext(id,offset);
+    const id = num(c.p[0]); await requireAttempt(c.actor, id, support(c));
+    const offset = Number(c.url.searchParams.get("offset") ?? 0);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 100000) throw new HttpError(400, "Invalid context evidence offset");
+    return attemptContext(id, offset);
   }],
-  ["GET", /^\/api\/analytics\/(health|health-service|usage|performance|workflows|options)$/, c => engineeringAnalytics(c.actor,c.url,c.p[0])],
-  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/lifecycle$/, c => updateIncidentLifecycle(c.actor,c.p[0],c.body)],
+  ["GET", /^\/api\/analytics\/(health|health-service|usage|performance|workflows|options)$/, c => engineeringAnalytics(c.actor, c.url, c.p[0])],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/lifecycle$/, c => updateIncidentLifecycle(c.actor, c.p[0], c.body)],
   // ------------------------------------------------------------ meta
   [
     "GET",
@@ -315,10 +315,10 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/cancel$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), cancelRun(num(c.p[0]), c.body.reason || "canceled by user"))],
   ["POST", /^\/api\/runs\/(\d+)\/repositories$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), selectRepositories(num(c.p[0]), c.body.repositories ?? []))],
   ["POST", /^\/api\/runs\/(\d+)\/feedback$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), sendFeedback(num(c.p[0]), String(c.body.message ?? "").trim() || fail("empty message")))],
-  ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff-providers$/,async c=>(await requireRun(c.actor,num(c.p[0]),support(c)),providerHandoffOptions(num(c.p[0]),c.p[1]))],
-  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff$/, async c => (await requireRun(c.actor,num(c.p[0]),support(c)),requestProviderHandoff(num(c.p[0]),c.p[1],c.body,c.actor.id))],
-  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff-resume$/, async c => (await requireRun(c.actor,num(c.p[0]),support(c)),resumeProviderHandoff(num(c.p[0]),c.p[1],c.body,c.actor.id))],
-  ["GET", /^\/api\/runs\/(\d+)\/handoffs$/, async c => (await requireRun(c.actor,num(c.p[0]),support(c)),q(pool,"SELECT * FROM provider_handoff_metrics WHERE run_id=$1 ORDER BY id",[num(c.p[0])]))],
+  ["GET", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff-providers$/, async c => (await requireRun(c.actor, num(c.p[0]), support(c)), providerHandoffOptions(num(c.p[0]), c.p[1]))],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff$/, async c => (await requireRun(c.actor, num(c.p[0]), support(c)), requestProviderHandoff(num(c.p[0]), c.p[1], c.body, c.actor.id))],
+  ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/handoff-resume$/, async c => (await requireRun(c.actor, num(c.p[0]), support(c)), resumeProviderHandoff(num(c.p[0]), c.p[1], c.body, c.actor.id))],
+  ["GET", /^\/api\/runs\/(\d+)\/handoffs$/, async c => (await requireRun(c.actor, num(c.p[0]), support(c)), q(pool, "SELECT * FROM provider_handoff_metrics WHERE run_id=$1 ORDER BY id", [num(c.p[0])]))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/agent$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), setStepAgent(num(c.p[0]), c.p[1], c.body.agent, c.actor.id))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/retry$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), retryStep(num(c.p[0]), c.p[1], c.body.input))],
   ["POST", /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), reexecuteStep(num(c.p[0]), c.p[1], { feedback: c.body.feedback, input: c.body.input, skills: c.body.skills, by: c.actor.username }))],
@@ -412,20 +412,20 @@ export const routes: Route[] = [
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/approve$/, async (c) => reviewMemory(c.p[0], "approve", c.actor.username, (await readableKnowledge(c, c.p[0])).owner_id ?? null)],
   ["POST", /^\/api\/knowledge\/([a-z0-9_.-]+)\/reject$/, async (c) => reviewMemory(c.p[0], "reject", c.actor.username, (await readableKnowledge(c, c.p[0])).owner_id ?? null)],
   ["GET", /^\/api\/benchmark-suites$/, () => listSuites()],
-  ["POST", /^\/api\/benchmark-suites\/publish$/, async ({ actor }) => { requireAdmin(actor); if (!config.evaluation.enabled) throw new HttpError(409, "Evaluation framework disabled"); const row=await publishBuiltinSuite(); return {id:row.id,key:row.suite_key,version:row.version}; }],
-  ["GET", /^\/api\/agent-evaluation$/,c=>evaluationAnalytics(c.actor,c.url)],
-  ["POST", /^\/api\/agent-recommendations$/,c=>createRecommendation(c.actor,c.body)],
-  ["GET", /^\/api\/agent-recommendations\/(\d+)$/,async c=>{const row=await one(pool,"SELECT * FROM agent_recommendations WHERE id=$1",[num(c.p[0])]);if(!row)throw new HttpError(404,"Recommendation not found");await requireOwner(c.actor,row.owner_id,support(c),"agent_recommendation",String(row.id));return row;}],
-  ["GET", /^\/api\/agent-recommendations$/,c=>q(pool,"SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50",[c.actor.id])],
-  ["POST", /^\/api\/agent-optimization$/,c=>saveOptimizationPolicy(c.actor.id,c.body)],
-  ["GET", /^\/api\/agent-optimization$/,c=>optimizationPolicies(c.actor.id)],
-  ["GET", /^\/api\/evaluation-runs$/, async ({ actor }) => ({enabled:config.evaluation.enabled,runs:await evaluationList(actor.id)})],
-  ["POST", /^\/api\/evaluation-runs$/, ({actor,body}) => createEvaluation(actor.id,body,actor.role==="admin")],
-  ["GET", /^\/api\/evaluation-runs\/(\d+)$/, ({actor,p}) => evaluationDetail(num(p[0]),actor.id)],
-  ["POST", /^\/api\/evaluation-runs\/(\d+)\/start$/, async ({actor,p}) => {if (!config.evaluation.enabled) throw new HttpError(409,"Evaluation framework disabled"); const row=await evaluationDetail(num(p[0]),actor.id);return startPendingRun(row.workflow_run_id);}],
-  ["POST", /^\/api\/evaluation-runs\/(\d+)\/cancel$/, ({actor,p}) => cancelEvaluation(num(p[0]),actor.id)],
-  ["POST", /^\/api\/evaluation-comparisons$/, ({actor,body}) => createComparison(actor.id,num(String(body.baseline_id)),num(String(body.candidate_id)),body.policy)],
-  ["GET", /^\/api\/evaluation-comparisons\/(\d+)$/, ({actor,p}) => comparisonDetail(num(p[0]),actor.id)],
+  ["POST", /^\/api\/benchmark-suites\/publish$/, async ({ actor }) => { requireAdmin(actor); if (!config.evaluation.enabled) throw new HttpError(409, "Evaluation framework disabled"); const row = await publishBuiltinSuite(); return { id: row.id, key: row.suite_key, version: row.version }; }],
+  ["GET", /^\/api\/agent-evaluation$/, c => evaluationAnalytics(c.actor, c.url)],
+  ["POST", /^\/api\/agent-recommendations$/, c => createRecommendation(c.actor, c.body)],
+  ["GET", /^\/api\/agent-recommendations\/(\d+)$/, async c => { const row = await one(pool, "SELECT * FROM agent_recommendations WHERE id=$1", [num(c.p[0])]); if (!row) throw new HttpError(404, "Recommendation not found"); await requireOwner(c.actor, row.owner_id, support(c), "agent_recommendation", String(row.id)); return row; }],
+  ["GET", /^\/api\/agent-recommendations$/, c => q(pool, "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50", [c.actor.id])],
+  ["POST", /^\/api\/agent-optimization$/, c => saveOptimizationPolicy(c.actor.id, c.body)],
+  ["GET", /^\/api\/agent-optimization$/, c => optimizationPolicies(c.actor.id)],
+  ["GET", /^\/api\/evaluation-runs$/, async ({ actor }) => ({ enabled: config.evaluation.enabled, runs: await evaluationList(actor.id) })],
+  ["POST", /^\/api\/evaluation-runs$/, ({ actor, body }) => createEvaluation(actor.id, body, actor.role === "admin")],
+  ["GET", /^\/api\/evaluation-runs\/(\d+)$/, ({ actor, p }) => evaluationDetail(num(p[0]), actor.id)],
+  ["POST", /^\/api\/evaluation-runs\/(\d+)\/start$/, async ({ actor, p }) => { if (!config.evaluation.enabled) throw new HttpError(409, "Evaluation framework disabled"); const row = await evaluationDetail(num(p[0]), actor.id); return startPendingRun(row.workflow_run_id); }],
+  ["POST", /^\/api\/evaluation-runs\/(\d+)\/cancel$/, ({ actor, p }) => cancelEvaluation(num(p[0]), actor.id)],
+  ["POST", /^\/api\/evaluation-comparisons$/, ({ actor, body }) => createComparison(actor.id, num(String(body.baseline_id)), num(String(body.candidate_id)), body.policy)],
+  ["GET", /^\/api\/evaluation-comparisons\/(\d+)$/, ({ actor, p }) => comparisonDetail(num(p[0]), actor.id)],
   ["GET", /^\/api\/evals$/, async ({ url, actor }) => {
     const suite = url.searchParams.get("suite");
     const rows = await q(pool, `SELECT * FROM eval_results WHERE ($1::text IS NULL OR suite = $1) AND (owner_id IS NULL OR owner_id=$2) ORDER BY id DESC LIMIT 500`, [suite, actor.id]);

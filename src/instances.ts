@@ -87,9 +87,11 @@ export async function startInstanceHeartbeat(options: { waitForPrevious?: boolea
     if (!stopped) schedule();
   };
   schedule();
-  return { async stop() {
-    stopped = true; clearTimeout(timer); await pending;
-    await q(pool, "UPDATE platform_instances SET stopped_at = now() WHERE instance_id = $1 AND session_id = $2", [config.instanceId, instanceSession]);
-    started = false;
-  } };
+  return {
+    async stop() {
+      stopped = true; clearTimeout(timer); await pending;
+      await q(pool, "UPDATE platform_instances SET stopped_at = now() WHERE instance_id = $1 AND session_id = $2", [config.instanceId, instanceSession]);
+      started = false;
+    }
+  };
 }
