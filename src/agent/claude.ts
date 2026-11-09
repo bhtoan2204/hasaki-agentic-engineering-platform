@@ -1417,8 +1417,13 @@ const agentExecutor: StepExecutor = {
         };
       const repairsUsed = (await one<{ n: number }>(
         pool,
-        "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE step_id = $1 AND output->>'verdict' = 'FAIL'",
-        [ctx.step.id],
+        // Repair budget restarts when a human re-executes (re-run / instructions / rejection): automatic repair rounds
+        // since then are what is bounded, not FAIL verdicts from before the developer intervened.
+        `SELECT count(*)::int AS n FROM workflow_step_attempts a
+          WHERE a.step_id = $1 AND a.output->>'verdict' = 'FAIL'
+            AND a.started_at > COALESCE((SELECT max(e.created_at) FROM workflow_events e WHERE e.run_id = $2 AND e.kind = 'status'
+              AND (e.content LIKE '%(re-executed by user)%' OR e.content LIKE '%(re-executed with %' OR e.content LIKE '%(re-executed after rejection%')), '-infinity'::timestamptz)`,
+        [ctx.step.id, ctx.run.id],
       ))!.n;
       const maxRepairs = Math.max(
         0,
@@ -1667,7 +1672,7 @@ const agentExecutor: StepExecutor = {
       const changed = Object.values(state.files).flat();
       if (changed.length) {
         metrics.first_useful_location_ms = firstUsefulLocationMs(metrics, changed);
-        await ctx.recordMetrics({ first_useful_location_ms: metrics.first_useful_location_ms }).catch(() => {});
+        await ctx.recordMetrics({ first_useful_location_ms: metrics.first_useful_location_ms }).catch(() => { });
       }
       if (Object.keys(state.heads).length) {
         output = { ...output, commits: state.heads };
