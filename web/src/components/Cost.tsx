@@ -156,6 +156,7 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
       {!none && kind === "run" && data.by_step.length > 0 && (
         <div className="cost-section">
           <div className="cost-h">{t("cost.byStep")}</div>
+          <div className="table-wrap">
           <table className="cost-table">
             <thead>
               <tr>
@@ -178,12 +179,14 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {kind === "work_item" && data.runs.length > 0 && (
         <div className="cost-section">
           <div className="cost-h">{t("cost.byRun")}</div>
+          <div className="table-wrap">
           <table className="cost-table">
             <thead>
               <tr>
@@ -208,12 +211,14 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {!none && data.by_model.length > 0 && (
         <div className="cost-section">
           <div className="cost-h">{t("cost.byModel")}</div>
+          <div className="table-wrap">
           <table className="cost-table">
             <thead>
               <tr>
@@ -236,6 +241,7 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
