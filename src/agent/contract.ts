@@ -1,6 +1,6 @@
 /**
  * Top-level keys of a step's prose output contract, e.g. "{ goal, requirements: string[], risks }" → goal, requirements,
- * risks. Dynamic keys ("[repo]") are skipped. Used to refuse a Codex step that ends without a result matching it.
+ * risks. Dynamic keys ("[repo]") and optional keys ("key?") are skipped. Used to refuse a Codex step that ends without a result matching it.
  */
 export function contractKeys(contract: unknown): string[] {
   const s = typeof contract === "string" ? contract.trim() : "";
@@ -10,8 +10,9 @@ export function contractKeys(contract: unknown): string[] {
   let depth = 0;
   let cur = "";
   const flush = () => {
-    const m = cur.trim().match(/^([A-Za-z_][\w]*)\??\s*(:|$)/);
-    if (m) keys.push(m[1]);
+    // "key?" / "key?: type" is optional: shown to the agent, never required for the step to complete.
+    const m = cur.trim().match(/^([A-Za-z_][\w]*)(\?)?\s*(:|$)/);
+    if (m && !m[2]) keys.push(m[1]);
     cur = "";
   };
   for (const ch of body) {

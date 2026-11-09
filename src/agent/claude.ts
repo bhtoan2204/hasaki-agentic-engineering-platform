@@ -92,9 +92,18 @@ import {
   evidenceDrift,
   hasTestEvidence,
   isIndependent,
+  enforceScopeReview,
   normalizeVerdict,
   repairTargetFor,
 } from "./independentReview.ts";
+import {
+  approvedScopeIn,
+  evidenceRole,
+  normalizeInvestigationOutput,
+  SCOPE_REAPPROVAL_QUESTION,
+  scopeCheck,
+  unavailableSources,
+} from "./evidence.ts";
 import {
   diffTestsAgainstBase,
   repairPrompt,
@@ -1315,8 +1324,61 @@ const agentExecutor: StepExecutor = {
     }
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
 
+    // Evidence-gated investigation: normalize claims/root cause/fix risk (only ever lowers certainty, notes every change).
+    const role = independent ? null : evidenceRole(ctx.step.config);
+    if (role) {
+      output = normalizeInvestigationOutput(
+        role,
+        output,
+        Object.fromEntries(Object.entries(ctx.input.upstream).map(([k, u]) => [k, u.output])),
+        unavailableSources(ctx.context.contextPack),
+      );
+      const ev = output as any;
+      metrics.evidence = {
+        role,
+        claims: ev.claims?.length ?? 0,
+        downgraded: ev.evidence_validation?.downgraded ?? 0,
+        missing_evidence: ev.missing_evidence?.length ?? 0,
+        root_cause_status: ev.root_cause_assessment?.status ?? null,
+        fix_risk: ev.fix_assessment?.risk ?? null,
+        gate_satisfied: ev.evidence_gate?.satisfied ?? null,
+      };
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
+    }
+    // Approved scope integrity: compare the coding change with what a human approved; escalations need re-approval.
+    const scope = mode === "coding" && !independent ? approvedScopeIn(ctx.input.upstream) : null;
+    if (scope) {
+      const files: Record<string, string[]> = {};
+      for (const w of await workspacesOf(ctx.run.id).catch(() => [])) {
+        const base = `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}`;
+        const names = await execP("git", ["-C", w.path, "diff", "--name-only", `${base}...HEAD`]).then((r) => r.stdout.split("\n").filter(Boolean)).catch(() => []);
+        if (names.length) files[w.repo] = names;
+      }
+      const check = scopeCheck(scope, files, (output as any).scope_deviations);
+      const reapproved = ctx.input.answers.find((a: any) => String(a.question).startsWith(SCOPE_REAPPROVAL_QUESTION) && /^\s*(approve|duyệt|đồng ý)/i.test(String(a.answer)));
+      output = { ...output, scope_check: { ...check, reapproved: reapproved ? { answer: String(reapproved.answer).slice(0, 500) } : null } };
+      await ctx.log("system", `scope check vs approved proposal ${check.approved_proposal_hash}: ${check.out_of_scope_files.length} out-of-scope file(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? " — renewed approval required" : ""}`, { scope_check: check });
+      if (check.requires_reapproval && !reapproved)
+        return {
+          kind: "waiting_input",
+          output,
+          questions: [
+            {
+              question: `${SCOPE_REAPPROVAL_QUESTION}: ${check.reasons.join("; ")}`,
+              context: `Approved (${check.approved_risk}): ${scope.summary}`.slice(0, 1500),
+              options: [
+                "Approve the deviation (recorded as a renewed approval)",
+                "Reject: revert the deviation and stay inside the approved scope",
+              ],
+            },
+          ],
+        } as any;
+    }
+
     if (independent) {
       let v = normalizeVerdict(submitted ?? {});
+      if (ctx.step.config.scope_review === true)
+        v = enforceScopeReview(v, (submitted as any)?.scope_check, ctx.input.upstream);
       const drift = await evidenceDrift(
         ws.map((w) => ({ repo: w.repo, path: w.path })),
         evidence?.heads ?? {},

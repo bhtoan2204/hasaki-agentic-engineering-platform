@@ -2074,3 +2074,54 @@ test("canceling a waiting run caps its human and wall clocks without changing at
   assert.ok(row.human_wait_ms >= 0);
   assert.ok(row.end_time);
 });
+
+test("Evidence-gated approval: exact scope frozen, unmet HIGH-risk gate needs acknowledgement, history kept on re-execution", async () => {
+  const { normalizeInvestigationOutput } = await import("../src/agent/evidence.ts");
+  const key = await customWorkflow([
+    { key: "fix_proposal", type: "agent", config: { evidence: "fix_proposal" } },
+    { key: "approve_fix", type: "human_approval", depends_on: ["fix_proposal"], config: { show_outputs: ["fix_proposal"], approve_scope_from: "fix_proposal", on_reject: { reexecute: "fix_proposal" } } },
+    { key: "implement", type: "agent", depends_on: ["approve_fix"] },
+  ]);
+  const high = {
+    summary: "Mark the package as shipped when TrackingNo is set",
+    changes: [{ repo: "oms-api", files: ["app/rts.go"], description: "If TrackingNo is not empty, treat the package as successfully shipped and update the business state." }],
+    root_cause_assessment: { status: "UNCONFIRMED", explanation: "provider state not checked" },
+    fix_assessment: { risk: "LOW", explanation: "avoids the error" },
+  };
+  const low = {
+    summary: "Enrich the error; reject an empty package id",
+    changes: [{ repo: "oms-api", files: ["app/client.go"], description: "Enrich the error message and return a validation error for an empty package_id" }],
+    root_cause_assessment: { status: "UNCONFIRMED", explanation: "provider reason unknown" },
+    fix_assessment: { risk: "LOW", explanation: "correct whatever the root cause" },
+  };
+  scripts.fix_proposal = async (_ctx, n) => ({ kind: "completed", output: normalizeInvestigationOutput("fix_proposal", n === 1 ? high : low) });
+  const run = await startRun({ definitionKey: key, inputs: { project: "OMS" } });
+  await drain();
+  let approval = await stepOf(run.id, "approve_fix");
+  assert.equal(approval.status, "WAITING_APPROVAL");
+  const req = approval.approval.request;
+  assert.equal(req.scope.risk, "HIGH", "declared LOW, detected HIGH");
+  assert.equal(req.requires_risk_acknowledgement, true);
+  await assert.rejects(approveStep(run.id, "approve_fix", { comment: "ok" }), /explicit risk acknowledgement/);
+  await assert.rejects(approveStep(run.id, "approve_fix", { data: { acknowledge_risk: true } }), /requires a comment/);
+  assert.equal((await stepOf(run.id, "approve_fix")).status, "WAITING_APPROVAL", "a refused approval changes nothing");
+
+  // Reject → the proposal is re-executed (now LOW); the HIGH proposal stays in the attempt history untouched.
+  await rejectStep(run.id, "approve_fix", { comment: "do not infer shipped from TrackingNo" });
+  await drain();
+  approval = await stepOf(run.id, "approve_fix");
+  assert.equal(approval.approval.request.scope.risk, "LOW");
+  assert.equal(approval.approval.request.requires_risk_acknowledgement, false);
+  const history = await attemptsOf(run.id, "fix_proposal");
+  assert.equal(history.length, 2);
+  assert.equal(history[0].output.fix_assessment.risk, "HIGH", "historical results are not rewritten");
+  await approveStep(run.id, "approve_fix", { comment: "diagnostic only", by: "dev" });
+  await drain();
+  const out = (await stepOf(run.id, "approve_fix")).output;
+  assert.notEqual(out.approved_scope.proposal_hash, req.scope.proposal_hash, "the approval binds the re-executed proposal, not the rejected one");
+  assert.deepEqual([out.approved_scope.approved_by, out.approved_scope.comment, out.approved_scope.risk_acknowledged], ["dev", "diagnostic only", false]);
+  // Persisted: the next step (and any resumed/re-run attempt) reads the approved scope from the database.
+  const impl = seen.implement.at(-1)!;
+  assert.equal(impl.input.upstream.approve_fix.output.approved_scope.proposal_hash, out.approved_scope.proposal_hash);
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+});

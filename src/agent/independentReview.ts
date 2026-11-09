@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExecResult, StepSpec } from "../workflow/types.ts";
+import { approvedScopeIn } from "./evidence.ts";
 
 /**
  * Independent verification of a coding step's result.
@@ -28,6 +29,8 @@ export interface VerdictOutput {
   findings: Finding[];
   summary: string;
   blocked_reason?: string;
+  /** Scope review (evidence-gated workflows): the verifier's check of the diff against the approved scope. */
+  scope_check?: Record<string, unknown>;
 }
 
 export const isIndependent = (cfg: Record<string, any> | undefined) => cfg?.independent === true;
@@ -49,7 +52,9 @@ export function independentUpstream<T extends { output: any }>(graph: Array<Pick
   const out: Record<string, T> = {};
   for (const [key, u] of Object.entries(upstream)) {
     if (coding.has(key)) {
-      out[key] = { ...u, output: u.output?.verification ? { verification: u.output.verification, note: "coding agent's own summary/decisions withheld (independent verification)" } : { note: "coding agent output withheld (independent verification)" } };
+      // scope_check is platform-computed (files vs approved scope) plus deviations the author admitted: evidence, not claims of success.
+      const scope = u.output?.scope_check ? { scope_check: u.output.scope_check } : {};
+      out[key] = { ...u, output: u.output?.verification ? { verification: u.output.verification, ...scope, note: "coding agent's own summary/decisions withheld (independent verification)" } : { ...scope, note: "coding agent output withheld (independent verification)" } };
       continue;
     }
     if (afterCoding.has(key) && (type.get(key) === "agent" || type.get(key) === "coding_agent")) continue;
@@ -98,6 +103,31 @@ export function normalizeVerdict(raw: any): VerdictOutput {
   if (verdict === "FAIL" && !findings.length) return blocked("FAIL without any finding — nothing to repair", findings);
   if (verdict === "BLOCKED") return blocked(String(o.blocked_reason ?? "").trim() || "verifier could not decide", findings);
   return { verdict, findings, summary };
+}
+
+/**
+ * Scope review (evidence-gated workflows): a PASS must also say the diff stays inside the approved scope, implements no
+ * unverified hypothesis as fact, adds no unintended state transition and preserves the business invariants. Fail-closed
+ * like normalizeVerdict: a PASS that is missing the check, or contradicts it, becomes BLOCKED — passing unit tests never
+ * turn a speculative business-state change into a PASS. Without an approved scope upstream (legacy runs) nothing changes.
+ */
+export function enforceScopeReview(v: VerdictOutput, raw: any, upstream: Record<string, { output: any; status?: string }>): VerdictOutput {
+  const scope = approvedScopeIn(upstream);
+  if (!scope) return v;
+  const c = raw && typeof raw === "object" ? raw : null;
+  const coding = Object.values(upstream).map((u) => u.output?.scope_check).find(Boolean);
+  const out: VerdictOutput = { ...v, scope_check: c ?? undefined } as VerdictOutput;
+  if (v.verdict !== "PASS") return out;
+  const blocked = (reason: string): VerdictOutput => ({ ...out, verdict: "BLOCKED", blocked_reason: reason });
+  if (!c) return blocked("scope review missing: a PASS must include scope_check against the approved proposal");
+  const listed = (k: string) => (Array.isArray(c[k]) ? c[k].filter((x: unknown) => String(x ?? "").trim()) : []);
+  if (c.in_scope !== true) return blocked("the verifier did not confirm that the diff stays inside the approved scope");
+  if (listed("unsupported_assumptions").length) return blocked(`PASS with unsupported assumptions implemented as fact: ${listed("unsupported_assumptions").slice(0, 3).join("; ")}`);
+  if (listed("unintended_state_transitions").length) return blocked(`PASS with unintended state transitions: ${listed("unintended_state_transitions").slice(0, 3).join("; ")}`);
+  if (c.invariants_preserved === false || (scope.risk === "HIGH" && c.invariants_preserved !== true))
+    return blocked("business invariants of the HIGH-risk change were not confirmed preserved");
+  if (coding?.requires_reapproval && !coding?.reapproved) return blocked(`the implementation deviates from the approved scope without renewed approval: ${(coding.reasons ?? []).join("; ")}`);
+  return out;
 }
 
 export function findingsFeedback(v: VerdictOutput, round: number, max: number) {

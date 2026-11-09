@@ -729,7 +729,23 @@ export async function approveStep(runId: number, stepKey: string, opts: { commen
           [runId, single, Object.keys(perRepo).length ? json(perRepo) : null],
         );
       }
-      const output = { approved: true, comment: decision.comment, by: decision.by, ...(repos ? { repositories: repos } : {}) };
+      // Evidence-gated approval: the approved scope is the proposal frozen at request time. A gap in the evidence gate
+      // (e.g. a HIGH-risk state change on an unconfirmed root cause) needs an explicit, recorded acknowledgement.
+      const scope = s.approval?.request?.scope;
+      const acknowledged = Boolean(opts.data && typeof opts.data === "object" && (opts.data as any).acknowledge_risk === true);
+      if (scope && s.approval?.request?.requires_risk_acknowledgement && !acknowledged)
+        throw new EngineError(
+          `this proposal is ${scope.risk ?? "?"} risk with an unmet evidence gate (${(scope.gate?.missing ?? []).slice(0, 4).join("; ") || "invariants not verified"}): approving it requires an explicit risk acknowledgement`,
+          400,
+        );
+      if (scope && acknowledged && !decision.comment.trim()) throw new EngineError("acknowledging an unmet evidence gate requires a comment explaining why", 400);
+      const output = {
+        approved: true,
+        comment: decision.comment,
+        by: decision.by,
+        ...(repos ? { repositories: repos } : {}),
+        ...(scope ? { approved_scope: { ...scope, approved_by: decision.by, approved_at: decision.at, comment: decision.comment, risk_acknowledged: acknowledged } } : {}),
+      };
       if (s.current_attempt_id)
         await q(c, "UPDATE workflow_step_attempts SET status = 'COMPLETED', output = $2, resolved_at = now(), finished_at = now() WHERE id = $1", [
           s.current_attempt_id,

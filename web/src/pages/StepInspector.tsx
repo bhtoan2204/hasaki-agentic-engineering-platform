@@ -1,4 +1,5 @@
 import { ProviderHandoff } from "../ProviderHandoff.tsx";
+import { EvidenceSummary, hasEvidence } from "../EvidenceGate.tsx";
 import { StepAgentOverride } from "../StepAgentOverride.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { agentKey, asProvider, type AgentProvider } from "../agentProvider.tsx";
@@ -94,6 +95,7 @@ export function OutputView({ value }: { value: any }) {
     typeof value === "string" ? value : (value.summary ?? value.report ?? null);
   return (
     <div>
+      {hasEvidence(value) && <EvidenceSummary output={value} />}
       {typeof text === "string" && (
         <div className="rv-card">
           <div className="rv-card-head">
@@ -225,6 +227,7 @@ export function ApprovalPanel({
   const req = step.approval?.request;
   const gate = step.approval?.gate && !step.approval?.granted;
   const [comment, setComment] = useState("");
+  const [ackRisk, setAckRisk] = useState(false);
   const [repos, setRepos] = useState<string[]>(
     req?.recommended ?? run.selected_repositories ?? [],
   );
@@ -280,6 +283,8 @@ export function ApprovalPanel({
           repos.map((r) => [r, (branches[r] ?? "").trim()]),
         ),
       };
+    if (approve && req?.requires_risk_acknowledgement)
+      body.data = { ...(body.data ?? {}), acknowledge_risk: ackRisk };
     const r = await act(
       () =>
         api(
@@ -428,6 +433,7 @@ export function ApprovalPanel({
           )}
         </div>
       )}
+      {req?.scope && <EvidenceSummary scope={req.scope} />}
       {Object.entries(req?.outputs ?? {}).map(([k, v]) => (
         <details key={k} open style={{ marginTop: 8 }}>
           <summary>{t("si.stepOutput", { step: k })}</summary>
@@ -453,8 +459,23 @@ export function ApprovalPanel({
           {reexec ? t("si.rejectRedo", { step: reexec }) : t("si.rejectDoes")}
         </span>
       </div>
+      {req?.requires_risk_acknowledgement && (
+        <label className="small" style={{ display: "flex", gap: 6, marginTop: 8, color: "var(--st-err)" }}>
+          <input
+            type="checkbox"
+            checked={ackRisk}
+            onChange={(e) => setAckRisk(e.target.checked)}
+          />
+          <span>{t("ev.ack")}</span>
+        </label>
+      )}
       <div className="rv-attn-actions">
-        <button className="ok big" onClick={() => send(true)}>
+        <button
+          className="ok big"
+          disabled={req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim())}
+          title={req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim()) ? t("ev.ackHint") : undefined}
+          onClick={() => send(true)}
+        >
           <ShieldCheck size={16} /> {t("si.approve")}
         </button>
         {gate && (

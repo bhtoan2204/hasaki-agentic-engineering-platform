@@ -11,6 +11,7 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { AgentMetrics } from "../agent/metrics.ts";
 import type { PolicyContext } from "../agent/toolPolicy.ts";
 import { source } from "../agent/contextTools.ts";
+import { evidenceSummary } from "../agent/evidence.ts";
 
 export interface ContextEntry {
   id: string;
@@ -211,6 +212,19 @@ export async function ensureContextPack(
           true,
           source(`attempt:${ctx.attempt.id}:answers`, null, at, "owner", "explicit developer decisions for this step"),
         );
+      // Evidence-gated investigation: a compact, deterministic digest replaces re-reading every upstream output. It is
+      // required (never truncated or dropped), bounded, and keeps uncertainty, missing evidence and the approved scope.
+      const evidence = evidenceSummary(input.upstream);
+      if (evidence)
+        add(
+          "evidence_summary",
+          "decisions",
+          evidence,
+          997,
+          true,
+          source(`run:${ctx.run.id}:evidence`, null, at, "owner", "platform-normalized evidence digest of upstream steps; full outputs via get_step_output", "snapshot"),
+        );
+      const summarized = new Set(evidence ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, "")) : []);
       for (const k of ctx.context.knowledge) {
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
         const mandatory =
@@ -263,7 +277,8 @@ export async function ensureContextPack(
             `upstream:${key}`,
             "continuity",
             { step: key, attempt_id: u.attempt_id, status: u.status, output: critical ? rest : u.output },
-            60,
+            // Covered by evidence_summary: the raw output is summarized or omitted first and stays retrievable.
+            summarized.has(key) ? 35 : 60,
             false,
             source(
               `attempt:${u.attempt_id}`,

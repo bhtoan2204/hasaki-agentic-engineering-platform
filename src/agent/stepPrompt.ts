@@ -56,6 +56,11 @@ export function buildSystemAppend(run: RunRow, step: StepRow, ctx: ResolvedConte
         `- Return via submit_result exactly: { verdict: "PASS" | "FAIL" | "BLOCKED", findings: [{ severity: "high"|"medium"|"low", file, line, explanation, evidence }], summary, blocked_reason? }. FAIL only for concrete, fixable defects (wrong behaviour, missing requirement, broken/absent test for changed logic, security/data risk) — each with file, line and the evidence you saw. BLOCKED when you cannot decide without information you cannot obtain (say exactly what is missing). Style nits are "low" and never cause FAIL.`,
       ]
       : []),
+    ...(cfg.independent === true && cfg.scope_review === true
+      ? [
+        `- SCOPE REVIEW: also include scope_check: { in_scope, unsupported_assumptions: [], unintended_state_transitions: [], invariants_preserved, tests_cover_failure_paths, diagnosis_uncertainty_preserved } judged against evidence_summary.approved_scope (the exact proposal a human approved) and the implementation's platform-computed scope_check. The platform turns a PASS into BLOCKED when scope_check is missing, out of scope, lists unsupported assumptions or unintended state transitions, or (for HIGH risk) does not confirm the invariants.`,
+      ]
+      : []),
     `- Be economical with tools: start from the code locations listed in the prompt, use Grep with a path/glob and Read with offset/limit instead of scanning whole repositories, run independent reads in parallel, and do not re-read files whose content you already have.`,
     `- When done, call mcp__platform__submit_result exactly once with the step output object, then end your turn.`,
     "",

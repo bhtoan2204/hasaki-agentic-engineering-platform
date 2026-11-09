@@ -21,6 +21,8 @@ export interface AgentMetrics {
   reasoning_effort?: string;
   /** Verdict of an independent verification step (see independentReview.ts). */
   independent_verification?: Record<string, unknown>;
+  /** Evidence-gated investigation: claim counts, downgrades, root-cause status, fix risk, gate (no raw content). */
+  evidence?: Record<string, unknown>;
   knowledge_searches: string[];
   integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }>;
   subagents: Array<{ type: string; id: string; started_at: string; ended_at?: string }>;

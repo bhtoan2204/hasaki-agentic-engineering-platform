@@ -1,3 +1,4 @@
+import { approvedScopeFrom } from "../../agent/evidence.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
@@ -31,6 +32,12 @@ export const humanApprovalExecutor: StepExecutor = {
     const cfg = ctx.step.config;
     const shown = Object.fromEntries(((cfg.show_outputs as string[]) ?? []).map((k) => [k, ctx.input.upstream[k]?.output ?? null]));
     const request: Record<string, unknown> = { message: cfg.message ?? `Approve "${ctx.step.name}"?`, outputs: shown };
+    // Evidence-gated approval: freeze the exact proposal being approved (hash + changes + risk + assumptions) in the
+    // request, so the decision records what was approved even if the proposal is re-executed later.
+    if (typeof cfg.approve_scope_from === "string") {
+      const scope = approvedScopeFrom(cfg.approve_scope_from, ctx.input.upstream[cfg.approve_scope_from]?.output);
+      if (scope) Object.assign(request, { scope, requires_risk_acknowledgement: scope.gate ? !scope.gate.satisfied : scope.risk === "HIGH" });
+    }
     if (cfg.select_repositories) {
       const discovery = Object.values(ctx.input.upstream).find((u) => Array.isArray(u.output?.candidates))?.output;
       // Repositories already chosen for the run: selected at creation, or passed as the `repositories` run input
