@@ -19,6 +19,19 @@ TELEGRAM_BOT_TOKEN=<private bot token, or configure through the admin UI>
 # TELEGRAM_CHAT_ID=<shared destination>
 ```
 
+### Configuration and precedence
+
+| Variable | Where it comes from | Notes |
+|---|---|---|
+| `TELEGRAM_MODE` | environment only | `off` (default), `polling` or `webhook`; any other value fails startup. |
+| `TELEGRAM_BOT_TOKEN` | admin UI (encrypted shared secret) **overrides** environment | Never logged or returned; the UI shows a masked suffix only. |
+| `TELEGRAM_CHAT_ID` | admin UI overrides environment | Legacy shared chat (Production Error summaries). Not used for authorization. |
+| `TELEGRAM_WEBHOOK_URL` | environment only | Must be `https://…`; required in webhook mode. |
+| `TELEGRAM_WEBHOOK_SECRET` | environment only | 16-256 characters `A-Z a-z 0-9 _ -`; required in webhook mode. |
+| `TELEGRAM_API_BASE` | environment only | Defaults to `https://api.telegram.org`; tests point it at a mock. |
+
+Credentials saved in the admin UI are loaded at startup before the receiver starts, and every instance re-reads them about every 30 seconds. A token saved or cleared on one instance therefore reaches all receivers without a restart. Changing `TELEGRAM_MODE` or webhook settings still requires a restart.
+
 `TELEGRAM_MODE` defaults to `off`, preserving one-way notifications for installations that have not enabled the receiver. A bot token is never returned by the API; the administrator sees only its existing masked representation. Members do not see bot credential controls.
 
 Polling refuses to start while Telegram reports an existing webhook. Disable the old webhook before changing transport. Using a trusted administrator terminal and a privately supplied environment token:
@@ -58,7 +71,8 @@ Set the platform's existing `publicUrl` configuration to a public HTTPS address 
 - Cancellation: `/cancel` while replying to a prompt cancels that conversation. Without a reply target it cancels the user's pending conversations, not workflows. A canceled/expired conversation can be explicitly reopened from a still-valid action.
 - Required answers: answering one question does not resume a step while other required questions remain open; the existing engine owns that policy.
 - High-impact approval/option steps: set `config.telegram_confirm: true` or `config.high_impact: true` to require an explicit confirmation keyboard before applying the decision. Rejections already require the separate reason/confirmation reply.
-- Approval forms requiring repository/branch selections, questions with more than 20 options, and provider handoffs remain **View run** actions. Telegram never guesses missing form data or bypasses workspace inspection/fencing.
+- Questions with more than 20 string options get a **Reply with answer** prompt instead of buttons; the reply must match one of the exact options.
+- Approval forms requiring repository/branch selections, questions with non-text options, and provider handoffs remain **View run** actions. Telegram never guesses missing form data or bypasses workspace inspection/fencing.
 - Retry failed step, provider switching, arbitrary shell commands and generic paused-run continuation are not exposed as Telegram write actions. Existing web/domain services retain those workflows.
 
 Prompts expire after 15 minutes; action buttons expire after 24 hours or become invalid as soon as their workflow context changes. Successful decisions replace the original message's buttons with its final decision, actor and time. Final messages say the decision was saved; they do not imply that an offline or paused worker has executed anything. Assigned worker ownership/fencing and pause policy remain unchanged.
@@ -67,7 +81,7 @@ Question text and titles are bounded, recognizable credentials are redacted, and
 
 ## Identity, authorization and persistence
 
-A client-entered chat ID is only a legacy notification destination, never authorization. Binding records are created only from authenticated Telegram updates in private chats where `from.id` matches the private chat ID. Binding tokens are random, hashed at rest, single-use and scoped to the bot and active platform user. One Telegram account cannot silently link multiple platform users. Disconnect invalidates pending actions/conversations and removes the private destination. Changing the bot token invalidates the old bot fingerprint; explicitly disconnect/rebind after rotation.
+A client-entered chat ID is only a legacy notification destination, never authorization. Binding records are created only from authenticated Telegram updates in private chats where `from.id` matches the private chat ID. Binding tokens are random, hashed at rest, single-use and scoped to the bot and active platform user. One Telegram account cannot silently link multiple platform users. Disconnect invalidates pending actions/conversations and removes the private destination. Changing the bot token invalidates the old bot fingerprint: pending buttons from the old bot stop working, and the settings page asks each user to disconnect and rebind.
 
 Callbacks contain only `a:` plus a 24-character cryptographically random identifier (26 bytes, below Telegram's 64-byte callback limit). Every action revalidates active user/binding, private chat, original message, run owner, current step status, generation, attempt, approval/question context hash, question status and option membership. Administrators do not get a cross-owner Telegram override.
 
@@ -79,26 +93,64 @@ Additive migration `038_interactive_telegram.sql` creates binding/preferences, a
 
 All instances sharing one bot must share PostgreSQL. A session-level PostgreSQL advisory lock and a renewable 60-second database lease elect one receiver per bot fingerprint across polling/webhook modes. An independent one-connection consumer pool avoids exhausting a small application pool. A monotonic lease epoch fences stale poll responses. Poll batches and offsets commit together; offsets never acknowledge updates that were not persisted.
 
-Inbox processing has a durable 30-second claim. A crash after a domain commit is safe: the consumed capability prevents replay when the inbox is retried. Persisted polling offsets and inbox/outbox work survive worker restarts. Consumer leases renew every ten seconds and release on graceful shutdown. Different databases or external bot consumers cannot coordinate through this lease; use one shared installation/database per bot.
+Inbox processing has a durable 30-second claim. An update whose processing fails is retried with exponential backoff (5 s doubling, capped at 5 minutes). After 8 failures it is dead-lettered: it is marked processed with its `failures` count kept, and a `telegram.update.dead_lettered` audit row is written. Group/channel messages (for example the legacy shared chat) are stored only for chat discovery: no reply and no audit row. A crash after a domain commit is safe: the consumed capability prevents replay when the inbox is retried. Persisted polling offsets and inbox/outbox work survive worker restarts. Consumer leases renew every ten seconds and release on graceful shutdown. Different databases or external bot consumers cannot coordinate through this lease; use one shared installation/database per bot.
 
 Telegram delivery is retried with backoff, including API rate-limit retry delays. Permanent errors and exhausted retries become `dead` outbox rows. Unknown outcomes of `sendMessage` can cause a duplicate notification after a crash because Telegram has no send-message idempotency key; workflow transitions remain exactly once through the action registry. Stale duplicate-message buttons fail original-message/state checks. Callback responses are queued for every callback, with a direct best-effort fallback if response persistence fails. Network outages can still prevent Telegram delivery; no success is displayed before the database transition commits.
 
-Normal receiver loops remove expired/stale keyboards and deactivate expired conversations. Processed update payloads and delivered/dead outbox payloads are retained seven days; expired binding tokens and rate-limit counters are cleaned after a day. Workflow events, decisions, bindings/preferences and audit history retain their existing durable policies.
+Normal receiver loops remove expired/stale keyboards and deactivate expired conversations. Processed update payloads and delivered/dead outbox payloads are retained seven days; decided/expired/canceled actions are retained 30 days (so late taps still answer “already processed”); pending actions are never deleted by cleanup. Expired binding tokens and rate-limit counters are cleaned after a day.
 
-Operational checks (DB administrator only, no credentials/payloads needed):
+Receiver problems are logged once per distinct reason (for example `Telegram polling receiver unavailable: bot token rejected by Telegram (401/404); will retry`, or `Remove the existing Telegram webhook before enabling polling`), and recovery logs `Telegram polling receiver active`. Logs never include the token, request URL or update payloads. Integrations → Telegram shows **Receiver active** or **Receiver not running** from the shared lease, so users can see whether taps are being processed. Workflow events, decisions, bindings/preferences and audit history retain their existing durable policies.
+
+## Disabling the receiver safely
+
+1. Set `TELEGRAM_MODE=off` on **every** instance and restart them. Shutdown releases the lease. One-way notifications keep working through the legacy path while a token is configured.
+2. Pending buttons expire on their own (24 h); taps in the meantime are stored but not processed until a receiver runs again. No workflow state changes while the receiver is off.
+3. If you used webhook mode and want to stop Telegram delivering to the URL, call `deleteWebhook` (see above) from a trusted terminal.
+4. To revoke completely, clear the platform credentials (Integrations → Telegram → **Remove from the platform**, admin only) and revoke the token in BotFather.
+
+## Database troubleshooting
+
+Read-only queries; run as a DB administrator. None of them print tokens, callback identifiers' meaning, or message contents.
 
 ```sql
-SELECT mode, lease_until, epoch, update_offset FROM telegram_consumers;
-SELECT status, count(*) FROM telegram_outbox GROUP BY status;
-SELECT count(*) FROM telegram_updates WHERE processed_at IS NULL;
-SELECT action, count(*) FROM audit_log WHERE resource_type='telegram' GROUP BY action;
+-- Receiver lease: who owns the bot right now (owner_id is a random per-process UUID)
+SELECT mode, lease_until > now() AS active, lease_until, epoch, update_offset FROM telegram_consumers;
+
+-- Inbox backlog and failures
+SELECT count(*) FILTER (WHERE processed_at IS NULL) AS pending,
+       count(*) FILTER (WHERE processed_at IS NULL AND failures > 0) AS retrying,
+       count(*) FILTER (WHERE processed_at IS NOT NULL AND failures >= 8) AS dead_lettered,
+       min(received_at) FILTER (WHERE processed_at IS NULL) AS oldest_pending
+FROM telegram_updates;
+
+-- Outbox delivery: pending and dead rows by method
+SELECT method, status, count(*), max(attempts) AS max_attempts, min(next_at) FILTER (WHERE status = 'pending') AS next_retry
+FROM telegram_outbox GROUP BY method, status ORDER BY method, status;
+
+-- Pending actions (buttons) per run/step, with expiry
+SELECT run_id, step_id, action_type, count(*), min(expires_at) AS expires_at, bool_or(message_id IS NULL) AS unsent
+FROM telegram_actions WHERE status = 'pending' GROUP BY run_id, step_id, action_type ORDER BY run_id;
+
+-- Conversations (ForceReply prompts) that are still pending but already expired (cleared on the next receiver loop)
+SELECT a.run_id, c.status, c.expires_at FROM telegram_conversations c JOIN telegram_actions a USING (action_id)
+WHERE c.status = 'pending' AND c.expires_at <= now();
+
+-- Decision/denial audit summary
+SELECT action, count(*) FROM audit_log WHERE resource_type = 'telegram' GROUP BY action ORDER BY action;
 ```
+
+Typical findings:
+
+- `active = false` with `TELEGRAM_MODE` enabled: no instance holds the lease. Check the server log for the `receiver unavailable: …` reason (invalid token, leftover webhook, database connectivity).
+- Growing `pending` updates while the lease is active: look at `retrying`, then at `telegram.action.denied` / `telegram.update.dead_lettered` audit rows.
+- `dead` outbox rows: 400/401/403/404 from Telegram are permanent (bot blocked by the user, message deleted, chat not found). Other errors are retried with backoff and become `dead` after 12 attempts.
+- Do not delete rows from `telegram_actions` or `telegram_outbox` by hand while a receiver runs; disconnecting a user or letting expiry run is the supported way to invalidate buttons.
 
 ## Tests and actual verification
 
-CI does not need a live bot. `test/telegram.test.ts` starts a mocked Telegram HTTP server and runs real PostgreSQL/domain transactions. It covers binding/privacy, callbacks, replay/concurrency, expired/stale/changed contexts, canceled/paused/offline runs, rejection policy/reasons, choices/free text, simultaneous prompts, cancel/reopen, confirmations, handoff fencing, API failures, transaction rollback, webhook authentication, session/CSRF, receiver ownership/crash takeover, polling offsets, and both transport runtimes.
+CI does not need a live bot. `test/telegram.test.ts` starts a mocked Telegram HTTP server and runs real PostgreSQL/domain transactions. It covers binding/privacy, callbacks, >20-option ForceReply fallback, bounded inbox retries/dead-lettering, receiver status, cross-instance credential refresh, cleanup retention, replay/concurrency, expired/stale/changed contexts, canceled/paused/offline runs, rejection policy/reasons, choices/free text, simultaneous prompts, cancel/reopen, confirmations, handoff fencing, API failures, transaction rollback, webhook authentication, session/CSRF, receiver ownership/crash takeover, polling offsets, and both transport runtimes.
 
-`test/telegram.browser.ts` runs real Chromium/settings UI and HTTP/DB with a mocked bot. It verifies connection links, binding completion, owner preferences/language, credential visibility, disconnect and VI/EN light/dark layouts at 1440px/390px.
+`test/telegram.browser.ts` runs real Chromium/settings UI and HTTP/DB with a mocked bot. It verifies connection links, binding completion, receiver status, owner preferences/language, credential visibility, disconnect and VI/EN light/dark layouts at 1440px/390px.
 
 ```bash
 node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test test/telegram.test.ts

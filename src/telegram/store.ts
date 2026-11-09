@@ -28,7 +28,13 @@ export async function limited(subject:string, db:Db=pool,key=botKey(),limit=30) 
     ON CONFLICT(bot_key,subject,minute) DO UPDATE SET hits=telegram_rate_limits.hits+1 WHERE telegram_rate_limits.hits<$3 RETURNING hits`,[key,subject,limit]);
 }
 export async function bindingStatus(userId:number) {
-  return {needsRebind:!!await one(pool,"SELECT user_id FROM telegram_bindings WHERE user_id=$1 AND bot_key<>$2",[userId,botKey()]),binding:await one(pool,"SELECT telegram_user_id,chat_id,created_at FROM telegram_bindings WHERE user_id=$1 AND bot_key=$2",[userId,botKey()]) ?? null, preferences:await preferences(userId),mode:config.telegram.mode};
+  return {needsRebind:!!await one(pool,"SELECT user_id FROM telegram_bindings WHERE user_id=$1 AND bot_key<>$2",[userId,botKey()]),binding:await one(pool,"SELECT telegram_user_id,chat_id,created_at FROM telegram_bindings WHERE user_id=$1 AND bot_key=$2",[userId,botKey()]) ?? null, preferences:await preferences(userId),mode:config.telegram.mode,receiver:await receiverStatus()};
+}
+/** Whether ANY instance currently holds the receiver lease for this bot (owner ids and offsets stay private). */
+export async function receiverStatus(key=botKey()) {
+  if(!config.telegram.botToken || config.telegram.mode==="off")return {active:false,mode:null};
+  const row=await one(pool,"SELECT mode,lease_until>now() AS active FROM telegram_consumers WHERE bot_key=$1",[key]);
+  return {active:!!row?.active && row.mode===config.telegram.mode,mode:row?.mode??null};
 }
 export async function createBinding(userId:number) {
   if(!config.telegram.botToken || config.telegram.mode==="off")throw new HttpError(409,"Enable Telegram polling or webhook mode first");

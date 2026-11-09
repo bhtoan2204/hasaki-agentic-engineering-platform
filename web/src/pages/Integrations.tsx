@@ -681,7 +681,7 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
     </>}
     {st?.configured && <section className="ig-telegram-settings">
       <h4>{t("ig.tg.interactiveTitle")}</h4><p className="muted small">{t("ig.tg.bindingHint")}</p>
-      <p className="small">{t("ig.tg.transport")}: <code>{st.mode ?? "off"}</code></p>
+      <p className="small">{t("ig.tg.transport")}: <code>{st.mode ?? "off"}</code>{st.mode && st.mode!=="off" && <> · <span className={`ig-tg-receiver ${st.receiver?.active?"is-ok":"is-warn"}`} role="status">{t(st.receiver?.active?"ig.tg.receiverActive":"ig.tg.receiverDown")}</span></>}</p>
       {st.mode==="off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}
       {st.needsRebind && <p>{t("ig.tg.rebind")}</p>}
       <div className="ig-actions">

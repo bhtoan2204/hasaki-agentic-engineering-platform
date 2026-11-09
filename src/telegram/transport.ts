@@ -94,14 +94,33 @@ export async function expireActions(){
     await q(db,"DELETE FROM telegram_bind_tokens WHERE expires_at<now()-interval '1 day'");
     await q(db,"DELETE FROM telegram_updates WHERE processed_at<now()-interval '7 days'");
     await q(db,"DELETE FROM telegram_outbox WHERE status IN ('delivered','dead') AND created_at<now()-interval '7 days'");
+    // Decided/expired capabilities are kept 30 days so late taps still answer "already processed"; pending ones never.
+    await q(db,"DELETE FROM telegram_actions WHERE bot_key=$1 AND status<>'pending' AND created_at<now()-interval '30 days' AND NOT EXISTS (SELECT 1 FROM telegram_outbox o WHERE o.status='pending' AND telegram_actions.action_id=ANY(o.action_ids))",[botKey()]);
   });
 }
+const CREDENTIAL_REFRESH_MS=30000;
+async function refreshTelegramCredentials(){
+  const { refreshTelegramSettings }=await import("../integrations/accounts.ts");
+  await refreshTelegramSettings();
+}
+/** A loggable reason: Telegram error codes and our own messages only, never URLs, tokens or payloads. */
+export function consumerFailure(e:unknown){
+  if(e instanceof TelegramApiError)return e.code===401||e.code===404?"bot token rejected by Telegram (401/404)":e.code===409?"another getUpdates/webhook consumer is active for this bot (409)":`Telegram API error ${e.code}`;
+  if(e instanceof HttpError)return e.message;
+  const message=e instanceof Error?e.message:String(e);
+  const token=config.telegram.botToken;
+  return textLimitSafe(token?message.split(token).join("[redacted]"):message);
+}
+const textLimitSafe=(s:string)=>s.replace(/bot\d+:[A-Za-z0-9_-]+/g,"bot[redacted]").slice(0,200);
 export function startTelegramTransport(){
   // A reserved lock connection must not exhaust the application pool (including poolMax=1).
   const consumerPool=new pg.Pool({connectionString:config.databaseUrl,max:1,connectionTimeoutMillis:config.database.connectionTimeoutMillis,keepAlive:true});
   const stopping=new AbortController();
+  let lastFailure="",refreshedAt=0;
   const task=(async()=>{
     while(!stopping.signal.aborted){
+      // Credentials saved by an administrator on ANOTHER instance must reach this receiver without a restart.
+      if(Date.now()-refreshedAt>=CREDENTIAL_REFRESH_MS){refreshedAt=Date.now();await refreshTelegramCredentials().catch(()=>{});}
       if(!config.telegram.botToken || config.telegram.mode==="off"){
         await sleep(2000,undefined,{signal:stopping.signal}).catch(()=>{});continue;
       }
@@ -121,7 +140,9 @@ export function startTelegramTransport(){
           const webhook=await telegramCall("getWebhookInfo",{},{signal:session.signal});
           if(webhook.url)throw new Error("Remove the existing Telegram webhook before enabling polling");
         }else await telegramCall("setWebhook",{url:config.telegram.webhookUrl,secret_token:config.telegram.webhookSecret,allowed_updates:["message","callback_query"]},{signal:session.signal});
+        if(lastFailure){console.log(`Telegram ${mode} receiver active`);lastFailure="";}
         while(!session.signal.aborted && key===botKey() && mode===config.telegram.mode){
+          if(Date.now()-refreshedAt>=CREDENTIAL_REFRESH_MS){refreshedAt=Date.now();await refreshTelegramCredentials().catch(()=>{});if(key!==botKey())break;}
           const lease=await one(client,"UPDATE telegram_consumers SET lease_until=now()+interval '60 seconds' WHERE bot_key=$1 AND owner_id=$2 AND epoch=$3 AND lease_until>now() RETURNING update_offset",[key,owner,claim.epoch]);
           if(!lease)break;
           await processInbox();await expireActions();await deliverOutbox(30,session.signal);
@@ -132,8 +153,13 @@ export function startTelegramTransport(){
             if(!updates.length)await sleep(250,undefined,{signal:session.signal});
           }else await sleep(500,undefined,{signal:session.signal});
         }
-      }catch{
-        if(!stopping.signal.aborted){console.warn("Telegram consumer unavailable; will retry (credentials and payloads omitted)");await sleep(2000,undefined,{signal:stopping.signal}).catch(()=>{});}
+      }catch(e){
+        if(!stopping.signal.aborted){
+          const reason=consumerFailure(e);
+          if(reason!==lastFailure)console.warn(`Telegram ${mode} receiver unavailable: ${reason}; will retry`);
+          lastFailure=reason;
+          await sleep(2000,undefined,{signal:stopping.signal}).catch(()=>{});
+        }
       }finally{
         if(heartbeat)clearInterval(heartbeat);
         if(claim)await releaseConsumer(client,owner,key).catch(()=>{});

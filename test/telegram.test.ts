@@ -191,3 +191,57 @@ test("webhook runtime registers its secret and consumes an authenticated callbac
 test("high-impact option answers require explicit confirmation before recording or resuming",async()=>{
  const {run,questions}=await waitingQuestions([['Proceed','Stop']],{high_impact:true});const a=await action(run.id,"answer");await pump(callback(a));assert.equal((await one(pool,"SELECT status FROM workflow_questions WHERE id=$1",[questions[0].id]))!.status,"open");const confirm=await action(run.id,"confirm_answer");assert.ok(confirm);await pump(callback(confirm));assert.equal((await one(pool,"SELECT answer FROM workflow_questions WHERE id=$1",[questions[0].id]))!.answer,"Proceed");
 });
+test("questions with more than 20 options fall back to a ForceReply answer validated against the exact options",async()=>{
+ const many=Array.from({length:25},(_,i)=>`Option ${i+1}`);const {run,questions}=await waitingQuestions([many]);
+ assert.ok(!await one(pool,"SELECT 1 FROM telegram_actions WHERE run_id=$1 AND action_type='answer'",[run.id]));
+ const reply=await action(run.id,"reply",questions[0].id);await pump(callback(reply));const conversation=(await one(pool,"SELECT * FROM telegram_conversations WHERE action_id=$1",[reply.action_id]))!;
+ await pump(message(101,"Option 99",conversation.prompt_message_id));assert.equal((await one(pool,"SELECT status FROM workflow_questions WHERE id=$1",[questions[0].id]))!.status,"open");
+ await pump(message(101,"Option 17",conversation.prompt_message_id));const answered=(await one(pool,"SELECT * FROM workflow_questions WHERE id=$1",[questions[0].id]))!;
+ assert.equal(answered.status,"answered");assert.equal(answered.answer,"Option 17");
+});
+test("failing updates back off and dead-letter after a bounded number of attempts; group chatter is not audited",async()=>{
+ const {MAX_UPDATE_FAILURES}=await import("../src/telegram/updates.ts");
+ const poisoned={update_id:++updateId,message:{message_id:++messageId,from:{id:101,is_bot:false},chat:{id:101,type:"private"},text:"answer",reply_to_message:{message_id:"not-a-number"}}};
+ await ingestUpdate(poisoned);await processInbox();
+ let row=(await one(pool,"SELECT *,next_at>now()+interval '4 seconds' AS backed_off FROM telegram_updates WHERE update_id=$1",[poisoned.update_id]))!;
+ assert.equal(row.failures,1);assert.ok(!row.processed_at);assert.equal(row.backed_off,true);
+ for(let n=0;n<MAX_UPDATE_FAILURES+5 && !row.processed_at;n++){await q(pool,"UPDATE telegram_updates SET next_at=now() WHERE update_id=$1",[poisoned.update_id]);await processInbox();row=(await one(pool,"SELECT * FROM telegram_updates WHERE update_id=$1",[poisoned.update_id]))!;}
+ assert.ok(row.processed_at);assert.equal(row.failures,MAX_UPDATE_FAILURES);
+ assert.ok(await one(pool,"SELECT 1 FROM audit_log WHERE action='telegram.update.dead_lettered' AND resource_id=$1",[String(poisoned.update_id)]));
+ const group={update_id:++updateId,message:{message_id:++messageId,from:{id:101,is_bot:false},chat:{id:-500,type:"group",title:"Team"},text:"hello team"}};
+ const sent=calls.length;await pump(group);
+ assert.ok((await one(pool,"SELECT processed_at FROM telegram_updates WHERE update_id=$1",[group.update_id]))!.processed_at);
+ assert.ok(!await one(pool,"SELECT 1 FROM audit_log WHERE detail->>'updateId'=$1",[String(group.update_id)]));
+ assert.equal(calls.slice(sent).filter(c=>c.method==="sendMessage").length,0);
+});
+test("receiver status reflects the shared lease; failures are reported without credentials",async()=>{
+ const {consumerFailure}=await import("../src/telegram/transport.ts");const {TelegramApiError}=await import("../src/telegram/client.ts");
+ assert.equal((await bindingStatus(owner.id)).receiver.active,false);
+ const client=await pool.connect();
+ try{assert.ok(await claimConsumer(client,"status-owner","polling"));assert.equal((await bindingStatus(owner.id)).receiver.active,true);}
+ finally{await releaseConsumer(client,"status-owner");client.release();}
+ assert.equal((await bindingStatus(owner.id)).receiver.active,false);
+ config.telegram.mode="off";assert.deepEqual((await bindingStatus(owner.id)).receiver,{active:false,mode:null});config.telegram.mode="polling";
+ const leaked=consumerFailure(new Error(`request to https://api.telegram.org/bot${TOKEN}/getUpdates failed`));assert.ok(!leaked.includes(TOKEN));assert.ok(!leaked.includes("TEST_PRIVATE_TOKEN"));
+ assert.match(consumerFailure(new TelegramApiError(401)),/token rejected/);assert.match(consumerFailure(new TelegramApiError(409)),/another getUpdates\/webhook consumer/);
+ assert.match(consumerFailure(new Error("Remove the existing Telegram webhook before enabling polling")),/Remove the existing Telegram webhook/);
+});
+test("administrator-managed credentials saved on another instance reach this receiver without a restart",async()=>{
+ const {refreshTelegramSettings}=await import("../src/integrations/accounts.ts");const {putSharedSecret}=await import("../src/auth/secrets.ts");
+ try{
+  assert.equal(await refreshTelegramSettings(),false);
+  await putSharedSecret("telegram",JSON.stringify({botToken:"67890:ROTATED_TOKEN",chatId:"-1001"}));
+  assert.equal(await refreshTelegramSettings(),true);assert.equal(config.telegram.botToken,"67890:ROTATED_TOKEN");assert.equal(config.telegram.chatId,"-1001");
+  assert.equal(await refreshTelegramSettings(),false);
+ }finally{await putSharedSecret("telegram","null");await refreshTelegramSettings();config.telegram.botToken=TOKEN;config.telegram.chatId="";}
+ assert.equal(botKey(),botKey(TOKEN));
+});
+test("expiry cleanup deletes old decided capabilities but never pending ones",async()=>{
+ const {run}=await gate();const approve=await action(run.id,"approve");const reject=await action(run.id,"reject");
+ await pump(callback(approve));
+ await q(pool,"UPDATE telegram_actions SET created_at=now()-interval '31 days' WHERE run_id=$1",[run.id]);
+ const {run:open}=await gate();const pending=await action(open.id,"approve");await q(pool,"UPDATE telegram_actions SET created_at=now()-interval '31 days',expires_at=now()+interval '1 hour' WHERE action_id=$1",[pending.action_id]);
+ await expireActions();
+ assert.ok(!await one(pool,"SELECT 1 FROM telegram_actions WHERE action_id=ANY($1)",[[approve.action_id,reject.action_id]]));
+ assert.equal((await one(pool,"SELECT status FROM telegram_actions WHERE action_id=$1",[pending.action_id]))!.status,"pending");
+});

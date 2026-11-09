@@ -1,3 +1,4 @@
+PASS receiver status reflects the shared consumer lease
 PASS secure link-based binding and connected UI; no bot credential exposed to member
 PASS owner-scoped notification preferences and language persist through real API
 PASS VI/EN, light/dark and 1440px/390px settings layouts

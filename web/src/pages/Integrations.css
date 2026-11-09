@@ -189,3 +189,6 @@
 .ig-telegram-settings > .ig-grid { min-width: 0; }
 .ig-telegram-settings > button { justify-self: start; }
 .ig-telegram-settings summary { cursor: pointer; font-size: var(--fs-sm); }
+.ig-tg-receiver { font-weight: 600; }
+.ig-tg-receiver.is-ok { color: var(--ok); }
+.ig-tg-receiver.is-warn { color: var(--warn); }

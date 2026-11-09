@@ -46,7 +46,10 @@ export async function sendInteractiveWaiting(w:StepWaiting,dedupeKey:string):Pro
         const options=Array.isArray(question.options)?question.options:[];
         if(options.length>0 && options.length<=20 && options.every((v:unknown)=>typeof v==="string")){
           for(const value of options)keyboard.push([await makeAction(db,context,"answer",value)]);
-        }else if(!options.length)keyboard.push([await makeAction(db,context,"reply")]);
+        }else if(!options.length || options.length>20 && options.every((v:unknown)=>typeof v==="string")){
+          // Too many options for buttons: a ForceReply answer is still validated against the exact option list.
+          keyboard.push([await makeAction(db,context,"reply")]);
+        }
       }
       if(nav.reply_markup)keyboard.push(...nav.reply_markup.inline_keyboard);
       const ids=keyboard.flat().filter(b=>b.callback_data).map(b=>b.callback_data.slice(2));

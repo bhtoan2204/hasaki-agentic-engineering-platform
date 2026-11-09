@@ -97,6 +97,8 @@ async function prompt(id:string,identity:NonNullable<ReturnType<typeof privateId
 async function handleUpdate(update:any,retry=false){
   const identity=privateIdentity(update),callback=update.callback_query;
   let result="Saved / Đã lưu",actorId:number|null=null,actionId="";
+  // Group/channel chatter (e.g. the legacy shared chat) is stored for chat discovery only: no audit, no reply.
+  if(!identity && !callback)return;
   try{
     if(!identity)throw new HttpError(403,denied);
     if(!retry && !await limited(identity.telegramUser))throw new HttpError(429,"Too many requests / Quá nhiều yêu cầu");
@@ -153,6 +155,7 @@ export async function ingestUpdate(update:any,key=botKey()){
   if(!Number.isSafeInteger(update?.update_id) || update.update_id<0 || typeof update!=="object")throw new HttpError(400,"Invalid Telegram update");
   await q(pool,"INSERT INTO telegram_updates(bot_key,update_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",[key,update.update_id,JSON.stringify(update)]);
 }
+export const MAX_UPDATE_FAILURES=8;
 export async function processInbox(limit=50){
   for(let i=0;i<limit;i++){
     const token=opaqueId(),key=botKey();
@@ -165,7 +168,11 @@ export async function processInbox(limit=50){
       await handleUpdate(current.payload,current.failures>0);
       await q(pool,"UPDATE telegram_updates SET processed_at=now(),processing_token=NULL,processing_until=NULL WHERE bot_key=$1 AND update_id=$2 AND processing_token=$3",[key,current.update_id,token]);
     }catch{
-      await q(pool,"UPDATE telegram_updates SET failures=failures+1,next_at=now()+interval '5 seconds',processing_token=NULL,processing_until=NULL WHERE bot_key=$1 AND update_id=$2 AND processing_token=$3",[key,current.update_id,token]);
+      // Bounded exponential backoff; after MAX_UPDATE_FAILURES the update is dead-lettered (processed, failures kept).
+      const dead=current.failures+1>=MAX_UPDATE_FAILURES;
+      await q(pool,`UPDATE telegram_updates SET failures=failures+1,next_at=now()+make_interval(secs=>$4),processing_token=NULL,processing_until=NULL,
+        processed_at=CASE WHEN $5::boolean THEN now() END WHERE bot_key=$1 AND update_id=$2 AND processing_token=$3`,[key,current.update_id,token,Math.min(300,5*2**current.failures),dead]);
+      if(dead)await telegramAudit(pool,null,"update.dead_lettered",String(current.update_id),{failures:current.failures+1}).catch(()=>{});
     }
   }
 }

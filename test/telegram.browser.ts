@@ -108,6 +108,12 @@ try {
   await panel
     .getByRole("button", { name: "Disconnect Telegram", exact: true })
     .waitFor();
+  // No consumer holds the lease in this test: the panel must say so instead of implying taps work.
+  assert.match(
+    (await panel.locator(".ig-tg-receiver").textContent()) ?? "",
+    /Receiver not running/,
+  );
+  results.push("PASS receiver status reflects the shared consumer lease");
   assert.ok(
     await one(
       pool,

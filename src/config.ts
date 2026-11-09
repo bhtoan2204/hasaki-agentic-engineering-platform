@@ -504,7 +504,7 @@ function load(): Config {
     connectionTimeoutMillis: positiveInt(
       "database.connectionTimeoutMillis",
       process.env.DATABASE_CONNECTION_TIMEOUT_MS ??
-        cfg.database.connectionTimeoutMillis,
+      cfg.database.connectionTimeoutMillis,
     ),
     idleTimeoutMillis: positiveInt(
       "database.idleTimeoutMillis",
@@ -624,15 +624,15 @@ export function antigravityConfig(): Required<
   const c = config.agent.antigravity ?? {};
   const timeout = Number(
     process.env.AGY_TIMEOUT_MS ||
-      process.env.ANTIGRAVITY_TIMEOUT_MS ||
-      c.timeoutMs ||
-      45 * 60 * 1000,
+    process.env.ANTIGRAVITY_TIMEOUT_MS ||
+    c.timeoutMs ||
+    45 * 60 * 1000,
   );
   const maxConcurrent = Number(
     process.env.AGY_MAX_CONCURRENT ||
-      process.env.ANTIGRAVITY_MAX_CONCURRENT ||
-      c.maxConcurrent ||
-      1,
+    process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+    c.maxConcurrent ||
+    1,
   );
   return {
     bin: process.env.AGY_BIN || process.env.ANTIGRAVITY_BIN || c.bin || "agy",
@@ -649,14 +649,14 @@ export function antigravityConfig(): Required<
       Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
     allowSubagents:
       (process.env.AGY_ALLOW_SUBAGENTS ??
-      process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
+        process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
         ? process.env.AGY_ALLOW_SUBAGENTS === "true" ||
-          process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
+        process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
         : (c.allowSubagents ?? false),
     sandbox:
       (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
         ? process.env.AGY_SANDBOX === "true" ||
-          process.env.ANTIGRAVITY_SANDBOX === "true"
+        process.env.ANTIGRAVITY_SANDBOX === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},
   };

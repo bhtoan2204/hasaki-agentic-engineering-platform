@@ -42,6 +42,18 @@ function apply() {
   // Bitbucket in config stays the shared service account from startup. Personal tokens are not copied onto it.
 }
 
+/**
+ * Re-read the administrator-managed bot credentials (shared, encrypted) so a token saved or cleared on another
+ * instance reaches this process. A no-op while nothing changed, so in-process overrides stay untouched.
+ */
+export async function refreshTelegramSettings() {
+  const next = await readJson<TelegramSaved>("telegram");
+  if (JSON.stringify(next) === JSON.stringify(saved.telegram)) return false;
+  saved.telegram = next;
+  apply();
+  return true;
+}
+
 export async function loadAccountSettings() {
   saved = { telegram: await readJson<TelegramSaved>("telegram"), bitbucket: await readJson<BitbucketSaved>("bitbucket") };
   apply();
