@@ -25,6 +25,7 @@ import { clearSharedSplunkToken, clearSplunkCookie, setSharedSplunkToken, setSpl
 import { investigationDetail, routeWorkflow, startFixFromInvestigation } from "../investigation/service.ts";
 import { clearKafkaCookie, kafkaStatus, setKafkaCookie } from "../integrations/kafka.ts";
 import { clearVaultToken, setVaultToken, vaultStatus } from "../integrations/vault.ts";
+import { databasesForRun, deleteDatabase, publicDatabases, saveDatabase, testDatabase } from "../integrations/database.ts";
 import { getIncidentDetail, groupsForWorkItem, investigate, linkWorkItem, listGroups, saveSettings as saveProdErrorSettings, setIgnored, startScan } from "../prodErrors/scan.ts";
 import { adoptEnv, bitbucketStatus, clearBitbucket, clearTelegram, setBitbucket, setTelegram, setTelegramDestination, telegramChats, telegramStatus, testTelegram } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
@@ -662,6 +663,25 @@ export const routes: Route[] = [
   ["POST", /^\/api\/work\/pick\/(\d+)$/, ({ p, actor }) => pickTask(Number(p[0]), null, actor.id)],
 
   // ------------------------------------------------------------ Argo CD (QC logs): pasted token, read-only
+  // Project QC databases (read-only for agents): admins manage connections; a member sees the ones their access permits.
+  ["GET", /^\/api\/integrations\/databases$/, async ({ actor }) => {
+    if (actor.role === "admin") return publicDatabases();
+    const mine = (await listAccessibleRepositories(actor.id)).map((m) => m.repository.name);
+    return (await databasesForRun(mine)).map((d) => ({ key: d.key, project: d.project, environment: d.environment, engine: d.engine, database_name: d.database_name, repositories: d.repositories, description: d.description }));
+  }],
+  ["POST", /^\/api\/integrations\/databases$/, async ({ body, actor }) => {
+    requireAdmin(actor);
+    const r = await saveDatabase(body, actor.id);
+    await audit(actor.id, r.created ? "database.create" : "database.update", "project_database", r.key, { project: r.project, host: r.host, database: r.database_name, password_changed: !!body.password });
+    return r;
+  }],
+  ["POST", /^\/api\/integrations\/databases\/([a-z0-9_-]+)\/test$/, async ({ p, actor }) => (requireAdmin(actor), testDatabase(p[0]))],
+  ["POST", /^\/api\/integrations\/databases\/([a-z0-9_-]+)\/delete$/, async ({ p, actor }) => {
+    requireAdmin(actor);
+    if (!(await deleteDatabase(p[0]))) throw new HttpError(404, "database not found");
+    await audit(actor.id, "database.delete", "project_database", p[0]);
+    return { ok: true };
+  }],
   ["GET", /^\/api\/integrations\/argocd$/, () => argoStatus()],
   ["POST", /^\/api\/integrations\/argocd\/token$/, ({ body }) => setArgoToken(String(body.token ?? ""))],
   ["POST", /^\/api\/integrations\/argocd\/logout$/, () => clearArgoToken()],

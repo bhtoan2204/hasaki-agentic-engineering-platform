@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   ChevronRight,
+  Database,
   ExternalLink,
   GitPullRequest,
   KeyRound,
@@ -560,6 +561,208 @@ function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
   );
 }
 
+// ---------------------------------------------------------------- project QC databases
+
+const EMPTY_DB = {
+  key: "",
+  project: "",
+  repositories: "",
+  environment: "qc",
+  host: "",
+  port: 3306,
+  database_name: "",
+  username: "",
+  password: "",
+  ssl: false,
+  description: "",
+  max_rows: 200,
+  timeout_ms: 15000,
+  enabled: true,
+};
+
+/**
+ * Read-only MySQL QC databases per project. Agents query them through the platform tools (database.list / schema /
+ * query) only when their run's repository scope covers the database's project or repositories.
+ */
+function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; isAdmin: boolean }) {
+  const { t } = useI18n();
+  const { data, reload } = useApi<any[]>("/api/integrations/databases");
+  const [form, setForm] = useState<any>(null);
+  const [tests, setTests] = useState<Record<string, any>>({});
+  const list = data ?? [];
+  const usable = list.filter((d) => d.enabled !== false && (!p.isAdmin || d.has_password));
+  const health: Health = !data ? "loading" : usable.length ? "ok" : "off";
+  const set = (k: string, v: unknown) => setForm({ ...form, [k]: v });
+  const save = async () => {
+    const body = {
+      ...form,
+      port: Number(form.port),
+      max_rows: Number(form.max_rows),
+      timeout_ms: Number(form.timeout_ms),
+      repositories: String(form.repositories)
+        .split(",")
+        .map((x: string) => x.trim())
+        .filter(Boolean),
+      password: form.password || undefined,
+    };
+    if (await act(() => api("/api/integrations/databases", body), t("ig.db.saved"))) (setForm(null), reload());
+  };
+  return (
+    <Row
+      id="databases"
+      icon={Database}
+      title={t("ig.db.title")}
+      env="QC"
+      health={health}
+      {...p}
+      summary={usable.length ? usable.map((d) => d.key).join(", ") : t("ig.db.summaryOff")}
+    >
+      <p className="muted small">{t("ig.db.body")}</p>
+      {!list.length ? (
+        <p className="muted small">{t(p.isAdmin ? "ig.db.emptyAdmin" : "ig.db.emptyMember")}</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="ig-db-table">
+            <thead>
+              <tr>
+                <th>{t("ig.db.key")}</th>
+                <th>{t("ig.db.scope")}</th>
+                <th>{t("ig.db.database")}</th>
+                {p.isAdmin && <th>{t("ig.db.server")}</th>}
+                {p.isAdmin && <th />}
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((d) => (
+                <tr key={d.key} className={d.enabled === false ? "is-off" : undefined}>
+                  <td className="mono">
+                    {d.key}
+                    {d.enabled === false && <span className="muted small"> · {t("ig.off")}</span>}
+                  </td>
+                  <td className="small">
+                    {[d.project, ...(d.repositories ?? [])].filter(Boolean).join(", ")}
+                  </td>
+                  <td className="small">
+                    <span className="mono">{d.database_name}</span>
+                    {d.description && <div className="muted">{d.description}</div>}
+                  </td>
+                  {p.isAdmin && (
+                    <td className="small mono">
+                      {d.username}@{d.host}:{d.port}
+                      {!d.has_password && <div className="ig-db-warn">{t("ig.db.noPassword")}</div>}
+                      {tests[d.key] && (
+                        <div className={tests[d.key].warning ? "ig-db-warn" : "muted"}>
+                          {tests[d.key].version} · {tests[d.key].account}
+                          {tests[d.key].warning && <> · {t("ig.db.canWrite")}</>}
+                        </div>
+                      )}
+                    </td>
+                  )}
+                  {p.isAdmin && (
+                    <td className="ig-db-actions">
+                      <button
+                        className="sm ghost"
+                        onClick={async () => {
+                          const r = await act(() => api(`/api/integrations/databases/${d.key}/test`, {}), t("ig.db.testOk"));
+                          if (r) setTests({ ...tests, [d.key]: r });
+                        }}
+                      >
+                        <RefreshCw size={13} /> {t("ig.db.test")}
+                      </button>
+                      <button
+                        className="sm ghost"
+                        onClick={() => setForm({ ...EMPTY_DB, ...d, repositories: (d.repositories ?? []).join(", "), password: "" })}
+                      >
+                        {t("common.edit")}
+                      </button>
+                      <button
+                        className="sm ghost"
+                        onClick={async () => {
+                          if (!confirm(t("ig.db.deleteConfirm", { key: d.key }))) return;
+                          if (await act(() => api(`/api/integrations/databases/${d.key}/delete`, {}), t("ig.db.deleted"))) reload();
+                        }}
+                      >
+                        {t("common.delete")}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {p.isAdmin && !form && (
+        <div className="row">
+          <button className="sm" onClick={() => setForm({ ...EMPTY_DB })}>
+            <Database size={14} /> {t("ig.db.add")}
+          </button>
+        </div>
+      )}
+      {p.isAdmin && form && (
+        <div className="ig-db-form">
+          <div className="ig-db-grid">
+            <Field label={t("ig.db.key")}>
+              <input value={form.key} placeholder="oms-qc" onChange={(e) => set("key", e.target.value.trim().toLowerCase())} />
+            </Field>
+            <Field label={t("ig.db.project")}>
+              <input value={form.project} placeholder="OMS" onChange={(e) => set("project", e.target.value)} />
+            </Field>
+            <Field label={t("ig.db.repositories")}>
+              <input value={form.repositories} placeholder="warranty-api, warranty-worker" onChange={(e) => set("repositories", e.target.value)} />
+            </Field>
+            <Field label={t("ig.db.host")}>
+              <input value={form.host} placeholder="oms-db.qc.internal" onChange={(e) => set("host", e.target.value.trim())} />
+            </Field>
+            <Field label={t("ig.db.port")}>
+              <input type="number" value={form.port} onChange={(e) => set("port", e.target.value)} />
+            </Field>
+            <Field label={t("ig.db.database")}>
+              <input value={form.database_name} onChange={(e) => set("database_name", e.target.value.trim())} />
+            </Field>
+            <Field label={t("ig.db.username")}>
+              <input value={form.username} autoComplete="off" onChange={(e) => set("username", e.target.value.trim())} />
+            </Field>
+            <Field label={t("ig.db.password")}>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={form.password}
+                placeholder={form.has_password ? t("ig.db.passwordKeep") : ""}
+                onChange={(e) => set("password", e.target.value)}
+              />
+            </Field>
+            <Field label={t("ig.db.maxRows")}>
+              <input type="number" value={form.max_rows} onChange={(e) => set("max_rows", e.target.value)} />
+            </Field>
+            <Field label={t("ig.db.timeout")}>
+              <input type="number" value={form.timeout_ms} onChange={(e) => set("timeout_ms", e.target.value)} />
+            </Field>
+          </div>
+          <Field label={t("ig.db.description")}>
+            <input value={form.description} onChange={(e) => set("description", e.target.value)} />
+          </Field>
+          <label className="small">
+            <input type="checkbox" checked={form.ssl} onChange={(e) => set("ssl", e.target.checked)} /> TLS
+          </label>{" "}
+          <label className="small">
+            <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} /> {t("ig.db.enabled")}
+          </label>
+          <p className="muted small">{t("ig.db.scopeHint")}</p>
+          <div className="row">
+            <button className="sm" onClick={save}>
+              {t("common.save")}
+            </button>
+            <button className="sm ghost" onClick={() => setForm(null)}>
+              {t("common.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+    </Row>
+  );
+}
+
 // ---------------------------------------------------------------- platform accounts
 
 function sourceLabel(t: (k: string) => string, source: string) {
@@ -783,7 +986,7 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   </Row>;
 }
 
-export function IntegrationsPage() {
+export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {}) {
   const { t } = useI18n();
   const [open, setOpen] = useState<string | null>(null);
   const row = (id: string) => ({
@@ -807,6 +1010,7 @@ export function IntegrationsPage() {
           <Kafka {...row("kafka")} />
           <Vault {...row("vault")} />
           <Splunk {...row("splunk")} />
+          <ProjectDatabases {...row("databases")} isAdmin={me?.role === "admin"} />
         </div>
       </section>
       <section className="ig-group">

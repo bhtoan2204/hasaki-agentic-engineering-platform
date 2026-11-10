@@ -301,7 +301,7 @@ export function App() {
       page = <InvestigationsPage id={parts[1] ? Number(parts[1]) : undefined} />;
       break;
     case "integrations":
-      page = <IntegrationsPage />;
+      page = <IntegrationsPage me={me} />;
       break;
     case "insights":
       page = <InsightsPage tab={parts[1]} />;

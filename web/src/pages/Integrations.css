@@ -225,3 +225,12 @@
 }
 .ig-ok-text { color: var(--st-ok); font-weight: 600; }
 .ig-err-text { color: var(--st-err); font-weight: 600; }
+
+/* project QC databases */
+.ig-db-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.ig-db-table th, .ig-db-table td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08)); }
+.ig-db-table tr.is-off td { opacity: 0.6; }
+.ig-db-actions { white-space: nowrap; }
+.ig-db-warn { color: var(--st-wait); }
+.ig-db-form { display: grid; gap: 8px; margin-top: 8px; }
+.ig-db-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
