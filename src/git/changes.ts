@@ -1,3 +1,4 @@
+import { effectivePermissions } from "../repos/access.ts";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
@@ -23,7 +24,12 @@ const capped = (s: string) => (s.length > MAX_DIFF ? s.slice(0, MAX_DIFF) + `\nâ
  * Read-only view of what a run changed, per workspace: commits ahead of the base branch, changed files, the diff,
  * uncommitted work, and the PR title/description the git_pull_request step would send. Used to review before the PR step.
  */
-export async function runChanges(runId: number) {
+/**
+ * `viewerId`: source code (commits, diffs, file lists) is shown only for repositories the viewer can read right now;
+ * a run's history is kept, but a revoked repository shows as restricted, not as code. This also applies to an admin
+ * looking at another member's run.
+ */
+export async function runChanges(runId: number, viewerId?: number) {
   const run = await one(pool, "SELECT r.*, w.code AS work_item_code FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1", [runId]);
   if (!run) throw new Error(`run ${runId} not found`);
   const steps = await q(pool, "SELECT key, type, status, config, output FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);
@@ -32,7 +38,12 @@ export async function runChanges(runId: number) {
   const testExceptions = await testExceptionsOf(runId);
   const verificationNotes = await verificationNotesOf(runId);
   const repos = [];
+  const readable = viewerId == null ? null : await effectivePermissions(viewerId, { project: String(run.inputs?.project ?? "") });
   for (const w of await workspacesOf(runId)) {
+    if (readable && !readable.get(w.repo)?.effective.read) {
+      repos.push({ repo: w.repo, branch: w.branch, exists: false, restricted: true });
+      continue;
+    }
     const destination = await repositoryBaseBranch(w.repo);
     const base = `origin/${destination}`;
     if (!existsSync(w.path)) {

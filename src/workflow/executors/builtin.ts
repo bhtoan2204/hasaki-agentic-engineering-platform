@@ -1,3 +1,4 @@
+import { requireRunRepositoryAccess } from "../../repos/access.ts";
 import { createHash } from "node:crypto";
 import { investigationCorrelate, investigationLatency, investigationParse, investigationReport } from "../../investigation/steps.ts";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
@@ -497,6 +498,13 @@ export const pullRequestExecutor: StepExecutor = {
       }
       // A fenced-out / canceled attempt must not start another external action.
       if (ctx.signal.aborted) return { kind: "failed", error: `PR step interrupted before publishing ${w.repo}: ${String(ctx.signal.reason ?? "aborted")}`, retryable: false };
+      // The owner must still hold pull-request permission right now (revocation, Bitbucket check, repository policy).
+      try {
+        await requireRunRepositoryAccess(ctx.run.id, w.repo, "pull_request");
+      } catch (e) {
+        await ctx.log("system", `${w.repo}: publication refused: ${(e as Error).message}`);
+        return { kind: "failed", error: `${w.repo}: ${(e as Error).message}`, retryable: false };
+      }
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {

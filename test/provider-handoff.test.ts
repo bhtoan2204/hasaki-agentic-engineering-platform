@@ -36,6 +36,7 @@ import { resumableSession } from "../src/agent/claude.ts";
 import { handle } from "../src/http/app.ts";
 import { config } from "../src/config.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 let owner: PublicUser,
   other: PublicUser,
   admin: PublicUser,
@@ -48,6 +49,7 @@ const seen: ExecutionContext[] = [];
 const policy = { mode: "coding" as const, baseBranch: "main", workspaces: [] };
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
   owner = await createUser({ username: "handoff-owner", password: "handoff-password", role: "member" });
   other = await createUser({ username: "handoff-other", password: "handoff-password", role: "member" });
   admin = await createUser({ username: "handoff-admin", password: "handoff-password", role: "admin" });

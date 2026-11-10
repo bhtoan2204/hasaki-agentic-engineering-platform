@@ -17,6 +17,7 @@ import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
 import { isEvaluationRun as isEvaluationTelegramRun } from "../eval/scope.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
+import { allowedRepositoriesForRun, effectivePermissions } from "../repos/access.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
@@ -268,10 +269,13 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
   if (!dv) throw new EngineError(`workflow "${input.definitionKey}"${input.version ? ` v${input.version}` : ""} has no published version`, 404);
   const inputs = input.inputs ?? {};
   const project = wi?.project || String(inputs.project ?? "");
-  const allowed = await repositories.allowedFor(project, "read", c);
+  // The owner's own effective permissions (platform grant ∩ Bitbucket ∩ repository), narrowed by the project mapping.
+  const allowed = await allowedRepositoriesForRun(ownerId, project, "read", { db: c, verify: true });
   let selected = input.repositories ?? (Array.isArray(inputs.repositories) ? (inputs.repositories as string[]) : []);
+  if (!Array.isArray(selected) || selected.some((r) => typeof r !== "string")) throw new EngineError("repositories must be a list of repository names", 400);
   const outside = selected.filter((r) => !allowed.includes(r));
-  if (outside.length) throw new EngineError(`repositories not allowed for this run: ${outside.join(", ")} (allowed: ${allowed.join(", ") || "none"})`, 400);
+  // Same answer for "not registered" and "not yours": the existence of other repositories is not revealed.
+  if (outside.length) throw new EngineError(`repositories not found or not accessible for this run: ${outside.join(", ")}`, 403);
   // Reuse repositories already confirmed for this work item (skips rediscovery); never outside the allowed set.
   let reusedRepositories = false;
   if (!selected.length && wi) {
@@ -511,6 +515,12 @@ async function setSelectedRepositories(c: Db, run: RunRow, repos: string[]) {
   const clean = [...new Set(repos.map(String))];
   const outside = clean.filter((r) => !run.allowed_repositories.includes(r));
   if (outside.length) throw new EngineError(`repositories outside the allowed set: ${outside.join(", ")}`, 400);
+  // The persisted scope may predate a revocation: the owner must still be able to read every selected repository.
+  if (clean.length && run.owner_id != null) {
+    const perms = await effectivePermissions(Number(run.owner_id), { db: c, project: String(run.inputs?.project ?? "") });
+    const lost = clean.filter((r) => !perms.get(r)?.effective.read);
+    if (lost.length) throw new EngineError(`repository access revoked for the run owner: ${lost.join(", ")}`, 403);
+  }
   await q(c, "UPDATE workflow_runs SET selected_repositories = $2, updated_at = now() WHERE id = $1", [run.id, clean]);
   run.selected_repositories = clean;
   await runEvents.add(c, run.id, "system", `selected repositories: ${clean.join(", ") || "(none)"}`);

@@ -20,6 +20,7 @@ import { prepareWorkspace } from "../src/git/provider.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
 import { startRun } from "../src/workflow/engine.ts";
 import { indexRepository, localScope } from "../src/codeIntelligence/indexer.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
 const git = (cwd: string, ...args: string[]) => execFileSync(realGit, ["-C", cwd, ...args], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.com" } }).trim();
@@ -41,6 +42,7 @@ before(async () => {
   await q(pool, `INSERT INTO knowledge_items(key,category,scope_type,scope_ref,title) VALUES ('legacy-reference','repository_convention','REPOSITORY','legacy-full','Keep reference')`);
   await q(pool, `INSERT INTO code_intelligence.snapshots(repository_id,commit_sha,index_version,identity) SELECT id,'abc123','legacy','before-migration' FROM repositories WHERE name='legacy-full'`);
   await migrate();
+  await shareAllRepositoriesForTests();
   userA = (await createUser({ username: "remote-a", password: "password-a", role: "admin" })).id;
   userB = (await createUser({ username: "remote-b", password: "password-b", role: "member" })).id;
   await putUserSecret(userA, "bitbucket_user", "person@example.com");

@@ -1,3 +1,4 @@
+import { visibleKnowledge } from "../knowledge/visibility.ts";
 import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
 import { q, one, json, type Db } from "../db/pool.ts";
@@ -163,7 +164,8 @@ export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: S
   const pinned: Array<{ key: string; version: number }> = input.pending?.reexecute?.skills ?? [];
   // One instant for version selection (effective dates) and expiry, recorded in the snapshot for reproducibility.
   const at = new Date();
-  const res = resolveKnowledge(await knowledge.candidates(c, run.owner_id, at), {
+  // Knowledge derived from repositories the owner cannot read never reaches the agent.
+  const res = resolveKnowledge(await visibleKnowledge(run.owner_id, await knowledge.candidates(c, run.owner_id, at)), {
     organization: config.organization,
     project,
     repositories,

@@ -9,8 +9,21 @@ import { writeFileSync } from "node:fs";
 import { repositories, syncRepositoriesFromConfig, repoPath, projectScope } from "../src/repos/service.ts";
 import { frontmatter, importFromRepositories, looksSecret } from "../src/knowledge/importer.ts";
 import { knowledge } from "../src/knowledge/service.ts";
+import { createUser } from "../src/auth/users.ts";
+import { allowedRepositoriesForRun } from "../src/repos/access.ts";
 
 after(() => pool.end());
+
+/**
+ * Project mapping is now one input of user-scoped access (repos/access.ts): these tests look at the mapping alone, so
+ * every repository is shared for reading with the test user and the result is what that user's run would get.
+ */
+let syncUser: number | null = null;
+async function allowedFor(project: string) {
+  syncUser ??= Number((await createUser({ username: "sync-user", password: "sync-user-password", role: "member" })).id);
+  await q(pool, "UPDATE repositories SET shared_access = 'read' WHERE shared_access = 'none'");
+  return allowedRepositoriesForRun(syncUser, project);
+}
 
 test("group folders (e.g. oms-src/) are expanded into their git repos; local non-repos leave shared metadata unchanged", async () => {
   await migrate();
@@ -26,7 +39,7 @@ test("group folders (e.g. oms-src/) are expanded into their git repos; local non
   assert.equal(byName["solo"], undefined, "a checkout under reposRoot that no project maps is not registered");
   assert.equal(byName["oms-src"].enabled, true, "local filesystem cannot disable a shared entry");
   assert.equal(byName["docs"], undefined);
-  assert.deepEqual((await repositories.allowedFor("OMS")).sort(), ["oms-api", "oms-background", "oms-src"]);
+  assert.deepEqual((await allowedFor("OMS")).sort(), ["oms-api", "oms-background", "oms-src"]);
 });
 
 test("shared registry: a repo missing on this machine stays enabled; a known project never widens to every repo", async () => {
@@ -36,8 +49,8 @@ test("shared registry: a repo missing on this machine stays enabled; a known pro
   assert.equal((await repositories.get("elsewhere-only"))!.enabled, true, "not on this disk is not a reason to disable a shared row");
   for (const n of ["oms-api", "oms-background", "oms-src"]) await repositories.upsert(n, { enabled: false });
   try {
-    assert.deepEqual(await repositories.allowedFor("OMS"), [], "OMS has repositories (all disabled): never falls back to unrelated ones");
-    assert.ok((await repositories.allowedFor("NoSuchProject")).includes("unrelated-tool"), "an unknown project still sees every enabled repo");
+    assert.deepEqual(await allowedFor("OMS"), [], "OMS has repositories (all disabled): never falls back to unrelated ones");
+    assert.ok((await allowedFor("NoSuchProject")).includes("unrelated-tool"), "an unknown project sees every enabled repo the user may read");
   } finally {
     for (const n of ["oms-api", "oms-background", "oms-src"]) await repositories.upsert(n, { enabled: true });
     await q(pool, "DELETE FROM repositories WHERE name IN ('elsewhere-only', 'unrelated-tool')");
@@ -54,17 +67,17 @@ test("projectScope: related projects link both ways, one hop, case-insensitive",
   assert.deepEqual(projectScope("  ", related), []);
 });
 
-test("allowedFor: a run for a project also sees the repositories of its related projects", async () => {
+test("allowed repositories: a run for a project also sees the repositories of its related projects", async () => {
   await repositories.upsert("payment-core", { path: "payment-src/payment-core", projects: ["Payment"] });
   const saved = config.relatedProjects;
   try {
     config.relatedProjects = {};
-    assert.ok(!(await repositories.allowedFor("Payment")).includes("oms-api"), "unlinked: OMS repos stay out of a Payment run");
+    assert.ok(!(await allowedFor("Payment")).includes("oms-api"), "unlinked: OMS repos stay out of a Payment run");
     config.relatedProjects = { OMS: ["Payment"] };
-    const forPayment = await repositories.allowedFor("Payment");
+    const forPayment = await allowedFor("Payment");
     assert.ok(forPayment.includes("payment-core") && forPayment.includes("oms-api") && forPayment.includes("oms-background"));
-    assert.ok((await repositories.allowedFor("oms")).includes("payment-core"), "link works from the other side too");
-    assert.ok(!(await repositories.allowedFor("Payment")).includes("unrelated-tool"));
+    assert.ok((await allowedFor("oms")).includes("payment-core"), "link works from the other side too");
+    assert.ok(!(await allowedFor("Payment")).includes("unrelated-tool"));
   } finally {
     config.relatedProjects = saved;
     await q(pool, "DELETE FROM repositories WHERE name = 'payment-core'");

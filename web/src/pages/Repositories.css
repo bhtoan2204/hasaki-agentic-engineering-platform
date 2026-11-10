@@ -513,3 +513,36 @@
     grid-template-columns: minmax(0, 1fr)
   }
 }
+/* ---- user-scoped access (My repositories / Access management) ---- */
+.repo-level {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--fs-xs, 12px);
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+  color: var(--text-2, inherit);
+}
+.repo-level.is-read { color: var(--st-run); }
+.repo-level.is-write,
+.repo-level.is-pull_request { color: var(--st-ok); }
+.repo-bb {
+  font-size: var(--fs-xs, 12px);
+  color: var(--text-3, inherit);
+}
+.repo-bb.is-verified,
+.repo-bb.is-trusted { color: var(--st-ok); }
+.repo-bb.is-denied { color: var(--st-err); }
+.repo-bb.is-unknown,
+.repo-bb.is-stale { color: var(--st-wait); }
+.repo-access { display: grid; gap: 16px; margin-bottom: 16px; }
+.repo-access-search { max-width: 320px; margin-bottom: 8px; }
+.repo-access-table { width: 100%; border-collapse: collapse; }
+.repo-access-table th,
+.repo-access-table td { padding: 6px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08)); }
+.repo-access-table thead th { white-space: nowrap; font-weight: 600; }
+.repo-access-table tr.is-off th a { opacity: 0.6; }
+.repo-access-table select { min-width: 12em; }
+.repo-audit { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

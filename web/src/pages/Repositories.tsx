@@ -13,6 +13,7 @@ import {
   Network,
   PenLine,
   Plus,
+  RefreshCw,
   Power,
   Save,
   ShieldCheck,
@@ -39,6 +40,7 @@ import {
 } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Repositories.css";
+import { BitbucketState, RepositoryAccessAdmin } from "./RepositoryAccess.tsx";
 
 const LISTS = [
   "projects",
@@ -92,17 +94,83 @@ function Actions({ items }: { items?: string[] }) {
 }
 const repoDir = (r: any) => r.repository_url || r.path || r.name;
 
+/** The caller's effective access to one repository (platform grant ∩ Bitbucket ∩ repository policy). */
+function AccessCard({ access }: { access: any }) {
+  const { t } = useI18n();
+  if (!access) return null;
+  return (
+    <section className="card">
+      <div className="card-head">
+        <ShieldCheck size={16} color="var(--brand)" />
+        <h4>{t("repo.yourAccess")}</h4>
+        <span className="grow" />
+        <span className={`repo-level is-${access.level}`}>{t(`repo.level.${access.level}`)}</span>
+      </div>
+      <dl className="repo-kv">
+        <div>
+          <dt>{t("repo.access.source")}</dt>
+          <dd>{access.source ? t(`repo.source.${access.source}`) : "—"}</dd>
+        </div>
+        <div>
+          <dt>Bitbucket</dt>
+          <dd>
+            <BitbucketState state={access.bitbucket.state} reason={access.bitbucket.reason} stale={access.bitbucket.stale} />
+          </dd>
+        </div>
+      </dl>
+      <p className="muted small">{t("repo.access.effectiveHint")}</p>
+    </section>
+  );
+}
+
 export function RepositoriesPage({
   name,
   query,
-}: { name?: string; query?: string } = {}) {
+  me,
+}: { name?: string; query?: string; me?: { role?: string } | null } = {}) {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
-  const index = useApi<{ enabled: boolean; repositories: any[] }>(
-    name ? "/api/repositories/index-status" : null,
+  const isAdmin = me?.role === "admin";
+  const view = new URLSearchParams(
+    query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
+  ).get("view");
+  // Members only ever see "My repositories". Admins also manage the registry and grants (view=manage); managing
+  // access is not reading: the workspace and index panels need the admin's own grant like anyone else's.
+  const manage = isAdmin && view === "manage";
+  const { data, error, loading, reload } = useApi<any[]>(
+    manage ? "/api/repositories?manage=1" : "/api/repositories",
+    [manage],
   );
+
+  // Only for a repository the caller can read (otherwise the page shows "not found", like an unknown name).
+  const readable = !!name && !manage && !!data?.some((x) => x.name === name);
   const workspace = useApi<any>(
-    name ? `/api/repositories/${encodeURIComponent(name)}/workspace` : null,
+    readable ? `/api/repositories/${encodeURIComponent(name!)}/workspace` : null,
+    [manage, readable],
+  );
+  const index = useApi<{ enabled: boolean; repositories: any[] }>(
+    readable ? "/api/repositories/index-status" : null,
+    [manage, readable],
+  );
+  const manageHref = (repo?: string) =>
+    repo ? `/repositories/${repo}?view=manage` : "/repositories?view=manage";
+  const tabs = isAdmin && (
+    <Segmented
+      label={t("repo.title")}
+      options={[
+        ["mine", t("repo.mine")],
+        ["manage", t("repo.manage")],
+      ]}
+      value={manage ? "manage" : "mine"}
+      onChange={(v) =>
+        navigate(
+          v === "manage"
+            ? manageHref(name)
+            : name
+              ? `/repositories/${name}`
+              : "/repositories",
+        )
+      }
+    />
   );
   const [form, setForm] = useState<any>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
@@ -124,6 +192,7 @@ export function RepositoriesPage({
   const syncUrl = (newFilter: string, newQ: string) => {
     if (name) return;
     const p = new URLSearchParams();
+    if (manage) p.set("view", "manage");
     if (newFilter && newFilter !== "all") p.set("filter", newFilter);
     if (newQ.trim()) p.set("q", newQ.trim());
     const qs = p.toString();
@@ -211,10 +280,10 @@ export function RepositoriesPage({
         t("repo.saved"),
       )
     )
-      (reload(), setCreating(false), navigate(`/repositories/${form.name}`));
+      (reload(), setCreating(false), navigate(manageHref(form.name)));
   };
   const startNew = () => {
-    if (name) navigate("/repositories");
+    if (name) navigate(manageHref());
     setCreating(true);
   };
   const remove = async (repo: string) => {
@@ -226,10 +295,10 @@ export function RepositoriesPage({
         t("repo.deleted", { name: repo }),
       )
     )
-      (reload(), navigate("/repositories"));
+      (reload(), navigate(manageHref()));
   };
 
-  const editor = form && (
+  const editor = manage && form && (
     <RepoForm form={form} setForm={setForm} isNew={!name} onSave={save} />
   );
 
@@ -245,18 +314,23 @@ export function RepositoriesPage({
           subtitle={r?.description || undefined}
           actions={
             <>
+              {tabs}
               <button
                 className="ghost"
-                onClick={() => navigate("/repositories")}
+                onClick={() =>
+                  navigate(manage ? manageHref() : "/repositories")
+                }
               >
                 <ArrowLeft size={15} />
                 {t("repo.list")}
               </button>
-              <button className="ghost" onClick={startNew}>
-                <Plus size={15} />
-                {t("repo.add")}
-              </button>
-              {r && (
+              {manage && (
+                <button className="ghost" onClick={startNew}>
+                  <Plus size={15} />
+                  {t("repo.add")}
+                </button>
+              )}
+              {manage && r && (
                 <button className="danger" onClick={() => remove(r.name)}>
                   <Trash2 size={15} />
                   {t("repo.delete")}
@@ -272,7 +346,9 @@ export function RepositoriesPage({
             action={
               <button
                 className="ghost sm"
-                onClick={() => navigate("/repositories")}
+                onClick={() =>
+                  navigate(manage ? manageHref() : "/repositories")
+                }
               >
                 {t("repo.back")}
               </button>
@@ -336,6 +412,12 @@ export function RepositoriesPage({
                 </dl>
               </div>
 
+              {manage ? (
+                <RepositoryAccessAdmin only={r.name} />
+              ) : (
+                <AccessCard access={r.access} />
+              )}
+              {!manage && (<>
               <section className="card">
                 <div className="card-head">
                   <FolderGit2 size={16} />
@@ -435,6 +517,7 @@ export function RepositoriesPage({
                             {state.last_indexing_error}
                           </p>
                         )}
+                        {isAdmin && (
                         <button
                           className="ghost sm"
                           onClick={async () => {
@@ -453,10 +536,11 @@ export function RepositoriesPage({
                         >
                           Reindex (admin)
                         </button>
+                        )}
                         <button className="ghost sm" onClick={index.reload}>
                           Refresh
                         </button>
-                        {state?.indexing_run_id &&
+                        {isAdmin && state?.indexing_run_id &&
                           ["queued", "running"].includes(state.status) && (
                             <button
                               className="ghost sm"
@@ -482,6 +566,7 @@ export function RepositoriesPage({
                   })()
                 )}
               </section>
+              </>)}
 
               <section className="card">
                 <div className="card-head">
@@ -531,7 +616,7 @@ export function RepositoriesPage({
                           <a
                             key={d}
                             className="repo-chip is-link"
-                            href={`#/repositories/${d}`}
+                            href={`#${manage ? manageHref(d) : `/repositories/${d}`}`}
                           >
                             <Link2 size={11} />
                             {d}
@@ -587,22 +672,47 @@ export function RepositoriesPage({
   const all = data!;
   const enabled = all.filter((r) => r.enabled).length;
   const projects = new Set(all.flatMap((r) => r.projects));
-  const writable = all.filter(
-    (r) => r.enabled && r.allowed_actions.includes("write"),
+  // My repositories: what the caller may actually do. Management: what the registry allows.
+  const writable = all.filter((r) =>
+    manage
+      ? r.enabled && r.allowed_actions.includes("write")
+      : r.access?.effective?.write,
   ).length;
   return (
     <div className="repo">
       <PageHeader
         icon={FolderGit2}
-        title={t("repo.title")}
-        subtitle={t("repo.subtitle")}
+        title={manage ? t("repo.manage") : t("repo.mine")}
+        subtitle={manage ? t("repo.subtitle") : t("repo.mineSubtitle")}
         actions={
-          <button onClick={startNew}>
-            <Plus size={15} strokeWidth={2.2} />
-            {t("repo.add")}
-          </button>
+          <>
+            {tabs}
+            {manage ? (
+              <button onClick={startNew}>
+                <Plus size={15} strokeWidth={2.2} />
+                {t("repo.add")}
+              </button>
+            ) : (
+              <button
+                className="ghost"
+                onClick={async () => {
+                  if (
+                    await act(
+                      () => api("/api/repository-access/revalidate", {}),
+                      t("repo.access.revalidated"),
+                    )
+                  )
+                    reload();
+                }}
+              >
+                <RefreshCw size={15} />
+                {t("repo.revalidateMine")}
+              </button>
+            )}
+          </>
         }
       />
+      {manage && <RepositoryAccessAdmin />}
       <div className="repo-stats">
         <StatCard
           icon={FolderGit2}
@@ -657,7 +767,11 @@ export function RepositoriesPage({
               {t("repo.count", { shown: shown.length, all: all.length })}
             </span>
           </div>
-          {!all.length ? (
+          {!all.length && !manage ? (
+            <EmptyState icon={FolderGit2} title={t("repo.mineEmpty")}>
+              {t(isAdmin ? "repo.mineEmptyAdmin" : "repo.mineEmptyBody")}
+            </EmptyState>
+          ) : !all.length ? (
             <EmptyState
               icon={FolderGit2}
               title={t("repo.empty")}
@@ -679,7 +793,11 @@ export function RepositoriesPage({
                   key={r.name}
                   type="button"
                   className={`repo-card${r.enabled ? "" : " is-off"}`}
-                  onClick={() => navigate(`/repositories/${r.name}`)}
+                  onClick={() =>
+                    navigate(
+                      manage ? manageHref(r.name) : `/repositories/${r.name}`,
+                    )
+                  }
                 >
                   <div className="repo-card-head">
                     <span className="repo-card-icon">
@@ -693,6 +811,11 @@ export function RepositoriesPage({
                     </div>
                     {!r.enabled && (
                       <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>
+                    )}
+                    {r.access && (
+                      <span className={`repo-level is-${r.access.level}`}>
+                        {t(`repo.level.${r.access.level}`)}
+                      </span>
                     )}
                   </div>
                   <div className="repo-card-desc">
@@ -722,6 +845,17 @@ export function RepositoriesPage({
                       </span>
                       <Actions items={r.allowed_actions} />
                     </div>
+                    {r.access?.bitbucket?.state &&
+                      r.access.bitbucket.state !== "not_applicable" && (
+                        <div>
+                          <span className="repo-label-inline">Bitbucket</span>
+                          <BitbucketState
+                            state={r.access.bitbucket.state}
+                            reason={r.access.bitbucket.reason}
+                            stale={r.access.bitbucket.stale}
+                          />
+                        </div>
+                      )}
                   </div>
                 </button>
               ))}
@@ -812,7 +946,7 @@ export function RepositoriesPage({
           </section>
         </aside>
       </div>
-      {creating && (
+      {creating && manage && (
         <NewRepoDrawer
           form={form}
           setForm={setForm}

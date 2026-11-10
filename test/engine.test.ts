@@ -56,6 +56,7 @@ import { addEvidence } from "../src/report/evidenceStore.ts";
 import { costTotalsForRuns, runCost, workItemCost } from "../src/report/cost.ts";
 import { OPTIONS, setTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
 import { testExceptionsOf, prDescription } from "../src/workflow/executors/builtin.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 // ---------------------------------------------------------------- fakes
 
@@ -140,6 +141,7 @@ setGitProvider({
 
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
   await seedTemplates();
   registerExecutor("agent", fakeAgent);
   registerExecutor("coding_agent", fakeAgent);
@@ -627,7 +629,7 @@ test("command step is skipped (not failed) when the run changed no code", async 
 });
 
 test("repository selection outside the allowed set is rejected at run start", async () => {
-  await assert.rejects(startRun({ definitionKey: "code-review", repositories: ["payment-src"], inputs: { project: "OMS" } }), /not allowed/);
+  await assert.rejects(startRun({ definitionKey: "code-review", repositories: ["payment-src"], inputs: { project: "OMS" } }), /not found or not accessible/);
 });
 
 test("step mode: a paused run executes one chosen step at a time; inspector API and NOTIFY", async () => {

@@ -10,6 +10,7 @@ Importing a task **never** executes anything. You pick a workflow and start a ru
 Architecture: [`docs/architecture/agent-architecture.md`](docs/architecture/agent-architecture.md) (single agent + skills + tools) ·
 [`docs/architecture/performance.md`](docs/architecture/performance.md) (FAST / STANDARD / DEEP profiles, reuse, latency) ·
 [`live-updates.md`](docs/architecture/live-updates.md) (SSE, replay, fallback polling) ·
+[`repository-access.md`](docs/architecture/repository-access.md) (user-scoped repository permissions) ·
 [`docs/architecture/current-state.md`](docs/architecture/current-state.md) ·
 [`target-state.md`](docs/architecture/target-state.md) · [`migration-plan.md`](docs/architecture/migration-plan.md)
 
@@ -45,7 +46,8 @@ templates stay shared (`owner_id` NULL). Unassigned private rows stay invisible 
 
 | Resource | Member | Admin |
 | --- | --- | --- |
-| Seeded skills, rules, conventions, workflow templates, repository registry, shared integration settings | Read and use | Modify, publish, archive |
+| Seeded skills, rules, conventions, workflow templates, shared integration settings | Read and use | Modify, publish, archive |
+| Repositories (list, workspace, ranking, runs, agents, PRs, repository knowledge) | Only repositories granted to them (or explicitly shared), further limited by their own Bitbucket permission | Register, grant, share, revalidate, delete; source access only through their own grant |
 | Work items, inbox imports, private workflows, runs and everything under a run, private knowledge, task memory | Own rows only | Own rows by default. "View the whole team's resources" is explicit and audited |
 | Clone a shared template | Yes, into a private workflow | Yes |
 | Promote a private workflow or knowledge item to shared | No | Yes, after review |

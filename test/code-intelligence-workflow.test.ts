@@ -19,6 +19,7 @@ import {
   runIndexOnce,
   enqueue,
 } from "../src/codeIntelligence/indexer.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 const a = "ci-proof-a",
   z = "ci-proof-z";
@@ -45,6 +46,7 @@ const block = (prompt: string) =>
   )?.[1] ?? "";
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
   config.codeIntelligence.enabled = true;
   config.codeIntelligence.contextTokens = 200;
   config.learning.detectChanges = false;

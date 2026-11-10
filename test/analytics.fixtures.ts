@@ -5,9 +5,11 @@ import { startRun } from "../src/workflow/engine.ts";
 import { workItems } from "../src/workitems/service.ts";
 import { repositories } from "../src/repos/service.ts";
 import { createUser } from "../src/auth/users.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 export async function analyticsFixtures() {
   await migrate();
+  await shareAllRepositoriesForTests();
   const owner = await createUser({ username: "analytics-a", password: "analytics-password", role: "member" });
   const other = await createUser({ username: "analytics-b", password: "analytics-password", role: "member" });
   const admin = await createUser({ username: "analytics-admin", password: "analytics-password", role: "admin" });

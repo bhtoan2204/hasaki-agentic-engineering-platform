@@ -30,12 +30,14 @@ import { handle } from "../src/http/app.ts";
 import { estimateTokens } from "../src/context/plan.ts";
 import { source } from "../src/agent/contextTools.ts";
 import { decide } from "../src/agent/toolPolicy.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 let a: PublicUser, b: PublicUser, admin: PublicUser, server: Server, base: string;
 const runs: number[] = [];
 const policy = { mode: "analysis" as const, workspaces: [], protectedRoots: [], baseBranch: "main" };
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
   a = await createUser({ username: "context-a", password: "context-password", role: "member" });
   b = await createUser({ username: "context-b", password: "context-password", role: "member" });
   admin = await createUser({ username: "context-admin", password: "context-password", role: "admin" });

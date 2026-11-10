@@ -31,6 +31,7 @@ import { HttpError } from "../http/error.ts";
 import { assertQuestionsAccessible, audit, requireAdmin, requireArtifact, requireAttempt, requireOwner, requireRun, requireSnapshot, requireWorkItem, wantsSupport, type Actor } from "../authz/access.ts";
 import { listUsers, createUser, setActive, setPassword } from "../auth/users.ts";
 import { knowledge } from "../knowledge/service.ts";
+import { knowledgeRestricted, readableRepositoryNames, visibleKnowledge } from "../knowledge/visibility.ts";
 import { reviewMemory } from "../knowledge/memory.ts";
 import { approveProposal, getProposal, listProposals, rejectProposal, reviewScope, rollbackProposal } from "../knowledge/proposals.ts";
 import { detectKnowledgeChanges, proposeSkillUpdates } from "../knowledge/learning.ts";
@@ -44,6 +45,18 @@ import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
 import { repositoryRemote } from "../repos/remote.ts";
 import { prepareRepository, workspaceStatus, testRepositoryConnection } from "../repos/workspaces.ts";
 import { repositories, isAmbiguous, RepositoryInUseError } from "../repos/service.ts";
+import {
+  accessAudit,
+  accessMatrix,
+  allowedRepositoriesForRun,
+  listAccessibleRepositories,
+  requireRepositoryAccess,
+  revalidateBitbucket,
+  setRepositoryAccess,
+  setSharedAccess,
+  type AccessLevel,
+  type EffectivePermissions,
+} from "../repos/access.ts";
 import { definitions } from "../workflow/definitions.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { runEvents } from "../workflow/events.ts";
@@ -168,7 +181,13 @@ async function readableKnowledge(c: Ctx, key: string) {
     await requireOwner(c.actor, ownerId, support(c), "knowledge", key);
     return must(await knowledge.get(key, pool, ownerId), "knowledge item");
   }
-  return must((await knowledge.get(key, pool, c.actor.id)) ?? (await knowledge.get(key, pool, null)), "knowledge item");
+  return hideRestrictedKnowledge(c.actor.id, must((await knowledge.get(key, pool, c.actor.id)) ?? (await knowledge.get(key, pool, null)), "knowledge item"));
+}
+
+/** Knowledge derived from a repository the caller cannot read answers 404, like any unknown item. */
+async function hideRestrictedKnowledge<T extends { scope_type?: string; scope_ref?: string; versions?: Array<{ metadata?: any }> }>(userId: number, item: T): Promise<T> {
+  if (knowledgeRestricted(item, await readableRepositoryNames(userId))) throw new HttpError(404, "knowledge item not found");
+  return item;
 }
 
 function redactGroup(group: any, actor: Actor, showAll: boolean) {
@@ -325,7 +344,7 @@ export const routes: Route[] = [
   ["GET", /^\/api\/runs\/(\d+)$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runDetail(num(c.p[0])))],
   ["GET", /^\/api\/runs\/(\d+)\/events$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runEvents.list(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0)))],
   ["POST", /^\/api\/runs\/(\d+)\/start$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), startPendingRun(num(c.p[0]), c.body.repositories, !!c.body.step_mode))],
-  ["GET", /^\/api\/runs\/(\d+)\/changes$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runChanges(num(c.p[0])))],
+  ["GET", /^\/api\/runs\/(\d+)\/changes$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runChanges(num(c.p[0]), c.actor.id))],
   // Cost: totals, tokens, by step / model, wasted cost and budget; budget_usd null clears the run's own budget.
   // Verified outcome ladder (proven states only) + deterministic failure categories; refresh=1 recomputes, sync_pr=1
   // first asks the git provider for the PR lifecycle state (read-only).
@@ -393,7 +412,9 @@ export const routes: Route[] = [
   ["POST", /^\/api\/questions\/answers$/, async (c) => (await assertQuestionsAccessible(c.actor, support(c), c.body.answers ?? {}), answerQuestions(c.body.answers ?? {}, c.actor.username))],
 
   // ------------------------------------------------------------ knowledge
-  ["GET", /^\/api\/knowledge$/, (c) => knowledge.list({ category: c.url.searchParams.get("category") ?? undefined, ...mine(c) })],
+  ["GET", /^\/api\/knowledge$/, async (c) => {
+    return visibleKnowledge(c.actor.id, await knowledge.list({ category: c.url.searchParams.get("category") ?? undefined, ...mine(c) }));
+  }],
   ["POST", /^\/api\/knowledge$/, ({ body, actor }) => {
     const shared = body.shared === true;
     if (shared) requireAdmin(actor);
@@ -436,17 +457,19 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/knowledge\/preview$/,
-    async ({ body, actor }) =>
-      resolveKnowledge(await knowledge.candidates(pool, actor.id), {
+    async ({ body, actor }) => {
+      const visible = await readableRepositoryNames(actor.id);
+      return resolveKnowledge((await knowledge.candidates(pool, actor.id)).filter((k) => !knowledgeRestricted(k, visible)), {
         organization: config.organization,
         project: String(body.project ?? ""),
-        repositories: body.repositories ?? [],
+        repositories: (Array.isArray(body.repositories) ? body.repositories : []).filter((r: unknown) => visible.has(String(r).toLowerCase())),
         workflowKey: String(body.workflow ?? ""),
         stepKey: String(body.step ?? ""),
         stepType: String(body.step_type ?? ""),
         text: String(body.text ?? ""),
         explicit: body.explicit ?? [],
-      }),
+      });
+    },
   ],
   // Executions that actually received this item (from immutable context snapshots) + explicit assignments in workflows.
   [
@@ -516,12 +539,75 @@ export const routes: Route[] = [
   }],
 
   // ------------------------------------------------------------ repositories
-  ["POST", /^\/api\/repositories\/validate-url$/, ({ body }) => repositoryRemote(body.repository_url)],
-  ["GET", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/workspace$/, async ({ p }) => workspaceStatus(must(await repositories.get(p[0]), "Repository"))],
+  // Every member endpoint is scoped by the caller's effective permissions (repos/access.ts); an inaccessible repository
+  // answers 404 like an unknown one. Admin-only endpoints manage the registry and grants; they never give the admin
+  // access to source code by themselves.
+  ["POST", /^\/api\/repositories\/validate-url$/, ({ body, actor }) => (requireAdmin(actor), repositoryRemote(body.repository_url))],
+  ["GET", /^\/api\/repositories$/, async ({ actor, url }) => {
+    if (url.searchParams.get("manage") === "1") {
+      requireAdmin(actor);
+      return (await repositories.list()).filter((r) => r.provider !== "benchmark").map(publicRepository);
+    }
+    const mine = await listAccessibleRepositories(actor.id, { verify: true });
+    const visible = new Set(mine.map((m) => m.repository.name));
+    return mine.map((m) => memberRepository(m.repository, m.access, visible));
+  }],
+  ["GET", /^\/api\/repositories\/index-status$/, async ({ actor, url }) => {
+    if (!config.codeIntelligence.enabled) return { enabled: false, repositories: [] };
+    const rows = await codeIndexStatus();
+    if (url.searchParams.get("manage") === "1") return (requireAdmin(actor), { enabled: true, repositories: rows });
+    const visible = new Set((await listAccessibleRepositories(actor.id)).map((m) => m.repository.name));
+    return { enabled: true, repositories: rows.filter((r: any) => visible.has(r.name)) };
+  }],
+  ["POST", /^\/api\/repositories\/index-runs\/(\d+)\/cancel$/, async ({ p, actor }) => { requireAdmin(actor); await q(pool, "UPDATE code_intelligence.runs SET status='canceled', fencing_token=fencing_token+1,updated_at=now() WHERE id=$1 AND instance_id=$2 AND status IN ('queued','running')", [num(p[0]), config.instanceId]); return { ok: true }; }],
+  [
+    "POST",
+    /^\/api\/repositories\/rank$/,
+    async ({ body, actor }) => {
+      // Ranking only ever sees the caller's own repositories (never another member's, never "all").
+      const allowed = new Set(await allowedRepositoriesForRun(actor.id, String(body.project ?? ""), "read", { verify: true }));
+      const ranked = await hybridRank((await repositories.list()).filter((r) => allowed.has(r.name)), { text: String(body.text ?? ""), project: body.project });
+      return { ranked, ambiguous: isAmbiguous(ranked) };
+    },
+  ],
+  // Access management (admin): matrix, grants, shared level, Bitbucket revalidation, audit.
+  ["GET", /^\/api\/repository-access$/, ({ actor }) => (requireAdmin(actor), accessMatrix())],
+  ["GET", /^\/api\/repository-access\/audit$/, ({ actor, url }) => (requireAdmin(actor), accessAudit(url.searchParams.get("repository") || undefined))],
+  ["POST", /^\/api\/repository-access\/revalidate$/, async ({ actor, body }) => {
+    // A member may re-check their own Bitbucket access; an admin may re-check anyone's (or everyone's).
+    const target = body.user_id == null ? actor.id : num(body.user_id);
+    if (target !== actor.id || body.all) requireAdmin(actor);
+    const r = await revalidateBitbucket(body.all ? {} : { userId: target });
+    await audit(actor.id, "repository.access.revalidate", "repository", "", { user_id: body.all ? null : target });
+    return r;
+  }],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/access$/, async ({ p, body, actor }) => {
+    requireAdmin(actor);
+    const repo = must(await repositories.get(p[0]), "Repository");
+    const userId = num(body.user_id);
+    const change = await setRepositoryAccess(repo, userId, String(body.level ?? "none") as AccessLevel, actor.id);
+    await audit(actor.id, "repository.access.grant", "repository", repo.name, { user_id: userId, ...change });
+    return change;
+  }],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/shared$/, async ({ p, body, actor }) => {
+    requireAdmin(actor);
+    const repo = must(await repositories.get(p[0]), "Repository");
+    const change = await setSharedAccess(repo, String(body.level ?? "none") as AccessLevel);
+    await audit(actor.id, "repository.access.shared", "repository", repo.name, change);
+    return change;
+  }],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/revalidate$/, async ({ p, actor }) => {
+    requireAdmin(actor);
+    const repo = must(await repositories.get(p[0]), "Repository");
+    const r = await revalidateBitbucket({ repository: repo });
+    await audit(actor.id, "repository.access.revalidate", "repository", repo.name, r);
+    return r;
+  }],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/reindex$/, async ({ p, actor }) => { requireAdmin(actor); return { enabled: config.codeIntelligence.enabled, job: await enqueueCodeIndex(p[0]) }; }],
   ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/delete$/, async ({ p, actor }) => {
     requireAdmin(actor);
     try {
-      if (!(await repositories.remove(p[0]))) throw new HttpError(404, "Repository not found");
+      if (!(await repositories.remove(p[0], actor.id))) throw new HttpError(404, "Repository not found");
     } catch (e) {
       if (e instanceof RepositoryInUseError) throw new HttpError(409, e.message);
       throw e;
@@ -529,33 +615,32 @@ export const routes: Route[] = [
     await audit(actor.id, "repository.delete", "repository", p[0]);
     return { ok: true };
   }],
-  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/(test-connection|prepare|refresh)$/, async ({ p }) => {
-    const repo = must(await repositories.get(p[0]), "Repository");
-    if (!repo.enabled || !repo.allowed_actions.includes("read")) throw new HttpError(403, "Repository read permission required");
-    if (p[1] === "test-connection") return testRepositoryConnection(repo);
-    await prepareRepository(repo, p[1] === "refresh");
-    return workspaceStatus(repo);
+  ["GET", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/workspace$/, async ({ p, actor }) => workspaceStatus((await requireRepositoryAccess(actor.id, p[0], "read")).repository)],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/(test-connection|prepare|refresh)$/, async ({ p, actor }) => {
+    // Connection tests and checkouts run with the caller's credentials, and only for a repository they may read.
+    const { repository } = await requireRepositoryAccess(actor.id, p[0], "read", { verify: true });
+    if (p[1] === "test-connection") return testRepositoryConnection(repository);
+    await prepareRepository(repository, p[1] === "refresh");
+    return workspaceStatus(repository);
   }],
-  ["GET", /^\/api\/repositories\/index-status$/, async () => ({ enabled: config.codeIntelligence.enabled, repositories: config.codeIntelligence.enabled ? await codeIndexStatus() : [] })],
-  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/reindex$/, async ({ p, actor }) => { requireAdmin(actor); return { enabled: config.codeIntelligence.enabled, job: await enqueueCodeIndex(p[0]) }; }],
-  ["POST", /^\/api\/repositories\/index-runs\/(\d+)\/cancel$/, async ({ p, actor }) => { requireAdmin(actor); await q(pool, "UPDATE code_intelligence.runs SET status='canceled', fencing_token=fencing_token+1,updated_at=now() WHERE id=$1 AND instance_id=$2 AND status IN ('queued','running')", [num(p[0]), config.instanceId]); return { ok: true }; }],
-  ["GET", /^\/api\/repositories$/, async () => (await repositories.list()).map(publicRepository)],
-  [
-    "POST",
-    /^\/api\/repositories\/rank$/,
-    async ({ body }) => {
-      const allowed = new Set(await repositories.allowedFor(String(body.project ?? "")));
-      const ranked = await hybridRank((await repositories.list()).filter((r) => allowed.has(r.name)), { text: String(body.text ?? ""), project: body.project });
-      return { ranked, ambiguous: isAmbiguous(ranked) };
-    },
-  ],
+  ["GET", /^\/api\/repositories\/([A-Za-z0-9._-]+)$/, async ({ p, actor, url }) => {
+    if (url.searchParams.get("manage") === "1") {
+      requireAdmin(actor);
+      return publicRepository(must(await repositories.get(p[0]), "Repository"));
+    }
+    const { repository, access } = await requireRepositoryAccess(actor.id, p[0], "read", { verify: true });
+    const visible = new Set((await listAccessibleRepositories(actor.id)).map((m) => m.repository.name));
+    return memberRepository(repository, access, visible);
+  }],
   ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)$/, async ({ p, body, actor }) => {
     requireAdmin(actor);
     if (!(await repositories.get(p[0]))) {
       if (body.provider && body.provider !== "bitbucket") throw new HttpError(400, "Only Bitbucket HTTPS repositories can be registered");
       repositoryRemote(body.repository_url);
     }
-    return publicRepository(must(await repositories.upsert(p[0], body), "Repository"));
+    // Registration never grants access; shared access is a separate, explicit admin action.
+    const { shared_access: _ignored, ...patch } = body;
+    return publicRepository(must(await repositories.upsert(p[0], patch), "Repository"));
   }],
 
   // ------------------------------------------------------------ Hasaki Work (unchanged endpoints; pick = import only)
@@ -731,6 +816,19 @@ export function errorStatus(e: unknown) {
   if (code === "23505") return 409; // unique violation
   if (code === "23503" || code === "23514" || code === "22P02") return 400;
   return 400;
+}
+
+/**
+ * A repository as one member sees it: their effective permission level and its sources, and no names of
+ * repositories they cannot access (dependencies are filtered so a relationship does not disclose them).
+ */
+function memberRepository(repo: import("../repos/service.ts").RepositoryRow, access: EffectivePermissions, visible: Set<string>) {
+  const { shared_access: _shared, ...rest } = publicRepository(repo);
+  return {
+    ...rest,
+    dependencies: repo.dependencies.filter((d) => visible.has(d)),
+    access: { level: access.level, effective: access.effective, source: access.platform.source, bitbucket: access.bitbucket },
+  };
 }
 
 /** Legacy rows may contain another developer's absolute layout; never return it to members. */

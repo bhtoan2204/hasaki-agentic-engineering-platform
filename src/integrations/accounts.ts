@@ -1,3 +1,4 @@
+import { forgetBitbucketChecks } from "../repos/access.ts";
 import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
 import { botKey } from "../telegram/client.ts";
 import { pool, one } from "../db/pool.ts";
@@ -194,6 +195,8 @@ export async function setBitbucket(input: { user?: string; token?: string; works
   const me = await bbGet(user, token, "/user").catch(() => null);
   await putUserSecret(userId, "bitbucket_user", user);
   await putUserSecret(userId, "bitbucket_token", token);
+  // New credentials may see different repositories: forget the cached permission checks of this user.
+  await forgetBitbucketChecks({ userId });
   return { ...(await bitbucketStatus(userId)), account: me?.ok ? (me.body.display_name ?? me.body.username ?? null) : null };
 }
 
@@ -201,6 +204,7 @@ export async function clearBitbucket(userId?: number) {
   if (userId) {
     await deleteUserSecret(userId, "bitbucket_user");
     await deleteUserSecret(userId, "bitbucket_token");
+    await forgetBitbucketChecks({ userId });
   }
   return bitbucketStatus(userId);
 }

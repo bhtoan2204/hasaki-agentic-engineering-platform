@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveRepoPath } from "./paths.ts";
 import { repositoryRemote, repositoryBranch } from "./remote.ts";
 import { config } from "../config.ts";
-import { pool, q, one, inTx, txWrote, type Db } from "../db/pool.ts";
+import { pool, q, one, inTx, txWrote, withTx, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
 
 export interface RepositoryRow {
@@ -24,6 +24,8 @@ export interface RepositoryRow {
   architecture: string;
   allowed_actions: string[];
   enabled: boolean;
+  /** Explicit access for every active user ('none' = only per-user grants; see repos/access.ts). */
+  shared_access?: "none" | "read" | "write" | "pull_request";
 }
 
 /** The registry is small and read on every run start, discovery, PR and authorization check. */
@@ -70,6 +72,8 @@ export const repositories = {
     }
     const cols = EDITABLE.filter((k) => patch[k] !== undefined);
     if (!existing) {
+      // Registering a deleted name again is explicit: discovery may pick it up again from now on.
+      await q(db, "DELETE FROM repository_exclusions WHERE name = $1", [name]);
       await q(
         db,
         `INSERT INTO repositories (name${cols.length ? ", " + cols.join(", ") : ""}) VALUES ($1${cols.map((_, i) => `, $${i + 2}`).join("")}) ON CONFLICT (name) DO NOTHING`,
@@ -86,33 +90,22 @@ export const repositories = {
 
   /**
    * Unregister a repository. Only the registry row (and its code-intelligence index, by cascade) is removed: local
-   * checkouts on disk, past runs and their workspaces keep the name as history. Refused while an unfinished run may
-   * use it, and for a repository this installation's config.projects would re-register on the next start.
+   * checkouts on disk, past runs and their workspaces keep the name as history. The name is recorded as an exclusion
+   * so discovery from config.projects (group folders) does not register it again on the next start. Refused while
+   * an unfinished run may use it.
    */
-  async remove(name: string, db: Db = pool) {
-    const existing = await repositories.get(name, db);
-    if (!existing) return false;
-    const active = await one(db, "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1", [name]);
-    if (active) throw new RepositoryInUseError(`Repository is used by unfinished run #${active.id}; finish or cancel it first, or disable the repository`);
-    if (configuredRepositories().has(name)) throw new RepositoryInUseError("Repository comes from config.json projects and would be registered again on restart; remove it there first, or disable it");
-    await q(db, "DELETE FROM repositories WHERE name = $1", [name]);
-    return true;
+  async remove(name: string, deletedBy: number | null = null) {
+    return withTx(async (c) => {
+      const existing = await one(c, "SELECT id FROM repositories WHERE name = $1 FOR UPDATE", [name]);
+      if (!existing) return false;
+      const active = await one(c, "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1", [name]);
+      if (active) throw new RepositoryInUseError(`Repository is used by unfinished run #${active.id}; finish or cancel it first, or disable the repository`);
+      await q(c, "DELETE FROM repositories WHERE name = $1", [name]);
+      await q(c, "INSERT INTO repository_exclusions (name, deleted_by) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET deleted_by = EXCLUDED.deleted_by, deleted_at = now()", [name, deletedBy]);
+      return true;
+    });
   },
 
-  /**
-   * Enabled repositories allowed to perform `action` for a project: those mapped to the project or to a project
-   * linked with it in config.relatedProjects, or every such repository when the project has no mapping.
-   */
-  async allowedFor(project: string, action: "read" | "write" | "pull_request" = "read", db: Db = pool): Promise<string[]> {
-    const all = await allRepositories(db);
-    const rows = all.filter((r) => r.enabled && r.allowed_actions.includes(action) && (r.provider !== "benchmark" || (project.startsWith("__benchmark:") && r.projects.includes(project))));
-    const p = project.trim().toLowerCase();
-    const scope = new Set(projectScope(project));
-    const maps = (r: RepositoryRow) => r.projects.some((x) => scope.has(x.toLowerCase()));
-    // A known project never widens to every repository, even when all of its repositories are disabled right now.
-    if (p && all.some(maps)) return rows.filter(maps).map((r) => r.name);
-    return rows.map((r) => r.name);
-  },
 };
 
 /**
@@ -193,7 +186,9 @@ export function configuredRepositories(): Map<string, { rel: string; projects: s
 }
 
 export async function syncRepositoriesFromConfig() {
+  const excluded = new Set((await q<{ name: string }>(pool, "SELECT name FROM repository_exclusions")).map((r) => r.name));
   for (const [name, { rel, projects }] of configuredRepositories()) {
+    if (excluded.has(name)) continue; // deleted by an admin; only an explicit registration brings it back
     const existing = await repositories.get(name);
     const path = rel === name ? "" : rel;
     if (!existing) await repositories.upsert(name, { path, projects, remote_slug: name });

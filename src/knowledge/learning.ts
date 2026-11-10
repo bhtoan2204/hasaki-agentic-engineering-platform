@@ -1,3 +1,4 @@
+import { visibleKnowledge } from "./visibility.ts";
 import { isEvaluationRun } from "../eval/scope.ts";
 import { z } from "zod";
 import { config } from "../config.ts";
@@ -332,7 +333,7 @@ export async function detectKnowledgeChanges(runId: number, opts: { force?: bool
   const human = sources.filter((s) => s.trust === "human");
   const requirement = sources.find((s) => s.trust === "requirement");
   if (!human.length && !(requirement && CHANGE_SIGNAL.test(requirement.text))) return record({ status: "skipped", reason: "no human input that could change a rule", sources: sources.length });
-  const all = await knowledge.candidates(db, run.owner_id);
+  const all = await visibleKnowledge(run.owner_id, await knowledge.candidates(db, run.owner_id));
   const signalText = [run.title, ...sources.map((s) => s.text)].join("\n");
   const rank = (items: KnowledgeCandidate[], n: number) =>
     items

@@ -286,7 +286,7 @@ export function App() {
       page = <KnowledgePage itemKey={parts[1]} subKey={parts[2]} />;
       break;
     case "repositories":
-      page = <RepositoriesPage name={parts[1]} query={queryPart} />;
+      page = <RepositoriesPage name={parts[1]} query={queryPart} me={me} />;
       break;
     case "prod-errors":
       page = (

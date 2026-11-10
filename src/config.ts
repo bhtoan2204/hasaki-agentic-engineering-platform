@@ -71,6 +71,19 @@ export interface Config {
   bitbucket: {
     /** Explicit process service account may be used when no personal credential exists. */
     allowSharedCredentials?: boolean;
+    /**
+     * How a user's own Bitbucket permission limits their repository access (src/repos/access.ts):
+     *  - "strict" (default): read must be verified with the user's personal credentials; write and pull requests
+     *    must be verified too. Unknown (no personal token, API unavailable) is never allowed.
+     *  - "personal": read must be verified; write/PR that Bitbucket does not report (its permission API is
+     *    workspace-admin only) are allowed because pushes and PRs then run with that same personal token, so
+     *    Bitbucket itself enforces them. A shared service account never qualifies.
+     *  - "trusted": an admin vouches that platform grants mirror Bitbucket for this team (e.g. everyone works through
+     *    the shared service account). Bitbucket is not consulted; effective access = platform grant ∩ repository.
+     */
+    accessVerification?: "strict" | "personal" | "trusted";
+    /** How long a Bitbucket permission check is reused before it is checked again (seconds, default 900). */
+    permissionTtlSeconds?: number;
     workspace: string;
     /** Atlassian account email (API token) or Bitbucket username (app password). Empty = no API, return a "create PR" link instead. */
     user: string;

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
 import { repositories } from "../repos/service.ts";
+import { requireRunRepositoryAccess } from "../repos/access.ts";
 import { execution } from "../auth/execution.ts";
 import { instanceDirectory } from "../repos/paths.ts";
 import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
@@ -33,8 +34,10 @@ export interface GitProvider {
 export const bitbucketProvider: GitProvider = {
   name: "bitbucket",
   push: async (path, branch) => {
-    const row = await one(pool, "SELECT r.* FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1", [path]);
+    const row = await one(pool, "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1", [path]);
     if (!row?.enabled || !row.allowed_actions.includes("write") || !row.allowed_actions.includes("pull_request")) throw new Error("Repository publication permission required");
+    // Re-checked at the moment of writing: the run owner's own permission, never the credentials' reach.
+    await requireRunRepositoryAccess(Number(row.workspace_run_id), row.name, "write");
     await validateCheckout(row, path);
     await prepareRepository(row);
     return repositoryLock(row, () => pushBranch(path, branch, row.default_branch || config.baseBranch));
@@ -69,7 +72,9 @@ export async function prepareWorkspace(run: { id: number; branch: string; inputs
   if (!reg?.enabled || !reg.allowed_actions.includes("write")) throw new Error("Repository write permission required");
   if (!owner.allowed_repositories.includes(repo)) throw new Error("Repository outside run scope");
   const principal = execution.getStore();
-  if (principal && owner.owner_id !== principal.userId) throw new Error("Run owner mismatch");
+  if (principal && Number(owner.owner_id) !== principal.userId) throw new Error("Run owner mismatch");
+  // A worktree is where the agent writes: the owner needs write permission now, not only at run creation.
+  await requireRunRepositoryAccess(run.id, repo, "write");
   const checkout = await prepareRepository(reg, true, await checkoutForRun(reg, run.id));
   const target = branchFor(run, repo);
   // Preserve persisted workspaces for resumable runs. New remote workspaces use stable IDs.

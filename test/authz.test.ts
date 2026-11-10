@@ -238,6 +238,9 @@ test("P1 status is authenticated; reindex and cancellation require an administra
     await member.login("membera", "member-a-password");
     await repositories.upsert("p1-api-status", { projects: ["P1"] });
     assert.equal((await client().call("/api/repositories/index-status")).status, 401);
+    const memberId = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!.id;
+    assert.ok(!(await member.call("/api/repositories/index-status")).body.repositories.some((r: any) => r.name === "p1-api-status"), "status follows repository access");
+    assert.equal((await admin.call("/api/repositories/p1-api-status/access", { user_id: memberId, level: "read" })).status, 200);
     assert.equal((await member.call("/api/repositories/p1-api-status/reindex", {})).status, 403);
     const queued = await admin.call("/api/repositories/p1-api-status/reindex", {});
     assert.equal(queued.status, 200); assert.equal(queued.body.job.status, "queued");
@@ -267,15 +270,21 @@ test("P2 suites and evaluation results require authentication and preserve evalu
  }finally{config.evaluation.enabled=previous;}
 });
 
-test("repository URL administration is admin-only, members share identity and local status never exposes paths", async () => {
+test("repository URL administration is admin-only, granted members share identity and local status never exposes paths", async () => {
   const admin = client(), member = client();
   await admin.login("admin", "admin-password"); await member.login("membera", "member-a-password");
+  const savedPolicy = config.bitbucket.accessVerification;
+  config.bitbucket.accessVerification = "trusted"; // the member has no personal Bitbucket token in this test
+  try {
   const definition = { repository_url: "https://bitbucket.org/portable-team/shared", default_branch: "main", projects: ["Portable"], provider: "bitbucket" };
   assert.equal((await member.call("/api/repositories/url-registry", definition)).status, 403);
   const created = await admin.call("/api/repositories/url-registry", definition);
   assert.equal(created.status, 200); assert.equal(created.body.repository_url, definition.repository_url + ".git");
   assert.equal((await admin.call("/api/repositories/url-registry-duplicate", definition)).status, 409);
   assert.equal((await admin.call("/api/repositories/no-url", { description: "old registration" })).status, 400);
+  assert.equal((await member.call("/api/repositories/url-registry/workspace")).status, 404, "registered is not granted");
+  const memberId = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!.id;
+  assert.equal((await admin.call("/api/repositories/url-registry/access", { user_id: memberId, level: "read" })).status, 200);
   const rows = await member.call("/api/repositories");
   assert.equal(rows.status, 200); assert.equal(rows.body.find((r:any)=>r.name==='url-registry').id,created.body.id);
   const status = await member.call("/api/repositories/url-registry/workspace");
@@ -283,9 +292,11 @@ test("repository URL administration is admin-only, members share identity and lo
   const connection = await member.call("/api/repositories/url-registry/test-connection", {});
   assert.equal(connection.status,400); assert.match(connection.body.error,/authentication required/);
   await repositories.upsert("url-registry",{enabled:false});
-  assert.equal((await member.call("/api/repositories/url-registry/prepare", {})).status,403);
-  const invalid = await member.call("/api/repositories/validate-url", {repository_url:"https://person:private-token@bitbucket.org/team/repo"});
+  assert.equal((await member.call("/api/repositories/url-registry/prepare", {})).status,404, "a disabled repository is not accessible");
+  assert.equal((await member.call("/api/repositories/validate-url", {repository_url:"https://bitbucket.org/team/repo"})).status,403, "registration helper is admin-only");
+  const invalid = await admin.call("/api/repositories/validate-url", {repository_url:"https://person:private-token@bitbucket.org/team/repo"});
   assert.equal(invalid.status,400); assert.ok(!invalid.text.includes("private-token"));
+  } finally { config.bitbucket.accessVerification = savedPolicy; }
 });
 
 test("metrics use owner scope; explicit admin support access is audited including cache hits", async () => {

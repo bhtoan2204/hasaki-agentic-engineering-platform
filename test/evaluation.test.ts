@@ -37,7 +37,7 @@ import {
 } from "../src/workflow/engine.ts";
 import { runOnce, claimJob } from "../src/workflow/scheduler.ts";
 import { registerDefaultExecutors } from "../src/workflow/executors/index.ts";
-import { repositories } from "../src/repos/service.ts";
+import { allowedRepositoriesForRun } from "../src/repos/access.ts";
 let suite: any, owner: any, other: any;
 const evidence = (): Evidence => ({
   environment: true,
@@ -210,7 +210,8 @@ test("Configuration is bounded, live execution needs approval, and fixture repos
     }),
     /approval/,
   );
-  const ordinary = await repositories.allowedFor("Unmapped normal project");
+  await q(pool, "UPDATE repositories SET shared_access = 'read' WHERE provider = 'benchmark'").catch(() => {}); // refused below anyway
+  const ordinary = await allowedRepositoriesForRun(Number(owner.id), "Unmapped normal project");
   assert.ok(!ordinary.some((n) => n.startsWith("bench-")));
   const original = config.codeIntelligence.enabled;
   await Promise.all([

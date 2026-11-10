@@ -8,6 +8,7 @@ import { pool, one, q, retryTransient } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
 import { dispatchRunEffects } from "./effects.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
+import { enforceRunRepositoryAccess } from "../repos/access.ts";
 import { localJobs } from "./local.ts";
 import { settleBackground } from "./background.ts";
 import type { ExecResult, JobRow } from "./types.ts";
@@ -101,9 +102,27 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   const deadline = timeoutMs ? setTimeout(() => { timedOut = true; executionAbort.abort(); }, timeoutMs) : null;
   let result: ExecResult;
   try {
-    const ctx = makeContext({ ...begun, signal: executionAbort.signal });
     const ownerId = Number(begun.run.owner_id);
-    result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });
+    // Revalidate the owner's repository access before any protected content is touched (revocation, retries,
+    // resume and re-execution all pass through here). A revoked selected repository stops the step safely.
+    const scope = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, () => enforceRunRepositoryAccess(begun.run));
+    if (scope.blocked.length) {
+      result = {
+        kind: "failed",
+        error: `Repository access revoked for the run owner: ${scope.blocked.join(", ")}. Ask an admin to restore access, then retry the step.`,
+        retryable: false,
+        details: { code: "repository_access_revoked", repositories: scope.blocked },
+      };
+    } else {
+      if (scope.revoked.length) {
+        // The step input and context were assembled before the check: give the attempt only the narrowed scope.
+        const keep = new Set(begun.run.allowed_repositories);
+        begun.input.run.allowed_repositories = begun.run.allowed_repositories;
+        if (begun.context.repoPaths) begun.context.repoPaths = begun.context.repoPaths.filter((r) => keep.has(r.name));
+      }
+      const ctx = makeContext({ ...begun, signal: executionAbort.signal });
+      result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });
+    }
   } catch (e) {
     result = ac.signal.aborted
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }

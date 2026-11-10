@@ -36,6 +36,7 @@ import { startRun } from "../src/workflow/engine.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
 import { publish } from "../src/codeIntelligence/store.ts";
 import { parserVersion } from "../src/codeIntelligence/parser.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 const env = {
   ...process.env,
@@ -66,6 +67,7 @@ const names = async (run?: number) =>
   ).hits.map((h) => h.symbol_name);
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
   config.codeIntelligence.enabled = true;
   root = join(config.reposRoot, name);
   mkdirSync(root, { recursive: true });

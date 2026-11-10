@@ -1,4 +1,5 @@
 import { execution } from "../auth/execution.ts";
+import { assertRunScopeReadable } from "../repos/access.ts";
 import { pool, q, one, withTx } from "../db/pool.ts";
 import { config } from "../config.ts";
 import { instanceSession } from "../instances.ts";
@@ -14,7 +15,7 @@ export async function validateToolBinding(env: PlatformToolEnv) {
   const row = await one(
     pool,
     `SELECT a.effective_agent,a.run_id,a.step_id,a.status,a.fencing_token,a.generation AS attempt_generation,s.generation AS step_generation,s.type,s.current_attempt_id,s.status AS step_status,
-    r.owner_id,r.worker_instance,r.status AS run_status,r.allowed_repositories,u.active,
+    r.owner_id,r.worker_instance,r.status AS run_status,r.allowed_repositories,r.inputs->>'project' AS run_project,u.active,
     j.status AS job_status,j.fencing_token AS job_token,j.lease_expires_at>clock_timestamp() AS live,
     EXISTS(SELECT 1 FROM platform_instances i WHERE i.instance_id=r.worker_instance AND (i.session_id<>$2 OR i.stopped_at IS NOT NULL)) AS replaced
     FROM workflow_step_attempts a JOIN workflow_runs r ON r.id=a.run_id JOIN workflow_steps s ON s.id=a.step_id
@@ -54,6 +55,9 @@ export async function validateToolBinding(env: PlatformToolEnv) {
     env.selected.some((r) => !env.allowed.includes(r))
   )
     throw new Error("Repository permissions exceed the persisted run scope");
+  // Revocation takes effect inside a running step: every tool call re-checks the owner's current access to the
+  // repositories in this attempt's scope (last known Bitbucket result; platform grants are always current).
+  await assertRunScopeReadable(Number(row.owner_id), env.allowed, row.run_project ?? "");
 }
 export async function journalToolCall(
   env: PlatformToolEnv,

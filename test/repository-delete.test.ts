@@ -1,4 +1,4 @@
-/** Deleting a repository from the registry: admin only, refused while in use or when config.json would re-add it. */
+/** Deleting a repository from the registry: admin only, refused while in use, never re-added by config discovery. */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -11,7 +11,8 @@ import { seedTemplates } from "../src/workflow/definitions.ts";
 import { seedKnowledge } from "../src/knowledge/service.ts";
 import { handle } from "../src/http/app.ts";
 import { createUser } from "../src/auth/users.ts";
-import { repositories } from "../src/repos/service.ts";
+import { repositories, syncRepositoriesFromConfig } from "../src/repos/service.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 let server: Server;
 let base = "";
@@ -32,6 +33,7 @@ async function login(username: string, password: string) {
 
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
   await seedTemplates();
   await seedKnowledge();
   await createUser({ username: "repo-admin", password: "repo-admin-password", role: "admin" });
@@ -82,12 +84,18 @@ test("a repository used by an unfinished run cannot be deleted until the run fin
   assert.equal((await admin("/api/repositories/in-use/delete", {})).status, 200);
 });
 
-test("a repository from config.json projects is refused (it would come back on restart)", async () => {
+test("a repository discovered from a config.json group folder stays deleted across the startup sync", async () => {
   const admin = await login("repo-admin", "repo-admin-password");
-  mkdirSync(join(config.reposRoot, "payment-src", ".git"), { recursive: true }); // test config: Payment → payment-src
-  await register("payment-src");
-  const refused = await admin("/api/repositories/payment-src/delete", {});
-  assert.equal(refused.status, 409);
-  assert.match(refused.body.error, /config\.json/);
-  assert.ok(await repositories.get("payment-src"));
+  // test config: Payment → payment-src, a group folder; every git checkout inside it is registered on boot
+  mkdirSync(join(config.reposRoot, "payment-src", "side-project", ".git"), { recursive: true });
+  await syncRepositoriesFromConfig();
+  assert.ok(await repositories.get("side-project"), "discovered on boot");
+  const r = await admin("/api/repositories/side-project/delete", {});
+  assert.equal(r.status, 200);
+  await syncRepositoriesFromConfig(); // what the next restart does
+  assert.equal(await repositories.get("side-project"), undefined, "not registered again");
+  // an explicit registration lifts the exclusion
+  assert.equal((await admin("/api/repositories/side-project", { repository_url: "https://bitbucket.org/hasaki/side-project.git" })).status, 200);
+  assert.equal(await one(pool, "SELECT 1 FROM repository_exclusions WHERE name = 'side-project'"), undefined);
+  assert.equal((await admin("/api/repositories/side-project/delete", {})).status, 200);
 });
