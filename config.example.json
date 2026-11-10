@@ -91,5 +91,24 @@
     "maxCostUsd": 2,
     "maxLiveAgents": 1,
     "sandboxImage": "docker.io/library/postgres:17-alpine"
+  },
+  "splunk": {
+    "baseUrl": "https://siem.hasaki.work",
+    "managementUrl": "",
+    "locale": "en-US",
+    "environment": "production",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "allowedIndexes": [
+      "k8s_prod"
+    ],
+    "defaultIndexes": [
+      "k8s_prod"
+    ],
+    "maxMinutes": 10080,
+    "maxResults": 500,
+    "timeoutSeconds": 60,
+    "concurrency": 3,
+    "queryBudget": 25,
+    "allowSharedToken": false
   }
 }

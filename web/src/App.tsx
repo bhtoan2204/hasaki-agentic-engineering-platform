@@ -9,6 +9,7 @@ import {
   BookOpen,
   Building2,
   ClipboardList,
+  FileSearch,
   FolderGit2,
   Inbox,
   LayoutDashboard,
@@ -48,6 +49,7 @@ import { InsightsPage } from "./pages/Insights.tsx";
 import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
+import { InvestigationsPage } from "./pages/Investigations.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
 import { ProductionErrorsPage } from "./pages/prodErrors/ProductionErrorsPage.tsx";
 import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
@@ -102,6 +104,7 @@ const NAV: Array<{
       { key: "workflows", labelKey: "nav.workflows", icon: Workflow },
       { key: "questions", labelKey: "nav.questions", icon: Inbox },
       { key: "prod-errors", labelKey: "nav.prodErrors", icon: Siren },
+      { key: "investigations", labelKey: "nav.investigations", icon: FileSearch },
     ],
   },
   {
@@ -292,6 +295,9 @@ export function App() {
           query={queryPart}
         />
       );
+      break;
+    case "investigations":
+      page = <InvestigationsPage id={parts[1] ? Number(parts[1]) : undefined} />;
       break;
     case "integrations":
       page = <IntegrationsPage />;

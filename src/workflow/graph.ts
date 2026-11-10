@@ -30,6 +30,9 @@ export function validateSpec(raw: unknown): WorkflowSpec {
     if (s.type === "command" && typeof s.config.command !== "string") errors.push(`command step "${s.key}" needs config.command`);
   }
   if (spec.feedback_step && !keys.has(spec.feedback_step)) errors.push(`feedback_step "${spec.feedback_step}" is not a step`);
+  if (spec.execution_mode === "read_only")
+    for (const s of spec.steps)
+      if (["coding_agent", "command", "git_pull_request"].includes(s.type)) errors.push(`read-only workflow: step "${s.key}" of type ${s.type} could change code or external state`);
   if (!errors.length) {
     try {
       topoOrder(spec.steps);

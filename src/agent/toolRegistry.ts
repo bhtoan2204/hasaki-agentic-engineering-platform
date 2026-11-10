@@ -8,7 +8,7 @@ import { listPullRequests } from "../bitbucket.ts";
 import { workApi } from "../hasakiAuth.ts";
 import { normalizeJiraIssue } from "../integrations/jira.ts";
 import { appPods, argoStatus, listApps, podLogs } from "../integrations/argocd.ts";
-import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
+import { buildSearchUrl, getEvent, investigationSearch, resolveWindow, searchResults, searchStatus, splunkConnected, splunkExpired, splunkSearch, splunkTestConnection, validateInvestigationSpl } from "../integrations/splunk.ts";
 import { vaultConnected, vaultExpired, vaultKeys, vaultList } from "../integrations/vault.ts";
 import { consumerGroupDetail, consumerGroups, kafkaConnected, kafkaExpired, listTopics, readMessages } from "../integrations/kafka.ts";
 import { repositoryReference, repositories, tokens } from "../repos/service.ts";
@@ -26,6 +26,8 @@ export interface ToolCallContext {
   allowedRepositories: string[];
   /** analysis = read-only step (or a subagent); coding = may use tools that change external state. */
   mode: "analysis" | "coding";
+  /** Step that made the call (audit records). */
+  stepKey?: string;
 }
 
 export interface IntegrationTool<S extends z.ZodObject<any> = z.ZodObject<any>> {
@@ -301,6 +303,82 @@ export function registerBuiltinTools() {
     available: () =>
       splunkConnected() ? true : splunkExpired() ? "Splunk session expired — ask the user (ask_user) to paste a new Splunk cookie on the platform's Integrations page" : "Splunk not connected — the user pastes the Splunk Web cookie on the platform's Integrations page",
     handler: (args) => splunkSearch(args),
+  });
+  // Production incident investigation (absolute windows, audited, evidence persisted per run, manual mode).
+  const scopeOf = (ctx: ToolCallContext) => ({ runId: ctx.runId || null, stepKey: ctx.stepKey ?? null });
+  const timeArg = z.string().min(2).max(64);
+  registerIntegrationTool({
+    name: "splunk_search",
+    summary: "PRODUCTION logs (Splunk): bounded read-only SPL over an absolute time range; returns structured, sanitized events with evidence refs.",
+    description:
+      "Read-only production log search for incident investigation. `query` is SPL that names its index (no wildcard index, no leading-wildcard terms, " +
+      "no write/exfiltration commands) and filters by a concrete identifier (order code, shipment id, request id …) or aggregates. " +
+      "`earliest`/`latest`: ISO-8601 with offset (2026-11-10T08:35:00+07:00), Splunk absolute time (11/10/2026:08:35:00, read in the investigation timezone) or relative (-30m); " +
+      "inline earliest=/latest= in the base search are honoured the same way and the window is capped. `max_results` ≤ the configured limit. " +
+      "Each event comes back as { event_ref, timestamp (investigation timezone, observed precision), index, source, sourcetype, service, ids {order_code, shipment_id, tracking_no, request_id, trace_id, correlation_id, message_id …}, excerpt }. " +
+      "Cite events by event_ref; fetch a full sanitized event with splunk_get_event and more rows with splunk_get_search_results. " +
+      "Repeating the same query and window in this run returns the stored result (no new search). Searches per run are budgeted. " +
+      "If Splunk is not connected the result has manual_required=true: ask the user (ask_user) to run the SPL and paste the results in the investigation panel; never invent results.",
+    input: z.object({
+      query: z.string().min(3).max(4000),
+      earliest: timeArg.optional(),
+      latest: timeArg.optional(),
+      max_results: z.number().int().positive().optional(),
+      mode: z.enum(["job", "export"]).optional(),
+      page_size: z.number().int().min(1).max(100).optional(),
+    }),
+    readOnly: true,
+    available: () => true,
+    handler: (args, ctx) => investigationSearch(args, scopeOf(ctx)),
+  });
+  registerIntegrationTool({
+    name: "splunk_get_event",
+    summary: "One stored production log event in full (sanitized), by evidence ref (S<search>:<n>), with its query provenance.",
+    description: "Read-only. Returns the sanitized raw text, small fields, identifiers, observed time (original text, precision, timezone) and the search that found it (query, window, Splunk link). Only events of this run's searches.",
+    input: z.object({ event_ref: z.string().regex(/^S\d+:\d+$/) }),
+    readOnly: true,
+    available: () => true,
+    handler: ({ event_ref }, ctx) => getEvent(event_ref, scopeOf(ctx)),
+  });
+  registerIntegrationTool({
+    name: "splunk_get_search_results",
+    summary: "Page through the results of an earlier splunk_search (stored first, then the Splunk job).",
+    description: "Read-only. `offset`/`count` (≤ 200) over a search of this run; more rows are fetched from the Splunk job while it exists. Also returns a manual search once the user pasted its results.",
+    input: z.object({ search_id: z.number().int().positive(), offset: z.number().int().min(0).optional(), count: z.number().int().min(1).max(200).optional() }),
+    readOnly: true,
+    available: () => true,
+    handler: ({ search_id, offset, count }, ctx) => searchResults(search_id, offset ?? 0, count ?? 50, scopeOf(ctx)),
+  });
+  registerIntegrationTool({
+    name: "splunk_get_search_status",
+    summary: "Status of an earlier splunk_search: stored state, and the Splunk job's dispatch state/progress when it exists.",
+    description: "Read-only. For searches of this run.",
+    input: z.object({ search_id: z.number().int().positive() }),
+    readOnly: true,
+    available: () => true,
+    handler: ({ search_id }, ctx) => searchStatus(search_id, scopeOf(ctx)),
+  });
+  registerIntegrationTool({
+    name: "splunk_build_search_url",
+    summary: "Build a Splunk Web link for an SPL query and time range (validated; does not run anything).",
+    description: "Read-only, no network. Validates the SPL with the same guard rails as splunk_search and returns the Splunk Web URL a developer can open to reproduce the search.",
+    input: z.object({ query: z.string().min(3).max(4000), earliest: timeArg.optional(), latest: timeArg.optional() }),
+    readOnly: true,
+    available: () => true,
+    handler: async ({ query, earliest, latest }) => {
+      const v = validateInvestigationSpl(query);
+      const w = resolveWindow(v, { earliest, latest });
+      return { query: v.spl, url: buildSearchUrl(v.spl, w.earliest, w.latest) };
+    },
+  });
+  registerIntegrationTool({
+    name: "splunk_test_connection",
+    summary: "Check the Splunk connection: identity, read-only posture and access to the default indexes.",
+    description: "Read-only. Never returns credentials. Use when splunk_search fails with an authentication or permission error.",
+    input: z.object({}),
+    readOnly: true,
+    available: () => (splunkConnected() ? true : "Splunk not connected — the user connects it on the platform's Integrations page"),
+    handler: () => splunkTestConnection(),
   });
   registerIntegrationTool({
     name: "bitbucket.list_pull_requests",

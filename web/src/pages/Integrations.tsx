@@ -393,7 +393,91 @@ function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
           )
         }
       />
+      <SplunkToken onSaved={reload} connected={!!st?.connected} />
+      <SplunkTest connected={!!st?.connected} />
+      <SplunkShared st={st} onSaved={reload} />
     </Row>
+  );
+}
+
+/** Alternative to the cookie: a personal Splunk authentication token (Settings → Tokens), validated before saving. */
+function SplunkToken({ onSaved, connected }: { onSaved: () => void; connected: boolean }) {
+  const { t } = useI18n();
+  return (
+    <details className="ig-more">
+      <summary className="small">{t("ig.splunk.tokenTitle")}</summary>
+      <p className="muted small">{t("ig.splunk.tokenBody")}</p>
+      <PasteForm
+        label={connected ? t("ig.splunk.tokenReplace") : t("ig.splunk.token")}
+        placeholder="eyJraWQiOiJzcGx1bmsuc2VjcmV0…"
+        onSave={async (token) => (await act(() => api("/api/integrations/splunk/token", { token }), t("ig.splunk.saved"))) && (onSaved(), true)}
+      />
+    </details>
+  );
+}
+
+/** Test connection: identity, read-only posture and access to the default indexes. Never shows credentials. */
+function SplunkTest({ connected }: { connected: boolean }) {
+  const { t } = useI18n();
+  const [res, setRes] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  if (!connected) return null;
+  return (
+    <div className="ig-test">
+      <button
+        className="sm ghost"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setRes(await act(() => api("/api/integrations/splunk/test", {})).finally(() => setBusy(false)));
+        }}
+      >
+        <PlugZap size={14} strokeWidth={2} />
+        {busy ? t("ig.splunk.testing") : t("ig.splunk.test")}
+      </button>
+      {res && (
+        <div className="ig-test-result small" role="status">
+          <span className={res.ok ? "ig-ok-text" : "ig-err-text"}>{res.ok ? t("ig.splunk.testOk") : t("ig.splunk.testFail")}</span>{" "}
+          · {res.user} ({res.auth}) · {res.latency_ms} ms
+          {!res.read_only && <div className="ig-err-text">{res.warning}</div>}
+          <ul>
+            {res.indexes.map((i: any) => (
+              <li key={i.index}>
+                <code>{i.index}</code>: {i.ok ? t("ig.splunk.indexOk", { n: i.events_15m }) : i.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Administrators: a shared read-only service-account token; members use it only when splunk.allowSharedToken is on. */
+function SplunkShared({ st, onSaved }: { st: any; onSaved: () => void }) {
+  const { t } = useI18n();
+  const { data: me } = useApi<any>("/api/auth/me");
+  if (me?.user?.role !== "admin" || !st) return null;
+  return (
+    <details className="ig-more">
+      <summary className="small">
+        {t("ig.splunk.sharedTitle")} · {st.shared.configured ? `${st.shared.user ?? "?"} (${st.shared.allowed ? t("ig.splunk.sharedOn") : t("ig.splunk.sharedOff")})` : t("common.none")}
+      </summary>
+      <p className="muted small">{t("ig.splunk.sharedBody")}</p>
+      <PasteForm
+        label={t("ig.splunk.token")}
+        placeholder="eyJraWQiOiJzcGx1bmsuc2VjcmV0…"
+        onSave={async (token) => (await act(() => api("/api/integrations/splunk/shared", { token }), t("ig.splunk.saved"))) && (onSaved(), true)}
+        extra={
+          st.shared.configured && (
+            <button className="sm ghost" onClick={async () => (await act(() => api("/api/integrations/splunk/shared/clear", {}), t("ig.kafka.cleared"))) && onSaved()}>
+              <LogOut size={14} strokeWidth={2} />
+              {t("ig.disconnect")}
+            </button>
+          )
+        }
+      />
+    </details>
   );
 }
 

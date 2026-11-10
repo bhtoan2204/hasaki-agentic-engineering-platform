@@ -31,8 +31,10 @@ export const definitions = {
       db,
       `SELECT d.id, d.key, d.name, d.description, d.latest_version, d.is_template, d.archived, d.updated_at, d.owner_id,
               d.draft_spec IS NOT NULL AS has_draft,
+              lv.spec->>'category' AS category, lv.spec->>'execution_mode' AS execution_mode, lv.spec->'triggers' AS triggers,
               (SELECT count(*) FROM workflow_runs r WHERE r.definition_key = d.key AND ($1::bigint IS NULL OR r.owner_id = $1)) AS run_count
          FROM workflow_definitions d
+         LEFT JOIN workflow_definition_versions lv ON lv.definition_id = d.id AND lv.version = d.latest_version
         WHERE NOT d.archived AND (d.owner_id IS NULL OR $3::bool OR d.owner_id = $2)
         ORDER BY d.is_template DESC, d.owner_id NULLS FIRST, d.name`,
       [all ? null : owner, owner, all],

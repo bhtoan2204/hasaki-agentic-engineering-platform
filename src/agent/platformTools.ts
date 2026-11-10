@@ -40,6 +40,8 @@ export interface PlatformToolEnv {
   /** Run owner. Tool calls that touch credentials use this, not a process-global user. */
   ownerId?: number | null;
   stepId: number;
+  /** Step key, for audit records of integration calls. */
+  stepKey?: string;
   attemptId: number;
   fencingToken: number | null;
   mode: ToolMode;
@@ -471,6 +473,7 @@ async function callIntegration(args: any, env: PlatformToolEnv): Promise<string>
     runId: env.runId,
     allowedRepositories: env.allowed,
     mode: env.mode,
+    stepKey: env.stepKey,
   });
   env.metrics?.integration_calls.push({
     name: toolName,
@@ -513,6 +516,7 @@ export function envFromExecution(
     independent: ctx.step.config.independent === true,
     ownerId: ctx.run.owner_id ?? null,
     stepId: ctx.step.id,
+    stepKey: ctx.step.key,
     attemptId: ctx.attempt.id,
     fencingToken: ctx.attempt.fencing_token,
     mode,
@@ -567,6 +571,7 @@ export async function envFromDatabase(
     independent: step.config?.independent === true,
     ownerId: run.owner_id ?? null,
     stepId: step.id,
+    stepKey: step.key,
     attemptId: attempt.id,
     fencingToken: attempt.fencing_token,
     mode,

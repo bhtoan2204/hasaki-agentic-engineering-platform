@@ -212,11 +212,28 @@ export interface Config {
   };
   splunk: {
     baseUrl: string;
+    /**
+     * Optional splunkd management endpoint (e.g. https://splunk.example:8089) for token authentication. Empty = token
+     * searches go through Splunk Web's proxy (`<baseUrl>/<locale>/splunkd/__raw`), which accepts `Authorization: Bearer`.
+     */
+    managementUrl: string;
     locale: string;
     allowedIndexes: string[];
     maxMinutes: number;
     maxResults: number;
     timeoutSeconds: number;
+    /** Label shown to users and recorded with every search; investigations default to it. */
+    environment: string;
+    /** Timezone used to read and display investigation times (Splunk `_time` keeps its own offset). */
+    timezone: string;
+    /** Indexes an investigation searches when the request names none (must be within allowedIndexes when that is set). */
+    defaultIndexes: string[];
+    /** Concurrent Splunk searches per platform process. */
+    concurrency: number;
+    /** Searches one investigation run may execute against Splunk (cache hits and manual results do not count). */
+    queryBudget: number;
+    /** Let members use the administrator-managed shared service token when they have no personal session. */
+    allowSharedToken: boolean;
   };
   /** Daily production error scan over Splunk (page "Lỗi production"). */
   prodErrors: {
@@ -340,11 +357,18 @@ const defaults: Config = {
   },
   splunk: {
     baseUrl: "https://siem.hasaki.work",
+    managementUrl: "",
     locale: "en-US",
     allowedIndexes: [],
     maxMinutes: 7 * 24 * 60,
     maxResults: 500,
     timeoutSeconds: 60,
+    environment: "production",
+    timezone: "Asia/Ho_Chi_Minh",
+    defaultIndexes: ["k8s_prod"],
+    concurrency: 3,
+    queryBudget: 25,
+    allowSharedToken: false,
   },
   telegram: {
     botToken: "",

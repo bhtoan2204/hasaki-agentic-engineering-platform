@@ -121,6 +121,22 @@ export const WorkflowSpec = z.object({
       }),
     )
     .default({}),
+  /** UI grouping, e.g. "Operations / Debugging". */
+  category: z.string().max(80).optional(),
+  /**
+   * read_only: the workflow may not contain steps that change code or external state (coding_agent, command,
+   * git_pull_request); its agent steps run with read-only tools only. Enforced by validateSpec.
+   */
+  execution_mode: z.enum(["standard", "read_only"]).optional(),
+  /** Intent routing: suggest this workflow when a request matches (see investigation/request.ts scoreTriggers). */
+  triggers: z
+    .object({
+      phrases: z.array(z.string().min(2)).min(1),
+      requires_any: z.array(z.string()).optional(),
+      excludes: z.array(z.string()).optional(),
+      explicit: z.array(z.string()).optional(),
+    })
+    .optional(),
   /** Knowledge item / skill keys applied to every step of this workflow. */
   knowledge: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),

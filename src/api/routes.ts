@@ -21,7 +21,8 @@ import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasa
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
 import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
 import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd.ts";
-import { clearSplunkCookie, setSplunkCookie, splunkStatus } from "../integrations/splunk.ts";
+import { clearSharedSplunkToken, clearSplunkCookie, setSharedSplunkToken, setSplunkCookie, setSplunkToken, splunkStatus, splunkTestConnection, submitManualResults } from "../integrations/splunk.ts";
+import { investigationDetail, routeWorkflow, startFixFromInvestigation } from "../investigation/service.ts";
 import { clearKafkaCookie, kafkaStatus, setKafkaCookie } from "../integrations/kafka.ts";
 import { clearVaultToken, setVaultToken, vaultStatus } from "../integrations/vault.ts";
 import { getIncidentDetail, groupsForWorkItem, investigate, linkWorkItem, listGroups, saveSettings as saveProdErrorSettings, setIgnored, startScan } from "../prodErrors/scan.ts";
@@ -269,6 +270,8 @@ export const routes: Route[] = [
       }
     },
   ],
+  // Intent routing: which workflow fits a free-text request (suggestion only; the user still chooses).
+  ["POST", /^\/api\/workflows\/route$/, async (c) => routeWorkflow(String(c.body.text ?? ""), await definitions.list(pool, mine(c)))],
   ["GET", /^\/api\/workflows\/([a-z0-9_-]+)$/, (c) => readableWorkflow(c, c.p[0])],
   ["POST", /^\/api\/workflows\/([a-z0-9_-]+)\/draft$/, async (c) => definitions.saveDraft(c.p[0], c.body.spec, await workflowOwner(c, c.p[0]))],
   ["POST", /^\/api\/workflows\/([a-z0-9_-]+)\/publish$/, async (c) => definitions.publish(c.p[0], String(c.body.change_note ?? ""), await workflowOwner(c, c.p[0]))],
@@ -336,6 +339,19 @@ export const routes: Route[] = [
   ["POST", /^\/api\/runs\/(\d+)\/regression-case$/, async (c) => {
     await requireRun(c.actor, num(c.p[0]), support(c));
     return proposeRegressionCase(num(c.p[0]), c.actor.id);
+  }],
+  // Production investigation: searches (audit + sanitized evidence), timeline, latency, report of one run.
+  ["GET", /^\/api\/runs\/(\d+)\/investigation$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), investigationDetail(num(c.p[0])))],
+  // Hand the findings to the Bug Investigation workflow (fix behind its approval gates); the investigation stays read-only.
+  ["POST", /^\/api\/runs\/(\d+)\/investigation\/fix$/, async (c) => {
+    await requireRun(c.actor, num(c.p[0]), false);
+    await audit(c.actor.id, "investigation.fix", "run", String(num(c.p[0])));
+    return startFixFromInvestigation(num(c.p[0]));
+  }],
+  ["POST", /^\/api\/runs\/(\d+)\/investigation\/manual-results$/, async (c) => {
+    await requireRun(c.actor, num(c.p[0]), support(c));
+    await audit(c.actor.id, "investigation.manual_results", "run", String(num(c.p[0])), { search_id: c.body.search_id ?? null });
+    return submitManualResults(num(c.p[0]), { search_id: c.body.search_id ? Number(c.body.search_id) : undefined, query: c.body.query, earliest: c.body.earliest, latest: c.body.latest, text: String(c.body.text ?? "") });
   }],
   ["GET", /^\/api\/runs\/(\d+)\/cost$/, async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runCost(num(c.p[0])))],
   ["POST", /^\/api\/runs\/(\d+)\/budget$/, async (c) => {
@@ -548,6 +564,19 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/splunk$/, ({ url }) => splunkStatus(url.searchParams.get("check") === "1")],
   ["POST", /^\/api\/integrations\/splunk\/cookie$/, ({ body }) => setSplunkCookie(String(body.cookie ?? ""))],
   ["POST", /^\/api\/integrations\/splunk\/logout$/, () => clearSplunkCookie()],
+  ["POST", /^\/api\/integrations\/splunk\/token$/, ({ body }) => setSplunkToken(String(body.token ?? ""))],
+  ["POST", /^\/api\/integrations\/splunk\/test$/, () => splunkTestConnection()],
+  // Shared read-only service account: administrators only; members use it only when splunk.allowSharedToken is on.
+  ["POST", /^\/api\/integrations\/splunk\/shared$/, async ({ body, actor }) => {
+    requireAdmin(actor);
+    await audit(actor.id, "integration.splunk.shared_token", "integration", "splunk");
+    return setSharedSplunkToken(String(body.token ?? ""));
+  }],
+  ["POST", /^\/api\/integrations\/splunk\/shared\/clear$/, async ({ actor }) => {
+    requireAdmin(actor);
+    await audit(actor.id, "integration.splunk.shared_token_clear", "integration", "splunk");
+    return clearSharedSplunkToken();
+  }],
   ["GET", /^\/api\/prod-errors$/, async (c) => {
     const data = await listGroups({ day: c.url.searchParams.get("day") ?? undefined, all: c.url.searchParams.get("all") === "1" });
     return { ...data, groups: (data.groups ?? []).map((g: any) => redactGroup(g, c.actor, support(c))) };

@@ -60,6 +60,7 @@ import { stepTypeIcon } from "../graph.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { ReportPanel } from "./Report.tsx";
+import { InvestigationOutput } from "./Investigations.tsx";
 import "./RunView.css";
 
 const AGENT_TYPES = ["agent", "coding_agent"];
@@ -88,7 +89,7 @@ const TabLabel = ({
 );
 
 /** Render a step output: Markdown for summary-like strings, then the full structure. */
-export function OutputView({ value }: { value: any }) {
+export function OutputView({ value, locale }: { value: any; locale?: string | null }) {
   const { t } = useI18n();
   if (value == null) return <Empty>{t("si.noOutput")}</Empty>;
   const text =
@@ -96,6 +97,7 @@ export function OutputView({ value }: { value: any }) {
   return (
     <div>
       {hasEvidence(value) && <EvidenceSummary output={value} />}
+      <InvestigationOutput value={value} locale={locale} />
       {typeof text === "string" && (
         <div className="rv-card">
           <div className="rv-card-head">
@@ -437,7 +439,7 @@ export function ApprovalPanel({
       {Object.entries(req?.outputs ?? {}).map(([k, v]) => (
         <details key={k} open style={{ marginTop: 8 }}>
           <summary>{t("si.stepOutput", { step: k })}</summary>
-          <OutputView value={v} />
+          <OutputView value={v} locale={run.output_locale} />
         </details>
       ))}
       <textarea
@@ -1053,6 +1055,7 @@ export function StepInspector({
         {tab === "output" && (
           <div>
             <OutputView
+              locale={run.output_locale}
               value={
                 attempt && attempt.id !== step.current_attempt_id
                   ? attempt.output

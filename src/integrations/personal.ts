@@ -12,7 +12,8 @@ export class PersonalSession<T> {
   }
 }
 
-async function userId() {
+/** The authenticated actor (run owner inside a worker); the test owner under PLATFORM_TEST. */
+export async function actorId() {
   const id = currentUserId();
   if (id) return id;
   if (process.env.PLATFORM_TEST === "1") return (await import("../auth/testOwner.ts")).ensureTestOwner();
@@ -23,10 +24,10 @@ async function userId() {
 export const personalSettings = {
   async get(kind: string) {
     if (!currentUserId() && process.env.PLATFORM_TEST !== "1") return null;
-    return getUserSecret(await userId(), kind);
+    return getUserSecret(await actorId(), kind);
   },
   async set(kind: string, value: string) {
-    const id = await userId();
+    const id = await actorId();
     if (value) await putUserSecret(id, kind, value); else await deleteUserSecret(id, kind);
   },
 };

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import {
@@ -647,6 +648,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 </div>
               </div>
               <ReportCard run={run} />
+              <InvestigationRunCard run={run} />
               <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
               <CostPanel kind="run" id={id} tick={tick} />

@@ -227,6 +227,16 @@ update proposals, and every approved change can be rolled back. Later runs resol
 context snapshot records which version a run received. See
 [docs/architecture/knowledge-evolution.md](docs/architecture/knowledge-evolution.md).
 
+## Production incident investigation (Splunk, read-only)
+
+Workflow `production-incident-investigation` (sidebar *Điều tra Production*): a Vietnamese or English request
+("Kiểm tra log đơn hàng … lúc khoảng 08:48 …") → Splunk searches with guard rails → events correlated by identifiers
+across services → timeline with the logged precision → latency between explicitly named event pairs → evidence-backed
+summary and developer report. Agents only label stored, sanitized log events; timestamps and relationships come from
+the evidence itself. Connect Splunk (cookie, personal token, or an admin-managed shared read-only token) and press
+*Test connection* on the Integrations page; without a connection the workflow hands out the SPL and accepts pasted
+results. See [docs/integrations/production-investigation.md](docs/integrations/production-investigation.md).
+
 ## Safety
 
 - No `bypassPermissions`. Each agent step gets an explicit tool list and a PreToolUse/`canUseTool` policy

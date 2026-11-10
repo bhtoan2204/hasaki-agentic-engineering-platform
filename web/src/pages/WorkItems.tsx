@@ -1078,6 +1078,16 @@ export function WorkItemDetail({ id }: { id: number }) {
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
   const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
+  // Intent routing: preselect a workflow whose triggers match the item (e.g. a production log investigation).
+  // Only a suggestion: a workflow the user picked is never overridden.
+  const [wfTouched, setWfTouched] = useState(false);
+  useEffect(() => {
+    if (!w || wfTouched) return;
+    api<any>("/api/workflows/route", { text: `${w.title ?? ""}\n${w.description ?? ""}` })
+      .then((r) => r?.workflow && !wfTouched && setWf(r.workflow))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [w?.id]);
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const start = async (mode: "start" | "step" | "pending") => {
@@ -1213,7 +1223,7 @@ export function WorkItemDetail({ id }: { id: number }) {
               </div>
             </div>
             <Field label={t("common.workflow")}>
-              <select value={wf} onChange={(e) => setWf(e.target.value)}>
+              <select value={wf} onChange={(e) => (setWf(e.target.value), setWfTouched(true))}>
                 {(wfs ?? [])
                   .filter((x) => x.latest_version > 0)
                   .map((x) => (

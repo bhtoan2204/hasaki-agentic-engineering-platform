@@ -97,10 +97,15 @@ const EVIDENCE_RULES =
   "Never copy secrets or raw customer payloads into claims; cite a reference instead. Use low/medium/high, never numeric confidence.";
 const ROOT_CAUSE_CONTRACT = "root_cause_assessment: { status: 'CONFIRMED'|'PROBABLE'|'UNCONFIRMED'|'INSUFFICIENT_EVIDENCE', confidence: 'low'|'medium'|'high', explanation, supporting_claims: string[] }";
 
+const INVESTIGATION_HANDOFF =
+  "If run inputs contain `investigation` (handed over from a read-only production investigation), start from it: its findings, timeline and latencies cite evidence_refs (S<search>:<n>). " +
+  "Re-read the events you rely on with call_tool splunk_get_event before classifying them as OBSERVED_FACT (source_type production_log, source_ref = the evidence_ref); its hypotheses and missing_evidence are open questions, not facts. ";
+
 const BUG_ANALYZE = {
   evidence: "analysis",
   instructions:
     "Analyse the reported problem: symptoms, expected vs actual behaviour, reproduction hints, affected flows. Read attachments (screenshots often hold the actual error). " +
+    INVESTIGATION_HANDOFF +
     "Report coverage explicitly: verified observations, code paths inspected, hypotheses, missing evidence, an impact assessment (do not infer an exact blast radius from one log event), " +
     "suggestions for collecting the missing evidence, and safe next actions. " +
     EVIDENCE_RULES,
@@ -114,6 +119,7 @@ const BUG_ROOT_CAUSE = {
   evidence: "root_cause",
   instructions:
     "Find the root cause with evidence (file:line at a known commit, logs, data flow). List competing hypotheses and how each was confirmed or ruled out. " +
+    INVESTIGATION_HANDOFF +
     "Assess the root cause separately from any fix: CONFIRMED only when a CONFIRMED_ROOT_CAUSE claim rests on verified facts; PROBABLE when verified facts point to it but alternatives remain; " +
     "UNCONFIRMED when it is a plausible hypothesis; INSUFFICIENT_EVIDENCE when the needed data was not available. Explain the assessment in one or two sentences. " +
     "Do not raise the status of an earlier step's conclusion unless you cite NEW verified evidence. " +
@@ -158,6 +164,138 @@ const BUG_REVIEW = {
     "FAIL with findings for fixable defects, BLOCKED when evidence or human approval is missing.",
   output_contract:
     "{ verdict: 'PASS'|'FAIL'|'BLOCKED', findings: [{ severity, file, line, explanation, evidence }], summary, blocked_reason?, scope_check: { in_scope: boolean, unsupported_assumptions: string[], unintended_state_transitions: string[], invariants_preserved: boolean|null, tests_cover_failure_paths: boolean, diagnosis_uncertainty_preserved: boolean|null } }",
+};
+
+/**
+ * Production Incident Investigation (read-only). Agents search Splunk and label stored events by reference; the
+ * deterministic steps (src/investigation/) validate labels against the stored evidence, correlate by identifiers,
+ * rebuild the timeline, measure latency between the right event pairs and write the report. Bounded: one refinement
+ * round runs only when evidence is incomplete, and every search counts against splunk.queryBudget.
+ */
+const INVESTIGATION_EVENT_TYPES =
+  "OUTBOUND_MESSAGE_CREATED | MESSAGE_PUBLISHED | MESSAGE_CONSUMED | PARTNER_REQUEST_SENT | PARTNER_REQUEST_ACCEPTED | PARTNER_RESPONSE_RECEIVED | PARTNER_CALLBACK_RECEIVED | " +
+  "TRACKING_NUMBER_RECEIVED | TRACKING_NUMBER_PERSISTED | SHIPPING_LABEL_REQUESTED | SHIPPING_LABEL_URL_GENERATED | SHIPPING_LABEL_URL_OBSERVED | SHIPPING_LABEL_URL_PERSISTED | " +
+  "STATE_CHANGED | RETRY_SCHEDULED | ERROR | OTHER (or another UPPER_SNAKE type for other domains, e.g. PAYMENT_CALLBACK_RECEIVED)";
+const INVESTIGATION_RULES =
+  "Production investigation rules: this workflow is READ-ONLY — never change code, data, configuration, Kafka, or Splunk objects. " +
+  "Search production logs only with call_tool name=splunk_search. Always pass earliest/latest (start from parse_request.time) and name the index from parse_request.indexes. " +
+  "Filter by a concrete identifier first; search broader identifiers (shipment id, tracking number, request id, Kafka key) only after the first results reveal them; " +
+  "widen the time window at most twice and only after an empty result; never search every index or use leading wildcards. " +
+  "Label only events you actually saw in a search result, by event_ref. The platform reads timestamps, services and identifiers from the stored log itself — do not restate times as your own facts and never invent an event_ref, URL, payload or time. " +
+  "Use distinct event types for internal message creation, broker publish, consumer processing, HTTP request sent, synchronous HTTP response, asynchronous partner callback, tracking-number availability, " +
+  "label URL generation and the first time a label URL is merely observed or persisted — they are different moments. Never relate events only because they are close in time. " +
+  "If the result says manual_required, ask the user once with ask_user (include the SPL, the window and the splunk_url, and ask them to paste the results into the investigation panel), then read them with splunk_get_search_results. " +
+  "Quote only what the question needs from production data.";
+const INVESTIGATION_EVENTS_CONTRACT =
+  `events: [{ evidence_ref: 'S<search id>:<n>', event_type: ${JSON.stringify(INVESTIGATION_EVENT_TYPES)}, ids?: { order_code?, shipment_code?, shipment_id?, tracking_no?, request_id?, trace_id?, correlation_id?, message_id? }, note? }]`;
+const INVESTIGATION_SEARCH_CONTRACT =
+  `{ searches: number[], ${INVESTIGATION_EVENTS_CONTRACT}, discovered_identifiers: { [field]: string[] }, observations: string[], missing: string[] }`;
+
+const PRODUCTION_INVESTIGATION = {
+  name: "Production Incident Investigation",
+  description: "Read-only: parse the request → discover services & code paths → search Splunk → correlate events → refine (bounded) → timeline → latency → findings → evidence-backed report",
+  category: "Operations / Debugging",
+  execution_mode: "read_only",
+  triggers: {
+    phrases: [
+      "debug production", "production issue", "production incident", "prod issue", "incident", "check splunk", "splunk", "production log", "prod log", "trace this order", "trace order",
+      "find when the callback", "callback happened", "when the callback", "shipment creation was slow", "why shipment", "response time", "took to respond", "shipping label",
+      "kiem tra log", "xem log", "log don hang", "truy vet", "thoi gian now phan hoi", "now phan hoi", "thoi gian phan hoi", "tim thoi diem", "sinh shipping label", "loi production", "su co",
+    ],
+    requires_any: [
+      "production", "prod", "splunk", "log", "logs", "callback", "webhook", "order", "don hang", "van don", "shipment", "tracking", "phan hoi", "respond", "label", "trace", "truy vet", "incident", "su co",
+    ],
+    excludes: ["implement", "refactor", "add a feature", "write a test", "write tests", "create a pr", "open a pr", "them tinh nang", "viet test", "sua code", "tao pr", "code review"],
+    explicit: ["splunk", "production log", "prod log", "log production", "log prod", "kiem tra log", "xem log"],
+  },
+  inputs: {
+    request: { description: "what to investigate, in Vietnamese or English (identifiers, approximate time, question)", required: true },
+    environment: { description: "Splunk environment (default: production)", required: false },
+    indexes: { description: "Splunk indexes to search (default: splunk.defaultIndexes)", required: false },
+    earliest: { description: "explicit start of the search window (ISO-8601 with offset)", required: false },
+    latest: { description: "explicit end of the search window (ISO-8601 with offset)", required: false },
+  },
+  steps: [
+    { key: "parse_request", type: "integration", name: "Parse Request & Identify Entities", config: { action: "investigation_parse" } },
+    { key: "discover", type: "integration", name: "Discover Services & Repositories", depends_on: ["parse_request"], config: { ...DISCOVER, optional: true } },
+    {
+      key: "analyze_code",
+      type: "agent",
+      name: "Analyze Code Paths",
+      depends_on: ["discover"],
+      max_attempts: 2,
+      config: {
+        instructions:
+          "Map the business flow behind the investigation request (inputs.request, parse_request.objectives) in the discovered repositories, READ-ONLY. " +
+          "Use call_tool code_intelligence.search (symbols, references, exact) plus Grep/Read to find, as candidates to confirm: the outbound shipment/order creation, the partner integration client " +
+          "(e.g. HasakiNOW when the request names it — do not assume), Kafka/RabbitMQ publishers and consumers, external API request/response handling, callback/webhook handlers, " +
+          "tracking-number persistence and shipping-label generation/persistence. For each, record the service/container name it runs as, the exact log statements (message text and logged fields) " +
+          "and which identifiers they carry (order code, shipment id, request id, trace id, Kafka key). These log formats are what the searches will look for. " +
+          "If no repository is available, say so and return empty lists — do not guess file paths. Cite code as repo:path:line.",
+        output_contract:
+          "{ services: [{ name, repo, role, container_name?, evidence }], log_patterns: [{ service, event_type, message_pattern, fields: string[], code_location }], identifier_fields: string[], " +
+          "flow: string[], code_locations: [{ repo, file, line, description }], notes: string[] }",
+      },
+    },
+    {
+      key: "search_logs",
+      type: "agent",
+      name: "Search Initial Logs",
+      depends_on: ["discover"],
+      max_attempts: 2,
+      config: {
+        instructions:
+          "Run the initial production log searches. Start with parse_request.initial_queries (or an equivalent bounded query on the identifier) over parse_request.time, then read the results: " +
+          "identify which service logged what, which identifiers appear (shipment id, tracking number, request/trace/correlation id, Kafka message id) and label every relevant event. " +
+          "Run at most 6 searches in this step. " + INVESTIGATION_RULES,
+        output_contract: INVESTIGATION_SEARCH_CONTRACT,
+      },
+    },
+    { key: "correlate", type: "integration", name: "Correlate Events", depends_on: ["analyze_code", "search_logs"], config: { action: "investigation_correlate" } },
+    {
+      key: "refine_search",
+      type: "agent",
+      name: "Refine SPL & Search Additional Logs",
+      depends_on: ["correlate"],
+      run_if: { step: "correlate", path: "complete", equals: false },
+      max_attempts: 2,
+      config: {
+        instructions:
+          "Evidence is incomplete (correlate.missing). Close the gaps with targeted searches: use correlate.identifiers and analyze_code.log_patterns/services to search for the missing event types " +
+          "(e.g. the partner callback by shipment id or tracking number in the callback service, the label URL by tracking number), label events in correlate.unlabeled_refs that matter, " +
+          "and label nothing you did not see. Run at most 8 searches. If an event cannot be found, list exactly what evidence is missing and why. " + INVESTIGATION_RULES,
+        output_contract: INVESTIGATION_SEARCH_CONTRACT,
+      },
+    },
+    { key: "timeline", type: "integration", name: "Reconstruct Timeline", depends_on: ["refine_search"], config: { action: "investigation_correlate", final: true } },
+    { key: "latency", type: "integration", name: "Calculate Latency", depends_on: ["timeline"], config: { action: "investigation_latency", from: "timeline" } },
+    {
+      key: "analyze_findings",
+      type: "agent",
+      name: "Analyze Findings",
+      depends_on: ["latency"],
+      max_attempts: 2,
+      config: {
+        instructions:
+          "Interpret the validated evidence: timeline (timeline.timeline, already ordered and correlated by the platform), latency.latencies (with the compared events and qualification) and analyze_code. " +
+          "Answer each question of parse_request.questions. Every finding cites evidence_refs from the timeline; classify it 'confirmed' only when the cited log lines show it directly, 'inferred' when it follows " +
+          "from correlated evidence, 'unknown' otherwise — the platform lowers any classification the evidence does not support and drops unknown references. " +
+          "Do not recompute or restate latencies differently; explain which events were compared. Keep a synchronous HTTP response and an asynchronous callback separate, and never present broker or end-to-end time " +
+          "as the partner's pure processing time. When the exact label generation time is not logged, say the URL was first observed at that time. Put root-cause ideas under hypotheses, missing data under missing_evidence " +
+          "(say which log or field would settle it) and concrete next investigation steps under next_steps. Do not search further. READ-ONLY.",
+        output_contract:
+          "{ answers: [{ question, answer, evidence_refs: string[] }], findings: [{ statement, classification: 'confirmed'|'inferred'|'unknown', evidence_refs: string[], code_location? }], " +
+          "hypotheses: [{ hypothesis, supporting_refs: string[] }], missing_evidence: string[], next_steps: string[] }",
+      },
+    },
+    {
+      key: "report",
+      type: "integration",
+      name: "Generate Report",
+      depends_on: ["analyze_findings"],
+      config: { action: "investigation_report", from: { timeline: "timeline", latency: "latency", findings: "analyze_findings", code: "analyze_code" } },
+    },
+  ],
 };
 
 export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = [
@@ -356,4 +494,5 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       ],
     },
   },
+  { key: "production-incident-investigation", spec: PRODUCTION_INVESTIGATION },
 ];

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { investigationCorrelate, investigationLatency, investigationParse, investigationReport } from "../../investigation/steps.ts";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
@@ -275,7 +276,11 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   const cfg = ctx.step.config;
   const allowed = new Set(ctx.run.allowed_repositories);
   const rows = (await repositories.list()).filter((r) => allowed.has(r.name));
-  if (!rows.length) return { kind: "failed", error: "no repositories are allowed for this run (check the repository registry / project mapping)", retryable: false };
+  if (!rows.length) {
+    // Investigations can proceed on logs alone; code context is a bonus there.
+    if (cfg.optional === true) return { kind: "completed", output: { candidates: [], recommended: [], ambiguous: false, method: "none", note: "no repositories are allowed for this run; continuing without code context" } };
+    return { kind: "failed", error: "no repositories are allowed for this run (check the repository registry / project mapping)", retryable: false };
+  }
   const keywords = Object.values(ctx.input.upstream).flatMap((u) => (Array.isArray(u.output?.keywords) ? u.output.keywords : []));
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");
   const rankingStarted = Date.now();
@@ -355,6 +360,14 @@ export const integrationExecutor: StepExecutor = {
         return selectRepositories(ctx);
       case "publish_report":
         return publishReport(ctx);
+      case "investigation_parse":
+        return investigationParse(ctx);
+      case "investigation_correlate":
+        return investigationCorrelate(ctx);
+      case "investigation_latency":
+        return investigationLatency(ctx);
+      case "investigation_report":
+        return investigationReport(ctx);
       case "noop":
         return { kind: "completed", output: { ok: true } };
       default:

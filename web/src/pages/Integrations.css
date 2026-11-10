@@ -192,3 +192,36 @@
 .ig-tg-receiver { font-weight: 600; }
 .ig-tg-receiver.is-ok { color: var(--ok); }
 .ig-tg-receiver.is-warn { color: var(--warn); }
+
+/* Splunk: token, test connection, shared service account */
+.ig-more {
+  margin-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-2);
+}
+.ig-more > summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.ig-test {
+  margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.ig-test-result {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.ig-test-result ul {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-4);
+}
+.ig-ok-text { color: var(--st-ok); font-weight: 600; }
+.ig-err-text { color: var(--st-err); font-weight: 600; }
