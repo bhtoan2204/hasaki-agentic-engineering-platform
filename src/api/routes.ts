@@ -667,7 +667,11 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/databases$/, async ({ actor }) => {
     if (actor.role === "admin") return publicDatabases();
     const mine = (await listAccessibleRepositories(actor.id)).map((m) => m.repository.name);
-    return (await databasesForRun(mine)).map((d) => ({ key: d.key, project: d.project, environment: d.environment, engine: d.engine, database_name: d.database_name, repositories: d.repositories, description: d.description }));
+    // Status without technical details (host, account, raw error): those stay with admins.
+    return (await databasesForRun(mine)).map((d) => ({
+      key: d.key, project: d.project, environment: d.environment, engine: d.engine, database_name: d.database_name, repositories: d.repositories, description: d.description,
+      last_status: d.last_status ?? null, last_checked_at: d.last_checked_at ?? null, last_used_at: d.last_used_at ?? null, last_error_kind: d.last_error_kind ?? null, last_latency_ms: d.last_latency_ms ?? null,
+    }));
   }],
   ["POST", /^\/api\/integrations\/databases$/, async ({ body, actor }) => {
     requireAdmin(actor);

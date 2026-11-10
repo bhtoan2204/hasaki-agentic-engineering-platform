@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   Database,
@@ -17,7 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
-import { act, Field, PageHeader, time } from "../ui.tsx";
+import { act, ago, Field, PageHeader, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Integrations.css";
 
@@ -28,7 +28,7 @@ function slot(text: string, parts: Record<string, ReactNode>) {
     .map((part, i) => (i % 2 ? (parts[part] ?? `{${part}}`) : part));
 }
 
-type Health = "ok" | "expired" | "off" | "loading";
+type Health = "ok" | "expired" | "off" | "loading" | "error" | "partial";
 
 function StatusPill({ h }: { h: Health }) {
   const { t } = useI18n();
@@ -37,6 +37,8 @@ function StatusPill({ h }: { h: Health }) {
     expired: t("ig.expired"),
     off: t("ig.off"),
     loading: "…",
+    error: t("ig.connError"),
+    partial: t("ig.partial"),
   }[h];
   return (
     <span className={`ig-pill ig-${h}`}>
@@ -580,22 +582,137 @@ const EMPTY_DB = {
   enabled: true,
 };
 
+/** A database's state as shown: a test in progress wins, then disabled, then the last known result. */
+type DbState = "checking" | "ok" | "failed" | "untested" | "off";
+const dbState = (d: any, checking: Set<string>): DbState =>
+  checking.has(d.key) ? "checking" : d.enabled === false ? "off" : d.last_status === "ok" ? "ok" : d.last_status === "failed" ? "failed" : "untested";
+/** Older than this, the last check is redone automatically when an admin opens the card. */
+const STALE_MS = 5 * 60_000;
+
+function DbCard({
+  d,
+  state,
+  isAdmin,
+  onTest,
+  onEdit,
+  onDelete,
+}: {
+  d: any;
+  state: DbState;
+  isAdmin: boolean;
+  onTest: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useI18n();
+  const when = (v?: string | null) => (v ? t("common.ago", { when: ago(v) }) : "");
+  const scope = [d.project, ...(d.repositories ?? [])].filter(Boolean);
+  return (
+    <article className={`ig-db-card is-${state}`}>
+      <header className="ig-db-card-head">
+        <span className="ig-db-light" aria-hidden />
+        <b className="mono">{d.key}</b>
+        <span className="ig-env">{String(d.environment ?? "qc").toUpperCase()}</span>
+        <span className="grow" />
+        <span className={`ig-db-state is-${state}`}>{t(`ig.db.state.${state}`)}</span>
+      </header>
+      <div className="ig-db-target mono small">
+        {d.database_name}
+        {isAdmin && d.host && (
+          <span className="muted">
+            {" "}
+            · {d.username}@{d.host}:{d.port}
+          </span>
+        )}
+      </div>
+      {scope.length > 0 && (
+        <div className="ig-db-chips">
+          {scope.map((x) => (
+            <span key={x} className="ig-db-chip">
+              {x}
+            </span>
+          ))}
+        </div>
+      )}
+      {d.description && <div className="small">{d.description}</div>}
+      <div className="ig-db-meta small muted">
+        {d.last_status === "ok" && d.last_version && <span>{d.last_version.replace(/-MariaDB.*$/, " MariaDB")}</span>}
+        {d.last_status === "ok" && d.last_latency_ms != null && <span>{t("ig.db.latency", { ms: d.last_latency_ms })}</span>}
+        {d.last_checked_at ? <span>{t("ig.db.checkedAgo", { when: when(d.last_checked_at) })}</span> : <span>{t("ig.db.neverChecked")}</span>}
+        <span>{d.last_used_at ? t("ig.db.usedAgo", { when: when(d.last_used_at) }) : t("ig.db.neverUsed")}</span>
+      </div>
+      {state === "failed" && (
+        <div className="ig-db-error small">
+          <b>{t(`ig.db.kind.${d.last_error_kind ?? "unknown"}`)}</b>
+          <div>{t(`ig.db.hint.${d.last_error_kind ?? "unknown"}`)}</div>
+          {isAdmin && d.last_error && <code>{d.last_error}</code>}
+        </div>
+      )}
+      {isAdmin && d.has_password === false && state !== "failed" && <div className="ig-db-warn small">{t("ig.db.noPassword")}</div>}
+      {isAdmin && d.last_can_write && <div className="ig-db-warn small">{t("ig.db.canWrite")}</div>}
+      {isAdmin && (
+        <footer className="ig-db-actions">
+          <button className="sm ghost" onClick={onTest} disabled={state === "checking"}>
+            <RefreshCw size={13} className={state === "checking" ? "ig-spin" : undefined} /> {t("ig.db.test")}
+          </button>
+          <button className="sm ghost" onClick={onEdit}>
+            {t("common.edit")}
+          </button>
+          <button className="sm ghost" onClick={onDelete}>
+            {t("common.delete")}
+          </button>
+        </footer>
+      )}
+    </article>
+  );
+}
+
 /**
  * Read-only MySQL QC databases per project. Agents query them through the platform tools (database.list / schema /
- * query) only when their run's repository scope covers the database's project or repositories.
+ * query) only when their run's repository scope covers the database's project or repositories. The status shown is the
+ * last real connection (admin test, automatic re-check, or an agent query), never just "configured".
  */
 function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; isAdmin: boolean }) {
   const { t } = useI18n();
   const { data, reload } = useApi<any[]>("/api/integrations/databases");
   const [form, setForm] = useState<any>(null);
-  const [tests, setTests] = useState<Record<string, any>>({});
+  const [checking, setChecking] = useState<Set<string>>(new Set());
   const list = data ?? [];
-  const usable = list.filter((d) => d.enabled !== false && (!p.isAdmin || d.has_password));
-  const health: Health = !data ? "loading" : usable.length ? "ok" : "off";
+  const enabled = list.filter((d) => d.enabled !== false);
+  const states = enabled.map((d) => dbState(d, checking));
+  const health: Health = !data
+    ? "loading"
+    : !enabled.length
+      ? "off"
+      : states.some((s) => s === "failed")
+        ? "error"
+        : states.every((s) => s === "ok")
+          ? "ok"
+          : "partial";
+  const test = async (keys: string[]) => {
+    if (!keys.length) return;
+    setChecking((c) => new Set([...c, ...keys]));
+    // A failed connection is a result (ok: false), shown on the card, not an error toast.
+    await Promise.all(keys.map((k) => api(`/api/integrations/databases/${k}/test`, {}).catch(() => null)));
+    setChecking((c) => new Set([...c].filter((k) => !keys.includes(k))));
+    reload();
+  };
+  // Loading the page re-checks databases never checked or checked more than five minutes ago (admins only), so the
+  // lights in the collapsed row are current before anyone opens it.
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (!p.isAdmin || !data || autoChecked.current) return;
+    autoChecked.current = true;
+    const stale = data
+      .filter((d) => d.enabled !== false && d.has_password)
+      .filter((d) => !d.last_checked_at || Date.now() - new Date(d.last_checked_at).getTime() > STALE_MS)
+      .map((d) => d.key);
+    void test(stale);
+  }, [p.isAdmin, data]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k: string, v: unknown) => setForm({ ...form, [k]: v });
   const save = async () => {
     const body = {
-      ...form,
+      ...Object.fromEntries(Object.entries(form).filter(([k]) => !k.startsWith("last_") && !["id", "has_password", "updated_at", "created_at", "created_by"].includes(k))),
       port: Number(form.port),
       max_rows: Number(form.max_rows),
       timeout_ms: Number(form.timeout_ms),
@@ -605,91 +722,46 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
         .filter(Boolean),
       password: form.password || undefined,
     };
-    if (await act(() => api("/api/integrations/databases", body), t("ig.db.saved"))) (setForm(null), reload());
+    const r = await act(() => api<any>("/api/integrations/databases", body), t("ig.db.saved"));
+    if (r) {
+      setForm(null);
+      reload();
+      void test([r.key]); // check the new settings right away
+    }
   };
+  const summary = !enabled.length ? (
+    t("ig.db.summaryOff")
+  ) : (
+    <span className="ig-db-summary">
+      {enabled.map((d, i) => (
+        <span key={d.key} className={`ig-db-sum is-${states[i]}`}>
+          <span className="ig-db-light" aria-hidden />
+          {d.key}
+        </span>
+      ))}
+    </span>
+  );
   return (
-    <Row
-      id="databases"
-      icon={Database}
-      title={t("ig.db.title")}
-      env="QC"
-      health={health}
-      {...p}
-      summary={usable.length ? usable.map((d) => d.key).join(", ") : t("ig.db.summaryOff")}
-    >
+    <Row id="databases" icon={Database} title={t("ig.db.title")} env="QC" health={health} {...p} summary={summary}>
       <p className="muted small">{t("ig.db.body")}</p>
       {!list.length ? (
         <p className="muted small">{t(p.isAdmin ? "ig.db.emptyAdmin" : "ig.db.emptyMember")}</p>
       ) : (
-        <div className="table-wrap">
-          <table className="ig-db-table">
-            <thead>
-              <tr>
-                <th>{t("ig.db.key")}</th>
-                <th>{t("ig.db.scope")}</th>
-                <th>{t("ig.db.database")}</th>
-                {p.isAdmin && <th>{t("ig.db.server")}</th>}
-                {p.isAdmin && <th />}
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((d) => (
-                <tr key={d.key} className={d.enabled === false ? "is-off" : undefined}>
-                  <td className="mono">
-                    {d.key}
-                    {d.enabled === false && <span className="muted small"> · {t("ig.off")}</span>}
-                  </td>
-                  <td className="small">
-                    {[d.project, ...(d.repositories ?? [])].filter(Boolean).join(", ")}
-                  </td>
-                  <td className="small">
-                    <span className="mono">{d.database_name}</span>
-                    {d.description && <div className="muted">{d.description}</div>}
-                  </td>
-                  {p.isAdmin && (
-                    <td className="small mono">
-                      {d.username}@{d.host}:{d.port}
-                      {!d.has_password && <div className="ig-db-warn">{t("ig.db.noPassword")}</div>}
-                      {tests[d.key] && (
-                        <div className={tests[d.key].warning ? "ig-db-warn" : "muted"}>
-                          {tests[d.key].version} · {tests[d.key].account}
-                          {tests[d.key].warning && <> · {t("ig.db.canWrite")}</>}
-                        </div>
-                      )}
-                    </td>
-                  )}
-                  {p.isAdmin && (
-                    <td className="ig-db-actions">
-                      <button
-                        className="sm ghost"
-                        onClick={async () => {
-                          const r = await act(() => api(`/api/integrations/databases/${d.key}/test`, {}), t("ig.db.testOk"));
-                          if (r) setTests({ ...tests, [d.key]: r });
-                        }}
-                      >
-                        <RefreshCw size={13} /> {t("ig.db.test")}
-                      </button>
-                      <button
-                        className="sm ghost"
-                        onClick={() => setForm({ ...EMPTY_DB, ...d, repositories: (d.repositories ?? []).join(", "), password: "" })}
-                      >
-                        {t("common.edit")}
-                      </button>
-                      <button
-                        className="sm ghost"
-                        onClick={async () => {
-                          if (!confirm(t("ig.db.deleteConfirm", { key: d.key }))) return;
-                          if (await act(() => api(`/api/integrations/databases/${d.key}/delete`, {}), t("ig.db.deleted"))) reload();
-                        }}
-                      >
-                        {t("common.delete")}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="ig-db-cards">
+          {list.map((d) => (
+            <DbCard
+              key={d.key}
+              d={d}
+              state={dbState(d, checking)}
+              isAdmin={p.isAdmin}
+              onTest={() => void test([d.key])}
+              onEdit={() => setForm({ ...EMPTY_DB, ...d, repositories: (d.repositories ?? []).join(", "), password: "" })}
+              onDelete={async () => {
+                if (!confirm(t("ig.db.deleteConfirm", { key: d.key }))) return;
+                if (await act(() => api(`/api/integrations/databases/${d.key}/delete`, {}), t("ig.db.deleted"))) reload();
+              }}
+            />
+          ))}
         </div>
       )}
       {p.isAdmin && !form && (
@@ -697,6 +769,11 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
           <button className="sm" onClick={() => setForm({ ...EMPTY_DB })}>
             <Database size={14} /> {t("ig.db.add")}
           </button>
+          {enabled.length > 1 && (
+            <button className="sm ghost" onClick={() => void test(enabled.filter((d) => d.has_password).map((d) => d.key))}>
+              <RefreshCw size={14} /> {t("ig.db.checkAll")}
+            </button>
+          )}
         </div>
       )}
       {p.isAdmin && form && (

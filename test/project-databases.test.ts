@@ -167,6 +167,38 @@ test("agent tools: the run scope decides which database can be listed, described
   setDatabaseDriver(null);
 });
 
+test("status is the last real connection: tests and agent queries record it, members get no technical details", async () => {
+  const status = async (key: string) => (await one<any>(pool, "SELECT last_status, last_error_kind, last_error, last_used_at, last_version FROM project_databases WHERE key = $1", [key]))!;
+  // unreachable server
+  setDatabaseDriver(async () => { throw Object.assign(new Error("connect ECONNREFUSED 10.0.0.9:3306"), { code: "ECONNREFUSED" }); });
+  const down = (await admin("/api/integrations/databases/oms-qc/test", {})).body;
+  assert.deepEqual([down.ok, down.kind], [false, "unreachable"], "a failed connection is a result, not an HTTP error");
+  assert.equal((await status("oms-qc")).last_status, "failed");
+  // wrong password
+  setDatabaseDriver(async () => { throw Object.assign(new Error("Access denied for user 'ro'"), { code: "ER_ACCESS_DENIED_ERROR" }); });
+  assert.equal((await admin("/api/integrations/databases/oms-qc/test", {})).body.kind, "auth");
+  const member = (await A("/api/integrations/databases")).body.find((d: any) => d.key === "oms-qc");
+  assert.equal(member.last_status, "failed");
+  assert.equal(member.last_error_kind, "auth");
+  assert.equal(member.last_error, undefined, "raw errors stay with admins");
+  assert.match((await admin("/api/integrations/databases")).body.find((d: any) => d.key === "oms-qc").last_error, /Access denied/);
+  // an SQL error proves the connection works
+  setDatabaseDriver(async () => { throw Object.assign(new Error("Table 'oms.nope' doesn't exist"), { code: "ER_NO_SUCH_TABLE" }); });
+  const sqlErr = await callTool("database.query", { database: "oms-qc", sql: "SELECT * FROM nope" }, { runId: 1, allowedRepositories: ["oms-api"], mode: "analysis" });
+  assert.equal(sqlErr.ok, false);
+  assert.equal((await status("oms-qc")).last_status, "ok");
+  assert.ok((await status("oms-qc")).last_used_at, "agent use is recorded");
+  // a successful test stores version and latency
+  setDatabaseDriver(async (_db, sql) => sql.startsWith("SHOW GRANTS")
+    ? { columns: ["g"], rows: [{ g: "GRANT SELECT ON `oms`.* TO `ro`@`%`" }], truncated: false }
+    : { columns: ["version", "account"], rows: [{ version: "10.7.8-MariaDB", account: "ro@%" }], truncated: false });
+  const up = (await admin("/api/integrations/databases/oms-qc/test", {})).body;
+  assert.deepEqual([up.ok, up.version, up.can_write], [true, "10.7.8-MariaDB", false]);
+  const s2 = await status("oms-qc");
+  assert.deepEqual([s2.last_status, s2.last_error_kind, s2.last_error, s2.last_version], ["ok", null, null, "10.7.8-MariaDB"]);
+  setDatabaseDriver(null);
+});
+
 test("deleting a database removes its stored password", async () => {
   await admin("/api/integrations/databases", { key: "temp-qc", project: "OMS", host: "t.qc", database_name: "t", username: "u", password: "temp-pw" });
   assert.ok(await one(pool, "SELECT 1 FROM shared_secrets WHERE kind = 'database:temp-qc'"));
@@ -214,8 +246,8 @@ test("real MySQL/MariaDB: rows, cap, masking, READ ONLY transaction and the writ
   await c.query("ROLLBACK");
   await c.end();
 
-  assert.equal((await testDatabase("live-ro")).can_write, false);
-  const t = await testDatabase("live-root");
+  assert.equal(((await testDatabase("live-ro")) as any).can_write, false);
+  const t = (await testDatabase("live-root")) as any;
   assert.equal(t.can_write, true);
   assert.match(t.warning!, /write privileges/);
   await assert.rejects(runQuery(rootDb, "SELECT * FROM no_such_table"), /ER_NO_SUCH_TABLE|doesn't exist/);

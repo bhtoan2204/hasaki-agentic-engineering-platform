@@ -39,6 +39,58 @@ export interface ProjectDatabase {
   timeout_ms: number;
   enabled: boolean;
   updated_at?: string;
+  last_status?: "ok" | "failed" | null;
+  last_checked_at?: string | null;
+  last_error_kind?: ErrorKind | null;
+  last_error?: string | null;
+  last_version?: string | null;
+  last_account?: string | null;
+  last_can_write?: boolean | null;
+  last_latency_ms?: number | null;
+  last_used_at?: string | null;
+}
+
+/**
+ * Why a connection failed, in words a person can act on. Only connection-level failures count: a SQL error (unknown
+ * column, syntax) means the database is reachable.
+ */
+export type ErrorKind = "unreachable" | "timeout" | "auth" | "database" | "tls" | "no_password" | "unknown";
+const CONNECTION_ERRORS: Record<string, ErrorKind> = {
+  ECONNREFUSED: "unreachable",
+  ENOTFOUND: "unreachable",
+  EHOSTUNREACH: "unreachable",
+  ENETUNREACH: "unreachable",
+  EAI_AGAIN: "unreachable",
+  ECONNRESET: "unreachable",
+  PROTOCOL_CONNECTION_LOST: "unreachable",
+  ETIMEDOUT: "timeout",
+  PROTOCOL_SEQUENCE_TIMEOUT: "timeout",
+  ER_ACCESS_DENIED_ERROR: "auth",
+  ER_DBACCESS_DENIED_ERROR: "auth",
+  ER_NOT_SUPPORTED_AUTH_MODE: "auth",
+  ER_BAD_DB_ERROR: "database",
+  HANDSHAKE_SSL_ERROR: "tls",
+  HANDSHAKE_NO_SSL_SUPPORT: "tls",
+};
+export const connectionErrorKind = (code?: string): ErrorKind | null => (code ? (CONNECTION_ERRORS[code] ?? (/SSL|TLS|CERT/.test(code) ? "tls" : null)) : null);
+
+/** Persist the last known status. Successful agent queries are recorded at most once a minute per database. */
+async function recordStatus(key: string, s: { ok: true; latency?: number; version?: string; account?: string; can_write?: boolean | null; used?: boolean } | { ok: false; kind: ErrorKind; error: string }) {
+  if (s.ok)
+    await q(
+      pool,
+      `UPDATE project_databases SET last_status = 'ok', last_checked_at = now(), last_error_kind = NULL, last_error = NULL,
+         last_latency_ms = COALESCE($2, last_latency_ms), last_version = COALESCE($3, last_version), last_account = COALESCE($4, last_account),
+         last_can_write = CASE WHEN $6 THEN $5 ELSE last_can_write END, last_used_at = CASE WHEN $7 THEN now() ELSE last_used_at END
+       WHERE key = $1 AND ($7 = false OR last_status IS DISTINCT FROM 'ok' OR last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`,
+      [key, s.latency ?? null, s.version ?? null, s.account ?? null, s.can_write ?? null, s.can_write !== undefined, !!s.used],
+    ).catch(() => {});
+  else
+    await q(
+      pool,
+      "UPDATE project_databases SET last_status = 'failed', last_checked_at = now(), last_error_kind = $2, last_error = $3 WHERE key = $1",
+      [key, s.kind, s.error.slice(0, 500)],
+    ).catch(() => {});
 }
 
 const secretKind = (key: string) => `database:${key}`;
@@ -251,7 +303,7 @@ async function connectionOf(db: ProjectDatabase): Promise<Connection> {
   return { ...db, password };
 }
 
-export async function runQuery(db: ProjectDatabase, sql: string, maxRows?: number): Promise<QueryResult> {
+export async function runQuery(db: ProjectDatabase, sql: string, maxRows?: number, options: { used?: boolean } = { used: true }): Promise<QueryResult> {
   const statement = assertReadOnlySql(sql);
   const cap = Math.max(1, Math.min(maxRows ?? db.max_rows, db.max_rows));
   const t0 = Date.now();
@@ -259,11 +311,18 @@ export async function runQuery(db: ProjectDatabase, sql: string, maxRows?: numbe
   try {
     r = await driver(await connectionOf(db), statement, cap);
   } catch (e) {
-    if (e instanceof HttpError) throw e;
+    if (e instanceof HttpError) {
+      if (e.status === 409) await recordStatus(db.key, { ok: false, kind: "no_password", error: e.message });
+      throw e;
+    }
     // Driver errors carry the server message (useful: unknown column…) but never the connection settings.
     const err = e as { code?: string; sqlMessage?: string; message?: string };
-    throw new Error(`database ${db.key}: ${err.code ?? "error"}: ${redactSecrets(String(err.sqlMessage ?? err.message ?? e)).slice(0, 500)}`);
+    const message = redactSecrets(String(err.sqlMessage ?? err.message ?? e)).slice(0, 500);
+    const kind = connectionErrorKind(err.code);
+    await recordStatus(db.key, kind ? { ok: false, kind, error: `${err.code}: ${message}` } : { ok: true, used: options.used });
+    throw new Error(`database ${db.key}: ${err.code ?? "error"}: ${message}`);
   }
+  await recordStatus(db.key, { ok: true, latency: Date.now() - t0, used: options.used });
   const columns = r.columns.length ? r.columns : Object.keys(r.rows[0] ?? {});
   return { columns, rows: r.rows.map((row) => columns.map((c) => cell(c, row[c]))), row_count: r.rows.length, truncated: r.truncated, ms: Date.now() - t0 };
 }
@@ -298,21 +357,30 @@ export async function describeSchema(db: ProjectDatabase, table?: string) {
   };
 }
 
-/** Admin connection test: server version, current account, and a warning when the account can write. */
+/**
+ * Connection test (admin): server version, account, latency and whether the account can write. A failure is a result
+ * (ok: false, kind, error), not an exception, and is stored as the database's status either way.
+ */
 export async function testDatabase(key: string) {
   const db = (await listDatabases()).find((d) => d.key === key);
   if (!db) throw new HttpError(404, "database not found");
-  const version = await runQuery(db, "SELECT VERSION() AS version, CURRENT_USER() AS account", 1);
-  const grants = await runQuery(db, "SHOW GRANTS", 100).catch(() => null);
-  const text = grants ? grants.rows.map((r) => String(r[0])).join("\n") : "";
-  const writes = /\b(ALL PRIVILEGES|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b/i.test(text);
-  return {
-    ok: true,
-    version: version.rows[0]?.[0],
-    account: version.rows[0]?.[1],
-    can_write: grants ? writes : null,
-    warning: writes ? "This account has write privileges. Agents are limited to read statements in read-only transactions, but a SELECT-only database user is safer." : null,
-  };
+  const t0 = Date.now();
+  try {
+    const version = await runQuery(db, "SELECT VERSION() AS version, CURRENT_USER() AS account", 1, { used: false });
+    const latency = Date.now() - t0;
+    const grants = await runQuery(db, "SHOW GRANTS", 100, { used: false }).catch(() => null);
+    const text = grants ? grants.rows.map((r) => String(r[0])).join("\n") : "";
+    const can_write = grants ? /\b(ALL PRIVILEGES|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b/i.test(text) : null;
+    const result = { ok: true as const, version: String(version.rows[0]?.[0] ?? ""), account: String(version.rows[0]?.[1] ?? ""), latency_ms: latency, can_write };
+    await recordStatus(key, { ok: true, latency, version: result.version, account: result.account, can_write });
+    return {
+      ...result,
+      warning: can_write ? "This account has write privileges. Agents are limited to read statements in read-only transactions, but a SELECT-only database user is safer." : null,
+    };
+  } catch (e) {
+    const fresh = (await q<ProjectDatabase>(pool, "SELECT * FROM project_databases WHERE key = $1", [key]))[0];
+    return { ok: false as const, kind: (fresh?.last_error_kind ?? "unknown") as ErrorKind, error: fresh?.last_error ?? (e as Error).message, latency_ms: Date.now() - t0 };
+  }
 }
 
 // ---------------------------------------------------------------- run authorization
