@@ -124,6 +124,35 @@ test("9. admin manages grants and shared access through the API, with an audit t
   assert.equal((await repositories.get("repo-d"))!.shared_access, "none");
 });
 
+test("9. checkboxes and bulk: independent read/write/PR flags normalize to a level; one user on many repositories", async () => {
+  const cases: Array<[Record<string, unknown>, string]> = [
+    [{ read: true }, "read"],
+    [{ read: true, write: true }, "write"],
+    [{ read: true, write: true, pull_request: true }, "pull_request"],
+    [{ pull_request: true }, "pull_request"], // a PR needs a pushed branch: implies write and read
+    [{ read: false, write: false, pull_request: false }, "none"],
+  ];
+  for (const [flags, level] of cases) {
+    const r = await admin("/api/repositories/repo-d/access", { user_id: ids["acl-b"], ...flags });
+    assert.equal(r.status, 200, JSON.stringify(flags));
+    assert.equal(r.body.after, level, JSON.stringify(flags));
+  }
+  assert.equal((await admin("/api/repositories/repo-d/access", { user_id: ids["acl-b"], write: "yes" })).status, 400);
+  assert.equal((await A("/api/repository-access/bulk", { user_id: ids["acl-a"], level: "pull_request" })).status, 403);
+  const bulk = await admin("/api/repository-access/bulk", { user_id: ids["acl-b"], level: "pull_request", repositories: ["repo-b", "repo-d"] });
+  assert.equal(bulk.status, 200);
+  assert.deepEqual(bulk.body.repositories.sort(), ["repo-b", "repo-d"]);
+  assert.equal((await admin("/api/repository-access/bulk", { user_id: ids["acl-b"], level: "read", repositories: ["nope"] })).status, 404);
+  const m = (await admin("/api/repository-access")).body;
+  const level = (repo: string) => m.grants.find((g: any) => g.user_id === ids["acl-b"] && g.repository_id === m.repositories.find((r: any) => r.name === repo).id)?.level;
+  assert.equal(level("repo-b"), "pull_request");
+  assert.equal(level("repo-d"), "pull_request");
+  assert.ok((await admin("/api/repository-access/audit")).body.some((x: any) => x.action === "repository.access.bulk"));
+  // restore what later tests expect
+  await admin("/api/repositories/repo-b/access", { user_id: ids["acl-b"], level: "write" });
+  await admin("/api/repositories/repo-d/access", { user_id: ids["acl-b"], level: "none" });
+});
+
 test("1/12. members see only their repositories; others are 404 everywhere; the admin manages without reading", async () => {
   assert.deepEqual(names((await A("/api/repositories")).body), ["repo-a", "repo-c"]);
   assert.deepEqual(names((await B("/api/repositories")).body), ["repo-b", "repo-c"]);
@@ -261,7 +290,7 @@ test("8/11. revocation reaches existing runs: scope narrows, the step stops, wri
 
   const row = await one<any>(pool, "SELECT id, owner_id, allowed_repositories, selected_repositories, inputs FROM workflow_runs WHERE id = $1", [run.id]);
   const scope = await enforceRunRepositoryAccess(row);
-  assert.deepEqual(scope, { revoked: ["repo-a", "repo-c"], blocked: ["repo-a"] }, "a selected repository was revoked: the step must stop");
+  assert.deepEqual(scope, { revoked: ["repo-a", "repo-c"], blocked: ["repo-a"], added: [], changed: true }, "a selected repository was revoked: the step must stop");
   assert.deepEqual(
     (await one<any>(pool, "SELECT allowed_repositories FROM workflow_runs WHERE id = $1", [run.id]))!.allowed_repositories,
     ["repo-a"],
@@ -297,6 +326,34 @@ test("8. a queued step of an existing run stops before executing once its select
   assert.equal(await runOnce("acl-worker"), true);
   assert.equal(executed, 1);
   assert.equal((await getRun(run.id)).steps.find((x: any) => x.key === "look")!.status, "COMPLETED");
+});
+
+test("a run created before any grant picks the grant up when its step is retried (nothing selected yet)", async () => {
+  // B has no access to repo-d; the run starts with an empty scope (the user story behind "no repositories are allowed")
+  const wi = (await B("/api/work-items", { title: "before grant", project: "ACL" })).body;
+  await admin("/api/repositories/repo-c/shared", { level: "none" });
+  await admin("/api/repositories/repo-b/access", { user_id: ids["acl-b"], level: "none" });
+  try {
+    const run = (await B("/api/runs", { workflow: "bug-investigation", work_item_id: wi.id, start: false })).body;
+    assert.deepEqual(run.allowed_repositories, []);
+    await admin("/api/repositories/repo-b/access", { user_id: ids["acl-b"], level: "write" });
+    const row = await one<any>(pool, "SELECT id, owner_id, allowed_repositories, selected_repositories, inputs FROM workflow_runs WHERE id = $1", [run.id]);
+    const scope = await enforceRunRepositoryAccess(row);
+    assert.deepEqual(scope, { revoked: [], blocked: [], added: ["repo-b"], changed: true });
+    assert.deepEqual((await one<any>(pool, "SELECT allowed_repositories FROM workflow_runs WHERE id = $1", [run.id]))!.allowed_repositories, ["repo-b"]);
+    assert.ok(await one(pool, "SELECT 1 FROM workflow_events WHERE run_id = $1 AND content LIKE 'repository scope refreshed%added: repo-b%'", [run.id]));
+    // never wider than the owner's own access: A's repository is not added to B's run
+    assert.ok(!row.allowed_repositories.includes("repo-a"));
+    // once a repository is selected, the scope no longer widens
+    await selectRepositories(run.id, ["repo-b"]);
+    await admin("/api/repositories/repo-c/shared", { level: "read" });
+    const selected = await one<any>(pool, "SELECT id, owner_id, allowed_repositories, selected_repositories, inputs FROM workflow_runs WHERE id = $1", [run.id]);
+    assert.equal((await enforceRunRepositoryAccess(selected)).changed, false);
+    assert.deepEqual(selected.allowed_repositories, ["repo-b"]);
+  } finally {
+    await admin("/api/repositories/repo-c/shared", { level: "read" });
+    await admin("/api/repositories/repo-b/access", { user_id: ids["acl-b"], level: "write" });
+  }
 });
 
 test("5. code intelligence status is filtered by access", async () => {

@@ -14,7 +14,9 @@
     "user": "",
     "token": "",
     "reviewers": [],
-    "allowSharedCredentials": false
+    "allowSharedCredentials": false,
+    "accessVerification": "strict",
+    "permissionTtlSeconds": 900
   },
   "notifyWebhook": "",
   "database": {

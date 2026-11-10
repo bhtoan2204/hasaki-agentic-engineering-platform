@@ -280,7 +280,17 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   if (!rows.length) {
     // Investigations can proceed on logs alone; code context is a bonus there.
     if (cfg.optional === true) return { kind: "completed", output: { candidates: [], recommended: [], ambiguous: false, method: "none", note: "no repositories are allowed for this run; continuing without code context" } };
-    return { kind: "failed", error: "no repositories are allowed for this run (check the repository registry / project mapping)", retryable: false };
+    // Since migration 045 the run scope is the owner's own accessible repositories (grant or shared access ∩ Bitbucket
+    // ∩ repository policy), narrowed by the project mapping. It is fixed when the run is created.
+    return {
+      kind: "failed",
+      error:
+        "no repositories are allowed for this run: the run owner has no access to any repository of this project. " +
+        "An admin grants access in Repositories → Access management (or sets a repository's Shared level); " +
+        "for Bitbucket repositories the owner also needs a personal Bitbucket token. Then retry this step: " +
+        "until repositories are selected, the run scope follows the owner's current access.",
+      retryable: false,
+    };
   }
   const keywords = Object.values(ctx.input.upstream).flatMap((u) => (Array.isArray(u.output?.keywords) ? u.output.keywords : []));
   const text = [ctx.input.work_item?.title, ctx.input.work_item?.description, ctx.input.run.title, JSON.stringify(ctx.input.run.inputs ?? {})].filter(Boolean).join("\n");

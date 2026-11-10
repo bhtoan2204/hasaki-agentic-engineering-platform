@@ -9,6 +9,7 @@ import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttem
 import { dispatchRunEffects } from "./effects.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { enforceRunRepositoryAccess } from "../repos/access.ts";
+import { repositories, repoPath } from "../repos/service.ts";
 import { localJobs } from "./local.ts";
 import { settleBackground } from "./background.ts";
 import type { ExecResult, JobRow } from "./types.ts";
@@ -114,11 +115,15 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
         details: { code: "repository_access_revoked", repositories: scope.blocked },
       };
     } else {
-      if (scope.revoked.length) {
-        // The step input and context were assembled before the check: give the attempt only the narrowed scope.
-        const keep = new Set(begun.run.allowed_repositories);
+      if (scope.changed) {
+        // The step input and context were assembled before the check: give the attempt the scope it now has.
         begun.input.run.allowed_repositories = begun.run.allowed_repositories;
-        if (begun.context.repoPaths) begun.context.repoPaths = begun.context.repoPaths.filter((r) => keep.has(r.name));
+        if (begun.context.repoPaths && !begun.run.selected_repositories.length) {
+          const scopeNames = new Set(begun.run.allowed_repositories);
+          begun.context.repoPaths = (await repositories.list())
+            .filter((r) => scopeNames.has(r.name))
+            .map((r) => ({ name: r.name, path: repoPath(r) }));
+        }
       }
       const ctx = makeContext({ ...begun, signal: executionAbort.signal });
       result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });

@@ -53,8 +53,9 @@ import {
   requireRepositoryAccess,
   revalidateBitbucket,
   setRepositoryAccess,
+  setRepositoryAccessMany,
   setSharedAccess,
-  type AccessLevel,
+  accessLevelFrom,
   type EffectivePermissions,
 } from "../repos/access.ts";
 import { definitions } from "../workflow/definitions.ts";
@@ -581,18 +582,26 @@ export const routes: Route[] = [
     await audit(actor.id, "repository.access.revalidate", "repository", "", { user_id: body.all ? null : target });
     return r;
   }],
+  // One user, many repositories (every repository when `repositories` is omitted): one transaction, one audit entry.
+  ["POST", /^\/api\/repository-access\/bulk$/, async ({ body, actor }) => {
+    requireAdmin(actor);
+    const names = body.repositories == null ? undefined : (Array.isArray(body.repositories) ? body.repositories.map(String) : (() => { throw new HttpError(400, "repositories must be a list"); })());
+    const r = await setRepositoryAccessMany(num(body.user_id), accessLevelFrom(body), actor.id, names);
+    await audit(actor.id, "repository.access.bulk", "repository", "", { user_id: r.user_id, after: r.level, repositories: r.repositories.length });
+    return r;
+  }],
   ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/access$/, async ({ p, body, actor }) => {
     requireAdmin(actor);
     const repo = must(await repositories.get(p[0]), "Repository");
     const userId = num(body.user_id);
-    const change = await setRepositoryAccess(repo, userId, String(body.level ?? "none") as AccessLevel, actor.id);
+    const change = await setRepositoryAccess(repo, userId, accessLevelFrom(body), actor.id);
     await audit(actor.id, "repository.access.grant", "repository", repo.name, { user_id: userId, ...change });
     return change;
   }],
   ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/shared$/, async ({ p, body, actor }) => {
     requireAdmin(actor);
     const repo = must(await repositories.get(p[0]), "Repository");
-    const change = await setSharedAccess(repo, String(body.level ?? "none") as AccessLevel);
+    const change = await setSharedAccess(repo, accessLevelFrom(body));
     await audit(actor.id, "repository.access.shared", "repository", repo.name, change);
     return change;
   }],

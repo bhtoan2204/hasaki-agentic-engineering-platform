@@ -184,34 +184,52 @@ type RunScope = { id: number; owner_id?: number | null; allowed_repositories: st
 const runProject = (run: RunScope) => String(run.inputs?.project ?? "");
 
 /**
- * Step start: drop repositories the owner can no longer read from the run's scope (persisted, with a timeline note)
- * and report selected repositories that were revoked; the caller stops the step without retrying. The run object is
- * updated in place so the attempt starts with the narrowed scope.
+ * Step start (also on retry, resume and re-execution).
+ *  - Before any repository is selected, the scope follows the owner's CURRENT access for the run's project, exactly as
+ *    computed at run creation: a grant given after the run was created is picked up by retrying the step, a
+ *    revocation narrows it. Nothing has been read from a repository yet, so nothing is widened behind a selection.
+ *  - Once repositories are selected the scope only narrows: repositories the owner can no longer read leave it, and a
+ *    revoked selected repository is reported in `blocked`; the caller stops the step without retrying.
+ * Changes are persisted with a timeline note, and the run object is updated in place (`changed`).
  */
-export async function enforceRunRepositoryAccess(run: RunScope, db: Db = pool): Promise<{ revoked: string[]; blocked: string[] }> {
-  if (run.owner_id == null) return { revoked: [...run.allowed_repositories], blocked: [...run.selected_repositories] };
+export async function enforceRunRepositoryAccess(run: RunScope, db: Db = pool): Promise<{ revoked: string[]; blocked: string[]; added: string[]; changed: boolean }> {
+  if (run.owner_id == null) return { revoked: [...run.allowed_repositories], blocked: [...run.selected_repositories], added: [], changed: false };
   const project = await runProjectOf(run, db);
-  const perms = await effectivePermissions(Number(run.owner_id), { db, verify: true, project });
-  const revoked = run.allowed_repositories.filter((r) => !perms.get(r)?.effective.read);
-  const blocked = run.selected_repositories.filter((r) => revoked.includes(r));
-  if (revoked.length) {
-    // Unselected revoked repositories leave the scope. Selected ones stay recorded (selected ⊆ allowed, and the
-    // selection is the run's history); every permission check refuses them and the caller stops the step.
-    const removed = revoked.filter((r) => !blocked.includes(r));
-    const { runEvents } = await import("../workflow/events.ts");
-    if (removed.length) {
-      const keep = run.allowed_repositories.filter((r) => !removed.includes(r));
-      await q(db, "UPDATE workflow_runs SET allowed_repositories = $2, updated_at = now() WHERE id = $1", [run.id, keep]);
-      run.allowed_repositories = keep;
-    }
+  const { runEvents } = await import("../workflow/events.ts");
+  if (!run.selected_repositories.length) {
+    const current = await allowedRepositoriesForRun(Number(run.owner_id), project, "read", { db, verify: true });
+    const revoked = run.allowed_repositories.filter((r) => !current.includes(r));
+    const added = current.filter((r) => !run.allowed_repositories.includes(r));
+    if (!revoked.length && !added.length) return { revoked, blocked: [], added, changed: false };
+    await q(db, "UPDATE workflow_runs SET allowed_repositories = $2, updated_at = now() WHERE id = $1", [run.id, current]);
+    run.allowed_repositories = current;
     await runEvents.add(
       db,
       run.id,
       "system",
-      `repository access revoked for the run owner: ${revoked.join(", ")}${removed.length ? `; removed from the run scope: ${removed.join(", ")}` : ""}${blocked.length ? `; selected and now blocked: ${blocked.join(", ")}` : ""}`,
+      `repository scope refreshed from the run owner's current access (no repository selected yet)${added.length ? `; added: ${added.join(", ")}` : ""}${revoked.length ? `; removed: ${revoked.join(", ")}` : ""}`,
     );
+    return { revoked, blocked: [], added, changed: true };
   }
-  return { revoked, blocked };
+  const perms = await effectivePermissions(Number(run.owner_id), { db, verify: true, project });
+  const revoked = run.allowed_repositories.filter((r) => !perms.get(r)?.effective.read);
+  const blocked = run.selected_repositories.filter((r) => revoked.includes(r));
+  if (!revoked.length) return { revoked, blocked, added: [], changed: false };
+  // Unselected revoked repositories leave the scope. Selected ones stay recorded (selected ⊆ allowed, and the
+  // selection is the run's history); every permission check refuses them and the caller stops the step.
+  const removed = revoked.filter((r) => !blocked.includes(r));
+  if (removed.length) {
+    const keep = run.allowed_repositories.filter((r) => !removed.includes(r));
+    await q(db, "UPDATE workflow_runs SET allowed_repositories = $2, updated_at = now() WHERE id = $1", [run.id, keep]);
+    run.allowed_repositories = keep;
+  }
+  await runEvents.add(
+    db,
+    run.id,
+    "system",
+    `repository access revoked for the run owner: ${revoked.join(", ")}${removed.length ? `; removed from the run scope: ${removed.join(", ")}` : ""}${blocked.length ? `; selected and now blocked: ${blocked.join(", ")}` : ""}`,
+  );
+  return { revoked, blocked, added: [], changed: removed.length > 0 };
 }
 
 async function runProjectOf(run: RunScope, db: Db) {
@@ -344,6 +362,48 @@ export async function revalidateBitbucket(filter: { userId?: number; repository?
 }
 
 // ------------------------------------------------------------------ administration
+
+/**
+ * Access from an API body: a level, or independent checkboxes { read, write, pull_request }. Permissions imply each
+ * other the way Git hosting does (a pull request needs a pushed branch, a push needs read), so the highest ticked one
+ * wins: { pull_request: true } alone is full access, { write: true } is read + write.
+ */
+export function accessLevelFrom(body: { level?: unknown; read?: unknown; write?: unknown; pull_request?: unknown }): AccessLevel {
+  if (body.level !== undefined) {
+    const level = String(body.level) as AccessLevel;
+    if (!ACCESS_LEVELS.includes(level)) throw new HttpError(400, `invalid access level "${String(body.level)}"`);
+    return level;
+  }
+  for (const k of ["read", "write", "pull_request"] as const)
+    if (body[k] !== undefined && typeof body[k] !== "boolean") throw new HttpError(400, `${k} must be true or false`);
+  return body.pull_request === true ? "pull_request" : body.write === true ? "write" : body.read === true ? "read" : "none";
+}
+
+/** The same level for one user on many repositories (all non-benchmark ones when `names` is omitted), in one transaction. */
+export async function setRepositoryAccessMany(userId: number, level: AccessLevel, grantedBy: number | null, names?: string[]) {
+  if (!ACCESS_LEVELS.includes(level)) throw new HttpError(400, `invalid access level "${level}"`);
+  const u = await one<{ id: number }>(pool, "SELECT id FROM users WHERE id = $1", [userId]);
+  if (!u) throw new RepositoryAccessError(404, "User not found");
+  const all = (await repositories.list()).filter((r) => r.provider !== "benchmark");
+  const targets = names ? all.filter((r) => names.includes(r.name)) : all;
+  const unknown = names?.filter((n) => !all.some((r) => r.name === n)) ?? [];
+  if (unknown.length) throw new RepositoryAccessError(404, `Repository not found: ${unknown.join(", ")}`);
+  const f = flags(level);
+  await withTx(async (c) => {
+    const ids = targets.map((r) => Number(r.id));
+    if (level === "none") await q(c, "DELETE FROM user_repository_access WHERE user_id = $1 AND repository_id = ANY($2::bigint[])", [userId, ids]);
+    else
+      await q(
+        c,
+        `INSERT INTO user_repository_access (user_id, repository_id, can_read, can_write, can_create_pr, granted_by)
+         SELECT $1, id, $3, $4, $5, $6 FROM unnest($2::bigint[]) AS id
+         ON CONFLICT (user_id, repository_id) DO UPDATE SET can_read = EXCLUDED.can_read, can_write = EXCLUDED.can_write,
+           can_create_pr = EXCLUDED.can_create_pr, granted_by = EXCLUDED.granted_by, updated_at = now()`,
+        [userId, ids, f.read, f.write, f.pull_request, grantedBy],
+      );
+  });
+  return { user_id: userId, level, repositories: targets.map((r) => r.name) };
+}
 
 /** Grant (or with "none" remove) a user's platform access to a repository. Audited by the caller. */
 export async function setRepositoryAccess(repository: RepositoryRow, userId: number, level: AccessLevel, grantedBy: number) {

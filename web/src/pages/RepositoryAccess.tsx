@@ -16,6 +16,34 @@ type Matrix = {
   checks: Array<{ user_id: number; repository_id: number; state: string; reason: string; checked_at: string; expired: boolean }>;
 };
 
+const RANK: Record<Level, number> = { none: 0, read: 1, write: 2, pull_request: 3 };
+const PERMS = ["read", "write", "pull_request"] as const;
+
+/**
+ * Independent Read / Write / PR checkboxes. They imply each other like Git hosting does (a pull request needs a pushed
+ * branch, a push needs read): ticking one ticks the ones below it, unticking one unticks the ones above it.
+ */
+function AccessChecks({ level, label, onChange }: { level: Level; label: string; onChange: (l: Level) => void }) {
+  const { t } = useI18n();
+  return (
+    <span className="repo-perm-checks" role="group" aria-label={label} title={t("repo.access.impliesHint")}>
+      {PERMS.map((p) => {
+        const on = RANK[level] >= RANK[p];
+        return (
+          <label key={p} className={`repo-perm-check is-${p}${on ? " is-on" : ""}`}>
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => onChange(e.target.checked ? (RANK[p] > RANK[level] ? p : level) : (LEVELS[RANK[p] - 1] as Level))}
+            />
+            {t(`repo.perm.${p}`)}
+          </label>
+        );
+      })}
+    </span>
+  );
+}
+
 /** One user's Bitbucket verification state as a short, colour-coded label. */
 export function BitbucketState({ state, reason, stale }: { state: string; reason?: string; stale?: boolean }) {
   const { t } = useI18n();
@@ -56,6 +84,10 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
   const grant = async (repo: string, userId: number, level: Level) => {
     if (await act(() => api(`/api/repositories/${encodeURIComponent(repo)}/access`, { user_id: userId, level }), t("repo.access.saved"))) reload();
   };
+  const bulk = async (user: { id: number; username: string }, level: Level) => {
+    if (!confirm(t(level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm", { user: user.username, n: m.repositories.length }))) return;
+    if (await act(() => api("/api/repository-access/bulk", { user_id: user.id, level }), t("repo.access.saved"))) reload();
+  };
   const share = async (repo: string, level: Level) => {
     if (await act(() => api(`/api/repositories/${encodeURIComponent(repo)}/shared`, { level }), t("repo.access.saved"))) reload();
   };
@@ -75,6 +107,7 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
           </button>
         </div>
         <p className="muted small">{t("repo.access.note")}</p>
+        <p className="muted small">{t("repo.access.impliesHint")}</p>
         <p className="small">
           <b>{t("repo.access.policy")}:</b> {t(`repo.access.policy.${m.policy}`)}
         </p>
@@ -97,6 +130,16 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                   <th key={u.id} scope="col">
                     <Users size={12} /> {u.username}
                     {u.role === "admin" && <span className="muted small"> · admin</span>}
+                    {!only && (
+                      <div className="repo-access-bulk">
+                        <button className="ghost sm" onClick={() => bulk(u, "pull_request")}>
+                          {t("repo.access.allFull")}
+                        </button>
+                        <button className="ghost sm" onClick={() => bulk(u, "none")}>
+                          {t("repo.access.allNone")}
+                        </button>
+                      </div>
+                    )}
                   </th>
                 ))}
               </tr>
@@ -111,26 +154,14 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                     <div className="muted small">{r.projects.join(", ") || "—"}</div>
                   </th>
                   <td>
-                    <select aria-label={`${r.name} ${t("repo.access.shared")}`} value={r.shared_access} onChange={(e) => share(r.name, e.target.value as Level)}>
-                      {LEVELS.map((l) => (
-                        <option key={l} value={l}>
-                          {t(`repo.level.${l}`)}
-                        </option>
-                      ))}
-                    </select>
+                    <AccessChecks level={r.shared_access} label={`${r.name} · ${t("repo.access.shared")}`} onChange={(l) => share(r.name, l)} />
                   </td>
                   {users.map((u) => {
                     const level = grantOf.get(`${r.id}:${u.id}`) ?? "none";
                     const check = checkOf.get(`${r.id}:${u.id}`);
                     return (
                       <td key={u.id}>
-                        <select aria-label={`${r.name} · ${u.username}`} value={level} onChange={(e) => grant(r.name, u.id, e.target.value as Level)}>
-                          {LEVELS.map((l) => (
-                            <option key={l} value={l}>
-                              {t(`repo.level.${l}`)}
-                            </option>
-                          ))}
-                        </select>
+                        <AccessChecks level={level} label={`${r.name} · ${u.username}`} onChange={(l) => grant(r.name, u.id, l)} />
                         {r.bitbucket && m.policy !== "trusted" && (level !== "none" || r.shared_access !== "none") && (
                           <div>
                             <BitbucketState state={check?.state ?? "unknown"} reason={check?.reason} stale={check?.expired} />

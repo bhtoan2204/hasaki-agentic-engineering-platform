@@ -546,3 +546,9 @@
 .repo-access-table tr.is-off th a { opacity: 0.6; }
 .repo-access-table select { min-width: 12em; }
 .repo-audit { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.repo-perm-checks { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.repo-perm-check { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm, 13px); cursor: pointer; white-space: nowrap; }
+.repo-perm-check input { margin: 0; }
+.repo-perm-check.is-on { font-weight: 600; }
+.repo-access-bulk { display: flex; gap: 4px; margin-top: 4px; }
+.repo-access-bulk button { font-weight: 500; }
