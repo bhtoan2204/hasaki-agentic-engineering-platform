@@ -347,7 +347,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
   const { data: tools } = useApi<any[]>("/api/tools");
   const [wfMetric, setWfMetric] = useState<"cost" | "tokens" | "runs">("cost");
   const [stMetric, setStMetric] = useState<"avg" | "fail" | "cost">("avg");
-  useLive(null, (p) => p?.kind === "status" && reload());
+  useLive(null, (p) => (!p || p.kind === "status") && reload());
 
   const header = (
     <PageHeader

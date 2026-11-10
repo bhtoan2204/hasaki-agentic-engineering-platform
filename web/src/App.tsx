@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  isStateChange,
   setAuthed,
   setCsrf,
   setSupportView,
@@ -243,7 +244,7 @@ export function App() {
   const live: LiveState = useLive(
     null,
     (p) => {
-      if (!p || p.kind === "status" || p.kind === "system") void refreshCount();
+      if (isStateChange(p)) void refreshCount();
     },
     !!me,
   );

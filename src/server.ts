@@ -23,7 +23,7 @@ import { startScheduler } from "./workflow/scheduler.ts";
 import { startCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
-import { startEventStream } from "./api/stream.ts";
+import { startEventStream, stopEventStream } from "./api/stream.ts";
 import { childGroups } from "./workflow/local.ts";
 
 // The Claude Agent SDK (and detect-libc) call process.report.getReport() to tell glibc from musl. By default a report
@@ -91,6 +91,7 @@ async function shutdown(reason: string, code: number) {
   shuttingDown = true;
   console.log(`${reason}: stopping workers; interrupted steps will be reconciled (Ctrl+C again to force)`);
   server.close();
+  void stopEventStream(); // open SSE responses would otherwise keep server.close() waiting
   childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
   // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.
   setTimeout(() => process.exit(code), 30_000).unref();

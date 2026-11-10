@@ -10,7 +10,7 @@ import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
 import { singleflight } from "../cache/index.ts";
 import { HttpError } from "./error.ts";
 import { messages as uiMessages } from "../../web/src/i18n/messages.ts";
-import { handleStream } from "../api/stream.ts";
+import { handleEventsSince, handleStream } from "../api/stream.ts";
 import { clearSessionCookie, csrfOk, login, logout, sessionFromRequest, setSessionCookie } from "../auth/sessions.ts";
 import { setPassword } from "../auth/users.ts";
 import { wantsSupport } from "../authz/access.ts";
@@ -116,6 +116,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
 
     if (method === "GET" && url.pathname === "/api/stream") {
       return handleStream(req, res, url, actor, wantsSupport(actor, url.searchParams.get("scope")));
+    }
+    if (key === "GET /api/events") {
+      const slice = await handleEventsSince(url, actor, wantsSupport(actor, url.searchParams.get("scope")));
+      return slice ? send(res, 200, slice, { "Cache-Control": "no-store" }) : send(res, 404, { error: "not found" });
     }
     const raw = method === "GET" && url.pathname.match(/^\/api\/artifacts\/(\d+)\/raw$/);
     if (raw) {

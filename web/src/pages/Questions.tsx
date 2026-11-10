@@ -10,7 +10,7 @@ import {
   Send,
   Star,
 } from "lucide-react";
-import { api, useApi, useLive } from "../api.ts";
+import { api, isStateChange, useApi, useLive } from "../api.ts";
 import {
   act,
   Badge,
@@ -153,7 +153,8 @@ export function QuestionsPage() {
   const { data: history, reload: reloadHistory } = useApi<any[]>(
     "/api/questions/history",
   );
-  useLive(null, () => (reload(), reloadHistory()));
+  // Questions open and close with step status changes and user actions, never with transcript lines.
+  useLive(null, (p) => isStateChange(p) && (reload(), reloadHistory()));
   if (loading && !open) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const groups: Record<string, any[]> = {};

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, useApi } from "../api.ts";
 import {
   AlertTriangle,
@@ -74,10 +74,13 @@ function fileDiff(diff: string, path: string) {
 export function Changes({
   run,
   tick,
+  activity = 0,
   onChanged,
 }: {
   run: any;
   tick: number;
+  /** Bumped on every transcript event; the diff (git on the server) is refreshed from it at most every 10 s. */
+  activity?: number;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
@@ -86,6 +89,12 @@ export function Changes({
   );
   const [file, setFile] = useState<Record<string, string | null>>({});
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastDiff = useRef(Date.now());
+  useEffect(() => {
+    if (!activity || Date.now() - lastDiff.current < 10_000) return;
+    lastDiff.current = Date.now();
+    void reload();
+  }, [activity]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const prWaiting = data.pr_step?.status === "WAITING_APPROVAL";

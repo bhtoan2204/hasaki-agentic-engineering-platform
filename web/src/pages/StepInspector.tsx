@@ -510,11 +510,15 @@ export function StepInspector({
   run,
   stepKey,
   tick,
+  activity = tick,
   onChanged,
 }: {
   run: any;
   stepKey: string;
+  /** Bumped when step state may have changed (reloads the step). */
   tick: number;
+  /** Bumped on every event of the run (incremental transcript fetches). */
+  activity?: number;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
@@ -1032,14 +1036,14 @@ export function StepInspector({
             <Transcript
               attemptId={attempt.id}
               live={live}
-              tick={tick}
+              tick={activity}
               provider={asProvider(effectiveProvider)}
             />
           ) : (
             <CommandLog
               attemptId={attempt.id}
               live={live}
-              tick={tick}
+              tick={activity}
               startedAt={attempt.started_at}
             />
           ))}

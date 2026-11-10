@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Activity, ChevronDown, Wrench, ChevronRight, ClipboardPaste, ExternalLink, FileSearch, GitBranch, History, RefreshCw, Search, ShieldCheck, Timer } from "lucide-react";
-import { api, useApi, useLive } from "../api.ts";
+import { api, isStateChange, useApi, useLive } from "../api.ts";
 import { act, Badge, Copy, EmptyState, ErrorBox, Field, Loading, Markdown, PageHeader, navigate, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { translate, type UiLocale } from "../i18n/messages.ts";
@@ -173,9 +173,9 @@ function InvestigationDetail({ id }: { id: number }) {
   const { data: run, reload: reloadRun, error } = useApi<any>(`/api/runs/${id}`);
   const t = useRunT(run?.output_locale);
   const { data: inv, reload } = useApi<any>(`/api/runs/${id}/investigation`);
-  useLive(id, () => {
-    reloadRun();
-    reload();
+  useLive(id, (p) => {
+    if (isStateChange(p)) reloadRun();
+    reload(); // searches and evidence arrive with transcript events
   });
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const events = useMemo(() => {

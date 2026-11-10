@@ -729,7 +729,11 @@ export function ProdErrorsPage({
 
   useEffect(() => {
     if (!data?.scanning) return;
-    const t = setInterval(reload, 1500);
+    // Scan progress is in-memory server state, not a workflow event: poll only while a scan runs and the tab is seen.
+    const t = setInterval(
+      () => document.visibilityState === "visible" && reload(),
+      1500,
+    );
     return () => clearInterval(t);
   }, [data?.scanning, reload]);
 

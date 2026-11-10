@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, useApi, useLive, type LiveState } from "../api.ts";
+import { api, isStateChange, useApi, useLive, type LiveState } from "../api.ts";
 import type { EventLite, OfficeSnapshot } from "./types.ts";
 
 const KEEP_EVENTS = 40;
@@ -79,7 +79,15 @@ export function useOfficeExecutionState(
   );
 
   useEffect(() => void pullTranscripts(run), [run, pullTranscripts]);
-  const live: LiveState = useLive(runId, () => void reload(), !!runId);
+  // A transcript line only extends the speech bubbles (incremental); the run itself is reloaded on state changes.
+  const latestRun = useRef(run);
+  latestRun.current = run;
+  const live: LiveState = useLive(
+    runId,
+    (p) =>
+      isStateChange(p) ? void reload() : void pullTranscripts(latestRun.current),
+    !!runId,
+  );
 
   const snapshot: OfficeSnapshot | null = run
     ? {

@@ -145,7 +145,11 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
   const [connecting, setConnecting] = useState(false);
   useEffect(() => {
     if (!st?.windowOpen) return;
-    const timer = setInterval(reloadSt, 1500);
+    // The external login window is not a workflow event: poll while it is open and the tab is visible.
+    const timer = setInterval(
+      () => document.visibilityState === "visible" && reloadSt(),
+      1500,
+    );
     return () => clearInterval(timer);
   }, [st?.windowOpen, reloadSt]);
   const [taskId, setTaskId] = useState("");

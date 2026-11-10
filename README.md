@@ -9,6 +9,7 @@ Importing a task **never** executes anything. You pick a workflow and start a ru
 
 Architecture: [`docs/architecture/agent-architecture.md`](docs/architecture/agent-architecture.md) (single agent + skills + tools) ·
 [`docs/architecture/performance.md`](docs/architecture/performance.md) (FAST / STANDARD / DEEP profiles, reuse, latency) ·
+[`live-updates.md`](docs/architecture/live-updates.md) (SSE, replay, fallback polling) ·
 [`docs/architecture/current-state.md`](docs/architecture/current-state.md) ·
 [`target-state.md`](docs/architecture/target-state.md) · [`migration-plan.md`](docs/architecture/migration-plan.md)
 

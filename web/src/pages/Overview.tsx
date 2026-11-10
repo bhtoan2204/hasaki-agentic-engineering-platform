@@ -61,7 +61,11 @@ export function OverviewPage() {
     if (!p || p.kind === "status") void (reloadRuns(), reloadQ());
   });
   useEffect(() => {
-    const t = setInterval(() => void reloadM(), 60_000);
+    // 30-day aggregates: a minute-old figure is fine, and nobody needs it in a hidden tab.
+    const t = setInterval(
+      () => document.visibilityState === "visible" && void reloadM(),
+      60_000,
+    );
     return () => clearInterval(t);
   }, [reloadM]);
 

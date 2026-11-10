@@ -33,7 +33,7 @@ import {
   Ban,
   PenLine,
 } from "lucide-react";
-import { api, STATUS_COLORS, useApi, useLive } from "../api.ts";
+import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
@@ -131,14 +131,25 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const { data: health, reload: reloadHealth } = useApi<any>(
     `/api/runs/${id}/worker`,
   );
+  // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
+  const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
   useEffect(() => {
-    const timer = setInterval(reloadHealth, 15000);
+    if (finished) return;
+    const timer = setInterval(
+      () => document.visibilityState === "visible" && reloadHealth(),
+      15000,
+    );
     return () => clearInterval(timer);
-  }, [id, reloadHealth]);
+  }, [id, reloadHealth, finished]);
+  // tick: state changed (run, steps, cost, totals, changes); activity: any event (incremental transcript/timeline).
   const [tick, setTick] = useState(0);
-  const live = useLive(id, () => {
-    reload();
-    setTick((t) => t + 1);
+  const [activity, setActivity] = useState(0);
+  const live = useLive(id, (p) => {
+    if (isStateChange(p)) {
+      reload();
+      setTick((t) => t + 1);
+    }
+    setActivity((a) => a + 1);
   });
   const [feedback, setFeedback] = useState("");
 
@@ -584,7 +595,12 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         >
           {stepKey === "~changes" ? (
             <div className="rv-pane">
-              <Changes run={run} tick={tick} onChanged={reload} />
+              <Changes
+                run={run}
+                tick={tick}
+                activity={activity}
+                onChanged={reload}
+              />
             </div>
           ) : stepKey ? (
             <StepInspector
@@ -592,6 +608,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               run={run}
               stepKey={stepKey}
               tick={tick}
+              activity={activity}
               onChanged={reload}
             />
           ) : (
@@ -719,7 +736,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                   </div>
                 </div>
               )}
-              <RunTimeline runId={id} tick={tick} />
+              <RunTimeline runId={id} activity={activity} />
             </div>
           )}
         </aside>
@@ -1130,10 +1147,28 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
   );
 }
 
-function RunTimeline({ runId, tick }: { runId: number; tick: number }) {
+/** Run timeline, fetched once and then incrementally (`?after=`) whenever an event arrives. */
+function RunTimeline({ runId, activity }: { runId: number; activity: number }) {
   const { t } = useI18n();
-  const { data, reload } = useApi<any[]>(`/api/runs/${runId}/events`);
-  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [data, setData] = useState<any[] | null>(null);
+  const last = useRef(0);
+  useEffect(() => {
+    setData(null);
+    last.current = 0;
+  }, [runId]);
+  useEffect(() => {
+    let stop = false;
+    api<any[]>(`/api/runs/${runId}/events?after=${last.current}`)
+      .then((rows) => {
+        if (stop) return;
+        if (rows.length) last.current = rows[rows.length - 1].id;
+        setData((prev) => [...(prev ?? []), ...rows]);
+      })
+      .catch(() => !stop && setData((prev) => prev ?? []));
+    return () => {
+      stop = true;
+    };
+  }, [runId, activity]);
   if (!data) return null;
   return (
     <div className="rv-sec">

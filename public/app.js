@@ -1004,5 +1004,5 @@ window.A = {
   account.addEventListener("keydown", (e) => { if (e.key === "Escape") { account.open = false; account.querySelector("summary").focus(); } });
   META = await api("/api/meta").catch(() => null);
   await render(true);
-  setInterval(() => render(false), 3000);
+  setInterval(() => document.visibilityState === "visible" && render(false), 3000); // classic UI: plain polling, paused while hidden
 })();
