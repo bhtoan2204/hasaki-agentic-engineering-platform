@@ -23,6 +23,7 @@ import {
   answerQuestions,
   stepDetail,
 } from "../src/workflow/engine.ts";
+import { settleBackground } from "../src/workflow/background.ts";
 import { claimJob, processJob } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
@@ -70,11 +71,13 @@ before(async () => {
 afterEach(async () => {
   for (const id of runs.splice(0))
     if (!["CANCELED", "COMPLETED", "FAILED"].includes((await getRun(id)).status)) await cancelRun(id);
+  await settleBackground();
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
 });
 after(async () => {
   setHandoffReadinessForTests(undefined);
   server.close();
+  await settleBackground();
   await pool.end();
 });
 async function run(provider = "claude", fallback: any = {}, extra: any = {}) {

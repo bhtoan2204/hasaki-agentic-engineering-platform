@@ -3,6 +3,7 @@ import { mkdir, realpath, rename, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { dirname, join, relative } from "node:path";
+import pg from "pg";
 import { currentUserId } from "../auth/execution.ts";
 import { config } from "../config.ts";
 import { pool, one } from "../db/pool.ts";
@@ -12,9 +13,26 @@ import { repositoryRemote } from "./remote.ts";
 
 const exec = promisify(execFile);
 
+/**
+ * Advisory locks are held for the whole clone or fetch. That connection must not come from the
+ * application pool: waiters and the clone would otherwise consume every client (including claimJob).
+ * Idle clients do not keep the process alive.
+ */
+let repositoryPool: pg.Pool | undefined;
+function lockPool() {
+  return repositoryPool ??= new pg.Pool({
+    connectionString: config.databaseUrl,
+    max: 4,
+    connectionTimeoutMillis: config.database.connectionTimeoutMillis,
+    idleTimeoutMillis: config.database.idleTimeoutMillis,
+    keepAlive: true,
+    allowExitOnIdle: true,
+  });
+}
+
 /** Session locks survive process concurrency and are released by PostgreSQL after a crash. No stale lockfiles. */
 export async function repositoryLock<T>(repo: LocalRepository, action: () => Promise<T>): Promise<T> {
-  const c = await pool.connect();
+  const c = await lockPool().connect();
   const key = `repository:${config.instanceId}:${repo.id ?? repo.name}`;
   try {
     await c.query("SET lock_timeout='180s'");

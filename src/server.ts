@@ -1,7 +1,7 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
-import { background } from "./workflow/background.ts";
+import { background, settleBackground } from "./workflow/background.ts";
 import { createServer } from "node:http";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { config } from "./config.ts";
@@ -97,6 +97,7 @@ async function shutdown(reason: string, code: number) {
   try {
     await telegram.stop();
     await scheduler.drain(reason);
+    await settleBackground();
   } catch (e) {
     console.error("shutdown:", (e as Error).message);
   } finally {

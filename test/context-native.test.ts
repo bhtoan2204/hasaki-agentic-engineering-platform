@@ -10,7 +10,8 @@ import { config } from "../src/config.ts";
 import { createUser, type PublicUser } from "../src/auth/users.ts";
 import { execution } from "../src/auth/execution.ts";
 import { definitions } from "../src/workflow/definitions.ts";
-import { startRun, beginAttempt, cancelRun, finishAttempt } from "../src/workflow/engine.ts";
+import { startRun, beginAttempt, cancelRun, finishAttempt, reexecuteStep } from "../src/workflow/engine.ts";
+import { settleBackground } from "../src/workflow/background.ts";
 import { claimJob } from "../src/workflow/scheduler.ts";
 import { makeContext } from "../src/workflow/executors/registry.ts";
 import { workItems } from "../src/workitems/service.ts";
@@ -57,11 +58,38 @@ before(async () => {
     scope_type: "GLOBAL",
     ownerId: b.id,
   });
+  await knowledge.create({
+    key: "stock-on-demand",
+    title: "Stock on-demand guide",
+    category: "agent_skill",
+    content: "ON_DEMAND_SECRET_BODY " + "token ".repeat(4000),
+    scope_type: "PROJECT",
+    scope_ref: "OMS",
+    metadata: { load: "on_demand", description: "Load only when editing stock refunds" },
+    ownerId: a.id,
+  });
   await definitions.create({
     key: "context-native",
     spec: {
       name: "Context native fixture",
       steps: [{ key: "inspect", type: "agent", config: { instructions: "Inspect stock refund requirements" } }],
+    },
+  });
+  await definitions.create({
+    key: "context-budget",
+    spec: {
+      name: "Context budget fixture",
+      steps: [
+        { key: "investigate", type: "agent", config: { instructions: "Investigate" } },
+        { key: "notes", type: "agent", config: { instructions: "Notes" } },
+        {
+          key: "fix",
+          type: "agent",
+          depends_on: ["investigate", "notes"],
+          max_attempts: 2,
+          config: { instructions: "Fix", knowledge_index_size: 0, upstream_tokens: 64 },
+        },
+      ],
     },
   });
   server = createServer(handle);
@@ -73,9 +101,11 @@ afterEach(async () => {
     const r = await one(pool, "SELECT status FROM workflow_runs WHERE id=$1", [id]);
     if (!["COMPLETED", "FAILED", "CANCELED"].includes(r.status)) await cancelRun(id);
   }
+  await settleBackground();
 });
 after(async () => {
   server?.close();
+  await settleBackground();
   await pool.end();
 });
 async function live(provider: "claude" | "codex" | "cursor" = "claude", pending?: unknown) {
@@ -565,4 +595,63 @@ test("context pack singleflight never substitutes an authenticated owner's pack 
   const forged = ensureContextPack({ ...ctx, run: { ...ctx.run, owner_id: b.id } }, newMetrics("fixture"), policy);
   await assert.rejects(forged, /owner mismatch/);
   assert.equal((await owned).owner_id, a.id);
+});
+
+test("context pack follows the disclosure plan instead of repeating full knowledge and upstream output", async () => {
+  const narrative = "HUGE_NARRATIVE_" + "n".repeat(8000);
+  const notes = "NOTES_FLOOD_" + "z".repeat(8000);
+  const item = await workItems.createManual({
+    title: "Prevent duplicate stock refund events",
+    description: "Keep refunds idempotent",
+    project: "OMS",
+    ownerId: a.id,
+  });
+  const run = await startRun({ definitionKey: "context-budget", workItemId: item.id, ownerId: a.id, agentProvider: "claude" });
+  runs.push(run.id);
+  const outputFor = (key: string) => key === "investigate"
+    ? { claims: ["refunds can be applied twice"], narrative, note: "see src/stock/refund.go:12" }
+    : { essay: notes };
+  for (let i = 0; i < 2; i++) {
+    const job = (await claimJob("context-budget", 120))!;
+    const begun = (await beginAttempt(job, "context-budget"))!;
+    assert.equal((await finishAttempt(job.id, job.fencing_token, begun.attempt.id, { kind: "completed", output: outputFor(begun.step.key) })).applied, true);
+  }
+  const job = (await claimJob("context-budget", 120))!;
+  const begun = (await beginAttempt(job, "context-budget"))!;
+  assert.equal(begun.step.key, "fix");
+  const ctx = makeContext({ ...begun, signal: new AbortController().signal });
+  const metrics = newMetrics("fixture-model");
+  const pack = await ensureContextPack(ctx, metrics, policy);
+  const skill = ctx.context.knowledge.find((k) => k.key === "stock-on-demand");
+  assert.ok(skill, "on-demand skill was resolved");
+  assert.equal(ctx.context.disclosure.find((d) => d.key === "stock-on-demand")?.disclosure, "search");
+  const fullSkillTokens = estimateTokens(skill!.content);
+  const narrativeTokens = estimateTokens(narrative);
+  const notesTokens = estimateTokens(notes);
+  assert.ok(fullSkillTokens > 4000, `on-demand body is ${fullSkillTokens} estimated tokens`);
+  assert.ok(narrativeTokens > 2000 && notesTokens > 2000);
+  const packed = JSON.stringify(pack);
+  assert.ok(!packed.includes("ON_DEMAND_SECRET_BODY"), "search-tier skill body is not in the pack");
+  assert.ok(!packed.includes("HUGE_NARRATIVE_"), "investigation output covered by the evidence digest is not packed again");
+  assert.ok(!packed.includes("z".repeat(500)), "oversized ancestor output is summarized");
+  assert.match(packed, /Never duplicate stock events/);
+  assert.ok(pack.entries.some((e) => e.id === "evidence_summary"));
+  assert.ok(pack.entries.some((e) => e.id === "file_refs"));
+  assert.match(packed, /src\/stock\/refund\.go/);
+  const notesEntry = pack.entries.find((e) => e.id === "upstream:notes");
+  assert.ok(notesEntry && notesEntry.body.length < 2000, `summarized notes are ${notesEntry?.body.length} chars against ${notes.length}`);
+  assert.ok(pack.omitted.some((o) => o.reason.includes("search")));
+  const env = envFromExecution(ctx, "analysis", policy, metrics, () => {});
+  assert.match(await dispatchPlatformTool("read_knowledge", { key: "stock-on-demand" }, env), /ON_DEMAND_SECRET_BODY/);
+  assert.match(await dispatchPlatformTool("platform.get_step_output", { step_key: "investigate" }, env), /HUGE_NARRATIVE_/);
+  assert.equal((await finishAttempt(job.id, job.fencing_token, begun.attempt.id, { kind: "failed", error: "PREVIOUS_ATTEMPT_MARKER revise refund.go", retryable: false })).applied, true);
+  await reexecuteStep(run.id, "fix", { feedback: "revise the refund path" });
+  const again = (await claimJob("context-budget", 120))!;
+  const next = (await beginAttempt(again, "context-budget"))!;
+  const revised = await ensureContextPack(makeContext({ ...next, signal: new AbortController().signal }), newMetrics("fixture-model"), policy);
+  const revisedText = JSON.stringify(revised);
+  assert.match(revisedText, /PREVIOUS_ATTEMPT_MARKER/);
+  assert.match(revisedText, /revise the refund path/);
+  assert.ok(!revisedText.includes("ON_DEMAND_SECRET_BODY"));
+  console.log(`context pack budget: omitted ${fullSkillTokens}+${narrativeTokens}+${notesTokens} estimated tokens; notes entry ${notesEntry!.body.length} chars`);
 });

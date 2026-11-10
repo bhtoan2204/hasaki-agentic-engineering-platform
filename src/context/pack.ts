@@ -166,6 +166,7 @@ export async function ensureContextPack(
       const budget = role != null && role < globalBudget ? role : globalBudget;
       const budgetSource: ContextPack["budget_source"] = ctx.step.config.context_tokens != null ? "step_config" : budget !== globalBudget ? "role" : "global";
       const entries: ContextEntry[] = [];
+      const searchOmitted: string[] = [];
       const add = (
         id: string,
         section: ContextEntry["section"],
@@ -265,6 +266,7 @@ export async function ensureContextPack(
           source(`run:${ctx.run.id}:evidence`, null, at, "owner", "platform-normalized evidence digest of upstream steps; full outputs via get_step_output", "snapshot"),
         );
       const summarized = new Set(evidence ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, "")) : []);
+      const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
       for (const k of ctx.context.knowledge) {
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
         const mandatory =
@@ -272,10 +274,20 @@ export async function ensureContextPack(
           k.category === "business_rule" ||
           k.reason === "assigned to step" ||
           k.reason.startsWith("selected for this re-execution");
+        const mode = tier.get(k.key) ?? "inline";
+        // Search-tier bodies stay on the snapshot and read_knowledge. Copying them into the pack
+        // paid for text the disclosure plan had already decided not to show.
+        if (!mandatory && mode === "search") {
+          searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
+          continue;
+        }
+        const indexOnly = !mandatory && mode === "index";
         add(
           `knowledge:${k.id ?? k.key}:v${k.version}`,
           "knowledge",
-          { key: k.key, title: k.title, category: k.category, content: k.content },
+          indexOnly
+            ? { key: k.key, title: k.title, category: k.category, disclosure: "index", description: String((k.metadata as { description?: string } | undefined)?.description ?? "").slice(0, 400) }
+            : { key: k.key, title: k.title, category: k.category, content: k.content },
           mandatory ? 990 : 80 + scored.score,
           mandatory,
           source(
@@ -283,11 +295,12 @@ export async function ensureContextPack(
             k.version,
             k.updated_at ?? k.effective_from ?? snap.content.resolved_at,
             k.owner_id == null ? "shared" : "owner",
-            `${k.reason}; ${scored.why}`,
+            `${k.reason}; ${scored.why}${indexOnly ? "; index only — read_knowledge for the body" : ""}`,
             k.category === "task_memory" ? "fresh_at_resolution" : "snapshot",
           ),
           k.category === "task_memory" ? "untrusted_evidence" : "curated_rule",
         );
+        if (indexOnly) entries[entries.length - 1].truncated = true;
       }
       for (const [key, u] of Object.entries(input.upstream))
         if (u.status === "COMPLETED") {
@@ -313,22 +326,51 @@ export async function ensureContextPack(
                 "upstream requirement/constraint fields retained verbatim",
               ),
             );
+          // The evidence digest already carries this step. The raw output stays on get_step_output.
+          if (summarized.has(key)) continue;
+          const planned = ctx.context.upstream?.plan?.[key];
+          const summaryText = ctx.context.upstream?.text?.[key];
           add(
             `upstream:${key}`,
             "continuity",
-            { step: key, attempt_id: u.attempt_id, status: u.status, output: critical ? rest : u.output },
-            // Covered by evidence_summary: the raw output is summarized or omitted first and stays retrievable.
-            summarized.has(key) ? 35 : 60,
+            planned?.mode === "summary" && summaryText != null
+              ? { step: key, attempt_id: u.attempt_id, status: u.status, output: summaryText, summarized_from_tokens: planned.full_tokens }
+              : { step: key, attempt_id: u.attempt_id, status: u.status, output: critical ? rest : u.output },
+            60,
             false,
             source(
               `attempt:${u.attempt_id}`,
               null,
               at,
               "owner",
-              "pinned ancestor evidence; prior agent claims are not verification",
+              planned?.mode === "summary"
+                ? "ancestor output summarized to the upstream budget; full output via get_step_output"
+                : "pinned ancestor evidence; prior agent claims are not verification",
             ),
           );
         }
+      if (ctx.context.fileRefs?.length)
+        add(
+          "file_refs",
+          "code",
+          ctx.context.fileRefs,
+          90,
+          false,
+          source(`snapshot:${ctx.context.snapshot_id}:file_refs`, ctx.context.hash, at, "owner", "paths already identified by ancestor steps; start here instead of scanning the repository"),
+        );
+      if (input.previous_attempt)
+        add(
+          "previous_attempt",
+          "continuity",
+          {
+            number: input.previous_attempt.number,
+            status: input.previous_attempt.status,
+            body: summarizeValue(input.previous_attempt.output ?? input.previous_attempt.error, 6000),
+          },
+          96,
+          false,
+          source(`step:${ctx.step.id}:previous_attempt`, input.previous_attempt.number, at, "owner", "prior attempt of this step; revise it, do not treat it as verified", "historical"),
+        );
       if (!independent) {
         const notes = await q(
           pool,
@@ -525,6 +567,13 @@ export async function ensureContextPack(
       }
       // Attached after budgeting: the cache is stored with the pack but is neither rendered nor counted as context.
       if (retrievalCache) pack = { ...pack, retrieval_cache: retrievalCache };
+      for (const id of searchOmitted) {
+        const candidate = { ...pack, omitted: [...pack.omitted, { id, reason: "progressive disclosure (search); retrieve with read_knowledge" }] };
+        const estimated = estimateTokens(JSON.stringify(candidate)) + 8;
+        if (estimated > pack.budget_tokens) break;
+        pack.omitted.push({ id, reason: "progressive disclosure (search); retrieve with read_knowledge" });
+        pack.estimated_tokens = estimated;
+      }
       const row = await one(
         pool,
         `INSERT INTO agent_context_packs(attempt_id,run_id,step_id,owner_id,snapshot_id,content_hash,content)

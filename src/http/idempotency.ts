@@ -11,7 +11,8 @@ import { pool, one, q, json } from "../db/pool.ts";
  *   different body  → 422: a key belongs to exactly one request
  *   handler error   → 5xx/transport failures release the key so the same action can be retried; 4xx are stored
  *                      (the same input fails the same way)
- * Keys are per user; rows older than a day are pruned.
+ * Keys are per user. Finished rows older than a day are pruned. An in-progress row (status NULL) is kept:
+ * deleting it would let a retry after a crash create a second run.
  */
 export const IDEMPOTENT_ROUTES: RegExp[] = [
   /^\/api\/work-items$/,
@@ -33,12 +34,18 @@ export type Claim =
 
 let lastPrune = 0;
 
+/** Drop finished keys only. In-progress keys stay until the handler stores a response or releases them. */
+export async function pruneIdempotency() {
+  const rows = await q(pool, "DELETE FROM http_idempotency WHERE status IS NOT NULL AND created_at < now() - interval '1 day' RETURNING key");
+  return rows.length;
+}
+
 export async function claimIdempotency(actorId: number, key: string, route: string, body: unknown): Promise<Claim> {
   if (!KEY_RE.test(key)) return { kind: "conflict", status: 400, body: { error: "invalid Idempotency-Key (8–128 of A-Z a-z 0-9 . _ : -)" } };
   const hash = createHash("sha256").update(`${route}\n${JSON.stringify(body ?? null)}`).digest("hex");
   if (Date.now() - lastPrune > 3600_000) {
     lastPrune = Date.now();
-    void q(pool, "DELETE FROM http_idempotency WHERE created_at < now() - interval '1 day'").catch(() => { });
+    void pruneIdempotency().catch(() => { });
   }
   const inserted = await one(
     pool,

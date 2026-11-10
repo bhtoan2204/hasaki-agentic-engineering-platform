@@ -77,7 +77,7 @@ before(async () => {
   wfKey = "refund-fix";
   await definitions.create({ key: wfKey, spec: { name: "refund fix", steps: [{ key: "work", type: "agent", config: { instructions: "Fix the refund calculation." } }] } });
 });
-after(() => pool.end());
+after(async () => { await settleBackground(); await pool.end(); });
 beforeEach(() => {
   scripts = {};
   for (const k of Object.keys(calls)) delete calls[k];

@@ -4,6 +4,7 @@ import pg from "pg";
 import { positiveInt } from "../src/config.ts";
 import { pool, withTx } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
+import { repositoryLock } from "../src/repos/workspaces.ts";
 import { finishAttempt } from "../src/workflow/engine.ts";
 
 before(() => migrate());
@@ -116,6 +117,37 @@ test("with one free pool client, finishAttempt does not borrow a second connecti
     assert.ok(Date.now() - started < 1000, `finishAttempt waited ${Date.now() - started}ms for a second connection`);
   } finally {
     for (const c of held) c.release();
+  }
+});
+
+test("repository advisory locks do not take an application-pool client", async () => {
+  const before = pool.totalCount;
+  let during = -1;
+  await repositoryLock({ id: 1, name: "lock-probe" }, async () => {
+    during = pool.totalCount;
+    assert.equal(pool.waitingCount, 0);
+  });
+  assert.equal(during, before);
+});
+
+test("answered question inbox can use its partial index", async () => {
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL enable_seqscan = off");
+    const plan = (await c.query(
+      `EXPLAIN SELECT q.id
+         FROM workflow_questions q
+         JOIN workflow_steps s ON s.id = q.step_id
+         JOIN workflow_runs r ON r.id = q.run_id
+        WHERE q.status = 'answered'
+        ORDER BY q.answered_at DESC
+        LIMIT 100`,
+    )).rows.map((r) => r["QUERY PLAN"]).join("\n");
+    assert.match(plan, /workflow_questions_answered/);
+    await c.query("ROLLBACK");
+  } finally {
+    c.release();
   }
 });
 

@@ -30,6 +30,7 @@ import {
   startRun,
 } from "../src/workflow/engine.ts";
 import { claimJob, drain, LIGHT_STEP_TYPES, schedulerStatus, runOnce, startScheduler } from "../src/workflow/scheduler.ts";
+import { settleBackground } from "../src/workflow/background.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -159,7 +160,7 @@ before(async () => {
   await repositories.upsert("oms-background", { projects: ["OMS"], services: ["outbox", "consumer"], description: "kafka consumers" });
   await repositories.upsert("payment-src", { projects: ["Payment"], services: ["payment", "refund"] });
 });
-after(() => pool.end());
+after(async () => { await settleBackground(); await pool.end(); });
 beforeEach(() => {
   scripts = {};
   for (const k of Object.keys(calls)) delete calls[k];

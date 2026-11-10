@@ -10,7 +10,6 @@ import { config } from "../config.ts";
 import { budgetsForRun } from "../report/cost.ts";
 import { executionPolicyVersions } from "../learning/policyVersions.ts";
 import { workspacesOf } from "../git/provider.ts";
-import { recordRunOutcome } from "../learning/outcomes.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
@@ -22,10 +21,8 @@ import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
-import { extractRunMemory } from "../knowledge/memory.ts";
-import { detectKnowledgeChanges } from "../knowledge/learning.ts";
-import { storeRunSummary } from "../report/runSummary.ts";
 import { background } from "./background.ts";
+import { dispatchRunEffects, effectKindsFor, enqueueRunEffects } from "./effects.ts";
 import { downstream, getPath, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
@@ -133,15 +130,12 @@ async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: Aft
     if (to === "COMPLETED" || to === "FAILED") afterCommit(() => background(`private Telegram run ${run.id}`, async () => {
       if (!await isEvaluationTelegramRun(run.id)) await (await import("../telegram/workflow.ts")).notifyTelegramRun(run.id, to);
     }));
-    // Cross-task memory: verified facts (enabled) + agent conclusions (disabled until a human approves).
-    if (to === "COMPLETED") afterCommit(() => background(`memory extraction for run ${run.id}`, () => extractRunMemory(run.id)));
-    // Continuous learning: human decisions of this run → reviewable knowledge-change proposals (never auto-applied).
-    if (to === "COMPLETED") afterCommit(() => background(`knowledge change detection for run ${run.id}`, () => detectKnowledgeChanges(run.id)));
   }
-  // "What did this run do?" snapshot for the work item page (factual, from the run's own records; never throws).
-  if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => background(`run ${run.id} summary`, () => storeRunSummary(run.id)));
-  // Verified outcome ladder + deterministic failure categories (no model call; proven states only).
-  if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "CANCELED")) afterCommit(() => background(`run ${run.id} outcome`, () => recordRunOutcome(run.id)));
+  // Summary, outcome, memory and learning are rows in this transaction. The worker deletes a row only
+  // after the effect succeeds, so a crash after COMMIT retries instead of dropping them. Cancel used to
+  // pass no hook, which skipped summary and outcome entirely.
+  await enqueueRunEffects(c, run.id, to);
+  if (afterCommit && effectKindsFor(to).length) afterCommit(() => background(`run ${run.id} effects`, () => dispatchRunEffects()));
 }
 
 async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
@@ -507,7 +501,7 @@ export async function cancelRun(runId: number, reason = "canceled by user") {
       json({ message: reason }),
     ]);
     await q(c, "UPDATE workflow_questions SET status = 'dismissed' WHERE run_id = $1 AND status = 'open'", [runId]);
-    await setRunStatus(c, run, "CANCELED", undefined, reason);
+    await setRunStatus(c, run, "CANCELED", afterCommit, reason);
     afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
     return;
   });

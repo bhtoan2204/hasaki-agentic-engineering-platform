@@ -6,6 +6,7 @@ import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
 import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
+import { dispatchRunEffects } from "./effects.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { localJobs } from "./local.ts";
 import { settleBackground } from "./background.ts";
@@ -167,8 +168,12 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
       })(),
     );
   }
-  const reaper = setInterval(() => reapExpiredLeases().catch((e) => console.error("reaper:", e.message)), Math.max(5, opts.leaseSeconds / 2) * 1000);
-  void reapExpiredLeases().catch(() => { });
+  const reconcile = () => {
+    reapExpiredLeases().catch((e) => console.error("reaper:", e.message));
+    dispatchRunEffects().catch((e) => console.error("run effects:", e.message));
+  };
+  const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);
+  void reconcile();
   console.log(`scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`);
   return {
     async stop() {
@@ -186,6 +191,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
       localJobs.abortAll();
       await Promise.all(loops);
       draining = null;
+      await settleBackground();
     },
   };
 }

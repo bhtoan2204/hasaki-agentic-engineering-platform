@@ -20,6 +20,7 @@ import {
   answerQuestions,
 } from "../src/workflow/engine.ts";
 import { claimJob, processJob } from "../src/workflow/scheduler.ts";
+import { settleBackground } from "../src/workflow/background.ts";
 import { registerExecutor, makeContext } from "../src/workflow/executors/registry.ts";
 import { resolveStepAgent, StepAgentConfig, validateAgentOptions } from "../src/agent/stepAgent.ts";
 import { ensureContextPack } from "../src/context/pack.ts";
@@ -47,9 +48,11 @@ before(async () => {
 afterEach(async () => {
   for (const id of runs.splice(0))
     if (!["COMPLETED", "FAILED", "CANCELED"].includes((await getRun(id)).status)) await cancelRun(id);
+  await settleBackground();
 });
 after(async () => {
   server.close();
+  await settleBackground();
   await pool.end();
 });
 async function run(steps: any[], provider: "claude" | "codex" | "cursor" = "claude") {

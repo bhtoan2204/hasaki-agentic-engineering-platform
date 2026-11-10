@@ -42,12 +42,14 @@ test("legacy data survives the upgrade and is backfilled into work items / pull 
 });
 
 test("migrations are idempotent and refuse edited history", async () => {
+  await migrate(pool);
   assert.deepEqual(await migrate(pool), []);
   const edited = loadMigrations().map((m, i) => (i === 1 ? { ...m, checksum: "tampered" } : m));
   await assert.rejects(migrate(pool, edited), /checksum mismatch/);
 });
 
 test("schema constraints reject invalid keys and statuses", async () => {
+  await migrate(pool);
   await assert.rejects(pool.query(`INSERT INTO workflow_definitions (key, name) VALUES ('Bad Key', 'x')`), /check constraint/);
   await assert.rejects(pool.query(`INSERT INTO work_items (code, source, title) VALUES ('X-1', 'email', 't')`), /check constraint/);
 });
