@@ -71,6 +71,62 @@ export function listTools(query: string | undefined, ctx: Pick<ToolCallContext, 
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
+/**
+ * Integration families as the agent should think of them, in the order they are presented. A tool belongs to the
+ * first family whose pattern matches its name; anything else is grouped under "other".
+ */
+const FAMILIES: Array<{ key: string; label: string; match: RegExp }> = [
+  { key: "splunk", label: "Splunk: production logs (SIEM), read-only searches and events", match: /^splunk[._]/ },
+  { key: "database", label: "project QC databases (MySQL): schema and read-only SQL", match: /^database\./ },
+  { key: "kafka", label: "Kafka UI (QC): topics, consumer groups and lag, messages", match: /^kafka\./ },
+  { key: "vault", label: "Vault (QC): which secret/env keys a service declares (never the values)", match: /^vault\./ },
+  { key: "argocd", label: "Argo CD (QC): applications, pods and pod logs", match: /^argocd\./ },
+  { key: "jira", label: "Jira issues", match: /^jira\./ },
+  { key: "hasaki_work", label: "Hasaki Work tasks", match: /^hasaki_work\./ },
+  { key: "bitbucket", label: "Bitbucket pull requests", match: /^bitbucket\./ },
+  { key: "code_intelligence", label: "code intelligence index (symbols, references, dependencies)", match: /^code_intelligence\./ },
+  { key: "repositories", label: "repository registry", match: /^repositories\./ },
+  { key: "run", label: "this run's history and git changes", match: /^run\./ },
+];
+const familyOf = (name: string) => FAMILIES.find((f) => f.match.test(name)) ?? { key: "other", label: "other", match: /./ };
+
+/**
+ * What this run can actually use, for the step prompt: integration families with their callable tools, plus the ones
+ * that are not usable and why (not connected for the run owner, no QC database for its repositories, read-only step).
+ * Availability is evaluated in the run owner's execution context (personal integrations already loaded).
+ */
+export async function integrationCatalog(ctx: Pick<ToolCallContext, "allowedRepositories" | "mode">) {
+  const groups = new Map<string, { label: string; tools: string[]; reasons: Set<string> }>();
+  for (const t of integrationTools()) {
+    const f = familyOf(t.name);
+    const g = groups.get(f.key) ?? groups.set(f.key, { label: f.label, tools: [], reasons: new Set() }).get(f.key)!;
+    const avail = t.available();
+    if (avail !== true) g.reasons.add(avail);
+    else if (ctx.mode === "analysis" && !t.readOnly) g.reasons.add("changes external state: not callable in this read-only step");
+    else g.tools.push(t.name);
+  }
+  const databases = groups.has("database") ? await databasesForRun(ctx.allowedRepositories) : [];
+  const db = groups.get("database");
+  if (db && !databases.length) {
+    db.tools = [];
+    db.reasons.add("no project QC database covers this run's repositories");
+  }
+  const available: string[] = [];
+  const unavailable: string[] = [];
+  for (const f of [...FAMILIES.map((x) => x.key), "other"]) {
+    const g = groups.get(f);
+    if (!g) continue;
+    if (g.tools.length) {
+      const extra =
+        f === "database"
+          ? `; databases: ${databases.map((d) => `${d.key} (${[d.project, ...d.repositories].filter(Boolean).join(", ")}${d.description ? `: ${d.description.slice(0, 120)}` : ""})`).join("; ")}`
+          : "";
+      available.push(`- ${f}: ${g.label}${extra}. Tools: ${g.tools.join(", ")}`);
+    } else unavailable.push(`${f} (${[...g.reasons][0] ?? "unavailable"})`);
+  }
+  return { available, unavailable };
+}
+
 export function describeTool(name: string) {
   const t = registry.get(name);
   if (!t) throw new Error(`unknown tool "${name}" — use list_tools`);

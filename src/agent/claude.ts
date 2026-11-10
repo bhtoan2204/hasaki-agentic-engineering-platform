@@ -75,7 +75,7 @@ import {
   type PolicyContext,
   type ToolMode,
 } from "./toolPolicy.ts";
-import { integrationTools } from "./toolRegistry.ts";
+import { integrationCatalog, integrationTools } from "./toolRegistry.ts";
 import { dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
 import { runCommand } from "../workflow/executors/builtin.ts";
 import {
@@ -336,7 +336,7 @@ function platformServer(
     ),
     tool(
       "list_tools",
-      "Discover domain integration tools (Hasaki Work, Jira, Bitbucket, repository registry, this run's history/changes). Optional query ranks by relevance.",
+      "Discover integration tools (Splunk production logs, project QC databases, Kafka, Vault, Argo CD, Jira, Hasaki Work, Bitbucket, code intelligence, repository registry, this run's history/changes). Optional query ranks by relevance.",
       { query: z.string().optional() },
       call("list_tools"),
     ),
@@ -811,11 +811,14 @@ const agentExecutor: StepExecutor = {
         extras,
         ctx.context.contextPack,
       );
+    // Which integrations this run can actually use (connected for the owner, databases in its repository scope).
+    const integrations = await integrationCatalog({ allowedRepositories: ctx.run.allowed_repositories, mode }).catch(() => undefined);
     const systemAppend = buildSystemAppend(
       ctx.run,
       ctx.step,
       ctx.context,
       mode,
+      integrations,
     );
 
     // The PreToolUse hook sees the shell's real cwd; canUseTool (called afterwards for the same call) does not.

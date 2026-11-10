@@ -252,3 +252,29 @@ test("real MySQL/MariaDB: rows, cap, masking, READ ONLY transaction and the writ
   assert.match(t.warning!, /write privileges/);
   await assert.rejects(runQuery(rootDb, "SELECT * FROM no_such_table"), /ER_NO_SUCH_TABLE|doesn't exist/);
 });
+
+test("the step prompt tells the agent which integrations THIS run can use, and which it cannot", async () => {
+  const { integrationCatalog } = await import("../src/agent/toolRegistry.ts");
+  const { buildSystemAppend } = await import("../src/agent/stepPrompt.ts");
+  const oms = await integrationCatalog({ allowedRepositories: ["oms-api"], mode: "analysis" });
+  const line = (key: string) => oms.available.find((l) => l.startsWith(`- ${key}:`));
+  assert.ok(line("database"), JSON.stringify(oms));
+  assert.match(line("database")!, /oms-qc \(OMS/);
+  assert.doesNotMatch(line("database")!, /payment-qc|warranty-qc/, "only databases covered by this run's repositories");
+  assert.match(line("database")!, /database\.query/);
+  // personal integrations that nobody connected in this test are listed as unusable, with the reason
+  // (splunk_search stays available without a connection: it falls back to manual results pasted by the user)
+  for (const f of ["kafka", "vault", "argocd"]) assert.ok(oms.unavailable.some((u) => u.startsWith(`${f} (`)), `${f}: ${JSON.stringify(oms.unavailable)}`);
+  const none = await integrationCatalog({ allowedRepositories: [], mode: "analysis" });
+  assert.ok(none.unavailable.some((u) => /^database \(no project QC database/.test(u)));
+
+  const run: any = { id: 1, definition_key: "bug-investigation", output_locale: "en", allowed_repositories: ["oms-api"], selected_repositories: ["oms-api"], inputs: {}, branch: "wf/x" };
+  const step: any = { key: "analyze", name: "Analyze", type: "agent", config: {} };
+  const ctx: any = { knowledge: [], repositories: [], repoPaths: [], upstream: [], fileRefs: [] };
+  const prompt = buildSystemAppend(run, step, ctx, "analysis", oms);
+  assert.match(prompt, /Integrations available to THIS run/);
+  assert.match(prompt, /- database: project QC databases/);
+  assert.match(prompt, /Not usable in this run: .*kafka \(Kafka UI not connected/);
+  const generic = buildSystemAppend(run, step, ctx, "analysis");
+  assert.match(generic, /Splunk, project QC databases, Kafka, Vault, Argo CD/, "without a catalog the section still names every integration");
+});
