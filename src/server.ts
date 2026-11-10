@@ -3,6 +3,7 @@ import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
 import { background, settleBackground } from "./workflow/background.ts";
 import { createServer } from "node:http";
+import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { config } from "./config.ts";
 import { startInstanceHeartbeat } from "./instances.ts";
@@ -30,6 +31,12 @@ import { childGroups } from "./workflow/local.ts";
 // resolves every open socket's peer with a SYNCHRONOUS reverse-DNS lookup on the main thread; over VPN each lookup
 // times out (5 s), so with the DB pool and SSE sockets open the whole server froze for minutes at every agent start.
 (process.report as NodeJS.ProcessReport & { excludeNetwork: boolean }).excludeNetwork = true; // Node ≥ 22.13; older @types lack it
+
+// Node gives each address of a host only 250 ms to connect before trying the next ("happy eyeballs"), and fails the
+// whole connection when every attempt is cut short. Without an IPv6 route (WSL) and with a distant server (Telegram:
+// ~1 s to connect from here), every outbound fetch to it failed with ETIMEDOUT after ~280 ms — the Telegram receiver
+// logged that as "Telegram API error 503". Give each address 2.5 s; a real outage still fails at the caller's timeout.
+setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) {
   console.error("AUTH_SECRET must be set (at least 16 characters). Refusing to start.");

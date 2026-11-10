@@ -1,3 +1,4 @@
+import { networkCode } from "../telegram/client.ts";
 import { forgetBitbucketChecks } from "../repos/access.ts";
 import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
 import { botKey } from "../telegram/client.ts";
@@ -69,7 +70,9 @@ async function telegramApi(token: string, method: string, body?: unknown) {
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(8000),
   }).catch((e: Error) => {
-    throw new Error(`không gọi được Telegram: ${e.name === "TimeoutError" ? "timeout" : e.message.split(token).join("***")}`);
+    // "fetch failed" alone says nothing: name the system error (ETIMEDOUT, ENOTFOUND, ECONNREFUSED…) and the host.
+    const host = (() => { try { return new URL(config.telegram.apiBase).host; } catch { return "Telegram API"; } })();
+    throw new Error(`không gọi được Telegram (${networkCode(e)}): máy chạy platform không kết nối được tới ${host}; kiểm tra mạng, VPN hoặc proxy (TELEGRAM_API_BASE)`);
   });
   const j: any = await res.json().catch(() => ({}));
   if (!res.ok || !j.ok) throw new Error(`Telegram ${method}: ${String(j.description ?? `HTTP ${res.status}`).split(token).join("***")}`);

@@ -105,12 +105,19 @@ async function refreshTelegramCredentials() {
 }
 /** A loggable reason: Telegram error codes and our own messages only, never URLs, tokens or payloads. */
 export function consumerFailure(e: unknown) {
-  if (e instanceof TelegramApiError) return e.code === 401 || e.code === 404 ? "bot token rejected by Telegram (401/404)" : e.code === 409 ? "another getUpdates/webhook consumer is active for this bot (409)" : `Telegram API error ${e.code}`;
+  if (e instanceof TelegramApiError) {
+    if (e.network) return `cannot reach ${apiHost()} (${e.network}): check this machine's network, VPN or proxy (TELEGRAM_API_BASE)`;
+    return e.code === 401 || e.code === 404 ? "bot token rejected by Telegram (401/404)" : e.code === 409 ? "another getUpdates/webhook consumer is active for this bot (409)" : `Telegram API error ${e.code}`;
+  }
   if (e instanceof HttpError) return e.message;
   const message = e instanceof Error ? e.message : String(e);
   const token = config.telegram.botToken;
   return textLimitSafe(token ? message.split(token).join("[redacted]") : message);
 }
+/** Host only: the API base never carries the token, but its path is not logged either. */
+const apiHost = () => {
+  try { return new URL(config.telegram.apiBase).host; } catch { return "the Telegram API"; }
+};
 const textLimitSafe = (s: string) => s.replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot[redacted]").slice(0, 200);
 export function startTelegramTransport() {
   // A reserved lock connection must not exhaust the application pool (including poolMax=1).

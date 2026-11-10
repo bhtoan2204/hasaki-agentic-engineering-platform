@@ -245,3 +245,28 @@ test("expiry cleanup deletes old decided capabilities but never pending ones",as
  assert.ok(!await one(pool,"SELECT 1 FROM telegram_actions WHERE action_id=ANY($1)",[[approve.action_id,reject.action_id]]));
  assert.equal((await one(pool,"SELECT status FROM telegram_actions WHERE action_id=$1",[pending.action_id]))!.status,"pending");
 });
+
+test("an unreachable Telegram API is reported as a network failure with its system code, never as a Telegram 503", async () => {
+  const { telegramCall, TelegramApiError } = await import("../src/telegram/client.ts");
+  const { consumerFailure } = await import("../src/telegram/transport.ts");
+  const saved = config.telegram.apiBase;
+  // A port that was free a moment ago: nothing listens there (port 1 is refused by fetch itself as a "bad port").
+  const probe = createServer();
+  await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+  const closedPort = (probe.address() as any).port;
+  await new Promise<void>((r) => probe.close(() => r()));
+  config.telegram.apiBase = `http://127.0.0.1:${closedPort}`;
+  try {
+    const e = await telegramCall("getMe", {}, { token: "123456:SECRET_TOKEN_VALUE", timeout: 3000 }).then(() => null, (x) => x);
+    assert.ok(e instanceof TelegramApiError);
+    assert.equal(e.code, 503, "still retried like a temporary outage");
+    assert.equal(e.network, "ECONNREFUSED");
+    const reason = consumerFailure(e);
+    assert.match(reason, new RegExp(`cannot reach 127\\.0\\.0\\.1:${closedPort} \\(ECONNREFUSED\\)`));
+    assert.doesNotMatch(reason, /SECRET_TOKEN_VALUE|503/);
+  } finally {
+    config.telegram.apiBase = saved;
+  }
+  assert.equal(consumerFailure(new TelegramApiError(503)), "Telegram API error 503", "a real 503 from Telegram keeps its wording");
+  assert.match(consumerFailure(new TelegramApiError(503, 5, "ETIMEDOUT")), /cannot reach .*\(ETIMEDOUT\)/);
+});

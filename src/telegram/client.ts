@@ -5,7 +5,20 @@ import { config } from "../config.ts";
 export const botKey = (token = config.telegram.botToken) => createHash("sha256").update(token).digest("hex");
 export class TelegramApiError extends Error {
   code: number; retryAfter: number;
-  constructor(code: number, retryAfter = 5) { super(`Telegram request failed (${code})`); this.code = code; this.retryAfter = retryAfter; }
+  /** Set when Telegram was never reached (DNS, connect, TLS, timeout): the system error code, e.g. "ETIMEDOUT". */
+  network?: string;
+  constructor(code: number, retryAfter = 5, network?: string) {
+    super(network ? `Telegram unreachable (${network})` : `Telegram request failed (${code})`);
+    this.code = code; this.retryAfter = retryAfter; this.network = network;
+  }
+}
+/** The system error code behind a failed fetch (undici nests it in `cause`, sometimes twice); never a URL or token. */
+export function networkCode(e: unknown): string {
+  const err = e as { name?: string; code?: string; cause?: { code?: string; cause?: { code?: string } } };
+  if (err?.name === "TimeoutError") return "timeout";
+  if (err?.name === "AbortError") return "aborted";
+  const code = err?.cause?.code ?? err?.cause?.cause?.code ?? err?.code;
+  return typeof code === "string" && /^[A-Za-z_]{2,40}$/.test(code) ? code : "network error";
 }
 /** Never return/log a token-bearing URL or remote error description. */
 export async function telegramCall(method: string, body: unknown, options: { token?: string; signal?: AbortSignal; timeout?: number } = {}): Promise<any> {
@@ -22,7 +35,8 @@ export async function telegramCall(method: string, body: unknown, options: { tok
     return data.result;
   } catch (e) {
     if (e instanceof TelegramApiError) throw e;
-    throw new TelegramApiError(503);
+    // Not an answer from Telegram: keep the retry semantics of a 503, but say what actually happened.
+    throw new TelegramApiError(503, 5, networkCode(e));
   }
 }
 export function validWebhookSecret(value: unknown) {
