@@ -517,6 +517,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.subtitle":
       "Registry dùng cho repository discovery và tập repo được phép (theo project). Agent không bao giờ sửa repo ngoài tập được phép của run.",
     "repo.add": "Thêm repo",
+    "repo.delete": "Xóa",
+    "repo.deleteConfirm":
+      "Xóa {name} khỏi registry? Run mới sẽ không dùng được repo này nữa. Lịch sử run cũ và thư mục checkout trên máy được giữ nguyên.",
+    "repo.deleted": "Đã xóa {name}",
     "repo.list": "Danh sách",
     "repo.missing": "Không tìm thấy repository",
     "repo.back": "Về danh sách",
@@ -2618,6 +2622,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.subtitle":
       "Registry used for repository discovery and the set of repos a run may touch (by project). The agent never edits a repo outside that set.",
     "repo.add": "Add repo",
+    "repo.delete": "Delete",
+    "repo.deleteConfirm":
+      "Remove {name} from the registry? New runs will no longer be able to use it. Past runs and the local checkout on disk are kept.",
+    "repo.deleted": "Deleted {name}",
     "repo.list": "List",
     "repo.missing": "Repository not found",
     "repo.back": "Back to the list",

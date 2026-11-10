@@ -35,6 +35,11 @@ function allRepositories(db: Db): Promise<RepositoryRow[]> {
 
 const EDITABLE = ["repository_url", "default_branch", "path", "description", "projects", "services", "owners", "tags", "dependencies", "architecture", "allowed_actions", "enabled", "remote_slug", "provider"] as const;
 
+/** A repository cannot be removed right now (HTTP 409). */
+export class RepositoryInUseError extends Error {
+  status = 409;
+}
+
 export const repositories = {
   list(db: Db = pool) {
     return allRepositories(db);
@@ -77,6 +82,21 @@ export const repositories = {
       ]);
     }
     return repositories.get(name, db);
+  },
+
+  /**
+   * Unregister a repository. Only the registry row (and its code-intelligence index, by cascade) is removed: local
+   * checkouts on disk, past runs and their workspaces keep the name as history. Refused while an unfinished run may
+   * use it, and for a repository this installation's config.projects would re-register on the next start.
+   */
+  async remove(name: string, db: Db = pool) {
+    const existing = await repositories.get(name, db);
+    if (!existing) return false;
+    const active = await one(db, "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1", [name]);
+    if (active) throw new RepositoryInUseError(`Repository is used by unfinished run #${active.id}; finish or cancel it first, or disable the repository`);
+    if (configuredRepositories().has(name)) throw new RepositoryInUseError("Repository comes from config.json projects and would be registered again on restart; remove it there first, or disable it");
+    await q(db, "DELETE FROM repositories WHERE name = $1", [name]);
+    return true;
   },
 
   /**
@@ -153,7 +173,8 @@ export function expandRepoEntry(rel: string): string[] {
  * The registry lives in a database that several machines may share, each with its own reposRoot. A repository missing
  * from THIS machine is left alone. Local discovery only bootstraps absent entries; metadata edits are explicit.
  */
-export async function syncRepositoriesFromConfig() {
+/** Repositories this installation's config.projects would (re-)register on boot: name → relative path and projects. */
+export function configuredRepositories(): Map<string, { rel: string; projects: string[] }> {
   const found = new Map<string, Set<string>>(); // relative path -> projects
   const add = (rel: string, project?: string) => {
     const s = found.get(rel) ?? found.set(rel, new Set()).get(rel)!;
@@ -161,13 +182,21 @@ export async function syncRepositoriesFromConfig() {
   };
   for (const [project, entries] of Object.entries(config.projects)) for (const e of entries) for (const rel of expandRepoEntry(e)) add(rel, project);
   const taken = new Map<string, string>();
+  const out = new Map<string, { rel: string; projects: string[] }>();
   for (const [rel, projects] of found) {
     let name = rel.split("/").pop()!;
     if (taken.has(name) && taken.get(name) !== rel) name = rel.replace(/\//g, ".");
     taken.set(name, rel);
+    out.set(name, { rel, projects: [...projects] });
+  }
+  return out;
+}
+
+export async function syncRepositoriesFromConfig() {
+  for (const [name, { rel, projects }] of configuredRepositories()) {
     const existing = await repositories.get(name);
     const path = rel === name ? "" : rel;
-    if (!existing) await repositories.upsert(name, { path, projects: [...projects], remote_slug: name });
+    if (!existing) await repositories.upsert(name, { path, projects, remote_slug: name });
   }
   // Existing shared entries are never changed based on this installation's config or filesystem.
 

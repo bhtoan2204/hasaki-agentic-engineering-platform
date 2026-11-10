@@ -17,6 +17,7 @@ import {
   Save,
   ShieldCheck,
   Tag,
+  Trash2,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -216,6 +217,17 @@ export function RepositoriesPage({
     if (name) navigate("/repositories");
     setCreating(true);
   };
+  const remove = async (repo: string) => {
+    if (!confirm(t("repo.deleteConfirm", { name: repo }))) return;
+    if (
+      await act(
+        () =>
+          api(`/api/repositories/${encodeURIComponent(repo)}/delete`, {}),
+        t("repo.deleted", { name: repo }),
+      )
+    )
+      (reload(), navigate("/repositories"));
+  };
 
   const editor = form && (
     <RepoForm form={form} setForm={setForm} isNew={!name} onSave={save} />
@@ -244,6 +256,12 @@ export function RepositoriesPage({
                 <Plus size={15} />
                 {t("repo.add")}
               </button>
+              {r && (
+                <button className="danger" onClick={() => remove(r.name)}>
+                  <Trash2 size={15} />
+                  {t("repo.delete")}
+                </button>
+              )}
             </>
           }
         />

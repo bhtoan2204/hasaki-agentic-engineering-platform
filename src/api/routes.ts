@@ -43,7 +43,7 @@ import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
 import { repositoryRemote } from "../repos/remote.ts";
 import { prepareRepository, workspaceStatus, testRepositoryConnection } from "../repos/workspaces.ts";
-import { repositories, isAmbiguous } from "../repos/service.ts";
+import { repositories, isAmbiguous, RepositoryInUseError } from "../repos/service.ts";
 import { definitions } from "../workflow/definitions.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { runEvents } from "../workflow/events.ts";
@@ -518,6 +518,17 @@ export const routes: Route[] = [
   // ------------------------------------------------------------ repositories
   ["POST", /^\/api\/repositories\/validate-url$/, ({ body }) => repositoryRemote(body.repository_url)],
   ["GET", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/workspace$/, async ({ p }) => workspaceStatus(must(await repositories.get(p[0]), "Repository"))],
+  ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/delete$/, async ({ p, actor }) => {
+    requireAdmin(actor);
+    try {
+      if (!(await repositories.remove(p[0]))) throw new HttpError(404, "Repository not found");
+    } catch (e) {
+      if (e instanceof RepositoryInUseError) throw new HttpError(409, e.message);
+      throw e;
+    }
+    await audit(actor.id, "repository.delete", "repository", p[0]);
+    return { ok: true };
+  }],
   ["POST", /^\/api\/repositories\/([A-Za-z0-9._-]+)\/(test-connection|prepare|refresh)$/, async ({ p }) => {
     const repo = must(await repositories.get(p[0]), "Repository");
     if (!repo.enabled || !repo.allowed_actions.includes("read")) throw new HttpError(403, "Repository read permission required");
