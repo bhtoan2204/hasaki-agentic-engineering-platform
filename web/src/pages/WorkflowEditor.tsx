@@ -262,6 +262,24 @@ function Editor({ wfKey }: { wfKey: string }) {
     [spec],
   );
 
+  // Ctrl+S / ⌘S publishes the workflow (same as the Publish button: validate, save, publish a new version) instead of
+  // the browser's "Save page". Declared before the early returns; `publish` is defined below and kept in a ref.
+  const publishRef = useRef<() => Promise<void>>(async () => {});
+  const publishing = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      if (publishing.current || e.repeat) return;
+      publishing.current = true;
+      void publishRef.current().finally(() => {
+        publishing.current = false;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (loading && !def) return <Loading />;
   if (error)
     return (
@@ -418,6 +436,7 @@ function Editor({ wfKey }: { wfKey: string }) {
       reload();
     }
   };
+  publishRef.current = publish;
   const loadVersion = (v: string) => {
     if (dirty && !confirm(t("wfe.discard"))) return;
     if (v === "draft") load(def.draft_spec);
@@ -500,7 +519,12 @@ function Editor({ wfKey }: { wfKey: string }) {
               onChange={(e) => setNote(e.target.value)}
               aria-label={t("wfe.changeNoteAria")}
             />
-            <button className="sm" onClick={publish}>
+            <button
+              className="sm"
+              onClick={publish}
+              title={t("wfe.publishShortcut")}
+              aria-keyshortcuts="Control+S Meta+S"
+            >
               <Rocket size={15} /> {t("wfe.publish")}
             </button>
           </div>
