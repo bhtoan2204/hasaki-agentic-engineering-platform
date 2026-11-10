@@ -5,9 +5,43 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to the same branch makes the older run pointless: cancel it instead of queueing both.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+  # Code search falls back to ripgrep (src/codeIntelligence/search.ts); workers must have it, so CI does too.
+  RIPGREP_VERSION: 15.1.0
+  RIPGREP_SHA256: 1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
+
 jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # node_modules keyed by the lockfile: an unchanged lockfile skips `npm ci` entirely.
+      - id: modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The suite runs one file at a time against its own database; three shards run in parallel jobs.
+        shard: [1, 2, 3]
+    name: test (${{ matrix.shard }}/3)
     services:
       postgres:
         image: postgres:17-alpine
@@ -17,19 +51,43 @@ jobs:
           POSTGRES_DB: platform
         ports:
           - 5432:5432
+        # Every test file creates its own database: the default 64 MB /dev/shm is too small for that.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U platform -d platform"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+          node-version: ${{ env.NODE_VERSION }}
+      - id: modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - id: ripgrep
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/ripgrep
+          key: ripgrep-${{ runner.os }}-${{ env.RIPGREP_VERSION }}-${{ env.RIPGREP_SHA256 }}
+      - name: Install ripgrep (pinned, checksum-verified)
+        if: steps.ripgrep.outputs.cache-hit != 'true'
+        run: |
+          f="ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSLo "/tmp/$f" "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/$f"
+          echo "${RIPGREP_SHA256}  /tmp/$f" | sha256sum -c -
+          mkdir -p ~/.local/ripgrep
+          tar -xzf "/tmp/$f" -C ~/.local/ripgrep --strip-components=1
+      - run: echo "$HOME/.local/ripgrep" >> "$GITHUB_PATH"
+      - run: rg --version
+      - name: npm test (shard ${{ matrix.shard }}/3)
+        run: >-
+          node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1
+          --test-shard=${{ matrix.shard }}/3 test/*.test.ts
         env:
           TEST_DATABASE_ADMIN_URL: postgres://platform:platform@localhost:5432/platform

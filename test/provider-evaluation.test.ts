@@ -24,7 +24,17 @@ import { registerDefaultExecutors } from "../src/workflow/executors/index.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 import { handle } from "../src/http/app.ts";
+import { sandboxIdentity } from "../src/eval/isolation.ts";
 let owner: PublicUser, other: PublicUser, admin: PublicUser, suite: any, server: Server, base: string;
+/**
+ * Objective validation runs inside the evaluation sandbox (src/eval/isolation.ts): a container runtime with a
+ * pre-loaded image (never pulled) and a pinned Nix Node closure. Where that infrastructure is absent (CI runners,
+ * developer machines without Nix), the cases that need it are skipped with the reason instead of failing.
+ */
+const sandboxMissing = await sandboxIdentity().then(
+  () => false as const,
+  (e: Error) => `evaluation sandbox unavailable on this machine (${e.message.slice(0, 80)}…)`,
+);
 let seq = 0;
 const url = (q = "") => new URL("http://local/?from=2026-01-01&to=2027-01-01&timezone=UTC" + q);
 before(async () => {
@@ -94,7 +104,7 @@ test("provider models and context settings are strictly validated without cross-
     assert.equal(ConfigurationSchema.safeParse(cfg).success, false);
 });
 
-test("six provider plans use durable attempts and equivalent pinned fixtures with objective validation", async () => {
+test("six provider plans use durable attempts and equivalent pinned fixtures with objective validation", { skip: sandboxMissing }, async () => {
   for (const route of [
     ["claude"],
     ["codex"],
@@ -129,7 +139,7 @@ test("six provider plans use durable attempts and equivalent pinned fixtures wit
   }
 });
 
-test("A/B/C isolates pack/tool access and paired comparisons reject multiple changing factors", async () => {
+test("A/B/C isolates pack/tool access and paired comparisons reject multiple changing factors", { skip: sandboxMissing }, async () => {
   const a = await evaluation(["codex"], "minimal"),
     b = await evaluation(["codex"], "pack"),
     c = await evaluation(["codex"], "tools");
@@ -303,6 +313,8 @@ async function client(user: PublicUser) {
     });
 }
 test("analytics, evidence and recommendation endpoints preserve owner isolation and audited admin scope", async () => {
+  // Its own evidence, not data left by earlier tests (those may be skipped where the sandbox is unavailable).
+  await finish((await evaluation(["codex"], "tools", { repetitions: 3 })).id);
   const a = await client(owner),
     b = await client(other),
     support = await client(admin);
