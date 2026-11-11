@@ -26,6 +26,7 @@ import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
 import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
 import { scoreKnowledge } from "../context/plan.ts";
+import { externalNotice, isExternal } from "../knowledge/external.ts";
 import { callTool, capResult, describeTool, listTools } from "./toolRegistry.ts";
 import { isInside, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
@@ -461,7 +462,8 @@ async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
   const offset = Number(args.offset ?? 0),
     limit = Number(args.limit ?? 18000);
   const body = k.content.slice(offset, offset + limit);
-  return `# ${k.title} (${k.key} v${k.version})\n\n${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
+  const notice = isExternal(k.metadata) && offset === 0 ? `${externalNotice(k.metadata)}\n\n` : "";
+  return `# ${k.title} (${k.key} v${k.version})\n\n${notice}${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
 }
 
 async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string> {

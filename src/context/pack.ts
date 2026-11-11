@@ -7,6 +7,7 @@ import { dispatchPlatformTool, envFromExecution } from "../agent/platformTools.t
 import { safeDiagnostics } from "../agent/telemetry.ts";
 import { redactContextText, redactContextValue } from "./redact.ts";
 import { singleflight } from "../cache/index.ts";
+import { externalNotice, isExternal } from "../knowledge/external.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { AgentMetrics } from "../agent/metrics.ts";
 import type { PolicyContext } from "../agent/toolPolicy.ts";
@@ -375,11 +376,20 @@ export async function ensureContextPack(
                 title: k.title,
                 category: k.category,
                 disclosure: "index",
-                description: String(
-                  (k.metadata as { description?: string } | undefined)?.description ?? "",
-                ).slice(0, 400),
+                description:
+                  (isExternal(k.metadata) ? "[third-party] " : "") +
+                  String(
+                    (k.metadata as { description?: string } | undefined)?.description ?? "",
+                  ).slice(0, 400),
               }
-            : { key: k.key, title: k.title, category: k.category, content: k.content },
+            : {
+                key: k.key,
+                title: k.title,
+                category: k.category,
+                content: isExternal(k.metadata)
+                  ? `${externalNotice(k.metadata)}\n\n${k.content}`
+                  : k.content,
+              },
           mandatory ? 990 : 80 + scored.score,
           mandatory,
           source(

@@ -19,6 +19,7 @@
     "dev:web": "vite --config web/vite.config.ts",
     "knowledge:import": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts",
     "knowledge:rescope": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/rescope-knowledge.ts",
+    "skills:import-external": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/import-external-skills.ts",
     "step:reexecute": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/reexecute-step.ts",
     "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts",
     "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts",

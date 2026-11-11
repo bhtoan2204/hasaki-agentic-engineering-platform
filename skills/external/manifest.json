@@ -1,0 +1,424 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "key": "skill.ext.verification-before-completion",
+      "name": "verification-before-completion",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/obra/superpowers",
+        "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+        "path": "skills/verification-before-completion",
+        "path_commit": "3be5aad3dd2400ef23b15680969f4bcd3b6d7b8b",
+        "license": "MIT",
+        "attribution": "Copyright (c) 2025 Jesse Vincent. MIT License (skills/external/LICENSE.superpowers-MIT).",
+        "adapted": false,
+        "adaptation_notes": []
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor",
+          "test",
+          "regression_test",
+          "fix_test"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3",
+          "upstream_sha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3",
+          "modified": false
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.systematic-debugging",
+      "name": "systematic-debugging",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/obra/superpowers",
+        "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+        "path": "skills/systematic-debugging",
+        "path_commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+        "license": "MIT",
+        "attribution": "Copyright (c) 2025 Jesse Vincent. MIT License (skills/external/LICENSE.superpowers-MIT).",
+        "adapted": true,
+        "adaptation_notes": [
+          "replaced the keychain/secret-printing multi-layer example with a PII/secret-safe boundary-logging example",
+          "'ask for help' / 'discuss with your human partner' -> ask_user tool or blocked result",
+          "superpowers:* skill references -> registry keys (read_knowledge)",
+          "find-polluter.sh and condition-based-waiting-example.ts not imported (no executable scripts); text describes the technique"
+        ]
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "root_cause",
+          "fix_proposal",
+          "analyze_findings",
+          "analyze_code",
+          "correlate"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "9d3e4c305cf44f1acdaffc80ff058c59816a08011b0875384cbf6a8db5f7757d",
+          "upstream_sha256": "51c6435d98c83c42c96ba7c35725a0b2c376cd487fb1a4e6bd0ddbe7e33ef202",
+          "modified": true
+        },
+        {
+          "file": "condition-based-waiting.md",
+          "sha256": "88db8302daaa0fbdc21f586bffca9012c51f5c1dab46d152bcd173b3ff277b5d",
+          "upstream_sha256": "e89fec8400d6cd50f43407cec9fab50976ba4d55d0ec2eb51c0bd68036b54c26",
+          "modified": true
+        },
+        {
+          "file": "defense-in-depth.md",
+          "sha256": "1e175fb86fc357e58c6aebf5441e481e1b7868b4380c0456b63a17eefbd18ba7",
+          "upstream_sha256": "1e175fb86fc357e58c6aebf5441e481e1b7868b4380c0456b63a17eefbd18ba7",
+          "modified": false
+        },
+        {
+          "file": "root-cause-tracing.md",
+          "sha256": "984f71a0ff5b03b1fdb9e91b262bad0af0bf1bd2e6cff0b1ad402583fec51460",
+          "upstream_sha256": "75b933b6a8c40bdb2031b10f21654395b56ec6ab6bc7b018c18d3fe57aeb7fb8",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.test-driven-development",
+      "name": "test-driven-development",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/obra/superpowers",
+        "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+        "path": "skills/test-driven-development",
+        "path_commit": "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+        "license": "MIT",
+        "attribution": "Copyright (c) 2025 Jesse Vincent. MIT License (skills/external/LICENSE.superpowers-MIT).",
+        "adapted": true,
+        "adaptation_notes": [
+          "'delete code written before the test' limited to code written in the current step; never pre-existing or developer code",
+          "exceptions are recorded in the step result / asked with ask_user instead of 'ask your human partner'"
+        ]
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor",
+          "regression_test",
+          "test",
+          "fix_test"
+        ]
+      },
+      "supersedes": [
+        "user.skill.tdd"
+      ],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "df4dd4f237b62662702515c8d4bce4cb5b73c20ab0d95d7c25c021c880725a6f",
+          "upstream_sha256": "64b03fce4aee5a97a93160cea8111f3ba13a17b7c001db4bd5836d67fd10705d",
+          "modified": true
+        },
+        {
+          "file": "writing-good-tests.md",
+          "sha256": "102c53bdb484d0740fdbb5960c1e9ec7d9e5eb6e83039600a9dc2082682933fd",
+          "upstream_sha256": "51471c853306ff92ca8bb41dcaea05f31c0e46b03651f8f3c99754b7172f4ae1",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.writing-plans",
+      "name": "writing-plans",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/obra/superpowers",
+        "commit": "22f0b463e7a5e579904dd6211a520321035526f7",
+        "path": "skills/writing-plans",
+        "path_commit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
+        "license": "MIT",
+        "attribution": "Copyright (c) 2025 Jesse Vincent. MIT License (skills/external/LICENSE.superpowers-MIT).",
+        "adapted": true,
+        "adaptation_notes": [
+          "removed announce line, worktree setup and docs/superpowers/plans file output: the plan is the step result",
+          "removed REQUIRED SUB-SKILL header and subagent/executing-plans handoff: execution is the workflow's approve_plan -> implement steps",
+          "commit steps -> checkpoints (the implementation step commits through the platform)"
+        ]
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "plan",
+          "fix_proposal"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "abcff990279d4ed1130ff2e1372b536b71a3af6cff9b03d8fc4bdece0d6b4b2a",
+          "upstream_sha256": "a6c67c1900064347c2a329990dd3c555657c51c3ec53b259a08aa01a2c26139a",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.differential-review",
+      "name": "differential-review",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/trailofbits/skills",
+        "commit": "e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff",
+        "path": "plugins/differential-review/skills/differential-review",
+        "path_commit": "123037ec8aed26f0d86327cc39137ee5043e5deb",
+        "license": "CC-BY-SA-4.0",
+        "attribution": "By Trail of Bits, CC BY-SA 4.0 (skills/external/LICENSE.trailofbits-CC-BY-SA-4.0). Adapted versions are shared under the same license.",
+        "adapted": true,
+        "adaptation_notes": [
+          "no git checkout/switch of the baseline: git show / git grep at the base commit",
+          "removed gh pr view, audit-context-building and issue-writer integrations",
+          "removed the adversarial-modeler subagent delegation (adversarial.md is followed inline)",
+          "report returned through submit_result, never written to the repo, Desktop or ~/.claude",
+          "allowed-tools frontmatter dropped (platform tool policy decides)"
+        ]
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "security",
+          "review"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "d2b5a25b157d5b99aaa96ce739f444a2a454703fc2c774641519659042f7ac36",
+          "upstream_sha256": "f9af6a8193fc1a9f8ca3c54bb8d19095a5f20c9472ca6d014488bbde50b67da0",
+          "modified": true
+        },
+        {
+          "file": "adversarial.md",
+          "sha256": "3cb823f38c6e551cbcf5f72325d2bb219dacdad774072519c31d50d92db19800",
+          "upstream_sha256": "3cb823f38c6e551cbcf5f72325d2bb219dacdad774072519c31d50d92db19800",
+          "modified": false
+        },
+        {
+          "file": "methodology.md",
+          "sha256": "646cde7db1378b32dc7de756fb0f67280f16f4419b2f95db9f5d43dd1c86c33d",
+          "upstream_sha256": "16b335d24cf2145e3dc4a37f50056550d29db2efa20e6df78fec95ec1e6fb0b4",
+          "modified": true
+        },
+        {
+          "file": "patterns.md",
+          "sha256": "52abb18abbc73502a3d3b2f36a7a035adc1db40fd812d1d5424cf065036a06e9",
+          "upstream_sha256": "52abb18abbc73502a3d3b2f36a7a035adc1db40fd812d1d5424cf065036a06e9",
+          "modified": false
+        },
+        {
+          "file": "reporting.md",
+          "sha256": "77fa099e1271157b9d3b76927c9fd077e859e30fe763f41b0f5f7bcbb4765297",
+          "upstream_sha256": "0016876dc6f158e926448bff1b6f634796757c7afe09dff177cfe30250724fc4",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.frontend-design",
+      "name": "frontend-design",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/anthropics/skills",
+        "commit": "2c5958ecac7cee2b583967a2c4981d0f4a75c579",
+        "path": "skills/frontend-design",
+        "path_commit": "41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f",
+        "license": "Apache-2.0",
+        "attribution": "Anthropic, Apache License 2.0 (skills/external/LICENSE.anthropics-Apache-2.0).",
+        "adapted": false,
+        "adaptation_notes": []
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor"
+        ],
+        "repos": [
+          "oms-frontend"
+        ]
+      },
+      "supersedes": [
+        "user.skill.frontend-design"
+      ],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+          "upstream_sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+          "modified": false
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.supply-chain-risk-auditor",
+      "name": "supply-chain-risk-auditor",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/trailofbits/skills",
+        "commit": "e4dd0bb5b15535f7c5a0834187dffba6ac37e4ff",
+        "path": "plugins/supply-chain-risk-auditor/skills/supply-chain-risk-auditor",
+        "path_commit": "123037ec8aed26f0d86327cc39137ee5043e5deb",
+        "license": "CC-BY-SA-4.0",
+        "attribution": "By Trail of Bits, CC BY-SA 4.0 (skills/external/LICENSE.trailofbits-CC-BY-SA-4.0). Adapted versions are shared under the same license.",
+        "adapted": false,
+        "adaptation_notes": []
+      },
+      "status": "blocked",
+      "runtime": {
+        "binaries": [
+          "uv",
+          "gh"
+        ],
+        "network": true,
+        "scripts": true
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "security"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": null,
+          "upstream_sha256": "a1254b7f8d3a1731a9a7e1f9cd6c67b59cf84ed6ef7c7fb455db9a14c528ceb4",
+          "modified": false
+        }
+      ],
+      "block_reason": "requires its bundled Python collectors (scripts/collect.py, sources.py), outbound network to package registries and GitHub, and a GitHub token; the platform does not run third-party scripts or give agents network credentials"
+    },
+    {
+      "key": "skill.ext.playwright-cli",
+      "name": "playwright-cli",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/microsoft/playwright-cli",
+        "commit": "8297c9b12432ea12c1707cd64995fc96768bdb70",
+        "path": "skills/playwright-cli",
+        "path_commit": "745fbc7820c326e140a805a662ecbba754910806",
+        "license": "Apache-2.0",
+        "attribution": "Microsoft, Apache License 2.0.",
+        "adapted": false,
+        "adaptation_notes": []
+      },
+      "status": "blocked",
+      "runtime": {
+        "binaries": [
+          "playwright-cli"
+        ],
+        "network": true,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "test",
+          "regression_test"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": null,
+          "upstream_sha256": "b07a6cbe4e5b638046fe0b9df0e84783cb9899f0aed3db1eef915601c3260a64",
+          "modified": false
+        }
+      ],
+      "block_reason": "needs a globally installed playwright-cli, a real browser with network access and optional use of the user's Chrome profile/cookies; not provisioned on platform workers and not covered by the tool policy"
+    }
+  ]
+}

@@ -1270,7 +1270,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     ))!;
     const contextPreparationStarted = performance.now();
     const input = await buildStepInput(c, run, step);
-    const context = await resolveContext(c, run, step, input);
+    const context = await resolveContext(c, run, step, input, effective?.provider ?? null);
     const contextPreparationMs = performance.now() - contextPreparationStarted;
     const attempt = (await one<AttemptRow>(
       c,

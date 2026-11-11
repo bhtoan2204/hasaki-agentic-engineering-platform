@@ -7,6 +7,7 @@ import type { ResolvedContext, StepInput } from "../workflow/context.ts";
 import type { RunRow, StepRow } from "../workflow/types.ts";
 import type { ToolMode } from "./toolPolicy.ts";
 import { summarizeValue } from "../context/plan.ts";
+import { externalNotice, isExternal } from "../knowledge/external.ts";
 import { languagePolicy, languageReminder, outputLocale } from "./language.ts";
 
 /**
@@ -118,6 +119,7 @@ export function buildSystemAppend(
         .join(", ");
       lines.push(
         `### [${k.category}] ${k.title} (${k.key} v${k.version}, ${k.reason}${evo ? `; ${evo}` : ""})`,
+        ...(isExternal(meta) ? [externalNotice(meta)] : []),
         k.content.trim(),
       );
       if (k.category === "agent_skill" && meta?.output_contract)
@@ -132,7 +134,9 @@ export function buildSystemAppend(
     );
     for (const k of onDemand)
       lines.push(
-        `- \`${k.key}\` [${k.category}] ${k.title}: ${String((k.metadata as any)?.description ?? "")
+        `- \`${k.key}\` [${k.category}${isExternal(k.metadata) ? ", third-party" : ""}] ${k.title}: ${String(
+          (k.metadata as any)?.description ?? "",
+        )
           .replace(/\s+/g, " ")
           .slice(0, 400)}`,
       );

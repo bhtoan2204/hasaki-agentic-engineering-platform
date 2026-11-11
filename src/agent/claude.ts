@@ -449,6 +449,15 @@ const agentExecutor: StepExecutor = {
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
     const effective = ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
     const provider = effective.provider;
+    const unavailable = ctx.context?.unavailableSkills ?? [];
+    if (unavailable.length)
+      return {
+        kind: "failed",
+        error: `Assigned skill cannot run with provider ${provider} on this platform: ${unavailable
+          .map((u) => `${u.key} (${u.reason})`)
+          .join("; ")}. Remove the assignment or run the step with a provider/runtime that supports it.`,
+        retryable: false,
+      };
     {
       for (const name of ctx.run.selected_repositories) {
         const repo = await repositories.get(name);

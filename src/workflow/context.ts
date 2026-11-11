@@ -13,6 +13,7 @@ import {
 import { projectsOfRepositories, repoPath } from "../repos/service.ts";
 import { independentUpstream, isIndependent } from "../agent/independentReview.ts";
 import { memoryFreshness } from "../knowledge/memory.ts";
+import { skillAvailability } from "../knowledge/external.ts";
 import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
 import { createHash } from "node:crypto";
@@ -77,6 +78,8 @@ export interface ResolvedContext {
   fileRefs: Array<{ path: string; refs: number; from: string[] }>;
   /** Primary checkout path of each repository the run may use (selected, else allowed). */
   repoPaths?: Array<{ name: string; path: string }>;
+  /** Explicitly assigned skills that cannot run here (blocked, missing runtime, unsupported provider): the attempt fails. */
+  unavailableSkills?: Array<{ key: string; reason: string }>;
 }
 
 const CODE_REF =
@@ -198,6 +201,7 @@ export async function resolveContext(
   run: RunRow,
   step: StepRow,
   input: StepInput,
+  provider?: string | null,
 ): Promise<ResolvedContext> {
   const project = input.work_item?.project || String(input.run.inputs?.project ?? "");
   const repositories = run.selected_repositories;
@@ -267,6 +271,31 @@ export async function resolveContext(
     }
     res.applied = res.applied.filter((k) => !memoryStale.includes(k.key));
   }
+  // Third-party skills the agent cannot use here never reach it; an explicitly assigned one fails the attempt.
+  const unavailable = new Map<string, string>();
+  for (const k of res.applied) {
+    const a = skillAvailability(k.metadata, provider);
+    if (!a.available) unavailable.set(k.key, a.reason);
+  }
+  for (const k of res.applied) {
+    const parent = (k.metadata as any)?.parent_skill;
+    if (parent && unavailable.has(parent) && !unavailable.has(k.key))
+      unavailable.set(k.key, `supporting file of unavailable ${parent}`);
+  }
+  const unavailableSkills: Array<{ key: string; reason: string }> = [];
+  for (const k of res.applied.filter((x) => unavailable.has(x.key))) {
+    res.overridden.push({
+      key: k.key,
+      version: k.version,
+      by: "",
+      conflict_key: k.conflict_key ?? "",
+      reason: "unavailable",
+      detail: unavailable.get(k.key),
+    });
+    if (k.reason === "assigned to step" || k.reason.startsWith("selected for this re-execution"))
+      unavailableSkills.push({ key: k.key, reason: unavailable.get(k.key)! });
+  }
+  res.applied = res.applied.filter((k) => !unavailable.has(k.key));
   const rankText = [
     requestText(input),
     step.name,
@@ -316,6 +345,8 @@ export async function resolveContext(
       verification: step.type === "coding_agent" ? verificationPlan(cfg) : null,
       memory_excluded: memoryStale,
       memory_freshness: memoryStates,
+      ...(provider ? { provider } : {}),
+      ...(unavailableSkills.length ? { unavailable_skills: unavailableSkills } : {}),
     },
     project,
     repositories,
@@ -370,6 +401,7 @@ export async function resolveContext(
     requestText: rankText,
     fileRefs,
     repoPaths,
+    unavailableSkills,
   };
 }
 

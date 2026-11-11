@@ -98,7 +98,9 @@ export interface Resolution {
     version: number;
     by: string;
     conflict_key: string;
-    reason?: "conflict" | "superseded" | "expired";
+    reason?: "conflict" | "superseded" | "expired" | "unavailable";
+    /** Why an item was left out (reason "unavailable"). */
+    detail?: string;
   }>;
 }
 
