@@ -13,6 +13,8 @@ export interface SearchScope {
   repositories: string[];
   allowed: string[];
   runId?: number;
+  /** When one run has several worktrees of the same repository, read this checkout rather than the first. */
+  workspaces?: Readonly<Record<string, string>>;
   /** Metadata ranking may inspect existing sources but must never provision or schedule clones. */
   provision?: boolean;
 }
@@ -40,8 +42,13 @@ function authorize(s: SearchScope) {
 }
 export const queryTerms = (text: string) =>
   [...new Set(text.match(/[A-Za-z_][A-Za-z0-9_./:-]{2,127}/g) ?? [])].slice(0, 24);
-export async function fresh(repoName: string, runId?: number, provision = false) {
-  const local = await localScope(repoName, runId, provision);
+export async function fresh(
+  repoName: string,
+  runId?: number,
+  provision = false,
+  workspacePath?: string,
+) {
+  const local = await localScope(repoName, runId, provision, workspacePath);
   const base = await baseCommit(local.primary, local.repo.default_branch || config.baseBranch);
   const baseline = await snapshot(local.repo.id, `base:${base}`);
   if (!baseline) return { ...local, index: null, base };
@@ -80,7 +87,8 @@ export async function searchSymbols(
   for (const repo of scope.repositories) {
     try {
       const run = await scopeRun(repo, scope);
-      const f = await fresh(repo, run, scope.provision === true);
+      const checkout = scope.workspaces?.[repo];
+      const f = await fresh(repo, run, scope.provision === true, checkout);
       if (!f.index) {
         fallback_count++;
         if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
@@ -110,7 +118,7 @@ export async function searchSymbols(
         ORDER BY f.file_path,r.line,r.id LIMIT 8`,
         [f.index.id, terms],
       );
-      const recheck = await fresh(repo, run, scope.provision === true);
+      const recheck = await fresh(repo, run, scope.provision === true, checkout);
       if (recheck.index?.id !== f.index.id) {
         fallback_count++;
         if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
@@ -214,7 +222,8 @@ export async function findDependencies(
     for (const repo of scope.repositories) {
       try {
         const run = await scopeRun(repo, scope);
-        const f = await fresh(repo, run, scope.provision === true);
+        const checkout = scope.workspaces?.[repo];
+        const f = await fresh(repo, run, scope.provision === true, checkout);
         if (!f.index) {
           if (report && !report.unavailable.includes(repo)) report.unavailable.push(repo);
           continue;
@@ -230,7 +239,7 @@ export async function findDependencies(
               : frontier,
           ],
         );
-        if ((await fresh(repo, run)).index?.id !== f.index.id) {
+        if ((await fresh(repo, run, scope.provision === true, checkout)).index?.id !== f.index.id) {
           if (report && !report.unavailable.includes(repo))
             report.unavailable.push(`${repo} (index changed during the query)`);
           continue;
@@ -315,7 +324,12 @@ export async function searchCodeExact(
   const hits: Hit[] = [];
   for (const name of scope.repositories) {
     const run = await scopeRun(name, scope);
-    const { root } = await localScope(name, run, scope.provision !== false);
+    const { root } = await localScope(
+      name,
+      run,
+      scope.provision !== false,
+      scope.workspaces?.[name],
+    );
     const before = await changes(root, (await git(root, ["rev-parse", "HEAD"])).trim());
     const repositoryHits: Hit[] = [];
     let stdout = "";
@@ -494,7 +508,13 @@ export async function buildCodeContext(text: string, scope: SearchScope) {
       if (ranges.some(([a, b]) => first <= b && end >= a)) continue;
       const scopeKey = `${hit.repository}:${hit.snapshot.run_id}`;
       const rootPromise =
-        localRoots.get(scopeKey) ?? localScope(hit.repository, hit.snapshot.run_id ?? undefined);
+        localRoots.get(scopeKey) ??
+        localScope(
+          hit.repository,
+          hit.snapshot.run_id ?? undefined,
+          false,
+          scope.workspaces?.[hit.repository],
+        );
       localRoots.set(scopeKey, rootPromise);
       const local = await rootPromise;
       let source: string | null;

@@ -6,7 +6,7 @@ import { dirname, join, relative } from "node:path";
 import pg from "pg";
 import { currentUserId } from "../auth/execution.ts";
 import { config } from "../config.ts";
-import { pool, one } from "../db/pool.ts";
+import { pool, one, watchPoolErrors } from "../db/pool.ts";
 import {
   unsafeRelativePath,
   instanceDirectory,
@@ -27,14 +27,16 @@ const exec = promisify(execFile);
  */
 let repositoryPool: pg.Pool | undefined;
 function lockPool() {
-  return (repositoryPool ??= new pg.Pool({
-    connectionString: config.databaseUrl,
-    max: 4,
-    connectionTimeoutMillis: config.database.connectionTimeoutMillis,
-    idleTimeoutMillis: config.database.idleTimeoutMillis,
-    keepAlive: true,
-    allowExitOnIdle: true,
-  }));
+  return (repositoryPool ??= watchPoolErrors(
+    new pg.Pool({
+      connectionString: config.databaseUrl,
+      max: 4,
+      connectionTimeoutMillis: config.database.connectionTimeoutMillis,
+      idleTimeoutMillis: config.database.idleTimeoutMillis,
+      keepAlive: true,
+      allowExitOnIdle: true,
+    }),
+  ));
 }
 
 /** Session locks survive process concurrency and are released by PostgreSQL after a crash. No stale lockfiles. */

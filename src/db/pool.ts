@@ -13,9 +13,21 @@ export const pool = new pg.Pool({
   // TCP keepalive so a VPN/NAT hop does not silently drop a long-idle client (the next query would then hang).
   keepAlive: true,
   keepAliveInitialDelayMillis: 30000,
+  // A developer shell may set a multi-minute idle timeout and a minimum pool. Those sockets must not pin a
+  // finished test process; checked-out clients and every other handle still keep it alive.
+  allowExitOnIdle: process.env.PLATFORM_TEST === "1",
 });
-// Idle clients can error after a restart or network blip. Log the message only — never the connection string.
-pool.on("error", (err) => console.error("postgres idle client error:", err.message));
+watchPoolErrors(pool);
+
+/** Idle clients can error after a restart, a network blip, or DROP DATABASE ... FORCE in test teardown. */
+export function watchPoolErrors(target: pg.Pool) {
+  target.on("error", (err: NodeJS.ErrnoException) => {
+    // 57P01 is the backend being closed on purpose (administrator shutdown / DROP ... FORCE).
+    if (err.code === "57P01") return;
+    console.error("postgres idle client error:", err.message);
+  });
+  return target;
+}
 
 /** A pool or a client inside a transaction: every repository function accepts either. */
 export type Db = pg.Pool | pg.PoolClient;

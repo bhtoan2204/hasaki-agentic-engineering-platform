@@ -33,7 +33,12 @@ export async function enqueue(repoName: string, runId?: number) {
     [repo.id, config.instanceId, runId ?? null, runId ? `run:${runId}` : "base", currentUserId()],
   );
 }
-export async function localScope(repoName: string, runId?: number, provision = false) {
+export async function localScope(
+  repoName: string,
+  runId?: number,
+  provision = false,
+  workspacePath?: string,
+) {
   const repo = await repositories.get(repoName);
   if (!repo?.enabled || !repo.allowed_actions.includes("read"))
     throw new Error("Repository unavailable or unauthorized");
@@ -49,7 +54,10 @@ export async function localScope(repoName: string, runId?: number, provision = f
   );
   if (run?.worker_instance !== config.instanceId || !run.allowed_repositories.includes(repoName))
     throw new Error("Unauthorized index worktree");
-  const ws = (await workspacesOf(runId)).find((w) => w.repo === repoName);
+  const listed = await workspacesOf(runId);
+  const ws = workspacePath
+    ? listed.find((w) => w.repo === repoName && w.path === workspacePath)
+    : listed.find((w) => w.repo === repoName);
   if (!ws) throw new Error("Worktree unavailable");
   const root = await realpath(ws.path);
   const common = (
@@ -67,6 +75,7 @@ export async function indexRepository(
   runId?: number,
   signal?: AbortSignal,
   fence?: { id: number; token: number },
+  workspacePath?: string,
 ) {
   const start = Date.now();
   const metrics: Record<string, number> = {
@@ -75,7 +84,7 @@ export async function indexRepository(
     parse_failures: 0,
     index_cache_hits: 0,
   };
-  const scope = await localScope(repoName, runId, true);
+  const scope = await localScope(repoName, runId, true, workspacePath);
   const progress = async (processed: number, total: number) => {
     if (!fence) return;
     const row = await one(

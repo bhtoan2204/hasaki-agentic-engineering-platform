@@ -79,7 +79,7 @@ function registerAndHold(id: string) {
       clearTimeout(timer);
       if (ok) resolve(proc);
       else {
-        proc.kill("SIGKILL");
+        proc.stdin?.end();
         reject(new Error(err || out || "register-hold failed"));
       }
     };
@@ -328,10 +328,9 @@ test("registry rejects concurrent duplicate live IDs; replacement fences jobs; h
   } finally {
     await Promise.all(
       live.map((proc) => {
+        proc.stdin?.end();
         if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
-        const exited = once(proc, "exit");
-        proc.kill("SIGKILL");
-        return exited;
+        return once(proc, "exit");
       }),
     );
   }

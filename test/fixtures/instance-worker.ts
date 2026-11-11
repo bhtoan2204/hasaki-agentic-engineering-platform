@@ -10,11 +10,8 @@ try {
     await registerInstance();
     process.stdout.write("registered\n");
     await new Promise<void>((resolve) => {
-      const end = () => resolve();
-      process.once("SIGTERM", end);
-      process.once("SIGINT", end);
       process.stdin.resume();
-      process.stdin.once("end", end);
+      process.stdin.once("end", () => resolve());
     });
   } else if (mode === "claim") {
     const job = await claimJob("child", 30);

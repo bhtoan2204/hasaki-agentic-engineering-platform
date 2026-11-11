@@ -84,33 +84,44 @@ after(async () => {
   await settleBackground();
   await pool.end();
 });
-async function drive(id: number) {
+async function driveAll(ids: number[]) {
   const at = Date.now();
+  const width = Math.min(4, ids.length);
   for (;;) {
     if (Date.now() - at > 300000) throw new Error("Evaluation test wall time exceeded");
-    const d = await evaluationDetail(id, owner.id);
-    if (["COMPLETED", "FAILED", "CANCELED"].includes(d.status)) return d;
-    const approvals = await q(
-      pool,
-      "SELECT key FROM workflow_steps WHERE run_id=$1 AND status='WAITING_APPROVAL'",
-      [d.workflow_run_id],
-    );
-    for (const step of approvals)
-      await approveStep(d.workflow_run_id, step.key, {
-        by: "synthetic test approval",
-      });
-    const questions = await q(
-      pool,
-      "SELECT id,options FROM workflow_questions WHERE run_id=$1 AND status='open'",
-      [d.workflow_run_id],
-    );
-    if (questions.length)
-      await answerQuestions(
-        Object.fromEntries(questions.map((q) => [q.id, q.options[0]])),
-        "synthetic test answer",
+    const details = [];
+    for (const id of ids) {
+      const d = await evaluationDetail(id, owner.id);
+      details.push(d);
+      if (["COMPLETED", "FAILED", "CANCELED"].includes(d.status)) continue;
+      const approvals = await q(
+        pool,
+        "SELECT key FROM workflow_steps WHERE run_id=$1 AND status='WAITING_APPROVAL'",
+        [d.workflow_run_id],
       );
-    if (!(await runOnce())) await new Promise((r) => setTimeout(r, 10));
+      for (const step of approvals)
+        await approveStep(d.workflow_run_id, step.key, {
+          by: "synthetic test approval",
+        });
+      const questions = await q(
+        pool,
+        "SELECT id,options FROM workflow_questions WHERE run_id=$1 AND status='open'",
+        [d.workflow_run_id],
+      );
+      if (questions.length)
+        await answerQuestions(
+          Object.fromEntries(questions.map((q) => [q.id, q.options[0]])),
+          "synthetic test answer",
+        );
+    }
+    if (details.every((d) => ["COMPLETED", "FAILED", "CANCELED"].includes(d.status)))
+      return details;
+    const ran = await Promise.all(Array.from({ length: width }, () => runOnce()));
+    if (ran.every((ok) => !ok)) await new Promise((r) => setTimeout(r, 10));
   }
+}
+async function drive(id: number) {
+  return (await driveAll([id]))[0];
 }
 test("15 labeled synthetic cases have valid pinned repositories and immutable suite versions", async () => {
   assert.equal(suite.manifest.cases.length, 15);
@@ -256,8 +267,7 @@ test("Fixture evaluations use existing jobs, objective validators, checkpoints, 
   );
   await startPendingRun(baseline.workflow_run_id);
   await startPendingRun(candidate.workflow_run_id);
-  const a = await drive(baseline.id),
-    b = await drive(candidate.id);
+  const [a, b] = await driveAll([baseline.id, candidate.id]);
   const available = !!candidate.configuration.sandbox;
   if (!available) {
     assert.equal(b.summary.blocked, 30);

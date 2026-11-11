@@ -224,12 +224,14 @@ async function executeIsolated(
         branch: "HEAD",
         created_from: sha,
       });
-      if (cfg.code_intelligence) await indexRepository(fixtureName(logical), ctx.run.id, signal);
+      if (cfg.code_intelligence)
+        await indexRepository(fixtureName(logical), ctx.run.id, signal, undefined, path);
     }
     e.environment = true;
     e.authorized_changes = true;
     e.side_effects_blocked = true;
     const names = task.repositories.map(fixtureName),
+      workspaces = Object.fromEntries(created.map((w) => [fixtureName(w.logical), w.path])),
       registry = (await repositories.list()).filter((r) => names.includes(r.name));
     const query = task.validation.export_name ?? task.description;
     const ranked = cfg.code_intelligence
@@ -247,6 +249,7 @@ async function executeIsolated(
         repositories: names,
         allowed: names,
         runId: ctx.run.id,
+        workspaces,
       });
     if (e.repository_correct && context.body.includes(task.validation.path))
       timings.first_correct_file_ms = Date.now() - totalStart;
@@ -391,6 +394,7 @@ async function executeIsolated(
         repositories: [fixtureName(task.repository)],
         allowed: [fixtureName(task.repository)],
         runId: ctx.run.id,
+        workspaces,
       };
       if (cfg.code_intelligence) {
         context = await buildCodeContext("SnapshotMarker", scope);

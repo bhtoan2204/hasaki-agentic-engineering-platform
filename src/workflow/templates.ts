@@ -68,7 +68,7 @@ tests=$(
 if [ -n "$tests" ]; then
   echo "== targeted tests"
   # shellcheck disable=SC2086
-  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 --test-force-exit $tests
+  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
 else
   echo "no matching test files for the diff; targeted suite skipped"
 fi`;
@@ -118,7 +118,7 @@ elif [ -f package.json ]; then
     )
     if [ -n "$tests" ]; then
       echo "== targeted tests"
-      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 --test-force-exit $tests
+      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
     else
       echo "no matching test files; targeted suite skipped"
     fi
@@ -165,6 +165,8 @@ const CONFIRM_REPOS = {
 };
 
 const IMPLEMENT = {
+  // The repair loop runs the tests that match the diff. The full suite stays on the later regression step.
+  verify: { command: FEATURE_TARGETED_COMMAND, timeout_seconds: 900 },
   instructions:
     "Implement the approved plan. Call prepare_branch for each repository before editing and edit ONLY inside the returned " +
     "worktree paths. Make the smallest correct change, run the relevant build/tests, commit with the platform commit convention. " +
@@ -177,6 +179,7 @@ const IMPLEMENT = {
 
 const SELF_IMPLEMENT = {
   ...IMPLEMENT,
+  verify: { command: PLATFORM_TARGETED_COMMAND, timeout_seconds: 900 },
   instructions:
     IMPLEMENT.instructions +
     " This run targets the platform that is executing it. Call prepare_branch and edit only the returned worktree. " +
