@@ -54,11 +54,41 @@ const readJson = async <T>(key: string): Promise<T | null> => {
   }
 };
 
+/**
+ * Update transport ("off" | "polling") chosen on the Integrations page, stored in `settings` (not a secret) so every
+ * instance sharing the database follows it without a restart. TELEGRAM_MODE in the environment always wins (and is
+ * the only way to use webhook mode, which also needs a public HTTPS URL and a secret).
+ */
+export type TelegramUiMode = "off" | "polling";
+const envMode = process.env.TELEGRAM_MODE ? config.telegram.mode : null;
+let savedMode: TelegramUiMode | null = null;
+const readMode = async (): Promise<TelegramUiMode | null> => {
+  const v = await settings.get("telegram_mode");
+  return v === "off" || v === "polling" ? v : null;
+};
+
 function apply() {
   const t = saved.telegram ?? fromEnv.telegram;
   config.telegram.botToken = t.botToken;
   config.telegram.chatId = t.chatId;
+  if (!envMode && savedMode) config.telegram.mode = savedMode;
   // Bitbucket in config stays the shared service account from startup. Personal tokens are not copied onto it.
+}
+
+/** Where the active transport mode comes from: the environment, the Integrations page, or the default (off). */
+export const telegramModeSource = () => (envMode ? "env" : savedMode ? "platform" : "default");
+
+/** Administrators turn the long-polling receiver on/off from the UI; the receiver loop picks it up within ~30 s. */
+export async function setTelegramMode(mode: unknown) {
+  if (mode !== "off" && mode !== "polling") throw new HttpError(400, "mode must be off or polling");
+  if (envMode)
+    throw new HttpError(409, `TELEGRAM_MODE=${envMode} is set in the environment; change it there`);
+  if (mode === "polling" && !config.telegram.botToken)
+    throw new HttpError(409, "Save the bot token first");
+  await settings.set("telegram_mode", mode);
+  savedMode = mode;
+  apply();
+  return { mode: config.telegram.mode, modeSource: telegramModeSource() };
 }
 
 /**
@@ -67,8 +97,10 @@ function apply() {
  */
 export async function refreshTelegramSettings() {
   const next = await readJson<TelegramSaved>("telegram");
-  if (JSON.stringify(next) === JSON.stringify(saved.telegram)) return false;
+  const mode = await readMode();
+  if (JSON.stringify(next) === JSON.stringify(saved.telegram) && mode === savedMode) return false;
   saved.telegram = next;
+  savedMode = mode;
   apply();
   return true;
 }
@@ -78,6 +110,7 @@ export async function loadAccountSettings() {
     telegram: await readJson<TelegramSaved>("telegram"),
     bitbucket: await readJson<BitbucketSaved>("bitbucket"),
   };
+  savedMode = await readMode();
   apply();
 }
 
@@ -127,6 +160,8 @@ export async function telegramStatus(userId?: number, canManage = false) {
     envAvailable: !!(fromEnv.telegram.botToken && fromEnv.telegram.chatId),
     chatId: config.telegram.chatId || null,
     botToken: mask(config.telegram.botToken),
+    mode: config.telegram.mode,
+    modeSource: telegramModeSource(),
   };
 }
 

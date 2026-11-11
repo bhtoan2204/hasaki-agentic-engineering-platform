@@ -1095,6 +1095,121 @@ test("administrator-managed credentials saved on another instance reach this rec
   }
   assert.equal(botKey(), botKey(TOKEN));
 });
+test("administrators switch the receiver on/off from the UI; other instances follow without a restart", async () => {
+  const { setTelegramMode, refreshTelegramSettings, telegramModeSource } =
+    await import("../src/integrations/accounts.ts");
+  const { settings } = await import("../src/db.ts");
+  try {
+    await assert.rejects(
+      setTelegramMode("webhook"),
+      /off or polling/,
+      "webhook needs URL + secret: environment only",
+    );
+    config.telegram.mode = "off";
+    const r = await setTelegramMode("polling");
+    assert.deepEqual(r, { mode: "polling", modeSource: "platform" });
+    assert.equal(config.telegram.mode, "polling");
+    // Another instance saved "off": this one picks it up on its periodic refresh.
+    await settings.set("telegram_mode", "off");
+    assert.equal(await refreshTelegramSettings(), true);
+    assert.equal(config.telegram.mode, "off");
+    assert.equal(telegramModeSource(), "platform");
+    // HTTP: a member cannot change it (owner is a member; the setting is session/CSRF scoped like the page).
+    const login = await fetch(base + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: owner.username, password: "telegram-test-password" }),
+    });
+    const session = await login.json();
+    const headers = {
+      cookie: login.headers.get("set-cookie")!.split(";")[0],
+      "Content-Type": "application/json",
+      "x-csrf-token": session.csrf,
+    };
+    const member = await fetch(base + "/api/integrations/telegram/mode", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ mode: "polling" }),
+    });
+    assert.equal(member.status, 403);
+    assert.equal(config.telegram.mode, "off", "unchanged by the refused request");
+  } finally {
+    await q(pool, "DELETE FROM settings WHERE key='telegram_mode'");
+    await refreshTelegramSettings(); // re-applies the startup (env) credentials: restore the test bot below
+    config.telegram.mode = "polling";
+    config.telegram.botToken = TOKEN;
+    config.telegram.chatId = "";
+  }
+});
+test("inbox approvals: the owner's waiting approval steps are listed; canceled runs and other owners are not", async () => {
+  const { openApprovals } = await import("../src/workflow/engine.ts");
+  const { run, step } = await gate();
+  const mine = await openApprovals(pool, { ownerId: owner.id });
+  const row = mine.find((a: any) => a.run_id === run.id)!;
+  assert.ok(row, "a WAITING_APPROVAL step appears in the inbox");
+  assert.equal(row.step_key, "gate");
+  assert.equal(row.quick, true, "a plain approval can be decided from the inbox");
+  assert.equal(row.requires_risk_acknowledgement, false);
+  assert.equal(row.outputs, undefined, "step outputs stay in the run, not in the inbox list");
+  assert.ok(
+    !(await openApprovals(pool, { ownerId: other.id })).some((a: any) => a.run_id === run.id),
+    "other owners never see it",
+  );
+  await q(
+    pool,
+    `UPDATE workflow_steps SET approval = coalesce(approval,'{}'::jsonb) || jsonb_build_object('request', coalesce(approval->'request','{}'::jsonb) || '{"select_repositories": true}'::jsonb) WHERE id=$1`,
+    [step.id],
+  );
+  assert.equal(
+    (await openApprovals(pool, { ownerId: owner.id })).find((a: any) => a.run_id === run.id)!.quick,
+    false,
+    "repository selection needs the run UI",
+  );
+  await cancelRun(run.id);
+  assert.ok(
+    !(await openApprovals(pool, { ownerId: owner.id })).some((a: any) => a.run_id === run.id),
+    "canceled runs drop out",
+  );
+});
+test("an approval that needs an explicit risk acknowledgement gets no Telegram approve button (link only)", async () => {
+  const { sendInteractiveWaiting } = await import("../src/telegram/workflow.ts");
+  const { run, step } = await gate();
+  await q(pool, "UPDATE telegram_actions SET status='canceled' WHERE run_id=$1", [run.id]);
+  await q(
+    pool,
+    `UPDATE workflow_steps SET approval = coalesce(approval,'{}'::jsonb) || jsonb_build_object('request', coalesce(approval->'request','{}'::jsonb) || '{"requires_risk_acknowledgement": true}'::jsonb) WHERE id=$1`,
+    [step.id],
+  );
+  const before = (await q(pool, "SELECT action_id FROM telegram_actions WHERE run_id=$1", [run.id]))
+    .length;
+  assert.equal(
+    await sendInteractiveWaiting(
+      {
+        runId: run.id,
+        runTitle: run.title,
+        stepKey: "gate",
+        stepName: "gate",
+        status: "WAITING_APPROVAL",
+        detail: "",
+        ownerId: owner.id,
+      },
+      `risk-${run.id}`,
+    ),
+    true,
+    "still notified",
+  );
+  const after = await q<any>(
+    pool,
+    "SELECT action_type FROM telegram_actions WHERE run_id=$1 AND status='pending'",
+    [run.id],
+  );
+  assert.ok(!after.some((a: any) => a.action_type === "approve"), "no approve button");
+  assert.ok(
+    after.some((a: any) => a.action_type === "reject"),
+    "rejecting (with a reason) is still possible from Telegram",
+  );
+  void before;
+});
 test("expiry cleanup deletes old decided capabilities but never pending ones", async () => {
   const { run } = await gate();
   const approve = await action(run.id, "approve");
@@ -1152,6 +1267,17 @@ test("an unreachable Telegram API is reported as a network failure with its syst
       new RegExp(`cannot reach 127\\.0\\.0\\.1:${closedPort} \\(ECONNREFUSED\\)`),
     );
     assert.doesNotMatch(reason, /SECRET_TOKEN_VALUE|503/);
+    const { retryDelayMs } = await import("../src/telegram/transport.ts");
+    assert.equal(
+      retryDelayMs(e),
+      60_000,
+      "an instance that cannot reach Telegram yields the receiver lease for a minute",
+    );
+    assert.equal(
+      retryDelayMs(new TelegramApiError(503)),
+      2000,
+      "a Telegram-side error retries quickly",
+    );
   } finally {
     config.telegram.apiBase = saved;
   }

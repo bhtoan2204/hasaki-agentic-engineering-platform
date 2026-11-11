@@ -206,6 +206,14 @@ async function refreshTelegramCredentials() {
   const { refreshTelegramSettings } = await import("../integrations/accounts.ts");
   await refreshTelegramSettings();
 }
+/**
+ * Pause before competing for the receiver lease again. An instance that cannot reach Telegram at all (blocked network,
+ * no VPN/proxy) backs off for a minute so an instance sharing the database that CAN reach it keeps the lease, instead
+ * of the two alternating every few seconds.
+ */
+export function retryDelayMs(e: unknown) {
+  return e instanceof TelegramApiError && e.network ? 60_000 : 2000;
+}
 /** A loggable reason: Telegram error codes and our own messages only, never URLs, tokens or payloads. */
 export function consumerFailure(e: unknown) {
   if (e instanceof TelegramApiError) {
@@ -344,7 +352,7 @@ export function startTelegramTransport() {
           if (reason !== lastFailure)
             console.warn(`Telegram ${mode} receiver unavailable: ${reason}; will retry`);
           lastFailure = reason;
-          await sleep(2000, undefined, { signal: stopping.signal }).catch(() => {});
+          await sleep(retryDelayMs(e), undefined, { signal: stopping.signal }).catch(() => {});
         }
       } finally {
         if (heartbeat) clearInterval(heartbeat);

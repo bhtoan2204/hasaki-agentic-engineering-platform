@@ -154,10 +154,15 @@ export async function sendInteractiveWaiting(w: StepWaiting, dedupeKey: string):
       // Selection/branch forms and fenced provider handoffs require their existing full UI.
       const interactive =
         pref.interactive && config.telegram.mode !== "off" && !step.pending_input?.provider_handoff;
+      // An unmet evidence gate needs an explicit risk acknowledgement plus a written reason (engine-enforced), which
+      // the full UI collects: no approve button then, but rejecting (with its ForceReply reason) stays available.
+      const needsRiskAck = step.approval?.request?.requires_risk_acknowledgement === true;
       if (interactive && !question && !step.config.select_repositories && !step.config.ask_branch) {
         const confirm = step.config.telegram_confirm === true || step.config.high_impact === true;
         keyboard.push([
-          await makeAction(db, context, "approve", confirm ? "confirm" : null),
+          ...(needsRiskAck
+            ? []
+            : [await makeAction(db, context, "approve", confirm ? "confirm" : null)]),
           await makeAction(db, context, "reject"),
         ]);
       } else if (interactive && question) {

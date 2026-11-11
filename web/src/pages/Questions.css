@@ -270,3 +270,15 @@
     justify-content: center;
   }
 }
+
+/* approvals waiting in the inbox */
+.qx-approval .qx-icon {
+  color: var(--st-wait);
+}
+
+.qx-ack {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--st-err);
+}

@@ -1228,6 +1228,30 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
               </>
             )}
           </p>
+          {st.canManage && (
+            <Field label={t("ig.tg.modeTitle")}>
+              {st.modeSource === "env" ? (
+                <span className="muted small">{t("ig.tg.modeEnv", { mode: st.mode })}</span>
+              ) : (
+                <select
+                  aria-label={t("ig.tg.modeTitle")}
+                  value={st.mode === "polling" ? "polling" : "off"}
+                  onChange={async (e) => {
+                    if (
+                      await act(
+                        () => api("/api/integrations/telegram/mode", { mode: e.target.value }),
+                        t("ig.tg.modeSaved"),
+                      )
+                    )
+                      reload();
+                  }}
+                >
+                  <option value="off">{t("ig.tg.modeOffOpt")}</option>
+                  <option value="polling">{t("ig.tg.modePolling")}</option>
+                </select>
+              )}
+            </Field>
+          )}
           {st.mode === "off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}
           {st.needsRebind && <p>{t("ig.tg.rebind")}</p>}
           <div className="ig-actions">

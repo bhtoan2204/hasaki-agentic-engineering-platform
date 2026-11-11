@@ -6,9 +6,12 @@ import {
   History,
   Inbox,
   Layers,
+  Hand,
   MessageCircleQuestion,
   Send,
+  ShieldCheck,
   Star,
+  X,
 } from "lucide-react";
 import { api, isStateChange, useApi, useLive } from "../api.ts";
 import {
@@ -124,15 +127,128 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
   );
 }
 
+/**
+ * One step waiting for approval. Simple approvals are decided here (comment, and the explicit risk acknowledgement the
+ * engine requires for an unmet evidence gate); repository selection / branch / provider handoff open the run instead.
+ */
+function ApprovalCard({ a, onDone }: { a: any; onDone: () => void }) {
+  const { t } = useI18n();
+  const [comment, setComment] = useState("");
+  const [ack, setAck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const open = () => navigate(`/runs/${a.run_id}/${a.step_key}`);
+  const blocked = a.requires_risk_acknowledgement && (!ack || !comment.trim());
+  const send = async (approve: boolean) => {
+    if (!approve && !confirm(t("qx.ap.rejectConfirm", { step: a.step_name }))) return;
+    setBusy(true);
+    const body: Record<string, unknown> = { comment };
+    if (approve && a.requires_risk_acknowledgement) body.data = { acknowledge_risk: ack };
+    const r = await act(
+      () =>
+        api(`/api/runs/${a.run_id}/steps/${a.step_key}/${approve ? "approve" : "reject"}`, body),
+      approve ? t("qx.ap.approved") : t("qx.ap.rejected"),
+    );
+    setBusy(false);
+    if (r) onDone();
+  };
+  return (
+    <section className="qx-card qx-approval">
+      <header className="qx-head">
+        <div className="qx-icon">
+          <Hand size={20} strokeWidth={1.9} />
+        </div>
+        <div className="qx-ctx">
+          <div className="qx-run">
+            <span className="qx-runid">Run #{a.run_id}</span>
+            {a.work_item_code && <span className="mono muted">{a.work_item_code}</span>}
+            <Badge s={a.run_status} label />
+            {a.risk && <span className="kn-tag">{t("qx.ap.risk", { risk: a.risk })}</span>}
+          </div>
+          <div className="qx-title">{a.run_title}</div>
+          <div className="qx-step">
+            <Layers size={13} strokeWidth={2} /> {t("qx.step")} <b>{a.step_name}</b>{" "}
+            <span className="mono muted">{a.step_key}</span>
+          </div>
+        </div>
+        <button className="ghost sm" onClick={open}>
+          {t("qx.openInWf")} <ArrowUpRight size={14} strokeWidth={2} />
+        </button>
+      </header>
+      <div className="qx-body">
+        <div className="qx-q">
+          <div className="qx-q-text">{a.message ?? t("qx.ap.default")}</div>
+          {a.gate_missing?.length > 0 && (
+            <div className="qx-q-context">
+              {t("qx.ap.gap", { items: a.gate_missing.join("; ") })}
+            </div>
+          )}
+          {a.quick ? (
+            <>
+              <textarea
+                rows={2}
+                aria-label={t("qx.ap.comment")}
+                placeholder={
+                  a.requires_risk_acknowledgement ? t("qx.ap.commentRequired") : t("qx.ap.comment")
+                }
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+              />
+              {a.requires_risk_acknowledgement && (
+                <label className="small qx-ack">
+                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                  <span>{t("ev.ack")}</span>
+                </label>
+              )}
+            </>
+          ) : (
+            <div className="qx-q-context">{t("qx.ap.needsRun")}</div>
+          )}
+        </div>
+      </div>
+      <footer className="qx-foot">
+        <div className="qx-consequence">
+          <CircleHelp size={15} strokeWidth={2} />
+          <span>
+            {a.reexecute
+              ? t("qx.ap.rejectRedo", { step: a.reexecute })
+              : t("qx.ap.consequence", { step: a.step_name })}
+          </span>
+        </div>
+        {a.quick ? (
+          <>
+            <button className="danger sm" disabled={busy} onClick={() => send(false)}>
+              <X size={15} strokeWidth={2} /> {t("qx.ap.reject")}
+            </button>
+            <button
+              className="ok"
+              disabled={busy || blocked}
+              title={blocked ? t("ev.ackHint") : undefined}
+              onClick={() => send(true)}
+            >
+              <ShieldCheck size={15} strokeWidth={2} /> {t("qx.ap.approve")}
+            </button>
+          </>
+        ) : (
+          <button onClick={open}>
+            {t("qx.ap.openToDecide")} <ArrowUpRight size={14} strokeWidth={2} />
+          </button>
+        )}
+      </footer>
+    </section>
+  );
+}
+
 /** Every open question across runs, grouped by blocked step; answer inline or jump to the step in its run graph. */
 export function QuestionsPage() {
   const { t } = useI18n();
   const { data: open, error, loading, reload } = useApi<any[]>("/api/questions");
   const { data: history, reload: reloadHistory } = useApi<any[]>("/api/questions/history");
+  const approvals = useApi<any[]>("/api/approvals");
   // Questions open and close with step status changes and user actions, never with transcript lines.
-  useLive(null, (p) => isStateChange(p) && (reload(), reloadHistory()));
+  useLive(null, (p) => isStateChange(p) && (reload(), reloadHistory(), approvals.reload()));
   if (loading && !open) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
+  const pendingApprovals = approvals.data ?? [];
   const groups: Record<string, any[]> = {};
   for (const q of open ?? []) (groups[`${q.run_id}:${q.step_key}`] ??= []).push(q);
   const entries = Object.entries(groups);
@@ -154,7 +270,12 @@ export function QuestionsPage() {
           value={open?.length ?? 0}
           hint={t("qx.blockedRuns", { n: runs })}
         />
-        <StatCard icon={Layers} tone="run" label={t("qx.waitingSteps")} value={entries.length} />
+        <StatCard
+          icon={Hand}
+          tone="wait"
+          label={t("qx.ap.waiting")}
+          value={approvals.data ? pendingApprovals.length : "—"}
+        />
         <StatCard
           icon={CircleCheck}
           tone="ok"
@@ -164,7 +285,29 @@ export function QuestionsPage() {
         />
       </div>
 
-      {!entries.length ? (
+      {pendingApprovals.length > 0 && (
+        <>
+          <h3 className="qx-section">
+            <Hand size={14} strokeWidth={2} /> {t("qx.ap.section", { n: pendingApprovals.length })}
+          </h3>
+          <div className="qx-list">
+            {pendingApprovals.map((a) => (
+              <ApprovalCard
+                key={a.step_id}
+                a={a}
+                onDone={() => (approvals.reload(), reloadHistory())}
+              />
+            ))}
+          </div>
+          {entries.length > 0 && (
+            <h3 className="qx-section">
+              <MessageCircleQuestion size={14} strokeWidth={2} /> {t("qx.waiting")}
+            </h3>
+          )}
+        </>
+      )}
+
+      {!entries.length && pendingApprovals.length ? null : !entries.length ? (
         <div className="qx-empty">
           <EmptyState icon={CircleCheck} title={t("qx.emptyTitle")}>
             {t("qx.emptyBody")}

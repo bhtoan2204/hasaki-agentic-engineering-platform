@@ -159,8 +159,9 @@ export function App() {
     setNotice(message);
   };
   const refreshCount = () =>
-    api<any[]>("/api/questions")
-      .then((q) => setOpenQuestions(q.length))
+    // The badge counts everything waiting for a human: open questions AND steps waiting for approval.
+    Promise.all([api<any[]>("/api/questions"), api<any[]>("/api/approvals").catch(() => [])])
+      .then(([q, a]) => setOpenQuestions(q.length + a.length))
       .catch(() => {});
   useEffect(() => {
     api<{ user: SessionUser; csrf: string }>("/api/auth/me")

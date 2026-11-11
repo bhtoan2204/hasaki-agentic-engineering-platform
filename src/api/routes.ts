@@ -89,6 +89,7 @@ import {
   clearTelegram,
   setBitbucket,
   setTelegram,
+  setTelegramMode,
   setTelegramDestination,
   telegramChats,
   telegramStatus,
@@ -172,6 +173,7 @@ import {
   EngineError,
   listRuns,
   openQuestions,
+  openApprovals,
   pauseRun,
   previewRun,
   rejectStep,
@@ -1017,6 +1019,8 @@ export const routes: Route[] = [
 
   // ------------------------------------------------------------ questions inbox
   ["GET", /^\/api\/questions$/, (c) => openQuestions(pool, mine(c))],
+  // Approval steps waiting for a decision (the inbox lists them next to open questions).
+  ["GET", /^\/api\/approvals$/, (c) => openApprovals(pool, mine(c))],
   ["GET", /^\/api\/questions\/history$/, (c) => answeredQuestions(100, pool, mine(c))],
   [
     "POST",
@@ -1846,6 +1850,11 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/integrations\/telegram$/,
     ({ body, actor }) => (requireAdmin(actor), setTelegram(body)),
+  ],
+  [
+    "POST",
+    /^\/api\/integrations\/telegram\/mode$/,
+    ({ body, actor }) => (requireAdmin(actor), setTelegramMode(body.mode)),
   ],
   ["POST", /^\/api\/integrations\/telegram\/connect$/, ({ actor }) => createBinding(actor.id)],
   [

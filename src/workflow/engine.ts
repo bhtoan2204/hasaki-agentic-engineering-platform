@@ -1887,6 +1887,47 @@ export function openQuestions(db: Db = pool, scope?: { ownerId?: number; all?: b
   );
 }
 
+/**
+ * Steps waiting for a human approval (same owner scoping as openQuestions), for the "Questions & approvals" inbox.
+ * `quick` = can be decided from the inbox (and Telegram) with approve/reject + comment; repository selection, branch
+ * input and fenced provider handoffs need the full step UI. Step outputs are not copied here (they stay in the run).
+ */
+export async function openApprovals(db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {
+  const extra = !scope
+    ? ""
+    : scope.all
+      ? "AND r.owner_id IS NOT NULL"
+      : "AND r.owner_id = " + Number(scope.ownerId);
+  const rows = await q<any>(
+    db,
+    `SELECT s.id AS step_id, s.run_id, s.key AS step_key, s.name AS step_name, s.type AS step_type, s.updated_at,
+            s.approval->'request' AS request, s.config->'on_reject'->>'reexecute' AS reexecute,
+            (s.pending_input ? 'provider_handoff') AS provider_handoff,
+            r.title AS run_title, r.status AS run_status, w.code AS work_item_code
+       FROM workflow_steps s JOIN workflow_runs r ON r.id = s.run_id
+       LEFT JOIN work_items w ON w.id = r.work_item_id
+      WHERE s.status = 'WAITING_APPROVAL' AND r.status NOT IN ('CANCELED', 'COMPLETED', 'FAILED') ${extra}
+      ORDER BY s.updated_at`,
+  );
+  return rows.map(({ request, ...r }) => {
+    const req = request ?? {};
+    return {
+      ...r,
+      message: typeof req.message === "string" ? req.message : null,
+      risk: req.scope?.risk ?? req.scope?.gate?.fix_risk ?? null,
+      gate_missing: Array.isArray(req.scope?.gate?.missing)
+        ? req.scope.gate.missing.slice(0, 6)
+        : [],
+      requires_risk_acknowledgement: req.requires_risk_acknowledgement === true,
+      quick:
+        !req.select_repositories &&
+        !req.ask_branch &&
+        !r.provider_handoff &&
+        r.step_type !== "git_pull_request",
+    };
+  });
+}
+
 export function answeredQuestions(
   limit = 100,
   db: Db = pool,
