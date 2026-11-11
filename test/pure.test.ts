@@ -253,6 +253,48 @@ test("tool policy: dangerous shell denied everywhere, analysis shell allowlisted
   assert.ok(decideBash("grep -rn x . 2>&1 | head", analysis).allow);
 });
 
+test("tool policy: no machine-wide recursive scans; timeout-bounded reads allowed; find actions are not read-only", () => {
+  // The run #73 command: crawled / (and every Windows drive under WSL) for minutes after the result was submitted.
+  for (const cmd of [
+    'cd /repo && ls -la . && find / -iname "FPTPAY*" 2>/dev/null | head',
+    "find /mnt -name x",
+    "find /mnt/c -name x",
+    "timeout 600 find / -name x",
+    "grep -rn secret /",
+    "rg token /mnt/c",
+    "du -sh /",
+    "ls -R /",
+    "tree /",
+  ]) {
+    assert.ok(!decideBash(cmd, analysis).allow, cmd);
+    assert.ok(!decideBash(cmd, coding).allow, `${cmd} (coding)`);
+  }
+  const d = decideBash("find / -name x", analysis);
+  assert.match(d.allow ? "" : d.reason, /searches the whole machine/);
+  // Not scans of the machine root: a pattern that is "/", a non-recursive ls, a repository path.
+  for (const cmd of [
+    'grep -rn "/" src',
+    "ls /",
+    "ls -la /tmp",
+    "find /home/me/src/payment-fptpay -name '*.go'",
+    "rg TODO /repo/src",
+    "find /mnt/c/work/repo -name '*.go'",
+  ])
+    assert.ok(decideBash(cmd, analysis).allow, cmd);
+  // `timeout N <read-only>` is read-only (it was refused in run #73), `timeout N <write>` is not.
+  assert.ok(
+    decideBash('timeout 60 find /home/me/src -iname "*fptpay*" 2>/dev/null | head', analysis).allow,
+  );
+  assert.ok(!decideBash("timeout 60 go test ./...", analysis).allow);
+  // find that deletes / runs commands / writes files is not a read-only command.
+  for (const cmd of [
+    "find . -name '*.tmp' -delete",
+    "find . -exec rm {} \\;",
+    "find . -fprint out.txt",
+  ])
+    assert.ok(!decideBash(cmd, analysis).allow, cmd);
+});
+
 test("tool policy: primary checkouts are read-only for coding steps, including after `cd` (hook cwd)", () => {
   const ctx: PolicyContext = { ...coding, protectedRoots: ["/home/me/src"] };
   const primary = "/home/me/src/oms-src/oms-api";

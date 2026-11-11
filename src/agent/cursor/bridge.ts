@@ -12,7 +12,9 @@ export function startBridge() {
   }
   serveStdio({
     tools: bridgeToolsFor(process.env.PLATFORM_MODE || "analysis"),
-    framing: "content-length",
+    // Reply in the framing the client used: current Cursor CLIs speak newline-delimited JSON (MCP stdio) and fail to
+    // load a server that answers with LSP-style Content-Length headers ("namespace platform not found").
+    framing: "auto",
     async call(name, args) {
       const r = await brokerRequest(socket, { token, kind: "tool", name, args }, 65000);
       return r?.ok

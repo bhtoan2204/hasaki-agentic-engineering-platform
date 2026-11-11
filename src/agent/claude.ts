@@ -160,6 +160,32 @@ async function worktreeState(workspaces: Array<{ repo: string; path: string }>):
   return out.join("\n");
 }
 
+/**
+ * One-shot timer that stops a Claude session which outlives its submitted result. `arm()` starts it once (later calls
+ * are no-ops, so a background wake-up does not extend the deadline); `fired` tells the caller the abort was ours.
+ */
+export function postSubmitReaper(stop: () => void, graceMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const state = {
+    armed: false,
+    fired: false,
+    arm() {
+      if (state.armed) return;
+      state.armed = true;
+      timer = setTimeout(() => {
+        state.fired = true;
+        stop();
+      }, graceMs);
+      timer.unref?.();
+    },
+    disarm() {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+  return state;
+}
+
 function summarize(input: unknown) {
   const s = JSON.stringify(input);
   return s.length > 300 ? s.slice(0, 300) + "…" : s;
@@ -919,6 +945,10 @@ const agentExecutor: StepExecutor = {
       const ac = new AbortController();
       const onAbort = () => ac.abort();
       ctx.signal.addEventListener("abort", onAbort);
+      // Once the result is submitted and the turn ended, the CLI should exit. A background shell task (e.g. a command
+      // that outlived its 120 s timeout) keeps it alive and re-invokes the agent later: stop it after a grace period.
+      const graceSeconds = Math.max(0, Number(config.agent.postSubmitGraceSeconds ?? 30));
+      const reaper = postSubmitReaper(() => ac.abort(), graceSeconds * 1000);
       async function* input(): AsyncGenerator<SDKUserMessage> {
         yield {
           type: "user",
@@ -1015,15 +1045,30 @@ const agentExecutor: StepExecutor = {
           else if (msg.type === "system" && msg.subtype === "init") await persistSession();
           if (msg.type === "assistant") result.assistantTurns++;
           else if (msg.type === "result") {
-            result.isError = msg.is_error;
-            result.text =
-              msg.subtype === "success" ? msg.result : msg.errors?.join("\n") || msg.subtype;
-            if (msg.is_error) result.failure = normalizeProviderFailure(msg);
+            // After the submitted result, later turns are background-task wake-ups ("the find finished..."): they
+            // must not replace the step's final answer.
+            if (!reaper.armed) {
+              result.isError = msg.is_error;
+              result.text =
+                msg.subtype === "success" ? msg.result : msg.errors?.join("\n") || msg.subtype;
+              if (msg.is_error) result.failure = normalizeProviderFailure(msg);
+            }
+            if (submitted && !msg.is_error) reaper.arm();
           }
         }
+      } catch (error) {
+        // Our own post-submit stop is a normal end of the session, not a provider failure.
+        if (!reaper.fired) throw error;
       } finally {
+        reaper.disarm();
         ctx.signal.removeEventListener("abort", onAbort);
       }
+      if (reaper.fired)
+        await ctx.log(
+          "system",
+          `Claude was still running ${graceSeconds}s after the result was submitted (background shell tasks keep the CLI alive); the platform stopped the session`,
+          { post_submit_grace_seconds: graceSeconds },
+        );
       return result;
     };
 

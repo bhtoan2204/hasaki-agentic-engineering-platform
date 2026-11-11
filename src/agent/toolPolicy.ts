@@ -101,7 +101,9 @@ const ALWAYS_DENIED: Array<[RegExp, string]> = [
 
 // First word(s) of each pipeline segment allowed in analysis steps.
 const READ_ONLY = [
-  /^(ls|cat|head|tail|wc|grep|rg|find|tree|file|stat|pwd|echo|sort|uniq|cut|tr|jq|diff|basename|dirname|realpath|which|date)\b/,
+  /^(ls|cat|head|tail|wc|grep|rg|tree|file|stat|pwd|echo|sort|uniq|cut|tr|jq|diff|basename|dirname|realpath|which|date)\b/,
+  // find reads, unless it deletes, runs commands or writes files through its own actions.
+  /^find\b(?!.*\s-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)\b)/,
   /^sed\b(?!.*(\s-[a-zA-Z]*i|--in-place|\/w\s|;\s*w\s|^sed\s+(-\S+\s+)*['"]?w\s))/, // no in-place edit, no `w file`
   /^awk\b(?!.*system\()/,
   /^git\s+(-C\s+\S+\s+)?(log|show|diff|status|blame|branch|rev-parse|ls-files|ls-tree|grep|cat-file|merge-base|describe|remote\s+-v|fetch|stash\s+(list|show))\b/,
@@ -348,7 +350,11 @@ function readOnlyViolation(
     if (allow(cmd)) continue;
     // VAR=value only sets a shell variable (also inside loop bodies: `do b=$(…)`); VAR=value cmd … runs cmd
     if (/^([A-Za-z_]\w*=\S*\s*)+$/.test(cmd)) continue;
-    const s = cmd.replace(/^([A-Za-z_]\w*=\S*\s+)+/, "").replace(/^cd\s+\S+\s*$/, "pwd");
+    // `timeout 30 <cmd>` only bounds how long a read-only command may run: judge the wrapped command.
+    const s = cmd
+      .replace(/^([A-Za-z_]\w*=\S*\s+)+/, "")
+      .replace(/^timeout\s+(-[ks]\s+\S+\s+|--?[a-z-]+(=\S+)?\s+)*\d+(\.\d+)?[smhd]?\s+/, "")
+      .replace(/^cd\s+\S+\s*$/, "pwd");
     if (!READ_ONLY.some((re) => re.test(s)))
       return `"${cmd.slice(0, 80)}" is not a read-only command`;
   }
@@ -520,6 +526,50 @@ export function rmRfViolation(
   return null;
 }
 
+/** Roots a recursive search must never start from: the whole machine, Windows drives under WSL, kernel trees. */
+const SCAN_ROOT = /^\/(mnt(\/[^/]+)?|proc|sys|dev)?\/?$/;
+const RECURSIVE_SCAN = /^(find|tree|du|rg|grep|ls)\b/;
+
+/**
+ * A recursive search started at `/`, `/mnt`, `/mnt/c`, `/proc`, `/sys` or `/dev` (e.g. `find / -iname x`). It never
+ * belongs to a step — the repositories and worktrees are known — and on WSL it crawls every Windows drive for minutes,
+ * long enough for the CLI to move it to the background and keep the step "running" after its result was submitted.
+ */
+export function filesystemScanViolation(p: ShellParse): string | null {
+  for (const raw of p.segments) {
+    const seg = raw.replace(/^timeout\s+(-\S+\s+)*\d+(\.\d+)?[smhd]?\s+/, "");
+    const m = seg.match(RECURSIVE_SCAN);
+    if (!m) continue;
+    const words = seg.split(/\s+/).slice(1);
+    const flags = words.filter((w) => w.startsWith("-")).join(" ");
+    const recursive =
+      m[1] === "find" ||
+      m[1] === "tree" ||
+      m[1] === "du" ||
+      m[1] === "rg" ||
+      (m[1] === "grep" &&
+        /(^|\s)(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive)(\s|$)/.test(flags)) ||
+      (m[1] === "ls" && /(^|\s)(-[a-zA-Z]*R[a-zA-Z]*|--recursive)(\s|$)/.test(flags));
+    if (!recursive) continue;
+    // find: paths come before the first expression. grep/rg: the first non-flag word is the pattern (unless given with
+    // -e/-f). Others: any non-flag word may be a path.
+    const end = m[1] === "find" ? words.findIndex((w) => /^[-(!]/.test(w)) : -1;
+    let operands =
+      end >= 0
+        ? words.slice(0, end)
+        : m[1] === "find"
+          ? words
+          : words.filter((w) => !w.startsWith("-"));
+    if ((m[1] === "grep" || m[1] === "rg") && !/(^|\s)(-[a-zA-Z]*[ef]|--regexp|--file)/.test(flags))
+      operands = operands.slice(1);
+    const paths = operands.map((w) => w.replace(/^['"]|['"]$/g, ""));
+    const hit = paths.find((w) => SCAN_ROOT.test(w));
+    if (hit)
+      return `"${m[1]} ${hit}" searches the whole machine (on WSL also every Windows drive) and can run for many minutes: search the repositories or worktrees you were given instead (e.g. ${m[1]} <repo path> …), bounded with "timeout 30 …" if unsure`;
+  }
+  return null;
+}
+
 /**
  * A worktree may borrow the primary checkout's node_modules through a symlink (to run eslint/tsc/prettier), but then a
  * package install would write THROUGH the link into the primary checkout: refuse it while node_modules is a symlink.
@@ -631,6 +681,8 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
   for (const [re, why] of ALWAYS_DENIED) if (re.test(scan)) return deny(why);
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
+  const fsScan = filesystemScanViolation(p);
+  if (fsScan) return deny(fsScan);
   const wt = worktreeRemoveViolation(p);
   if (wt) return deny(wt);
   const base = ctx.baseBranch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

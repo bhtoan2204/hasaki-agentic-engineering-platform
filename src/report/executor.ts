@@ -7,6 +7,7 @@ import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./b
 import { testExceptionsOf } from "../workflow/executors/builtin.ts";
 import { languagePolicy, outputLocale } from "../agent/language.ts";
 import { completeForRun } from "../agent/complete.ts";
+import { syncApprovedReport, type HasakiSyncResult } from "./hasakiSync.ts";
 
 /**
  * Task Result Report executor.
@@ -14,7 +15,8 @@ import { completeForRun } from "../agent/complete.ts";
  *   evidence (reasoning only, no tools) → validate with rules → persist JSON + Markdown drafts as artifacts → wait for
  *   human review (WAITING_APPROVAL; no worker held).
  *   After approval: finalize from the persisted draft (no new LLM call), record limitations, complete.
- * Never writes to Hasaki Work, never closes tasks or touches PRs.
+ * After approval it writes the outcome back to the Hasaki Work task (report/hasakiSync.ts; owner token; opt out with
+ * hasaki_sync: false). It never closes tasks or touches PRs.
  */
 
 export type ReportReasoner = (
@@ -134,6 +136,24 @@ async function finalize(ctx: ExecutionContext): Promise<ExecResult> {
     JSON.stringify(report, null, 2),
     { final: true },
   );
+  // Approved: write the outcome back to the Hasaki Work task (owner's own token). Opt out with `hasaki_sync: false`.
+  // A failure is recorded, never fails the step — the approved report stands on its own.
+  let hasakiSync: HasakiSyncResult | undefined;
+  if (ctx.step.config.hasaki_sync !== false && ctx.input.work_item?.source === "hasaki_work") {
+    hasakiSync = await syncApprovedReport({
+      runId: ctx.run.id,
+      ownerId: ctx.run.owner_id,
+      workItem: ctx.input.work_item,
+      summary: report.summary ?? "",
+    });
+    await ctx.log(
+      "system",
+      hasakiSync.ok
+        ? `Hasaki Work task updated: unit_value=${hasakiSync.values?.unitValue}, amount_of_work=${hasakiSync.values?.amount}`
+        : `Hasaki Work task NOT updated: ${hasakiSync.skipped ?? hasakiSync.calls.map((c) => `${c.field} ${c.ok ? "ok" : `failed (${c.error})`}`).join("; ")}`,
+      { hasaki_sync: hasakiSync },
+    );
+  }
   return {
     kind: "completed",
     output: {
@@ -143,6 +163,7 @@ async function finalize(ctx: ExecutionContext): Promise<ExecResult> {
       final: true,
       limitations: report.limitations,
       summary: report.summary,
+      ...(hasakiSync ? { hasaki_sync: hasakiSync } : {}),
     },
   };
 }

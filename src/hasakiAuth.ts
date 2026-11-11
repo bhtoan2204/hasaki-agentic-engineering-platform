@@ -105,15 +105,17 @@ export async function workApi(
 ) {
   const url = new URL(config.hasakiWork.apiUrl + "/" + path.replace(/^\//, ""));
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, String(v));
+  // FormData is sent as multipart/form-data (fetch sets the boundary header itself); anything else as JSON.
+  const form = body instanceof FormData;
   const res = await fetch(url, {
     method,
     headers: {
       Authorization: `Bearer ${await getToken(userId)}`,
       Accept: "application/json",
       "X-Locale": "vi",
-      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(body && !form ? { "Content-Type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: form ? (body as FormData) : body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401) {
     tokens.delete(userId);

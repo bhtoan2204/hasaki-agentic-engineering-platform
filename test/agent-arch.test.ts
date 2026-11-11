@@ -372,3 +372,23 @@ test("metrics accumulate tokens, cost, tool usage and errors across sessions", (
   assert.deepEqual(m.tool_calls, { Read: 2, mcp__platform__read_knowledge: 1 });
   assert.equal(m.tool_errors, 1);
 });
+
+test("post-submit reaper: stops a session that outlives its submitted result, once, and never before it is armed", async () => {
+  const { postSubmitReaper } = await import("../src/agent/claude.ts");
+  let stops = 0;
+  const r = postSubmitReaper(() => stops++, 20);
+  await new Promise((res) => setTimeout(res, 40));
+  assert.equal(stops, 0, "not armed: the agent is still working, nothing is stopped");
+  r.arm();
+  r.arm(); // a background wake-up's second result must not extend or duplicate the deadline
+  assert.equal(r.armed, true);
+  await new Promise((res) => setTimeout(res, 60));
+  assert.equal(stops, 1);
+  assert.equal(r.fired, true, "the caller can tell the abort was the platform's, not a provider failure");
+  const quick = postSubmitReaper(() => stops++, 20);
+  quick.arm();
+  quick.disarm(); // the CLI exited on its own within the grace period
+  await new Promise((res) => setTimeout(res, 40));
+  assert.equal(stops, 1);
+  assert.equal(quick.fired, false);
+});

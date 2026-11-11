@@ -171,6 +171,12 @@ export interface Config {
     contextTokens?: number;
     contextToolTimeoutMs?: number;
     /**
+     * After the agent submitted its result and its turn ended, how long the platform waits for the CLI to exit before
+     * stopping the session. Background shell tasks keep the CLI alive (it re-invokes the agent when they finish), which
+     * otherwise holds the step RUNNING and a worker slot for as long as that task runs.
+     */
+    postSubmitGraceSeconds?: number;
+    /**
      * Claude Code settings layers loaded by agent steps. Default [] so skills come from ONE place, the platform
      * knowledge registry (imported from repos and ~/.claude/skills), instead of also being auto-loaded by Claude Code.
      */
@@ -422,6 +428,7 @@ const defaults: Config = {
   agent: {
     contextTokens: 24000,
     contextToolTimeoutMs: 10000,
+    postSubmitGraceSeconds: 30,
     settingSources: [],
     inlineKnowledgeTokens: 8000,
     knowledgeIndexSize: 12,
