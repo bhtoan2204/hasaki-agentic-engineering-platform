@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { join, sep } from "node:path";
@@ -17,6 +18,35 @@ export class InstanceConflictError extends Error {
     );
     this.name = "InstanceConflictError";
     this.retrySeconds = retrySeconds;
+  }
+}
+
+/**
+ * True only when the recorded registration is provably dead: it was made on this same host by a process that no
+ * longer exists (or whose PID now belongs to a non-Node process). Any doubt — another host, no PID recorded, the PID
+ * alive, permission to signal it denied — keeps the registration protected.
+ */
+export function previousProcessGone(
+  meta: { host?: unknown; pid?: unknown } | null | undefined,
+  me: { host: string; pid: number },
+  alive: (pid: number) => boolean = processAlive,
+): boolean {
+  const pid = Number(meta?.pid);
+  if (meta?.host !== me.host || !Number.isInteger(pid) || pid <= 0 || pid === me.pid) return false;
+  return !alive(pid);
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM"; // exists but owned by someone else
+  }
+  try {
+    // A recycled PID: alive, but not a Node process, so not the previous platform server.
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("node");
+  } catch {
+    return true; // no /proc (macOS): trust the signal check
   }
 }
 
@@ -47,14 +77,33 @@ export async function registerInstance(id = config.instanceId, session = instanc
           "Local dataDir has workspaces owned by another or unassigned instance identity. Verify the original ID and set PLATFORM_INSTANCE explicitly; ownership cannot be inferred safely.",
         );
     }
-    const row = await one(
+    const me = { host: hostname(), pid: process.pid };
+    let row = await one(
       c,
-      `INSERT INTO platform_instances (instance_id, session_id) VALUES ($1, $2)
-      ON CONFLICT (instance_id) DO UPDATE SET session_id = excluded.session_id, started_at = now(), last_seen_at = now(), stopped_at = NULL
+      `INSERT INTO platform_instances (instance_id, session_id, metadata) VALUES ($1, $2, $4)
+      ON CONFLICT (instance_id) DO UPDATE SET session_id = excluded.session_id, started_at = now(), last_seen_at = now(), stopped_at = NULL,
+        metadata = coalesce(platform_instances.metadata, '{}'::jsonb) || excluded.metadata
       WHERE platform_instances.stopped_at IS NOT NULL OR platform_instances.last_seen_at < now() - make_interval(secs => $3)
       RETURNING instance_id`,
-      [id, session, config.instance.offlineSeconds],
+      [id, session, config.instance.offlineSeconds, JSON.stringify(me)],
     );
+    if (!row) {
+      // The live-looking registration may belong to a process of THIS machine that already exited without marking
+      // itself stopped (killed, terminal closed). Its PID proves it: take over at once instead of waiting it out.
+      const prev = await one<{ metadata: any }>(
+        c,
+        "SELECT metadata FROM platform_instances WHERE instance_id = $1 FOR UPDATE",
+        [id],
+      );
+      if (previousProcessGone(prev?.metadata, me))
+        row = await one(
+          c,
+          `UPDATE platform_instances SET session_id = $2, started_at = now(), last_seen_at = now(), stopped_at = NULL,
+             metadata = coalesce(metadata, '{}'::jsonb) || $3::jsonb
+           WHERE instance_id = $1 RETURNING instance_id`,
+          [id, session, JSON.stringify(me)],
+        );
+    }
     if (!row) {
       const live = await one(
         c,

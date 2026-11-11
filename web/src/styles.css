@@ -2231,3 +2231,35 @@ details > summary {
 .sb-avatar {
   background: linear-gradient(135deg, var(--brand), #4f9474);
 }
+
+/* provider handoff: explicit resume authorization */
+.handoff-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.handoff-confirm.is-on {
+  border-color: var(--st-ok);
+}
+.handoff-confirm input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+.handoff-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.handoff-history {
+  margin-top: 12px;
+}

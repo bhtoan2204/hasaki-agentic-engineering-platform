@@ -1777,6 +1777,7 @@ function ReexecuteDialog({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [skills, setSkills] = useState<string[]>([]);
+  const [persist, setPersist] = useState(true);
   const [busy, setBusy] = useState(false);
   const { data: catalog } = useApi<any[]>(open ? "/api/knowledge?category=agent_skill" : null, [
     open,
@@ -1839,6 +1840,23 @@ function ReexecuteDialog({
           onChange={(e) => setText(e.target.value)}
         />
       </label>
+      {text.trim() && (
+        <label
+          className="small"
+          style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 6 }}
+        >
+          <input
+            type="checkbox"
+            checked={persist}
+            onChange={(e) => setPersist(e.target.checked)}
+            style={{ marginTop: 2, flex: "none" }}
+          />
+          <span>
+            <b>{t("si.persistDecision")}</b>
+            <span className="muted"> — {t("si.persistDecisionHint")}</span>
+          </span>
+        </label>
+      )}
       <div className="field">
         <span>
           {t("si.skillsThis")}{" "}
@@ -1921,7 +1939,7 @@ function ReexecuteDialog({
           onClick={async () => {
             setBusy(true);
             const r = await onSubmit({
-              ...(text.trim() ? { feedback: text.trim() } : {}),
+              ...(text.trim() ? { feedback: text.trim(), persist } : {}),
               ...(skills.length ? { skills } : {}),
             });
             setBusy(false);

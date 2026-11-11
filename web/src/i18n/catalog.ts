@@ -1914,6 +1914,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kp.done.reject": "Đã từ chối",
     "kp.done.rollback": "Đã rollback",
     "kp.bulk.toolbar": "Duyệt hàng loạt",
+    "si.persistDecision": "Ghi nhớ cho cả run",
+    "si.persistDecisionHint":
+      "áp dụng như rule nghiệp vụ cho mọi bước sau, kể cả vòng review → implement tự động. Bỏ chọn nếu chỉ là gợi ý cho riêng lần chạy lại này.",
     "kp.bulk.selectAll": "Chọn tất cả ({n} chờ duyệt)",
     "kp.bulk.selectOne": "Chọn đề xuất #{id}",
     "kp.bulk.selected": "Đã chọn {n}",
@@ -4132,6 +4135,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kp.done.reject": "Rejected",
     "kp.done.rollback": "Rolled back",
     "kp.bulk.toolbar": "Bulk review",
+    "si.persistDecision": "Keep for the whole run",
+    "si.persistDecisionHint":
+      "applies as a business rule to every later step, including the automatic review → implement loop. Untick for advice meant only for this re-execution.",
     "kp.bulk.selectAll": "Select all ({n} pending)",
     "kp.bulk.selectOne": "Select proposal #{id}",
     "kp.bulk.selected": "{n} selected",

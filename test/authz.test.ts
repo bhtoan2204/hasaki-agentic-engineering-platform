@@ -622,3 +622,19 @@ test("metrics use owner scope; explicit admin support access is audited includin
   );
   assert.equal(log.n, 2);
 });
+
+test("login sessions last 3 days by default (cookie Max-Age and stored expiry)", async () => {
+  const r = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "membera", password: "member-a-password" }),
+  });
+  assert.equal(r.status, 200);
+  const setCookie = r.headers.getSetCookie().find((c) => c.startsWith("sid=")) ?? "";
+  assert.match(setCookie, /Max-Age=259200(;|$)/, "72 h = 259200 s");
+  const row = await one<{ s: number }>(
+    pool,
+    "SELECT extract(epoch FROM expires_at - created_at)::int AS s FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = 'membera') ORDER BY created_at DESC LIMIT 1",
+  );
+  assert.ok(row && Math.abs(row.s - 259200) < 60, `stored expiry ${row?.s}s`);
+});

@@ -403,6 +403,58 @@ test("startup grace period never replaces a registration that keeps heartbeating
   await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
 });
 
+test("startup takes over at once when the previous registration's process on this host is gone; otherwise it stays protected", async () => {
+  const { previousProcessGone } = await import("../src/instances.ts");
+  const host = hostname();
+  // Decision rules (alive() injected).
+  assert.equal(
+    previousProcessGone({ host, pid: 4242 }, { host, pid: 1 }, () => false),
+    true,
+    "same host, dead pid",
+  );
+  assert.equal(
+    previousProcessGone({ host, pid: 4242 }, { host, pid: 1 }, () => true),
+    false,
+    "same host, still running",
+  );
+  assert.equal(
+    previousProcessGone({ host: "other-host", pid: 4242 }, { host, pid: 1 }, () => false),
+    false,
+    "another machine",
+  );
+  assert.equal(
+    previousProcessGone({}, { host, pid: 1 }, () => false),
+    false,
+    "no pid recorded (older version)",
+  );
+  // End to end with a real exited process: no wait at all.
+  const { spawnSync } = await import("node:child_process");
+  const dead = spawnSync(process.execPath, ["-e", "0"]).pid!;
+  let hb: Awaited<ReturnType<typeof startInstanceHeartbeat>> | undefined;
+  const waits: number[] = [];
+  try {
+    await registerInstance(config.instanceId, randomUUID());
+    await q(pool, "UPDATE platform_instances SET metadata = $2 WHERE instance_id = $1", [
+      config.instanceId,
+      JSON.stringify({ host, pid: dead }),
+    ]);
+    const t0 = Date.now();
+    hb = await startInstanceHeartbeat({ waitForPrevious: true, onWait: (s) => waits.push(s) });
+    assert.deepEqual(waits, [], "no grace-period wait");
+    assert.ok(Date.now() - t0 < 5000);
+    const row = await one(
+      pool,
+      "SELECT session_id, metadata FROM platform_instances WHERE instance_id=$1",
+      [config.instanceId],
+    );
+    assert.equal(row!.session_id, instanceSession);
+    assert.equal(row!.metadata.pid, process.pid, "the new process records itself");
+  } finally {
+    await hb?.stop();
+    await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
+  }
+});
+
 test("lost identity with existing local workspace records requires explicit administration", async () => {
   const r = await run("condition");
   await q(

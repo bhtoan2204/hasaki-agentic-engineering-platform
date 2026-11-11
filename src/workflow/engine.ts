@@ -674,7 +674,14 @@ async function reexecuteTx(
 export async function reexecuteStep(
   runId: number,
   stepKey: string,
-  opts: { input?: Record<string, unknown>; feedback?: string; skills?: string[]; by?: string } = {},
+  opts: {
+    input?: Record<string, unknown>;
+    feedback?: string;
+    skills?: string[];
+    by?: string;
+    /** Keep the instructions as a developer decision for every later step of the run (default true). */
+    persist?: boolean;
+  } = {},
 ) {
   return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
@@ -707,8 +714,21 @@ export async function reexecuteStep(
           }
         : null;
     await adoptRun(c, runId);
+    // A developer decision (business rule, scope ruling) must outlive this one attempt: the automatic review → implement
+    // loop re-runs steps with fresh input, and without this the next reviewer raises the overruled findings again.
+    if (feedback && opts.persist !== false)
+      await q(
+        c,
+        `UPDATE workflow_runs SET inputs = coalesce(inputs, '{}'::jsonb) || jsonb_build_object('developer_decisions',
+           coalesce(inputs->'developer_decisions', '[]'::jsonb) || jsonb_build_array($2::jsonb)), updated_at = now()
+         WHERE id = $1`,
+        [
+          runId,
+          json({ step: stepKey, text: feedback, by: opts.by ?? "", at: new Date().toISOString() }),
+        ],
+      );
     const why = reexecute
-      ? `re-executed with ${[feedback && "instructions", pinned.length && `skills ${pinned.map((p) => `${p.key}@v${p.version}`).join(", ")}`].filter(Boolean).join(" + ")}`
+      ? `re-executed with ${[feedback && (opts.persist !== false ? "instructions (kept for the rest of the run)" : "instructions"), pinned.length && `skills ${pinned.map((p) => `${p.key}@v${p.version}`).join(", ")}`].filter(Boolean).join(" + ")}`
       : "re-executed by user";
     await reexecuteTx(c, run, stepKey, pending, afterCommit, why);
     if (feedback) await runEvents.add(c, runId, "user", feedback);

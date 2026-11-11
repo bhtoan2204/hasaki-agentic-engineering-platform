@@ -4179,3 +4179,51 @@ test("run #53 regression: the branch is detected from 'branch task cha: <code>',
     /worktree already prepared for oms-api/,
   );
 });
+
+test("re-execute instructions are kept as run-level developer decisions: later steps and loop re-runs still receive them", async () => {
+  const { buildUserPrompt } = await import("../src/agent/stepPrompt.ts");
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    { key: "review", type: "agent", depends_on: ["implement"] },
+  ]);
+  scripts.implement = () => ({ kind: "completed", output: { summary: "impl" } });
+  scripts.review = () => ({ kind: "completed", output: { verdict: "PASS" } });
+  const run = await startRun({ definitionKey: key });
+  await drain();
+  // The developer rules on the review once…
+  await reexecuteStep(run.id, "review", {
+    feedback: "Nhiều phiên new/processing song song là hợp lệ (rule mở rộng).",
+    by: "toan",
+  });
+  await drain();
+  // …then the implement step re-runs (e.g. the automatic review → implement loop): fresh input, no pending reexecute.
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  const decisions = (await getRun(run.id)).inputs.developer_decisions as any[];
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].step, "review");
+  const lastReview = seen.review.filter((c) => c.run.id === run.id).at(-1)!;
+  const lastImpl = seen.implement.filter((c) => c.run.id === run.id).at(-1)!;
+  assert.equal(
+    lastReview.input.pending?.reexecute,
+    undefined,
+    "the later review is a plain re-run…",
+  );
+  for (const ctx of [lastReview, lastImpl]) {
+    const prompt = buildUserPrompt(ctx.input, [], [], ctx.context.upstream, ctx.context.fileRefs);
+    assert.match(
+      prompt,
+      /Developer decisions for this run \(binding\)[\s\S]*song song là hợp lệ/,
+      `${ctx.step.key} still gets the decision`,
+    );
+    assert.doesNotMatch(
+      prompt,
+      /Run inputs: [^\n]*developer_decisions/,
+      "not duplicated in the raw inputs dump",
+    );
+  }
+  // Advice meant for one re-execution only is not kept.
+  await reexecuteStep(run.id, "review", { feedback: "thử ngắn gọn hơn", persist: false });
+  await drain();
+  assert.equal(((await getRun(run.id)).inputs.developer_decisions as any[]).length, 1);
+});

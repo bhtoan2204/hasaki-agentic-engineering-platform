@@ -110,6 +110,10 @@ const READ_ONLY = [
   /^git\s+(-C\s+\S+\s+)?symbolic-ref(\s+(-q|--quiet|--short))*\s+\S+\s*$/, // one argument = read; two = write
   /^(\[|test)\s/, // [ -d dir ], test -f file
   /^go\s+(list|doc|version|env|vet)\b/,
+  // `go test` verifies (review, analysis) and only writes Go's own build/test cache — unless a flag writes a file:
+  // -c / -o (test binary), -coverprofile / -cpuprofile / -memprofile / -blockprofile / -mutexprofile / -trace /
+  // -outputdir. Those stay refused unless they point at /tmp or /dev/null.
+  /^go\s+test\b(?!.*\s-c(\s|$))(?!.*\s-(o|coverprofile|cpuprofile|memprofile|blockprofile|mutexprofile|trace|outputdir)(=|\s+)(?!\/tmp\/|\/dev\/null))/,
   /^(node|npm)\s+(-v|--version|ls)\b/,
 ];
 

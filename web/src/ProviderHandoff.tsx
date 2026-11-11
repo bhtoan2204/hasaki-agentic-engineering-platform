@@ -163,36 +163,40 @@ export function ProviderHandoff({
               : (target?.error ??
                 (en ? "Checking provider availability…" : "Đang kiểm tra khả dụng…"))}
           </p>
-          <label className="small">
+          <label className={`handoff-confirm${confirmed ? " is-on" : ""}`}>
             <input
               type="checkbox"
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            {en
-              ? "I reviewed the checkpoint and preserved changes, and authorize continuation with this provider, including unreported usage/cost."
-              : "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo."}
+            <span>
+              {en
+                ? "I reviewed the checkpoint and preserved changes, and authorize continuation with this provider, including unreported usage/cost."
+                : "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo."}
+            </span>
           </label>
-          <button
-            className="sm"
-            disabled={busy || !confirmed || !target?.ok || current.status !== "READY"}
-            onClick={() =>
-              send("handoff-resume", {
-                handoff_id: current.id,
-                expected_attempt_id: current.source_attempt_id,
-                provider,
-                model: model || null,
-                confirm: true,
-                checkpoint_fingerprint: current.workspace_fingerprint,
-              })
-            }
-          >
-            {en ? "Confirm resume" : "Xác nhận tiếp tục"}
-          </button>
+          <div className="handoff-actions">
+            <button
+              className="sm"
+              disabled={busy || !confirmed || !target?.ok || current.status !== "READY"}
+              onClick={() =>
+                send("handoff-resume", {
+                  handoff_id: current.id,
+                  expected_attempt_id: current.source_attempt_id,
+                  provider,
+                  model: model || null,
+                  confirm: true,
+                  checkpoint_fingerprint: current.workspace_fingerprint,
+                })
+              }
+            >
+              {en ? "Confirm resume" : "Xác nhận tiếp tục"}
+            </button>
+          </div>
         </>
       )}
       {(handoffs.length > 0 || attempts.length > 1) && (
-        <details>
+        <details className="handoff-history">
           <summary>
             {en
               ? "Handoff history & provider timeline"

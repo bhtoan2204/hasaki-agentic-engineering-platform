@@ -923,6 +923,7 @@ export const routes: Route[] = [
         input: c.body.input,
         skills: c.body.skills,
         by: c.actor.username,
+        persist: c.body.persist !== false,
       })
     ),
   ],

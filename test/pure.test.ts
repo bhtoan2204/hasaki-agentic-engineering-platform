@@ -248,7 +248,25 @@ test("tool policy: dangerous shell denied everywhere, analysis shell allowlisted
     assert.ok(!decideBash(cmd, coding).allow, cmd);
   assert.ok(decideBash("go test ./internal/...", coding).allow);
   assert.ok(decideBash("git log --oneline | head -5 && grep -rn Foo .", analysis).allow);
-  assert.ok(!decideBash("go test ./...", analysis).allow);
+  // Verifying with go test is allowed in analysis/review steps; flags that write files into the checkout are not.
+  assert.ok(decideBash("go test ./...", analysis).allow);
+  assert.ok(
+    decideBash(
+      "go test ./internal/transaction/... ./internal/processor/providers/fptpay/... -count=1 -run TestIPN",
+      analysis,
+    ).allow,
+  );
+  assert.ok(decideBash("go test -coverprofile=/tmp/cover.out ./...", analysis).allow);
+  for (const cmd of [
+    "go test -c ./pkg",
+    "go test -o bin/x.test ./pkg",
+    "go test -coverprofile=cover.out ./...",
+    "go test -cpuprofile cpu.out ./x",
+    "go generate ./...",
+    "go build ./cmd/server",
+    "go mod tidy",
+  ])
+    assert.ok(!decideBash(cmd, analysis).allow, cmd);
   assert.ok(!decideBash("cat a > b", analysis).allow);
   assert.ok(decideBash("grep -rn x . 2>&1 | head", analysis).allow);
 });
@@ -285,7 +303,11 @@ test("tool policy: no machine-wide recursive scans; timeout-bounded reads allowe
   assert.ok(
     decideBash('timeout 60 find /home/me/src -iname "*fptpay*" 2>/dev/null | head', analysis).allow,
   );
-  assert.ok(!decideBash("timeout 60 go test ./...", analysis).allow);
+  assert.ok(
+    decideBash("timeout 120 go test ./...", analysis).allow,
+    "a bounded go test is a read-only verification",
+  );
+  assert.ok(!decideBash("timeout 60 go generate ./...", analysis).allow);
   // find that deletes / runs commands / writes files is not a read-only command.
   for (const cmd of [
     "find . -name '*.tmp' -delete",
