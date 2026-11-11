@@ -68,7 +68,7 @@ tests=$(
 if [ -n "$tests" ]; then
   echo "== targeted tests"
   # shellcheck disable=SC2086
-  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 $tests
+  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
 else
   echo "no matching test files for the diff; targeted suite skipped"
 fi`;
@@ -118,7 +118,7 @@ elif [ -f package.json ]; then
     )
     if [ -n "$tests" ]; then
       echo "== targeted tests"
-      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 $tests
+      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
     else
       echo "no matching test files; targeted suite skipped"
     fi
