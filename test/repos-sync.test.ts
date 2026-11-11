@@ -252,6 +252,12 @@ test("delete: a skill goes with its supporting files, leaves a tombstone, and ne
     "the source file still exists, but a deleted key is not re-imported",
   );
   assert.ok(again.skipped.some((s) => /skill\.del-me was deleted/.test(s.reason)));
+  writeFileSync(join(dir, "reference/b.md"), "# B\n"); // a supporting file added after the deletion
+  assert.equal(
+    (await importFromRepositories({ only: "skill.del-me" })).created,
+    0,
+    "supporting files of a deleted skill are not imported either",
+  );
   // An explicit re-creation lifts the tombstone.
   await knowledge.create({
     key: "skill.del-me",

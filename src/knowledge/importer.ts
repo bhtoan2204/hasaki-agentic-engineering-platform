@@ -750,10 +750,13 @@ async function applyCandidates(
   // Deleted by an admin (knowledge_deletions): never re-created while the source file still exists.
   const deleted = await knowledge.deletedKeys();
   for (const c of candidates) {
-    if (deleted.has(c.key)) {
+    const parent = (c.metadata as any)?.parent_skill as string | undefined;
+    if (deleted.has(c.key) || (parent && deleted.has(parent))) {
       report.skipped.push({
         path: c.source.map((s) => `${s.repo}/${s.path}`).join(", "),
-        reason: `${c.key} was deleted from the registry`,
+        reason: deleted.has(c.key)
+          ? `${c.key} was deleted from the registry`
+          : `${c.key}: its skill ${parent} was deleted from the registry`,
       });
       continue;
     }
