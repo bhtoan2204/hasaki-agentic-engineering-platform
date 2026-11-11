@@ -87,7 +87,23 @@ function AccessChecks({
   );
 }
 
-/** One user's Bitbucket verification state as a short, colour-coded label. */
+const HOST_NAME: Record<string, string> = { github: "GitHub", bitbucket: "Bitbucket" };
+
+function hostName(provider: string) {
+  return HOST_NAME[provider] ?? provider;
+}
+
+/** Hosted providers in view, each with the verification policy that applies to that host. */
+function hostPolicies(repos: Matrix["repositories"], fallback: Matrix["policy"]) {
+  const seen = new Map<string, Matrix["policy"]>();
+  for (const repo of repos) {
+    if (repo.provider !== "github" && repo.provider !== "bitbucket") continue;
+    seen.set(repo.provider, repo.host_policy ?? fallback);
+  }
+  return [...seen.entries()];
+}
+
+/** One user's Git host verification state as a short, colour-coded label. */
 export function BitbucketState({
   state,
   reason,
@@ -114,8 +130,8 @@ export function BitbucketState({
 
 /**
  * Admin: who may use which repository. Each cell is the platform grant; the effective permission is further limited
- * by the user's own Bitbucket permission and the repository's allowed actions. Managing access does not give the admin
- * access: admins grant themselves like anyone else.
+ * by the user's own GitHub or Bitbucket permission and the repository's allowed actions. Managing access does not
+ * give the admin access: admins grant themselves like anyone else.
  */
 export function RepositoryAccessAdmin({ only }: { only?: string }) {
   const { t } = useI18n();
@@ -205,9 +221,12 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
         </div>
         <p className="muted small">{t("repo.access.note")}</p>
         <p className="muted small">{t("repo.access.impliesHint")}</p>
-        <p className="small">
-          <b>{t("repo.access.policy")}:</b> {t(`repo.access.policy.${m.policy}`)}
-        </p>
+        {hostPolicies(repos, m.policy).map(([provider, policy]) => (
+          <p className="small" key={provider}>
+            <b>{t("repo.access.policy", { host: hostName(provider) })}:</b>{" "}
+            {t(`repo.access.policy.${policy}`, { host: hostName(provider) })}
+          </p>
+        ))}
         {!only && (
           <input
             className="repo-access-search"
@@ -217,51 +236,29 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
             aria-label={t("repo.search")}
           />
         )}
-        <div className="table-wrap">
-          <table className="repo-access-table">
-            <thead>
-              <tr>
-                <th scope="col">{t("repo.access.repo")}</th>
-                <th scope="col">{t("repo.access.shared")}</th>
-                {users.map((u) => (
-                  <th key={u.id} scope="col">
-                    <Users size={12} /> {u.username}
-                    {u.role === "admin" && <span className="muted small"> · admin</span>}
-                    {!only && (
-                      <div className="repo-access-bulk">
-                        <button className="ghost sm" onClick={() => bulk(u, "pull_request")}>
-                          {t("repo.access.allFull")}
-                        </button>
-                        <button className="ghost sm" onClick={() => bulk(u, "none")}>
-                          {t("repo.access.allNone")}
-                        </button>
+        {only ? (
+          <div className="repo-access-people">
+            {repos.map((r) => (
+              <div key={r.id}>
+                <div className="repo-access-row">
+                  <div className="repo-access-who">{t("repo.access.shared")}</div>
+                  <AccessChecks
+                    level={r.shared_access}
+                    label={`${r.name} · ${t("repo.access.shared")}`}
+                    onChange={(l) => share(r.name, l)}
+                  />
+                </div>
+                {users.map((u) => {
+                  const level = grantOf.get(`${r.id}:${u.id}`) ?? "none";
+                  const check = checkOf.get(`${r.id}:${u.id}`);
+                  return (
+                    <div className="repo-access-row" key={u.id}>
+                      <div className="repo-access-who">
+                        <Users size={13} />
+                        <span>{u.username}</span>
+                        {u.role === "admin" && <span className="muted small">admin</span>}
                       </div>
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {repos.map((r) => (
-                <tr key={r.id} className={r.enabled ? undefined : "is-off"}>
-                  <th scope="row">
-                    <a className="mono" href={`#/repositories/${r.name}?view=manage`}>
-                      {r.name}
-                    </a>
-                    <div className="muted small">{r.projects.join(", ") || "—"}</div>
-                  </th>
-                  <td>
-                    <AccessChecks
-                      level={r.shared_access}
-                      label={`${r.name} · ${t("repo.access.shared")}`}
-                      onChange={(l) => share(r.name, l)}
-                    />
-                  </td>
-                  {users.map((u) => {
-                    const level = grantOf.get(`${r.id}:${u.id}`) ?? "none";
-                    const check = checkOf.get(`${r.id}:${u.id}`);
-                    return (
-                      <td key={u.id}>
+                      <div className="repo-access-grant">
                         <AccessChecks
                           level={level}
                           label={`${r.name} · ${u.username}`}
@@ -270,23 +267,94 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                         {r.bitbucket &&
                           (r.host_policy ?? m.policy) !== "trusted" &&
                           (level !== "none" || r.shared_access !== "none") && (
-                            <div>
+                            <span className="repo-host-state">
+                              <span>{hostName(r.provider)}</span>
                               <BitbucketState
                                 host={r.provider}
                                 state={check?.state ?? "unknown"}
                                 reason={check?.reason}
                                 stale={check?.expired}
                               />
-                            </div>
+                            </span>
                           )}
-                      </td>
-                    );
-                  })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="repo-access-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t("repo.access.repo")}</th>
+                  <th scope="col">{t("repo.access.shared")}</th>
+                  {users.map((u) => (
+                    <th key={u.id} scope="col">
+                      <Users size={12} /> {u.username}
+                      {u.role === "admin" && <span className="muted small"> · admin</span>}
+                      <div className="repo-access-bulk">
+                        <button className="ghost sm" onClick={() => bulk(u, "pull_request")}>
+                          {t("repo.access.allFull")}
+                        </button>
+                        <button className="ghost sm" onClick={() => bulk(u, "none")}>
+                          {t("repo.access.allNone")}
+                        </button>
+                      </div>
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {repos.map((r) => (
+                  <tr key={r.id} className={r.enabled ? undefined : "is-off"}>
+                    <th scope="row">
+                      <a className="mono" href={`#/repositories/${r.name}?view=manage`}>
+                        {r.name}
+                      </a>
+                      <div className="muted small">{r.projects.join(", ") || "—"}</div>
+                    </th>
+                    <td>
+                      <AccessChecks
+                        level={r.shared_access}
+                        label={`${r.name} · ${t("repo.access.shared")}`}
+                        onChange={(l) => share(r.name, l)}
+                      />
+                    </td>
+                    {users.map((u) => {
+                      const level = grantOf.get(`${r.id}:${u.id}`) ?? "none";
+                      const check = checkOf.get(`${r.id}:${u.id}`);
+                      return (
+                        <td key={u.id}>
+                          <AccessChecks
+                            level={level}
+                            label={`${r.name} · ${u.username}`}
+                            onChange={(l) => grant(r.name, u.id, l)}
+                          />
+                          {r.bitbucket &&
+                            (r.host_policy ?? m.policy) !== "trusted" &&
+                            (level !== "none" || r.shared_access !== "none") && (
+                              <div className="repo-host-state">
+                                <span>{hostName(r.provider)}</span>
+                                <BitbucketState
+                                  host={r.provider}
+                                  state={check?.state ?? "unknown"}
+                                  reason={check?.reason}
+                                  stale={check?.expired}
+                                />
+                              </div>
+                            )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
       <section className="card">
         <div className="card-head">

@@ -308,10 +308,17 @@
   min-width: 0;
 }
 
+.repo-access-span {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .repo-detail-side {
   min-width: 0;
   position: sticky;
   top: 0;
+  max-height: 100vh;
+  overflow: auto;
 }
 
 .repo-detail-side:only-child {
@@ -516,6 +523,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
 /* ---- user-scoped access (My repositories / Access management) ---- */
 .repo-level {
   display: inline-flex;
@@ -554,6 +562,13 @@
   display: grid;
   gap: 16px;
   margin-bottom: 16px;
+  min-width: 0;
+}
+.repo-access .card-head {
+  flex-wrap: wrap;
+}
+.repo-access .card-head h4 {
+  flex: 1 1 auto;
 }
 .repo-access-search {
   max-width: 320px;
@@ -589,8 +604,46 @@
 }
 .repo-perm-checks {
   display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+.repo-access-people {
+  display: grid;
+}
+.repo-access-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+  gap: 8px 16px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+}
+.repo-access-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+.repo-access-who span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-access-grant {
+  display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  align-items: center;
+  gap: 8px 16px;
+  min-width: 0;
+}
+.repo-host-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-xs, 12px);
 }
 .repo-perm-check {
   display: inline-flex;
@@ -613,4 +666,15 @@
 }
 .repo-access-bulk button {
   font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .repo-access-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .repo-perm-checks {
+    flex-wrap: wrap;
+  }
 }

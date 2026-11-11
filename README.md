@@ -82,6 +82,10 @@ The live checkout is never the worktree. Git operations refuse that directory, e
 
 Details, the gap analysis and the limitations are in [`docs/architecture/self-development.md`](docs/architecture/self-development.md).
 
+## Intelligent Feature Engineering
+
+`intelligent-feature-engineering` is the built-in template for a complex feature or a cross-module change. It runs on the same engine: requirements, repository discovery, architecture, an approved plan, implementation in a worktree, targeted checks, an independent review with a bounded repair, regression, a human quality gate, then a pull request. Subtasks in the plan are not child runs. Completing the run proposes learning candidates through the existing post-run effect; it does not publish rules. See [`docs/architecture/intelligent-feature-engineering.md`](docs/architecture/intelligent-feature-engineering.md).
+
 ## Language
 
 The React UI supports Vietnamese (`vi`, default) and English (`en`). The selector in the top bar is stored in

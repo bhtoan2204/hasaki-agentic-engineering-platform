@@ -73,6 +73,69 @@ export const PLATFORM_REGRESSION_COMMAND = `${SELF_TEST_GUARD}
 echo "== full regression (npm test)"
 npm test`;
 
+/** Refuses the application database only when the command runner already marked this checkout as the live platform. */
+const FEATURE_SELF_GUARD = `if [ "\${PLATFORM_SELF_TEST:-}" = "1" ]; then
+  if [ -n "\${DATABASE_URL:-}" ]; then echo "refusing verification: DATABASE_URL is set" >&2; exit 2; fi
+  admin="\${TEST_DATABASE_ADMIN_URL:-}"
+  case "$admin" in
+    */platform|*/platform\\?*) echo "refusing verification: admin URL names the application database" >&2; exit 2 ;;
+  esac
+fi`;
+
+/** Typecheck, lint and tests for the modules touched on the branch. Full-suite regression is a later step. */
+export const FEATURE_TARGETED_COMMAND = `set -euo pipefail
+${FEATURE_SELF_GUARD}
+if [ -f go.mod ]; then
+  pkgs=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" -- '*.go' | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
+  echo "== go build ./..."
+  go build ./...
+  if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m \${GO_TEST_SKIP:+-skip $GO_TEST_SKIP} $pkgs"; go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} $pkgs; else echo "no Go packages changed"; fi
+elif [ -f package.json ]; then
+  echo "== typecheck"
+  if [ -x node_modules/.bin/tsc ]; then npx --no-install tsc -p . --pretty false --noEmit --incremental false; else echo "tsc not installed; typecheck skipped"; fi
+  changed=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" || true)
+  files=$(printf '%s\\n' "$changed" | grep -E '\\.(ts|tsx|js|jsx)$' || true)
+  if [ -n "$files" ] && [ -x node_modules/.bin/eslint ]; then
+    echo "== eslint (changed files)"
+    printf '%s\\n' "$files" | xargs -r npx --no-install eslint --no-error-on-unmatched-pattern
+  else
+    echo "eslint skipped"
+  fi
+  if [ -f test/setup.ts ]; then
+    tests=$(
+      {
+        printf '%s\\n' "$changed" | grep -E '^test/.*\\.test\\.ts$' || true
+        printf '%s\\n' "$changed" | sed -n 's|^src/\\(.*\\)\\.ts$|test/\\1.test.ts|p'
+      } | sort -u | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && printf '%s\\n' "$f"; done
+    )
+    if [ -n "$tests" ]; then
+      echo "== targeted tests"
+      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 $tests
+    else
+      echo "no matching test files; targeted suite skipped"
+    fi
+  else
+    echo "no platform test harness; the regression step runs npm test"
+  fi
+else
+  echo "no test runner detected"
+fi`;
+
+/** Broader gate after review. Bounded with -short / the step timeout. Not a second scheduler. */
+export const FEATURE_REGRESSION_COMMAND = `set -euo pipefail
+${FEATURE_SELF_GUARD}
+if [ -f go.mod ]; then
+  echo "== go build ./..."
+  go build ./...
+  echo "== go test -short -timeout 8m ./..."
+  go test -short -timeout 8m ./...
+elif [ -f package.json ]; then
+  echo "== regression (npm test)"
+  npm test --if-present
+else
+  echo "no regression runner detected"
+fi`;
+
 const ANALYZE = {
   instructions:
     "Analyse the engineering request. Restate the goal, list functional requirements, acceptance criteria, " +
@@ -957,6 +1020,171 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "git_pull_request",
           name: "Pull Request",
           depends_on: ["regression_test"],
+          config: { mode: "approval", content_from: "implement" },
+        },
+      ],
+    },
+  },
+  {
+    key: "intelligent-feature-engineering",
+    spec: {
+      name: "Intelligent Feature Engineering",
+      description:
+        "Complex features and cross-module changes: requirements, repository discovery, architecture, an approved plan, implementation in a worktree, targeted checks, independent review, regression, then a pull request. Learning stays a reviewable proposal.",
+      category: "Engineering",
+      execution_mode: "standard",
+      feedback_step: "implement",
+      inputs: {
+        goal: {
+          description: "Feature goal when it is narrower than the work item text",
+          required: false,
+        },
+        repositories: {
+          description: "Repositories to change. Empty lets discovery recommend them",
+          required: false,
+        },
+      },
+      steps: [
+        {
+          key: "understand",
+          type: "agent",
+          name: "Understand Requirements",
+          config: {
+            instructions:
+              "Extract the engineering request. Do not design the change and do not search the whole codebase. " +
+              "Read code only to pin down terminology. If a behaviour cannot be settled from the request, ask the developer. " +
+              "Produce objectives, acceptance criteria, constraints, assumptions, ambiguities and risks.",
+            output_contract:
+              "{ goal, objectives: string[], acceptance_criteria: string[], constraints: string[], assumptions: string[], ambiguities: string[], keywords: string[], risks: string[] }",
+          },
+        },
+        {
+          key: "discover",
+          type: "integration",
+          name: "Discover Context & Experience",
+          depends_on: ["understand"],
+          config: DISCOVER,
+        },
+        {
+          key: "confirm_repos",
+          type: "human_approval",
+          name: "Confirm Repositories",
+          depends_on: ["discover"],
+          config: CONFIRM_REPOS,
+        },
+        {
+          key: "architecture",
+          type: "agent",
+          name: "Architecture & Impact Analysis",
+          depends_on: ["confirm_repos"],
+          config: {
+            instructions:
+              "The confirmed repositories are already selected. Applicable knowledge and approved task memory are already in your context; " +
+              "use search_knowledge and search_task_memory only for a gap, and call_tool code_intelligence.search for the symbols and dependencies this change touches. " +
+              "Do not rank repositories again. Record what you consulted so later steps reuse this output instead of searching again. " +
+              "Evaluate affected modules, dependency impact, alternatives, compatibility and architectural risks. Cite path:line.",
+            output_contract:
+              "{ summary, modules: [{ repo, path, reason }], dependencies: string[], symbols: [{ repo, name, path }], knowledge: string[], experience: string[], alternatives: [{ option, rejected_because }], compatibility: string[], risks: string[] }",
+          },
+        },
+        {
+          key: "plan",
+          type: "agent",
+          name: "Decompose & Plan",
+          depends_on: ["architecture"],
+          config: {
+            instructions:
+              "Turn the architecture output into one ordered implementation plan for this run. " +
+              "Subtasks are logical plan items, not child runs and not a second scheduler. " +
+              "Each subtask names its dependencies, the files it touches, its acceptance criteria and how it will be verified. " +
+              "Do not search the repository again unless a file cited above is missing. " +
+              "Targeted checks run before the independent review; the broader regression runs after that review and before the pull request.",
+            output_contract:
+              "{ summary, subtasks: [{ id, title, depends_on: string[], files: string[], acceptance_criteria: string[], verification: string[] }], risks: string[], verification_strategy: string[] }",
+          },
+        },
+        {
+          key: "approve_plan",
+          type: "human_approval",
+          name: "Human Plan Approval",
+          depends_on: ["plan"],
+          config: {
+            message: "Duyệt kế hoạch trước khi sửa mã nguồn. Từ chối sẽ làm lại bước lập kế hoạch.",
+            show_outputs: ["understand", "architecture", "plan"],
+            on_reject: { reexecute: "plan" },
+          },
+        },
+        {
+          key: "implement",
+          type: "coding_agent",
+          name: "Implementation",
+          depends_on: ["approve_plan"],
+          config: {
+            ...IMPLEMENT,
+            instructions:
+              IMPLEMENT.instructions +
+              " Implement only the approved plan's subtasks, in that order, inside the worktrees returned by prepare_branch. " +
+              "Do not modify the running application's checkout, restart it, deploy, or merge. " +
+              "Do not create child runs. Read the plan output instead of repeating discovery.",
+          },
+          max_attempts: 2,
+        },
+        {
+          key: "targeted_test",
+          type: "command",
+          name: "Targeted Verification",
+          depends_on: ["implement"],
+          config: {
+            command: FEATURE_TARGETED_COMMAND,
+            timeout_seconds: 900,
+            baseline_compare: "go",
+            on_failure: "ask",
+            require_workspace: true,
+          },
+        },
+        {
+          key: "review",
+          type: "agent",
+          name: "Independent Review & Repair",
+          depends_on: ["targeted_test"],
+          config: {
+            ...REVIEW,
+            instructions:
+              REVIEW.instructions +
+              " Judge the diff against the approved acceptance criteria, the architecture constraints, security, correctness and maintainability. " +
+              "Repair stays inside the existing review budget. Do not open a new run.",
+          },
+        },
+        {
+          key: "regression_test",
+          type: "command",
+          name: "Regression & Quality Gate",
+          depends_on: ["review"],
+          config: {
+            command: FEATURE_REGRESSION_COMMAND,
+            timeout_seconds: 1800,
+            baseline_compare: "go",
+            on_failure: "ask",
+            require_workspace: true,
+          },
+        },
+        {
+          key: "quality_gate",
+          type: "human_approval",
+          name: "Quality Gate",
+          depends_on: ["regression_test"],
+          config: {
+            message:
+              "Kiểm tra bắt buộc phải đạt trước khi mở pull request. Từ chối sẽ làm lại bước hiện thực.",
+            show_outputs: ["targeted_test", "review", "regression_test"],
+            on_reject: { reexecute: "implement" },
+          },
+        },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["quality_gate"],
           config: { mode: "approval", content_from: "implement" },
         },
       ],

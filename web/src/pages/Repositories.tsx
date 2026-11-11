@@ -351,6 +351,11 @@ export function RepositoriesPage({
           </EmptyState>
         ) : null}
         <div className="repo-detail">
+          {r && manage && (
+            <div className="repo-access-span">
+              <RepositoryAccessAdmin only={r.name} />
+            </div>
+          )}
           {r && (
             <div className="repo-detail-main">
               <div className="card repo-hero">
@@ -390,6 +395,16 @@ export function RepositoriesPage({
                     <dd>{r.category || <span className="muted">—</span>}</dd>
                   </div>
                   <div>
+                    <dt>{t("repo.project")}</dt>
+                    <dd>
+                      {r.projects?.length ? (
+                        r.projects.join(", ")
+                      ) : (
+                        <span className="muted">{t("repo.noProject")}</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
                     <dt>{t("repo.defaultBranch")}</dt>
                     <dd className="mono">
                       {r.default_branch || (
@@ -400,11 +415,7 @@ export function RepositoriesPage({
                 </dl>
               </div>
 
-              {manage ? (
-                <RepositoryAccessAdmin only={r.name} />
-              ) : (
-                <AccessCard access={r.access} provider={r.provider} />
-              )}
+              {!manage && <AccessCard access={r.access} provider={r.provider} />}
               {!manage && (
                 <>
                   <section className="card">
@@ -555,7 +566,7 @@ export function RepositoriesPage({
                     <Actions items={r.allowed_actions} />
                   </div>
                   <div>
-                    <div className="repo-label">{t("repo.projectsAllowed")}</div>
+                    <div className="repo-label">{t("repo.project")}</div>
                     <Chips items={r.projects} kind="is-project" empty={t("repo.noProject")} />
                   </div>
                 </div>
@@ -997,6 +1008,13 @@ function RepoForm({
           onChange={(e) => setForm({ ...form, category: e.target.value })}
         />
       </Field>
+      <Field label={t("repo.project")} hint={t("repo.projectHint")}>
+        <input
+          value={form.projects ?? ""}
+          placeholder={t("repo.projectPh")}
+          onChange={(e) => setForm({ ...form, projects: e.target.value })}
+        />
+      </Field>
       <Field label={t("repo.desc")}>
         <textarea
           rows={2}
@@ -1005,7 +1023,7 @@ function RepoForm({
         />
       </Field>
       <div className="repo-form-grid">
-        {LISTS.map((k) => (
+        {LISTS.filter((k) => k !== "projects").map((k) => (
           <Field key={k} label={t(`repo.list.${k}`)} hint={t("repo.comma")}>
             <input value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
           </Field>
