@@ -2,6 +2,25 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /**
+ * Environment files that hold real values. Templates (.env.example, .env.sample, .env.template, .env.dist) stay
+ * readable and editable: they document the configuration keys a change may need to add. Deny rules win over allow
+ * rules in Cursor, so the secret names are listed instead of denying `.env*` and carving out exceptions.
+ */
+export const SECRET_ENV_FILES = [
+  ".env",
+  ".envrc",
+  ".env.local",
+  ".env.*.local",
+  ".env.prod*",
+  ".env.live*",
+  ".env.stag*",
+  ".env.uat*",
+  ".env.qc*",
+  ".env.dev*",
+  ".env.test*",
+];
+
+/**
  * Project permission file the installed CLI actually reads: `<workspace>/.cursor/cli.json`.
  * Deny rules win over allow rules, including when --force is set (Cursor docs: --force allows commands unless explicitly denied).
  * --force is NOT the policy. Print mode will not apply file edits without it (headless docs), so coding mode passes --force
@@ -19,10 +38,10 @@ export function writeCursorPolicy(
     "Shell(git:clean*)",
     "Shell(sudo)",
     "Shell(rm)",
-    "Read(**/.env*)",
+    ...SECRET_ENV_FILES.map((g) => `Read(**/${g})`),
     "Read(**/mcp.json)",
     "Read(**/cli.json)",
-    "Write(**/.env*)",
+    ...SECRET_ENV_FILES.map((g) => `Write(**/${g})`),
     "Write(**/*.key)",
     "Write(**/mcp.json)",
     "Write(**/cli.json)",

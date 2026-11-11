@@ -17,7 +17,13 @@ import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { excludeFromGit, writeCursorPolicy, writeMcpConfig } from "./permissions.ts";
 import { cursorToolDecision, writeOutsideWorktrees } from "./policyWatch.ts";
-import { isDuplicateAssistant, NdjsonStream, toolCallShape, type CursorEvent } from "./stream.ts";
+import {
+  isDuplicateAssistant,
+  NdjsonStream,
+  TextCoalescer,
+  toolCallShape,
+  type CursorEvent,
+} from "./stream.ts";
 
 const exec = promisify(execFile);
 
@@ -223,7 +229,24 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     const denied: Array<{ tool: string; reason: string }> = [];
 
     const seenTools = new Set<string>();
+    // One transcript line per message, not per streamed token; the step's final text is the whole message.
+    const coalescer = new TextCoalescer(async (kind, message) => {
+      if (kind === "thinking") return input.ctx.log("thinking", message, { provider: "cursor" });
+      assistantTurns++;
+      text = message;
+      await input.ctx.log("agent", message, { provider: "cursor" });
+    });
     const handle = async (ev: CursorEvent) => {
+      if (ev.type === "assistant" && !isDuplicateAssistant(ev, true)) {
+        if (ev.text) await coalescer.push("agent", ev.text);
+        return;
+      }
+      if (ev.type === "thinking" && ev.text && ev.subtype !== "completed") {
+        await coalescer.push("thinking", ev.text);
+        return;
+      }
+      // Any other event (tool call, result, init, the CLI's duplicate full-message flush) ends the open message.
+      await coalescer.flush();
       const eventKey = `${ev.subtype}:${ev.call_id}`;
       if (ev.type === "tool_call" && ev.call_id) {
         if (seenTools.has(eventKey)) return;
@@ -243,14 +266,6 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
           `Cursor session ${ev.session_id} started${model ? ` (model ${model})` : ""}`,
           { provider: "cursor", session_id: ev.session_id, model: model || null },
         );
-      } else if (ev.type === "thinking" && ev.text?.trim()) {
-        await input.ctx.log("thinking", ev.text, { provider: "cursor" });
-      } else if (ev.type === "assistant" && !isDuplicateAssistant(ev, true)) {
-        assistantTurns++;
-        if (ev.text?.trim()) {
-          text = ev.text;
-          await input.ctx.log("agent", ev.text, { provider: "cursor" });
-        }
       } else if (ev.type === "tool_call" && ev.subtype === "started") {
         const pending = await one<{ n: number }>(
           pool,
@@ -352,6 +367,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       await input.ctx.log("system", `Cursor stream: malformed line (${err.error})`, {
         provider: "cursor",
       });
+    await coalescer.flush(); // a message still open when the CLI exited (killed, timed out, no result event)
 
     rmSync(join(input.cwd, ".cursor", "mcp.json"), { force: true });
     rmSync(promptFile, { force: true });

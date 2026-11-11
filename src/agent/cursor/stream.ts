@@ -109,6 +109,34 @@ function assistantText(raw: any): string | undefined {
 }
 
 /**
+ * Joins the per-token deltas of `--stream-partial-output` into whole messages. Consecutive deltas of the same kind
+ * (assistant text or thinking) accumulate; anything else — a tool call, the other kind, the result, the CLI's own
+ * duplicate full-message flush, or the end of the stream — closes the open message and `emit`s it once.
+ */
+export class TextCoalescer {
+  private kind: "agent" | "thinking" | null = null;
+  private text = "";
+  private emit: (kind: "agent" | "thinking", text: string) => Promise<void>;
+  constructor(emit: (kind: "agent" | "thinking", text: string) => Promise<void>) {
+    this.emit = emit;
+  }
+  /** Feed one delta. */
+  async push(kind: "agent" | "thinking", delta: string) {
+    if (this.kind && this.kind !== kind) await this.flush();
+    this.kind = kind;
+    this.text += delta;
+  }
+  /** Close the open message (no-op when nothing or only whitespace is buffered). */
+  async flush() {
+    const kind = this.kind,
+      text = this.text;
+    this.kind = null;
+    this.text = "";
+    if (kind && text.trim()) await this.emit(kind, text.trim());
+  }
+}
+
+/**
  * With --stream-partial-output the CLI repeats assistant text. Only the delta
  * (timestamp_ms set, model_call_id absent) is new. Other assistant events are duplicates.
  * Without partial streaming, assistant events have neither field and are the full message.

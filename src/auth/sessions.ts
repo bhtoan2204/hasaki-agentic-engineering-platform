@@ -11,7 +11,9 @@ import {
 } from "./sessionCache.ts";
 
 const COOKIE = "sid";
-const MAX_AGE_S = 8 * 60 * 60;
+/** Login session lifetime (cookie Max-Age and the stored expiry). Default 3 days; SESSION_MAX_AGE_HOURS overrides. */
+const hours = Number(process.env.SESSION_MAX_AGE_HOURS ?? 72);
+export const MAX_AGE_S = Math.round((Number.isFinite(hours) && hours > 0 ? hours : 72) * 60 * 60);
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 8;
 
