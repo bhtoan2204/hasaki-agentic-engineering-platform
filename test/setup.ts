@@ -9,9 +9,11 @@ import { join } from "node:path";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 
-const admin = process.env.TEST_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
+const admin =
+  process.env.TEST_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
 const adminUrl = new URL(admin);
-if (!["localhost", "127.0.0.1", "[::1]"].includes(adminUrl.hostname)) throw new Error("Tests require a local isolated PostgreSQL; remote database refused.");
+if (!["localhost", "127.0.0.1", "[::1]"].includes(adminUrl.hostname))
+  throw new Error("Tests require a local isolated PostgreSQL; remote database refused.");
 const dbName = `platform_test_${randomUUID().replaceAll("-", "")}`;
 const c = new pg.Client({ connectionString: admin });
 await c.connect();
@@ -45,4 +47,12 @@ process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never r
 
 // Tests must never inherit a developer's live Telegram bot or receiver settings. Individual Telegram tests
 // explicitly point config at their local mocked Bot API after the isolated database is ready.
-for (const key of ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_MODE", "TELEGRAM_API_BASE", "TELEGRAM_WEBHOOK_URL", "TELEGRAM_WEBHOOK_SECRET"]) delete process.env[key];
+for (const key of [
+  "TELEGRAM_BOT_TOKEN",
+  "TELEGRAM_CHAT_ID",
+  "TELEGRAM_MODE",
+  "TELEGRAM_API_BASE",
+  "TELEGRAM_WEBHOOK_URL",
+  "TELEGRAM_WEBHOOK_SECRET",
+])
+  delete process.env[key];

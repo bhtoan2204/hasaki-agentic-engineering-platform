@@ -19,7 +19,9 @@ export function redactContextValue(value: unknown, depth = 0): any {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => [
         k,
-        /^(?:password|passwd|secret|api[_-]?key|(?:access|refresh|auth|session)[_-]?token|client[_-]?secret)$/i.test(k)
+        /^(?:password|passwd|secret|api[_-]?key|(?:access|refresh|auth|session)[_-]?token|client[_-]?secret)$/i.test(
+          k,
+        )
           ? "[redacted]"
           : redactContextValue(v, depth + 1),
       ]),

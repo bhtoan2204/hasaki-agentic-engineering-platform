@@ -6,7 +6,13 @@ import { config } from "../config.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
-import { beginAttempt, finishAttempt, heartbeat, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
+import {
+  beginAttempt,
+  finishAttempt,
+  heartbeat,
+  prepareProviderPause,
+  processAutomaticHandoff,
+} from "./engine.ts";
 import { dispatchRunEffects } from "./effects.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { enforceRunRepositoryAccess } from "../repos/access.ts";
@@ -33,16 +39,27 @@ export interface SchedulerOptions {
 // Starts with the instance id: the database (migration 019) only lets the run's own instance take its jobs.
 const processId = `${config.instanceId}:${process.pid}:${randomUUID().slice(0, 8)}`;
 /** Lease owner as stored: always `<instance>:...`, also for ad-hoc worker ids (tests, CLI). */
-const leaseOwner = (workerId: string) => (workerId.startsWith(`${config.instanceId}:`) ? workerId : `${config.instanceId}:${workerId}`);
+const leaseOwner = (workerId: string) =>
+  workerId.startsWith(`${config.instanceId}:`) ? workerId : `${config.instanceId}:${workerId}`;
 
 /** Set while the server shuts down: interrupted jobs are handed back to the queue instead of being failed. */
 let draining: string | null = null;
 
 /** Step types that finish in seconds (no long agent session or command). */
-export const LIGHT_STEP_TYPES = ["human_input", "human_approval", "condition", "integration", "git_pull_request"];
+export const LIGHT_STEP_TYPES = [
+  "human_input",
+  "human_approval",
+  "condition",
+  "integration",
+  "git_pull_request",
+];
 
 /** `onlyTypes`: restrict the claim to these step types (light lane). */
-export async function claimJob(workerId: string, leaseSeconds: number, onlyTypes?: string[]): Promise<JobRow | undefined> {
+export async function claimJob(
+  workerId: string,
+  leaseSeconds: number,
+  onlyTypes?: string[],
+): Promise<JobRow | undefined> {
   await processAutomaticHandoff();
   return one<JobRow>(
     pool,
@@ -79,18 +96,37 @@ export async function schedulerStatus() {
        FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
       WHERE j.status = 'queued' AND r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') ORDER BY j.available_at, j.id`,
   );
-  return { instance: config.instanceId, workers: config.scheduler.workers, light_workers: config.scheduler.lightWorkers ?? 1, light_step_types: LIGHT_STEP_TYPES, running, queued };
+  return {
+    instance: config.instanceId,
+    workers: config.scheduler.workers,
+    light_workers: config.scheduler.lightWorkers ?? 1,
+    light_step_types: LIGHT_STEP_TYPES,
+    running,
+    queued,
+  };
 }
 
 /** Execute one claimed job end to end. */
-export async function processJob(job: JobRow, workerId: string, opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds">) {
+export async function processJob(
+  job: JobRow,
+  workerId: string,
+  opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds">,
+) {
   const begun = await beginAttempt(job, workerId);
   if (!begun) return;
   const ac = new AbortController();
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
     try {
-      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) || await one(pool, "SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'", [begun.attempt.id])) ac.abort();
+      if (
+        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) ||
+        (await one(
+          pool,
+          "SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'",
+          [begun.attempt.id],
+        ))
+      )
+        ac.abort();
     } catch (e) {
       ac.abort();
       console.error(`heartbeat job ${job.id}:`, (e as Error).message);
@@ -101,13 +137,20 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
   ac.signal.addEventListener("abort", forwardAbort, { once: true });
   const timeoutMs = begun.attempt.effective_agent?.timeout_ms;
   let timedOut = false;
-  const deadline = timeoutMs ? setTimeout(() => { timedOut = true; executionAbort.abort(); }, timeoutMs) : null;
+  const deadline = timeoutMs
+    ? setTimeout(() => {
+        timedOut = true;
+        executionAbort.abort();
+      }, timeoutMs)
+    : null;
   let result: ExecResult;
   try {
     const ownerId = Number(begun.run.owner_id);
     // Revalidate the owner's repository access before any protected content is touched (revocation, retries,
     // resume and re-execution all pass through here). A revoked selected repository stops the step safely.
-    const scope = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, () => enforceRunRepositoryAccess(begun.run));
+    const scope = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, () =>
+      enforceRunRepositoryAccess(begun.run),
+    );
     if (scope.blocked.length) {
       result = {
         kind: "failed",
@@ -127,20 +170,68 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
         }
       }
       const ctx = makeContext({ ...begun, signal: executionAbort.signal });
-      result = await execution.run({ userId: ownerId, runId: begun.run.id, kind: "run" }, async () => { await loadPersonalIntegrations(); return getExecutor(begun.step.type).execute(ctx); });
+      result = await execution.run(
+        { userId: ownerId, runId: begun.run.id, kind: "run" },
+        async () => {
+          await loadPersonalIntegrations();
+          return getExecutor(begun.step.type).execute(ctx);
+        },
+      );
     }
   } catch (e) {
     result = ac.signal.aborted
       ? { kind: "failed", error: "aborted (canceled or lease lost)", retryable: false }
-      : { kind: "failed", error: (e as Error)?.message ?? String(e), retryable: true, details: (e as Error)?.stack };
+      : {
+          kind: "failed",
+          error: (e as Error)?.message ?? String(e),
+          retryable: true,
+          details: (e as Error)?.stack,
+        };
   }
   try {
     if (deadline) clearTimeout(deadline);
-    if (timedOut && !ac.signal.aborted) result = { kind: "failed", error: `execution timeout after ${timeoutMs}ms`, retryable: true, details: { provider_error: { code: "execution_timeout", message: `execution timeout after ${timeoutMs}ms` } } };
-    await retryTransient(() => q(pool, "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2", [begun.attempt.id, job.fencing_token]), `record executor termination ${job.id}`);
+    if (timedOut && !ac.signal.aborted)
+      result = {
+        kind: "failed",
+        error: `execution timeout after ${timeoutMs}ms`,
+        retryable: true,
+        details: {
+          provider_error: {
+            code: "execution_timeout",
+            message: `execution timeout after ${timeoutMs}ms`,
+          },
+        },
+      };
+    await retryTransient(
+      () =>
+        q(
+          pool,
+          "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2",
+          [begun.attempt.id, job.fencing_token],
+        ),
+      `record executor termination ${job.id}`,
+    );
     const handoff = await prepareProviderPause(begun, result);
-    if (!handoff && (draining || ac.signal.aborted) && result.kind === "failed" && (await retryTransient(() => releaseAttempt(job.id, job.fencing_token, begun.attempt.id, draining || "worker interrupted: heartbeat unavailable or lease lost"), `release job ${job.id}`))) return;
-    await retryTransient(() => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff), `finish job ${job.id}`);
+    if (
+      !handoff &&
+      (draining || ac.signal.aborted) &&
+      result.kind === "failed" &&
+      (await retryTransient(
+        () =>
+          releaseAttempt(
+            job.id,
+            job.fencing_token,
+            begun.attempt.id,
+            draining || "worker interrupted: heartbeat unavailable or lease lost",
+          ),
+        `release job ${job.id}`,
+      ))
+    )
+      return;
+    await retryTransient(
+      () => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff),
+      `finish job ${job.id}`,
+    );
   } finally {
     if (deadline) clearTimeout(deadline);
     ac.signal.removeEventListener("abort", forwardAbort);
@@ -150,7 +241,10 @@ export async function processJob(job: JobRow, workerId: string, opts: Pick<Sched
 }
 
 /** Claim and execute at most one job. Returns false when the queue had nothing runnable. Used by tests. */
-export async function runOnce(workerId = `${processId}:once`, opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds"> = config.scheduler) {
+export async function runOnce(
+  workerId = `${processId}:once`,
+  opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds"> = config.scheduler,
+) {
   const job = await claimJob(workerId, opts.leaseSeconds);
   if (!job) return runIndexOnce();
   await processJob(job, workerId, opts);
@@ -172,8 +266,14 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   const loops: Promise<void>[] = [];
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const lanes = [
-    ...Array.from({ length: opts.workers }, (_, i) => ({ id: `${processId}:w${i}`, types: undefined as string[] | undefined })),
-    ...Array.from({ length: opts.lightWorkers ?? 1 }, (_, i) => ({ id: `${processId}:light${i}`, types: LIGHT_STEP_TYPES })),
+    ...Array.from({ length: opts.workers }, (_, i) => ({
+      id: `${processId}:w${i}`,
+      types: undefined as string[] | undefined,
+    })),
+    ...Array.from({ length: opts.lightWorkers ?? 1 }, (_, i) => ({
+      id: `${processId}:light${i}`,
+      types: LIGHT_STEP_TYPES,
+    })),
   ];
   for (const lane of lanes) {
     const workerId = lane.id;
@@ -183,8 +283,9 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
           try {
             const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
             if (job) await processJob(job, workerId, opts);
-            else if (!lane.types && await runIndexOnce(indexAbort.signal)) { /* optional idle indexing */ }
-            else await sleep(opts.pollMs);
+            else if (!lane.types && (await runIndexOnce(indexAbort.signal))) {
+              /* optional idle indexing */
+            } else await sleep(opts.pollMs);
           } catch (e) {
             console.error(`worker ${workerId}:`, (e as Error).message);
             await sleep(opts.pollMs * 5);
@@ -199,7 +300,9 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   };
   const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);
   void reconcile();
-  console.log(`scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`);
+  console.log(
+    `scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`,
+  );
   return {
     async stop() {
       stopped = true;

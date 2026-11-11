@@ -3,15 +3,12 @@ import { useI18n } from "../../i18n/index.tsx";
 import type { Row } from "./shared.tsx";
 export function defaultFilters() {
   const now = new Date();
-  const to = new Date(
-    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1),
-  );
+  const to = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 1));
   const from = new Date(to.getTime() - 30 * 86400000);
   return {
     from: from.toISOString().slice(0, 10),
     to: to.toISOString().slice(0, 10),
-    timezone:
-      Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Bangkok",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Bangkok",
     bucket: "day",
     provider: "",
     model: "",
@@ -41,9 +38,7 @@ export function AnalyticsFilters({
   const initial = () => {
     const p = new URLSearchParams(query);
     const defaults = defaultFilters();
-    return Object.fromEntries(
-      Object.entries(defaults).map(([k, v]) => [k, p.get(k) ?? v]),
-    );
+    return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, p.get(k) ?? v]));
   };
   const [draft, setDraft] = useState(initial);
   useEffect(() => {
@@ -114,10 +109,7 @@ export function AnalyticsFilters({
           </label>
           <label>
             {t("an.timezone")}
-            <select
-              value={draft.timezone}
-              onChange={(e) => set("timezone", e.target.value)}
-            >
+            <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
               {[
                 ...new Set([
                   draft.timezone,
@@ -134,10 +126,7 @@ export function AnalyticsFilters({
           </label>
           <label>
             {t("an.bucket")}
-            <select
-              value={draft.bucket}
-              onChange={(e) => set("bucket", e.target.value)}
-            >
+            <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
               <option value="day">{t("an.day")}</option>
               <option value="hour">{t("an.hour")}</option>
             </select>
@@ -158,10 +147,7 @@ export function AnalyticsFilters({
               </label>
               {select(
                 "user",
-                (options?.users ?? []).map((u: Row) => [
-                  String(u.id),
-                  u.username,
-                ]),
+                (options?.users ?? []).map((u: Row) => [String(u.id), u.username]),
               )}
               {(["workflow", "repository", "project"] as const).map((k) =>
                 select(
@@ -191,10 +177,7 @@ export function AnalyticsFilters({
               )}
               {select(
                 "severity",
-                ["critical", "high", "medium", "low", "unknown"].map((v) => [
-                  v,
-                  v,
-                ]),
+                ["critical", "high", "medium", "low", "unknown"].map((v) => [v, v]),
               )}
               {select(
                 "incident_status",
@@ -208,11 +191,7 @@ export function AnalyticsFilters({
               <label>
                 {t("an.service")}
                 <select
-                  value={
-                    draft.service
-                      ? `${draft.namespace || "*"}\u001f${draft.service}`
-                      : ""
-                  }
+                  value={draft.service ? `${draft.namespace || "*"}\u001f${draft.service}` : ""}
                   onChange={(e) => {
                     const [namespace, service] = e.target.value.split("\u001f");
                     setDraft((d) => ({
@@ -225,10 +204,7 @@ export function AnalyticsFilters({
                 >
                   <option value="">{t("an.all")}</option>
                   {(options?.services ?? [])
-                    .filter(
-                      (v: Row) =>
-                        !draft.namespace || v.namespace === draft.namespace,
-                    )
+                    .filter((v: Row) => !draft.namespace || v.namespace === draft.namespace)
                     .map((v: Row) => (
                       <option
                         key={`${v.namespace}\u001f${v.service}`}
@@ -244,11 +220,7 @@ export function AnalyticsFilters({
         </div>
         <div className="an-filter-footer">
           <p className="muted small">
-            {t(
-              domain === "production"
-                ? "an.productionFilterHint"
-                : "an.scopeHint",
-            )}
+            {t(domain === "production" ? "an.productionFilterHint" : "an.scopeHint")}
           </p>
           <button
             className="ghost sm"

@@ -23,11 +23,20 @@ const BASH = `curl 'https://kafka-ui-qc-v2.hasaki.dev/api/clusters' \\
 
 test("Windows cmd cURL: caret escapes undone, cookie and headers extracted", () => {
   const c = parseCurl(CMD)!;
-  assert.equal(c.url, "https://siem.hasaki.work/en-GB/splunkd/__raw/servicesNS/nobody/system/web-features?output_mode=json");
-  assert.equal(c.cookie, "splunkweb_csrf_token_8000=111; session_id_8080=abc; splunkweb_csrf_token_8080=222; token_key=111; splunkd_8080=Aa^76iB_x^rnQ-z^C3QA_");
+  assert.equal(
+    c.url,
+    "https://siem.hasaki.work/en-GB/splunkd/__raw/servicesNS/nobody/system/web-features?output_mode=json",
+  );
+  assert.equal(
+    c.cookie,
+    "splunkweb_csrf_token_8000=111; session_id_8080=abc; splunkweb_csrf_token_8080=222; token_key=111; splunkd_8080=Aa^76iB_x^rnQ-z^C3QA_",
+  );
   assert.equal(c.headers["x-splunk-form-key"], "222");
   assert.equal(c.headers["sec-ch-ua"], '"Not:A-Brand";v="8", "Chromium";v="156"');
-  assert.equal(c.headers["user-agent"], "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0");
+  assert.equal(
+    c.headers["user-agent"],
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0",
+  );
 });
 
 test("Splunk: session cookie of port 8080 → CSRF of port 8080, not the stale 8000 one", () => {
@@ -35,8 +44,16 @@ test("Splunk: session cookie of port 8080 → CSRF of port 8080, not the stale 8
   assert.equal(s.formKey, "222");
   assert.match(s.cookie, /splunkd_8080=Aa\^76iB_x\^rnQ-z\^C3QA_/);
   // without the header, the key still comes from the matching port
-  assert.equal(parseSplunkCookie("splunkweb_csrf_token_8000=111; splunkd_8080=x; splunkweb_csrf_token_8080=222").formKey, "222");
-  assert.throws(() => parseSplunkCookie("splunkd_8080=x; splunkweb_csrf_token_8000=111"), /csrf_token_8080/);
+  assert.equal(
+    parseSplunkCookie(
+      "splunkweb_csrf_token_8000=111; splunkd_8080=x; splunkweb_csrf_token_8080=222",
+    ).formKey,
+    "222",
+  );
+  assert.throws(
+    () => parseSplunkCookie("splunkd_8080=x; splunkweb_csrf_token_8000=111"),
+    /csrf_token_8080/,
+  );
 });
 
 test("bash cURL and plain Cookie header still work; junk gives a clear error", () => {

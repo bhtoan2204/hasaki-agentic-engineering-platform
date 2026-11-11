@@ -6,15 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import {
-  ArrowUpRight,
-  Building2,
-  Eye,
-  EyeOff,
-  Minus,
-  Settings2,
-  X,
-} from "lucide-react";
+import { ArrowUpRight, Building2, Eye, EyeOff, Minus, Settings2, X } from "lucide-react";
 import { useI18n } from "../i18n/index.tsx";
 import { mapOffice, primaryStep } from "./workflowToAgentMapper.ts";
 import {
@@ -22,11 +14,7 @@ import {
   prioritizeCompanionRuns,
   type CompanionState,
 } from "./companionState.ts";
-import {
-  useNow,
-  useOfficeExecutionState,
-  useOfficeRuns,
-} from "./useOfficeExecutionState.ts";
+import { useNow, useOfficeExecutionState, useOfficeRuns } from "./useOfficeExecutionState.ts";
 import { HasakiCompanionAvatar } from "./HasakiCompanionAvatar.tsx";
 import "./companion.css";
 
@@ -56,8 +44,7 @@ function readPrefs(): Preferences {
       intensity: ["off", "subtle", "normal", "playful"].includes(p.intensity)
         ? p.intensity
         : "normal",
-      name:
-        typeof p.name === "string" ? p.name.slice(0, 32) : DEFAULT_PREFS.name,
+      name: typeof p.name === "string" ? p.name.slice(0, 32) : DEFAULT_PREFS.name,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -117,9 +104,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
   const [prefs, setPrefs] = useState(readPrefs);
   const [open, setOpen] = useState(() => !prefs.minimized);
   const [settings, setSettings] = useState(false);
-  const [visible, setVisible] = useState(
-    () => document.visibilityState === "visible",
-  );
+  const [visible, setVisible] = useState(() => document.visibilityState === "visible");
   const moved = useRef(false);
   const dragPosition = useRef(prefs.position);
   const pointerStart = useRef<{
@@ -140,16 +125,13 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
     [snapshot, now, locale],
   );
   const step = snapshot ? primaryStep(snapshot.steps, snapshot.attempts) : null;
-  const agent = step
-    ? (agents.find((a) => a.step?.key === step.key) ?? null)
-    : null;
+  const agent = step ? (agents.find((a) => a.step?.key === step.key) ?? null) : null;
   const attempt = step
     ? (snapshot?.attempts.find((a) => a.id === step.current_attempt_id) ?? null)
     : null;
   const pendingQuestion = !!snapshot?.questions.some(
     (q) =>
-      q.step_key === step?.key &&
-      ["OPEN", "PENDING", "WAITING"].includes(q.status.toUpperCase()),
+      q.step_key === step?.key && ["OPEN", "PENDING", "WAITING"].includes(q.status.toUpperCase()),
   );
   const activity = companionActivity(
     snapshot?.run ?? null,
@@ -165,9 +147,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
         const next = {
           ...old,
           ...patch,
-          position: patch.position
-            ? { ...old.position, ...patch.position }
-            : old.position,
+          position: patch.position ? { ...old.position, ...patch.position } : old.position,
         };
         try {
           localStorage.setItem(PREF_KEY, JSON.stringify(next));
@@ -202,23 +182,14 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
         dy = pointer.clientY - pointerStart.current.y;
       if (Math.abs(dx) + Math.abs(dy) > 5) moved.current = true;
       if (!moved.current) return;
-      const panelWidth = Math.min(
-        window.innerWidth - 16,
-        window.innerWidth < 600 ? 280 : 310,
-      );
+      const panelWidth = Math.min(window.innerWidth - 16, window.innerWidth < 600 ? 280 : 310);
       const maxRight = Math.max(8, window.innerWidth - panelWidth - 8);
       const maxBottom = open
-        ? Math.max(
-            8,
-            window.innerHeight - Math.min(window.innerHeight * 0.7, 540) - 86,
-          )
+        ? Math.max(8, window.innerHeight - Math.min(window.innerHeight * 0.7, 540) - 86)
         : Math.max(8, window.innerHeight - 76);
       dragPosition.current = {
         right: Math.max(8, Math.min(maxRight, pointerStart.current.right - dx)),
-        bottom: Math.max(
-          8,
-          Math.min(maxBottom, pointerStart.current.bottom - dy),
-        ),
+        bottom: Math.max(8, Math.min(maxBottom, pointerStart.current.bottom - dy)),
       };
       const root = avatarRef.current?.closest<HTMLElement>(".global-companion");
       if (root) {
@@ -244,16 +215,10 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
   }, []);
   useEffect(() => {
     const clamp = () => {
-      const panelWidth = Math.min(
-        window.innerWidth - 16,
-        window.innerWidth < 600 ? 280 : 310,
-      );
+      const panelWidth = Math.min(window.innerWidth - 16, window.innerWidth < 600 ? 280 : 310);
       const maxRight = Math.max(8, window.innerWidth - panelWidth - 8);
       const maxBottom = open
-        ? Math.max(
-            8,
-            window.innerHeight - Math.min(window.innerHeight * 0.7, 540) - 86,
-          )
+        ? Math.max(8, window.innerHeight - Math.min(window.innerHeight * 0.7, 540) - 86)
         : Math.max(8, window.innerHeight - 76);
       setPreference({
         position: {
@@ -355,21 +320,14 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
           aria-labelledby="companion-title"
         >
           <header className="companion-panel-head">
-            <span
-              className="companion-status-dot"
-              data-state={activity.state}
-            />
+            <span className="companion-status-dot" data-state={activity.state} />
             <div className="companion-heading">
               <strong id="companion-title">{prefs.name}</strong>
               <span>
                 {stateText} · {context}
               </span>
             </div>
-            <button
-              className="quiet icon"
-              onClick={closePanel}
-              aria-label={t("common.close")}
-            >
+            <button className="quiet icon" onClick={closePanel} aria-label={t("common.close")}>
               <X size={16} />
             </button>
           </header>
@@ -381,9 +339,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
                 <span>{activity.run.title}</span>
               </div>
               <div className="companion-meta">
-                <span>
-                  {activity.step?.name ?? t("companion.noCurrentStep")}
-                </span>
+                <span>{activity.step?.name ?? t("companion.noCurrentStep")}</span>
                 <span className="companion-run-status">{statusText}</span>
               </div>
               {provider && <div className="companion-provider">{provider}</div>}
@@ -406,9 +362,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
                 <input
                   maxLength={32}
                   value={prefs.name}
-                  onChange={(e) =>
-                    setPreference({ name: e.target.value || "Hasaki-chan" })
-                  }
+                  onChange={(e) => setPreference({ name: e.target.value || "Hasaki-chan" })}
                 />
               </label>
               <label>
@@ -473,37 +427,21 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
           }}
           onKeyDown={(event) => {
             const delta = event.shiftKey ? 32 : 12;
-            if (
-              !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(
-                event.key,
-              )
-            )
-              return;
+            if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
             event.preventDefault();
             setPreference({
               position: {
                 right:
                   prefs.position.right +
-                  (event.key === "ArrowLeft"
-                    ? delta
-                    : event.key === "ArrowRight"
-                      ? -delta
-                      : 0),
+                  (event.key === "ArrowLeft" ? delta : event.key === "ArrowRight" ? -delta : 0),
                 bottom:
                   prefs.position.bottom +
-                  (event.key === "ArrowUp"
-                    ? -delta
-                    : event.key === "ArrowDown"
-                      ? delta
-                      : 0),
+                  (event.key === "ArrowUp" ? -delta : event.key === "ArrowDown" ? delta : 0),
               },
             });
           }}
         >
-          <HasakiCompanionAvatar
-            state={activity.state}
-            className="companion-art"
-          />
+          <HasakiCompanionAvatar state={activity.state} className="companion-art" />
           <span className="companion-orbit" aria-hidden="true" />
         </button>
       </div>

@@ -9,7 +9,14 @@ import type { WorkflowSpec } from "./types.ts";
 function canonical(v: unknown): string {
   if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
   if (v && typeof v === "object")
-    return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canonical((v as any)[k])).join(",") + "}";
+    return (
+      "{" +
+      Object.keys(v)
+        .sort()
+        .map((k) => JSON.stringify(k) + ":" + canonical((v as any)[k]))
+        .join(",") +
+      "}"
+    );
   return JSON.stringify(v);
 }
 export const hashOf = (v: unknown) => createHash("sha256").update(canonical(v)).digest("hex");
@@ -43,7 +50,11 @@ export const definitions = {
 
   /** Shared definition when ownerId is null. Private definitions are looked up by their owner. */
   async get(key: string, db: Db = pool, ownerId: number | null = null) {
-    const d = await one(db, "SELECT * FROM workflow_definitions WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2", [key, ownerId]);
+    const d = await one(
+      db,
+      "SELECT * FROM workflow_definitions WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2",
+      [key, ownerId],
+    );
     if (!d) return undefined;
     const versions = await q(
       db,
@@ -55,20 +66,43 @@ export const definitions = {
 
   /** A published version; latest when `version` is omitted. */
   /** The owner's private copy when it exists, otherwise the shared definition. */
-  async version(key: string, version?: number, db: Db = pool, ownerId?: number | null): Promise<DefinitionVersion | undefined> {
-    const wrote = inTx(db) && (txWrote(db, "workflow_definitions") || txWrote(db, "workflow_definition_versions"));
+  async version(
+    key: string,
+    version?: number,
+    db: Db = pool,
+    ownerId?: number | null,
+  ): Promise<DefinitionVersion | undefined> {
+    const wrote =
+      inTx(db) &&
+      (txWrote(db, "workflow_definitions") || txWrote(db, "workflow_definition_versions"));
     const load = () => loadDefinitionVersion(key, version, db, ownerId);
-    return wrote ? load() : versionCache.get(`${key}|${version ?? "latest"}|${ownerId ?? ""}`, load);
+    return wrote
+      ? load()
+      : versionCache.get(`${key}|${version ?? "latest"}|${ownerId ?? ""}`, load);
   },
 
   /** Create a definition with an (optionally published) first spec. ownerId null means shared. */
-  async create(input: { key: string; spec: unknown; publish?: boolean; isTemplate?: boolean; changeNote?: string; ownerId?: number | null }) {
+  async create(input: {
+    key: string;
+    spec: unknown;
+    publish?: boolean;
+    isTemplate?: boolean;
+    changeNote?: string;
+    ownerId?: number | null;
+  }) {
     const spec = validateSpec(input.spec);
     return withTx(async (c) => {
       const d = await one(
         c,
         `INSERT INTO workflow_definitions (key, name, description, draft_spec, is_template, owner_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [input.key, spec.name, spec.description, json(spec), input.isTemplate ?? false, input.ownerId ?? null],
+        [
+          input.key,
+          spec.name,
+          spec.description,
+          json(spec),
+          input.isTemplate ?? false,
+          input.ownerId ?? null,
+        ],
       );
       if (input.publish !== false) await publishTx(c, d.id, input.changeNote ?? "initial version");
       return definitions.get(input.key, c, input.ownerId ?? null);
@@ -91,14 +125,22 @@ export const definitions = {
   /** Freeze the draft into a new immutable version. No-op if identical to the latest version. */
   async publish(key: string, changeNote = "", ownerId: number | null = null) {
     return withTx(async (c) => {
-      const d = await one(c, "SELECT id FROM workflow_definitions WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE", [key, ownerId]);
+      const d = await one(
+        c,
+        "SELECT id FROM workflow_definitions WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE",
+        [key, ownerId],
+      );
       if (!d) throw new Error(`workflow "${key}" not found`);
       return publishTx(c, d.id, changeNote);
     });
   },
 
   async archive(key: string, ownerId: number | null = null) {
-    await q(pool, "UPDATE workflow_definitions SET archived = true, updated_at = now() WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2", [key, ownerId]);
+    await q(
+      pool,
+      "UPDATE workflow_definitions SET archived = true, updated_at = now() WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2",
+      [key, ownerId],
+    );
   },
 };
 
@@ -107,19 +149,23 @@ async function publishTx(c: Db, definitionId: number, changeNote: string) {
   if (!d.draft_spec) throw new Error("nothing to publish: no draft");
   const spec = validateSpec(d.draft_spec);
   const hash = hashOf(spec);
-  const latest = await one(c, "SELECT spec_hash, version FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC LIMIT 1", [
-    definitionId,
-  ]);
+  const latest = await one(
+    c,
+    "SELECT spec_hash, version FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
+    [definitionId],
+  );
   if (latest?.spec_hash === hash) return { version: latest.version, unchanged: true };
   const version = d.latest_version + 1;
-  await q(c, `INSERT INTO workflow_definition_versions (definition_id, version, spec, spec_hash, change_note) VALUES ($1, $2, $3, $4, $5)`, [
-    definitionId,
-    version,
-    json(spec),
-    hash,
-    changeNote,
-  ]);
-  await q(c, "UPDATE workflow_definitions SET latest_version = $2, draft_spec = NULL, updated_at = now() WHERE id = $1", [definitionId, version]);
+  await q(
+    c,
+    `INSERT INTO workflow_definition_versions (definition_id, version, spec, spec_hash, change_note) VALUES ($1, $2, $3, $4, $5)`,
+    [definitionId, version, json(spec), hash, changeNote],
+  );
+  await q(
+    c,
+    "UPDATE workflow_definitions SET latest_version = $2, draft_spec = NULL, updated_at = now() WHERE id = $1",
+    [definitionId, version],
+  );
   return { version, unchanged: false };
 }
 
@@ -132,14 +178,26 @@ export async function seedTemplates() {
     const spec = validateSpec(t.spec);
     const existing = await definitions.get(t.key);
     if (!existing) {
-      await definitions.create({ key: t.key, spec, isTemplate: true, changeNote: "built-in template" });
+      await definitions.create({
+        key: t.key,
+        spec,
+        isTemplate: true,
+        changeNote: "built-in template",
+      });
       continue;
     }
     if (!existing.is_template) continue;
     const latest = existing.versions[0];
-    if (latest && latest.spec_hash !== hashOf(spec) && latest.change_note.startsWith("built-in template")) {
+    if (
+      latest &&
+      latest.spec_hash !== hashOf(spec) &&
+      latest.change_note.startsWith("built-in template")
+    ) {
       await withTx(async (c) => {
-        await q(c, "UPDATE workflow_definitions SET draft_spec = $2 WHERE id = $1", [existing.id, json(spec)]);
+        await q(c, "UPDATE workflow_definitions SET draft_spec = $2 WHERE id = $1", [
+          existing.id,
+          json(spec),
+        ]);
         await publishTx(c, existing.id, "built-in template update");
       });
     }
@@ -147,9 +205,19 @@ export async function seedTemplates() {
 }
 
 /** Published version rows never change; the latest pointer does (watched through workflow_definitions writes). */
-const versionCache = new CacheAside<DefinitionVersion | undefined>("definitions.version", ["workflow_definitions", "workflow_definition_versions"], 300_000, 500);
+const versionCache = new CacheAside<DefinitionVersion | undefined>(
+  "definitions.version",
+  ["workflow_definitions", "workflow_definition_versions"],
+  300_000,
+  500,
+);
 
-async function loadDefinitionVersion(key: string, version: number | undefined, db: Db, ownerId: number | null | undefined): Promise<DefinitionVersion | undefined> {
+async function loadDefinitionVersion(
+  key: string,
+  version: number | undefined,
+  db: Db,
+  ownerId: number | null | undefined,
+): Promise<DefinitionVersion | undefined> {
   if (ownerId) {
     const priv = await one<DefinitionVersion>(
       db,

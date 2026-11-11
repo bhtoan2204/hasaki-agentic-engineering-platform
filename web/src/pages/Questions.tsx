@@ -52,15 +52,12 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
         <div className="qx-ctx">
           <div className="qx-run">
             <span className="qx-runid">Run #{head.run_id}</span>
-            {head.work_item_code && (
-              <span className="mono muted">{head.work_item_code}</span>
-            )}
+            {head.work_item_code && <span className="mono muted">{head.work_item_code}</span>}
             <Badge s={head.run_status} label />
           </div>
           <div className="qx-title">{head.run_title}</div>
           <div className="qx-step">
-            <Layers size={13} strokeWidth={2} /> {t("qx.step")}{" "}
-            <b>{head.step_name}</b>{" "}
+            <Layers size={13} strokeWidth={2} /> {t("qx.step")} <b>{head.step_name}</b>{" "}
             <span className="mono muted">{head.step_key}</span>
           </div>
         </div>
@@ -82,11 +79,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
             </div>
             {q.context && <div className="qx-q-context">{q.context}</div>}
             {!!q.options?.length && (
-              <div
-                className="qx-options"
-                role="group"
-                aria-label={t("qx.choices")}
-              >
+              <div className="qx-options" role="group" aria-label={t("qx.choices")}>
                 {q.options.map((o: string, i: number) => (
                   <button
                     key={o}
@@ -95,13 +88,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
                     aria-pressed={answers[q.id] === o}
                     onClick={() => setAnswers({ ...answers, [q.id]: o })}
                   >
-                    {i === 0 && (
-                      <Star
-                        size={13}
-                        strokeWidth={2}
-                        aria-label={t("qx.suggested")}
-                      />
-                    )}
+                    {i === 0 && <Star size={13} strokeWidth={2} aria-label={t("qx.suggested")} />}
                     {o}
                   </button>
                 ))}
@@ -111,14 +98,10 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
               rows={2}
               aria-label={t("qx.answerN", { n: n + 1 })}
               placeholder={
-                q.suggested_answer
-                  ? t("qx.hintPh", { text: q.suggested_answer })
-                  : t("qx.answerPh")
+                q.suggested_answer ? t("qx.hintPh", { text: q.suggested_answer }) : t("qx.answerPh")
               }
               value={answers[q.id] ?? ""}
-              onChange={(e) =>
-                setAnswers({ ...answers, [q.id]: e.target.value })
-              }
+              onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
             />
           </div>
         ))}
@@ -144,22 +127,14 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
 /** Every open question across runs, grouped by blocked step; answer inline or jump to the step in its run graph. */
 export function QuestionsPage() {
   const { t } = useI18n();
-  const {
-    data: open,
-    error,
-    loading,
-    reload,
-  } = useApi<any[]>("/api/questions");
-  const { data: history, reload: reloadHistory } = useApi<any[]>(
-    "/api/questions/history",
-  );
+  const { data: open, error, loading, reload } = useApi<any[]>("/api/questions");
+  const { data: history, reload: reloadHistory } = useApi<any[]>("/api/questions/history");
   // Questions open and close with step status changes and user actions, never with transcript lines.
   useLive(null, (p) => isStateChange(p) && (reload(), reloadHistory()));
   if (loading && !open) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const groups: Record<string, any[]> = {};
-  for (const q of open ?? [])
-    (groups[`${q.run_id}:${q.step_key}`] ??= []).push(q);
+  for (const q of open ?? []) (groups[`${q.run_id}:${q.step_key}`] ??= []).push(q);
   const entries = Object.entries(groups);
   const runs = new Set((open ?? []).map((q) => q.run_id)).size;
   return (
@@ -179,20 +154,13 @@ export function QuestionsPage() {
           value={open?.length ?? 0}
           hint={t("qx.blockedRuns", { n: runs })}
         />
-        <StatCard
-          icon={Layers}
-          tone="run"
-          label={t("qx.waitingSteps")}
-          value={entries.length}
-        />
+        <StatCard icon={Layers} tone="run" label={t("qx.waitingSteps")} value={entries.length} />
         <StatCard
           icon={CircleCheck}
           tone="ok"
           label={t("qx.answeredStat")}
           value={history ? history.length : "—"}
-          hint={
-            history && history.length >= 100 ? t("qx.latest100") : undefined
-          }
+          hint={history && history.length >= 100 ? t("qx.latest100") : undefined}
         />
       </div>
 
@@ -205,11 +173,7 @@ export function QuestionsPage() {
       ) : (
         <div className="qx-list">
           {entries.map(([k, qs]) => (
-            <StepQuestionsCard
-              key={k}
-              qs={qs}
-              onDone={() => (reload(), reloadHistory())}
-            />
+            <StepQuestionsCard key={k} qs={qs} onDone={() => (reload(), reloadHistory())} />
           ))}
         </div>
       )}
@@ -240,8 +204,7 @@ export function QuestionsPage() {
                   tabIndex={0}
                   onClick={() => navigate(`/runs/${q.run_id}/${q.step_key}`)}
                   onKeyDown={(e) =>
-                    e.key === "Enter" &&
-                    navigate(`/runs/${q.run_id}/${q.step_key}`)
+                    e.key === "Enter" && navigate(`/runs/${q.run_id}/${q.step_key}`)
                   }
                 >
                   <td className="mono">#{q.run_id}</td>

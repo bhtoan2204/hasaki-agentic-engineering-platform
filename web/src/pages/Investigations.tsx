@@ -1,7 +1,33 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Activity, ChevronDown, Wrench, ChevronRight, ClipboardPaste, ExternalLink, FileSearch, GitBranch, History, RefreshCw, Search, ShieldCheck, Timer } from "lucide-react";
+import {
+  Activity,
+  ChevronDown,
+  Wrench,
+  ChevronRight,
+  ClipboardPaste,
+  ExternalLink,
+  FileSearch,
+  GitBranch,
+  History,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Timer,
+} from "lucide-react";
 import { api, isStateChange, useApi, useLive } from "../api.ts";
-import { act, Badge, Copy, EmptyState, ErrorBox, Field, Loading, Markdown, PageHeader, navigate, time } from "../ui.tsx";
+import {
+  act,
+  Badge,
+  Copy,
+  EmptyState,
+  ErrorBox,
+  Field,
+  Loading,
+  Markdown,
+  PageHeader,
+  navigate,
+  time,
+} from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { translate, type UiLocale } from "../i18n/messages.ts";
 import "./Investigations.css";
@@ -22,7 +48,9 @@ export const INVESTIGATION_WORKFLOW = "production-incident-investigation";
 function useRunT(runLocale?: string | null) {
   const { t, locale } = useI18n();
   const l: UiLocale = runLocale === "vi" || runLocale === "en" ? runLocale : locale;
-  return l === locale ? t : (key: string, params?: Record<string, string | number>) => translate(l, key, params);
+  return l === locale
+    ? t
+    : (key: string, params?: Record<string, string | number>) => translate(l, key, params);
 }
 
 export function InvestigationsPage({ id }: { id?: number }) {
@@ -33,10 +61,18 @@ function InvestigationHome() {
   const { t } = useI18n();
   const { data: runs, reload } = useApi<any[]>("/api/runs");
   const { data: splunk } = useApi<any>("/api/integrations/splunk");
-  const mine = useMemo(() => (runs ?? []).filter((r) => r.definition_key === INVESTIGATION_WORKFLOW), [runs]);
+  const mine = useMemo(
+    () => (runs ?? []).filter((r) => r.definition_key === INVESTIGATION_WORKFLOW),
+    [runs],
+  );
   return (
     <div className="inv-page">
-      <PageHeader icon={FileSearch} title={t("inv.title")} subtitle={t("inv.subtitle")} crumbs={[[t("nav.overview"), "#/overview"], [t("inv.title")]]} />
+      <PageHeader
+        icon={FileSearch}
+        title={t("inv.title")}
+        subtitle={t("inv.subtitle")}
+        crumbs={[[t("nav.overview"), "#/overview"], [t("inv.title")]]}
+      />
       <div className="inv-grid">
         <NewInvestigation splunk={splunk} onStarted={reload} />
         <div className="card">
@@ -44,7 +80,11 @@ function InvestigationHome() {
             <h3>
               <History size={16} /> {t("inv.history")}
             </h3>
-            <button className="ghost xs icon" aria-label={t("inv.refresh")} onClick={() => reload()}>
+            <button
+              className="ghost xs icon"
+              aria-label={t("inv.refresh")}
+              onClick={() => reload()}
+            >
               <RefreshCw size={14} />
             </button>
           </div>
@@ -65,7 +105,11 @@ function InvestigationHome() {
                 </thead>
                 <tbody>
                   {mine.map((r) => (
-                    <tr key={r.id} className="click" onClick={() => navigate(`#/investigations/${r.id}`)}>
+                    <tr
+                      key={r.id}
+                      className="click"
+                      onClick={() => navigate(`#/investigations/${r.id}`)}
+                    >
                       <td>{r.id}</td>
                       <td className="inv-title-cell">{r.title}</td>
                       <td>
@@ -94,19 +138,34 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
   const [route, setRoute] = useState<any>(null);
   useEffect(() => {
     if (request.trim().length < 12) return setRoute(null);
-    const h = setTimeout(() => api("/api/workflows/route", { text: request }).then(setRoute).catch(() => setRoute(null)), 500);
+    const h = setTimeout(
+      () =>
+        api("/api/workflows/route", { text: request })
+          .then(setRoute)
+          .catch(() => setRoute(null)),
+      500,
+    );
     return () => clearTimeout(h);
   }, [request]);
   const tz = splunk?.timezone ?? "Asia/Ho_Chi_Minh";
   // datetime-local has no zone: the value is read as the investigation timezone (fixed offset for Asia/Ho_Chi_Minh)
-  const iso = (v: string) => (v ? `${v.length === 16 ? v + ":00" : v}${tz === "Asia/Ho_Chi_Minh" ? "+07:00" : "Z"}` : undefined);
+  const iso = (v: string) =>
+    v
+      ? `${v.length === 16 ? v + ":00" : v}${tz === "Asia/Ho_Chi_Minh" ? "+07:00" : "Z"}`
+      : undefined;
   const start = async () => {
     const run = await act(
       () =>
         api("/api/runs", {
           workflow: INVESTIGATION_WORKFLOW,
           title: request.trim().split("\n")[0].slice(0, 120),
-          inputs: { request: request.trim(), environment: splunk?.environment ?? "production", ...(indexes.trim() ? { indexes: indexes.trim() } : {}), ...(earliest ? { earliest: iso(earliest) } : {}), ...(latest ? { latest: iso(latest) } : {}) },
+          inputs: {
+            request: request.trim(),
+            environment: splunk?.environment ?? "production",
+            ...(indexes.trim() ? { indexes: indexes.trim() } : {}),
+            ...(earliest ? { earliest: iso(earliest) } : {}),
+            ...(latest ? { latest: iso(latest) } : {}),
+          },
           output_locale: outputLocale,
         }),
       t("inv.started"),
@@ -129,7 +188,12 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
       </div>
       {splunk && !splunk.connected && <p className="inv-warn small">{t("inv.notConnected")}</p>}
       <Field label={t("inv.requestLabel")} hint={t("inv.requestHint")}>
-        <textarea rows={5} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={t("inv.placeholder")} />
+        <textarea
+          rows={5}
+          value={request}
+          onChange={(e) => setRequest(e.target.value)}
+          placeholder={t("inv.placeholder")}
+        />
       </Field>
       {notInvestigation && <p className="inv-warn small">{t("inv.routeHint")}</p>}
       <details className="inv-filters">
@@ -141,13 +205,27 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
             </select>
           </Field>
           <Field label={t("inv.indexes")} hint={(splunk?.limits?.defaultIndexes ?? []).join(", ")}>
-            <input value={indexes} onChange={(e) => setIndexes(e.target.value)} placeholder="k8s_prod" />
+            <input
+              value={indexes}
+              onChange={(e) => setIndexes(e.target.value)}
+              placeholder="k8s_prod"
+            />
           </Field>
           <Field label={`${t("inv.from")} (${tz})`}>
-            <input type="datetime-local" step={1} value={earliest} onChange={(e) => setEarliest(e.target.value)} />
+            <input
+              type="datetime-local"
+              step={1}
+              value={earliest}
+              onChange={(e) => setEarliest(e.target.value)}
+            />
           </Field>
           <Field label={`${t("inv.to")} (${tz})`}>
-            <input type="datetime-local" step={1} value={latest} onChange={(e) => setLatest(e.target.value)} />
+            <input
+              type="datetime-local"
+              step={1}
+              value={latest}
+              onChange={(e) => setLatest(e.target.value)}
+            />
           </Field>
           <Field label={t("inv.reportLanguage")}>
             <select value={outputLocale} onChange={(e) => setOutputLocale(e.target.value as any)}>
@@ -166,8 +244,17 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
   );
 }
 
-const CONF_TONE: Record<string, string> = { confirmed: "COMPLETED", inferred: "WAITING", unknown: "PENDING" };
-const STATUS_TONE: Record<string, string> = { complete: "COMPLETED", partial: "WAITING", insufficient_evidence: "FAILED", blocked: "FAILED" };
+const CONF_TONE: Record<string, string> = {
+  confirmed: "COMPLETED",
+  inferred: "WAITING",
+  unknown: "PENDING",
+};
+const STATUS_TONE: Record<string, string> = {
+  complete: "COMPLETED",
+  partial: "WAITING",
+  insufficient_evidence: "FAILED",
+  blocked: "FAILED",
+};
 
 function InvestigationDetail({ id }: { id: number }) {
   const { data: run, reload: reloadRun, error } = useApi<any>(`/api/runs/${id}`);
@@ -203,7 +290,9 @@ function InvestigationDetail({ id }: { id: number }) {
             <a className="btn ghost sm" href={`#/runs/${run.id}`}>
               <GitBranch size={14} /> {t("inv.dag")}
             </a>
-            {report?.report_markdown && <Copy text={report.report_markdown} label={t("inv.copyReport")} />}
+            {report?.report_markdown && (
+              <Copy text={report.report_markdown} label={t("inv.copyReport")} />
+            )}
             <FixButton run={run} hasReport={!!report} followUps={inv.follow_ups} t={t} />
           </>
         }
@@ -221,10 +310,18 @@ function InvestigationDetail({ id }: { id: number }) {
           <h3>
             <Activity size={16} /> {t("inv.summary")}
           </h3>
-          {report && <Badge s={STATUS_TONE[report.status] ?? "PENDING"}>{t(`inv.st.${report.status}`)}</Badge>}
+          {report && (
+            <Badge s={STATUS_TONE[report.status] ?? "PENDING"}>
+              {t(`inv.st.${report.status}`)}
+            </Badge>
+          )}
         </div>
         {!report ? (
-          <p className="muted small">{["COMPLETED", "FAILED", "CANCELED"].includes(run.status) ? t("inv.noReport") : t("inv.running")}</p>
+          <p className="muted small">
+            {["COMPLETED", "FAILED", "CANCELED"].includes(run.status)
+              ? t("inv.noReport")
+              : t("inv.running")}
+          </p>
         ) : (
           <div className="inv-summary">
             <dl>
@@ -236,7 +333,9 @@ function InvestigationDetail({ id }: { id: number }) {
                 <Fragment key={p.key}>
                   <dt>{p.label}</dt>
                   <dd>
-                    <span className="mono">{p.at ?? "—"}</span> · <b>{p.latency ?? t("inv.unknown")}</b> <Badge s={CONF_TONE[p.confidence]}>{t(`inv.conf.${p.confidence}`)}</Badge>
+                    <span className="mono">{p.at ?? "—"}</span> ·{" "}
+                    <b>{p.latency ?? t("inv.unknown")}</b>{" "}
+                    <Badge s={CONF_TONE[p.confidence]}>{t(`inv.conf.${p.confidence}`)}</Badge>
                     <div className="small muted">{p.qualification}</div>
                   </dd>
                 </Fragment>
@@ -245,7 +344,12 @@ function InvestigationDetail({ id }: { id: number }) {
               <dd>
                 {report.summary.shipping_label ? (
                   <>
-                    <span className="mono">{report.summary.shipping_label.at}</span> · {t(report.summary.shipping_label.kind === "generated" ? "inv.labelGenerated" : "inv.labelObserved")}
+                    <span className="mono">{report.summary.shipping_label.at}</span> ·{" "}
+                    {t(
+                      report.summary.shipping_label.kind === "generated"
+                        ? "inv.labelGenerated"
+                        : "inv.labelObserved",
+                    )}
                   </>
                 ) : (
                   t("inv.unknown")
@@ -254,8 +358,13 @@ function InvestigationDetail({ id }: { id: number }) {
             </dl>
             {report.summary.outbound_message && (
               <div>
-                <div className="small muted">{t("inv.outbound")} ({report.summary.outbound_message.evidence_ref})</div>
-                <pre className="inv-log">{report.summary.outbound_message.payload ?? report.summary.outbound_message.excerpt}</pre>
+                <div className="small muted">
+                  {t("inv.outbound")} ({report.summary.outbound_message.evidence_ref})
+                </div>
+                <pre className="inv-log">
+                  {report.summary.outbound_message.payload ??
+                    report.summary.outbound_message.excerpt}
+                </pre>
               </div>
             )}
             {report.summary.missing?.length > 0 && (
@@ -283,12 +392,16 @@ function InvestigationDetail({ id }: { id: number }) {
               <div key={i} className="inv-lat-row">
                 <div className="inv-lat-label">
                   <b>{l.label}</b>
-                  {l.attempt ? ` #${l.attempt}` : ""} <Badge s={CONF_TONE[l.confidence]}>{t(`inv.conf.${l.confidence}`)}</Badge>
+                  {l.attempt ? ` #${l.attempt}` : ""}{" "}
+                  <Badge s={CONF_TONE[l.confidence]}>{t(`inv.conf.${l.confidence}`)}</Badge>
                   <div className="small muted">
-                    {l.from.event_type} <code>{l.from.evidence_ref}</code> → {l.to.event_type} <code>{l.to.evidence_ref}</code>
+                    {l.from.event_type} <code>{l.from.evidence_ref}</code> → {l.to.event_type}{" "}
+                    <code>{l.to.evidence_ref}</code>
                     {l.shared_ids?.length ? ` · ${l.shared_ids.join(", ")}` : ""}
                   </div>
-                  <div className="small muted">{[l.qualification, ...(l.notes ?? [])].join(" · ")}</div>
+                  <div className="small muted">
+                    {[l.qualification, ...(l.notes ?? [])].join(" · ")}
+                  </div>
                 </div>
                 <div className="inv-lat-bar" aria-hidden>
                   <span style={{ width: `${Math.max(2, ((l.latency_ms ?? 0) / maxMs) * 100)}%` }} />
@@ -327,16 +440,30 @@ function InvestigationDetail({ id }: { id: number }) {
                 {timeline.map((e) => (
                   <Fragment key={e.evidence_ref}>
                     <tr className="click" onClick={() => toggle(e.evidence_ref)}>
-                      <td>{open[e.evidence_ref] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
+                      <td>
+                        {open[e.evidence_ref] ? (
+                          <ChevronDown size={14} />
+                        ) : (
+                          <ChevronRight size={14} />
+                        )}
+                      </td>
                       <td className="mono nowrap">{e.timestamp ?? "—"}</td>
                       <td>
                         {e.event_type}
                         {e.attempt ? <span className="pill">#{e.attempt}</span> : null}
-                        {e.delivery ? <span className="pill">{e.delivery.n}/{e.delivery.of}</span> : null}
+                        {e.delivery ? (
+                          <span className="pill">
+                            {e.delivery.n}/{e.delivery.of}
+                          </span>
+                        ) : null}
                         {e.conflicts?.length ? <span className="pill inv-pill-warn">!</span> : null}
                       </td>
                       <td>{e.service ?? "—"}</td>
-                      <td className="small">{Object.entries(e.ids ?? {}).map(([k, v]: any) => `${k}=${v.join(",")}`).join(" · ")}</td>
+                      <td className="small">
+                        {Object.entries(e.ids ?? {})
+                          .map(([k, v]: any) => `${k}=${v.join(",")}`)
+                          .join(" · ")}
+                      </td>
                       <td>
                         <Badge s={CONF_TONE[e.confidence]}>{t(`inv.conf.${e.confidence}`)}</Badge>
                       </td>
@@ -348,14 +475,31 @@ function InvestigationDetail({ id }: { id: number }) {
                       <tr className="inv-expand">
                         <td colSpan={7}>
                           {e.conflicts?.map((c: string, i: number) => (
-                            <div key={i} className="inv-warn small">{c}</div>
+                            <div key={i} className="inv-warn small">
+                              {c}
+                            </div>
                           ))}
                           <div className="small muted">
-                            {e.time_original && <>{t("inv.original")}: <code>{e.time_original}</code> · </>}
-                            {e.precision && <>{t("inv.precision")}: {e.precision}</>}
-                            {e.link?.via?.length ? <> · {t("inv.linkedBy")}: {e.link.via.join(", ")}</> : null}
+                            {e.time_original && (
+                              <>
+                                {t("inv.original")}: <code>{e.time_original}</code> ·{" "}
+                              </>
+                            )}
+                            {e.precision && (
+                              <>
+                                {t("inv.precision")}: {e.precision}
+                              </>
+                            )}
+                            {e.link?.via?.length ? (
+                              <>
+                                {" "}
+                                · {t("inv.linkedBy")}: {e.link.via.join(", ")}
+                              </>
+                            ) : null}
                           </div>
-                          <pre className="inv-log">{events.get(e.evidence_ref)?.raw ?? e.payload ?? e.excerpt}</pre>
+                          <pre className="inv-log">
+                            {events.get(e.evidence_ref)?.raw ?? e.payload ?? e.excerpt}
+                          </pre>
                         </td>
                       </tr>
                     )}
@@ -365,9 +509,16 @@ function InvestigationDetail({ id }: { id: number }) {
             </table>
           </div>
         )}
-        {(inv.correlation?.rejected?.length ?? 0) + (inv.correlation?.uncorrelated?.length ?? 0) > 0 && (
+        {(inv.correlation?.rejected?.length ?? 0) + (inv.correlation?.uncorrelated?.length ?? 0) >
+          0 && (
           <details className="small inv-rejected">
-            <summary>{t("inv.excluded", { n: (inv.correlation.rejected?.length ?? 0) + (inv.correlation.uncorrelated?.length ?? 0) })}</summary>
+            <summary>
+              {t("inv.excluded", {
+                n:
+                  (inv.correlation.rejected?.length ?? 0) +
+                  (inv.correlation.uncorrelated?.length ?? 0),
+              })}
+            </summary>
             <ul>
               {inv.correlation.rejected?.map((r: any, i: number) => (
                 <li key={`r${i}`}>
@@ -376,7 +527,8 @@ function InvestigationDetail({ id }: { id: number }) {
               ))}
               {inv.correlation.uncorrelated?.map((u: any) => (
                 <li key={u.evidence_ref}>
-                  <code>{u.evidence_ref}</code> {u.event_type} {u.timestamp} — {t("inv.uncorrelated")}
+                  <code>{u.evidence_ref}</code> {u.event_type} {u.timestamp} —{" "}
+                  {t("inv.uncorrelated")}
                 </li>
               ))}
             </ul>
@@ -393,7 +545,17 @@ function InvestigationDetail({ id }: { id: number }) {
         {!inv.searches.length ? (
           <p className="muted small">{t("inv.noSearches")}</p>
         ) : (
-          inv.searches.map((s: any) => <SearchCard key={s.id} t={t} s={s} runId={id} onPasted={reload} open={!!open[`s${s.id}`]} onToggle={() => toggle(`s${s.id}`)} />)
+          inv.searches.map((s: any) => (
+            <SearchCard
+              key={s.id}
+              t={t}
+              s={s}
+              runId={id}
+              onPasted={reload}
+              open={!!open[`s${s.id}`]}
+              onToggle={() => toggle(`s${s.id}`)}
+            />
+          ))
         )}
       </section>
 
@@ -412,7 +574,21 @@ function InvestigationDetail({ id }: { id: number }) {
   );
 }
 
-function SearchCard({ t, s, runId, onPasted, open, onToggle }: { t: (k: string, p?: Record<string, string | number>) => string; s: any; runId: number; onPasted: () => void; open: boolean; onToggle: () => void }) {
+function SearchCard({
+  t,
+  s,
+  runId,
+  onPasted,
+  open,
+  onToggle,
+}: {
+  t: (k: string, p?: Record<string, string | number>) => string;
+  s: any;
+  runId: number;
+  onPasted: () => void;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const [paste, setPaste] = useState("");
   const pending = s.status === "manual_pending";
   return (
@@ -421,7 +597,19 @@ function SearchCard({ t, s, runId, onPasted, open, onToggle }: { t: (k: string, 
         <button className="quiet xs" aria-expanded={open} onClick={onToggle}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} #{s.id}
         </button>
-        <Badge s={pending ? "WAITING_INPUT" : s.status === "done" ? "COMPLETED" : s.status === "failed" ? "FAILED" : "RUNNING"}>{pending ? t("inv.manualPending") : s.status}</Badge>
+        <Badge
+          s={
+            pending
+              ? "WAITING_INPUT"
+              : s.status === "done"
+                ? "COMPLETED"
+                : s.status === "failed"
+                  ? "FAILED"
+                  : "RUNNING"
+          }
+        >
+          {pending ? t("inv.manualPending") : s.status}
+        </Badge>
         <span className="small muted">
           {s.step_key ?? ""} · {s.earliest} → {s.latest} · {s.result_count ?? 0} {t("inv.rows")}
           {s.truncated ? "+" : ""}
@@ -437,12 +625,27 @@ function SearchCard({ t, s, runId, onPasted, open, onToggle }: { t: (k: string, 
       {pending && (
         <div className="inv-paste">
           <p className="small">{t("inv.pasteHelp")}</p>
-          <textarea rows={4} className="mono" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder='{"results":[{"_time":"…","_raw":"…"}]}' />
+          <textarea
+            rows={4}
+            className="mono"
+            value={paste}
+            onChange={(e) => setPaste(e.target.value)}
+            placeholder='{"results":[{"_time":"…","_raw":"…"}]}'
+          />
           <button
             className="sm"
             disabled={!paste.trim()}
             onClick={async () => {
-              if (await act(() => api(`/api/runs/${runId}/investigation/manual-results`, { search_id: s.id, text: paste }), t("inv.pasted"))) {
+              if (
+                await act(
+                  () =>
+                    api(`/api/runs/${runId}/investigation/manual-results`, {
+                      search_id: s.id,
+                      text: paste,
+                    }),
+                  t("inv.pasted"),
+                )
+              ) {
                 setPaste("");
                 onPasted();
               }
@@ -457,7 +660,8 @@ function SearchCard({ t, s, runId, onPasted, open, onToggle }: { t: (k: string, 
           {(s.events ?? []).map((e: any) => (
             <details key={e.ref}>
               <summary className="small">
-                <code>{e.ref}</code> <span className="mono">{e.time?.iso ?? "—"}</span> · {e.service ?? "?"} · {e.message.slice(0, 160)}
+                <code>{e.ref}</code> <span className="mono">{e.time?.iso ?? "—"}</span> ·{" "}
+                {e.service ?? "?"} · {e.message.slice(0, 160)}
               </summary>
               <pre className="inv-log">{e.raw}</pre>
             </details>
@@ -472,14 +676,18 @@ function SearchCard({ t, s, runId, onPasted, open, onToggle }: { t: (k: string, 
 export function InvestigationRunCard({ run }: { run: any }) {
   const t = useRunT(run.output_locale);
   if (run.definition_key !== INVESTIGATION_WORKFLOW) return null;
-  const rep = run.steps.find((s: any) => s.config?.action === "investigation_report" || s.key === "report")?.output;
+  const rep = run.steps.find(
+    (s: any) => s.config?.action === "investigation_report" || s.key === "report",
+  )?.output;
   return (
     <div className="rv-card">
       <div className="rv-card-head">
         <h4>
           <FileSearch size={16} /> {t("inv.title")}
         </h4>
-        {rep?.status && <Badge s={STATUS_TONE[rep.status] ?? "PENDING"}>{t(`inv.st.${rep.status}`)}</Badge>}
+        {rep?.status && (
+          <Badge s={STATUS_TONE[rep.status] ?? "PENDING"}>{t(`inv.st.${rep.status}`)}</Badge>
+        )}
       </div>
       {rep?.business_summary && <pre className="inv-log small">{rep.business_summary}</pre>}
       <div className="row">
@@ -506,7 +714,9 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
           <h4>
             <FileSearch size={15} /> {t("inv.report")}
           </h4>
-          {value.status && <Badge s={STATUS_TONE[value.status] ?? "PENDING"}>{t(`inv.st.${value.status}`)}</Badge>}
+          {value.status && (
+            <Badge s={STATUS_TONE[value.status] ?? "PENDING"}>{t(`inv.st.${value.status}`)}</Badge>
+          )}
           <Copy text={value.report_markdown} />
         </div>
         <Markdown text={value.report_markdown} />
@@ -515,14 +725,26 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
   const answers: any[] = Array.isArray(value.answers) ? value.answers : [];
   const findings: any[] = Array.isArray(value.findings) ? value.findings : [];
   if (!answers.length && !findings.length) return null;
-  const refs = (r: any) => (Array.isArray(r) && r.length ? <span className="small muted"> · {r.map((x: string) => <code key={x}>{x} </code>)}</span> : null);
+  const refs = (r: any) =>
+    Array.isArray(r) && r.length ? (
+      <span className="small muted">
+        {" "}
+        ·{" "}
+        {r.map((x: string) => (
+          <code key={x}>{x} </code>
+        ))}
+      </span>
+    ) : null;
   const list = (title: string, items: any[]) =>
     items.length > 0 && (
       <>
         <h5 className="inv-out-h">{title}</h5>
         <ul className="inv-out-list">
           {items.map((x, i) => (
-            <li key={i}>{typeof x === "string" ? x : x.hypothesis ?? JSON.stringify(x)}{typeof x === "object" && refs(x.supporting_refs)}</li>
+            <li key={i}>
+              {typeof x === "string" ? x : (x.hypothesis ?? JSON.stringify(x))}
+              {typeof x === "object" && refs(x.supporting_refs)}
+            </li>
           ))}
         </ul>
       </>
@@ -549,8 +771,16 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
           <ul className="inv-out-list">
             {findings.map((f, i) => (
               <li key={i}>
-                <Badge s={CONF_TONE[f.classification] ?? "PENDING"}>{t(`inv.conf.${f.classification}`)}</Badge> {f.statement}
-                {f.code_location && <span className="small muted"> — <code>{f.code_location}</code></span>}
+                <Badge s={CONF_TONE[f.classification] ?? "PENDING"}>
+                  {t(`inv.conf.${f.classification}`)}
+                </Badge>{" "}
+                {f.statement}
+                {f.code_location && (
+                  <span className="small muted">
+                    {" "}
+                    — <code>{f.code_location}</code>
+                  </span>
+                )}
                 {refs(f.evidence_refs)}
               </li>
             ))}
@@ -558,7 +788,10 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
         </>
       )}
       {list(t("inv.out.hypotheses"), Array.isArray(value.hypotheses) ? value.hypotheses : [])}
-      {list(t("inv.out.missing"), Array.isArray(value.missing_evidence) ? value.missing_evidence : [])}
+      {list(
+        t("inv.out.missing"),
+        Array.isArray(value.missing_evidence) ? value.missing_evidence : [],
+      )}
       {list(t("inv.out.next"), Array.isArray(value.next_steps) ? value.next_steps : [])}
     </div>
   );
@@ -568,7 +801,17 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
  * Hand the findings to the Bug Investigation workflow. The investigation stays read-only; the fix run has its own
  * approval gates (fix proposal, PR). Idempotent server-side: an active follow-up is reopened, not duplicated.
  */
-function FixButton({ run, hasReport, followUps, t }: { run: any; hasReport: boolean; followUps?: any[]; t: (k: string, p?: Record<string, string | number>) => string }) {
+function FixButton({
+  run,
+  hasReport,
+  followUps,
+  t,
+}: {
+  run: any;
+  hasReport: boolean;
+  followUps?: any[];
+  t: (k: string, p?: Record<string, string | number>) => string;
+}) {
   const active = (followUps ?? []).find((r) => !["FAILED", "CANCELED"].includes(r.status));
   if (active)
     return (
@@ -583,7 +826,10 @@ function FixButton({ run, hasReport, followUps, t }: { run: any; hasReport: bool
       title={t("inv.fixHint")}
       onClick={async () => {
         if (!window.confirm(t("inv.fixConfirm"))) return;
-        const r = await act(() => api<any>(`/api/runs/${run.id}/investigation/fix`, {}), t("inv.fixStarted"));
+        const r = await act(
+          () => api<any>(`/api/runs/${run.id}/investigation/fix`, {}),
+          t("inv.fixStarted"),
+        );
         if (r?.run_id) navigate(`#/runs/${r.run_id}`);
       }}
     >

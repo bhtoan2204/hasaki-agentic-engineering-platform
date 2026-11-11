@@ -32,7 +32,11 @@ before(async () => {
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as any).port}`;
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(), headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  browser = await chromium.launch({
+    executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
 });
 
 after(async () => {
@@ -48,7 +52,11 @@ async function signedIn(): Promise<{ context: BrowserContext; csrf: string }> {
   const page = await context.newPage();
   await page.goto(base + "/#/overview");
   const { csrf } = await page.evaluate(async () => {
-    const r = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "live-ui", password: "live-ui-password" }) });
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "live-ui", password: "live-ui-password" }),
+    });
     return r.json();
   });
   await page.close();
@@ -60,11 +68,27 @@ async function newRun(context: BrowserContext, csrf: string) {
   await page.goto(base + "/#/overview");
   const run = await page.evaluate(async (csrf) => {
     const h = { "content-type": "application/json", "x-csrf-token": csrf };
-    const w = await (await fetch("/api/work-items", { method: "POST", headers: h, body: JSON.stringify({ title: "live", project: "OMS" }) })).json();
-    return (await fetch("/api/runs", { method: "POST", headers: h, body: JSON.stringify({ workflow: "bug-investigation", work_item_id: w.id, start: false }) })).json();
+    const w = await (
+      await fetch("/api/work-items", {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({ title: "live", project: "OMS" }),
+      })
+    ).json();
+    return (
+      await fetch("/api/runs", {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({ workflow: "bug-investigation", work_item_id: w.id, start: false }),
+      })
+    ).json();
   }, csrf);
   await page.close();
-  const step = (await one<{ id: number }>(pool, "SELECT id FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1", [run.id]))!;
+  const step = (await one<{ id: number }>(
+    pool,
+    "SELECT id FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1",
+    [run.id],
+  ))!;
   return { runId: Number(run.id), stepId: Number(step.id) };
 }
 
@@ -81,18 +105,26 @@ async function openRun(context: BrowserContext, runId: number) {
   const page = await context.newPage();
   const t = track(page);
   await page.goto(`${base}/#/runs/${runId}`);
-  await page.getByText("run created", { exact: false }).first().waitFor({ timeout: 10_000 }).catch(() => {});
+  await page
+    .getByText("run created", { exact: false })
+    .first()
+    .waitFor({ timeout: 10_000 })
+    .catch(() => {});
   await sleep(1000);
   return { page, t };
 }
 
 const setVisible = (page: Page, v: boolean) =>
   page.evaluate((v) => {
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (v ? "visible" : "hidden") });
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => (v ? "visible" : "hidden"),
+    });
     Object.defineProperty(document, "hidden", { configurable: true, get: () => !v });
     document.dispatchEvent(new Event("visibilitychange"));
   }, v);
-const occurrences = (page: Page, text: string) => page.evaluate((t) => document.body.innerText.split(t).length - 1, text);
+const occurrences = (page: Page, text: string) =>
+  page.evaluate((t) => document.body.innerText.split(t).length - 1, text);
 async function shows(page: Page, text: string, ms = 10_000) {
   const end = Date.now() + ms;
   while ((await occurrences(page, text)) === 0) {
@@ -118,7 +150,10 @@ test("events written while the tab is hidden appear once after it is shown again
   assert.equal(await occurrences(page, "missed-while-hidden-1"), 1, "no duplicate timeline rows");
   assert.equal(await occurrences(page, "missed-while-hidden-2"), 1);
   const reopened = t.urls.filter((u) => u.startsWith("/api/stream")).slice(streamsBefore);
-  assert.ok(reopened.length >= 1 && reopened.every((u) => /after=\d+/.test(u)), `stream reopened from a cursor: ${reopened}`);
+  assert.ok(
+    reopened.length >= 1 && reopened.every((u) => /after=\d+/.test(u)),
+    `stream reopened from a cursor: ${reopened}`,
+  );
   await context.close();
 });
 
@@ -155,7 +190,11 @@ test("with the stream blocked, the tab polls the event cursor and still shows ne
   await runEvents.add(pool, runId, "user", "seen-through-fallback", stepId);
   await shows(page, "seen-through-fallback", 15_000);
   await sleep(6000); // quiet period: polling must not reload views when nothing changed
-  assert.equal(t.count(new RegExp(`^/api/runs/${runId}$`)), runLoadsBefore + 1, "one reload for the one state event");
+  assert.equal(
+    t.count(new RegExp(`^/api/runs/${runId}$`)),
+    runLoadsBefore + 1,
+    "one reload for the one state event",
+  );
   assert.equal(await occurrences(page, "seen-through-fallback"), 1);
   await context.close();
 });

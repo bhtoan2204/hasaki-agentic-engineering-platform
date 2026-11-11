@@ -11,7 +11,10 @@ export class SpecError extends Error {
 /** Parse + validate a definition: schema, unique keys, known dependencies, acyclic, run_if references. */
 export function validateSpec(raw: unknown): WorkflowSpec {
   const parsed = WorkflowSpec.safeParse(raw);
-  if (!parsed.success) throw new SpecError(parsed.error.issues.map((i) => `${i.path.join(".") || "spec"}: ${i.message}`));
+  if (!parsed.success)
+    throw new SpecError(
+      parsed.error.issues.map((i) => `${i.path.join(".") || "spec"}: ${i.message}`),
+    );
   const spec = parsed.data;
   const errors: string[] = [];
   const keys = new Set<string>();
@@ -25,14 +28,22 @@ export function validateSpec(raw: unknown): WorkflowSpec {
       if (d === s.key) errors.push(`step "${s.key}" depends on itself`);
     }
     if (s.run_if && !ancestors(spec.steps, s.key).has(s.run_if.step))
-      errors.push(`step "${s.key}" run_if references "${s.run_if.step}", which is not one of its ancestors`);
-    if (s.type === "condition" && typeof s.config.path !== "string") errors.push(`condition step "${s.key}" needs config.path`);
-    if (s.type === "command" && typeof s.config.command !== "string") errors.push(`command step "${s.key}" needs config.command`);
+      errors.push(
+        `step "${s.key}" run_if references "${s.run_if.step}", which is not one of its ancestors`,
+      );
+    if (s.type === "condition" && typeof s.config.path !== "string")
+      errors.push(`condition step "${s.key}" needs config.path`);
+    if (s.type === "command" && typeof s.config.command !== "string")
+      errors.push(`command step "${s.key}" needs config.command`);
   }
-  if (spec.feedback_step && !keys.has(spec.feedback_step)) errors.push(`feedback_step "${spec.feedback_step}" is not a step`);
+  if (spec.feedback_step && !keys.has(spec.feedback_step))
+    errors.push(`feedback_step "${spec.feedback_step}" is not a step`);
   if (spec.execution_mode === "read_only")
     for (const s of spec.steps)
-      if (["coding_agent", "command", "git_pull_request"].includes(s.type)) errors.push(`read-only workflow: step "${s.key}" of type ${s.type} could change code or external state`);
+      if (["coding_agent", "command", "git_pull_request"].includes(s.type))
+        errors.push(
+          `read-only workflow: step "${s.key}" of type ${s.type} could change code or external state`,
+        );
   if (!errors.length) {
     try {
       topoOrder(spec.steps);
@@ -67,7 +78,10 @@ export function topoOrder(steps: Pick<StepSpec, "key" | "depends_on">[]): string
 }
 
 /** Every step that transitively depends on `key` (excluding `key`). */
-export function downstream(steps: Pick<StepSpec, "key" | "depends_on">[], key: string): Set<string> {
+export function downstream(
+  steps: Pick<StepSpec, "key" | "depends_on">[],
+  key: string,
+): Set<string> {
   const out = new Set<string>();
   const stack = [key];
   while (stack.length) {

@@ -60,9 +60,7 @@ const RunIf = z
 
 export const StepSpec = z
   .object({
-    key: z
-      .string()
-      .regex(/^[a-z0-9][a-z0-9_-]*$/, "step key must be lowercase [a-z0-9_-]"),
+    key: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "step key must be lowercase [a-z0-9_-]"),
     type: z.enum(STEP_TYPES),
     name: z.string().optional(),
     depends_on: z.array(z.string()).default([]),
@@ -208,13 +206,13 @@ export interface AttemptRow {
   number: number;
   generation: number;
   status:
-  | "RUNNING"
-  | "COMPLETED"
-  | "FAILED"
-  | "WAITING_INPUT"
-  | "WAITING_APPROVAL"
-  | "CANCELED"
-  | "STALE";
+    | "RUNNING"
+    | "COMPLETED"
+    | "FAILED"
+    | "WAITING_INPUT"
+    | "WAITING_APPROVAL"
+    | "CANCELED"
+    | "STALE";
   job_id: number | null;
   fencing_token: number | null;
   input: any;
@@ -255,15 +253,15 @@ export type ExecResult =
   | { kind: "completed"; output: unknown }
   | { kind: "failed"; error: string; retryable?: boolean; details?: unknown }
   | {
-    kind: "waiting_input";
-    checkpoint?: Record<string, unknown>;
-    questions?: QuestionInput[];
-    output?: unknown;
-  }
+      kind: "waiting_input";
+      checkpoint?: Record<string, unknown>;
+      questions?: QuestionInput[];
+      output?: unknown;
+    }
   /** Re-execute an upstream step with feedback (its dependants, including this step, are invalidated and rerun). */
   | { kind: "reexecute"; target: string; feedback: string; output?: unknown }
   | {
-    kind: "waiting_approval";
-    request: Record<string, unknown>;
-    checkpoint?: Record<string, unknown>;
-  };
+      kind: "waiting_approval";
+      request: Record<string, unknown>;
+      checkpoint?: Record<string, unknown>;
+    };

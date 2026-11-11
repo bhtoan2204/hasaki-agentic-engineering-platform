@@ -22,27 +22,52 @@ export interface GitProvider {
   /** Push `branch` from a worktree; must refuse dirty trees / branches without commits. Returns the commit list. */
   push(path: string, branch: string): Promise<{ commits: string; note?: string }>;
   /** Idempotent: updates the open PR for source → target if there is one. */
-  openOrUpdatePullRequest(pr: { repo: string; source: string; target: string; title: string; description: string; draft: boolean }): Promise<{
+  openOrUpdatePullRequest(pr: {
+    repo: string;
+    source: string;
+    target: string;
+    title: string;
+    description: string;
+    draft: boolean;
+  }): Promise<{
     url: string;
     created: boolean;
     note: string;
   }>;
   /** Read-only lifecycle state of an existing PR (null: not a PR, e.g. a create-PR link). */
-  pullRequestState?(pr: { repo: string; url: string }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
+  pullRequestState?(pr: {
+    repo: string;
+    url: string;
+  }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
 }
 
 export const bitbucketProvider: GitProvider = {
   name: "bitbucket",
   push: async (path, branch) => {
-    const row = await one(pool, "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1", [path]);
-    if (!row?.enabled || !row.allowed_actions.includes("write") || !row.allowed_actions.includes("pull_request")) throw new Error("Repository publication permission required");
+    const row = await one(
+      pool,
+      "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1",
+      [path],
+    );
+    if (
+      !row?.enabled ||
+      !row.allowed_actions.includes("write") ||
+      !row.allowed_actions.includes("pull_request")
+    )
+      throw new Error("Repository publication permission required");
     // Re-checked at the moment of writing: the run owner's own permission, never the credentials' reach.
     await requireRunRepositoryAccess(Number(row.workspace_run_id), row.name, "write");
     await validateCheckout(row, path);
     await prepareRepository(row);
-    return repositoryLock(row, () => pushBranch(path, branch, row.default_branch || config.baseBranch));
+    return repositoryLock(row, () =>
+      pushBranch(path, branch, row.default_branch || config.baseBranch),
+    );
   },
-  openOrUpdatePullRequest: (pr) => openPullRequest(pr.repo, pr.source, pr.title, pr.description, { draft: pr.draft, dest: pr.target }),
+  openOrUpdatePullRequest: (pr) =>
+    openPullRequest(pr.repo, pr.source, pr.title, pr.description, {
+      draft: pr.draft,
+      dest: pr.target,
+    }),
   pullRequestState: (pr) => pullRequestState(pr.repo, pr.url),
 };
 
@@ -64,37 +89,83 @@ export interface Workspace {
 }
 
 /** Create (or reuse) the run's isolated worktree for `repo` and record it. Never touches reposRoot checkouts. */
-export async function prepareWorkspace(run: { id: number; branch: string; inputs?: Record<string, any> | null }, repo: string, checkLive?: () => Promise<void>): Promise<Workspace> {
+export async function prepareWorkspace(
+  run: { id: number; branch: string; inputs?: Record<string, any> | null },
+  repo: string,
+  checkLive?: () => Promise<void>,
+): Promise<Workspace> {
   await checkLive?.();
-  const owner = await one(pool, "SELECT worker_instance,allowed_repositories,owner_id FROM workflow_runs WHERE id = $1", [run.id]);
-  if (owner?.worker_instance !== config.instanceId) throw new Error("Workspaces may only be prepared by the assigned instance");
+  const owner = await one(
+    pool,
+    "SELECT worker_instance,allowed_repositories,owner_id FROM workflow_runs WHERE id = $1",
+    [run.id],
+  );
+  if (owner?.worker_instance !== config.instanceId)
+    throw new Error("Workspaces may only be prepared by the assigned instance");
   const reg = await repositories.get(repo);
-  if (!reg?.enabled || !reg.allowed_actions.includes("write")) throw new Error("Repository write permission required");
+  if (!reg?.enabled || !reg.allowed_actions.includes("write"))
+    throw new Error("Repository write permission required");
   if (!owner.allowed_repositories.includes(repo)) throw new Error("Repository outside run scope");
   const principal = execution.getStore();
-  if (principal && Number(owner.owner_id) !== principal.userId) throw new Error("Run owner mismatch");
+  if (principal && Number(owner.owner_id) !== principal.userId)
+    throw new Error("Run owner mismatch");
   // A worktree is where the agent writes: the owner needs write permission now, not only at run creation.
   await requireRunRepositoryAccess(run.id, repo, "write");
   const checkout = await prepareRepository(reg, true, await checkoutForRun(reg, run.id));
   const target = branchFor(run, repo);
   // Preserve persisted workspaces for resumable runs. New remote workspaces use stable IDs.
-  const saved = await one<{ path: string }>(pool, "SELECT path FROM execution_workspaces WHERE run_id=$1 AND repo=$2", [run.id, repo]);
-  const workspacePath = saved?.path ?? (reg.repository_url ? join(config.dataDir, "worktrees", instanceDirectory(config.instanceId), String(run.id), String(reg.id)) : undefined);
+  const saved = await one<{ path: string }>(
+    pool,
+    "SELECT path FROM execution_workspaces WHERE run_id=$1 AND repo=$2",
+    [run.id, repo],
+  );
+  const workspacePath =
+    saved?.path ??
+    (reg.repository_url
+      ? join(
+          config.dataDir,
+          "worktrees",
+          instanceDirectory(config.instanceId),
+          String(run.id),
+          String(reg.id),
+        )
+      : undefined);
   if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
   const b = await repositoryLock(reg, async () => {
     await checkLive?.();
-    const currentOwner = await one(pool, "SELECT worker_instance,allowed_repositories FROM workflow_runs WHERE id=$1", [run.id]);
-    if (currentOwner?.worker_instance !== config.instanceId || !currentOwner.allowed_repositories.includes(repo)) throw new Error("Run assignment changed during repository preparation");
+    const currentOwner = await one(
+      pool,
+      "SELECT worker_instance,allowed_repositories FROM workflow_runs WHERE id=$1",
+      [run.id],
+    );
+    if (
+      currentOwner?.worker_instance !== config.instanceId ||
+      !currentOwner.allowed_repositories.includes(repo)
+    )
+      throw new Error("Run assignment changed during repository preparation");
     const current = await repositories.get(repo);
-    if (!current?.enabled || !current.allowed_actions.includes("write")) throw new Error("Repository write permission required");
+    if (!current?.enabled || !current.allowed_actions.includes("write"))
+      throw new Error("Repository write permission required");
     return prepareBranch(workspaceKey(run.branch), repo, target.branch, reg.path || repo, {
-      mustExist: target.existing, checkoutPath: checkout, workspacePath, defaultBranch: reg.default_branch, skipFetch: !!reg.repository_url,
+      mustExist: target.existing,
+      checkoutPath: checkout,
+      workspacePath,
+      defaultBranch: reg.default_branch,
+      skipFetch: !!reg.repository_url,
     });
   });
   await checkLive?.();
-  if (b.path === checkout) throw new Error(`${repo}: branch is checked out in the primary checkout; switch it before continuing`);
-  await recordWorkspace(run.id, { repo, branch: b.branch, path: b.path, created_from: b.createdFrom });
-  if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => { });
+  if (b.path === checkout)
+    throw new Error(
+      `${repo}: branch is checked out in the primary checkout; switch it before continuing`,
+    );
+  await recordWorkspace(run.id, {
+    repo,
+    branch: b.branch,
+    path: b.path,
+    created_from: b.createdFrom,
+  });
+  if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => {});
   return { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
 }
 
@@ -108,5 +179,9 @@ export async function recordWorkspace(runId: number, w: Workspace, db: Db = pool
 }
 
 export function workspacesOf(runId: number, db: Db = pool) {
-  return q<Workspace>(db, "SELECT repo, branch, path, created_from FROM execution_workspaces WHERE run_id = $1 ORDER BY repo", [runId]);
+  return q<Workspace>(
+    db,
+    "SELECT repo, branch, path, created_from FROM execution_workspaces WHERE run_id = $1 ORDER BY repo",
+    [runId],
+  );
 }

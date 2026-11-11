@@ -22,6 +22,7 @@ import {
   Shield,
   Sparkles,
   SquarePen,
+  Trash2,
   Workflow,
   Footprints,
   Zap,
@@ -43,6 +44,7 @@ import {
   SkeletonRows,
   Tabs,
   time,
+  toast,
 } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { ProposalsPanel, ProposalStatus } from "./KnowledgeProposals.tsx";
@@ -71,14 +73,7 @@ const CAT_ICON: Record<string, LucideIcon> = {
   task_memory: History,
 };
 const catKey = (c: string) => (c ? `kn.cat.${c}` : "kn.cat.all");
-const SCOPES = [
-  "GLOBAL",
-  "ORGANIZATION",
-  "PROJECT",
-  "REPOSITORY",
-  "WORKFLOW",
-  "STEP",
-];
+const SCOPES = ["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY", "WORKFLOW", "STEP"];
 const SCOPE_STYLE: Record<string, { color: string; icon: LucideIcon }> = {
   GLOBAL: { color: "var(--brand)", icon: Globe },
   ORGANIZATION: { color: "var(--st-run)", icon: Building2 },
@@ -105,17 +100,13 @@ function ScopeBadge({ type, scopeRef }: { type: string; scopeRef?: string }) {
   );
 }
 /** Load mode follows the context planner: metadata.load === "on_demand" → index only, anything else → inline. */
-const loadMode = (metadata: any) =>
-  metadata?.load === "on_demand" ? "on_demand" : "inline";
+const loadMode = (metadata: any) => (metadata?.load === "on_demand" ? "on_demand" : "inline");
 function LoadChip({ metadata }: { metadata: any }) {
   const { t } = useI18n();
   const m = loadMode(metadata);
   const onDemand = m === "on_demand";
   return (
-    <span
-      className={`kn-load is-${m}`}
-      title={onDemand ? t("kn.onDemandTip") : t("kn.inlineTip")}
-    >
+    <span className={`kn-load is-${m}`} title={onDemand ? t("kn.onDemandTip") : t("kn.inlineTip")}>
       {onDemand ? <Eye size={11} /> : <Zap size={11} />}
       {onDemand ? t("kn.onDemand") : t("kn.inline")}
     </span>
@@ -156,17 +147,9 @@ const emptyDraft = (category = "business_rule"): Draft => ({
   change_note: "",
 });
 
-export function KnowledgePage({
-  itemKey,
-  subKey,
-}: {
-  itemKey?: string;
-  subKey?: string;
-}) {
+export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: string }) {
   const { t } = useI18n();
-  const pendingProposals = useApi<any[]>(
-    "/api/knowledge-proposals?status=pending",
-  );
+  const pendingProposals = useApi<any[]>("/api/knowledge-proposals?status=pending");
   const [cat, setCat] = useState("");
   const { data, error, loading, reload } = useApi<any[]>(
     `/api/knowledge${cat ? `?category=${cat}` : ""}`,
@@ -217,9 +200,7 @@ export function KnowledgePage({
               <Lightbulb size={15} />
               {t("kp.button")}
               {pendingProposals.data?.length ? (
-                <span className="kn-cat-count kp-count">
-                  {pendingProposals.data.length}
-                </span>
+                <span className="kn-cat-count kp-count">{pendingProposals.data.length}</span>
               ) : null}
             </button>
             <RepoImport onDone={reloadAll} />
@@ -251,12 +232,7 @@ export function KnowledgePage({
       <div className={`kn-layout${itemKey ? " has-detail" : ""}`}>
         <aside className="kn-list">
           <div className="kn-filter">
-            <SearchInput
-              value={q}
-              onChange={setQ}
-              placeholder={t("kn.searchPh")}
-              width="100%"
-            />
+            <SearchInput value={q} onChange={setQ} placeholder={t("kn.searchPh")} width="100%" />
             <select
               value={scope}
               onChange={(e) => setScope(e.target.value)}
@@ -279,10 +255,7 @@ export function KnowledgePage({
               icon={BookOpen}
               title={t("kn.emptyTitle")}
               action={
-                <button
-                  className="sm"
-                  onClick={() => navigate("/knowledge/~new")}
-                >
+                <button className="sm" onClick={() => navigate("/knowledge/~new")}>
                   <Plus size={14} />
                   {t("kn.create")}
                 </button>
@@ -312,25 +285,14 @@ export function KnowledgePage({
                           <Badge s={k.owner_id ? "RUNNING" : "COMPLETED"}>
                             {k.owner_id ? t("auth.my") : t("auth.shared")}
                           </Badge>
-                          {k.enforced && (
-                            <Badge s="FAILED">{t("kn.enforced")}</Badge>
-                          )}
-                          {!k.enabled && (
-                            <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>
-                          )}
+                          {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
+                          {!k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
                         </span>
                         <span className="kn-item-key mono">{k.key}</span>
                         <span className="kn-item-meta">
-                          <ScopeBadge
-                            type={k.scope_type}
-                            scopeRef={k.scope_ref}
-                          />
-                          <span className="kn-tag">
-                            {t(catKey(k.category))}
-                          </span>
-                          <span className="kn-tag mono">
-                            v{k.current_version}
-                          </span>
+                          <ScopeBadge type={k.scope_type} scopeRef={k.scope_ref} />
+                          <span className="kn-tag">{t(catKey(k.category))}</span>
+                          <span className="kn-tag mono">v{k.current_version}</span>
                           <LoadChip metadata={k.metadata} />
                         </span>
                       </span>
@@ -357,10 +319,7 @@ export function KnowledgePage({
                 icon={BookOpen}
                 title={t("kn.pickTitle")}
                 action={
-                  <button
-                    className="sm ghost"
-                    onClick={() => navigate("/knowledge/~new")}
-                  >
+                  <button className="sm ghost" onClick={() => navigate("/knowledge/~new")}>
                     <Plus size={14} />
                     {t("kn.createNew")}
                   </button>
@@ -392,9 +351,7 @@ function RepoImport({ onDone }: { onDone: () => void }) {
     if (dry) setPreview(r);
     else (setPreview(null), onDone());
   };
-  const changed = preview
-    ? preview.candidates.filter((c: any) => c.action !== "unchanged")
-    : [];
+  const changed = preview ? preview.candidates.filter((c: any) => c.action !== "unchanged") : [];
   return (
     <>
       <button className="ghost" disabled={busy} onClick={() => run(true)}>
@@ -402,11 +359,7 @@ function RepoImport({ onDone }: { onDone: () => void }) {
         {busy ? t("kn.scanning") : t("kn.scan")}
       </button>
       {preview && (
-        <Drawer
-          title={t("kn.importTitle")}
-          onClose={() => setPreview(null)}
-          width={560}
-        >
+        <Drawer title={t("kn.importTitle")} onClose={() => setPreview(null)} width={560}>
           <div className="kn-import-sum">
             <div>
               <b>{preview.created}</b>
@@ -436,9 +389,7 @@ function RepoImport({ onDone }: { onDone: () => void }) {
             <ul className="kn-import-list">
               {changed.map((c: any) => (
                 <li key={c.key}>
-                  <Badge s={c.action === "create" ? "READY" : "WAITING"}>
-                    {c.action}
-                  </Badge>
+                  <Badge s={c.action === "create" ? "READY" : "WAITING"}>{c.action}</Badge>
                   <div className="kn-import-body">
                     <span className="mono">{c.key}</span>
                     <span className="muted small">
@@ -501,8 +452,7 @@ function KeyValues({ value, empty }: { value: any; empty: string }) {
         <div key={k} className="kn-kv-row">
           <dt>{k}</dt>
           <dd>
-            {Array.isArray(x) &&
-            x.every((y) => typeof y !== "object" || y === null) ? (
+            {Array.isArray(x) && x.every((y) => typeof y !== "object" || y === null) ? (
               x.length ? (
                 x.map((y, i) => (
                   <span key={i} className="pill">
@@ -537,18 +487,12 @@ function KnowledgeEditor({
 }) {
   const { t } = useI18n();
   const isNew = itemKey === "~new";
-  const {
-    data: item,
-    error,
-    reload,
-  } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}`);
-  const { data: usage } = useApi<any>(
-    isNew ? null : `/api/knowledge/${itemKey}/usage`,
-  );
+  const { data: item, error, reload } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}`);
+  const { data: usage } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}/usage`);
   const [d, setD] = useState<Draft>(emptyDraft(defaultCategory));
-  const [tab, setTab] = useState<
-    "overview" | "edit" | "preview" | "versions" | "audit" | "usage"
-  >(isNew ? "edit" : "overview");
+  const [tab, setTab] = useState<"overview" | "edit" | "preview" | "versions" | "audit" | "usage">(
+    isNew ? "edit" : "overview",
+  );
   const [viewVersion, setViewVersion] = useState<number | null>(null);
   useEffect(() => {
     if (!item) return;
@@ -606,8 +550,7 @@ function KnowledgeEditor({
       metadata,
     };
     const r = await act(
-      () =>
-        api<any>(isNew ? "/api/knowledge" : `/api/knowledge/${itemKey}`, body),
+      () => api<any>(isNew ? "/api/knowledge" : `/api/knowledge/${itemKey}`, body),
       isNew ? t("kn.created") : t("kn.saved"),
     );
     if (r) {
@@ -618,6 +561,31 @@ function KnowledgeEditor({
   };
   const cur = isNew ? null : item.versions[0];
   const CatIcon = CAT_ICON[isNew ? d.category : item.category] ?? FileText;
+  // Permanent delete (server: admins for shared items, owners for private ones). A workflow that still assigns the key
+  // blocks it (409) until the reviewer confirms a forced delete.
+  const remove = async () => {
+    const companions: string[] = cur?.metadata?.companions ?? [];
+    const reason = prompt(
+      t("kn.delete.confirm", { key: item.key, n: companions.length }),
+      "",
+    );
+    if (reason === null) return;
+    const call = (force: boolean) =>
+      api<{ deleted: string[] }>(`/api/knowledge/${itemKey}/delete`, { reason, force });
+    let r: { deleted: string[] } | undefined;
+    try {
+      r = await call(false);
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (!/still assigned/.test(msg)) return act(async () => { throw e; });
+      if (!confirm(t("kn.delete.force", { detail: msg }))) return;
+      r = await act(() => call(true));
+    }
+    if (!r) return;
+    toast(t("kn.delete.done", { n: r.deleted.length }), "ok");
+    onSaved();
+    navigate("/knowledge");
+  };
   const tabs: Array<[typeof tab, ReactNode]> = isNew
     ? [
         [
@@ -661,24 +629,21 @@ function KnowledgeEditor({
           "versions",
           <>
             <History size={14} />
-            {t("kn.versions")}{" "}
-            <span className="kn-tab-count">{item.versions.length}</span>
+            {t("kn.versions")} <span className="kn-tab-count">{item.versions.length}</span>
           </>,
         ],
         [
           "audit",
           <>
             <ScrollText size={14} />
-            {t("kn.audit")}{" "}
-            <span className="kn-tab-count">{item.audit.length}</span>
+            {t("kn.audit")} <span className="kn-tab-count">{item.audit.length}</span>
           </>,
         ],
         [
           "usage",
           <>
             <Workflow size={14} />
-            {t("kn.used")}{" "}
-            <span className="kn-tab-count">{usage?.used.length ?? 0}</span>
+            {t("kn.used")} <span className="kn-tab-count">{usage?.used.length ?? 0}</span>
           </>,
         ],
       ];
@@ -691,9 +656,7 @@ function KnowledgeEditor({
           <CatIcon size={20} strokeWidth={2} />
         </span>
         <div className="kn-head-main">
-          <h2 className="kn-head-title">
-            {isNew ? t("kn.newTitle") : d.title || item.title}
-          </h2>
+          <h2 className="kn-head-title">{isNew ? t("kn.newTitle") : d.title || item.title}</h2>
           {isNew ? (
             <div className="muted small">{t("kn.newHint")}</div>
           ) : (
@@ -717,6 +680,15 @@ function KnowledgeEditor({
         {!isNew && (
           <div className="kn-head-time muted small">
             {t("kn.updatedAt", { time: time(item.updated_at) })}
+            <button
+              type="button"
+              className="ghost sm kn-delete"
+              onClick={remove}
+              title={t("kn.delete.title")}
+            >
+              <Trash2 size={14} />
+              {t("kn.delete.button")}
+            </button>
           </div>
         )}
       </div>
@@ -725,27 +697,15 @@ function KnowledgeEditor({
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
         {tab === "overview" && !isNew && cur?.metadata?.memory && (
-          <MemoryProvenance
-            itemKey={item.key}
-            m={cur.metadata.memory}
-            onDone={reload}
-          />
+          <MemoryProvenance itemKey={item.key} m={cur.metadata.memory} onDone={reload} />
         )}
         {tab === "overview" && !isNew && <Evolution item={item} />}
         {tab === "overview" && !isNew && (
           <div className="kn-overview">
             <Section
               icon={FileText}
-              title={
-                item.category === "agent_skill"
-                  ? t("kn.skillInstructions")
-                  : t("kn.content")
-              }
-              aside={
-                <span className="muted small">
-                  v{cur?.version ?? item.current_version}
-                </span>
-              }
+              title={item.category === "agent_skill" ? t("kn.skillInstructions") : t("kn.content")}
+              aside={<span className="muted small">v{cur?.version ?? item.current_version}</span>}
             >
               <div className="kn-content">
                 {cur?.content ? (
@@ -761,10 +721,7 @@ function KnowledgeEditor({
                   <div className="kn-kv-row">
                     <dt>{t("kn.scope")}</dt>
                     <dd>
-                      <ScopeBadge
-                        type={item.scope_type}
-                        scopeRef={item.scope_ref}
-                      />
+                      <ScopeBadge type={item.scope_type} scopeRef={item.scope_ref} />
                     </dd>
                   </div>
                   <div className="kn-kv-row">
@@ -809,16 +766,10 @@ function KnowledgeEditor({
                   </div>
                 </dl>
                 <div className="kn-sub-head">{t("kn.applicability")}</div>
-                <KeyValues
-                  value={cur?.applicability}
-                  empty={t("kn.applicabilityEmpty")}
-                />
+                <KeyValues value={cur?.applicability} empty={t("kn.applicabilityEmpty")} />
               </Section>
               <Section icon={BookMarked} title={t("kn.metadata")}>
-                <KeyValues
-                  value={cur?.metadata}
-                  empty={t("kn.metadataEmpty")}
-                />
+                <KeyValues value={cur?.metadata} empty={t("kn.metadataEmpty")} />
               </Section>
             </div>
           </div>
@@ -837,10 +788,7 @@ function KnowledgeEditor({
                   />
                 </Field>
                 <Field label={t("kn.titleField")}>
-                  <input
-                    value={d.title}
-                    onChange={(e) => set({ title: e.target.value })}
-                  />
+                  <input value={d.title} onChange={(e) => set({ title: e.target.value })} />
                 </Field>
                 <Field label={t("kn.category")}>
                   <select
@@ -866,8 +814,7 @@ function KnowledgeEditor({
                     onChange={(e) =>
                       set({
                         scope_type: e.target.value,
-                        scope_ref:
-                          e.target.value === "GLOBAL" ? "" : d.scope_ref,
+                        scope_ref: e.target.value === "GLOBAL" ? "" : d.scope_ref,
                       })
                     }
                   >
@@ -917,21 +864,14 @@ function KnowledgeEditor({
                     onChange={(e) => set({ enforced: e.target.checked })}
                   />
                   <span>
-                    <b>{t("kn.enforced")}</b>{" "}
-                    <span className="muted">({t("kn.enforcedYes")})</span>
+                    <b>{t("kn.enforced")}</b> <span className="muted">({t("kn.enforcedYes")})</span>
                   </span>
                 </label>
               </div>
             </fieldset>
             <fieldset className="kn-fieldset">
               <legend>{t("kn.contentLegend")}</legend>
-              <Field
-                label={
-                  d.category === "agent_skill"
-                    ? t("kn.skillMd")
-                    : t("kn.contentMd")
-                }
-              >
+              <Field label={d.category === "agent_skill" ? t("kn.skillMd") : t("kn.contentMd")}>
                 <textarea
                   className="kn-textarea"
                   rows={12}
@@ -943,10 +883,7 @@ function KnowledgeEditor({
             <fieldset className="kn-fieldset">
               <legend>{t("kn.advanced")}</legend>
               <div className="kn-form-grid two">
-                <Field
-                  label={t("kn.applicabilityJson")}
-                  hint={t("kn.applicabilityHint")}
-                >
+                <Field label={t("kn.applicabilityJson")} hint={t("kn.applicabilityHint")}>
                   <textarea
                     className="code"
                     rows={6}
@@ -1001,9 +938,7 @@ function KnowledgeEditor({
                     <div className="kn-tl-row">
                       <b className="mono">v{v.version}</b>
                       {v.version === item.current_version && (
-                        <span className="kn-tag chip-brand">
-                          {t("kn.current")}
-                        </span>
+                        <span className="kn-tag chip-brand">{t("kn.current")}</span>
                       )}
                       <span className="muted small">
                         {time(v.created_at)}
@@ -1027,9 +962,7 @@ function KnowledgeEditor({
                             : ""}
                       </div>
                     )}
-                    {v.change_note && (
-                      <div className="small kn-tl-note">{v.change_note}</div>
-                    )}
+                    {v.change_note && <div className="small kn-tl-note">{v.change_note}</div>}
                     {open && (
                       <div className="kn-content kn-tl-content">
                         <Markdown text={v.content} />
@@ -1054,9 +987,7 @@ function KnowledgeEditor({
                       <b>{a.action}</b>
                       <span className="muted small">{time(a.created_at)}</span>
                     </div>
-                    <code className="kn-audit-detail">
-                      {JSON.stringify(a.detail)}
-                    </code>
+                    <code className="kn-audit-detail">{JSON.stringify(a.detail)}</code>
                   </div>
                 </li>
               ))}
@@ -1076,14 +1007,10 @@ function KnowledgeEditor({
                         {a.workflow}
                       </a>{" "}
                       <span className="kn-tag">
-                        {a.version === "draft"
-                          ? t("kn.draft")
-                          : `v${a.version}`}
+                        {a.version === "draft" ? t("kn.draft") : `v${a.version}`}
                       </span>{" "}
                       <span className="muted small">
-                        {a.step
-                          ? t("kn.step", { step: a.step })
-                          : t("kn.allSteps")}
+                        {a.step ? t("kn.step", { step: a.step }) : t("kn.allSteps")}
                       </span>
                     </li>
                   ))}
@@ -1118,15 +1045,7 @@ function KnowledgeEditor({
 }
 
 /** Cross-task memory provenance + the explicit human promotion step (only path to trusted agent conclusions). */
-function MemoryProvenance({
-  itemKey,
-  m,
-  onDone,
-}: {
-  itemKey: string;
-  m: any;
-  onDone: () => void;
-}) {
+function MemoryProvenance({ itemKey, m, onDone }: { itemKey: string; m: any; onDone: () => void }) {
   const { t } = useI18n();
   const [by, setBy] = useState("");
   const tone =
@@ -1163,13 +1082,10 @@ function MemoryProvenance({
         </span>
         <span>{t("kn.repository")}</span>
         <span className="mono">
-          {m.repo} @ {String(m.commit_sha ?? "").slice(0, 12)} (base{" "}
-          {m.base_branch})
+          {m.repo} @ {String(m.commit_sha ?? "").slice(0, 12)} (base {m.base_branch})
         </span>
         <span>{t("kn.files")}</span>
-        <span className="mono">
-          {(m.files ?? []).slice(0, 8).join(", ") || "—"}
-        </span>
+        <span className="mono">{(m.files ?? []).slice(0, 8).join(", ") || "—"}</span>
         <span>{t("kn.sources")}</span>
         <span>{(m.sources ?? []).join(", ")}</span>
         <span>{t("kn.extracted")}</span>
@@ -1193,18 +1109,10 @@ function MemoryProvenance({
             onChange={(e) => setBy(e.target.value)}
             aria-label={t("kn.reviewerPh")}
           />
-          <button
-            className="sm ok"
-            disabled={!by.trim()}
-            onClick={() => decide("approve")}
-          >
+          <button className="sm ok" disabled={!by.trim()} onClick={() => decide("approve")}>
             {t("kn.approve")}
           </button>
-          <button
-            className="sm ghost"
-            disabled={!by.trim()}
-            onClick={() => decide("reject")}
-          >
+          <button className="sm ghost" disabled={!by.trim()} onClick={() => decide("reject")}>
             {t("kn.reject")}
           </button>
         </div>
@@ -1220,9 +1128,7 @@ function Evolution({ item }: { item: any }) {
     `/api/knowledge-proposals?target=${encodeURIComponent(item.key)}`,
     [item.key],
   );
-  const waiting =
-    item.effective_version != null &&
-    item.effective_version !== item.current_version;
+  const waiting = item.effective_version != null && item.effective_version !== item.current_version;
   const expired = item.expires_at && new Date(item.expires_at) <= new Date();
   if (
     !item.superseded_by_item &&
@@ -1237,10 +1143,7 @@ function Evolution({ item }: { item: any }) {
       {item.superseded_by_item && (
         <div className="kp-note kp-warn small">
           <History size={14} /> {t("kp.supersededBy")}{" "}
-          <a
-            className="mono"
-            href={`#/knowledge/${item.superseded_by_item.key}`}
-          >
+          <a className="mono" href={`#/knowledge/${item.superseded_by_item.key}`}>
             {item.superseded_by_item.key}
           </a>{" "}
           — {t("kp.supersededHint")}
@@ -1275,11 +1178,7 @@ function Evolution({ item }: { item: any }) {
         <div className="small">
           <b>{t("kp.related")}</b>{" "}
           {props.slice(0, 8).map((p) => (
-            <a
-              key={p.id}
-              className="kp-rel"
-              href={`#/knowledge/~proposals/${p.id}`}
-            >
+            <a key={p.id} className="kp-rel" href={`#/knowledge/~proposals/${p.id}`}>
               #{p.id} {p.change_type} <ProposalStatus s={p.status} />
             </a>
           ))}

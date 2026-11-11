@@ -25,8 +25,7 @@ const COLORS = [
   "#be9e37",
   "#46717c",
 ];
-const idOf = (r: Row) =>
-  `${r.namespace ?? "unknown"}\u001f${r.service ?? "unknown"}`;
+const idOf = (r: Row) => `${r.namespace ?? "unknown"}\u001f${r.service ?? "unknown"}`;
 function CompareMetric({
   row,
   label,
@@ -68,17 +67,12 @@ function CompareMetric({
               <Icon size={14} />
               {delta > 0 ? "+" : ""}
               {fmt(delta, style)} (
-              {pct == null
-                ? "—"
-                : `${pct > 0 ? "+" : ""}${fmt(pct, "number")}%`}
-              )
+              {pct == null ? "—" : `${pct > 0 ? "+" : ""}${fmt(pct, "number")}%`})
             </>
           )}
         </span>
       </div>
-      {caution && (
-        <span className="an-kpi-caution">{t("an.coverageWarning")}</span>
-      )}
+      {caution && <span className="an-kpi-caution">{t("an.coverageWarning")}</span>}
     </div>
   );
 }
@@ -115,9 +109,7 @@ export function ObservedTrend({
     ...rows.map((x): Row => ({ ...x, period: "current" })),
     ...previous.map((x): Row => ({ ...x, period: "previous" })),
   ].filter((x) => !x.series || !hidden.includes(x.series));
-  const values = data
-    .map((x) => number(x[field]))
-    .filter((x): x is number => x != null);
+  const values = data.map((x) => number(x[field])).filter((x): x is number => x != null);
   if (!data.length || !values.length || !(span > 0))
     return <div className="an-chart-empty">{t("an.insufficientHistory")}</div>;
   const max = Math.max(1, ...values),
@@ -128,21 +120,15 @@ export function ObservedTrend({
   const x = (bucketValue: string, period: string) => {
     let ms = Date.parse(bucketValue);
     if (period === "previous") ms += span;
-    return (
-      padX + Math.max(0, Math.min(1, (ms - begin) / span)) * (W - 2 * padX)
-    );
+    return padX + Math.max(0, Math.min(1, (ms - begin) / span)) * (W - 2 * padX);
   };
-  const y = (value: unknown) =>
-    H - padY - (Math.max(0, Number(value)) / max) * (H - 2 * padY);
+  const y = (value: unknown) => H - padY - (Math.max(0, Number(value)) / max) * (H - 2 * padY);
   const groups = new Map<string, Row[]>();
   for (const r of data) {
-    const key = seriesMode
-      ? (r.series ?? `${r.namespace}\u001f${r.service}`)
-      : r.period;
+    const key = seriesMode ? (r.series ?? `${r.namespace}\u001f${r.service}`) : r.period;
     groups.set(key, [...(groups.get(key) ?? []), r]);
   }
-  const paths: Array<{ key: string; d: string; color: string; dash: boolean }> =
-    [];
+  const paths: Array<{ key: string; d: string; color: string; dash: boolean }> = [];
   for (const [key, list] of groups) {
     list.sort((a, b) => Date.parse(a.bucket) - Date.parse(b.bucket));
     let segment: Row[] = [];
@@ -156,10 +142,7 @@ export function ObservedTrend({
                 `${i ? "L" : "M"}${x(r.bucket, r.period).toFixed(1)},${y(r[field]).toFixed(1)}`,
             )
             .join(" "),
-          color:
-            key === "previous"
-              ? "var(--muted)"
-              : (serviceColors.get(key) ?? "var(--brand)"),
+          color: key === "previous" ? "var(--muted)" : (serviceColors.get(key) ?? "var(--brand)"),
           dash: key === "previous",
         });
         segment = [];
@@ -172,11 +155,7 @@ export function ObservedTrend({
         continue;
       }
       const last = segment.at(-1);
-      if (
-        last &&
-        Math.abs(Date.parse(row.bucket) - Date.parse(last.bucket)) > step * 1.6
-      )
-        finish();
+      if (last && Math.abs(Date.parse(row.bucket) - Date.parse(last.bucket)) > step * 1.6) finish();
       segment.push(row);
     }
     finish();
@@ -206,11 +185,7 @@ export function ObservedTrend({
               y2={H - padY - v * (H - 2 * padY)}
               className="an-chart-grid"
             />
-            <text
-              x={2}
-              y={H - padY - v * (H - 2 * padY) + 4}
-              className="an-chart-axis"
-            >
+            <text x={2} y={H - padY - v * (H - 2 * padY) + 4} className="an-chart-axis">
               {Math.round(max * v).toLocaleString()}
             </text>
           </g>
@@ -274,13 +249,7 @@ export function ObservedTrend({
   );
 }
 
-function ServiceDonut({
-  rows,
-  onSelect,
-}: {
-  rows: Row[];
-  onSelect: (r: Row) => void;
-}) {
+function ServiceDonut({ rows, onSelect }: { rows: Row[]; onSelect: (r: Row) => void }) {
   const { t } = useI18n();
   const sorted = [...rows]
     .filter((r) => number(r.events) != null)
@@ -292,15 +261,11 @@ function ServiceDonut({
       service: t("an.otherServices"),
       namespace: "",
       events: rest.reduce((a, r) => a + Number(r.events), 0),
-      error_share_pct: rest.reduce(
-        (a, r) => a + (number(r.error_share_pct) ?? 0),
-        0,
-      ),
+      error_share_pct: rest.reduce((a, r) => a + (number(r.error_share_pct) ?? 0), 0),
       aggregate: rest,
     });
   const totalEvents = leading.reduce((a, r) => a + Number(r.events ?? 0), 0);
-  if (!totalEvents)
-    return <div className="an-chart-empty">{t("an.noServiceData")}</div>;
+  if (!totalEvents) return <div className="an-chart-empty">{t("an.noServiceData")}</div>;
   let cursor = 0;
   const parts = leading.map((r, i) => {
     const start = cursor;
@@ -359,19 +324,14 @@ export function ProductionOverview({
   const { t } = useI18n();
   const s = data.summary ?? {};
   const compare = s.comparisons ?? {};
-  const [barMetric, setBarMetric] = useState<"events" | "fingerprints">(
-    "events",
-  );
-  const [severityMetric, setSeverityMetric] = useState<
-    "events" | "fingerprints"
-  >("events");
+  const [barMetric, setBarMetric] = useState<"events" | "fingerprints">("events");
+  const [severityMetric, setSeverityMetric] = useState<"events" | "fingerprints">("events");
   const [hiddenServices, setHiddenServices] = useState<string[]>([]);
   const [servicePage, setServicePage] = useState(1);
   const canCompareCoverage =
     Number(s.current_coverage?.successful_scans_in_range) ===
       Number(s.previous_coverage?.successful_scans_in_range) &&
-    Number(s.current_coverage?.scans_in_range) ===
-      Number(s.previous_coverage?.scans_in_range) &&
+    Number(s.current_coverage?.scans_in_range) === Number(s.previous_coverage?.scans_in_range) &&
     Number(s.current_coverage?.failed_scans_in_range) ===
       Number(s.previous_coverage?.failed_scans_in_range) &&
     Number(s.current_coverage?.window_coverage_ms) ===
@@ -380,8 +340,7 @@ export function ProductionOverview({
     () =>
       new Map<string, string>(
         (data.services ?? []).map(
-          (r: Row, i: number) =>
-            [idOf(r), COLORS[i % COLORS.length]] as [string, string],
+          (r: Row, i: number) => [idOf(r), COLORS[i % COLORS.length]] as [string, string],
         ),
       ),
     [data.services],
@@ -400,16 +359,11 @@ export function ProductionOverview({
   };
   const allServiceRows: Row[] = data.services ?? [];
   const currentServiceRows = allServiceRows.slice(0, 10);
-  const serviceTableRows = allServiceRows.slice(
-    (servicePage - 1) * 25,
-    servicePage * 25,
-  );
+  const serviceTableRows = allServiceRows.slice((servicePage - 1) * 25, servicePage * 25);
   const onServicePage = (n: number) => setServicePage(n);
   const serviceTrendKeys = (data.services ?? []).slice(0, 5).map(idOf);
   const serviceTrendRows = (data.serviceTrends ?? [])
-    .filter((r: Row) =>
-      serviceTrendKeys.includes(`${r.namespace}\u001f${r.service}`),
-    )
+    .filter((r: Row) => serviceTrendKeys.includes(`${r.namespace}\u001f${r.service}`))
     .map((r: Row) => ({ ...r, series: `${r.namespace}\u001f${r.service}` }));
   const severityField = severityMetric === "events" ? "events" : "fingerprints";
   const freshness = data.freshness ?? {};
@@ -429,12 +383,10 @@ export function ProductionOverview({
           )}
         </span>
         <span>
-          {t("an.currentDataWindow")}: {dateCell(data.range.from)} –{" "}
-          {dateCell(data.range.to)}
+          {t("an.currentDataWindow")}: {dateCell(data.range.from)} – {dateCell(data.range.to)}
         </span>
         <span>
-          {t("an.lastSuccessfulScan")}:{" "}
-          {dateCell(freshness.last_successful_scan?.finished_at)}
+          {t("an.lastSuccessfulScan")}: {dateCell(freshness.last_successful_scan?.finished_at)}
         </span>
         <span>
           {t("an.latestObserved")}: {dateCell(freshness.latest_observation_at)}
@@ -449,10 +401,7 @@ export function ProductionOverview({
             Math.min(
               100,
               (Number(freshness.window_coverage_ms ?? 0) /
-                Math.max(
-                  1,
-                  Date.parse(data.range.to) - Date.parse(data.range.from),
-                )) *
+                Math.max(1, Date.parse(data.range.to) - Date.parse(data.range.from))) *
                 100,
             ),
             "number",
@@ -461,9 +410,7 @@ export function ProductionOverview({
         </span>
         <span>{freshness.data_source}</span>
         {freshness.latest_scan?.error && (
-          <span className="an-freshness-error">
-            {freshness.latest_scan.error}
-          </span>
+          <span className="an-freshness-error">{freshness.latest_scan.error}</span>
         )}
       </div>
       {!canCompareCoverage && (
@@ -496,9 +443,7 @@ export function ProductionOverview({
               caution={!canCompareCoverage}
             />
             <CompareMetric
-              row={
-                compare.resolved_incidents ?? { current: s.resolved_incidents }
-              }
+              row={compare.resolved_incidents ?? { current: s.resolved_incidents }}
               label={t("an.resolvedIncidents")}
               caution={!canCompareCoverage}
             />
@@ -521,9 +466,7 @@ export function ProductionOverview({
               caution={!canCompareCoverage}
             />
             <CompareMetric
-              row={
-                compare.affected_services ?? { current: s.affected_services }
-              }
+              row={compare.affected_services ?? { current: s.affected_services }}
               label={t("an.affectedServices")}
               caution={!canCompareCoverage}
             />
@@ -556,11 +499,7 @@ export function ProductionOverview({
           <div className="muted small">{t("an.notFailureRate")}</div>
         </Panel>
         <Panel title={t("an.topServices")}>
-          <div
-            className="an-health-toggle"
-            role="group"
-            aria-label={t("an.metric")}
-          >
+          <div className="an-health-toggle" role="group" aria-label={t("an.metric")}>
             <button
               className={barMetric === "events" ? "on" : ""}
               onClick={() => setBarMetric("events")}
@@ -577,12 +516,7 @@ export function ProductionOverview({
           <ul className="an-health-bars">
             {currentServiceRows.map((r: Row, i: number) => {
               const value = Number(r[barMetric] ?? 0),
-                max = Math.max(
-                  ...currentServiceRows.map((x: Row) =>
-                    Number(x[barMetric] ?? 0),
-                  ),
-                  1,
-                );
+                max = Math.max(...currentServiceRows.map((x: Row) => Number(x[barMetric] ?? 0)), 1);
               return (
                 <li key={idOf(r)}>
                   <ServiceVolumeBar
@@ -594,9 +528,7 @@ export function ProductionOverview({
                     color={COLORS[i % COLORS.length]}
                     formattedValue={fmt(value)}
                     formattedPercentage={
-                      r.error_share_pct == null
-                        ? "—"
-                        : `${fmt(r.error_share_pct)}%`
+                      r.error_share_pct == null ? "—" : `${fmt(r.error_share_pct)}%`
                     }
                     onSelect={() => serviceSelect(r)}
                   />
@@ -690,10 +622,7 @@ export function ProductionOverview({
       </Panel>
       {!servicesOnly && (
         <>
-          <Panel
-            title={t("an.productionTrend")}
-            hint={data.semantics?.event_count}
-          >
+          <Panel title={t("an.productionTrend")} hint={data.semantics?.event_count}>
             <ObservedTrend
               rows={data.trend ?? []}
               previous={data.previousTrend ?? []}
@@ -705,11 +634,7 @@ export function ProductionOverview({
           </Panel>
           <div className="ins-grid">
             <Panel title={t("an.severityMetric")}>
-              <div
-                className="an-health-toggle"
-                role="group"
-                aria-label={t("an.metric")}
-              >
+              <div className="an-health-toggle" role="group" aria-label={t("an.metric")}>
                 <button
                   className={severityMetric === "events" ? "on" : ""}
                   onClick={() => setSeverityMetric("events")}
@@ -723,11 +648,7 @@ export function ProductionOverview({
                   {t("an.metricFingerprints")}
                 </button>
               </div>
-              <BreakdownBars
-                rows={data.severity ?? []}
-                field={severityField}
-                labelKey="severity"
-              />
+              <BreakdownBars rows={data.severity ?? []} field={severityField} labelKey="severity" />
             </Panel>
             <Panel title={t("an.lifecycleChart")}>
               {Number(
@@ -759,10 +680,8 @@ export function ProductionOverview({
                 <div className="an-chart-empty">{t("an.noIncidents")}</div>
               )}
               <div className="an-chart-legend">
-                {t("an.recurringIncidents")}:{" "}
-                {fmt(data.lifecycle?.recurring_incidents)} ·{" "}
-                {t("an.reopenedIncidents")}:{" "}
-                {fmt(data.lifecycle?.reopened_incidents)}
+                {t("an.recurringIncidents")}: {fmt(data.lifecycle?.recurring_incidents)} ·{" "}
+                {t("an.reopenedIncidents")}: {fmt(data.lifecycle?.reopened_incidents)}
               </div>
             </Panel>
           </div>
@@ -782,9 +701,7 @@ export function ProductionOverview({
                 key={key}
                 className={hidden ? "muted" : "on"}
                 onClick={() =>
-                  setHiddenServices((s) =>
-                    hidden ? s.filter((x) => x !== key) : [...s, key],
-                  )
+                  setHiddenServices((s) => (hidden ? s.filter((x) => x !== key) : [...s, key]))
                 }
               >
                 <i style={{ background: COLORS[i % COLORS.length] }} />
@@ -806,10 +723,7 @@ export function ProductionOverview({
       </Panel>
       {!servicesOnly && (
         <>
-          <Panel
-            title={t("an.remediationOutcomes")}
-            hint={data.semantics?.remediation}
-          >
+          <Panel title={t("an.remediationOutcomes")} hint={data.semantics?.remediation}>
             <div className="an-remediation-grid">
               {[
                 ["linkedIncidents", data.remediation?.linked_incidents],
@@ -834,10 +748,7 @@ export function ProductionOverview({
               rows={(data.topFingerprints ?? []).map((r: Row) => ({
                 ...r,
                 fingerprint_link: (
-                  <button
-                    className="link-button mono"
-                    onClick={() => openIncident(r.fingerprint)}
-                  >
+                  <button className="link-button mono" onClick={() => openIncident(r.fingerprint)}>
                     {r.fingerprint}
                   </button>
                 ),
@@ -889,11 +800,7 @@ export function ProductionOverview({
                 {
                   key: "lifecycle_status",
                   label: "status",
-                  render: (r) => (
-                    <span className="pill">
-                      {t(`an.${r.lifecycle_status}`)}
-                    </span>
-                  ),
+                  render: (r) => <span className="pill">{t(`an.${r.lifecycle_status}`)}</span>,
                 },
                 {
                   key: "first_at",
@@ -909,10 +816,7 @@ export function ProductionOverview({
                   key: "links",
                   label: "evidence",
                   render: (r) => (
-                    <IncidentLinks
-                      row={r}
-                      onOpen={() => openIncident(r.fingerprint)}
-                    />
+                    <IncidentLinks row={r} onOpen={() => openIncident(r.fingerprint)} />
                   ),
                 },
               ]}

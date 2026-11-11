@@ -26,7 +26,16 @@ const fmtCache = new Map<string, Intl.DateTimeFormat>();
 function partsFormatter(tz: string) {
   let f = fmtCache.get(tz);
   if (!f) {
-    f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    f = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
     fmtCache.set(tz, f);
   }
   return f;
@@ -42,13 +51,33 @@ export function assertTimezone(tz: string) {
 
 /** Offset of `tz` from UTC at the given instant, in minutes (Asia/Ho_Chi_Minh → 420). */
 export function tzOffsetMinutes(tz: string, epochMs: number): number {
-  const p = Object.fromEntries(partsFormatter(tz).formatToParts(new Date(epochMs)).map((x) => [x.type, x.value]));
-  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  const p = Object.fromEntries(
+    partsFormatter(tz)
+      .formatToParts(new Date(epochMs))
+      .map((x) => [x.type, x.value]),
+  );
+  const asUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour),
+    Number(p.minute),
+    Number(p.second),
+  );
   return Math.round((asUtc - Math.floor(epochMs / 1000) * 1000) / 60_000);
 }
 
 /** Wall-clock time in `tz` → epoch ms (resolves DST by re-checking the offset at the candidate instant). */
-export function zonedToEpochMs(tz: string, y: number, mo: number, d: number, h = 0, mi = 0, s = 0, ms = 0): number {
+export function zonedToEpochMs(
+  tz: string,
+  y: number,
+  mo: number,
+  d: number,
+  h = 0,
+  mi = 0,
+  s = 0,
+  ms = 0,
+): number {
   const wall = Date.UTC(y, mo - 1, d, h, mi, s, ms);
   let guess = wall - tzOffsetMinutes(tz, wall) * 60_000;
   guess = wall - tzOffsetMinutes(tz, guess) * 60_000;
@@ -70,7 +99,12 @@ export function formatInZone(epochUs: number, tz: string, precision: Precision =
   const d = new Date(ms + off * 60_000);
   const base = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
   const us = ((epochUs % 1_000_000) + 1_000_000) % 1_000_000;
-  const frac = precision === "s" ? "" : precision === "ms" ? `.${pad(Math.floor(us / 1000), 3)}` : `.${pad(us, 6)}`;
+  const frac =
+    precision === "s"
+      ? ""
+      : precision === "ms"
+        ? `.${pad(Math.floor(us / 1000), 3)}`
+        : `.${pad(us, 6)}`;
   return `${base}${frac}${offsetText(off)}`;
 }
 
@@ -104,14 +138,17 @@ export function parseObservedTime(value: unknown, tz: string): ObservedTime | nu
     timezone: tz,
     assumed_timezone: assumed,
   });
-  let m = original.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?\s*(Z|[+-]\d{2}:?\d{2})?$/i);
+  let m = original.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?\s*(Z|[+-]\d{2}:?\d{2})?$/i,
+  );
   if (m) {
     const [, y, mo, d, h, mi, s, frac, off] = m;
     const fu = fractionUs(frac);
     if (off) {
       const sign = off === "Z" || off === "z" ? 0 : off[0] === "-" ? -1 : 1;
       const digits = off.replace(/[^0-9]/g, "");
-      const offMin = sign === 0 ? 0 : sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2, 4)));
+      const offMin =
+        sign === 0 ? 0 : sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2, 4)));
       const ms = Date.UTC(+y, +mo - 1, +d, +h, +mi, +s) - offMin * 60_000;
       return done(ms * 1000 + fu, precisionOf(frac), false);
     }
@@ -122,7 +159,11 @@ export function parseObservedTime(value: unknown, tz: string): ObservedTime | nu
   m = original.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}):(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?$/);
   if (m) {
     const [, mo, d, y, h, mi, s, frac] = m;
-    return done(zonedToEpochMs(tz, +y, +mo, +d, +h, +mi, +s) * 1000 + fractionUs(frac), precisionOf(frac), true);
+    return done(
+      zonedToEpochMs(tz, +y, +mo, +d, +h, +mi, +s) * 1000 + fractionUs(frac),
+      precisionOf(frac),
+      true,
+    );
   }
   return null;
 }
@@ -143,7 +184,9 @@ export function parseTimeModifier(raw: string, tz: string, now = Date.now()): nu
   if (/^now(\(\))?$/i.test(v) || v === "") return now;
   const abs = parseObservedTime(v, tz);
   if (abs) return Math.floor(abs.epoch_us / 1000);
-  const m = v.match(/^([+-])(\d+)(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days|w|week|weeks)(?:@(s|m|h|d))?$/i);
+  const m = v.match(
+    /^([+-])(\d+)(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days|w|week|weeks)(?:@(s|m|h|d))?$/i,
+  );
   if (m) {
     const unit = m[3][0].toLowerCase();
     const mult = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[unit as "s"]!;
@@ -155,7 +198,9 @@ export function parseTimeModifier(raw: string, tz: string, now = Date.now()): nu
     }
     return t;
   }
-  throw new Error(`unsupported time modifier "${raw}" (use an absolute time like 11/10/2026:08:35:00, an ISO time, or -15m)`);
+  throw new Error(
+    `unsupported time modifier "${raw}" (use an absolute time like 11/10/2026:08:35:00, an ISO time, or -15m)`,
+  );
 }
 
 /** Human duration with the precision the inputs allow: 1.234 s, 2 min 5.000 s, 350 ms. */
@@ -165,15 +210,19 @@ export function formatDuration(us: number, precision: Precision): string {
   const ms = a / 1000;
   const digits = precision === "s" ? 0 : precision === "ms" ? 3 : 6;
   let out: string;
-  if (ms < 1000 && precision !== "s") out = `${(ms).toFixed(precision === "us" ? 3 : 0)} ms`;
+  if (ms < 1000 && precision !== "s") out = `${ms.toFixed(precision === "us" ? 3 : 0)} ms`;
   else if (ms < 60_000) out = `${(ms / 1000).toFixed(digits)} s`;
   else {
     const min = Math.floor(ms / 60_000);
     const rest = (ms - min * 60_000) / 1000;
-    out = min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min ${rest.toFixed(digits)} s` : `${min} min ${rest.toFixed(digits)} s`;
+    out =
+      min >= 60
+        ? `${Math.floor(min / 60)} h ${min % 60} min ${rest.toFixed(digits)} s`
+        : `${min} min ${rest.toFixed(digits)} s`;
   }
   return neg ? `-${out}` : out;
 }
 
 /** The coarser of two precisions — a difference is only as precise as its least precise operand. */
-export const coarser = (a: Precision, b: Precision): Precision => (a === "s" || b === "s" ? "s" : a === "ms" || b === "ms" ? "ms" : "us");
+export const coarser = (a: Precision, b: Precision): Precision =>
+  a === "s" || b === "s" ? "s" : a === "ms" || b === "ms" ? "ms" : "us";

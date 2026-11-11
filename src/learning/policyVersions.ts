@@ -24,7 +24,9 @@ function digest(files: readonly string[]) {
   const h = createHash("sha256");
   for (const f of files) {
     try {
-      h.update(f).update("\0").update(readFileSync(join(SRC, f)));
+      h.update(f)
+        .update("\0")
+        .update(readFileSync(join(SRC, f)));
     } catch {
       h.update(f).update("\0missing");
     }
@@ -35,7 +37,9 @@ function digest(files: readonly string[]) {
 let cached: Record<string, string> | null = null;
 export function executionPolicyVersions(): Record<string, string> {
   if (!cached) {
-    cached = Object.fromEntries(Object.entries(POLICY_SOURCES).map(([k, files]) => [k, digest(files)]));
+    cached = Object.fromEntries(
+      Object.entries(POLICY_SOURCES).map(([k, files]) => [k, digest(files)]),
+    );
     cached.review_rules = REVIEW_POLICY_VERSION;
     cached.outcome_rules = String(OUTCOME_VERSION);
   }
@@ -44,4 +48,15 @@ export function executionPolicyVersions(): Record<string, string> {
 
 /** One comparable key for "same policies": the sorted version map. */
 export const policyKey = (v: Record<string, string> | null | undefined) =>
-  v ? createHash("sha256").update(JSON.stringify(Object.keys(v).sort().map((k) => [k, v[k]]))).digest("hex").slice(0, 12) : "unversioned";
+  v
+    ? createHash("sha256")
+        .update(
+          JSON.stringify(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, v[k]]),
+          ),
+        )
+        .digest("hex")
+        .slice(0, 12)
+    : "unversioned";

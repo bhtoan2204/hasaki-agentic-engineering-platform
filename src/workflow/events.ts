@@ -1,12 +1,32 @@
 import { pool, q, json, insertDeferred, type Db } from "../db/pool.ts";
 
 /** Event kinds that make up an agent conversation; the run timeline hides the verbose ones. */
-export const TRANSCRIPT_ONLY = ["system_prompt", "prompt", "thinking", "tool_result", "result", "log"];
+export const TRANSCRIPT_ONLY = [
+  "system_prompt",
+  "prompt",
+  "thinking",
+  "tool_result",
+  "result",
+  "log",
+];
 
 export const runEvents = {
   /** Inside withTx the row is written at COMMIT together with the transaction's other events (one round trip). */
-  async add(db: Db, runId: number, kind: string, content: string, stepId: number | null = null, attemptId: number | null = null, data: unknown = null) {
-    await insertDeferred(db, "workflow_events", ["run_id", "step_id", "attempt_id", "kind", "content", "data"], [runId, stepId, attemptId, kind, content, json(data)]);
+  async add(
+    db: Db,
+    runId: number,
+    kind: string,
+    content: string,
+    stepId: number | null = null,
+    attemptId: number | null = null,
+    data: unknown = null,
+  ) {
+    await insertDeferred(
+      db,
+      "workflow_events",
+      ["run_id", "step_id", "attempt_id", "kind", "content", "data"],
+      [runId, stepId, attemptId, kind, content, json(data)],
+    );
   },
   /** Run timeline: status changes, notes, tool calls (truncated); full transcripts are fetched per attempt. */
   list(runId: number, afterId = 0, db: Db = pool) {
@@ -21,6 +41,10 @@ export const runEvents = {
   },
   /** Everything that happened inside one attempt, in order (incremental with `afterId`). */
   transcript(attemptId: number, afterId = 0, db: Db = pool) {
-    return q(db, "SELECT id, kind, content, data, created_at FROM workflow_events WHERE attempt_id = $1 AND id > $2 ORDER BY id LIMIT 5000", [attemptId, afterId]);
+    return q(
+      db,
+      "SELECT id, kind, content, data, created_at FROM workflow_events WHERE attempt_id = $1 AND id > $2 ORDER BY id LIMIT 5000",
+      [attemptId, afterId],
+    );
   },
 };

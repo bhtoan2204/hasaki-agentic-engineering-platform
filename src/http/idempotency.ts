@@ -24,11 +24,16 @@ export const IDEMPOTENT_ROUTES: RegExp[] = [
   /^\/api\/prod-errors\/(scan|[0-9a-f]{20}\/investigate)$/,
 ];
 
-export const needsIdempotency = (method: string, path: string) => method === "POST" && IDEMPOTENT_ROUTES.some((re) => re.test(path));
+export const needsIdempotency = (method: string, path: string) =>
+  method === "POST" && IDEMPOTENT_ROUTES.some((re) => re.test(path));
 const KEY_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 
 export type Claim =
-  | { kind: "run"; finish: (status: number, body: unknown) => Promise<void>; release: () => Promise<void> }
+  | {
+      kind: "run";
+      finish: (status: number, body: unknown) => Promise<void>;
+      release: () => Promise<void>;
+    }
   | { kind: "replay"; status: number; body: unknown }
   | { kind: "conflict"; status: number; body: { error: string } };
 
@@ -36,16 +41,31 @@ let lastPrune = 0;
 
 /** Drop finished keys only. In-progress keys stay until the handler stores a response or releases them. */
 export async function pruneIdempotency() {
-  const rows = await q(pool, "DELETE FROM http_idempotency WHERE status IS NOT NULL AND created_at < now() - interval '1 day' RETURNING key");
+  const rows = await q(
+    pool,
+    "DELETE FROM http_idempotency WHERE status IS NOT NULL AND created_at < now() - interval '1 day' RETURNING key",
+  );
   return rows.length;
 }
 
-export async function claimIdempotency(actorId: number, key: string, route: string, body: unknown): Promise<Claim> {
-  if (!KEY_RE.test(key)) return { kind: "conflict", status: 400, body: { error: "invalid Idempotency-Key (8–128 of A-Z a-z 0-9 . _ : -)" } };
-  const hash = createHash("sha256").update(`${route}\n${JSON.stringify(body ?? null)}`).digest("hex");
+export async function claimIdempotency(
+  actorId: number,
+  key: string,
+  route: string,
+  body: unknown,
+): Promise<Claim> {
+  if (!KEY_RE.test(key))
+    return {
+      kind: "conflict",
+      status: 400,
+      body: { error: "invalid Idempotency-Key (8–128 of A-Z a-z 0-9 . _ : -)" },
+    };
+  const hash = createHash("sha256")
+    .update(`${route}\n${JSON.stringify(body ?? null)}`)
+    .digest("hex");
   if (Date.now() - lastPrune > 3600_000) {
     lastPrune = Date.now();
-    void pruneIdempotency().catch(() => { });
+    void pruneIdempotency().catch(() => {});
   }
   const inserted = await one(
     pool,
@@ -56,15 +76,42 @@ export async function claimIdempotency(actorId: number, key: string, route: stri
     return {
       kind: "run",
       finish: async (status, out) => {
-        if (status >= 500) await q(pool, "DELETE FROM http_idempotency WHERE actor_id = $1 AND key = $2", [actorId, key]);
-        else await q(pool, "UPDATE http_idempotency SET status = $3, response = $4 WHERE actor_id = $1 AND key = $2", [actorId, key, status, json(out ?? null)]);
+        if (status >= 500)
+          await q(pool, "DELETE FROM http_idempotency WHERE actor_id = $1 AND key = $2", [
+            actorId,
+            key,
+          ]);
+        else
+          await q(
+            pool,
+            "UPDATE http_idempotency SET status = $3, response = $4 WHERE actor_id = $1 AND key = $2",
+            [actorId, key, status, json(out ?? null)],
+          );
       },
-      release: async () => void (await q(pool, "DELETE FROM http_idempotency WHERE actor_id = $1 AND key = $2", [actorId, key])),
+      release: async () =>
+        void (await q(pool, "DELETE FROM http_idempotency WHERE actor_id = $1 AND key = $2", [
+          actorId,
+          key,
+        ])),
     };
   }
-  const row = await one(pool, "SELECT route, request_hash, status, response FROM http_idempotency WHERE actor_id = $1 AND key = $2", [actorId, key]);
+  const row = await one(
+    pool,
+    "SELECT route, request_hash, status, response FROM http_idempotency WHERE actor_id = $1 AND key = $2",
+    [actorId, key],
+  );
   if (!row) return claimIdempotency(actorId, key, route, body); // released between the two statements: try again
-  if (row.route !== route || row.request_hash !== hash) return { kind: "conflict", status: 422, body: { error: "Idempotency-Key was already used for a different request" } };
-  if (row.status == null) return { kind: "conflict", status: 409, body: { error: "the same request is already in progress" } };
+  if (row.route !== route || row.request_hash !== hash)
+    return {
+      kind: "conflict",
+      status: 422,
+      body: { error: "Idempotency-Key was already used for a different request" },
+    };
+  if (row.status == null)
+    return {
+      kind: "conflict",
+      status: 409,
+      body: { error: "the same request is already in progress" },
+    };
   return { kind: "replay", status: row.status, body: row.response };
 }

@@ -13,11 +13,9 @@ export function agentEnvironment(
   for (const [key, value] of Object.entries(base)) {
     if (value === undefined || platform.test(key)) continue;
     const ownAuth =
-      (provider === "claude" &&
-        (/^(ANTHROPIC_)/.test(key) || key === "CLAUDE_CODE_OAUTH_TOKEN")) ||
+      (provider === "claude" && (/^(ANTHROPIC_)/.test(key) || key === "CLAUDE_CODE_OAUTH_TOKEN")) ||
       (provider === "cursor" && key === "CURSOR_API_KEY");
-    if (ownAuth || (!providerKey.test(key) && !secret.test(key)))
-      out[key] = value;
+    if (ownAuth || (!providerKey.test(key) && !secret.test(key))) out[key] = value;
   }
   return out;
 }

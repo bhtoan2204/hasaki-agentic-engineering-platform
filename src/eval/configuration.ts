@@ -20,9 +20,7 @@ export const ConfigurationSchema = z
     adapter: z
       .enum(["baseline", "reference", "agent_fixture", "provider_fixture"])
       .default("baseline"),
-    provider: z
-      .enum(["fixture", "claude", "codex", "cursor", "antigravity"])
-      .default("fixture"),
+    provider: z.enum(["fixture", "claude", "codex", "cursor", "antigravity"]).default("fixture"),
     model: z.string().max(100).nullable().default(null),
     prompt_version: z.enum(["p2-task-v1", "p2-task-v2"]).default("p2-task-v1"),
     workflow_version: z.literal("p2-workflow-v1").default("p2-workflow-v1"),
@@ -40,14 +38,12 @@ export const ConfigurationSchema = z
       if (c.adapter !== "provider_fixture" && c.mode !== "live")
         ctx.addIssue({
           code: "custom",
-          message:
-            "Provider sequences require the provider_fixture adapter or live mode",
+          message: "Provider sequences require the provider_fixture adapter or live mode",
         });
       if (!c.context_variant)
         ctx.addIssue({
           code: "custom",
-          message:
-            "Provider sequences require an explicit minimal, pack, or tools context variant",
+          message: "Provider sequences require an explicit minimal, pack, or tools context variant",
         });
       for (const agent of c.provider_sequence) {
         try {

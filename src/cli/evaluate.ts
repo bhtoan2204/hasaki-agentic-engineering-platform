@@ -10,16 +10,13 @@ const args = Object.fromEntries(
     .map(([k, v]) => [k, v ?? "true"]),
 );
 if (args.candidate)
-  throw new Error(
-    "Use versioned fixture adapters; legacy live candidate flags are not accepted",
-  );
+  throw new Error("Use versioned fixture adapters; legacy live candidate flags are not accepted");
 if (args.live === "true" || args.mode === "live")
   throw new Error(
     "Live benchmark execution requires explicit approval through the API and a verified provider isolation/budget connector; this CLI only runs safe fixtures",
   );
 const url = new URL(
-  process.env.BENCH_DATABASE_ADMIN_URL ??
-  "postgres://platform:platform@localhost:55432/platform",
+  process.env.BENCH_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform",
 );
 if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
   throw new Error(
@@ -27,13 +24,7 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
   );
 const admin = new pg.Client({ connectionString: url.toString() });
 await admin.connect();
-if (
-  !(
-    await admin.query(
-      "SELECT 1 FROM pg_database WHERE datname='platform_bench'",
-    )
-  ).rowCount
-)
+if (!(await admin.query("SELECT 1 FROM pg_database WHERE datname='platform_bench'")).rowCount)
   await admin.query("CREATE DATABASE platform_bench");
 await admin.end();
 url.pathname = "/platform_bench";
@@ -56,8 +47,7 @@ writeFileSync(
   }),
 );
 process.env.PLATFORM_CONFIG = cfg;
-process.env.AUTH_SECRET =
-  process.env.AUTH_SECRET ?? "local-benchmark-fixture-secret-only";
+process.env.AUTH_SECRET = process.env.AUTH_SECRET ?? "local-benchmark-fixture-secret-only";
 process.env.CLAUDE_USER_SKILLS_DIR = join(root, "no-user-skills");
 const { pool } = await import("../db/pool.ts");
 const { migrate } = await import("../db/migrate.ts");
@@ -70,10 +60,8 @@ const {
   comparisonDetail,
   evaluationDetail,
 } = await import("../eval/service.ts");
-const { startPendingRun, answerQuestions, approveStep } =
-  await import("../workflow/engine.ts");
-const { registerDefaultExecutors } =
-  await import("../workflow/executors/index.ts");
+const { startPendingRun, answerQuestions, approveStep } = await import("../workflow/engine.ts");
+const { registerDefaultExecutors } = await import("../workflow/executors/index.ts");
 const { runOnce } = await import("../workflow/scheduler.ts");
 let heartbeat: Awaited<ReturnType<typeof startInstanceHeartbeat>> | undefined;
 try {
@@ -81,9 +69,7 @@ try {
   heartbeat = await startInstanceHeartbeat();
   registerDefaultExecutors();
   let owner = (
-    await pool.query(
-      "SELECT id FROM users WHERE username='benchmark-fixture-owner' AND active",
-    )
+    await pool.query("SELECT id FROM users WHERE username='benchmark-fixture-owner' AND active")
   ).rows[0];
   if (!owner)
     owner = await createUser({
@@ -111,9 +97,8 @@ try {
     });
     await startPendingRun(evaluation.workflow_run_id);
     const deadline = Date.now() + 30 * 60 * 1000;
-    for (; ;) {
-      if (Date.now() > deadline)
-        throw new Error("Benchmark CLI wall time exceeded");
+    for (;;) {
+      if (Date.now() > deadline) throw new Error("Benchmark CLI wall time exceeded");
       const detail = await evaluationDetail(evaluation.id, owner.id);
       if (["COMPLETED", "FAILED", "CANCELED"].includes(detail.status)) break;
       const approvals = (
@@ -123,9 +108,7 @@ try {
         )
       ).rows;
       if (approvals.length && args["answer-fixtures"] === "false")
-        throw new Error(
-          `Evaluation ${evaluation.id} awaits explicit approval in the workflow UI`,
-        );
+        throw new Error(`Evaluation ${evaluation.id} awaits explicit approval in the workflow UI`);
       for (const step of approvals)
         await approveStep(detail.workflow_run_id, step.key, {
           by: "benchmark scripted approval (synthetic fixture)",
@@ -150,12 +133,7 @@ try {
     }
     executions.push(await evaluationDetail(evaluation.id, owner.id));
   }
-  const comparison = await createComparison(
-    owner.id,
-    executions[0].id,
-    executions[1].id,
-    {},
-  );
+  const comparison = await createComparison(owner.id, executions[0].id, executions[1].id, {});
   const report = await comparisonDetail(comparison!.id, owner.id);
   const path = process.env.EVAL_REPORT ?? join(root, "report.json");
   writeFileSync(
@@ -168,8 +146,7 @@ try {
           version: suite.version,
           hash: suite.content_hash,
         },
-        provenance:
-          "Synthetic reference controls; no live-agent quality or token claim",
+        provenance: "Synthetic reference controls; no live-agent quality or token claim",
         executions,
         comparison: report,
       },

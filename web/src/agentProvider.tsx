@@ -3,18 +3,11 @@ import { useI18n } from "./i18n/index.tsx";
 import { Field } from "./ui.tsx";
 
 /** Default agent providers a run can be created with. Agent steps can override this default. */
-export const AGENT_PROVIDERS = [
-  "claude",
-  "cursor",
-  "codex",
-  "antigravity",
-] as const;
+export const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity"] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
 export function asProvider(v: unknown): AgentProvider {
-  return (AGENT_PROVIDERS as readonly unknown[]).includes(v)
-    ? (v as AgentProvider)
-    : "claude";
+  return (AGENT_PROVIDERS as readonly unknown[]).includes(v) ? (v as AgentProvider) : "claude";
 }
 
 /** i18n key of a provider's name: full ("Claude Code", "OpenAI Codex", "Google Antigravity") or short ("Claude", "Codex", "Antigravity"). */
@@ -43,10 +36,7 @@ export function AgentProviderField({
   return (
     <>
       <Field label={t("run.agent")} hint={t("run.agentHint")}>
-        <select
-          value={value}
-          onChange={(e) => onChange(asProvider(e.target.value))}
-        >
+        <select value={value} onChange={(e) => onChange(asProvider(e.target.value))}>
           {AGENT_PROVIDERS.map((p) => (
             <option key={p} value={p}>
               {t(agentKey(p))}
@@ -107,9 +97,7 @@ function AntigravityNotice() {
           {t("run.antigravity.statusUnknown")}: {error}
         </p>
       )}
-      {!data && !error && (
-        <p className="muted">{t("run.antigravity.checking")}</p>
-      )}
+      {!data && !error && <p className="muted">{t("run.antigravity.checking")}</p>}
       {agy && agy.ok && (
         <p className="muted">
           {t("run.antigravity.ready", {

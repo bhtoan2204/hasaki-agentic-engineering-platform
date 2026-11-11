@@ -17,10 +17,7 @@ import { uiLocale, useI18n } from "./i18n/index.tsx";
 const escapeHtml = (s: string) =>
   s.replace(
     /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ]!,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
   );
 // Agent output may contain raw HTML: render it as text, never as markup.
 marked.use({
@@ -41,10 +38,7 @@ export const time = (t?: string | null) =>
     : "";
 export const ago = (t?: string | null) => {
   if (!t) return "";
-  const s = Math.max(
-    0,
-    Math.round((Date.now() - new Date(t).getTime()) / 1000),
-  );
+  const s = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 1000));
   return s < 60
     ? `${s}s`
     : s < 3600
@@ -127,8 +121,7 @@ export function Json({
   name?: string;
 }) {
   const [open, setOpen] = useState(depth < 2);
-  const label =
-    name !== undefined ? <span className="jk">{name}: </span> : null;
+  const label = name !== undefined ? <span className="jk">{name}: </span> : null;
   if (value === null || value === undefined)
     return (
       <div className="jl">
@@ -177,13 +170,7 @@ export function Json({
 }
 
 /** JSON block with tree/raw toggle and copy. */
-export function JsonBlock({
-  value,
-  title,
-}: {
-  value: unknown;
-  title?: string;
-}) {
+export function JsonBlock({ value, title }: { value: unknown; title?: string }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState(false);
   const text = JSON.stringify(value, null, 2) ?? "null";
@@ -226,11 +213,7 @@ export function EmptyState({
   return (
     <div className="empty">
       <div className="empty-art">
-        {I ? (
-          <I size={34} strokeWidth={1.6} color="var(--brand)" />
-        ) : (
-          <BrandLogo size={52} />
-        )}
+        {I ? <I size={34} strokeWidth={1.6} color="var(--brand)" /> : <BrandLogo size={52} />}
       </div>
       <div className="empty-title">{title}</div>
       {children && <div style={{ maxWidth: 460 }}>{children}</div>}
@@ -251,9 +234,7 @@ export function Loading({ label }: { label?: string }) {
 }
 export function UpdatingBar({ active }: { active?: boolean }) {
   if (!active) return null;
-  return (
-    <div className="updating-bar" role="progressbar" aria-label="Updating" />
-  );
+  return <div className="updating-bar" role="progressbar" aria-label="Updating" />;
 }
 export function Skeleton({
   h = 14,
@@ -264,13 +245,7 @@ export function Skeleton({
   w?: number | string;
   r?: number;
 }) {
-  return (
-    <div
-      className="skeleton"
-      style={{ height: h, width: w, borderRadius: r }}
-      aria-hidden
-    />
-  );
+  return <div className="skeleton" style={{ height: h, width: w, borderRadius: r }} aria-hidden />;
 }
 export function SkeletonRows({ rows = 5 }: { rows?: number }) {
   return (
@@ -431,24 +406,14 @@ export function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
     >
-      {loading ? (
-        <LoaderCircle className="button-spinner" size={16} aria-hidden="true" />
-      ) : (
-        icon
-      )}
+      {loading ? <LoaderCircle className="button-spinner" size={16} aria-hidden="true" /> : icon}
       {children}
     </button>
   );
 }
 
 /** Labels and controls share a baseline without toolbar-specific offsets. */
-export function FilterField({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+export function FilterField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="filter-field">
       <span>{label}</span>
@@ -547,15 +512,13 @@ export function Drawer({
         ref.current?.focus();
       } else if (
         e.shiftKey &&
-        (document.activeElement === first ||
-          document.activeElement === ref.current)
+        (document.activeElement === first || document.activeElement === ref.current)
       ) {
         e.preventDefault();
         last?.focus();
       } else if (
         !e.shiftKey &&
-        (document.activeElement === last ||
-          !ref.current?.contains(document.activeElement))
+        (document.activeElement === last || !ref.current?.contains(document.activeElement))
       ) {
         e.preventDefault();
         first.focus();
@@ -594,24 +557,13 @@ export function Drawer({
   );
 }
 
-export function ErrorBox({
-  error,
-  onRetry,
-}: {
-  error: string;
-  onRetry?: () => void;
-}) {
+export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => void }) {
   const { t } = useI18n();
   return (
     <div className="errorbox">
-      <b>{t("common.error")}:</b>{" "}
-      <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
+      <b>{t("common.error")}:</b> <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
       {onRetry && (
-        <button
-          className="ghost xs"
-          onClick={onRetry}
-          style={{ marginLeft: 8 }}
-        >
+        <button className="ghost xs" onClick={onRetry} style={{ marginLeft: 8 }}>
           {t("common.retry")}
         </button>
       )}
@@ -705,10 +657,7 @@ if (typeof document !== "undefined")
  * shows a spinner until the request settles, so a slow call (remote database) reads as "working", never as a missed
  * click, and a second click cannot send the action twice. A click on a button that is still busy is ignored.
  */
-export async function act<T>(
-  fn: () => Promise<T>,
-  ok?: string,
-): Promise<T | undefined> {
+export async function act<T>(fn: () => Promise<T>, ok?: string): Promise<T | undefined> {
   const el = trigger;
   trigger = null;
   if (el?.getAttribute("aria-busy") === "true") return undefined;
@@ -729,8 +678,7 @@ export async function act<T>(
     if (el) {
       el.removeAttribute("aria-busy");
       el.classList.remove("is-busy");
-      if (el instanceof HTMLButtonElement && el.isConnected)
-        el.disabled = wasDisabled;
+      if (el instanceof HTMLButtonElement && el.isConnected) el.disabled = wasDisabled;
     }
   }
 }

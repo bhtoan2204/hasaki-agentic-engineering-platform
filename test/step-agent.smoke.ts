@@ -12,13 +12,22 @@ import { startRun } from "../src/workflow/engine.ts";
 import { handle } from "../src/http/app.ts";
 
 await migrate();
-const owner = await createUser({ username: "orchestration-smoke", password: "orchestration-password", role: "admin" });
+const owner = await createUser({
+  username: "orchestration-smoke",
+  password: "orchestration-password",
+  role: "admin",
+});
 await definitions.create({
   key: "mixed-provider-smoke",
   spec: {
     name: "Mixed provider workflow",
     steps: [
-      { key: "research", name: "Research", type: "agent", config: { agent: { provider: "claude", model: "sonnet" } } },
+      {
+        key: "research",
+        name: "Research",
+        type: "agent",
+        config: { agent: { provider: "claude", model: "sonnet" } },
+      },
       {
         key: "implement",
         name: "Implement",
@@ -70,11 +79,17 @@ try {
   await page.locator('.react-flow__node[data-id="implement"]').click();
   await page.getByLabel("Agent provider", { exact: true }).selectOption("codex");
   await page.getByLabel("Provider model", { exact: true }).fill("gpt-test");
-  await page.getByLabel("Agent provider", { exact: true }).evaluate((el) => el.scrollIntoView({ block: "start" }));
-  await page.locator(".wfe-inspector").evaluate(el => {el.scrollTop = Math.max(0,el.scrollTop - 60);});
+  await page
+    .getByLabel("Agent provider", { exact: true })
+    .evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.locator(".wfe-inspector").evaluate((el) => {
+    el.scrollTop = Math.max(0, el.scrollTop - 60);
+  });
   await page.screenshot({ path: resolve(output, "studio-en.png"), fullPage: true });
   const saved = page.waitForResponse(
-    (r) => r.url().endsWith("/api/workflows/mixed-provider-smoke/draft") && r.request().method() === "POST",
+    (r) =>
+      r.url().endsWith("/api/workflows/mixed-provider-smoke/draft") &&
+      r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   assert.equal((await saved).status(), 200);
@@ -88,7 +103,9 @@ try {
   await page.getByText("Agent settings for the next attempt", { exact: true }).click();
   await page.getByLabel("Agent provider", { exact: true }).selectOption("cursor");
   const override = page.waitForResponse(
-    (r) => r.url().endsWith(`/api/runs/${run.id}/steps/implement/agent`) && r.request().method() === "POST",
+    (r) =>
+      r.url().endsWith(`/api/runs/${run.id}/steps/implement/agent`) &&
+      r.request().method() === "POST",
   );
   await page.getByRole("button", { name: "Save override", exact: true }).click();
   assert.equal((await override).status(), 200);
@@ -98,7 +115,9 @@ try {
   await page.getByRole("button", { name: "VI", exact: true }).click();
   await page.getByText("Cấu hình agent cho lần thử tiếp theo", { exact: true }).waitFor();
   await page.screenshot({ path: resolve(output, "run-vi.png"), fullPage: true });
-  evidence.push("PASS Vietnamese: provider controls and attempt labels render in the existing locale system.");
+  evidence.push(
+    "PASS Vietnamese: provider controls and attempt labels render in the existing locale system.",
+  );
   assert.deepEqual(errors, []);
   evidence.push("PASS Browser: no uncaught page errors.");
   writeFileSync(resolve(output, "smoke-results.txt"), evidence.join("\n") + "\n");

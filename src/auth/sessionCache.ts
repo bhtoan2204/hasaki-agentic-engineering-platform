@@ -29,7 +29,13 @@ export function cachedSession<U>(hash: string, now = Date.now()): U | undefined 
   return e.user as U;
 }
 
-export function rememberSession<U>(hash: string, userId: number, expiresAt: number, user: U, now = Date.now()) {
+export function rememberSession<U>(
+  hash: string,
+  userId: number,
+  expiresAt: number,
+  user: U,
+  now = Date.now(),
+) {
   if (!SESSION_CACHE_MS) return;
   if (cache.size >= MAX_ENTRIES) cache.delete(cache.keys().next().value!);
   cache.set(hash, { at: now, expiresAt, userId, user });

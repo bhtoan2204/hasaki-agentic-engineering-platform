@@ -7,7 +7,16 @@ import { parseObservedTime, type ObservedTime } from "./time.ts";
  * string that is kept is sanitized: credentials, customer PII and payment data never reach storage or a model.
  */
 
-export const ID_FIELDS = ["order_code", "shipment_code", "shipment_id", "tracking_no", "request_id", "trace_id", "correlation_id", "message_id"] as const;
+export const ID_FIELDS = [
+  "order_code",
+  "shipment_code",
+  "shipment_id",
+  "tracking_no",
+  "request_id",
+  "trace_id",
+  "correlation_id",
+  "message_id",
+] as const;
 export type IdField = (typeof ID_FIELDS)[number];
 export type Ids = Partial<Record<IdField, string[]>>;
 
@@ -16,7 +25,18 @@ const ALIASES: Record<IdField, string[]> = {
   order_code: ["ordercode", "orderno", "ordernumber", "ordercd", "salesordercode"],
   shipment_code: ["shipmentcode", "shippingcode", "deliverycode"],
   shipment_id: ["shipmentid", "shippingid", "deliveryid"],
-  tracking_no: ["trackingno", "trackingnumber", "trackingcode", "trackingid", "waybill", "waybillno", "awb", "labelcode", "partnercode", "partnerordercode"],
+  tracking_no: [
+    "trackingno",
+    "trackingnumber",
+    "trackingcode",
+    "trackingid",
+    "waybill",
+    "waybillno",
+    "awb",
+    "labelcode",
+    "partnercode",
+    "partnerordercode",
+  ],
   request_id: ["requestid", "xrequestid", "reqid"],
   trace_id: ["traceid", "xb3traceid", "ddtraceid", "otteltraceid"],
   correlation_id: ["correlationid", "xcorrelationid", "corrid"],
@@ -27,7 +47,14 @@ for (const f of ID_FIELDS) {
   BY_ALIAS.set(f.replace(/[^a-z0-9]/g, ""), f);
   for (const a of ALIASES[f]) BY_ALIAS.set(a, f);
 }
-export const idFieldOf = (key: string): IdField | undefined => BY_ALIAS.get(key.split(".").pop()!.toLowerCase().replace(/[^a-z0-9]/g, ""));
+export const idFieldOf = (key: string): IdField | undefined =>
+  BY_ALIAS.get(
+    key
+      .split(".")
+      .pop()!
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, ""),
+  );
 
 /** Values that are not identifiers even when a field is named like one. */
 const JUNK = /^(null|nil|none|undefined|true|false|0|-|n\/a|""|\[\]|\{\})$/i;
@@ -94,7 +121,8 @@ export function extractIds(row: Record<string, unknown>, text: string): Ids {
 const SENSITIVE_KEY =
   /^(?:.*[_-])?(phone|phonenumber|phone_number|mobile|tel|email|address|addr|street|full_?address|fullname|full_name|customer_?name|receiver|receiver_?name|receiver_?phone|receiver_?address|sender_?name|sender_?phone|recipient|card|card_?number|cardno|pan|cvv|cvc|expiry|password|passwd|pwd|secret|client_?secret|token|access_?token|refresh_?token|id_?token|api_?key|apikey|authorization|cookie|set-cookie|signature|otp|id_?card|cmnd|cccd|passport|bank_?account|account_?number|iban)$/i;
 
-const SIGNED_URL_PARAM = /([?&](?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|Signature|signature|sig|token|access_token|Expires|GoogleAccessId|Key-Pair-Id|Policy)=)[^&\s"'<>]+/g;
+const SIGNED_URL_PARAM =
+  /([?&](?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|Signature|signature|sig|token|access_token|Expires|GoogleAccessId|Key-Pair-Id|Policy)=)[^&\s"'<>]+/g;
 
 /** Redact a parsed JSON value by field name; strings inside are also PII-masked. */
 export function redactValue(v: unknown, depth = 0): unknown {
@@ -109,7 +137,8 @@ export function redactValue(v: unknown, depth = 0): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v)) {
       const f = idFieldOf(k);
-      out[k] = !f && SENSITIVE_KEY.test(k) && x !== null && x !== "" ? "***" : redactValue(x, depth + 1);
+      out[k] =
+        !f && SENSITIVE_KEY.test(k) && x !== null && x !== "" ? "***" : redactValue(x, depth + 1);
     }
     return out;
   }
@@ -119,11 +148,13 @@ export function redactValue(v: unknown, depth = 0): unknown {
 /** Free text: credentials and PII patterns, `key=value` pairs with sensitive keys, signed URL parameters. */
 export function sanitizeText(s: string): string {
   const parsed = /^\s*[{[]/.test(s) ? tryJson(s) : undefined;
-  if (parsed !== undefined && typeof parsed === "object") return JSON.stringify(redactValue(parsed));
+  if (parsed !== undefined && typeof parsed === "object")
+    return JSON.stringify(redactValue(parsed));
   return redactPii(s)
     .replace(SIGNED_URL_PARAM, "$1***")
-    .replace(/(["']?([A-Za-z][\w-]{1,40})["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&}]+)/g, (all, prefix, key) =>
-      !idFieldOf(key) && SENSITIVE_KEY.test(key) ? `${prefix}"***"` : all,
+    .replace(
+      /(["']?([A-Za-z][\w-]{1,40})["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&}]+)/g,
+      (all, prefix, key) => (!idFieldOf(key) && SENSITIVE_KEY.test(key) ? `${prefix}"***"` : all),
     );
 }
 
@@ -150,12 +181,27 @@ export interface LogEvent {
   fingerprint: string;
 }
 
-const SERVICE_FIELDS = ["kubernetes.container_name", "kubernetes.labels.app", "kubernetes.labels.app.kubernetes.io/name", "service", "service_name", "app", "application", "container_name", "kubernetes.pod_name"];
+const SERVICE_FIELDS = [
+  "kubernetes.container_name",
+  "kubernetes.labels.app",
+  "kubernetes.labels.app.kubernetes.io/name",
+  "service",
+  "service_name",
+  "app",
+  "application",
+  "container_name",
+  "kubernetes.pod_name",
+];
 const MESSAGE_FIELDS = ["message", "msg", "log", "body"];
 const MAX_MESSAGE = 1000;
 const MAX_RAW = 6000;
 
-const str = (v: unknown) => (v === null || v === undefined ? null : Array.isArray(v) ? String(v[0] ?? "") || null : String(v) || null);
+const str = (v: unknown) =>
+  v === null || v === undefined
+    ? null
+    : Array.isArray(v)
+      ? String(v[0] ?? "") || null
+      : String(v) || null;
 
 function fnv(s: string) {
   let h = 0x811c9dc5;
@@ -163,14 +209,22 @@ function fnv(s: string) {
   return h.toString(16).padStart(8, "0");
 }
 
-const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n) + `… (+${s.length - n} chars)` : s);
+const cut = (s: string, n: number) =>
+  s.length > n ? s.slice(0, n) + `… (+${s.length - n} chars)` : s;
 
-export function normalizeEvent(row: Record<string, unknown>, seq: number, searchId: number | string, tz: string): LogEvent {
+export function normalizeEvent(
+  row: Record<string, unknown>,
+  seq: number,
+  searchId: number | string,
+  tz: string,
+): LogEvent {
   const rawText = str(row._raw) ?? "";
   const parsed = tryJson(rawText) as Record<string, any> | undefined;
   const pick = (names: string[]) => {
     for (const n of names) {
-      const v = str(row[n]) ?? (parsed ? str(n.split(".").reduce<any>((o, k) => (o == null ? o : o[k]), parsed)) : null);
+      const v =
+        str(row[n]) ??
+        (parsed ? str(n.split(".").reduce<any>((o, k) => (o == null ? o : o[k]), parsed)) : null);
       if (v) return v;
     }
     return null;
@@ -179,8 +233,9 @@ export function normalizeEvent(row: Record<string, unknown>, seq: number, search
   const message = pick(MESSAGE_FIELDS) ?? rawText;
   const fields: Record<string, string> = {};
   for (const [k, v] of Object.entries(row)) {
-    if (k === "_raw" || k.startsWith("_") && k !== "_time" || Object.keys(fields).length >= 30) continue;
-    if (v === null || typeof v === "object" && !Array.isArray(v)) continue;
+    if (k === "_raw" || (k.startsWith("_") && k !== "_time") || Object.keys(fields).length >= 30)
+      continue;
+    if (v === null || (typeof v === "object" && !Array.isArray(v))) continue;
     const s = str(v);
     if (s === null || s.length > 300) continue;
     fields[k] = !idFieldOf(k) && SENSITIVE_KEY.test(k) ? "***" : sanitizeText(s);
@@ -228,14 +283,14 @@ function parseCsv(text: string): Record<string, string>[] {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (quoted) {
-      if (c === '"' && text[i + 1] === '"') (cur += '"'), i++;
+      if (c === '"' && text[i + 1] === '"') ((cur += '"'), i++);
       else if (c === '"') quoted = false;
       else cur += c;
     } else if (c === '"') quoted = true;
-    else if (c === ",") row.push(cur), (cur = "");
+    else if (c === ",") (row.push(cur), (cur = ""));
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && text[i + 1] === "\n") i++;
-      row.push(cur), (cur = "");
+      (row.push(cur), (cur = ""));
       if (row.some((x) => x !== "")) rows.push(row);
       row = [];
     } else cur += c;
@@ -257,7 +312,8 @@ export function parsePastedResults(text: string): Record<string, unknown>[] {
   if (t.startsWith("[") || t.startsWith("{")) {
     try {
       const j: any = JSON.parse(t);
-      if (Array.isArray(j)) return j.map((x) => (x?.result && typeof x.result === "object" ? x.result : x));
+      if (Array.isArray(j))
+        return j.map((x) => (x?.result && typeof x.result === "object" ? x.result : x));
       if (Array.isArray(j?.results)) return j.results;
       if (j?.result) return [j.result];
       return [j];
@@ -274,7 +330,10 @@ export function parsePastedResults(text: string): Record<string, unknown>[] {
     }
   }
   const rows = parseCsv(t);
-  if (!rows.length || !Object.keys(rows[0]).some((k) => ["_time", "_raw", "time", "message"].includes(k)))
+  if (
+    !rows.length ||
+    !Object.keys(rows[0]).some((k) => ["_time", "_raw", "time", "message"].includes(k))
+  )
     throw new Error("pasted CSV needs a header row with _time and _raw (or message)");
   return rows;
 }

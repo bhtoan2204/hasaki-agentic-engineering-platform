@@ -21,7 +21,8 @@ import type { ApprovedScope } from "./evidence.ts";
 
 const exec = promisify(execFile);
 
-export const TEST_FILE = /(?:^|\/)(?:tests?|__tests__|spec|testdata|fixtures?)\/|[._-](?:test|spec)\.[a-z0-9]+$|_test\.go$/i;
+export const TEST_FILE =
+  /(?:^|\/)(?:tests?|__tests__|spec|testdata|fixtures?)\/|[._-](?:test|spec)\.[a-z0-9]+$|_test\.go$/i;
 
 /** `dir/name` without extension (and, for a test file, without its test marker): the key that pairs a test with its source. */
 export function stemKey(p: string, test = false) {
@@ -38,11 +39,14 @@ export type NormalizedPath = { path: string; dir: boolean } | { invalid: string 
  * Returns `{ invalid }` for anything that cannot be compared unambiguously.
  */
 export function normalizeScopePath(raw: unknown, repo = "", allowDir = false): NormalizedPath {
-  let p = String(raw ?? "").trim().replace(/:\d+(?:-\d+)?$/, "");
+  let p = String(raw ?? "")
+    .trim()
+    .replace(/:\d+(?:-\d+)?$/, "");
   if (!p) return { invalid: "empty path" };
   if (p.includes("\0")) return { invalid: "NUL byte in path" };
   if (p.includes("\\")) return { invalid: "backslash in path (ambiguous separator)" };
-  if (p.startsWith("/") || /^[a-zA-Z]:/.test(p) || p.startsWith("~")) return { invalid: "absolute path" };
+  if (p.startsWith("/") || /^[a-zA-Z]:/.test(p) || p.startsWith("~"))
+    return { invalid: "absolute path" };
   while (p.startsWith("./")) p = p.slice(2);
   if (repo && p.startsWith(`${repo}/`)) p = p.slice(repo.length + 1);
   let dir = false;
@@ -53,8 +57,10 @@ export function normalizeScopePath(raw: unknown, repo = "", allowDir = false): N
   if (!p) return { invalid: "empty path" };
   const segs = p.split("/");
   if (segs.includes("..")) return { invalid: "path traversal (..)" };
-  if (segs.some((s) => s === "" || s === ".")) return { invalid: "ambiguous path (empty or '.' segment)" };
-  if (/[*?[\]]/.test(p)) return { invalid: "wildcard path (only a trailing directory marker is allowed)" };
+  if (segs.some((s) => s === "" || s === "."))
+    return { invalid: "ambiguous path (empty or '.' segment)" };
+  if (/[*?[\]]/.test(p))
+    return { invalid: "wildcard path (only a trailing directory marker is allowed)" };
   if (posix.normalize(p) !== p) return { invalid: "non-canonical path" };
   return { path: p, dir };
 }
@@ -68,12 +74,19 @@ export interface ScopeEvaluation {
 }
 
 /** Pure comparison of changed files (per repository) with the approved scope. */
-export function evaluateScope(scope: Pick<ApprovedScope, "changes" | "required_tests">, files: Record<string, string[]>): ScopeEvaluation {
+export function evaluateScope(
+  scope: Pick<ApprovedScope, "changes" | "required_tests">,
+  files: Record<string, string[]>,
+): ScopeEvaluation {
   const approved = new Map<string, { files: Set<string>; dirs: string[]; stems: Set<string> }>();
   for (const c of scope.changes ?? []) {
     const repo = String(c.repo ?? "");
     if (!repo) continue;
-    const a = approved.get(repo) ?? { files: new Set<string>(), dirs: [], stems: new Set<string>() };
+    const a = approved.get(repo) ?? {
+      files: new Set<string>(),
+      dirs: [],
+      stems: new Set<string>(),
+    };
     for (const f of c.files ?? []) {
       const n = normalizeScopePath(f, repo, true);
       if ("invalid" in n) continue; // an unusable approved entry grants nothing
@@ -86,7 +99,12 @@ export function evaluateScope(scope: Pick<ApprovedScope, "changes" | "required_t
     approved.set(repo, a);
   }
   const requiredTests = (scope.required_tests ?? []).map(String);
-  const out: ScopeEvaluation = { out_of_scope_files: [], invalid_paths: [], unauthorized_repos: [], out_of_scope_tests: [] };
+  const out: ScopeEvaluation = {
+    out_of_scope_files: [],
+    invalid_paths: [],
+    unauthorized_repos: [],
+    out_of_scope_tests: [],
+  };
   for (const [repo, paths] of Object.entries(files)) {
     if (!paths.length) continue;
     const a = approved.get(repo);
@@ -102,7 +120,8 @@ export function evaluateScope(scope: Pick<ApprovedScope, "changes" | "required_t
       let ok = false;
       if (a) {
         ok = a.files.has(p) || a.dirs.some((d) => p === d || p.startsWith(`${d}/`));
-        if (!ok && isTest) ok = a.stems.has(stemKey(p, true)) || requiredTests.some((t) => t.includes(p));
+        if (!ok && isTest)
+          ok = a.stems.has(stemKey(p, true)) || requiredTests.some((t) => t.includes(p));
       }
       if (!ok) {
         out.out_of_scope_files.push(`${repo}:${p}`);
@@ -126,7 +145,9 @@ const z = (s: string) => s.split("\0").filter(Boolean);
 
 /** Every file the worktree differs in from `base`: committed, staged, unstaged and untracked. Throws when git fails. */
 export async function changedFiles(path: string, base: string) {
-  const committed = z(await git(path, ["diff", "--name-only", "-z", "--no-renames", `${base}...HEAD`]));
+  const committed = z(
+    await git(path, ["diff", "--name-only", "-z", "--no-renames", `${base}...HEAD`]),
+  );
   const staged = z(await git(path, ["diff", "--name-only", "-z", "--no-renames", "--cached"]));
   const unstaged = z(await git(path, ["diff", "--name-only", "-z", "--no-renames"]));
   const untracked = z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"]));
@@ -137,8 +158,13 @@ export async function changedFiles(path: string, base: string) {
 /** HEAD plus a fingerprint of uncommitted content: any edit, staged or not, changes it. */
 export async function worktreeFingerprint(path: string) {
   const head = (await git(path, ["rev-parse", "HEAD"])).trim();
-  const h = createHash("sha256").update(head).update("\0").update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]));
-  for (const f of z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"])).sort().slice(0, 500)) {
+  const h = createHash("sha256")
+    .update(head)
+    .update("\0")
+    .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]));
+  for (const f of z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"]))
+    .sort()
+    .slice(0, 500)) {
     const blob = (await git(path, ["hash-object", "--", f]).catch(() => "?")).trim();
     h.update(`\0${f}\0${blob}`);
   }
@@ -146,10 +172,22 @@ export async function worktreeFingerprint(path: string) {
 }
 
 /** Revision a renewed approval must name: the approved proposal + exact changed files + exact code state. */
-export function scopeRevision(proposalHash: string, files: Record<string, string[]>, states: Record<string, string>) {
-  const canon = Object.keys(files).sort().map((r) => [r, [...files[r]].sort(), states[r] ?? ""]);
-  const extra = Object.keys(states).filter((r) => !(r in files)).sort().map((r) => [r, [], states[r]]);
-  return createHash("sha256").update(JSON.stringify([proposalHash, canon, extra])).digest("hex").slice(0, 16);
+export function scopeRevision(
+  proposalHash: string,
+  files: Record<string, string[]>,
+  states: Record<string, string>,
+) {
+  const canon = Object.keys(files)
+    .sort()
+    .map((r) => [r, [...files[r]].sort(), states[r] ?? ""]);
+  const extra = Object.keys(states)
+    .filter((r) => !(r in files))
+    .sort()
+    .map((r) => [r, [], states[r]]);
+  return createHash("sha256")
+    .update(JSON.stringify([proposalHash, canon, extra]))
+    .digest("hex")
+    .slice(0, 16);
 }
 
 export interface WorkspaceScopeState {
@@ -161,7 +199,9 @@ export interface WorkspaceScopeState {
 }
 
 /** Read the actual changes of every worktree of a run. */
-export async function collectScopeState(workspaces: Array<{ repo: string; path: string; base: string }>): Promise<WorkspaceScopeState> {
+export async function collectScopeState(
+  workspaces: Array<{ repo: string; path: string; base: string }>,
+): Promise<WorkspaceScopeState> {
   const st: WorkspaceScopeState = { files: {}, states: {}, heads: {}, unreadable: [] };
   for (const w of workspaces) {
     try {
@@ -171,7 +211,9 @@ export async function collectScopeState(workspaces: Array<{ repo: string; path: 
       st.states[w.repo] = fp.fingerprint;
       st.heads[w.repo] = fp.head;
     } catch (e) {
-      st.unreadable.push(`${w.repo}: cannot read changes (${(e as Error).message.split("\n")[0].slice(0, 200)})`);
+      st.unreadable.push(
+        `${w.repo}: cannot read changes (${(e as Error).message.split("\n")[0].slice(0, 200)})`,
+      );
     }
   }
   return st;
@@ -181,10 +223,18 @@ export const SCOPE_REVISION_TAG = (rev: string) => `[scope revision ${rev}]`;
 const APPROVE_ANSWER = /^\s*(approve|duyệt|đồng ý)/i;
 
 /** A renewed approval counts only for the exact revision named in the question that was answered. */
-export function renewedApprovalFor(answers: Array<{ question?: unknown; answer?: unknown }>, prefix: string, revision: string) {
+export function renewedApprovalFor(
+  answers: Array<{ question?: unknown; answer?: unknown }>,
+  prefix: string,
+  revision: string,
+) {
   const tag = SCOPE_REVISION_TAG(revision);
-  const a = [...answers].reverse().find((x) => String(x.question ?? "").startsWith(prefix) && String(x.question).includes(tag));
-  return a && APPROVE_ANSWER.test(String(a.answer ?? "")) ? { answer: String(a.answer).slice(0, 500), revision } : null;
+  const a = [...answers]
+    .reverse()
+    .find((x) => String(x.question ?? "").startsWith(prefix) && String(x.question).includes(tag));
+  return a && APPROVE_ANSWER.test(String(a.answer ?? ""))
+    ? { answer: String(a.answer).slice(0, 500), revision }
+    : null;
 }
 
 /**
@@ -200,15 +250,24 @@ export function prePublishProblems(input: {
 }): string[] {
   const problems: string[] = [];
   for (const [repo, st] of Object.entries(input.publish)) {
-    if (!st.head || !st.branchTip) problems.push(`${repo}: cannot read the commit that would be published`);
-    else if (st.head !== st.branchTip) problems.push(`${repo}: worktree HEAD ${st.head.slice(0, 12)} is not the tip of the pushed branch (${st.branchTip.slice(0, 12)})`);
-    if (st.dirty) problems.push(`${repo}: uncommitted or untracked changes in the worktree would not be published as reviewed`);
+    if (!st.head || !st.branchTip)
+      problems.push(`${repo}: cannot read the commit that would be published`);
+    else if (st.head !== st.branchTip)
+      problems.push(
+        `${repo}: worktree HEAD ${st.head.slice(0, 12)} is not the tip of the pushed branch (${st.branchTip.slice(0, 12)})`,
+      );
+    if (st.dirty)
+      problems.push(
+        `${repo}: uncommitted or untracked changes in the worktree would not be published as reviewed`,
+      );
   }
   // Tested commit == published commit: every test record bound to commits must cover exactly what is pushed.
   for (const t of input.tested)
     for (const [repo, st] of Object.entries(input.publish))
       if (t.heads[repo] !== undefined && t.heads[repo] !== st.branchTip)
-        problems.push(`${repo}: tests in "${t.step}" ran on ${t.heads[repo].slice(0, 12) || "an unknown commit"}, but ${st.branchTip.slice(0, 12)} would be published`);
+        problems.push(
+          `${repo}: tests in "${t.step}" ran on ${t.heads[repo].slice(0, 12) || "an unknown commit"}, but ${st.branchTip.slice(0, 12)} would be published`,
+        );
   if (input.scope && input.state) {
     problems.push(...input.state.unreadable);
     const ev = evaluateScope(input.scope, input.state.files);

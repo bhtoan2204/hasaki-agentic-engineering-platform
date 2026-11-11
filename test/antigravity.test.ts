@@ -18,10 +18,7 @@ import {
   checkModel,
   resetCapabilitiesCache,
 } from "../src/agent/antigravity/capabilities.ts";
-import {
-  AntigravityStream,
-  classifyAntigravityError,
-} from "../src/agent/antigravity/stream.ts";
+import { AntigravityStream, classifyAntigravityError } from "../src/agent/antigravity/stream.ts";
 import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
@@ -176,30 +173,68 @@ test("antigravityCapabilities handles missing binary, old CLI, and logged-out st
 
 test("model checking validates dynamic catalog and effort levels", () => {
   const models = [
-    { slug: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash High", efforts: ["low", "medium", "high", "xhigh", "max"] },
-    { slug: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash Medium", efforts: ["low", "medium", "high", "xhigh", "max"] },
-    { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    {
+      slug: "gemini-3.8-flash-high",
+      name: "Gemini 3.8 Flash High",
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    },
+    {
+      slug: "gemini-3.8-flash-medium",
+      name: "Gemini 3.8 Flash Medium",
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    },
+    {
+      slug: "claude-sonnet-4-6",
+      name: "Claude Sonnet 4.6",
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    },
   ];
   assert.equal(checkModel(models, "gemini-3.8-flash-high", "high"), null);
-  assert.equal(checkModel(models, "gemini-3.8-flash-high", "invalid"), 'Antigravity does not support reasoning effort "invalid" (supported: low, medium, high, xhigh, max).');
-  assert.match(checkModel(models, "gpt-4o-unknown", "") ?? "", /model "gpt-4o-unknown" is not available/i);
+  assert.equal(
+    checkModel(models, "gemini-3.8-flash-high", "invalid"),
+    'Antigravity does not support reasoning effort "invalid" (supported: low, medium, high, xhigh, max).',
+  );
+  assert.match(
+    checkModel(models, "gpt-4o-unknown", "") ?? "",
+    /model "gpt-4o-unknown" is not available/i,
+  );
 });
 
 // ------------------------------------------------------------------ Stream Parsing & Classification
 
 test("AntigravityStream handles split chunks, UTF-8 boundaries, and malformed lines", () => {
   const stream = new AntigravityStream();
-  const line = Buffer.from('{"type":"message","role":"assistant","content":"Xin chào thế giới – ✓"}\n', "utf8");
+  const line = Buffer.from(
+    '{"type":"message","role":"assistant","content":"Xin chào thế giới – ✓"}\n',
+    "utf8",
+  );
   const cut = line.indexOf(Buffer.from("✓")) + 1; // within multibyte character
 
-  const chunk1 = stream.push(Buffer.concat([Buffer.from('{"type":"init","session_id":"s-1"}\n{"type":"think'), line.subarray(0, 0)]));
+  const chunk1 = stream.push(
+    Buffer.concat([
+      Buffer.from('{"type":"init","session_id":"s-1"}\n{"type":"think'),
+      line.subarray(0, 0),
+    ]),
+  );
   assert.equal(chunk1.events.length, 1);
   assert.equal(chunk1.events[0].type, "init");
 
-  const chunk2 = stream.push(Buffer.concat([Buffer.from('ing","thought":"thinking..."}\n'), line.subarray(0, cut)]));
-  assert.deepEqual(chunk2.events.map((e) => e.type), ["thinking"]);
+  const chunk2 = stream.push(
+    Buffer.concat([Buffer.from('ing","thought":"thinking..."}\n'), line.subarray(0, cut)]),
+  );
+  assert.deepEqual(
+    chunk2.events.map((e) => e.type),
+    ["thinking"],
+  );
 
-  const chunk3 = stream.push(Buffer.concat([line.subarray(cut), Buffer.from('bad json line\n{"type":"tokens","input":50,"output":10,"reasoning":2,"cache_read":5}\n')]));
+  const chunk3 = stream.push(
+    Buffer.concat([
+      line.subarray(cut),
+      Buffer.from(
+        'bad json line\n{"type":"tokens","input":50,"output":10,"reasoning":2,"cache_read":5}\n',
+      ),
+    ]),
+  );
   assert.equal(chunk3.errors.length, 1);
   assert.equal(chunk3.events.length, 2);
   assert.equal(chunk3.events[0].type, "message");
@@ -210,26 +245,56 @@ test("AntigravityStream handles split chunks, UTF-8 boundaries, and malformed li
 
 test("AntigravityStream parses split documented stream-json events and cumulative result usage", () => {
   const stream = new AntigravityStream();
-  const wire = [
-    JSON.stringify({ event: "init", conversation_id: "conv-stream" }),
-    JSON.stringify({ event: "step_update", step_update: { step_type: "agent_message", text_delta: "hello " } }),
-    JSON.stringify({ event: "step_update", step_update: { step_type: "agent_message", text_delta: "world" } }),
-    JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "hello world", num_turns: 1, usage: { input_tokens: 11, output_tokens: 7, cache_read_tokens: 3 } } }),
-  ].join("\n") + "\n";
+  const wire =
+    [
+      JSON.stringify({ event: "init", conversation_id: "conv-stream" }),
+      JSON.stringify({
+        event: "step_update",
+        step_update: { step_type: "agent_message", text_delta: "hello " },
+      }),
+      JSON.stringify({
+        event: "step_update",
+        step_update: { step_type: "agent_message", text_delta: "world" },
+      }),
+      JSON.stringify({
+        event: "result",
+        result: {
+          status: "SUCCESS",
+          response: "hello world",
+          num_turns: 1,
+          usage: { input_tokens: 11, output_tokens: 7, cache_read_tokens: 3 },
+        },
+      }),
+    ].join("\n") + "\n";
   const bytes = Buffer.from(wire);
   const a = stream.push(bytes.subarray(0, 29));
   const b = stream.push(bytes.subarray(29));
   const events = [...a.events, ...b.events];
   assert.equal(events[0].conversationId, "conv-stream");
-  assert.deepEqual(events.slice(1, 3).map((e) => e.text), ["hello ", "world"]);
+  assert.deepEqual(
+    events.slice(1, 3).map((e) => e.text),
+    ["hello ", "world"],
+  );
   assert.equal(events[3].type, "result");
   assert.equal(events[3].cumulativeUsage, true);
-  assert.deepEqual(events[3].tokens, { input: 11, output: 7, reasoning: null, cache_read: 3, cache_creation: null });
+  assert.deepEqual(events[3].tokens, {
+    input: 11,
+    output: 7,
+    reasoning: null,
+    cache_read: 3,
+    cache_creation: null,
+  });
 });
 
 test("classifyAntigravityError accurately identifies error classes", () => {
-  assert.equal(classifyAntigravityError("Resource has been exhausted (quota limit reached)"), "QUOTA_EXHAUSTED");
-  assert.equal(classifyAntigravityError("Google login required or expired credentials"), "AUTHENTICATION");
+  assert.equal(
+    classifyAntigravityError("Resource has been exhausted (quota limit reached)"),
+    "QUOTA_EXHAUSTED",
+  );
+  assert.equal(
+    classifyAntigravityError("Google login required or expired credentials"),
+    "AUTHENTICATION",
+  );
   assert.equal(classifyAntigravityError("Operation timed out after 30000ms"), "EXECUTION_TIMEOUT");
   assert.equal(classifyAntigravityError("Process aborted by user signal"), "CANCELED");
   assert.equal(classifyAntigravityError("agent_error: unexpected failure"), "AGENT_ERROR");
@@ -237,7 +302,10 @@ test("classifyAntigravityError accurately identifies error classes", () => {
 
 // ------------------------------------------------------------------ Security Policy & PreToolUse Hook
 
-function runHook(payload: unknown, env: Record<string, string>): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function runHook(
+  payload: unknown,
+  env: Record<string, string>,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const c = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", HOOK], {
       env: { PATH: process.env.PATH, ...env },
@@ -323,7 +391,10 @@ test("PreToolUse hook fails closed without valid broker token", async () => {
     await broker.close();
   }
 
-  const none = await runHook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } }, {});
+  const none = await runHook(
+    { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } },
+    {},
+  );
   assert.equal(none.code, 2, "hook exits 2 when broker is completely unavailable");
 });
 
@@ -362,14 +433,22 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
     sandbox: true,
   });
   assert.ok(args.includes("--output-format"));
-  assert.deepEqual(args.slice(0, 4), ["--output-format", "stream-json", "--input-format", "stream-json"]);
+  assert.deepEqual(args.slice(0, 4), [
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
+  ]);
   assert.ok(args.every((a) => !a.includes("inspect database")));
   assert.ok(args.includes("--model"));
   assert.ok(args.includes("gemini-3.8-flash-high"));
   assert.ok(args.includes("--effort"));
   assert.ok(args.includes("high"));
   assert.ok(args.includes("--sandbox"));
-  assert.ok(!args.includes("--dangerously-skip-permissions"), "unrestricted permission mode is never enabled by default");
+  assert.ok(
+    !args.includes("--dangerously-skip-permissions"),
+    "unrestricted permission mode is never enabled by default",
+  );
   assert.ok(args.includes("--conversation"));
   assert.ok(args.includes("conv-123"));
 
@@ -432,7 +511,12 @@ function fakeCtx(signal: AbortSignal) {
   };
 }
 
-const turn = (mode: "analysis" | "coding", signal = new AbortController().signal, prompt = "Analyze requirements and produce contract", resumeId?: string) => {
+const turn = (
+  mode: "analysis" | "coding",
+  signal = new AbortController().signal,
+  prompt = "Analyze requirements and produce contract",
+  resumeId?: string,
+) => {
   const dir = mkdtempSync(join(tmpdir(), "agy-turn-"));
   const f = fakeCtx(signal);
   const metrics = newMetrics("gemini-3.8-flash-high");
@@ -455,7 +539,7 @@ const turn = (mode: "analysis" | "coding", signal = new AbortController().signal
 
 test("Antigravity sends small and Unicode prompts through stdin only", async () => {
   process.env.FAKE_AGY_MODE = "ok";
-  const prompt = "Tạo PR\n" + JSON.stringify({ escaped: "\"\\", emoji: "🧪" });
+  const prompt = "Tạo PR\n" + JSON.stringify({ escaped: '"\\', emoji: "🧪" });
   const t = turn("analysis", new AbortController().signal, prompt);
   const result = await t.run();
   assert.equal(result.isError, false);
@@ -478,7 +562,12 @@ test("Antigravity streams prompts larger than 128 KiB without argv growth", asyn
 });
 
 test("Antigravity resume keeps the conversation ID while sending the continuation on stdin", async () => {
-  const t = turn("analysis", new AbortController().signal, "continue from checkpoint", "conv-existing");
+  const t = turn(
+    "analysis",
+    new AbortController().signal,
+    "continue from checkpoint",
+    "conv-existing",
+  );
   const result = await t.run();
   assert.equal(result.isError, false);
   const invocation = fakeLog().find((e) => Array.isArray(e.argv));
@@ -494,7 +583,11 @@ test("antigravityAgentTurn successfully completes turn, collects tokens and does
   assert.equal(r.isError, false);
   assert.equal(r.failure, undefined);
   assert.ok(r.text.includes("Antigravity task completed successfully"));
-  assert.equal(t.metrics.cost_usd, null, "cost_usd must remain null when provider does not report cost");
+  assert.equal(
+    t.metrics.cost_usd,
+    null,
+    "cost_usd must remain null when provider does not report cost",
+  );
   assert.equal(t.metrics.tokens?.input, 180);
   assert.equal(t.metrics.tokens?.output, 35);
   assert.equal(t.metrics.tokens?.reasoning_output, 12);
@@ -522,7 +615,11 @@ test("Antigravity handles premature stdin close without duplicate invocation", a
   const r = await t.run();
   assert.equal(r.isError, true);
   assert.match(r.text, /prompt|stdin|exited/i);
-  assert.equal(fakeLog().filter((e) => Array.isArray(e.argv)).length, 0, "no second invocation is scheduled");
+  assert.equal(
+    fakeLog().filter((e) => Array.isArray(e.argv)).length,
+    0,
+    "no second invocation is scheduled",
+  );
 });
 
 test("Antigravity aborts and times out a running CLI, and reports a missing CLI", async () => {
@@ -569,10 +666,7 @@ test("antigravityComplete produces auxiliary completions and integrates with com
   assert.ok(!auxInvocation.argv.some((arg: string) => arg.includes("Summarize this context")));
   assert.equal(auxInvocation.env.containsPrompt, false);
 
-  const runRes = await completeForRun(
-    { agent_provider: "antigravity" } as any,
-    "Summarize again",
-  );
+  const runRes = await completeForRun({ agent_provider: "antigravity" } as any, "Summarize again");
   assert.equal(runRes.text, '{"summary": "quick evaluation result"}');
   assert.equal(runRes.provider, "antigravity");
   assert.equal(runRes.metrics.tokens?.input, 25);

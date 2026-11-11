@@ -15,8 +15,16 @@ import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { handle } from "../src/http/app.ts";
 process.env.CODEX_BIN = join(import.meta.dirname, "fixtures/fake-codex.mjs");
 await migrate();
-await createUser({ username: "handoff-smoke-admin", password: "handoff-admin-password", role: "admin" });
-const owner = await createUser({ username: "handoff-smoke", password: "handoff-password", role: "member" });
+await createUser({
+  username: "handoff-smoke-admin",
+  password: "handoff-admin-password",
+  role: "admin",
+});
+const owner = await createUser({
+  username: "handoff-smoke",
+  password: "handoff-password",
+  role: "member",
+});
 await definitions.create({
   key: "handoff-smoke",
   spec: {
@@ -45,10 +53,17 @@ registerExecutor("coding_agent", {
         details: { provider_error: { code: "quota_exhausted" } },
       };
     assert.equal(ctx.attempt.agent_provider, "codex");
-    return { kind: "completed", output: { summary: "Continuation completed by fixture; verification not reported" } };
+    return {
+      kind: "completed",
+      output: { summary: "Continuation completed by fixture; verification not reported" },
+    };
   },
 });
-const run = await startRun({ definitionKey: "handoff-smoke", ownerId: owner.id, profile: "STANDARD" });
+const run = await startRun({
+  definitionKey: "handoff-smoke",
+  ownerId: owner.id,
+  profile: "STANDARD",
+});
 const first = await claimJob("smoke", 120);
 assert.ok(first);
 await processJob(first, "smoke", { leaseSeconds: 120, heartbeatSeconds: 1 });
@@ -83,7 +98,7 @@ try {
   await page.getByText("Review handoff package and checkpoint", { exact: true }).click();
   await page.screenshot({ path: resolve(output, "handoff-preview-en.png"), fullPage: true });
   await button.scrollIntoViewIfNeeded();
-  await page.screenshot({path:resolve(output,"handoff-confirmation-en.png"),fullPage:true});
+  await page.screenshot({ path: resolve(output, "handoff-confirmation-en.png"), fullPage: true });
   evidence.push(
     "PASS English: quota pause, original provider, handoff checkpoint and availability; confirmation disabled until review acknowledged.",
   );
@@ -91,7 +106,9 @@ try {
   await page.getByText("Bàn giao agent", { exact: true }).waitFor();
   await page.screenshot({ path: resolve(output, "handoff-preview-vi.png"), fullPage: true });
   await page.getByRole("checkbox", { name: /Tôi đã xem checkpoint/ }).check();
-  const resumed = page.waitForResponse((r) => r.url().endsWith("/handoff-resume") && r.request().method() === "POST");
+  const resumed = page.waitForResponse(
+    (r) => r.url().endsWith("/handoff-resume") && r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Xác nhận tiếp tục", exact: true }).click();
   assert.equal((await resumed).status(), 200);
   const next = await claimJob("smoke-continuation", 120);

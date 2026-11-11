@@ -18,13 +18,23 @@ let server: Server;
 let base = "";
 
 async function login(username: string, password: string) {
-  const r = await fetch(base + "/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }) });
-  const cookie = r.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const r = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const cookie = r.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
   const { csrf } = await r.json();
   return async (path: string, body?: unknown) => {
     const res = await fetch(base + path, {
       method: body === undefined ? "GET" : "POST",
-      headers: { cookie, ...(body === undefined ? {} : { "content-type": "application/json", "x-csrf-token": csrf }) },
+      headers: {
+        cookie,
+        ...(body === undefined ? {} : { "content-type": "application/json", "x-csrf-token": csrf }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -48,7 +58,11 @@ after(async () => {
   await pool.end();
 });
 
-const register = (name: string) => repositories.upsert(name, { repository_url: `https://bitbucket.org/hasaki/${name}.git`, projects: ["DEL"] });
+const register = (name: string) =>
+  repositories.upsert(name, {
+    repository_url: `https://bitbucket.org/hasaki/${name}.git`,
+    projects: ["DEL"],
+  });
 
 test("an admin deletes a registered repository; it disappears from the list and the audit log records it", async () => {
   const admin = await login("repo-admin", "repo-admin-password");
@@ -57,10 +71,22 @@ test("an admin deletes a registered repository; it disappears from the list and 
   assert.equal(r.status, 200);
   assert.equal(await repositories.get("to-delete"), undefined);
   assert.ok(!(await admin("/api/repositories")).body.some((x: any) => x.name === "to-delete"));
-  assert.ok(await one(pool, "SELECT 1 FROM audit_log WHERE action = 'repository.delete' AND resource_id = 'to-delete'"));
+  assert.ok(
+    await one(
+      pool,
+      "SELECT 1 FROM audit_log WHERE action = 'repository.delete' AND resource_id = 'to-delete'",
+    ),
+  );
   assert.equal((await admin("/api/repositories/to-delete/delete", {})).status, 404, "already gone");
   // the name can be registered again
-  assert.equal((await admin("/api/repositories/to-delete", { repository_url: "https://bitbucket.org/hasaki/to-delete.git" })).status, 200);
+  assert.equal(
+    (
+      await admin("/api/repositories/to-delete", {
+        repository_url: "https://bitbucket.org/hasaki/to-delete.git",
+      })
+    ).status,
+    200,
+  );
 });
 
 test("a member cannot delete a repository", async () => {
@@ -74,8 +100,18 @@ test("a repository used by an unfinished run cannot be deleted until the run fin
   const admin = await login("repo-admin", "repo-admin-password");
   await register("in-use");
   const wi = (await admin("/api/work-items", { title: "uses repo", project: "DEL" })).body;
-  const run = (await admin("/api/runs", { workflow: "bug-investigation", work_item_id: wi.id, start: false, repositories: ["in-use"] })).body;
-  await pool.query("UPDATE workflow_runs SET allowed_repositories = ARRAY['in-use'], status = 'RUNNING' WHERE id = $1", [run.id]);
+  const run = (
+    await admin("/api/runs", {
+      workflow: "bug-investigation",
+      work_item_id: wi.id,
+      start: false,
+      repositories: ["in-use"],
+    })
+  ).body;
+  await pool.query(
+    "UPDATE workflow_runs SET allowed_repositories = ARRAY['in-use'], status = 'RUNNING' WHERE id = $1",
+    [run.id],
+  );
   const refused = await admin("/api/repositories/in-use/delete", {});
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, new RegExp(`#${run.id}`));
@@ -95,7 +131,17 @@ test("a repository discovered from a config.json group folder stays deleted acro
   await syncRepositoriesFromConfig(); // what the next restart does
   assert.equal(await repositories.get("side-project"), undefined, "not registered again");
   // an explicit registration lifts the exclusion
-  assert.equal((await admin("/api/repositories/side-project", { repository_url: "https://bitbucket.org/hasaki/side-project.git" })).status, 200);
-  assert.equal(await one(pool, "SELECT 1 FROM repository_exclusions WHERE name = 'side-project'"), undefined);
+  assert.equal(
+    (
+      await admin("/api/repositories/side-project", {
+        repository_url: "https://bitbucket.org/hasaki/side-project.git",
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    await one(pool, "SELECT 1 FROM repository_exclusions WHERE name = 'side-project'"),
+    undefined,
+  );
   assert.equal((await admin("/api/repositories/side-project/delete", {})).status, 200);
 });

@@ -10,10 +10,31 @@ export type Level = (typeof LEVELS)[number];
 
 type Matrix = {
   policy: "strict" | "personal" | "trusted";
-  repositories: Array<{ id: number; name: string; provider: string; projects: string[]; enabled: boolean; shared_access: Level; bitbucket: boolean }>;
+  repositories: Array<{
+    id: number;
+    name: string;
+    provider: string;
+    projects: string[];
+    enabled: boolean;
+    shared_access: Level;
+    bitbucket: boolean;
+  }>;
   users: Array<{ id: number; username: string; role: string; active: boolean }>;
-  grants: Array<{ user_id: number; repository_id: number; level: Level; granted_by: string | null; updated_at: string }>;
-  checks: Array<{ user_id: number; repository_id: number; state: string; reason: string; checked_at: string; expired: boolean }>;
+  grants: Array<{
+    user_id: number;
+    repository_id: number;
+    level: Level;
+    granted_by: string | null;
+    updated_at: string;
+  }>;
+  checks: Array<{
+    user_id: number;
+    repository_id: number;
+    state: string;
+    reason: string;
+    checked_at: string;
+    expired: boolean;
+  }>;
 };
 
 const RANK: Record<Level, number> = { none: 0, read: 1, write: 2, pull_request: 3 };
@@ -23,10 +44,23 @@ const PERMS = ["read", "write", "pull_request"] as const;
  * Independent Read / Write / PR checkboxes. They imply each other like Git hosting does (a pull request needs a pushed
  * branch, a push needs read): ticking one ticks the ones below it, unticking one unticks the ones above it.
  */
-function AccessChecks({ level, label, onChange }: { level: Level; label: string; onChange: (l: Level) => void }) {
+function AccessChecks({
+  level,
+  label,
+  onChange,
+}: {
+  level: Level;
+  label: string;
+  onChange: (l: Level) => void;
+}) {
   const { t } = useI18n();
   return (
-    <span className="repo-perm-checks" role="group" aria-label={label} title={t("repo.access.impliesHint")}>
+    <span
+      className="repo-perm-checks"
+      role="group"
+      aria-label={label}
+      title={t("repo.access.impliesHint")}
+    >
       {PERMS.map((p) => {
         const on = RANK[level] >= RANK[p];
         return (
@@ -34,7 +68,15 @@ function AccessChecks({ level, label, onChange }: { level: Level; label: string;
             <input
               type="checkbox"
               checked={on}
-              onChange={(e) => onChange(e.target.checked ? (RANK[p] > RANK[level] ? p : level) : (LEVELS[RANK[p] - 1] as Level))}
+              onChange={(e) =>
+                onChange(
+                  e.target.checked
+                    ? RANK[p] > RANK[level]
+                      ? p
+                      : level
+                    : (LEVELS[RANK[p] - 1] as Level),
+                )
+              }
             />
             {t(`repo.perm.${p}`)}
           </label>
@@ -45,7 +87,15 @@ function AccessChecks({ level, label, onChange }: { level: Level; label: string;
 }
 
 /** One user's Bitbucket verification state as a short, colour-coded label. */
-export function BitbucketState({ state, reason, stale }: { state: string; reason?: string; stale?: boolean }) {
+export function BitbucketState({
+  state,
+  reason,
+  stale,
+}: {
+  state: string;
+  reason?: string;
+  stale?: boolean;
+}) {
   const { t } = useI18n();
   return (
     <span className={`repo-bb is-${state}${stale ? " is-stale" : ""}`} title={reason || undefined}>
@@ -63,7 +113,9 @@ export function BitbucketState({ state, reason, stale }: { state: string; reason
 export function RepositoryAccessAdmin({ only }: { only?: string }) {
   const { t } = useI18n();
   const matrix = useApi<Matrix>("/api/repository-access");
-  const audit = useApi<any[]>(`/api/repository-access/audit${only ? `?repository=${encodeURIComponent(only)}` : ""}`);
+  const audit = useApi<any[]>(
+    `/api/repository-access/audit${only ? `?repository=${encodeURIComponent(only)}` : ""}`,
+  );
   const [q, setQ] = useState("");
   const m = matrix.data;
   const grantOf = useMemo(() => {
@@ -79,20 +131,58 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
   if (matrix.error) return <ErrorBox error={matrix.error} onRetry={matrix.reload} />;
   if (!m) return <Loading />;
   const users = m.users.filter((u) => u.active);
-  const repos = m.repositories.filter((r) => (only ? r.name === only : !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase())));
+  const repos = m.repositories.filter((r) =>
+    only ? r.name === only : !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()),
+  );
   const reload = () => (matrix.reload(), audit.reload());
   const grant = async (repo: string, userId: number, level: Level) => {
-    if (await act(() => api(`/api/repositories/${encodeURIComponent(repo)}/access`, { user_id: userId, level }), t("repo.access.saved"))) reload();
+    if (
+      await act(
+        () =>
+          api(`/api/repositories/${encodeURIComponent(repo)}/access`, { user_id: userId, level }),
+        t("repo.access.saved"),
+      )
+    )
+      reload();
   };
   const bulk = async (user: { id: number; username: string }, level: Level) => {
-    if (!confirm(t(level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm", { user: user.username, n: m.repositories.length }))) return;
-    if (await act(() => api("/api/repository-access/bulk", { user_id: user.id, level }), t("repo.access.saved"))) reload();
+    if (
+      !confirm(
+        t(level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm", {
+          user: user.username,
+          n: m.repositories.length,
+        }),
+      )
+    )
+      return;
+    if (
+      await act(
+        () => api("/api/repository-access/bulk", { user_id: user.id, level }),
+        t("repo.access.saved"),
+      )
+    )
+      reload();
   };
   const share = async (repo: string, level: Level) => {
-    if (await act(() => api(`/api/repositories/${encodeURIComponent(repo)}/shared`, { level }), t("repo.access.saved"))) reload();
+    if (
+      await act(
+        () => api(`/api/repositories/${encodeURIComponent(repo)}/shared`, { level }),
+        t("repo.access.saved"),
+      )
+    )
+      reload();
   };
   const revalidate = async (repo?: string) => {
-    if (await act(() => (repo ? api(`/api/repositories/${encodeURIComponent(repo)}/revalidate`, {}) : api("/api/repository-access/revalidate", { all: true })), t("repo.access.revalidated"))) reload();
+    if (
+      await act(
+        () =>
+          repo
+            ? api(`/api/repositories/${encodeURIComponent(repo)}/revalidate`, {})
+            : api("/api/repository-access/revalidate", { all: true }),
+        t("repo.access.revalidated"),
+      )
+    )
+      reload();
   };
   return (
     <div className="repo-access">
@@ -154,19 +244,33 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                     <div className="muted small">{r.projects.join(", ") || "—"}</div>
                   </th>
                   <td>
-                    <AccessChecks level={r.shared_access} label={`${r.name} · ${t("repo.access.shared")}`} onChange={(l) => share(r.name, l)} />
+                    <AccessChecks
+                      level={r.shared_access}
+                      label={`${r.name} · ${t("repo.access.shared")}`}
+                      onChange={(l) => share(r.name, l)}
+                    />
                   </td>
                   {users.map((u) => {
                     const level = grantOf.get(`${r.id}:${u.id}`) ?? "none";
                     const check = checkOf.get(`${r.id}:${u.id}`);
                     return (
                       <td key={u.id}>
-                        <AccessChecks level={level} label={`${r.name} · ${u.username}`} onChange={(l) => grant(r.name, u.id, l)} />
-                        {r.bitbucket && m.policy !== "trusted" && (level !== "none" || r.shared_access !== "none") && (
-                          <div>
-                            <BitbucketState state={check?.state ?? "unknown"} reason={check?.reason} stale={check?.expired} />
-                          </div>
-                        )}
+                        <AccessChecks
+                          level={level}
+                          label={`${r.name} · ${u.username}`}
+                          onChange={(l) => grant(r.name, u.id, l)}
+                        />
+                        {r.bitbucket &&
+                          m.policy !== "trusted" &&
+                          (level !== "none" || r.shared_access !== "none") && (
+                            <div>
+                              <BitbucketState
+                                state={check?.state ?? "unknown"}
+                                reason={check?.reason}
+                                stale={check?.expired}
+                              />
+                            </div>
+                          )}
                       </td>
                     );
                   })}
@@ -188,10 +292,14 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
         ) : (
           <ul className="repo-audit">
             {audit.data.slice(0, 50).map((a) => {
-              const user = a.detail?.user_id != null ? m.users.find((u) => u.id === Number(a.detail.user_id))?.username : null;
+              const user =
+                a.detail?.user_id != null
+                  ? m.users.find((u) => u.id === Number(a.detail.user_id))?.username
+                  : null;
               return (
                 <li key={a.id}>
-                  <span className="muted small">{time(a.created_at)}</span> <b>{a.actor ?? "—"}</b> · {t(`repo.audit.${a.action}`)}{" "}
+                  <span className="muted small">{time(a.created_at)}</span> <b>{a.actor ?? "—"}</b>{" "}
+                  · {t(`repo.audit.${a.action}`)}{" "}
                   {a.repository && <span className="mono">{a.repository}</span>}
                   {user && <> → {user}</>}
                   {a.detail?.before != null && (

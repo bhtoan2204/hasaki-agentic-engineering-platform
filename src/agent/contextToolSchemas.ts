@@ -2,7 +2,12 @@ import { z } from "zod";
 const query = z.string().trim().min(1).max(512);
 const limit = z.number().int().min(1).max(20).default(8);
 const repos = z.array(z.string().min(1).max(160)).min(1).max(30).optional();
-const definition = <S extends z.ZodRawShape>(name: string, description: string, shape: S, readOnly = true) => ({
+const definition = <S extends z.ZodRawShape>(
+  name: string,
+  description: string,
+  shape: S,
+  readOnly = true,
+) => ({
   name,
   logicalName: `platform.${name}`,
   description,
@@ -13,13 +18,22 @@ export const CONTEXT_TOOLS = [
   definition(
     "search_code",
     "Search relevant symbols or exact code in this run's authorized repositories. Syntax hits are candidates, not semantic proof.",
-    { query, repositories: repos, operation: z.enum(["symbols", "exact", "context"]).default("symbols"), limit },
+    {
+      query,
+      repositories: repos,
+      operation: z.enum(["symbols", "exact", "context"]).default("symbols"),
+      limit,
+    },
   ),
-  definition("get_symbol", "Find definitions of a symbol with source snapshot provenance; no arbitrary file access.", {
-    symbol: query,
-    repositories: repos,
-    limit,
-  }),
+  definition(
+    "get_symbol",
+    "Find definitions of a symbol with source snapshot provenance; no arbitrary file access.",
+    {
+      symbol: query,
+      repositories: repos,
+      limit,
+    },
+  ),
   definition(
     "find_dependencies",
     "Find bounded syntax dependency candidates; unresolved references remain uncertain.",
@@ -103,4 +117,5 @@ export const CONTEXT_TOOLS = [
     false,
   ),
 ];
-export const contextTool = (name: string) => CONTEXT_TOOLS.find((t) => t.name === name.replace(/^platform\./, ""));
+export const contextTool = (name: string) =>
+  CONTEXT_TOOLS.find((t) => t.name === name.replace(/^platform\./, ""));

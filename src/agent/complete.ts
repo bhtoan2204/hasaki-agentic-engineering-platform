@@ -82,9 +82,7 @@ export async function completeForRun(
         ...metadata(),
         provider,
         model: r.model || null,
-        model_source: r.model
-          ? "agent.antigravity.model"
-          : "antigravity default",
+        model_source: r.model ? "agent.antigravity.model" : "antigravity default",
         cost_usd: null,
         tokens: r.tokens,
       },

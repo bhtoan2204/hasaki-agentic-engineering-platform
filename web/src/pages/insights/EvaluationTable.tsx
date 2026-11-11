@@ -11,13 +11,7 @@ export function EvaluationTable({
   const { locale } = useI18n();
   if (!rows.length)
     return (
-      <EmptyState
-        title={
-          locale === "en"
-            ? "No matching evidence"
-            : "Chưa có bằng chứng phù hợp"
-        }
-      />
+      <EmptyState title={locale === "en" ? "No matching evidence" : "Chưa có bằng chứng phù hợp"} />
     );
   return (
     <div className="table-wrap">

@@ -35,7 +35,8 @@ const ANALYZE = {
     "Analyse the engineering request. Restate the goal, list functional requirements, acceptance criteria, " +
     "affected business areas, unknowns and risks. Read code only to understand terminology; do not design the change yet. " +
     "If business behaviour is ambiguous and cannot be settled from the code, ask the developer.",
-  output_contract: "{ goal, requirements: string[], acceptance_criteria: string[], keywords: string[], unknowns: string[], risks: string[] }",
+  output_contract:
+    "{ goal, requirements: string[], acceptance_criteria: string[], keywords: string[], unknowns: string[], risks: string[] }",
 };
 
 const DISCOVER = { action: "repository_discovery", use_ai: true, max_candidates: 5 };
@@ -52,7 +53,8 @@ const IMPLEMENT = {
     "Do not push: a later workflow step opens the pull request. Finish by calling submit_result with " +
     "{ summary, pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }. " +
     TEST_POLICY,
-  output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }",
+  output_contract:
+    "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }",
 };
 
 /** Code review follow-up: fix what the review found, on the reviewed branch. */
@@ -67,7 +69,8 @@ const FIX_FROM_REVIEW = {
     "the platform commit convention. Do not push: a later step opens the pull request. Finish by calling submit_result with " +
     "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { <repo>: { title, summary, decisions: [{title, detail}] } }, verification }. " +
     TEST_POLICY,
-  output_contract: "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { [repo]: { title, summary, decisions } }, verification }",
+  output_contract:
+    "{ summary, fixed: [{ finding, repo, file, change }], not_fixed: [{ finding, reason }], pull_requests: { [repo]: { title, summary, decisions } }, verification }",
 };
 
 const REVIEW = {
@@ -77,7 +80,8 @@ const REVIEW = {
     "Review the diff of every workspace branch against origin/$BASE_BRANCH (git diff, read-only). Check correctness, the " +
     "approved plan or fix proposal, coding standards and security policies in your context. For every finding include a precise file/line, " +
     "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. Report findings; do not modify code.",
-  output_contract: "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
+  output_contract:
+    "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
   workspace_read: true,
   // Scope + curated per-language rules from Alibaba OpenCodeReview (delegation mode, no extra model/API key).
   open_code_review: true,
@@ -95,7 +99,8 @@ const EVIDENCE_RULES =
   "CODE_FACT needs repository, file_path, line_range and the commit you read. Earlier agent outputs are opinions, not evidence: repeating a hypothesis never makes it a fact. " +
   "If a source (logs/Splunk, database, external API docs) was not available to you, list it under missing_evidence and do not claim it was inspected. " +
   "Never copy secrets or raw customer payloads into claims; cite a reference instead. Use low/medium/high, never numeric confidence.";
-const ROOT_CAUSE_CONTRACT = "root_cause_assessment: { status: 'CONFIRMED'|'PROBABLE'|'UNCONFIRMED'|'INSUFFICIENT_EVIDENCE', confidence: 'low'|'medium'|'high', explanation, supporting_claims: string[] }";
+const ROOT_CAUSE_CONTRACT =
+  "root_cause_assessment: { status: 'CONFIRMED'|'PROBABLE'|'UNCONFIRMED'|'INSUFFICIENT_EVIDENCE', confidence: 'low'|'medium'|'high', explanation, supporting_claims: string[] }";
 
 const INVESTIGATION_HANDOFF =
   "If run inputs contain `investigation` (handed over from a read-only production investigation), start from it: its findings, timeline and latencies cite evidence_refs (S<search>:<n>). " +
@@ -112,7 +117,8 @@ const BUG_ANALYZE = {
   output_contract:
     "{ symptoms, expected, actual, keywords: string[], reproduction: string[], unknowns: string[], verified_observations?: string[], code_paths_inspected?: string[], hypotheses?: string[], " +
     "missing_evidence?: string[], impact_assessment?: { summary, scope: 'known'|'estimated'|'unknown', exact: boolean }, evidence_suggestions?: string[], safe_next_actions?: string[], " +
-    CLAIMS_CONTRACT.replace("claims:", "claims?:") + " }",
+    CLAIMS_CONTRACT.replace("claims:", "claims?:") +
+    " }",
 };
 
 const BUG_ROOT_CAUSE = {
@@ -124,7 +130,12 @@ const BUG_ROOT_CAUSE = {
     "UNCONFIRMED when it is a plausible hypothesis; INSUFFICIENT_EVIDENCE when the needed data was not available. Explain the assessment in one or two sentences. " +
     "Do not raise the status of an earlier step's conclusion unless you cite NEW verified evidence. " +
     EVIDENCE_RULES,
-  output_contract: "{ root_cause, evidence: string[], hypotheses: [{ hypothesis, verdict, evidence }], missing_evidence?: string[], " + ROOT_CAUSE_CONTRACT + ", " + CLAIMS_CONTRACT + " }",
+  output_contract:
+    "{ root_cause, evidence: string[], hypotheses: [{ hypothesis, verdict, evidence }], missing_evidence?: string[], " +
+    ROOT_CAUSE_CONTRACT +
+    ", " +
+    CLAIMS_CONTRACT +
+    " }",
 };
 
 const BUG_FIX_PROPOSAL = {
@@ -140,8 +151,10 @@ const BUG_FIX_PROPOSAL = {
     EVIDENCE_RULES,
   output_contract:
     "{ summary, changes: [{ repo, files, description }], regression_tests: string[], required_tests?: string[], risks: string[], missing_evidence?: string[], prohibited_assumptions?: string[], " +
-    ROOT_CAUSE_CONTRACT + ", fix_assessment: { risk: 'LOW'|'MEDIUM'|'HIGH', confidence: 'low'|'medium'|'high', explanation, side_effects, rollback, business_invariants?: { current_state, target_state, source_of_truth, preconditions, external_contract, idempotency, retry_behavior, side_effects, concurrency, failure_handling, regression_tests } }, " +
-    CLAIMS_CONTRACT + " }",
+    ROOT_CAUSE_CONTRACT +
+    ", fix_assessment: { risk: 'LOW'|'MEDIUM'|'HIGH', confidence: 'low'|'medium'|'high', explanation, side_effects, rollback, business_invariants?: { current_state, target_state, source_of_truth, preconditions, external_contract, idempotency, retry_behavior, side_effects, concurrency, failure_handling, regression_tests } }, " +
+    CLAIMS_CONTRACT +
+    " }",
 };
 
 const BUG_IMPLEMENT = {
@@ -150,7 +163,8 @@ const BUG_IMPLEMENT = {
     IMPLEMENT.instructions +
     " Implement ONLY the approved change scope in evidence_summary.approved_scope; optional or speculative ideas are not requirements, and open hypotheses or prohibited assumptions must not be coded as facts. " +
     "If you must change anything outside the approved scope, list it in scope_deviations with its risk: a deviation riskier than the approved risk pauses for renewed approval.",
-  output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification, scope_deviations?: [{ description, files, risk: 'LOW'|'MEDIUM'|'HIGH', reason }] }",
+  output_contract:
+    "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification, scope_deviations?: [{ description, files, risk: 'LOW'|'MEDIUM'|'HIGH', reason }] }",
 };
 
 const BUG_REVIEW = {
@@ -186,38 +200,127 @@ const INVESTIGATION_RULES =
   "label URL generation and the first time a label URL is merely observed or persisted — they are different moments. Never relate events only because they are close in time. " +
   "If the result says manual_required, ask the user once with ask_user (include the SPL, the window and the splunk_url, and ask them to paste the results into the investigation panel), then read them with splunk_get_search_results. " +
   "Quote only what the question needs from production data.";
-const INVESTIGATION_EVENTS_CONTRACT =
-  `events: [{ evidence_ref: 'S<search id>:<n>', event_type: ${JSON.stringify(INVESTIGATION_EVENT_TYPES)}, ids?: { order_code?, shipment_code?, shipment_id?, tracking_no?, request_id?, trace_id?, correlation_id?, message_id? }, note? }]`;
-const INVESTIGATION_SEARCH_CONTRACT =
-  `{ searches: number[], ${INVESTIGATION_EVENTS_CONTRACT}, discovered_identifiers: { [field]: string[] }, observations: string[], missing: string[] }`;
+const INVESTIGATION_EVENTS_CONTRACT = `events: [{ evidence_ref: 'S<search id>:<n>', event_type: ${JSON.stringify(INVESTIGATION_EVENT_TYPES)}, ids?: { order_code?, shipment_code?, shipment_id?, tracking_no?, request_id?, trace_id?, correlation_id?, message_id? }, note? }]`;
+const INVESTIGATION_SEARCH_CONTRACT = `{ searches: number[], ${INVESTIGATION_EVENTS_CONTRACT}, discovered_identifiers: { [field]: string[] }, observations: string[], missing: string[] }`;
 
 const PRODUCTION_INVESTIGATION = {
   name: "Production Incident Investigation",
-  description: "Read-only: parse the request → discover services & code paths → search Splunk → correlate events → refine (bounded) → timeline → latency → findings → evidence-backed report",
+  description:
+    "Read-only: parse the request → discover services & code paths → search Splunk → correlate events → refine (bounded) → timeline → latency → findings → evidence-backed report",
   category: "Operations / Debugging",
   execution_mode: "read_only",
   triggers: {
     phrases: [
-      "debug production", "production issue", "production incident", "prod issue", "incident", "check splunk", "splunk", "production log", "prod log", "trace this order", "trace order",
-      "find when the callback", "callback happened", "when the callback", "shipment creation was slow", "why shipment", "response time", "took to respond", "shipping label",
-      "kiem tra log", "xem log", "log don hang", "truy vet", "thoi gian now phan hoi", "now phan hoi", "thoi gian phan hoi", "tim thoi diem", "sinh shipping label", "loi production", "su co",
+      "debug production",
+      "production issue",
+      "production incident",
+      "prod issue",
+      "incident",
+      "check splunk",
+      "splunk",
+      "production log",
+      "prod log",
+      "trace this order",
+      "trace order",
+      "find when the callback",
+      "callback happened",
+      "when the callback",
+      "shipment creation was slow",
+      "why shipment",
+      "response time",
+      "took to respond",
+      "shipping label",
+      "kiem tra log",
+      "xem log",
+      "log don hang",
+      "truy vet",
+      "thoi gian now phan hoi",
+      "now phan hoi",
+      "thoi gian phan hoi",
+      "tim thoi diem",
+      "sinh shipping label",
+      "loi production",
+      "su co",
     ],
     requires_any: [
-      "production", "prod", "splunk", "log", "logs", "callback", "webhook", "order", "don hang", "van don", "shipment", "tracking", "phan hoi", "respond", "label", "trace", "truy vet", "incident", "su co",
+      "production",
+      "prod",
+      "splunk",
+      "log",
+      "logs",
+      "callback",
+      "webhook",
+      "order",
+      "don hang",
+      "van don",
+      "shipment",
+      "tracking",
+      "phan hoi",
+      "respond",
+      "label",
+      "trace",
+      "truy vet",
+      "incident",
+      "su co",
     ],
-    excludes: ["implement", "refactor", "add a feature", "write a test", "write tests", "create a pr", "open a pr", "them tinh nang", "viet test", "sua code", "tao pr", "code review"],
-    explicit: ["splunk", "production log", "prod log", "log production", "log prod", "kiem tra log", "xem log"],
+    excludes: [
+      "implement",
+      "refactor",
+      "add a feature",
+      "write a test",
+      "write tests",
+      "create a pr",
+      "open a pr",
+      "them tinh nang",
+      "viet test",
+      "sua code",
+      "tao pr",
+      "code review",
+    ],
+    explicit: [
+      "splunk",
+      "production log",
+      "prod log",
+      "log production",
+      "log prod",
+      "kiem tra log",
+      "xem log",
+    ],
   },
   inputs: {
-    request: { description: "what to investigate, in Vietnamese or English (identifiers, approximate time, question)", required: true },
+    request: {
+      description:
+        "what to investigate, in Vietnamese or English (identifiers, approximate time, question)",
+      required: true,
+    },
     environment: { description: "Splunk environment (default: production)", required: false },
-    indexes: { description: "Splunk indexes to search (default: splunk.defaultIndexes)", required: false },
-    earliest: { description: "explicit start of the search window (ISO-8601 with offset)", required: false },
-    latest: { description: "explicit end of the search window (ISO-8601 with offset)", required: false },
+    indexes: {
+      description: "Splunk indexes to search (default: splunk.defaultIndexes)",
+      required: false,
+    },
+    earliest: {
+      description: "explicit start of the search window (ISO-8601 with offset)",
+      required: false,
+    },
+    latest: {
+      description: "explicit end of the search window (ISO-8601 with offset)",
+      required: false,
+    },
   },
   steps: [
-    { key: "parse_request", type: "integration", name: "Parse Request & Identify Entities", config: { action: "investigation_parse" } },
-    { key: "discover", type: "integration", name: "Discover Services & Repositories", depends_on: ["parse_request"], config: { ...DISCOVER, optional: true } },
+    {
+      key: "parse_request",
+      type: "integration",
+      name: "Parse Request & Identify Entities",
+      config: { action: "investigation_parse" },
+    },
+    {
+      key: "discover",
+      type: "integration",
+      name: "Discover Services & Repositories",
+      depends_on: ["parse_request"],
+      config: { ...DISCOVER, optional: true },
+    },
     {
       key: "analyze_code",
       type: "agent",
@@ -247,11 +350,18 @@ const PRODUCTION_INVESTIGATION = {
         instructions:
           "Run the initial production log searches. Start with parse_request.initial_queries (or an equivalent bounded query on the identifier) over parse_request.time, then read the results: " +
           "identify which service logged what, which identifiers appear (shipment id, tracking number, request/trace/correlation id, Kafka message id) and label every relevant event. " +
-          "Run at most 6 searches in this step. " + INVESTIGATION_RULES,
+          "Run at most 6 searches in this step. " +
+          INVESTIGATION_RULES,
         output_contract: INVESTIGATION_SEARCH_CONTRACT,
       },
     },
-    { key: "correlate", type: "integration", name: "Correlate Events", depends_on: ["analyze_code", "search_logs"], config: { action: "investigation_correlate" } },
+    {
+      key: "correlate",
+      type: "integration",
+      name: "Correlate Events",
+      depends_on: ["analyze_code", "search_logs"],
+      config: { action: "investigation_correlate" },
+    },
     {
       key: "refine_search",
       type: "agent",
@@ -263,12 +373,25 @@ const PRODUCTION_INVESTIGATION = {
         instructions:
           "Evidence is incomplete (correlate.missing). Close the gaps with targeted searches: use correlate.identifiers and analyze_code.log_patterns/services to search for the missing event types " +
           "(e.g. the partner callback by shipment id or tracking number in the callback service, the label URL by tracking number), label events in correlate.unlabeled_refs that matter, " +
-          "and label nothing you did not see. Run at most 8 searches. If an event cannot be found, list exactly what evidence is missing and why. " + INVESTIGATION_RULES,
+          "and label nothing you did not see. Run at most 8 searches. If an event cannot be found, list exactly what evidence is missing and why. " +
+          INVESTIGATION_RULES,
         output_contract: INVESTIGATION_SEARCH_CONTRACT,
       },
     },
-    { key: "timeline", type: "integration", name: "Reconstruct Timeline", depends_on: ["refine_search"], config: { action: "investigation_correlate", final: true } },
-    { key: "latency", type: "integration", name: "Calculate Latency", depends_on: ["timeline"], config: { action: "investigation_latency", from: "timeline" } },
+    {
+      key: "timeline",
+      type: "integration",
+      name: "Reconstruct Timeline",
+      depends_on: ["refine_search"],
+      config: { action: "investigation_correlate", final: true },
+    },
+    {
+      key: "latency",
+      type: "integration",
+      name: "Calculate Latency",
+      depends_on: ["timeline"],
+      config: { action: "investigation_latency", from: "timeline" },
+    },
     {
       key: "analyze_findings",
       type: "agent",
@@ -293,7 +416,15 @@ const PRODUCTION_INVESTIGATION = {
       type: "integration",
       name: "Generate Report",
       depends_on: ["analyze_findings"],
-      config: { action: "investigation_report", from: { timeline: "timeline", latency: "latency", findings: "analyze_findings", code: "analyze_code" } },
+      config: {
+        action: "investigation_report",
+        from: {
+          timeline: "timeline",
+          latency: "latency",
+          findings: "analyze_findings",
+          code: "analyze_code",
+        },
+      },
     },
   ],
 };
@@ -306,7 +437,13 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       description: "Read-only: analyse the request and recommend repositories. Changes nothing.",
       steps: [
         { key: "analyze", type: "agent", name: "Requirement Analysis", config: ANALYZE },
-        { key: "discover", type: "integration", name: "Repository Discovery", depends_on: ["analyze"], config: DISCOVER },
+        {
+          key: "discover",
+          type: "integration",
+          name: "Repository Discovery",
+          depends_on: ["analyze"],
+          config: DISCOVER,
+        },
       ],
     },
   },
@@ -314,12 +451,25 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "feature-implementation",
     spec: {
       name: "Feature Implementation",
-      description: "Requirement analysis → repository discovery → architecture plan → approval → implementation → tests → review → PR",
+      description:
+        "Requirement analysis → repository discovery → architecture plan → approval → implementation → tests → review → PR",
       feedback_step: "implement",
       steps: [
         { key: "analyze", type: "agent", name: "Requirement Analysis", config: ANALYZE },
-        { key: "discover", type: "integration", name: "Repository Discovery", depends_on: ["analyze"], config: DISCOVER },
-        { key: "confirm_repos", type: "human_approval", name: "Confirm Repositories", depends_on: ["discover"], config: CONFIRM_REPOS },
+        {
+          key: "discover",
+          type: "integration",
+          name: "Repository Discovery",
+          depends_on: ["analyze"],
+          config: DISCOVER,
+        },
+        {
+          key: "confirm_repos",
+          type: "human_approval",
+          name: "Confirm Repositories",
+          depends_on: ["discover"],
+          config: CONFIRM_REPOS,
+        },
         {
           key: "plan",
           type: "agent",
@@ -329,7 +479,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
             instructions:
               "Design the change for the confirmed repositories: components touched, data/contract changes, migration needs, " +
               "test strategy, rollout risks, alternatives rejected. Reference concrete files (path:line).",
-            output_contract: "{ summary, changes: [{ repo, files: string[], description }], tests: string[], risks: string[], alternatives: string[] }",
+            output_contract:
+              "{ summary, changes: [{ repo, files: string[], description }], tests: string[], risks: string[], alternatives: string[] }",
           },
         },
         {
@@ -337,12 +488,40 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "human_approval",
           name: "Approve Plan",
           depends_on: ["plan"],
-          config: { message: "Duyệt kế hoạch kiến trúc trước khi code.", show_outputs: ["plan"], on_reject: { reexecute: "plan" } },
+          config: {
+            message: "Duyệt kế hoạch kiến trúc trước khi code.",
+            show_outputs: ["plan"],
+            on_reject: { reexecute: "plan" },
+          },
         },
-        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_plan"], config: IMPLEMENT, max_attempts: 2 },
-        { key: "test", type: "command", name: "Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
+        {
+          key: "implement",
+          type: "coding_agent",
+          name: "Implementation",
+          depends_on: ["approve_plan"],
+          config: IMPLEMENT,
+          max_attempts: 2,
+        },
+        {
+          key: "test",
+          type: "command",
+          name: "Testing",
+          depends_on: ["implement"],
+          config: {
+            command: TEST_COMMAND,
+            timeout_seconds: 1800,
+            baseline_compare: "go",
+            on_failure: "ask",
+          },
+        },
         { key: "review", type: "agent", name: "Code Review", depends_on: ["test"], config: REVIEW },
-        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["review"], config: { mode: "approval", content_from: "implement" } },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["review"],
+          config: { mode: "approval", content_from: "implement" },
+        },
       ],
     },
   },
@@ -350,12 +529,25 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "bug-investigation",
     spec: {
       name: "Bug Investigation",
-      description: "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → code review → PR",
+      description:
+        "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → code review → PR",
       feedback_step: "implement",
       steps: [
         { key: "analyze", type: "agent", name: "Problem Analysis", config: BUG_ANALYZE },
-        { key: "discover", type: "integration", name: "Repository Discovery", depends_on: ["analyze"], config: DISCOVER },
-        { key: "confirm_repos", type: "human_approval", name: "Confirm Repositories", depends_on: ["discover"], config: { ...CONFIRM_REPOS, auto_approve_unambiguous: true } },
+        {
+          key: "discover",
+          type: "integration",
+          name: "Repository Discovery",
+          depends_on: ["analyze"],
+          config: DISCOVER,
+        },
+        {
+          key: "confirm_repos",
+          type: "human_approval",
+          name: "Confirm Repositories",
+          depends_on: ["discover"],
+          config: { ...CONFIRM_REPOS, auto_approve_unambiguous: true },
+        },
         {
           key: "root_cause",
           type: "agent",
@@ -375,12 +567,46 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "human_approval",
           name: "Approve Fix",
           depends_on: ["fix_proposal"],
-          config: { show_outputs: ["root_cause", "fix_proposal"], approve_scope_from: "fix_proposal", on_reject: { reexecute: "fix_proposal" } },
+          config: {
+            show_outputs: ["root_cause", "fix_proposal"],
+            approve_scope_from: "fix_proposal",
+            on_reject: { reexecute: "fix_proposal" },
+          },
         },
-        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["approve_fix"], config: BUG_IMPLEMENT, max_attempts: 2 },
-        { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["implement"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
-        { key: "review", type: "agent", name: "Code Review", depends_on: ["regression_test"], config: BUG_REVIEW },
-        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["review"], config: { mode: "approval", content_from: "implement" } },
+        {
+          key: "implement",
+          type: "coding_agent",
+          name: "Implementation",
+          depends_on: ["approve_fix"],
+          config: BUG_IMPLEMENT,
+          max_attempts: 2,
+        },
+        {
+          key: "regression_test",
+          type: "command",
+          name: "Regression Testing",
+          depends_on: ["implement"],
+          config: {
+            command: TEST_COMMAND,
+            timeout_seconds: 1800,
+            baseline_compare: "go",
+            on_failure: "ask",
+          },
+        },
+        {
+          key: "review",
+          type: "agent",
+          name: "Code Review",
+          depends_on: ["regression_test"],
+          config: BUG_REVIEW,
+        },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["review"],
+          config: { mode: "approval", content_from: "implement" },
+        },
       ],
     },
   },
@@ -388,10 +614,19 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "code-review",
     spec: {
       name: "Code Review",
-      description: "Repository / branch selection → code analysis (OpenCodeReview rules) → architecture → security → review report → optional: fix the findings on the reviewed branch → tests → PR",
+      description:
+        "Repository / branch selection → code analysis (OpenCodeReview rules) → architecture → security → review report → optional: fix the findings on the reviewed branch → tests → PR",
       inputs: {
-        repositories: { description: "repositories to review (optional: when empty, the run asks you to pick them)", required: false },
-        branch: { description: "branch to review against the base branch (empty = review the base branch itself); fixes are committed on it", required: false },
+        repositories: {
+          description:
+            "repositories to review (optional: when empty, the run asks you to pick them)",
+          required: false,
+        },
+        branch: {
+          description:
+            "branch to review against the base branch (empty = review the base branch itself); fixes are committed on it",
+          required: false,
+        },
         focus: { description: "what to focus on", required: false },
       },
       steps: [
@@ -400,7 +635,12 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           key: "select",
           type: "human_approval",
           name: "Repository / PR Selection",
-          config: { message: "Chọn repo và branch cần review cho lần chạy này.", select_repositories: true, ask_branch: true, auto_approve_preselected: true },
+          config: {
+            message: "Chọn repo và branch cần review cho lần chạy này.",
+            select_repositories: true,
+            ask_branch: true,
+            auto_approve_preselected: true,
+          },
         },
         {
           key: "analyze",
@@ -412,7 +652,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
               "Review the selected repositories (read-only). Each repository's branch under review is inputs.branches[<repo>] " +
               "(else inputs.branch): review `git diff origin/$BASE_BRANCH...origin/<that branch>` in that repository. A repository " +
               "without a branch: review the areas named in inputs.focus on the base branch. Report correctness and maintainability issues.",
-            output_contract: "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
+            output_contract:
+              "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
             open_code_review: true,
           },
         },
@@ -422,7 +663,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           name: "Architecture Validation",
           depends_on: ["analyze"],
           config: {
-            instructions: "Validate the reviewed code against the architecture guidelines and repository conventions in your context.",
+            instructions:
+              "Validate the reviewed code against the architecture guidelines and repository conventions in your context.",
             output_contract: "{ violations: [{ guideline, repo, file, detail }], summary }",
           },
         },
@@ -432,8 +674,10 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           name: "Security Review",
           depends_on: ["analyze"],
           config: {
-            instructions: "Review the same code for security issues: injection, authz gaps, secrets, PII handling, unsafe deserialisation.",
-            output_contract: "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
+            instructions:
+              "Review the same code for security issues: injection, authz gaps, secrets, PII handling, unsafe deserialisation.",
+            output_contract:
+              "{ findings: [{ severity, repo, file, line, issue, suggestion }], summary }",
             skills: ["security-review"],
           },
         },
@@ -442,13 +686,43 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "integration",
           name: "Review Report",
           depends_on: ["architecture", "security"],
-          config: { action: "publish_report", from: ["analyze", "architecture", "security"], title: "Code review report" },
+          config: {
+            action: "publish_report",
+            from: ["analyze", "architecture", "security"],
+            title: "Code review report",
+          },
         },
         // Optional follow-up: approve to let the agent fix the review findings (the approval comment says which ones);
         // skip it to end with the report only — tests and PR then have nothing to do and finish without changes.
-        { key: "fix", type: "coding_agent", name: "Fix Review Findings", depends_on: ["report"], requires_approval: true, config: FIX_FROM_REVIEW },
-        { key: "fix_test", type: "command", name: "Testing", depends_on: ["fix"], run_if: { step: "fix", status: "COMPLETED" }, config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
-        { key: "fix_pr", type: "git_pull_request", name: "Pull Request", depends_on: ["fix_test"], run_if: { step: "fix", status: "COMPLETED" }, config: { mode: "approval", content_from: "fix" } },
+        {
+          key: "fix",
+          type: "coding_agent",
+          name: "Fix Review Findings",
+          depends_on: ["report"],
+          requires_approval: true,
+          config: FIX_FROM_REVIEW,
+        },
+        {
+          key: "fix_test",
+          type: "command",
+          name: "Testing",
+          depends_on: ["fix"],
+          run_if: { step: "fix", status: "COMPLETED" },
+          config: {
+            command: TEST_COMMAND,
+            timeout_seconds: 1800,
+            baseline_compare: "go",
+            on_failure: "ask",
+          },
+        },
+        {
+          key: "fix_pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["fix_test"],
+          run_if: { step: "fix", status: "COMPLETED" },
+          config: { mode: "approval", content_from: "fix" },
+        },
       ],
     },
   },
@@ -456,18 +730,28 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "refactoring",
     spec: {
       name: "Refactoring",
-      description: "Select repository → analyse code → refactoring plan → human approval → refactor → regression tests → PR",
+      description:
+        "Select repository → analyse code → refactoring plan → human approval → refactor → regression tests → PR",
       feedback_step: "refactor",
-      inputs: { repositories: { description: "repository to refactor", required: true }, goal: { description: "refactoring goal", required: true } },
+      inputs: {
+        repositories: { description: "repository to refactor", required: true },
+        goal: { description: "refactoring goal", required: true },
+      },
       steps: [
-        { key: "select", type: "integration", name: "Select Repository", config: { action: "select_repositories" } },
+        {
+          key: "select",
+          type: "integration",
+          name: "Select Repository",
+          config: { action: "select_repositories" },
+        },
         {
           key: "analyze",
           type: "agent",
           name: "Analyze Code",
           depends_on: ["select"],
           config: {
-            instructions: "Analyse the code relevant to inputs.goal: structure, coupling, test coverage, risky areas.",
+            instructions:
+              "Analyse the code relevant to inputs.goal: structure, coupling, test coverage, risky areas.",
             output_contract: "{ summary, hotspots: [{ file, issue }], test_coverage, risks }",
           },
         },
@@ -477,7 +761,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           name: "Refactoring Plan",
           depends_on: ["analyze"],
           config: {
-            instructions: "Produce a behaviour-preserving refactoring plan in small verifiable steps, with the tests that prove behaviour is unchanged.",
+            instructions:
+              "Produce a behaviour-preserving refactoring plan in small verifiable steps, with the tests that prove behaviour is unchanged.",
             output_contract: "{ summary, steps: [{ description, files }], safety_net: string[] }",
           },
         },
@@ -488,9 +773,33 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["plan"],
           config: { show_outputs: ["plan"], on_reject: { reexecute: "plan" } },
         },
-        { key: "refactor", type: "coding_agent", name: "Refactor", depends_on: ["approval"], config: IMPLEMENT, max_attempts: 2 },
-        { key: "regression_test", type: "command", name: "Regression Testing", depends_on: ["refactor"], config: { command: TEST_COMMAND, timeout_seconds: 1800, baseline_compare: "go", on_failure: "ask" } },
-        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["regression_test"], config: { mode: "approval", content_from: "refactor" } },
+        {
+          key: "refactor",
+          type: "coding_agent",
+          name: "Refactor",
+          depends_on: ["approval"],
+          config: IMPLEMENT,
+          max_attempts: 2,
+        },
+        {
+          key: "regression_test",
+          type: "command",
+          name: "Regression Testing",
+          depends_on: ["refactor"],
+          config: {
+            command: TEST_COMMAND,
+            timeout_seconds: 1800,
+            baseline_compare: "go",
+            on_failure: "ask",
+          },
+        },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["regression_test"],
+          config: { mode: "approval", content_from: "refactor" },
+        },
       ],
     },
   },

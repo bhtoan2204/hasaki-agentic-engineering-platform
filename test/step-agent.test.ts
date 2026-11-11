@@ -38,16 +38,29 @@ const runs: number[] = [];
 const policy = { mode: "analysis" as const, workspaces: [], baseBranch: "main" };
 before(async () => {
   await migrate();
-  owner = await createUser({ username: "routing-owner", password: "routing-password", role: "member" });
-  other = await createUser({ username: "routing-other", password: "routing-password", role: "member" });
-  admin = await createUser({ username: "routing-admin", password: "routing-password", role: "admin" });
+  owner = await createUser({
+    username: "routing-owner",
+    password: "routing-password",
+    role: "member",
+  });
+  other = await createUser({
+    username: "routing-other",
+    password: "routing-password",
+    role: "member",
+  });
+  admin = await createUser({
+    username: "routing-admin",
+    password: "routing-password",
+    role: "admin",
+  });
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as any).port}`;
 });
 afterEach(async () => {
   for (const id of runs.splice(0))
-    if (!["COMPLETED", "FAILED", "CANCELED"].includes((await getRun(id)).status)) await cancelRun(id);
+    if (!["COMPLETED", "FAILED", "CANCELED"].includes((await getRun(id)).status))
+      await cancelRun(id);
   await settleBackground();
 });
 after(async () => {
@@ -58,7 +71,12 @@ after(async () => {
 async function run(steps: any[], provider: "claude" | "codex" | "cursor" = "claude") {
   const key = `routing-${++seq}`;
   await definitions.create({ key, spec: { name: key, steps } });
-  const r = await startRun({ definitionKey: key, ownerId: owner.id, agentProvider: provider, profile: "STANDARD" });
+  const r = await startRun({
+    definitionKey: key,
+    ownerId: owner.id,
+    agentProvider: provider,
+    profile: "STANDARD",
+  });
   runs.push(r.id);
   return r;
 }
@@ -90,7 +108,10 @@ test("provider precedence, provider-specific model routing and nullable defaults
     config: { agent: { provider: "claude", model: "claude-test", reasoning_effort: "high" } },
   };
   assert.equal(resolveStepAgent(r, step)?.provider, "claude");
-  const overridden = resolveStepAgent(r, { ...step, agent_override: { provider: "codex", model: "gpt-test" } })!;
+  const overridden = resolveStepAgent(r, {
+    ...step,
+    agent_override: { provider: "codex", model: "gpt-test" },
+  })!;
   assert.equal(overridden.provider, "codex");
   assert.equal(overridden.model, "gpt-test");
   assert.notEqual(overridden.reasoning_effort, "high");
@@ -153,7 +174,11 @@ test("one durable DAG executes Claude → Codex → Cursor and keeps portable co
     if (key !== "research") assert.match(JSON.stringify(pack), /done/);
     await finish(x);
   }
-  const rows = await q(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id=$1 ORDER BY attempt_id", [r.id]);
+  const rows = await q(
+    pool,
+    "SELECT * FROM execution_attempt_telemetry WHERE run_id=$1 ORDER BY attempt_id",
+    [r.id],
+  );
   assert.deepEqual(
     rows.map((a) => a.provider),
     ["claude", "codex", "cursor"],
@@ -161,21 +186,38 @@ test("one durable DAG executes Claude → Codex → Cursor and keeps portable co
   assert.ok(rows.every((a) => a.reported_cost_usd === null));
   assert.equal((await getRun(r.id)).status, "COMPLETED");
   await assert.rejects(
-    () => q(pool, "UPDATE workflow_step_attempts SET agent_provider='claude' WHERE id=$1", [rows[1].attempt_id]),
+    () =>
+      q(pool, "UPDATE workflow_step_attempts SET agent_provider='claude' WHERE id=$1", [
+        rows[1].attempt_id,
+      ]),
     /immutable/,
   );
 });
 
 test("mixed read-only branches run concurrently with isolated agent directories; writer waits", async () => {
-  const r = await run([agent("a", "claude"), agent("b", "codex"), agent("writer", "cursor", [], "coding_agent")]);
+  const r = await run([
+    agent("a", "claude"),
+    agent("b", "codex"),
+    agent("writer", "cursor", [], "coding_agent"),
+  ]);
   const x = await begin(),
     y = await begin();
   assert.ok(x.b);
   assert.ok(y.b);
-  assert.notEqual(await runWorkingDirectory(r.id, x.b.step.id), await runWorkingDirectory(r.id, y.b.step.id));
+  assert.notEqual(
+    await runWorkingDirectory(r.id, x.b.step.id),
+    await runWorkingDirectory(r.id, y.b.step.id),
+  );
   const blocked = await begin();
   assert.equal(blocked.b, null);
-  assert.equal((await one(pool, "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE run_id=$1", [r.id])).n, 2);
+  assert.equal(
+    (
+      await one(pool, "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE run_id=$1", [
+        r.id,
+      ])
+    ).n,
+    2,
+  );
   await finish(x);
   await finish(y);
   await q(pool, "UPDATE workflow_jobs SET available_at=now() WHERE id=$1", [blocked.j.id]);
@@ -217,14 +259,22 @@ test("manual retry override never relabels earlier metrics or resumes a foreign 
 
 test("attempt retry policy and execution deadline use pinned step configuration", async () => {
   const s = agent("one", "codex");
-  s.config.agent = { provider: "codex", retry: { max_attempts: 2, backoff_seconds: 0 }, timeout_ms: 1000 } as any;
+  s.config.agent = {
+    provider: "codex",
+    retry: { max_attempts: 2, backoff_seconds: 0 },
+    timeout_ms: 1000,
+  } as any;
   const r = await run([s]);
   registerExecutor("agent", {
     execute: (ctx) =>
       new Promise((resolve) =>
-        ctx.signal.addEventListener("abort", () => resolve({ kind: "failed", error: "aborted", retryable: false }), {
-          once: true,
-        }),
+        ctx.signal.addEventListener(
+          "abort",
+          () => resolve({ kind: "failed", error: "aborted", retryable: false }),
+          {
+            once: true,
+          },
+        ),
       ),
   });
   const job = await claimJob("deadline", 120);
@@ -244,19 +294,41 @@ test("attempt retry policy and execution deadline use pinned step configuration"
 
 test("custom tools intersect baseline policy and cannot bypass via call_tool aliases", async () => {
   const s = agent("one", "codex");
-  s.config.agent = { provider: "codex", allowed_tools: ["Read", "platform.get_run_context"] } as any;
+  s.config.agent = {
+    provider: "codex",
+    allowed_tools: ["Read", "platform.get_run_context"],
+  } as any;
   await run([s]);
   const x = await begin();
   assert.ok(x.b);
   const ctx = makeContext({ ...x.b, signal: new AbortController().signal });
-  const env = envFromExecution(ctx, "analysis", { ...policy, allowedTools: ["Bash"] }, newMetrics(""), () => {});
+  const env = envFromExecution(
+    ctx,
+    "analysis",
+    { ...policy, allowedTools: ["Bash"] },
+    newMetrics(""),
+    () => {},
+  );
   assert.match(
-    await dispatchPlatformTool("call_tool", { name: "platform.search_code", arguments: { query: "x" } }, env),
+    await dispatchPlatformTool(
+      "call_tool",
+      { name: "platform.search_code", arguments: { query: "x" } },
+      env,
+    ),
     /excluded/,
   );
-  assert.equal(decide("Bash", { command: "ls" }, { ...policy, allowedTools: ["Read"] }).allow, false);
-  assert.equal(decide("Write", { file_path: "/tmp/x" }, { ...policy, allowedTools: ["Write"] }).allow, false);
-  assert.equal(decide("mcp__platform__submit_result", {}, { ...policy, allowedTools: [] }).allow, true);
+  assert.equal(
+    decide("Bash", { command: "ls" }, { ...policy, allowedTools: ["Read"] }).allow,
+    false,
+  );
+  assert.equal(
+    decide("Write", { file_path: "/tmp/x" }, { ...policy, allowedTools: ["Write"] }).allow,
+    false,
+  );
+  assert.equal(
+    decide("mcp__platform__submit_result", {}, { ...policy, allowedTools: [] }).allow,
+    true,
+  );
 });
 
 async function client(user: PublicUser) {
@@ -290,16 +362,18 @@ test("override endpoint preserves ownership and explicit audited admin scope; ac
   assert.equal(x.b?.attempt.agent_provider, "codex");
   assert.equal((await a(path, { agent: { provider: "cursor" } })).status, 409);
   assert.ok(
-    await one(pool, "SELECT id FROM audit_log WHERE actor_id=$1 AND action='support.access' AND resource_id=$2", [
-      admin.id,
-      String(r.id),
-    ]),
+    await one(
+      pool,
+      "SELECT id FROM audit_log WHERE actor_id=$1 AND action='support.access' AND resource_id=$2",
+      [admin.id, String(r.id)],
+    ),
   );
   assert.ok(
-    await one(pool, "SELECT id FROM audit_log WHERE actor_id=$1 AND action='step.agent_override' AND resource_id=$2", [
-      admin.id,
-      String(r.id),
-    ]),
+    await one(
+      pool,
+      "SELECT id FROM audit_log WHERE actor_id=$1 AND action='step.agent_override' AND resource_id=$2",
+      [admin.id, String(r.id)],
+    ),
   );
   await cancelRun(r.id);
   assert.equal((await a(path, { agent: { provider: "cursor" } })).status, 409);
@@ -358,7 +432,10 @@ test("shared executor routes a Claude-default run to the real Codex CLI adapter"
     process.env.FAKE_CODEX_MODE = "hang";
     process.env.FAKE_CODEX_PIDFILE = join(process.env.TEST_ROOT!, "deadline-child.pid");
     const timed = await run([
-      { ...agent("timeout", "codex"), config: { agent: { provider: "codex", model: "gpt-test", timeout_ms: 1000 } } },
+      {
+        ...agent("timeout", "codex"),
+        config: { agent: { provider: "codex", model: "gpt-test", timeout_ms: 1000 } },
+      },
     ]);
     const slow = await claimJob("adapter-timeout", 120);
     assert.ok(slow);
@@ -392,15 +469,19 @@ test("recovery keeps original provider session evidence and permits a portable p
     "INSERT INTO agent_sessions(attempt_id,session_id,cwd,provider,resumable) VALUES($1,'codex-recovery','/tmp/recovery','codex',true)",
     [first.b.attempt.id],
   );
-  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [first.j.id]);
+  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [
+    first.j.id,
+  ]);
   await reapExpiredLeases();
   const step = (await getRun(r.id)).steps[0];
   assert.equal(step.status, "WAITING_INPUT");
   assert.equal(step.pending_input.resume.checkpoint.session_id, "codex-recovery");
   await setStepAgent(r.id, "one", { provider: "cursor" }, owner.id);
-  const question = await one(pool, "SELECT id,options FROM workflow_questions WHERE step_id=$1 AND status='open'", [
-    step.id,
-  ]);
+  const question = await one(
+    pool,
+    "SELECT id,options FROM workflow_questions WHERE step_id=$1 AND status='open'",
+    [step.id],
+  );
   assert.ok(question);
   await answerQuestions({ [question.id]: question.options[0] });
   const second = await begin();
@@ -427,16 +508,26 @@ test("recovery keeps original provider session evidence and permits a portable p
 
 test("manual override cannot replace trusted verification or broaden a restrictive workflow allowlist", async () => {
   const r = await run([
-    { ...agent("one", "claude"), config: { agent: { provider: "claude", allowed_tools: ["Read"] } } },
+    {
+      ...agent("one", "claude"),
+      config: { agent: { provider: "claude", allowed_tools: ["Read"] } },
+    },
   ]);
   await assert.rejects(
     () => setStepAgent(r.id, "one", { verification: { command: "untrusted" } }, owner.id),
     /Unrecognized/,
   );
-  await assert.rejects(() => setStepAgent(r.id, "one", { allowed_tools: ["Read", "Bash"] }, owner.id), /subset/);
-  await assert.rejects(() => setStepAgent(r.id, "one", { allowed_tools: null }, owner.id), /subset/);
+  await assert.rejects(
+    () => setStepAgent(r.id, "one", { allowed_tools: ["Read", "Bash"] }, owner.id),
+    /subset/,
+  );
+  await assert.rejects(
+    () => setStepAgent(r.id, "one", { allowed_tools: null }, owner.id),
+    /subset/,
+  );
   assert.equal(
-    (await setStepAgent(r.id, "one", { provider: "codex", allowed_tools: [] }, owner.id)).effective_agent?.provider,
+    (await setStepAgent(r.id, "one", { provider: "codex", allowed_tools: [] }, owner.id))
+      .effective_agent?.provider,
     "codex",
   );
 });

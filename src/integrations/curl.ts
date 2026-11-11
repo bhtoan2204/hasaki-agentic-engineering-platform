@@ -29,7 +29,7 @@ export function shellWords(s: string): string[] {
       continue;
     }
     if (/\s/.test(c)) {
-      if (has) out.push(cur), (cur = ""), (has = false);
+      if (has) (out.push(cur), (cur = ""), (has = false));
       continue;
     }
     has = true;
@@ -80,14 +80,23 @@ export function parseCurl(raw: string): CurlParts | null {
  */
 export function cookiePairs(raw: string): { pairs: string[]; headers: Record<string, string> } {
   const curl = parseCurl(raw);
-  if (curl && !curl.cookie) throw new Error("lệnh cURL không có cookie (-b hoặc -H 'cookie: …') — copy một request tới đúng trang khi đang đăng nhập");
+  if (curl && !curl.cookie)
+    throw new Error(
+      "lệnh cURL không có cookie (-b hoặc -H 'cookie: …') — copy một request tới đúng trang khi đang đăng nhập",
+    );
   const text = (curl ? curl.cookie! : raw.trim()).replace(/^cookie:\s*/i, "").trim();
-  if (/[\r\n]/.test(text)) throw new Error("không đọc được cookie: hãy dán header Cookie, hoặc nguyên lệnh Copy as cURL (cmd hoặc bash)");
+  if (/[\r\n]/.test(text))
+    throw new Error(
+      "không đọc được cookie: hãy dán header Cookie, hoặc nguyên lệnh Copy as cURL (cmd hoặc bash)",
+    );
   const pairs = text
     .split(/;\s*/)
     .map((p) => p.trim())
     .filter((p) => /^[^=\s]+=/.test(p));
   const bad = pairs.find((p) => /[^\x21-\x7e]/.test(p.slice(p.indexOf("=") + 1)));
-  if (bad) throw new Error(`cookie ${bad.slice(0, bad.indexOf("="))} có ký tự không hợp lệ — copy lại (nên dùng Copy as cURL)`);
+  if (bad)
+    throw new Error(
+      `cookie ${bad.slice(0, bad.indexOf("="))} có ký tự không hợp lệ — copy lại (nên dùng Copy as cURL)`,
+    );
   return { pairs, headers: curl?.headers ?? {} };
 }

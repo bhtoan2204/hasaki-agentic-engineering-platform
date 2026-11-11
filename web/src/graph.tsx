@@ -1,11 +1,4 @@
-import {
-  Handle,
-  Position,
-  type Edge,
-  type Node,
-  type NodeProps,
-  MarkerType,
-} from "@xyflow/react";
+import { Handle, Position, type Edge, type Node, type NodeProps, MarkerType } from "@xyflow/react";
 import {
   Bot,
   CheckCircle2,
@@ -68,8 +61,7 @@ export const STATUS_ICONS: Record<string, LucideIcon> = {
   CANCELED: Ban,
   SKIPPED: SkipForward,
 };
-export const statusIcon = (s?: string): LucideIcon =>
-  (s && STATUS_ICONS[s]) || CircleDashed;
+export const statusIcon = (s?: string): LucideIcon => (s && STATUS_ICONS[s]) || CircleDashed;
 
 export interface StepLike {
   key: string;
@@ -85,9 +77,7 @@ export interface StepLike {
 }
 
 /** Vertical layered layout by longest-path depth (later steps below); used when a definition has no saved node positions. */
-export function autoLayout(
-  steps: StepLike[],
-): Record<string, { x: number; y: number }> {
+export function autoLayout(steps: StepLike[]): Record<string, { x: number; y: number }> {
   const byKey = new Map(steps.map((s) => [s.key, s]));
   const depth = new Map<string, number>();
   const d = (k: string, seen = new Set<string>()): number => {
@@ -103,14 +93,11 @@ export function autoLayout(
   const layers = new Map<number, string[]>();
   for (const s of steps)
     (
-      layers.get(depth.get(s.key)!) ??
-      layers.set(depth.get(s.key)!, []).get(depth.get(s.key)!)!
+      layers.get(depth.get(s.key)!) ?? layers.set(depth.get(s.key)!, []).get(depth.get(s.key)!)!
     ).push(s.key);
   const pos: Record<string, { x: number; y: number }> = {};
   for (const [l, keys] of layers)
-    keys.forEach(
-      (k, i) => (pos[k] = { x: (i - (keys.length - 1) / 2) * 250, y: l * 140 }),
-    );
+    keys.forEach((k, i) => (pos[k] = { x: (i - (keys.length - 1) / 2) * 250, y: l * 140 }));
   return pos;
 }
 
@@ -118,20 +105,13 @@ export function autoLayout(
 function edgeColor(src?: string, dst?: string) {
   if (dst === "RUNNING" || dst === "RETRYING") return "var(--st-run)";
   if (dst === "FAILED" || dst === "STALE") return "var(--st-err)";
-  if (
-    dst === "WAITING_INPUT" ||
-    dst === "WAITING_APPROVAL" ||
-    dst === "WAITING"
-  )
+  if (dst === "WAITING_INPUT" || dst === "WAITING_APPROVAL" || dst === "WAITING")
     return "var(--st-wait)";
   if (src === "COMPLETED" || src === "SKIPPED") return "var(--st-ok)";
   return "var(--line-strong)";
 }
 
-export function toEdges(
-  steps: StepLike[],
-  statusOf?: (k: string) => string | undefined,
-): Edge[] {
+export function toEdges(steps: StepLike[], statusOf?: (k: string) => string | undefined): Edge[] {
   const edges: Edge[] = [];
   for (const s of steps)
     for (const d of s.depends_on ?? []) {
@@ -148,8 +128,7 @@ export function toEdges(
         style: {
           stroke,
           strokeWidth: statusOf && (active || dst === "RUNNING") ? 2 : 1.6,
-          opacity:
-            statusOf && !active && stroke === "var(--line-strong)" ? 0.85 : 1,
+          opacity: statusOf && !active && stroke === "var(--line-strong)" ? 0.85 : 1,
         },
         label:
           (s.run_if as any)?.step === d
@@ -194,8 +173,7 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
     .filter(Boolean)
     .join(" ");
   const isAgent = ["agent", "coding_agent"].includes(step.type);
-  const provider =
-    step.effective_agent?.provider ?? step.config?.agent?.provider;
+  const provider = step.effective_agent?.provider ?? step.config?.agent?.provider;
   const TypeIcon = stepTypeIcon(step.type);
   const StIcon = statusIcon(status);
   const merged: string[] = Array.isArray((step as any).config?.merged_from)
@@ -236,11 +214,7 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
           {isAgent && (
             <span
               className="gn-pill"
-              title={
-                step.effective_agent?.model ??
-                step.config?.agent?.model ??
-                undefined
-              }
+              title={step.effective_agent?.model ?? step.config?.agent?.model ?? undefined}
             >
               {provider
                 ? ((
@@ -255,21 +229,13 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
             </span>
           )}
           {step.handoff && (
-            <span
-              className="gn-pill gn-pill-wait"
-              title={step.handoff.failure_category}
-            >
+            <span className="gn-pill gn-pill-wait" title={step.handoff.failure_category}>
               {t("handoff.paused")}
             </span>
           )}
-          {status && (
-            <span className="gn-pill gn-pill-st">{statusName(status)}</span>
-          )}
+          {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
           {!!data.attempts && (
-            <span
-              className="gn-pill"
-              title={t("graph.attempts", { n: data.attempts })}
-            >
+            <span className="gn-pill" title={t("graph.attempts", { n: data.attempts })}>
               <RotateCcw size={10} strokeWidth={2.4} />
               {data.attempts}
             </span>

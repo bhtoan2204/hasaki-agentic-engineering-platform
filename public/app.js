@@ -9,17 +9,31 @@ function tr(key, params) {
     const form = Number(params.n) === 1 ? `${key}.one` : `${key}.other`;
     if (DICT.vi?.[form]) lookup = form;
   }
-  const raw = DICT[locale]?.[lookup] ?? DICT.vi?.[lookup] ?? DICT[locale]?.[key] ?? DICT.vi?.[key] ?? key;
+  const raw =
+    DICT[locale]?.[lookup] ?? DICT.vi?.[lookup] ?? DICT[locale]?.[key] ?? DICT.vi?.[key] ?? key;
   if (!params) return raw;
-  return raw.replace(/\{(\w+)\}/g, (_, name) => (params[name] == null ? `{${name}}` : String(params[name])));
+  return raw.replace(/\{(\w+)\}/g, (_, name) =>
+    params[name] == null ? `{${name}}` : String(params[name]),
+  );
 }
 function setUiLocale(next) {
   locale = next === "en" ? "en" : "vi";
-  try { localStorage.setItem(UI_KEY, locale); } catch {}
+  try {
+    localStorage.setItem(UI_KEY, locale);
+  } catch {}
   document.documentElement.lang = locale;
   paintChrome();
-  if (!ME) { $("#view").dataset.login = ""; void showLogin(); return; }
-  if (typeof render === "function") Promise.resolve(render(true)).then(() => { paintModal(); paintRank(); paintPreview(); });
+  if (!ME) {
+    $("#view").dataset.login = "";
+    void showLogin();
+    return;
+  }
+  if (typeof render === "function")
+    Promise.resolve(render(true)).then(() => {
+      paintModal();
+      paintRank();
+      paintPreview();
+    });
 }
 function paintChrome() {
   const summary = document.querySelector("#classic-account summary");
@@ -27,8 +41,11 @@ function paintChrome() {
   document.querySelectorAll("[data-key]").forEach((el) => {
     const label = tr(el.dataset.key);
     const count = el.querySelector("#qcount");
-    el.childNodes.forEach((n) => { if (n.nodeType === 3) n.textContent = label; });
-    if (!el.childNodes.length || ![...el.childNodes].some((n) => n.nodeType === 3)) el.prepend(document.createTextNode(label));
+    el.childNodes.forEach((n) => {
+      if (n.nodeType === 3) n.textContent = label;
+    });
+    if (!el.childNodes.length || ![...el.childNodes].some((n) => n.nodeType === 3))
+      el.prepend(document.createTextNode(label));
     if (count) el.append(count);
   });
   document.querySelectorAll("#lang button").forEach((b) => {
@@ -39,18 +56,43 @@ function paintChrome() {
 window.setUiLocale = setUiLocale;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const time = (t) => (t ? new Date(t).toLocaleString(locale === "vi" ? "vi-VN" : "en-GB", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "");
+const esc = (s) =>
+  String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  );
+const time = (t) =>
+  t
+    ? new Date(t).toLocaleString(locale === "vi" ? "vi-VN" : "en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "2-digit",
+      })
+    : "";
 const badge = (s) => {
   const name = tr("status." + s);
   return `<span class="badge s-${esc(s)}">${esc(name === "status." + s ? s : name)}</span>`;
 };
 const wiBadge = (s) => {
-  const cls = s === "in_progress" ? "RUNNING" : s === "done" ? "COMPLETED" : s === "archived" ? "archived" : "open";
+  const cls =
+    s === "in_progress"
+      ? "RUNNING"
+      : s === "done"
+        ? "COMPLETED"
+        : s === "archived"
+          ? "archived"
+          : "open";
   return `<span class="badge s-${cls}">${esc(WI_STATUS[s] ? tr(WI_STATUS[s]) : s)}</span>`;
 };
 const json = (v) => `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`;
-const list = (v) => (Array.isArray(v) ? v : String(v || "").split(",").map((x) => x.trim()).filter(Boolean));
+const list = (v) =>
+  Array.isArray(v)
+    ? v
+    : String(v || "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
 
 let ME = null;
 let CSRF = "";
@@ -58,7 +100,12 @@ async function api(path, body) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (body !== undefined && CSRF) headers["X-CSRF-Token"] = CSRF;
-  const r = await fetch(path, { method: body !== undefined ? "POST" : "GET", headers, credentials: "include", body: body !== undefined ? JSON.stringify(body) : undefined });
+  const r = await fetch(path, {
+    method: body !== undefined ? "POST" : "GET",
+    headers,
+    credentials: "include",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && !String(path).startsWith("/api/auth/login")) {
     ME = null;
@@ -66,7 +113,8 @@ async function api(path, body) {
     for (const k of Object.keys(drafts)) delete drafts[k];
     showLogin();
   }
-  if (!r.ok) throw new Error((j.error || r.status) + (j.details ? "\n" + j.details.join("\n") : ""));
+  if (!r.ok)
+    throw new Error((j.error || r.status) + (j.details ? "\n" + j.details.join("\n") : ""));
   return j;
 }
 async function showLogin() {
@@ -87,11 +135,16 @@ async function showLogin() {
       view.innerHTML = `<div class="card"><p>${esc(tr("auth.bootstrap"))}</p><code>npm run admin:bootstrap -- --username &lt;username&gt; --claim-legacy</code><p>${esc(tr("auth.bootstrapReload"))}</p></div>`;
       return;
     }
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    toast(e.message);
+  }
   $("#login-form").onsubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await api("/api/auth/login", { username: $("#lu").value, password: $("#lp").value });
+      const res = await api("/api/auth/login", {
+        username: $("#lu").value,
+        password: $("#lp").value,
+      });
       ME = res.user;
       CSRF = res.csrf;
       view.dataset.login = "";
@@ -128,12 +181,26 @@ const providerSelect = (id) =>
 const keep = (id) => `id="${id}" oninput="drafts['${id}']=this.value"`;
 const routeKey = () => location.hash.slice(1) || "/work-items";
 const draftKey = (id) => routeKey() + "\0" + id;
-const shown = (id, server) => (drafts[draftKey(id)] !== undefined ? drafts[draftKey(id)] : (server ?? ""));
-const keepHere = (id) => `id="${id}" oninput="drafts[(location.hash.slice(1)||'/work-items')+'\\0'+this.id]=this.value" onchange="drafts[(location.hash.slice(1)||'/work-items')+'\\0'+this.id]=this.value"`;
+const shown = (id, server) =>
+  drafts[draftKey(id)] !== undefined ? drafts[draftKey(id)] : (server ?? "");
+const keepHere = (id) =>
+  `id="${id}" oninput="drafts[(location.hash.slice(1)||'/work-items')+'\\0'+this.id]=this.value" onchange="drafts[(location.hash.slice(1)||'/work-items')+'\\0'+this.id]=this.value"`;
 const val = (id) => ($("#" + id)?.value ?? "").trim();
-const WI_STATUS = { open: "wi.open", in_progress: "wi.doing", done: "wi.done", archived: "wi.archived" };
-const catLabel = (c) => { const k = "kn.cat." + c; const s = tr(k); return s === k ? c : s; };
-const statusText = (s) => { const name = tr("status." + s); return name === "status." + s ? s : name; };
+const WI_STATUS = {
+  open: "wi.open",
+  in_progress: "wi.doing",
+  done: "wi.done",
+  archived: "wi.archived",
+};
+const catLabel = (c) => {
+  const k = "kn.cat." + c;
+  const s = tr(k);
+  return s === k ? c : s;
+};
+const statusText = (s) => {
+  const name = tr("status." + s);
+  return name === "status." + s ? s : name;
+};
 let modalCache = null;
 let previewCache = null;
 let rankCache = null;
@@ -144,7 +211,10 @@ let STATE = { route: "", parts: [] };
 // ---------------------------------------------------------------- router
 
 async function render(force = false) {
-  if (!ME) { showLogin(); return; }
+  if (!ME) {
+    showLogin();
+    return;
+  }
   const hash = location.hash.slice(1) || "/work-items";
   // Legacy links (#TASK-CODE from notifications of the old platform) → the work item.
   if (!hash.startsWith("/")) {
@@ -157,9 +227,15 @@ async function render(force = false) {
     return;
   }
   const parts = hash.split("/").filter(Boolean);
-  if (parts[0] === "account") { location.href = "/#" + hash; return; }
+  if (parts[0] === "account") {
+    location.href = "/#" + hash;
+    return;
+  }
   if (parts[0] === "users") {
-    if (ME.role !== "admin") { $("#view").innerHTML = `<div class="card">${esc(tr("auth.users"))}</div>`; return; }
+    if (ME.role !== "admin") {
+      $("#view").innerHTML = `<div class="card">${esc(tr("auth.users"))}</div>`;
+      return;
+    }
     const users = await api("/api/users");
     $("#view").innerHTML = `<div class="card"><h1>${esc(tr("auth.users"))}</h1>
       <form id="new-user" style="display:flex;gap:8px;flex-wrap:wrap">
@@ -168,27 +244,47 @@ async function render(force = false) {
         <select id="nu-role"><option value="member">${esc(tr("auth.role.member"))}</option><option value="admin">${esc(tr("auth.role.admin"))}</option></select>
         <button class="primary" type="submit">${esc(tr("auth.create"))}</button>
       </form>
-      <ul>${users.map((u) => `<li><b>${esc(u.username)}</b> ${esc(u.role)} ${u.active ? "" : "(off)"}
+      <ul>${users
+        .map(
+          (u) => `<li><b>${esc(u.username)}</b> ${esc(u.role)} ${u.active ? "" : "(off)"}
         <button type="button" data-reset="${u.id}">${esc(tr("auth.reset"))}</button>
-        <button type="button" data-active="${u.id}" data-on="${u.active}">${esc(u.active ? tr("auth.deactivate") : tr("auth.activate"))}</button></li>`).join("")}</ul>
+        <button type="button" data-active="${u.id}" data-on="${u.active}">${esc(u.active ? tr("auth.deactivate") : tr("auth.activate"))}</button></li>`,
+        )
+        .join("")}</ul>
     </div>`;
     $("#new-user").onsubmit = async (e) => {
       e.preventDefault();
-      await api("/api/users", { username: $("#nu-name").value, password: $("#nu-pw").value, role: $("#nu-role").value });
+      await api("/api/users", {
+        username: $("#nu-name").value,
+        password: $("#nu-pw").value,
+        role: $("#nu-role").value,
+      });
       await render(true);
     };
-    $$("[data-reset]").forEach((b) => b.onclick = async () => {
-      const password = prompt(tr("auth.newPassword"));
-      if (password) { await api(`/api/users/${b.dataset.reset}/password`, { password }); toast(tr("auth.reset"), true); }
-    });
-    $$("[data-active]").forEach((b) => b.onclick = async () => {
-      await api(`/api/users/${b.dataset.active}/active`, { active: b.dataset.on !== "true" });
-      await render(true);
-    });
+    $$("[data-reset]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          const password = prompt(tr("auth.newPassword"));
+          if (password) {
+            await api(`/api/users/${b.dataset.reset}/password`, { password });
+            toast(tr("auth.reset"), true);
+          }
+        }),
+    );
+    $$("[data-active]").forEach(
+      (b) =>
+        (b.onclick = async () => {
+          await api(`/api/users/${b.dataset.active}/active`, { active: b.dataset.on !== "true" });
+          await render(true);
+        }),
+    );
     return;
   }
   const active = document.activeElement;
-  const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) && $("#view").contains(active);
+  const typing =
+    active &&
+    ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) &&
+    $("#view").contains(active);
   if (!force && typing && STATE.route === hash) return; // don't clobber typing on poll
   STATE = { route: hash, parts };
   $$("header a").forEach((a) => a.classList.toggle("on", a.dataset.nav === parts[0]));
@@ -196,9 +292,16 @@ async function render(force = false) {
   try {
     const html = await view(...parts.slice(1));
     if (STATE.route !== hash) return;
-    const openDetails = $$("details[data-k]").filter((d) => d.open).map((d) => d.dataset.k);
+    const openDetails = $$("details[data-k]")
+      .filter((d) => d.open)
+      .map((d) => d.dataset.k);
     const scroll = window.scrollY;
-    const inner = Object.fromEntries($$("[data-scroll]").map((el) => [el.dataset.scroll, { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 40 }]));
+    const inner = Object.fromEntries(
+      $$("[data-scroll]").map((el) => [
+        el.dataset.scroll,
+        { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 40 },
+      ]),
+    );
     $("#view").innerHTML = html;
     $$("[data-scroll]").forEach((el) => {
       const st = inner[el.dataset.scroll];
@@ -222,13 +325,21 @@ async function refreshCount() {
     $("#qcount").innerHTML = qs.length ? `<span class="count">${qs.length}</span>` : "";
   } catch {}
 }
-window.addEventListener("hashchange", () => { modalCache = null; const m = $("#modal"); if (m) m.innerHTML = ""; render(true); });
+window.addEventListener("hashchange", () => {
+  modalCache = null;
+  const m = $("#modal");
+  if (m) m.innerHTML = "";
+  render(true);
+});
 
 // ---------------------------------------------------------------- shared pieces
 
 function workflowSelect(id, workflows, selected) {
   return `<select ${keep(id)}>${workflows
-    .map((w) => `<option value="${esc(w.key)}" ${(drafts[id] ?? selected) === w.key ? "selected" : ""}>${esc(w.name)} (v${w.latest_version})</option>`)
+    .map(
+      (w) =>
+        `<option value="${esc(w.key)}" ${(drafts[id] ?? selected) === w.key ? "selected" : ""}>${esc(w.name)} (v${w.latest_version})</option>`,
+    )
     .join("")}</select>`;
 }
 function stepChips(steps) {
@@ -239,7 +350,9 @@ function runsTable(runs) {
   return `<table><tr><th>#</th><th>${esc(tr("ins.col.run"))}</th><th>${esc(tr("common.workflow"))}</th><th>${esc(tr("wi.status"))}</th><th>${esc(tr("wfe.type"))}</th><th>${esc(tr("nav.questions"))}</th><th>${esc(tr("common.created"))}</th></tr>
     ${runs
       .map(
-        (r) => `<tr class="click" onclick="location.hash='/runs/${r.id}'"><td>${r.id}</td><td>${esc(r.title)}<div class="muted small mono">${esc(r.branch)}</div></td>
+        (
+          r,
+        ) => `<tr class="click" onclick="location.hash='/runs/${r.id}'"><td>${r.id}</td><td>${esc(r.title)}<div class="muted small mono">${esc(r.branch)}</div></td>
       <td>${esc(r.definition_key)} <span class="muted">v${r.definition_version}</span></td><td>${badge(r.status)}</td><td>${stepChips(r.steps)}</td>
       <td>${r.open_questions ? `<span class="badge s-WAITING_INPUT">${r.open_questions}</span>` : ""}</td><td class="muted">${time(r.updated_at)}</td></tr>`,
       )
@@ -252,8 +365,14 @@ const VIEWS = {
   // ------------------------------------------------ Work items
   async "work-items"(id) {
     if (id) return workItemDetail(Number(id));
-    const [items, status, inbox] = await Promise.all([api("/api/work-items"), api("/api/work/status"), api("/api/work/inbox")]);
-    const exp = status.expiresAt ? ` · ${esc(tr("ig.expires", { time: new Date(status.expiresAt).toLocaleString(locale === "vi" ? "vi-VN" : "en-GB") }))}` : "";
+    const [items, status, inbox] = await Promise.all([
+      api("/api/work-items"),
+      api("/api/work/status"),
+      api("/api/work/inbox"),
+    ]);
+    const exp = status.expiresAt
+      ? ` · ${esc(tr("ig.expires", { time: new Date(status.expiresAt).toLocaleString(locale === "vi" ? "vi-VN" : "en-GB") }))}`
+      : "";
     return `
       <h2>${esc(tr("nav.workItems"))}</h2><div class="muted">${esc(tr("wi.subtitle"))}</div>
       <div class="grid3" style="margin-top:14px">
@@ -272,26 +391,38 @@ const VIEWS = {
           ${
             status.loggedIn
               ? `<div class="row"><button onclick="A.refreshInbox(this)">${esc(tr("wi.fetchTasks"))}</button></div>`
-              : `<div class="row">${status.windowOpen ? `<span class="muted">${esc(tr("wi.loginWindow"))}</span>` : (status.browserMode === "local" ? `<button onclick="A.openLogin()">${esc(tr("chrome.connect"))}</button>` : `<span>${esc(tr("chrome.hosted"))}</span>`)}</div>
+              : `<div class="row">${status.windowOpen ? `<span class="muted">${esc(tr("wi.loginWindow"))}</span>` : status.browserMode === "local" ? `<button onclick="A.openLogin()">${esc(tr("chrome.connect"))}</button>` : `<span>${esc(tr("chrome.hosted"))}</span>`}</div>
                  <div class="row"><input placeholder="${esc(tr("wi.tokenPh"))}" ${keep("tok")} value="${esc(drafts["tok"] || "")}"><button onclick="A.saveToken()">${esc(tr("ig.save"))}</button></div>`
           }
           ${status.loggedIn ? `<div class="row"><input placeholder="${esc(tr("wi.taskId"))}" ${keep("hw-id")} value="${esc(drafts["hw-id"] || "")}"><button class="ghost" onclick="A.importHasakiId()">${esc(tr("kn.import"))}</button></div>` : ""}
-          ${inbox.length ? `<div style="max-height:220px;overflow:auto;margin-top:8px">${inbox
-            .map(
-              (r) => `<div class="row small" style="margin:4px 0"><div style="flex:1"><span class="mono muted">${esc(r.code)}</span> ${esc(r.name)}</div>
+          ${
+            inbox.length
+              ? `<div style="max-height:220px;overflow:auto;margin-top:8px">${inbox
+                  .map(
+                    (
+                      r,
+                    ) => `<div class="row small" style="margin:4px 0"><div style="flex:1"><span class="mono muted">${esc(r.code)}</span> ${esc(r.name)}</div>
               ${r.work_item_id ? `<a href="#/work-items/${r.work_item_id}">${r.run_status ? badge(r.run_status) : esc(tr("wi.imported"))}</a>` : `<button class="sm ghost" onclick="A.pick(${r.work_id}, this)">${esc(tr("kn.import"))}</button>`}</div>`,
-            )
-            .join("")}</div>` : ""}
+                  )
+                  .join("")}</div>`
+              : ""
+          }
         </div>
       </div>
       <h3>${esc(tr("wi.all"))}</h3>
-      ${items.length ? `<table><tr><th>${esc(tr("cl.code"))}</th><th>${esc(tr("wi.fieldTitle"))}</th><th>${esc(tr("wi.source"))}</th><th>${esc(tr("common.project"))}</th><th>${esc(tr("wi.status"))}</th><th>${esc(tr("cl.runs"))}</th><th>${esc(tr("cl.lastRun"))}</th><th>${esc(tr("runs.col.updated"))}</th></tr>
+      ${
+        items.length
+          ? `<table><tr><th>${esc(tr("cl.code"))}</th><th>${esc(tr("wi.fieldTitle"))}</th><th>${esc(tr("wi.source"))}</th><th>${esc(tr("common.project"))}</th><th>${esc(tr("wi.status"))}</th><th>${esc(tr("cl.runs"))}</th><th>${esc(tr("cl.lastRun"))}</th><th>${esc(tr("runs.col.updated"))}</th></tr>
         ${items
           .map(
-            (w) => `<tr class="click" onclick="location.hash='/work-items/${w.id}'"><td class="mono">${esc(w.code)}</td><td>${esc(w.title)}</td><td>${esc(w.source)}</td>
+            (
+              w,
+            ) => `<tr class="click" onclick="location.hash='/work-items/${w.id}'"><td class="mono">${esc(w.code)}</td><td>${esc(w.title)}</td><td>${esc(w.source)}</td>
           <td>${esc(w.project)}</td><td>${wiBadge(w.status)}</td><td>${w.run_count}</td><td>${w.last_run_status ? badge(w.last_run_status) : ""}</td><td class="muted">${time(w.updated_at)}</td></tr>`,
           )
-          .join("")}</table>` : `<div class="empty">${esc(tr("wi.empty"))}</div>`}`;
+          .join("")}</table>`
+          : `<div class="empty">${esc(tr("wi.empty"))}</div>`
+      }`;
   },
 
   // ------------------------------------------------ Runs
@@ -312,7 +443,10 @@ const VIEWS = {
 
   // ------------------------------------------------ Questions inbox
   async questions() {
-    const [open, history] = await Promise.all([api("/api/questions"), api("/api/questions/history")]);
+    const [open, history] = await Promise.all([
+      api("/api/questions"),
+      api("/api/questions/history"),
+    ]);
     const byRun = {};
     for (const q of open) (byRun[q.run_id] ??= []).push(q);
     return `
@@ -321,7 +455,10 @@ const VIEWS = {
         open.length
           ? Object.entries(byRun)
               .map(
-                ([runId, qs]) => `<div class="card"><div class="row" style="margin:0"><b><a href="#/runs/${runId}">${esc(tr("ins.col.run"))} #${runId}</a></b> ${esc(qs[0].run_title)} ${badge(qs[0].run_status)}</div>
+                ([
+                  runId,
+                  qs,
+                ]) => `<div class="card"><div class="row" style="margin:0"><b><a href="#/runs/${runId}">${esc(tr("ins.col.run"))} #${runId}</a></b> ${esc(qs[0].run_title)} ${badge(qs[0].run_status)}</div>
               ${qs.map(questionForm).join("")}
               <div class="row"><button onclick="A.answer([${qs.map((q) => q.id).join(",")}])">${esc(tr("si.sendContinue"))}</button></div></div>`,
               )
@@ -329,11 +466,16 @@ const VIEWS = {
           : `<div class="empty">${esc(tr("qx.emptyTitle"))}</div>`
       }
       <h3>${esc(tr("qx.history"))}</h3>
-      ${history.length ? `<table><tr><th>${esc(tr("ins.col.run"))}</th><th>${esc(tr("cl.step"))}</th><th>${esc(tr("cl.question"))}</th><th>${esc(tr("cl.answer"))}</th><th>${esc(tr("cl.stepNow"))}</th><th>${esc(tr("cl.when"))}</th></tr>${history
-        .map(
-          (q) => `<tr><td><a href="#/runs/${q.run_id}">#${q.run_id}</a></td><td>${esc(q.step_name)}</td><td>${esc(q.question)}</td><td>${esc(q.answer)}</td><td>${badge(q.step_status)}</td><td class="muted">${time(q.answered_at)}</td></tr>`,
-        )
-        .join("")}</table>` : `<div class="empty">${esc(tr("qx.emptyBody"))}</div>`}`;
+      ${
+        history.length
+          ? `<table><tr><th>${esc(tr("ins.col.run"))}</th><th>${esc(tr("cl.step"))}</th><th>${esc(tr("cl.question"))}</th><th>${esc(tr("cl.answer"))}</th><th>${esc(tr("cl.stepNow"))}</th><th>${esc(tr("cl.when"))}</th></tr>${history
+              .map(
+                (q) =>
+                  `<tr><td><a href="#/runs/${q.run_id}">#${q.run_id}</a></td><td>${esc(q.step_name)}</td><td>${esc(q.question)}</td><td>${esc(q.answer)}</td><td>${badge(q.step_status)}</td><td class="muted">${time(q.answered_at)}</td></tr>`,
+              )
+              .join("")}</table>`
+          : `<div class="empty">${esc(tr("qx.emptyBody"))}</div>`
+      }`;
   },
 
   // ------------------------------------------------ Workflow library
@@ -341,7 +483,23 @@ const VIEWS = {
     if (key) return workflowDetail(key);
     const wfs = await api("/api/workflows");
     const sample = JSON.stringify(
-      { name: "My workflow", description: "", steps: [{ key: "analyze", type: "agent", config: { instructions: "…", output_contract: "{ summary }" } }, { key: "approve", type: "human_approval", depends_on: ["analyze"], config: { show_outputs: ["analyze"] } }] },
+      {
+        name: "My workflow",
+        description: "",
+        steps: [
+          {
+            key: "analyze",
+            type: "agent",
+            config: { instructions: "…", output_contract: "{ summary }" },
+          },
+          {
+            key: "approve",
+            type: "human_approval",
+            depends_on: ["analyze"],
+            config: { show_outputs: ["analyze"] },
+          },
+        ],
+      },
       null,
       2,
     );
@@ -350,7 +508,9 @@ const VIEWS = {
       <table style="margin-top:12px"><tr><th>${esc(tr("wfe.key"))}</th><th>${esc(tr("wfe.name"))}</th><th>${esc(tr("cl.latest"))}</th><th>${esc(tr("cl.runs"))}</th><th></th><th>${esc(tr("cl.updated"))}</th></tr>
       ${wfs
         .map(
-          (w) => `<tr class="click" onclick="location.hash='/workflows/${w.key}'"><td class="mono">${esc(w.key)}</td><td>${esc(w.name)}<div class="muted small">${esc(w.description)}</div></td>
+          (
+            w,
+          ) => `<tr class="click" onclick="location.hash='/workflows/${w.key}'"><td class="mono">${esc(w.key)}</td><td>${esc(w.name)}<div class="muted small">${esc(w.description)}</div></td>
         <td>v${w.latest_version}${w.has_draft ? ` <span class="badge s-WAITING">${esc(tr("wfe.draft"))}</span>` : ""}</td><td>${w.run_count}</td><td>${w.is_template ? `<span class="badge s-PENDING">${esc(tr("cl.template"))}</span>` : ""}</td><td class="muted">${time(w.updated_at)}</td></tr>`,
         )
         .join("")}</table>
@@ -372,7 +532,9 @@ const VIEWS = {
       <table style="margin-top:12px"><tr><th>${esc(tr("kn.key"))}</th><th>${esc(tr("kn.titleField"))}</th><th>${esc(tr("kn.category"))}</th><th>${esc(tr("kn.scope"))}</th><th>${esc(tr("kn.conflictKey"))}</th><th>${esc(tr("cl.version"))}</th><th>${esc(tr("kn.enabled"))}</th></tr>
       ${items
         .map(
-          (k) => `<tr class="click" onclick="location.hash='/knowledge/${k.key}'"><td class="mono">${esc(k.key)}</td><td>${esc(k.title)}</td><td>${esc(catLabel(k.category))}</td>
+          (
+            k,
+          ) => `<tr class="click" onclick="location.hash='/knowledge/${k.key}'"><td class="mono">${esc(k.key)}</td><td>${esc(k.title)}</td><td>${esc(catLabel(k.category))}</td>
         <td>${esc(k.scope_type)}${k.scope_ref ? `:<b>${esc(k.scope_ref)}</b>` : ""}${k.enforced ? ` <span class="badge s-FAILED">${esc(tr("kn.enforced"))}</span>` : ""}</td><td class="mono">${esc(k.conflict_key || "")}</td>
         <td>v${k.current_version}</td><td>${k.enabled ? "✓" : `<span class="muted">${esc(tr("cl.off"))}</span>`}</td></tr>`,
         )
@@ -380,7 +542,7 @@ const VIEWS = {
       <div class="grid2" style="margin-top:14px">
         <div class="card"><h4>${esc(tr("kn.newTitle"))}</h4>
           <div class="grid2"><div><label>${esc(tr("kn.key"))}</label><input ${keep("k-key")} value="${esc(drafts["k-key"] || "")}"></div><div><label>${esc(tr("kn.titleField"))}</label><input ${keep("k-title")} value="${esc(drafts["k-title"] || "")}"></div>
-          <div><label>${esc(tr("kn.category"))}</label><select ${keep("k-cat")}>${cats.map((c) => `<option value="${esc(c)}" ${ (drafts["k-cat"] ?? cats[0]) === c ? "selected" : ""}>${esc(catLabel(c))}</option>`).join("")}</select></div>
+          <div><label>${esc(tr("kn.category"))}</label><select ${keep("k-cat")}>${cats.map((c) => `<option value="${esc(c)}" ${(drafts["k-cat"] ?? cats[0]) === c ? "selected" : ""}>${esc(catLabel(c))}</option>`).join("")}</select></div>
           <div><label>${esc(tr("kn.scope"))}</label><select ${keep("k-scope")}>${scopes.map((c) => `<option value="${esc(c)}" ${(drafts["k-scope"] ?? scopes[0]) === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
           <div><label>${esc(tr("cl.scopeRefLong"))}</label><input ${keep("k-ref")} value="${esc(drafts["k-ref"] || "")}"></div>
           <div><label>${esc(tr("kn.conflictKey"))}</label><input ${keep("k-ck")} value="${esc(drafts["k-ck"] || "")}"></div></div>
@@ -406,7 +568,9 @@ const VIEWS = {
       <table style="margin-top:12px"><tr><th>${esc(tr("wfe.name"))}</th><th>${esc(tr("repo.list.projects"))}</th><th>${esc(tr("repo.list.services"))}</th><th>${esc(tr("repo.list.tags"))}</th><th>${esc(tr("repo.list.allowed_actions"))}</th><th>${esc(tr("kn.enabled"))}</th><th>${esc(tr("wi.description"))}</th></tr>
       ${repos
         .map(
-          (x) => `<tr class="click" onclick="location.hash='/repositories/${x.name}'"><td class="mono">${esc(x.name)}</td><td>${esc(x.projects.join(", "))}</td><td>${esc(x.services.join(", "))}</td>
+          (
+            x,
+          ) => `<tr class="click" onclick="location.hash='/repositories/${x.name}'"><td class="mono">${esc(x.name)}</td><td>${esc(x.projects.join(", "))}</td><td>${esc(x.services.join(", "))}</td>
         <td>${esc(x.tags.join(", "))}</td><td>${esc(x.allowed_actions.join(", "))}</td><td>${x.enabled ? "✓" : esc(tr("cl.off"))}</td><td class="small">${esc(x.description)}</td></tr>`,
         )
         .join("")}</table>
@@ -468,7 +632,9 @@ async function workItemDetail(id) {
 function prTable(prs) {
   return `<table><tr><th>${esc(tr("cl.repo"))}</th><th>${esc(tr("cl.pr"))}</th><th>${esc(tr("common.branch"))}</th><th></th><th>${esc(tr("cl.updated"))}</th></tr>${prs
     .map(
-      (p) => `<tr><td>${esc(p.repo)}</td><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>${p.decisions?.length ? `<details><summary>${esc(tr("cl.decisions", { n: p.decisions.length }))}</summary><ul>${p.decisions.map((d) => `<li><b>${esc(d.title)}</b>: ${esc(d.detail)}</li>`).join("")}</ul></details>` : ""}</td>
+      (
+        p,
+      ) => `<tr><td>${esc(p.repo)}</td><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>${p.decisions?.length ? `<details><summary>${esc(tr("cl.decisions", { n: p.decisions.length }))}</summary><ul>${p.decisions.map((d) => `<li><b>${esc(d.title)}</b>: ${esc(d.detail)}</li>`).join("")}</ul></details>` : ""}</td>
       <td class="mono">${esc(p.source_branch)} → ${esc(p.target_branch)}</td><td>${p.draft ? `<span class="badge s-PENDING">${esc(tr("ch.draft"))}</span>` : ""}${p.created ? "" : ` <span class="badge s-WAITING">${esc(tr("ch.linkOnly"))}</span>`}</td><td class="muted">${time(p.updated_at)}</td></tr>`,
     )
     .join("")}</table>`;
@@ -507,7 +673,8 @@ function approvalPanel(run, s) {
           .join("")}
         <div class="muted small">${esc(tr("cl.allowedLabel", { list: (req.allowed || run.allowed_repositories).join(", ") }))}</div>`;
     }
-    for (const [k, v] of Object.entries(req.outputs || {})) body += `<details data-k="appr-${s.key}-${k}" open><summary>${esc(tr("cl.outputOf", { step: k }))}</summary>${json(v)}</details>`;
+    for (const [k, v] of Object.entries(req.outputs || {}))
+      body += `<details data-k="appr-${s.key}-${k}" open><summary>${esc(tr("cl.outputOf", { step: k }))}</summary>${json(v)}</details>`;
   }
   return `<div class="card" style="background:var(--bg)">${body}
     <textarea rows="2" ${keep("cmt-" + s.key)} placeholder="${esc(tr("si.commentPh"))}">${esc(drafts["cmt-" + s.key] || "")}</textarea>
@@ -521,13 +688,32 @@ const convSel = {}; // stepKey -> selected attempt id
 const AGENT_TYPES = ["agent", "coding_agent"];
 const ago = (t) => {
   const s = Math.max(0, Math.round((Date.now() - new Date(t)) / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${s % 60}s` : `${Math.floor(s / 3600)}h`;
+  return s < 60
+    ? `${s}s`
+    : s < 3600
+      ? `${Math.floor(s / 60)}m${s % 60}s`
+      : `${Math.floor(s / 3600)}h`;
 };
-const fmtDur = (ms) => (ms == null ? "" : ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`);
+const fmtDur = (ms) =>
+  ms == null
+    ? ""
+    : ms < 60000
+      ? `${Math.round(ms / 1000)}s`
+      : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`;
 
 function toolLabel(name, input = {}) {
   const short = name.replace(/^mcp__platform__/, "platform·");
-  const hint = input.file_path ?? input.path ?? input.pattern ?? input.command ?? input.repo ?? input.description ?? input.url ?? input.query ?? input.step_key ?? "";
+  const hint =
+    input.file_path ??
+    input.path ??
+    input.pattern ??
+    input.command ??
+    input.repo ??
+    input.description ??
+    input.url ??
+    input.query ??
+    input.step_key ??
+    "";
   return `<b>${esc(short)}</b> <span class="mono">${esc(String(hint).split("\n")[0].slice(0, 140))}</span>`;
 }
 
@@ -537,24 +723,36 @@ function agentName(provider) {
 function renderTranscript(events, live, provider) {
   const name = agentName(provider);
   const results = {};
-  for (const e of events) if (e.kind === "tool_result" && e.data?.tool_use_id) results[e.data.tool_use_id] = e;
+  for (const e of events)
+    if (e.kind === "tool_result" && e.data?.tool_use_id) results[e.data.tool_use_id] = e;
   const out = [];
   for (const e of events) {
     const sub = e.data?.parent ? " sub" : "";
     const when = `<span class="muted small">${time(e.created_at)}</span>`;
-    const long = (txt, n = 1800) => (txt.length > n ? `<details><summary>${esc(txt.slice(0, 200))}… (${esc(tr("cl.chars", { n: txt.length }))})</summary><div class="pre">${esc(txt)}</div></details>` : `<div class="pre">${esc(txt)}</div>`);
+    const long = (txt, n = 1800) =>
+      txt.length > n
+        ? `<details><summary>${esc(txt.slice(0, 200))}… (${esc(tr("cl.chars", { n: txt.length }))})</summary><div class="pre">${esc(txt)}</div></details>`
+        : `<div class="pre">${esc(txt)}</div>`;
     switch (e.kind) {
       case "system_prompt":
-        out.push(`<details class="msg sys"><summary>📋 ${esc(tr("cl.system"))} · ${esc((e.data?.tools || []).join(", "))}${e.data?.knowledge?.length ? " · " + esc(tr("cl.knowledgeWord")) + ": " + esc(e.data.knowledge.join(", ")) : ""}</summary><div class="pre">${esc(e.content)}</div></details>`);
+        out.push(
+          `<details class="msg sys"><summary>📋 ${esc(tr("cl.system"))} · ${esc((e.data?.tools || []).join(", "))}${e.data?.knowledge?.length ? " · " + esc(tr("cl.knowledgeWord")) + ": " + esc(e.data.knowledge.join(", ")) : ""}</summary><div class="pre">${esc(e.content)}</div></details>`,
+        );
         break;
       case "prompt":
-        out.push(`<div class="msg user${sub}"><div class="who">➡️ ${esc(tr("cl.platformTo", { name }))} ${e.data?.resume_session ? `<span class="badge s-READY">${esc(tr("cl.resume"))}</span>` : ""} ${when}</div>${long(e.content)}</div>`);
+        out.push(
+          `<div class="msg user${sub}"><div class="who">➡️ ${esc(tr("cl.platformTo", { name }))} ${e.data?.resume_session ? `<span class="badge s-READY">${esc(tr("cl.resume"))}</span>` : ""} ${when}</div>${long(e.content)}</div>`,
+        );
         break;
       case "agent":
-        out.push(`<div class="msg claude${sub}"><div class="who">🤖 ${esc(name)} ${when}</div><div class="pre">${esc(e.content)}</div></div>`);
+        out.push(
+          `<div class="msg claude${sub}"><div class="who">🤖 ${esc(name)} ${when}</div><div class="pre">${esc(e.content)}</div></div>`,
+        );
         break;
       case "thinking":
-        out.push(`<details class="msg think${sub}"><summary>💭 ${esc(tr("cl.thinking"))} ${when}</summary><div class="pre">${esc(e.content)}</div></details>`);
+        out.push(
+          `<details class="msg think${sub}"><summary>💭 ${esc(tr("cl.thinking"))} ${when}</summary><div class="pre">${esc(e.content)}</div></details>`,
+        );
         break;
       case "tool": {
         if (!e.data?.name) {
@@ -562,21 +760,43 @@ function renderTranscript(events, live, provider) {
           break;
         }
         const r = results[e.data.id];
-        const flag = r ? (r.data?.is_error ? badge("FAILED") : "") : live ? `<span class="badge s-RUNNING">${esc(tr("cl.running"))}</span>` : "";
-        const result = r ? `<details${r.data?.is_error ? " open" : ""}><summary>${esc(tr("cl.toolResult"))} (${esc(tr("cl.chars", { n: r.content.length }))})</summary><pre${r.data?.is_error ? ' class="err"' : ""}>${esc(r.content)}</pre></details>` : "";
-        out.push(`<div class="msg tool${sub}"><div class="who">🔧 ${toolLabel(e.data.name, e.data.input)} ${when} ${flag}</div><details><summary>${esc(tr("cl.input"))}</summary><pre>${esc(JSON.stringify(e.data.input, null, 2))}</pre></details>${result}</div>`);
+        const flag = r
+          ? r.data?.is_error
+            ? badge("FAILED")
+            : ""
+          : live
+            ? `<span class="badge s-RUNNING">${esc(tr("cl.running"))}</span>`
+            : "";
+        const result = r
+          ? `<details${r.data?.is_error ? " open" : ""}><summary>${esc(tr("cl.toolResult"))} (${esc(tr("cl.chars", { n: r.content.length }))})</summary><pre${r.data?.is_error ? ' class="err"' : ""}>${esc(r.content)}</pre></details>`
+          : "";
+        out.push(
+          `<div class="msg tool${sub}"><div class="who">🔧 ${toolLabel(e.data.name, e.data.input)} ${when} ${flag}</div><details><summary>${esc(tr("cl.input"))}</summary><pre>${esc(JSON.stringify(e.data.input, null, 2))}</pre></details>${result}</div>`,
+        );
         break;
       }
       case "tool_result":
-        if (!e.data?.tool_use_id || !events.some((x) => x.kind === "tool" && x.data?.id === e.data.tool_use_id))
-          out.push(`<details class="msg tool${sub}"><summary>↩︎ ${esc(tr("cl.toolResult"))}</summary><pre>${esc(e.content)}</pre></details>`);
+        if (
+          !e.data?.tool_use_id ||
+          !events.some((x) => x.kind === "tool" && x.data?.id === e.data.tool_use_id)
+        )
+          out.push(
+            `<details class="msg tool${sub}"><summary>↩︎ ${esc(tr("cl.toolResult"))}</summary><pre>${esc(e.content)}</pre></details>`,
+          );
         break;
       case "result": {
         const d = e.data || {};
         const turns = d.num_turns == null ? "?" : tr("cl.turns", { n: d.num_turns });
-        const usage = d.usage ? " · " + tr("cl.tokensIn", { inn: d.usage.input_tokens ?? 0, out: d.usage.output_tokens ?? 0 }) : "";
-        const answer = e.content ? `<details><summary>${esc(tr("cl.lastAnswer"))}</summary><div class="pre">${esc(e.content)}</div></details>` : "";
-        out.push(`<div class="msg done"><b>${d.is_error ? "❌" : "✅"} ${esc(tr("cl.turnDone"))}</b> · ${esc(turns)} · ${fmtDur(d.duration_ms)}${d.total_cost_usd != null ? ` · $${Number(d.total_cost_usd).toFixed(3)}` : ""}${esc(usage)} ${when}${answer}</div>`);
+        const usage = d.usage
+          ? " · " +
+            tr("cl.tokensIn", { inn: d.usage.input_tokens ?? 0, out: d.usage.output_tokens ?? 0 })
+          : "";
+        const answer = e.content
+          ? `<details><summary>${esc(tr("cl.lastAnswer"))}</summary><div class="pre">${esc(e.content)}</div></details>`
+          : "";
+        out.push(
+          `<div class="msg done"><b>${d.is_error ? "❌" : "✅"} ${esc(tr("cl.turnDone"))}</b> · ${esc(turns)} · ${fmtDur(d.duration_ms)}${d.total_cost_usd != null ? ` · $${Number(d.total_cost_usd).toFixed(3)}` : ""}${esc(usage)} ${when}${answer}</div>`,
+        );
         break;
       }
       default:
@@ -601,11 +821,18 @@ async function conversationPanel(s, atts, provider) {
   const att = atts.find((a) => a.id === selected) ?? atts.at(-1);
   const live = running && att.id === s.current_attempt_id;
   const events = open ? await api(`/api/attempts/${att.id}/transcript`) : [];
-  return `<details data-k="${k}" ${open ? "open data-loaded=\"1\"" : ""} ontoggle="if (this.open && !this.dataset.loaded) render(true)">
+  return `<details data-k="${k}" ${open ? 'open data-loaded="1"' : ""} ontoggle="if (this.open && !this.dataset.loaded) render(true)">
     <summary>💬 ${esc(tr("cl.convo", { name: agentName(provider) }))} ${live ? `<span class="badge s-RUNNING">${esc(tr("cl.live"))}</span>` : ""}</summary>
-    <div class="row" style="margin:4px 0">${atts.length > 1 ? `<select style="width:auto" onchange="A.convAttempt('${s.key}', this.value)">${atts
-      .map((a) => `<option value="${a.id}" ${a.id === att.id ? "selected" : ""}>${esc(tr("cl.attemptLine", { n: a.number, gen: a.generation, status: statusText(a.status) }))}</option>`)
-      .join("")}</select>` : `<span class="muted small">${esc(tr("cl.attemptShort", { n: att.number, status: statusText(att.status) }))}</span>`}</div>
+    <div class="row" style="margin:4px 0">${
+      atts.length > 1
+        ? `<select style="width:auto" onchange="A.convAttempt('${s.key}', this.value)">${atts
+            .map(
+              (a) =>
+                `<option value="${a.id}" ${a.id === att.id ? "selected" : ""}>${esc(tr("cl.attemptLine", { n: a.number, gen: a.generation, status: statusText(a.status) }))}</option>`,
+            )
+            .join("")}</select>`
+        : `<span class="muted small">${esc(tr("cl.attemptShort", { n: att.number, status: statusText(att.status) }))}</span>`
+    }</div>
     <div class="convo" data-scroll="${k}">${open ? renderTranscript(events, live, provider) : ""}</div></details>`;
 }
 
@@ -633,16 +860,20 @@ async function runDetail(id) {
       ${["PENDING", "PAUSED"].includes(r.status) ? `<div class="row"><input ${keep("sel-repos")} value="${esc(drafts["sel-repos"] ?? r.selected_repositories.join(", "))}"><button class="ghost" onclick="A.setRepos(${r.id})">${esc(tr("cl.set"))}</button></div>` : ""}
     </div>
     <div class="graph">${r.steps
-      .map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}<span class="node s-${s.status}" title="${esc(s.type)} · ${esc(tr("cl.depends", { list: s.depends_on.join(", ") || "-" }))}" onclick="document.getElementById('step-${s.key}').scrollIntoView({behavior:'smooth'})">${esc(s.name)}</span>`)
+      .map(
+        (s, i) =>
+          `${i ? '<span class="arrow">→</span>' : ""}<span class="node s-${s.status}" title="${esc(s.type)} · ${esc(tr("cl.depends", { list: s.depends_on.join(", ") || "-" }))}" onclick="document.getElementById('step-${s.key}').scrollIntoView({behavior:'smooth'})">${esc(s.name)}</span>`,
+      )
       .join("")}</div>
-    ${(await Promise.all(r.steps
-      .map(async (s) => {
-        const atts = attempts[s.key] || [];
-        const convo = await conversationPanel(s, atts, r.agent_provider);
-        const qs = questions[s.key] || [];
-        const open = qs.filter((q) => q.status === "open");
-        const can = (a) => RUN_ACTIONS[a].includes(s.status) && active;
-        return `<div class="card step st-${s.status}" id="step-${s.key}">
+    ${(
+      await Promise.all(
+        r.steps.map(async (s) => {
+          const atts = attempts[s.key] || [];
+          const convo = await conversationPanel(s, atts, r.agent_provider);
+          const qs = questions[s.key] || [];
+          const open = qs.filter((q) => q.status === "open");
+          const can = (a) => RUN_ACTIONS[a].includes(s.status) && active;
+          return `<div class="card step st-${s.status}" id="step-${s.key}">
           <div class="step-head"><b>${esc(s.name)}</b><span class="type">${esc(s.key)} · ${esc(s.type)}</span>${badge(s.status)}
             <span class="muted small">${esc(tr("cl.gen"))} ${s.generation} · ${esc(tr("cl.attempts", { n: atts.length }))}${s.requires_approval ? " · " + esc(tr("si.gate")) : ""}${s.run_if ? ` · run_if ${esc(s.run_if.step)}=${esc(JSON.stringify(s.run_if.equals))}` : ""}</span>
             <span style="flex:1"></span>
@@ -656,25 +887,50 @@ async function runDetail(id) {
           ${convo}
           ${s.output != null ? `<details data-k="out-${s.key}"><summary>${esc(tr("cl.output"))}</summary>${json(s.output)}</details>` : ""}
           ${(artifacts[s.id] || []).length ? `<div class="row small">${artifacts[s.id].map((a) => `<button class="ghost sm" onclick="A.artifact(${a.id})">📎 ${esc(a.name)}</button>`).join("")}</div>` : ""}
-          ${qs.filter((q) => q.status !== "open").length ? `<details data-k="qa-${s.key}"><summary>${esc(tr("cl.earlierQ", { n: qs.filter((q) => q.status !== "open").length }))}</summary>${qs.filter((q) => q.status !== "open").map((q) => `<div class="q"><b>${esc(q.question)}</b> ${badge(q.status)}<div class="muted">→ ${esc(q.answer ?? "")}</div></div>`).join("")}</details>` : ""}
-          ${atts.length ? `<details data-k="att-${s.key}"><summary>${esc(tr("cl.attemptHistory"))}</summary><table><tr><th>#</th><th>${esc(tr("cl.gen"))}</th><th>${esc(tr("wi.status"))}</th><th>${esc(tr("si.started"))}</th><th>${esc(tr("si.finished"))}</th><th>${esc(tr("cl.context"))}</th><th>${esc(tr("cl.session"))}</th><th>${esc(tr("common.error"))}</th></tr>${atts
-            .map(
-              (a) => `<tr${a.invalidated_at ? ' class="muted"' : ""}><td>${a.number}</td><td>${a.generation}</td><td>${badge(a.status)}${a.invalidated_at ? ` <span class="small">${esc(tr("si.invalidated"))}</span>` : ""}</td><td>${time(a.started_at)}</td><td>${time(a.finished_at)}</td>
+          ${
+            qs.filter((q) => q.status !== "open").length
+              ? `<details data-k="qa-${s.key}"><summary>${esc(tr("cl.earlierQ", { n: qs.filter((q) => q.status !== "open").length }))}</summary>${qs
+                  .filter((q) => q.status !== "open")
+                  .map(
+                    (q) =>
+                      `<div class="q"><b>${esc(q.question)}</b> ${badge(q.status)}<div class="muted">→ ${esc(q.answer ?? "")}</div></div>`,
+                  )
+                  .join("")}</details>`
+              : ""
+          }
+          ${
+            atts.length
+              ? `<details data-k="att-${s.key}"><summary>${esc(tr("cl.attemptHistory"))}</summary><table><tr><th>#</th><th>${esc(tr("cl.gen"))}</th><th>${esc(tr("wi.status"))}</th><th>${esc(tr("si.started"))}</th><th>${esc(tr("si.finished"))}</th><th>${esc(tr("cl.context"))}</th><th>${esc(tr("cl.session"))}</th><th>${esc(tr("common.error"))}</th></tr>${atts
+                  .map(
+                    (
+                      a,
+                    ) => `<tr${a.invalidated_at ? ' class="muted"' : ""}><td>${a.number}</td><td>${a.generation}</td><td>${badge(a.status)}${a.invalidated_at ? ` <span class="small">${esc(tr("si.invalidated"))}</span>` : ""}</td><td>${time(a.started_at)}</td><td>${time(a.finished_at)}</td>
               <td>${a.context_snapshot_id ? `<button class="ghost sm" onclick="A.snapshot(${a.context_snapshot_id})">${esc(tr("cl.snapshot"))}</button>` : ""}</td><td class="mono small">${esc((a.agent_session_id || "").slice(0, 8))}</td>
               <td class="err small">${esc(a.error?.message || "")}</td></tr>`,
-            )
-            .join("")}</table></details>` : ""}
+                  )
+                  .join("")}</table></details>`
+              : ""
+          }
         </div>`;
-      }))).join("")}
+        }),
+      )
+    ).join("")}
     ${r.pull_requests.length ? `<h3>${esc(tr("common.pullRequests"))}</h3>${prTable(r.pull_requests)}` : ""}
-    ${active && (r.graph.feedback_step || r.steps.some((s) => s.type === "coding_agent")) ? `<h3>${esc(tr("rv.feedbackTitle"))}</h3>
-      <textarea rows="3" ${keep("fb")} placeholder="${esc(tr("rv.feedbackPh"))}">${esc(drafts.fb || "")}</textarea><div class="row"><button onclick="A.feedback(${r.id})">${esc(tr("rv.feedbackTip"))}</button></div>` : ""}
+    ${
+      active && (r.graph.feedback_step || r.steps.some((s) => s.type === "coding_agent"))
+        ? `<h3>${esc(tr("rv.feedbackTitle"))}</h3>
+      <textarea rows="3" ${keep("fb")} placeholder="${esc(tr("rv.feedbackPh"))}">${esc(drafts.fb || "")}</textarea><div class="row"><button onclick="A.feedback(${r.id})">${esc(tr("rv.feedbackTip"))}</button></div>`
+        : ""
+    }
     <h3>${esc(tr("common.timeline"))}</h3>
     ${events
       .slice()
       .reverse()
       .slice(0, 400)
-      .map((e) => `<div class="ev ${e.kind}"><time class="muted">${time(e.created_at)}</time><span class="s mono small muted">${esc(e.step_key || "run")}</span><span class="k muted">${esc(e.kind)}</span><span class="c">${esc(e.content)}</span></div>`)
+      .map(
+        (e) =>
+          `<div class="ev ${e.kind}"><time class="muted">${time(e.created_at)}</time><span class="s mono small muted">${esc(e.step_key || "run")}</span><span class="k muted">${esc(e.kind)}</span><span class="c">${esc(e.content)}</span></div>`,
+      )
       .join("")}`;
 }
 
@@ -688,8 +944,13 @@ async function workflowDetail(key) {
     <h2>${esc(w.name)}</h2><div class="muted"><span class="mono">${esc(w.key)}</span> · ${esc(tr("cl.latestV", { n: w.latest_version }))}${w.draft_spec ? ` · <span class="badge s-WAITING">${esc(tr("cl.unpublished"))}</span>` : ""}</div>
     <div class="muted">${esc(w.description)}</div>
     ${spec ? `<div class="graph">${spec.steps.map((s, i) => `${i ? '<span class="arrow">→</span>' : ""}<span class="node" title="${esc(s.type)} · ${esc(tr("cl.after", { list: (s.depends_on || []).join(", ") || "-" }))}">${esc(s.name || s.key)} <span class="muted small">${esc(s.type)}</span></span>`).join("")}</div>` : ""}
-    <div class="card"><h4>${esc(tr("wfe.addStep"))}</h4><table><tr><th>${esc(tr("wfe.key"))}</th><th>${esc(tr("wfe.type"))}</th><th>${esc(tr("wfe.depends"))}</th><th>${esc(tr("wfe.execution"))}</th></tr>${(spec?.steps || [])
-      .map((s) => `<tr><td class="mono">${esc(s.key)}</td><td>${esc(s.type)}</td><td>${esc((s.depends_on || []).join(", "))}</td><td class="small">${[s.requires_approval ? tr("si.gate") : "", s.max_attempts > 1 ? tr("si.maxAttempts") + " " + s.max_attempts : "", s.run_if ? "run_if" : "", (s.config?.skills || []).length ? tr("cl.skills") + ": " + s.config.skills.join(", ") : ""].filter(Boolean).join(" · ")}</td></tr>`)
+    <div class="card"><h4>${esc(tr("wfe.addStep"))}</h4><table><tr><th>${esc(tr("wfe.key"))}</th><th>${esc(tr("wfe.type"))}</th><th>${esc(tr("wfe.depends"))}</th><th>${esc(tr("wfe.execution"))}</th></tr>${(
+      spec?.steps || []
+    )
+      .map(
+        (s) =>
+          `<tr><td class="mono">${esc(s.key)}</td><td>${esc(s.type)}</td><td>${esc((s.depends_on || []).join(", "))}</td><td class="small">${[s.requires_approval ? tr("si.gate") : "", s.max_attempts > 1 ? tr("si.maxAttempts") + " " + s.max_attempts : "", s.run_if ? "run_if" : "", (s.config?.skills || []).length ? tr("cl.skills") + ": " + s.config.skills.join(", ") : ""].filter(Boolean).join(" · ")}</td></tr>`,
+      )
       .join("")}</table></div>
     <div class="card"><h4>${esc(tr("cl.editDef"))}</h4><div class="muted small">${esc(tr("cl.editDefHint", { version: w.latest_version + 1 }))}</div>
       <textarea class="code" rows="22" ${keep(id)}>${esc(drafts[id] ?? JSON.stringify(spec, null, 2))}</textarea>
@@ -697,7 +958,18 @@ async function workflowDetail(key) {
         <input placeholder="${esc(tr("wfe.changeNote"))}" ${keep("note-" + key)} value="${esc(drafts["note-" + key] || "")}" style="max-width:260px"><button onclick="A.publish('${key}')">${esc(tr("cl.publishNew"))}</button>
         <button class="ghost" onclick="location.hash='/runs'; drafts['nr-wf']='${key}'">${esc(tr("cl.startRunEllipsis"))}</button></div></div>
     <h3>${esc(tr("wfe.versions"))}</h3><table><tr><th>${esc(tr("wfe.versions"))}</th><th>${esc(tr("wfe.publishedBadge"))}</th><th>${esc(tr("wfe.changeNoteAria"))}</th><th>${esc(tr("cl.hash"))}</th></tr>${w.versions
-      .map((v) => "<tr><td>v" + v.version + "</td><td>" + time(v.published_at) + "</td><td>" + esc(v.change_note) + "</td><td class=\"mono small\">" + esc(v.spec_hash.slice(0, 12)) + "</td></tr>")
+      .map(
+        (v) =>
+          "<tr><td>v" +
+          v.version +
+          "</td><td>" +
+          time(v.published_at) +
+          "</td><td>" +
+          esc(v.change_note) +
+          '</td><td class="mono small">' +
+          esc(v.spec_hash.slice(0, 12)) +
+          "</td></tr>",
+      )
       .join("")}</table>`;
 }
 
@@ -739,8 +1011,16 @@ function artifactHtml(a) {
 }
 function snapshotHtml(s) {
   const c = s.content;
-  const items = (c.knowledge || []).map((k) => `<div class="small">• <b>${esc(k.key)}</b> v${k.version} <span class="muted">${esc(catLabel(k.category))} · ${esc(k.reason)}</span></div>`).join("") || `<div class="muted small">${esc(tr("cl.none"))}</div>`;
-  const over = (c.overridden || []).length ? `<h4 style="margin-top:8px">${esc(tr("cl.overriddenTitle"))}</h4>${c.overridden.map((o) => `<div class="small">• ${esc(o.key)} v${o.version} ${esc(tr("cl.overriddenBy", { by: o.by }))} <span class="muted">(${esc(o.conflict_key)})</span></div>`).join("")}` : "";
+  const items =
+    (c.knowledge || [])
+      .map(
+        (k) =>
+          `<div class="small">• <b>${esc(k.key)}</b> v${k.version} <span class="muted">${esc(catLabel(k.category))} · ${esc(k.reason)}</span></div>`,
+      )
+      .join("") || `<div class="muted small">${esc(tr("cl.none"))}</div>`;
+  const over = (c.overridden || []).length
+    ? `<h4 style="margin-top:8px">${esc(tr("cl.overriddenTitle"))}</h4>${c.overridden.map((o) => `<div class="small">• ${esc(o.key)} v${o.version} ${esc(tr("cl.overriddenBy", { by: o.by }))} <span class="muted">(${esc(o.conflict_key)})</span></div>`).join("")}`
+    : "";
   return `<div class="card"><div class="row" style="margin:0"><b>${esc(tr("cl.snapTitle", { id: s.id }))}</b> <span class="mono muted small">${esc(s.hash.slice(0, 16))}</span><span style="flex:1"></span><button class="ghost sm" onclick="A.closeModal()">${esc(tr("common.close"))}</button></div>
     <div class="small">${esc(tr("cl.snapLine", { step: c.step?.key || "", gen: c.step?.generation ?? "", project: c.project || "-", repos: (c.repositories || []).join(", ") || "-" }))}</div>
     <h4 style="margin-top:8px">${esc(tr("cl.applied"))}</h4>${items}${over}
@@ -749,45 +1029,74 @@ function snapshotHtml(s) {
 function paintModal() {
   const host = $("#modal");
   if (!host || !modalCache) return;
-  host.innerHTML = modalCache.kind === "artifact" ? artifactHtml(modalCache.data) : snapshotHtml(modalCache.data);
+  host.innerHTML =
+    modalCache.kind === "artifact" ? artifactHtml(modalCache.data) : snapshotHtml(modalCache.data);
 }
 function paintPreview() {
   const host = $("#preview");
   if (!host || !previewCache) return;
   const r = previewCache;
   host.innerHTML =
-    r.applied.map((k) => `<div class="small">✓ <b>${esc(k.key)}</b> v${k.version} <span class="muted">${esc(catLabel(k.category))} · ${esc(k.reason)}</span></div>`).join("") +
-    r.overridden.map((o) => `<div class="small muted">✗ ${esc(o.key)} ${esc(tr("cl.overriddenBy", { by: o.by }))} (${esc(o.conflict_key)})</div>`).join("");
+    r.applied
+      .map(
+        (k) =>
+          `<div class="small">✓ <b>${esc(k.key)}</b> v${k.version} <span class="muted">${esc(catLabel(k.category))} · ${esc(k.reason)}</span></div>`,
+      )
+      .join("") +
+    r.overridden
+      .map(
+        (o) =>
+          `<div class="small muted">✗ ${esc(o.key)} ${esc(tr("cl.overriddenBy", { by: o.by }))} (${esc(o.conflict_key)})</div>`,
+      )
+      .join("");
 }
 function paintRank() {
   const host = $("#rank");
   if (!host || !rankCache) return;
   host.innerHTML =
-    (rankCache.ambiguous ? `<div class="small" style="color:var(--warn)">⚠️ ${esc(tr("repo.ambiguous"))}</div>` : "") +
-    rankCache.ranked.map((x) => `<div class="small"><b>${esc(x.repo)}</b> ${x.score} <span class="muted">${esc(x.reasons.join(" · "))}</span></div>`).join("");
+    (rankCache.ambiguous
+      ? `<div class="small" style="color:var(--warn)">⚠️ ${esc(tr("repo.ambiguous"))}</div>`
+      : "") +
+    rankCache.ranked
+      .map(
+        (x) =>
+          `<div class="small"><b>${esc(x.repo)}</b> ${x.score} <span class="muted">${esc(x.reasons.join(" · "))}</span></div>`,
+      )
+      .join("");
 }
 
 window.drafts = drafts;
 window.A = {
   createWorkItem: () =>
     act(async () => {
-      const w = await api("/api/work-items", { title: val("wi-title"), project: val("wi-project"), description: val("wi-desc") });
+      const w = await api("/api/work-items", {
+        title: val("wi-title"),
+        project: val("wi-project"),
+        description: val("wi-desc"),
+      });
       ["wi-title", "wi-project", "wi-desc"].forEach((k) => delete drafts[k]);
       location.hash = "/work-items/" + w.id;
     }),
   importJson: (source) =>
     act(async () => {
-      const r = await api("/api/work-items/import", { source, payload: parseJson(val("wi-json"), "payload") });
+      const r = await api("/api/work-items/import", {
+        source,
+        payload: parseJson(val("wi-json"), "payload"),
+      });
       delete drafts["wi-json"];
       location.hash = "/work-items/" + (r.item?.id ?? r.work_item_id);
     }, tr("cl.importedIdle")),
-  importJiraKey: () => act(async () => {
-    const r = await api("/api/work-items/import", { source: "jira", key: val("jira-key") });
-    location.hash = "/work-items/" + r.item.id;
-  }),
+  importJiraKey: () =>
+    act(async () => {
+      const r = await api("/api/work-items/import", { source: "jira", key: val("jira-key") });
+      location.hash = "/work-items/" + r.item.id;
+    }),
   importHasakiId: () =>
     act(async () => {
-      const r = await api("/api/work-items/import", { source: "hasaki_work", work_id: Number(val("hw-id")) });
+      const r = await api("/api/work-items/import", {
+        source: "hasaki_work",
+        work_id: Number(val("hw-id")),
+      });
       delete drafts["hw-id"];
       location.hash = "/work-items/" + r.work_item_id;
     }, tr("cl.importedPick")),
@@ -811,23 +1120,57 @@ window.A = {
   startForItem: (id, start) =>
     act(async () => {
       const repos = list(val("wi-repos"));
-      const r = await api(`/api/work-items/${id}/runs`, { workflow: val("wi-wf") || "feature-implementation", repositories: repos.length ? repos : undefined, start, agent_provider: val("wi-provider") || "claude" });
+      const r = await api(`/api/work-items/${id}/runs`, {
+        workflow: val("wi-wf") || "feature-implementation",
+        repositories: repos.length ? repos : undefined,
+        start,
+        agent_provider: val("wi-provider") || "claude",
+      });
       location.hash = "/runs/" + r.id;
     }),
-  analyze: (id) => act(async () => (location.hash = "/runs/" + (await api(`/api/work-items/${id}/analyze`, { agent_provider: val("wi-provider") || "claude" })).id)),
-  setPolicy: (id, on) => act(() => api(`/api/work-items/${id}`, { automation_policy: on ? { workflow: val("wi-wf") } : null }), tr("wi.saved")),
+  analyze: (id) =>
+    act(
+      async () =>
+        (location.hash =
+          "/runs/" +
+          (
+            await api(`/api/work-items/${id}/analyze`, {
+              agent_provider: val("wi-provider") || "claude",
+            })
+          ).id),
+    ),
+  setPolicy: (id, on) =>
+    act(
+      () =>
+        api(`/api/work-items/${id}`, { automation_policy: on ? { workflow: val("wi-wf") } : null }),
+      tr("wi.saved"),
+    ),
   setStatus: (id, status) => act(() => api(`/api/work-items/${id}`, { status })),
   newRun: (start) =>
     act(async () => {
       const repos = list(val("nr-repos"));
-      const r = await api("/api/runs", { workflow: val("nr-wf"), repositories: repos, title: val("nr-title") || undefined, inputs: { ...parseJson(val("nr-inputs"), "inputs"), ...(repos.length ? { repositories: repos } : {}) }, start, agent_provider: val("nr-provider") || "claude" });
+      const r = await api("/api/runs", {
+        workflow: val("nr-wf"),
+        repositories: repos,
+        title: val("nr-title") || undefined,
+        inputs: {
+          ...parseJson(val("nr-inputs"), "inputs"),
+          ...(repos.length ? { repositories: repos } : {}),
+        },
+        start,
+        agent_provider: val("nr-provider") || "claude",
+      });
       location.hash = "/runs/" + r.id;
     }),
   runAction: (id, action) => {
     if (action === "cancel" && !confirm(tr("rv.cancelConfirm"))) return;
     return act(() => api(`/api/runs/${id}/${action}`, {}));
   },
-  setRepos: (id) => act(() => api(`/api/runs/${id}/repositories`, { repositories: list(val("sel-repos")) }), tr("cl.reposUpdated")),
+  setRepos: (id) =>
+    act(
+      () => api(`/api/runs/${id}/repositories`, { repositories: list(val("sel-repos")) }),
+      tr("cl.reposUpdated"),
+    ),
   stepAction: (id, key, action) => {
     let body = {};
     if (action === "reexecute") {
@@ -855,12 +1198,20 @@ window.A = {
       }
       const r = await api("/api/questions/answers", { answers });
       ids.forEach((id) => delete drafts["ans-" + id]);
-      toast(r.resumed.length ? tr("cl.resumed", { steps: r.resumed.join(", ") }) : tr("cl.stillOpen", { n: r.stillOpen }), true);
+      toast(
+        r.resumed.length
+          ? tr("cl.resumed", { steps: r.resumed.join(", ") })
+          : tr("cl.stillOpen", { n: r.stillOpen }),
+        true,
+      );
     }),
   approve: (id, key) =>
     act(async () => {
       const boxes = $$(`input[name="repo-${key}"]`);
-      await api(`/api/runs/${id}/steps/${key}/approve`, { comment: val("cmt-" + key), repositories: boxes.length ? boxes.filter((b) => b.checked).map((b) => b.value) : undefined });
+      await api(`/api/runs/${id}/steps/${key}/approve`, {
+        comment: val("cmt-" + key),
+        repositories: boxes.length ? boxes.filter((b) => b.checked).map((b) => b.value) : undefined,
+      });
       delete drafts["cmt-" + key];
     }, tr("cl.approved")),
   reject: (id, key) =>
@@ -893,15 +1244,25 @@ window.A = {
     }),
   createWorkflow: () =>
     act(async () => {
-      await api("/api/workflows", { key: val("wf-key"), spec: parseJson(val("wf-spec"), "definition") });
+      await api("/api/workflows", {
+        key: val("wf-key"),
+        spec: parseJson(val("wf-spec"), "definition"),
+      });
       location.hash = "/workflows/" + val("wf-key");
       delete drafts["wf-key"];
       delete drafts["wf-spec"];
     }, tr("cl.createdV1")),
-  saveDraft: (key) => act(() => api(`/api/workflows/${key}/draft`, { spec: parseJson(val("spec-" + key), "definition") }), tr("wfe.draftSaved")),
+  saveDraft: (key) =>
+    act(
+      () =>
+        api(`/api/workflows/${key}/draft`, { spec: parseJson(val("spec-" + key), "definition") }),
+      tr("wfe.draftSaved"),
+    ),
   publish: (key) =>
     act(async () => {
-      await api(`/api/workflows/${key}/draft`, { spec: parseJson(val("spec-" + key), "definition") });
+      await api(`/api/workflows/${key}/draft`, {
+        spec: parseJson(val("spec-" + key), "definition"),
+      });
       const r = await api(`/api/workflows/${key}/publish`, { change_note: val("note-" + key) });
       delete drafts["spec-" + key];
       toast(r.unchanged ? tr("wfe.noChange") : tr("wfe.published", { version: r.version }), true);
@@ -920,7 +1281,9 @@ window.A = {
         metadata: parseJson(val("k-meta"), "metadata"),
         enforced: $("#k-enf").checked,
       });
-      ["k-key", "k-title", "k-ref", "k-ck", "k-content", "k-app", "k-meta"].forEach((x) => delete drafts[x]);
+      ["k-key", "k-title", "k-ref", "k-ck", "k-content", "k-app", "k-meta"].forEach(
+        (x) => delete drafts[x],
+      );
       location.hash = "/knowledge/" + k.key;
     }),
   updateKnowledge: (key) =>
@@ -942,7 +1305,14 @@ window.A = {
     ),
   previewKnowledge: async () => {
     try {
-      previewCache = await api("/api/knowledge/preview", { workflow: val("p-wf"), step: val("p-step"), step_type: val("p-type"), project: val("p-proj"), repositories: list(val("p-repos")), text: val("p-text") });
+      previewCache = await api("/api/knowledge/preview", {
+        workflow: val("p-wf"),
+        step: val("p-step"),
+        step_type: val("p-type"),
+        project: val("p-proj"),
+        repositories: list(val("p-repos")),
+        text: val("p-text"),
+      });
       paintPreview();
     } catch (e) {
       toast(e.message);
@@ -966,7 +1336,10 @@ window.A = {
     }, tr("wi.saved")),
   rank: async () => {
     try {
-      rankCache = await api("/api/repositories/rank", { text: val("rk-text"), project: val("rk-proj") });
+      rankCache = await api("/api/repositories/rank", {
+        text: val("rk-text"),
+        project: val("rk-proj"),
+      });
       paintRank();
     } catch (e) {
       toast(e.message);
@@ -975,7 +1348,9 @@ window.A = {
 };
 
 (async () => {
-  try { locale = localStorage.getItem(UI_KEY) === "en" ? "en" : "vi"; } catch {}
+  try {
+    locale = localStorage.getItem(UI_KEY) === "en" ? "en" : "vi";
+  } catch {}
   document.documentElement.lang = locale;
   DICT = await api("/api/ui-messages").catch(() => ({ vi: {}, en: {} }));
   paintChrome();
@@ -983,8 +1358,13 @@ window.A = {
     const me = await api("/api/auth/me");
     ME = me.user;
     CSRF = me.csrf;
-  } catch { ME = null; }
-  if (!ME) { showLogin(); return; }
+  } catch {
+    ME = null;
+  }
+  if (!ME) {
+    showLogin();
+    return;
+  }
   const account = document.createElement("details");
   account.id = "classic-account";
   account.innerHTML = `<summary>${esc(ME.username)} · ${esc(tr(`auth.role.${ME.role}`))}</summary><nav aria-label="${esc(tr("auth.account"))}">
@@ -995,13 +1375,23 @@ window.A = {
   $("#lang").before(account);
   $("#logout").onclick = async () => {
     if (!confirm(tr("auth.logoutConfirm", { name: ME.username }))) return;
-    try { await api("/api/auth/logout", {}); }
-    catch { toast(tr("auth.logoutFailed")); return; }
-    ME = null; CSRF = "";
+    try {
+      await api("/api/auth/logout", {});
+    } catch {
+      toast(tr("auth.logoutFailed"));
+      return;
+    }
+    ME = null;
+    CSRF = "";
     for (const k of Object.keys(drafts)) delete drafts[k];
     location.reload();
   };
-  account.addEventListener("keydown", (e) => { if (e.key === "Escape") { account.open = false; account.querySelector("summary").focus(); } });
+  account.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      account.open = false;
+      account.querySelector("summary").focus();
+    }
+  });
   META = await api("/api/meta").catch(() => null);
   await render(true);
   setInterval(() => document.visibilityState === "visible" && render(false), 3000); // classic UI: plain polling, paused while hidden

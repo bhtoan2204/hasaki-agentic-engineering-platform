@@ -1,12 +1,12 @@
 /* Questions & Approvals — action inbox. */
 .qx-stats {
-  margin-bottom: var(--sp-5)
+  margin-bottom: var(--sp-5);
 }
 
 .qx-list {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4)
+  gap: var(--sp-4);
 }
 
 .qx-card {
@@ -15,7 +15,7 @@
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-2);
   overflow: hidden;
-  position: relative
+  position: relative;
 }
 
 .qx-card::before {
@@ -25,7 +25,7 @@
   top: 0;
   bottom: 0;
   width: 4px;
-  background: var(--st-wait)
+  background: var(--st-wait);
 }
 
 .qx-head {
@@ -35,7 +35,7 @@
   padding: var(--sp-4) var(--sp-5);
   background: linear-gradient(135deg, var(--st-wait-bg), var(--surface) 70%);
   border-bottom: 1px solid var(--line);
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .qx-icon {
@@ -47,12 +47,12 @@
   background: var(--surface);
   color: var(--st-wait);
   box-shadow: var(--shadow-1);
-  flex: none
+  flex: none;
 }
 
 .qx-ctx {
   flex: 1;
-  min-width: 200px
+  min-width: 200px;
 }
 
 .qx-run {
@@ -60,12 +60,12 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: var(--fs-sm)
+  font-size: var(--fs-sm);
 }
 
 .qx-runid {
   font: 600 12px var(--mono);
-  color: var(--ink-2)
+  color: var(--ink-2);
 }
 
 .qx-title {
@@ -73,7 +73,7 @@
   font-size: var(--fs-lg);
   color: var(--ink);
   margin-top: 2px;
-  overflow-wrap: anywhere
+  overflow-wrap: anywhere;
 }
 
 .qx-step {
@@ -83,30 +83,30 @@
   color: var(--ink-2);
   font-size: var(--fs-sm);
   margin-top: 2px;
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .qx-step svg {
-  color: var(--muted)
+  color: var(--muted);
 }
 
 .qx-body {
-  padding: var(--sp-2) var(--sp-5)
+  padding: var(--sp-2) var(--sp-5);
 }
 
 .qx-q {
   padding: var(--sp-4) 0;
-  border-bottom: 1px dashed var(--line)
+  border-bottom: 1px dashed var(--line);
 }
 
 .qx-q:last-child {
-  border-bottom: 0
+  border-bottom: 0;
 }
 
 .qx-q-top {
   display: flex;
   gap: var(--sp-3);
-  align-items: flex-start
+  align-items: flex-start;
 }
 
 .qx-num {
@@ -120,7 +120,7 @@
   display: grid;
   place-items: center;
   flex: none;
-  margin-top: 1px
+  margin-top: 1px;
 }
 
 .qx-q-text {
@@ -130,7 +130,7 @@
   color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  min-width: 0
+  min-width: 0;
 }
 
 .qx-q-context {
@@ -142,14 +142,14 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   padding: 8px 10px;
-  overflow-wrap: anywhere
+  overflow-wrap: anywhere;
 }
 
 .qx-options {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 10px 0 0 36px
+  margin: 10px 0 0 36px;
 }
 
 .qx-opt {
@@ -161,33 +161,33 @@
   padding: 6px 13px;
   font-weight: 500;
   white-space: normal;
-  text-align: left
+  text-align: left;
 }
 
 .qx-opt:hover {
   background: var(--brand-50);
   border-color: var(--brand-400);
-  color: var(--brand-700)
+  color: var(--brand-700);
 }
 
 .qx-opt.on {
   background: var(--brand);
   border-color: var(--brand);
-  color: #fff
+  color: #fff;
 }
 
 .qx-opt svg {
   color: var(--st-wait);
-  flex: none
+  flex: none;
 }
 
 .qx-opt.on svg {
-  color: currentColor
+  color: currentColor;
 }
 
 .qx-q textarea {
   margin: 10px 0 0 36px;
-  width: calc(100% - 36px)
+  width: calc(100% - 36px);
 }
 
 .qx-foot {
@@ -197,7 +197,7 @@
   padding: var(--sp-3) var(--sp-5);
   background: var(--surface-2);
   border-top: 1px solid var(--line);
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .qx-consequence {
@@ -207,67 +207,66 @@
   gap: 8px;
   align-items: flex-start;
   color: var(--ink-2);
-  font-size: var(--fs-sm)
+  font-size: var(--fs-sm);
 }
 
 .qx-consequence svg {
   color: var(--st-wait);
   flex: none;
-  margin-top: 2px
+  margin-top: 2px;
 }
 
-.qx-foot>button {
+.qx-foot > button {
   padding: 10px 18px;
-  font-size: var(--fs-md)
+  font-size: var(--fs-md);
 }
 
 .qx-empty {
   background: linear-gradient(135deg, var(--brand-50), var(--blush));
   border-radius: var(--r-xl);
-  border: 1px solid var(--line)
+  border: 1px solid var(--line);
 }
 
 .qx-section {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 32px
+  margin-top: 32px;
 }
 
 .qx-history td {
-  vertical-align: middle
+  vertical-align: middle;
 }
 
 .qx-clip {
   max-width: 340px;
-  overflow-wrap: anywhere
+  overflow-wrap: anywhere;
 }
 
 .qx-history {
-  min-width: 760px
+  min-width: 760px;
 }
 
 @media (max-width: 900px) {
-
   .qx-head,
   .qx-body,
   .qx-foot {
     padding-left: var(--sp-4);
-    padding-right: var(--sp-4)
+    padding-right: var(--sp-4);
   }
 
   .qx-q-context,
   .qx-options {
-    margin-left: 0
+    margin-left: 0;
   }
 
   .qx-q textarea {
     margin-left: 0;
-    width: 100%
+    width: 100%;
   }
 
-  .qx-foot>button {
+  .qx-foot > button {
     width: 100%;
-    justify-content: center
+    justify-content: center;
   }
 }

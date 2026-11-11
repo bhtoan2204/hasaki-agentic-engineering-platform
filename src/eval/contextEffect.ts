@@ -6,9 +6,7 @@ export function compareContextEffect(a: any, b: any) {
     a.configuration.context_variant === b.configuration.context_variant
   )
     return null;
-  const left = new Map<string, any>(
-    a.cases.map((r: any) => [`${r.task_id}:${r.repetition}`, r]),
-  );
+  const left = new Map<string, any>(a.cases.map((r: any) => [`${r.task_id}:${r.repetition}`, r]));
   const tasks = new Map<string, Array<{ a: any; b: any }>>();
   for (const r of b.cases) {
     const previous = left.get(`${r.task_id}:${r.repetition}`);
@@ -45,20 +43,13 @@ export function compareContextEffect(a: any, b: any) {
   const times: Array<{ baseline: number; candidate: number }> = [];
   for (const group of valid) {
     const passed = (key: "a" | "b") =>
-      group.every(
-        (p) => p[key].correct === true && p[key].hard_gates_passed === true,
-      );
+      group.every((p) => p[key].correct === true && p[key].hard_gates_passed === true);
     if (!passed("a") && passed("b")) improved++;
     if (passed("a") && !passed("b")) regressed++;
     const values = (key: "a" | "b") =>
       group
-        .map(
-          (p) =>
-            p[key].completion_duration_ms ?? p[key].data?.evidence?.duration_ms,
-        )
-        .filter(
-          (v: any): v is number => typeof v === "number" && Number.isFinite(v),
-        );
+        .map((p) => p[key].completion_duration_ms ?? p[key].data?.evidence?.duration_ms)
+        .filter((v: any): v is number => typeof v === "number" && Number.isFinite(v));
     const av = values("a"),
       bv = values("b");
     if (av.length === group.length && bv.length === group.length) {
@@ -88,10 +79,10 @@ export function compareContextEffect(a: any, b: any) {
       improved > regressed && qualityP != null && qualityP < 0.025
         ? "MEASURABLE_QUALITY_GAIN"
         : regressed === 0 &&
-          verifiedTimingTasks >= 10 &&
-          faster > slower &&
-          latencyP != null &&
-          latencyP < 0.025
+            verifiedTimingTasks >= 10 &&
+            faster > slower &&
+            latencyP != null &&
+            latencyP < 0.025
           ? "MEASURABLE_LATENCY_GAIN"
           : "NO_MEASURABLE_BENEFIT";
   }
@@ -112,8 +103,7 @@ export function compareContextEffect(a: any, b: any) {
       : null,
     method:
       "Two-sided exact sign tests over distinct task outcomes/mean task durations; threshold 0.025 for two tests; at least two repetitions and ten paired tasks. Conditional on this fixed cohort, not a general model superiority claim.",
-    usage_tradeoff:
-      "Inspect reported token/cost coverage separately; unknown usage is not zero.",
+    usage_tradeoff: "Inspect reported token/cost coverage separately; unknown usage is not zero.",
   };
 }
 export function exactSign(positive: number, negative: number) {

@@ -1,8 +1,5 @@
 import { AgentEvaluation } from "./insights/AgentEvaluation.tsx";
-import {
-  AnalyticsInsights,
-  ANALYTICS_TABS,
-} from "./insights/AnalyticsInsights.tsx";
+import { AnalyticsInsights, ANALYTICS_TABS } from "./insights/AnalyticsInsights.tsx";
 import { EvaluationBenchmarks } from "./EvaluationBenchmarks.tsx";
 import { QualityLoop } from "./insights/QualityLoop.tsx";
 import { useState, type ReactNode } from "react";
@@ -50,8 +47,7 @@ const num = (x: unknown): number | null =>
 const sum = (rows: any[] | undefined, k: string) =>
   (rows ?? []).reduce((a, r) => a + (num(r[k]) ?? 0), 0);
 const numLoc = () => (uiLocale() === "vi" ? "vi-VN" : "en-GB");
-const fmtInt = (x: number | null) =>
-  x == null ? "—" : x.toLocaleString(numLoc());
+const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString(numLoc()));
 const fmtNum = (x: number | null, d = 1) =>
   x == null ? "—" : x.toLocaleString(numLoc(), { maximumFractionDigits: d });
 const fmtCompact = (x: number | null) =>
@@ -67,11 +63,7 @@ const fmtUsd = (x: number | null) =>
     : `$${x.toLocaleString(numLoc(), { minimumFractionDigits: 2, maximumFractionDigits: x < 1 ? 4 : 2 })}`;
 const fmtPct = (x: number | null) => (x == null ? "—" : `${fmtNum(x, 1)}%`);
 const fmtSec = (x: number | null) =>
-  x == null
-    ? "—"
-    : x >= 60
-      ? `${Math.floor(x / 60)}m${Math.round(x % 60)}s`
-      : `${fmtNum(x, 1)}s`;
+  x == null ? "—" : x >= 60 ? `${Math.floor(x / 60)}m${Math.round(x % 60)}s` : `${fmtNum(x, 1)}s`;
 const pct = (a: number, b: number) => (b ? (a / b) * 100 : null);
 
 // ---------------------------------------------------------------- chart primitives (plain SVG / CSS)
@@ -98,14 +90,12 @@ function Bars({
   empty?: string;
 }) {
   const { t } = useI18n();
-  if (!rows.length)
-    return <div className="ins-empty">{empty ?? t("ins.empty")}</div>;
+  if (!rows.length) return <div className="ins-empty">{empty ?? t("ins.empty")}</div>;
   const max = Math.max(...rows.map((r) => r.value ?? 0), 0);
   return (
     <ul className="ins-bars">
       {rows.map((r) => {
-        const w =
-          max > 0 && r.value != null ? Math.max(1.5, (r.value / max) * 100) : 0;
+        const w = max > 0 && r.value != null ? Math.max(1.5, (r.value / max) * 100) : 0;
         const segTotal = r.segments?.reduce((a, s) => a + s.value, 0) ?? 0;
         return (
           <li key={r.key} className="ins-bar" title={r.title}>
@@ -183,14 +173,7 @@ function Ring({
         role="img"
         aria-label={`${label}: ${fmtPct(value)}`}
       >
-        <circle
-          cx="48"
-          cy="48"
-          r={r}
-          fill="none"
-          stroke="var(--surface-3)"
-          strokeWidth="9"
-        />
+        <circle cx="48" cy="48" r={r} fill="none" stroke="var(--surface-3)" strokeWidth="9" />
         {value != null && (
           <circle
             cx="48"
@@ -266,13 +249,7 @@ function Metric({
 }
 
 /** Plain data table inside a scroll wrapper. */
-function Table({
-  rows,
-  cols,
-}: {
-  rows: any[];
-  cols: Array<[string, string, ((r: any) => any)?]>;
-}) {
+function Table({ rows, cols }: { rows: any[]; cols: Array<[string, string, ((r: any) => any)?]> }) {
   const { t } = useI18n();
   if (!rows?.length) return <div className="ins-empty">{t("ins.empty")}</div>;
   return (
@@ -292,9 +269,7 @@ function Table({
                 <td
                   key={h}
                   className={
-                    num(r[k]) != null && typeof r[k] !== "boolean" && !f
-                      ? "mono ins-num"
-                      : ""
+                    num(r[k]) != null && typeof r[k] !== "boolean" && !f ? "mono ins-num" : ""
                   }
                 >
                   {f ? f(r) : String(r[k] ?? "")}
@@ -312,23 +287,12 @@ function Table({
 
 /** Observability: cost/tokens per workflow, step-type durations & failures, tool / integration / skill usage. */
 type InsightsTab = "overview" | "quality" | "tools" | "failures" | "registry";
-const TAB_KEYS: InsightsTab[] = [
-  "overview",
-  "quality",
-  "tools",
-  "failures",
-  "registry",
-];
+const TAB_KEYS: InsightsTab[] = ["overview", "quality", "tools", "failures", "registry"];
 
 /** `tab` comes from the URL (#/insights/<tab>) so a tab can be linked and survives reloads. */
 export function InsightsPage({ tab }: { tab?: string }) {
   if (tab?.split("?")[0] === "evaluation") return <AgentEvaluation />;
-  if (
-    !tab ||
-    ANALYTICS_TABS.includes(
-      tab.split("?")[0] as (typeof ANALYTICS_TABS)[number],
-    )
-  )
+  if (!tab || ANALYTICS_TABS.includes(tab.split("?")[0] as (typeof ANALYTICS_TABS)[number]))
     return <AnalyticsInsights tabParam={tab} />;
   return <LegacyInsightsPage tab={tab} />;
 }
@@ -340,10 +304,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
     : "overview";
   const setTab = (t: InsightsTab) => navigate(`/insights/${t}`);
   const [days, setDays] = useState(30);
-  const { data, error, loading, reload } = useApi<any>(
-    `/api/metrics/summary?days=${days}`,
-    [days],
-  );
+  const { data, error, loading, reload } = useApi<any>(`/api/metrics/summary?days=${days}`, [days]);
   const { data: tools } = useApi<any[]>("/api/tools");
   const [wfMetric, setWfMetric] = useState<"cost" | "tokens" | "runs">("cost");
   const [stMetric, setStMetric] = useState<"avg" | "fail" | "cost">("avg");
@@ -453,8 +414,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
         value: num(r.avg_seconds),
         display: fmtSec(num(r.avg_seconds)),
       };
-    if (stMetric === "fail")
-      return { ...base, value: pct(f, att), display: fmtPct(pct(f, att)) };
+    if (stMetric === "fail") return { ...base, value: pct(f, att), display: fmtPct(pct(f, att)) };
     return {
       ...base,
       value: num(r.cost_usd),
@@ -589,9 +549,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
             >
               <Bars
                 rows={wfSorted}
-                color={
-                  wfMetric === "tokens" ? "var(--st-wait)" : "var(--brand)"
-                }
+                color={wfMetric === "tokens" ? "var(--st-wait)" : "var(--brand)"}
               />
             </Panel>
             <Panel
@@ -630,11 +588,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
             </Panel>
           </div>
 
-          <Panel
-            icon={Users}
-            title={t("ins.byProfile")}
-            sub={t("ins.profileSub")}
-          >
+          <Panel icon={Users} title={t("ins.byProfile")} sub={t("ins.profileSub")}>
             <Table
               rows={data.by_profile}
               cols={[
@@ -660,11 +614,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
       {tab === "tools" && (
         <>
           <div className="ins-grid">
-            <Panel
-              icon={Wrench}
-              title={t("ins.toolsTitle")}
-              sub={t("ins.calls")}
-            >
+            <Panel icon={Wrench} title={t("ins.toolsTitle")} sub={t("ins.calls")}>
               <Bars
                 rows={(data.tools ?? []).map((r: any) => ({
                   key: r.tool,
@@ -700,8 +650,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                     hint: t("ins.failAvg", {
                       failed: fmtInt(f),
                       avg: t("ins.avgMs", {
-                        ms:
-                          r.avg_ms != null ? `${fmtInt(num(r.avg_ms))}ms` : "—",
+                        ms: r.avg_ms != null ? `${fmtInt(num(r.avg_ms))}ms` : "—",
                       }),
                     }),
                     segments: [
@@ -720,11 +669,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                 })}
               />
             </Panel>
-            <Panel
-              icon={Sparkles}
-              title={t("ins.skillsLoaded")}
-              sub={t("ins.loads")}
-            >
+            <Panel icon={Sparkles} title={t("ins.skillsLoaded")} sub={t("ins.loads")}>
               <Bars
                 rows={(data.skills ?? []).map((r: any) => ({
                   key: r.key,
@@ -746,9 +691,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                 <ul className="ins-denied">
                   {data.denied.map((r: any, i: number) => (
                     <li key={i}>
-                      <span className="ins-denied-times">
-                        {fmtInt(num(r.times))}×
-                      </span>
+                      <span className="ins-denied-times">{fmtInt(num(r.times))}×</span>
                       <div className="ins-denied-body">
                         <b className="mono">{r.tool}</b>
                         <div className="muted small">{r.reason}</div>
@@ -764,11 +707,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
       {tab === "failures" && (
         <>
           <QualityLoop />
-          <Panel
-            icon={AlertTriangle}
-            title={t("ins.recent")}
-            sub={t("ins.recentSub")}
-          >
+          <Panel icon={AlertTriangle} title={t("ins.recent")} sub={t("ins.recentSub")}>
             <Table
               rows={data.failures}
               cols={[
@@ -777,9 +716,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                   t("ins.col.run"),
                   (r) => (
                     <a
-                      onClick={() =>
-                        navigate(`/runs/${r.run_id}/${r.step_key}`)
-                      }
+                      onClick={() => navigate(`/runs/${r.run_id}/${r.step_key}`)}
                       style={{ cursor: "pointer" }}
                       className="mono"
                     >
@@ -787,23 +724,13 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                     </a>
                   ),
                 ],
-                [
-                  "type",
-                  t("ins.col.type"),
-                  (r) => <span className="pill">{r.type}</span>,
-                ],
+                ["type", t("ins.col.type"), (r) => <span className="pill">{r.type}</span>],
                 [
                   "finished_at",
                   t("ins.col.at"),
-                  (r) => (
-                    <span className="muted nowrap">{time(r.finished_at)}</span>
-                  ),
+                  (r) => <span className="muted nowrap">{time(r.finished_at)}</span>,
                 ],
-                [
-                  "error",
-                  t("ins.col.error"),
-                  (r) => <span className="ins-error">{r.error}</span>,
-                ],
+                ["error", t("ins.col.error"), (r) => <span className="ins-error">{r.error}</span>],
               ]}
             />
           </Panel>
@@ -811,19 +738,11 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
       )}
       {tab === "registry" && (
         <>
-          <Panel
-            icon={Plug}
-            title={t("ins.registry")}
-            sub={t("ins.registrySub")}
-          >
+          <Panel icon={Plug} title={t("ins.registry")} sub={t("ins.registrySub")}>
             <Table
               rows={tools ?? []}
               cols={[
-                [
-                  "name",
-                  t("ins.col.name"),
-                  (r) => <b className="mono">{r.name}</b>,
-                ],
+                ["name", t("ins.col.name"), (r) => <b className="mono">{r.name}</b>],
                 ["summary", t("ins.col.summary")],
                 [
                   "read_only",
@@ -841,11 +760,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                   (r) =>
                     r.available === true ? (
                       <span className="okc ins-avail">
-                        <Check
-                          size={15}
-                          strokeWidth={2.4}
-                          aria-label={t("ins.available")}
-                        />
+                        <Check size={15} strokeWidth={2.4} aria-label={t("ins.available")} />
                       </span>
                     ) : (
                       <span className="muted small">{String(r.available)}</span>
@@ -884,24 +799,11 @@ const KNOWN_V = new Set([
   "pass_rate_pct",
   "first_try_pass_rate_pct",
 ]);
-const KNOWN_H = new Set([
-  "runs",
-  "with_human",
-  "answers",
-  "reexecutions",
-  "rate_pct",
-]);
-const humanize = (k: string) =>
-  k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+const KNOWN_H = new Set(["runs", "with_human", "answers", "reexecutions", "rate_pct"]);
+const humanize = (k: string) => k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 /** Fields the API may add later: scalars become metric tiles, structures are shown as JSON. */
-function Extras({
-  obj,
-  known,
-}: {
-  obj: Record<string, any>;
-  known: Set<string>;
-}) {
+function Extras({ obj, known }: { obj: Record<string, any>; known: Set<string> }) {
   const extra = Object.entries(obj ?? {}).filter(([k]) => !known.has(k));
   if (!extra.length) return null;
   const scalars = extra.filter(([, x]) => x == null || typeof x !== "object");
@@ -914,9 +816,7 @@ function Extras({
             <Metric
               key={k}
               label={humanize(k)}
-              value={
-                x == null ? "—" : num(x) != null ? fmtNum(num(x), 2) : String(x)
-              }
+              value={x == null ? "—" : num(x) != null ? fmtNum(num(x), 2) : String(x)}
             />
           ))}
         </div>
@@ -973,19 +873,9 @@ function HarnessEvaluation({ e }: { e: any }) {
             </div>
             <div className="ins-eval-side">
               <div className="ins-metrics">
-                <Metric
-                  label={t("ins.codingAttempts")}
-                  value={fmtInt(num(v.coding_attempts))}
-                />
-                <Metric
-                  label={t("ins.repairs")}
-                  value={fmtNum(num(v.avg_repairs), 2)}
-                  tone="run"
-                />
-                <Metric
-                  label={t("ins.verifyAvg")}
-                  value={fmtSec(num(v.avg_verify_s))}
-                />
+                <Metric label={t("ins.codingAttempts")} value={fmtInt(num(v.coding_attempts))} />
+                <Metric label={t("ins.repairs")} value={fmtNum(num(v.avg_repairs), 2)} tone="run" />
+                <Metric label={t("ins.verifyAvg")} value={fmtSec(num(v.avg_verify_s))} />
                 <Metric
                   label={t("ins.exhausted")}
                   value={fmtInt(num(v.repair_budget_exhausted))}
@@ -1001,11 +891,7 @@ function HarnessEvaluation({ e }: { e: any }) {
               </div>
               {verified > 0 ? (
                 <div className="ins-outcome">
-                  <div
-                    className="ins-outcome-bar"
-                    role="img"
-                    aria-label={t("ins.outcome")}
-                  >
+                  <div className="ins-outcome-bar" role="img" aria-label={t("ins.outcome")}>
                     {outcome.map(
                       (s) =>
                         s.value > 0 && (
@@ -1023,13 +909,7 @@ function HarnessEvaluation({ e }: { e: any }) {
                   <Legend
                     items={outcome
                       .filter((s) => s.value > 0)
-                      .map(
-                        (s) =>
-                          [`${s.label} · ${s.value}`, s.color] as [
-                            string,
-                            string,
-                          ],
-                      )}
+                      .map((s) => [`${s.label} · ${s.value}`, s.color] as [string, string])}
                   />
                 </div>
               ) : (
@@ -1057,10 +937,7 @@ function HarnessEvaluation({ e }: { e: any }) {
             />
             <div className="ins-metrics ins-metrics-col">
               <Metric label={t("ins.answers")} value={fmtInt(num(h.answers))} />
-              <Metric
-                label={t("ins.reexec")}
-                value={fmtInt(num(h.reexecutions))}
-              />
+              <Metric label={t("ins.reexec")} value={fmtInt(num(h.reexecutions))} />
             </div>
           </div>
           <Extras obj={h} known={KNOWN_H} />
@@ -1100,9 +977,7 @@ function RepeatedFailures({ rows }: { rows: any[] }) {
               </td>
               <td className="ins-times">
                 <span className="ins-mini-track">
-                  <span
-                    style={{ width: `${((num(r.times) ?? 0) / max) * 100}%` }}
-                  />
+                  <span style={{ width: `${((num(r.times) ?? 0) / max) * 100}%` }} />
                 </span>
                 <span className="mono">{fmtInt(num(r.times))}</span>
               </td>
@@ -1129,8 +1004,7 @@ function EvalComparison() {
       </div>
       {!groups.length ? (
         <div className="muted small">
-          {t("ins.benchEmpty")}{" "}
-          <span className="kbd">npm run bench -- --suite=backend-v1</span>{" "}
+          {t("ins.benchEmpty")} <span className="kbd">npm run bench -- --suite=backend-v1</span>{" "}
           <span className="kbd">--repetitions=2</span>
         </div>
       ) : (
@@ -1159,9 +1033,7 @@ function EvalComparison() {
                   <td className="mono">{g.runs}</td>
                   <td className="mono">
                     {v(g.success_rate_pct, "%")}{" "}
-                    <span className="muted small">
-                      ({t("ins.graded", { n: g.graded })})
-                    </span>
+                    <span className="muted small">({t("ins.graded", { n: g.graded })})</span>
                   </td>
                   <td className="mono">{v(g.regression_rate_pct, "%")}</td>
                   <td className="mono">
@@ -1173,16 +1045,12 @@ function EvalComparison() {
                       : "—"}
                   </td>
                   <td className="mono">
-                    {g.verifier
-                      ? `${g.verifier.false_pass} / ${g.verifier.false_alarm}`
-                      : "—"}
+                    {g.verifier ? `${g.verifier.false_pass} / ${g.verifier.false_alarm}` : "—"}
                   </td>
                   <td className="mono">{v(g.repair_success_pct, "%")}</td>
                   <td className="mono">{v(g.human_intervention_pct, "%")}</td>
                   <td className="mono">{v(g.avg_wall_s, "s")}</td>
-                  <td className="mono">
-                    {g.avg_cost_usd == null ? "—" : `$${g.avg_cost_usd}`}
-                  </td>
+                  <td className="mono">{g.avg_cost_usd == null ? "—" : `$${g.avg_cost_usd}`}</td>
                 </tr>
               ))}
             </tbody>

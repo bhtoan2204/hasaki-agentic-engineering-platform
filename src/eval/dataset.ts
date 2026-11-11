@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
 
-export const sha256 = (v: string) =>
-  createHash("sha256").update(v).digest("hex");
+export const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
 const relativePath = z
   .string()
   .min(1)
@@ -32,22 +31,14 @@ export const CaseSchema = z.object({
     type: z.enum(["behavior", "proto", "sql", "navigation", "freshness"]),
     path: relativePath,
     export_name: z.string().optional(),
-    public_checks: z.array(
-      z.object({ args: z.array(z.unknown()), expected: z.unknown() }),
-    ),
-    hidden_checks: z.array(
-      z.object({ args: z.array(z.unknown()), expected: z.unknown() }),
-    ),
+    public_checks: z.array(z.object({ args: z.array(z.unknown()), expected: z.unknown() })),
+    hidden_checks: z.array(z.object({ args: z.array(z.unknown()), expected: z.unknown() })),
     timeout_seconds: z.number().int().min(1).max(30),
   }),
-  allowed_changes: z
-    .array(z.object({ repository: z.string(), path: relativePath }))
-    .max(4),
+  allowed_changes: z.array(z.object({ repository: z.string(), path: relativePath })).max(4),
   tags: z.array(z.string()),
   critical: z.boolean(),
-  clarification: z
-    .object({ question: z.string(), answer: z.string() })
-    .optional(),
+  clarification: z.object({ question: z.string(), answer: z.string() }).optional(),
   transient_once: z.boolean().optional(),
 });
 export type BenchmarkCase = z.infer<typeof CaseSchema>;
@@ -76,18 +67,12 @@ export const SuiteSchema = z
           message: "Duplicate benchmark task id",
         });
       ids.add(c.task_id);
-      if (
-        !s.repositories[c.repository] ||
-        s.repositories[c.repository].commit !== c.base_commit
-      )
+      if (!s.repositories[c.repository] || s.repositories[c.repository].commit !== c.base_commit)
         ctx.addIssue({
           code: "custom",
           message: "Case commit is not pinned to its fixture repository",
         });
-      if (
-        c.repositories.some((r) => !s.repositories[r]) ||
-        !c.repositories.includes(c.repository)
-      )
+      if (c.repositories.some((r) => !s.repositories[r]) || !c.repositories.includes(c.repository))
         ctx.addIssue({ code: "custom", message: "Unknown fixture repository" });
       if (c.origin === "real_derived" && !c.provenance.startsWith("verified:"))
         ctx.addIssue({
@@ -114,19 +99,16 @@ const baseline: Record<string, Record<string, string>> = {
     "refund.ts":
       'export function CalculateRefund(price, quantity, refunded) { return price * quantity; }\nexport function FindRefundHandler() { return "refund"; }\n',
     "api.ts": "export function serializePayment(p) { return {id:p.id}; }\n",
-    "client.ts":
-      "export function requestPayment(id, currency) { return {id}; }\n",
+    "client.ts": "export function requestPayment(id, currency) { return {id}; }\n",
     "idempotency.ts":
       "export function chargeEvents(events) { return events.reduce((sum,e) => sum + e.amount,0); }\n",
-    "money.ts":
-      "export function money(amount) { return Math.floor(amount * 100) / 100; }\n",
+    "money.ts": "export function money(amount) { return Math.floor(amount * 100) / 100; }\n",
     "policy.ts": 'export function refundPolicy() { return "unspecified"; }\n',
     "transaction.ts":
       "export function transfer(a,b,amount) { a.balance -= amount; if (b.closed) return false; b.balance += amount; return true; }\n",
     "retry.ts": "export function retryValue() { return false; }\n",
     "freshness.ts": 'export function SnapshotMarker() { return "old"; }\n',
-    "pagination.sql":
-      "SELECT id FROM payments ORDER BY id LIMIT $2 OFFSET $1;\n",
+    "pagination.sql": "SELECT id FROM payments ORDER BY id LIMIT $2 OFFSET $1;\n",
   },
   "fixture-shared-proto": {
     "payment.proto":
@@ -175,12 +157,8 @@ function add(
       type: "behavior",
       path,
       export_name: fn,
-      public_checks: checks
-        .slice(0, 1)
-        .map(([args, expected]) => ({ args, expected })),
-      hidden_checks: checks
-        .slice(1)
-        .map(([args, expected]) => ({ args, expected })),
+      public_checks: checks.slice(0, 1).map(([args, expected]) => ({ args, expected })),
+      hidden_checks: checks.slice(1).map(([args, expected]) => ({ args, expected })),
       timeout_seconds: 10,
     },
     allowed_changes: allowed,
@@ -188,8 +166,7 @@ function add(
     critical: false,
     ...options,
   });
-  referencePatches[id] =
-    path && fixed ? [{ repository, path, content: fixed }] : [];
+  referencePatches[id] = path && fixed ? [{ repository, path, content: fixed }] : [];
 }
 add(
   1,
@@ -199,10 +176,7 @@ add(
   "refund.ts",
   "CalculateRefund",
   "Fix CalculateRefund to exclude previously refunded quantities and clamp negative remaining quantity.",
-  [
-    "Price is multiplied by remaining quantity",
-    "Over-refunded quantity returns zero",
-  ],
+  ["Price is multiplied by remaining quantity", "Over-refunded quantity returns zero"],
   [
     [[10, 2, 0], 20],
     [[10, 3, 1], 20],
@@ -274,10 +248,7 @@ add(
   "payment.proto",
   "",
   "Add optional string currency field number 2 to Request. Keep the Payment.Charge RPC and existing field numbers.",
-  [
-    "Request.currency has tag 2",
-    "Existing RPC request/response and id tag preserved",
-  ],
+  ["Request.currency has tag 2", "Existing RPC request/response and id tag preserved"],
   [],
   'syntax = "proto3"; package fixture.payment; message Request { string id = 1; string currency = 2; } message Reply { bool ok = 1; } service Payment { rpc Charge(Request) returns(Reply); }\n',
   {
@@ -436,10 +407,7 @@ add(
   "retry.ts",
   "retryValue",
   "Recover once from the synthetic transient worker failure, then implement retryValue returning true.",
-  [
-    "Only the declared transient failure is retried",
-    "Final behavior is verified",
-  ],
+  ["Only the declared transient failure is retried", "Final behavior is verified"],
   [[[], true]],
   "export function retryValue() { return true; }\n",
   { transient_once: true },
@@ -456,11 +424,7 @@ add(
   [],
   "",
   {
-    repositories: [
-      "fixture-alpha-service",
-      "fixture-payment-service",
-      "fixture-shared-proto",
-    ],
+    repositories: ["fixture-alpha-service", "fixture-payment-service", "fixture-shared-proto"],
     allowed_changes: [],
     validation: {
       type: "navigation",
@@ -480,10 +444,7 @@ add(
   "freshness.ts",
   "SnapshotMarker",
   "Update SnapshotMarker from old to new, then retrieve context from the changed worktree without returning old source.",
-  [
-    "Updated implementation returns new",
-    "Retrieved snippet belongs to the modified snapshot",
-  ],
+  ["Updated implementation returns new", "Retrieved snippet belongs to the modified snapshot"],
   [[[], "new"]],
   'export function SnapshotMarker() { return "new"; }\n',
   {

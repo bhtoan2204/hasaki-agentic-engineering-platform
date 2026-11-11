@@ -29,15 +29,35 @@ test("agent provider defaults to claude and rejects unknown values", () => {
   assert.equal(resolveAgentProvider(undefined), "claude");
   assert.equal(resolveAgentProvider(""), "claude");
   assert.equal(resolveAgentProvider("cursor"), "cursor");
-  assert.throws(() => resolveAgentProvider("openai"), /agent_provider must be one of claude, cursor, codex/);
+  assert.throws(
+    () => resolveAgentProvider("openai"),
+    /agent_provider must be one of claude, cursor, codex/,
+  );
 });
 
 test("a new run stores the provider and legacy creates stay on claude", async () => {
-  const claude = await startRun({ definitionKey: "feature-implementation", title: "legacy provider", start: false });
+  const claude = await startRun({
+    definitionKey: "feature-implementation",
+    title: "legacy provider",
+    start: false,
+  });
   assert.equal((await getRun(claude.id)).agent_provider, "claude");
-  const cursor = await startRun({ definitionKey: "feature-implementation", title: "cursor provider", start: false, agentProvider: "cursor" });
+  const cursor = await startRun({
+    definitionKey: "feature-implementation",
+    title: "cursor provider",
+    start: false,
+    agentProvider: "cursor",
+  });
   assert.equal((await getRun(cursor.id)).agent_provider, "cursor");
-  await assert.rejects(() => startRun({ definitionKey: "feature-implementation", agentProvider: "gpt" as "claude", start: false }), /agent_provider must be one of claude, cursor, codex/);
+  await assert.rejects(
+    () =>
+      startRun({
+        definitionKey: "feature-implementation",
+        agentProvider: "gpt" as "claude",
+        start: false,
+      }),
+    /agent_provider must be one of claude, cursor, codex/,
+  );
 });
 
 test("stream parser keeps a partial line and rejects a bad event", () => {
@@ -45,10 +65,15 @@ test("stream parser keeps a partial line and rejects a bad event", () => {
   const first = p.push('{"type":"system","subtype":"init","session_id":"abc"}\n{"type":"assi');
   assert.equal(first.events.length, 1);
   assert.equal(first.events[0].session_id, "abc");
-  const second = p.push('stant","message":{"content":[{"type":"text","text":"hello"}]},"timestamp_ms":1}\n');
+  const second = p.push(
+    'stant","message":{"content":[{"type":"text","text":"hello"}]},"timestamp_ms":1}\n',
+  );
   assert.equal(second.events[0].text, "hello");
   assert.equal(isDuplicateAssistant(second.events[0], true), false);
-  assert.equal(isDuplicateAssistant({ ...second.events[0], model_call_id: "m1", raw: {} }, true), true);
+  assert.equal(
+    isDuplicateAssistant({ ...second.events[0], model_call_id: "m1", raw: {} }, true),
+    true,
+  );
   const bad = p.push("not-json\n");
   assert.equal(bad.errors.length, 1);
   assert.equal(bad.events.length, 0);
@@ -57,30 +82,65 @@ test("stream parser keeps a partial line and rejects a bad event", () => {
 });
 
 test("cursor native shell and writes use the same deny rules as Claude", () => {
-  const policy: PolicyContext = { mode: "coding", workspaces: ["/wt/app"], baseBranch: "release/prod", protectedRoots: ["/src"] };
-  const push = cursorToolDecision({ shellToolCall: { args: { command: "git push origin HEAD" } } }, policy, "/wt/app");
+  const policy: PolicyContext = {
+    mode: "coding",
+    workspaces: ["/wt/app"],
+    baseBranch: "release/prod",
+    protectedRoots: ["/src"],
+  };
+  const push = cursorToolDecision(
+    { shellToolCall: { args: { command: "git push origin HEAD" } } },
+    policy,
+    "/wt/app",
+  );
   assert.equal(push.allow, false);
-  const outside = cursorToolDecision({ writeToolCall: { args: { path: "/src/app/main.go" } } }, policy, "/wt/app");
+  const outside = cursorToolDecision(
+    { writeToolCall: { args: { path: "/src/app/main.go" } } },
+    policy,
+    "/wt/app",
+  );
   assert.equal(outside.allow, false);
-  const inside = cursorToolDecision({ writeToolCall: { args: { path: "/wt/app/main.go" } } }, policy, "/wt/app");
+  const inside = cursorToolDecision(
+    { writeToolCall: { args: { path: "/wt/app/main.go" } } },
+    policy,
+    "/wt/app",
+  );
   assert.equal(inside.allow, true);
 });
 
 test("a dead attempt cannot submit a result", async () => {
   const live = await attemptIsLive(0, null);
   assert.equal(live.ok, false);
-  const text = await dispatchPlatformTool("submit_result", { output: { ok: true } }, {
-    runId: 0, stepId: 0, attemptId: 0, fencingToken: null, mode: "analysis", branch: "x", allowed: [], selected: [],
-    prose: "English", knowledge: [], disclosure: [], upstream: {}, stepType: "agent",
-    log: async () => {}, ask: async () => 0,
-  });
+  const text = await dispatchPlatformTool(
+    "submit_result",
+    { output: { ok: true } },
+    {
+      runId: 0,
+      stepId: 0,
+      attemptId: 0,
+      fencingToken: null,
+      mode: "analysis",
+      branch: "x",
+      allowed: [],
+      selected: [],
+      prose: "English",
+      knowledge: [],
+      disclosure: [],
+      upstream: {},
+      stepType: "agent",
+      log: async () => {},
+      ask: async () => 0,
+    },
+  );
   assert.match(text, /^ERROR: refused submit_result/);
 });
 
 function fakeAgent(mode: string) {
   const dir = mkdtempSync(join(tmpdir(), "fake-agent-"));
   const file = join(dir, "agent.js");
-  writeFileSync(file, `#!/usr/bin/env node
+  writeFileSync(
+    file,
+    `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_MODE || ${JSON.stringify(mode)};
 if (mode === "missing-flag") { process.stdout.write("--print\\n"); process.exit(0); }
@@ -103,7 +163,8 @@ else if (mode === "partial") {
 process.stdout.write('{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s","duration_ms":3}\\n');
 process.exit(0);
 }
-`);
+`,
+  );
   chmodSync(file, 0o755);
   return file;
 }
@@ -113,11 +174,19 @@ function fakeCtx(signal: AbortSignal) {
   return {
     logs,
     ctx: {
-      run: { id: 0, branch: "t", allowed_repositories: [], selected_repositories: [], output_locale: "en" },
+      run: {
+        id: 0,
+        branch: "t",
+        allowed_repositories: [],
+        selected_repositories: [],
+        output_locale: "en",
+      },
       step: { id: 0, type: "agent", config: {}, key: "analyze" },
       attempt: { id: 0, fencing_token: null },
       signal,
-      log: async (_k: string, content: string) => { logs.push(content); },
+      log: async (_k: string, content: string) => {
+        logs.push(content);
+      },
       recordSession: async () => {},
       recordMetrics: async () => {},
     } as any,
@@ -137,7 +206,13 @@ test("zero exit without a result event fails the turn", async () => {
   const ac = new AbortController();
   const { ctx } = fakeCtx(ac.signal);
   const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
-  const result = await cursorAgentTurn({ ctx, mode: "analysis", policy: { mode: "analysis", workspaces: [], baseBranch: "release/prod", protectedRoots: [] }, cwd: dir, prompt: "hi" });
+  const result = await cursorAgentTurn({
+    ctx,
+    mode: "analysis",
+    policy: { mode: "analysis", workspaces: [], baseBranch: "release/prod", protectedRoots: [] },
+    cwd: dir,
+    prompt: "hi",
+  });
   assert.equal(result.isError, true);
   assert.match(result.text, /without a result event/);
 });
@@ -146,11 +221,28 @@ test("nonzero exit and a denied git push are failures", async () => {
   process.env.CURSOR_AGENT_BIN = fakeAgent("fail");
   const ac = new AbortController();
   const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
-  const failed = await cursorAgentTurn({ ctx: fakeCtx(ac.signal).ctx, mode: "analysis", policy: { mode: "analysis", workspaces: [dir], baseBranch: "release/prod", protectedRoots: [] }, cwd: dir, prompt: "hi" });
+  const failed = await cursorAgentTurn({
+    ctx: fakeCtx(ac.signal).ctx,
+    mode: "analysis",
+    policy: { mode: "analysis", workspaces: [dir], baseBranch: "release/prod", protectedRoots: [] },
+    cwd: dir,
+    prompt: "hi",
+  });
   assert.equal(failed.isError, true);
   process.env.CURSOR_AGENT_BIN = fakeAgent("partial");
   const dir2 = mkdtempSync(join(tmpdir(), "cursor-turn-"));
-  const blocked = await cursorAgentTurn({ ctx: fakeCtx(ac.signal).ctx, mode: "coding", policy: { mode: "coding", workspaces: [dir2], baseBranch: "release/prod", protectedRoots: ["/src"] }, cwd: dir2, prompt: "edit" });
+  const blocked = await cursorAgentTurn({
+    ctx: fakeCtx(ac.signal).ctx,
+    mode: "coding",
+    policy: {
+      mode: "coding",
+      workspaces: [dir2],
+      baseBranch: "release/prod",
+      protectedRoots: ["/src"],
+    },
+    cwd: dir2,
+    prompt: "edit",
+  });
   assert.equal(blocked.isError, true);
   assert.match(blocked.text, /platform policy|git push|pushing/);
 });
@@ -161,7 +253,13 @@ test("cancellation kills a hung Cursor process", async () => {
   const ac = new AbortController();
   const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
   const started = Date.now();
-  const result = await cursorAgentTurn({ ctx: fakeCtx(ac.signal).ctx, mode: "analysis", policy: { mode: "analysis", workspaces: [], baseBranch: "release/prod", protectedRoots: [] }, cwd: dir, prompt: "wait" });
+  const result = await cursorAgentTurn({
+    ctx: fakeCtx(ac.signal).ctx,
+    mode: "analysis",
+    policy: { mode: "analysis", workspaces: [], baseBranch: "release/prod", protectedRoots: [] },
+    cwd: dir,
+    prompt: "wait",
+  });
   assert.equal(result.isError, true);
   assert.ok(Date.now() - started < 5000);
 });
@@ -174,14 +272,24 @@ test("Cursor shares the attempt collector across invocations without overwriting
   delete process.env.CURSOR_AGENT_TIMEOUT_MS;
   for (let i = 0; i < 2; i++) {
     const dir = mkdtempSync(join(tmpdir(), "cursor-metrics-"));
-    await cursorAgentTurn({ ctx: fakeCtx(new AbortController().signal).ctx, metrics, invocationId: `invocation-${i}`,
-      mode: "coding", policy: { mode: "coding", workspaces: [dir], baseBranch: "release/prod", protectedRoots: [] }, cwd: dir, prompt: "work" });
+    await cursorAgentTurn({
+      ctx: fakeCtx(new AbortController().signal).ctx,
+      metrics,
+      invocationId: `invocation-${i}`,
+      mode: "coding",
+      policy: { mode: "coding", workspaces: [dir], baseBranch: "release/prod", protectedRoots: [] },
+      cwd: dir,
+      prompt: "work",
+    });
   }
   assert.equal(metrics.provider, "cursor");
   assert.equal(metrics.model, "Auto");
   assert.equal(metrics.sessions, 2);
   assert.equal(metrics.denied.length, 2);
-  assert.equal(Object.values(metrics.tool_calls).reduce((a, b) => a + b, 0), 2);
+  assert.equal(
+    Object.values(metrics.tool_calls).reduce((a, b) => a + b, 0),
+    2,
+  );
   assert.equal(metrics.tokens, null);
   assert.equal(metrics.cost_usd, null);
 });

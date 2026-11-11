@@ -42,8 +42,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ov.health.preexisting": " · {n} kèm lỗi có sẵn",
     "ov.health.noData": "chưa có dữ liệu",
     "ov.health.repairs": "Số lần sửa / attempt",
-    "ov.health.repairsHint":
-      "{stopped} dừng vì không tiến triển · {exhausted} hết lượt",
+    "ov.health.repairsHint": "{stopped} dừng vì không tiến triển · {exhausted} hết lượt",
     "ov.health.time": "Thời gian / run",
     "ov.health.minutes": "{n} phút",
     "ov.health.runs30": "{n} run trong 30 ngày",
@@ -58,15 +57,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ov.verifySub": "coding step gần đây",
     "ov.verifyEmpty": "Chưa có coding step nào chạy qua verification gate.",
     "ov.verifyRounds": "{rounds} vòng · sửa {repairs}",
-    "ov.verifyFail":
-      "Có coding step không qua verification — mở run để xem chẩn đoán.",
+    "ov.verifyFail": "Có coding step không qua verification — mở run để xem chẩn đoán.",
     "runs.title": "Workflow Runs",
     "runs.subtitle":
       "Theo dõi mọi lần thực thi workflow theo thời gian thực — trạng thái, tiến độ từng bước và câu hỏi đang chờ.",
     "runs.progressAria": "{done}/{total} bước hoàn thành",
     "runs.emptyTitle": "Chưa có run nào",
-    "runs.emptyBody":
-      "Chạy một workflow từ Work Item hoặc trang Workflows để bắt đầu.",
+    "runs.emptyBody": "Chạy một workflow từ Work Item hoặc trang Workflows để bắt đầu.",
     "runs.col.run": "Run",
     "runs.col.workflow": "Workflow",
     "runs.col.status": "Trạng thái",
@@ -85,7 +82,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ql.costSuccess": "Chi phí / lần thành công",
     "ql.unknownCost": "Không rõ cost",
     "ql.verifyPass": "Verify đạt",
-    "ql.providersNote": "* Dưới {n} attempt: không đủ mẫu để so sánh. Số liệu quan sát; đổi routing chỉ qua đề xuất có kiểm soát.",
+    "ql.providersNote":
+      "* Dưới {n} attempt: không đủ mẫu để so sánh. Số liệu quan sát; đổi routing chỉ qua đề xuất có kiểm soát.",
     "ql.sub": "{runs} run có outcome trong {days} ngày",
     "ql.propose": "Đề xuất cải tiến",
     "ql.proposed": "Đã gửi đề xuất vào hàng chờ duyệt",
@@ -104,7 +102,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ql.reviewRate": "Review đạt",
     "ql.failureRate": "Có lỗi",
     "ql.repairs": "Sửa lại TB",
-    "ql.observational": "Số liệu quan sát (task khác nhau): chỉ áp dụng policy mới sau khi so sánh benchmark ghép cặp.",
+    "ql.observational":
+      "Số liệu quan sát (task khác nhau): chỉ áp dụng policy mới sau khi so sánh benchmark ghép cặp.",
     "ql.cat.wrong_repository": "Sai repository",
     "ql.cat.incorrect_business_assumption": "Giả định nghiệp vụ sai",
     "ql.cat.missing_regression_test": "Thiếu regression test",
@@ -195,8 +194,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "qx.answeredStat": "Đã trả lời",
     "qx.latest100": "100 gần nhất",
     "qx.emptyTitle": "Không có câu hỏi nào đang chờ",
-    "qx.emptyBody":
-      "Mọi bước đều đang chạy. Câu hỏi mới từ agent sẽ xuất hiện ở đây.",
+    "qx.emptyBody": "Mọi bước đều đang chạy. Câu hỏi mới từ agent sẽ xuất hiện ở đây.",
     "qx.history": "Lịch sử trả lời",
     "qx.noneYet": "Chưa có.",
     "qx.col.question": "Câu hỏi",
@@ -253,8 +251,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rp.addNote": "Thêm ghi chú",
     "rp.skipped": "Work item không có ai_suggest.report — bỏ qua báo cáo.",
     "rp.building": "Đang tạo báo cáo…",
-    "rp.pending":
-      "Báo cáo sẽ được tạo sau khi mọi bước của task hoàn tất (test, review, PR).",
+    "rp.pending": "Báo cáo sẽ được tạo sau khi mọi bước của task hoàn tất (test, review, PR).",
     "rp.missing": "Chưa có báo cáo ({status}).",
     "rp.regen": "Đang tạo lại báo cáo",
     "rp.approved": "Đã duyệt báo cáo",
@@ -273,8 +270,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rp.noEvidence": "Không có bằng chứng",
     "rp.limits": "Thiếu bằng chứng / giới hạn",
     "rp.finalMd": "Bản cuối (đã duyệt).",
-    "rp.editMd":
-      "Có thể sửa trước khi duyệt; bản sửa sẽ được lưu làm bản cuối.",
+    "rp.editMd": "Có thể sửa trước khi duyệt; bản sửa sẽ được lưu làm bản cuối.",
     "rp.copyMd": "Sao chép Markdown",
     "rp.sharedEv": "Bằng chứng chung (không gắn với yêu cầu cụ thể):",
     "rp.note": "ghi chú",
@@ -328,8 +324,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ch.prStep": "Bước PR",
     "ch.mode": "chế độ {mode}",
     "ch.waiting": "Bước PR đang chờ duyệt",
-    "ch.waitingSub":
-      "Xem thay đổi bên dưới rồi duyệt để push và mở/cập nhật PR trên Bitbucket.",
+    "ch.waitingSub": "Xem thay đổi bên dưới rồi duyệt để push và mở/cập nhật PR trên Bitbucket.",
     "ch.approve": "Duyệt & tạo PR",
     "ch.openStep": "Mở bước PR",
     "ch.approved": "Đã duyệt bước PR",
@@ -346,8 +341,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ch.seeAll": "Xem tất cả",
     "ch.noDiff": "(không có diff)",
     "ch.willOpen": "sẽ được mở",
-    "ch.wontOpen":
-      "sẽ không mở (chưa có commit / chưa chọn repo / còn thay đổi chưa commit)",
+    "ch.wontOpen": "sẽ không mở (chưa có commit / chưa chọn repo / còn thay đổi chưa commit)",
     "ch.copyTitle": "Copy tiêu đề",
     "ch.copyDesc": "Copy mô tả",
     "ch.testsFailed": "test thất bại",
@@ -399,13 +393,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.scopeFilter": "Lọc theo scope",
     "kn.allScopes": "Mọi scope",
     "kn.emptyTitle": "Chưa có item",
-    "kn.emptyBody":
-      "Tạo item mới hoặc quét repository để import CLAUDE.md, skills, rules.",
+    "kn.emptyBody": "Tạo item mới hoặc quét repository để import CLAUDE.md, skills, rules.",
     "kn.create": "Tạo item",
     "kn.noMatch": "Không có item khớp bộ lọc.",
     "kn.pickTitle": "Chọn một item để xem/sửa",
-    "kn.pickBody":
-      "Mỗi item có nội dung Markdown, scope áp dụng, lịch sử version và audit log.",
+    "kn.pickBody": "Mỗi item có nội dung Markdown, scope áp dụng, lịch sử version và audit log.",
     "kn.createNew": "Tạo mới",
     "kn.scanning": "Đang quét…",
     "kn.scan": "Quét repository",
@@ -430,6 +422,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.newTitle": "Knowledge item mới",
     "kn.newHint": "Điền thông tin, scope và nội dung rồi bấm Tạo.",
     "kn.updatedAt": "cập nhật {time}",
+    "kn.delete.button": "Xóa",
+    "kn.delete.title": "Xóa vĩnh viễn khỏi registry (giữ snapshot để khôi phục thủ công)",
+    "kn.delete.confirm":
+      "Xóa vĩnh viễn {key} (kèm {n} file hỗ trợ)? Importer sẽ không tạo lại item này. Nhập lý do rồi bấm OK:",
+    "kn.delete.force": "{detail}\n\nVẫn xóa? Workflow đang dùng sẽ không nhận item này nữa.",
+    "kn.delete.done": "Đã xóa {n} item",
     "kn.content": "Nội dung",
     "kn.skillInstructions": "Skill instructions",
     "kn.emptyContent": "(trống)",
@@ -451,8 +449,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.scopePriority": "Scope & ưu tiên",
     "kn.scope": "Scope",
     "kn.scopeRef": "Scope ref",
-    "kn.conflictHint":
-      "Item cùng conflict key cạnh tranh; scope hẹp hơn thắng.",
+    "kn.conflictHint": "Item cùng conflict key cạnh tranh; scope hẹp hơn thắng.",
     "kn.enabled": "Bật",
     "kn.enforced": "Enforced",
     "kn.contentLegend": "Nội dung",
@@ -460,8 +457,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.skillMd": "Skill instructions (Markdown)",
     "kn.advanced": "Nâng cao",
     "kn.applicabilityJson": "Applicability (JSON)",
-    "kn.applicabilityHint":
-      "step_types, step_keys, repos, projects, workflows, keywords",
+    "kn.applicabilityHint": "step_types, step_keys, repos, projects, workflows, keywords",
     "kn.metadataJson": "Metadata (JSON)",
     "kn.metadataHint": "skills: required_tools, output_contract",
     "kn.changeNote": "ghi chú thay đổi",
@@ -511,8 +507,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.hint.PROJECT": "vd OMS",
     "kn.hint.REPOSITORY": "vd oms-api",
     "kn.hint.WORKFLOW": "workflow key, vd feature-implementation",
-    "kn.hint.STEP":
-      "workflow:step hoặc step key, vd feature-implementation:implement",
+    "kn.hint.STEP": "workflow:step hoặc step key, vd feature-implementation:implement",
     "repo.title": "Repositories",
     "repo.subtitle":
       "Registry dùng cho repository discovery và tập repo được phép (theo project). Agent không bao giờ sửa repo ngoài tập được phép của run.",
@@ -547,9 +542,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.hint.unknown": "Xem chi tiết lỗi, rồi bấm Kiểm tra lại.",
     "ig.db.title": "Database QC theo dự án",
     "ig.db.summaryOff": "chưa cấu hình",
-    "ig.db.body": "Agent truy vấn database QC (MySQL) của dự án qua công cụ platform: database.list, database.schema, database.query, cho Claude, Codex và Cursor. Chỉ đọc: một câu SELECT / SHOW / DESCRIBE / EXPLAIN / WITH, chạy trong transaction READ ONLY, có giới hạn số dòng và thời gian; cột giống mật khẩu/token bị che. Chỉ run có repository thuộc dự án đó (theo quyền repository của chủ run) mới dùng được.",
-    "ig.db.emptyAdmin": "Chưa có database nào. Thêm database QC của OMS, Payment, Warranty bên dưới.",
-    "ig.db.emptyMember": "Không có database nào bạn dùng được: cần quyền repository của dự án tương ứng.",
+    "ig.db.body":
+      "Agent truy vấn database QC (MySQL) của dự án qua công cụ platform: database.list, database.schema, database.query, cho Claude, Codex và Cursor. Chỉ đọc: một câu SELECT / SHOW / DESCRIBE / EXPLAIN / WITH, chạy trong transaction READ ONLY, có giới hạn số dòng và thời gian; cột giống mật khẩu/token bị che. Chỉ run có repository thuộc dự án đó (theo quyền repository của chủ run) mới dùng được.",
+    "ig.db.emptyAdmin":
+      "Chưa có database nào. Thêm database QC của OMS, Payment, Warranty bên dưới.",
+    "ig.db.emptyMember":
+      "Không có database nào bạn dùng được: cần quyền repository của dự án tương ứng.",
     "ig.db.key": "Mã",
     "ig.db.scope": "Dự án / repository",
     "ig.db.database": "Database",
@@ -565,7 +563,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.timeout": "Timeout (ms)",
     "ig.db.description": "Mô tả (agent đọc được, ví dụ các bảng chính)",
     "ig.db.enabled": "Bật",
-    "ig.db.scopeHint": "Run được dùng database này khi phạm vi repository của nó có một repository trong danh sách trên, hoặc một repository thuộc dự án trên. Ví dụ Warranty: điền repository warranty-api, warranty-worker (vì chúng đang thuộc dự án OMS). Nên dùng tài khoản MySQL chỉ có quyền SELECT.",
+    "ig.db.scopeHint":
+      "Run được dùng database này khi phạm vi repository của nó có một repository trong danh sách trên, hoặc một repository thuộc dự án trên. Ví dụ Warranty: điền repository warranty-api, warranty-worker (vì chúng đang thuộc dự án OMS). Nên dùng tài khoản MySQL chỉ có quyền SELECT.",
     "ig.db.add": "Thêm database",
     "ig.db.saved": "Đã lưu database",
     "ig.db.deleted": "Đã xoá database",
@@ -577,16 +576,21 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.perm.read": "Đọc",
     "repo.perm.write": "Ghi",
     "repo.perm.pull_request": "Tạo PR",
-    "repo.access.impliesHint": "Tick được nhiều quyền. Tạo PR cần quyền ghi (phải push branch), ghi cần quyền đọc: tick quyền cao hơn sẽ tự tick quyền thấp hơn, bỏ tick Đọc là gỡ hết.",
+    "repo.access.impliesHint":
+      "Tick được nhiều quyền. Tạo PR cần quyền ghi (phải push branch), ghi cần quyền đọc: tick quyền cao hơn sẽ tự tick quyền thấp hơn, bỏ tick Đọc là gỡ hết.",
     "repo.access.allFull": "Toàn quyền tất cả",
     "repo.access.allNone": "Gỡ hết",
-    "repo.access.allFullConfirm": "Cho {user} toàn quyền (đọc, ghi, tạo PR) trên tất cả {n} repository?",
+    "repo.access.allFullConfirm":
+      "Cho {user} toàn quyền (đọc, ghi, tạo PR) trên tất cả {n} repository?",
     "repo.access.allNoneConfirm": "Gỡ mọi quyền của {user} trên tất cả {n} repository?",
     "repo.audit.repository.access.bulk": "đổi quyền hàng loạt",
-    "repo.mineSubtitle": "Chỉ những repository bạn được cấp quyền. Quyền thực tế = quyền được cấp trên nền tảng ∩ quyền Bitbucket của chính bạn ∩ hành động repository cho phép.",
+    "repo.mineSubtitle":
+      "Chỉ những repository bạn được cấp quyền. Quyền thực tế = quyền được cấp trên nền tảng ∩ quyền Bitbucket của chính bạn ∩ hành động repository cho phép.",
     "repo.mineEmpty": "Bạn chưa có quyền truy cập repository nào",
-    "repo.mineEmptyBody": "Nhờ admin cấp quyền cho bạn. Nếu đã được cấp, hãy kiểm tra token Bitbucket cá nhân trong Integrations rồi bấm Kiểm tra lại quyền.",
-    "repo.mineEmptyAdmin": "Quyền admin dùng để quản lý, không tự cho quyền đọc mã nguồn. Cấp quyền cho chính bạn trong Quản lý quyền truy cập.",
+    "repo.mineEmptyBody":
+      "Nhờ admin cấp quyền cho bạn. Nếu đã được cấp, hãy kiểm tra token Bitbucket cá nhân trong Integrations rồi bấm Kiểm tra lại quyền.",
+    "repo.mineEmptyAdmin":
+      "Quyền admin dùng để quản lý, không tự cho quyền đọc mã nguồn. Cấp quyền cho chính bạn trong Quản lý quyền truy cập.",
     "repo.manage": "Quản lý quyền truy cập",
     "repo.yourAccess": "Quyền của bạn",
     "repo.revalidate": "Kiểm tra lại quyền Bitbucket",
@@ -605,15 +609,20 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.bb.trusted": "Tin cậy theo cấu hình",
     "repo.bb.stale": "cần kiểm tra lại",
     "repo.access.title": "Phân quyền repository",
-    "repo.access.note": "Mỗi ô là quyền cấp trên nền tảng. Quyền thực tế còn bị giới hạn bởi quyền Bitbucket của chính người dùng và hành động repository cho phép. Quản lý quyền không cho admin quyền đọc mã nguồn; admin tự cấp quyền như mọi người.",
+    "repo.access.note":
+      "Mỗi ô là quyền cấp trên nền tảng. Quyền thực tế còn bị giới hạn bởi quyền Bitbucket của chính người dùng và hành động repository cho phép. Quản lý quyền không cho admin quyền đọc mã nguồn; admin tự cấp quyền như mọi người.",
     "repo.access.policy": "Chính sách xác minh Bitbucket",
-    "repo.access.policy.strict": "strict — đọc, ghi và tạo PR đều phải được Bitbucket xác minh bằng token cá nhân; chưa xác minh = không có quyền.",
-    "repo.access.policy.personal": "personal — đọc phải được xác minh; ghi/PR Bitbucket không báo được thì chạy bằng chính token cá nhân đó (Bitbucket tự chặn nếu thiếu quyền).",
-    "repo.access.policy.trusted": "trusted — admin xác nhận quyền trên nền tảng khớp với Bitbucket (ví dụ dùng chung service account); không hỏi Bitbucket.",
+    "repo.access.policy.strict":
+      "strict — đọc, ghi và tạo PR đều phải được Bitbucket xác minh bằng token cá nhân; chưa xác minh = không có quyền.",
+    "repo.access.policy.personal":
+      "personal — đọc phải được xác minh; ghi/PR Bitbucket không báo được thì chạy bằng chính token cá nhân đó (Bitbucket tự chặn nếu thiếu quyền).",
+    "repo.access.policy.trusted":
+      "trusted — admin xác nhận quyền trên nền tảng khớp với Bitbucket (ví dụ dùng chung service account); không hỏi Bitbucket.",
     "repo.access.repo": "Repository",
     "repo.access.shared": "Chia sẻ",
     "repo.access.source": "Nguồn quyền",
-    "repo.access.effectiveHint": "Bị thu hồi quyền thì run đang chạy sẽ dừng ở bước kế tiếp hoặc ở lệnh gọi công cụ kế tiếp.",
+    "repo.access.effectiveHint":
+      "Bị thu hồi quyền thì run đang chạy sẽ dừng ở bước kế tiếp hoặc ở lệnh gọi công cụ kế tiếp.",
     "repo.access.saved": "Đã cập nhật quyền",
     "repo.access.revalidated": "Đã kiểm tra lại quyền Bitbucket",
     "repo.access.audit": "Lịch sử thay đổi quyền",
@@ -711,8 +720,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "office.simRun": "Run mô phỏng",
     "office.loadFail": "Không tải được run: {error}",
     "office.loading": "Đang tải…",
-    "office.break":
-      "Chưa có workflow nào đang chạy — văn phòng đang nghỉ giải lao",
+    "office.break": "Chưa có workflow nào đang chạy — văn phòng đang nghỉ giải lao",
     "office.waitingSign": "{n} cần bạn",
     "office.nobodyWaiting": "không ai chờ",
     "office.cap.quiet": "Văn phòng yên tĩnh — mọi người uống cà phê chờ việc",
@@ -742,8 +750,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.prodFrom": "từ trang Lỗi production",
     "wi.prodCurrent": "Lần quét mới nhất ({day}): {count} lần, gần nhất {when}",
     "wi.prodYesterday": "hôm qua {count}",
-    "wi.prodGone":
-      "Không còn thấy ở lần quét mới nhất ({day}) — lần cuối {when}",
+    "wi.prodGone": "Không còn thấy ở lần quét mới nhất ({day}) — lần cuối {when}",
     "wi.open": "Mở",
     "wi.doing": "Đang làm",
     "wi.done": "Xong",
@@ -766,8 +773,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Giữ đúng một tab work.hasaki.vn trong Chrome cá nhân rồi kết nối lại; app không tự chọn giữa nhiều tab tài khoản khác nhau.",
     chrome_existing_owner:
       "Chrome cá nhân chỉ được kết nối bởi tài khoản platform được cấu hình trên máy local.",
-    chrome_existing_platform:
-      "Chế độ Chrome cá nhân hiện hỗ trợ Chrome Windows qua WSL.",
+    chrome_existing_platform: "Chế độ Chrome cá nhân hiện hỗ trợ Chrome Windows qua WSL.",
     "chrome.connect": "Kết nối bằng Chrome",
     "chrome.local":
       "Chrome mở trên máy chạy backend. Tự đăng nhập và MFA trong cửa sổ riêng; nếu SSO từ chối Chrome được kết nối, hãy dùng token cá nhân.",
@@ -786,14 +792,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Không tìm thấy Google Chrome chính thức. Cài Chrome hoặc cấu hình HASAKI_WORK_CHROME_PATH.",
     chrome_wsl_loopback:
       "Không kết nối được DevTools của Chrome Windows qua cầu nối WSL. Kiểm tra chính sách Chrome/PowerShell, hoặc dán token thủ công.",
-    chrome_debugging:
-      "Không kết nối được DevTools của Chrome. Có thể bị chính sách công ty chặn.",
+    chrome_debugging: "Không kết nối được DevTools của Chrome. Có thể bị chính sách công ty chặn.",
     chrome_sso_start:
       "Không tìm thấy nút Hasaki SSO. Kiểm tra trang trong Chrome và đăng nhập thủ công.",
     chrome_start:
       "Không mở được phiên Chrome hoặc trang SSO. Kiểm tra cửa sổ Chrome, hoặc dùng token cá nhân.",
-    chrome_verification:
-      "API chưa xác minh được token mới. Token trước đó được giữ lại.",
+    chrome_verification: "API chưa xác minh được token mới. Token trước đó được giữ lại.",
     "wi.tokenPh": "hoặc dán token (Bearer eyJ…)",
     "wi.tokenSaved": "Đã lưu token",
     "wi.save": "Lưu",
@@ -803,8 +807,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.inbox": "Hộp task",
     "wi.imported": "đã import",
     "wi.title": "Work Items",
-    "wi.subtitle":
-      "Yêu cầu kỹ thuật. Import không bao giờ tự chạy — bạn chọn workflow để chạy.",
+    "wi.subtitle": "Yêu cầu kỹ thuật. Import không bao giờ tự chạy — bạn chọn workflow để chạy.",
     "wi.refresh": "Làm mới",
     "wi.refreshList": "Làm mới danh sách",
     "wi.importBtn": "Import JSON / Jira",
@@ -816,14 +819,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.all": "Tất cả",
     "wi.empty": "Chưa có work item",
     "wi.first": "Tạo yêu cầu đầu tiên",
-    "wi.emptyBody":
-      "Tạo yêu cầu thủ công, import JSON/Jira hoặc lấy task từ Hasaki Work.",
+    "wi.emptyBody": "Tạo yêu cầu thủ công, import JSON/Jira hoặc lấy task từ Hasaki Work.",
     "wi.noMatch": "Không có work item phù hợp",
     "wi.noMatchBody": "Thử từ khoá khác hoặc bỏ bộ lọc.",
     "wi.runs": "{n} run",
     "wi.ago": "{ago} trước",
-    "wi.note":
-      "Import chỉ tạo work item. Mở work item để xem mô tả và chọn workflow chạy.",
+    "wi.note": "Import chỉ tạo work item. Mở work item để xem mô tả và chọn workflow chạy.",
     "wi.createTitle": "Yêu cầu mới (thủ công)",
     "wi.fieldTitle": "Tiêu đề",
     "wi.titlePh": "Tiêu đề",
@@ -841,21 +842,18 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.savedDesc": "Đã lưu mô tả",
     "wi.request": "Yêu cầu",
     "wi.edited": "đã sửa tay",
-    "wi.editedTip":
-      "Đã sửa tay — import lại từ Hasaki Work/Jira sẽ không ghi đè",
+    "wi.editedTip": "Đã sửa tay — import lại từ Hasaki Work/Jira sẽ không ghi đè",
     "wi.edit": "Sửa",
     "wi.addDesc": "Thêm mô tả",
     "wi.descPh":
       "Mô tả yêu cầu: hiện tượng, kết quả mong đợi, đối tượng, repo hoặc màn hình liên quan… (Markdown)",
     "wi.saving": "Đang lưu…",
     "wi.agentUses": "Agent sẽ dùng mô tả này ở các lần chạy sau.",
-    "wi.noDesc":
-      "Không có mô tả — bấm “Thêm mô tả” để bổ sung trước khi chạy workflow.",
+    "wi.noDesc": "Không có mô tả — bấm “Thêm mô tả” để bổ sung trước khi chạy workflow.",
     "wi.noProject": "không có project",
     "wi.raw": "payload gốc",
     "wi.history": "Lịch sử thực thi",
-    "wi.legacy":
-      "Lịch sử cũ (trước workflow) — {questions} câu hỏi, {events} sự kiện",
+    "wi.legacy": "Lịch sử cũ (trước workflow) — {questions} câu hỏi, {events} sự kiện",
     "wi.unanswered": "(chưa trả lời)",
     "wi.settings": "Thiết lập",
     "wi.policy": "Chính sách tự động",
@@ -914,12 +912,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.assignedInstance": "Máy được giao",
     "rv.lastSeen": "Lần cuối kết nối",
     "rv.workerAvailable": "Worker",
-    "rv.ownerOnly":
-      "Tiếp tục trên máy được giao; khởi động lại nền tảng ở máy đó nếu mất kết nối.",
-    "rv.reconcile":
-      "Cần kiểm tra worktree và tác động bên ngoài trước khi tiếp tục.",
-    "rv.queueHint":
-      "tăng scheduler.workers trong config.json để chạy song song.",
+    "rv.ownerOnly": "Tiếp tục trên máy được giao; khởi động lại nền tảng ở máy đó nếu mất kết nối.",
+    "rv.reconcile": "Cần kiểm tra worktree và tác động bên ngoài trước khi tiếp tục.",
+    "rv.queueHint": "tăng scheduler.workers trong config.json để chạy song song.",
     "rv.report": "Báo cáo kết quả",
     "rv.verified": "{n} đã xác minh",
     "rv.partial": "{n} một phần",
@@ -939,15 +934,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.machine": "Máy",
     "rv.queue": "Hàng đợi",
     "rv.humanWait": "Chờ người",
-    "rv.claudeLine":
-      "{sessions} session · {time} · {turns} lượt · ≈${cost} (ước tính)",
+    "rv.claudeLine": "{sessions} session · {time} · {turns} lượt · ≈${cost} (ước tính)",
     "rv.tokens": "vào {inn} · ra {out} · cache {cache}",
     "rv.tools":
       "{calls} lần gọi · {tool} · command/test {command} · {integration} integration · {skills} skill",
     "rv.retries": "Lần thử / lỗi",
     "rv.retryLine": "{retries} lần thử lại · {failed} attempt lỗi",
-    "rv.retrySlow":
-      "{retries} lần thử lại · {failed} attempt lỗi · chậm nhất: {step}",
+    "rv.retrySlow": "{retries} lần thử lại · {failed} attempt lỗi · chậm nhất: {step}",
     "rv.slowest": "chậm nhất: {step}",
     "rv.attemptTip": "{type} · {n} attempt",
     "rv.barTip": "hàng đợi {queue} · máy {exec} · người {human}",
@@ -1030,8 +1023,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.name": "Tên",
     "wfe.description": "Mô tả",
     "wfe.feedbackStep": "Bước nhận feedback",
-    "wfe.feedbackHint":
-      "Bước nhận feedback review (nút Gửi feedback trên run).",
+    "wfe.feedbackHint": "Bước nhận feedback review (nút Gửi feedback trên run).",
     "wfe.firstCoding": "(bước viết code đầu tiên)",
     "wfe.skillsKnowledge": "Skills và knowledge",
     "wfe.skillsAll": "Skills cho mọi bước",
@@ -1040,8 +1032,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.addKnowledge": "+ thêm knowledge",
     "wfe.scoped": "Knowledge có scope WORKFLOW:{key} (tự áp dụng):",
     "wfe.runInputs": "Input của run",
-    "wfe.runInputsLabel":
-      "Input của run (JSON, mô tả các trường form chạy cần)",
+    "wfe.runInputsLabel": "Input của run (JSON, mô tả các trường form chạy cần)",
     "wfe.versions": "Các version",
     "wfe.noVersions": "Chưa publish version nào.",
     "wfe.noNote": "Không có ghi chú",
@@ -1116,8 +1107,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.maxAttempts": "Số lần thử tối đa",
     "wfe.backoff": "Chờ giữa các lần thử (giây)",
     "wfe.runIf": "Chỉ chạy nếu",
-    "wfe.runIfHint":
-      "So sánh output.result (hoặc path) của một bước phía trước.",
+    "wfe.runIfHint": "So sánh output.result (hoặc path) của một bước phía trước.",
     "wfe.always": "(luôn chạy)",
     "wfe.pathPh": "path (result)",
     "wfe.equalsPh": "equals (JSON)",
@@ -1176,8 +1166,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.stepMetric": "Chỉ số loại bước",
     "ins.time": "Thời gian",
     "ins.byProfile": "So sánh theo hồ sơ",
-    "ins.profileSub":
-      "Thời gian, số bước Claude, số lượt và chi phí trung bình mỗi run",
+    "ins.profileSub": "Thời gian, số bước Claude, số lượt và chi phí trung bình mỗi run",
     "ins.col.profile": "Hồ sơ",
     "ins.col.runs": "Runs",
     "ins.col.completed": "Hoàn thành",
@@ -1235,15 +1224,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.repeated": "Lỗi verification lặp lại",
     "ins.repeatedSub": "Chữ ký lỗi xuất hiện nhiều hơn một lần",
     "ins.noneRepeated": "Không có lỗi lặp lại",
-    "ins.noneRepeatedBody":
-      "Chưa có chữ ký lỗi nào lặp lại trong khoảng thời gian này.",
+    "ins.noneRepeatedBody": "Chưa có chữ ký lỗi nào lặp lại trong khoảng thời gian này.",
     "ins.signature": "Chữ ký lỗi",
     "ins.times": "Số lần",
     "ins.bench": "So sánh benchmark",
-    "ins.benchSub":
-      "npm run bench -- --live · bài kiểm tra ẩn · candidate và profile",
-    "ins.benchEmpty":
-      "Chưa có kết quả benchmark. Chạy lệnh bên dưới để so sánh.",
+    "ins.benchSub": "npm run bench -- --live · bài kiểm tra ẩn · candidate và profile",
+    "ins.benchEmpty": "Chưa có kết quả benchmark. Chạy lệnh bên dưới để so sánh.",
     "ins.col.candidate": "Candidate / hồ sơ",
     "ins.col.success": "Thành công",
     "ins.col.regression": "Hồi quy",
@@ -1256,8 +1242,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.graded": "{n} đã chấm",
     "ins.ofJudged": "{pct}% trên {n}",
     "ig.title": "Tích hợp",
-    "ig.subtitle":
-      "Kết nối hệ thống bên ngoài. Bấm một dòng để xem hướng dẫn và nhập thông tin.",
+    "ig.subtitle": "Kết nối hệ thống bên ngoài. Bấm một dòng để xem hướng dẫn và nhập thông tin.",
     "ig.sources": "Nguồn điều tra",
     "ig.sourcesHint": "agent dùng, chỉ đọc",
     "ig.accounts": "Tài khoản của platform",
@@ -1285,8 +1270,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.argo.s1": "Mở {link} và đăng nhập (Keycloak).",
     "ig.argo.s2":
       "F12 → Application → Cookies → copy giá trị argocd.token. Nếu có argocd.token-1… thì copy cả header Cookie (hoặc Copy as cURL) ở tab Network.",
-    "ig.argo.s3":
-      "Dán vào ô dưới và bấm Lưu. Platform kiểm tra token với Argo CD trước khi lưu.",
+    "ig.argo.s3": "Dán vào ô dưới và bấm Lưu. Platform kiểm tra token với Argo CD trước khi lưu.",
     "ig.argo.ph": "eyJhbGciOi… hoặc argocd.token=eyJ…; argocd.token-1=…",
     "ig.argo.saved": "Đã kết nối Argo CD",
     "ig.argo.cleared": "Đã xoá token",
@@ -1310,12 +1294,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.splunk.s1": "Mở {link} và đăng nhập Google.",
     "ig.splunk.s2":
       "F12 → Network → chuột phải một request tới siem.hasaki.work → Copy as cURL (cmd hoặc bash), hoặc copy header Cookie (cần splunkd_… và splunkweb_csrf_token_…).",
-    "ig.splunk.s3":
-      "Dán vào ô dưới và bấm Lưu. Platform kiểm tra phiên với Splunk trước khi lưu.",
+    "ig.splunk.s3": "Dán vào ô dưới và bấm Lưu. Platform kiểm tra phiên với Splunk trước khi lưu.",
     "ig.splunk.ph": "curl … hoặc splunkd_8080=…; splunkweb_csrf_token_8080=…",
     "ig.splunk.saved": "Đã kết nối Splunk",
     "ig.splunk.tokenTitle": "Hoặc dùng Splunk token cá nhân",
-    "ig.splunk.tokenBody": "Token xác thực Splunk (Settings → Tokens) của tài khoản chỉ đọc. Token được kiểm tra trước khi lưu, mã hoá theo người dùng và không bao giờ gửi cho agent.",
+    "ig.splunk.tokenBody":
+      "Token xác thực Splunk (Settings → Tokens) của tài khoản chỉ đọc. Token được kiểm tra trước khi lưu, mã hoá theo người dùng và không bao giờ gửi cho agent.",
     "ig.splunk.token": "Splunk token",
     "ig.splunk.tokenReplace": "Thay token",
     "ig.splunk.test": "Kiểm tra kết nối",
@@ -1324,11 +1308,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.splunk.testFail": "Có index không truy cập được",
     "ig.splunk.indexOk": "truy cập được ({n} sự kiện trong 15 phút)",
     "ig.splunk.sharedTitle": "Tài khoản dịch vụ dùng chung (admin)",
-    "ig.splunk.sharedBody": "Token của một service account chỉ đọc, dùng khi người dùng không có phiên Splunk riêng — chỉ khi cấu hình splunk.allowSharedToken bật. Mọi truy vấn vẫn được ghi audit theo người dùng.",
+    "ig.splunk.sharedBody":
+      "Token của một service account chỉ đọc, dùng khi người dùng không có phiên Splunk riêng — chỉ khi cấu hình splunk.allowSharedToken bật. Mọi truy vấn vẫn được ghi audit theo người dùng.",
     "ig.splunk.sharedOn": "đang cho phép dùng chung",
     "ig.splunk.sharedOff": "chưa cho phép dùng chung",
     "inv.title": "Điều tra sự cố Production",
-    "inv.subtitle": "Truy vết log Splunk, ghép sự kiện giữa các service, dựng dòng thời gian và tính độ trễ — chỉ đọc, có bằng chứng.",
+    "inv.subtitle":
+      "Truy vết log Splunk, ghép sự kiện giữa các service, dựng dòng thời gian và tính độ trễ — chỉ đọc, có bằng chứng.",
     "inv.history": "Các lần điều tra",
     "inv.refresh": "Tải lại",
     "inv.noHistory": "Chưa có lần điều tra nào",
@@ -1337,11 +1323,14 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.created": "Tạo lúc",
     "inv.new": "Điều tra mới",
     "inv.readOnly": "Chỉ đọc",
-    "inv.notConnected": "Splunk chưa kết nối: agent sẽ đưa câu SPL để bạn tự chạy và dán kết quả (hoặc kết nối ở trang Integrations).",
+    "inv.notConnected":
+      "Splunk chưa kết nối: agent sẽ đưa câu SPL để bạn tự chạy và dán kết quả (hoặc kết nối ở trang Integrations).",
     "inv.requestLabel": "Cần điều tra gì?",
     "inv.requestHint": "Mã đơn / vận đơn / request id, thời điểm gần đúng, và câu hỏi cần trả lời.",
-    "inv.placeholder": "VD: Đơn 2611095VL160RW01, lấy message gửi HasakiNOW lúc khoảng 08:48 ngày 10/11/2026; NOW phản hồi tracking sau bao lâu; shipping label URL sinh lúc nào?",
-    "inv.routeHint": "Yêu cầu này có vẻ là việc code, không phải điều tra log production. Vẫn có thể chạy nếu bạn chắc chắn.",
+    "inv.placeholder":
+      "VD: Đơn 2611095VL160RW01, lấy message gửi HasakiNOW lúc khoảng 08:48 ngày 10/11/2026; NOW phản hồi tracking sau bao lâu; shipping label URL sinh lúc nào?",
+    "inv.routeHint":
+      "Yêu cầu này có vẻ là việc code, không phải điều tra log production. Vẫn có thể chạy nếu bạn chắc chắn.",
     "inv.filters": "Bộ lọc (tuỳ chọn): môi trường, index, khoảng thời gian, ngôn ngữ báo cáo",
     "inv.environment": "Môi trường",
     "inv.indexes": "Index",
@@ -1382,7 +1371,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.noSearches": "Chưa chạy truy vấn nào.",
     "inv.manualPending": "chờ dán kết quả",
     "inv.rows": "dòng",
-    "inv.pasteHelp": "Chạy câu SPL này trong Splunk Web (link Splunk, đúng khoảng thời gian), Export dạng JSON hoặc CSV (có _time và _raw) rồi dán vào đây. Dữ liệu được che thông tin nhạy cảm trước khi lưu; bản dán gốc không được lưu.",
+    "inv.pasteHelp":
+      "Chạy câu SPL này trong Splunk Web (link Splunk, đúng khoảng thời gian), Export dạng JSON hoặc CSV (có _time và _raw) rồi dán vào đây. Dữ liệu được che thông tin nhạy cảm trước khi lưu; bản dán gốc không được lưu.",
     "inv.submitPaste": "Gửi kết quả",
     "inv.pasted": "Đã lưu kết quả — trả lời câu hỏi của agent để tiếp tục",
     "inv.report": "Báo cáo chi tiết",
@@ -1395,8 +1385,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.st.insufficient_evidence": "Không đủ bằng chứng",
     "inv.st.blocked": "Không truy cập được log",
     "inv.fix": "Chuyển sang sửa lỗi",
-    "inv.fixHint": "Mở run Bug Investigation dùng kết quả điều tra này: phân tích nguyên nhân → đề xuất fix → bạn duyệt → sửa code → test → review → PR (cần duyệt).",
-    "inv.fixConfirm": "Tạo run Bug Investigation từ kết quả điều tra này?\n\nRun mới sẽ phân tích nguyên nhân và đề xuất cách sửa. Code chỉ được sửa sau khi bạn duyệt đề xuất, và PR cũng cần bạn duyệt. Quy trình điều tra vẫn giữ chỉ đọc.",
+    "inv.fixHint":
+      "Mở run Bug Investigation dùng kết quả điều tra này: phân tích nguyên nhân → đề xuất fix → bạn duyệt → sửa code → test → review → PR (cần duyệt).",
+    "inv.fixConfirm":
+      "Tạo run Bug Investigation từ kết quả điều tra này?\n\nRun mới sẽ phân tích nguyên nhân và đề xuất cách sửa. Code chỉ được sửa sau khi bạn duyệt đề xuất, và PR cũng cần bạn duyệt. Quy trình điều tra vẫn giữ chỉ đọc.",
     "inv.fixStarted": "Đã tạo run sửa lỗi",
     "inv.fixOpen": "Run sửa lỗi #{id}",
     "inv.out.answers": "Trả lời câu hỏi",
@@ -1411,8 +1403,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.vault.policies": "Policies: {policies}",
     "ig.vault.s1": "Mở {link}, chọn method OIDC và đăng nhập.",
     "ig.vault.s2": "Bấm avatar hoặc menu user ở góc trên phải, rồi Copy token.",
-    "ig.vault.s3":
-      "Dán vào ô dưới và bấm Lưu. Platform kiểm tra token với Vault trước khi lưu.",
+    "ig.vault.s3": "Dán vào ô dưới và bấm Lưu. Platform kiểm tra token với Vault trước khi lưu.",
     "ig.vault.ph": "hvs.…",
     "ig.vault.saved": "Đã kết nối Vault",
     "ig.src.platform": "lưu trên platform",
@@ -1436,24 +1427,26 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.bb.token": "Token",
     "ig.bb.tokenPh": "API token",
     "ig.bb.reviewers": "Người review (UUID, mỗi dòng một người)",
-    "ig.bb.reviewersHint":
-      "Tuỳ chọn. Dạng {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
+    "ig.bb.reviewersHint": "Tuỳ chọn. Dạng {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
     "ig.bb.saved": "Đã lưu Bitbucket",
     "ig.tg.summaryOff": "Báo khi bước cần trả lời hoặc duyệt",
     "ig.tg.chat": "chat {id}",
     "ig.tg.interactiveTitle": "Điều khiển workflow qua Telegram",
-    "ig.tg.bindingHint": "Liên kết tài khoản Telegram riêng qua bot. Chỉ chat riêng đã xác minh mới có thể duyệt, từ chối và trả lời.",
+    "ig.tg.bindingHint":
+      "Liên kết tài khoản Telegram riêng qua bot. Chỉ chat riêng đã xác minh mới có thể duyệt, từ chối và trả lời.",
     "ig.tg.connect": "Kết nối Telegram",
     "ig.tg.disconnect": "Ngắt kết nối Telegram",
     "ig.tg.openBinding": "Mở Telegram để liên kết (10 phút)",
     "ig.tg.checkBinding": "Kiểm tra liên kết",
     "ig.tg.connected": "Đã liên kết Telegram ID {id}",
     "ig.tg.rebind": "Bot đã thay đổi. Ngắt kết nối rồi liên kết lại.",
-    "ig.tg.modeOff": "Quản trị viên cần bật TELEGRAM_MODE=polling hoặc webhook trên máy chủ. Polling hỗ trợ WSL, không cần URL công khai.",
+    "ig.tg.modeOff":
+      "Quản trị viên cần bật TELEGRAM_MODE=polling hoặc webhook trên máy chủ. Polling hỗ trợ WSL, không cần URL công khai.",
     "ig.tg.language": "Ngôn ngữ thông báo",
     "ig.tg.transport": "Chế độ nhận cập nhật",
     "ig.tg.receiverActive": "Bộ nhận đang hoạt động",
-    "ig.tg.receiverDown": "Bộ nhận chưa hoạt động — nút bấm Telegram sẽ được xử lý khi bộ nhận khởi động lại. Xem log máy chủ.",
+    "ig.tg.receiverDown":
+      "Bộ nhận chưa hoạt động — nút bấm Telegram sẽ được xử lý khi bộ nhận khởi động lại. Xem log máy chủ.",
     "ig.tg.pref.approvals": "Thông báo cần duyệt",
     "ig.tg.pref.questions": "Thông báo câu hỏi",
     "ig.tg.pref.failures": "Thông báo thất bại",
@@ -1461,7 +1454,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.tg.pref.interactive": "Bật nút tương tác",
     "ig.tg.prefsSaved": "Đã lưu cấu hình Telegram",
     "ig.tg.legacy": "Đích thông báo một chiều cũ",
-    "ig.tg.legacyHint": "Đích nhập tay chỉ nhận thông báo, không cấp quyền tương tác. Liên kết qua bot để thao tác an toàn.",
+    "ig.tg.legacyHint":
+      "Đích nhập tay chỉ nhận thông báo, không cấp quyền tương tác. Liên kết qua bot để thao tác an toàn.",
     "ig.tg.body":
       "Thông báo workflow chỉ gửi tới đích riêng của bạn. Liên kết Telegram để duyệt, từ chối và trả lời trực tiếp; đích nhập tay chỉ nhận thông báo một chiều.",
     "ig.tg.s1": "Tạo bot với {link} (/newbot) và copy bot token.",
@@ -1548,8 +1542,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "pe.noMatch": "Không có nhóm lỗi nào khớp bộ lọc",
     "pe.none": "Không có lỗi nào",
     "pe.noData": "Chưa có dữ liệu",
-    "pe.widen":
-      "Không có nhóm critical hoặc high. Chọn Tất cả để xem nhóm medium và low.",
+    "pe.widen": "Không có nhóm critical hoặc high. Chọn Tất cả để xem nhóm medium và low.",
     "pe.col.level": "Mức",
     "pe.col.service": "Service",
     "pe.col.error": "Lỗi",
@@ -1633,13 +1626,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.noRepoMatch": "Không có repo nào khớp.",
     "si.stepOutput": "Output của bước {step}",
     "si.commentPh": "Nhận xét (gửi cho bước được làm lại khi từ chối)",
-    "si.gateCommentPh":
-      "Ghi chú cho bước này (vd: chỉ sửa finding 1 và 3, bỏ qua finding 2)",
+    "si.gateCommentPh": "Ghi chú cho bước này (vd: chỉ sửa finding 1 và 3, bỏ qua finding 2)",
     "si.branch": "Branch cần review",
     "si.branchHint":
       'Mỗi repo một branch; ô trên là branch chung cho repo nào để trống (có thể dán "repo: branch, repo: branch"). Để trống hết = review branch base. Nếu sau đó cho sửa, agent commit tiếp lên đúng branch của từng repo.',
-    "si.branchCommonPh":
-      'Branch chung (vd HSK-XXXXXXXX), hoặc dán "repo: branch …"',
+    "si.branchCommonPh": 'Branch chung (vd HSK-XXXXXXXX), hoặc dán "repo: branch …"',
     "si.branchBase": "(branch base)",
     "si.skipGate": "Bỏ qua bước này",
     "si.skipGateHint":
@@ -1659,7 +1650,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ev.assumptions": "Giả định chưa kiểm chứng",
     "ev.approvedBy": "Duyệt bởi {by}",
     "ev.ackRecorded": "đã xác nhận chấp nhận rủi ro",
-    "ev.ack": "Tôi hiểu đề xuất này chưa đáp ứng điều kiện bằng chứng và vẫn chấp nhận rủi ro (bắt buộc ghi lý do trong nhận xét).",
+    "ev.ack":
+      "Tôi hiểu đề xuất này chưa đáp ứng điều kiện bằng chứng và vẫn chấp nhận rủi ro (bắt buộc ghi lý do trong nhận xét).",
     "ev.ackHint": "Đánh dấu xác nhận rủi ro và ghi lý do trong nhận xét để duyệt.",
     "ev.rc.CONFIRMED": "Đã xác nhận",
     "ev.rc.PROBABLE": "Có khả năng",
@@ -1668,8 +1660,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ev.risk.LOW": "Thấp",
     "ev.risk.MEDIUM": "Trung bình",
     "ev.risk.HIGH": "Cao",
-    "si.approveRepos":
-      "Duyệt — bước được duyệt và run tiếp tục với {n} repo đã chọn.",
+    "si.approveRepos": "Duyệt — bước được duyệt và run tiếp tục với {n} repo đã chọn.",
     "si.rejectDoes": "Từ chối — bước bị từ chối kèm nhận xét của bạn.",
     "si.rejectRedo": "Từ chối — bước {step} được làm lại kèm nhận xét của bạn.",
     "si.approve": "Duyệt",
@@ -1780,8 +1771,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.cost": "Chi phí",
     "si.turns": "Lượt",
     "si.duration": "Thời gian",
-    "si.tokenLine":
-      "vào {inn} · ra {out} · đọc cache {read} · ghi cache {write}",
+    "si.tokenLine": "vào {inn} · ra {out} · đọc cache {read} · ghi cache {write}",
     "si.disclosure": "Cách nạp",
     "si.disclosureLine":
       "{inline} nhúng · {index} chỉ mục · {search} chỉ tìm · bước trước {full} đầy đủ / {summary} tóm tắt",
@@ -1817,8 +1807,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.full": "đầy đủ",
     "si.summarised": "tóm tắt",
     "si.overridden": "Bị ghi đè",
-    "si.overriddenBy":
-      "{key} v{version} bị ghi đè bởi {by} (conflict key {conflict})",
+    "si.overriddenBy": "{key} v{version} bị ghi đè bởi {by} (conflict key {conflict})",
     "si.supersededBy":
       "{key} v{version} đã bị thay thế bởi {by} (rule mới áp dụng cho phạm vi này)",
     "si.expiredRule": "{key} v{version} đã hết hiệu lực",
@@ -1882,8 +1871,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kp.finalTextHint":
       "Có thể sửa câu chữ trước khi duyệt; nội dung thực sự áp dụng được lưu lại.",
     "kp.effectiveFrom": "Hiệu lực từ",
-    "kp.effectiveHint":
-      "Để trống = áp dụng ngay. Trước ngày này các run vẫn dùng rule cũ.",
+    "kp.effectiveHint": "Để trống = áp dụng ngay. Trước ngày này các run vẫn dùng rule cũ.",
     "kp.acceptCurrent": "Tôi đã đọc bản hiện tại và vẫn duyệt",
     "kp.override": "Bỏ qua kiểm tra tự động (tôi chịu trách nhiệm)",
     "kp.commentPh": "Lý do / ai đã xác nhận",
@@ -1891,20 +1879,28 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Duyệt: tạo version mới cho rule; các run sau dùng bản mới, lịch sử giữ nguyên.",
     "kp.effect.SUPERSEDE":
       "Duyệt: tạo rule mới cho phạm vi đã chọn; rule cũ chỉ còn áp dụng ngoài phạm vi đó.",
-    "kp.effect.DEPRECATE":
-      "Duyệt: rule ngừng áp dụng (ngay hoặc từ ngày hiệu lực).",
+    "kp.effect.DEPRECATE": "Duyệt: rule ngừng áp dụng (ngay hoặc từ ngày hiệu lực).",
     "kp.effect.CREATE": "Duyệt: tạo rule mới.",
-    "kp.rejectEffect":
-      "Từ chối: không thay đổi gì; cập nhật skill phụ thuộc bị đánh dấu lỗi thời.",
+    "kp.rejectEffect": "Từ chối: không thay đổi gì; cập nhật skill phụ thuộc bị đánh dấu lỗi thời.",
     "kp.approve": "Duyệt và áp dụng",
     "kp.reject": "Từ chối",
     "kp.rollback": "Rollback",
     "kp.rollbackPh": "Lý do rollback",
-    "kp.rollbackConfirm":
-      "Rollback thay đổi này? Nội dung cũ được khôi phục bằng một version mới.",
+    "kp.rollbackConfirm": "Rollback thay đổi này? Nội dung cũ được khôi phục bằng một version mới.",
     "kp.done.approve": "Đã duyệt và áp dụng",
     "kp.done.reject": "Đã từ chối",
     "kp.done.rollback": "Đã rollback",
+    "kp.bulk.toolbar": "Duyệt hàng loạt",
+    "kp.bulk.selectAll": "Chọn tất cả ({n} chờ duyệt)",
+    "kp.bulk.selectOne": "Chọn đề xuất #{id}",
+    "kp.bulk.selected": "Đã chọn {n}",
+    "kp.bulk.approve": "Duyệt {n} mục",
+    "kp.bulk.reject": "Từ chối {n} mục",
+    "kp.bulk.confirm.approve": "Duyệt và áp dụng {n} đề xuất đã chọn?",
+    "kp.bulk.confirm.reject": "Từ chối {n} đề xuất đã chọn?",
+    "kp.bulk.done.approve": "Đã duyệt {n} đề xuất",
+    "kp.bulk.done.reject": "Đã từ chối {n} đề xuất",
+    "kp.bulk.failed": "{n} đề xuất không xử lý được — {detail}",
     "kp.supersededBy": "Đã bị thay thế bởi",
     "kp.supersededHint": "rule này không còn áp dụng ở nơi rule mới áp dụng.",
     "kp.replaces": "Thay thế cho",
@@ -1976,8 +1972,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cl.createRun": "Tạo run (cấu hình trước)",
     "cl.analyzeOnly": "Chỉ phân tích",
     "cl.autoStarts": "Tự chạy {workflow} khi poller import.",
-    "cl.nonePolicy":
-      "Không có — không gì tự chạy nếu không có thao tác rõ ràng.",
+    "cl.nonePolicy": "Không có — không gì tự chạy nếu không có thao tác rõ ràng.",
     "cl.usePolicy": "Dùng workflow đang chọn làm chính sách",
     "cl.clear": "Xoá",
     "cl.events": "{n} sự kiện",
@@ -2037,8 +2032,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cl.applied": "Knowledge đã áp dụng",
     "cl.none": "không có",
     "cl.snapTitle": "Bản chụp ngữ cảnh #{id}",
-    "cl.snapLine":
-      "Bước {step} thế hệ {gen} · project {project} · repo {repos}",
+    "cl.snapLine": "Bước {step} thế hệ {gen} · project {project} · repo {repos}",
     "cl.loading": "Đang tải…",
     "cl.jiraPh": "JIRA-123",
     "cl.platformTo": "Platform → {name}",
@@ -2057,8 +2051,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cl.enabled": "đang bật",
     "cl.disabled": "đang tắt",
     "cl.noProject": "không có project",
-    "cl.scopeRefLong":
-      "Scope ref (org / project / repo / workflow / workflow:step)",
+    "cl.scopeRefLong": "Scope ref (org / project / repo / workflow / workflow:step)",
     "cl.appHint":
       "Applicability (JSON: step_types, step_keys, repos, projects, workflows, keywords)",
     "cl.metaHint": "Metadata (skills: required_tools, output_contract)",
@@ -2133,11 +2126,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "auth.confirmPassword": "Nhập lại mật khẩu mới",
     "auth.unavailable": "Không thể kết nối hệ thống. Vui lòng thử lại.",
     "auth.required": "Vui lòng nhập tên đăng nhập và mật khẩu.",
-    "auth.loginFailed":
-      "Chưa thể đăng nhập. Kiểm tra kết nối hoặc thử lại sau ít phút.",
+    "auth.loginFailed": "Chưa thể đăng nhập. Kiểm tra kết nối hoặc thử lại sau ít phút.",
     "auth.signingIn": "Đang đăng nhập…",
-    "auth.usersIntro":
-      "Quản lý quyền truy cập của các thành viên trong không gian làm việc.",
+    "auth.usersIntro": "Quản lý quyền truy cập của các thành viên trong không gian làm việc.",
     "auth.searchUsers": "Tìm theo tên đăng nhập…",
     "auth.userCount": "{n} tài khoản",
     "auth.noMatches": "Không tìm thấy tài khoản phù hợp",
@@ -2148,40 +2139,31 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "auth.you": "(Bạn)",
     "auth.active": "Đang hoạt động",
     "auth.inactive": "Ngưng hoạt động",
-    "auth.noSelfDeactivate":
-      "Bạn không thể ngưng hoạt động tài khoản của chính mình.",
+    "auth.noSelfDeactivate": "Bạn không thể ngưng hoạt động tài khoản của chính mình.",
     "auth.loadFailed": "Không thể tải danh sách người dùng. Vui lòng thử lại.",
     "auth.saved": "Đã lưu thay đổi.",
     "auth.saving": "Đang lưu…",
     "auth.passwordMismatch": "Mật khẩu nhập lại chưa khớp.",
     "auth.usernameTaken": "Tên đăng nhập này đã được sử dụng.",
     "auth.saveFailed": "Không thể lưu thay đổi. Kiểm tra thông tin và thử lại.",
-    "auth.usernameHint":
-      "3–32 ký tự: chữ cái, số, dấu chấm, gạch dưới hoặc gạch ngang.",
-    "auth.adminHint":
-      "Quản trị viên có thể quản lý người dùng và tài nguyên dùng chung.",
-    "auth.memberHint":
-      "Thành viên làm việc với dữ liệu của mình và tài nguyên dùng chung.",
+    "auth.usernameHint": "3–32 ký tự: chữ cái, số, dấu chấm, gạch dưới hoặc gạch ngang.",
+    "auth.adminHint": "Quản trị viên có thể quản lý người dùng và tài nguyên dùng chung.",
+    "auth.memberHint": "Thành viên làm việc với dữ liệu của mình và tài nguyên dùng chung.",
     "auth.resetWarning":
       "Xác nhận đặt mật khẩu mới cho tài khoản này. Các phiên đăng nhập hiện tại sẽ bị thu hồi.",
     "auth.deactivateWarning":
       "Tài khoản sẽ không thể đăng nhập và các phiên hiện tại sẽ bị thu hồi. Dữ liệu vẫn được giữ nguyên.",
-    "auth.activateWarning":
-      "Tài khoản sẽ có thể đăng nhập lại bằng mật khẩu hiện tại.",
-    "auth.passwordIntro":
-      "Bảo vệ quyền truy cập vào không gian làm việc của bạn.",
+    "auth.activateWarning": "Tài khoản sẽ có thể đăng nhập lại bằng mật khẩu hiện tại.",
+    "auth.passwordIntro": "Bảo vệ quyền truy cập vào không gian làm việc của bạn.",
     "auth.accountIntro": "Thông tin tài khoản đang đăng nhập.",
     "auth.passwordSessionHint":
       "Sau khi đổi mật khẩu, bạn sẽ đăng xuất và cần đăng nhập lại bằng mật khẩu mới.",
-    "auth.passwordChanged":
-      "Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.",
+    "auth.passwordChanged": "Đã đổi mật khẩu. Vui lòng đăng nhập lại bằng mật khẩu mới.",
     "auth.security": "Bảo mật tài khoản",
-    "auth.logoutConfirm":
-      "Đăng xuất khỏi tài khoản {name}? Bạn cần đăng nhập lại để tiếp tục.",
+    "auth.logoutConfirm": "Đăng xuất khỏi tài khoản {name}? Bạn cần đăng nhập lại để tiếp tục.",
     "auth.logoutFailed": "Chưa thể đăng xuất. Vui lòng thử lại.",
     "auth.loggedOut": "Bạn đã đăng xuất an toàn.",
-    "auth.sessionExpired":
-      "Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.",
+    "auth.sessionExpired": "Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.",
     "auth.administration": "Quản trị",
     "auth.expandSidebar": "Mở rộng sidebar",
     "auth.collapseSidebar": "Thu gọn sidebar",
@@ -2241,8 +2223,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ov.officeIdle": "The office is quiet — no run is active",
     "ov.expand": "Expand",
     "ov.openOffice": "Open Agent Office",
-    "ov.officeNote":
-      "Each character is a logical workflow role. Status comes from the real run.",
+    "ov.officeNote": "Each character is a logical workflow role. Status comes from the real run.",
     "ov.seeAll": "See all",
     "ov.noQuestions": "No questions are waiting.",
     "ov.health.title": "Harness health",
@@ -2265,18 +2246,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ov.firstRun": "The first run will show up here.",
     "ov.verify": "Verification results",
     "ov.verifySub": "recent coding steps",
-    "ov.verifyEmpty":
-      "No coding step has passed through the verification gate yet.",
+    "ov.verifyEmpty": "No coding step has passed through the verification gate yet.",
     "ov.verifyRounds": "{rounds} rounds · {repairs} repairs",
-    "ov.verifyFail":
-      "A coding step failed verification — open the run for the diagnosis.",
+    "ov.verifyFail": "A coding step failed verification — open the run for the diagnosis.",
     "runs.title": "Workflow Runs",
     "runs.subtitle":
       "Follow every workflow execution live — status, step progress, and questions waiting for you.",
     "runs.progressAria": "{done}/{total} steps complete",
     "runs.emptyTitle": "No runs yet",
-    "runs.emptyBody":
-      "Start a workflow from a work item or the Workflows page.",
+    "runs.emptyBody": "Start a workflow from a work item or the Workflows page.",
     "runs.col.run": "Run",
     "runs.col.workflow": "Workflow",
     "runs.col.status": "Status",
@@ -2295,7 +2273,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ql.costSuccess": "Cost / success",
     "ql.unknownCost": "Unknown cost",
     "ql.verifyPass": "Verify pass",
-    "ql.providersNote": "* Fewer than {n} attempts: not enough samples to compare. Observational; change routing only via controlled recommendations.",
+    "ql.providersNote":
+      "* Fewer than {n} attempts: not enough samples to compare. Observational; change routing only via controlled recommendations.",
     "ql.sub": "{runs} runs with outcomes in {days} days",
     "ql.propose": "Propose improvements",
     "ql.proposed": "Proposals sent to the review queue",
@@ -2314,7 +2293,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ql.reviewRate": "Review passed",
     "ql.failureRate": "With failures",
     "ql.repairs": "Avg repairs",
-    "ql.observational": "Observational (different tasks): adopt a new policy only after a paired benchmark comparison.",
+    "ql.observational":
+      "Observational (different tasks): adopt a new policy only after a paired benchmark comparison.",
     "ql.cat.wrong_repository": "Wrong repository",
     "ql.cat.incorrect_business_assumption": "Incorrect business assumption",
     "ql.cat.missing_regression_test": "Missing regression test",
@@ -2405,8 +2385,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "qx.answeredStat": "Answered",
     "qx.latest100": "latest 100",
     "qx.emptyTitle": "No questions are waiting",
-    "qx.emptyBody":
-      "Every step is moving. New questions from the agent will show up here.",
+    "qx.emptyBody": "Every step is moving. New questions from the agent will show up here.",
     "qx.history": "Answer history",
     "qx.noneYet": "None yet.",
     "qx.col.question": "Question",
@@ -2461,11 +2440,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rp.upload": "Upload image/file",
     "rp.notePh": "or a note / manual confirmation…",
     "rp.addNote": "Add note",
-    "rp.skipped":
-      "This work item has no ai_suggest.report — the report step is skipped.",
+    "rp.skipped": "This work item has no ai_suggest.report — the report step is skipped.",
     "rp.building": "Building the report…",
-    "rp.pending":
-      "The report is created after the task steps finish (test, review, PR).",
+    "rp.pending": "The report is created after the task steps finish (test, review, PR).",
     "rp.missing": "No report yet ({status}).",
     "rp.regen": "Regenerating the report",
     "rp.approved": "Report approved",
@@ -2484,8 +2461,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rp.noEvidence": "No evidence",
     "rp.limits": "Missing evidence / limits",
     "rp.finalMd": "Final copy (approved).",
-    "rp.editMd":
-      "You can edit this before approving. The edit is stored as the final copy.",
+    "rp.editMd": "You can edit this before approving. The edit is stored as the final copy.",
     "rp.copyMd": "Copy Markdown",
     "rp.sharedEv": "Evidence not tied to one requirement:",
     "rp.note": "note",
@@ -2557,8 +2533,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ch.seeAll": "Show all",
     "ch.noDiff": "(no diff)",
     "ch.willOpen": "will be opened",
-    "ch.wontOpen":
-      "will not open (no commits / repo not selected / uncommitted changes remain)",
+    "ch.wontOpen": "will not open (no commits / repo not selected / uncommitted changes remain)",
     "ch.copyTitle": "Copy title",
     "ch.copyDesc": "Copy description",
     "ch.testsFailed": "tests failed",
@@ -2610,8 +2585,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.scopeFilter": "Filter by scope",
     "kn.allScopes": "Every scope",
     "kn.emptyTitle": "No items yet",
-    "kn.emptyBody":
-      "Create an item or scan a repository to import CLAUDE.md, skills, and rules.",
+    "kn.emptyBody": "Create an item or scan a repository to import CLAUDE.md, skills, and rules.",
     "kn.create": "Create item",
     "kn.noMatch": "No item matches the filter.",
     "kn.pickTitle": "Select an item to view or edit",
@@ -2641,6 +2615,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.newTitle": "New knowledge item",
     "kn.newHint": "Fill in the details, scope, and content, then press Create.",
     "kn.updatedAt": "updated {time}",
+    "kn.delete.button": "Delete",
+    "kn.delete.title": "Delete from the registry for good (a snapshot is kept for manual restore)",
+    "kn.delete.confirm":
+      "Delete {key} for good (with {n} supporting files)? The importer will not re-create it. Enter a reason and press OK:",
+    "kn.delete.force": "{detail}\n\nDelete anyway? Workflows that assign it will no longer receive it.",
+    "kn.delete.done": "Deleted {n} items",
     "kn.content": "Content",
     "kn.skillInstructions": "Skill instructions",
     "kn.emptyContent": "(empty)",
@@ -2662,8 +2642,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.scopePriority": "Scope & priority",
     "kn.scope": "Scope",
     "kn.scopeRef": "Scope ref",
-    "kn.conflictHint":
-      "Items that share a conflict key compete; the narrower scope wins.",
+    "kn.conflictHint": "Items that share a conflict key compete; the narrower scope wins.",
     "kn.enabled": "Enabled",
     "kn.enforced": "Enforced",
     "kn.contentLegend": "Content",
@@ -2671,8 +2650,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.skillMd": "Skill instructions (Markdown)",
     "kn.advanced": "Advanced",
     "kn.applicabilityJson": "Applicability (JSON)",
-    "kn.applicabilityHint":
-      "step_types, step_keys, repos, projects, workflows, keywords",
+    "kn.applicabilityHint": "step_types, step_keys, repos, projects, workflows, keywords",
     "kn.metadataJson": "Metadata (JSON)",
     "kn.metadataHint": "skills: required_tools, output_contract",
     "kn.changeNote": "change note",
@@ -2722,8 +2700,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kn.hint.PROJECT": "e.g. OMS",
     "kn.hint.REPOSITORY": "e.g. oms-api",
     "kn.hint.WORKFLOW": "workflow key, e.g. feature-implementation",
-    "kn.hint.STEP":
-      "workflow:step or step key, e.g. feature-implementation:implement",
+    "kn.hint.STEP": "workflow:step or step key, e.g. feature-implementation:implement",
     "repo.title": "Repositories",
     "repo.subtitle":
       "Registry used for repository discovery and the set of repos a run may touch (by project). The agent never edits a repo outside that set.",
@@ -2743,7 +2720,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.neverUsed": "not used by agents yet",
     "ig.db.checkAll": "Check all",
     "ig.db.kind.unreachable": "Server unreachable",
-    "ig.db.hint.unreachable": "Check host/port, VPN or firewall from the machine running the platform.",
+    "ig.db.hint.unreachable":
+      "Check host/port, VPN or firewall from the machine running the platform.",
     "ig.db.kind.timeout": "Timed out",
     "ig.db.hint.timeout": "The server did not answer: usually VPN/network, or a wrong host/port.",
     "ig.db.kind.auth": "Wrong user or password",
@@ -2758,9 +2736,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.hint.unknown": "See the error details, then check again.",
     "ig.db.title": "Project QC databases",
     "ig.db.summaryOff": "not configured",
-    "ig.db.body": "Agents query a project's QC database (MySQL) through the platform tools database.list, database.schema and database.query, with Claude, Codex and Cursor alike. Read only: one SELECT / SHOW / DESCRIBE / EXPLAIN / WITH statement in a READ ONLY transaction, with row and time limits; password/token-like columns are masked. Only runs whose repositories belong to that project (per the run owner's repository access) can use it.",
+    "ig.db.body":
+      "Agents query a project's QC database (MySQL) through the platform tools database.list, database.schema and database.query, with Claude, Codex and Cursor alike. Read only: one SELECT / SHOW / DESCRIBE / EXPLAIN / WITH statement in a READ ONLY transaction, with row and time limits; password/token-like columns are masked. Only runs whose repositories belong to that project (per the run owner's repository access) can use it.",
     "ig.db.emptyAdmin": "No database yet. Add the OMS, Payment and Warranty QC databases below.",
-    "ig.db.emptyMember": "No database is available to you: it needs access to the matching project's repositories.",
+    "ig.db.emptyMember":
+      "No database is available to you: it needs access to the matching project's repositories.",
     "ig.db.key": "Key",
     "ig.db.scope": "Project / repositories",
     "ig.db.database": "Database",
@@ -2776,11 +2756,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.timeout": "Timeout (ms)",
     "ig.db.description": "Description (shown to agents, e.g. the main tables)",
     "ig.db.enabled": "Enabled",
-    "ig.db.scopeHint": "A run may use this database when its repository scope contains one of the repositories above, or a repository of the project above. Warranty, for example: list warranty-api, warranty-worker (they belong to project OMS). Use a MySQL account with SELECT only.",
+    "ig.db.scopeHint":
+      "A run may use this database when its repository scope contains one of the repositories above, or a repository of the project above. Warranty, for example: list warranty-api, warranty-worker (they belong to project OMS). Use a MySQL account with SELECT only.",
     "ig.db.add": "Add database",
     "ig.db.saved": "Database saved",
     "ig.db.deleted": "Database deleted",
-    "ig.db.deleteConfirm": "Delete the {key} database configuration (including its stored password)?",
+    "ig.db.deleteConfirm":
+      "Delete the {key} database configuration (including its stored password)?",
     "ig.db.test": "Test",
     "ig.db.testOk": "Connected",
     "ig.db.noPassword": "no password stored",
@@ -2788,16 +2770,21 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.perm.read": "Read",
     "repo.perm.write": "Write",
     "repo.perm.pull_request": "PR",
-    "repo.access.impliesHint": "Tick any number of permissions. A pull request needs write (a pushed branch) and write needs read: ticking a higher one ticks the lower ones; unticking Read removes access.",
+    "repo.access.impliesHint":
+      "Tick any number of permissions. A pull request needs write (a pushed branch) and write needs read: ticking a higher one ticks the lower ones; unticking Read removes access.",
     "repo.access.allFull": "Full access to all",
     "repo.access.allNone": "Remove all",
-    "repo.access.allFullConfirm": "Give {user} full access (read, write, pull requests) to all {n} repositories?",
+    "repo.access.allFullConfirm":
+      "Give {user} full access (read, write, pull requests) to all {n} repositories?",
     "repo.access.allNoneConfirm": "Remove all of {user}'s access to all {n} repositories?",
     "repo.audit.repository.access.bulk": "changed access in bulk",
-    "repo.mineSubtitle": "Only repositories you are authorized for. Effective access = your platform grant ∩ your own Bitbucket permission ∩ what the repository allows.",
+    "repo.mineSubtitle":
+      "Only repositories you are authorized for. Effective access = your platform grant ∩ your own Bitbucket permission ∩ what the repository allows.",
     "repo.mineEmpty": "You have no repository access yet",
-    "repo.mineEmptyBody": "Ask an admin to grant you access. If you already have a grant, check your personal Bitbucket token in Integrations, then press Re-check access.",
-    "repo.mineEmptyAdmin": "The admin role manages access; it does not grant source access by itself. Grant yourself access in Access management.",
+    "repo.mineEmptyBody":
+      "Ask an admin to grant you access. If you already have a grant, check your personal Bitbucket token in Integrations, then press Re-check access.",
+    "repo.mineEmptyAdmin":
+      "The admin role manages access; it does not grant source access by itself. Grant yourself access in Access management.",
     "repo.manage": "Access management",
     "repo.yourAccess": "Your access",
     "repo.revalidate": "Re-check Bitbucket access",
@@ -2816,15 +2803,20 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.bb.trusted": "Trusted by configuration",
     "repo.bb.stale": "re-check due",
     "repo.access.title": "Repository access",
-    "repo.access.note": "Each cell is the platform grant. Effective access is further limited by the user's own Bitbucket permission and the repository's allowed actions. Managing access does not let an admin read source code; admins grant themselves like anyone else.",
+    "repo.access.note":
+      "Each cell is the platform grant. Effective access is further limited by the user's own Bitbucket permission and the repository's allowed actions. Managing access does not let an admin read source code; admins grant themselves like anyone else.",
     "repo.access.policy": "Bitbucket verification policy",
-    "repo.access.policy.strict": "strict — read, write and pull requests must all be verified by Bitbucket with the user's personal token; not verified = no access.",
-    "repo.access.policy.personal": "personal — read must be verified; write/PR that Bitbucket does not report run with that same personal token (Bitbucket rejects them without permission).",
-    "repo.access.policy.trusted": "trusted — an admin vouches that platform grants mirror Bitbucket (e.g. a shared service account); Bitbucket is not consulted.",
+    "repo.access.policy.strict":
+      "strict — read, write and pull requests must all be verified by Bitbucket with the user's personal token; not verified = no access.",
+    "repo.access.policy.personal":
+      "personal — read must be verified; write/PR that Bitbucket does not report run with that same personal token (Bitbucket rejects them without permission).",
+    "repo.access.policy.trusted":
+      "trusted — an admin vouches that platform grants mirror Bitbucket (e.g. a shared service account); Bitbucket is not consulted.",
     "repo.access.repo": "Repository",
     "repo.access.shared": "Shared",
     "repo.access.source": "Granted by",
-    "repo.access.effectiveHint": "When access is revoked, a running run stops at its next step or its next tool call.",
+    "repo.access.effectiveHint":
+      "When access is revoked, a running run stops at its next step or its next tool call.",
     "repo.access.saved": "Access updated",
     "repo.access.revalidated": "Bitbucket access re-checked",
     "repo.access.audit": "Access changes",
@@ -2872,8 +2864,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.servicesTagsInline": "Services / tags",
     "repo.actions": "Actions",
     "repo.rankTitle": "Try a repo suggestion",
-    "repo.rankHint":
-      "Describe a request to see which repo would be chosen for the project.",
+    "repo.rankHint": "Describe a request to see which repo would be chosen for the project.",
     "repo.rankPh": "describe the request",
     "repo.rankAria": "Request description",
     "repo.project": "project",
@@ -2931,8 +2922,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "office.cap.read": "{role} reads the request (Read)",
     "office.cap.grep": "{role} searches the code (Grep)",
     "office.cap.think": "{role} is thinking",
-    "office.cap.ask":
-      "{role} needs your answer — heading to the Ask & Approve desk",
+    "office.cap.ask": "{role} needs your answer — heading to the Ask & Approve desk",
     "office.cap.discover": "{role} looks for the repository",
     "office.cap.done": "{role} finishes and celebrates",
     "office.cap.plan": "{role} sketches the architecture",
@@ -2964,8 +2954,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.src.hasaki_work": "Hasaki Work",
     "wi.src.jira": "Jira",
     "wi.src.legacy": "Legacy",
-    "wi.importedRun":
-      "Imported — nothing has run yet; pick a workflow to start",
+    "wi.importedRun": "Imported — nothing has run yet; pick a workflow to start",
     "wi.loggedIn": "signed in",
     "wi.loggedOut": "not signed in",
     "wi.expires": "expires {time}",
@@ -2979,8 +2968,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Keep exactly one work.hasaki.vn tab in personal Chrome and reconnect; the app does not choose between different account tabs.",
     chrome_existing_owner:
       "Personal Chrome can only be connected by the configured local platform account.",
-    chrome_existing_platform:
-      "Personal Chrome mode currently supports Windows Chrome through WSL.",
+    chrome_existing_platform: "Personal Chrome mode currently supports Windows Chrome through WSL.",
     "chrome.connect": "Connect with Chrome",
     "chrome.local":
       "Chrome opens on the backend machine. Sign in and complete MFA in the separate window; if SSO rejects connected Chrome, use your personal token.",
@@ -2999,14 +2987,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Official Google Chrome not found. Install Chrome or set HASAKI_WORK_CHROME_PATH.",
     chrome_wsl_loopback:
       "Cannot reach Windows Chrome DevTools through the WSL bridge. Check Chrome/PowerShell policy, or paste a token.",
-    chrome_debugging:
-      "Cannot connect to Chrome DevTools. Company policy may restrict it.",
+    chrome_debugging: "Cannot connect to Chrome DevTools. Company policy may restrict it.",
     chrome_sso_start:
       "Cannot find the Hasaki SSO button. Check the Chrome window and sign in manually.",
-    chrome_start:
-      "Could not open Chrome or the SSO page. Check Chrome or use a personal token.",
-    chrome_verification:
-      "The API could not verify the new token. The previous token is retained.",
+    chrome_start: "Could not open Chrome or the SSO page. Check Chrome or use a personal token.",
+    chrome_verification: "The API could not verify the new token. The previous token is retained.",
 
     "wi.tokenPh": "or paste a token (Bearer eyJ…)",
     "wi.tokenSaved": "Token saved",
@@ -3017,8 +3002,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.inbox": "Task inbox",
     "wi.imported": "imported",
     "wi.title": "Work Items",
-    "wi.subtitle":
-      "Engineering requests. Import never starts a run — you choose the workflow.",
+    "wi.subtitle": "Engineering requests. Import never starts a run — you choose the workflow.",
     "wi.refresh": "Refresh",
     "wi.refreshList": "Refresh the list",
     "wi.importBtn": "Import JSON / Jira",
@@ -3030,8 +3014,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.all": "All",
     "wi.empty": "No work items yet",
     "wi.first": "Create the first request",
-    "wi.emptyBody":
-      "Create a request by hand, import JSON/Jira, or fetch a task from Hasaki Work.",
+    "wi.emptyBody": "Create a request by hand, import JSON/Jira, or fetch a task from Hasaki Work.",
     "wi.noMatch": "No matching work item",
     "wi.noMatchBody": "Try another keyword or clear the filter.",
     "wi.runs": "{n} runs",
@@ -3055,21 +3038,18 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.savedDesc": "Description saved",
     "wi.request": "Request",
     "wi.edited": "edited by hand",
-    "wi.editedTip":
-      "Edited by hand — a later Hasaki Work or Jira import will not overwrite it",
+    "wi.editedTip": "Edited by hand — a later Hasaki Work or Jira import will not overwrite it",
     "wi.edit": "Edit",
     "wi.addDesc": "Add a description",
     "wi.descPh":
       "Describe the request: what happens, the expected result, the subject, and related repos or screens… (Markdown)",
     "wi.saving": "Saving…",
     "wi.agentUses": "The agent will use this description on later runs.",
-    "wi.noDesc":
-      "No description — use “Add a description” before starting a workflow.",
+    "wi.noDesc": "No description — use “Add a description” before starting a workflow.",
     "wi.noProject": "no project",
     "wi.raw": "raw payload",
     "wi.history": "Run history",
-    "wi.legacy":
-      "Older history (before workflows) — {questions} questions, {events} events",
+    "wi.legacy": "Older history (before workflows) — {questions} questions, {events} events",
     "wi.unanswered": "(not answered)",
     "wi.settings": "Settings",
     "wi.policy": "Automation policy",
@@ -3085,8 +3065,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.live": "Live",
     "rv.polling": "Polling",
     "rv.connecting": "Connecting",
-    "rv.continueTip":
-      "Continue an existing branch{source} — do not create a new branch",
+    "rv.continueTip": "Continue an existing branch{source} — do not create a new branch",
     "rv.from": " (from {source})",
     "rv.allRepos": "every repo",
     "rv.continueOn": "continue",
@@ -3129,11 +3108,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.assignedInstance": "Assigned instance",
     "rv.lastSeen": "Last seen",
     "rv.workerAvailable": "Worker availability",
-    "rv.ownerOnly":
-      "Continue on the assigned instance; restart its platform if disconnected.",
+    "rv.ownerOnly": "Continue on the assigned instance; restart its platform if disconnected.",
     "rv.reconcile": "Inspect worktrees and external effects before continuing.",
-    "rv.queueHint":
-      "raise scheduler.workers in config.json to run more in parallel.",
+    "rv.queueHint": "raise scheduler.workers in config.json to run more in parallel.",
     "rv.report": "Task result report",
     "rv.verified": "{n} verified",
     "rv.partial": "{n} partial",
@@ -3153,15 +3130,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.machine": "Machine",
     "rv.queue": "Queue",
     "rv.humanWait": "Waiting on a person",
-    "rv.claudeLine":
-      "{sessions} sessions · {time} · {turns} turns · ≈${cost} (estimate)",
+    "rv.claudeLine": "{sessions} sessions · {time} · {turns} turns · ≈${cost} (estimate)",
     "rv.tokens": "in {inn} · out {out} · cache {cache}",
     "rv.tools":
       "{calls} calls · {tool} · command/test {command} · {integration} integration · {skills} skills",
     "rv.retries": "Retries / failures",
     "rv.retryLine": "{retries} retries · {failed} failed attempts",
-    "rv.retrySlow":
-      "{retries} retries · {failed} failed attempts · slowest: {step}",
+    "rv.retrySlow": "{retries} retries · {failed} failed attempts · slowest: {step}",
     "rv.slowest": "slowest: {step}",
     "rv.attemptTip": "{type} · {n} attempts",
     "rv.barTip": "queue {queue} · machine {exec} · person {human}",
@@ -3244,8 +3219,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.name": "Name",
     "wfe.description": "Description",
     "wfe.feedbackStep": "Feedback step",
-    "wfe.feedbackHint":
-      "The step that receives review feedback (Send feedback on the run).",
+    "wfe.feedbackHint": "The step that receives review feedback (Send feedback on the run).",
     "wfe.firstCoding": "(first coding step)",
     "wfe.skillsKnowledge": "Skills and knowledge",
     "wfe.skillsAll": "Skills for every step",
@@ -3254,8 +3228,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.addKnowledge": "+ add knowledge",
     "wfe.scoped": "Knowledge scoped to WORKFLOW:{key} (applied automatically):",
     "wfe.runInputs": "Run inputs",
-    "wfe.runInputsLabel":
-      "Run inputs (JSON describing the fields the start form needs)",
+    "wfe.runInputsLabel": "Run inputs (JSON describing the fields the start form needs)",
     "wfe.versions": "Versions",
     "wfe.noVersions": "No version has been published yet.",
     "wfe.noNote": "No note",
@@ -3283,8 +3256,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.assignSkill": "+ assign a skill",
     "wfe.rules": "Business rules and guidelines",
     "wfe.assignKnowledge": "+ assign knowledge",
-    "wfe.delegate":
-      "Allow read-only subagents (explorer / reviewer) to work in parallel",
+    "wfe.delegate": "Allow read-only subagents (explorer / reviewer) to work in parallel",
     "wfe.delegateTip":
       "Optional: the agent may hand independent read-only exploration or review to explorer/reviewer subagents running in parallel. Off by default.",
     "wfe.model": "Model (empty = default)",
@@ -3298,13 +3270,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.showOutputs": "Show output from",
     "wfe.prevStep": "+ an earlier step",
     "wfe.selectRepos": "Allow choosing repositories when approving",
-    "wfe.autoApprove":
-      "Approve automatically when the repo suggestion is unambiguous",
+    "wfe.autoApprove": "Approve automatically when the repo suggestion is unambiguous",
     "wfe.onReject": "On reject, redo this step",
     "wfe.markFailed": "(mark as failed)",
     "wfe.action": "Action",
-    "wfe.act.discovery":
-      "repository_discovery — suggest repos, with an explanation",
+    "wfe.act.discovery": "repository_discovery — suggest repos, with an explanation",
     "wfe.act.select": "select_repositories — use the repos chosen at run time",
     "wfe.act.report": "publish_report — gather findings into a report",
     "wfe.act.noop": "noop",
@@ -3314,8 +3284,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.gather": "Gather from steps",
     "wfe.addStepShort": "+ step",
     "wfe.command": "Command (bash, run in each worktree)",
-    "wfe.commandHint":
-      "Environment variables: BASE_BRANCH, REPO, BRANCH, RUN_ID",
+    "wfe.commandHint": "Environment variables: BASE_BRANCH, REPO, BRANCH, RUN_ID",
     "wfe.timeout": "Timeout (seconds)",
     "wfe.allowFail": "Allow failure",
     "wfe.path": "Path",
@@ -3454,10 +3423,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.signature": "Failure signature",
     "ins.times": "Times",
     "ins.bench": "Benchmark comparison",
-    "ins.benchSub":
-      "npm run bench -- --live · hidden acceptance tests · candidates and profiles",
-    "ins.benchEmpty":
-      "No benchmark results yet. Run the command below to compare.",
+    "ins.benchSub": "npm run bench -- --live · hidden acceptance tests · candidates and profiles",
+    "ins.benchEmpty": "No benchmark results yet. Run the command below to compare.",
     "ins.col.candidate": "Candidate / profile",
     "ins.col.success": "Success",
     "ins.col.regression": "Regression",
@@ -3470,8 +3437,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.graded": "{n} graded",
     "ins.ofJudged": "{pct}% of {n}",
     "ig.title": "Integrations",
-    "ig.subtitle":
-      "Connect outside systems. Open a row for the instructions and the fields.",
+    "ig.subtitle": "Connect outside systems. Open a row for the instructions and the fields.",
     "ig.sources": "Investigation sources",
     "ig.sourcesHint": "used by the agent, read-only",
     "ig.accounts": "Platform accounts",
@@ -3529,7 +3495,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.splunk.ph": "curl … or splunkd_8080=…; splunkweb_csrf_token_8080=…",
     "ig.splunk.saved": "Connected to Splunk",
     "ig.splunk.tokenTitle": "Or use a personal Splunk token",
-    "ig.splunk.tokenBody": "A Splunk authentication token (Settings → Tokens) of a read-only account. It is validated before saving, encrypted per user and never sent to an agent.",
+    "ig.splunk.tokenBody":
+      "A Splunk authentication token (Settings → Tokens) of a read-only account. It is validated before saving, encrypted per user and never sent to an agent.",
     "ig.splunk.token": "Splunk token",
     "ig.splunk.tokenReplace": "Replace token",
     "ig.splunk.test": "Test connection",
@@ -3538,11 +3505,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.splunk.testFail": "Some indexes are not accessible",
     "ig.splunk.indexOk": "accessible ({n} events in 15 min)",
     "ig.splunk.sharedTitle": "Shared service account (admin)",
-    "ig.splunk.sharedBody": "Token of a read-only service account, used when a user has no Splunk session of their own — only when splunk.allowSharedToken is on. Every search is still audited per user.",
+    "ig.splunk.sharedBody":
+      "Token of a read-only service account, used when a user has no Splunk session of their own — only when splunk.allowSharedToken is on. Every search is still audited per user.",
     "ig.splunk.sharedOn": "shared use allowed",
     "ig.splunk.sharedOff": "shared use not allowed",
     "inv.title": "Production Incident Investigation",
-    "inv.subtitle": "Trace Splunk logs, correlate events across services, rebuild the timeline and measure latency — read-only and evidence-backed.",
+    "inv.subtitle":
+      "Trace Splunk logs, correlate events across services, rebuild the timeline and measure latency — read-only and evidence-backed.",
     "inv.history": "Investigations",
     "inv.refresh": "Refresh",
     "inv.noHistory": "No investigations yet",
@@ -3551,11 +3520,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.created": "Created",
     "inv.new": "New investigation",
     "inv.readOnly": "Read-only",
-    "inv.notConnected": "Splunk is not connected: the agent will hand you the SPL to run and paste back (or connect it on the Integrations page).",
+    "inv.notConnected":
+      "Splunk is not connected: the agent will hand you the SPL to run and paste back (or connect it on the Integrations page).",
     "inv.requestLabel": "What should be investigated?",
-    "inv.requestHint": "Order / tracking / request id, the approximate time, and the questions to answer.",
-    "inv.placeholder": "e.g. Order 2611095VL160RW01: the message sent to HasakiNOW around 08:48 on 10 Nov 2026; how long NOW took to return tracking; when the shipping label URL was generated.",
-    "inv.routeHint": "This looks like a coding task rather than a production log investigation. You can still run it if you are sure.",
+    "inv.requestHint":
+      "Order / tracking / request id, the approximate time, and the questions to answer.",
+    "inv.placeholder":
+      "e.g. Order 2611095VL160RW01: the message sent to HasakiNOW around 08:48 on 10 Nov 2026; how long NOW took to return tracking; when the shipping label URL was generated.",
+    "inv.routeHint":
+      "This looks like a coding task rather than a production log investigation. You can still run it if you are sure.",
     "inv.filters": "Filters (optional): environment, indexes, time range, report language",
     "inv.environment": "Environment",
     "inv.indexes": "Indexes",
@@ -3596,7 +3569,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.noSearches": "No search has run yet.",
     "inv.manualPending": "waiting for pasted results",
     "inv.rows": "rows",
-    "inv.pasteHelp": "Run this SPL in Splunk Web (Splunk link, same time range), export as JSON or CSV (with _time and _raw) and paste it here. Sensitive data is redacted before storage; the raw paste is not kept.",
+    "inv.pasteHelp":
+      "Run this SPL in Splunk Web (Splunk link, same time range), export as JSON or CSV (with _time and _raw) and paste it here. Sensitive data is redacted before storage; the raw paste is not kept.",
     "inv.submitPaste": "Submit results",
     "inv.pasted": "Results saved — answer the agent's question to continue",
     "inv.report": "Detailed report",
@@ -3609,8 +3583,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.st.insufficient_evidence": "Insufficient evidence",
     "inv.st.blocked": "No log access",
     "inv.fix": "Continue to fix",
-    "inv.fixHint": "Open a Bug Investigation run seeded with these findings: root cause → fix proposal → your approval → code change → tests → review → PR (approval required).",
-    "inv.fixConfirm": "Create a Bug Investigation run from this investigation?\n\nThe new run analyses the root cause and proposes a fix. Code changes only after you approve the proposal, and the PR also needs your approval. The investigation itself stays read-only.",
+    "inv.fixHint":
+      "Open a Bug Investigation run seeded with these findings: root cause → fix proposal → your approval → code change → tests → review → PR (approval required).",
+    "inv.fixConfirm":
+      "Create a Bug Investigation run from this investigation?\n\nThe new run analyses the root cause and proposes a fix. Code changes only after you approve the proposal, and the PR also needs your approval. The investigation itself stays read-only.",
     "inv.fixStarted": "Fix run created",
     "inv.fixOpen": "Fix run #{id}",
     "inv.out.answers": "Answers",
@@ -3619,14 +3595,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "inv.out.hypotheses": "Hypotheses (not confirmed)",
     "inv.out.missing": "Missing evidence",
     "inv.out.next": "Next investigation steps",
-    "ig.vault.summaryOff":
-      "Check a service's secrets and env (values stay hidden)",
+    "ig.vault.summaryOff": "Check a service's secrets and env (values stay hidden)",
     "ig.vault.body":
       "The agent sees which keys a QC service declares (vault.list, vault.keys): only the key name, whether it is set or empty, and its length. Secret values are never returned. A short number or boolean under a non-sensitive key name (for example timeout = 15) may be shown. The platform only reads, except for renewing this token.",
     "ig.vault.policies": "Policies: {policies}",
     "ig.vault.s1": "Open {link}, choose the OIDC method, and sign in.",
-    "ig.vault.s2":
-      "Open the avatar or user menu at the top right, then Copy token.",
+    "ig.vault.s2": "Open the avatar or user menu at the top right, then Copy token.",
     "ig.vault.s3":
       "Paste it below and press Save. The platform checks the token with Vault before saving.",
     "ig.vault.ph": "hvs.…",
@@ -3639,8 +3613,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.adopted": "Moved onto the platform",
     "ig.envStored":
       "Stored on the platform (it takes priority over .env). You can remove the matching variables from .env.",
-    "ig.bb.summaryOff":
-      "Push and open PRs (without this, the PR step only returns a link)",
+    "ig.bb.summaryOff": "Push and open PRs (without this, the PR step only returns a link)",
     "ig.bb.body":
       "The PR step uses these credentials to open or update a pull request; the agent uses bitbucket.list_pull_requests. Without credentials the PR step only returns a create-PR link.",
     "ig.bb.s1":
@@ -3653,24 +3626,26 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.bb.token": "Token",
     "ig.bb.tokenPh": "API token",
     "ig.bb.reviewers": "Reviewers (UUID, one person per line)",
-    "ig.bb.reviewersHint":
-      "Optional. Form {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
+    "ig.bb.reviewersHint": "Optional. Form {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
     "ig.bb.saved": "Bitbucket saved",
     "ig.tg.summaryOff": "Notify when a step needs an answer or an approval",
     "ig.tg.chat": "chat {id}",
     "ig.tg.interactiveTitle": "Workflow control in Telegram",
-    "ig.tg.bindingHint": "Link your own Telegram account through the bot. Only verified private chats can approve, reject and answer.",
+    "ig.tg.bindingHint":
+      "Link your own Telegram account through the bot. Only verified private chats can approve, reject and answer.",
     "ig.tg.connect": "Connect Telegram",
     "ig.tg.disconnect": "Disconnect Telegram",
     "ig.tg.openBinding": "Open Telegram to link (10 minutes)",
     "ig.tg.checkBinding": "Check connection",
     "ig.tg.connected": "Linked Telegram ID {id}",
     "ig.tg.rebind": "The bot changed. Disconnect and link again.",
-    "ig.tg.modeOff": "An administrator must enable TELEGRAM_MODE=polling or webhook on the server. Polling supports WSL without a public URL.",
+    "ig.tg.modeOff":
+      "An administrator must enable TELEGRAM_MODE=polling or webhook on the server. Polling supports WSL without a public URL.",
     "ig.tg.language": "Notification language",
     "ig.tg.transport": "Update transport",
     "ig.tg.receiverActive": "Receiver active",
-    "ig.tg.receiverDown": "Receiver not running — Telegram taps are processed once it restarts. Check the server log.",
+    "ig.tg.receiverDown":
+      "Receiver not running — Telegram taps are processed once it restarts. Check the server log.",
     "ig.tg.pref.approvals": "Approval notifications",
     "ig.tg.pref.questions": "Question notifications",
     "ig.tg.pref.failures": "Failure notifications",
@@ -3678,14 +3653,14 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.tg.pref.interactive": "Enable interactive buttons",
     "ig.tg.prefsSaved": "Telegram preferences saved",
     "ig.tg.legacy": "Legacy one-way destination",
-    "ig.tg.legacyHint": "Manually entered destinations receive notifications only and never grant interactive access. Bind through the bot for secure actions.",
+    "ig.tg.legacyHint":
+      "Manually entered destinations receive notifications only and never grant interactive access. Bind through the bot for secure actions.",
     "ig.tg.body":
       "Workflow notifications go to your own destination. Bind Telegram to approve, reject and answer directly; manually entered destinations remain one-way.",
     "ig.tg.s1": "Create a bot with {link} (/newbot) and copy the bot token.",
     "ig.tg.s2":
       "Send /start to the bot (or add the bot to a group), paste the token, press Find chat id, and pick the chat.",
-    "ig.tg.s3":
-      "Press Save (the platform checks the token with Telegram), then Send a test.",
+    "ig.tg.s3": "Press Save (the platform checks the token with Telegram), then Send a test.",
     "ig.tg.tokenNow": "Bot token (current {token})",
     "ig.tg.token": "Bot token",
     "ig.tg.chatId": "Shared scan summary chat (optional)",
@@ -3754,8 +3729,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "pe.staleData": "the data below is from the scan {ago}",
     "pe.never": "No scan yet — press Scan now.",
     "pe.oldDay": "Data is for {day}; today has not been scanned.",
-    "pe.scanDone":
-      "Scan finished: {groups} error groups, {attention} need a look",
+    "pe.scanDone": "Scan finished: {groups} error groups, {attention} need a look",
     "pe.scanFail": "Scan failed: {error}",
     "pe.system": "System",
     "pe.all": "All",
@@ -3767,8 +3741,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "pe.noMatch": "No error group matches the filter",
     "pe.none": "No errors",
     "pe.noData": "No data yet",
-    "pe.widen":
-      "No critical or high group. Choose All to see medium and low groups.",
+    "pe.widen": "No critical or high group. Choose All to see medium and low groups.",
     "pe.col.level": "Level",
     "pe.col.service": "Service",
     "pe.col.error": "Error",
@@ -3787,8 +3760,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "pe.ignored": "ignored",
     "pe.fixing": "Work item fixing this error",
     "pe.noRun": "no run yet",
-    "pe.unlinkTip":
-      "Detach the work item from this error group (the work item is not deleted)",
+    "pe.unlinkTip": "Detach the work item from this error group (the work item is not deleted)",
     "pe.unlink": "Unlink",
     "pe.noItem": "No work item is fixing this error",
     "pe.investigateTip":
@@ -3816,8 +3788,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "pe.schedule": "Scan automatically at {times}",
     "pe.scheduleOff": "(off)",
     "pe.telegram": "Telegram alerts",
-    "pe.hours":
-      "Scan times (Vietnam time, comma-separated; empty turns it off)",
+    "pe.hours": "Scan times (Vietnam time, comma-separated; empty turns it off)",
     "pe.notify":
       "Send Telegram when a new critical or high group appears (once per group per day), and when the Splunk session expires",
     "pe.saved": "Scan schedule saved",
@@ -3854,13 +3825,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.noRepoMatch": "No repo matches.",
     "si.stepOutput": "Output of step {step}",
     "si.commentPh": "Comment (sent to the step that is redone if you reject)",
-    "si.gateCommentPh":
-      "Note for this step (e.g. fix findings 1 and 3 only, skip finding 2)",
+    "si.gateCommentPh": "Note for this step (e.g. fix findings 1 and 3 only, skip finding 2)",
     "si.branch": "Branch to review",
     "si.branchHint":
       'One branch per repository; the field above applies to every repository left empty (you can paste "repo: branch, repo: branch"). All empty = review the base branch. If you then approve fixes, the agent commits on top of each repository\'s branch.',
-    "si.branchCommonPh":
-      'Common branch (e.g. HSK-XXXXXXXX), or paste "repo: branch …"',
+    "si.branchCommonPh": 'Common branch (e.g. HSK-XXXXXXXX), or paste "repo: branch …"',
     "si.branchBase": "(base branch)",
     "si.skipGate": "Skip this step",
     "si.skipGateHint":
@@ -3880,7 +3849,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ev.assumptions": "Unverified assumptions",
     "ev.approvedBy": "Approved by {by}",
     "ev.ackRecorded": "risk acknowledged",
-    "ev.ack": "I understand this proposal does not meet the evidence gate and accept the risk (a reason in the comment is required).",
+    "ev.ack":
+      "I understand this proposal does not meet the evidence gate and accept the risk (a reason in the comment is required).",
     "ev.ackHint": "Tick the risk acknowledgement and give a reason in the comment to approve.",
     "ev.rc.CONFIRMED": "Confirmed",
     "ev.rc.PROBABLE": "Probable",
@@ -3944,8 +3914,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.reopened": "Opened a new attempt",
     "si.checkpoints": "Checkpoints ({n})",
     "si.notStarted": "This step has not run.",
-    "si.inputLater":
-      "This step has not run — input is resolved when the attempt starts.",
+    "si.inputLater": "This step has not run — input is resolved when the attempt starts.",
     "si.resolvedInput": "Resolved input · attempt #{n}",
     "si.attemptError": "Attempt error",
     "si.noQuestions": "This step has not asked anything.",
@@ -3964,8 +3933,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.exit": "exit {code}",
     "si.log": "log",
     "si.weakened": "Tests were deleted or skipped (not allowed): {list}",
-    "si.preexisting":
-      "{n} pre-existing failures on the base (not counted as regressions)",
+    "si.preexisting": "{n} pre-existing failures on the base (not counted as regressions)",
     "si.signatures": "Failure signatures ({n})",
     "si.cat.new": "new failure",
     "si.cat.pre_existing": "already on the baseline",
@@ -4003,8 +3971,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.cost": "Cost",
     "si.turns": "Turns",
     "si.duration": "Duration",
-    "si.tokenLine":
-      "in {inn} · out {out} · cache read {read} · cache write {write}",
+    "si.tokenLine": "in {inn} · out {out} · cache read {read} · cache write {write}",
     "si.disclosure": "Disclosure",
     "si.disclosureLine":
       "{inline} inline · {index} index · {search} search-only · upstream {full} full / {summary} summarised",
@@ -4018,8 +3985,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.by": "by {name}",
     "si.fromAttempt": "editing from attempt #{n}",
     "si.noGuidance": "(no instructions)",
-    "si.rerunHint":
-      "Run this step again (optionally with instructions or a skill).",
+    "si.rerunHint": "Run this step again (optionally with instructions or a skill).",
     "si.rerunTitle": "Re-run “{name}” with instructions",
     "si.guidance": "Instructions (optional)",
     "si.guidancePh":
@@ -4030,8 +3996,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.willRerun": "Will run again",
     "si.reapprove": "approve again",
     "si.noDependents": "(no dependent steps)",
-    "si.rerunNote":
-      "Earlier steps keep their results. The old attempt stays visible in History.",
+    "si.rerunNote": "Earlier steps keep their results. The old attempt stays visible in History.",
     "si.confirmRerun": "Confirm the re-run",
     "si.noSnapshot": "No context snapshot yet (the step has not run).",
     "si.noKnowledge": "No knowledge applies to this step.",
@@ -4041,10 +4006,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.full": "full",
     "si.summarised": "summarised",
     "si.overridden": "Overridden",
-    "si.overriddenBy":
-      "{key} v{version} was overridden by {by} (conflict key {conflict})",
-    "si.supersededBy":
-      "{key} v{version} was superseded by {by} (the newer rule applies here)",
+    "si.overriddenBy": "{key} v{version} was overridden by {by} (conflict key {conflict})",
+    "si.supersededBy": "{key} v{version} was superseded by {by} (the newer rule applies here)",
     "si.expiredRule": "{key} v{version} has expired",
     "kp.button": "Change proposals",
     "kp.title": "Knowledge change proposals",
@@ -4058,8 +4021,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kp.status.obsolete": "Obsolete",
     "kp.status.all": "All",
     "kp.emptyTitle": "No proposals",
-    "kp.emptyBody":
-      "When a run's answers or comments change a rule, a proposal shows up here.",
+    "kp.emptyBody": "When a run's answers or comments change a rule, a proposal shows up here.",
     "kp.source.workflow": "From a run",
     "kp.source.skill_evolution": "Skill update",
     "kp.source.repository_import": "Repository file conflict",
@@ -4103,35 +4065,39 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "kp.rolledBack": "Rolled back by",
     "kp.review": "Review",
     "kp.finalText": "Text to apply",
-    "kp.finalTextHint":
-      "You may edit the wording before approving; what is applied is recorded.",
+    "kp.finalTextHint": "You may edit the wording before approving; what is applied is recorded.",
     "kp.effectiveFrom": "Effective from",
-    "kp.effectiveHint":
-      "Empty = immediately. Until then runs keep the old rule.",
+    "kp.effectiveHint": "Empty = immediately. Until then runs keep the old rule.",
     "kp.acceptCurrent": "I read the current text and still approve",
     "kp.override": "Skip the automatic checks (my responsibility)",
     "kp.commentPh": "Why / who confirmed it",
-    "kp.effect.UPDATE":
-      "Approve: new version of the rule; later runs use it, history is kept.",
+    "kp.effect.UPDATE": "Approve: new version of the rule; later runs use it, history is kept.",
     "kp.effect.SUPERSEDE":
       "Approve: a new rule for the chosen scope; the old one keeps applying outside it.",
-    "kp.effect.DEPRECATE":
-      "Approve: the rule stops applying (now or from the effective date).",
+    "kp.effect.DEPRECATE": "Approve: the rule stops applying (now or from the effective date).",
     "kp.effect.CREATE": "Approve: a new rule is created.",
-    "kp.rejectEffect":
-      "Reject: nothing changes; dependent skill updates become obsolete.",
+    "kp.rejectEffect": "Reject: nothing changes; dependent skill updates become obsolete.",
     "kp.approve": "Approve and apply",
     "kp.reject": "Reject",
     "kp.rollback": "Roll back",
     "kp.rollbackPh": "Why roll back",
-    "kp.rollbackConfirm":
-      "Roll this change back? The previous text is restored as a new version.",
+    "kp.rollbackConfirm": "Roll this change back? The previous text is restored as a new version.",
     "kp.done.approve": "Approved and applied",
     "kp.done.reject": "Rejected",
     "kp.done.rollback": "Rolled back",
+    "kp.bulk.toolbar": "Bulk review",
+    "kp.bulk.selectAll": "Select all ({n} pending)",
+    "kp.bulk.selectOne": "Select proposal #{id}",
+    "kp.bulk.selected": "{n} selected",
+    "kp.bulk.approve": "Approve {n}",
+    "kp.bulk.reject": "Reject {n}",
+    "kp.bulk.confirm.approve": "Approve and apply the {n} selected proposals?",
+    "kp.bulk.confirm.reject": "Reject the {n} selected proposals?",
+    "kp.bulk.done.approve": "Approved {n} proposals",
+    "kp.bulk.done.reject": "Rejected {n} proposals",
+    "kp.bulk.failed": "{n} proposals could not be processed — {detail}",
     "kp.supersededBy": "Superseded by",
-    "kp.supersededHint":
-      "this rule no longer applies where the newer one does.",
+    "kp.supersededHint": "this rule no longer applies where the newer one does.",
     "kp.replaces": "Replaces",
     "kp.waitingVersion":
       "Version v{current} is approved but not yet effective; runs currently use v{effective}.",
@@ -4145,8 +4111,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "si.chars": "{n} characters",
     "si.data": "Data",
     "si.independent": "Independent verification",
-    "si.fresh":
-      "Fresh session · the coding agent's claims were withheld · judged {heads}",
+    "si.fresh": "Fresh session · the coding agent's claims were withheld · judged {heads}",
     "si.blockedReason": "Blocked: {reason}",
     "si.severity": "Severity",
     "si.location": "Location",
@@ -4281,8 +4246,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cl.enabled": "enabled",
     "cl.disabled": "disabled",
     "cl.noProject": "no project",
-    "cl.scopeRefLong":
-      "Scope ref (org / project / repo / workflow / workflow:step)",
+    "cl.scopeRefLong": "Scope ref (org / project / repo / workflow / workflow:step)",
     "cl.appHint":
       "Applicability (JSON: step_types, step_keys, repos, projects, workflows, keywords)",
     "cl.metaHint": "Metadata (skills: required_tools, output_contract)",
@@ -4357,8 +4321,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "auth.confirmPassword": "Confirm new password",
     "auth.unavailable": "Unable to reach the service. Please try again.",
     "auth.required": "Enter your username and password.",
-    "auth.loginFailed":
-      "Unable to sign in. Check your connection or try again in a few minutes.",
+    "auth.loginFailed": "Unable to sign in. Check your connection or try again in a few minutes.",
     "auth.signingIn": "Signing in…",
     "auth.usersIntro": "Manage access for members of your workspace.",
     "auth.searchUsers": "Search by username…",
@@ -4378,25 +4341,21 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "auth.passwordMismatch": "The passwords do not match.",
     "auth.usernameTaken": "This username is already taken.",
     "auth.saveFailed": "Unable to save. Check the details and try again.",
-    "auth.usernameHint":
-      "3–32 characters: letters, numbers, dots, underscores or hyphens.",
+    "auth.usernameHint": "3–32 characters: letters, numbers, dots, underscores or hyphens.",
     "auth.adminHint": "Admins can manage users and shared resources.",
     "auth.memberHint": "Members work with their own data and shared resources.",
     "auth.resetWarning":
       "Confirm a new password for this account. Existing sessions will be revoked.",
     "auth.deactivateWarning":
       "This account will no longer be able to sign in and existing sessions will be revoked. Its data is retained.",
-    "auth.activateWarning":
-      "This account will be able to sign in again with its current password.",
+    "auth.activateWarning": "This account will be able to sign in again with its current password.",
     "auth.passwordIntro": "Protect access to your workspace.",
     "auth.accountIntro": "Details of your signed-in account.",
     "auth.passwordSessionHint":
       "Changing your password signs you out. Sign in again with your new password.",
-    "auth.passwordChanged":
-      "Password changed. Please sign in with your new password.",
+    "auth.passwordChanged": "Password changed. Please sign in with your new password.",
     "auth.security": "Account security",
-    "auth.logoutConfirm":
-      "Sign out of {name}? You will need to sign in again to continue.",
+    "auth.logoutConfirm": "Sign out of {name}? You will need to sign in again to continue.",
     "auth.logoutFailed": "Unable to sign out. Please try again.",
     "auth.loggedOut": "You have signed out.",
     "auth.sessionExpired": "Your session has ended. Please sign in again.",

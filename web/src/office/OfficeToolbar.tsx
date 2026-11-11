@@ -1,12 +1,4 @@
-import {
-  Maximize2,
-  Minimize2,
-  Pause,
-  Play,
-  Shrink,
-  Sparkles,
-  Expand,
-} from "lucide-react";
+import { Maximize2, Minimize2, Pause, Play, Shrink, Sparkles, Expand } from "lucide-react";
 import type { LiveState } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
 
@@ -43,11 +35,7 @@ export function OfficeToolbar({
   const active = runs.filter((r) => activeIds.has(r.id));
   const recent = runs.filter((r) => !activeIds.has(r.id)).slice(0, 30);
   return (
-    <div
-      className="office-toolbar"
-      role="toolbar"
-      aria-label={t("office.toolbar")}
-    >
+    <div className="office-toolbar" role="toolbar" aria-label={t("office.toolbar")}>
       <label className="office-runpick">
         <span className="sr-only">{t("office.pick")}</span>
         <select
@@ -55,13 +43,10 @@ export function OfficeToolbar({
           onChange={(e) =>
             e.target.value === "preview"
               ? onPreview(true)
-              : (onPreview(false),
-                onRun(e.target.value ? Number(e.target.value) : null))
+              : (onPreview(false), onRun(e.target.value ? Number(e.target.value) : null))
           }
         >
-          <option value="">
-            {active.length ? t("office.auto") : t("office.none")}
-          </option>
+          <option value="">{active.length ? t("office.auto") : t("office.none")}</option>
           {active.length > 0 && (
             <optgroup label={t("office.active")}>
               {active.map((r) => (
@@ -138,11 +123,7 @@ export function OfficeToolbar({
           </>
         )}
       </button>
-      <button
-        className="ghost sm"
-        aria-pressed={fullscreen}
-        onClick={onFullscreen}
-      >
+      <button className="ghost sm" aria-pressed={fullscreen} onClick={onFullscreen}>
         {fullscreen ? (
           <>
             <Minimize2 size={15} /> {t("office.exitFullscreen")}

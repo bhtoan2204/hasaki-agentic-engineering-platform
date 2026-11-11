@@ -62,13 +62,11 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
   };
 
   const handle = async (msg: any): Promise<unknown> => {
-    if (!msg || !authorized(msg.token))
-      return { ok: false, error: "unauthorized" };
+    if (!msg || !authorized(msg.token)) return { ok: false, error: "unauthorized" };
     if (msg.kind === "hook") {
       hookCalls++;
       const payload = (msg.payload ?? {}) as CodexHookPayload;
-      if (typeof payload.model === "string" && payload.model)
-        deps.onModel?.(payload.model);
+      if (typeof payload.model === "string" && payload.model) deps.onModel?.(payload.model);
       let decision: Decision;
       try {
         decision = deps.decideHook
@@ -106,7 +104,7 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
   const server: Server = createServer((sock) => {
     sockets.add(sock);
     sock.on("close", () => sockets.delete(sock));
-    sock.on("error", () => { });
+    sock.on("error", () => {});
     let buf = "";
     sock.setEncoding("utf8");
     sock.on("data", (chunk: string) => {

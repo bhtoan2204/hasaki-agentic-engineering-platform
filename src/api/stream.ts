@@ -16,7 +16,13 @@ import type { Actor } from "../authz/access.ts";
  *  - `GET /api/events?after=<id>` returns the same slice for the client's polling fallback.
  * Payloads are only ids and the kind (never content): clients fetch what they show through the REST API.
  */
-export type LivePayload = { id: number; run_id: number; step_id: number | null; attempt_id: number | null; kind: string };
+export type LivePayload = {
+  id: number;
+  run_id: number;
+  step_id: number | null;
+  attempt_id: number | null;
+  kind: string;
+};
 type Client = {
   res: ServerResponse;
   runId: number | null;
@@ -42,7 +48,8 @@ const owners = new Map<number, number>();
 async function ownerOf(runId: number): Promise<number | null> {
   const hit = owners.get(runId);
   if (hit != null) return hit;
-  const row = (await pool.query("SELECT owner_id FROM workflow_runs WHERE id = $1", [runId])).rows[0];
+  const row = (await pool.query("SELECT owner_id FROM workflow_runs WHERE id = $1", [runId]))
+    .rows[0];
   const ownerId = row?.owner_id == null ? null : Number(row.owner_id);
   if (ownerId != null) {
     if (owners.size >= 5000) owners.clear();
@@ -51,7 +58,11 @@ async function ownerOf(runId: number): Promise<number | null> {
   return ownerId;
 }
 
-function visible(client: Pick<Client, "runId" | "userId" | "role" | "support">, runId: number, ownerId: number | null) {
+function visible(
+  client: Pick<Client, "runId" | "userId" | "role" | "support">,
+  runId: number,
+  ownerId: number | null,
+) {
   if (client.runId !== null && client.runId !== runId) return false;
   if (ownerId == null) return false;
   if (ownerId === client.userId) return true;
@@ -98,17 +109,27 @@ export async function eventsSince(
         ORDER BY e.id LIMIT $6`,
       [afterId, cursor, all, viewer.userId, viewer.runId, limit + 1],
     )
-  ).rows.map((r) => ({ id: Number(r.id), run_id: Number(r.run_id), step_id: r.step_id == null ? null : Number(r.step_id), attempt_id: r.attempt_id == null ? null : Number(r.attempt_id), kind: r.kind }));
+  ).rows.map((r) => ({
+    id: Number(r.id),
+    run_id: Number(r.run_id),
+    step_id: r.step_id == null ? null : Number(r.step_id),
+    attempt_id: r.attempt_id == null ? null : Number(r.attempt_id),
+    kind: r.kind,
+  }));
   if (rows.length > limit) return { events: [], reset: true, cursor };
   return { events: rows, reset: false, cursor: Math.max(cursor, afterId) };
 }
 
 async function latestEventId() {
-  return Number((await pool.query("SELECT COALESCE(max(id), 0) AS id FROM workflow_events")).rows[0].id);
+  return Number(
+    (await pool.query("SELECT COALESCE(max(id), 0) AS id FROM workflow_events")).rows[0].id,
+  );
 }
 
 function hello(client: Client, info: Record<string, unknown>) {
-  client.res.write(`retry: 3000\nevent: hello\ndata: ${JSON.stringify({ live: !!listener, ...info })}\n\n`);
+  client.res.write(
+    `retry: 3000\nevent: hello\ndata: ${JSON.stringify({ live: !!listener, ...info })}\n\n`,
+  );
 }
 
 /** Replay what `client` missed after `afterId`, then switch it to live delivery (queued live events after the replay). */
@@ -137,14 +158,24 @@ export async function startEventStream() {
   let failed = false;
   const connect = async () => {
     // keepAlive: this LISTEN connection is idle between events; without it a VPN/NAT hop can drop it silently.
-    const c = new pg.Client({ connectionString: config.databaseUrl, keepAlive: true, keepAliveInitialDelayMillis: 30000 });
+    const c = new pg.Client({
+      connectionString: config.databaseUrl,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 30000,
+    });
     c.on("notification", (n) => {
       if (!n.payload) return;
       let p: LivePayload;
       try {
         const raw = JSON.parse(n.payload);
         if (raw.run_id == null || raw.id == null) return;
-        p = { id: Number(raw.id), run_id: Number(raw.run_id), step_id: raw.step_id ?? null, attempt_id: raw.attempt_id ?? null, kind: String(raw.kind) };
+        p = {
+          id: Number(raw.id),
+          run_id: Number(raw.run_id),
+          step_id: raw.step_id ?? null,
+          attempt_id: raw.attempt_id ?? null,
+          kind: String(raw.kind),
+        };
       } catch {
         return;
       }
@@ -171,7 +202,8 @@ export async function startEventStream() {
     if (failed) {
       failed = false;
       // Notifications sent while LISTEN was down are lost; replay them to every client from what it last saw.
-      for (const cl of clients) catchUp(cl, cl.cursor).catch((e) => console.error("event stream resync:", e.message));
+      for (const cl of clients)
+        catchUp(cl, cl.cursor).catch((e) => console.error("event stream resync:", e.message));
     }
   };
   await connect();
@@ -201,16 +233,39 @@ async function runAllowed(runId: number, actor: Actor, support: boolean) {
 }
 
 function notFound(res: ServerResponse) {
-  res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+  res
+    .writeHead(404, { "Content-Type": "application/json" })
+    .end(JSON.stringify({ error: "not found" }));
 }
 
-export async function handleStream(req: IncomingMessage, res: ServerResponse, url: URL, actor: Actor, support: boolean) {
+export async function handleStream(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  actor: Actor,
+  support: boolean,
+) {
   const runId = url.searchParams.get("run_id") ? Number(url.searchParams.get("run_id")) : null;
   if (runId != null && !(await runAllowed(runId, actor, support))) return notFound(res);
   // The browser's own reconnect sends Last-Event-ID (newest); a reopened stream passes ?after=.
-  const after = cursorParam(req.headers["last-event-id"]) ?? cursorParam(url.searchParams.get("after"));
-  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-  const client: Client = { res, runId, userId: actor.id, role: actor.role, support, queued: [], sent: new Set(), cursor: after };
+  const after =
+    cursorParam(req.headers["last-event-id"]) ?? cursorParam(url.searchParams.get("after"));
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  const client: Client = {
+    res,
+    runId,
+    userId: actor.id,
+    role: actor.role,
+    support,
+    queued: [],
+    sent: new Set(),
+    cursor: after,
+  };
   clients.add(client);
   const ping = setInterval(() => {
     sessionFromRequest(req)

@@ -30,7 +30,8 @@ type ListenerState = "none" | "connected" | "down";
 let listener: ListenerState = "none";
 const usable = () => !DISABLED && listener !== "down";
 
-export const cacheStats: Record<string, { hits: number; misses: number; invalidations: number }> = {};
+export const cacheStats: Record<string, { hits: number; misses: number; invalidations: number }> =
+  {};
 const stat = (name: string) => (cacheStats[name] ??= { hits: 0, misses: 0, invalidations: 0 });
 
 const registry = new Set<CacheAside<any>>();
@@ -154,7 +155,11 @@ export async function startCacheInvalidation(connectionString = config.databaseU
   stopped = false;
   listener = "down";
   flushAllCaches();
-  const c = new pg.Client({ connectionString, keepAlive: true, keepAliveInitialDelayMillis: 30000 });
+  const c = new pg.Client({
+    connectionString,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 30000,
+  });
   const lost = (why: string) => {
     if (client !== c) return;
     client = null;
@@ -162,10 +167,13 @@ export async function startCacheInvalidation(connectionString = config.databaseU
     flushAllCaches();
     if (stopped) return;
     console.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
-    setTimeout(() => void startCacheInvalidation(connectionString).catch(() => { }), retryMs);
+    setTimeout(() => void startCacheInvalidation(connectionString).catch(() => {}), retryMs);
     retryMs = Math.min(30_000, retryMs * 2);
   };
-  c.on("notification", (n) => n.channel === "cache_invalidate" && n.payload && invalidateTables([n.payload]));
+  c.on(
+    "notification",
+    (n) => n.channel === "cache_invalidate" && n.payload && invalidateTables([n.payload]),
+  );
   c.on("error", (e) => lost(e.message));
   c.on("end", () => lost("connection ended"));
   client = c;
@@ -178,7 +186,7 @@ export async function startCacheInvalidation(connectionString = config.databaseU
     retryMs = 1000;
   } catch (e) {
     lost((e as Error).message);
-    c.end().catch(() => { });
+    c.end().catch(() => {});
   }
 }
 
@@ -187,7 +195,7 @@ export async function stopCacheInvalidation() {
   const c = client;
   client = null;
   listener = "none";
-  await c?.end().catch(() => { });
+  await c?.end().catch(() => {});
 }
 
 export const cacheListenerState = () => listener;

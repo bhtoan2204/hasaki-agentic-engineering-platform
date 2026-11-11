@@ -47,9 +47,13 @@ export function source(
 }
 export async function authorizedRepositoryRows(env: PlatformToolEnv, requested?: string[]) {
   const names = requested ?? (env.selected.length ? env.selected : env.allowed).slice(0, 30);
-  if (names.some((name) => !env.allowed.includes(name))) throw new Error("Repository outside authorized run scope");
+  if (names.some((name) => !env.allowed.includes(name)))
+    throw new Error("Repository outside authorized run scope");
   const rows = (await repositories.list()).filter((r) => names.includes(r.name));
-  if (rows.length !== new Set(names).size || rows.some((r) => !r.enabled || !r.allowed_actions.includes("read")))
+  if (
+    rows.length !== new Set(names).size ||
+    rows.some((r) => !r.enabled || !r.allowed_actions.includes("read"))
+  )
     throw new Error("Repository unavailable or read permission revoked");
   return rows;
 }
@@ -61,7 +65,9 @@ export async function relatedProductionErrors(env: PlatformToolEnv, text = "", m
     [env.runId, env.ownerId],
   );
   if (!run) throw new Error("Run ownership unavailable");
-  const namespaces = config.prodErrors.namespaces.filter((n) => n.project === run.project).map((n) => n.namespace);
+  const namespaces = config.prodErrors.namespaces
+    .filter((n) => n.project === run.project)
+    .map((n) => n.namespace);
   const rows = await q(
     pool,
     `SELECT g.fingerprint,g.namespace,g.service,g.signature,g.severity,g.today_count,g.first_at,g.last_at,g.lifecycle_status,g.updated_at
@@ -89,11 +95,18 @@ export async function visibleSnapshotKnowledge(env: PlatformToolEnv) {
     pool,
     `SELECT i.id,i.key,i.owner_id,v.version,v.content FROM knowledge_items i JOIN knowledge_versions v ON v.item_id=i.id
     WHERE i.enabled AND (i.owner_id IS NULL OR i.owner_id=$1) AND i.key=ANY($2::text[]) AND v.version=ANY($3::int[]) LIMIT 2000`,
-    [env.ownerId, env.knowledge.map((k) => k.key), [...new Set(env.knowledge.map((k) => k.version))]],
+    [
+      env.ownerId,
+      env.knowledge.map((k) => k.key),
+      [...new Set(env.knowledge.map((k) => k.version))],
+    ],
   );
   return env.knowledge.filter((k) =>
     rows.some(
-      (r) => (k.id == null ? r.key === k.key : r.id === k.id) && r.version === k.version && r.content === k.content,
+      (r) =>
+        (k.id == null ? r.key === k.key : r.id === k.id) &&
+        r.version === k.version &&
+        r.content === k.content,
     ),
   );
 }
@@ -114,11 +127,27 @@ function usageOf(env: { attemptId?: number | null }) {
   let u = usage.get(k);
   if (!u) {
     if (usage.size > 500) usage.delete(usage.keys().next().value);
-    usage.set(k, (u = { calls: {}, index_hits: 0, fallbacks: 0, ripgrep_exact: 0, empty_results: 0, unavailable_repos: [], latency_ms_total: 0, latency_ms_max: 0 }));
+    usage.set(
+      k,
+      (u = {
+        calls: {},
+        index_hits: 0,
+        fallbacks: 0,
+        ripgrep_exact: 0,
+        empty_results: 0,
+        unavailable_repos: [],
+        latency_ms_total: 0,
+        latency_ms_max: 0,
+      }),
+    );
   }
   return u;
 }
-export async function executeContextTool(name: string, args: any, env: PlatformToolEnv): Promise<unknown> {
+export async function executeContextTool(
+  name: string,
+  args: any,
+  env: PlatformToolEnv,
+): Promise<unknown> {
   switch (name) {
     case "search_code":
     case "get_symbol":
@@ -126,17 +155,29 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
       const rows = await authorizedRepositoryRows(env, args.repositories);
       if (!codeIntelligenceEnabled())
         return { supported: false, reason: "Code intelligence disabled on this worker", hits: [] };
-      const scope = { repositories: rows.map((r) => r.name), allowed: env.allowed, runId: env.runId, provision: false };
+      const scope = {
+        repositories: rows.map((r) => r.name),
+        allowed: env.allowed,
+        runId: env.runId,
+        provision: false,
+      };
       const started = Date.now();
       const op = name === "search_code" ? `search_code:${args.operation ?? "symbols"}` : name;
-      const note = async (r: { fallback: number; unavailable?: string[]; empty: boolean; ripgrep?: boolean }) => {
+      const note = async (r: {
+        fallback: number;
+        unavailable?: string[];
+        empty: boolean;
+        ripgrep?: boolean;
+      }) => {
         const u = usageOf(env);
         u.calls[op] = (u.calls[op] ?? 0) + 1;
         if (r.ripgrep) u.ripgrep_exact++;
         else if (r.fallback || r.unavailable?.length) u.fallbacks++;
         else u.index_hits++;
         if (r.empty) u.empty_results++;
-        for (const x of r.unavailable ?? []) if (!u.unavailable_repos.includes(x) && u.unavailable_repos.length < 20) u.unavailable_repos.push(x);
+        for (const x of r.unavailable ?? [])
+          if (!u.unavailable_repos.includes(x) && u.unavailable_repos.length < 20)
+            u.unavailable_repos.push(x);
         const ms = Date.now() - started;
         u.latency_ms_total += ms;
         u.latency_ms_max = Math.max(u.latency_ms_max, ms);
@@ -145,7 +186,10 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
       if (name === "search_code" && args.operation === "context") {
         const context = await buildCodeContext(args.query, scope);
         await env.recordMetrics?.({ code_intelligence: context.metrics });
-        await note({ fallback: Number((context.metrics as any)?.fallback_count ?? 0), empty: !(context as any).hits?.length && !(context as any).entries?.length });
+        await note({
+          fallback: Number((context.metrics as any)?.fallback_count ?? 0),
+          empty: !(context as any).hits?.length && !(context as any).entries?.length,
+        });
         return context;
       }
       if (name === "get_symbol") {
@@ -156,8 +200,12 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
           definitions,
           ...(r.fallback_count
             ? {
-                index_fallback: { repositories_without_fresh_index: r.fallback_count, text_candidates: r.text_candidates },
-                warning: "the symbol index was stale or unavailable for some repositories: text matches are listed as candidates only — they are NOT resolved definitions; verify in live files",
+                index_fallback: {
+                  repositories_without_fresh_index: r.fallback_count,
+                  text_candidates: r.text_candidates,
+                },
+                warning:
+                  "the symbol index was stale or unavailable for some repositories: text matches are listed as candidates only — they are NOT resolved definitions; verify in live files",
               }
             : {}),
           uncertainty: "syntax candidates; check live files and snapshot freshness",
@@ -170,21 +218,31 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
         return {
           dependencies,
           ...(report.unavailable.length
-            ? { unavailable_repositories: report.unavailable, warning: "no fresh dependency index for these repositories: their edges are missing from this result (not proof of no dependency) — fall back to search_code exact / targeted reads" }
+            ? {
+                unavailable_repositories: report.unavailable,
+                warning:
+                  "no fresh dependency index for these repositories: their edges are missing from this result (not proof of no dependency) — fall back to search_code exact / targeted reads",
+              }
             : {}),
           uncertainty: "candidate edges are not semantic resolution",
         };
       }
       if (args.operation === "exact") {
         // Exact strings, config and logs: bounded ripgrep over any non-secret file (never forced through Tree-sitter).
-        const hits = (await searchCodeExact(args.query, scope, args.limit, { anyFile: true })).slice(0, args.limit);
+        const hits = (
+          await searchCodeExact(args.query, scope, args.limit, { anyFile: true })
+        ).slice(0, args.limit);
         await note({ fallback: 0, empty: !hits.length, ripgrep: true });
         return { hits, uncertainty: "text matches are not semantic proof" };
       }
       const r = await searchSymbols(args.query, scope, args.limit);
       await note({ fallback: r.fallback_count, empty: !r.hits.length });
       return r.fallback_count
-        ? { ...r, warning: "index stale/unavailable for some repositories: those hits are bounded live text matches (match_type text), not indexed symbols" }
+        ? {
+            ...r,
+            warning:
+              "index stale/unavailable for some repositories: those hits are bounded live text matches (match_type text), not indexed symbols",
+          }
         : r;
     }
     case "search_knowledge":
@@ -200,17 +258,27 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
       const ranked = candidates
         .map((k) => ({
           k,
-          ...scoreKnowledge({ ...k, reason: "resolved step knowledge" }, args.query ?? "", env.stepType),
+          ...scoreKnowledge(
+            { ...k, reason: "resolved step knowledge" },
+            args.query ?? "",
+            env.stepType,
+          ),
         }))
         .filter((x) => !args.query || x.score > 0)
         .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key))
         .slice(0, args.limit);
       const hits = [];
       for (const { k, score, why } of ranked) {
-        let freshness: { state: string; reason: string } = { state: "SNAPSHOT", reason: "pinned applicable version" };
+        let freshness: { state: string; reason: string } = {
+          state: "SNAPSHOT",
+          reason: "pinned applicable version",
+        };
         if (k.category === "task_memory") {
           const memory = k.metadata?.memory;
-          const repo = memory?.repo && env.allowed.includes(memory.repo) ? await repositories.get(memory.repo) : null;
+          const repo =
+            memory?.repo && env.allowed.includes(memory.repo)
+              ? await repositories.get(memory.repo)
+              : null;
           freshness =
             memory && ["verified", "approved"].includes(memory.trust)
               ? await memoryFreshness(memory, repo ? repoPath(repo) : null)
@@ -244,14 +312,21 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
       );
       return row
         ? {
-          ...row,
-          provenance: source(`work_item:${row.id}`, null, row.updated_at, "owner", "current run's work item"),
-        }
+            ...row,
+            provenance: source(
+              `work_item:${row.id}`,
+              null,
+              row.updated_at,
+              "owner",
+              "current run's work item",
+            ),
+          }
         : { available: false, reason: "Run has no accessible linked work item" };
     }
     case "get_step_output": {
       const u = env.upstream[args.step_key];
-      if (!u || u.status !== "COMPLETED") throw new Error("Only pinned completed ancestor outputs are available");
+      if (!u || u.status !== "COMPLETED")
+        throw new Error("Only pinned completed ancestor outputs are available");
       return {
         step_key: args.step_key,
         ...u,
@@ -276,7 +351,9 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
           reason: "Pack has not been built; existing immutable step snapshot remains available",
           snapshot_id: env.snapshotId ?? null,
         };
-      const entries = pack.content.entries.filter((e: any) => args.section === "all" || e.section === args.section);
+      const entries = pack.content.entries.filter(
+        (e: any) => args.section === "all" || e.section === args.section,
+      );
       return {
         pack_id: pack.id,
         snapshot_id: pack.snapshot_id,
@@ -287,18 +364,49 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
         entries: entries.slice(args.offset, args.offset + args.limit),
         total: entries.length,
         omitted: pack.content.omitted,
-        provider_handoff: args.section === "all" || args.section === "continuity" ? await (async () => {
-          const h = await one(pool, "SELECT id,source_attempt_id,package FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'", [env.attemptId, env.runId, env.stepId]);
-          if (!h) return null;
-          const details = args.handoff_workspace && h.package?.workspace_artifact_id ? await one(pool, "SELECT content FROM workflow_artifacts WHERE id=$1 AND run_id=$2 AND kind='provider_handoff'", [h.package.workspace_artifact_id, env.runId]) : null;
-          const original = args.handoff_source_pack ? await one(pool, "SELECT content FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4", [h.source_attempt_id, env.runId, env.stepId, env.ownerId]) : null;
-          const text = original ? JSON.stringify(original.content) : details?.content ?? JSON.stringify(h.package), offset = args.handoff_offset ?? 0, limit = args.handoff_limit ?? 6000;
-          return { id: h.id, content: text.slice(offset, offset + limit), total_chars: text.length, next_offset: offset + limit < text.length ? offset + limit : null };
-        })() : null,
+        provider_handoff:
+          args.section === "all" || args.section === "continuity"
+            ? await (async () => {
+                const h = await one(
+                  pool,
+                  "SELECT id,source_attempt_id,package FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",
+                  [env.attemptId, env.runId, env.stepId],
+                );
+                if (!h) return null;
+                const details =
+                  args.handoff_workspace && h.package?.workspace_artifact_id
+                    ? await one(
+                        pool,
+                        "SELECT content FROM workflow_artifacts WHERE id=$1 AND run_id=$2 AND kind='provider_handoff'",
+                        [h.package.workspace_artifact_id, env.runId],
+                      )
+                    : null;
+                const original = args.handoff_source_pack
+                  ? await one(
+                      pool,
+                      "SELECT content FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",
+                      [h.source_attempt_id, env.runId, env.stepId, env.ownerId],
+                    )
+                  : null;
+                const text = original
+                    ? JSON.stringify(original.content)
+                    : (details?.content ?? JSON.stringify(h.package)),
+                  offset = args.handoff_offset ?? 0,
+                  limit = args.handoff_limit ?? 6000;
+                return {
+                  id: h.id,
+                  content: text.slice(offset, offset + limit),
+                  total_chars: text.length,
+                  next_offset: offset + limit < text.length ? offset + limit : null,
+                };
+              })()
+            : null,
         capabilities: CONTEXT_TOOLS.map((t) => ({
           name: t.logicalName,
           read_only: t.readOnly,
-          supported: !["search_code", "get_symbol", "find_dependencies"].includes(t.name) || codeIntelligenceEnabled(),
+          supported:
+            !["search_code", "get_symbol", "find_dependencies"].includes(t.name) ||
+            codeIntelligenceEnabled(),
         })),
       };
     }
@@ -321,7 +429,13 @@ export async function executeContextTool(name: string, args: any, env: PlatformT
               default_branch: x.default_branch,
               allowed_actions: x.allowed_actions,
             }))[0],
-          provenance: source(`repository:${r.repo}`, null, null, "shared", "ranked within authorized run repositories"),
+          provenance: source(
+            `repository:${r.repo}`,
+            null,
+            null,
+            "shared",
+            "ranked within authorized run repositories",
+          ),
         }));
     }
     case "request_clarification":

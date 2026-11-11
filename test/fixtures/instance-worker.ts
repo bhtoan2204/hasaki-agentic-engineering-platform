@@ -14,6 +14,15 @@ try {
     console.log(JSON.stringify(!!(await beginAttempt(job, "child"))));
   } else if (mode === "finish") {
     const { job, attempt } = JSON.parse(process.argv[3]);
-    console.log(JSON.stringify(await finishAttempt(job.id, job.fencing_token, attempt.id, { kind: "completed", output: { unauthorized: true } })));
+    console.log(
+      JSON.stringify(
+        await finishAttempt(job.id, job.fencing_token, attempt.id, {
+          kind: "completed",
+          output: { unauthorized: true },
+        }),
+      ),
+    );
   } else console.log(JSON.stringify(config.instanceId));
-} finally { await pool.end(); }
+} finally {
+  await pool.end();
+}

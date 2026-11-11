@@ -1,5 +1,11 @@
 import { pool, q, one } from "../../db/pool.ts";
-import { boundsSql, bucketSql, filterParams, type AnalyticsFilters, type AnalyticsScope } from "./filters.ts";
+import {
+  boundsSql,
+  bucketSql,
+  filterParams,
+  type AnalyticsFilters,
+  type AnalyticsScope,
+} from "./filters.ts";
 
 /** One cohort for all engineering tabs. Repository membership never multiplies attempts. */
 export const executionCte = `WITH ${boundsSql},
@@ -70,7 +76,8 @@ const usageFields = [
 const usageAggregate = usageFields
   .map((k) => `sum(${k}) AS ${k}, count(*) FILTER(WHERE ${k} IS NULL)::int AS missing_${k}`)
   .join(",\n");
-const pagination = (f: AnalyticsFilters) => `LIMIT ${f.pageSize} OFFSET ${(f.page - 1) * f.pageSize}`;
+const pagination = (f: AnalyticsFilters) =>
+  `LIMIT ${f.pageSize} OFFSET ${(f.page - 1) * f.pageSize}`;
 const moneyRatios = `sum(reported_cost_usd) FILTER(WHERE run_status='COMPLETED')/NULLIF(count(DISTINCT run_id) FILTER(WHERE run_status='COMPLETED'),0) AS cost_per_successful_run,
  sum(reported_cost_usd) FILTER(WHERE run_status='COMPLETED' AND verified)/NULLIF(count(DISTINCT work_item_id) FILTER(WHERE run_status='COMPLETED' AND verified),0) AS cost_per_verified_task`;
 
@@ -251,5 +258,13 @@ export async function workflowAnalytics(f: AnalyticsFilters, scope: AnalyticsSco
       (SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT * FROM step_stats WHERE approval_ms>0 ORDER BY approval_ms DESC,dimension LIMIT 10) x) AS approvals`,
     params,
   );
-  return { workflows, steps, trend, verification_trend: verificationTrend, evidence, details, hotspots };
+  return {
+    workflows,
+    steps,
+    trend,
+    verification_trend: verificationTrend,
+    evidence,
+    details,
+    hotspots,
+  };
 }

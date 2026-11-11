@@ -6,12 +6,7 @@ import { config, codeIntelligenceEnabled } from "../src/config.ts";
 import { execution } from "../src/auth/execution.ts";
 import { createUser } from "../src/auth/users.ts";
 import { SuiteSchema } from "../src/eval/dataset.ts";
-import {
-  fixtureGit,
-  fixtureRoot,
-  fixtureName,
-  materializeSuite,
-} from "../src/eval/fixtures.ts";
+import { fixtureGit, fixtureRoot, fixtureName, materializeSuite } from "../src/eval/fixtures.ts";
 import {
   publishBuiltinSuite,
   createEvaluation,
@@ -92,8 +87,7 @@ after(async () => {
 async function drive(id: number) {
   const at = Date.now();
   for (;;) {
-    if (Date.now() - at > 300000)
-      throw new Error("Evaluation test wall time exceeded");
+    if (Date.now() - at > 300000) throw new Error("Evaluation test wall time exceeded");
     const d = await evaluationDetail(id, owner.id);
     if (["COMPLETED", "FAILED", "CANCELED"].includes(d.status)) return d;
     const approvals = await q(
@@ -134,9 +128,7 @@ test("15 labeled synthetic cases have valid pinned repositories and immutable su
   falseHistory.cases[0].origin = "real_derived";
   assert.throws(() => SuiteSchema.parse(falseHistory));
   await assert.rejects(
-    q(pool, "UPDATE benchmark_suites SET title='tampered' WHERE id=$1", [
-      suite.id,
-    ]),
+    q(pool, "UPDATE benchmark_suites SET title='tampered' WHERE id=$1", [suite.id]),
     /immutable/,
   );
   await assert.rejects(
@@ -189,15 +181,9 @@ test("Hard gates override a high weighted score; unknown/incorrect usage stays u
   assert.equal(summary.average_input_tokens, null);
   assert.equal(summary.cost_per_success, null);
   assert.equal(summary.cost_known, 0);
-  assert.equal(
-    compareResults([row], [row], 1, new Set()).verdict,
-    "INCONCLUSIVE",
-  );
+  assert.equal(compareResults([row], [row], 1, new Set()).verdict, "INCONCLUSIVE");
   const regression = { ...row, correct: false, status: "FAIL" };
-  assert.equal(
-    compareResults([row], [regression], 1, new Set(["BENCH-001"])).verdict,
-    "FAIL",
-  );
+  assert.equal(compareResults([row], [regression], 1, new Set(["BENCH-001"])).verdict, "FAIL");
 });
 test("Configuration is bounded, live execution needs approval, and fixture repositories do not enter normal discovery", async () => {
   assert.throws(() => ConfigurationSchema.parse({ repetitions: 20 }));
@@ -210,7 +196,10 @@ test("Configuration is bounded, live execution needs approval, and fixture repos
     }),
     /approval/,
   );
-  await q(pool, "UPDATE repositories SET shared_access = 'read' WHERE provider = 'benchmark'").catch(() => {}); // refused below anyway
+  await q(
+    pool,
+    "UPDATE repositories SET shared_access = 'read' WHERE provider = 'benchmark'",
+  ).catch(() => {}); // refused below anyway
   const ordinary = await allowedRepositoriesForRun(Number(owner.id), "Unmapped normal project");
   assert.ok(!ordinary.some((n) => n.startsWith("bench-")));
   const original = config.codeIntelligence.enabled;
@@ -304,48 +293,34 @@ test("Fixture evaluations use existing jobs, objective validators, checkpoints, 
   assert.ok(freshness.data.evidence.details.stale_fallback > 0);
   assert.equal(b.summary.average_input_tokens, null);
   assert.equal(b.summary.cost_per_success, 0);
-  const compare = await createComparison(
-    owner.id,
-    baseline.id,
-    candidate.id,
-    {},
-  );
+  const compare = await createComparison(owner.id, baseline.id, candidate.id, {});
   const detail = await comparisonDetail(compare!.id, owner.id);
   assert.equal(detail.report.verdict, "PASS");
   assert.equal(detail.report.pairs.length, 30);
   assert.equal(
     (
-      await q(
-        pool,
-        "SELECT id FROM execution_workspaces WHERE run_id=ANY($1::bigint[])",
-        [[a.workflow_run_id, b.workflow_run_id]],
-      )
+      await q(pool, "SELECT id FROM execution_workspaces WHERE run_id=ANY($1::bigint[])", [
+        [a.workflow_run_id, b.workflow_run_id],
+      ])
     ).length,
     0,
   );
   for (const logical of Object.keys(suite.manifest.repositories))
     assert.equal(
-      await fixtureGit(fixtureRoot(fixtureName(logical)), [
-        "status",
-        "--porcelain",
-      ]),
+      await fixtureGit(fixtureRoot(fixtureName(logical)), ["status", "--porcelain"]),
       "",
     );
   assert.equal(
     (
-      await q(
-        pool,
-        "SELECT id FROM pull_requests WHERE run_id=ANY($1::bigint[])",
-        [[a.workflow_run_id, b.workflow_run_id]],
-      )
+      await q(pool, "SELECT id FROM pull_requests WHERE run_id=ANY($1::bigint[])", [
+        [a.workflow_run_id, b.workflow_run_id],
+      ])
     ).length,
     0,
   );
-  const artifact = await one(
-    pool,
-    "SELECT content FROM workflow_artifacts WHERE id=$1",
-    [clarification.data.evidence.details.artifact_id],
-  );
+  const artifact = await one(pool, "SELECT content FROM workflow_artifacts WHERE id=$1", [
+    clarification.data.evidence.details.artifact_id,
+  ]);
   assert.ok(artifact!.content.includes("checks"));
 });
 test("Interrupted integration jobs recover from pinned fixtures; cancellation is private and idempotent", async () => {
@@ -358,11 +333,9 @@ test("Interrupted integration jobs recover from pinned fixtures; cancellation is
   const job = (await claimJob("eval-crash", 30))!;
   const started = await beginAttempt(job, "eval-crash");
   assert.ok(started);
-  await q(
-    pool,
-    "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",
-    [job.id],
-  );
+  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [
+    job.id,
+  ]);
   await reapExpiredLeases();
   const done = await drive(e.id);
   assert.equal(done.status, "COMPLETED");
@@ -375,15 +348,9 @@ test("Interrupted integration jobs recover from pinned fixtures; cancellation is
     configuration: { case_limit: 1 },
   });
   await cancelEvaluation(canceled.id, owner.id);
-  assert.equal(
-    (await evaluationDetail(canceled.id, owner.id)).status,
-    "CANCELED",
-  );
+  assert.equal((await evaluationDetail(canceled.id, owner.id)).status, "CANCELED");
   const comparison = await createComparison(owner.id, e.id, canceled.id, {});
-  assert.notEqual(
-    (await comparisonDetail(comparison!.id, owner.id)).report.verdict,
-    "PASS",
-  );
+  assert.notEqual((await comparisonDetail(comparison!.id, owner.id)).report.verdict, "PASS");
 });
 test("A plausible provider-fixture explanation without working code fails objective evaluation", async () => {
   const e = await createEvaluation(owner.id, {
@@ -406,10 +373,8 @@ test("Evaluation completion never sends notifications or triggers paid learning 
   const { detectKnowledgeChanges, setKnowledgeChangeAnalyzer } =
     await import("../src/knowledge/learning.ts");
   const { extractRunMemory } = await import("../src/knowledge/memory.ts");
-  const run = (await one(
-    pool,
-    "SELECT workflow_run_id FROM evaluation_runs ORDER BY id LIMIT 1",
-  ))!.workflow_run_id;
+  const run = (await one(pool, "SELECT workflow_run_id FROM evaluation_runs ORDER BY id LIMIT 1"))!
+    .workflow_run_id;
   let called = 0;
   setKnowledgeChangeAnalyzer(async () => {
     called++;
@@ -433,10 +398,7 @@ test("Evaluation completion never sends notifications or triggers paid learning 
       generation: 0,
       ownerId: owner.id,
     });
-    assert.equal(
-      (await detectKnowledgeChanges(run, { force: true })).status,
-      "disabled",
-    );
+    assert.equal((await detectKnowledgeChanges(run, { force: true })).status, "disabled");
     assert.deepEqual(await extractRunMemory(run), []);
     assert.equal(called, 0);
     assert.equal(fetchMock.mock.callCount(), 0);
@@ -495,16 +457,11 @@ test("Two evaluations can execute concurrently without A/B scope or workspace co
   });
   await startPendingRun(a.workflow_run_id);
   await startPendingRun(b.workflow_run_id);
-  const jobs = await Promise.all([
-    claimJob("eval-a", 30),
-    claimJob("eval-b", 30),
-  ]);
+  const jobs = await Promise.all([claimJob("eval-a", 30), claimJob("eval-b", 30)]);
   assert.ok(jobs[0] && jobs[1]);
   assert.notEqual(jobs[0]!.id, jobs[1]!.id);
   await Promise.all(
-    jobs.map((j, i) =>
-      processJob(j!, `eval-${i}`, { leaseSeconds: 30, heartbeatSeconds: 5 }),
-    ),
+    jobs.map((j, i) => processJob(j!, `eval-${i}`, { leaseSeconds: 30, heartbeatSeconds: 5 })),
   );
   const ra = await evaluationDetail(a.id, owner.id),
     rb = await evaluationDetail(b.id, owner.id);
@@ -529,17 +486,12 @@ test("An expired worker cannot publish an evaluation result before the normal re
   await startPendingRun(e.workflow_run_id);
   const job = (await claimJob("stale-evaluator", 30))!;
   const begun = (await beginAttempt(job, "stale-evaluator"))!;
-  await q(
-    pool,
-    "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",
-    [job.id],
-  );
+  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [
+    job.id,
+  ]);
   const result = await execution.run(
     { userId: owner.id, runId: e.workflow_run_id, kind: "run" },
-    () =>
-      executeBenchmarkCase(
-        makeContext({ ...begun, signal: new AbortController().signal }),
-      ),
+    () => executeBenchmarkCase(makeContext({ ...begun, signal: new AbortController().signal })),
   );
   assert.equal(result.kind, "failed");
   assert.equal(

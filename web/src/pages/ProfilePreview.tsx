@@ -15,12 +15,7 @@ import {
 } from "lucide-react";
 import { Badge, Segmented } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
-import {
-  autoLayout,
-  nodeTypes,
-  toEdges,
-  type StepNodeData,
-} from "../graph.tsx";
+import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
 
 export type ProfileChoice = "AUTO" | "FAST" | "STANDARD" | "DEEP";
@@ -30,13 +25,7 @@ const COLOR: Record<string, string> = {
   DEEP: "WAITING",
 };
 
-export function ProfileBadge({
-  profile,
-  title,
-}: {
-  profile?: string;
-  title?: string;
-}) {
+export function ProfileBadge({ profile, title }: { profile?: string; title?: string }) {
   if (!profile) return null;
   const I =
     profile === "FAST"
@@ -77,13 +66,7 @@ export function ProfilePreview({
   const { t } = useI18n();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const key = JSON.stringify([
-    workflow,
-    workItemId,
-    repositories,
-    inputs,
-    value,
-  ]);
+  const key = JSON.stringify([workflow, workItemId, repositories, inputs, value]);
   useEffect(() => {
     if (!workflow) return;
     let stop = false;
@@ -115,10 +98,7 @@ export function ProfilePreview({
   return (
     <div>
       <div className="row tight" style={{ gap: 10 }}>
-        <b
-          className="small"
-          style={{ display: "inline-flex", gap: 6, alignItems: "center" }}
-        >
+        <b className="small" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
           <Gauge size={15} color="var(--brand)" /> {t("pp.profile")}
         </b>
         <Segmented<ProfileChoice>
@@ -128,36 +108,28 @@ export function ProfilePreview({
           options={[
             [
               "AUTO",
-              <span
-                style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-              >
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                 <Sparkles size={12} />
                 AUTO
               </span>,
             ],
             [
               "FAST",
-              <span
-                style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-              >
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                 <Zap size={12} />
                 FAST
               </span>,
             ],
             [
               "STANDARD",
-              <span
-                style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-              >
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                 <Layers size={12} />
                 STANDARD
               </span>,
             ],
             [
               "DEEP",
-              <span
-                style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-              >
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                 <Microscope size={12} />
                 DEEP
               </span>,
@@ -175,10 +147,7 @@ export function ProfilePreview({
           <div className="small rv-chipline">
             <ArrowRight size={13} color="var(--muted)" />{" "}
             <ProfileBadge profile={data.profile?.profile} />{" "}
-            <span className="muted">
-              ({t("pp.confidence", { n: data.profile?.confidence })})
-            </span>{" "}
-            ·{" "}
+            <span className="muted">({t("pp.confidence", { n: data.profile?.confidence })})</span> ·{" "}
             {t("pp.steps", {
               n: data.graph?.steps?.length ?? 0,
               total: data.published_steps ?? 0,
@@ -187,8 +156,7 @@ export function ProfilePreview({
             {data.reused_repositories && (
               <>
                 {" "}
-                · {t("pp.reuse")}{" "}
-                <b>{(data.selected_repositories ?? []).join(", ")}</b>
+                · {t("pp.reuse")} <b>{(data.selected_repositories ?? []).join(", ")}</b>
               </>
             )}
           </div>
@@ -198,11 +166,7 @@ export function ProfilePreview({
             ))}
           </ul>
           {(data.profile?.warnings ?? []).map((w: string) => (
-            <div
-              key={w}
-              className="rv-note"
-              style={{ color: "var(--st-wait)", margin: "4px 0" }}
-            >
+            <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}>
               <AlertTriangle size={13} />
               {w}
             </div>

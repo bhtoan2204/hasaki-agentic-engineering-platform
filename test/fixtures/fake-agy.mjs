@@ -8,7 +8,8 @@ import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const mode = process.env.FAKE_AGY_MODE || "ok";
-const log = (o) => process.env.FAKE_AGY_LOG && appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(o) + "\n");
+const log = (o) =>
+  process.env.FAKE_AGY_LOG && appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(o) + "\n");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -51,8 +52,12 @@ gpt-oss-120b-medium`);
   process.exit(0);
 }
 
-if (!argv.includes("--input-format") || argv[argv.indexOf("--input-format") + 1] !== "stream-json" ||
-    !argv.includes("--output-format") || argv[argv.indexOf("--output-format") + 1] !== "stream-json") {
+if (
+  !argv.includes("--input-format") ||
+  argv[argv.indexOf("--input-format") + 1] !== "stream-json" ||
+  !argv.includes("--output-format") ||
+  argv[argv.indexOf("--output-format") + 1] !== "stream-json"
+) {
   console.error("Expected --input-format stream-json and --output-format stream-json");
   process.exit(2);
 }
@@ -64,7 +69,8 @@ try {
   const rows = stdinText.trimEnd().split("\n");
   if (rows.length !== 1) throw new Error("expected exactly one NDJSON input event");
   const input = JSON.parse(rows[0]);
-  if (input.event !== "user" || typeof input.message?.content !== "string") throw new Error("invalid user event");
+  if (input.event !== "user" || typeof input.message?.content !== "string")
+    throw new Error("invalid user event");
   prompt = input.message.content;
 } catch (e) {
   console.error(`invalid stream-json stdin: ${e.message}`);
@@ -88,7 +94,9 @@ log({
     DATABASE_URL: !!process.env.DATABASE_URL,
     AUTH_SECRET: !!process.env.AUTH_SECRET,
     BROKER: !!process.env.PLATFORM_BROKER_TOKEN,
-    containsPrompt: Object.values(process.env).some((v) => v === prompt || (prompt.length > 1000 && v?.includes(prompt.slice(0, 1000)))),
+    containsPrompt: Object.values(process.env).some(
+      (v) => v === prompt || (prompt.length > 1000 && v?.includes(prompt.slice(0, 1000))),
+    ),
   },
 });
 
@@ -110,7 +118,11 @@ if (mode === "quota") {
 
 if (mode === "aux_complete") {
   out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
-  out({ type: "message", role: "assistant", content: process.env.FAKE_AGY_TEXT || "Auxiliary response" });
+  out({
+    type: "message",
+    role: "assistant",
+    content: process.env.FAKE_AGY_TEXT || "Auxiliary response",
+  });
   out({ type: "tokens", input: 25, output: 10, reasoning: 0, cache_read: 0 });
   process.exit(0);
 }
@@ -276,7 +288,11 @@ const output =
   mode === "bad-contract"
     ? { summary: "missing required keys" }
     : resumeId
-      ? { goal: "resumed from antigravity", requirements: [], answer_seen: prompt.includes("Yes") || prompt.includes("Có") }
+      ? {
+          goal: "resumed from antigravity",
+          requirements: [],
+          answer_seen: prompt.includes("Yes") || prompt.includes("Có"),
+        }
       : { goal: "from antigravity", requirements: ["r1", "r2"] };
 
 await tool(mcp, "submit_result", { output });

@@ -67,7 +67,9 @@ test("a failed COMMIT skips afterCommit and does not leave the client aborted", 
           ran = true;
         });
         await c.query("CREATE TABLE commit_fail_parent (id int PRIMARY KEY)");
-        await c.query("CREATE TABLE commit_fail_child (id int PRIMARY KEY, parent_id int, CONSTRAINT commit_fail_fk FOREIGN KEY (parent_id) REFERENCES commit_fail_parent(id) DEFERRABLE INITIALLY DEFERRED)");
+        await c.query(
+          "CREATE TABLE commit_fail_child (id int PRIMARY KEY, parent_id int, CONSTRAINT commit_fail_fk FOREIGN KEY (parent_id) REFERENCES commit_fail_parent(id) DEFERRABLE INITIALLY DEFERRED)",
+        );
         await c.query("INSERT INTO commit_fail_child (id, parent_id) VALUES (1, 99)");
       }),
     /commit_fail_fk/,
@@ -86,11 +88,18 @@ test("an afterCommit error leaves the committed row in place", async () => {
     return 7;
   });
   assert.equal(out, 7);
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM pool_probe WHERE id = 2")).rows[0].n, 1);
+  assert.equal(
+    (await pool.query("SELECT count(*)::int AS n FROM pool_probe WHERE id = 2")).rows[0].n,
+    1,
+  );
 });
 
 test("pool max=1: afterCommit can query without waiting for the transaction client", async () => {
-  const db = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 1000 });
+  const db = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 1,
+    connectionTimeoutMillis: 1000,
+  });
   try {
     let seen = 0;
     await withTx(async (c, afterCommit) => {
@@ -112,9 +121,16 @@ test("with one free pool client, finishAttempt does not borrow a second connecti
   for (let i = 0; i < max - 1; i++) held.push(await pool.connect());
   try {
     const started = Date.now();
-    const result = await finishAttempt(1, 1, 999_999_999, { kind: "failed", error: "not a real attempt", retryable: false });
+    const result = await finishAttempt(1, 1, 999_999_999, {
+      kind: "failed",
+      error: "not a real attempt",
+      retryable: false,
+    });
     assert.deepEqual(result, { applied: false, reason: "attempt not found" });
-    assert.ok(Date.now() - started < 1000, `finishAttempt waited ${Date.now() - started}ms for a second connection`);
+    assert.ok(
+      Date.now() - started < 1000,
+      `finishAttempt waited ${Date.now() - started}ms for a second connection`,
+    );
   } finally {
     for (const c of held) c.release();
   }
@@ -135,15 +151,19 @@ test("answered question inbox can use its partial index", async () => {
   try {
     await c.query("BEGIN");
     await c.query("SET LOCAL enable_seqscan = off");
-    const plan = (await c.query(
-      `EXPLAIN SELECT q.id
+    const plan = (
+      await c.query(
+        `EXPLAIN SELECT q.id
          FROM workflow_questions q
          JOIN workflow_steps s ON s.id = q.step_id
          JOIN workflow_runs r ON r.id = q.run_id
         WHERE q.status = 'answered'
         ORDER BY q.answered_at DESC
         LIMIT 100`,
-    )).rows.map((r) => r["QUERY PLAN"]).join("\n");
+      )
+    ).rows
+      .map((r) => r["QUERY PLAN"])
+      .join("\n");
     assert.match(plan, /workflow_questions_answered/);
     await c.query("ROLLBACK");
   } finally {
@@ -152,8 +172,10 @@ test("answered question inbox can use its partial index", async () => {
 });
 
 test("lookup indexes from migration 012 exist", async () => {
-  const names = (await pool.query("SELECT indexname FROM pg_indexes WHERE indexname IN ('workflow_checkpoints_attempt', 'workflow_step_attempts_job') ORDER BY 1")).rows.map(
-    (r) => r.indexname,
-  );
+  const names = (
+    await pool.query(
+      "SELECT indexname FROM pg_indexes WHERE indexname IN ('workflow_checkpoints_attempt', 'workflow_step_attempts_job') ORDER BY 1",
+    )
+  ).rows.map((r) => r.indexname);
   assert.deepEqual(names, ["workflow_checkpoints_attempt", "workflow_step_attempts_job"]);
 });

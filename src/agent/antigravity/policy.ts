@@ -26,13 +26,11 @@ export function antigravityHookDecision(
   sessionCwd: string,
 ): Decision {
   const toolCall = payload?.toolCall ?? payload?.tool_call;
-  const toolName = String(
-    toolCall?.name ?? payload?.tool_name ?? payload?.name ?? "",
-  );
-  const args = (toolCall?.args ??
-    payload?.tool_input ??
-    payload?.args ??
-    {}) as Record<string, unknown>;
+  const toolName = String(toolCall?.name ?? payload?.tool_name ?? payload?.name ?? "");
+  const args = (toolCall?.args ?? payload?.tool_input ?? payload?.args ?? {}) as Record<
+    string,
+    unknown
+  >;
   const lower = toolName.toLowerCase();
 
   // 1. MCP Platform tools
@@ -51,9 +49,7 @@ export function antigravityHookDecision(
 
   // 2. Subagents restriction
   if (lower.includes("subagent")) {
-    return deny(
-      "Subagents are not permitted for this provider under platform security policy",
-    );
+    return deny("Subagents are not permitted for this provider under platform security policy");
   }
 
   // 3. Web search restriction
@@ -74,23 +70,17 @@ export function antigravityHookDecision(
   // 5. File modifications (write_file, edit_file)
   if (lower === "write_file" || lower === "edit_file") {
     if (policy.mode !== "coding") {
-      return deny(
-        `Tool ${toolName} is only allowed in coding steps (analysis mode is read-only)`,
-      );
+      return deny(`Tool ${toolName} is only allowed in coding steps (analysis mode is read-only)`);
     }
     const filePath = String(args.Path ?? args.path ?? "");
     if (!filePath.trim()) return deny("empty file path");
     for (const [re, why] of SECRET_PATTERNS) {
       if (re.test(filePath)) return deny(why);
     }
-    const resolved = isAbsolute(filePath)
-      ? resolve(filePath)
-      : resolve(sessionCwd, filePath);
+    const resolved = isAbsolute(filePath) ? resolve(filePath) : resolve(sessionCwd, filePath);
     // Ensure path doesn't escape into sensitive roots
     if (resolved.includes("/.git/"))
-      return deny(
-        "modifying .git internal files directly is forbidden; use commit_changes",
-      );
+      return deny("modifying .git internal files directly is forbidden; use commit_changes");
     return decide(toolName, { path: resolved }, policy, sessionCwd);
   }
 
@@ -184,7 +174,7 @@ export function excludeFromGit(gitDir: string) {
   let cur = "";
   try {
     cur = readFileSync(exclude, "utf8");
-  } catch { }
+  } catch {}
   const lines = [".agents/hooks.json", ".agents/mcp_config.json"];
   let added = false;
   for (const line of lines) {

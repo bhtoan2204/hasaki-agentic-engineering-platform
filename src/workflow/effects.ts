@@ -69,9 +69,16 @@ export async function dispatchRunEffects(limit = 8) {
   for (const row of rows) {
     try {
       await perform(row.kind, row.run_id);
-      await q(pool, "DELETE FROM workflow_run_effects WHERE run_id = $1 AND kind = $2", [row.run_id, row.kind]);
+      await q(pool, "DELETE FROM workflow_run_effects WHERE run_id = $1 AND kind = $2", [
+        row.run_id,
+        row.kind,
+      ]);
     } catch (e) {
-      await q(pool, "UPDATE workflow_run_effects SET claimed_until = NULL WHERE run_id = $1 AND kind = $2", [row.run_id, row.kind]).catch(() => {});
+      await q(
+        pool,
+        "UPDATE workflow_run_effects SET claimed_until = NULL WHERE run_id = $1 AND kind = $2",
+        [row.run_id, row.kind],
+      ).catch(() => {});
       console.error(`run effect ${row.kind} #${row.run_id}: ${(e as Error).message}`);
     }
   }

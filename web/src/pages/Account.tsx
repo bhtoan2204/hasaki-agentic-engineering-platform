@@ -29,9 +29,7 @@ export function AccountPage({
         title={t(passwordMode ? "auth.passwordChange" : "auth.account")}
         subtitle={t(passwordMode ? "auth.passwordIntro" : "auth.accountIntro")}
         crumbs={
-          passwordMode
-            ? [[t("auth.account"), "#/account"], [t("auth.passwordChange")]]
-            : undefined
+          passwordMode ? [[t("auth.account"), "#/account"], [t("auth.passwordChange")]] : undefined
         }
       />
       {passwordMode ? (
@@ -172,10 +170,7 @@ export function AccountMenu({
       const r = menu.current!.getBoundingClientRect();
       setPosition({
         left: Math.max(8, Math.min(a.left, window.innerWidth - r.width - 8)),
-        top: Math.max(
-          8,
-          Math.min(a.top - r.height - 8, window.innerHeight - r.height - 8),
-        ),
+        top: Math.max(8, Math.min(a.top - r.height - 8, window.innerHeight - r.height - 8)),
       });
     };
     place();
@@ -183,10 +178,7 @@ export function AccountMenu({
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     const outside = (e: PointerEvent) => {
-      if (
-        !menu.current?.contains(e.target as Node) &&
-        !trigger.current?.contains(e.target as Node)
-      )
+      if (!menu.current?.contains(e.target as Node) && !trigger.current?.contains(e.target as Node))
         setOpen(false);
     };
     document.addEventListener("pointerdown", outside);
@@ -238,11 +230,7 @@ export function AccountMenu({
             aria-label={t("auth.account")}
             style={position}
             onKeyDown={(e) => {
-              const items = [
-                ...e.currentTarget.querySelectorAll<HTMLElement>(
-                  "[role=menuitem]",
-                ),
-              ];
+              const items = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
               const i = items.indexOf(document.activeElement as HTMLElement);
               if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
                 e.preventDefault();
@@ -251,8 +239,7 @@ export function AccountMenu({
                     ? 0
                     : e.key === "End"
                       ? items.length - 1
-                      : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) %
-                        items.length
+                      : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length
                 ]?.focus();
               }
               if (e.key === "Escape" || e.key === "Tab") {
@@ -317,12 +304,7 @@ export function AccountMenu({
             </div>
           )}
           <div className="auth-actions">
-            <button
-              className="ghost"
-              disabled={busy}
-              onClick={() => setConfirm(false)}
-              autoFocus
-            >
+            <button className="ghost" disabled={busy} onClick={() => setConfirm(false)} autoFocus>
               {t("common.cancel")}
             </button>
             <button

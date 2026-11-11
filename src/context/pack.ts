@@ -19,19 +19,20 @@ import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-const gitTip = async (path: string, ref: string) => (await promisify(execFile)("git", ["-C", path, "rev-parse", ref])).stdout.trim();
+const gitTip = async (path: string, ref: string) =>
+  (await promisify(execFile)("git", ["-C", path, "rev-parse", ref])).stdout.trim();
 
 export interface ContextEntry {
   id: string;
   section:
-  | "requirements"
-  | "knowledge"
-  | "code"
-  | "decisions"
-  | "continuity"
-  | "production"
-  | "verification"
-  | "repositories";
+    | "requirements"
+    | "knowledge"
+    | "code"
+    | "decisions"
+    | "continuity"
+    | "production"
+    | "verification"
+    | "repositories";
   trust: "curated_rule" | "untrusted_evidence" | "platform_constraint";
   required: boolean;
   priority: number;
@@ -60,9 +61,13 @@ export interface ContextPack {
   /** Why this budget: explicit step config, the role default, or the global default (fallback). */
   budget_source?: "step_config" | "role" | "global";
   /** Redacted raw code-retrieval results + their deterministic key (never rendered into the prompt). */
-  retrieval_cache?: { key: string; entries: Record<string, string>; reused_from_pack?: number | null };
+  retrieval_cache?: {
+    key: string;
+    entries: Record<string, string>;
+    reused_from_pack?: number | null;
+  };
 }
-export class ContextBudgetError extends Error { }
+export class ContextBudgetError extends Error {}
 
 /**
  * Role-based default budgets (tokens, estimate): a step that does not set `context_tokens` gets context sized for its
@@ -84,9 +89,28 @@ export function roleBudget(step: { type: string; config: Record<string, any> }):
  * scope, query, exact repository state (HEAD + uncommitted fingerprint + base tip) and the code-index version.
  * Any change → a different key → fresh retrieval.
  */
-export function codeRetrievalKey(input: { ownerId: number; runId: number; stepId: number; allowed: string[]; query: string; repos: Record<string, string>; indexVersion: string }) {
-  const repos = Object.keys(input.repos).sort().map((k) => [k, input.repos[k]]);
-  return hashOf({ v: 1, owner: input.ownerId, run: input.runId, step: input.stepId, allowed: [...input.allowed].sort(), query: input.query, repos, index: input.indexVersion });
+export function codeRetrievalKey(input: {
+  ownerId: number;
+  runId: number;
+  stepId: number;
+  allowed: string[];
+  query: string;
+  repos: Record<string, string>;
+  indexVersion: string;
+}) {
+  const repos = Object.keys(input.repos)
+    .sort()
+    .map((k) => [k, input.repos[k]]);
+  return hashOf({
+    v: 1,
+    owner: input.ownerId,
+    run: input.runId,
+    step: input.stepId,
+    allowed: [...input.allowed].sort(),
+    query: input.query,
+    repos,
+    index: input.indexVersion,
+  });
 }
 /** The estimate includes provenance and summaries. Required constraints are never silently shortened or dropped. */
 export function budgetContextPack(
@@ -115,7 +139,10 @@ export function budgetContextPack(
     pack.entries.push(summary);
     if (estimateTokens(JSON.stringify(pack)) > base.budget_tokens - 500) {
       pack.entries.pop();
-      pack.omitted.push({ id: entry.id, reason: "context budget; retrieve through platform tools" });
+      pack.omitted.push({
+        id: entry.id,
+        reason: "context budget; retrieve through platform tools",
+      });
     }
   }
   // The list of omissions is also bounded. Constraints are in the complete required entries, not in this index.
@@ -131,7 +158,13 @@ export async function ensureContextPack(
   policy: PolicyContext,
 ): Promise<ContextPack> {
   await validateToolBinding(
-    envFromExecution(ctx, ctx.step.type === "coding_agent" ? "coding" : "analysis", policy, metrics, () => { }),
+    envFromExecution(
+      ctx,
+      ctx.step.type === "coding_agent" ? "coding" : "analysis",
+      policy,
+      metrics,
+      () => {},
+    ),
   );
   return singleflight(
     `context-pack:${ctx.run.owner_id}:${ctx.run.id}:${ctx.step.id}:${ctx.attempt.id}:${ctx.attempt.fencing_token}:${ctx.context.snapshot_id}`,
@@ -159,12 +192,19 @@ export async function ensureContextPack(
       }
       const started = performance.now(),
         at = new Date().toISOString();
-      const globalBudget = Number(ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000);
+      const globalBudget = Number(
+        ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000,
+      );
       if (!Number.isInteger(globalBudget) || globalBudget < 2000 || globalBudget > 64000)
         throw new ContextBudgetError("context_tokens must be an integer between 2000 and 64000");
       const role = ctx.step.config.context_tokens == null ? roleBudget(ctx.step) : null;
       const budget = role != null && role < globalBudget ? role : globalBudget;
-      const budgetSource: ContextPack["budget_source"] = ctx.step.config.context_tokens != null ? "step_config" : budget !== globalBudget ? "role" : "global";
+      const budgetSource: ContextPack["budget_source"] =
+        ctx.step.config.context_tokens != null
+          ? "step_config"
+          : budget !== globalBudget
+            ? "role"
+            : "global";
       const entries: ContextEntry[] = [];
       const searchOmitted: string[] = [];
       const add = (
@@ -179,21 +219,48 @@ export async function ensureContextPack(
         entries.push({
           id,
           section,
-          body: typeof body === "string" ? redactContextText(body) : JSON.stringify(redactContextValue(body)),
+          body:
+            typeof body === "string"
+              ? redactContextText(body)
+              : JSON.stringify(redactContextValue(body)),
           priority,
           required,
           provenance,
           trust,
         });
-      const handoff = await one(pool, "SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'", [ctx.attempt.id, ctx.run.id, ctx.step.id]);
-      if (handoff) add("provider_handoff", "continuity", { handoff_id: handoff.id, source_attempt_id: handoff.source_attempt_id, summary: summarizeValue(handoff.package, 10000), details: "Retrieve the full handoff through platform.get_run_context" }, 100, true, source(`provider_handoff:${handoff.id}`, 1, String(handoff.ready_at), "owner", "confirmed stable provider-neutral checkpoint", "historical"));
+      const handoff = await one(
+        pool,
+        "SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",
+        [ctx.attempt.id, ctx.run.id, ctx.step.id],
+      );
+      if (handoff)
+        add(
+          "provider_handoff",
+          "continuity",
+          {
+            handoff_id: handoff.id,
+            source_attempt_id: handoff.source_attempt_id,
+            summary: summarizeValue(handoff.package, 10000),
+            details: "Retrieve the full handoff through platform.get_run_context",
+          },
+          100,
+          true,
+          source(
+            `provider_handoff:${handoff.id}`,
+            1,
+            String(handoff.ready_at),
+            "owner",
+            "confirmed stable provider-neutral checkpoint",
+            "historical",
+          ),
+        );
       const input = ctx.input,
         independent = ctx.step.config.independent === true;
-      const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id=$1 AND run_id=$2 AND step_id=$3", [
-        ctx.context.snapshot_id,
-        ctx.run.id,
-        ctx.step.id,
-      ]);
+      const snap = await one(
+        pool,
+        "SELECT content FROM context_snapshots WHERE id=$1 AND run_id=$2 AND step_id=$3",
+        [ctx.context.snapshot_id, ctx.run.id, ctx.step.id],
+      );
       if (!snap || !ctx.run.owner_id) throw new Error("Owned context snapshot required");
       add(
         "request",
@@ -203,16 +270,16 @@ export async function ensureContextPack(
           inputs: input.run.inputs,
           work_item: input.work_item
             ? {
-              id: input.work_item.id,
-              code: input.work_item.code,
-              title: input.work_item.title,
-              description: input.work_item.description || input.work_item.payload?.note || "",
-              project: input.work_item.project,
-              business_requirements:
-                input.work_item.payload?.business_requirements ??
-                input.work_item.payload?.acceptance_criteria ??
-                null,
-            }
+                id: input.work_item.id,
+                code: input.work_item.code,
+                title: input.work_item.title,
+                description: input.work_item.description || input.work_item.payload?.note || "",
+                project: input.work_item.project,
+                business_requirements:
+                  input.work_item.payload?.business_requirements ??
+                  input.work_item.payload?.acceptance_criteria ??
+                  null,
+              }
             : null,
         },
         1000,
@@ -251,7 +318,13 @@ export async function ensureContextPack(
           },
           998,
           true,
-          source(`attempt:${ctx.attempt.id}:answers`, null, at, "owner", "explicit developer decisions for this step"),
+          source(
+            `attempt:${ctx.attempt.id}:answers`,
+            null,
+            at,
+            "owner",
+            "explicit developer decisions for this step",
+          ),
         );
       // Evidence-gated investigation: a compact, deterministic digest replaces re-reading every upstream output. It is
       // required (never truncated or dropped), bounded, and keeps uncertainty, missing evidence and the approved scope.
@@ -263,9 +336,20 @@ export async function ensureContextPack(
           evidence,
           997,
           true,
-          source(`run:${ctx.run.id}:evidence`, null, at, "owner", "platform-normalized evidence digest of upstream steps; full outputs via get_step_output", "snapshot"),
+          source(
+            `run:${ctx.run.id}:evidence`,
+            null,
+            at,
+            "owner",
+            "platform-normalized evidence digest of upstream steps; full outputs via get_step_output",
+            "snapshot",
+          ),
         );
-      const summarized = new Set(evidence ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, "")) : []);
+      const summarized = new Set(
+        evidence
+          ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, ""))
+          : [],
+      );
       const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
       for (const k of ctx.context.knowledge) {
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
@@ -286,7 +370,15 @@ export async function ensureContextPack(
           `knowledge:${k.id ?? k.key}:v${k.version}`,
           "knowledge",
           indexOnly
-            ? { key: k.key, title: k.title, category: k.category, disclosure: "index", description: String((k.metadata as { description?: string } | undefined)?.description ?? "").slice(0, 400) }
+            ? {
+                key: k.key,
+                title: k.title,
+                category: k.category,
+                disclosure: "index",
+                description: String(
+                  (k.metadata as { description?: string } | undefined)?.description ?? "",
+                ).slice(0, 400),
+              }
             : { key: k.key, title: k.title, category: k.category, content: k.content },
           mandatory ? 990 : 80 + scored.score,
           mandatory,
@@ -307,7 +399,9 @@ export async function ensureContextPack(
           const critical = Boolean(
             u.output &&
             typeof u.output === "object" &&
-            ["requirements", "acceptance_criteria", "constraints", "business_rules"].some((k) => k in u.output),
+            ["requirements", "acceptance_criteria", "constraints", "business_rules"].some(
+              (k) => k in u.output,
+            ),
           );
           const { requirements, acceptance_criteria, constraints, business_rules, ...rest } =
             u.output && typeof u.output === "object" && !Array.isArray(u.output) ? u.output : {};
@@ -334,8 +428,19 @@ export async function ensureContextPack(
             `upstream:${key}`,
             "continuity",
             planned?.mode === "summary" && summaryText != null
-              ? { step: key, attempt_id: u.attempt_id, status: u.status, output: summaryText, summarized_from_tokens: planned.full_tokens }
-              : { step: key, attempt_id: u.attempt_id, status: u.status, output: critical ? rest : u.output },
+              ? {
+                  step: key,
+                  attempt_id: u.attempt_id,
+                  status: u.status,
+                  output: summaryText,
+                  summarized_from_tokens: planned.full_tokens,
+                }
+              : {
+                  step: key,
+                  attempt_id: u.attempt_id,
+                  status: u.status,
+                  output: critical ? rest : u.output,
+                },
             60,
             false,
             source(
@@ -356,7 +461,13 @@ export async function ensureContextPack(
           ctx.context.fileRefs,
           90,
           false,
-          source(`snapshot:${ctx.context.snapshot_id}:file_refs`, ctx.context.hash, at, "owner", "paths already identified by ancestor steps; start here instead of scanning the repository"),
+          source(
+            `snapshot:${ctx.context.snapshot_id}:file_refs`,
+            ctx.context.hash,
+            at,
+            "owner",
+            "paths already identified by ancestor steps; start here instead of scanning the repository",
+          ),
         );
       if (input.previous_attempt)
         add(
@@ -365,11 +476,21 @@ export async function ensureContextPack(
           {
             number: input.previous_attempt.number,
             status: input.previous_attempt.status,
-            body: summarizeValue(input.previous_attempt.output ?? input.previous_attempt.error, 6000),
+            body: summarizeValue(
+              input.previous_attempt.output ?? input.previous_attempt.error,
+              6000,
+            ),
           },
           96,
           false,
-          source(`step:${ctx.step.id}:previous_attempt`, input.previous_attempt.number, at, "owner", "prior attempt of this step; revise it, do not treat it as verified", "historical"),
+          source(
+            `step:${ctx.step.id}:previous_attempt`,
+            input.previous_attempt.number,
+            at,
+            "owner",
+            "prior attempt of this step; revise it, do not treat it as verified",
+            "historical",
+          ),
         );
       if (!independent) {
         const notes = await q(
@@ -445,12 +566,17 @@ export async function ensureContextPack(
         ctx.step.type === "coding_agent" ? "coding" : "analysis",
         policy,
         metrics,
-        () => { },
+        () => {},
       );
       env.contextPreparation = true; // Trusted server retrieval, never supplied by a provider.
       let retrievalCalls = 0,
         retrievalFailures = 0;
-      const retrieve = async (name: string, args: unknown, section: ContextEntry["section"], priority: number) => {
+      const retrieve = async (
+        name: string,
+        args: unknown,
+        section: ContextEntry["section"],
+        priority: number,
+      ) => {
         retrievalCalls++;
         const text = await dispatchPlatformTool(`platform.${name}`, args, env);
         if (text.startsWith("ERROR:")) {
@@ -503,7 +629,17 @@ export async function ensureContextPack(
             keyable = false; // unreadable state: never reuse
           }
         }
-        const key = keyable ? codeRetrievalKey({ ownerId: ctx.run.owner_id!, runId: ctx.run.id, stepId: ctx.step.id, allowed: ctx.run.allowed_repositories, query, repos: repoState, indexVersion: INDEX_VERSION }) : null;
+        const key = keyable
+          ? codeRetrievalKey({
+              ownerId: ctx.run.owner_id!,
+              runId: ctx.run.id,
+              stepId: ctx.step.id,
+              allowed: ctx.run.allowed_repositories,
+              query,
+              repos: repoState,
+              indexVersion: INDEX_VERSION,
+            })
+          : null;
         const prior = key
           ? await one<{ id: number; cache: any }>(
               pool,
@@ -511,18 +647,46 @@ export async function ensureContextPack(
               [ctx.run.id, ctx.step.id, ctx.run.owner_id, key],
             )
           : null;
-        const cached = prior?.cache?.entries && typeof prior.cache.entries === "object" ? (prior.cache.entries as Record<string, string>) : null;
+        const cached =
+          prior?.cache?.entries && typeof prior.cache.entries === "object"
+            ? (prior.cache.entries as Record<string, string>)
+            : null;
         if (cached && cached.search_code) {
           for (const [id, body] of Object.entries(cached))
-            entries.push({ id, section: "code", body, priority: id === "search_code" ? 65 : 55, required: false, trust: "untrusted_evidence", provenance: source(id, null, at, "owner", `reused from context pack ${prior!.id}: identical owner, authorization, query, repository state and index version`, "observed") });
+            entries.push({
+              id,
+              section: "code",
+              body,
+              priority: id === "search_code" ? 65 : 55,
+              required: false,
+              trust: "untrusted_evidence",
+              provenance: source(
+                id,
+                null,
+                at,
+                "owner",
+                `reused from context pack ${prior!.id}: identical owner, authorization, query, repository state and index version`,
+                "observed",
+              ),
+            });
           retrievalCache = { key: key!, entries: cached, reused_from_pack: prior!.id };
         } else {
           await retrieve("search_code", { query, operation: "context", limit: 8 }, "code", 65);
           const first = entries.find((e) => e.id === "search_code");
           const symbol = first && JSON.parse(first.body)?.hits?.[0]?.qualified_name;
-          if (symbol) await retrieve("find_dependencies", { symbol: String(symbol).slice(0, 512), depth: 1 }, "code", 55);
+          if (symbol)
+            await retrieve(
+              "find_dependencies",
+              { symbol: String(symbol).slice(0, 512), depth: 1 },
+              "code",
+              55,
+            );
           // Cache only successful, already-redacted results; failures are never reused.
-          const ok = Object.fromEntries(entries.filter((e) => e.id === "search_code" || e.id === "find_dependencies").map((e) => [e.id, e.body]));
+          const ok = Object.fromEntries(
+            entries
+              .filter((e) => e.id === "search_code" || e.id === "find_dependencies")
+              .map((e) => [e.id, e.body]),
+          );
           if (key && ok.search_code) retrievalCache = { key, entries: ok, reused_from_pack: null };
         }
       }
@@ -534,29 +698,32 @@ export async function ensureContextPack(
           ctx.run.owner_id,
           [
             ...Object.values(input.upstream).flatMap((u) => (u.attempt_id ? [u.attempt_id] : [])),
-            ...(input.pending?.resume?.from_attempt_id ? [Number(input.pending.resume.from_attempt_id)] : []),
+            ...(input.pending?.resume?.from_attempt_id
+              ? [Number(input.pending.resume.from_attempt_id)]
+              : []),
           ],
         ],
       );
-      const build = (b: number, src: ContextPack["budget_source"]) => budgetContextPack(
-        {
-          budget_source: src,
-          version: 1,
-          run_id: ctx.run.id,
-          step_id: ctx.step.id,
-          attempt_id: ctx.attempt.id,
-          owner_id: ctx.run.owner_id!, // checked above ("Owned context snapshot required")
-          snapshot_id: ctx.context.snapshot_id,
-          created_at: at,
-          budget_tokens: b,
-          token_measurement: "character_estimate_not_provider_usage",
-          parent_pack_ids: parents.map((p) => p.id),
-          retrieval_calls: retrievalCalls,
-          retrieval_failures: retrievalFailures,
-          preparation_ms: performance.now() - started,
-        },
-        entries,
-      );
+      const build = (b: number, src: ContextPack["budget_source"]) =>
+        budgetContextPack(
+          {
+            budget_source: src,
+            version: 1,
+            run_id: ctx.run.id,
+            step_id: ctx.step.id,
+            attempt_id: ctx.attempt.id,
+            owner_id: ctx.run.owner_id!, // checked above ("Owned context snapshot required")
+            snapshot_id: ctx.context.snapshot_id,
+            created_at: at,
+            budget_tokens: b,
+            token_measurement: "character_estimate_not_provider_usage",
+            parent_pack_ids: parents.map((p) => p.id),
+            retrieval_calls: retrievalCalls,
+            retrieval_failures: retrievalFailures,
+            preparation_ms: performance.now() - started,
+          },
+          entries,
+        );
       let pack: ContextPack;
       try {
         pack = build(budget, budgetSource);
@@ -568,10 +735,19 @@ export async function ensureContextPack(
       // Attached after budgeting: the cache is stored with the pack but is neither rendered nor counted as context.
       if (retrievalCache) pack = { ...pack, retrieval_cache: retrievalCache };
       for (const id of searchOmitted) {
-        const candidate = { ...pack, omitted: [...pack.omitted, { id, reason: "progressive disclosure (search); retrieve with read_knowledge" }] };
+        const candidate = {
+          ...pack,
+          omitted: [
+            ...pack.omitted,
+            { id, reason: "progressive disclosure (search); retrieve with read_knowledge" },
+          ],
+        };
         const estimated = estimateTokens(JSON.stringify(candidate)) + 8;
         if (estimated > pack.budget_tokens) break;
-        pack.omitted.push({ id, reason: "progressive disclosure (search); retrieve with read_knowledge" });
+        pack.omitted.push({
+          id,
+          reason: "progressive disclosure (search); retrieve with read_knowledge",
+        });
         pack.estimated_tokens = estimated;
       }
       const row = await one(
@@ -603,7 +779,9 @@ export async function ensureContextPack(
           id: persisted.id,
           snapshot_id: pack.snapshot_id,
           estimated_tokens: pack.estimated_tokens,
-          estimated_bytes: Buffer.byteLength(JSON.stringify({ ...pack, retrieval_cache: undefined })),
+          estimated_bytes: Buffer.byteLength(
+            JSON.stringify({ ...pack, retrieval_cache: undefined }),
+          ),
           preparation_ms: pack.preparation_ms,
           retrieval_calls: retrievalCalls,
           retrieval_failures: retrievalFailures,
@@ -627,7 +805,10 @@ export function renderContextPack(pack: ContextPack, trusted: boolean) {
         if (typeof value.body !== "string") return e;
         return {
           ...e,
-          body: JSON.stringify({ ...value, body: "See the following validated code_intelligence snippet block" }),
+          body: JSON.stringify({
+            ...value,
+            body: "See the following validated code_intelligence snippet block",
+          }),
         };
       } catch {
         return e;

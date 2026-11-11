@@ -10,7 +10,10 @@ import type { PlatformToolEnv } from "./platformTools.ts";
 /** Identity comes from worker-owned attempt data, never tool arguments or provider-selected IDs. */
 export async function validateToolBinding(env: PlatformToolEnv) {
   const principal = execution.getStore();
-  if (principal && (principal.userId !== env.ownerId || (principal.runId != null && principal.runId !== env.runId)))
+  if (
+    principal &&
+    (principal.userId !== env.ownerId || (principal.runId != null && principal.runId !== env.runId))
+  )
     throw new Error("Authenticated principal does not own this run");
   const row = await one(
     pool,
@@ -106,8 +109,12 @@ export async function auditToolDenial(env: PlatformToolEnv, name: string, error:
     pool,
     `INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail)
     SELECT id,'platform_tool.denied','attempt',$2,$3 FROM users WHERE id=$1`,
-    [env.ownerId ?? null, String(env.attemptId), JSON.stringify({ tool: name, reason: safeDiagnostics(error) })],
-  ).catch(() => { });
+    [
+      env.ownerId ?? null,
+      String(env.attemptId),
+      JSON.stringify({ tool: name, reason: safeDiagnostics(error) }),
+    ],
+  ).catch(() => {});
 }
 export async function postClarification(
   env: PlatformToolEnv,

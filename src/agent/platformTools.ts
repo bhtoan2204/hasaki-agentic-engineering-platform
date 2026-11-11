@@ -6,7 +6,12 @@ import {
   boundedContextJson,
   visibleSnapshotKnowledge,
 } from "./contextTools.ts";
-import { validateToolBinding, journalToolCall, auditToolDenial, postClarification } from "./toolRuntime.ts";
+import {
+  validateToolBinding,
+  journalToolCall,
+  auditToolDenial,
+  postClarification,
+} from "./toolRuntime.ts";
 import { redactContextText } from "../context/redact.ts";
 import { safeDiagnostics } from "./telemetry.ts";
 import { z } from "zod";
@@ -70,7 +75,9 @@ export interface PlatformToolEnv {
     integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }>;
   };
   log(kind: "agent" | "system", content: string, data?: unknown): Promise<void>;
-  ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;
+  ask(
+    questions: Array<{ question: string; context?: string; options?: string[] }>,
+  ): Promise<number>;
   onSubmit?(output: Record<string, unknown>): void;
 }
 
@@ -129,7 +136,11 @@ async function openQuestions(attemptId: number): Promise<number> {
 
 const activeContextReads = new Map<number, number>();
 
-export async function dispatchPlatformTool(name: string, args: any, env: PlatformToolEnv): Promise<string> {
+export async function dispatchPlatformTool(
+  name: string,
+  args: any,
+  env: PlatformToolEnv,
+): Promise<string> {
   const started = performance.now();
   try {
     await validateToolBinding(env);
@@ -141,7 +152,9 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
     { ...execution.getStore(), userId: Number(env.ownerId), runId: env.runId, kind: "run" },
     async () => {
       const nativeName =
-        name === "call_tool" && String(args?.name ?? "").startsWith("platform.") ? String(args.name) : name;
+        name === "call_tool" && String(args?.name ?? "").startsWith("platform.")
+          ? String(args.name)
+          : name;
       const nativeArgs = nativeName !== name ? (args.arguments ?? {}) : args;
       const native =
         nativeName.startsWith("platform.") || !["search_knowledge"].includes(nativeName)
@@ -155,7 +168,9 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
           ? describeToolSafe(String(args?.name ?? ""))?.read_only === true
           : !MUTATING.has(name) && name !== "ask_user" && name !== "post_update");
       try {
-        const target = native?.logicalName ?? (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
+        const target =
+          native?.logicalName ??
+          (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
         const experiment = execution.getStore()?.evaluation;
         if (!env.contextPreparation && experiment?.contextMode) {
           const control = [
@@ -165,31 +180,45 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
             "platform.post_update",
           ].includes(target);
           if (!control && experiment.contextMode !== "tools")
-            throw new Error(
-              "Platform tools are disabled by the frozen benchmark context variant",
-            );
+            throw new Error("Platform tools are disabled by the frozen benchmark context variant");
           if (!toolAllowed(target, experiment.allowedTools))
             throw new Error("Tool excluded by frozen benchmark permissions");
         }
-        if (!env.contextPreparation && !toolAllowed(target, env.attemptAllowedTools)) throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
+        if (!env.contextPreparation && !toolAllowed(target, env.attemptAllowedTools))
+          throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
         if (["read_knowledge", "search_knowledge"].includes(name) && !native)
           env = { ...env, knowledge: await visibleSnapshotKnowledge(env) };
-        if (JSON.stringify(args ?? {}).length > 128000) throw new Error("Tool arguments exceed 128000 characters");
+        if (JSON.stringify(args ?? {}).length > 128000)
+          throw new Error("Tool arguments exceed 128000 characters");
         if (!native) {
           const legacy = legacyInputs[name];
-          if (!legacy) throw new Error("Unknown tool; starting arbitrary workflows is not a supported capability");
+          if (!legacy)
+            throw new Error(
+              "Unknown tool; starting arbitrary workflows is not a supported capability",
+            );
           args = legacy.parse(args ?? {});
         }
         if (native) {
           const parsed = native.input.safeParse(nativeArgs ?? {});
           if (!parsed.success)
-            throw new Error(`Invalid arguments: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
-          const timeout = Math.min(60000, Math.max(1000, Number(config.agent.contextToolTimeoutMs) || 10000));
+            throw new Error(
+              `Invalid arguments: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+            );
+          const timeout = Math.min(
+            60000,
+            Math.max(1000, Number(config.agent.contextToolTimeoutMs) || 10000),
+          );
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             if (readOnly && (activeContextReads.get(env.attemptId) ?? 0) >= 4)
-              throw new Error("Context retrieval concurrency limit reached; wait for existing reads");
-            if (readOnly) activeContextReads.set(env.attemptId, (activeContextReads.get(env.attemptId) ?? 0) + 1);
+              throw new Error(
+                "Context retrieval concurrency limit reached; wait for existing reads",
+              );
+            if (readOnly)
+              activeContextReads.set(
+                env.attemptId,
+                (activeContextReads.get(env.attemptId) ?? 0) + 1,
+              );
             const operation = executeContextTool(native.name, parsed.data, env);
             if (readOnly) {
               const release = () => {
@@ -201,11 +230,14 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
             }
             const value = readOnly
               ? await Promise.race([
-                operation,
-                new Promise((_, reject) => {
-                  timer = setTimeout(() => reject(new Error("Context tool deadline exceeded")), timeout);
-                }),
-              ])
+                  operation,
+                  new Promise((_, reject) => {
+                    timer = setTimeout(
+                      () => reject(new Error("Context tool deadline exceeded")),
+                      timeout,
+                    );
+                  }),
+                ])
               : await operation;
             if (readOnly) await validateToolBinding(env);
             result = boundedContextJson(value);
@@ -213,7 +245,8 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
             if (timer) clearTimeout(timer);
           }
         } else {
-          if (nativeName.startsWith("platform.")) throw new Error("Unsupported platform capability");
+          if (nativeName.startsWith("platform."))
+            throw new Error("Unsupported platform capability");
           if (["call_tool", "list_tools"].includes(name)) await loadPersonalIntegrations();
           result = await dispatchOwned(name, args, env);
         }
@@ -230,9 +263,15 @@ export async function dispatchPlatformTool(name: string, args: any, env: Platfor
           summary: result.slice(0, 20000),
           next: "Narrow the request or paginate the source tool",
         });
-      await journalToolCall(env, native?.logicalName ?? name, readOnly, status, started, nativeArgs, result).catch(
-        (error) => console.error(`tool audit persistence failed: ${safeDiagnostics(error)}`),
-      );
+      await journalToolCall(
+        env,
+        native?.logicalName ?? name,
+        readOnly,
+        status,
+        started,
+        nativeArgs,
+        result,
+      ).catch((error) => console.error(`tool audit persistence failed: ${safeDiagnostics(error)}`));
       return result;
     },
   );
@@ -274,7 +313,8 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
             summary: t.description,
             read_only: t.readOnly,
             available:
-              !["search_code", "get_symbol", "find_dependencies"].includes(t.name) || codeIntelligenceEnabled(),
+              !["search_code", "get_symbol", "find_dependencies"].includes(t.name) ||
+              codeIntelligenceEnabled(),
           })),
         ],
         null,
@@ -286,14 +326,14 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
         return JSON.stringify(
           native
             ? {
-              name: native.logicalName,
-              description: native.description,
-              read_only: native.readOnly,
-              available:
-                !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
-                codeIntelligenceEnabled(),
-              input_schema: z.toJSONSchema(native.input),
-            }
+                name: native.logicalName,
+                description: native.description,
+                read_only: native.readOnly,
+                available:
+                  !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
+                  codeIntelligenceEnabled(),
+                input_schema: z.toJSONSchema(native.input),
+              }
             : describeTool(String(args?.name ?? "")),
           null,
           2,
@@ -310,7 +350,13 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
 
 async function askUser(args: any, env: PlatformToolEnv): Promise<string> {
   const questions = z
-    .array(z.object({ question: z.string(), context: z.string().optional(), options: z.array(z.string()).optional() }))
+    .array(
+      z.object({
+        question: z.string(),
+        context: z.string().optional(),
+        options: z.array(z.string()).optional(),
+      }),
+    )
     .min(1)
     .parse(args?.questions ?? args);
   const n = await postClarification(env, questions);
@@ -345,7 +391,8 @@ async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
 async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
   const editable = env.selected.length ? env.selected : env.allowed;
-  if (!editable.includes(repo)) return `Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`;
+  if (!editable.includes(repo))
+    return `Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`;
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [env.runId]);
   const w = await prepareWorkspace(run, repo, async () => {
     const live = await attemptIsLive(env.attemptId, env.fencingToken);
@@ -404,8 +451,12 @@ async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
 async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
   const key = String(args?.key ?? "");
   const k = env.knowledge.find((x) => x.key === key);
-  if (!k) return `"${key}" is not available to this step. Use search_knowledge to find applicable items.`;
-  await env.log("system", `loaded knowledge ${key} v${k.version}`, { knowledge: key, version: k.version });
+  if (!k)
+    return `"${key}" is not available to this step. Use search_knowledge to find applicable items.`;
+  await env.log("system", `loaded knowledge ${key} v${k.version}`, {
+    knowledge: key,
+    version: k.version,
+  });
   if (env.metrics && !env.metrics.skills_loaded.includes(key)) env.metrics.skills_loaded.push(key);
   const offset = Number(args.offset ?? 0),
     limit = Number(args.limit ?? 18000);
@@ -432,18 +483,26 @@ async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string>
       score: x.score,
       already_in_prompt: tier.get(x.k.key) === "inline",
     }));
-  await env.log("system", `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`, {
-    query,
-    hits: hits.map((h) => h.key),
-  });
-  return hits.length ? JSON.stringify(hits, null, 2) : "No applicable knowledge matches. Try other words.";
+  await env.log(
+    "system",
+    `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`,
+    {
+      query,
+      hits: hits.map((h) => h.key),
+    },
+  );
+  return hits.length
+    ? JSON.stringify(hits, null, 2)
+    : "No applicable knowledge matches. Try other words.";
 }
 
 async function readStepOutput(args: any, env: PlatformToolEnv): Promise<string> {
   const stepKey = String(args?.step_key ?? "");
   if (env.independent) {
     const u = env.upstream[stepKey];
-    return u ? capResult(u.output) : "ERROR: independent review only exposes sanitized pinned ancestors";
+    return u
+      ? capResult(u.output)
+      : "ERROR: independent review only exposes sanitized pinned ancestors";
   }
   const attempt = args?.attempt != null ? Number(args.attempt) : undefined;
   if (attempt) {
@@ -541,7 +600,9 @@ export async function envFromDatabase(
   ids: { runId: number; stepId: number; attemptId: number },
   onSubmit?: (o: Record<string, unknown>) => void,
 ): Promise<PlatformToolEnv> {
-  const attempt = await one<any>(pool, "SELECT * FROM workflow_step_attempts WHERE id = $1", [ids.attemptId]);
+  const attempt = await one<any>(pool, "SELECT * FROM workflow_step_attempts WHERE id = $1", [
+    ids.attemptId,
+  ]);
   const step = await one<any>(pool, "SELECT * FROM workflow_steps WHERE id = $1", [ids.stepId]);
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [ids.runId]);
   if (
@@ -555,7 +616,9 @@ export async function envFromDatabase(
   )
     throw new Error("bridge attempt not found or assigned to another instance");
   const snap = attempt.context_snapshot_id
-    ? await one<any>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [attempt.context_snapshot_id])
+    ? await one<any>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [
+        attempt.context_snapshot_id,
+      ])
     : null;
   const content = snap?.content ?? {};
   const input = attempt.input ?? {};
@@ -590,7 +653,8 @@ export async function envFromDatabase(
       baseBranch: config.baseBranch,
       protectedRoots: [config.reposRoot, ...localPaths],
     },
-    log: (kind, text, data) => runEvents.add(pool, run.id, kind, text, step.id, attempt.id, data ?? null),
+    log: (kind, text, data) =>
+      runEvents.add(pool, run.id, kind, text, step.id, attempt.id, data ?? null),
     ask: async (questions) => {
       for (const x of questions)
         await q(

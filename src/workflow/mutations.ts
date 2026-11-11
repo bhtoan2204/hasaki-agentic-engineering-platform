@@ -26,11 +26,16 @@ export async function lockRun(c: Db, runId: number): Promise<RunRow> {
   return run;
 }
 
-export const stepsOf = (c: Db, runId: number) => q<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);
+export const stepsOf = (c: Db, runId: number) =>
+  q<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);
 
 const JSON_COLS = new Set(["output", "pending_input", "approval", "config"]);
 
-async function updateStep(c: Db, step: StepRow, patch: Partial<Record<keyof StepRow | "ready_at" | "started_at" | "finished_at", unknown>>) {
+async function updateStep(
+  c: Db,
+  step: StepRow,
+  patch: Partial<Record<keyof StepRow | "ready_at" | "started_at" | "finished_at", unknown>>,
+) {
   const keys = Object.keys(patch);
   if (!keys.length) return;
   await q(
@@ -41,14 +46,33 @@ async function updateStep(c: Db, step: StepRow, patch: Partial<Record<keyof Step
   Object.assign(step, patch);
 }
 
-export async function setStepStatus(c: Db, step: StepRow, to: StepStatus, patch: Parameters<typeof updateStep>[2] = {}, note = "") {
+export async function setStepStatus(
+  c: Db,
+  step: StepRow,
+  to: StepStatus,
+  patch: Parameters<typeof updateStep>[2] = {},
+  note = "",
+) {
   assertStepTransition(step.status, to);
   const from = step.status;
   await updateStep(c, step, { ...patch, status: to });
-  if (from !== to) await runEvents.add(c, step.run_id, "status", `${step.key}: ${from} → ${to}${note ? ` (${note})` : ""}`, step.id);
+  if (from !== to)
+    await runEvents.add(
+      c,
+      step.run_id,
+      "status",
+      `${step.key}: ${from} → ${to}${note ? ` (${note})` : ""}`,
+      step.id,
+    );
 }
 
-export async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommit?: AfterCommit, error: string | null = null) {
+export async function setRunStatus(
+  c: Db,
+  run: RunRow,
+  to: RunStatus,
+  afterCommit?: AfterCommit,
+  error: string | null = null,
+) {
   if (run.status === to) return;
   assertRunTransition(run.status, to);
   const from = run.status;
@@ -64,16 +88,25 @@ export async function setRunStatus(c: Db, run: RunRow, to: RunStatus, afterCommi
   await runEvents.add(c, run.id, "status", `run: ${from} → ${to}`);
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "WAITING")) {
     const icon = { COMPLETED: "✅", FAILED: "❌", WAITING: "⏸️" }[to];
-    afterCommit(() => background(`notify run ${run.id}`, () => notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`)));
-    if (to === "COMPLETED" || to === "FAILED") afterCommit(() => background(`private Telegram run ${run.id}`, async () => {
-      if (!await isEvaluationTelegramRun(run.id)) await (await import("../telegram/workflow.ts")).notifyTelegramRun(run.id, to);
-    }));
+    afterCommit(() =>
+      background(`notify run ${run.id}`, () =>
+        notify(`${icon} Run #${run.id} ${run.title}: ${to}`, `/runs/${run.id}`),
+      ),
+    );
+    if (to === "COMPLETED" || to === "FAILED")
+      afterCommit(() =>
+        background(`private Telegram run ${run.id}`, async () => {
+          if (!(await isEvaluationTelegramRun(run.id)))
+            await (await import("../telegram/workflow.ts")).notifyTelegramRun(run.id, to);
+        }),
+      );
   }
   // Summary, outcome, memory and learning are rows in this transaction. The worker deletes a row only
   // after the effect succeeds, so a crash after COMMIT retries instead of dropping them. Cancel used to
   // pass no hook, which skipped summary and outcome entirely.
   await enqueueRunEffects(c, run.id, to);
-  if (afterCommit && effectKindsFor(to).length) afterCommit(() => background(`run ${run.id} effects`, () => dispatchRunEffects()));
+  if (afterCommit && effectKindsFor(to).length)
+    afterCommit(() => background(`run ${run.id} effects`, () => dispatchRunEffects()));
 }
 
 export async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
@@ -81,7 +114,13 @@ export async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
     c,
     `INSERT INTO workflow_jobs (run_id, step_id, generation, idempotency_key, available_at)
      VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5)) ON CONFLICT DO NOTHING`,
-    [step.run_id, step.id, step.generation, `step:${step.id}:gen:${step.generation}:n:${step.attempt_count}`, delaySeconds],
+    [
+      step.run_id,
+      step.id,
+      step.generation,
+      `step:${step.id}:gen:${step.generation}:n:${step.attempt_count}`,
+      delaySeconds,
+    ],
   );
 }
 
@@ -95,4 +134,3 @@ export async function cancelStepJobs(c: Db, stepId: number, reason: string): Pro
   );
   return rows.map((r) => r.id);
 }
-

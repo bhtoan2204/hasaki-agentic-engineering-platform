@@ -25,10 +25,7 @@ const copy: Record<string, [string, string]> = {
     "AI usage, cost, agent performance and workflows",
   ],
   health: ["Sức khỏe production", "Production health"],
-  productionAnalytics: [
-    "Phân tích lỗi production",
-    "Production error analytics",
-  ],
+  productionAnalytics: ["Phân tích lỗi production", "Production error analytics"],
   operationalErrors: ["Quản lý sự cố", "Incident operations"],
   agentEvaluation: ["Đánh giá agent", "Agent evaluation"],
   healthAnalytics: ["Phân tích sức khỏe", "Health analytics"],
@@ -43,14 +40,8 @@ const copy: Record<string, [string, string]> = {
   newIncidents: ["Sự cố mới", "New incidents"],
   activeIncidents: ["Sự cố chưa xử lý", "Active incidents"],
   resolvedIncidents: ["Sự cố đã xác nhận xử lý", "Resolved incidents"],
-  criticalHighIncidents: [
-    "Mức nghiêm trọng / cao",
-    "Critical / high incidents",
-  ],
-  criticalHighErrors: [
-    "Sự kiện lỗi nghiêm trọng / cao",
-    "Critical / high error events",
-  ],
+  criticalHighIncidents: ["Mức nghiêm trọng / cao", "Critical / high incidents"],
+  criticalHighErrors: ["Sự kiện lỗi nghiêm trọng / cao", "Critical / high error events"],
   affectedServices: ["Dịch vụ bị ảnh hưởng", "Affected services"],
   currentPeriod: ["Kỳ hiện tại", "Current period"],
   previousPeriod: ["Kỳ trước", "Previous period"],
@@ -60,10 +51,7 @@ const copy: Record<string, [string, string]> = {
   serviceErrorTrends: ["Xu hướng lỗi theo dịch vụ", "Service error trends"],
   productionTrend: ["Xu hướng lỗi production", "Production error trend"],
   errorShare: ["Tỷ trọng sự kiện lỗi", "Share of observed error events"],
-  notFailureRate: [
-    "Không phải tỷ lệ request thất bại",
-    "Not a request failure rate",
-  ],
+  notFailureRate: ["Không phải tỷ lệ request thất bại", "Not a request failure rate"],
   errorEvents: ["Lượt phát sinh lỗi", "Error Events"],
   fingerprintsMetric: ["Fingerprint duy nhất", "Unique fingerprints"],
   otherServices: ["Dịch vụ khác", "Other services"],
@@ -72,20 +60,11 @@ const copy: Record<string, [string, string]> = {
   severityMetric: ["Phân loại mức độ", "Severity distribution"],
   lifecycleChart: ["Vòng đời sự cố", "Incident lifecycle"],
   openIncidents: ["Đang mở", "Open"],
-  acknowledgedIncidents: [
-    "Đã ghi nhận / đang xử lý",
-    "Acknowledged / in progress",
-  ],
+  acknowledgedIncidents: ["Đã ghi nhận / đang xử lý", "Acknowledged / in progress"],
   reopenedIncidents: ["Đã mở lại", "Reopened"],
   recurringIncidents: ["Sự cố tái diễn", "Recurring incidents"],
-  remediationOutcomes: [
-    "Kết quả xử lý có hỗ trợ AI",
-    "AI-assisted remediation outcomes",
-  ],
-  linkedIncidents: [
-    "Incident liên kết work item",
-    "Incidents linked to work items",
-  ],
+  remediationOutcomes: ["Kết quả xử lý có hỗ trợ AI", "AI-assisted remediation outcomes"],
+  linkedIncidents: ["Incident liên kết work item", "Incidents linked to work items"],
   workItemsWithRuns: ["Work item có agent run", "Work items with agent runs"],
   completedRuns: ["Run hoàn thành", "Completed runs"],
   verifiedFixes: ["Run có kiểm chứng đạt", "Runs with passing verification"],
@@ -125,25 +104,16 @@ const copy: Record<string, [string, string]> = {
     "Không đủ dữ liệu lịch sử để hiển thị xu hướng.",
     "Insufficient historical data to show a trend.",
   ],
-  noServiceData: [
-    "Không có dữ liệu dịch vụ trong phạm vi này.",
-    "No service data in this scope.",
-  ],
+  noServiceData: ["Không có dữ liệu dịch vụ trong phạm vi này.", "No service data in this scope."],
   noIncidents: [
     "Không có sự cố quan sát được trong phạm vi này.",
     "No observed incidents in this scope.",
   ],
   incidentsForService: ["Sự cố của dịch vụ", "Service incidents"],
-  incidentEvidence: [
-    "Chi tiết và lịch sử quan sát",
-    "Incident details and observation history",
-  ],
+  incidentEvidence: ["Chi tiết và lịch sử quan sát", "Incident details and observation history"],
   incidentLifecycleHistory: ["Lịch sử vòng đời", "Incident lifecycle history"],
   relatedWork: ["Công việc liên quan", "Related work"],
-  noRelatedWork: [
-    "Chưa có work item, run hoặc PR liên kết.",
-    "No linked work item, run, or PR.",
-  ],
+  noRelatedWork: ["Chưa có work item, run hoặc PR liên kết.", "No linked work item, run, or PR."],
   stackTrace: ["Stack trace", "Stack trace"],
   yes: ["Có", "Yes"],
   no: ["Không", "No"],
@@ -156,10 +126,7 @@ const copy: Record<string, [string, string]> = {
   lastObservedError: ["Lỗi ghi nhận gần nhất", "Last observed error"],
   incidentStatus: ["Trạng thái incident", "Incident status"],
   metricEvents: ["Sự kiện lỗi", "Error events"],
-  metricFingerprints: [
-    "Fingerprint / incident",
-    "Unique fingerprints / incidents",
-  ],
+  metricFingerprints: ["Fingerprint / incident", "Unique fingerprints / incidents"],
   retrying: ["Đang làm mới dữ liệu…", "Refreshing data…"],
   backToHealth: ["Quay lại phân tích", "Back to analytics"],
   usage: ["Sử dụng AI & chi phí", "AI usage & cost"],
@@ -204,10 +171,7 @@ const copy: Record<string, [string, string]> = {
   recurring: ["Tái diễn", "Recurring"],
   acknowledge: ["Thời gian ghi nhận TB", "Mean time to acknowledge"],
   resolve: ["Thời gian xử lý TB", "Mean time to resolve"],
-  missingLifecycle: [
-    "{n} nhóm thiếu mốc thời gian",
-    "{n} groups missing timestamps",
-  ],
+  missingLifecycle: ["{n} nhóm thiếu mốc thời gian", "{n} groups missing timestamps"],
   healthHint: [
     "Lỗi production dùng chung; liên kết task và run chỉ trong quyền truy cập. Agent hoàn thành không chứng minh production đã được sửa.",
     "Production errors are shared; task and run links respect ownership. Agent completion does not establish a production fix.",
@@ -219,10 +183,7 @@ const copy: Record<string, [string, string]> = {
   errorTrend: ["Xu hướng lỗi đã ghi nhận", "Observed error trend"],
   severity: ["Mức độ nghiêm trọng", "Severity breakdown"],
   frequency: ["Tần suất theo dịch vụ / nguồn", "Frequency by service / source"],
-  incidents: [
-    "Sự cố tái diễn & chưa xử lý",
-    "Recurring & unresolved incidents",
-  ],
+  incidents: ["Sự cố tái diễn & chưa xử lý", "Recurring & unresolved incidents"],
   fingerprint: ["Fingerprint / nội dung", "Fingerprint / signature"],
   events: ["Số lỗi", "Events"],
   baseline: ["Mốc so sánh", "Baseline"],
@@ -269,10 +230,7 @@ const copy: Record<string, [string, string]> = {
   invocations: ["Lần gọi provider", "Provider invocations"],
   costTrend: ["Xu hướng chi phí (ước tính)", "Reported cost trend (estimate)"],
   usageBreakdown: ["Phân tích mức sử dụng", "Usage breakdown"],
-  usageDetails: [
-    "Chi tiết lần gọi & token bất thường",
-    "Invocation details & token anomalies",
-  ],
+  usageDetails: ["Chi tiết lần gọi & token bất thường", "Invocation details & token anomalies"],
   anomaly: ["Token bất thường", "Token anomaly"],
   anomalyHint: [
     "Đánh dấu khi input + output > 10.000 và > 3× trung vị cùng provider/model, với ít nhất 5 lần gọi có dữ liệu. Đây là tín hiệu kiểm tra, không phải kết luận lỗi.",
@@ -314,26 +272,14 @@ const copy: Record<string, [string, string]> = {
   ],
   throughput: ["Thông lượng theo thời gian", "Throughput over time"],
   workflowRuns: ["Runs theo workflow", "Runs by workflow"],
-  slowSteps: [
-    "Bước chậm, thử lại & tắc nghẽn",
-    "Slow steps, retries & bottlenecks",
-  ],
+  slowSteps: ["Bước chậm, thử lại & tắc nghẽn", "Slow steps, retries & bottlenecks"],
   blocked: ["Lần chờ xử lý", "Blocked attempts"],
   context: ["Chuẩn bị ngữ cảnh TB", "Mean context preparation"],
   approval: ["Chờ phê duyệt TB", "Mean approval wait"],
-  repositoryAccuracy: [
-    "Độ chính xác chọn repository",
-    "Repository selection accuracy",
-  ],
+  repositoryAccuracy: ["Độ chính xác chọn repository", "Repository selection accuracy"],
   labeled: ["{n} bằng chứng có nhãn", "{n} labeled observations"],
-  switching: [
-    "Lần chuyển provider quan sát được",
-    "Observed provider switches",
-  ],
-  verificationTrend: [
-    "Xu hướng kiểm chứng thất bại",
-    "Verification failure trend",
-  ],
+  switching: ["Lần chuyển provider quan sát được", "Observed provider switches"],
+  verificationTrend: ["Xu hướng kiểm chứng thất bại", "Verification failure trend"],
   runDetails: ["Chi tiết workflow run", "Workflow run details"],
   completed: ["Hoàn thành", "Completed"],
   verification: ["Kiểm chứng", "Verification"],
@@ -349,10 +295,6 @@ const copy: Record<string, [string, string]> = {
   ],
 };
 export const analyticsMessages = {
-  vi: Object.fromEntries(
-    Object.entries(copy).map(([k, v]) => [`an.${k}`, v[0]]),
-  ),
-  en: Object.fromEntries(
-    Object.entries(copy).map(([k, v]) => [`an.${k}`, v[1]]),
-  ),
+  vi: Object.fromEntries(Object.entries(copy).map(([k, v]) => [`an.${k}`, v[0]])),
+  en: Object.fromEntries(Object.entries(copy).map(([k, v]) => [`an.${k}`, v[1]])),
 };

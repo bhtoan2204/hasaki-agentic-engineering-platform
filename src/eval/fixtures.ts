@@ -1,11 +1,4 @@
-import {
-  mkdir,
-  writeFile,
-  readFile,
-  lstat,
-  realpath,
-  access,
-} from "node:fs/promises";
+import { mkdir, writeFile, readFile, lstat, realpath, access } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { execFile } from "node:child_process";
 import { config } from "../config.ts";
@@ -17,26 +10,13 @@ import {
   FIXTURE_VERSION,
   type BenchmarkSuite,
 } from "./dataset.ts";
-export const fixtureNamespace = sha256(JSON.stringify(fixtureTrees)).slice(
-  0,
-  12,
-);
-export const fixtureName = (logical: string) =>
-  `bench-${fixtureNamespace}-${logical}`;
-export const fixtureRoot = (name: string) =>
-  join(config.dataDir, "evaluation-fixtures", name);
+export const fixtureNamespace = sha256(JSON.stringify(fixtureTrees)).slice(0, 12);
+export const fixtureName = (logical: string) => `bench-${fixtureNamespace}-${logical}`;
+export const fixtureRoot = (name: string) => join(config.dataDir, "evaluation-fixtures", name);
 export async function fixtureGit(root: string, args: string[], input?: string) {
   const cp = execFile(
     "git",
-    [
-      "-c",
-      "core.hooksPath=/dev/null",
-      "-c",
-      "core.fsmonitor=false",
-      "-C",
-      root,
-      ...args,
-    ],
+    ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", root, ...args],
     {
       encoding: "utf8",
       timeout: 10000,
@@ -61,9 +41,7 @@ export async function fixtureGit(root: string, args: string[], input?: string) {
     cp.stdout!.on("data", (b) => (out += b));
     cp.on("error", reject);
     cp.on("close", (c) =>
-      c === 0
-        ? resolve(out.trim())
-        : reject(new Error("Fixture Git operation failed")),
+      c === 0 ? resolve(out.trim()) : reject(new Error("Fixture Git operation failed")),
     );
   });
 }
@@ -75,44 +53,28 @@ export async function materializeSuite(): Promise<BenchmarkSuite> {
     await mkdir(root, { recursive: true });
     if (
       (await lstat(root)).isSymbolicLink() ||
-      relative(await realpath(config.dataDir), await realpath(root)).startsWith(
-        "..",
-      )
+      relative(await realpath(config.dataDir), await realpath(root)).startsWith("..")
     )
       throw new Error("Unsafe benchmark fixture root");
     let existing = false;
     try {
       await access(join(root, ".git"));
       existing = true;
-    } catch { }
+    } catch {}
     if (!existing) {
-      await fixtureGit(root, [
-        "init",
-        "--quiet",
-        "--initial-branch",
-        config.baseBranch,
-      ]);
+      await fixtureGit(root, ["init", "--quiet", "--initial-branch", config.baseBranch]);
       for (const [path, source] of Object.entries(files)) {
         await writeFile(join(root, path), source);
       }
       await fixtureGit(root, ["add", "--all"]);
       const tree = await fixtureGit(root, ["write-tree"]);
-      const commit = await fixtureGit(
-        root,
-        ["commit-tree", tree],
-        `Hasaki ${FIXTURE_VERSION}\n`,
-      );
-      await fixtureGit(root, [
-        "update-ref",
-        `refs/heads/${config.baseBranch}`,
-        commit,
-      ]);
+      const commit = await fixtureGit(root, ["commit-tree", tree], `Hasaki ${FIXTURE_VERSION}\n`);
+      await fixtureGit(root, ["update-ref", `refs/heads/${config.baseBranch}`, commit]);
     }
     const commit = await fixtureGit(root, ["rev-parse", "HEAD"]);
     for (const [path, source] of Object.entries(files)) {
       const actual = await fixtureGit(root, ["show", `${commit}:${path}`]);
-      if (actual !== source.trim())
-        throw new Error("Pinned fixture source has been modified");
+      if (actual !== source.trim()) throw new Error("Pinned fixture source has been modified");
       if ((await readFile(join(root, path), "utf8")) !== source)
         throw new Error("Dirty managed fixture repository");
     }

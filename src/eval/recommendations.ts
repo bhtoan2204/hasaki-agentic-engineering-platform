@@ -33,13 +33,7 @@ export interface RecommendationSample {
 /** Conservative clustered-sample thresholds; repeated tasks do not inflate independent task support. */
 export function chooseRecommendation(rows: RecommendationSample[]) {
   const eligible = rows
-    .filter(
-      (r) =>
-        r.samples >= 30 &&
-        r.tasks >= 10 &&
-        r.evaluations >= 2 &&
-        r.repetitions >= 2,
-    )
+    .filter((r) => r.samples >= 30 && r.tasks >= 10 && r.evaluations >= 2 && r.repetitions >= 2)
     .map((r) => ({ ...r, interval: wilson(r.stable_task_successes, r.tasks) }));
   // A distinct task succeeds only if every observed repetition passed the objective hard gates.
   const cohorts = new Map<string, typeof eligible>();
@@ -52,10 +46,7 @@ export function chooseRecommendation(rows: RecommendationSample[]) {
     if (group.length < 2) continue;
     group.sort((a, b) => b.successes / b.samples - a.successes / a.samples);
     const [best, ...others] = group;
-    if (
-      best.interval &&
-      others.every((r) => r.interval && best.interval!.low > r.interval.high)
-    )
+    if (best.interval && others.every((r) => r.interval && best.interval!.low > r.interval.high))
       conclusions.push(best);
   }
   if (conclusions.length !== 1)
@@ -129,9 +120,7 @@ export const RecommendationRequest = z
   .strict();
 export async function createRecommendation(actor: Actor, raw: unknown) {
   const input = RecommendationRequest.parse(raw);
-  const url = new URL(
-    "http://local/?category=" + encodeURIComponent(input.category),
-  );
+  const url = new URL("http://local/?category=" + encodeURIComponent(input.category));
   if (input.cohort) url.searchParams.set("cohort", input.cohort);
   for (const key of ["from", "to", "timezone"] as const)
     if (input[key]) url.searchParams.set(key, input[key]);
@@ -185,11 +174,10 @@ export async function createRecommendation(actor: Actor, raw: unknown) {
   );
 }
 export async function recommendationDetail(id: number, owner: number) {
-  const row = await one(
-    pool,
-    "SELECT * FROM agent_recommendations WHERE id=$1 AND owner_id=$2",
-    [id, owner],
-  );
+  const row = await one(pool, "SELECT * FROM agent_recommendations WHERE id=$1 AND owner_id=$2", [
+    id,
+    owner,
+  ]);
   if (!row) throw new HttpError(404, "Recommendation not found");
   return row;
 }

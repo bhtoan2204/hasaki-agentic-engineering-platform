@@ -21,7 +21,9 @@ export function QualityLoop() {
         <h4>
           <Repeat size={16} /> {t("ql.title")}
         </h4>
-        <span className="muted small">{t("ql.sub", { runs: data.runs, days: data.window_days })}</span>
+        <span className="muted small">
+          {t("ql.sub", { runs: data.runs, days: data.window_days })}
+        </span>
         <button
           className="ghost"
           onClick={() =>
@@ -34,12 +36,20 @@ export function QualityLoop() {
         >
           {t("ql.propose")}
         </button>
-        <a className="small" href="#/knowledge/~proposals">{t("ql.review")}</a>
+        <a className="small" href="#/knowledge/~proposals">
+          {t("ql.review")}
+        </a>
       </div>
       <div className="cost-section">
         <div className="cost-h">{t("ql.levels")}</div>
-        <p className="small">{levels.length ? levels.map(([k, n]) => `${t(`ql.level.${k}`)}: ${n}`).join(" · ") : "—"}</p>
-        {data.cost_per_verified_task != null && <p className="small muted">{t("ql.costVerified", { usd: data.cost_per_verified_task })}</p>}
+        <p className="small">
+          {levels.length ? levels.map(([k, n]) => `${t(`ql.level.${k}`)}: ${n}`).join(" · ") : "—"}
+        </p>
+        {data.cost_per_verified_task != null && (
+          <p className="small muted">
+            {t("ql.costVerified", { usd: data.cost_per_verified_task })}
+          </p>
+        )}
       </div>
       <div className="cost-section">
         <div className="cost-h">{t("ql.patterns")}</div>
@@ -57,7 +67,9 @@ export function QualityLoop() {
               {data.patterns.map((p: any) => (
                 <tr key={p.category} title={p.examples.join("\n")}>
                   <td>{t(`ql.cat.${p.category}`)}</td>
-                  <td>{p.runs} ({p.rate}%)</td>
+                  <td>
+                    {p.runs} ({p.rate}%)
+                  </td>
                   <td>{p.distinct_tasks}</td>
                   <td className="muted">{p.suggested?.title ?? "—"}</td>
                 </tr>
@@ -89,12 +101,26 @@ export function QualityLoop() {
                 <tr key={`${g.provider}|${g.step_type}`} className={g.sample_ok ? "" : "muted"}>
                   <td>{g.provider}</td>
                   <td>{g.step_type}</td>
-                  <td>{g.attempts}{g.sample_ok ? "" : " *"}</td>
+                  <td>
+                    {g.attempts}
+                    {g.sample_ok ? "" : " *"}
+                  </td>
                   <td>{g.success_rate ?? "—"}%</td>
-                  <td>{g.p50_ms != null ? `${Math.round(g.p50_ms / 1000)}s / ${Math.round(g.p95_ms / 1000)}s` : "—"}</td>
-                  <td>{g.cost_per_successful_completion != null ? `$${g.cost_per_successful_completion}` : "—"}</td>
+                  <td>
+                    {g.p50_ms != null
+                      ? `${Math.round(g.p50_ms / 1000)}s / ${Math.round(g.p95_ms / 1000)}s`
+                      : "—"}
+                  </td>
+                  <td>
+                    {g.cost_per_successful_completion != null
+                      ? `$${g.cost_per_successful_completion}`
+                      : "—"}
+                  </td>
                   <td>{g.unknown_cost_rate ?? "—"}%</td>
-                  <td>{g.verification_pass_rate ?? g.review_pass_rate ?? "—"}{g.verification_pass_rate != null || g.review_pass_rate != null ? "%" : ""}</td>
+                  <td>
+                    {g.verification_pass_rate ?? g.review_pass_rate ?? "—"}
+                    {g.verification_pass_rate != null || g.review_pass_rate != null ? "%" : ""}
+                  </td>
                 </tr>
               ))}
             </tbody>

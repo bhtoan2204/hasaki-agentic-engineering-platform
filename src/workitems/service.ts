@@ -53,12 +53,7 @@ export const workItems = {
         WHERE ($1::text IS NULL OR w.source = $1) AND ($2::text IS NULL OR w.status = $2)
           AND w.owner_id IS NOT NULL AND ($3::bool OR w.owner_id = $4)
         ORDER BY w.updated_at DESC LIMIT 500`,
-      [
-        filter.source ?? null,
-        filter.status ?? null,
-        !!filter.all,
-        filter.ownerId ?? null,
-      ],
+      [filter.source ?? null, filter.status ?? null, !!filter.all, filter.ownerId ?? null],
     );
   },
 
@@ -66,11 +61,10 @@ export const workItems = {
     return one<WorkItemRow>(db, "SELECT * FROM work_items WHERE id = $1", [id]);
   },
   byCode(code: string, ownerId: number, db: Db = pool) {
-    return one<WorkItemRow>(
-      db,
-      "SELECT * FROM work_items WHERE code = $1 AND owner_id = $2",
-      [code, ownerId],
-    );
+    return one<WorkItemRow>(db, "SELECT * FROM work_items WHERE code = $1 AND owner_id = $2", [
+      code,
+      ownerId,
+    ]);
   },
 
   async detail(id: number) {
@@ -78,25 +72,19 @@ export const workItems = {
     if (!wi) return undefined;
     const [runs, prs] = await Promise.all([
       listRuns({ workItemId: id }),
-      q(
-        pool,
-        "SELECT * FROM pull_requests WHERE work_item_id = $1 ORDER BY id",
-        [id],
-      ),
+      q(pool, "SELECT * FROM pull_requests WHERE work_item_id = $1 ORDER BY id", [id]),
     ]);
     const legacy = wi.legacy_task_code
       ? {
-        questions: await q(
-          pool,
-          "SELECT * FROM questions WHERE task_code = $1 ORDER BY id",
-          [wi.legacy_task_code],
-        ),
-        events: await q(
-          pool,
-          "SELECT * FROM events WHERE task_code = $1 ORDER BY id DESC LIMIT 200",
-          [wi.legacy_task_code],
-        ),
-      }
+          questions: await q(pool, "SELECT * FROM questions WHERE task_code = $1 ORDER BY id", [
+            wi.legacy_task_code,
+          ]),
+          events: await q(
+            pool,
+            "SELECT * FROM events WHERE task_code = $1 ORDER BY id DESC LIMIT 200",
+            [wi.legacy_task_code],
+          ),
+        }
       : null;
     return { ...wi, runs, pull_requests: prs, legacy };
   },
@@ -111,8 +99,7 @@ export const workItems = {
   }) {
     if (!x.title?.trim()) throw new Error("title is required");
     const ownerId =
-      x.ownerId ??
-      (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
+      x.ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
     if (!ownerId) throw new Error("owner is required");
     return withTx(async (c) => {
       const { id } = (await one<{ id: number }>(
@@ -125,14 +112,7 @@ export const workItems = {
       await q(
         c,
         "INSERT INTO work_items (id, code, source, title, description, project, owner_id) VALUES ($1, $2, 'manual', $3, $4, $5, $6)",
-        [
-          id,
-          code,
-          x.title.trim(),
-          x.description ?? "",
-          x.project ?? "",
-          ownerId,
-        ],
+        [id, code, x.title.trim(), x.description ?? "", x.project ?? "", ownerId],
       );
       return (await workItems.get(id, c))!;
     });
@@ -142,12 +122,9 @@ export const workItems = {
    * Import or refresh an external work item. NEVER starts a run by itself; the caller decides
    * (explicit user action, or the item's automation policy via `applyAutomationPolicy`).
    */
-  async upsertImported(
-    x: ImportInput,
-  ): Promise<{ item: WorkItemRow; created: boolean }> {
+  async upsertImported(x: ImportInput): Promise<{ item: WorkItemRow; created: boolean }> {
     const ownerId =
-      x.ownerId ??
-      (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
+      x.ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
     if (!ownerId) throw new Error("owner is required");
     return withTx(async (c) => {
       const existing = await one<WorkItemRow>(
@@ -203,30 +180,15 @@ export const workItems = {
     },
   ) {
     const keys = (
-      [
-        "title",
-        "description",
-        "project",
-        "status",
-        "automation_policy",
-      ] as const
+      ["title", "description", "project", "status", "automation_policy"] as const
     ).filter((k) => patch[k] !== undefined);
     if (patch.description !== undefined)
-      await q(
-        pool,
-        "UPDATE work_items SET description_source = 'manual' WHERE id = $1",
-        [id],
-      );
+      await q(pool, "UPDATE work_items SET description_source = 'manual' WHERE id = $1", [id]);
     if (keys.length)
       await q(
         pool,
         `UPDATE work_items SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
-        [
-          id,
-          ...keys.map((k) =>
-            k === "automation_policy" ? json(patch[k]) : patch[k],
-          ),
-        ],
+        [id, ...keys.map((k) => (k === "automation_policy" ? json(patch[k]) : patch[k]))],
       );
     return workItems.get(id);
   },

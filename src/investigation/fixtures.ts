@@ -29,48 +29,144 @@ const row = (time: string, container: string, raw: unknown) => ({
 
 /** Search 1: index=k8s_prod "2611095VL160RW01" (out of time order on purpose). */
 export const SEARCH_BY_ORDER = [
-  row("2026-11-10T08:48:01.402+07:00", "hasakinow-connector", { level: "info", message: "hasakinow response", order_code: ORDER, request_id: "req-7f3a91", shipment_id: SHIPMENT, http_status: 200, body: { status: "accepted", partner_ref: "NOWREF-1188" } }),
-  row("2026-11-10T08:47:59.812+07:00", "oms-background", { level: "info", message: "outbound shipment created", order_code: ORDER, shipment_id: SHIPMENT, message_id: "msg-55aa01", carrier: "HASAKI_NOW" }),
+  row("2026-11-10T08:48:01.402+07:00", "hasakinow-connector", {
+    level: "info",
+    message: "hasakinow response",
+    order_code: ORDER,
+    request_id: "req-7f3a91",
+    shipment_id: SHIPMENT,
+    http_status: 200,
+    body: { status: "accepted", partner_ref: "NOWREF-1188" },
+  }),
+  row("2026-11-10T08:47:59.812+07:00", "oms-background", {
+    level: "info",
+    message: "outbound shipment created",
+    order_code: ORDER,
+    shipment_id: SHIPMENT,
+    message_id: "msg-55aa01",
+    carrier: "HASAKI_NOW",
+  }),
   row("2026-11-10T08:48:00.135+07:00", "hasakinow-connector", {
     level: "info",
     message: "hasakinow request POST /v1/orders",
     order_code: ORDER,
     request_id: "req-7f3a91",
     shipment_id: SHIPMENT,
-    body: { order_code: ORDER, receiver_name: "Nguyen Van A", receiver_phone: "0912345678", address: "12 Ly Thuong Kiet, Q.10", cod_amount: 350000, items: [{ sku: "SKU-1", qty: 2 }] },
+    body: {
+      order_code: ORDER,
+      receiver_name: "Nguyen Van A",
+      receiver_phone: "0912345678",
+      address: "12 Ly Thuong Kiet, Q.10",
+      cod_amount: 350000,
+      items: [{ sku: "SKU-1", qty: 2 }],
+    },
     headers: { Authorization: "Bearer sk_live_abcdefghijklmnop123456" },
   }),
-  row("2026-11-10T08:47:59.840+07:00", "oms-background", { level: "info", message: "kafka publish topic=shipment.outbound", order_code: ORDER, message_id: "msg-55aa01" }),
-  row("2026-11-10T08:49:18.044+07:00", "oms-background", { level: "info", message: `shipping label url generated url=https://cdn.example.invalid/labels/${SHIPMENT}.pdf?X-Amz-Signature=abcdef1234567890&X-Amz-Expires=600`, order_code: ORDER, shipment_id: SHIPMENT }),
+  row("2026-11-10T08:47:59.840+07:00", "oms-background", {
+    level: "info",
+    message: "kafka publish topic=shipment.outbound",
+    order_code: ORDER,
+    message_id: "msg-55aa01",
+  }),
+  row("2026-11-10T08:49:18.044+07:00", "oms-background", {
+    level: "info",
+    message: `shipping label url generated url=https://cdn.example.invalid/labels/${SHIPMENT}.pdf?X-Amz-Signature=abcdef1234567890&X-Amz-Expires=600`,
+    order_code: ORDER,
+    shipment_id: SHIPMENT,
+  }),
 ];
 
 /** Search 2 (refinement): index=k8s_prod "98765001" — overlaps search 1 on purpose. */
 export const SEARCH_BY_SHIPMENT = [
-  row("2026-11-10T08:49:16.778+07:00", "oms-api", { level: "info", message: "hasakinow callback received", shipment_id: SHIPMENT, tracking_no: TRACKING, partner_order_code: TRACKING, status: "assigned", driver_phone: "0987654321" }),
-  row("2026-11-10T08:48:00.120+07:00", "hasakinow-connector", { level: "info", message: "consumed shipment.outbound", shipment_id: SHIPMENT, message_id: "msg-55aa01", partition: 3, offset: 99120 }),
-  row("2026-11-10T08:48:05.010+07:00", "hasakinow-connector", { level: "warn", message: "consumed shipment.outbound (redelivery after rebalance), skipped duplicate", shipment_id: SHIPMENT, message_id: "msg-55aa01", partition: 3, offset: 99120 }),
-  row("2026-11-10T08:49:16.950+07:00", "oms-api", { level: "info", message: "tracking number persisted", shipment_id: SHIPMENT, tracking_no: TRACKING }),
-  row("2026-11-10T08:49:17.300+07:00", "oms-background", { level: "info", message: "generating shipping label", shipment_id: SHIPMENT, tracking_no: TRACKING }),
-  row("2026-11-10T08:49:18.044+07:00", "oms-background", { level: "info", message: `shipping label url generated url=https://cdn.example.invalid/labels/${SHIPMENT}.pdf?X-Amz-Signature=abcdef1234567890&X-Amz-Expires=600`, order_code: ORDER, shipment_id: SHIPMENT }),
-  row("2026-11-10T08:49:20.500+07:00", "oms-api", { level: "info", message: "label persisted", shipment_id: SHIPMENT, label_url: `https://cdn.example.invalid/labels/${SHIPMENT}.pdf` }),
+  row("2026-11-10T08:49:16.778+07:00", "oms-api", {
+    level: "info",
+    message: "hasakinow callback received",
+    shipment_id: SHIPMENT,
+    tracking_no: TRACKING,
+    partner_order_code: TRACKING,
+    status: "assigned",
+    driver_phone: "0987654321",
+  }),
+  row("2026-11-10T08:48:00.120+07:00", "hasakinow-connector", {
+    level: "info",
+    message: "consumed shipment.outbound",
+    shipment_id: SHIPMENT,
+    message_id: "msg-55aa01",
+    partition: 3,
+    offset: 99120,
+  }),
+  row("2026-11-10T08:48:05.010+07:00", "hasakinow-connector", {
+    level: "warn",
+    message: "consumed shipment.outbound (redelivery after rebalance), skipped duplicate",
+    shipment_id: SHIPMENT,
+    message_id: "msg-55aa01",
+    partition: 3,
+    offset: 99120,
+  }),
+  row("2026-11-10T08:49:16.950+07:00", "oms-api", {
+    level: "info",
+    message: "tracking number persisted",
+    shipment_id: SHIPMENT,
+    tracking_no: TRACKING,
+  }),
+  row("2026-11-10T08:49:17.300+07:00", "oms-background", {
+    level: "info",
+    message: "generating shipping label",
+    shipment_id: SHIPMENT,
+    tracking_no: TRACKING,
+  }),
+  row("2026-11-10T08:49:18.044+07:00", "oms-background", {
+    level: "info",
+    message: `shipping label url generated url=https://cdn.example.invalid/labels/${SHIPMENT}.pdf?X-Amz-Signature=abcdef1234567890&X-Amz-Expires=600`,
+    order_code: ORDER,
+    shipment_id: SHIPMENT,
+  }),
+  row("2026-11-10T08:49:20.500+07:00", "oms-api", {
+    level: "info",
+    message: "label persisted",
+    shipment_id: SHIPMENT,
+    label_url: `https://cdn.example.invalid/labels/${SHIPMENT}.pdf`,
+  }),
 ];
 
 /** Search 3: index=k8s_prod kubernetes.container_name=hasakinow-connector "hasakinow response" — includes another order. */
 export const SEARCH_CONNECTOR = [
-  row("2026-11-10T08:48:00.610+07:00", "hasakinow-connector", { level: "info", message: "hasakinow response", order_code: "2611095ZZ000AA99", request_id: "req-0000ff", shipment_id: "98760042", http_status: 200, body: { status: "accepted" } }),
-  row("2026-11-10T08:48:01.402+07:00", "hasakinow-connector", { level: "info", message: "hasakinow response", order_code: ORDER, request_id: "req-7f3a91", shipment_id: SHIPMENT, http_status: 200, body: { status: "accepted", partner_ref: "NOWREF-1188" } }),
+  row("2026-11-10T08:48:00.610+07:00", "hasakinow-connector", {
+    level: "info",
+    message: "hasakinow response",
+    order_code: "2611095ZZ000AA99",
+    request_id: "req-0000ff",
+    shipment_id: "98760042",
+    http_status: 200,
+    body: { status: "accepted" },
+  }),
+  row("2026-11-10T08:48:01.402+07:00", "hasakinow-connector", {
+    level: "info",
+    message: "hasakinow response",
+    order_code: ORDER,
+    request_id: "req-7f3a91",
+    shipment_id: SHIPMENT,
+    http_status: 200,
+    body: { status: "accepted", partner_ref: "NOWREF-1188" },
+  }),
 ];
 
 export const FIXTURE_SEARCHES = [
   { id: 101, query: `search index=k8s_prod "${ORDER}"`, rows: SEARCH_BY_ORDER },
   { id: 102, query: `search index=k8s_prod "${SHIPMENT}"`, rows: SEARCH_BY_SHIPMENT },
-  { id: 103, query: `search index=k8s_prod kubernetes.container_name=hasakinow-connector "hasakinow response"`, rows: SEARCH_CONNECTOR },
+  {
+    id: 103,
+    query: `search index=k8s_prod kubernetes.container_name=hasakinow-connector "hasakinow response"`,
+    rows: SEARCH_CONNECTOR,
+  },
 ];
 
 /** Reference of a fixture row by its time and container (event refs depend on row order within each search). */
 export function refOf(searchId: number, time: string, container?: string) {
   const s = FIXTURE_SEARCHES.find((x) => x.id === searchId)!;
-  const i = s.rows.findIndex((r) => r._time === time && (!container || r["kubernetes.container_name"] === container));
+  const i = s.rows.findIndex(
+    (r) => r._time === time && (!container || r["kubernetes.container_name"] === container),
+  );
   if (i < 0) throw new Error(`no fixture row ${searchId} ${time}`);
   return `S${searchId}:${i}`;
 }
@@ -78,28 +174,68 @@ export function refOf(searchId: number, time: string, container?: string) {
 /** What a careful agent would label. */
 export function goodLabels() {
   return [
-    { evidence_ref: refOf(101, "2026-11-10T08:47:59.812+07:00"), event_type: "OUTBOUND_MESSAGE_CREATED" },
+    {
+      evidence_ref: refOf(101, "2026-11-10T08:47:59.812+07:00"),
+      event_type: "OUTBOUND_MESSAGE_CREATED",
+    },
     { evidence_ref: refOf(101, "2026-11-10T08:47:59.840+07:00"), event_type: "MESSAGE_PUBLISHED" },
-    { evidence_ref: refOf(101, "2026-11-10T08:48:00.135+07:00"), event_type: "PARTNER_REQUEST_SENT" },
-    { evidence_ref: refOf(101, "2026-11-10T08:48:01.402+07:00"), event_type: "PARTNER_RESPONSE_RECEIVED" },
+    {
+      evidence_ref: refOf(101, "2026-11-10T08:48:00.135+07:00"),
+      event_type: "PARTNER_REQUEST_SENT",
+    },
+    {
+      evidence_ref: refOf(101, "2026-11-10T08:48:01.402+07:00"),
+      event_type: "PARTNER_RESPONSE_RECEIVED",
+    },
     { evidence_ref: refOf(102, "2026-11-10T08:48:00.120+07:00"), event_type: "MESSAGE_CONSUMED" },
     { evidence_ref: refOf(102, "2026-11-10T08:48:05.010+07:00"), event_type: "MESSAGE_CONSUMED" },
-    { evidence_ref: refOf(102, "2026-11-10T08:49:16.778+07:00"), event_type: "PARTNER_CALLBACK_RECEIVED" },
-    { evidence_ref: refOf(102, "2026-11-10T08:49:16.950+07:00"), event_type: "TRACKING_NUMBER_PERSISTED" },
-    { evidence_ref: refOf(102, "2026-11-10T08:49:17.300+07:00"), event_type: "SHIPPING_LABEL_REQUESTED" },
-    { evidence_ref: refOf(101, "2026-11-10T08:49:18.044+07:00"), event_type: "SHIPPING_LABEL_URL_GENERATED" },
+    {
+      evidence_ref: refOf(102, "2026-11-10T08:49:16.778+07:00"),
+      event_type: "PARTNER_CALLBACK_RECEIVED",
+    },
+    {
+      evidence_ref: refOf(102, "2026-11-10T08:49:16.950+07:00"),
+      event_type: "TRACKING_NUMBER_PERSISTED",
+    },
+    {
+      evidence_ref: refOf(102, "2026-11-10T08:49:17.300+07:00"),
+      event_type: "SHIPPING_LABEL_REQUESTED",
+    },
+    {
+      evidence_ref: refOf(101, "2026-11-10T08:49:18.044+07:00"),
+      event_type: "SHIPPING_LABEL_URL_GENERATED",
+    },
     // the same line again from the overlapping refinement search
-    { evidence_ref: refOf(102, "2026-11-10T08:49:18.044+07:00"), event_type: "SHIPPING_LABEL_URL_GENERATED" },
-    { evidence_ref: refOf(102, "2026-11-10T08:49:20.500+07:00"), event_type: "SHIPPING_LABEL_URL_PERSISTED" },
+    {
+      evidence_ref: refOf(102, "2026-11-10T08:49:18.044+07:00"),
+      event_type: "SHIPPING_LABEL_URL_GENERATED",
+    },
+    {
+      evidence_ref: refOf(102, "2026-11-10T08:49:20.500+07:00"),
+      event_type: "SHIPPING_LABEL_URL_PERSISTED",
+    },
   ];
 }
 
 /** What an over-eager agent adds: a fabricated ref, a wrong time, a claimed id that is not in the log, another order's response. */
 export function adversarialLabels() {
   return [
-    { evidence_ref: "S999:0", event_type: "PARTNER_CALLBACK_RECEIVED", note: "callback at 08:48:30" },
-    { evidence_ref: refOf(103, "2026-11-10T08:48:00.610+07:00"), event_type: "PARTNER_RESPONSE_RECEIVED", note: "fast response right after our request" },
-    { evidence_ref: refOf(101, "2026-11-10T08:48:00.135+07:00"), event_type: "PARTNER_REQUEST_SENT", timestamp: "2026-11-10T08:48:00+07:00", ids: { tracking_no: "NOW-TRK-FAKE" } },
+    {
+      evidence_ref: "S999:0",
+      event_type: "PARTNER_CALLBACK_RECEIVED",
+      note: "callback at 08:48:30",
+    },
+    {
+      evidence_ref: refOf(103, "2026-11-10T08:48:00.610+07:00"),
+      event_type: "PARTNER_RESPONSE_RECEIVED",
+      note: "fast response right after our request",
+    },
+    {
+      evidence_ref: refOf(101, "2026-11-10T08:48:00.135+07:00"),
+      event_type: "PARTNER_REQUEST_SENT",
+      timestamp: "2026-11-10T08:48:00+07:00",
+      ids: { tracking_no: "NOW-TRK-FAKE" },
+    },
   ];
 }
 

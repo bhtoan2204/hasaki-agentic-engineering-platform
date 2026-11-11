@@ -10,7 +10,7 @@ export function background(label: string, fn: () => unknown) {
   const p: Promise<void> = Promise.resolve()
     .then(fn)
     .then(
-      () => { },
+      () => {},
       (e) => console.error(`${label}: ${(e as Error)?.message ?? e}`),
     )
     .finally(() => pending.delete(p));

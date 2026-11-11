@@ -14,11 +14,7 @@ import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { integrationExecutor } from "../src/workflow/executors/builtin.ts";
 import { claudeExecutor } from "../src/agent/claude.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
-import {
-  indexRepository,
-  runIndexOnce,
-  enqueue,
-} from "../src/codeIntelligence/indexer.ts";
+import { indexRepository, runIndexOnce, enqueue } from "../src/codeIntelligence/indexer.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 const a = "ci-proof-a",
@@ -41,9 +37,8 @@ const logs = () =>
     .map((s) => JSON.parse(s))
     .filter((r) => r.argv);
 const block = (prompt: string) =>
-  /<untrusted_input source="code_intelligence">([\s\S]*?)<\/untrusted_input>/.exec(
-    prompt,
-  )?.[1] ?? "";
+  /<untrusted_input source="code_intelligence">([\s\S]*?)<\/untrusted_input>/.exec(prompt)?.[1] ??
+  "";
 before(async () => {
   await migrate();
   await shareAllRepositoriesForTests();
@@ -93,14 +88,11 @@ before(async () => {
   });
 });
 after(async () => {
-  for (const key of ["CODEX_BIN", "FAKE_CODEX_LOG", "FAKE_CODEX_MODE"])
-    delete process.env[key];
+  for (const key of ["CODEX_BIN", "FAKE_CODEX_LOG", "FAKE_CODEX_MODE"]) delete process.env[key];
   await pool.end();
 });
 test("Actual analysis → discovery → ranking → shared executor → Codex process receives indexed source; resume refreshes changed worktree", async () => {
-  const rows = (await repositories.list()).filter((r) =>
-    [a, z].includes(r.name),
-  );
+  const rows = (await repositories.list()).filter((r) => [a, z].includes(r.name));
   assert.equal(
     rankRepositories(rows, { text: "FulfillRefund", project: "Proof" })[0].repo,
     a,
@@ -131,9 +123,7 @@ test("Actual analysis → discovery → ranking → shared executor → Codex pr
   );
   assert.equal(discovery!.output.candidates[0].repo, z);
   assert.ok(
-    discovery!.output.candidates[0].reasons.some((r: string) =>
-      r.includes("code evidence"),
-    ),
+    discovery!.output.candidates[0].reasons.some((r: string) => r.includes("code evidence")),
   );
   assert.deepEqual((await getRun(run.id)).selected_repositories, [z]);
   process.env.FAKE_CODEX_MODE = "ask";
@@ -156,11 +146,9 @@ test("Actual analysis → discovery → ranking → shared executor → Codex pr
     [run.id],
   );
   assert.equal(step!.status, "WAITING_INPUT");
-  const metrics = await one(
-    pool,
-    "SELECT metrics FROM workflow_step_attempts WHERE id=$1",
-    [step!.current_attempt_id],
-  );
+  const metrics = await one(pool, "SELECT metrics FROM workflow_step_attempts WHERE id=$1", [
+    step!.current_attempt_id,
+  ]);
   assert.ok(metrics!.metrics.code_intelligence.retrieved_context_size > 0);
   writeFileSync(
     join(path, "refund.go"),
@@ -198,11 +186,7 @@ test("Concurrent idle callers respect the configured indexing concurrency before
   config.codeIntelligence.concurrency = 1;
   await enqueue(a);
   await enqueue(z);
-  const results = await Promise.all([
-    runIndexOnce(),
-    runIndexOnce(),
-    runIndexOnce(),
-  ]);
+  const results = await Promise.all([runIndexOnce(), runIndexOnce(), runIndexOnce()]);
   assert.equal(results.filter(Boolean).length, 1);
   assert.equal(
     (await one(
@@ -217,18 +201,11 @@ test("Early path matches cannot starve an exact definition in a later registered
   const { searchSymbols } = await import("../src/codeIntelligence/search.ts");
   const root = join(config.reposRoot, a);
   for (let i = 0; i < 8; i++)
-    writeFileSync(
-      join(root, `FulfillRefund-${i}.go`),
-      `package other\nfunc Other${i}() {}\n`,
-    );
+    writeFileSync(join(root, `FulfillRefund-${i}.go`), `package other\nfunc Other${i}() {}\n`);
   git(root, "add", ".");
   git(root, "commit", "-qm", "path distractors");
   await indexRepository(a);
-  const found = await searchSymbols(
-    "FulfillRefund",
-    { repositories: [a, z], allowed: [a, z] },
-    3,
-  );
+  const found = await searchSymbols("FulfillRefund", { repositories: [a, z], allowed: [a, z] }, 3);
   assert.equal(found.hits[0].repository, z);
   assert.equal(found.hits[0].symbol_name, "FulfillRefund");
 });
@@ -248,30 +225,19 @@ test("A fresh index without a definition still falls back to exact source search
     allowed: [a],
   });
   assert.ok(found.fallback_count > 0);
-  assert.ok(
-    found.hits.some(
-      (h) => h.match_type === "text" && h.file_path === "literal.go",
-    ),
-  );
+  assert.ok(found.hits.some((h) => h.match_type === "text" && h.file_path === "literal.go"));
 });
 
 test("Missing ripgrep is visible to exact search and does not abort hybrid discovery", async () => {
   const { mkdtempSync, symlinkSync } = await import("node:fs");
-  const { searchCodeExact, searchSymbols } =
-    await import("../src/codeIntelligence/search.ts");
+  const { searchCodeExact, searchSymbols } = await import("../src/codeIntelligence/search.ts");
   const directory = mkdtempSync(join(process.env.TEST_ROOT!, "git-only-"));
-  symlinkSync(
-    execFileSync("which", ["git"], { encoding: "utf8" }).trim(),
-    join(directory, "git"),
-  );
+  symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(directory, "git"));
   const path = process.env.PATH;
   try {
     process.env.PATH = directory;
     const scope = { repositories: [a], allowed: [a] };
-    await assert.rejects(
-      searchCodeExact("NoSuchNeedle", scope),
-      /ripgrep unavailable/,
-    );
+    await assert.rejects(searchCodeExact("NoSuchNeedle", scope), /ripgrep unavailable/);
     const result = await searchSymbols("NoSuchNeedle", scope);
     assert.equal(result.hits.length, 0);
     assert.ok(result.fallback_count > 0);

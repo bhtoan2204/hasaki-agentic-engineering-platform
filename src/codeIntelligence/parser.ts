@@ -45,8 +45,7 @@ export interface Extraction {
 }
 const unquote = (s: string) => s.replace(/^["'`]|["'`]$/g, "");
 const field = (n: Node, name: string) => n.childForFieldName(name);
-const child = (n: Node, type: string) =>
-  n.namedChildren.find((c) => c.type === type);
+const child = (n: Node, type: string) => n.namedChildren.find((c) => c.type === type);
 const names: Record<string, string> = {
   function_declaration: "function",
   function_signature: "function",
@@ -99,8 +98,7 @@ export async function extract(
   });
   const parser = new Parser();
   let tree;
-  const deadline =
-    Date.now() + Math.min(5000, config.codeIntelligence.timeoutMs);
+  const deadline = Date.now() + Math.min(5000, config.codeIntelligence.timeoutMs);
   try {
     try {
       parser.setLanguage(await grammar);
@@ -130,10 +128,7 @@ export async function extract(
       kind: string,
       resolution: RelationRecord["resolution"] = "unresolved",
     ) => {
-      if (
-        target &&
-        out.relations.length < config.codeIntelligence.maxSymbols * 4
-      )
+      if (target && out.relations.length < config.codeIntelligence.maxSymbols * 4)
         out.relations.push({
           source_name: src,
           target_name: unquote(target).slice(0, 512),
@@ -143,13 +138,10 @@ export async function extract(
         });
     };
     // Iterative traversal prevents malformed/deep source exhausting the JS call stack.
-    const stack: Array<{ n: Node; parent: string | null }> = [
-      { n: tree.rootNode, parent: null },
-    ];
+    const stack: Array<{ n: Node; parent: string | null }> = [{ n: tree.rootNode, parent: null }];
     let visited = 0;
     while (stack.length) {
-      if (++visited > 200000 || Date.now() > deadline)
-        throw new Error("Extractor limit exceeded");
+      if (++visited > 200000 || Date.now() > deadline) throw new Error("Extractor limit exceeded");
       signal?.throwIfAborted();
       const { n, parent } = stack.pop()!;
       if (n.type === "ERROR" || n.isMissing) {
@@ -164,18 +156,11 @@ export async function extract(
       }
       if (n.type === "type_spec") {
         const t = field(n, "type")?.type;
-        kind =
-          t === "struct_type"
-            ? "struct"
-            : t === "interface_type"
-              ? "interface"
-              : "type";
+        kind = t === "struct_type" ? "struct" : t === "interface_type" ? "interface" : "type";
       }
       if (
         n.type === "variable_declarator" &&
-        ["arrow_function", "function_expression"].includes(
-          field(n, "value")?.type ?? "",
-        )
+        ["arrow_function", "function_expression"].includes(field(n, "value")?.type ?? "")
       )
         kind = "function";
       if (["message", "enum", "service", "rpc"].includes(n.type))
@@ -184,19 +169,11 @@ export async function extract(
         name = child(n, "object_reference")?.text ?? field(n, "column")?.text;
       if (n.type === "create_index") name = field(n, "column")?.text ?? name;
       let scope = parent;
-      if (
-        kind &&
-        name &&
-        out.symbols.length < config.codeIntelligence.maxSymbols
-      ) {
+      if (kind && name && out.symbols.length < config.codeIntelligence.maxSymbols) {
         const receiver = field(n, "receiver")
           ?.namedChildren[0]?.childForFieldName("type")
           ?.text.replace(/^\*/, "");
-        const qualified = [
-          parent ?? (pkg && kind !== "package" ? pkg : null),
-          receiver,
-          name,
-        ]
+        const qualified = [parent ?? (pkg && kind !== "package" ? pkg : null), receiver, name]
           .filter(Boolean)
           .join(".");
         const body = field(n, "body") ?? child(n, "message_body");
@@ -214,10 +191,7 @@ export async function extract(
           .split(/\bAS\s+\$\$|\{/i)[0]
           .trim()
           .slice(0, 400);
-        signature = redactSecrets(signature).replace(
-          /(['"])(?:\\.|(?!\1).)*?\1/g,
-          '"…"',
-        );
+        signature = redactSecrets(signature).replace(/(['"])(?:\\.|(?!\1).)*?\1/g, '"…"');
         out.symbols.push({
           symbol_name: name,
           qualified_name: qualified,
@@ -230,61 +204,29 @@ export async function extract(
           signature,
         });
         relation(n, parent ?? pkg, qualified, "DEFINES", "resolved");
-        if (
-          n.parent?.type === "export_statement" ||
-          n.parent?.parent?.type === "export_statement"
-        )
+        if (n.parent?.type === "export_statement" || n.parent?.parent?.type === "export_statement")
           relation(n, "export", qualified, "REFERENCES", "resolved");
         scope = qualified;
         if (n.type === "rpc") {
-          const types = n.namedChildren.filter(
-            (c) => c.type === "message_or_enum_type",
-          );
-          if (types[0])
-            relation(n, qualified, types[0].text, "RPC_REQUEST", "candidate");
-          if (types[1])
-            relation(n, qualified, types[1].text, "RPC_RESPONSE", "candidate");
+          const types = n.namedChildren.filter((c) => c.type === "message_or_enum_type");
+          if (types[0]) relation(n, qualified, types[0].text, "RPC_REQUEST", "candidate");
+          if (types[1]) relation(n, qualified, types[1].text, "RPC_RESPONSE", "candidate");
         }
       }
-      if (
-        [
-          "import_spec",
-          "import_statement",
-          "import",
-          "export_statement",
-        ].includes(n.type)
-      ) {
+      if (["import_spec", "import_statement", "import", "export_statement"].includes(n.type)) {
         const target = field(n, "path") ?? field(n, "source");
         if (target) relation(n, parent ?? pkg, target.text, "IMPORTS");
       }
       if (n.type === "export_statement") {
-        for (const c of n.namedChildren.filter(
-          (c) => c.type === "export_clause",
-        ))
+        for (const c of n.namedChildren.filter((c) => c.type === "export_clause"))
           relation(n, pkg, c.text, "REFERENCES", "candidate");
       }
       if (n.type === "call_expression") {
-        relation(
-          n,
-          parent ?? pkg,
-          field(n, "function")?.text ?? "",
-          "CALLS",
-          "candidate",
-        );
+        relation(n, parent ?? pkg, field(n, "function")?.text ?? "", "CALLS", "candidate");
         for (const argument of field(n, "arguments")?.namedChildren ?? []) {
-          if (!["interpreted_string_literal", "string"].includes(argument.type))
-            continue;
-          const rpc = /^\/([A-Za-z_][\w.]*)\/([A-Za-z_]\w*)$/.exec(
-            unquote(argument.text),
-          );
-          if (rpc)
-            relation(
-              n,
-              parent ?? pkg,
-              `${rpc[1]}.${rpc[2]}`,
-              "REFERENCES",
-              "candidate",
-            );
+          if (!["interpreted_string_literal", "string"].includes(argument.type)) continue;
+          const rpc = /^\/([A-Za-z_][\w.]*)\/([A-Za-z_]\w*)$/.exec(unquote(argument.text));
+          if (rpc) relation(n, parent ?? pkg, `${rpc[1]}.${rpc[2]}`, "REFERENCES", "candidate");
         }
       }
       if (n.type === "implements_clause")
@@ -295,13 +237,11 @@ export async function extract(
         n.type === "object_reference" &&
         !(
           n.parent?.type.startsWith("create_") &&
-          n.parent.namedChildren.find((c) => c.type === "object_reference")
-            ?.id === n.id
+          n.parent.namedChildren.find((c) => c.type === "object_reference")?.id === n.id
         )
       )
         relation(n, parent ?? "", n.text, "REFERENCES", "candidate");
-      for (const c of [...n.namedChildren].reverse())
-        stack.push({ n: c, parent: scope });
+      for (const c of [...n.namedChildren].reverse()) stack.push({ n: c, parent: scope });
     }
     return out;
   } finally {

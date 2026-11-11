@@ -30,17 +30,30 @@ test("Phase H: migration 035 performance indexes exist and are active in Postgre
       ORDER BY indexname`,
   );
   const names = indexes.map((i) => i.indexname);
-  assert.ok(names.includes("workflow_questions_run_status"), "workflow_questions_run_status index exists");
+  assert.ok(
+    names.includes("workflow_questions_run_status"),
+    "workflow_questions_run_status index exists",
+  );
   assert.ok(names.includes("workflow_questions_run_id"), "workflow_questions_run_id index exists");
-  assert.ok(names.includes("workflow_checkpoints_run_id"), "workflow_checkpoints_run_id index exists");
+  assert.ok(
+    names.includes("workflow_checkpoints_run_id"),
+    "workflow_checkpoints_run_id index exists",
+  );
   assert.ok(names.includes("pull_requests_work_item"), "pull_requests_work_item index exists");
   assert.ok(names.includes("pull_requests_run"), "pull_requests_run index exists");
   assert.ok(names.includes("pull_requests_updated"), "pull_requests_updated index exists");
-  assert.ok(names.includes("workflow_steps_run_position"), "workflow_steps_run_position index exists");
+  assert.ok(
+    names.includes("workflow_steps_run_position"),
+    "workflow_steps_run_position index exists",
+  );
 });
 
 test("Phase G & H: listRuns and runDetail execute efficiently with the new indexes", async () => {
-  const user = await createUser({ username: "spa-perf-user", password: "perf-pass-123", role: "admin" });
+  const user = await createUser({
+    username: "spa-perf-user",
+    password: "perf-pass-123",
+    role: "admin",
+  });
   const wi = await workItems.createManual({
     title: "Test SPA Performance Work Item",
     description: "Verify index performance",

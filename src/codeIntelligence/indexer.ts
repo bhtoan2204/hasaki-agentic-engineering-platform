@@ -7,22 +7,8 @@ import { workspacesOf } from "../git/provider.ts";
 import { ownsInstance } from "../instances.ts";
 import { pool, one, q } from "../db/pool.ts";
 import { realpath } from "node:fs/promises";
-import {
-  git,
-  baseCommit,
-  treeFiles,
-  changes,
-  readBlobs,
-  hash,
-  languageOf,
-} from "./git.ts";
-import {
-  snapshot,
-  filesOf,
-  extractionBatch,
-  publish,
-  type FileRecord,
-} from "./store.ts";
+import { git, baseCommit, treeFiles, changes, readBlobs, hash, languageOf } from "./git.ts";
+import { snapshot, filesOf, extractionBatch, publish, type FileRecord } from "./store.ts";
 import { parserVersion, ParserLoadError } from "./parser.ts";
 
 export async function enqueue(repoName: string, runId?: number) {
@@ -37,23 +23,14 @@ export async function enqueue(repoName: string, runId?: number) {
       "SELECT worker_instance,allowed_repositories FROM workflow_runs WHERE id=$1",
       [runId],
     );
-    if (
-      run?.worker_instance !== config.instanceId ||
-      !run.allowed_repositories.includes(repoName)
-    )
+    if (run?.worker_instance !== config.instanceId || !run.allowed_repositories.includes(repoName))
       throw new Error("Unauthorized index worktree");
   }
   return one(
     pool,
     `INSERT INTO code_intelligence.runs(repository_id,instance_id,run_id,scope_key,requested_by) VALUES($1,$2,$3,$4,$5)
     ON CONFLICT(repository_id,instance_id,scope_key) WHERE status IN ('queued','running') DO UPDATE SET requested_at=now(),requested_by=excluded.requested_by RETURNING id,status`,
-    [
-      repo.id,
-      config.instanceId,
-      runId ?? null,
-      runId ? `run:${runId}` : "base",
-      currentUserId(),
-    ],
+    [repo.id, config.instanceId, runId ?? null, runId ? `run:${runId}` : "base", currentUserId()],
   );
 }
 export async function localScope(repoName: string, runId?: number, provision = false) {
@@ -61,17 +38,16 @@ export async function localScope(repoName: string, runId?: number, provision = f
   if (!repo?.enabled || !repo.allowed_actions.includes("read"))
     throw new Error("Repository unavailable or unauthorized");
   const existing = runId ? await checkoutForRun(repo, runId) : undefined;
-  const primary = provision ? await prepareRepository(repo, false, existing) : await validateCheckout(repo, existing);
+  const primary = provision
+    ? await prepareRepository(repo, false, existing)
+    : await validateCheckout(repo, existing);
   if (!runId) return { repo, root: primary, primary };
   const run = await one(
     pool,
     "SELECT worker_instance,allowed_repositories FROM workflow_runs WHERE id=$1",
     [runId],
   );
-  if (
-    run?.worker_instance !== config.instanceId ||
-    !run.allowed_repositories.includes(repoName)
-  )
+  if (run?.worker_instance !== config.instanceId || !run.allowed_repositories.includes(repoName))
     throw new Error("Unauthorized index worktree");
   const ws = (await workspacesOf(runId)).find((w) => w.repo === repoName);
   if (!ws) throw new Error("Worktree unavailable");
@@ -81,13 +57,7 @@ export async function localScope(repoName: string, runId?: number, provision = f
   ).trim();
   if (
     common !==
-    (
-      await git(primary, [
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-      ])
-    ).trim()
+    (await git(primary, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).trim()
   )
     throw new Error("Worktree repository mismatch");
   return { repo, root, primary };
@@ -128,8 +98,7 @@ export async function indexRepository(
   let baseline = await snapshot(scope.repo.id, `base:${base}`);
   const check = () => {
     signal?.throwIfAborted();
-    if (Date.now() - start > config.codeIntelligence.timeoutMs)
-      throw new Error("Index timeout");
+    if (Date.now() - start > config.codeIntelligence.timeoutMs) throw new Error("Index timeout");
   };
   if (!baseline) {
     const manifest = await treeFiles(scope.primary, base, metrics);
@@ -138,9 +107,7 @@ export async function indexRepository(
       `SELECT id FROM code_intelligence.snapshots WHERE repository_id=$1 AND base_snapshot_id IS NULL AND index_version=$2 ORDER BY id DESC LIMIT 1`,
       [scope.repo.id, parserVersion()],
     );
-    const previous = new Map(
-      (prior ? await filesOf(prior.id) : []).map((f) => [f.file_path, f]),
-    );
+    const previous = new Map((prior ? await filesOf(prior.id) : []).map((f) => [f.file_path, f]));
     const files: FileRecord[] = [];
     const byBlob = new Map(
       [...previous.values()].map((f) => [
@@ -152,15 +119,13 @@ export async function indexRepository(
       check();
       await progress(offset, manifest.length);
       const batch = manifest.slice(offset, offset + 100);
-      const pending = batch.filter(
-        (f) => !byBlob.has(`${languageOf(f.path)}:${f.blob}`),
-      );
+      const pending = batch.filter((f) => !byBlob.has(`${languageOf(f.path)}:${f.blob}`));
       const sources = pending.length
         ? await readBlobs(
-          scope.primary,
-          pending.map((f) => f.blob),
-          signal,
-        )
+            scope.primary,
+            pending.map((f) => f.blob),
+            signal,
+          )
         : [];
       const ids = await extractionBatch(
         pending.map((f, i) => ({ path: f.path, source: sources[i] })),
@@ -173,8 +138,7 @@ export async function indexRepository(
         const id = byBlob.has(`${languageOf(f.path)}:${f.blob}`)
           ? byBlob.get(`${languageOf(f.path)}:${f.blob}`)!
           : (ids.get(`${languageOf(f.path)}:${hash(sources[at])}`) ?? null);
-        if (byBlob.has(`${languageOf(f.path)}:${f.blob}`))
-          metrics.index_cache_hits++;
+        if (byBlob.has(`${languageOf(f.path)}:${f.blob}`)) metrics.index_cache_hits++;
         files.push({
           file_path: f.path,
           blob_hash: f.blob,
@@ -217,9 +181,7 @@ export async function indexRepository(
             file_path: f.path,
             blob_hash: f.hash,
             extraction_id:
-              f.content === null
-                ? null
-                : (ids.get(`${languageOf(f.path)}:${f.hash}`) ?? null),
+              f.content === null ? null : (ids.get(`${languageOf(f.path)}:${f.hash}`) ?? null),
             deleted: f.content === null,
           });
       }
@@ -255,11 +217,7 @@ export async function indexRepository(
 let active = 0;
 /** Idle work in the existing scheduler; durable PostgreSQL leases survive process crashes. */
 export async function runIndexOnce(signal?: AbortSignal) {
-  if (
-    !codeIntelligenceEnabled() ||
-    active >= config.codeIntelligence.concurrency
-  )
-    return false;
+  if (!codeIntelligenceEnabled() || active >= config.codeIntelligence.concurrency) return false;
   active++;
   let job: any;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -296,23 +254,31 @@ export async function runIndexOnce(signal?: AbortSignal) {
           ac.abort();
       })().catch(() => ac.abort());
     }, 10000);
-    const repo = await one(pool, "SELECT name FROM repositories WHERE id=$1", [
-      job.repository_id,
-    ]);
-    const owner = job.run_id ? (await one(pool, "SELECT owner_id FROM workflow_runs WHERE id=$1", [job.run_id]))?.owner_id : job.requested_by;
-    if (owner && !(await one(pool, "SELECT id FROM users WHERE id=$1 AND active", [owner]))) throw new Error("Index requester is inactive");
-    const execute = () => indexRepository(repo!.name, job.run_id ?? undefined, ac.signal, { id: job.id, token: job.fencing_token });
-    const out = owner ? await execution.run({ userId: Number(owner), kind: job.run_id ? "run" : "user", runId: job.run_id ?? undefined }, execute) : await execute();
+    const repo = await one(pool, "SELECT name FROM repositories WHERE id=$1", [job.repository_id]);
+    const owner = job.run_id
+      ? (await one(pool, "SELECT owner_id FROM workflow_runs WHERE id=$1", [job.run_id]))?.owner_id
+      : job.requested_by;
+    if (owner && !(await one(pool, "SELECT id FROM users WHERE id=$1 AND active", [owner])))
+      throw new Error("Index requester is inactive");
+    const execute = () =>
+      indexRepository(repo!.name, job.run_id ?? undefined, ac.signal, {
+        id: job.id,
+        token: job.fencing_token,
+      });
+    const out = owner
+      ? await execution.run(
+          {
+            userId: Number(owner),
+            kind: job.run_id ? "run" : "user",
+            runId: job.run_id ?? undefined,
+          },
+          execute,
+        )
+      : await execute();
     await q(
       pool,
       `UPDATE code_intelligence.runs SET status=CASE WHEN requested_at>$5::timestamptz THEN 'queued' ELSE 'done' END,attempts=CASE WHEN requested_at>$5::timestamptz THEN 0 ELSE attempts END,snapshot_id=$3,metrics=$4,error=NULL,updated_at=now() WHERE id=$1 AND fencing_token=$2 AND status='running'`,
-      [
-        job.id,
-        job.fencing_token,
-        out.snapshot.id,
-        JSON.stringify(out.metrics),
-        job.request_marker,
-      ],
+      [job.id, job.fencing_token, out.snapshot.id, JSON.stringify(out.metrics), job.request_marker],
     );
     // Completed overlays only; never remove a snapshot that is still referenced as a base or by a live run.
     await q(
@@ -339,10 +305,8 @@ export async function runIndexOnce(signal?: AbortSignal) {
 }
 export function diagnostic(e: unknown) {
   // Child-process errors may embed source or credentials. Persist categories only.
-  if (e instanceof ParserLoadError)
-    return `${e.message}; check installed WASM assets`;
-  if ((e as NodeJS.ErrnoException)?.code === "EACCES")
-    return "Indexing source permission denied";
+  if (e instanceof ParserLoadError) return `${e.message}; check installed WASM assets`;
+  if ((e as NodeJS.ErrnoException)?.code === "EACCES") return "Indexing source permission denied";
   const message = (e as Error)?.message ?? "";
   for (const name of [
     "limit exceeded",

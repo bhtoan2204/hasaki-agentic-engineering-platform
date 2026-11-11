@@ -22,8 +22,19 @@ function respond(event: string, allow: boolean, reason: string) {
   if (allow) process.exit(0);
   const out =
     event === "PermissionRequest"
-      ? { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: reason } } }
-      : { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
+      ? {
+          hookSpecificOutput: {
+            hookEventName: "PermissionRequest",
+            decision: { behavior: "deny", message: reason },
+          },
+        }
+      : {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: reason,
+          },
+        };
   process.stdout.write(JSON.stringify(out));
   process.stderr.write(`platform policy: ${reason}\n`);
   process.exit(2);
@@ -37,14 +48,23 @@ async function main() {
     event = String(payload.hook_event_name ?? event);
     const socket = process.env.PLATFORM_BROKER_SOCKET;
     const token = process.env.PLATFORM_BROKER_TOKEN;
-    if (!socket || !token) throw new Error("platform broker credentials are missing from the hook environment");
+    if (!socket || !token)
+      throw new Error("platform broker credentials are missing from the hook environment");
     const r = await brokerRequest(socket, { token, kind: "hook", payload }, 60_000);
     if (!r?.ok) throw new Error(String(r?.error ?? "broker refused the request"));
-    respond(event, r.decision?.allow === true, String(r.decision?.reason ?? "denied by platform policy"));
+    respond(
+      event,
+      r.decision?.allow === true,
+      String(r.decision?.reason ?? "denied by platform policy"),
+    );
   } catch (e) {
     const gated = event === "PreToolUse" || event === "PermissionRequest";
     if (!gated) process.exit(0);
-    respond(event, false, `platform policy unavailable (${(e as Error).message}); the call was not executed`);
+    respond(
+      event,
+      false,
+      `platform policy unavailable (${(e as Error).message}); the call was not executed`,
+    );
   }
 }
 

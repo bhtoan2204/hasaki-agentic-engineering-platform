@@ -23,9 +23,7 @@ import "./Integrations.css";
 
 /** One translated sentence with a {name} slot rendered as a node (a link), not string concatenation. */
 function slot(text: string, parts: Record<string, ReactNode>) {
-  return text
-    .split(/\{(\w+)\}/g)
-    .map((part, i) => (i % 2 ? (parts[part] ?? `{${part}}`) : part));
+  return text.split(/\{(\w+)\}/g).map((part, i) => (i % 2 ? (parts[part] ?? `{${part}}`) : part));
 }
 
 type Health = "ok" | "expired" | "off" | "loading" | "error" | "partial";
@@ -160,13 +158,7 @@ function PasteForm({
 function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/argocd");
-  const health: Health = !st
-    ? "loading"
-    : st.loggedIn
-      ? "ok"
-      : st.expired
-        ? "expired"
-        : "off";
+  const health: Health = !st ? "loading" : st.loggedIn ? "ok" : st.expired ? "expired" : "off";
   const href = st?.baseUrl ?? "https://argocd-qc-v2.hasaki.dev";
   return (
     <Row
@@ -180,9 +172,7 @@ function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
         st?.loggedIn ? (
           <>
             {st.user}
-            {st.expiresAt && (
-              <> · {t("ig.expires", { time: time(st.expiresAt) })}</>
-            )}
+            {st.expiresAt && <> · {t("ig.expires", { time: time(st.expiresAt) })}</>}
           </>
         ) : (
           t("ig.argo.summaryOff")
@@ -199,10 +189,8 @@ function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
         label={st?.loggedIn ? t("ig.replaceToken") : t("ig.token")}
         placeholder={t("ig.argo.ph")}
         onSave={async (token) =>
-          (await act(
-            () => api("/api/integrations/argocd/token", { token }),
-            t("ig.argo.saved"),
-          )) && (reload(), true)
+          (await act(() => api("/api/integrations/argocd/token", { token }), t("ig.argo.saved"))) &&
+          (reload(), true)
         }
         extra={
           (st?.loggedIn || st?.expired) && (
@@ -228,13 +216,7 @@ function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
 function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/kafka?check=1");
-  const health: Health = !st
-    ? "loading"
-    : st.connected
-      ? "ok"
-      : st.expired
-        ? "expired"
-        : "off";
+  const health: Health = !st ? "loading" : st.connected ? "ok" : st.expired ? "expired" : "off";
   return (
     <Row
       id="kafka"
@@ -263,9 +245,7 @@ function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
       <Steps>
         <li>
           {slot(t("ig.kafka.s1"), {
-            link: (
-              <Link href={st?.baseUrl ?? "https://kafka-ui-qc-v2.hasaki.dev"} />
-            ),
+            link: <Link href={st?.baseUrl ?? "https://kafka-ui-qc-v2.hasaki.dev"} />,
           })}
         </li>
         <li>{t("ig.kafka.s2")}</li>
@@ -310,15 +290,8 @@ function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
 function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/splunk");
-  const health: Health = !st
-    ? "loading"
-    : st.connected
-      ? "ok"
-      : st.expired
-        ? "expired"
-        : "off";
-  const check = async () =>
-    (await act(() => api("/api/integrations/splunk?check=1"))) && reload();
+  const health: Health = !st ? "loading" : st.connected ? "ok" : st.expired ? "expired" : "off";
+  const check = async () => (await act(() => api("/api/integrations/splunk?check=1"))) && reload();
   return (
     <Row
       id="splunk"
@@ -351,9 +324,7 @@ function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
             })}
           </>
         ) : null}
-        {st?.checkedAt && (
-          <> {t("ig.splunk.checked", { time: time(st.checkedAt) })}</>
-        )}
+        {st?.checkedAt && <> {t("ig.splunk.checked", { time: time(st.checkedAt) })}</>}
       </p>
       <Steps>
         <li>
@@ -413,7 +384,12 @@ function SplunkToken({ onSaved, connected }: { onSaved: () => void; connected: b
       <PasteForm
         label={connected ? t("ig.splunk.tokenReplace") : t("ig.splunk.token")}
         placeholder="eyJraWQiOiJzcGx1bmsuc2VjcmV0…"
-        onSave={async (token) => (await act(() => api("/api/integrations/splunk/token", { token }), t("ig.splunk.saved"))) && (onSaved(), true)}
+        onSave={async (token) =>
+          (await act(
+            () => api("/api/integrations/splunk/token", { token }),
+            t("ig.splunk.saved"),
+          )) && (onSaved(), true)
+        }
       />
     </details>
   );
@@ -432,7 +408,9 @@ function SplunkTest({ connected }: { connected: boolean }) {
         disabled={busy}
         onClick={async () => {
           setBusy(true);
-          setRes(await act(() => api("/api/integrations/splunk/test", {})).finally(() => setBusy(false)));
+          setRes(
+            await act(() => api("/api/integrations/splunk/test", {})).finally(() => setBusy(false)),
+          );
         }}
       >
         <PlugZap size={14} strokeWidth={2} />
@@ -440,13 +418,16 @@ function SplunkTest({ connected }: { connected: boolean }) {
       </button>
       {res && (
         <div className="ig-test-result small" role="status">
-          <span className={res.ok ? "ig-ok-text" : "ig-err-text"}>{res.ok ? t("ig.splunk.testOk") : t("ig.splunk.testFail")}</span>{" "}
+          <span className={res.ok ? "ig-ok-text" : "ig-err-text"}>
+            {res.ok ? t("ig.splunk.testOk") : t("ig.splunk.testFail")}
+          </span>{" "}
           · {res.user} ({res.auth}) · {res.latency_ms} ms
           {!res.read_only && <div className="ig-err-text">{res.warning}</div>}
           <ul>
             {res.indexes.map((i: any) => (
               <li key={i.index}>
-                <code>{i.index}</code>: {i.ok ? t("ig.splunk.indexOk", { n: i.events_15m }) : i.error}
+                <code>{i.index}</code>:{" "}
+                {i.ok ? t("ig.splunk.indexOk", { n: i.events_15m }) : i.error}
               </li>
             ))}
           </ul>
@@ -464,16 +445,32 @@ function SplunkShared({ st, onSaved }: { st: any; onSaved: () => void }) {
   return (
     <details className="ig-more">
       <summary className="small">
-        {t("ig.splunk.sharedTitle")} · {st.shared.configured ? `${st.shared.user ?? "?"} (${st.shared.allowed ? t("ig.splunk.sharedOn") : t("ig.splunk.sharedOff")})` : t("common.none")}
+        {t("ig.splunk.sharedTitle")} ·{" "}
+        {st.shared.configured
+          ? `${st.shared.user ?? "?"} (${st.shared.allowed ? t("ig.splunk.sharedOn") : t("ig.splunk.sharedOff")})`
+          : t("common.none")}
       </summary>
       <p className="muted small">{t("ig.splunk.sharedBody")}</p>
       <PasteForm
         label={t("ig.splunk.token")}
         placeholder="eyJraWQiOiJzcGx1bmsuc2VjcmV0…"
-        onSave={async (token) => (await act(() => api("/api/integrations/splunk/shared", { token }), t("ig.splunk.saved"))) && (onSaved(), true)}
+        onSave={async (token) =>
+          (await act(
+            () => api("/api/integrations/splunk/shared", { token }),
+            t("ig.splunk.saved"),
+          )) && (onSaved(), true)
+        }
         extra={
           st.shared.configured && (
-            <button className="sm ghost" onClick={async () => (await act(() => api("/api/integrations/splunk/shared/clear", {}), t("ig.kafka.cleared"))) && onSaved()}>
+            <button
+              className="sm ghost"
+              onClick={async () =>
+                (await act(
+                  () => api("/api/integrations/splunk/shared/clear", {}),
+                  t("ig.kafka.cleared"),
+                )) && onSaved()
+              }
+            >
               <LogOut size={14} strokeWidth={2} />
               {t("ig.disconnect")}
             </button>
@@ -487,13 +484,7 @@ function SplunkShared({ st, onSaved }: { st: any; onSaved: () => void }) {
 function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/vault?check=1");
-  const health: Health = !st
-    ? "loading"
-    : st.connected
-      ? "ok"
-      : st.expired
-        ? "expired"
-        : "off";
+  const health: Health = !st ? "loading" : st.connected ? "ok" : st.expired ? "expired" : "off";
   return (
     <Row
       id="vault"
@@ -506,9 +497,7 @@ function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
         st?.connected ? (
           <>
             {st.user}
-            {st.expiresAt && (
-              <> · {t("ig.expires", { time: time(st.expiresAt) })}</>
-            )}
+            {st.expiresAt && <> · {t("ig.expires", { time: time(st.expiresAt) })}</>}
             {st.renewable && <> · {t("ig.renews")}</>}
           </>
         ) : (
@@ -518,16 +507,12 @@ function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
     >
       <p className="muted small">{t("ig.vault.body")}</p>
       {st?.connected && st.policies?.length > 0 && (
-        <div className="small">
-          {t("ig.vault.policies", { policies: st.policies.join(", ") })}
-        </div>
+        <div className="small">{t("ig.vault.policies", { policies: st.policies.join(", ") })}</div>
       )}
       <Steps>
         <li>
           {slot(t("ig.vault.s1"), {
-            link: (
-              <Link href={st?.baseUrl ?? "https://vault-qc-v2.hasaki.dev"} />
-            ),
+            link: <Link href={st?.baseUrl ?? "https://vault-qc-v2.hasaki.dev"} />,
           })}
         </li>
         <li>{t("ig.vault.s2")}</li>
@@ -537,10 +522,8 @@ function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
         label={st?.connected ? t("ig.replaceToken") : t("ig.token")}
         placeholder={t("ig.vault.ph")}
         onSave={async (token) =>
-          (await act(
-            () => api("/api/integrations/vault/token", { token }),
-            t("ig.vault.saved"),
-          )) && (reload(), true)
+          (await act(() => api("/api/integrations/vault/token", { token }), t("ig.vault.saved"))) &&
+          (reload(), true)
         }
         extra={
           (st?.connected || st?.expired) && (
@@ -585,7 +568,15 @@ const EMPTY_DB = {
 /** A database's state as shown: a test in progress wins, then disabled, then the last known result. */
 type DbState = "checking" | "ok" | "failed" | "untested" | "off";
 const dbState = (d: any, checking: Set<string>): DbState =>
-  checking.has(d.key) ? "checking" : d.enabled === false ? "off" : d.last_status === "ok" ? "ok" : d.last_status === "failed" ? "failed" : "untested";
+  checking.has(d.key)
+    ? "checking"
+    : d.enabled === false
+      ? "off"
+      : d.last_status === "ok"
+        ? "ok"
+        : d.last_status === "failed"
+          ? "failed"
+          : "untested";
 /** Older than this, the last check is redone automatically when an admin opens the card. */
 const STALE_MS = 5 * 60_000;
 
@@ -636,10 +627,22 @@ function DbCard({
       )}
       {d.description && <div className="small">{d.description}</div>}
       <div className="ig-db-meta small muted">
-        {d.last_status === "ok" && d.last_version && <span>{d.last_version.replace(/-MariaDB.*$/, " MariaDB")}</span>}
-        {d.last_status === "ok" && d.last_latency_ms != null && <span>{t("ig.db.latency", { ms: d.last_latency_ms })}</span>}
-        {d.last_checked_at ? <span>{t("ig.db.checkedAgo", { when: when(d.last_checked_at) })}</span> : <span>{t("ig.db.neverChecked")}</span>}
-        <span>{d.last_used_at ? t("ig.db.usedAgo", { when: when(d.last_used_at) }) : t("ig.db.neverUsed")}</span>
+        {d.last_status === "ok" && d.last_version && (
+          <span>{d.last_version.replace(/-MariaDB.*$/, " MariaDB")}</span>
+        )}
+        {d.last_status === "ok" && d.last_latency_ms != null && (
+          <span>{t("ig.db.latency", { ms: d.last_latency_ms })}</span>
+        )}
+        {d.last_checked_at ? (
+          <span>{t("ig.db.checkedAgo", { when: when(d.last_checked_at) })}</span>
+        ) : (
+          <span>{t("ig.db.neverChecked")}</span>
+        )}
+        <span>
+          {d.last_used_at
+            ? t("ig.db.usedAgo", { when: when(d.last_used_at) })
+            : t("ig.db.neverUsed")}
+        </span>
       </div>
       {state === "failed" && (
         <div className="ig-db-error small">
@@ -648,12 +651,15 @@ function DbCard({
           {isAdmin && d.last_error && <code>{d.last_error}</code>}
         </div>
       )}
-      {isAdmin && d.has_password === false && state !== "failed" && <div className="ig-db-warn small">{t("ig.db.noPassword")}</div>}
+      {isAdmin && d.has_password === false && state !== "failed" && (
+        <div className="ig-db-warn small">{t("ig.db.noPassword")}</div>
+      )}
       {isAdmin && d.last_can_write && <div className="ig-db-warn small">{t("ig.db.canWrite")}</div>}
       {isAdmin && (
         <footer className="ig-db-actions">
           <button className="sm ghost" onClick={onTest} disabled={state === "checking"}>
-            <RefreshCw size={13} className={state === "checking" ? "ig-spin" : undefined} /> {t("ig.db.test")}
+            <RefreshCw size={13} className={state === "checking" ? "ig-spin" : undefined} />{" "}
+            {t("ig.db.test")}
           </button>
           <button className="sm ghost" onClick={onEdit}>
             {t("common.edit")}
@@ -693,7 +699,9 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
     if (!keys.length) return;
     setChecking((c) => new Set([...c, ...keys]));
     // A failed connection is a result (ok: false), shown on the card, not an error toast.
-    await Promise.all(keys.map((k) => api(`/api/integrations/databases/${k}/test`, {}).catch(() => null)));
+    await Promise.all(
+      keys.map((k) => api(`/api/integrations/databases/${k}/test`, {}).catch(() => null)),
+    );
     setChecking((c) => new Set([...c].filter((k) => !keys.includes(k))));
     reload();
   };
@@ -705,14 +713,22 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
     autoChecked.current = true;
     const stale = data
       .filter((d) => d.enabled !== false && d.has_password)
-      .filter((d) => !d.last_checked_at || Date.now() - new Date(d.last_checked_at).getTime() > STALE_MS)
+      .filter(
+        (d) => !d.last_checked_at || Date.now() - new Date(d.last_checked_at).getTime() > STALE_MS,
+      )
       .map((d) => d.key);
     void test(stale);
   }, [p.isAdmin, data]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k: string, v: unknown) => setForm({ ...form, [k]: v });
   const save = async () => {
     const body = {
-      ...Object.fromEntries(Object.entries(form).filter(([k]) => !k.startsWith("last_") && !["id", "has_password", "updated_at", "created_at", "created_by"].includes(k))),
+      ...Object.fromEntries(
+        Object.entries(form).filter(
+          ([k]) =>
+            !k.startsWith("last_") &&
+            !["id", "has_password", "updated_at", "created_at", "created_by"].includes(k),
+        ),
+      ),
       port: Number(form.port),
       max_rows: Number(form.max_rows),
       timeout_ms: Number(form.timeout_ms),
@@ -742,7 +758,15 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
     </span>
   );
   return (
-    <Row id="databases" icon={Database} title={t("ig.db.title")} env="QC" health={health} {...p} summary={summary}>
+    <Row
+      id="databases"
+      icon={Database}
+      title={t("ig.db.title")}
+      env="QC"
+      health={health}
+      {...p}
+      summary={summary}
+    >
       <p className="muted small">{t("ig.db.body")}</p>
       {!list.length ? (
         <p className="muted small">{t(p.isAdmin ? "ig.db.emptyAdmin" : "ig.db.emptyMember")}</p>
@@ -755,10 +779,23 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
               state={dbState(d, checking)}
               isAdmin={p.isAdmin}
               onTest={() => void test([d.key])}
-              onEdit={() => setForm({ ...EMPTY_DB, ...d, repositories: (d.repositories ?? []).join(", "), password: "" })}
+              onEdit={() =>
+                setForm({
+                  ...EMPTY_DB,
+                  ...d,
+                  repositories: (d.repositories ?? []).join(", "),
+                  password: "",
+                })
+              }
               onDelete={async () => {
                 if (!confirm(t("ig.db.deleteConfirm", { key: d.key }))) return;
-                if (await act(() => api(`/api/integrations/databases/${d.key}/delete`, {}), t("ig.db.deleted"))) reload();
+                if (
+                  await act(
+                    () => api(`/api/integrations/databases/${d.key}/delete`, {}),
+                    t("ig.db.deleted"),
+                  )
+                )
+                  reload();
               }}
             />
           ))}
@@ -770,7 +807,10 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
             <Database size={14} /> {t("ig.db.add")}
           </button>
           {enabled.length > 1 && (
-            <button className="sm ghost" onClick={() => void test(enabled.filter((d) => d.has_password).map((d) => d.key))}>
+            <button
+              className="sm ghost"
+              onClick={() => void test(enabled.filter((d) => d.has_password).map((d) => d.key))}
+            >
               <RefreshCw size={14} /> {t("ig.db.checkAll")}
             </button>
           )}
@@ -780,25 +820,52 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
         <div className="ig-db-form">
           <div className="ig-db-grid">
             <Field label={t("ig.db.key")}>
-              <input value={form.key} placeholder="oms-qc" onChange={(e) => set("key", e.target.value.trim().toLowerCase())} />
+              <input
+                value={form.key}
+                placeholder="oms-qc"
+                onChange={(e) => set("key", e.target.value.trim().toLowerCase())}
+              />
             </Field>
             <Field label={t("ig.db.project")}>
-              <input value={form.project} placeholder="OMS" onChange={(e) => set("project", e.target.value)} />
+              <input
+                value={form.project}
+                placeholder="OMS"
+                onChange={(e) => set("project", e.target.value)}
+              />
             </Field>
             <Field label={t("ig.db.repositories")}>
-              <input value={form.repositories} placeholder="warranty-api, warranty-worker" onChange={(e) => set("repositories", e.target.value)} />
+              <input
+                value={form.repositories}
+                placeholder="warranty-api, warranty-worker"
+                onChange={(e) => set("repositories", e.target.value)}
+              />
             </Field>
             <Field label={t("ig.db.host")}>
-              <input value={form.host} placeholder="oms-db.qc.internal" onChange={(e) => set("host", e.target.value.trim())} />
+              <input
+                value={form.host}
+                placeholder="oms-db.qc.internal"
+                onChange={(e) => set("host", e.target.value.trim())}
+              />
             </Field>
             <Field label={t("ig.db.port")}>
-              <input type="number" value={form.port} onChange={(e) => set("port", e.target.value)} />
+              <input
+                type="number"
+                value={form.port}
+                onChange={(e) => set("port", e.target.value)}
+              />
             </Field>
             <Field label={t("ig.db.database")}>
-              <input value={form.database_name} onChange={(e) => set("database_name", e.target.value.trim())} />
+              <input
+                value={form.database_name}
+                onChange={(e) => set("database_name", e.target.value.trim())}
+              />
             </Field>
             <Field label={t("ig.db.username")}>
-              <input value={form.username} autoComplete="off" onChange={(e) => set("username", e.target.value.trim())} />
+              <input
+                value={form.username}
+                autoComplete="off"
+                onChange={(e) => set("username", e.target.value.trim())}
+              />
             </Field>
             <Field label={t("ig.db.password")}>
               <input
@@ -810,20 +877,38 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
               />
             </Field>
             <Field label={t("ig.db.maxRows")}>
-              <input type="number" value={form.max_rows} onChange={(e) => set("max_rows", e.target.value)} />
+              <input
+                type="number"
+                value={form.max_rows}
+                onChange={(e) => set("max_rows", e.target.value)}
+              />
             </Field>
             <Field label={t("ig.db.timeout")}>
-              <input type="number" value={form.timeout_ms} onChange={(e) => set("timeout_ms", e.target.value)} />
+              <input
+                type="number"
+                value={form.timeout_ms}
+                onChange={(e) => set("timeout_ms", e.target.value)}
+              />
             </Field>
           </div>
           <Field label={t("ig.db.description")}>
             <input value={form.description} onChange={(e) => set("description", e.target.value)} />
           </Field>
           <label className="small">
-            <input type="checkbox" checked={form.ssl} onChange={(e) => set("ssl", e.target.checked)} /> TLS
+            <input
+              type="checkbox"
+              checked={form.ssl}
+              onChange={(e) => set("ssl", e.target.checked)}
+            />{" "}
+            TLS
           </label>{" "}
           <label className="small">
-            <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} /> {t("ig.db.enabled")}
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(e) => set("enabled", e.target.checked)}
+            />{" "}
+            {t("ig.db.enabled")}
           </label>
           <p className="muted small">{t("ig.db.scopeHint")}</p>
           <div className="row">
@@ -846,15 +931,7 @@ function sourceLabel(t: (k: string) => string, source: string) {
   return source === "platform" || source === "env" ? t(`ig.src.${source}`) : "";
 }
 
-function EnvNote({
-  st,
-  which,
-  reload,
-}: {
-  st: any;
-  which: string;
-  reload: () => void;
-}) {
+function EnvNote({ st, which, reload }: { st: any; which: string; reload: () => void }) {
   const { t } = useI18n();
   if (st?.source === "env")
     return (
@@ -863,10 +940,8 @@ function EnvNote({
         <button
           className="sm ghost"
           onClick={async () =>
-            (await act(
-              () => api(`/api/integrations/${which}/adopt-env`, {}),
-              t("ig.adopted"),
-            )) && reload()
+            (await act(() => api(`/api/integrations/${which}/adopt-env`, {}), t("ig.adopted"))) &&
+            reload()
           }
         >
           <Upload size={14} strokeWidth={2} />
@@ -925,9 +1000,7 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
       <Steps>
         <li>
           {slot(t("ig.bb.s1"), {
-            link: (
-              <Link href="https://id.atlassian.com/manage-profile/security/api-tokens" />
-            ),
+            link: <Link href="https://id.atlassian.com/manage-profile/security/api-tokens" />,
           })}
         </li>
         <li>{t("ig.bb.s2")}</li>
@@ -947,13 +1020,7 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
             onChange={(e) => setF({ ...f, workspace: e.target.value })}
           />
         </Field>
-        <Field
-          label={
-            st?.configured
-              ? t("ig.bb.tokenNow", { token: st.token })
-              : t("ig.bb.token")
-          }
-        >
+        <Field label={st?.configured ? t("ig.bb.tokenNow", { token: st.token }) : t("ig.bb.token")}>
           <input
             type="password"
             autoComplete="off"
@@ -1005,7 +1072,9 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState<string>();
   const [mine, setMine] = useState<string>();
-  const [chats, setChats] = useState<Array<{id:string;name:string;type:string}> | null>(null);
+  const [chats, setChats] = useState<Array<{ id: string; name: string; type: string }> | null>(
+    null,
+  );
   const [bindingLink, setBindingLink] = useState("");
   const [prefs, setPrefs] = useState<Record<string, any>>({});
   const [busy, setBusy] = useState(false);
@@ -1015,52 +1084,246 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
     if (result) setBindingLink(result.url);
   };
   const disconnect = async () => {
-    if (await act(() => api("/api/integrations/telegram/disconnect", {}))) { setBindingLink(""); reload(); }
+    if (await act(() => api("/api/integrations/telegram/disconnect", {}))) {
+      setBindingLink("");
+      reload();
+    }
   };
   const savePrefs = async () => {
-    if (await act(() => api("/api/integrations/telegram/preferences", prefs), t("ig.tg.prefsSaved"))) { setPrefs({}); reload(); }
+    if (
+      await act(() => api("/api/integrations/telegram/preferences", prefs), t("ig.tg.prefsSaved"))
+    ) {
+      setPrefs({});
+      reload();
+    }
   };
   const save = async () => {
     setBusy(true);
-    const result = await act(() => api("/api/integrations/telegram", {botToken:token,chatId:chat}), t("ig.tg.saved"));
+    const result = await act(
+      () => api("/api/integrations/telegram", { botToken: token, chatId: chat }),
+      t("ig.tg.saved"),
+    );
     setBusy(false);
-    if (result) { setToken(""); setChatId(undefined); reload(); }
+    if (result) {
+      setToken("");
+      setChatId(undefined);
+      reload();
+    }
   };
-  return <Row id="telegram" icon={Send} title="Telegram" health={!st ? "loading" : st.configured ? "ok" : "off"} {...p}
-    summary={st?.configured ? <>{sourceLabel(t,st.source)} · {st.binding ? t("ig.tg.connected",{id:st.binding.telegram_user_id}) : t("ig.tg.mineMissing")}</> : t("ig.tg.summaryOff")}>
-    <p className="muted small">{t("ig.tg.body")}</p>
-    {st?.canManage && <>
-      <EnvNote st={st} which="telegram" reload={reload}/>
-      <Steps><li>{slot(t("ig.tg.s1"),{link:<Link href="https://t.me/BotFather"/>})}</li><li>{t("ig.tg.s2")}</li><li>{t("ig.tg.s3")}</li></Steps>
-      <div className="ig-grid">
-        <Field label={st.configured ? t("ig.tg.tokenNow",{token:st.botToken}) : t("ig.tg.token")}><input type="password" autoComplete="off" value={token} placeholder={st.configured?t("ig.keep"):"123456789:AA…"} onChange={e=>setToken(e.target.value)}/></Field>
-        <Field label={t("ig.tg.chatId")}><input value={chat} onChange={e=>setChatId(e.target.value)}/></Field>
-      </div>
-      {chats && <div className="ig-chats small">{chats.length ? chats.map(c=><button key={c.id} type="button" className="sm ghost" onClick={()=>setChatId(c.id)}>{c.name || c.id} · {c.type} · {c.id}</button>) : <span>{t("ig.tg.none")}</span>}</div>}
-      <div className="ig-actions">
-        <button type="button" className="sm" disabled={busy || (!token && !st.configured)} onClick={save}>{busy?t("ig.checking"):t("ig.save")}</button>
-        <button type="button" className="sm ghost" disabled={!token && !st.configured} onClick={async()=>{const result=await act(()=>api<any[]>("/api/integrations/telegram/chats",{botToken:token}));if(result)setChats(result);}}>{t("ig.tg.find")}</button>
-        {st.source==="platform" && <button type="button" className="sm ghost" onClick={async()=>{if(await act(()=>api("/api/integrations/telegram/clear",{})))reload();}}>{t("ig.removePlatform")}</button>}
-      </div>
-    </>}
-    {st?.configured && <section className="ig-telegram-settings">
-      <h4>{t("ig.tg.interactiveTitle")}</h4><p className="muted small">{t("ig.tg.bindingHint")}</p>
-      <p className="small">{t("ig.tg.transport")}: <code>{st.mode ?? "off"}</code>{st.mode && st.mode!=="off" && <> · <span className={`ig-tg-receiver ${st.receiver?.active?"is-ok":"is-warn"}`} role="status">{t(st.receiver?.active?"ig.tg.receiverActive":"ig.tg.receiverDown")}</span></>}</p>
-      {st.mode==="off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}
-      {st.needsRebind && <p>{t("ig.tg.rebind")}</p>}
-      <div className="ig-actions">
-        {st.binding || st.needsRebind ? <button type="button" className="ghost sm" onClick={disconnect}>{t("ig.tg.disconnect")}</button> : <button type="button" className="sm" disabled={st.mode==="off"} onClick={connect}>{t("ig.tg.connect")}</button>}
-        {bindingLink && !st.binding && <><a className="btn ghost sm" href={bindingLink} target="_blank" rel="noreferrer">{t("ig.tg.openBinding")}</a><button type="button" className="ghost sm" onClick={reload}>{t("ig.tg.checkBinding")}</button></>}
-      </div>
-      <div className="ig-grid">
-        {(["approvals","questions","failures","completions","interactive"] as const).map(key=><label className="row tight small" key={key}><input type="checkbox" checked={prefs[key] ?? st.preferences?.[key] ?? true} onChange={e=>setPrefs(v=>({...v,[key]:e.target.checked}))}/>{t(`ig.tg.pref.${key}`)}</label>)}
-        <Field label={t("ig.tg.language")}><select aria-label={t("ig.tg.language")} value={prefs.locale ?? st.preferences?.locale ?? "vi"} onChange={e=>setPrefs(v=>({...v,locale:e.target.value}))}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></Field>
-      </div>
-      <button type="button" className="ghost sm" disabled={!Object.keys(prefs).length} onClick={savePrefs}>{t("ig.save")}</button>
-      {!st.binding && <details><summary>{t("ig.tg.legacy")}</summary><Field label={t("ig.tg.mine")}><input value={mine ?? st.myChatId ?? ""} onChange={e=>setMine(e.target.value)}/></Field><button type="button" className="ghost sm" onClick={async()=>{if(await act(()=>api("/api/integrations/telegram/destination",{chatId:mine ?? st.myChatId ?? ""}))) {setMine(undefined);reload();}}}>{t("ig.tg.mineSave")}</button><p className="muted small">{t("ig.tg.legacyHint")}</p></details>}
-      <button type="button" className="ghost sm" onClick={()=>act(()=>api("/api/integrations/telegram/test",{}),t("ig.tg.sent"))}>{t("ig.tg.test")}</button>
-    </section>}
-  </Row>;
+  return (
+    <Row
+      id="telegram"
+      icon={Send}
+      title="Telegram"
+      health={!st ? "loading" : st.configured ? "ok" : "off"}
+      {...p}
+      summary={
+        st?.configured ? (
+          <>
+            {sourceLabel(t, st.source)} ·{" "}
+            {st.binding
+              ? t("ig.tg.connected", { id: st.binding.telegram_user_id })
+              : t("ig.tg.mineMissing")}
+          </>
+        ) : (
+          t("ig.tg.summaryOff")
+        )
+      }
+    >
+      <p className="muted small">{t("ig.tg.body")}</p>
+      {st?.canManage && (
+        <>
+          <EnvNote st={st} which="telegram" reload={reload} />
+          <Steps>
+            <li>{slot(t("ig.tg.s1"), { link: <Link href="https://t.me/BotFather" /> })}</li>
+            <li>{t("ig.tg.s2")}</li>
+            <li>{t("ig.tg.s3")}</li>
+          </Steps>
+          <div className="ig-grid">
+            <Field
+              label={st.configured ? t("ig.tg.tokenNow", { token: st.botToken }) : t("ig.tg.token")}
+            >
+              <input
+                type="password"
+                autoComplete="off"
+                value={token}
+                placeholder={st.configured ? t("ig.keep") : "123456789:AA…"}
+                onChange={(e) => setToken(e.target.value)}
+              />
+            </Field>
+            <Field label={t("ig.tg.chatId")}>
+              <input value={chat} onChange={(e) => setChatId(e.target.value)} />
+            </Field>
+          </div>
+          {chats && (
+            <div className="ig-chats small">
+              {chats.length ? (
+                chats.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="sm ghost"
+                    onClick={() => setChatId(c.id)}
+                  >
+                    {c.name || c.id} · {c.type} · {c.id}
+                  </button>
+                ))
+              ) : (
+                <span>{t("ig.tg.none")}</span>
+              )}
+            </div>
+          )}
+          <div className="ig-actions">
+            <button
+              type="button"
+              className="sm"
+              disabled={busy || (!token && !st.configured)}
+              onClick={save}
+            >
+              {busy ? t("ig.checking") : t("ig.save")}
+            </button>
+            <button
+              type="button"
+              className="sm ghost"
+              disabled={!token && !st.configured}
+              onClick={async () => {
+                const result = await act(() =>
+                  api<any[]>("/api/integrations/telegram/chats", { botToken: token }),
+                );
+                if (result) setChats(result);
+              }}
+            >
+              {t("ig.tg.find")}
+            </button>
+            {st.source === "platform" && (
+              <button
+                type="button"
+                className="sm ghost"
+                onClick={async () => {
+                  if (await act(() => api("/api/integrations/telegram/clear", {}))) reload();
+                }}
+              >
+                {t("ig.removePlatform")}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+      {st?.configured && (
+        <section className="ig-telegram-settings">
+          <h4>{t("ig.tg.interactiveTitle")}</h4>
+          <p className="muted small">{t("ig.tg.bindingHint")}</p>
+          <p className="small">
+            {t("ig.tg.transport")}: <code>{st.mode ?? "off"}</code>
+            {st.mode && st.mode !== "off" && (
+              <>
+                {" "}
+                ·{" "}
+                <span
+                  className={`ig-tg-receiver ${st.receiver?.active ? "is-ok" : "is-warn"}`}
+                  role="status"
+                >
+                  {t(st.receiver?.active ? "ig.tg.receiverActive" : "ig.tg.receiverDown")}
+                </span>
+              </>
+            )}
+          </p>
+          {st.mode === "off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}
+          {st.needsRebind && <p>{t("ig.tg.rebind")}</p>}
+          <div className="ig-actions">
+            {st.binding || st.needsRebind ? (
+              <button type="button" className="ghost sm" onClick={disconnect}>
+                {t("ig.tg.disconnect")}
+              </button>
+            ) : (
+              <button type="button" className="sm" disabled={st.mode === "off"} onClick={connect}>
+                {t("ig.tg.connect")}
+              </button>
+            )}
+            {bindingLink && !st.binding && (
+              <>
+                <a className="btn ghost sm" href={bindingLink} target="_blank" rel="noreferrer">
+                  {t("ig.tg.openBinding")}
+                </a>
+                <button type="button" className="ghost sm" onClick={reload}>
+                  {t("ig.tg.checkBinding")}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="ig-grid">
+            {(["approvals", "questions", "failures", "completions", "interactive"] as const).map(
+              (key) => (
+                <label className="row tight small" key={key}>
+                  <input
+                    type="checkbox"
+                    checked={prefs[key] ?? st.preferences?.[key] ?? true}
+                    onChange={(e) => setPrefs((v) => ({ ...v, [key]: e.target.checked }))}
+                  />
+                  {t(`ig.tg.pref.${key}`)}
+                </label>
+              ),
+            )}
+            <Field label={t("ig.tg.language")}>
+              <select
+                aria-label={t("ig.tg.language")}
+                value={prefs.locale ?? st.preferences?.locale ?? "vi"}
+                onChange={(e) => setPrefs((v) => ({ ...v, locale: e.target.value }))}
+              >
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+              </select>
+            </Field>
+          </div>
+          <button
+            type="button"
+            className="ghost sm"
+            disabled={!Object.keys(prefs).length}
+            onClick={savePrefs}
+          >
+            {t("ig.save")}
+          </button>
+          {!st.binding && (
+            <details>
+              <summary>{t("ig.tg.legacy")}</summary>
+              <Field label={t("ig.tg.mine")}>
+                <input
+                  value={mine ?? st.myChatId ?? ""}
+                  onChange={(e) => setMine(e.target.value)}
+                />
+              </Field>
+              <button
+                type="button"
+                className="ghost sm"
+                onClick={async () => {
+                  if (
+                    await act(() =>
+                      api("/api/integrations/telegram/destination", {
+                        chatId: mine ?? st.myChatId ?? "",
+                      }),
+                    )
+                  ) {
+                    setMine(undefined);
+                    reload();
+                  }
+                }}
+              >
+                {t("ig.tg.mineSave")}
+              </button>
+              <p className="muted small">{t("ig.tg.legacyHint")}</p>
+            </details>
+          )}
+          <button
+            type="button"
+            className="ghost sm"
+            onClick={() => act(() => api("/api/integrations/telegram/test", {}), t("ig.tg.sent"))}
+          >
+            {t("ig.tg.test")}
+          </button>
+        </section>
+      )}
+    </Row>
+  );
 }
 
 export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {}) {
@@ -1072,15 +1335,10 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
   });
   return (
     <>
-      <PageHeader
-        icon={PlugZap}
-        title={t("ig.title")}
-        subtitle={t("ig.subtitle")}
-      />
+      <PageHeader icon={PlugZap} title={t("ig.title")} subtitle={t("ig.subtitle")} />
       <section className="ig-group">
         <h3 className="ig-group-title">
-          {t("ig.sources")}{" "}
-          <span className="muted small">· {t("ig.sourcesHint")}</span>
+          {t("ig.sources")} <span className="muted small">· {t("ig.sourcesHint")}</span>
         </h3>
         <div className="ig-list">
           <ArgoCd {...row("argocd")} />

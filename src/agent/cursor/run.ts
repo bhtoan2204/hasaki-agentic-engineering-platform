@@ -47,7 +47,11 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
   const bin = cursorBinary();
   let help = "";
   try {
-    const out = await exec(bin, ["--help"], { env: scrubEnv(process.env), timeout: 20_000, maxBuffer: 1024 * 1024 });
+    const out = await exec(bin, ["--help"], {
+      env: scrubEnv(process.env),
+      timeout: 20_000,
+      maxBuffer: 1024 * 1024,
+    });
     help = `${out.stdout}\n${out.stderr}`;
   } catch (e: any) {
     const missing = e?.code === "ENOENT";
@@ -59,18 +63,44 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
         : `Cursor CLI (${bin}) failed: ${String(e?.stderr || e?.message || e).slice(0, 400)}. The platform will not fall back to Claude.`,
     });
   }
-  for (const flag of ["--print", "--output-format", "--resume", "--mode", "--approve-mcps", "--trust", "--sandbox", "--force"]) {
+  for (const flag of [
+    "--print",
+    "--output-format",
+    "--resume",
+    "--mode",
+    "--approve-mcps",
+    "--trust",
+    "--sandbox",
+    "--force",
+  ]) {
     if (!help.includes(flag))
-      return finish({ ok: false, bin, error: `Cursor CLI at ${bin} does not advertise ${flag}. This version cannot enforce the platform's execution policy. The platform will not fall back to Claude.` });
+      return finish({
+        ok: false,
+        bin,
+        error: `Cursor CLI at ${bin} does not advertise ${flag}. This version cannot enforce the platform's execution policy. The platform will not fall back to Claude.`,
+      });
   }
   if (!process.env.CURSOR_API_KEY) {
     try {
-      const st = await exec(bin, ["status"], { env: scrubEnv(process.env), timeout: 20_000, maxBuffer: 256 * 1024 });
+      const st = await exec(bin, ["status"], {
+        env: scrubEnv(process.env),
+        timeout: 20_000,
+        maxBuffer: 256 * 1024,
+      });
       const body = `${st.stdout}\n${st.stderr}`;
       if (!/logged in/i.test(body))
-        return finish({ ok: false, bin, error: "Cursor CLI is not authenticated. Run `agent login` on this machine, or set CURSOR_API_KEY. The platform will not fall back to Claude." });
+        return finish({
+          ok: false,
+          bin,
+          error:
+            "Cursor CLI is not authenticated. Run `agent login` on this machine, or set CURSOR_API_KEY. The platform will not fall back to Claude.",
+        });
     } catch (e: any) {
-      return finish({ ok: false, bin, error: `Cursor CLI authentication check failed: ${String(e?.stderr || e?.message || e).split("\n")[0]}. Run \`agent login\` or set CURSOR_API_KEY. The platform will not fall back to Claude.` });
+      return finish({
+        ok: false,
+        bin,
+        error: `Cursor CLI authentication check failed: ${String(e?.stderr || e?.message || e).split("\n")[0]}. Run \`agent login\` or set CURSOR_API_KEY. The platform will not fall back to Claude.`,
+      });
     }
   }
   return finish({ ok: true, bin, supportsModel: help.includes("--model") });
@@ -97,7 +127,8 @@ export interface CursorTurnInput {
 
 export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTurnResult> {
   const cap = await cursorCapabilities();
-  if (!cap.ok) return { isError: true, text: cap.error || "Cursor CLI is not usable", assistantTurns: 0 };
+  if (!cap.ok)
+    return { isError: true, text: cap.error || "Cursor CLI is not usable", assistantTurns: 0 };
   if (input.policy.delegation)
     return {
       isError: true,
@@ -105,13 +136,28 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       assistantTurns: 0,
     };
   mkdirSync(input.cwd, { recursive: true });
-  const toolEnv = envFromExecution(input.ctx, input.mode, input.policy, input.metrics ?? newMetrics(""), () => { });
-  const broker = await startBroker({ policy: input.policy, cwd: input.cwd, requireHooks: false, dispatch: (name, args) => dispatchPlatformTool(name, args, toolEnv) });
+  const toolEnv = envFromExecution(
+    input.ctx,
+    input.mode,
+    input.policy,
+    input.metrics ?? newMetrics(""),
+    () => {},
+  );
+  const broker = await startBroker({
+    policy: input.policy,
+    cwd: input.cwd,
+    requireHooks: false,
+    dispatch: (name, args) => dispatchPlatformTool(name, args, toolEnv),
+  });
   try {
     const promptFile = join(input.cwd, ".cursor", "task-prompt.txt");
     mkdirSync(join(input.cwd, ".cursor"), { recursive: true });
     writeFileSync(promptFile, input.prompt);
-    writeCursorPolicy(input.cwd, { reposRoot: config.reposRoot, protectedRoots: input.policy.protectedRoots, workspaces: [...input.policy.workspaces] });
+    writeCursorPolicy(input.cwd, {
+      reposRoot: config.reposRoot,
+      protectedRoots: input.policy.protectedRoots,
+      workspaces: [...input.policy.workspaces],
+    });
     writeMcpConfig(input.cwd, process.execPath, [join(import.meta.dirname, "bridge.ts")], {
       PLATFORM_BROKER_SOCKET: broker.socketPath,
       PLATFORM_BROKER_TOKEN: broker.token,
@@ -140,7 +186,9 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     }
     if (input.resumeId) args.push("--resume", input.resumeId);
     for (const dir of extraDirs(input)) args.push("--add-dir", dir);
-    args.push(`Follow the task in ${promptFile}. Do not print or copy .cursor/mcp.json. Use the platform MCP tools for questions, progress, knowledge, and submit_result.`);
+    args.push(
+      `Follow the task in ${promptFile}. Do not print or copy .cursor/mcp.json. Use the platform MCP tools for questions, progress, knowledge, and submit_result.`,
+    );
 
     const child = spawn(cap.bin, args, {
       cwd: input.cwd,
@@ -153,7 +201,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     const kill = () => {
       try {
         if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch { }
+      } catch {}
     };
     const onAbort = () => kill();
     input.ctx.signal.addEventListener("abort", onAbort, { once: true });
@@ -181,14 +229,20 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         if (seenTools.has(eventKey)) return;
         seenTools.add(eventKey);
       }
-      const toolId = ev.call_id ? `${input.invocationId ?? input.ctx.attempt.id}:${ev.call_id}` : undefined;
+      const toolId = ev.call_id
+        ? `${input.invocationId ?? input.ctx.attempt.id}:${ev.call_id}`
+        : undefined;
       if (ev.type === "system" && ev.subtype === "init" && ev.session_id) {
         sessionId = ev.session_id;
         model = ev.model || "";
         if (input.metrics && model) input.metrics.model = model;
         await input.onTelemetry?.();
         await input.ctx.recordSession(ev.session_id, input.cwd, model, "cursor");
-        await input.ctx.log("system", `Cursor session ${ev.session_id} started${model ? ` (model ${model})` : ""}`, { provider: "cursor", session_id: ev.session_id, model: model || null });
+        await input.ctx.log(
+          "system",
+          `Cursor session ${ev.session_id} started${model ? ` (model ${model})` : ""}`,
+          { provider: "cursor", session_id: ev.session_id, model: model || null },
+        );
       } else if (ev.type === "thinking" && ev.text?.trim()) {
         await input.ctx.log("thinking", ev.text, { provider: "cursor" });
       } else if (ev.type === "assistant" && !isDuplicateAssistant(ev, true)) {
@@ -198,28 +252,60 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
           await input.ctx.log("agent", ev.text, { provider: "cursor" });
         }
       } else if (ev.type === "tool_call" && ev.subtype === "started") {
-        const pending = await one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'", [input.ctx.attempt.id]);
-        if (pending?.n) { violation = "This attempt is waiting for clarification; stop native tools until it resumes"; kill(); return; }
+        const pending = await one<{ n: number }>(
+          pool,
+          "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'",
+          [input.ctx.attempt.id],
+        );
+        if (pending?.n) {
+          violation =
+            "This attempt is waiting for clarification; stop native tools until it resumes";
+          kill();
+          return;
+        }
         const shape = toolCallShape(ev.tool_call);
         const name = shape?.name ?? "tool";
         toolCalls[name] = (toolCalls[name] ?? 0) + 1;
-        await input.ctx.log("tool", `${name}`, { provider: "cursor", call_id: ev.call_id, id: toolId, name, tool_call: ev.tool_call });
+        await input.ctx.log("tool", `${name}`, {
+          provider: "cursor",
+          call_id: ev.call_id,
+          id: toolId,
+          name,
+          tool_call: ev.tool_call,
+        });
         const ws = (await workspacesOf(input.ctx.run.id)).map((w) => w.path);
-        const policy = { ...input.policy, workspaces: [...new Set([...input.policy.workspaces, ...ws])] };
+        const policy = {
+          ...input.policy,
+          workspaces: [...new Set([...input.policy.workspaces, ...ws])],
+        };
         const decision = cursorToolDecision(ev.tool_call, policy, input.cwd);
-        const path = String((shape?.body as any)?.args?.path ?? (shape?.body as any)?.args?.file_path ?? "");
-        const outside = (shape?.name === "write" || shape?.name === "edit") && path && writeOutsideWorktrees(path, policy.workspaces);
+        const path = String(
+          (shape?.body as any)?.args?.path ?? (shape?.body as any)?.args?.file_path ?? "",
+        );
+        const outside =
+          (shape?.name === "write" || shape?.name === "edit") &&
+          path &&
+          writeOutsideWorktrees(path, policy.workspaces);
         if (!decision.allow || outside) {
-          const reason = !decision.allow ? decision.reason : `write ${path} is outside the run's worktrees`;
+          const reason = !decision.allow
+            ? decision.reason
+            : `write ${path} is outside the run's worktrees`;
           violation = reason;
           denied.push({ tool: shape?.name ?? "tool", reason });
-          await input.ctx.log("tool", `denied ${shape?.name ?? "tool"}: ${reason}`, { provider: "cursor" });
+          await input.ctx.log("tool", `denied ${shape?.name ?? "tool"}: ${reason}`, {
+            provider: "cursor",
+          });
           kill();
         }
       } else if (ev.type === "tool_call" && ev.subtype === "completed") {
         const failed = JSON.stringify(ev.tool_call ?? {}).includes('"error"');
         if (failed) toolErrors++;
-        await input.ctx.log("tool_result", JSON.stringify(ev.tool_call ?? {}).slice(0, 4000), { provider: "cursor", call_id: ev.call_id, tool_use_id: toolId, is_error: failed });
+        await input.ctx.log("tool_result", JSON.stringify(ev.tool_call ?? {}).slice(0, 4000), {
+          provider: "cursor",
+          call_id: ev.call_id,
+          tool_use_id: toolId,
+          is_error: failed,
+        });
       } else if (ev.type === "result") {
         if (sawResult) return;
         sawResult = true;
@@ -232,7 +318,11 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
 
     const consume = async (chunk: string) => {
       const { events, errors } = parser.push(chunk);
-      for (const err of errors) await input.ctx.log("system", `Cursor stream: malformed line (${err.error})`, { provider: "cursor", line: err.line });
+      for (const err of errors)
+        await input.ctx.log("system", `Cursor stream: malformed line (${err.error})`, {
+          provider: "cursor",
+          line: err.line,
+        });
       for (const ev of events) await handle(ev);
     };
 
@@ -258,13 +348,14 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     if (child.pid) childGroups.remove(child.pid);
     const tail = parser.flush();
     for (const ev of tail.events) await handle(ev);
-    for (const err of tail.errors) await input.ctx.log("system", `Cursor stream: malformed line (${err.error})`, { provider: "cursor" });
+    for (const err of tail.errors)
+      await input.ctx.log("system", `Cursor stream: malformed line (${err.error})`, {
+        provider: "cursor",
+      });
 
     rmSync(join(input.cwd, ".cursor", "mcp.json"), { force: true });
     rmSync(promptFile, { force: true });
     rmSync(join(input.cwd, ".cursor", "cli.json"), { force: true });
-
-
 
     const submittedRow = await one<{ data: { output?: Record<string, unknown> } }>(
       pool,
@@ -278,35 +369,68 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       input.metrics.sessions += sessionId ? 1 : 0;
       input.metrics.duration_ms += duration ?? 0;
       input.metrics.turns += assistantTurns;
-      for (const [name, count] of Object.entries(toolCalls)) input.metrics.tool_calls[name] = (input.metrics.tool_calls[name] ?? 0) + count;
+      for (const [name, count] of Object.entries(toolCalls))
+        input.metrics.tool_calls[name] = (input.metrics.tool_calls[name] ?? 0) + count;
       input.metrics.tool_errors += toolErrors;
       input.metrics.denied.push(...denied);
     }
 
     if (input.ctx.signal.aborted) return { isError: true, text: "canceled", assistantTurns };
-    if (violation) return { isError: true, text: `Cursor tool blocked by platform policy: ${violation}`, assistantTurns: Math.max(assistantTurns, 1) };
+    if (violation)
+      return {
+        isError: true,
+        text: `Cursor tool blocked by platform policy: ${violation}`,
+        assistantTurns: Math.max(assistantTurns, 1),
+      };
 
     const ws = (await workspacesOf(input.ctx.run.id)).map((w) => w.path);
     for (const p of ws) if (!input.policy.workspaces.includes(p)) input.policy.workspaces.push(p);
 
-    if (stderr.trim()) await input.ctx.log("log", stderr.trim().slice(0, 4000), { provider: "cursor", stream: "stderr" });
+    if (stderr.trim())
+      await input.ctx.log("log", stderr.trim().slice(0, 4000), {
+        provider: "cursor",
+        stream: "stderr",
+      });
 
     if (!sawResult) {
-      const why = exitCode === 0 ? "Cursor exited 0 without a result event" : `Cursor exited ${exitCode ?? "unknown"} without a result event`;
-      return { isError: true, text: `${why}${stderr.trim() ? `: ${stderr.trim().slice(0, 500)}` : ""}`, assistantTurns, submitted };
+      const why =
+        exitCode === 0
+          ? "Cursor exited 0 without a result event"
+          : `Cursor exited ${exitCode ?? "unknown"} without a result event`;
+      return {
+        isError: true,
+        text: `${why}${stderr.trim() ? `: ${stderr.trim().slice(0, 500)}` : ""}`,
+        assistantTurns,
+        submitted,
+      };
     }
-    if (exitCode !== 0 || isError) return { isError: true, text: text || stderr.trim().slice(0, 500) || `Cursor exited ${exitCode}`, assistantTurns, submitted };
+    if (exitCode !== 0 || isError)
+      return {
+        isError: true,
+        text: text || stderr.trim().slice(0, 500) || `Cursor exited ${exitCode}`,
+        assistantTurns,
+        submitted,
+      };
     return { isError: false, text, assistantTurns, submitted };
-  } finally { await broker.close(); rmSync(join(input.cwd, ".cursor", "mcp.json"), { force: true }); }
+  } finally {
+    await broker.close();
+    rmSync(join(input.cwd, ".cursor", "mcp.json"), { force: true });
+  }
 }
 
 function extraDirs(input: CursorTurnInput): string[] {
-  const dirs = new Set<string>([config.reposRoot, ...(input.policy.protectedRoots ?? []), ...input.policy.workspaces]);
+  const dirs = new Set<string>([
+    config.reposRoot,
+    ...(input.policy.protectedRoots ?? []),
+    ...input.policy.workspaces,
+  ]);
   dirs.delete(input.cwd);
   return [...dirs].filter((d) => d && existsSync(d));
 }
 
-function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv { return agentEnvironment(env, "cursor"); }
+function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return agentEnvironment(env, "cursor");
+}
 
 /** One-shot text completion for auxiliary calls (ranking, report, test explanation). No tools that mutate. */
 export async function cursorComplete(prompt: string, signal?: AbortSignal): Promise<string> {
@@ -317,13 +441,31 @@ export async function cursorComplete(prompt: string, signal?: AbortSignal): Prom
   const file = join(dir, "prompt.txt");
   writeFileSync(file, prompt);
   writeCursorPolicy(dir, { reposRoot: config.reposRoot, workspaces: [] });
-  const args = ["--print", "--output-format", "json", "--mode", "ask", "--sandbox", "enabled", "--trust", "--workspace", dir, `Reply using only the instructions in ${file}. Do not modify files.`];
-  const child = spawn(cap.bin, args, { cwd: dir, env: scrubEnv(process.env), detached: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+  const args = [
+    "--print",
+    "--output-format",
+    "json",
+    "--mode",
+    "ask",
+    "--sandbox",
+    "enabled",
+    "--trust",
+    "--workspace",
+    dir,
+    `Reply using only the instructions in ${file}. Do not modify files.`,
+  ];
+  const child = spawn(cap.bin, args, {
+    cwd: dir,
+    env: scrubEnv(process.env),
+    detached: true,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   if (child.pid) childGroups.add(child.pid);
   const kill = () => {
     try {
       if (child.pid) process.kill(-child.pid, "SIGKILL");
-    } catch { }
+    } catch {}
   };
   signal?.addEventListener("abort", kill, { once: true });
   let stdout = "";
@@ -337,7 +479,8 @@ export async function cursorComplete(prompt: string, signal?: AbortSignal): Prom
   if (child.pid) childGroups.remove(child.pid);
   rmSync(dir, { recursive: true, force: true });
   if (signal?.aborted) throw new Error("canceled");
-  if (code !== 0) throw new Error(`Cursor text completion failed (${code}): ${stderr.slice(0, 300)}`);
+  if (code !== 0)
+    throw new Error(`Cursor text completion failed (${code}): ${stderr.slice(0, 300)}`);
   try {
     const msg = JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) || "{}");
     if (typeof msg.result === "string") return msg.result;

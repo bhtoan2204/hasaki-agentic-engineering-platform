@@ -118,7 +118,13 @@ export interface Config {
    * override these. Checked after every attempt: `warnPct` logs a warning, 100% pauses the run when action = "pause".
    * Env: COST_BUDGET_RUN_USD / COST_BUDGET_WORK_ITEM_USD / COST_BUDGET_WARN_PCT / COST_BUDGET_ACTION.
    */
-  costBudget: { runUsd: number | null; workItemUsd: number | null; warnPct: number; action: "pause" | "warn"; unknownEstimate: "warn" | "pause" };
+  costBudget: {
+    runUsd: number | null;
+    workItemUsd: number | null;
+    warnPct: number;
+    action: "pause" | "warn";
+    unknownEstimate: "warn" | "pause";
+  };
   /**
    * Routing guard rails. `sensitiveProviders`: providers with an approved security policy for HIGH_RISK work
    * (ROUTING_SENSITIVE_PROVIDERS, comma-separated; default: the platform's default provider only).
@@ -343,7 +349,13 @@ const defaults: Config = {
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
-  costBudget: { runUsd: null, workItemUsd: null, warnPct: 0.8, action: "pause", unknownEstimate: "warn" },
+  costBudget: {
+    runUsd: null,
+    workItemUsd: null,
+    warnPct: 0.8,
+    action: "pause",
+    unknownEstimate: "warn",
+  },
   routing: { sensitiveProviders: [] },
   database: {
     poolMax: 10,
@@ -421,9 +433,7 @@ export let instanceIdentityExplicit = false;
 
 function load(): Config {
   const file = resolve(process.env.PLATFORM_CONFIG ?? "config.json");
-  const fromFile = existsSync(file)
-    ? JSON.parse(readFileSync(file, "utf8"))
-    : {};
+  const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   const cfg: Config = {
     ...defaults,
     ...fromFile,
@@ -458,10 +468,7 @@ function load(): Config {
     "maxLiveAgents",
   ] as const)
     cfg.evaluation[k] = positiveInt(`evaluation.${k}`, cfg.evaluation[k]);
-  if (
-    !Number.isFinite(cfg.evaluation.maxCostUsd) ||
-    cfg.evaluation.maxCostUsd < 0
-  )
+  if (!Number.isFinite(cfg.evaluation.maxCostUsd) || cfg.evaluation.maxCostUsd < 0)
     throw new Error("evaluation.maxCostUsd must be nonnegative");
   for (const k of [
     "maxFileBytes",
@@ -473,13 +480,9 @@ function load(): Config {
     "contextTokens",
     "retentionDays",
   ] as const)
-    cfg.codeIntelligence[k] = positiveInt(
-      `codeIntelligence.${k}`,
-      cfg.codeIntelligence[k],
-    );
+    cfg.codeIntelligence[k] = positiveInt(`codeIntelligence.${k}`, cfg.codeIntelligence[k]);
   for (const v of Object.values(cfg.codeIntelligence.weights))
-    if (!Number.isFinite(v) || v < 0)
-      throw new Error("Invalid code intelligence weight");
+    if (!Number.isFinite(v) || v < 0) throw new Error("Invalid code intelligence weight");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
@@ -505,9 +508,7 @@ function load(): Config {
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.dataDir = resolve(cfg.dataDir);
   cfg.reposRoot = resolve(cfg.reposRoot);
-  instanceIdentityExplicit = !!(
-    process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId
-  );
+  instanceIdentityExplicit = !!(process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
   cfg.instanceId = persistentInstanceId(
     cfg.dataDir,
     process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId,
@@ -516,45 +517,25 @@ function load(): Config {
     "instance.heartbeatSeconds",
     cfg.instance.heartbeatSeconds,
   );
-  cfg.instance.offlineSeconds = positiveInt(
-    "instance.offlineSeconds",
-    cfg.instance.offlineSeconds,
-  );
+  cfg.instance.offlineSeconds = positiveInt("instance.offlineSeconds", cfg.instance.offlineSeconds);
   if (cfg.instance.offlineSeconds <= cfg.instance.heartbeatSeconds * 2)
-    throw new Error(
-      "instance.offlineSeconds must exceed twice heartbeatSeconds",
-    );
-  for (const key of [
-    "workers",
-    "leaseSeconds",
-    "heartbeatSeconds",
-    "pollMs",
-  ] as const)
+    throw new Error("instance.offlineSeconds must exceed twice heartbeatSeconds");
+  for (const key of ["workers", "leaseSeconds", "heartbeatSeconds", "pollMs"] as const)
     cfg.scheduler[key] = positiveInt(`scheduler.${key}`, cfg.scheduler[key]);
   if (cfg.scheduler.heartbeatSeconds >= cfg.scheduler.leaseSeconds)
     throw new Error("scheduler heartbeat must be shorter than lease");
-  if (
-    !Number.isInteger(cfg.scheduler.lightWorkers) ||
-    cfg.scheduler.lightWorkers < 0
-  )
+  if (!Number.isInteger(cfg.scheduler.lightWorkers) || cfg.scheduler.lightWorkers < 0)
     throw new Error("scheduler.lightWorkers must be nonnegative");
   const dbUrl = new URL(process.env.DATABASE_URL ?? cfg.databaseUrl);
   if (!["postgres:", "postgresql:"].includes(dbUrl.protocol))
     throw new Error("databaseUrl must use PostgreSQL");
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
-    poolMax: positiveInt(
-      "database.poolMax",
-      process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax,
-    ),
-    poolMin: Math.max(
-      0,
-      Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0,
-    ),
+    poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),
+    poolMin: Math.max(0, Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0),
     connectionTimeoutMillis: positiveInt(
       "database.connectionTimeoutMillis",
-      process.env.DATABASE_CONNECTION_TIMEOUT_MS ??
-      cfg.database.connectionTimeoutMillis,
+      process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? cfg.database.connectionTimeoutMillis,
     ),
     idleTimeoutMillis: positiveInt(
       "database.idleTimeoutMillis",
@@ -562,16 +543,29 @@ function load(): Config {
     ),
   };
   cfg.database.poolMin = Math.min(cfg.database.poolMin, cfg.database.poolMax);
-  const sensitive = (process.env.ROUTING_SENSITIVE_PROVIDERS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  cfg.routing = { sensitiveProviders: sensitive.length ? sensitive : cfg.routing?.sensitiveProviders?.length ? cfg.routing.sensitiveProviders : [cfg.agent?.defaultProvider ?? "claude"] };
+  const sensitive = (process.env.ROUTING_SENSITIVE_PROVIDERS ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  cfg.routing = {
+    sensitiveProviders: sensitive.length
+      ? sensitive
+      : cfg.routing?.sensitiveProviders?.length
+        ? cfg.routing.sensitiveProviders
+        : [cfg.agent?.defaultProvider ?? "claude"],
+  };
   const usd = (v: unknown) => (v == null || v === "" ? null : Number(v) > 0 ? Number(v) : null);
   const cb = { ...defaults.costBudget, ...(cfg.costBudget ?? {}) };
   cfg.costBudget = {
     runUsd: usd(process.env.COST_BUDGET_RUN_USD ?? cb.runUsd),
     workItemUsd: usd(process.env.COST_BUDGET_WORK_ITEM_USD ?? cb.workItemUsd),
-    warnPct: Math.min(1, Math.max(0.1, Number(process.env.COST_BUDGET_WARN_PCT ?? cb.warnPct) || 0.8)),
+    warnPct: Math.min(
+      1,
+      Math.max(0.1, Number(process.env.COST_BUDGET_WARN_PCT ?? cb.warnPct) || 0.8),
+    ),
     action: (process.env.COST_BUDGET_ACTION ?? cb.action) === "warn" ? "warn" : "pause",
-    unknownEstimate: (process.env.COST_BUDGET_UNKNOWN ?? cb.unknownEstimate) === "pause" ? "pause" : "warn",
+    unknownEstimate:
+      (process.env.COST_BUDGET_UNKNOWN ?? cb.unknownEstimate) === "pause" ? "pause" : "warn",
   };
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
@@ -588,8 +582,7 @@ export function positiveInt(name: string, raw: unknown): number {
   if (typeof raw !== "number" && typeof raw !== "string")
     throw new Error(`${name} must be a positive integer`);
   const n = typeof raw === "number" ? raw : Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1)
-    throw new Error(`${name} must be a positive integer`);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
   return n;
 }
 
@@ -612,29 +605,19 @@ export function codexConfig(): Required<
 > & { models: Record<string, Record<string, string>> } {
   if (execution.getStore()?.evaluation?.fixtureAgent)
     return {
-      bin: join(
-        import.meta.dirname,
-        "..",
-        "test",
-        "fixtures",
-        "fake-codex.mjs",
-      ),
+      bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-codex.mjs"),
       timeoutMs: 15000,
       model: "gpt-test",
       reasoningEffort: "low",
       models: {},
     };
   const c = config.agent.codex ?? {};
-  const timeout = Number(
-    process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000,
-  );
+  const timeout = Number(process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
   return {
     bin: process.env.CODEX_BIN || c.bin || "codex",
-    timeoutMs:
-      Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
     model: process.env.CODEX_MODEL ?? c.model ?? "",
-    reasoningEffort:
-      process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
+    reasoningEffort: process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
     models: c.models ?? {},
   };
 }
@@ -662,13 +645,7 @@ export interface AntigravityConfig {
 export function antigravityConfig(): Required<
   Pick<
     AntigravityConfig,
-    | "bin"
-    | "timeoutMs"
-    | "model"
-    | "effort"
-    | "maxConcurrent"
-    | "allowSubagents"
-    | "sandbox"
+    "bin" | "timeoutMs" | "model" | "effort" | "maxConcurrent" | "allowSubagents" | "sandbox"
   >
 > & { models: Record<string, Record<string, string>> } {
   if (execution.getStore()?.evaluation?.fixtureAgent)
@@ -685,39 +662,30 @@ export function antigravityConfig(): Required<
   const c = config.agent.antigravity ?? {};
   const timeout = Number(
     process.env.AGY_TIMEOUT_MS ||
-    process.env.ANTIGRAVITY_TIMEOUT_MS ||
-    c.timeoutMs ||
-    45 * 60 * 1000,
+      process.env.ANTIGRAVITY_TIMEOUT_MS ||
+      c.timeoutMs ||
+      45 * 60 * 1000,
   );
   const maxConcurrent = Number(
     process.env.AGY_MAX_CONCURRENT ||
-    process.env.ANTIGRAVITY_MAX_CONCURRENT ||
-    c.maxConcurrent ||
-    1,
+      process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+      c.maxConcurrent ||
+      1,
   );
   return {
     bin: process.env.AGY_BIN || process.env.ANTIGRAVITY_BIN || c.bin || "agy",
-    timeoutMs:
-      Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model:
-      process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? "",
-    effort:
-      process.env.AGY_EFFORT ??
-      process.env.ANTIGRAVITY_EFFORT ??
-      c.effort ??
-      "",
-    maxConcurrent:
-      Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model: process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? "",
+    effort: process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? c.effort ?? "",
+    maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
     allowSubagents:
-      (process.env.AGY_ALLOW_SUBAGENTS ??
-        process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
+      (process.env.AGY_ALLOW_SUBAGENTS ?? process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
         ? process.env.AGY_ALLOW_SUBAGENTS === "true" ||
-        process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
+          process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
         : (c.allowSubagents ?? false),
     sandbox:
       (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
-        ? process.env.AGY_SANDBOX === "true" ||
-        process.env.ANTIGRAVITY_SANDBOX === "true"
+        ? process.env.AGY_SANDBOX === "true" || process.env.ANTIGRAVITY_SANDBOX === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},
   };
@@ -727,8 +695,5 @@ export const config = load();
 
 /** Evaluation overrides are per async execution, never shared mutable flags. */
 export function codeIntelligenceEnabled() {
-  return (
-    execution.getStore()?.evaluation?.codeIntelligence ??
-    config.codeIntelligence.enabled
-  );
+  return execution.getStore()?.evaluation?.codeIntelligence ?? config.codeIntelligence.enabled;
 }

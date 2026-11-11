@@ -39,15 +39,11 @@ export interface ParsedRequest {
 }
 
 export const fold = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toLowerCase();
+  s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 
 const VI_MARKS = /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/i;
-const VI_WORDS = /\b(don hang|van don|kiem tra|thoi gian|phan hoi|luc|ngay|khoang|bao lau|tim|xem|truy vet|gui|nhan)\b/;
+const VI_WORDS =
+  /\b(don hang|van don|kiem tra|thoi gian|phan hoi|luc|ngay|khoang|bao lau|tim|xem|truy vet|gui|nhan)\b/;
 
 export function detectLanguage(text: string): "vi" | "en" {
   return VI_MARKS.test(text) || VI_WORDS.test(fold(text)) ? "vi" : "en";
@@ -68,14 +64,26 @@ const ID_HINTS: Array<[RegExp, IdField]> = [
 
 const TOKEN = /[A-Za-z0-9][A-Za-z0-9_-]{5,63}/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const STOP = new Set(["hasakinow", "production", "november", "december", "shipping", "tracking", "callback", "response", "message", "investigate", "shipment"]);
+const STOP = new Set([
+  "hasakinow",
+  "production",
+  "november",
+  "december",
+  "shipping",
+  "tracking",
+  "callback",
+  "response",
+  "message",
+  "investigate",
+  "shipment",
+]);
 
 function looksLikeId(tok: string) {
   if (UUID.test(tok)) return true;
   if (STOP.has(tok.toLowerCase())) return false;
   const digits = (tok.match(/\d/g) ?? []).length;
   // identifiers mix digits and letters (2611095VL160RW01) or are long digit strings (shipment ids)
-  return (digits >= 3 && /[A-Za-z]/.test(tok) && tok.length >= 8) || (/^\d{8,20}$/.test(tok));
+  return (digits >= 3 && /[A-Za-z]/.test(tok) && tok.length >= 8) || /^\d{8,20}$/.test(tok);
 }
 
 export function extractIdentifiers(text: string): ParsedIdentifier[] {
@@ -107,24 +115,60 @@ export function extractIdentifiers(text: string): ParsedIdentifier[] {
 // ---------------------------------------------------------------- time
 
 const MONTHS: Record<string, number> = {
-  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
-  aug: 8, august: 8, sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
 };
 
-interface DateParts { y?: number; mo: number; d: number; ambiguous?: boolean }
+interface DateParts {
+  y?: number;
+  mo: number;
+  d: number;
+  ambiguous?: boolean;
+}
 
-function parseDate(f: string, lang: "vi" | "en", now: { y: number; mo: number; d: number }): DateParts | null {
+function parseDate(
+  f: string,
+  lang: "vi" | "en",
+  now: { y: number; mo: number; d: number },
+): DateParts | null {
   let m = f.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
   if (m) return { y: +m[1], mo: +m[2], d: +m[3] };
   m = f.match(/\b(?:ngay\s*)?(\d{1,2})\s*thang\s*(\d{1,2})(?:\s*(?:nam\s*)?(\d{4}))?/);
   if (m) return { y: m[3] ? +m[3] : undefined, mo: +m[2], d: +m[1] };
-  m = f.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/);
+  m = f.match(
+    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/,
+  );
   if (m) return { y: m[3] ? +m[3] : undefined, mo: MONTHS[m[1]], d: +m[2] };
-  m = f.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:,?\s*(\d{4}))?/);
+  m = f.match(
+    /\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:,?\s*(\d{4}))?/,
+  );
   if (m) return { y: m[3] ? +m[3] : undefined, mo: MONTHS[m[2]], d: +m[1] };
   m = f.match(/\b(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{4}))?\b/);
   if (m) {
-    const a = +m[1], b = +m[2];
+    const a = +m[1],
+      b = +m[2];
     const y = m[3] ? +m[3] : undefined;
     // Vietnamese writes dd/mm; English is ambiguous — dd/mm unless that is impossible
     if (lang === "en" && a <= 12 && b <= 12 && a !== b) return { y, mo: a, d: b, ambiguous: true };
@@ -169,7 +213,11 @@ export interface WindowDefaults {
   locale?: "vi" | "en";
 }
 
-export function parseTimeWindow(text: string, lang: "vi" | "en", o: WindowDefaults): ParsedRequest["time"] {
+export function parseTimeWindow(
+  text: string,
+  lang: "vi" | "en",
+  o: WindowDefaults,
+): ParsedRequest["time"] {
   const tz = o.timezone;
   const nowMs = o.now ?? Date.now();
   const local = new Date(nowMs + tzOffsetMinutes(tz, nowMs) * 60_000);
@@ -186,10 +234,20 @@ export function parseTimeWindow(text: string, lang: "vi" | "en", o: WindowDefaul
     const candidate = zonedToEpochMs(tz, y, date.mo, date.d);
     if (candidate > nowMs + 86_400_000) {
       y -= 1;
-      notes.push(nl === "vi" ? "năm không ghi rõ: dùng năm trước vì ngày này chưa tới" : "no year given: the previous year is used because the date is in the future");
-    } else notes.push(nl === "vi" ? `năm không ghi rõ: dùng ${y}` : `no year given: ${y} is assumed`);
+      notes.push(
+        nl === "vi"
+          ? "năm không ghi rõ: dùng năm trước vì ngày này chưa tới"
+          : "no year given: the previous year is used because the date is in the future",
+      );
+    } else
+      notes.push(nl === "vi" ? `năm không ghi rõ: dùng ${y}` : `no year given: ${y} is assumed`);
   }
-  if (date?.ambiguous) notes.push(nl === "vi" ? "ngày dạng số có thể hiểu hai cách; đã đọc là ngày/tháng" : `numeric date is ambiguous; read as ${date.mo}/${date.d} (month/day)`);
+  if (date?.ambiguous)
+    notes.push(
+      nl === "vi"
+        ? "ngày dạng số có thể hiểu hai cách; đã đọc là ngày/tháng"
+        : `numeric date is ambiguous; read as ${date.mo}/${date.d} (month/day)`,
+    );
   let anchor: number | null = null;
   let earliest: number;
   let latest: number;
@@ -197,18 +255,25 @@ export function parseTimeWindow(text: string, lang: "vi" | "en", o: WindowDefaul
   if (clock) {
     const d = date ?? today;
     anchor = zonedToEpochMs(tz, date ? y : today.y, d.mo, d.d, clock.h, clock.mi, clock.s);
-    if (!date) notes.push(nl === "vi" ? "không ghi ngày: dùng hôm nay" : "no date given: today is assumed");
+    if (!date)
+      notes.push(nl === "vi" ? "không ghi ngày: dùng hôm nay" : "no date given: today is assumed");
     earliest = anchor - before;
     latest = anchor + after;
   } else if (date) {
     earliest = zonedToEpochMs(tz, y, date.mo, date.d);
     latest = earliest + 86_400_000;
-    notes.push(nl === "vi" ? "không có giờ: tìm cả ngày" : "no time of day: the whole day is searched");
+    notes.push(
+      nl === "vi" ? "không có giờ: tìm cả ngày" : "no time of day: the whole day is searched",
+    );
   } else {
     latest = nowMs;
     earliest = nowMs - 24 * 3_600_000;
     assumed = true;
-    notes.push(nl === "vi" ? "yêu cầu không có thời điểm: mặc định 24 giờ gần nhất" : "no time in the request: the last 24 hours are assumed");
+    notes.push(
+      nl === "vi"
+        ? "yêu cầu không có thời điểm: mặc định 24 giờ gần nhất"
+        : "no time in the request: the last 24 hours are assumed",
+    );
   }
   if (latest > nowMs) latest = nowMs;
   if (latest - earliest > o.maxMinutes * 60_000) earliest = latest - o.maxMinutes * 60_000;
@@ -230,7 +295,10 @@ export function parseTimeWindow(text: string, lang: "vi" | "en", o: WindowDefaul
 
 /** Known external partners and internal systems: candidates for discovery, never confirmed services. */
 const SERVICES: Array<[RegExp, string]> = [
-  [/\bhasaki\s*now\b|\bhasakinow\b|\bnow\b(?=.*(phan hoi|respond|response|ship|giao|van don|tracking|label))/, "HasakiNOW"],
+  [
+    /\bhasaki\s*now\b|\bhasakinow\b|\bnow\b(?=.*(phan hoi|respond|response|ship|giao|van don|tracking|label))/,
+    "HasakiNOW",
+  ],
   [/\bghn\b|giao hang nhanh/, "GHN"],
   [/\bghtk\b|giao hang tiet kiem/, "GHTK"],
   [/\bspx\b|shopee express/, "SPX"],
@@ -245,10 +313,19 @@ const SERVICES: Array<[RegExp, string]> = [
 ];
 
 const OBJECTIVE_RULES: Array<[RegExp, Objective]> = [
-  [/(exact message|message sent|payload|request sent|request body|noi dung (gui|message)|message gui|tin nhan gui|message (da )?gui|request gui|gui (cho|sang|toi))/, "outbound_message"],
-  [/(how long|took to respond|response time|latency|respond|bao lau|thoi gian .*phan hoi|phan hoi|do tre|cham)/, "partner_response_latency"],
+  [
+    /(exact message|message sent|payload|request sent|request body|noi dung (gui|message)|message gui|tin nhan gui|message (da )?gui|request gui|gui (cho|sang|toi))/,
+    "outbound_message",
+  ],
+  [
+    /(how long|took to respond|response time|latency|respond|bao lau|thoi gian .*phan hoi|phan hoi|do tre|cham)/,
+    "partner_response_latency",
+  ],
   [/(tracking|ma van don|thong tin van chuyen|shipping info|shipping\/tracking)/, "tracking_info"],
-  [/(shipping label|label url|nhan van chuyen|tem van chuyen|\blabel\b|in tem)/, "shipping_label_time"],
+  [
+    /(shipping label|label url|nhan van chuyen|tem van chuyen|\blabel\b|in tem)/,
+    "shipping_label_time",
+  ],
   [/(callback|webhook)/, "callback_time"],
   [/(\bwhy\b|error|fail|exception|loi|tai sao|vi sao|nguyen nhan|slow)/, "error_cause"],
 ];
@@ -264,16 +341,37 @@ export function parseRequest(text: string, o: WindowDefaults): ParsedRequest {
     if (m && !services.some((s) => s.name === name)) services.push({ name, matched: m[0] });
   }
   const objectives: Objective[] = [];
-  for (const [re, obj] of OBJECTIVE_RULES) if (re.test(f) && !objectives.includes(obj)) objectives.push(obj);
+  for (const [re, obj] of OBJECTIVE_RULES)
+    if (re.test(f) && !objectives.includes(obj)) objectives.push(obj);
   // tracking info asked together with latency is answered by the latency pair; keep both
   if (!objectives.length) objectives.push("timeline");
-  const rank = (t: ParsedIdentifier["type"]) => ["order_code", "shipment_code", "shipment_id", "tracking_no", "request_id", "correlation_id", "message_id", "trace_id", "unknown"].indexOf(t);
+  const rank = (t: ParsedIdentifier["type"]) =>
+    [
+      "order_code",
+      "shipment_code",
+      "shipment_id",
+      "tracking_no",
+      "request_id",
+      "correlation_id",
+      "message_id",
+      "trace_id",
+      "unknown",
+    ].indexOf(t);
   const anchors = [...identifiers].sort((a, b) => rank(a.type) - rank(b.type)).map((i) => i.value);
   const questions = request
     .split(/(?<=[.?!])\s+|\n+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 3);
-  return { request, language, identifiers, anchors, time: parseTimeWindow(request, language, o), services, objectives, questions };
+  return {
+    request,
+    language,
+    identifiers,
+    anchors,
+    time: parseTimeWindow(request, language, o),
+    services,
+    objectives,
+    questions,
+  };
 }
 
 // ---------------------------------------------------------------- intent routing
@@ -287,7 +385,10 @@ export interface WorkflowTriggers {
 }
 
 /** Score a request against a workflow's triggers (diacritic-insensitive). 0 = do not route. */
-export function scoreTriggers(text: string, t: WorkflowTriggers): { score: number; matched: string[] } {
+export function scoreTriggers(
+  text: string,
+  t: WorkflowTriggers,
+): { score: number; matched: string[] } {
   const f = ` ${fold(text).replace(/\s+/g, " ")} `;
   const has = (p: string) => f.includes(fold(p));
   const phrases = t.phrases.filter(has);
@@ -295,6 +396,7 @@ export function scoreTriggers(text: string, t: WorkflowTriggers): { score: numbe
   const support = (t.requires_any ?? []).filter(has);
   if (t.requires_any?.length && !support.length) return { score: 0, matched: phrases };
   const excluded = (t.excludes ?? []).filter(has);
-  if (excluded.length && !(t.explicit ?? []).some(has)) return { score: 0, matched: [...phrases, ...excluded.map((x) => `!${x}`)] };
+  if (excluded.length && !(t.explicit ?? []).some(has))
+    return { score: 0, matched: [...phrases, ...excluded.map((x) => `!${x}`)] };
   return { score: phrases.length * 2 + support.length, matched: [...phrases, ...support] };
 }

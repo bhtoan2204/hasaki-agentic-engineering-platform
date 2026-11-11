@@ -8,8 +8,7 @@ import { unsafeRelativePath } from "../repos/paths.ts";
 import { config } from "../config.ts";
 
 const exec = promisify(execFile);
-export const hash = (s: string | Buffer) =>
-  createHash("sha256").update(s).digest("hex");
+export const hash = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 export async function git(root: string, args: string[], signal?: AbortSignal) {
   return (
     await exec("git", ["-c", "core.fsmonitor=false", "-C", root, ...args], {
@@ -22,7 +21,7 @@ export async function git(root: string, args: string[], signal?: AbortSignal) {
 }
 export const languageOf = (p: string) =>
   ({ go: "go", ts: "typescript", tsx: "tsx", proto: "proto", sql: "sql" })[
-  p.split(".").pop() ?? ""
+    p.split(".").pop() ?? ""
   ];
 export function eligible(p: string) {
   const parts = p.split("/");
@@ -32,8 +31,7 @@ export function eligible(p: string) {
     (config.codeIntelligence.includeDependencies ||
       !parts.some((s) => /^(?:node_modules|vendor)$/.test(s))) &&
     (config.codeIntelligence.includeGenerated ||
-      (!parts.includes("generated") &&
-        !/(?:\.pb\.go|\.gen\.|\.generated\.|\.min\.)/.test(p))) &&
+      (!parts.includes("generated") && !/(?:\.pb\.go|\.gen\.|\.generated\.|\.min\.)/.test(p))) &&
     !config.codeIntelligence.excludes.some(
       (prefix) => p === prefix || p.startsWith(prefix.replace(/\/$/, "") + "/"),
     )
@@ -42,12 +40,7 @@ export function eligible(p: string) {
 export function safePath(root: string, p: string) {
   const full = resolve(root, p),
     rel = relative(root, full);
-  if (
-    !p ||
-    isAbsolute(p) ||
-    unsafeRelativePath(rel) ||
-    p.includes("\0")
-  )
+  if (!p || isAbsolute(p) || unsafeRelativePath(rel) || p.includes("\0"))
     throw new Error("Unsafe source path");
   return full;
 }
@@ -58,8 +51,7 @@ export async function readSource(root: string, p: string) {
   let cursor = canonical;
   for (const part of relative(canonical, full).split("/")) {
     cursor = resolve(cursor, part);
-    if ((await lstat(cursor)).isSymbolicLink())
-      throw new Error("Source symlink refused");
+    if ((await lstat(cursor)).isSymbolicLink()) throw new Error("Source symlink refused");
   }
   const fd = await open(full, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -68,13 +60,11 @@ export async function readSource(root: string, p: string) {
       if (opened !== full) throw new Error("Source symlink race refused");
     }
     const stat = await fd.stat();
-    if (!stat.isFile() || stat.size > config.codeIntelligence.maxFileBytes)
-      return null;
+    if (!stat.isFile() || stat.size > config.codeIntelligence.maxFileBytes) return null;
     const buffer = Buffer.alloc(config.codeIntelligence.maxFileBytes + 1);
     const { bytesRead } = await fd.read(buffer, 0, buffer.length, 0);
     const b = buffer.subarray(0, bytesRead);
-    if (b.length > config.codeIntelligence.maxFileBytes || b.includes(0))
-      return null;
+    if (b.length > config.codeIntelligence.maxFileBytes || b.includes(0)) return null;
     return b.toString("utf8");
   } finally {
     await fd.close();
@@ -87,20 +77,14 @@ export async function baseCommit(root: string, defaultBranch = config.baseBranch
     "refs/remotes/origin/HEAD",
   ]) {
     try {
-      return (
-        await git(root, ["rev-parse", "--verify", `${ref}^{commit}`])
-      ).trim();
+      return (await git(root, ["rev-parse", "--verify", `${ref}^{commit}`])).trim();
     } catch {
       /* next configured ref */
     }
   }
   throw new Error("Default/configured base branch unavailable");
 }
-export async function treeFiles(
-  root: string,
-  sha: string,
-  metrics?: Record<string, number>,
-) {
+export async function treeFiles(root: string, sha: string, metrics?: Record<string, number>) {
   const out = await git(root, ["ls-tree", "-rlz", sha]);
   const files = out
     .split("\0")
@@ -151,9 +135,7 @@ export async function changes(
       .split("\0")
       .filter(Boolean),
   );
-  for (const p of (
-    await git(root, ["ls-files", "--others", "--exclude-standard", "-z"])
-  )
+  for (const p of (await git(root, ["ls-files", "--others", "--exclude-standard", "-z"]))
     .split("\0")
     .filter(Boolean))
     names.add(p);
@@ -168,9 +150,7 @@ export async function changes(
       content = await readSource(root, path);
     } catch (e) {
       if (
-        !["ENOENT", "ENOTDIR"].includes(
-          (e as NodeJS.ErrnoException).code ?? "",
-        ) &&
+        !["ENOENT", "ENOTDIR"].includes((e as NodeJS.ErrnoException).code ?? "") &&
         !/symlink/.test((e as Error).message)
       )
         throw e;
@@ -188,12 +168,7 @@ export async function changes(
   return {
     head,
     generation: hash(
-      JSON.stringify([
-        head,
-        marker.ino,
-        marker.mtimeMs,
-        files.map((f) => [f.path, f.hash]),
-      ]),
+      JSON.stringify([head, marker.ino, marker.mtimeMs, files.map((f) => [f.path, f.hash])]),
     ),
     files,
   };
@@ -208,14 +183,10 @@ export async function readBlobs(
   if (!blobs.every((b) => /^[a-f0-9]{40,64}$/.test(b)))
     throw new Error("Invalid Git blob identity");
   const buffer = await new Promise<Buffer>((resolve, reject) => {
-    const cp = spawn(
-      "git",
-      ["-c", "core.fsmonitor=false", "-C", root, "cat-file", "--batch"],
-      {
-        signal,
-        stdio: ["pipe", "pipe", "ignore"],
-      },
-    );
+    const cp = spawn("git", ["-c", "core.fsmonitor=false", "-C", root, "cat-file", "--batch"], {
+      signal,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
     const chunks: Buffer[] = [];
     let size = 0;
     const timer = setTimeout(() => {
@@ -246,10 +217,7 @@ export async function readBlobs(
     const m = /^([a-f0-9]+) blob (\d+)$/.exec(header);
     if (!m || m[1] !== blob) throw new Error("Invalid Git object response");
     const length = +m[2];
-    if (
-      length > config.codeIntelligence.maxFileBytes ||
-      end + 1 + length >= buffer.length
-    )
+    if (length > config.codeIntelligence.maxFileBytes || end + 1 + length >= buffer.length)
       throw new Error("Blob size limit exceeded");
     out.push(buffer.subarray(end + 1, end + 1 + length).toString("utf8"));
     offset = end + length + 2;

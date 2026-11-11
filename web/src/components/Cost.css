@@ -1,24 +1,24 @@
 .cost-section {
-  margin-top: 12px
+  margin-top: 12px;
 }
 
 .cost-h {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: 0.05em;
   color: var(--muted);
-  margin-bottom: 6px
+  margin-bottom: 6px;
 }
 
 .cost-mini small {
   display: block;
   font-size: 11px;
-  margin-top: 2px
+  margin-top: 2px;
 }
 
 .cost-waste {
-  color: var(--st-err)
+  color: var(--st-err);
 }
 
 .cost-flag {
@@ -27,18 +27,18 @@
   color: var(--st-wait);
   background: var(--st-wait-bg);
   border-radius: 999px;
-  padding: 2px 8px
+  padding: 2px 8px;
 }
 
 .cost-reasons {
-  margin: 8px 0 0
+  margin: 8px 0 0;
 }
 
 .cost-budget {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .cost-budget-track {
@@ -49,25 +49,25 @@
   border-radius: 999px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  overflow: hidden
+  overflow: hidden;
 }
 
 .cost-budget-fill {
   height: 100%;
   background: var(--st-ok);
-  transition: width .2s
+  transition: width 0.2s;
 }
 
 .cost-budget-warning .cost-budget-fill {
-  background: var(--st-wait)
+  background: var(--st-wait);
 }
 
 .cost-budget-exceeded .cost-budget-fill {
-  background: var(--st-err)
+  background: var(--st-err);
 }
 
-.cost-budget-exceeded>span {
-  color: var(--st-err)
+.cost-budget-exceeded > span {
+  color: var(--st-err);
 }
 
 .cost-wi-budget {
@@ -75,24 +75,24 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 6px
+  margin-top: 6px;
 }
 
 .cost-budget-edit {
   display: flex;
   gap: 6px;
   margin-top: 8px;
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .cost-budget-edit input {
-  width: 130px
+  width: 130px;
 }
 
 .cost-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px
+  font-size: 12.5px;
 }
 
 .cost-table th,
@@ -100,23 +100,23 @@
   text-align: left;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .cost-table th {
   font-weight: 600;
   color: var(--muted);
-  font-size: 11.5px
+  font-size: 11.5px;
 }
 
 .cost-cell {
   white-space: nowrap;
-  font-variant-numeric: tabular-nums
+  font-variant-numeric: tabular-nums;
 }
 
 .cost-cell-waste {
   color: var(--st-err);
-  font-size: 11.5px
+  font-size: 11.5px;
 }
 
 .cost-card {
@@ -126,7 +126,7 @@
   padding: 14px 16px;
   margin: 10px 0;
   box-shadow: var(--shadow-1);
-  min-width: 0
+  min-width: 0;
 }
 
 .cost-card-head {
@@ -134,7 +134,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .cost-card-head h4 {
@@ -144,18 +144,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px
+  font-size: 13.5px;
 }
 
 .cost-card-head h4 svg {
   color: var(--brand);
-  flex: none
+  flex: none;
 }
 
 .cost-minis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 8px
+  gap: 8px;
 }
 
 .cost-mini {
@@ -163,22 +163,22 @@
   border-radius: var(--r-md);
   padding: 9px 11px;
   background: var(--surface);
-  min-width: 0
+  min-width: 0;
 }
 
 .cost-mini b {
   display: block;
   font-size: var(--fs-lg);
-  letter-spacing: -.01em;
+  letter-spacing: -0.01em;
   line-height: 1.2;
-  font-variant-numeric: tabular-nums
+  font-variant-numeric: tabular-nums;
 }
 
-.cost-mini>span {
+.cost-mini > span {
   display: block;
   font-size: 11px;
   color: var(--muted);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .05em
+  letter-spacing: 0.05em;
 }

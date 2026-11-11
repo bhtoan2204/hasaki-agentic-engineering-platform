@@ -10,12 +10,12 @@
   border-radius: var(--r-md);
   background: var(--surface-2, var(--surface));
   font-size: var(--fs-xs);
-  color: var(--ink-2)
+  color: var(--ink-2);
 }
 
 .an-health-freshness[data-state="stale"],
 .an-health-freshness[data-state="latest_scan_failed"] {
-  border-left-color: var(--st-err)
+  border-left-color: var(--st-err);
 }
 
 .an-freshness-error {
@@ -23,7 +23,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--st-err)
+  color: var(--st-err);
 }
 
 .an-refreshing {
@@ -32,12 +32,12 @@
   gap: 6px;
   color: var(--muted);
   font-size: var(--fs-xs);
-  margin-bottom: 8px
+  margin-bottom: 8px;
 }
 
 .an-health-kpis {
   grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
-  margin-bottom: var(--sp-4)
+  margin-bottom: var(--sp-4);
 }
 
 .an-health-kpi {
@@ -45,20 +45,20 @@
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: var(--surface)
+  background: var(--surface);
 }
 
 .an-health-kpi-label {
   font-size: var(--fs-sm);
   color: var(--ink-2);
-  min-height: 2.4em
+  min-height: 2.4em;
 }
 
-.an-health-kpi>strong {
+.an-health-kpi > strong {
   font-size: clamp(20px, 2vw, 28px);
   display: block;
   margin: 4px 0 8px;
-  font-variant-numeric: tabular-nums
+  font-variant-numeric: tabular-nums;
 }
 
 .an-health-kpi-compare {
@@ -67,36 +67,36 @@
   gap: 8px;
   align-items: center;
   color: var(--muted);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
-.an-health-kpi-compare>span:last-child {
+.an-health-kpi-compare > span:last-child {
   display: inline-flex;
   align-items: center;
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .an-delta-up {
-  color: var(--st-err)
+  color: var(--st-err);
 }
 
 .an-delta-down {
-  color: var(--st-ok)
+  color: var(--st-ok);
 }
 
 .an-kpi-caution {
   display: block;
   margin-top: 7px;
   color: var(--st-wait);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .an-health-donut-layout {
   display: grid;
-  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   align-items: center;
   gap: 16px;
-  min-height: 230px
+  min-height: 230px;
 }
 
 .an-health-donut {
@@ -106,7 +106,7 @@
   display: grid;
   place-items: center;
   margin: auto;
-  position: relative
+  position: relative;
 }
 
 .an-health-donut:before {
@@ -114,31 +114,31 @@
   position: absolute;
   inset: 23%;
   border-radius: 50%;
-  background: var(--surface)
+  background: var(--surface);
 }
 
-.an-health-donut>div {
+.an-health-donut > div {
   z-index: 1;
   text-align: center;
   display: grid;
-  gap: 3px
+  gap: 3px;
 }
 
 .an-health-donut b {
   font-size: 22px;
-  font-variant-numeric: tabular-nums
+  font-variant-numeric: tabular-nums;
 }
 
 .an-health-donut span {
   font-size: var(--fs-xs);
-  color: var(--muted)
+  color: var(--muted);
 }
 
 .an-health-donut-legend {
   display: grid;
   gap: 4px;
   max-height: 270px;
-  overflow: auto
+  overflow: auto;
 }
 
 .an-health-donut-legend button {
@@ -153,41 +153,41 @@
   border: 0;
   padding: var(--sp-2) var(--sp-1);
   color: var(--ink);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .an-health-donut-legend button:hover {
   background: var(--surface-2);
-  border-radius: 4px
+  border-radius: 4px;
 }
 
-.an-health-donut-legend button>i,
+.an-health-donut-legend button > i,
 .an-service-select i {
   width: 9px;
   height: 9px;
-  border-radius: 50%
+  border-radius: 50%;
 }
 
-.an-health-donut-legend button>span {
+.an-health-donut-legend button > span {
   min-width: 0;
-  overflow-wrap: anywhere
+  overflow-wrap: anywhere;
 }
 
 .an-health-donut-legend small {
   display: block;
   color: var(--muted);
-  font-size: 10px
+  font-size: 10px;
 }
 
 .an-health-donut-legend b {
-  font-variant-numeric: tabular-nums
+  font-variant-numeric: tabular-nums;
 }
 
 .an-health-toggle {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  margin-bottom: 12px
+  margin-bottom: 12px;
 }
 
 .an-health-toggle button {
@@ -199,30 +199,30 @@
   background: transparent;
   color: var(--ink-2);
   padding: 5px 10px;
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .an-health-toggle button.on {
   border-color: var(--brand);
   color: var(--brand);
-  background: var(--brand-50)
+  background: var(--brand-50);
 }
 
 .an-health-line {
   width: 100%;
   height: auto;
   min-height: 150px;
-  overflow: visible
+  overflow: visible;
 }
 
 .an-chart-grid {
   stroke: var(--line);
-  stroke-width: 1
+  stroke-width: 1;
 }
 
 .an-chart-axis {
   font-size: 11px;
-  fill: var(--muted)
+  fill: var(--muted);
 }
 
 .an-chart-legend {
@@ -231,24 +231,24 @@
   gap: 8px;
   color: var(--muted);
   font-size: var(--fs-xs);
-  margin-top: 8px
+  margin-top: 8px;
 }
 
 .an-chart-legend i {
   width: 16px;
-  border-top: 2px solid var(--brand)
+  border-top: 2px solid var(--brand);
 }
 
 .an-chart-legend .an-legend-previous {
   border-top: 2px dashed var(--muted);
-  margin-left: 10px
+  margin-left: 10px;
 }
 
 .an-chart-empty {
   padding: 28px 12px;
   text-align: center;
   color: var(--muted);
-  font-size: var(--fs-sm)
+  font-size: var(--fs-sm);
 }
 
 .an-lifecycle-stack {
@@ -256,10 +256,10 @@
   min-height: 95px;
   border-radius: var(--r-md);
   overflow: hidden;
-  gap: 2px
+  gap: 2px;
 }
 
-.an-lifecycle-stack>div {
+.an-lifecycle-stack > div {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -268,57 +268,57 @@
   padding: 8px;
   color: white;
   font-size: var(--fs-xs);
-  text-align: center
+  text-align: center;
 }
 
 .an-lifecycle-stack b {
   font-size: 19px;
-  margin-top: 5px
+  margin-top: 5px;
 }
 
 .an-service-select {
-  margin-bottom: 6px
+  margin-bottom: 6px;
 }
 
 .an-remediation-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 10px
+  gap: 10px;
 }
 
-.an-remediation-grid>div,
-.an-health-service-kpis>div {
+.an-remediation-grid > div,
+.an-health-service-kpis > div {
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   display: flex;
   flex-direction: column;
-  gap: 6px
+  gap: 6px;
 }
 
 .an-remediation-grid span,
 .an-health-service-kpis span {
   font-size: var(--fs-xs);
-  color: var(--muted)
+  color: var(--muted);
 }
 
 .an-remediation-grid b,
 .an-health-service-kpis b {
   font-size: 20px;
-  font-variant-numeric: tabular-nums
+  font-variant-numeric: tabular-nums;
 }
 
 .an-remediation-grid small {
   font-size: 10px;
-  color: var(--muted)
+  color: var(--muted);
 }
 
 .an-incident-links {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 130px
+  min-width: 130px;
 }
 
 .an-incident-links a {
@@ -326,33 +326,33 @@
   align-items: center;
   gap: 4px;
   overflow-wrap: anywhere;
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .an-fingerprint-cell {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 280px
+  max-width: 280px;
 }
 
 .an-fingerprint-cell small {
   color: var(--muted);
   overflow: hidden;
-  text-overflow: ellipsis
+  text-overflow: ellipsis;
 }
 
 .an-service-back-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px
+  margin-bottom: 12px;
 }
 
 .an-service-back-row .ghost {
   display: inline-flex;
   align-items: center;
-  gap: 6px
+  gap: 6px;
 }
 
 .an-service-heading {
@@ -360,53 +360,53 @@
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 18px 0
+  padding: 18px 0;
 }
 
 .an-service-heading h2 {
   margin: 5px 0;
-  font-size: 26px
+  font-size: 26px;
 }
 
-.an-service-heading>span {
+.an-service-heading > span {
   color: var(--muted);
-  font-size: var(--fs-sm)
+  font-size: var(--fs-sm);
 }
 
 .an-health-service-kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
-  margin: 0 0 16px
+  margin: 0 0 16px;
 }
 
 .an-health-service-loading {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px
+  gap: 12px;
 }
 
-.an-health-service-loading>div {
+.an-health-service-loading > div {
   height: 120px;
   border-radius: var(--r-md);
   background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2));
   background-size: 200% 100%;
-  animation: an-skeleton 1.3s infinite
+  animation: an-skeleton 1.3s infinite;
 }
 
 .an-prod-incident code {
   color: var(--muted);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .an-incident-status {
   display: flex;
   gap: 7px;
-  flex-wrap: wrap
+  flex-wrap: wrap;
 }
 
 .an-incident-diagnostics {
-  overflow-wrap: anywhere
+  overflow-wrap: anywhere;
 }
 
 .an-incident-diagnostics pre {
@@ -416,53 +416,53 @@
   padding: 12px;
   background: var(--surface-2);
   border-radius: var(--r-md);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .an-incident-related {
-  gap: 10px
+  gap: 10px;
 }
 
 .an-incident-related a {
   display: flex;
   align-items: center;
-  gap: 7px
+  gap: 7px;
 }
 
 @keyframes an-skeleton {
   to {
-    background-position: -200% 0
+    background-position: -200% 0;
   }
 }
 
-@media(max-width:720px) {
+@media (max-width: 720px) {
   .an-health-donut-layout {
-    grid-template-columns: 1fr
+    grid-template-columns: 1fr;
   }
 
   .an-health-donut {
-    width: 170px
+    width: 170px;
   }
 
   .an-health-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr))
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .an-service-heading {
     align-items: flex-start;
-    flex-direction: column
+    flex-direction: column;
   }
 
   .an-health-freshness {
-    align-items: flex-start
+    align-items: flex-start;
   }
 
-  .an-lifecycle-stack>div {
-    min-width: 0
+  .an-lifecycle-stack > div {
+    min-width: 0;
   }
 
-  .an-lifecycle-stack>div span {
-    overflow-wrap: anywhere
+  .an-lifecycle-stack > div span {
+    overflow-wrap: anywhere;
   }
 }
 
@@ -505,8 +505,7 @@
   }
 }
 
-
-.pe-workspace .an-lifecycle-stack>div {
+.pe-workspace .an-lifecycle-stack > div {
   min-width: min(90px, 30%);
   overflow-wrap: anywhere;
 }

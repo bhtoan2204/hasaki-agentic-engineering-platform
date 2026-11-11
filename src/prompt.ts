@@ -24,15 +24,20 @@ export function buildTaskPrompt(d: any, repos: string[], files: string[]) {
     `- Deadline: ${d.date_end ?? "?"}`,
     "",
     "## Description",
-    d.note?.trim() ? d.note : "(empty — the task has only a title" + (files.length ? " and attachments)" : ")"),
+    d.note?.trim()
+      ? d.note
+      : "(empty — the task has only a title" + (files.length ? " and attachments)" : ")"),
     "",
-    files.length ? "## Attachments (read them with the Read tool — screenshots often hold the actual error)\n" + files.map((f) => `- ${f}`).join("\n") : "",
+    files.length
+      ? "## Attachments (read them with the Read tool — screenshots often hold the actual error)\n" +
+        files.map((f) => `- ${f}`).join("\n")
+      : "",
     ai
       ? [
-        "## Task-system AI hints (may be wrong; reporting guidance — never a reason to change what you implement)",
-        ai.object ? `- Object: ${ai.object} = ${ai.object_value}` : "",
-        ai.readiness_reasoning ? `- ${ai.readiness_reasoning}` : "",
-      ].join("\n")
+          "## Task-system AI hints (may be wrong; reporting guidance — never a reason to change what you implement)",
+          ai.object ? `- Object: ${ai.object} = ${ai.object_value}` : "",
+          ai.readiness_reasoning ? `- ${ai.readiness_reasoning}` : "",
+        ].join("\n")
       : "",
     "",
     `## Repositories you may change (resolve paths through platform tools)`,

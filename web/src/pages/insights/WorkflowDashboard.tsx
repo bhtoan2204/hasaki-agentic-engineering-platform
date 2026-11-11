@@ -31,11 +31,7 @@ export function WorkflowDashboard({
           hint={t("an.labeled", { n: e.labeled_repositories ?? 0 })}
         />
         <Metric label="switching" value={e.agent_switches} />
-        <Metric
-          label="missing"
-          value={e.missing_context}
-          hint={t("an.contextHint")}
-        />
+        <Metric label="missing" value={e.missing_context} hint={t("an.contextHint")} />
       </div>
       <div className="ins-grid">
         <Panel title={t("an.throughput")}>
@@ -120,9 +116,7 @@ export function WorkflowDashboard({
               key: "verified",
               label: "verification",
               render: (r) =>
-                r.verified == null
-                  ? "—"
-                  : t(r.verified ? "an.passed" : "an.notPassed"),
+                r.verified == null ? "—" : t(r.verified ? "an.passed" : "an.notPassed"),
             },
             {
               key: "created_at",

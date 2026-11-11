@@ -5,11 +5,7 @@ import { realpath, readFile, lstat } from "node:fs/promises";
 import { resolve, relative, isAbsolute } from "node:path";
 import { pool, q, one } from "../db/pool.ts";
 import { workspacesOf } from "../git/provider.ts";
-import {
-  safeDiagnostics,
-  normalizeProviderFailure,
-  type FailureCategory,
-} from "./telemetry.ts";
+import { safeDiagnostics, normalizeProviderFailure, type FailureCategory } from "./telemetry.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { summarizeValue } from "../context/plan.ts";
 import { evidenceSummary } from "./evidence.ts";
@@ -19,12 +15,7 @@ import { cursorCapabilities } from "./cursor/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
 import { agentEnvironment } from "./environment.ts";
 import type { EffectiveAgent } from "./stepAgent.ts";
-import type {
-  RunRow,
-  StepRow,
-  AttemptRow,
-  ExecResult,
-} from "../workflow/types.ts";
+import type { RunRow, StepRow, AttemptRow, ExecResult } from "../workflow/types.ts";
 
 const exec = promisify(execFile);
 export const AUTOMATIC_FAILURES: FailureCategory[] = [
@@ -45,32 +36,24 @@ export async function providerFailure(
 ): Promise<FailureCategory | null> {
   if (result.kind !== "failed") return null;
   const metrics = (
-    await one(pool, "SELECT metrics FROM workflow_step_attempts WHERE id=$1", [
-      attemptId,
-    ])
+    await one(pool, "SELECT metrics FROM workflow_step_attempts WHERE id=$1", [attemptId])
   )?.metrics;
   // Prefer structured executor/provider diagnostics, then the latest reported session category.
   const detail = result.details as any;
-  const normalized = normalizeProviderFailure(
-    detail?.provider_error ?? { message: result.error },
-  );
+  const normalized = normalizeProviderFailure(detail?.provider_error ?? { message: result.error });
   const sessions = Object.values(metrics?.provider_sessions ?? {}) as any[];
   const reported = sessions
     .sort((a, b) => String(b.start_time).localeCompare(String(a.start_time)))
     .find(
-      (s) =>
-        s.normalized_failure_category &&
-        s.normalized_failure_category !== "UNKNOWN",
+      (s) => s.normalized_failure_category && s.normalized_failure_category !== "UNKNOWN",
     )?.normalized_failure_category;
   return normalized !== "UNKNOWN" ? normalized : (reported ?? normalized);
 }
-const hash = (v: string | Buffer) =>
-  createHash("sha256").update(v).digest("hex");
+const hash = (v: string | Buffer) => createHash("sha256").update(v).digest("hex");
 export async function inspectHandoffWorkspace(runId: number) {
   const deadline = AbortSignal.timeout(30000);
   const workspaces = await workspacesOf(runId);
-  if (workspaces.length > 30)
-    throw new Error("Workspace count exceeds bounded handoff inspection");
+  if (workspaces.length > 30) throw new Error("Workspace count exceeds bounded handoff inspection");
   const state = [];
   for (const w of workspaces) {
     const root = await realpath(w.path);
@@ -78,15 +61,7 @@ export async function inspectHandoffWorkspace(runId: number) {
       (
         await exec(
           "git",
-          [
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=false",
-            "-C",
-            root,
-            ...args,
-          ],
+          ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", root, ...args],
           {
             signal: deadline,
             timeout: 10000,
@@ -95,44 +70,22 @@ export async function inspectHandoffWorkspace(runId: number) {
           },
         )
       ).stdout;
-    if (
-      (await realpath((await git("rev-parse", "--show-toplevel")).trim())) !==
-      root
-    )
+    if ((await realpath((await git("rev-parse", "--show-toplevel")).trim())) !== root)
       throw new Error("Worktree root changed");
     const branch = (await git("symbolic-ref", "--short", "HEAD")).trim();
-    if (branch !== w.branch)
-      throw new Error(`Worktree branch changed: ${w.repo}`);
+    if (branch !== w.branch) throw new Error(`Worktree branch changed: ${w.repo}`);
     if (
-      (
-        await git(
-          "diff",
-          "--no-ext-diff",
-          "--no-textconv",
-          "--name-only",
-          "--diff-filter=U",
-        )
-      ).trim()
+      (await git("diff", "--no-ext-diff", "--no-textconv", "--name-only", "--diff-filter=U")).trim()
     )
       throw new Error(`Unresolved Git conflicts: ${w.repo}`);
     const head = (await git("rev-parse", "HEAD")).trim();
-    const diff = await git(
-      "diff",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--binary",
-      "HEAD",
-    );
+    const diff = await git("diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD");
     const status = await git("status", "--porcelain=v1");
-    const names = (
-      await git("ls-files", "--others", "--exclude-standard", "-z")
-    )
+    const names = (await git("ls-files", "--others", "--exclude-standard", "-z"))
       .split("\0")
       .filter(Boolean);
     if (names.length > 100)
-      throw new Error(
-        "More than 100 untracked files; reconcile workspace before handoff",
-      );
+      throw new Error("More than 100 untracked files; reconcile workspace before handoff");
     let bytes = 0;
     const untracked = [];
     for (const name of names) {
@@ -143,9 +96,7 @@ export async function inspectHandoffWorkspace(runId: number) {
       const stat = await lstat(path);
       bytes += stat.size;
       if (!stat.isFile() || bytes > 5 * 1024 * 1024)
-        throw new Error(
-          "Untracked state cannot be inspected safely within handoff bounds",
-        );
+        throw new Error("Untracked state cannot be inspected safely within handoff bounds");
       untracked.push({ path: name, hash: hash(await readFile(path)) });
     }
     state.push({
@@ -154,19 +105,13 @@ export async function inspectHandoffWorkspace(runId: number) {
       path: root,
       head,
       status: status.slice(0, 12000),
-      diff_summary: (
-        await git("diff", "--no-ext-diff", "--no-textconv", "--stat", "HEAD")
-      ).slice(0, 12000),
+      diff_summary: (await git("diff", "--no-ext-diff", "--no-textconv", "--stat", "HEAD")).slice(
+        0,
+        12000,
+      ),
       diff_hash: hash(diff),
       index_hash: hash(
-        await git(
-          "diff",
-          "--no-ext-diff",
-          "--no-textconv",
-          "--cached",
-          "--binary",
-          "HEAD",
-        ),
+        await git("diff", "--no-ext-diff", "--no-textconv", "--cached", "--binary", "HEAD"),
       ),
       untracked,
     });
@@ -180,62 +125,41 @@ export async function buildHandoffPackage(
   reason: string,
 ) {
   const workspace = await inspectHandoffWorkspace(run.id);
-  const [
-    continuity,
-    packs,
-    notes,
-    events,
-    checkpoints,
-    artifacts,
-    item,
-    observation,
-  ] = await Promise.all([
-    one(
-      pool,
-      "SELECT content FROM agent_context_continuity WHERE attempt_id=$1",
-      [attempt.id],
-    ),
-    q(
-      pool,
-      "SELECT id,snapshot_id FROM agent_context_packs WHERE attempt_id=$1",
-      [attempt.id],
-    ),
-    q(
-      pool,
-      "SELECT id,data FROM workflow_checkpoints WHERE step_id=$1 ORDER BY id DESC LIMIT 10",
-      [step.id],
-    ),
-    q(
-      pool,
-      "SELECT id,kind,left(content,2000) AS text,data FROM workflow_events WHERE attempt_id=$1 AND kind IN ('command','tool','tool_result','log') ORDER BY id DESC LIMIT 30",
-      [attempt.id],
-    ),
-    q(
-      pool,
-      "SELECT id,reason FROM workflow_checkpoints WHERE attempt_id=$1 ORDER BY id DESC LIMIT 20",
-      [attempt.id],
-    ),
-    q(
-      pool,
-      "SELECT id,kind,name FROM workflow_artifacts WHERE attempt_id=$1 ORDER BY id DESC LIMIT 30",
-      [attempt.id],
-    ),
-    run.work_item_id
-      ? one(
+  const [continuity, packs, notes, events, checkpoints, artifacts, item, observation] =
+    await Promise.all([
+      one(pool, "SELECT content FROM agent_context_continuity WHERE attempt_id=$1", [attempt.id]),
+      q(pool, "SELECT id,snapshot_id FROM agent_context_packs WHERE attempt_id=$1", [attempt.id]),
+      q(
         pool,
-        "SELECT id,title,description FROM work_items WHERE id=$1 AND owner_id=$2",
-        [run.work_item_id, run.owner_id],
-      )
-      : null,
-    one(pool, "SELECT output,metrics FROM workflow_step_attempts WHERE id=$1", [
-      attempt.id,
-    ]),
-  ]);
+        "SELECT id,data FROM workflow_checkpoints WHERE step_id=$1 ORDER BY id DESC LIMIT 10",
+        [step.id],
+      ),
+      q(
+        pool,
+        "SELECT id,kind,left(content,2000) AS text,data FROM workflow_events WHERE attempt_id=$1 AND kind IN ('command','tool','tool_result','log') ORDER BY id DESC LIMIT 30",
+        [attempt.id],
+      ),
+      q(
+        pool,
+        "SELECT id,reason FROM workflow_checkpoints WHERE attempt_id=$1 ORDER BY id DESC LIMIT 20",
+        [attempt.id],
+      ),
+      q(
+        pool,
+        "SELECT id,kind,name FROM workflow_artifacts WHERE attempt_id=$1 ORDER BY id DESC LIMIT 30",
+        [attempt.id],
+      ),
+      run.work_item_id
+        ? one(pool, "SELECT id,title,description FROM work_items WHERE id=$1 AND owner_id=$2", [
+            run.work_item_id,
+            run.owner_id,
+          ])
+        : null,
+      one(pool, "SELECT output,metrics FROM workflow_step_attempts WHERE id=$1", [attempt.id]),
+    ]);
   const detailed = JSON.stringify(redactContextValue(workspace.workspaces));
   if (detailed.length > 4 * 1024 * 1024)
-    throw new Error(
-      "Detailed workspace evidence exceeds bounded handoff storage",
-    );
+    throw new Error("Detailed workspace evidence exceeds bounded handoff storage");
   const artifact = await one(
     pool,
     `INSERT INTO workflow_artifacts(run_id,step_id,attempt_id,kind,name,content,data) VALUES($1,$2,$3,'provider_handoff',$4,$5,$6)
@@ -251,25 +175,62 @@ export async function buildHandoffPackage(
   );
   // Verified context the next provider reuses instead of re-investigating: approved scope, evidence summary (high-risk
   // items first), tests already executed and whether they still match the workspace, and what is still unverified.
-  const runSteps = await q<{ key: string; type: string; status: string; output: any; independent: boolean }>(
+  const runSteps = await q<{
+    key: string;
+    type: string;
+    status: string;
+    output: any;
+    independent: boolean;
+  }>(
     pool,
     "SELECT key, type, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
     [run.id],
   );
   const heads = Object.fromEntries(workspace.workspaces.map((w) => [w.repository, w.head]));
-  const approvedScope = [...runSteps].reverse().find((x) => x.status === "COMPLETED" && x.output?.approved_scope)?.output.approved_scope ?? null;
+  const approvedScope =
+    [...runSteps].reverse().find((x) => x.status === "COMPLETED" && x.output?.approved_scope)
+      ?.output.approved_scope ?? null;
   const testsExecuted = runSteps
-    .filter((x) => x.output?.tested_heads && (Array.isArray(x.output?.results) || x.output?.verification))
-    .map((x) => ({ step: x.key, passed: x.output.passed ?? x.output.verification?.passed ?? null, tested_heads: x.output.tested_heads, matches_current_workspace: Object.entries(heads).every(([r, h]) => x.output.tested_heads[r] === h) }));
+    .filter(
+      (x) => x.output?.tested_heads && (Array.isArray(x.output?.results) || x.output?.verification),
+    )
+    .map((x) => ({
+      step: x.key,
+      passed: x.output.passed ?? x.output.verification?.passed ?? null,
+      tested_heads: x.output.tested_heads,
+      matches_current_workspace: Object.entries(heads).every(
+        ([r, h]) => x.output.tested_heads[r] === h,
+      ),
+    }));
   const missing: string[] = [];
-  if (!testsExecuted.some((t) => t.passed === true && t.matches_current_workspace)) missing.push("no passing test run on the current workspace commits");
+  if (!testsExecuted.some((t) => t.passed === true && t.matches_current_workspace))
+    missing.push("no passing test run on the current workspace commits");
   for (const v of runSteps.filter((x) => x.independent))
-    if (!(v.status === "COMPLETED" && v.output?.verdict === "PASS" && Object.entries(heads).every(([r, h]) => v.output?.verified_heads?.[r] === h))) missing.push(`independent verification "${v.key}" has no PASS on the current commits`);
-  if (workspace.workspaces.some((w) => w.status.trim())) missing.push("uncommitted changes in the workspace (not tested or reviewed as committed state)");
-  const evidence = evidenceSummary(Object.fromEntries(runSteps.map((x) => [x.key, { output: x.output, status: x.status }])));
+    if (
+      !(
+        v.status === "COMPLETED" &&
+        v.output?.verdict === "PASS" &&
+        Object.entries(heads).every(([r, h]) => v.output?.verified_heads?.[r] === h)
+      )
+    )
+      missing.push(`independent verification "${v.key}" has no PASS on the current commits`);
+  if (workspace.workspaces.some((w) => w.status.trim()))
+    missing.push(
+      "uncommitted changes in the workspace (not tested or reviewed as committed state)",
+    );
+  const evidence = evidenceSummary(
+    Object.fromEntries(runSteps.map((x) => [x.key, { output: x.output, status: x.status }])),
+  );
   const content = redactContextValue({
     version: 1,
-    approved_scope: approvedScope ? { proposal_hash: approvedScope.proposal_hash, summary: approvedScope.summary, changes: approvedScope.changes, risk: approvedScope.risk } : null,
+    approved_scope: approvedScope
+      ? {
+          proposal_hash: approvedScope.proposal_hash,
+          summary: approvedScope.summary,
+          changes: approvedScope.changes,
+          risk: approvedScope.risk,
+        }
+      : null,
     evidence_summary: evidence ? summarizeValue(evidence, 6000) : null,
     tests_already_executed: testsExecuted,
     missing_verification: missing,
@@ -327,13 +288,10 @@ export async function buildHandoffPackage(
 
 /** Readiness checks do not invoke a model or change credentials. Unknown quota/billing is never called available. */
 let testReadiness:
-  | ((
-    a: EffectiveAgent,
-  ) => Promise<{ ok: boolean; error?: string; quota: string; cost: string }>)
+  | ((a: EffectiveAgent) => Promise<{ ok: boolean; error?: string; quota: string; cost: string }>)
   | undefined;
 export function setHandoffReadinessForTests(value: typeof testReadiness) {
-  if (process.env.PLATFORM_TEST !== "1")
-    throw new Error("Test readiness override disabled");
+  if (process.env.PLATFORM_TEST !== "1") throw new Error("Test readiness override disabled");
   testReadiness = value;
 }
 export async function handoffReadiness(a: EffectiveAgent) {
@@ -350,11 +308,7 @@ export async function handoffReadiness(a: EffectiveAgent) {
       const c = await cursorCapabilities();
       return {
         ok: c.ok && (!a.model || !!c.supportsModel),
-        error:
-          c.error ??
-          (a.model && !c.supportsModel
-            ? "Cursor --model unsupported"
-            : undefined),
+        error: c.error ?? (a.model && !c.supportsModel ? "Cursor --model unsupported" : undefined),
         quota: "unknown",
         cost: "unknown",
       };
@@ -366,18 +320,11 @@ export async function handoffReadiness(a: EffectiveAgent) {
       });
       return { ok: c.ok, error: c.error, quota: "unknown", cost: "unknown" };
     }
-    const configured =
-      process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin;
+    const configured = process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin;
     const bin = configured || "claude";
     const { stdout } = await exec(
-      process.execPath === bin
-        ? bin
-        : bin.endsWith(".js")
-          ? process.execPath
-          : bin,
-      bin.endsWith(".js")
-        ? [bin, "auth", "status", "--json"]
-        : ["auth", "status", "--json"],
+      process.execPath === bin ? bin : bin.endsWith(".js") ? process.execPath : bin,
+      bin.endsWith(".js") ? [bin, "auth", "status", "--json"] : ["auth", "status", "--json"],
       {
         timeout: 15000,
         maxBuffer: 64000,
@@ -387,10 +334,7 @@ export async function handoffReadiness(a: EffectiveAgent) {
     const status = JSON.parse(stdout);
     return {
       ok: status.loggedIn === true,
-      error:
-        status.loggedIn === true
-          ? undefined
-          : "Claude authentication readiness not confirmed",
+      error: status.loggedIn === true ? undefined : "Claude authentication readiness not confirmed",
       quota: "unknown",
       cost: "unknown",
     };

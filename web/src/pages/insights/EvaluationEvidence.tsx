@@ -14,11 +14,7 @@ export function EvaluationEvidence({
     <>
       {" "}
       <Panel title={en ? "Failure distribution" : "Phân bố lỗi"}>
-        <BreakdownBars
-          rows={data.failures}
-          field="samples"
-          labelKey="category"
-        />
+        <BreakdownBars rows={data.failures} field="samples" labelKey="category" />
       </Panel>
       <Panel
         title={
@@ -51,19 +47,12 @@ export function EvaluationEvidence({
             },
             {
               label: en ? "Cost / coverage" : "Chi phí / độ đầy đủ",
-              value: (r) =>
-                `${fmt(r.reported_cost_usd, "usd")} · ${r.cost_known}/${r.attempts}`,
+              value: (r) => `${fmt(r.reported_cost_usd, "usd")} · ${r.cost_known}/${r.attempts}`,
             },
           ]}
         />
       </Panel>
-      <Panel
-        title={
-          en
-            ? "Evidence and verification artifacts"
-            : "Bằng chứng và tài liệu xác minh"
-        }
-      >
+      <Panel title={en ? "Evidence and verification artifacts" : "Bằng chứng và tài liệu xác minh"}>
         <EvaluationTable
           rows={data.details}
           columns={[
@@ -77,8 +66,7 @@ export function EvaluationEvidence({
             },
             {
               label: en ? "Evidence / result" : "Bằng chứng / kết quả",
-              value: (r) =>
-                `${r.evidence_kind} · ${r.result_status ?? "pending"}`,
+              value: (r) => `${r.evidence_kind} · ${r.result_status ?? "pending"}`,
             },
             {
               label: en ? "Inspect" : "Xem",
@@ -91,11 +79,7 @@ export function EvaluationEvidence({
                     <>
                       {" "}
                       ·{" "}
-                      <a
-                        href={`/api/artifacts/${r.artifact_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a href={`/api/artifacts/${r.artifact_id}`} target="_blank" rel="noreferrer">
                         {en ? "Verification artifact" : "Tài liệu xác minh"}
                       </a>
                     </>
@@ -118,10 +102,7 @@ export function EvaluationEvidence({
           </span>
           <button
             className="ghost xs"
-            disabled={
-              data.pagination.page * data.pagination.page_size >=
-              data.pagination.total
-            }
+            disabled={data.pagination.page * data.pagination.page_size >= data.pagination.total}
             onClick={() => onPage(data.pagination.page + 1)}
           >
             {en ? "Next" : "Sau"}

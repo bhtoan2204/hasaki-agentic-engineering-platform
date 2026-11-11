@@ -25,10 +25,16 @@ function arg(name: string) {
 async function password(): Promise<string> {
   if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD;
   if (!stdin.isTTY) {
-    console.error("Set ADMIN_PASSWORD in the environment, or run this from a terminal so it can prompt.");
+    console.error(
+      "Set ADMIN_PASSWORD in the environment, or run this from a terminal so it can prompt.",
+    );
     process.exit(1);
   }
-  const muted = new Writable({ write(_chunk, _encoding, done) { done(); } });
+  const muted = new Writable({
+    write(_chunk, _encoding, done) {
+      done();
+    },
+  });
   const rl = createInterface({ input: stdin, output: muted, terminal: true });
   const ask = async (label: string) => {
     stdout.write(label);
@@ -40,7 +46,9 @@ async function password(): Promise<string> {
   try {
     a = await ask("Password (10–200 characters, hidden): ");
     b = await ask("Repeat password: ");
-  } finally { rl.close(); }
+  } finally {
+    rl.close();
+  }
   if (a !== b) {
     console.error("Passwords did not match.");
     process.exit(1);
@@ -65,24 +73,39 @@ try {
   await migrate(); // Always before querying users, including an empty database.
   const existing = await userByUsername(name);
   const count = await one<{ n: number }>(pool, "SELECT count(*)::int AS n FROM users");
-  if (!existing && count!.n > 0) throw new Error("A user already exists. This command only creates the first admin.");
-  if (existing && (existing.role !== "admin" || !existing.active)) throw new Error("The existing user must be an active admin; no account changes were made.");
+  if (!existing && count!.n > 0)
+    throw new Error("A user already exists. This command only creates the first admin.");
+  if (existing && (existing.role !== "admin" || !existing.active))
+    throw new Error("The existing user must be an active admin; no account changes were made.");
   const pw = existing ? undefined : await password();
   const result = await withTx(async (c) => {
     await c.query("LOCK TABLE users IN EXCLUSIVE MODE");
-    let user = await one<{ id: number; role: string; active: boolean }>(c, "SELECT id, role, active FROM users WHERE username = $1", [name]);
+    let user = await one<{ id: number; role: string; active: boolean }>(
+      c,
+      "SELECT id, role, active FROM users WHERE username = $1",
+      [name],
+    );
     let created = false;
     if (!user) {
       const n = await one<{ n: number }>(c, "SELECT count(*)::int AS n FROM users");
-      if (n!.n) throw new Error("A user already exists. This command only creates the first admin.");
+      if (n!.n)
+        throw new Error("A user already exists. This command only creates the first admin.");
       user = await createUser({ username: name, password: pw!, role: "admin" }, c);
       created = true;
     }
-    if (user.role !== "admin" || !user.active) throw new Error("Claim target must be an active admin.");
+    if (user.role !== "admin" || !user.active)
+      throw new Error("Claim target must be an active admin.");
     return { created, claimed: claim ? await claimLegacy(user.id, c) : null };
   });
-  console.log(result.created ? `Created admin ${name}.` : `Admin ${name} already exists; password and role unchanged.`);
-  if (result.claimed) console.log(`Claimed legacy private rows: ${JSON.stringify(result.claimed)}. Shared templates and knowledge unchanged.`);
+  console.log(
+    result.created
+      ? `Created admin ${name}.`
+      : `Admin ${name} already exists; password and role unchanged.`,
+  );
+  if (result.claimed)
+    console.log(
+      `Claimed legacy private rows: ${JSON.stringify(result.claimed)}. Shared templates and knowledge unchanged.`,
+    );
 } catch (e) {
   console.error((e as Error).message);
   process.exitCode = 1;

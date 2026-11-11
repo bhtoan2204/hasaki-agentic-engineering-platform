@@ -24,9 +24,12 @@ export interface KnowledgeInput {
 }
 
 function check(x: Partial<KnowledgeInput>) {
-  if (x.category && !(CATEGORIES as readonly string[]).includes(x.category)) throw new Error(`unknown category ${x.category}`);
-  if (x.scope_type && !(SCOPES as readonly string[]).includes(x.scope_type)) throw new Error(`unknown scope ${x.scope_type}`);
-  if (x.scope_type && x.scope_type !== "GLOBAL" && !x.scope_ref) throw new Error(`scope ${x.scope_type} needs scope_ref`);
+  if (x.category && !(CATEGORIES as readonly string[]).includes(x.category))
+    throw new Error(`unknown category ${x.category}`);
+  if (x.scope_type && !(SCOPES as readonly string[]).includes(x.scope_type))
+    throw new Error(`unknown scope ${x.scope_type}`);
+  if (x.scope_type && x.scope_type !== "GLOBAL" && !x.scope_ref)
+    throw new Error(`scope ${x.scope_type} needs scope_ref`);
 }
 
 export const knowledge = {
@@ -43,23 +46,60 @@ export const knowledge = {
             OR ($5::bool)
           )
         ORDER BY i.category, i.scope_type, i.owner_id NULLS FIRST, i.key`,
-      [filter.category ?? null, !scoped, filter.ownerId != null && !filter.all, filter.ownerId ?? null, !!filter.all],
+      [
+        filter.category ?? null,
+        !scoped,
+        filter.ownerId != null && !filter.all,
+        filter.ownerId ?? null,
+        !!filter.all,
+      ],
     );
   },
 
   /** Shared item when ownerId is omitted. Pass the owner to read that user's private item. */
   async get(key: string, db: Db = pool, ownerId: number | null = null) {
-    const item = await one(db, "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2", [key, ownerId]);
+    const item = await one(
+      db,
+      "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2",
+      [key, ownerId],
+    );
     if (!item) return undefined;
-    const versions = await q(db, "SELECT * FROM knowledge_versions WHERE item_id = $1 ORDER BY version DESC", [item.id]);
-    const audit = await q(db, "SELECT * FROM knowledge_audit WHERE item_id = $1 ORDER BY id DESC LIMIT 100", [item.id]);
+    const versions = await q(
+      db,
+      "SELECT * FROM knowledge_versions WHERE item_id = $1 ORDER BY version DESC",
+      [item.id],
+    );
+    const audit = await q(
+      db,
+      "SELECT * FROM knowledge_audit WHERE item_id = $1 ORDER BY id DESC LIMIT 100",
+      [item.id],
+    );
     // Supersession both ways, plus the version in effect now (a later approved version may take effect in the future).
-    const superseded_by = item.superseded_by ? ((await one(db, "SELECT key, title, enabled FROM knowledge_items WHERE id = $1", [item.superseded_by])) ?? null) : null;
-    const supersedes = await q(db, "SELECT key, title, enabled, superseded_at FROM knowledge_items WHERE superseded_by = $1 ORDER BY key", [item.id]);
+    const superseded_by = item.superseded_by
+      ? ((await one(db, "SELECT key, title, enabled FROM knowledge_items WHERE id = $1", [
+          item.superseded_by,
+        ])) ?? null)
+      : null;
+    const supersedes = await q(
+      db,
+      "SELECT key, title, enabled, superseded_at FROM knowledge_items WHERE superseded_by = $1 ORDER BY key",
+      [item.id],
+    );
     const now = Date.now();
     const effective_version =
-      versions.find((v: any) => v.version <= item.current_version && (!v.effective_from || new Date(v.effective_from).getTime() <= now))?.version ?? null;
-    return { ...item, versions, audit, superseded_by_item: superseded_by, supersedes, effective_version };
+      versions.find(
+        (v: any) =>
+          v.version <= item.current_version &&
+          (!v.effective_from || new Date(v.effective_from).getTime() <= now),
+      )?.version ?? null;
+    return {
+      ...item,
+      versions,
+      audit,
+      superseded_by_item: superseded_by,
+      supersedes,
+      effective_version,
+    };
   },
 
   /** `db`: run inside the caller's transaction (proposal approval), else a new one. */
@@ -72,18 +112,39 @@ export const knowledge = {
         c,
         `INSERT INTO knowledge_items (key, category, scope_type, scope_ref, title, conflict_key, priority, enforced, enabled, current_version, owner_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10) RETURNING *`,
-        [x.key, x.category, x.scope_type, scopeRef, x.title, x.conflict_key || null, x.priority ?? 0, x.enforced ?? false, x.enabled ?? true, x.ownerId ?? null],
+        [
+          x.key,
+          x.category,
+          x.scope_type,
+          scopeRef,
+          x.title,
+          x.conflict_key || null,
+          x.priority ?? 0,
+          x.enforced ?? false,
+          x.enabled ?? true,
+          x.ownerId ?? null,
+        ],
       );
-      await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`, [
-        item.id,
-        x.content,
-        json(x.applicability ?? {}),
-        json(x.metadata ?? {}),
-        x.change_note ?? "created",
-        x.created_by ?? "",
-        x.effective_from ?? null,
-      ]);
-      await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'created', $2)", [item.id, json({ scope: x.scope_type, scope_ref: scopeRef })]);
+      await q(
+        c,
+        `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
+        [
+          item.id,
+          x.content,
+          json(x.applicability ?? {}),
+          json(x.metadata ?? {}),
+          x.change_note ?? "created",
+          x.created_by ?? "",
+          x.effective_from ?? null,
+        ],
+      );
+      await q(
+        c,
+        "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'created', $2)",
+        [item.id, json({ scope: x.scope_type, scope_ref: scopeRef })],
+      );
+      // Creating a deleted shared key again is an explicit decision: the importer/seeds may produce it again too.
+      if (x.ownerId == null) await q(c, "DELETE FROM knowledge_deletions WHERE key = $1", [x.key]);
       return knowledge.get(x.key, c, x.ownerId ?? null);
     });
   },
@@ -96,34 +157,89 @@ export const knowledge = {
     check(x);
     const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
     return run(async (c) => {
-      const item = await one(c, "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE", [key, ownerId]);
+      const item = await one(
+        c,
+        "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE",
+        [key, ownerId],
+      );
       if (!item) throw new Error(`knowledge item "${key}" not found`);
-      const cur = await one(c, "SELECT * FROM knowledge_versions WHERE item_id = $1 AND version = $2", [item.id, item.current_version]);
+      const cur = await one(
+        c,
+        "SELECT * FROM knowledge_versions WHERE item_id = $1 AND version = $2",
+        [item.id, item.current_version],
+      );
       const content = x.content ?? cur.content;
       const applicability = x.applicability ?? cur.applicability;
       const metadata = x.metadata ?? cur.metadata;
-      if (content !== cur.content || json(applicability) !== json(cur.applicability) || json(metadata) !== json(cur.metadata) || (x.effective_from ?? null) !== null) {
+      if (
+        content !== cur.content ||
+        json(applicability) !== json(cur.applicability) ||
+        json(metadata) !== json(cur.metadata) ||
+        (x.effective_from ?? null) !== null
+      ) {
         const version = item.current_version + 1;
-        await q(c, `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [
-          item.id,
-          version,
-          content,
-          json(applicability),
-          json(metadata),
-          x.change_note ?? "",
-          x.created_by ?? "",
-          x.effective_from ?? null,
-        ]);
-        await q(c, "UPDATE knowledge_items SET current_version = $2, updated_at = now() WHERE id = $1", [item.id, version]);
-        await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'version', $2)", [item.id, json({ version, note: x.change_note ?? "", ...(x.effective_from ? { effective_from: x.effective_from } : {}) })]);
+        await q(
+          c,
+          `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            item.id,
+            version,
+            content,
+            json(applicability),
+            json(metadata),
+            x.change_note ?? "",
+            x.created_by ?? "",
+            x.effective_from ?? null,
+          ],
+        );
+        await q(
+          c,
+          "UPDATE knowledge_items SET current_version = $2, updated_at = now() WHERE id = $1",
+          [item.id, version],
+        );
+        await q(
+          c,
+          "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'version', $2)",
+          [
+            item.id,
+            json({
+              version,
+              note: x.change_note ?? "",
+              ...(x.effective_from ? { effective_from: x.effective_from } : {}),
+            }),
+          ],
+        );
       }
-      const attrs = (["title", "scope_type", "scope_ref", "conflict_key", "priority", "enforced", "enabled"] as const).filter(
-        (k) => x[k] !== undefined && x[k] !== item[k],
-      );
+      const attrs = (
+        [
+          "title",
+          "scope_type",
+          "scope_ref",
+          "conflict_key",
+          "priority",
+          "enforced",
+          "enabled",
+        ] as const
+      ).filter((k) => x[k] !== undefined && x[k] !== item[k]);
       if (attrs.length) {
-        const vals = attrs.map((k) => (k === "conflict_key" ? x[k] || null : k === "scope_ref" && (x.scope_type ?? item.scope_type) === "GLOBAL" ? "" : x[k]));
-        await q(c, `UPDATE knowledge_items SET ${attrs.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`, [item.id, ...vals]);
-        const action = attrs.length === 1 && attrs[0] === "enabled" ? (x.enabled ? "enabled" : "disabled") : "updated";
+        const vals = attrs.map((k) =>
+          k === "conflict_key"
+            ? x[k] || null
+            : k === "scope_ref" && (x.scope_type ?? item.scope_type) === "GLOBAL"
+              ? ""
+              : x[k],
+        );
+        await q(
+          c,
+          `UPDATE knowledge_items SET ${attrs.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
+          [item.id, ...vals],
+        );
+        const action =
+          attrs.length === 1 && attrs[0] === "enabled"
+            ? x.enabled
+              ? "enabled"
+              : "disabled"
+            : "updated";
         await q(c, "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, $2, $3)", [
           item.id,
           action,
@@ -135,17 +251,103 @@ export const knowledge = {
   },
 
   /**
+   * Delete an item for good, with its supporting files (items whose metadata.parent_skill is this key). Versions and
+   * audit go with it; proposals keep their history (target set to NULL). A shared item leaves a tombstone in
+   * knowledge_deletions holding the full snapshot, so the importer and the seeds never bring it back.
+   */
+  async remove(
+    key: string,
+    opts: { ownerId?: number | null; by: string; reason?: string },
+    db?: Db,
+  ) {
+    const ownerId = opts.ownerId ?? null;
+    const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
+    return run(async (c) => {
+      const item = await knowledge.get(key, c, ownerId);
+      if (!item) throw new Error(`knowledge item "${key}" not found`);
+      const companions = await q<{ key: string }>(
+        c,
+        `SELECT i.key FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
+          WHERE i.owner_id IS NOT DISTINCT FROM $2 AND v.metadata->>'parent_skill' = $1 ORDER BY i.key`,
+        [key, ownerId],
+      );
+      const removed: string[] = [];
+      for (const k of [...companions.map((x) => x.key), key]) {
+        const it = k === key ? item : await knowledge.get(k, c, ownerId);
+        if (!it) continue;
+        if (ownerId == null)
+          await q(
+            c,
+            `INSERT INTO knowledge_deletions (key, title, category, reason, snapshot, deleted_by) VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (key) DO UPDATE SET title = EXCLUDED.title, category = EXCLUDED.category, reason = EXCLUDED.reason,
+                                             snapshot = EXCLUDED.snapshot, deleted_by = EXCLUDED.deleted_by, deleted_at = now()`,
+            [
+              k,
+              it.title,
+              it.category,
+              k === key ? (opts.reason ?? "") : `supporting file of ${key}: ${opts.reason ?? ""}`,
+              json(it),
+              opts.by,
+            ],
+          );
+        await q(c, "DELETE FROM knowledge_items WHERE id = $1", [it.id]);
+        removed.push(k);
+      }
+      return { deleted: removed };
+    });
+  },
+
+  /** Keys of deleted shared items (tombstones): the importer and the seeds skip them. */
+  async deletedKeys(db: Db = pool): Promise<Set<string>> {
+    return new Set(
+      (await q<{ key: string }>(db, "SELECT key FROM knowledge_deletions")).map((r) => r.key),
+    );
+  },
+
+  /** Workflows (latest published version or draft) that assign this key to the whole workflow or to a step. */
+  async assignments(
+    key: string,
+    db: Db = pool,
+  ): Promise<Array<{ workflow: string; version: number | string; step: string | null }>> {
+    const out: Array<{ workflow: string; version: number | string; step: string | null }> = [];
+    const defs = await q(
+      db,
+      `SELECT d.key, d.draft_spec, v.version, v.spec FROM workflow_definitions d
+         LEFT JOIN workflow_definition_versions v ON v.definition_id = d.id AND v.version = d.latest_version WHERE NOT d.archived`,
+    );
+    for (const d of defs)
+      for (const [spec, ver] of [
+        [d.spec, d.version],
+        [d.draft_spec, "draft"],
+      ] as const) {
+        if (!spec) continue;
+        if ([...(spec.knowledge ?? []), ...(spec.skills ?? [])].includes(key))
+          out.push({ workflow: d.key, version: ver, step: null });
+        for (const st of spec.steps ?? [])
+          if ([...(st.config?.knowledge ?? []), ...(st.config?.skills ?? [])].includes(key))
+            out.push({ workflow: d.key, version: ver, step: st.key });
+      }
+    return out;
+  },
+
+  /**
    * Enabled items the run may see: shared knowledge plus that owner's private items.
    * Applicability scope (GLOBAL, REPOSITORY, …) is not visibility.
    * Each item comes at the version IN EFFECT at `at`: the newest version up to current_version whose effective_from has
    * passed (an approved rule dated in the future does not apply yet; an item with no version in effect is left out).
    * `superseded_by` is the successor's key while that successor is enabled.
    */
-  async candidates(db: Db = pool, ownerId?: number | null, at: Date = new Date()): Promise<KnowledgeCandidate[]> {
+  async candidates(
+    db: Db = pool,
+    ownerId?: number | null,
+    at: Date = new Date(),
+  ): Promise<KnowledgeCandidate[]> {
     // Cached per owner (read on every step attempt). Bypassed inside a transaction that wrote knowledge itself.
     const wrote = inTx(db) && (txWrote(db, "knowledge_items") || txWrote(db, "knowledge_versions"));
     if (!wrote) {
-      const snap = await candidateCache.get(String(ownerId ?? ""), () => loadCandidateSet(db, ownerId ?? null));
+      const snap = await candidateCache.get(String(ownerId ?? ""), () =>
+        loadCandidateSet(db, ownerId ?? null),
+      );
       // Versions older than the one in effect at load time were dropped: an instant before that needs the database.
       if (at.getTime() >= snap.loadedAt - 1000) return pickEffective(snap.items, at);
     }
@@ -169,11 +371,27 @@ export const knowledge = {
 
 interface CandidateSet {
   loadedAt: number;
-  items: Array<Omit<KnowledgeCandidate, "version" | "content" | "applicability" | "metadata" | "effective_from"> & {
-    versions: Array<{ version: number; content: string; applicability: any; metadata: any; effective_from: string | null }>;
-  }>;
+  items: Array<
+    Omit<
+      KnowledgeCandidate,
+      "version" | "content" | "applicability" | "metadata" | "effective_from"
+    > & {
+      versions: Array<{
+        version: number;
+        content: string;
+        applicability: any;
+        metadata: any;
+        effective_from: string | null;
+      }>;
+    }
+  >;
 }
-const candidateCache = new CacheAside<CandidateSet>("knowledge.candidates", ["knowledge_items", "knowledge_versions"], 60_000, 200);
+const candidateCache = new CacheAside<CandidateSet>(
+  "knowledge.candidates",
+  ["knowledge_items", "knowledge_versions"],
+  60_000,
+  200,
+);
 
 /**
  * Every enabled visible item with the versions that can still be in effect: the one in effect now and newer ones
@@ -204,7 +422,15 @@ function pickEffective(items: CandidateSet["items"], at: Date): KnowledgeCandida
   const out: KnowledgeCandidate[] = [];
   for (const { versions, ...it } of items) {
     const v = versions.find((x) => !x.effective_from || new Date(x.effective_from).getTime() <= t);
-    if (v) out.push({ ...it, version: v.version, content: v.content, applicability: v.applicability ?? {}, metadata: v.metadata ?? {}, effective_from: v.effective_from } as KnowledgeCandidate);
+    if (v)
+      out.push({
+        ...it,
+        version: v.version,
+        content: v.content,
+        applicability: v.applicability ?? {},
+        metadata: v.metadata ?? {},
+        effective_from: v.effective_from,
+      } as KnowledgeCandidate);
   }
   return out;
 }
@@ -231,7 +457,8 @@ export async function seedKnowledge() {
       title: "Never commit secrets or customer PII",
       conflict_key: "security.secrets",
       enforced: true,
-      content: "Never commit credentials, tokens, private keys or customer personal data (phone, address, email) to code, tests, logs or PR text.",
+      content:
+        "Never commit credentials, tokens, private keys or customer personal data (phone, address, email) to code, tests, logs or PR text.",
     },
     {
       key: "security-review",
@@ -242,7 +469,10 @@ export async function seedKnowledge() {
         "Check: injection (SQL, command, template), missing authorization on new endpoints, secrets in code/config, PII in logs, " +
         "unsafe deserialisation, SSRF in outbound calls, missing input validation at trust boundaries. Report each finding with " +
         "severity, file:line, exploit scenario and a concrete fix.",
-      metadata: { required_tools: ["Read", "Grep", "Glob"], output_contract: "{ findings: [{ severity, file, line, issue, suggestion }] }" },
+      metadata: {
+        required_tools: ["Read", "Grep", "Glob"],
+        output_contract: "{ findings: [{ severity, file, line, issue, suggestion }] }",
+      },
     },
     {
       key: "latency-service-boundaries",
@@ -264,9 +494,11 @@ export async function seedKnowledge() {
         "- Quote latency in milliseconds only when it was measured (logs, traces, benchmarks); otherwise say it is unmeasured.",
       ].join("\n"),
       metadata: {
-        description: "Avoid unnecessary synchronous service calls: trace the request path, use data already in the request/domain/own DB, justify remaining calls, batch/parallelize, report round trips (ms only when measured).",
+        description:
+          "Avoid unnecessary synchronous service calls: trace the request path, use data already in the request/domain/own DB, justify remaining calls, batch/parallelize, report round trips (ms only when measured).",
         required_tools: ["Read", "Grep", "Glob"],
-        output_contract: "{ call_analysis: [{ call, needed: boolean, reason, data_source }], round_trips: { before, after }, latency_ms_measured?: number }",
+        output_contract:
+          "{ call_analysis: [{ call, needed: boolean, reason, data_source }], round_trips: { before, after }, latency_ms_measured?: number }",
       },
     },
     {
@@ -280,5 +512,8 @@ export async function seedKnowledge() {
       metadata: { required_tools: ["Read", "Edit", "Write", "Bash"] },
     },
   ];
-  for (const s of seeds) if (!(await knowledge.get(s.key))) await knowledge.create({ ...s, change_note: "seed" });
+  const deleted = await knowledge.deletedKeys();
+  for (const s of seeds)
+    if (!deleted.has(s.key) && !(await knowledge.get(s.key)))
+      await knowledge.create({ ...s, change_note: "seed" });
 }

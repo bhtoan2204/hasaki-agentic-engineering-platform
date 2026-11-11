@@ -4,11 +4,15 @@ import { getUserSecret, putUserSecret, deleteUserSecret } from "../auth/secrets.
 /** Memory sessions are isolated by authenticated actor (or persisted run owner), never process-global logins. */
 export class PersonalSession<T> {
   private sessions = new Map<number, T>();
-  get current(): T | null { return this.sessions.get(currentUserId() ?? 0) ?? null; }
+  get current(): T | null {
+    return this.sessions.get(currentUserId() ?? 0) ?? null;
+  }
   set current(value: T | null) {
     const id = currentUserId() ?? 0;
-    if (!id && process.env.PLATFORM_TEST !== "1") throw new Error("Personal integration requires an authenticated execution owner");
-    if (value === null) this.sessions.delete(id); else this.sessions.set(id, value);
+    if (!id && process.env.PLATFORM_TEST !== "1")
+      throw new Error("Personal integration requires an authenticated execution owner");
+    if (value === null) this.sessions.delete(id);
+    else this.sessions.set(id, value);
   }
 }
 
@@ -16,7 +20,8 @@ export class PersonalSession<T> {
 export async function actorId() {
   const id = currentUserId();
   if (id) return id;
-  if (process.env.PLATFORM_TEST === "1") return (await import("../auth/testOwner.ts")).ensureTestOwner();
+  if (process.env.PLATFORM_TEST === "1")
+    return (await import("../auth/testOwner.ts")).ensureTestOwner();
   throw new Error("Personal integration requires an authenticated execution owner");
 }
 
@@ -28,6 +33,7 @@ export const personalSettings = {
   },
   async set(kind: string, value: string) {
     const id = await actorId();
-    if (value) await putUserSecret(id, kind, value); else await deleteUserSecret(id, kind);
+    if (value) await putUserSecret(id, kind, value);
+    else await deleteUserSecret(id, kind);
   },
 };

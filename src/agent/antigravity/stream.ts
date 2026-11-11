@@ -1,8 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import {
-  normalizeProviderFailure,
-  type FailureCategory,
-} from "../telemetry.ts";
+import { normalizeProviderFailure, type FailureCategory } from "../telemetry.ts";
 
 export interface AntigravityTokens {
   input?: number | null;
@@ -108,10 +105,16 @@ function parseAntigravityLine(
   }
 
   const protocolEvent = typeof raw.event === "string" ? raw.event : "";
-  const payload = protocolEvent === "step_update" ? raw.step_update ?? {} : protocolEvent === "result" ? raw.result ?? {} : raw;
-  const type = protocolEvent === "step_update"
-    ? `step_update.${String(payload.step_type ?? "unknown")}`
-    : protocolEvent || String(raw.type ?? raw.event_type ?? raw.kind ?? "message");
+  const payload =
+    protocolEvent === "step_update"
+      ? (raw.step_update ?? {})
+      : protocolEvent === "result"
+        ? (raw.result ?? {})
+        : raw;
+  const type =
+    protocolEvent === "step_update"
+      ? `step_update.${String(payload.step_type ?? "unknown")}`
+      : protocolEvent || String(raw.type ?? raw.event_type ?? raw.kind ?? "message");
   let text: string | undefined = undefined;
   let thinking: string | undefined = undefined;
 
@@ -131,8 +134,7 @@ function parseAntigravityLine(
 
   if (typeof payload.thinking === "string") thinking = payload.thinking;
   else if (typeof raw.thinking === "string") thinking = raw.thinking;
-  else if (typeof raw.delta?.thinking === "string")
-    thinking = raw.delta.thinking;
+  else if (typeof raw.delta?.thinking === "string") thinking = raw.delta.thinking;
 
   const conversationId =
     payload.conversationId ??
@@ -153,46 +155,55 @@ function parseAntigravityLine(
   if (usage && typeof usage === "object") {
     tokens = {
       input: num(usage.input_tokens ?? usage.input ?? usage.prompt_tokens),
-      output: num(
-        usage.output_tokens ?? usage.output ?? usage.completion_tokens,
-      ),
+      output: num(usage.output_tokens ?? usage.output ?? usage.completion_tokens),
       reasoning: num(
         usage.thinking_output_tokens ??
-        usage.reasoning_tokens ??
-        usage.thinking_tokens ??
-        usage.reasoning,
+          usage.reasoning_tokens ??
+          usage.thinking_tokens ??
+          usage.reasoning,
       ),
-      cache_read: num(
-        usage.cache_read_tokens ?? usage.cached_tokens ?? usage.cache_read,
-      ),
+      cache_read: num(usage.cache_read_tokens ?? usage.cached_tokens ?? usage.cache_read),
       cache_creation: num(usage.cache_creation_tokens ?? usage.cache_creation),
     };
   }
 
   const rawError = payload.error ?? raw.error;
-  const error = protocolEvent === "result" && payload.status === "ERROR"
-    ? (typeof rawError === "string" ? rawError : String(rawError?.message ?? "Antigravity returned ERROR"))
-    : rawError
+  const error =
+    protocolEvent === "result" && payload.status === "ERROR"
       ? typeof rawError === "string"
         ? rawError
-        : rawError.message
-          ? String(rawError.message)
-          : JSON.stringify(rawError)
-      : undefined;
+        : String(rawError?.message ?? "Antigravity returned ERROR")
+      : rawError
+        ? typeof rawError === "string"
+          ? rawError
+          : rawError.message
+            ? String(rawError.message)
+            : JSON.stringify(rawError)
+        : undefined;
 
   return {
     event: {
       type,
       text,
       thinking,
-      conversationId:
-        typeof conversationId === "string" ? conversationId : undefined,
+      conversationId: typeof conversationId === "string" ? conversationId : undefined,
       tokens,
       cumulativeUsage: protocolEvent === "result",
       status: typeof payload.status === "string" ? payload.status : undefined,
       turns: num(payload.num_turns) ?? undefined,
-      tool: payload.tool_info?.name ?? payload.tool_info?.tool_name ?? raw.toolCall?.name ?? raw.tool_call?.name ?? raw.tool ?? undefined,
-      toolArgs: payload.tool_info?.parameters ?? raw.toolCall?.args ?? raw.tool_call?.args ?? raw.args ?? undefined,
+      tool:
+        payload.tool_info?.name ??
+        payload.tool_info?.tool_name ??
+        raw.toolCall?.name ??
+        raw.tool_call?.name ??
+        raw.tool ??
+        undefined,
+      toolArgs:
+        payload.tool_info?.parameters ??
+        raw.toolCall?.args ??
+        raw.tool_call?.args ??
+        raw.args ??
+        undefined,
       toolResult: payload.tool_info ?? raw.result ?? raw.toolResult ?? undefined,
       error,
       raw,
@@ -205,11 +216,7 @@ const num = (v: unknown): number | null =>
 
 export function classifyAntigravityError(err: unknown): FailureCategory {
   const text = String(
-    (err as any)?.message ??
-    (err as any)?.error?.message ??
-    (err as any)?.error ??
-    err ??
-    "",
+    (err as any)?.message ?? (err as any)?.error?.message ?? (err as any)?.error ?? err ?? "",
   ).toLowerCase();
   if (/quota|resource has been exhausted|rate_limit|too many requests|429/.test(text)) {
     if (/quota|credit|billing|exhausted/.test(text)) return "QUOTA_EXHAUSTED";

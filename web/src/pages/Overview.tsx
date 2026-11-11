@@ -24,10 +24,7 @@ import { ago, Badge, EmptyState, navigate, StatCard } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ChibiAgent } from "../office/ChibiAgent.tsx";
 import { OfficeScene } from "../office/OfficeScene.tsx";
-import {
-  useNow,
-  useOfficeExecutionState,
-} from "../office/useOfficeExecutionState.ts";
+import { useNow, useOfficeExecutionState } from "../office/useOfficeExecutionState.ts";
 import { mapOffice } from "../office/workflowToAgentMapper.ts";
 import type { OfficeSnapshot } from "../office/types.ts";
 import "../office/office.css";
@@ -54,18 +51,13 @@ export function OverviewPage() {
   const { t } = useI18n();
   const { data: runs, reload: reloadRuns } = useApi<any[]>("/api/runs");
   const { data: questions, reload: reloadQ } = useApi<any[]>("/api/questions");
-  const { data: metrics, reload: reloadM } = useApi<any>(
-    "/api/metrics/summary?days=30",
-  );
+  const { data: metrics, reload: reloadM } = useApi<any>("/api/metrics/summary?days=30");
   useLive(null, (p) => {
     if (!p || p.kind === "status") void (reloadRuns(), reloadQ());
   });
   useEffect(() => {
     // 30-day aggregates: a minute-old figure is fine, and nobody needs it in a hidden tab.
-    const t = setInterval(
-      () => document.visibilityState === "visible" && void reloadM(),
-      60_000,
-    );
+    const t = setInterval(() => document.visibilityState === "visible" && void reloadM(), 60_000);
     return () => clearInterval(t);
   }, [reloadM]);
 
@@ -76,8 +68,7 @@ export function OverviewPage() {
   const counts = {
     running: list.filter((r) => r.status === "RUNNING").length,
     waiting: list.filter(
-      (r) =>
-        r.status === "WAITING" || r.status === "PAUSED" || r.open_questions > 0,
+      (r) => r.status === "WAITING" || r.status === "PAUSED" || r.open_questions > 0,
     ).length,
     completed: list.filter((r) => r.status === "COMPLETED").length,
     failed: list.filter((r) => r.status === "FAILED").length,
@@ -93,11 +84,7 @@ export function OverviewPage() {
           tone="run"
           label={t("status.RUNNING")}
           value={runs ? counts.running : null}
-          hint={
-            active.length
-              ? t("ov.activeRuns", { n: active.length })
-              : t("office.none")
-          }
+          hint={active.length ? t("ov.activeRuns", { n: active.length }) : t("office.none")}
           onClick={() => navigate("/runs")}
         />
         <StatCard
@@ -155,8 +142,7 @@ function Hero({ active, waiting }: { active: number; waiting: number }) {
           {active ? (
             <>
               {t("ov.heroActive", { n: active })}
-              {waiting ? <> {t("ov.heroWaiting", { n: waiting })}</> : ""}.{" "}
-              {t("ov.heroOffice")}
+              {waiting ? <> {t("ov.heroWaiting", { n: waiting })}</> : ""}. {t("ov.heroOffice")}
             </>
           ) : (
             <>{t("ov.heroEmpty")}</>
@@ -177,26 +163,9 @@ function Hero({ active, waiting }: { active: number; waiting: number }) {
         </div>
       </div>
       <div className="ov-mascot" aria-hidden>
-        <svg
-          viewBox="-6 -10 42 54"
-          shapeRendering="crispEdges"
-          className="office"
-        >
-          <ellipse
-            cx={15}
-            cy={39}
-            rx={11}
-            ry={2}
-            fill="rgba(160, 60, 40, .16)"
-          />
-          <ChibiAgent
-            role="pr"
-            pose="greet"
-            activity={null}
-            x={0}
-            y={0}
-            walking={false}
-          />
+        <svg viewBox="-6 -10 42 54" shapeRendering="crispEdges" className="office">
+          <ellipse cx={15} cy={39} rx={11} ry={2} fill="rgba(160, 60, 40, .16)" />
+          <ChibiAgent role="pr" pose="greet" activity={null} x={0} y={0} walking={false} />
         </svg>
         <div className="ov-mascot-bubble">{t("ov.hello")}</div>
       </div>
@@ -209,14 +178,9 @@ function MiniOffice({ runId }: { runId: number | null }) {
   const { snapshot } = useOfficeExecutionState(runId, null);
   const now = useNow(1000);
   const snap = snapshot ?? EMPTY;
-  const agents = useMemo(
-    () => mapOffice(snap, now, locale),
-    [snap, now, locale],
-  );
+  const agents = useMemo(() => mapOffice(snap, now, locale), [snap, now, locale]);
   const working = agents.filter((a) => a.pose === "work").length;
-  const waiting = agents.filter(
-    (a) => a.pose === "ask" || a.pose === "approval",
-  ).length;
+  const waiting = agents.filter((a) => a.pose === "ask" || a.pose === "approval").length;
   return (
     <section className="card ov-office">
       <div className="card-head">
@@ -232,10 +196,7 @@ function MiniOffice({ runId }: { runId: number | null }) {
             t("ov.officeIdle")
           )}
         </span>
-        <a
-          className="btn ghost sm"
-          href={runId ? `#/office/${runId}` : "#/office"}
-        >
+        <a className="btn ghost sm" href={runId ? `#/office/${runId}` : "#/office"}>
           {t("ov.expand")} <ArrowRight size={14} />
         </a>
       </div>
@@ -245,9 +206,7 @@ function MiniOffice({ runId }: { runId: number | null }) {
         role="link"
         tabIndex={0}
         aria-label={t("ov.openOffice")}
-        onKeyDown={(e) =>
-          e.key === "Enter" && navigate(runId ? `/office/${runId}` : "/office")
-        }
+        onKeyDown={(e) => e.key === "Enter" && navigate(runId ? `/office/${runId}` : "/office")}
       >
         <OfficeScene
           agents={agents}
@@ -289,9 +248,7 @@ function ActionInbox({ questions }: { questions: any[] }) {
         <ul className="ov-list">
           {[...byStep.entries()].slice(0, 4).map(([k, qs]) => (
             <li key={k}>
-              <a
-                href={`#/runs/${qs[0].run_id}/${encodeURIComponent(qs[0].step_key)}`}
-              >
+              <a href={`#/runs/${qs[0].run_id}/${encodeURIComponent(qs[0].step_key)}`}>
                 <span className="ov-dot wait" />
                 <span className="ov-li-main">
                   <b>
@@ -319,15 +276,9 @@ function HarnessHealth({ m }: { m: any }) {
   const runs = (m?.by_profile ?? []) as any[];
   const totalRuns = runs.reduce((s, r) => s + (r.runs ?? 0), 0);
   const avgWall = totalRuns
-    ? runs.reduce(
-        (s, r) => s + Number(r.avg_wall_min ?? 0) * (r.runs ?? 0),
-        0,
-      ) / totalRuns
+    ? runs.reduce((s, r) => s + Number(r.avg_wall_min ?? 0) * (r.runs ?? 0), 0) / totalRuns
     : null;
-  const cost = ((m?.by_workflow ?? []) as any[]).reduce(
-    (s, r) => s + Number(r.cost_usd ?? 0),
-    0,
-  );
+  const cost = ((m?.by_workflow ?? []) as any[]).reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
   const rows: Array<[typeof ShieldCheck, string, string, string?]> = [
     [
       ShieldCheck,
@@ -357,23 +308,14 @@ function HarnessHealth({ m }: { m: any }) {
     [
       Clock,
       t("ov.health.time"),
-      avgWall != null && totalRuns
-        ? t("ov.health.minutes", { n: fmt(avgWall, 1) })
-        : "—",
+      avgWall != null && totalRuns ? t("ov.health.minutes", { n: fmt(avgWall, 1) }) : "—",
       totalRuns ? t("ov.health.runs30", { n: totalRuns }) : undefined,
     ],
-    [
-      Coins,
-      t("ov.health.cost"),
-      m ? `$${fmt(cost, 2)}` : "—",
-      t("ov.health.costHint"),
-    ],
+    [Coins, t("ov.health.cost"), m ? `$${fmt(cost, 2)}` : "—", t("ov.health.costHint")],
     [
       UserRound,
       t("ov.health.human"),
-      e?.human_intervention?.rate_pct != null
-        ? `${e.human_intervention.rate_pct}%`
-        : "—",
+      e?.human_intervention?.rate_pct != null ? `${e.human_intervention.rate_pct}%` : "—",
       e
         ? t("ov.health.humanHint", {
             answers: e.human_intervention.answers ?? 0,
@@ -446,9 +388,7 @@ function RecentRuns({ runs }: { runs: any[] }) {
             const steps = (Array.isArray(r?.steps) ? r.steps : []) as Array<{
               status: string;
             }>;
-            const done = steps.filter((s) =>
-              ["COMPLETED", "SKIPPED"].includes(s?.status),
-            ).length;
+            const done = steps.filter((s) => ["COMPLETED", "SKIPPED"].includes(s?.status)).length;
             return (
               <li key={r.id}>
                 <a href={`#/runs/${r.id}`}>
@@ -456,8 +396,7 @@ function RecentRuns({ runs }: { runs: any[] }) {
                   <span className="ov-li-main">
                     <b className="ov-ellipsis">{r.title}</b>
                     <span className="muted small">
-                      {r.definition_key} ·{" "}
-                      {t("common.ago", { when: ago(r.updated_at) })}
+                      {r.definition_key} · {t("common.ago", { when: ago(r.updated_at) })}
                     </span>
                   </span>
                   <span
@@ -471,10 +410,7 @@ function RecentRuns({ runs }: { runs: any[] }) {
                       <span
                         style={{
                           width: `${steps.length ? (done / steps.length) * 100 : 0}%`,
-                          background:
-                            r.status === "FAILED"
-                              ? "var(--st-err)"
-                              : "var(--st-ok)",
+                          background: r.status === "FAILED" ? "var(--st-err)" : "var(--st-ok)",
                         }}
                       />
                     </span>
@@ -499,9 +435,7 @@ function RecentVerification({ runs }: { runs: any[] }) {
   useEffect(() => {
     let alive = true;
     Promise.all(
-      runList
-        .slice(0, 6)
-        .map((r) => api<any>(`/api/runs/${r.id}`).catch(() => null)),
+      runList.slice(0, 6).map((r) => api<any>(`/api/runs/${r.id}`).catch(() => null)),
     ).then((details) => {
       if (!alive) return;
       const out: any[] = [];
@@ -519,11 +453,7 @@ function RecentVerification({ runs }: { runs: any[] }) {
             });
         }
       }
-      setRows(
-        out
-          .sort((a, b) => String(b.at).localeCompare(String(a.at)))
-          .slice(0, 6),
-      );
+      setRows(out.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 6));
     });
     return () => void (alive = false);
     // eslint-disable-next-line react-hooks/exhaustive-deps

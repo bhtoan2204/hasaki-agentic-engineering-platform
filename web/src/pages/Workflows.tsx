@@ -103,9 +103,7 @@ export function WorkflowsPage() {
             },
           ],
         };
-    const r = await act(() =>
-      api("/api/workflows", { key, spec, publish: false }),
-    );
+    const r = await act(() => api("/api/workflows", { key, spec, publish: false }));
     if (r) navigate(`/workflows/${key}`);
   };
   const duplicate = async (src: string) => {
@@ -183,15 +181,13 @@ export function WorkflowsPage() {
             [
               "template",
               <>
-                {t("wfs.template")}{" "}
-                <span className="wfs-n">{counts.template}</span>
+                {t("wfs.template")} <span className="wfs-n">{counts.template}</span>
               </>,
             ],
             [
               "published",
               <>
-                {t("wfs.published")}{" "}
-                <span className="wfs-n">{counts.published}</span>
+                {t("wfs.published")} <span className="wfs-n">{counts.published}</span>
               </>,
             ],
             [
@@ -224,10 +220,7 @@ export function WorkflowsPage() {
             icon={Layers}
             title={t("wfs.noMatch")}
             action={
-              <button
-                className="ghost sm"
-                onClick={() => (setQ(""), setFilter("all"))}
-              >
+              <button className="ghost sm" onClick={() => (setQ(""), setFilter("all"))}>
                 {t("wfs.clearFilter")}
               </button>
             }
@@ -236,11 +229,7 @@ export function WorkflowsPage() {
       ) : (
         <div className="wfs-grid">
           {list.map((w) => (
-            <WorkflowCard
-              key={w.key}
-              w={w}
-              onDuplicate={() => openCreate(w.key)}
-            />
+            <WorkflowCard key={w.key} w={w} onDuplicate={() => openCreate(w.key)} />
           ))}
           <button className="wfs-new" onClick={() => openCreate()}>
             <span className="wfs-new-icon">
@@ -272,8 +261,7 @@ export function WorkflowsPage() {
                 </span>
                 <div>
                   <div className="muted small">{t("wfs.copiedFrom")}</div>
-                  <b>{source.name}</b>{" "}
-                  <span className="mono muted">{source.key}</span>
+                  <b>{source.name}</b> <span className="mono muted">{source.key}</span>
                 </div>
               </div>
             )}
@@ -305,11 +293,7 @@ export function WorkflowsPage() {
                   </>
                 )}
               </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => setCreating(null)}
-              >
+              <button type="button" className="ghost" onClick={() => setCreating(null)}>
                 {t("common.cancel")}
               </button>
             </div>
@@ -345,9 +329,7 @@ function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
         </span>
         <div className="wfs-card-title">
           <b>{w.name}</b>
-          <span className="pill">
-            {w.owner_id ? t("auth.my") : t("auth.shared")}
-          </span>
+          <span className="pill">{w.owner_id ? t("auth.my") : t("auth.shared")}</span>
           <span className="mono muted">{w.key}</span>
         </div>
         <button
@@ -389,11 +371,7 @@ function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
           types.map((t) => {
             const I = WF_TYPE_ICON[t] ?? Layers;
             return (
-              <span
-                key={t}
-                className={`wfs-type tone-${WF_TYPE_TONE[t] ?? "logic"}`}
-                title={t}
-              >
+              <span key={t} className={`wfs-type tone-${WF_TYPE_TONE[t] ?? "logic"}`} title={t}>
                 <I size={12} strokeWidth={2} /> {SHORT_LABEL[t] ?? t}
               </span>
             );
@@ -405,17 +383,14 @@ function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
 
       <div className="wfs-meta">
         <span title={t("wfs.stepsTip")}>
-          <Layers size={13} />{" "}
-          {def ? t("wfs.stepCount", { n: steps.length }) : "—"}
+          <Layers size={13} /> {def ? t("wfs.stepCount", { n: steps.length }) : "—"}
         </span>
         <span title={t("wfs.runsTip")}>
-          <Play size={13} />{" "}
-          {w.run_count != null ? t("wfs.runCount", { n: w.run_count }) : "—"}
+          <Play size={13} /> {w.run_count != null ? t("wfs.runCount", { n: w.run_count }) : "—"}
         </span>
         <span className="grow" />
         <span title={w.updated_at}>
-          <Clock size={13} />{" "}
-          {w.updated_at ? t("common.ago", { when: ago(w.updated_at) }) : "—"}
+          <Clock size={13} /> {w.updated_at ? t("common.ago", { when: ago(w.updated_at) }) : "—"}
         </span>
       </div>
     </article>

@@ -99,15 +99,10 @@ function ProdErrorRefs({ rows }: { rows: any[] }) {
       {rows.map((g) => {
         const current = g.day === g.latest_day;
         return (
-          <a
-            key={g.fingerprint}
-            className="wi-prod-row"
-            href={`#/prod-errors/${g.fingerprint}`}
-          >
+          <a key={g.fingerprint} className="wi-prod-row" href={`#/prod-errors/${g.fingerprint}`}>
             <span className={`pe-sev pe-${g.severity}`}>{g.severity}</span>
             <span className="wi-prod-main">
-              <b>{g.service}</b>{" "}
-              <span className="mono small">{g.signature}</span>
+              <b>{g.service}</b> <span className="mono small">{g.signature}</span>
               <span className="muted small">
                 {current ? (
                   <>
@@ -146,10 +141,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
   useEffect(() => {
     if (!st?.windowOpen) return;
     // The external login window is not a workflow event: poll while it is open and the tab is visible.
-    const timer = setInterval(
-      () => document.visibilityState === "visible" && reloadSt(),
-      1500,
-    );
+    const timer = setInterval(() => document.visibilityState === "visible" && reloadSt(), 1500);
     return () => clearInterval(timer);
   }, [st?.windowOpen, reloadSt]);
   const [taskId, setTaskId] = useState("");
@@ -161,12 +153,8 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
     if (r) reloadInbox();
   };
   const pick = async (workId: number | string) => {
-    const r = await act(
-      () => api<any>(`/api/work/pick/${workId}`, {}),
-      t("wi.importedRun"),
-    );
-    if (r)
-      (reloadInbox(), onImported(), navigate(`/work-items/${r.work_item_id}`));
+    const r = await act(() => api<any>(`/api/work/pick/${workId}`, {}), t("wi.importedRun"));
+    if (r) (reloadInbox(), onImported(), navigate(`/work-items/${r.work_item_id}`));
   };
   return (
     <section className="card wi-hasaki">
@@ -184,8 +172,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
       </div>
       {st?.expiresAt && (
         <div className="muted small wi-hexp">
-          <Clock size={12} strokeWidth={2} />{" "}
-          {t("wi.expires", { time: time(st.expiresAt) })}
+          <Clock size={12} strokeWidth={2} /> {t("wi.expires", { time: time(st.expiresAt) })}
         </div>
       )}
       {st && (
@@ -241,12 +228,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
             aria-label={t("ig.token")}
             onSubmit={async (e) => {
               e.preventDefault();
-              if (
-                await act(
-                  () => api("/api/work/token", { token }),
-                  t("wi.tokenSaved"),
-                )
-              ) {
+              if (await act(() => api("/api/work/token", { token }), t("wi.tokenSaved"))) {
                 setToken("");
                 await reloadSt();
               }
@@ -273,11 +255,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
       {st?.loggedIn && (
         <div className="stack wi-hlogin wi-hfetch">
           <button className="sm" disabled={busy} onClick={refresh}>
-            <RefreshCw
-              size={14}
-              strokeWidth={2}
-              className={busy ? "wi-spin" : undefined}
-            />
+            <RefreshCw size={14} strokeWidth={2} className={busy ? "wi-spin" : undefined} />
             {busy ? t("wi.fetching") : t("wi.fetchTasks")}
           </button>
           <div className="wi-inline wi-hfield">
@@ -287,11 +265,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
               value={taskId}
               onChange={(e) => setTaskId(e.target.value)}
             />
-            <button
-              className="sm ghost"
-              disabled={!taskId}
-              onClick={() => pick(taskId)}
-            >
+            <button className="sm ghost" disabled={!taskId} onClick={() => pick(taskId)}>
               <Download size={14} strokeWidth={2} />
               {t("kn.import")}
             </button>
@@ -314,16 +288,11 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
                   <div className="wi-hitem-name">{r.name}</div>
                 </div>
                 {r.work_item_id ? (
-                  <a
-                    className="wi-hitem-link"
-                    href={`#/work-items/${r.work_item_id}`}
-                  >
+                  <a className="wi-hitem-link" href={`#/work-items/${r.work_item_id}`}>
                     {r.run_status ? (
                       <Badge s={r.run_status} label />
                     ) : (
-                      <span className="pill chip-brand">
-                        {t("wi.imported")}
-                      </span>
+                      <span className="pill chip-brand">{t("wi.imported")}</span>
                     )}
                   </a>
                 ) : (
@@ -345,33 +314,25 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
   const initParams = useMemo(
     () =>
       new URLSearchParams(
-        query ||
-          (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
+        query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
       ),
     [query],
   );
-  const [source, setSourceState] = useState(
-    () => initParams.get("source") || "",
-  );
+  const [source, setSourceState] = useState(() => initParams.get("source") || "");
   const [q, setQState] = useState(() => initParams.get("q") || "");
-  const [statusF, setStatusFState] = useState(
-    () => initParams.get("status") || "",
-  );
+  const [statusF, setStatusFState] = useState(() => initParams.get("status") || "");
 
-  const syncUrl = useCallback(
-    (newSource: string, newStatus: string, newQ: string) => {
-      const p = new URLSearchParams();
-      if (newSource) p.set("source", newSource);
-      if (newStatus) p.set("status", newStatus);
-      if (newQ.trim()) p.set("q", newQ.trim());
-      const qs = p.toString();
-      const newHash = `#/work-items${qs ? `?${qs}` : ""}`;
-      if (location.hash !== newHash) {
-        history.replaceState(null, "", newHash);
-      }
-    },
-    [],
-  );
+  const syncUrl = useCallback((newSource: string, newStatus: string, newQ: string) => {
+    const p = new URLSearchParams();
+    if (newSource) p.set("source", newSource);
+    if (newStatus) p.set("status", newStatus);
+    if (newQ.trim()) p.set("q", newQ.trim());
+    const qs = p.toString();
+    const newHash = `#/work-items${qs ? `?${qs}` : ""}`;
+    if (location.hash !== newHash) {
+      history.replaceState(null, "", newHash);
+    }
+  }, []);
 
   const setSource = (s: string) => {
     setSourceState(s);
@@ -409,8 +370,7 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
       () => api<any>("/api/work-items/import", { source: src, payload }),
       t("wi.importedOnly"),
     );
-    if (r)
-      (setPaste(""), navigate(`/work-items/${r.item?.id ?? r.work_item_id}`));
+    if (r) (setPaste(""), navigate(`/work-items/${r.item?.id ?? r.work_item_id}`));
   };
 
   const counts = useMemo(() => {
@@ -423,10 +383,7 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
     return (data ?? []).filter(
       (w) =>
         (!statusF || w.status === statusF) &&
-        (!s ||
-          [w.code, w.title, w.project].some(
-            (v) => v && String(v).toLowerCase().includes(s),
-          )),
+        (!s || [w.code, w.title, w.project].some((v) => v && String(v).toLowerCase().includes(s))),
     );
   }, [data, q, statusF]);
 
@@ -445,11 +402,7 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
               title={t("wi.refresh")}
               onClick={reload}
             >
-              <RefreshCw
-                size={16}
-                strokeWidth={2}
-                className={refreshing ? "wi-spin" : undefined}
-              />
+              <RefreshCw size={16} strokeWidth={2} className={refreshing ? "wi-spin" : undefined} />
             </button>
             <button className="ghost" onClick={() => setPanel("import")}>
               <FileJson size={15} strokeWidth={2} />
@@ -486,19 +439,11 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
               />
             </div>
           </div>
-          <div
-            className="wi-statusbar"
-            role="group"
-            aria-label={t("wi.filterStatus")}
-          >
+          <div className="wi-statusbar" role="group" aria-label={t("wi.filterStatus")}>
             {(
               [
                 ["", t("wi.all"), data?.length ?? 0],
-                ...Object.keys(WI_STATUS_KEY).map((k) => [
-                  k,
-                  t(WI_STATUS_KEY[k]),
-                  counts[k] ?? 0,
-                ]),
+                ...Object.keys(WI_STATUS_KEY).map((k) => [k, t(WI_STATUS_KEY[k]), counts[k] ?? 0]),
               ] as Array<[string, string, number]>
             ).map(([k, label, n]) => (
               <button
@@ -558,12 +503,9 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
                     <WiStatus s={w.status} />
                     <div className="wi-row-runs">
                       <span className="muted small">
-                        <Workflow size={12} strokeWidth={2} />{" "}
-                        {t("wi.runs", { n: w.run_count })}
+                        <Workflow size={12} strokeWidth={2} /> {t("wi.runs", { n: w.run_count })}
                       </span>
-                      {w.last_run_status && (
-                        <Badge s={w.last_run_status} label />
-                      )}
+                      {w.last_run_status && <Badge s={w.last_run_status} label />}
                       {w.cost?.cost_usd != null && (
                         <span className="small">
                           <CostCell cost={w.cost} />
@@ -575,12 +517,7 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
                       {t("wi.ago", { ago: ago(w.updated_at) })}
                     </span>
                   </div>
-                  <ChevronRight
-                    size={18}
-                    strokeWidth={1.9}
-                    className="wi-chev"
-                    aria-hidden
-                  />
+                  <ChevronRight size={18} strokeWidth={1.9} className="wi-chev" aria-hidden />
                 </a>
               ))}
             </div>
@@ -617,9 +554,7 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
             <textarea
               rows={8}
               value={form.description}
-              onChange={(e) =>
-                setForm({ ...form, description: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
             />
           </Field>
           <div className="row">
@@ -652,19 +587,11 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
             />
           </Field>
           <div className="row">
-            <button
-              className="ghost"
-              disabled={!paste}
-              onClick={() => importJson("hasaki_work")}
-            >
+            <button className="ghost" disabled={!paste} onClick={() => importJson("hasaki_work")}>
               <Download size={14} strokeWidth={2} />
               {t("wi.importHasaki")}
             </button>
-            <button
-              className="ghost"
-              disabled={!paste}
-              onClick={() => importJson("jira")}
-            >
+            <button className="ghost" disabled={!paste} onClick={() => importJson("jira")}>
               <Download size={14} strokeWidth={2} />
               {t("wi.importJira")}
             </button>
@@ -807,10 +734,7 @@ const fmtDur = (ms: number | null) => {
 function RunSummaryCard({ runs }: { runs: any[] }) {
   const { t } = useI18n();
   const finished = useMemo(
-    () =>
-      (runs ?? [])
-        .filter((r) => FINISHED.includes(r.status))
-        .sort((a, b) => b.id - a.id),
+    () => (runs ?? []).filter((r) => FINISHED.includes(r.status)).sort((a, b) => b.id - a.id),
     [runs],
   );
   const [runId, setRunId] = useState<number | null>(null);
@@ -820,12 +744,9 @@ function RunSummaryCard({ runs }: { runs: any[] }) {
     data: s,
     error,
     loading,
-  } = useApi<any>(
-    current
-      ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}`
-      : null,
-    [refresh],
-  );
+  } = useApi<any>(current ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}` : null, [
+    refresh,
+  ]);
   if (!finished.length) return null;
   return (
     <section className="card wi-sum">
@@ -882,16 +803,11 @@ export function RunSummaryView({ s }: { s: any }) {
         </span>
         <span>
           <b>{s.totals.attempts}</b> {t("sum.attempts")}
-          {s.totals.retries > 0 && (
-            <> ({t("sum.retries", { n: s.totals.retries })})</>
-          )}
+          {s.totals.retries > 0 && <> ({t("sum.retries", { n: s.totals.retries })})</>}
         </span>
         {s.changes.length > 0 && (
           <span>
-            <b>
-              {s.changes.reduce((n: number, c: any) => n + c.files.length, 0)}
-            </b>{" "}
-            {t("sum.files")}{" "}
+            <b>{s.changes.reduce((n: number, c: any) => n + c.files.length, 0)}</b> {t("sum.files")}{" "}
             <span className="wi-sum-add">
               +{s.changes.reduce((n: number, c: any) => n + c.additions, 0)}
             </span>{" "}
@@ -928,24 +844,18 @@ export function RunSummaryView({ s }: { s: any }) {
               <span className="grow" />
               <span className="muted small">
                 {fmtDur(st.duration_ms)}
-                {st.attempts > 1
-                  ? ` · ${t("sum.tries", { n: st.attempts })}`
-                  : ""}
+                {st.attempts > 1 ? ` · ${t("sum.tries", { n: st.attempts })}` : ""}
               </span>
             </div>
             {st.summary && <p className="wi-sum-text">{st.summary}</p>}
             {st.lists.length > 0 && (
               <details className="wi-sum-more">
                 <summary>
-                  {st.lists
-                    .map((l: any) => `${l.label} (${l.items.length})`)
-                    .join(" · ")}
+                  {st.lists.map((l: any) => `${l.label} (${l.items.length})`).join(" · ")}
                 </summary>
                 {st.lists.map((l: any) => (
                   <div key={l.label} className="wi-sum-list">
-                    {st.lists.length > 1 && (
-                      <div className="muted small">{l.label}</div>
-                    )}
+                    {st.lists.length > 1 && <div className="muted small">{l.label}</div>}
                     <ul>
                       {l.items.map((i: string, n: number) => (
                         <li key={n}>{i}</li>
@@ -974,15 +884,13 @@ export function RunSummaryView({ s }: { s: any }) {
               </summary>
               {c.commits.map((cm: any) => (
                 <div key={cm.hash} className="small">
-                  <GitCommit size={12} />{" "}
-                  <span className="mono">{cm.hash}</span> {cm.subject}
+                  <GitCommit size={12} /> <span className="mono">{cm.hash}</span> {cm.subject}
                 </div>
               ))}
               <ul className="wi-sum-files">
                 {c.files.map((f: any) => (
                   <li key={f.path} className="mono small">
-                    {f.path}{" "}
-                    <span className="wi-sum-add">+{f.additions ?? "bin"}</span>{" "}
+                    {f.path} <span className="wi-sum-add">+{f.additions ?? "bin"}</span>{" "}
                     <span className="wi-sum-del">−{f.deletions ?? "bin"}</span>
                   </li>
                 ))}
@@ -1069,12 +977,7 @@ export function RunSummaryView({ s }: { s: any }) {
 }
 
 export function WorkItemDetail({ id }: { id: number }) {
-  const {
-    data: w,
-    error,
-    loading,
-    reload,
-  } = useApi<any>(`/api/work-items/${id}`);
+  const { data: w, error, loading, reload } = useApi<any>(`/api/work-items/${id}`);
   const { data: wfs } = useApi<any[]>("/api/workflows");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
   const { t, locale } = useI18n();
@@ -1105,8 +1008,7 @@ export function WorkItemDetail({ id }: { id: number }) {
       }),
     );
     if (!r) return;
-    if (mode === "step")
-      await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
+    if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
   };
   const selectedWf = (wfs ?? []).find((x) => x.key === wf);
@@ -1155,9 +1057,7 @@ export function WorkItemDetail({ id }: { id: number }) {
             <div className="wi-section-head">
               <History size={16} strokeWidth={2} />
               <h4>{t("wi.history")}</h4>
-              <span className="muted small">
-                {t("wi.runs", { n: w.runs.length })}
-              </span>
+              <span className="muted small">{t("wi.runs", { n: w.runs.length })}</span>
             </div>
             <RunsTable runs={w.runs} />
           </section>
@@ -1188,31 +1088,27 @@ export function WorkItemDetail({ id }: { id: number }) {
             </section>
           )}
 
-          {w.legacy &&
-            (w.legacy.questions.length > 0 || w.legacy.events.length > 0) && (
-              <details className="card flat wi-legacy">
-                <summary>
-                  {t("wi.legacy", {
-                    questions: w.legacy.questions.length,
-                    events: w.legacy.events.length,
-                  })}
-                </summary>
-                {w.legacy.questions.map((q: any) => (
-                  <div key={q.id} className="q">
-                    <b>{q.question}</b>
-                    <div className="muted">
-                      → {q.answer ?? t("wi.unanswered")}
-                    </div>
-                  </div>
-                ))}
-                {w.legacy.events.map((e: any) => (
-                  <div key={e.id} className="small">
-                    <span className="muted">{time(e.created_at)}</span>{" "}
-                    <b>{e.kind}</b> {e.content}
-                  </div>
-                ))}
-              </details>
-            )}
+          {w.legacy && (w.legacy.questions.length > 0 || w.legacy.events.length > 0) && (
+            <details className="card flat wi-legacy">
+              <summary>
+                {t("wi.legacy", {
+                  questions: w.legacy.questions.length,
+                  events: w.legacy.events.length,
+                })}
+              </summary>
+              {w.legacy.questions.map((q: any) => (
+                <div key={q.id} className="q">
+                  <b>{q.question}</b>
+                  <div className="muted">→ {q.answer ?? t("wi.unanswered")}</div>
+                </div>
+              ))}
+              {w.legacy.events.map((e: any) => (
+                <div key={e.id} className="small">
+                  <span className="muted">{time(e.created_at)}</span> <b>{e.kind}</b> {e.content}
+                </div>
+              ))}
+            </details>
+          )}
         </div>
 
         <aside className="wi-detail-side">
@@ -1232,21 +1128,13 @@ export function WorkItemDetail({ id }: { id: number }) {
                   .filter((x) => x.latest_version > 0)
                   .map((x) => (
                     <option key={x.key} value={x.key}>
-                      {x.name} (v{x.latest_version}) —{" "}
-                      {x.description?.slice(0, 60)}
+                      {x.name} (v{x.latest_version}) — {x.description?.slice(0, 60)}
                     </option>
                   ))}
               </select>
             </Field>
-            {selectedWf?.description && (
-              <div className="wi-wfdesc">{selectedWf.description}</div>
-            )}
-            <ProfilePreview
-              workflow={wf}
-              workItemId={id}
-              value={profile}
-              onChange={setProfile}
-            />
+            {selectedWf?.description && <div className="wi-wfdesc">{selectedWf.description}</div>}
+            <ProfilePreview workflow={wf} workItemId={id} value={profile} onChange={setProfile} />
             <Field label={t("run.outputLanguage")} hint={t("run.outputHint")}>
               <select
                 value={outputLocale}
@@ -1256,20 +1144,13 @@ export function WorkItemDetail({ id }: { id: number }) {
                 <option value="en">{t("lang.en")}</option>
               </select>
             </Field>
-            <AgentProviderField
-              value={agentProvider}
-              onChange={setAgentProvider}
-            />
+            <AgentProviderField value={agentProvider} onChange={setAgentProvider} />
             <button className="wi-start" onClick={() => start("start")}>
               <Play size={16} strokeWidth={2.2} />
               {t("run.start")}
             </button>
             <div className="wi-launch-alt">
-              <button
-                className="ghost sm"
-                onClick={() => start("step")}
-                title={t("run.step")}
-              >
+              <button className="ghost sm" onClick={() => start("step")} title={t("run.step")}>
                 <StepForward size={14} strokeWidth={2} />
                 {t("run.step")}
               </button>
@@ -1345,9 +1226,8 @@ export function WorkItemDetail({ id }: { id: number }) {
               <select
                 value={w.status}
                 onChange={async (e) =>
-                  (await act(() =>
-                    api(`/api/work-items/${id}`, { status: e.target.value }),
-                  )) && reload()
+                  (await act(() => api(`/api/work-items/${id}`, { status: e.target.value }))) &&
+                  reload()
                 }
               >
                 {["open", "in_progress", "done", "archived"].map((s) => (

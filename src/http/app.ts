@@ -11,13 +11,24 @@ import { singleflight } from "../cache/index.ts";
 import { HttpError } from "./error.ts";
 import { messages as uiMessages } from "../../web/src/i18n/messages.ts";
 import { handleEventsSince, handleStream } from "../api/stream.ts";
-import { clearSessionCookie, csrfOk, login, logout, sessionFromRequest, setSessionCookie } from "../auth/sessions.ts";
+import {
+  clearSessionCookie,
+  csrfOk,
+  login,
+  logout,
+  sessionFromRequest,
+  setSessionCookie,
+} from "../auth/sessions.ts";
 import { setPassword } from "../auth/users.ts";
 import { wantsSupport } from "../authz/access.ts";
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 const publicDir = join(import.meta.dirname, "..", "..", "public");
-const CLASSIC: Record<string, string> = { "/classic": "index.html", "/classic/": "index.html", "/app.js": "app.js" };
+const CLASSIC: Record<string, string> = {
+  "/classic": "index.html",
+  "/classic/": "index.html",
+  "/app.js": "app.js",
+};
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -29,27 +40,43 @@ const TYPES: Record<string, string> = {
 };
 
 function serveFile(res: ServerResponse, file: string, cache = "no-cache") {
-  res.writeHead(200, { "Content-Type": TYPES[extname(file)] ?? "application/octet-stream", "Cache-Control": cache });
+  res.writeHead(200, {
+    "Content-Type": TYPES[extname(file)] ?? "application/octet-stream",
+    "Cache-Control": cache,
+  });
   res.end(readFileSync(file));
 }
 
 function serveStatic(url: URL, res: ServerResponse) {
-  if (CLASSIC[url.pathname]) return serveFile(res, join(publicDir, CLASSIC[url.pathname])), true;
+  if (CLASSIC[url.pathname]) return (serveFile(res, join(publicDir, CLASSIC[url.pathname])), true);
   if (url.pathname.startsWith("/api/")) return false;
   const rel = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, "");
   const file = join(webDist, rel);
   if (rel && file.startsWith(webDist) && existsSync(file) && statSync(file).isFile())
-    return serveFile(res, file, rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache"), true;
+    return (
+      serveFile(
+        res,
+        file,
+        rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+      ),
+      true
+    );
   const index = join(webDist, "index.html");
-  if (existsSync(index)) return serveFile(res, index), true;
-  res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" }).end("UI not built yet: run `npm run build` (npm start does it automatically).");
+  if (existsSync(index)) return (serveFile(res, index), true);
+  res
+    .writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
+    .end("UI not built yet: run `npm run build` (npm start does it automatically).");
   return true;
 }
 
 async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<any> {
   const chunks: Buffer[] = [];
   let bytes = 0;
-  for await (const c of req) { bytes += (c as Buffer).length; if (bytes > maxBytes) throw new HttpError(413, "Body too large"); chunks.push(c as Buffer); }
+  for await (const c of req) {
+    bytes += (c as Buffer).length;
+    if (bytes > maxBytes) throw new HttpError(413, "Body too large");
+    chunks.push(c as Buffer);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   try {
     return raw ? JSON.parse(raw) : {};
@@ -71,24 +98,45 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     if (key === "POST /api/telegram/webhook") {
       // Verify BEFORE reading a body or bypassing session/CSRF for this single authenticated transport route.
       const { validWebhookSecret } = await import("../telegram/client.ts");
-      if (!validWebhookSecret(req.headers["x-telegram-bot-api-secret-token"])) throw new HttpError(403, "Invalid Telegram webhook authentication");
-      return send(res, 200, await acceptWebhook(req.headers["x-telegram-bot-api-secret-token"], await readJson(req, 262144)));
+      if (!validWebhookSecret(req.headers["x-telegram-bot-api-secret-token"]))
+        throw new HttpError(403, "Invalid Telegram webhook authentication");
+      return send(
+        res,
+        200,
+        await acceptWebhook(
+          req.headers["x-telegram-bot-api-secret-token"],
+          await readJson(req, 262144),
+        ),
+      );
     }
     if (key === "GET /api/health") return send(res, 200, { ok: true });
     if (key === "GET /api/ui-messages") {
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-cache",
+      });
       return res.end(JSON.stringify(uiMessages));
     }
     if (key === "GET /api/auth/status") {
-      const result = await pool.query("SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND active) AS ready");
-      return send(res, 200, { bootstrapRequired: !result.rows[0].ready }, { "Cache-Control": "no-store" });
+      const result = await pool.query(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin' AND active) AS ready",
+      );
+      return send(
+        res,
+        200,
+        { bootstrapRequired: !result.rows[0].ready },
+        { "Cache-Control": "no-store" },
+      );
     }
     if (key === "POST /api/auth/login") {
       const body = await readJson(req);
       try {
         const result = await login(String(body.username ?? ""), String(body.password ?? ""), req);
         setSessionCookie(res, req, result.token);
-        return send(res, 200, { user: { id: result.user.id, username: result.user.username, role: result.user.role }, csrf: result.user.csrf });
+        return send(res, 200, {
+          user: { id: result.user.id, username: result.user.username, role: result.user.role },
+          csrf: result.user.csrf,
+        });
       } catch (e) {
         const status = (e as { status?: number }).status ?? 401;
         return send(res, status, { error: (e as Error).message });
@@ -98,9 +146,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
 
     const actor = await sessionFromRequest(req);
     if (!actor) return send(res, 401, { error: "authentication required" });
-    if (method !== "GET" && method !== "HEAD" && !csrfOk(req, actor.csrf)) return send(res, 403, { error: "CSRF check failed" });
+    if (method !== "GET" && method !== "HEAD" && !csrfOk(req, actor.csrf))
+      return send(res, 403, { error: "CSRF check failed" });
 
-    if (key === "GET /api/auth/me") return send(res, 200, { user: { id: actor.id, username: actor.username, role: actor.role }, csrf: actor.csrf });
+    if (key === "GET /api/auth/me")
+      return send(res, 200, {
+        user: { id: actor.id, username: actor.username, role: actor.role },
+        csrf: actor.csrf,
+      });
     if (key === "POST /api/auth/logout") {
       await logout(req);
       clearSessionCookie(res, req);
@@ -118,14 +171,28 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       return handleStream(req, res, url, actor, wantsSupport(actor, url.searchParams.get("scope")));
     }
     if (key === "GET /api/events") {
-      const slice = await handleEventsSince(url, actor, wantsSupport(actor, url.searchParams.get("scope")));
-      return slice ? send(res, 200, slice, { "Cache-Control": "no-store" }) : send(res, 404, { error: "not found" });
+      const slice = await handleEventsSince(
+        url,
+        actor,
+        wantsSupport(actor, url.searchParams.get("scope")),
+      );
+      return slice
+        ? send(res, 200, slice, { "Cache-Control": "no-store" })
+        : send(res, 404, { error: "not found" });
     }
     const raw = method === "GET" && url.pathname.match(/^\/api\/artifacts\/(\d+)\/raw$/);
     if (raw) {
       const { requireArtifact } = await import("../authz/access.ts");
-      await requireArtifact(actor, Number(raw[1]), wantsSupport(actor, url.searchParams.get("scope")));
-      const a = (await pool.query("SELECT name, content, data FROM workflow_artifacts WHERE id = $1", [Number(raw[1])])).rows[0];
+      await requireArtifact(
+        actor,
+        Number(raw[1]),
+        wantsSupport(actor, url.searchParams.get("scope")),
+      );
+      const a = (
+        await pool.query("SELECT name, content, data FROM workflow_artifacts WHERE id = $1", [
+          Number(raw[1]),
+        ])
+      ).rows[0];
       if (!a) return res.writeHead(404).end();
       const bin = a.data?.encoding === "base64";
       res.writeHead(200, {
@@ -142,20 +209,40 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const body = method === "POST" ? await readJson(req) : {};
       // Create-type POSTs with an Idempotency-Key: a repeat replays the first response instead of creating twice.
       const idemKey = req.headers["idempotency-key"];
-      const claim = typeof idemKey === "string" && needsIdempotency(method, url.pathname) ? await claimIdempotency(actor.id, idemKey, url.pathname, body) : null;
-      if (claim && claim.kind !== "run") return send(res, claim.status, claim.body, claim.kind === "replay" ? { "Idempotent-Replayed": "true" } : undefined);
+      const claim =
+        typeof idemKey === "string" && needsIdempotency(method, url.pathname)
+          ? await claimIdempotency(actor.id, idemKey, url.pathname, body)
+          : null;
+      if (claim && claim.kind !== "run")
+        return send(
+          res,
+          claim.status,
+          claim.body,
+          claim.kind === "replay" ? { "Idempotent-Replayed": "true" } : undefined,
+        );
       try {
         const ctx = { p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor };
         // Identical concurrent GETs of one user (every open tab refetches on the same live event) share one execution.
-        const execute = () => execution.run({ userId: actor.id, kind: "user" }, async () => {
-          if (/^\/api\/(integrations|prod-errors)/.test(url.pathname)) await loadPersonalIntegrations();
-          return handler(ctx);
-        });
-        const out = method === "GET" ? await singleflight(`${actor.id} ${url.pathname}${url.search}`, execute) : await execute();
+        const execute = () =>
+          execution.run({ userId: actor.id, kind: "user" }, async () => {
+            if (/^\/api\/(integrations|prod-errors)/.test(url.pathname))
+              await loadPersonalIntegrations();
+            return handler(ctx);
+          });
+        const out =
+          method === "GET"
+            ? await singleflight(`${actor.id} ${url.pathname}${url.search}`, execute)
+            : await execute();
         if (claim) await claim.finish(200, out ?? null);
         return send(res, 200, out ?? null);
       } catch (e) {
-        if (claim) await claim.finish(errorStatus(e), { error: (e as Error).message, details: (e as { errors?: unknown }).errors }).catch(() => claim.release().catch(() => { }));
+        if (claim)
+          await claim
+            .finish(errorStatus(e), {
+              error: (e as Error).message,
+              details: (e as { errors?: unknown }).errors,
+            })
+            .catch(() => claim.release().catch(() => {}));
         throw e;
       }
     }
@@ -164,6 +251,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     if (res.headersSent) return;
     const status = errorStatus(e);
     if (status >= 500) console.error(e);
-    return send(res, status, { error: (e as Error).message, details: (e as { errors?: unknown }).errors });
+    return send(res, status, {
+      error: (e as Error).message,
+      details: (e as { errors?: unknown }).errors,
+    });
   }
 }

@@ -12,7 +12,9 @@ let started = false;
 export class InstanceConflictError extends Error {
   readonly retrySeconds: number;
   constructor(id: string, retrySeconds: number) {
-    super(`Instance identity conflict: ${id} has a live registration. Stop the other installation or use its own dataDir and PLATFORM_INSTANCE. If the previous process just exited, retry in ${retrySeconds} seconds; a continuing heartbeat will keep the registration protected.`);
+    super(
+      `Instance identity conflict: ${id} has a live registration. Stop the other installation or use its own dataDir and PLATFORM_INSTANCE. If the previous process just exited, retry in ${retrySeconds} seconds; a continuing heartbeat will keep the registration protected.`,
+    );
     this.name = "InstanceConflictError";
     this.retrySeconds = retrySeconds;
   }
@@ -22,51 +24,88 @@ export class InstanceConflictError extends Error {
 export async function registerInstance(id = config.instanceId, session = instanceSession) {
   await withTx(async (c) => {
     if (!instanceIdentityExplicit && id !== hostname().replace(/:/g, "-")) {
-      const legacy = await one(c, "SELECT id FROM workflow_runs WHERE worker_instance = $1 LIMIT 1", [hostname().replace(/:/g, "-")]);
-      if (legacy) throw new Error("Legacy hostname-owned runs exist. Set PLATFORM_INSTANCE to the old hostname after verifying this is their original installation; ownership will not be migrated automatically.");
+      const legacy = await one(
+        c,
+        "SELECT id FROM workflow_runs WHERE worker_instance = $1 LIMIT 1",
+        [hostname().replace(/:/g, "-")],
+      );
+      if (legacy)
+        throw new Error(
+          "Legacy hostname-owned runs exist. Set PLATFORM_INSTANCE to the old hostname after verifying this is their original installation; ownership will not be migrated automatically.",
+        );
     }
     if (!instanceIdentityExplicit) {
       const prefix = join(config.dataDir, "worktrees") + sep;
-      const owners = await q(c, `SELECT DISTINCT r.worker_instance FROM workflow_runs r JOIN execution_workspaces w ON w.run_id = r.id
-        WHERE left(w.path, length($1)) = $1 AND r.worker_instance IS DISTINCT FROM $2`, [prefix, id]);
-      if (owners.length) throw new Error("Local dataDir has workspaces owned by another or unassigned instance identity. Verify the original ID and set PLATFORM_INSTANCE explicitly; ownership cannot be inferred safely.");
+      const owners = await q(
+        c,
+        `SELECT DISTINCT r.worker_instance FROM workflow_runs r JOIN execution_workspaces w ON w.run_id = r.id
+        WHERE left(w.path, length($1)) = $1 AND r.worker_instance IS DISTINCT FROM $2`,
+        [prefix, id],
+      );
+      if (owners.length)
+        throw new Error(
+          "Local dataDir has workspaces owned by another or unassigned instance identity. Verify the original ID and set PLATFORM_INSTANCE explicitly; ownership cannot be inferred safely.",
+        );
     }
-    const row = await one(c, `INSERT INTO platform_instances (instance_id, session_id) VALUES ($1, $2)
+    const row = await one(
+      c,
+      `INSERT INTO platform_instances (instance_id, session_id) VALUES ($1, $2)
       ON CONFLICT (instance_id) DO UPDATE SET session_id = excluded.session_id, started_at = now(), last_seen_at = now(), stopped_at = NULL
       WHERE platform_instances.stopped_at IS NOT NULL OR platform_instances.last_seen_at < now() - make_interval(secs => $3)
-      RETURNING instance_id`, [id, session, config.instance.offlineSeconds]);
+      RETURNING instance_id`,
+      [id, session, config.instance.offlineSeconds],
+    );
     if (!row) {
-      const live = await one(c, `SELECT GREATEST(1, ceil($2 - extract(epoch FROM now()-last_seen_at)))::int AS retry_seconds
-        FROM platform_instances WHERE instance_id=$1`, [id, config.instance.offlineSeconds]);
+      const live = await one(
+        c,
+        `SELECT GREATEST(1, ceil($2 - extract(epoch FROM now()-last_seen_at)))::int AS retry_seconds
+        FROM platform_instances WHERE instance_id=$1`,
+        [id, config.instance.offlineSeconds],
+      );
       throw new InstanceConflictError(id, live?.retry_seconds ?? config.instance.offlineSeconds);
     }
     // Replaced session may still have unexpired job leases. Expire and fence them before the new scheduler starts.
-    await q(c, `UPDATE workflow_jobs j SET lease_expires_at = now() - interval '1 second', fencing_token = fencing_token + 1
-      FROM workflow_runs r WHERE j.run_id = r.id AND r.worker_instance = $1 AND j.status = 'running'`, [id]);
+    await q(
+      c,
+      `UPDATE workflow_jobs j SET lease_expires_at = now() - interval '1 second', fencing_token = fencing_token + 1
+      FROM workflow_runs r WHERE j.run_id = r.id AND r.worker_instance = $1 AND j.status = 'running'`,
+      [id],
+    );
   });
 }
 
 /** Unregistered CLI/test workers remain compatible; registered servers must hold their process session. */
 export async function ownsInstance(db: Db = pool): Promise<boolean> {
-  return !(await one(db, "SELECT 1 FROM platform_instances WHERE instance_id = $1 AND (session_id <> $2 OR stopped_at IS NOT NULL)", [config.instanceId, instanceSession]));
+  return !(await one(
+    db,
+    "SELECT 1 FROM platform_instances WHERE instance_id = $1 AND (session_id <> $2 OR stopped_at IS NOT NULL)",
+    [config.instanceId, instanceSession],
+  ));
 }
 
 export async function instanceHealth(id: string | null, db: Db = pool) {
   if (!id) return { instance_id: null, health: "UNKNOWN", last_seen_at: null };
-  const row = await one(db, `SELECT instance_id, last_seen_at, stopped_at,
+  const row = await one(
+    db,
+    `SELECT instance_id, last_seen_at, stopped_at,
     CASE WHEN stopped_at IS NOT NULL THEN 'OFFLINE'
       WHEN last_seen_at < now() - make_interval(secs => $2) THEN 'OFFLINE'
       WHEN last_seen_at < now() - make_interval(secs => $3) THEN 'STALE' ELSE 'ONLINE' END AS health
-    FROM platform_instances WHERE instance_id = $1`, [id, config.instance.offlineSeconds, config.instance.heartbeatSeconds * 2]);
+    FROM platform_instances WHERE instance_id = $1`,
+    [id, config.instance.offlineSeconds, config.instance.heartbeatSeconds * 2],
+  );
   return row ?? { instance_id: id, health: "UNKNOWN", last_seen_at: null };
 }
 
-export async function startInstanceHeartbeat(options: { waitForPrevious?: boolean; onWait?: (seconds: number) => void } = {}) {
+export async function startInstanceHeartbeat(
+  options: { waitForPrevious?: boolean; onWait?: (seconds: number) => void } = {},
+) {
   if (started) throw new Error("Instance heartbeat already started");
   started = true;
   try {
-    try { await registerInstance(); }
-    catch (e) {
+    try {
+      await registerInstance();
+    } catch (e) {
       if (!options.waitForPrevious || !(e instanceof InstanceConflictError)) throw e;
       // One bounded wait covers an unclean exit; a renewed heartbeat still blocks takeover.
       const seconds = Math.min(config.instance.offlineSeconds, e.retrySeconds);
@@ -74,24 +113,50 @@ export async function startInstanceHeartbeat(options: { waitForPrevious?: boolea
       await delay(seconds * 1000);
       await registerInstance();
     }
-  } catch (e) { started = false; throw e; }
+  } catch (e) {
+    started = false;
+    throw e;
+  }
   let stopped = false;
   let timer: ReturnType<typeof setTimeout>;
   let pending: Promise<void> = Promise.resolve();
-  const schedule = () => { timer = setTimeout(() => { pending = beat(); }, config.instance.heartbeatSeconds * 1000); timer.unref(); };
+  const schedule = () => {
+    timer = setTimeout(() => {
+      pending = beat();
+    }, config.instance.heartbeatSeconds * 1000);
+    timer.unref();
+  };
   const beat = async () => {
     try {
-      const r = await q(pool, "UPDATE platform_instances SET last_seen_at = now() WHERE instance_id = $1 AND session_id = $2 AND stopped_at IS NULL RETURNING instance_id", [config.instanceId, instanceSession]);
-      if (!r.length) { localJobs.abortAll(); stopped = true; console.error("Instance registration lost; workers fenced. Restart with a unique PLATFORM_INSTANCE."); }
-    } catch (e) { console.warn("Instance heartbeat unavailable:", (e as Error).message); }
+      const r = await q(
+        pool,
+        "UPDATE platform_instances SET last_seen_at = now() WHERE instance_id = $1 AND session_id = $2 AND stopped_at IS NULL RETURNING instance_id",
+        [config.instanceId, instanceSession],
+      );
+      if (!r.length) {
+        localJobs.abortAll();
+        stopped = true;
+        console.error(
+          "Instance registration lost; workers fenced. Restart with a unique PLATFORM_INSTANCE.",
+        );
+      }
+    } catch (e) {
+      console.warn("Instance heartbeat unavailable:", (e as Error).message);
+    }
     if (!stopped) schedule();
   };
   schedule();
   return {
     async stop() {
-      stopped = true; clearTimeout(timer); await pending;
-      await q(pool, "UPDATE platform_instances SET stopped_at = now() WHERE instance_id = $1 AND session_id = $2", [config.instanceId, instanceSession]);
+      stopped = true;
+      clearTimeout(timer);
+      await pending;
+      await q(
+        pool,
+        "UPDATE platform_instances SET stopped_at = now() WHERE instance_id = $1 AND session_id = $2",
+        [config.instanceId, instanceSession],
+      );
       started = false;
-    }
+    },
   };
 }

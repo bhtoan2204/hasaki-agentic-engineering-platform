@@ -92,13 +92,23 @@ const REQUEST_SCOPE: IdField[] = ["request_id", "correlation_id", "message_id", 
 /** Business identifiers: tie events to the same entity, but not to the same request attempt. */
 const ENTITY_SCOPE: IdField[] = ["order_code", "shipment_code", "shipment_id", "tracking_no"];
 const MIN_KEY_LEN = 6;
-const PAYLOAD_TYPES = new Set(["OUTBOUND_MESSAGE_CREATED", "MESSAGE_PUBLISHED", "PARTNER_REQUEST_SENT", "PARTNER_RESPONSE_RECEIVED", "PARTNER_CALLBACK_RECEIVED"]);
+const PAYLOAD_TYPES = new Set([
+  "OUTBOUND_MESSAGE_CREATED",
+  "MESSAGE_PUBLISHED",
+  "PARTNER_REQUEST_SENT",
+  "PARTNER_RESPONSE_RECEIVED",
+  "PARTNER_CALLBACK_RECEIVED",
+]);
 
 const norm = (s: string) => s.trim().toLowerCase();
 
 function occurs(e: LogEvent, value: string) {
   const v = value.toLowerCase();
-  return e.raw.toLowerCase().includes(v) || e.message.toLowerCase().includes(v) || Object.values(e.fields).some((x) => x.toLowerCase().includes(v));
+  return (
+    e.raw.toLowerCase().includes(v) ||
+    e.message.toLowerCase().includes(v) ||
+    Object.values(e.fields).some((x) => x.toLowerCase().includes(v))
+  );
 }
 
 const say = (locale: "vi" | "en", vi: string, en: string) => (locale === "vi" ? vi : en);
@@ -109,7 +119,13 @@ function mergedIds(e: LogEvent, label: EventLabel, conflicts: string[], locale: 
   for (const [f, v] of Object.entries(label.ids ?? {}) as Array<[IdField, string]>) {
     if (!v || !ID_FIELDS.includes(f)) continue;
     if (!occurs(e, String(v))) {
-      conflicts.push(say(locale, `${f}=${v} do agent khai báo không có trong ${e.ref}; bỏ qua`, `${f}=${v} claimed by the agent does not occur in ${e.ref}; ignored`));
+      conflicts.push(
+        say(
+          locale,
+          `${f}=${v} do agent khai báo không có trong ${e.ref}; bỏ qua`,
+          `${f}=${v} claimed by the agent does not occur in ${e.ref}; ignored`,
+        ),
+      );
       continue;
     }
     const list = (ids[f] ??= []);
@@ -119,7 +135,10 @@ function mergedIds(e: LogEvent, label: EventLabel, conflicts: string[], locale: 
 }
 
 const eventType = (t: string) => {
-  const u = String(t ?? "").trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+  const u = String(t ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_");
   return /^[A-Z][A-Z0-9_]{2,40}$/.test(u) ? u : "OTHER";
 };
 
@@ -139,7 +158,8 @@ class UnionFind {
 
 const valueKeys = (ids: Ids) => {
   const out: string[] = [];
-  for (const f of ID_FIELDS) for (const v of ids[f] ?? []) if (v.length >= MIN_KEY_LEN) out.push(`v:${norm(v)}`);
+  for (const f of ID_FIELDS)
+    for (const v of ids[f] ?? []) if (v.length >= MIN_KEY_LEN) out.push(`v:${norm(v)}`);
   return [...new Set(out)];
 };
 
@@ -172,17 +192,48 @@ export function correlate(input: CorrelationInput): CorrelationResult {
     const ref = String(label.evidence_ref ?? "").trim();
     const e = input.events.get(ref);
     if (!e) {
-      rejected.push({ evidence_ref: ref, event_type: label.event_type, reason: say(locale, "mã bằng chứng không tồn tại — không có trong kết quả tìm kiếm đã lưu; không dùng", "unknown evidence reference — no stored search result has it; not used"), labeled_by: label.labeled_by });
+      rejected.push({
+        evidence_ref: ref,
+        event_type: label.event_type,
+        reason: say(
+          locale,
+          "mã bằng chứng không tồn tại — không có trong kết quả tìm kiếm đã lưu; không dùng",
+          "unknown evidence reference — no stored search result has it; not used",
+        ),
+        labeled_by: label.labeled_by,
+      });
       continue;
     }
     const conflicts: string[] = [];
-    if (!e.time) conflicts.push(say(locale, "sự kiện không có thời điểm đọc được", "event has no parseable timestamp"));
-    if (label.timestamp && e.time && label.timestamp !== e.time.iso && label.timestamp !== e.time.original)
-      conflicts.push(say(locale, `agent ghi thời điểm ${label.timestamp} khác log (${e.time.iso}); dùng thời điểm trong log`, `agent-stated time ${label.timestamp} differs from the log (${e.time.iso}); the log time is used`));
+    if (!e.time)
+      conflicts.push(
+        say(locale, "sự kiện không có thời điểm đọc được", "event has no parseable timestamp"),
+      );
+    if (
+      label.timestamp &&
+      e.time &&
+      label.timestamp !== e.time.iso &&
+      label.timestamp !== e.time.original
+    )
+      conflicts.push(
+        say(
+          locale,
+          `agent ghi thời điểm ${label.timestamp} khác log (${e.time.iso}); dùng thời điểm trong log`,
+          `agent-stated time ${label.timestamp} differs from the log (${e.time.iso}); the log time is used`,
+        ),
+      );
     const type = eventType(label.event_type);
     const prior = seen.get(ref);
     if (prior) {
-      if (prior.event_type !== type) prior.conflicts = [...(prior.conflicts ?? []), say(locale, `${label.labeled_by ?? "agent"} còn gắn nhãn ${type}; giữ nhãn đầu tiên`, `also labeled ${type} by ${label.labeled_by ?? "an agent"}; first label kept`)];
+      if (prior.event_type !== type)
+        prior.conflicts = [
+          ...(prior.conflicts ?? []),
+          say(
+            locale,
+            `${label.labeled_by ?? "agent"} còn gắn nhãn ${type}; giữ nhãn đầu tiên`,
+            `also labeled ${type} by ${label.labeled_by ?? "an agent"}; first label kept`,
+          ),
+        ];
       continue;
     }
     const ids = mergedIds(e, label, conflicts, locale);
@@ -252,22 +303,40 @@ export function correlate(input: CorrelationInput): CorrelationResult {
     }
   }
   const sortKey = (t: TimelineEvent) => t.epoch_us ?? Number.MAX_SAFE_INTEGER;
-  const timeline = all.filter((t) => t.confidence !== "unknown").sort((a, b) => sortKey(a) - sortKey(b) || a.evidence_ref.localeCompare(b.evidence_ref));
-  const uncorrelated = all.filter((t) => t.confidence === "unknown").sort((a, b) => sortKey(a) - sortKey(b));
+  const timeline = all
+    .filter((t) => t.confidence !== "unknown")
+    .sort((a, b) => sortKey(a) - sortKey(b) || a.evidence_ref.localeCompare(b.evidence_ref));
+  const uncorrelated = all
+    .filter((t) => t.confidence === "unknown")
+    .sort((a, b) => sortKey(a) - sortKey(b));
 
   // Redelivery: the same message id processed more than once (by type) — numbered in time order.
   const groups = new Map<string, TimelineEvent[]>();
-  for (const t of timeline) if (t.message_id) groups.set(`${t.event_type}|${t.message_id}`, [...(groups.get(`${t.event_type}|${t.message_id}`) ?? []), t]);
-  for (const [key, g] of groups) if (g.length > 1) g.forEach((t, i) => (t.delivery = { n: i + 1, of: g.length, key }));
+  for (const t of timeline)
+    if (t.message_id)
+      groups.set(`${t.event_type}|${t.message_id}`, [
+        ...(groups.get(`${t.event_type}|${t.message_id}`) ?? []),
+        t,
+      ]);
+  for (const [key, g] of groups)
+    if (g.length > 1) g.forEach((t, i) => (t.delivery = { n: i + 1, of: g.length, key }));
 
   // Attempts: outbound partner requests numbered in time order.
-  timeline.filter((t) => t.event_type === "PARTNER_REQUEST_SENT").forEach((t, i) => (t.attempt = i + 1));
+  timeline
+    .filter((t) => t.event_type === "PARTNER_REQUEST_SENT")
+    .forEach((t, i) => (t.attempt = i + 1));
 
   const identifiers: Partial<Record<IdField, string[]>> = {};
-  for (const t of timeline) for (const f of ID_FIELDS) for (const v of t.ids[f] ?? []) if (!(identifiers[f] ??= []).includes(v)) identifiers[f]!.push(v);
+  for (const t of timeline)
+    for (const f of ID_FIELDS)
+      for (const v of t.ids[f] ?? [])
+        if (!(identifiers[f] ??= []).includes(v)) identifiers[f]!.push(v);
 
   const labeled = new Set(seen.keys());
-  const unlabeled_refs = [...input.events.values()].filter((e) => !labeled.has(e.ref) && anchors.some((a) => occurs(e, a))).map((e) => e.ref).slice(0, 100);
+  const unlabeled_refs = [...input.events.values()]
+    .filter((e) => !labeled.has(e.ref) && anchors.some((a) => occurs(e, a)))
+    .map((e) => e.ref)
+    .slice(0, 100);
   return { timeline, uncorrelated, rejected, identifiers, unlabeled_refs };
 }
 
@@ -316,7 +385,10 @@ export const LATENCY_DEFINITIONS: LatencyDefinition[] = [
     key: "tracking_available",
     from: ["PARTNER_REQUEST_SENT"],
     to: ["TRACKING_NUMBER_RECEIVED"],
-    label: { vi: "Có thông tin vận đơn / tracking", en: "Shipping / tracking information available" },
+    label: {
+      vi: "Có thông tin vận đơn / tracking",
+      en: "Shipping / tracking information available",
+    },
     qualification: {
       vi: "Từ lúc gửi request tới lần đầu log ghi nhận mã tracking.",
       en: "From our request to the first log line that holds the tracking number.",
@@ -327,14 +399,20 @@ export const LATENCY_DEFINITIONS: LatencyDefinition[] = [
     from: ["SHIPPING_LABEL_REQUESTED"],
     to: ["SHIPPING_LABEL_URL_GENERATED"],
     label: { vi: "Sinh shipping label", en: "Shipping label generation" },
-    qualification: { vi: "Từ yêu cầu tạo label tới lúc URL label được sinh.", en: "From the label request to the label URL being generated." },
+    qualification: {
+      vi: "Từ yêu cầu tạo label tới lúc URL label được sinh.",
+      en: "From the label request to the label URL being generated.",
+    },
   },
   {
     key: "internal_dispatch",
     from: ["OUTBOUND_MESSAGE_CREATED", "MESSAGE_PUBLISHED"],
     fromPriority: true,
     to: ["PARTNER_REQUEST_SENT"],
-    label: { vi: "Xử lý nội bộ trước khi gọi đối tác", en: "Internal processing before the partner call" },
+    label: {
+      vi: "Xử lý nội bộ trước khi gọi đối tác",
+      en: "Internal processing before the partner call",
+    },
     qualification: {
       vi: "Nội bộ: broker + consumer + xử lý trước khi gửi request; không thuộc về đối tác.",
       en: "Internal: broker, consumer and processing before the request is sent; not attributable to the partner.",
@@ -352,7 +430,11 @@ export const LATENCY_DEFINITIONS: LatencyDefinition[] = [
     from: ["OUTBOUND_MESSAGE_CREATED", "PARTNER_REQUEST_SENT"],
     fromPriority: true,
     single: true,
-    to: ["SHIPPING_LABEL_URL_GENERATED", "SHIPPING_LABEL_URL_OBSERVED", "SHIPPING_LABEL_URL_PERSISTED"],
+    to: [
+      "SHIPPING_LABEL_URL_GENERATED",
+      "SHIPPING_LABEL_URL_OBSERVED",
+      "SHIPPING_LABEL_URL_PERSISTED",
+    ],
     label: { vi: "Đầu-cuối tới khi có URL label", en: "End to end until the label URL" },
     qualification: {
       vi: "Đầu-cuối gồm cả xử lý nội bộ và đối tác; không dùng làm thời gian xử lý của đối tác. Nếu chỉ có thời điểm 'thấy URL lần đầu' thì đó là cận trên.",
@@ -365,8 +447,18 @@ export interface LatencyResult {
   key: string;
   label: string;
   qualification: string;
-  from: { evidence_ref: string; event_type: string; timestamp: string | null; service: string | null };
-  to: { evidence_ref: string; event_type: string; timestamp: string | null; service: string | null };
+  from: {
+    evidence_ref: string;
+    event_type: string;
+    timestamp: string | null;
+    service: string | null;
+  };
+  to: {
+    evidence_ref: string;
+    event_type: string;
+    timestamp: string | null;
+    service: string | null;
+  };
   latency_us: number | null;
   latency_ms: number | null;
   latency_text: string | null;
@@ -381,7 +473,10 @@ export interface LatencyResult {
 
 function sharedValues(a: TimelineEvent, b: TimelineEvent, fields: IdField[]) {
   const out: string[] = [];
-  for (const f of fields) for (const v of a.ids[f] ?? []) for (const fb of fields) if ((b.ids[fb] ?? []).some((x) => norm(x) === norm(v))) out.push(`${f}=${v}`);
+  for (const f of fields)
+    for (const v of a.ids[f] ?? [])
+      for (const fb of fields)
+        if ((b.ids[fb] ?? []).some((x) => norm(x) === norm(v))) out.push(`${f}=${v}`);
   return [...new Set(out)];
 }
 
@@ -400,7 +495,11 @@ function conflictingRequestIds(a: TimelineEvent, b: TimelineEvent) {
  * (request_id / correlation_id / message_id / trace_id); otherwise a shared business id with the closest preceding
  * request, as "inferred", flagged when several attempts are possible; never across conflicting request ids.
  */
-export function computeLatencies(timeline: TimelineEvent[], locale: "vi" | "en" = "vi", defs = LATENCY_DEFINITIONS): LatencyResult[] {
+export function computeLatencies(
+  timeline: TimelineEvent[],
+  locale: "vi" | "en" = "vi",
+  defs = LATENCY_DEFINITIONS,
+): LatencyResult[] {
   const usable = timeline.filter((t) => t.epoch_us !== null && (!t.delivery || t.delivery.n === 1));
   const out: LatencyResult[] = [];
   for (const d of defs) {
@@ -422,17 +521,36 @@ export function computeLatencies(timeline: TimelineEvent[], locale: "vi" | "en" 
       let shared: string[] = [];
       const strong = froms.filter((f) => sharedValues(f, to, REQUEST_SCOPE).length);
       if (strong.length) {
-        from = strong.sort((a, b) => priority(a) - priority(b) || b.epoch_us! - a.epoch_us!).find((f) => f.epoch_us! <= to.epoch_us!) ?? strong[0];
+        from =
+          strong
+            .sort((a, b) => priority(a) - priority(b) || b.epoch_us! - a.epoch_us!)
+            .find((f) => f.epoch_us! <= to.epoch_us!) ?? strong[0];
         pairing = "request_scope_id";
         shared = sharedValues(from, to, REQUEST_SCOPE);
-        if (strong.length > 1) notes.push(locale === "vi" ? `${strong.length} request cùng mã; chọn request gần nhất trước sự kiện` : `${strong.length} requests share the id; the closest preceding one is used`);
+        if (strong.length > 1)
+          notes.push(
+            locale === "vi"
+              ? `${strong.length} request cùng mã; chọn request gần nhất trước sự kiện`
+              : `${strong.length} requests share the id; the closest preceding one is used`,
+          );
       } else {
-        const candidates = froms.filter((f) => sharedValues(f, to, ENTITY_SCOPE).length && !(d.sameRequest && conflictingRequestIds(f, to)) && f.epoch_us! <= to.epoch_us!);
+        const candidates = froms.filter(
+          (f) =>
+            sharedValues(f, to, ENTITY_SCOPE).length &&
+            !(d.sameRequest && conflictingRequestIds(f, to)) &&
+            f.epoch_us! <= to.epoch_us!,
+        );
         if (candidates.length) {
-          from = candidates.sort((a, b) => priority(a) - priority(b) || b.epoch_us! - a.epoch_us!)[0];
+          from = candidates.sort(
+            (a, b) => priority(a) - priority(b) || b.epoch_us! - a.epoch_us!,
+          )[0];
           pairing = "entity_id";
           shared = sharedValues(from, to, ENTITY_SCOPE);
-          notes.push(locale === "vi" ? "ghép theo mã nghiệp vụ chung, không có request id chung" : "paired through a shared business id; no shared request id");
+          notes.push(
+            locale === "vi"
+              ? "ghép theo mã nghiệp vụ chung, không có request id chung"
+              : "paired through a shared business id; no shared request id",
+          );
           const same = candidates.filter((c) => c.event_type === from!.event_type);
           if (same.length > 1)
             notes.push(
@@ -446,21 +564,46 @@ export function computeLatencies(timeline: TimelineEvent[], locale: "vi" | "en" 
       usedTo.add(to.evidence_ref);
       const us = to.epoch_us! - from.epoch_us!;
       const precision = coarser(from.precision ?? "s", to.precision ?? "s");
-      let confidence: Confidence = pairing === "request_scope_id" && from.confidence === "confirmed" && to.confidence === "confirmed" ? "confirmed" : "inferred";
+      let confidence: Confidence =
+        pairing === "request_scope_id" &&
+        from.confidence === "confirmed" &&
+        to.confidence === "confirmed"
+          ? "confirmed"
+          : "inferred";
       if (us < 0) {
-        notes.push(locale === "vi" ? "thời điểm đích sớm hơn nguồn (lệch đồng hồ giữa các service hoặc ghép sai) — không tính độ trễ" : "the later event is timestamped before the earlier one (clock skew or wrong pairing) — latency not computed");
+        notes.push(
+          locale === "vi"
+            ? "thời điểm đích sớm hơn nguồn (lệch đồng hồ giữa các service hoặc ghép sai) — không tính độ trễ"
+            : "the later event is timestamped before the earlier one (clock skew or wrong pairing) — latency not computed",
+        );
         confidence = "unknown";
       }
-      if (from.assumed_timezone || to.assumed_timezone) notes.push(locale === "vi" ? "múi giờ của log được giả định" : "log timezone was assumed");
-      if (precision === "s") notes.push(locale === "vi" ? "độ chính xác chỉ tới giây" : "second precision only");
+      if (from.assumed_timezone || to.assumed_timezone)
+        notes.push(locale === "vi" ? "múi giờ của log được giả định" : "log timezone was assumed");
+      if (precision === "s")
+        notes.push(locale === "vi" ? "độ chính xác chỉ tới giây" : "second precision only");
       if (d.key === "end_to_end_label" && to.event_type !== "SHIPPING_LABEL_URL_GENERATED")
-        notes.push(locale === "vi" ? "chỉ biết lúc thấy URL lần đầu, không phải lúc sinh — cận trên" : "only the first observation of the URL is known, not its creation — upper bound");
+        notes.push(
+          locale === "vi"
+            ? "chỉ biết lúc thấy URL lần đầu, không phải lúc sinh — cận trên"
+            : "only the first observation of the URL is known, not its creation — upper bound",
+        );
       out.push({
         key: d.key,
         label: d.label[locale],
         qualification: d.qualification[locale],
-        from: { evidence_ref: from.evidence_ref, event_type: from.event_type, timestamp: from.timestamp, service: from.service },
-        to: { evidence_ref: to.evidence_ref, event_type: to.event_type, timestamp: to.timestamp, service: to.service },
+        from: {
+          evidence_ref: from.evidence_ref,
+          event_type: from.event_type,
+          timestamp: from.timestamp,
+          service: from.service,
+        },
+        to: {
+          evidence_ref: to.evidence_ref,
+          event_type: to.event_type,
+          timestamp: to.timestamp,
+          service: to.service,
+        },
         latency_us: us >= 0 ? us : null,
         latency_ms: us >= 0 ? Math.round(us / 100) / 10 : null,
         latency_text: us >= 0 ? formatDuration(us, precision) : null,
@@ -478,33 +621,99 @@ export function computeLatencies(timeline: TimelineEvent[], locale: "vi" | "en" 
 
 // ---------------------------------------------------------------- evidence completeness
 
-export const OBJECTIVES = ["outbound_message", "partner_response_latency", "tracking_info", "shipping_label_time", "callback_time", "error_cause", "timeline"] as const;
+export const OBJECTIVES = [
+  "outbound_message",
+  "partner_response_latency",
+  "tracking_info",
+  "shipping_label_time",
+  "callback_time",
+  "error_cause",
+  "timeline",
+] as const;
 export type Objective = (typeof OBJECTIVES)[number];
 
 const NEEDS: Record<Objective, { any: string[][]; describe: { vi: string; en: string } }> = {
-  outbound_message: { any: [["PARTNER_REQUEST_SENT", "OUTBOUND_MESSAGE_CREATED", "MESSAGE_PUBLISHED"]], describe: { vi: "log của message/request gửi đi (payload)", en: "the log line of the outbound message/request (payload)" } },
-  partner_response_latency: {
-    any: [["PARTNER_REQUEST_SENT"], ["PARTNER_RESPONSE_RECEIVED", "PARTNER_CALLBACK_RECEIVED", "TRACKING_NUMBER_RECEIVED", "PARTNER_REQUEST_ACCEPTED"]],
-    describe: { vi: "cặp log request gửi đi và phản hồi/callback của đối tác", en: "the request log and the partner's response/callback log" },
+  outbound_message: {
+    any: [["PARTNER_REQUEST_SENT", "OUTBOUND_MESSAGE_CREATED", "MESSAGE_PUBLISHED"]],
+    describe: {
+      vi: "log của message/request gửi đi (payload)",
+      en: "the log line of the outbound message/request (payload)",
+    },
   },
-  tracking_info: { any: [["TRACKING_NUMBER_RECEIVED", "TRACKING_NUMBER_PERSISTED", "PARTNER_CALLBACK_RECEIVED"]], describe: { vi: "log có mã tracking/vận đơn", en: "a log line holding the tracking number" } },
-  shipping_label_time: { any: [["SHIPPING_LABEL_URL_GENERATED", "SHIPPING_LABEL_URL_OBSERVED", "SHIPPING_LABEL_URL_PERSISTED"]], describe: { vi: "log sinh hoặc lưu URL shipping label", en: "a log line generating or persisting the shipping label URL" } },
-  callback_time: { any: [["PARTNER_CALLBACK_RECEIVED"]], describe: { vi: "log nhận callback/webhook", en: "the callback/webhook receipt log" } },
-  error_cause: { any: [["ERROR"]], describe: { vi: "log lỗi liên quan", en: "the related error log" } },
-  timeline: { any: [], describe: { vi: "ít nhất một sự kiện được xác nhận", en: "at least one confirmed event" } },
+  partner_response_latency: {
+    any: [
+      ["PARTNER_REQUEST_SENT"],
+      [
+        "PARTNER_RESPONSE_RECEIVED",
+        "PARTNER_CALLBACK_RECEIVED",
+        "TRACKING_NUMBER_RECEIVED",
+        "PARTNER_REQUEST_ACCEPTED",
+      ],
+    ],
+    describe: {
+      vi: "cặp log request gửi đi và phản hồi/callback của đối tác",
+      en: "the request log and the partner's response/callback log",
+    },
+  },
+  tracking_info: {
+    any: [["TRACKING_NUMBER_RECEIVED", "TRACKING_NUMBER_PERSISTED", "PARTNER_CALLBACK_RECEIVED"]],
+    describe: { vi: "log có mã tracking/vận đơn", en: "a log line holding the tracking number" },
+  },
+  shipping_label_time: {
+    any: [
+      [
+        "SHIPPING_LABEL_URL_GENERATED",
+        "SHIPPING_LABEL_URL_OBSERVED",
+        "SHIPPING_LABEL_URL_PERSISTED",
+      ],
+    ],
+    describe: {
+      vi: "log sinh hoặc lưu URL shipping label",
+      en: "a log line generating or persisting the shipping label URL",
+    },
+  },
+  callback_time: {
+    any: [["PARTNER_CALLBACK_RECEIVED"]],
+    describe: { vi: "log nhận callback/webhook", en: "the callback/webhook receipt log" },
+  },
+  error_cause: {
+    any: [["ERROR"]],
+    describe: { vi: "log lỗi liên quan", en: "the related error log" },
+  },
+  timeline: {
+    any: [],
+    describe: { vi: "ít nhất một sự kiện được xác nhận", en: "at least one confirmed event" },
+  },
 };
 
-export function evaluateCompleteness(timeline: TimelineEvent[], objectives: string[], locale: "vi" | "en" = "vi") {
-  const types = new Set(timeline.filter((t) => t.confidence !== "unknown").map((t) => t.event_type));
+export function evaluateCompleteness(
+  timeline: TimelineEvent[],
+  objectives: string[],
+  locale: "vi" | "en" = "vi",
+) {
+  const types = new Set(
+    timeline.filter((t) => t.confidence !== "unknown").map((t) => t.event_type),
+  );
   const missing: Array<{ objective: string; needed: string }> = [];
   const satisfied: string[] = [];
-  const objs = (objectives.length ? objectives : ["timeline"]).filter((o): o is Objective => (OBJECTIVES as readonly string[]).includes(o));
+  const objs = (objectives.length ? objectives : ["timeline"]).filter((o): o is Objective =>
+    (OBJECTIVES as readonly string[]).includes(o),
+  );
   for (const o of objs) {
     const need = NEEDS[o];
-    const ok = o === "timeline" ? timeline.some((t) => t.confidence === "confirmed") : need.any.every((group) => group.some((g) => types.has(g)));
+    const ok =
+      o === "timeline"
+        ? timeline.some((t) => t.confidence === "confirmed")
+        : need.any.every((group) => group.some((g) => types.has(g)));
     // A URL that was only seen later (persisted/returned) does not tell when it was generated: keep looking once.
     if (o === "shipping_label_time" && ok && !types.has("SHIPPING_LABEL_URL_GENERATED"))
-      missing.push({ objective: o, needed: locale === "vi" ? "log sinh URL label (hiện chỉ thấy URL lần đầu, chưa rõ lúc sinh)" : "the label URL generation log (only the first observation is known)" });
+      missing.push({
+        objective: o,
+        needed:
+          locale === "vi"
+            ? "log sinh URL label (hiện chỉ thấy URL lần đầu, chưa rõ lúc sinh)"
+            : "the label URL generation log (only the first observation is known)",
+      });
     else if (ok) satisfied.push(o);
     else missing.push({ objective: o, needed: need.describe[locale] });
   }

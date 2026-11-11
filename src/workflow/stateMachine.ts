@@ -7,7 +7,16 @@ import type { RunStatus, StepStatus } from "./types.ts";
 export const STEP_TRANSITIONS: Record<StepStatus, readonly StepStatus[]> = {
   PENDING: ["READY", "SKIPPED", "CANCELED", "WAITING_APPROVAL"],
   READY: ["RUNNING", "CANCELED", "SKIPPED", "WAITING_APPROVAL", "PENDING"],
-  RUNNING: ["COMPLETED", "FAILED", "WAITING_INPUT", "WAITING_APPROVAL", "RETRYING", "CANCELED", "PENDING", "READY"],
+  RUNNING: [
+    "COMPLETED",
+    "FAILED",
+    "WAITING_INPUT",
+    "WAITING_APPROVAL",
+    "RETRYING",
+    "CANCELED",
+    "PENDING",
+    "READY",
+  ],
   // SKIPPED: the developer chose "skip this step" while it was waiting (skipStep allows it from these states).
   WAITING_INPUT: ["READY", "COMPLETED", "CANCELED", "PENDING", "FAILED", "SKIPPED"],
   WAITING_APPROVAL: ["COMPLETED", "READY", "FAILED", "CANCELED", "PENDING", "SKIPPED"],
@@ -44,18 +53,29 @@ export const RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
 };
 
 export function assertRunTransition(from: RunStatus, to: RunStatus) {
-  if (from !== to && !RUN_TRANSITIONS[from].includes(to)) throw new TransitionError("run", from, to);
+  if (from !== to && !RUN_TRANSITIONS[from].includes(to))
+    throw new TransitionError("run", from, to);
 }
 
 /** Statuses that satisfy a dependency. */
 export const DONE: readonly StepStatus[] = ["COMPLETED", "SKIPPED"];
 /** Statuses a step can be manually re-executed from. */
-export const RETRYABLE: readonly StepStatus[] = ["FAILED", "COMPLETED", "CANCELED", "SKIPPED", "WAITING_INPUT", "WAITING_APPROVAL"];
+export const RETRYABLE: readonly StepStatus[] = [
+  "FAILED",
+  "COMPLETED",
+  "CANCELED",
+  "SKIPPED",
+  "WAITING_INPUT",
+  "WAITING_APPROVAL",
+];
 
 /**
  * Derive the run status from its steps. PAUSED and CANCELED are sticky: only explicit actions leave them.
  */
-export function deriveRunStatus(current: RunStatus, steps: { status: StepStatus; depends_on: string[]; key: string }[]): RunStatus {
+export function deriveRunStatus(
+  current: RunStatus,
+  steps: { status: StepStatus; depends_on: string[]; key: string }[],
+): RunStatus {
   if (current === "PAUSED" || current === "CANCELED") return current;
   const has = (...s: StepStatus[]) => steps.some((x) => s.includes(x.status));
   if (has("READY", "RUNNING", "RETRYING")) return "RUNNING";

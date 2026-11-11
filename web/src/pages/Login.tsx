@@ -36,9 +36,7 @@ export function PasswordField({
       <div className="auth-password">
         <input
           id={id}
-          name={
-            current ? "password" : confirm ? "confirmPassword" : "newPassword"
-          }
+          name={current ? "password" : confirm ? "confirmPassword" : "newPassword"}
           type={visible ? "text" : "password"}
           autoComplete={current ? "current-password" : "new-password"}
           required
@@ -97,11 +95,7 @@ export function Login({
     <main className="auth-login">
       <div className="auth-login-inner">
         <div className="auth-login-tools">
-          <div
-            className="lang-switch"
-            role="group"
-            aria-label={t("lang.switch")}
-          >
+          <div className="lang-switch" role="group" aria-label={t("lang.switch")}>
             {(["vi", "en"] as const).map((l) => (
               <button
                 type="button"
@@ -136,10 +130,7 @@ export function Login({
           )}
           {error && (
             <div role="alert">
-              <ErrorBox
-                error={t(error)}
-                onRetry={setup === null ? load : undefined}
-              />
+              <ErrorBox error={t(error)} onRetry={setup === null ? load : undefined} />
             </div>
           )}
           {setup === null && !error && <Loading label={t("auth.loading")} />}
@@ -147,8 +138,7 @@ export function Login({
             <div className="stack">
               <p className="muted">{t("auth.bootstrap")}</p>
               <pre className="auth-command">
-                npm run admin:bootstrap -- --username &lt;username&gt;
-                --claim-legacy
+                npm run admin:bootstrap -- --username &lt;username&gt; --claim-legacy
               </pre>
               <p className="small muted">{t("auth.bootstrapReload")}</p>
               <button className="ghost" onClick={load}>
@@ -168,10 +158,10 @@ export function Login({
                 setBusy(true);
                 setError("");
                 try {
-                  const res = await api<{ user: SessionUser; csrf: string }>(
-                    "/api/auth/login",
-                    { username: username.trim(), password },
-                  );
+                  const res = await api<{ user: SessionUser; csrf: string }>("/api/auth/login", {
+                    username: username.trim(),
+                    password,
+                  });
                   setCsrf(res.csrf);
                   setAuthed(true);
                   onIn(res.user);

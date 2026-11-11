@@ -14,7 +14,11 @@ import {
   ConfigurationSchema,
   createComparison,
 } from "../src/eval/service.ts";
-import { chooseRecommendation, createRecommendation, RECOMMENDATION_VERSION } from "../src/eval/recommendations.ts";
+import {
+  chooseRecommendation,
+  createRecommendation,
+  RECOMMENDATION_VERSION,
+} from "../src/eval/recommendations.ts";
 import { evaluationAnalytics } from "../src/eval/analytics.ts";
 import { saveOptimizationPolicy } from "../src/eval/optimization.ts";
 import { sha256 } from "../src/eval/dataset.ts";
@@ -25,7 +29,12 @@ import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 import { handle } from "../src/http/app.ts";
 import { sandboxIdentity } from "../src/eval/isolation.ts";
-let owner: PublicUser, other: PublicUser, admin: PublicUser, suite: any, server: Server, base: string;
+let owner: PublicUser,
+  other: PublicUser,
+  admin: PublicUser,
+  suite: any,
+  server: Server,
+  base: string;
 /**
  * Objective validation runs inside the evaluation sandbox (src/eval/isolation.ts): a container runtime with a
  * pre-loaded image (never pulled) and a pinned Nix Node closure. Where that infrastructure is absent (CI runners,
@@ -43,9 +52,21 @@ before(async () => {
   config.learning.detectChanges = false;
   config.learning.evolveSkills = false;
   registerDefaultExecutors();
-  owner = await createUser({ username: "p6-owner", password: "evaluation-password", role: "member" });
-  other = await createUser({ username: "p6-other", password: "evaluation-password", role: "member" });
-  admin = await createUser({ username: "p6-admin", password: "evaluation-password", role: "admin" });
+  owner = await createUser({
+    username: "p6-owner",
+    password: "evaluation-password",
+    role: "member",
+  });
+  other = await createUser({
+    username: "p6-other",
+    password: "evaluation-password",
+    role: "member",
+  });
+  admin = await createUser({
+    username: "p6-admin",
+    password: "evaluation-password",
+    role: "admin",
+  });
   suite = await publishBuiltinSuite();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -104,74 +125,97 @@ test("provider models and context settings are strictly validated without cross-
     assert.equal(ConfigurationSchema.safeParse(cfg).success, false);
 });
 
-test("six provider plans use durable attempts and equivalent pinned fixtures with objective validation", { skip: sandboxMissing }, async () => {
-  for (const route of [
-    ["claude"],
-    ["codex"],
-    ["cursor"],
-    ["claude", "codex"],
-    ["codex", "claude"],
-    ["claude", "codex", "cursor"],
-  ]) {
-    const e = await evaluation(route, "tools", { repetitions: 2 });
-    const d = await finish(e.id);
-    assert.equal(d.status, "COMPLETED");
-    assert.equal(d.summary.successes, 2, JSON.stringify(d.cases.map((c: any) => c.data?.evidence?.details)));
-    assert.ok(d.cases.every((c: any) => c.data.evidence.cost_usd === null));
-    const attempts = await q(
-      pool,
-      "SELECT a.agent_provider,a.metrics FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id WHERE a.run_id=$1 AND s.type IN ('agent','coding_agent') ORDER BY a.id",
-      [e.workflow_run_id],
-    );
-    assert.deepEqual(
-      attempts.map((a) => a.agent_provider),
-      [...route, ...route],
-    );
-    assert.ok(
-      attempts.every(
-        (a) =>
-          a.metrics.execution_kind === "fixture_control" && a.metrics.tokens === null && a.metrics.cost_usd === null,
-      ),
-    );
-    const samples = await q(pool, "SELECT * FROM evaluation_analytics_samples WHERE evaluation_id=$1", [e.id]);
-    assert.ok(samples.every((s) => s.evidence_kind === "fixture_control" && s.cost_usd === null));
-    assert.equal(samples[0].base_commit, d.cases[0].base_commit);
-  }
-});
+test(
+  "six provider plans use durable attempts and equivalent pinned fixtures with objective validation",
+  { skip: sandboxMissing },
+  async () => {
+    for (const route of [
+      ["claude"],
+      ["codex"],
+      ["cursor"],
+      ["claude", "codex"],
+      ["codex", "claude"],
+      ["claude", "codex", "cursor"],
+    ]) {
+      const e = await evaluation(route, "tools", { repetitions: 2 });
+      const d = await finish(e.id);
+      assert.equal(d.status, "COMPLETED");
+      assert.equal(
+        d.summary.successes,
+        2,
+        JSON.stringify(d.cases.map((c: any) => c.data?.evidence?.details)),
+      );
+      assert.ok(d.cases.every((c: any) => c.data.evidence.cost_usd === null));
+      const attempts = await q(
+        pool,
+        "SELECT a.agent_provider,a.metrics FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id WHERE a.run_id=$1 AND s.type IN ('agent','coding_agent') ORDER BY a.id",
+        [e.workflow_run_id],
+      );
+      assert.deepEqual(
+        attempts.map((a) => a.agent_provider),
+        [...route, ...route],
+      );
+      assert.ok(
+        attempts.every(
+          (a) =>
+            a.metrics.execution_kind === "fixture_control" &&
+            a.metrics.tokens === null &&
+            a.metrics.cost_usd === null,
+        ),
+      );
+      const samples = await q(
+        pool,
+        "SELECT * FROM evaluation_analytics_samples WHERE evaluation_id=$1",
+        [e.id],
+      );
+      assert.ok(samples.every((s) => s.evidence_kind === "fixture_control" && s.cost_usd === null));
+      assert.equal(samples[0].base_commit, d.cases[0].base_commit);
+    }
+  },
+);
 
-test("A/B/C isolates pack/tool access and paired comparisons reject multiple changing factors", { skip: sandboxMissing }, async () => {
-  const a = await evaluation(["codex"], "minimal"),
-    b = await evaluation(["codex"], "pack"),
-    c = await evaluation(["codex"], "tools");
-  assert.equal(a.constraints_hash, b.constraints_hash);
-  assert.equal(b.constraints_hash, c.constraints_hash);
-  for (const [e, variant] of [
-    [a, "minimal"],
-    [b, "pack"],
-    [c, "tools"],
-  ] as const) {
-    await finish(e.id);
-    const step = await one(pool, "SELECT id FROM workflow_steps WHERE run_id=$1 AND type='coding_agent'", [
-      e.workflow_run_id,
-    ]);
-    const packs = await q(pool, "SELECT id FROM agent_context_packs WHERE step_id=$1", [step.id]);
-    assert.equal(packs.length, variant === "minimal" ? 0 : 1);
-    const calls = await q(
-      pool,
-      "SELECT tool FROM agent_context_tool_calls WHERE step_id=$1 AND tool='platform.get_run_context'",
-      [step.id],
+test(
+  "A/B/C isolates pack/tool access and paired comparisons reject multiple changing factors",
+  { skip: sandboxMissing },
+  async () => {
+    const a = await evaluation(["codex"], "minimal"),
+      b = await evaluation(["codex"], "pack"),
+      c = await evaluation(["codex"], "tools");
+    assert.equal(a.constraints_hash, b.constraints_hash);
+    assert.equal(b.constraints_hash, c.constraints_hash);
+    for (const [e, variant] of [
+      [a, "minimal"],
+      [b, "pack"],
+      [c, "tools"],
+    ] as const) {
+      await finish(e.id);
+      const step = await one(
+        pool,
+        "SELECT id FROM workflow_steps WHERE run_id=$1 AND type='coding_agent'",
+        [e.workflow_run_id],
+      );
+      const packs = await q(pool, "SELECT id FROM agent_context_packs WHERE step_id=$1", [step.id]);
+      assert.equal(packs.length, variant === "minimal" ? 0 : 1);
+      const calls = await q(
+        pool,
+        "SELECT tool FROM agent_context_tool_calls WHERE step_id=$1 AND tool='platform.get_run_context'",
+        [step.id],
+      );
+      assert.equal(calls.length, variant === "tools" ? 1 : 0);
+    }
+    await createComparison(owner.id, a.id, b.id, {});
+    const changed = await evaluation(["claude"], "pack");
+    await assert.rejects(
+      () => createComparison(owner.id, a.id, changed.id, {}),
+      /provider\/model sequence fixed/,
     );
-    assert.equal(calls.length, variant === "tools" ? 1 : 0);
-  }
-  await createComparison(owner.id, a.id, b.id, {});
-  const changed = await evaluation(["claude"], "pack");
-  await assert.rejects(() => createComparison(owner.id, a.id, changed.id, {}), /provider\/model sequence fixed/);
-  const budget = await evaluation(["codex"], "pack", { max_tokens: 9999 });
-  await assert.rejects(() => createComparison(owner.id, b.id, budget.id, {}), /identical suite/);
-  const result = await evaluationAnalytics(owner, url());
-  assert.ok(result.comparisons.every((g: any) => g.reported_cost_usd == null));
-  assert.ok(result.context.some((g: any) => g.context_variant === "minimal"));
-});
+    const budget = await evaluation(["codex"], "pack", { max_tokens: 9999 });
+    await assert.rejects(() => createComparison(owner.id, b.id, budget.id, {}), /identical suite/);
+    const result = await evaluationAnalytics(owner, url());
+    assert.ok(result.comparisons.every((g: any) => g.reported_cost_usd == null));
+    assert.ok(result.context.some((g: any) => g.context_variant === "minimal"));
+  },
+);
 
 test("changed context inventory blocks a frozen experiment rather than contaminating A/B", async () => {
   const e = await evaluation(["claude"], "pack");
@@ -208,8 +252,14 @@ test("fixture controls and small or overlapping cohorts cannot create unsupporte
     evaluation_ids: [1, 2],
   });
   assert.equal(chooseRecommendation([sample("claude", 60)]).status, "INSUFFICIENT_EVIDENCE");
-  assert.equal(chooseRecommendation([sample("claude", 60), sample("codex", 59)]).status, "INSUFFICIENT_EVIDENCE");
-  assert.equal(chooseRecommendation([sample("claude", 60, 1), sample("codex", 0, 1)]).status, "INSUFFICIENT_EVIDENCE");
+  assert.equal(
+    chooseRecommendation([sample("claude", 60), sample("codex", 59)]).status,
+    "INSUFFICIENT_EVIDENCE",
+  );
+  assert.equal(
+    chooseRecommendation([sample("claude", 60, 1), sample("codex", 0, 1)]).status,
+    "INSUFFICIENT_EVIDENCE",
+  );
   const supported = chooseRecommendation([sample("claude", 0), sample("codex", 60)]);
   assert.equal(supported.status, "RECOMMENDED");
   assert.equal(supported.confidence, "MEDIUM");
@@ -249,7 +299,10 @@ test("optimization stays off by default, never changes running work, and persist
     inputs: { task_category: "go-backend" },
   });
   const rec = await recommendation();
-  const p = await saveOptimizationPolicy(owner.id, { recommendation_id: rec.id, category: "go-backend" });
+  const p = await saveOptimizationPolicy(owner.id, {
+    recommendation_id: rec.id,
+    category: "go-backend",
+  });
   assert.equal(p.enabled, false);
   const untouched = await startRun({
     definitionKey: "p6-opt",
@@ -274,7 +327,9 @@ test("optimization stays off by default, never changes running work, and persist
   const step = (await getRun(optimized.id)).steps[0];
   assert.equal(step.config.agent.provider, "codex");
   assert.equal(step.config.optimization_decision.evidence_hash, rec.evidence_hash);
-  assert.ok(await one(pool, "SELECT id FROM agent_optimization_decisions WHERE run_id=$1", [optimized.id]));
+  assert.ok(
+    await one(pool, "SELECT id FROM agent_optimization_decisions WHERE run_id=$1", [optimized.id]),
+  );
   const explicit = await startRun({
     definitionKey: "p6-opt",
     ownerId: owner.id,
@@ -284,7 +339,12 @@ test("optimization stays off by default, never changes running work, and persist
   });
   assert.equal((await getRun(explicit.id)).steps[0].config.agent, undefined);
   await assert.rejects(
-    () => saveOptimizationPolicy(other.id, { recommendation_id: rec.id, category: "go-backend", enabled: true }),
+    () =>
+      saveOptimizationPolicy(other.id, {
+        recommendation_id: rec.id,
+        category: "go-backend",
+        enabled: true,
+      }),
     /not found/,
   );
   await assert.rejects(
@@ -318,12 +378,18 @@ test("analytics, evidence and recommendation endpoints preserve owner isolation 
   const a = await client(owner),
     b = await client(other),
     support = await client(admin);
-  const mine = await (await a("/api/agent-evaluation?from=2026-01-01&to=2027-01-01&timezone=UTC&page_size=2")).json();
+  const mine = await (
+    await a("/api/agent-evaluation?from=2026-01-01&to=2027-01-01&timezone=UTC&page_size=2")
+  ).json();
   assert.ok(mine.details.length <= 2);
   assert.ok(mine.pagination.total > 2);
-  const foreign = await (await b("/api/agent-evaluation?from=2026-01-01&to=2027-01-01&scope=all")).json();
+  const foreign = await (
+    await b("/api/agent-evaluation?from=2026-01-01&to=2027-01-01&scope=all")
+  ).json();
   assert.equal(foreign.details.length, 0);
-  const team = await (await support("/api/agent-evaluation?from=2026-01-01&to=2027-01-01&scope=all")).json();
+  const team = await (
+    await support("/api/agent-evaluation?from=2026-01-01&to=2027-01-01&scope=all")
+  ).json();
   assert.ok(team.details.length > 0);
   assert.ok(
     await one(
@@ -375,7 +441,14 @@ test("controlled evidence query supports reproducible recommendations while keep
       await one(
         pool,
         "INSERT INTO benchmark_cases(suite_id,task_id,category,difficulty,origin,repository,base_commit,definition) VALUES($1,$2,'go-backend',$3,'synthetic',$4,$5,$6) RETURNING id,task_id",
-        [s.id, task.task_id, task.difficulty, task.repository, task.base_commit, JSON.stringify(task)],
+        [
+          s.id,
+          task.task_id,
+          task.difficulty,
+          task.repository,
+          task.base_commit,
+          JSON.stringify(task),
+        ],
       ),
     );
   await definitions.create({
@@ -388,9 +461,11 @@ test("controlled evidence query supports reproducible recommendations while keep
   for (const provider of ["claude", "codex"]) {
     for (let repeat = 0; repeat < 2; repeat++) {
       const w = await startRun({ definitionKey: "p6-evidence", ownerId: owner.id, start: false });
-      await q(pool, "UPDATE workflow_runs SET status='COMPLETED',created_at='2026-11-01T12:00:00Z' WHERE id=$1", [
-        w.id,
-      ]);
+      await q(
+        pool,
+        "UPDATE workflow_runs SET status='COMPLETED',created_at='2026-11-01T12:00:00Z' WHERE id=$1",
+        [w.id],
+      );
       const e = await one(
         pool,
         "INSERT INTO evaluation_runs(suite_id,owner_id,workflow_run_id,configuration,configuration_hash,scoring,constraints_hash,request_key,created_at) VALUES($1,$2,$3,$4,$5,'{}','controlled-fixture','test-live-fixture-'||$3::bigint::text,'2026-11-01T12:00:00Z') RETURNING id",
@@ -471,7 +546,11 @@ test("controlled evidence query supports reproducible recommendations while keep
   assert.equal(unavailable.decision.status, "UNAVAILABLE");
   await assert.rejects(
     () =>
-      saveOptimizationPolicy(owner.id, { recommendation_id: unavailable.id, category: "go-backend", enabled: true }),
+      saveOptimizationPolicy(owner.id, {
+        recommendation_id: unavailable.id,
+        category: "go-backend",
+        enabled: true,
+      }),
     /supported/,
   );
   setHandoffReadinessForTests(undefined);
@@ -485,7 +564,10 @@ test("controlled evidence query supports reproducible recommendations while keep
 test("observational verification coverage, unknown cost and timezone boundaries stay truthful", async () => {
   await definitions.create({
     key: "p6-production",
-    spec: { name: "Production analytics fixture", steps: [{ key: "implementation", type: "coding_agent" }] },
+    spec: {
+      name: "Production analytics fixture",
+      steps: [{ key: "implementation", type: "coding_agent" }],
+    },
   });
   for (const passed of [true, false]) {
     const r = await startRun({
@@ -513,10 +595,11 @@ test("observational verification coverage, unknown cost and timezone boundaries 
         }),
       ],
     );
-    await q(pool, "UPDATE workflow_runs SET status=$2,created_at='2026-11-01T23:30:00Z' WHERE id=$1", [
-      r.id,
-      passed ? "COMPLETED" : "FAILED",
-    ]);
+    await q(
+      pool,
+      "UPDATE workflow_runs SET status=$2,created_at='2026-11-01T23:30:00Z' WHERE id=$1",
+      [r.id, passed ? "COMPLETED" : "FAILED"],
+    );
     await q(pool, "UPDATE workflow_steps SET current_attempt_id=$2,status=$3 WHERE id=$1", [
       s.id,
       a.id,
@@ -525,7 +608,9 @@ test("observational verification coverage, unknown cost and timezone boundaries 
   }
   const bkk = await evaluationAnalytics(
     owner,
-    new URL("http://local/?from=2026-11-02&to=2026-11-03&timezone=Asia/Bangkok&provider=codex&category=go-backend"),
+    new URL(
+      "http://local/?from=2026-11-02&to=2026-11-03&timezone=Asia/Bangkok&provider=codex&category=go-backend",
+    ),
   );
   assert.equal(bkk.production[0].attempts, 2);
   assert.equal(bkk.production[0].verified_success_rate, 0.5);
@@ -534,7 +619,9 @@ test("observational verification coverage, unknown cost and timezone boundaries 
   assert.equal(bkk.production[0].reported_cost_usd, 0.25);
   const utc = await evaluationAnalytics(
     owner,
-    new URL("http://local/?from=2026-11-02&to=2026-11-03&timezone=UTC&provider=codex&category=go-backend"),
+    new URL(
+      "http://local/?from=2026-11-02&to=2026-11-03&timezone=UTC&provider=codex&category=go-backend",
+    ),
   );
   assert.equal(utc.production.length, 0);
   const otherScope = await evaluationAnalytics(
@@ -560,14 +647,19 @@ test("context value assessment uses paired task outcomes, not fixture or agent c
       })),
     ).flat();
   const a = { configuration: cfg, status: "COMPLETED", cases: trials(false) },
-    b = { configuration: { ...cfg, context_variant: "tools" }, status: "COMPLETED", cases: trials(true) };
+    b = {
+      configuration: { ...cfg, context_variant: "tools" },
+      status: "COMPLETED",
+      cases: trials(true),
+    };
   assert.equal(compareContextEffect(a, b)?.status, "MEASURABLE_QUALITY_GAIN");
   assert.equal(
     compareContextEffect({ ...a, configuration: { ...cfg, mode: "fixture" } }, b)?.status,
     "HARNESS_CONTROL_ONLY",
   );
   assert.equal(
-    compareContextEffect({ ...a, cases: a.cases.slice(0, 4) }, { ...b, cases: b.cases.slice(0, 4) })?.status,
+    compareContextEffect({ ...a, cases: a.cases.slice(0, 4) }, { ...b, cases: b.cases.slice(0, 4) })
+      ?.status,
     "INSUFFICIENT_EVIDENCE",
   );
 });

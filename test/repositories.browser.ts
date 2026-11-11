@@ -6,41 +6,75 @@ import { migrate } from "../src/db/migrate.ts";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { createUser } from "../src/auth/users.ts";
-assert.equal(process.env.PLATFORM_TEST,"1");
+assert.equal(process.env.PLATFORM_TEST, "1");
 await migrate();
-await createUser({username:"repository-admin",password:"repository-test-password",role:"admin"});
-const server=createServer(handle);
-await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
-const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
-const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH,headless:true,args:["--no-sandbox"]});
-const page=await browser.newPage({viewport:{width:1440,height:1000}});
-const errors:string[]=[];
-let indexRequests=0;
-page.on("request",r=>{if(new URL(r.url()).pathname==="/api/repositories/index-status") indexRequests++;});
-page.on("pageerror",e=>errors.push(e.message));
+await createUser({
+  username: "repository-admin",
+  password: "repository-test-password",
+  role: "admin",
+});
+const server = createServer(handle);
+await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_PATH,
+  headless: true,
+  args: ["--no-sandbox"],
+});
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const errors: string[] = [];
+let indexRequests = 0;
+page.on("request", (r) => {
+  if (new URL(r.url()).pathname === "/api/repositories/index-status") indexRequests++;
+});
+page.on("pageerror", (e) => errors.push(e.message));
 page.setDefaultTimeout(10000);
 try {
-  await page.addInitScript(()=>localStorage.setItem("hasaki.uiLocale","en"));
-  await page.goto(base+"/#/repositories");
-  await page.getByLabel("Username",{exact:true}).fill("repository-admin");
-  await page.getByLabel("Password",{exact:true}).fill("repository-test-password");
-  await page.getByRole("button",{name:"Sign in",exact:true}).click();
-  await page.getByRole("button",{name:"Add repo",exact:true}).first().click();
-  await page.getByLabel("Repository name",{exact:true}).fill("browser-portable");
-  await page.getByLabel("Repository URL",{exact:true}).fill("https://bitbucket.org/browser-team/portable");
-  await page.getByLabel("Default branch (blank: instance default)",{exact:true}).fill("main");
-  await page.getByRole("button",{name:"Validate Repository URL",exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector<HTMLInputElement>('input[placeholder="https://bitbucket.org/workspace/repository.git"]')?.value.endsWith(".git"));
-  assert.equal(indexRequests,0,"the list and creation drawer do not request detail-only index status");
-  await page.getByRole("button",{name:"Save",exact:true}).click();
-  await page.getByText("Not cloned on this instance",{exact:true}).waitFor();
-  for (const label of ["Test Bitbucket Connection","Prepare / Clone Repository","Refresh Repository","View Local Workspace Status"]) await page.getByRole("button",{name:label,exact:true}).waitFor();
-  await page.getByRole("button",{name:"Test Bitbucket Connection",exact:true}).click();
+  await page.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));
+  await page.goto(base + "/#/repositories");
+  await page.getByLabel("Username", { exact: true }).fill("repository-admin");
+  await page.getByLabel("Password", { exact: true }).fill("repository-test-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Add repo", exact: true }).first().click();
+  await page.getByLabel("Repository name", { exact: true }).fill("browser-portable");
+  await page
+    .getByLabel("Repository URL", { exact: true })
+    .fill("https://bitbucket.org/browser-team/portable");
+  await page.getByLabel("Default branch (blank: instance default)", { exact: true }).fill("main");
+  await page.getByRole("button", { name: "Validate Repository URL", exact: true }).click();
+  await page.waitForFunction(() =>
+    document
+      .querySelector<HTMLInputElement>(
+        'input[placeholder="https://bitbucket.org/workspace/repository.git"]',
+      )
+      ?.value.endsWith(".git"),
+  );
+  assert.equal(
+    indexRequests,
+    0,
+    "the list and creation drawer do not request detail-only index status",
+  );
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText("Not cloned on this instance", { exact: true }).waitFor();
+  for (const label of [
+    "Test Bitbucket Connection",
+    "Prepare / Clone Repository",
+    "Refresh Repository",
+    "View Local Workspace Status",
+  ])
+    await page.getByRole("button", { name: label, exact: true }).waitFor();
+  await page.getByRole("button", { name: "Test Bitbucket Connection", exact: true }).click();
   await page.getByText(/Bitbucket authentication required/).waitFor();
-  await page.getByRole("button",{name:"View Local Workspace Status",exact:true}).click();
-  await page.getByText("Authentication required",{exact:true}).waitFor();
-  assert.ok(indexRequests>0,"index status is requested on the detail page");
-  assert.deepEqual(errors,[]);
-  await page.screenshot({path:"/tmp/repository-ui-smoke.png",fullPage:true});
-  console.log("Repository UI smoke passed: URL registration, validation, local status, controls, and authentication error");
-} finally {await browser.close();server.close();await pool.end();}
+  await page.getByRole("button", { name: "View Local Workspace Status", exact: true }).click();
+  await page.getByText("Authentication required", { exact: true }).waitFor();
+  assert.ok(indexRequests > 0, "index status is requested on the detail page");
+  assert.deepEqual(errors, []);
+  await page.screenshot({ path: "/tmp/repository-ui-smoke.png", fullPage: true });
+  console.log(
+    "Repository UI smoke passed: URL registration, validation, local status, controls, and authentication error",
+  );
+} finally {
+  await browser.close();
+  server.close();
+  await pool.end();
+}

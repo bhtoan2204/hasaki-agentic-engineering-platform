@@ -24,13 +24,30 @@ export interface CodexHookPayload {
 /** Native tools that only read or only touch Codex' own plan state. */
 const HARMLESS = new Set(["update_plan", "todo_write", "view_image", "write_stdin"]);
 /** Shell tool names across Codex releases. */
-const SHELL = new Set(["bash", "shell", "local_shell", "exec_command", "unified_exec", "container.exec", "shell_command"]);
+const SHELL = new Set([
+  "bash",
+  "shell",
+  "local_shell",
+  "exec_command",
+  "unified_exec",
+  "container.exec",
+  "shell_command",
+]);
 const PATCH = new Set(["apply_patch", "edit", "write", "multiedit"]);
 /** Never read these through the shell, even though the sandbox allows reads: Codex credentials and the per-attempt broker. */
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/auth\.json|\.codex(\/|\b)|CODEX_HOME/i, "Codex credentials and configuration are not readable by workflow steps"],
-  [/PLATFORM_BROKER|ctp-codex-|\/proc\/[^\s]*\/(environ|cmdline)/i, "the platform's per-attempt broker is not accessible to workflow steps"],
-  [/(^|[\s'"/=])\.env(\.[\w-]+)?(\s|$|['"])/, "environment files may contain credentials and are not readable by workflow steps"],
+  [
+    /auth\.json|\.codex(\/|\b)|CODEX_HOME/i,
+    "Codex credentials and configuration are not readable by workflow steps",
+  ],
+  [
+    /PLATFORM_BROKER|ctp-codex-|\/proc\/[^\s]*\/(environ|cmdline)/i,
+    "the platform's per-attempt broker is not accessible to workflow steps",
+  ],
+  [
+    /(^|[\s'"/=])\.env(\.[\w-]+)?(\s|$|['"])/,
+    "environment files may contain credentials and are not readable by workflow steps",
+  ],
 ];
 
 export function shellCommandText(input: unknown): string {
@@ -42,7 +59,12 @@ export function shellCommandText(input: unknown): string {
   if (Array.isArray(c)) {
     const parts = c.map(String);
     // ["bash", "-lc", "<script>"] → the script is what runs.
-    if (parts.length >= 3 && /(^|\/)(ba|z)?sh$/.test(parts[0]) && /^-l?c$|^-c$|^-lc$/.test(parts[1])) return parts.slice(2).join(" ");
+    if (
+      parts.length >= 3 &&
+      /(^|\/)(ba|z)?sh$/.test(parts[0]) &&
+      /^-l?c$|^-c$|^-lc$/.test(parts[1])
+    )
+      return parts.slice(2).join(" ");
     return parts.join(" ");
   }
   return "";
@@ -75,16 +97,27 @@ function patchText(input: unknown): string {
 
 const deny = (reason: string): Decision => ({ allow: false, reason });
 
-export function codexHookDecision(payload: CodexHookPayload, policy: PolicyContext, sessionCwd: string): Decision {
+export function codexHookDecision(
+  payload: CodexHookPayload,
+  policy: PolicyContext,
+  sessionCwd: string,
+): Decision {
   const event = String(payload.hook_event_name ?? "");
   if (event === "PermissionRequest")
-    return deny("the platform never grants sandbox escalation; work inside the worktree and commit with mcp__platform__commit_changes");
+    return deny(
+      "the platform never grants sandbox escalation; work inside the worktree and commit with mcp__platform__commit_changes",
+    );
   if (event !== "PreToolUse") return { allow: true };
   const tool = String(payload.tool_name ?? "");
   const lower = tool.toLowerCase();
   const input = payload.tool_input;
   const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  const workdir = typeof obj.workdir === "string" && obj.workdir ? resolve(sessionCwd, obj.workdir) : typeof payload.cwd === "string" && payload.cwd ? payload.cwd : sessionCwd;
+  const workdir =
+    typeof obj.workdir === "string" && obj.workdir
+      ? resolve(sessionCwd, obj.workdir)
+      : typeof payload.cwd === "string" && payload.cwd
+        ? payload.cwd
+        : sessionCwd;
 
   if (tool.startsWith("mcp__")) {
     // Platform tools are authorized again inside the broker (attempt lease, mode, open questions).
@@ -98,18 +131,40 @@ export function codexHookDecision(payload: CodexHookPayload, policy: PolicyConte
     return decide("Bash", { command }, policy, workdir);
   }
   if (PATCH.has(lower)) {
-    if (policy.mode !== "coding") return deny("this step is read-only; file edits happen in a coding step");
-    const direct = typeof obj.file_path === "string" ? [resolve(workdir, obj.file_path)] : typeof obj.path === "string" ? [resolve(workdir, obj.path)] : [];
+    if (policy.mode !== "coding")
+      return deny("this step is read-only; file edits happen in a coding step");
+    const direct =
+      typeof obj.file_path === "string"
+        ? [resolve(workdir, obj.file_path)]
+        : typeof obj.path === "string"
+          ? [resolve(workdir, obj.path)]
+          : [];
     const paths = direct.length ? direct : patchPaths(patchText(input), workdir);
-    if (!paths.length) return deny("cannot determine which files this edit touches; use apply_patch with explicit file paths");
+    if (!paths.length)
+      return deny(
+        "cannot determine which files this edit touches; use apply_patch with explicit file paths",
+      );
     for (const p of paths) {
       const d = decide("Write", { file_path: p }, policy, workdir);
       if (!d.allow) return d;
     }
     return { allow: true };
   }
-  if (HARMLESS.has(lower)) return decide(lower === "view_image" ? "Read" : lower === "write_stdin" ? "Bash" : "TodoWrite", {}, policy, workdir);
-  if (lower === "spawn_agent" || lower.includes("subagent") || lower === "send_input" || lower === "wait_agent")
-    return deny("delegation to Codex subagents is not supported by the platform policy for this provider");
+  if (HARMLESS.has(lower))
+    return decide(
+      lower === "view_image" ? "Read" : lower === "write_stdin" ? "Bash" : "TodoWrite",
+      {},
+      policy,
+      workdir,
+    );
+  if (
+    lower === "spawn_agent" ||
+    lower.includes("subagent") ||
+    lower === "send_input" ||
+    lower === "wait_agent"
+  )
+    return deny(
+      "delegation to Codex subagents is not supported by the platform policy for this provider",
+    );
   return deny(`tool ${tool || "(unnamed)"} is not allowed in workflow steps`);
 }

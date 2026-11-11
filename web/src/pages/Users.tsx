@@ -39,10 +39,7 @@ export function UsersPage({
         title={t("auth.users")}
         subtitle={t("auth.usersIntro")}
         actions={
-          <button
-            disabled={loading || !!error}
-            onClick={() => setAction({ kind: "create" })}
-          >
+          <button disabled={loading || !!error} onClick={() => setAction({ kind: "create" })}>
             <Plus size={16} />
             {t("auth.create")}
           </button>
@@ -55,14 +52,8 @@ export function UsersPage({
       ) : (
         <>
           <div className="toolbar">
-            <SearchInput
-              value={query}
-              onChange={setQuery}
-              placeholder={t("auth.searchUsers")}
-            />
-            <span className="muted small">
-              {t("auth.userCount", { n: data?.length ?? 0 })}
-            </span>
+            <SearchInput value={query} onChange={setQuery} placeholder={t("auth.searchUsers")} />
+            <span className="muted small">{t("auth.userCount", { n: data?.length ?? 0 })}</span>
           </div>
           {!shown.length ? (
             <EmptyState
@@ -96,9 +87,7 @@ export function UsersPage({
                             {u.username[0].toUpperCase()}
                           </span>
                           <b>{u.username}</b>
-                          {u.id === me.id && (
-                            <span className="muted small">{t("auth.you")}</span>
-                          )}
+                          {u.id === me.id && <span className="muted small">{t("auth.you")}</span>}
                         </div>
                       </td>
                       <td>
@@ -113,9 +102,7 @@ export function UsersPage({
                         <div className="row tight">
                           <button
                             className="ghost sm"
-                            onClick={() =>
-                              setAction({ kind: "reset", user: u })
-                            }
+                            onClick={() => setAction({ kind: "reset", user: u })}
                             aria-label={`${t("auth.reset")} · ${u.username}`}
                           >
                             <KeyRound size={14} />
@@ -124,14 +111,8 @@ export function UsersPage({
                           <button
                             className="ghost sm"
                             disabled={u.id === me.id}
-                            data-tip={
-                              u.id === me.id
-                                ? t("auth.noSelfDeactivate")
-                                : undefined
-                            }
-                            onClick={() =>
-                              setAction({ kind: "status", user: u })
-                            }
+                            data-tip={u.id === me.id ? t("auth.noSelfDeactivate") : undefined}
+                            onClick={() => setAction({ kind: "status", user: u })}
                             aria-label={`${t(u.active ? "auth.deactivate" : "auth.activate")} · ${u.username}`}
                           >
                             <Power size={14} />
@@ -246,11 +227,7 @@ function UserDialog({
               />
             </Field>
             <Field label={t("auth.role")}>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                disabled={busy}
-              >
+              <select value={role} onChange={(e) => setRole(e.target.value)} disabled={busy}>
                 <option value="member">{t("auth.role.member")}</option>
                 <option value="admin">{t("auth.role.admin")}</option>
               </select>
@@ -262,8 +239,7 @@ function UserDialog({
         ) : (
           <>
             <p>
-              <b>{action.user.username}</b> ·{" "}
-              {t(`auth.role.${action.user.role}`)}
+              <b>{action.user.username}</b> · {t(`auth.role.${action.user.role}`)}
             </p>
             <p className="muted">
               {t(
@@ -299,19 +275,12 @@ function UserDialog({
           </div>
         )}
         <div className="auth-actions">
-          <button
-            type="button"
-            className="ghost"
-            disabled={busy}
-            onClick={onClose}
-          >
+          <button type="button" className="ghost" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </button>
           <button
             type="submit"
-            className={
-              action.kind === "status" && action.user.active ? "danger" : ""
-            }
+            className={action.kind === "status" && action.user.active ? "danger" : ""}
             disabled={busy}
           >
             {busy && <span className="spinner" />}

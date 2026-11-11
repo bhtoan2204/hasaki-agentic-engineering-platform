@@ -26,7 +26,9 @@ export function resolveOutputLocale(v: unknown): OutputLocale {
 }
 
 /** Locale to generate with. NULL (legacy) falls back to Vietnamese and stays NULL in the database. */
-export function outputLocale(run: { output_locale?: string | null } | null | undefined): OutputLocale {
+export function outputLocale(
+  run: { output_locale?: string | null } | null | undefined,
+): OutputLocale {
   return parseOutputLocale(run?.output_locale) ?? "vi";
 }
 

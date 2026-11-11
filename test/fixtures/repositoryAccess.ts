@@ -10,7 +10,11 @@ import { pool } from "../../src/db/pool.ts";
 import { config } from "../../src/config.ts";
 
 export async function shareAllRepositoriesForTests() {
-  await pool.query("ALTER TABLE repositories ALTER COLUMN shared_access SET DEFAULT 'pull_request'");
-  await pool.query("UPDATE repositories SET shared_access = 'pull_request' WHERE provider <> 'benchmark' AND shared_access <> 'pull_request'");
+  await pool.query(
+    "ALTER TABLE repositories ALTER COLUMN shared_access SET DEFAULT 'pull_request'",
+  );
+  await pool.query(
+    "UPDATE repositories SET shared_access = 'pull_request' WHERE provider <> 'benchmark' AND shared_access <> 'pull_request'",
+  );
   config.bitbucket.accessVerification = "trusted";
 }

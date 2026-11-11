@@ -51,9 +51,7 @@ export async function validateSource(
       if (
         path.endsWith(".ts") &&
         (path === c.validation.path ||
-          c.allowed_changes.some(
-            (a) => a.repository === logical && a.path === path,
-          ))
+          c.allowed_changes.some((a) => a.repository === logical && a.path === path))
       )
         sources.push(`/workspace/${logical}/${path}`);
     }
@@ -91,31 +89,15 @@ export async function validateSource(
           { source: workspace, target: "/workspace" },
           { source: validatorRoot, target: "/validator" },
           {
-            source: join(
-              import.meta.dirname,
-              "..",
-              "..",
-              "node_modules",
-              "typescript",
-            ),
+            source: join(import.meta.dirname, "..", "..", "node_modules", "typescript"),
             target: "/compiler/node_modules/typescript",
           },
           {
-            source: join(
-              import.meta.dirname,
-              "..",
-              "..",
-              "node_modules",
-              "@typescript",
-            ),
+            source: join(import.meta.dirname, "..", "..", "node_modules", "@typescript"),
             target: "/compiler/node_modules/@typescript",
           },
         ],
-        [
-          "/compiler/node_modules/typescript/lib/tsc.js",
-          "--project",
-          "/validator/tsconfig.json",
-        ],
+        ["/compiler/node_modules/typescript/lib/tsc.js", "--project", "/validator/tsconfig.json"],
         c.validation.timeout_seconds * 1000,
         signal,
       );
@@ -145,8 +127,7 @@ export async function validateSource(
       signal,
     );
     const parsed = JSON.parse(result.stdout.trim());
-    if (!Array.isArray(parsed.checks))
-      throw new Error("Invalid validation result");
+    if (!Array.isArray(parsed.checks)) throw new Error("Invalid validation result");
     return {
       syntax,
       security,
@@ -171,14 +152,12 @@ export async function validateSource(
           checks: parsed.checks as typeof checks,
           diagnostic: "Required or hidden assertions failed",
         };
-    } catch { }
+    } catch {}
     return {
       syntax,
       security,
       checks: [{ name: "hidden:validator", passed: false }],
-      diagnostic: (e as any).killed
-        ? "Validation timeout"
-        : "Validation process failed",
+      diagnostic: (e as any).killed ? "Validation timeout" : "Validation process failed",
     };
   }
 }

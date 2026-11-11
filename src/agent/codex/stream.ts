@@ -110,10 +110,12 @@ export function parseCodexLine(line: string): { event: CodexEvent } | { error: C
   } catch (e) {
     return { error: { line: line.slice(0, 500), error: (e as Error).message } };
   }
-  if (!raw || typeof raw !== "object" || typeof raw.type !== "string") return { error: { line: line.slice(0, 500), error: "event has no type" } };
+  if (!raw || typeof raw !== "object" || typeof raw.type !== "string")
+    return { error: { line: line.slice(0, 500), error: "event has no type" } };
   switch (raw.type) {
     case "thread.started":
-      if (typeof raw.thread_id !== "string" || !raw.thread_id) return { error: { line: line.slice(0, 500), error: "thread.started without thread_id" } };
+      if (typeof raw.thread_id !== "string" || !raw.thread_id)
+        return { error: { line: line.slice(0, 500), error: "thread.started without thread_id" } };
       return { event: { type: "thread.started", thread_id: raw.thread_id, raw } };
     case "turn.started":
       return { event: { type: "turn.started", raw } };
@@ -121,24 +123,31 @@ export function parseCodexLine(line: string): { event: CodexEvent } | { error: C
       const u = raw.usage && typeof raw.usage === "object" ? raw.usage : null;
       const usage: CodexUsage | null = u
         ? {
-          input_tokens: num(u.input_tokens),
-          cached_input_tokens: num(u.cached_input_tokens),
-          output_tokens: num(u.output_tokens),
-          reasoning_output_tokens: num(u.reasoning_output_tokens),
-          ...(typeof u.cache_write_input_tokens === "number" ? { cache_write_input_tokens: u.cache_write_input_tokens } : {}),
-        }
+            input_tokens: num(u.input_tokens),
+            cached_input_tokens: num(u.cached_input_tokens),
+            output_tokens: num(u.output_tokens),
+            reasoning_output_tokens: num(u.reasoning_output_tokens),
+            ...(typeof u.cache_write_input_tokens === "number"
+              ? { cache_write_input_tokens: u.cache_write_input_tokens }
+              : {}),
+          }
         : null;
       return { event: { type: "turn.completed", usage, raw } };
     }
     case "turn.failed":
-      return { event: { type: "turn.failed", message: errorText(raw.error) || "turn failed", raw } };
+      return {
+        event: { type: "turn.failed", message: errorText(raw.error) || "turn failed", raw },
+      };
     case "error":
-      return { event: { type: "error", message: errorText(raw.message ?? raw.error) || "error", raw } };
+      return {
+        event: { type: "error", message: errorText(raw.message ?? raw.error) || "error", raw },
+      };
     case "item.started":
     case "item.updated":
     case "item.completed": {
       const it = raw.item;
-      if (!it || typeof it !== "object" || typeof it.type !== "string") return { error: { line: line.slice(0, 500), error: `${raw.type} without item.type` } };
+      if (!it || typeof it !== "object" || typeof it.type !== "string")
+        return { error: { line: line.slice(0, 500), error: `${raw.type} without item.type` } };
       const item: CodexItem = {
         id: String(it.id ?? ""),
         type: it.type,
@@ -146,8 +155,17 @@ export function parseCodexLine(line: string): { event: CodexEvent } | { error: C
         text: str(it.text),
         command: str(it.command),
         aggregated_output: str(it.aggregated_output),
-        exit_code: typeof it.exit_code === "number" ? it.exit_code : it.exit_code === null ? null : undefined,
-        changes: Array.isArray(it.changes) ? it.changes.filter((c: any) => c && typeof c.path === "string").map((c: any) => ({ path: c.path, kind: String(c.kind ?? "") })) : undefined,
+        exit_code:
+          typeof it.exit_code === "number"
+            ? it.exit_code
+            : it.exit_code === null
+              ? null
+              : undefined,
+        changes: Array.isArray(it.changes)
+          ? it.changes
+              .filter((c: any) => c && typeof c.path === "string")
+              .map((c: any) => ({ path: c.path, kind: String(c.kind ?? "") }))
+          : undefined,
         server: str(it.server),
         tool: str(it.tool),
         arguments: it.arguments,
@@ -168,9 +186,23 @@ export type CodexFailureKind = "quota" | "auth" | "model" | "error";
 
 export function classifyCodexError(text: string): CodexFailureKind {
   const t = text.toLowerCase();
-  if (/usage limit|rate limit|quota|insufficient_quota|too many requests|\b429\b|purchase more credits|upgrade to (plus|pro)/.test(t)) return "quota";
-  if (/not logged in|login required|unauthori[sz]ed|\b401\b|authentication|refresh token|token (has )?expired|please (re-?)?log ?in|codex login/.test(t)) return "auth";
-  if (/model[^.\n]{0,80}(not supported|does not exist|not found|unsupported|not available|unknown)|unsupported model|invalid model|model_not_found|reasoning[^.\n]{0,40}(not supported|unsupported|invalid)/.test(t))
+  if (
+    /usage limit|rate limit|quota|insufficient_quota|too many requests|\b429\b|purchase more credits|upgrade to (plus|pro)/.test(
+      t,
+    )
+  )
+    return "quota";
+  if (
+    /not logged in|login required|unauthori[sz]ed|\b401\b|authentication|refresh token|token (has )?expired|please (re-?)?log ?in|codex login/.test(
+      t,
+    )
+  )
+    return "auth";
+  if (
+    /model[^.\n]{0,80}(not supported|does not exist|not found|unsupported|not available|unknown)|unsupported model|invalid model|model_not_found|reasoning[^.\n]{0,40}(not supported|unsupported|invalid)/.test(
+      t,
+    )
+  )
     return "model";
   return "error";
 }

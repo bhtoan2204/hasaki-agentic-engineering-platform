@@ -27,22 +27,15 @@ export function ProviderHandoff({
     [confirmed, setConfirmed] = useState(false),
     [busy, setBusy] = useState(false);
   const [show, setShow] = useState(false);
-  const current = handoffs.find(
-    (h) => h.source_attempt_id === step.current_attempt_id,
-  );
+  const current = handoffs.find((h) => h.source_attempt_id === step.current_attempt_id);
   useEffect(() => setConfirmed(false), [current?.workspace_fingerprint]);
-  const pending =
-    active &&
-    current &&
-    ["STOPPING", "READY", "BLOCKED"].includes(current.status);
+  const pending = active && current && ["STOPPING", "READY", "BLOCKED"].includes(current.status);
   const {
     data: options,
     error,
     reload,
   } = useApi<any[]>(
-    show || pending
-      ? `/api/runs/${runId}/steps/${step.key}/handoff-providers`
-      : null,
+    show || pending ? `/api/runs/${runId}/steps/${step.key}/handoff-providers` : null,
   );
   const target = options?.find((p) => p.provider === provider);
   const send = async (path: string, body: any) => {
@@ -63,20 +56,11 @@ export function ProviderHandoff({
     attempts.length > 1;
   return (
     <section className="card tight" style={{ margin: 12 }}>
-      <div
-        className="card-head"
-        style={hasBody ? undefined : { marginBottom: 0 }}
-      >
+      <div className="card-head" style={hasBody ? undefined : { marginBottom: 0 }}>
         <h4>{en ? "Agent handoff" : "Bàn giao agent"}</h4>
         {!pending &&
           active &&
-          [
-            "RUNNING",
-            "FAILED",
-            "WAITING_INPUT",
-            "RETRYING",
-            "CANCELED",
-          ].includes(step.status) && (
+          ["RUNNING", "FAILED", "WAITING_INPUT", "RETRYING", "CANCELED"].includes(step.status) && (
             <button
               className="sm"
               disabled={busy || !step.current_attempt_id}
@@ -84,9 +68,7 @@ export function ProviderHandoff({
                 setShow(true);
                 void send("handoff", {
                   expected_attempt_id: step.current_attempt_id,
-                  reason: en
-                    ? "User requested provider switch"
-                    : "Người dùng yêu cầu chuyển agent",
+                  reason: en ? "User requested provider switch" : "Người dùng yêu cầu chuyển agent",
                 });
               }}
             >
@@ -96,16 +78,11 @@ export function ProviderHandoff({
       </div>
       {pending && (
         <p role="status">
-          <strong>
-            {current.failure_category ??
-              (en ? "Manual switch" : "Chuyển thủ công")}
-          </strong>{" "}
+          <strong>{current.failure_category ?? (en ? "Manual switch" : "Chuyển thủ công")}</strong>{" "}
           · {current.original_provider} · {current.status}
         </p>
       )}
-      {current?.blocked_reason && (
-        <p className="error">{current.blocked_reason}</p>
-      )}
+      {current?.blocked_reason && <p className="error">{current.blocked_reason}</p>}
       {current?.status === "STOPPING" && (
         <p className="muted small">
           {en
@@ -116,8 +93,7 @@ export function ProviderHandoff({
       {pending && (
         <>
           {(current.status !== "STOPPING" ||
-            attempts.find((a) => a.id === current.source_attempt_id)
-              ?.executor_stopped_at) && (
+            attempts.find((a) => a.id === current.source_attempt_id)?.executor_stopped_at) && (
             <button
               className="sm ghost"
               disabled={busy}
@@ -130,9 +106,7 @@ export function ProviderHandoff({
                 })
               }
             >
-              {en
-                ? "Reinspect preserved state"
-                : "Kiểm tra lại trạng thái được giữ lại"}
+              {en ? "Reinspect preserved state" : "Kiểm tra lại trạng thái được giữ lại"}
             </button>
           )}
           <HandoffPreview handoff={current} />
@@ -187,9 +161,7 @@ export function ProviderHandoff({
                 ? "CLI readiness confirmed. Remaining quota and billing are unknown; readiness does not guarantee a successful request."
                 : "CLI đã sẵn sàng. Chưa biết hạn mức còn lại và chi phí; trạng thái sẵn sàng không bảo đảm yêu cầu sẽ thành công."
               : (target?.error ??
-                (en
-                  ? "Checking provider availability…"
-                  : "Đang kiểm tra khả dụng…"))}
+                (en ? "Checking provider availability…" : "Đang kiểm tra khả dụng…"))}
           </p>
           <label className="small">
             <input
@@ -203,9 +175,7 @@ export function ProviderHandoff({
           </label>
           <button
             className="sm"
-            disabled={
-              busy || !confirmed || !target?.ok || current.status !== "READY"
-            }
+            disabled={busy || !confirmed || !target?.ok || current.status !== "READY"}
             onClick={() =>
               send("handoff-resume", {
                 handoff_id: current.id,
@@ -230,16 +200,14 @@ export function ProviderHandoff({
           </summary>
           {handoffs.map((h) => (
             <p key={h.id} className="small">
-              #{h.id} · {h.original_provider} → {h.target_provider ?? "—"} ·{" "}
-              {h.status} · {h.failure_category ?? h.reason} ·{" "}
-              {time(h.created_at)}
+              #{h.id} · {h.original_provider} → {h.target_provider ?? "—"} · {h.status} ·{" "}
+              {h.failure_category ?? h.reason} · {time(h.created_at)}
             </p>
           ))}
           {attempts.map((a) => (
             <p key={a.id} className="small">
               #{a.number} · {a.agent_provider ?? a.metrics?.provider ?? "—"} ·{" "}
-              {a.agent_model ?? a.metrics?.model ?? "—"} · {a.status} ·{" "}
-              {time(a.started_at)}
+              {a.agent_model ?? a.metrics?.model ?? "—"} · {a.status} · {time(a.started_at)}
             </p>
           ))}
         </details>

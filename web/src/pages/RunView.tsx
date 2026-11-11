@@ -37,12 +37,7 @@ import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
-import {
-  autoLayout,
-  nodeTypes,
-  toEdges,
-  type StepNodeData,
-} from "../graph.tsx";
+import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
 import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
@@ -98,8 +93,7 @@ function useInspectorWidth() {
     const startX = e.clientX,
       startW = pane.getBoundingClientRect().width;
     document.body.classList.add("rv-resizing");
-    const move = (ev: PointerEvent) =>
-      setWidth(clamp(startW + (startX - ev.clientX)));
+    const move = (ev: PointerEvent) => setWidth(clamp(startW + (startX - ev.clientX)));
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -128,9 +122,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const pane = useInspectorWidth();
   const { t, status } = useI18n();
   const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
-  const { data: health, reload: reloadHealth } = useApi<any>(
-    `/api/runs/${id}/worker`,
-  );
+  const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
   // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
   const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
   useEffect(() => {
@@ -162,26 +154,19 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     for (const q of run.questions)
       if (q.status === "open") openQ[q.step_key] = (openQ[q.step_key] ?? 0) + 1;
     const attempts: Record<string, number> = {};
-    for (const a of run.attempts)
-      attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
+    for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
-      const latestAttempt = [...run.attempts]
-        .reverse()
-        .find((a: any) => a.step_key === s.key);
+      const latestAttempt = [...run.attempts].reverse().find((a: any) => a.step_key === s.key);
       const effectiveAgent = latestAttempt
         ? {
             provider:
-              latestAttempt.agent_provider ??
-              latestAttempt.metrics?.provider ??
-              run.agent_provider,
+              latestAttempt.agent_provider ?? latestAttempt.metrics?.provider ?? run.agent_provider,
             model: latestAttempt.agent_model ?? null,
           }
         : {
             provider:
-              row?.agent_override?.provider ??
-              s.config?.agent?.provider ??
-              run.agent_provider,
+              row?.agent_override?.provider ?? s.config?.agent?.provider ?? run.agent_provider,
             model: row?.agent_override?.model ?? s.config?.agent?.model,
           };
       return {
@@ -192,9 +177,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           step: {
             ...s,
             handoff:
-              row?.status === "WAITING_INPUT"
-                ? row?.pending_input?.provider_handoff
-                : undefined,
+              row?.status === "WAITING_INPUT" ? row?.pending_input?.provider_handoff : undefined,
             effective_agent: effectiveAgent,
             name: row?.name ?? s.name,
             requires_approval: row?.requires_approval ?? s.requires_approval,
@@ -211,12 +194,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
-    if (
-      run &&
-      stepKey &&
-      stepKey !== "~changes" &&
-      !run.steps.some((s: any) => s.key === stepKey)
-    )
+    if (run && stepKey && stepKey !== "~changes" && !run.steps.some((s: any) => s.key === stepKey))
       navigate(`/runs/${id}`);
   }, [run, stepKey, id]);
   if (loading && !run) return <Loading />;
@@ -242,8 +220,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const hasWorkspaces = run.workspaces.length > 0;
   const canFeedback =
     run.status !== "CANCELED" &&
-    (run.graph.feedback_step ||
-      run.steps.some((s: any) => s.type === "coding_agent"));
+    (run.graph.feedback_step || run.steps.some((s: any) => s.type === "coding_agent"));
   const openFeedback = () => {
     if (stepKey) navigate(`/runs/${id}`);
     setTimeout(() => {
@@ -263,11 +240,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             </a>
             <ChevronRight size={13} aria-hidden />
             <span className={stepKey ? undefined : "rv-cur"}>
-              {stepKey ? (
-                <a href={`#/runs/${id}`}>Run #{run.id}</a>
-              ) : (
-                `Run #${run.id}`
-              )}
+              {stepKey ? <a href={`#/runs/${id}`}>Run #{run.id}</a> : `Run #${run.id}`}
             </span>
             {stepKey && (
               <>
@@ -275,8 +248,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span className="rv-cur">
                   {stepKey === "~changes"
                     ? t("ch.title")
-                    : (run.steps.find((s: any) => s.key === stepKey)?.name ??
-                      stepKey)}
+                    : (run.steps.find((s: any) => s.key === stepKey)?.name ?? stepKey)}
                 </span>
               </>
             )}
@@ -299,9 +271,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             <div style={{ minWidth: 0 }}>
               <h1 className="rv-title">
                 <span className="rv-id">#{run.id}</span>
-                <span className="rv-name">
-                  {run.title || run.definition_key}
-                </span>
+                <span className="rv-name">{run.title || run.definition_key}</span>
                 <Badge s={run.status} label />
                 <ProfileBadge
                   profile={run.profile}
@@ -312,11 +282,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 </span>
                 <span
                   className="pill"
-                  title={
-                    run.output_locale
-                      ? t("run.outputCurrent")
-                      : t("run.outputLegacyHint")
-                  }
+                  title={run.output_locale ? t("run.outputCurrent") : t("run.outputLegacyHint")}
                 >
                   {t("run.outputCurrent")}:{" "}
                   {run.output_locale === "en"
@@ -329,51 +295,54 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <div className="rv-meta">
                 <span title={t("common.workflow")}>
                   <Workflow size={13} />
-                  <a href={`#/workflows/${run.definition_key}`}>
-                    {run.definition_key}
-                  </a>{" "}
+                  <a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a>{" "}
                   <span className="muted">v{run.definition_version}</span>
                 </span>
                 <span title={t("common.branch")}>
                   <GitBranch size={13} />
                   <span className="mono">{run.branch}</span>
                 </span>
-                {Object.entries(
-                  (run.inputs?.branches ?? {}) as Record<string, string>,
-                ).map(([repo, b]) => (
-                  <span
-                    key={repo}
-                    className="pill chip-brand"
-                    title={t("rv.continueTip", {
-                      source: run.inputs?.branches_source
-                        ? t("rv.from", { source: run.inputs.branches_source })
-                        : "",
-                    })}
-                  >
-                    <GitBranch size={12} />{" "}
-                    {repo === "*" ? t("rv.allRepos") : repo} →{" "}
-                    <span className="mono">{b}</span> ({t("rv.continueOn")})
-                    {run.status !== "COMPLETED" && run.status !== "CANCELED" && (
-                      <button
-                        type="button"
-                        className="quiet"
-                        title={t("rv.editBranch")}
-                        onClick={() => {
-                          const next = prompt(t("rv.editBranchPrompt", { repo: repo === "*" ? t("rv.allRepos") : repo }), b);
-                          if (next !== null && next.trim() !== b) void runAction("branches", { branches: { ...(run.inputs?.branches ?? {}), [repo]: next.trim() } });
-                        }}
-                      >
-                        ✎
-                      </button>
-                    )}
-                  </span>
-                ))}
+                {Object.entries((run.inputs?.branches ?? {}) as Record<string, string>).map(
+                  ([repo, b]) => (
+                    <span
+                      key={repo}
+                      className="pill chip-brand"
+                      title={t("rv.continueTip", {
+                        source: run.inputs?.branches_source
+                          ? t("rv.from", { source: run.inputs.branches_source })
+                          : "",
+                      })}
+                    >
+                      <GitBranch size={12} /> {repo === "*" ? t("rv.allRepos") : repo} →{" "}
+                      <span className="mono">{b}</span> ({t("rv.continueOn")})
+                      {run.status !== "COMPLETED" && run.status !== "CANCELED" && (
+                        <button
+                          type="button"
+                          className="quiet"
+                          title={t("rv.editBranch")}
+                          onClick={() => {
+                            const next = prompt(
+                              t("rv.editBranchPrompt", {
+                                repo: repo === "*" ? t("rv.allRepos") : repo,
+                              }),
+                              b,
+                            );
+                            if (next !== null && next.trim() !== b)
+                              void runAction("branches", {
+                                branches: { ...(run.inputs?.branches ?? {}), [repo]: next.trim() },
+                              });
+                          }}
+                        >
+                          ✎
+                        </button>
+                      )}
+                    </span>
+                  ),
+                )}
                 {run.work_item && (
                   <span title={t("common.workItem")}>
                     <Ticket size={13} />
-                    <a href={`#/work-items/${run.work_item.id}`}>
-                      {run.work_item.code}
-                    </a>
+                    <a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a>
                   </span>
                 )}
                 {run.created_at && (
@@ -411,11 +380,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               </button>
             )}
             {canFeedback && (
-              <button
-                className="sm ghost"
-                onClick={openFeedback}
-                title={t("rv.feedbackTip")}
-              >
+              <button className="sm ghost" onClick={openFeedback} title={t("rv.feedbackTip")}>
                 <MessageSquareText size={14} /> {t("rv.feedback")}
               </button>
             )}
@@ -466,20 +431,14 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       </header>
 
       {run.steps
-        .filter(
-          (s: any) =>
-            s.status === "WAITING_INPUT" && s.pending_input?.provider_handoff,
-        )
+        .filter((s: any) => s.status === "WAITING_INPUT" && s.pending_input?.provider_handoff)
         .map((s: any) => (
           <div key={s.id} className="rv-banner wait">
             <b>
               {t("handoff.paused")}: {s.name} ·{" "}
               {s.pending_input.provider_handoff.failure_category ?? ""}
             </b>{" "}
-            <button
-              className="ghost xs"
-              onClick={() => navigate(`/runs/${id}/${s.key}`)}
-            >
+            <button className="ghost xs" onClick={() => navigate(`/runs/${id}/${s.key}`)}>
               {t("handoff.review")}
             </button>
           </div>
@@ -508,9 +467,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         <div className="rv-banner idle" role="status">
           <Info size={15} />
           <span>
-            {t("rv.assignedInstance")}:{" "}
-            {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"} ·{" "}
-            {health?.health ?? run.worker.health}
+            {t("rv.assignedInstance")}: {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"}{" "}
+            · {health?.health ?? run.worker.health}
             {" · "}
             {t("rv.lastSeen")}:{" "}
             {(health?.last_seen_at ?? run.worker.last_seen_at)
@@ -518,17 +476,12 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               : "UNKNOWN"}
             {" · "}
             {t("rv.workerAvailable")}:{" "}
-            {(health?.available ?? run.worker.available)
-              ? "ONLINE"
-              : "WAITING_FOR_WORKER"}
+            {(health?.available ?? run.worker.available) ? "ONLINE" : "WAITING_FOR_WORKER"}
             {run.worker.recovery && <> · {run.worker.recovery}</>}
-            {(!run.worker.local ||
-              !(health?.available ?? run.worker.available)) && (
+            {(!run.worker.local || !(health?.available ?? run.worker.available)) && (
               <> — {t("rv.ownerOnly")}</>
             )}
-            {run.worker.recovery === "NEEDS_ATTENTION" && (
-              <> — {t("rv.reconcile")}</>
-            )}
+            {run.worker.recovery === "NEEDS_ATTENTION" && <> — {t("rv.reconcile")}</>}
           </span>
         </div>
       )}
@@ -595,12 +548,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         >
           {stepKey === "~changes" ? (
             <div className="rv-pane">
-              <Changes
-                run={run}
-                tick={tick}
-                activity={activity}
-                onChanged={reload}
-              />
+              <Changes run={run} tick={tick} activity={activity} onChanged={reload} />
             </div>
           ) : stepKey ? (
             <StepInspector
@@ -649,9 +597,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     )}
                   </span>
                   <span>{t("rv.allowedRepos")}</span>
-                  <span className="small">
-                    {run.allowed_repositories.join(", ")}
-                  </span>
+                  <span className="small">{run.allowed_repositories.join(", ")}</span>
                   <span>{t("rv.created")}</span>
                   <span>{time(run.created_at)}</span>
                   <span>{t("rv.finishedAt")}</span>
@@ -669,9 +615,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
               <CostPanel kind="run" id={id} tick={tick} />
-              {run.status === "PENDING" && (
-                <RepoPicker run={run} onDone={reload} />
-              )}
+              {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
               <div className="rv-note">
                 <Info size={14} />
                 {t("rv.clickNode")}
@@ -748,13 +692,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 /** READY steps that no worker has picked up yet: say who is holding the workers and for how long. */
 function QueueBanner({ run, tick }: { run: any; tick: number }) {
   const { t } = useI18n();
-  const waiting = run.steps.filter(
-    (s: any) => s.status === "READY" || s.status === "RETRYING",
-  );
+  const waiting = run.steps.filter((s: any) => s.status === "READY" || s.status === "RETRYING");
   const { data, reload } = useApi<any>(
-    waiting.length && !["PAUSED", "CANCELED"].includes(run.status)
-      ? "/api/scheduler"
-      : null,
+    waiting.length && !["PAUSED", "CANCELED"].includes(run.status) ? "/api/scheduler" : null,
   );
   useEffect(() => void reload(), [tick, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const [, force] = useState(0);
@@ -777,11 +717,7 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
           light: data.light_workers,
         })}{" "}
         {others.map((j: any) => (
-          <a
-            key={j.job_id}
-            href={`#/runs/${j.run_id}/${j.step_key}`}
-            style={{ marginRight: 10 }}
-          >
+          <a key={j.job_id} href={`#/runs/${j.run_id}/${j.step_key}`} style={{ marginRight: 10 }}>
             run #{j.run_id} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
           </a>
         ))}
@@ -813,23 +749,16 @@ function ReportCard({ run }: { run: any }) {
       {report ? (
         <div className="rv-chipline small">
           <Badge s="COMPLETED">
-            <CheckCircle2 size={11} />{" "}
-            {t("rv.verified", { n: report.counts.VERIFIED })}
+            <CheckCircle2 size={11} /> {t("rv.verified", { n: report.counts.VERIFIED })}
           </Badge>
           <Badge s="WAITING">
-            <AlertTriangle size={11} />{" "}
-            {t("rv.partial", { n: report.counts.PARTIAL })}
+            <AlertTriangle size={11} /> {t("rv.partial", { n: report.counts.PARTIAL })}
           </Badge>
           <Badge s="FAILED">
-            <XCircle size={11} />{" "}
-            {t("rv.missing", { n: report.counts.MISSING })}
+            <XCircle size={11} /> {t("rv.missing", { n: report.counts.MISSING })}
           </Badge>
           <span className="muted">
-            {s.status === "COMPLETED"
-              ? t("rv.approved")
-              : waiting
-                ? t("rv.reviewWait")
-                : ""}
+            {s.status === "COMPLETED" ? t("rv.approved") : waiting ? t("rv.reviewWait") : ""}
           </span>
         </div>
       ) : (
@@ -872,11 +801,7 @@ function ProfileCard({ run }: { run: any }) {
         ))}
       </ul>
       {(d.warnings ?? []).map((w: string) => (
-        <div
-          key={w}
-          className="rv-note"
-          style={{ color: "var(--st-wait)", margin: "4px 0" }}
-        >
+        <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}>
           <AlertTriangle size={13} />
           {w}
         </div>
@@ -921,10 +846,7 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const num = (n: number | null | undefined) =>
     n == null ? "—" : n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
   const steps = Object.entries<any>(data.per_step);
-  const max = Math.max(
-    1,
-    ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms),
-  );
+  const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
   const C = {
     queue: "var(--st-idle)",
     claude: "var(--brand)",
@@ -1044,12 +966,7 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
               <span
                 style={{
                   width: `${(s.exec_ms / max) * 100}%`,
-                  background:
-                    s.type === "command"
-                      ? C.command
-                      : s.claude_ms
-                        ? C.claude
-                        : C.other,
+                  background: s.type === "command" ? C.command : s.claude_ms ? C.claude : C.other,
                 }}
               />
               <span
@@ -1064,29 +981,21 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
             </span>
           </div>
         ))}
-        <div
-          className="rv-chipline muted small"
-          style={{ marginTop: 8, gap: 12 }}
-        >
-          {(["queue", "claude", "command", "other", "human"] as const).map(
-            (k) => (
-              <span
-                key={k}
-                style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
-              >
-                <i
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 3,
-                    background: C[k],
-                    display: "inline-block",
-                  }}
-                />
-                {k === "claude" ? "Claude" : t(`rv.legend.${k}`)}
-              </span>
-            ),
-          )}
+        <div className="rv-chipline muted small" style={{ marginTop: 8, gap: 12 }}>
+          {(["queue", "claude", "command", "other", "human"] as const).map((k) => (
+            <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <i
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 3,
+                  background: C[k],
+                  display: "inline-block",
+                }}
+              />
+              {k === "claude" ? "Claude" : t(`rv.legend.${k}`)}
+            </span>
+          ))}
         </div>
       </div>
     </div>
@@ -1118,11 +1027,7 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
             <input
               type="checkbox"
               checked={sel.includes(r)}
-              onChange={(e) =>
-                setSel(
-                  e.target.checked ? [...sel, r] : sel.filter((x) => x !== r),
-                )
-              }
+              onChange={(e) => setSel(e.target.checked ? [...sel, r] : sel.filter((x) => x !== r))}
               style={{ marginTop: 0 }}
             />{" "}
             {r}
@@ -1134,8 +1039,7 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
           className="sm ghost"
           onClick={async () =>
             (await act(
-              () =>
-                api(`/api/runs/${run.id}/repositories`, { repositories: sel }),
+              () => api(`/api/runs/${run.id}/repositories`, { repositories: sel }),
               t("wi.saved"),
             )) && onDone()
           }

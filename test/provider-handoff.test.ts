@@ -50,9 +50,21 @@ const policy = { mode: "coding" as const, baseBranch: "main", workspaces: [] };
 before(async () => {
   await migrate();
   await shareAllRepositoriesForTests();
-  owner = await createUser({ username: "handoff-owner", password: "handoff-password", role: "member" });
-  other = await createUser({ username: "handoff-other", password: "handoff-password", role: "member" });
-  admin = await createUser({ username: "handoff-admin", password: "handoff-password", role: "admin" });
+  owner = await createUser({
+    username: "handoff-owner",
+    password: "handoff-password",
+    role: "member",
+  });
+  other = await createUser({
+    username: "handoff-other",
+    password: "handoff-password",
+    role: "member",
+  });
+  admin = await createUser({
+    username: "handoff-admin",
+    password: "handoff-password",
+    role: "admin",
+  });
   registerExecutor("coding_agent", {
     execute: async (ctx) => {
       seen.push(ctx);
@@ -72,7 +84,8 @@ before(async () => {
 });
 afterEach(async () => {
   for (const id of runs.splice(0))
-    if (!["CANCELED", "COMPLETED", "FAILED"].includes((await getRun(id)).status)) await cancelRun(id);
+    if (!["CANCELED", "COMPLETED", "FAILED"].includes((await getRun(id)).status))
+      await cancelRun(id);
   await settleBackground();
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
 });
@@ -100,7 +113,12 @@ async function run(provider = "claude", fallback: any = {}, extra: any = {}) {
       ],
     },
   });
-  const r = await startRun({ definitionKey: key, ownerId: owner.id, agentProvider: "claude", profile: "STANDARD" });
+  const r = await startRun({
+    definitionKey: key,
+    ownerId: owner.id,
+    agentProvider: "claude",
+    profile: "STANDARD",
+  });
   runs.push(r.id);
   return r;
 }
@@ -120,7 +138,9 @@ async function quota() {
   execute = async () => fail("quota_exhausted", "Usage limit reached; api_key=supersecretvalue");
 }
 async function checkpoint(id: number) {
-  return one(pool, "SELECT * FROM provider_handoffs WHERE run_id=$1 ORDER BY id DESC LIMIT 1", [id]);
+  return one(pool, "SELECT * FROM provider_handoffs WHERE run_id=$1 ORDER BY id DESC LIMIT 1", [
+    id,
+  ]);
 }
 const resume = (r: number, h: any, provider: string, actor: number = owner.id) =>
   resumeProviderHandoff(
@@ -150,7 +170,9 @@ function git(path: string, ...args: string[]) {
 }
 async function workspace(r: any) {
   await repositories.upsert("fixture", { description: "Handoff fixture" });
-  await q(pool, "UPDATE workflow_runs SET allowed_repositories=ARRAY['fixture'] WHERE id=$1", [r.id]);
+  await q(pool, "UPDATE workflow_runs SET allowed_repositories=ARRAY['fixture'] WHERE id=$1", [
+    r.id,
+  ]);
   const path = mkdtempSync(join(process.env.TEST_ROOT!, "handoff-wt-"));
   execFileSync("git", ["init", "-q", "-b", r.branch, path]);
   writeFileSync(join(path, "task.txt"), "original\n");
@@ -186,12 +208,21 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.ok(h.package.repository_state[0].diff_hash);
   // Verified context travels with the handoff so the next provider does not re-investigate from scratch.
   assert.ok(Array.isArray(h.package.tests_already_executed));
-  assert.ok(Array.isArray(h.package.missing_verification) && h.package.missing_verification.includes("no passing test run on the current workspace commits"), "unverified state is explicit");
+  assert.ok(
+    Array.isArray(h.package.missing_verification) &&
+      h.package.missing_verification.includes(
+        "no passing test run on the current workspace commits",
+      ),
+    "unverified state is explicit",
+  );
   assert.ok("approved_scope" in h.package && "evidence_summary" in h.package);
   assert.ok(!JSON.stringify(h).includes("supersecretvalue"));
   assert.equal(
-    (await one(pool, "SELECT status,lease_owner,lease_expires_at FROM workflow_jobs WHERE id=$1", [job.id]))
-      .lease_expires_at,
+    (
+      await one(pool, "SELECT status,lease_owner,lease_expires_at FROM workflow_jobs WHERE id=$1", [
+        job.id,
+      ])
+    ).lease_expires_at,
     null,
   );
   const duplicate = await Promise.all([resume(r.id, h, "codex"), resume(r.id, h, "codex")]);
@@ -202,19 +233,35 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
     assert.equal(await resumableSession(ctx, path, "codex"), null);
     const pack = await ensureContextPack(ctx, newMetrics(""), { ...policy, workspaces: [path] });
     assert.match(JSON.stringify(pack), /provider_handoff/);
-    const env = envFromExecution(ctx, "coding", { ...policy, workspaces: [path] }, newMetrics(""), () => {});
+    const env = envFromExecution(
+      ctx,
+      "coding",
+      { ...policy, workspaces: [path] },
+      newMetrics(""),
+      () => {},
+    );
     assert.match(
       await dispatchPlatformTool("get_run_context", { section: "all", offset: 0, limit: 20 }, env),
       /provider_handoff/,
     );
-    const original=await dispatchPlatformTool("get_run_context",{section:"all",offset:0,limit:1,handoff_source_pack:true,handoff_limit:12000},env);
-    const sourcePack=JSON.parse(JSON.parse(original).provider_handoff.content);
-    assert.equal(sourcePack.attempt_id,h.source_attempt_id);
-    assert.notEqual(sourcePack.attempt_id,ctx.attempt.id);
+    const original = await dispatchPlatformTool(
+      "get_run_context",
+      { section: "all", offset: 0, limit: 1, handoff_source_pack: true, handoff_limit: 12000 },
+      env,
+    );
+    const sourcePack = JSON.parse(JSON.parse(original).provider_handoff.content);
+    assert.equal(sourcePack.attempt_id, h.source_attempt_id);
+    assert.notEqual(sourcePack.attempt_id, ctx.attempt.id);
     await ctx.recordMetrics({ provider: "codex", verification: { overall: "passed" } });
-    return { kind: "completed", output: { summary: "continued", verification: { overall: "passed" } } };
+    return {
+      kind: "completed",
+      output: { summary: "continued", verification: { overall: "passed" } },
+    };
   };
-  const claims = await Promise.all([claimJob("competing-one", 120), claimJob("competing-two", 120)]);
+  const claims = await Promise.all([
+    claimJob("competing-one", 120),
+    claimJob("competing-two", 120),
+  ]);
   assert.equal(claims.filter(Boolean).length, 1);
   const continuation = claims.find(Boolean)!;
   await processJob(continuation, "competing-one", { leaseSeconds: 120, heartbeatSeconds: 1 });
@@ -228,9 +275,11 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
     ).applied,
     false,
   );
-  const rows = await q(pool, "SELECT agent_provider,status FROM workflow_step_attempts WHERE run_id=$1 ORDER BY id", [
-    r.id,
-  ]);
+  const rows = await q(
+    pool,
+    "SELECT agent_provider,status FROM workflow_step_attempts WHERE run_id=$1 ORDER BY id",
+    [r.id],
+  );
   assert.deepEqual(
     rows.map((a) => a.agent_provider),
     ["claude", "codex"],
@@ -242,7 +291,8 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   const metrics = await one(pool, "SELECT * FROM provider_handoff_metrics WHERE id=$1", [h.id]);
   assert.equal(
     metrics.target_attempt_id,
-    (await one(pool, "SELECT id FROM workflow_step_attempts WHERE job_id=$1", [continuation.id])).id,
+    (await one(pool, "SELECT id FROM workflow_step_attempts WHERE job_id=$1", [continuation.id]))
+      .id,
   );
   assert.equal(metrics.reported_cost_usd, null);
   assert.ok(metrics.handoff_duration_ms >= 0);
@@ -289,7 +339,8 @@ test("manual in-progress Codex → Cursor waits for cancellation and creates a f
   const ready = await checkpoint(r.id);
   assert.equal(ready.status, "READY");
   assert.equal(
-    (await one(pool, "SELECT status FROM workflow_step_attempts WHERE id=$1", [source.attempt.id])).status,
+    (await one(pool, "SELECT status FROM workflow_step_attempts WHERE id=$1", [source.attempt.id]))
+      .status,
     "CANCELED",
   );
   await resume(r.id, ready, "cursor");
@@ -308,14 +359,22 @@ test("workspace drift, unavailable providers and wrong workers block continuatio
   await quota();
   await once();
   const h = await checkpoint(r.id);
-  setHandoffReadinessForTests(async () => ({ ok: false, error: "Not logged in", quota: "unknown", cost: "unknown" }));
+  setHandoffReadinessForTests(async () => ({
+    ok: false,
+    error: "Not logged in",
+    quota: "unknown",
+    cost: "unknown",
+  }));
   await assert.rejects(() => resume(r.id, h, "codex"), /Not logged in/);
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   writeFileSync(join(path, "task.txt"), "changed after checkpoint");
   await assert.rejects(() => resume(r.id, h, "codex"), /Workspace changed/);
   await q(pool, "UPDATE workflow_runs SET worker_instance='different-worker' WHERE id=$1", [r.id]);
   await assert.rejects(() => resume(r.id, h, "codex"), /assigned worker/);
-  await q(pool, "UPDATE workflow_runs SET worker_instance=$2 WHERE id=$1", [r.id, config.instanceId]);
+  await q(pool, "UPDATE workflow_runs SET worker_instance=$2 WHERE id=$1", [
+    r.id,
+    config.instanceId,
+  ]);
   assert.equal((await checkpoint(r.id)).status, "READY");
   const fresh = await requestProviderHandoff(
     r.id,
@@ -332,7 +391,11 @@ test("workspace drift, unavailable providers and wrong workers block continuatio
 });
 
 test("automatic mode requires explicit cost permission, excludes auth/timeouts and never loops", async () => {
-  const r = await run("claude", { mode: "automatic", providers: ["claude", "codex", "cursor"], max_switches: 2 });
+  const r = await run("claude", {
+    mode: "automatic",
+    providers: ["claude", "codex", "cursor"],
+    max_switches: 2,
+  });
   await quota();
   await once();
   const h = await checkpoint(r.id);
@@ -358,7 +421,12 @@ test("automatic mode requires explicit cost permission, excludes auth/timeouts a
 });
 
 test("authentication, context limits, timeouts and unknown structured provider failures pause for manual recovery", async () => {
-  for (const code of ["authentication", "context_length_exceeded", "timeout", "unrecognized_provider_error"]) {
+  for (const code of [
+    "authentication",
+    "context_length_exceeded",
+    "timeout",
+    "unrecognized_provider_error",
+  ]) {
     const r = await run("claude", { mode: "automatic", allow_unknown_cost: true });
     execute = async () => fail(code);
     await once();
@@ -378,13 +446,19 @@ test("rate limits retry with bounded backoff before handoff; timeout is not quot
   assert.equal((await getRun(r.id)).steps[0].status, "RETRYING");
   assert.equal(await checkpoint(r.id), undefined);
   for (let i = 0; i < 2; i++) {
-    await q(pool, "UPDATE workflow_jobs SET available_at=now() WHERE run_id=$1 AND status='queued'", [r.id]);
+    await q(
+      pool,
+      "UPDATE workflow_jobs SET available_at=now() WHERE run_id=$1 AND status='queued'",
+      [r.id],
+    );
     await once();
   }
   assert.equal((await checkpoint(r.id)).failure_category, "RATE_LIMIT");
   const timed = await run("codex", { mode: "manual" }, { timeout_ms: 1000 });
   execute = (ctx) =>
-    new Promise((resolve) => ctx.signal.addEventListener("abort", () => resolve(fail("canceled")), { once: true }));
+    new Promise((resolve) =>
+      ctx.signal.addEventListener("abort", () => resolve(fail("canceled")), { once: true }),
+    );
   await once();
   assert.equal((await checkpoint(timed.id)).failure_category, "EXECUTION_TIMEOUT");
 });
@@ -396,15 +470,24 @@ test("durable ready checkpoint survives scheduler restart; recovery blocks uncon
   const h = (await stepDetail(r.id, "implement")).handoffs[0];
   assert.equal(h.status, "READY");
   // A fresh Node process has no scheduler handles or application caches from the source execution.
-  const restarted = execFileSync(process.execPath,["--disable-warning=ExperimentalWarning","--input-type=module","-e",`
-    const {setHandoffReadinessForTests}=await import(${JSON.stringify(new URL("../src/agent/handoff.ts",import.meta.url).href)});
+  const restarted = execFileSync(
+    process.execPath,
+    [
+      "--disable-warning=ExperimentalWarning",
+      "--input-type=module",
+      "-e",
+      `
+    const {setHandoffReadinessForTests}=await import(${JSON.stringify(new URL("../src/agent/handoff.ts", import.meta.url).href)});
     setHandoffReadinessForTests(async()=>({ok:true,quota:"unknown",cost:"unknown"}));
-    const {resumeProviderHandoff}=await import(${JSON.stringify(new URL("../src/workflow/engine.ts",import.meta.url).href)});
-    const result=await resumeProviderHandoff(${r.id},"implement",${JSON.stringify({handoff_id:h.id,expected_attempt_id:h.source_attempt_id,provider:"codex",model:null,confirm:true,checkpoint_fingerprint:h.workspace_fingerprint})},${owner.id});
+    const {resumeProviderHandoff}=await import(${JSON.stringify(new URL("../src/workflow/engine.ts", import.meta.url).href)});
+    const result=await resumeProviderHandoff(${r.id},"implement",${JSON.stringify({ handoff_id: h.id, expected_attempt_id: h.source_attempt_id, provider: "codex", model: null, confirm: true, checkpoint_fingerprint: h.workspace_fingerprint })},${owner.id});
     console.log(result.handoff.status);
-    await (await import(${JSON.stringify(new URL("../src/db/pool.ts",import.meta.url).href)})).pool.end();
-  `],{encoding:"utf8",timeout:20000});
-  assert.equal(restarted.trim(),"RESUMED");
+    await (await import(${JSON.stringify(new URL("../src/db/pool.ts", import.meta.url).href)})).pool.end();
+  `,
+    ],
+    { encoding: "utf8", timeout: 20000 },
+  );
+  assert.equal(restarted.trim(), "RESUMED");
   execute = async () => ({ kind: "completed", output: { resumed_after_restart: true } });
   await once();
   const interrupted = await run("codex");
@@ -418,7 +501,9 @@ test("durable ready checkpoint survives scheduler restart; recovery blocks uncon
     { expected_attempt_id: b.attempt.id, reason: "Unresponsive process" },
     owner.id,
   );
-  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [j.id]);
+  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [
+    j.id,
+  ]);
   await reapExpiredLeases();
   const blocked = await checkpoint(interrupted.id);
   assert.equal(blocked.status, "BLOCKED");
@@ -440,7 +525,11 @@ async function client(user: PublicUser) {
   return async (path: string, value?: unknown, csrf = true) =>
     fetch(base + path, {
       method: value === undefined ? "GET" : "POST",
-      headers: { cookie, "content-type": "application/json", "x-csrf-token": csrf ? body.csrf : "" },
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        "x-csrf-token": csrf ? body.csrf : "",
+      },
       body: value === undefined ? undefined : JSON.stringify(value),
     });
 }
@@ -466,9 +555,17 @@ test("handoff endpoints enforce owner isolation, CSRF and explicit audited admin
   assert.equal((await b(`/api/runs/${r.id}/handoffs`)).status, 404);
   assert.equal((await support(path + "?scope=all", body)).status, 200);
   assert.ok(
-    await one(pool, "SELECT id FROM audit_log WHERE actor_id=$1 AND action='provider_handoff.resume'", [admin.id]),
+    await one(
+      pool,
+      "SELECT id FROM audit_log WHERE actor_id=$1 AND action='provider_handoff.resume'",
+      [admin.id],
+    ),
   );
-  assert.ok(await one(pool, "SELECT id FROM audit_log WHERE actor_id=$1 AND action='support.access'", [admin.id]));
+  assert.ok(
+    await one(pool, "SELECT id FROM audit_log WHERE actor_id=$1 AND action='support.access'", [
+      admin.id,
+    ]),
+  );
   const metrics = await (await a(`/api/runs/${r.id}/handoffs`)).json();
   assert.equal(metrics[0].original_provider, "claude");
   await cancelRun(r.id);
@@ -481,13 +578,19 @@ test("fallback disabled, existing approval gates, and reported budgets remain au
   await once();
   assert.equal((await getRun(disabled.id)).status, "FAILED");
   assert.equal(await checkpoint(disabled.id), undefined);
-  const r = await run("claude", { mode: "automatic", allow_unknown_cost: true, max_reported_cost_usd: 0 });
+  const r = await run("claude", {
+    mode: "automatic",
+    allow_unknown_cost: true,
+    max_reported_cost_usd: 0,
+  });
   await quota();
   await once();
   await processAutomaticHandoff();
   assert.equal((await checkpoint(r.id)).status, "READY");
   assert.match((await checkpoint(r.id)).blocked_reason, /cost limit/);
-  await q(pool, "UPDATE workflow_steps SET requires_approval=true,approval=NULL WHERE run_id=$1", [r.id]);
+  await q(pool, "UPDATE workflow_steps SET requires_approval=true,approval=NULL WHERE run_id=$1", [
+    r.id,
+  ]);
   const h = await checkpoint(r.id);
   await assert.rejects(() => resume(r.id, h, "codex"), /approval gate/);
 });
@@ -495,16 +598,26 @@ test("fallback disabled, existing approval gates, and reported budgets remain au
 test("pending human answers are retained and cannot be bypassed by a provider switch", async () => {
   const r = await run();
   execute = async (ctx) => {
-    await ctx.ask([{ question: "Which acceptance criterion applies?", options: ["Preserve idempotency"] }]);
+    await ctx.ask([
+      { question: "Which acceptance criterion applies?", options: ["Preserve idempotency"] },
+    ]);
     return fail("quota_exhausted");
   };
   await once();
   const h = await checkpoint(r.id);
   await assert.rejects(() => resume(r.id, h, "codex"), /pending human questions/);
-  const question = await one(pool, "SELECT id FROM workflow_questions WHERE run_id=$1 AND status='open'", [r.id]);
+  const question = await one(
+    pool,
+    "SELECT id FROM workflow_questions WHERE run_id=$1 AND status='open'",
+    [r.id],
+  );
   await answerQuestions({ [question.id]: "Preserve idempotency" });
   assert.equal((await getRun(r.id)).steps[0].status, "WAITING_INPUT");
-  assert.equal((await q(pool, "SELECT id FROM workflow_jobs WHERE run_id=$1 AND status='queued'", [r.id])).length, 0);
+  assert.equal(
+    (await q(pool, "SELECT id FROM workflow_jobs WHERE run_id=$1 AND status='queued'", [r.id]))
+      .length,
+    0,
+  );
   await resume(r.id, h, "codex");
 });
 
@@ -516,7 +629,11 @@ test("budget exhaustion and missing token coverage cannot silently start a fallb
   assert.equal((await checkpoint(budget.id)).status, "READY");
   assert.match((await checkpoint(budget.id)).blocked_reason, /Budget failure/);
   await cancelRun(budget.id);
-  const tokens = await run("claude", { mode: "automatic", allow_unknown_cost: true, max_reported_tokens: 100 });
+  const tokens = await run("claude", {
+    mode: "automatic",
+    allow_unknown_cost: true,
+    max_reported_tokens: 100,
+  });
   await quota();
   await once();
   await processAutomaticHandoff();
@@ -530,7 +647,9 @@ test("switch racing executor completion blocks for reinspection instead of losin
   assert.ok(job);
   const begun = await beginAttempt(job, "completion-race");
   assert.ok(begun);
-  await q(pool, "UPDATE workflow_step_attempts SET executor_stopped_at=now() WHERE id=$1", [begun.attempt.id]);
+  await q(pool, "UPDATE workflow_step_attempts SET executor_stopped_at=now() WHERE id=$1", [
+    begun.attempt.id,
+  ]);
   const requested = await requestProviderHandoff(
     r.id,
     "implement",
@@ -550,7 +669,8 @@ test("switch racing executor completion blocks for reinspection instead of losin
   const blocked = await checkpoint(r.id);
   assert.equal(blocked.status, "BLOCKED");
   assert.equal(
-    (await one(pool, "SELECT output FROM workflow_step_attempts WHERE id=$1", [begun.attempt.id])).output.summary,
+    (await one(pool, "SELECT output FROM workflow_step_attempts WHERE id=$1", [begun.attempt.id]))
+      .output.summary,
     "settled",
   );
   assert.equal((await getRun(r.id)).status, "WAITING");
@@ -564,14 +684,35 @@ test("switch racing executor completion blocks for reinspection instead of losin
   await resume(r.id, ready, "cursor");
 });
 
-
-test("ordinary step cancellation retains termination proof for a later safe handoff",async()=>{
- const r=await run("codex");let entered!:()=>void;const started=new Promise<void>(resolve=>entered=resolve);
- execute=ctx=>new Promise(resolve=>{entered();ctx.signal.addEventListener("abort",()=>resolve(fail("canceled")),{once:true});});
- const job=await claimJob("ordinary-stop",120);assert.ok(job);const processing=processJob(job,"ordinary-stop",{leaseSeconds:120,heartbeatSeconds:1});await started;
- const attempt=seen.at(-1)!.attempt;
- await stopStep(r.id,"implement","User stopped step");await processing;
- assert.ok((await one(pool,"SELECT executor_stopped_at FROM workflow_step_attempts WHERE id=$1",[attempt.id])).executor_stopped_at);
- const handoff=await requestProviderHandoff(r.id,"implement",{expected_attempt_id:attempt.id,reason:"Continue safely after stop"},owner.id);assert.equal(handoff.status,"READY");
- await resume(r.id,handoff,"cursor");
+test("ordinary step cancellation retains termination proof for a later safe handoff", async () => {
+  const r = await run("codex");
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => (entered = resolve));
+  execute = (ctx) =>
+    new Promise((resolve) => {
+      entered();
+      ctx.signal.addEventListener("abort", () => resolve(fail("canceled")), { once: true });
+    });
+  const job = await claimJob("ordinary-stop", 120);
+  assert.ok(job);
+  const processing = processJob(job, "ordinary-stop", { leaseSeconds: 120, heartbeatSeconds: 1 });
+  await started;
+  const attempt = seen.at(-1)!.attempt;
+  await stopStep(r.id, "implement", "User stopped step");
+  await processing;
+  assert.ok(
+    (
+      await one(pool, "SELECT executor_stopped_at FROM workflow_step_attempts WHERE id=$1", [
+        attempt.id,
+      ])
+    ).executor_stopped_at,
+  );
+  const handoff = await requestProviderHandoff(
+    r.id,
+    "implement",
+    { expected_attempt_id: attempt.id, reason: "Continue safely after stop" },
+    owner.id,
+  );
+  assert.equal(handoff.status, "READY");
+  await resume(r.id, handoff, "cursor");
 });

@@ -54,19 +54,29 @@ export class NdjsonStream {
     this.buf = "";
     if (!rest.trim()) return { events: [], errors: [] };
     const parsed = parseLine(rest.trim());
-    return parsed.ok ? { events: [parsed.event], errors: [] } : { events: [], errors: [parsed.error] };
+    return parsed.ok
+      ? { events: [parsed.event], errors: [] }
+      : { events: [], errors: [parsed.error] };
   }
 }
 
-function parseLine(line: string): { ok: true; event: CursorEvent } | { ok: false; error: ParseError } {
+function parseLine(
+  line: string,
+): { ok: true; event: CursorEvent } | { ok: false; error: ParseError } {
   let raw: any;
   try {
     raw = JSON.parse(line);
   } catch (e) {
-    return { ok: false, error: { type: "malformed", line: line.slice(0, 500), error: (e as Error).message } };
+    return {
+      ok: false,
+      error: { type: "malformed", line: line.slice(0, 500), error: (e as Error).message },
+    };
   }
   if (!raw || typeof raw !== "object" || typeof raw.type !== "string")
-    return { ok: false, error: { type: "malformed", line: line.slice(0, 500), error: "event has no type" } };
+    return {
+      ok: false,
+      error: { type: "malformed", line: line.slice(0, 500), error: "event has no type" },
+    };
   const text = assistantText(raw);
   return {
     ok: true,
@@ -92,7 +102,9 @@ function parseLine(line: string): { ok: true; event: CursorEvent } | { ok: false
 function assistantText(raw: any): string | undefined {
   const content = raw.message?.content;
   if (!Array.isArray(content)) return undefined;
-  const parts = content.filter((c) => c && c.type === "text" && typeof c.text === "string").map((c) => c.text);
+  const parts = content
+    .filter((c) => c && c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text);
   return parts.length ? parts.join("") : undefined;
 }
 
@@ -109,7 +121,9 @@ export function isDuplicateAssistant(ev: CursorEvent, partial: boolean): boolean
 }
 
 /** First key of a tool_call object, e.g. readToolCall → { name: "read", body }. */
-export function toolCallShape(toolCall: Record<string, unknown> | undefined): { name: string; body: any } | null {
+export function toolCallShape(
+  toolCall: Record<string, unknown> | undefined,
+): { name: string; body: any } | null {
   if (!toolCall) return null;
   if (toolCall.function && typeof toolCall.function === "object") {
     const fn = toolCall.function as { name?: string; arguments?: unknown };

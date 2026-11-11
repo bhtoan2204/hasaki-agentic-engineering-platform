@@ -1,24 +1,24 @@
 .ui-dialog.dialog {
-    inset: 0;
-    transform: none;
-    margin: auto;
-    height: fit-content;
-    max-height: calc(100dvh - 32px);
-    overflow: auto;
-    border: 1px solid var(--line);
-    color: var(--ink)
+  inset: 0;
+  transform: none;
+  margin: auto;
+  height: fit-content;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  color: var(--ink);
 }
 
 .ui-dialog::backdrop {
-    background: color-mix(in srgb, var(--black) 50%, transparent);
-    backdrop-filter: blur(2px)
+  background: color-mix(in srgb, var(--black) 50%, transparent);
+  backdrop-filter: blur(2px);
 }
 
 .ui-dialog .card-head {
-    justify-content: space-between
+  justify-content: space-between;
 }
 
 .ui-dialog .card-head h2 {
-    font-size: var(--fs-lg);
-    margin: 0
+  font-size: var(--fs-lg);
+  margin: 0;
 }

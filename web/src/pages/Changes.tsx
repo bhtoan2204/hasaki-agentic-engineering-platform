@@ -14,16 +14,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import {
-  act,
-  Badge,
-  Copy,
-  Empty,
-  ErrorBox,
-  Loading,
-  Markdown,
-  navigate,
-} from "../ui.tsx";
+import { act, Badge, Copy, Empty, ErrorBox, Loading, Markdown, navigate } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { OutputView } from "./StepInspector.tsx";
 import "./RunView.css";
@@ -63,9 +54,7 @@ function fileDiff(diff: string, path: string) {
   const parts = diff.split(/^(?=diff --git )/m);
   return (
     parts.find(
-      (p) =>
-        p.startsWith("diff --git") &&
-        (p.includes(` b/${path}\n`) || p.includes(` b/${path}`)),
+      (p) => p.startsWith("diff --git") && (p.includes(` b/${path}\n`) || p.includes(` b/${path}`)),
     ) ?? ""
   );
 }
@@ -84,9 +73,7 @@ export function Changes({
   onChanged: () => void;
 }) {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any>(
-    `/api/runs/${run.id}/changes`,
-  );
+  const { data, error, loading, reload } = useApi<any>(`/api/runs/${run.id}/changes`);
   const [file, setFile] = useState<Record<string, string | null>>({});
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   const lastDiff = useRef(Date.now());
@@ -107,19 +94,14 @@ export function Changes({
         <div className="si-title">
           <h2>{t("ch.title")}</h2>
           <div className="si-meta">
-            <span
-              style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-            >
+            <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
               <GitBranch size={12} />
               <span className="mono">{data.branch}</span>
             </span>
             {data.pr_step && (
-              <span
-                style={{ display: "inline-flex", gap: 6, alignItems: "center" }}
-              >
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                 {t("ch.prStep")} <b className="mono">{data.pr_step.key}</b> (
-                {t("ch.mode", { mode: data.pr_step.mode })}){" "}
-                <Badge s={data.pr_step.status} label />
+                {t("ch.mode", { mode: data.pr_step.mode })}) <Badge s={data.pr_step.status} label />
               </span>
             )}
           </div>
@@ -149,11 +131,7 @@ export function Changes({
               className="ok big"
               onClick={async () =>
                 (await act(
-                  () =>
-                    api(
-                      `/api/runs/${run.id}/steps/${data.pr_step.key}/approve`,
-                      {},
-                    ),
+                  () => api(`/api/runs/${run.id}/steps/${data.pr_step.key}/approve`, {}),
                   t("ch.approved"),
                 )) && (onChanged(), reload())
               }
@@ -187,18 +165,12 @@ export function Changes({
             </div>
           ) : (
             <>
-              <div
-                className="muted small mono"
-                style={{ marginTop: 4, overflowWrap: "anywhere" }}
-              >
+              <div className="muted small mono" style={{ marginTop: 4, overflowWrap: "anywhere" }}>
                 {r.path}
               </div>
               {r.status && (
                 <div className="errorbox small">
-                  <AlertTriangle
-                    size={13}
-                    style={{ verticalAlign: -2, color: "var(--st-err)" }}
-                  />{" "}
+                  <AlertTriangle size={13} style={{ verticalAlign: -2, color: "var(--st-err)" }} />{" "}
                   <b>{t("ch.dirty")}</b> {t("ch.dirtySub")}
                   <pre>{r.status}</pre>
                   <details>
@@ -208,17 +180,13 @@ export function Changes({
                 </div>
               )}
               <div className="rv-sec-title" style={{ marginTop: 16 }}>
-                <GitCommitHorizontal size={14} />{" "}
-                {t("ch.commits", { n: r.commits.length })}
+                <GitCommitHorizontal size={14} /> {t("ch.commits", { n: r.commits.length })}
               </div>
               {r.commits.length ? (
                 r.commits.map((c: any) => (
                   <div key={c.hash} className="ch-commit">
                     <span className="mono">{c.hash}</span>{" "}
-                    <span
-                      className="grow"
-                      style={{ minWidth: 0, overflowWrap: "anywhere" }}
-                    >
+                    <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                       {c.subject}{" "}
                       <span className="muted">
                         — {c.author}, {c.when}
@@ -227,9 +195,7 @@ export function Changes({
                   </div>
                 ))
               ) : (
-                <div className="muted small">
-                  {t("ch.noCommits", { base: r.base })}
-                </div>
+                <div className="muted small">{t("ch.noCommits", { base: r.base })}</div>
               )}
               <div className="rv-sec-title" style={{ marginTop: 16 }}>
                 <FileCode2 size={14} /> {t("ch.files", { n: r.files.length })}
@@ -240,9 +206,7 @@ export function Changes({
                     {r.files.map((f: any) => (
                       <tr
                         key={f.path}
-                        className={
-                          "click" + (file[r.repo] === f.path ? " on" : "")
-                        }
+                        className={"click" + (file[r.repo] === f.path ? " on" : "")}
                         onClick={() =>
                           setFile({
                             ...file,
@@ -250,10 +214,7 @@ export function Changes({
                           })
                         }
                       >
-                        <td
-                          className="mono"
-                          style={{ overflowWrap: "anywhere" }}
-                        >
+                        <td className="mono" style={{ overflowWrap: "anywhere" }}>
                           {f.path}
                         </td>
                         <td className="ch-stat-add small" style={{ width: 60 }}>
@@ -269,9 +230,7 @@ export function Changes({
               </div>
               <div className="rv-sec-title" style={{ marginTop: 16 }}>
                 <FileDiff size={14} />{" "}
-                {file[r.repo]
-                  ? t("ch.diffFile", { file: file[r.repo]! })
-                  : t("ch.diffAll")}
+                {file[r.repo] ? t("ch.diffFile", { file: file[r.repo]! }) : t("ch.diffAll")}
                 {file[r.repo] && (
                   <button
                     className="quiet xs"
@@ -286,13 +245,8 @@ export function Changes({
                   </button>
                 )}
               </div>
-              <Diff
-                text={file[r.repo] ? fileDiff(r.diff, file[r.repo]!) : r.diff}
-              />
-              <div
-                className="rv-sec-title"
-                style={{ marginTop: 16, flexWrap: "wrap" }}
-              >
+              <Diff text={file[r.repo] ? fileDiff(r.diff, file[r.repo]!) : r.diff} />
+              <div className="rv-sec-title" style={{ marginTop: 16, flexWrap: "wrap" }}>
                 <GitPullRequest size={14} /> PR preview
                 <span style={{ textTransform: "none", letterSpacing: 0 }}>
                   {r.pr_preview.will_open ? (
@@ -309,10 +263,7 @@ export function Changes({
                 </div>
                 <div className="row tight">
                   <span className="grow" />
-                  <Copy
-                    text={r.pr_preview.description}
-                    label={t("ch.copyDesc")}
-                  />
+                  <Copy text={r.pr_preview.description} label={t("ch.copyDesc")} />
                 </div>
                 <Markdown text={r.pr_preview.description} />
               </div>
@@ -341,14 +292,9 @@ export function Changes({
                   flexWrap: "wrap",
                 }}
               >
-                <b>{v.key}</b> <span className="muted">{v.type}</span>{" "}
-                <Badge s={v.status} />
-                {v.output?.passed === false && (
-                  <Badge s="FAILED">{t("ch.testsFailed")}</Badge>
-                )}
-                {v.output?.approved === false && (
-                  <Badge s="FAILED">{t("ch.reviewChanges")}</Badge>
-                )}
+                <b>{v.key}</b> <span className="muted">{v.type}</span> <Badge s={v.status} />
+                {v.output?.passed === false && <Badge s="FAILED">{t("ch.testsFailed")}</Badge>}
+                {v.output?.approved === false && <Badge s="FAILED">{t("ch.reviewChanges")}</Badge>}
               </summary>
               <OutputView value={v.output} />
             </details>
@@ -371,8 +317,7 @@ export function Changes({
                 className="grow"
                 style={{ minWidth: 0, overflowWrap: "anywhere" }}
               >
-                {p.title}{" "}
-                <ExternalLink size={11} style={{ verticalAlign: -1 }} />
+                {p.title} <ExternalLink size={11} style={{ verticalAlign: -1 }} />
               </a>{" "}
               {p.draft && <Badge s="PENDING">{t("ch.draft")}</Badge>}{" "}
               {!p.created && <Badge s="WAITING">{t("ch.linkOnly")}</Badge>}

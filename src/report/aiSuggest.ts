@@ -24,7 +24,14 @@ export interface Requirement {
   section: string;
   text: string;
   /** What kind of proof satisfies it (derived deterministically from the wording). */
-  needs: { screenshot: boolean; screenshotOnly: boolean; log: boolean; code: boolean; test: boolean; outcome: boolean };
+  needs: {
+    screenshot: boolean;
+    screenshotOnly: boolean;
+    log: boolean;
+    code: boolean;
+    test: boolean;
+    outcome: boolean;
+  };
   accepts: EvidenceKind[];
 }
 
@@ -39,15 +46,19 @@ export interface ReportSpec {
 }
 
 const VI = /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/i;
-const SCREENSHOT = /(ảnh|hình)\s*(chụp|màn hình)|chụp\s*(màn hình|ảnh)|screenshot|screen\s*shot|\bảnh\b|image|hình ảnh/i;
+const SCREENSHOT =
+  /(ảnh|hình)\s*(chụp|màn hình)|chụp\s*(màn hình|ảnh)|screenshot|screen\s*shot|\bảnh\b|image|hình ảnh/i;
 const LOG = /\blogs?\b|nhật ký/i;
 const CODE = /\bcode\b|mã nguồn|commit|\bdiff\b|pull request|\bpr\b|merge/i;
 const TEST = /\btests?\b|kiểm (tra|thử)|unit test|testing/i;
 // "the order shows X after the fix", "kết quả" — a business outcome, not just a code change.
-const OUTCOME = /sau khi (fix|sửa)|hiển thị|kết quả|thành công|hoạt động|after the fix|shows?|displays?|works?/i;
+const OUTCOME =
+  /sau khi (fix|sửa)|hiển thị|kết quả|thành công|hoạt động|after the fix|shows?|displays?|works?/i;
 const ALTERNATIVE = /\bhoặc\b|\bor\b|\//i;
 
-export function analyzeRequirement(text: string): Requirement["needs"] & { accepts: EvidenceKind[] } {
+export function analyzeRequirement(
+  text: string,
+): Requirement["needs"] & { accepts: EvidenceKind[] } {
   const screenshot = SCREENSHOT.test(text);
   const log = LOG.test(text);
   const code = CODE.test(text);
@@ -58,9 +69,24 @@ export function analyzeRequirement(text: string): Requirement["needs"] & { accep
   if (screenshot) accepts.add("screenshot").add("attachment");
   if (!screenshotOnly) {
     if (log) accepts.add("log").add("test_result");
-    if (code) accepts.add("commit").add("file_change").add("pr").add("implementation_summary").add("review");
+    if (code)
+      accepts
+        .add("commit")
+        .add("file_change")
+        .add("pr")
+        .add("implementation_summary")
+        .add("review");
     if (test) accepts.add("test_result").add("log");
-    if (!screenshot && !log && !code && !test) for (const k of ["implementation_summary", "test_result", "commit", "file_change", "review", "log"] as const) accepts.add(k);
+    if (!screenshot && !log && !code && !test)
+      for (const k of [
+        "implementation_summary",
+        "test_result",
+        "commit",
+        "file_change",
+        "review",
+        "log",
+      ] as const)
+        accepts.add(k);
   }
   return { screenshot, screenshotOnly, log, code, test, outcome, accepts: [...accepts] };
 }
@@ -68,10 +94,19 @@ export function analyzeRequirement(text: string): Requirement["needs"] & { accep
 /** null when there is nothing meaningful to report (missing/null ai_suggest, empty report, only blank items). */
 export function parseAiSuggest(payload: any): ReportSpec | null {
   const ai = payload?.task_ai?.ai_suggest ?? payload?.data?.task_ai?.ai_suggest;
-  if (!ai || typeof ai !== "object" || !ai.report || typeof ai.report !== "object" || Array.isArray(ai.report)) return null;
+  if (
+    !ai ||
+    typeof ai !== "object" ||
+    !ai.report ||
+    typeof ai.report !== "object" ||
+    Array.isArray(ai.report)
+  )
+    return null;
   const sections: ReportSpec["sections"] = [];
   for (const [name, raw] of Object.entries<any>(ai.report)) {
-    const items = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean);
+    const items = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [])
+      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .filter(Boolean);
     if (!name.trim() || !items.length) continue;
     const si = sections.length + 1;
     sections.push({
@@ -83,7 +118,11 @@ export function parseAiSuggest(payload: any): ReportSpec | null {
     });
   }
   if (!sections.length) return null;
-  const sample = [...sections.map((s) => s.name), ...sections.flatMap((s) => s.requirements.map((r) => r.text)), ai.reasoning ?? ""].join(" ");
+  const sample = [
+    ...sections.map((s) => s.name),
+    ...sections.flatMap((s) => s.requirements.map((r) => r.text)),
+    ai.reasoning ?? "",
+  ].join(" ");
   return {
     suggest_id: ai.suggest_id ?? null,
     object: ai.object ?? null,

@@ -46,14 +46,22 @@ const origQuery = pg.Client.prototype.query;
   return (origQuery as any).apply(this, a);
 };
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(), headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
+  headless: true,
+  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+});
 
 async function session() {
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(base + "/#/overview");
   const login = await page.evaluate(async () => {
-    const r = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "bench", password: "bench-password" }) });
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "bench", password: "bench-password" }),
+    });
     return r.json();
   });
   return { context, page, csrf: login.csrf as string };
@@ -61,23 +69,68 @@ async function session() {
 
 async function newRun(page: Page, csrf: string) {
   const run = await page.evaluate(async (csrf) => {
-    const w = await (await fetch("/api/work-items", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": csrf }, body: JSON.stringify({ title: "bench", project: "OMS" }) })).json();
-    return (await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": csrf }, body: JSON.stringify({ workflow: "bug-investigation", work_item_id: w.id, start: false }) })).json();
+    const w = await (
+      await fetch("/api/work-items", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": csrf },
+        body: JSON.stringify({ title: "bench", project: "OMS" }),
+      })
+    ).json();
+    return (
+      await fetch("/api/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-csrf-token": csrf },
+        body: JSON.stringify({ workflow: "bug-investigation", work_item_id: w.id, start: false }),
+      })
+    ).json();
   }, csrf);
-  const step = (await one<{ id: number; key: string }>(pool, "SELECT id, key FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1", [run.id]))!;
-  const attempt = (await one<{ id: number }>(pool, "INSERT INTO workflow_step_attempts (step_id, run_id, number, generation, status) VALUES ($1, $2, 1, 1, 'RUNNING') RETURNING id", [step.id, run.id]))!;
-  await pool.query("UPDATE workflow_steps SET status = 'RUNNING', current_attempt_id = $1 WHERE id = $2", [attempt.id, step.id]);
+  const step = (await one<{ id: number; key: string }>(
+    pool,
+    "SELECT id, key FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1",
+    [run.id],
+  ))!;
+  const attempt = (await one<{ id: number }>(
+    pool,
+    "INSERT INTO workflow_step_attempts (step_id, run_id, number, generation, status) VALUES ($1, $2, 1, 1, 'RUNNING') RETURNING id",
+    [step.id, run.id],
+  ))!;
+  await pool.query(
+    "UPDATE workflow_steps SET status = 'RUNNING', current_attempt_id = $1 WHERE id = $2",
+    [attempt.id, step.id],
+  );
   await pool.query("UPDATE workflow_runs SET status = 'RUNNING' WHERE id = $1", [run.id]);
-  return { runId: Number(run.id), stepId: Number(step.id), stepKey: step.key, attemptId: Number(attempt.id) };
+  return {
+    runId: Number(run.id),
+    stepId: Number(step.id),
+    stepKey: step.key,
+    attemptId: Number(attempt.id),
+  };
 }
 
 /** An agent at work: every burst is a tool call, its result and a line of assistant text; status changes at 1/3 and 2/3. */
-async function agentActivity(r: { runId: number; stepId: number; attemptId: number }, bursts = BURSTS) {
+async function agentActivity(
+  r: { runId: number; stepId: number; attemptId: number },
+  bursts = BURSTS,
+) {
   for (let i = 0; i < bursts; i++) {
     await runEvents.add(pool, r.runId, "tool", `Read src/file${i}.ts`, r.stepId, r.attemptId);
-    await runEvents.add(pool, r.runId, "tool_result", `contents of file ${i}`, r.stepId, r.attemptId);
+    await runEvents.add(
+      pool,
+      r.runId,
+      "tool_result",
+      `contents of file ${i}`,
+      r.stepId,
+      r.attemptId,
+    );
     await runEvents.add(pool, r.runId, "agent", `Looking at file ${i}`, r.stepId, r.attemptId);
-    if (i === Math.floor(bursts / 3) || i === Math.floor((2 * bursts) / 3)) await runEvents.add(pool, r.runId, "status", `analyze: RUNNING → RUNNING (bench ${i})`, r.stepId);
+    if (i === Math.floor(bursts / 3) || i === Math.floor((2 * bursts) / 3))
+      await runEvents.add(
+        pool,
+        r.runId,
+        "status",
+        `analyze: RUNNING → RUNNING (bench ${i})`,
+        r.stepId,
+      );
     await sleep(BURST_GAP_MS);
   }
 }
@@ -86,7 +139,7 @@ async function agentActivity(r: { runId: number; stepId: number; attemptId: numb
 async function open(page: Page, url: string) {
   await page.goto(url);
   await page.reload();
-  await page.waitForLoadState("networkidle").catch(() => { });
+  await page.waitForLoadState("networkidle").catch(() => {});
 }
 
 function recorder(page: Page) {
@@ -110,10 +163,21 @@ async function measure(name: string, fn: () => Promise<void>, counts: Record<str
   const cpu = process.cpuUsage(cpu0);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const sorted = Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]));
-  console.log(JSON.stringify({ scenario: name, seconds: Math.round((Date.now() - t0) / 1000), api_requests: total, db_queries: dbQueries - q0, server_cpu_ms: Math.round((cpu.user + cpu.system) / 1000), by_endpoint: sorted }));
+  console.log(
+    JSON.stringify({
+      scenario: name,
+      seconds: Math.round((Date.now() - t0) / 1000),
+      api_requests: total,
+      db_queries: dbQueries - q0,
+      server_cpu_ms: Math.round((cpu.user + cpu.system) / 1000),
+      by_endpoint: sorted,
+    }),
+  );
 }
 
-const want = (process.env.BENCH_SCENARIOS ?? "run-view,run-overview,questions,fallback,hidden-tab").split(",");
+const want = (
+  process.env.BENCH_SCENARIOS ?? "run-view,run-overview,questions,fallback,hidden-tab"
+).split(",");
 try {
   if (want.includes("run-view")) {
     const { context, page, csrf } = await session();
@@ -160,7 +224,10 @@ try {
     await sleep(2500);
     const setVisible = (v: boolean) =>
       page.evaluate((v) => {
-        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (v ? "visible" : "hidden") });
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          get: () => (v ? "visible" : "hidden"),
+        });
         Object.defineProperty(document, "hidden", { configurable: true, get: () => !v });
         document.dispatchEvent(new Event("visibilitychange"));
       }, v);
@@ -180,6 +247,6 @@ try {
   await browser.close();
   await new Promise<void>((r) => server.close(() => r()));
   await (stream as any).stopEventStream?.();
-  await pool.end().catch(() => { });
+  await pool.end().catch(() => {});
   process.exit(0); // the LISTEN client has no stop hook on older code
 }

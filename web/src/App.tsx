@@ -183,8 +183,7 @@ export function App() {
     if (me) void refreshCount();
   }, [me]);
   useEffect(() => {
-    if (me?.role === "member" && hash.startsWith("/users"))
-      location.hash = "/overview";
+    if (me?.role === "member" && hash.startsWith("/users")) location.hash = "/overview";
   }, [me, hash]);
   useEffect(() => {
     setNavOpen(false);
@@ -223,9 +222,7 @@ export function App() {
       }
       if (e.key !== "Tab" || document.getElementById("account-menu")) return;
       const items = [
-        ...(sidebar.current?.querySelectorAll<HTMLElement>(
-          "a, button:not(:disabled)",
-        ) ?? []),
+        ...(sidebar.current?.querySelectorAll<HTMLElement>("a, button:not(:disabled)") ?? []),
       ].filter((el) => el.getClientRects().length > 0);
       const first = items[0],
         last = items[items.length - 1];
@@ -289,13 +286,7 @@ export function App() {
       page = <RepositoriesPage name={parts[1]} query={queryPart} me={me} />;
       break;
     case "prod-errors":
-      page = (
-        <ProductionErrorsPage
-          route={parts[1]}
-          fingerprint={parts[2]}
-          query={queryPart}
-        />
-      );
+      page = <ProductionErrorsPage route={parts[1]} fingerprint={parts[2]} query={queryPart} />;
       break;
     case "investigations":
       page = <InvestigationsPage id={parts[1] ? Number(parts[1]) : undefined} />;
@@ -308,19 +299,11 @@ export function App() {
       break;
     case "users":
       page =
-        me?.role === "admin" ? (
-          <UsersPage me={me} onSignedOut={signedOut} />
-        ) : (
-          <OverviewPage />
-        );
+        me?.role === "admin" ? <UsersPage me={me} onSignedOut={signedOut} /> : <OverviewPage />;
       break;
     case "account":
       page = me && (
-        <AccountPage
-          me={me}
-          passwordMode={parts[1] === "password"}
-          onSignedOut={signedOut}
-        />
+        <AccountPage me={me} passwordMode={parts[1] === "password"} onSignedOut={signedOut} />
       );
       break;
     case "office":
@@ -348,9 +331,7 @@ export function App() {
   const CurrentIcon = current.icon;
 
   return (
-    <div
-      className={`app${navOpen ? " nav-open" : ""}${collapsed ? " sidebar-collapsed" : ""}`}
-    >
+    <div className={`app${navOpen ? " nav-open" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
       <GlobalChibiCompanion section={section} />
       <aside
         ref={sidebar}
@@ -370,28 +351,16 @@ export function App() {
         >
           <X size={18} />
         </button>
-        <a
-          className="sb-brand"
-          href="#/overview"
-          aria-label={`${BRAND.product} — Overview`}
-        >
+        <a className="sb-brand" href="#/overview" aria-label={`${BRAND.product} — Overview`}>
           <BrandLogo size={40} withName />
         </a>
         <button
           className="sb-link sb-toggle"
           onClick={() => setCollapsed(!collapsed)}
-          aria-label={t(
-            collapsed ? "auth.expandSidebar" : "auth.collapseSidebar",
-          )}
-          data-tip={t(
-            collapsed ? "auth.expandSidebar" : "auth.collapseSidebar",
-          )}
+          aria-label={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")}
+          data-tip={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")}
         >
-          {collapsed ? (
-            <PanelLeftOpen size={18} />
-          ) : (
-            <PanelLeftClose size={18} />
-          )}
+          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           <span>{t("auth.collapseSidebar")}</span>
         </button>
         <nav className="sb-nav">
@@ -472,11 +441,7 @@ export function App() {
         </div>
       </aside>
       {navOpen && (
-        <div
-          className="scrim"
-          style={{ zIndex: 55 }}
-          onClick={() => setNavOpen(false)}
-        />
+        <div className="scrim" style={{ zIndex: 55 }} onClick={() => setNavOpen(false)} />
       )}
 
       <div className="main" inert={navOpen || undefined}>
@@ -502,11 +467,7 @@ export function App() {
             </span>
           </div>
           <div className="tb-right">
-            <span
-              className={`live-pill is-${live}`}
-              tabIndex={0}
-              data-tip={t("live.tip")}
-            >
+            <span className={`live-pill is-${live}`} tabIndex={0} data-tip={t("live.tip")}>
               <i />{" "}
               <b>
                 {live === "sse"
@@ -516,11 +477,7 @@ export function App() {
                     : t("live.connecting")}
               </b>
             </span>
-            <div
-              className="lang-switch"
-              role="group"
-              aria-label={t("lang.switch")}
-            >
+            <div className="lang-switch" role="group" aria-label={t("lang.switch")}>
               {(["vi", "en"] as UiLocale[]).map((code) => (
                 <button
                   key={code}
@@ -541,16 +498,12 @@ export function App() {
               data-tip={t("inbox.tip")}
             >
               <Inbox size={17} />
-              {openQuestions > 0 && (
-                <span className="count">{openQuestions}</span>
-              )}
+              {openQuestions > 0 && <span className="count">{openQuestions}</span>}
             </a>
             <button
               className="ghost icon"
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              aria-label={
-                theme === "light" ? t("theme.toDark") : t("theme.toLight")
-              }
+              aria-label={theme === "light" ? t("theme.toDark") : t("theme.toLight")}
               data-tip={theme === "light" ? t("theme.dark") : t("theme.light")}
             >
               {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
@@ -559,9 +512,7 @@ export function App() {
         </header>
         <main
           ref={pageRef}
-          onScroll={(e) =>
-            scrollPositions.current.set(pathPart, e.currentTarget.scrollTop)
-          }
+          onScroll={(e) => scrollPositions.current.set(pathPart, e.currentTarget.scrollTop)}
           tabIndex={-1}
           className={full ? "page full" : "page"}
           key={`${me.id}:${support}`}

@@ -18,14 +18,19 @@ export function cursorToolDecision(
   if (!native) return { allow: true };
   const input = toolInput(native, shape.body);
   if (native === "Bash" && /mcp\.json|PLATFORM_BRIDGE|cli\.json/i.test(String(input.command ?? "")))
-    return { allow: false, reason: "reading the per-run bridge configuration is not allowed", tool: native };
+    return {
+      allow: false,
+      reason: "reading the per-run bridge configuration is not allowed",
+      tool: native,
+    };
   const d = decide(native, input, policy, cwd);
   return d.allow ? { allow: true } : { allow: false, reason: d.reason, tool: native };
 }
 
 function nativeName(name: string): string | null {
   const n = name.toLowerCase();
-  if (n === "read" || n === "grep" || n === "glob") return n === "read" ? "Read" : n === "grep" ? "Grep" : "Glob";
+  if (n === "read" || n === "grep" || n === "glob")
+    return n === "read" ? "Read" : n === "grep" ? "Grep" : "Glob";
   if (n === "write" || n === "edit" || n === "strreplace" || n === "delete") return "Write";
   if (n === "shell" || n === "bash") return "Bash";
   if (n.startsWith("mcp") || n === "function") return null;
@@ -43,7 +48,11 @@ function toolInput(native: string, body: any): Record<string, unknown> {
   }
   if (native === "Bash") return { command: String(args.command ?? args.cmd ?? "") };
   if (native === "Grep") return { pattern: args.pattern ?? args.query ?? "", path: args.path };
-  if (native === "Glob") return { pattern: args.glob_pattern ?? args.pattern ?? args.glob ?? "", path: args.path ?? args.target_directory };
+  if (native === "Glob")
+    return {
+      pattern: args.glob_pattern ?? args.pattern ?? args.glob ?? "",
+      path: args.path ?? args.target_directory,
+    };
   const path = args.path ?? args.file_path ?? args.target_file ?? "";
   return { file_path: path, path };
 }

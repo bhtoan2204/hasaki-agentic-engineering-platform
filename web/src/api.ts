@@ -29,11 +29,7 @@ export function setAuthed(on: boolean) {
 }
 
 function withScope(path: string) {
-  if (
-    !supportView ||
-    path.startsWith("/api/auth") ||
-    path.startsWith("/api/ui-messages")
-  )
+  if (!supportView || path.startsWith("/api/auth") || path.startsWith("/api/ui-messages"))
     return path;
   return path + (path.includes("?") ? "&" : "?") + "scope=all";
 }
@@ -45,11 +41,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * while Wi-Fi re-keys or the VPN (Cloudflare WARP) reconnects. GETs are safe to repeat, so they are retried a few
  * times with a short backoff; POSTs are not (the server may already have applied them).
  */
-async function fetchRetrying(
-  url: string,
-  init: RequestInit,
-  retries: number,
-): Promise<Response> {
+async function fetchRetrying(url: string, init: RequestInit, retries: number): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fetch(url, init);
@@ -92,8 +84,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   }
   if (!r.ok)
     throw new Error(
-      (j.error || `HTTP ${r.status}`) +
-        (j.details ? "\n" + j.details.join("\n") : ""),
+      (j.error || `HTTP ${r.status}`) + (j.details ? "\n" + j.details.join("\n") : ""),
     );
   return j as T;
 }
@@ -127,9 +118,7 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
   const scopedKey = path ? withScope(path) : null;
   const cached = scopedKey ? apiCache.get(scopedKey) : undefined;
 
-  const [data, setDataState] = useState<T | null>(() =>
-    cached ? (cached.data as T) : null,
-  );
+  const [data, setDataState] = useState<T | null>(() => (cached ? (cached.data as T) : null));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(!cached && !!path);
   const [refreshing, setRefreshing] = useState<boolean>(!!cached && !!path);
@@ -320,8 +309,7 @@ function streamUrl() {
   return s ? `/api/stream?${s}` : "/api/stream";
 }
 function open() {
-  if (!authed || es || !subs.size || document.visibilityState === "hidden")
-    return;
+  if (!authed || es || !subs.size || document.visibilityState === "hidden") return;
   if (reopen) (clearTimeout(reopen), (reopen = null));
   try {
     const source = new EventSource(streamUrl());
@@ -331,13 +319,12 @@ function open() {
       reopenDelay = 2000;
       const unknownGap = cursor == null ? false : !!h.reset;
       if (typeof h.cursor === "number") cursor = Math.max(cursor ?? 0, h.cursor);
-      if (h.live === false) startPolling(); // stream open but the server's LISTEN is down: don't trust it yet
+      if (h.live === false)
+        startPolling(); // stream open but the server's LISTEN is down: don't trust it yet
       else (stopPolling(), setShared("sse"));
       if (unknownGap) broadcast();
     });
-    source.addEventListener("change", (e) =>
-      deliver(JSON.parse((e as MessageEvent).data)),
-    );
+    source.addEventListener("change", (e) => deliver(JSON.parse((e as MessageEvent).data)));
     source.onerror = () => {
       startPolling(); // EventSource reconnects by itself (with Last-Event-ID); poll meanwhile
       // After a network change the browser may give up for good (CLOSED): open a fresh stream with backoff.
@@ -373,8 +360,7 @@ if (typeof document !== "undefined")
   });
 
 /** Rank of a payload when several arrive in one batch: the most significant one is handed to the subscriber. */
-const weight = (p?: LivePayload) =>
-  !p ? 3 : p.kind === "status" ? 2.5 : isStateChange(p) ? 2 : 1;
+const weight = (p?: LivePayload) => (!p ? 3 : p.kind === "status" ? 2.5 : isStateChange(p) ? 2 : 1);
 /** First call 250 ms after an event, then at most once per second while events keep coming. */
 const FIRST_MS = 250;
 const GAP_MS = 1000;
@@ -411,8 +397,7 @@ export function useLive(
       setState: setLive,
       cb: (p) => {
         if (!pending || weight(p) > weight(pending.p)) pending = { p };
-        if (!timer)
-          timer = setTimeout(fire, Math.max(FIRST_MS, last + GAP_MS - Date.now()));
+        if (!timer) timer = setTimeout(fire, Math.max(FIRST_MS, last + GAP_MS - Date.now()));
       },
     };
     subs.add(sub);

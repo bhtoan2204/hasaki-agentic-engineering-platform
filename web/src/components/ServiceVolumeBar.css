@@ -41,7 +41,7 @@
   overflow: hidden;
 }
 
-.service-volume-track>span {
+.service-volume-track > span {
   display: block;
   height: 100%;
   border-radius: inherit;

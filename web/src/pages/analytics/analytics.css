@@ -2,7 +2,7 @@
   min-width: 0;
 }
 
-.an>.tabs {
+.an > .tabs {
   min-width: 0;
 }
 
@@ -112,7 +112,7 @@
   margin-top: var(--sp-3);
 }
 
-.an-pagination>span {
+.an-pagination > span {
   margin-right: auto;
 }
 
@@ -224,7 +224,7 @@
   overflow-wrap: anywhere;
 }
 
-.an-signature>div {
+.an-signature > div {
   margin-top: 4px;
   font-size: var(--fs-sm);
   white-space: normal;
@@ -258,7 +258,7 @@
     flex-wrap: wrap;
   }
 
-  .an-pagination>span {
+  .an-pagination > span {
     flex-basis: 100%;
   }
 }

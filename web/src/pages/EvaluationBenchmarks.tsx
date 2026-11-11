@@ -2,8 +2,7 @@ import { useState } from "react";
 import { api, useApi } from "../api.ts";
 import { act, ErrorBox, Loading, navigate } from "../ui.tsx";
 
-const number = (v: any, digits = 1) =>
-  v == null ? "Unknown" : Number(v).toFixed(digits);
+const number = (v: any, digits = 1) => (v == null ? "Unknown" : Number(v).toFixed(digits));
 export function EvaluationBenchmarks() {
   const suites = useApi<any[]>("/api/benchmark-suites");
   const runs = useApi<any>("/api/evaluation-runs");
@@ -54,13 +53,11 @@ export function EvaluationBenchmarks() {
     <section className="card ins-bench">
       <div className="card-head">
         <h4>Versioned benchmark evaluations</h4>
-        <span className="sub">
-          Synthetic fixtures · no live model execution
-        </span>
+        <span className="sub">Synthetic fixtures · no live model execution</span>
       </div>
       <p className="muted small">
-        Hard gates precede quality scores. Token usage is unknown unless a real
-        provider reports it. Fixture controls do not measure model quality.
+        Hard gates precede quality scores. Token usage is unknown unless a real provider reports it.
+        Fixture controls do not measure model quality.
       </p>
       <div className="toolbar">
         <button
@@ -85,9 +82,7 @@ export function EvaluationBenchmarks() {
           Refresh
         </button>
         {!runs.data.enabled && (
-          <span className="muted small">
-            Disabled locally: evaluation.enabled
-          </span>
+          <span className="muted small">Disabled locally: evaluation.enabled</span>
         )}
       </div>
       <div className="table-wrap">
@@ -122,12 +117,8 @@ export function EvaluationBenchmarks() {
           </select>
         </label>
         <label className="ins-bench-toggle">
-          <input
-            type="checkbox"
-            checked={ci}
-            onChange={(e) => setCi(e.target.checked)}
-          />{" "}
-          P1 code intelligence
+          <input type="checkbox" checked={ci} onChange={(e) => setCi(e.target.checked)} /> P1 code
+          intelligence
         </label>
         <label>
           Repetitions{" "}
@@ -139,10 +130,7 @@ export function EvaluationBenchmarks() {
             onChange={(e) => setRepetitions(Number(e.target.value))}
           />
         </label>
-        <button
-          disabled={!runs.data.enabled || !suites.data.length}
-          onClick={create}
-        >
+        <button disabled={!runs.data.enabled || !suites.data.length} onClick={create}>
           Run safe fixtures
         </button>
       </div>
@@ -168,9 +156,8 @@ export function EvaluationBenchmarks() {
                 </td>
                 <td>{r.status}</td>
                 <td>
-                  {r.configuration.adapter} · P1{" "}
-                  {r.configuration.code_intelligence ? "ON" : "OFF"} ·{" "}
-                  {r.configuration.prompt_version}
+                  {r.configuration.adapter} · P1 {r.configuration.code_intelligence ? "ON" : "OFF"}{" "}
+                  · {r.configuration.prompt_version}
                 </td>
                 <td>
                   {r.finished}/{r.tasks}
@@ -187,10 +174,7 @@ export function EvaluationBenchmarks() {
       <div className="ins-bench-form ins-bench-compare">
         <label>
           Baseline{" "}
-          <select
-            value={baseline}
-            onChange={(e) => setBaseline(e.target.value)}
-          >
+          <select value={baseline} onChange={(e) => setBaseline(e.target.value)}>
             <option value="">Choose run</option>
             {runs.data.runs.map((r: any) => (
               <option key={r.id} value={r.id}>
@@ -201,10 +185,7 @@ export function EvaluationBenchmarks() {
         </label>
         <label>
           Candidate{" "}
-          <select
-            value={candidate}
-            onChange={(e) => setCandidate(e.target.value)}
-          >
+          <select value={candidate} onChange={(e) => setCandidate(e.target.value)}>
             <option value="">Choose run</option>
             {runs.data.runs.map((r: any) => (
               <option key={r.id} value={r.id}>
@@ -257,8 +238,7 @@ export function EvaluationBenchmarks() {
                     <td>
                       {p.baseline
                         ? number(
-                            Number(p.candidate.quality_score) -
-                              Number(p.baseline.quality_score),
+                            Number(p.candidate.quality_score) - Number(p.baseline.quality_score),
                           )
                         : "Unknown"}
                     </td>
@@ -321,8 +301,8 @@ export function EvaluationBenchmarks() {
           {detail.cases.map((c: any) => (
             <details key={`${c.task_id}-${c.repetition}`}>
               <summary>
-                {c.task_id} / {c.repetition} · {c.status ?? c.step_status} ·
-                score {number(c.quality_score)}
+                {c.task_id} / {c.repetition} · {c.status ?? c.step_status} · score{" "}
+                {number(c.quality_score)}
               </summary>
               <p>{c.definition.description}</p>
               <p className="mono">Pinned commit: {c.base_commit}</p>

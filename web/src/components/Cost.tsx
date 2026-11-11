@@ -10,7 +10,11 @@ export const usd = (n: number | null | undefined) =>
   n == null ? "—" : `$${n >= 1 ? n.toFixed(2) : n.toFixed(3)}`;
 
 const compact = (n: number) =>
-  n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n));
+  n >= 1e6
+    ? `${(n / 1e6).toFixed(1)}M`
+    : n >= 1e3
+      ? `${(n / 1e3).toFixed(1)}k`
+      : String(Math.round(n));
 
 /** List cell: total cost, with wasted share and availability in the tooltip. */
 export function CostCell({ cost }: { cost?: any }) {
@@ -20,7 +24,9 @@ export function CostCell({ cost }: { cost?: any }) {
     t("cost.wasted") + ": " + usd(cost.wasted_usd),
     cost.availability === "partial" ? t("cost.partial") : "",
     cost.run_count != null ? t("cost.runs", { n: cost.run_count }) : "",
-  ].filter(Boolean).join(" · ");
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <span className="cost-cell" title={tip}>
       {usd(cost.cost_usd)}
@@ -32,7 +38,8 @@ export function CostCell({ cost }: { cost?: any }) {
 
 function BudgetBar({ line }: { line: any }) {
   const { t } = useI18n();
-  if (!line || line.status === "none") return <span className="muted small">{t("cost.noBudget")}</span>;
+  if (!line || line.status === "none")
+    return <span className="muted small">{t("cost.noBudget")}</span>;
   const pct = Math.min(100, line.pct ?? 0);
   return (
     <div className={`cost-budget cost-budget-${line.status}`}>
@@ -47,7 +54,15 @@ function BudgetBar({ line }: { line: any }) {
   );
 }
 
-function BudgetEditor({ path, current, onSaved }: { path: string; current: number | null; onSaved: (d: any) => void }) {
+function BudgetEditor({
+  path,
+  current,
+  onSaved,
+}: {
+  path: string;
+  current: number | null;
+  onSaved: (d: any) => void;
+}) {
   const { t } = useI18n();
   const [v, setV] = useState(current == null ? "" : String(current));
   useEffect(() => setV(current == null ? "" : String(current)), [current]);
@@ -61,8 +76,19 @@ function BudgetEditor({ path, current, onSaved }: { path: string; current: numbe
         void save(v.trim() || null);
       }}
     >
-      <input type="number" min="0.01" step="0.01" inputMode="decimal" placeholder={t("cost.budgetPlaceholder")} value={v} onChange={(e) => setV(e.target.value)} aria-label={t("cost.budget")} />
-      <button type="submit" className="ghost">{t("cost.setBudget")}</button>
+      <input
+        type="number"
+        min="0.01"
+        step="0.01"
+        inputMode="decimal"
+        placeholder={t("cost.budgetPlaceholder")}
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        aria-label={t("cost.budget")}
+      />
+      <button type="submit" className="ghost">
+        {t("cost.setBudget")}
+      </button>
       {current != null && (
         <button type="button" className="quiet" onClick={() => void save(null)}>
           {t("cost.clearBudget")}
@@ -78,7 +104,15 @@ const REASONS = ["failed", "canceled", "stale", "superseded", "failed_run"];
  * Cost panel for one run (`kind="run"`) or one work item across all its runs (`kind="work_item"`):
  * totals and tokens, wasted cost, budget (editable), breakdown by step or by run, and by model.
  */
-export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: number; tick?: unknown }) {
+export function CostPanel({
+  kind,
+  id,
+  tick,
+}: {
+  kind: "run" | "work_item";
+  id: number;
+  tick?: unknown;
+}) {
   const { t } = useI18n();
   const base = kind === "run" ? `/api/runs/${id}` : `/api/work-items/${id}`;
   const { data: fetched, reload } = useApi<any>(`${base}/cost`, [id]);
@@ -94,10 +128,13 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
     <div className="cost-card">
       <div className="cost-card-head">
         <h4>
-          <CircleDollarSign size={16} /> {t(kind === "run" ? "cost.titleRun" : "cost.titleWorkItem")}
+          <CircleDollarSign size={16} />{" "}
+          {t(kind === "run" ? "cost.titleRun" : "cost.titleWorkItem")}
         </h4>
         {data.availability === "partial" && <span className="cost-flag">{t("cost.partial")}</span>}
-        {data.availability === "unavailable" && <span className="cost-flag">{t("cost.unavailable")}</span>}
+        {data.availability === "unavailable" && (
+          <span className="cost-flag">{t("cost.unavailable")}</span>
+        )}
       </div>
       {none ? (
         <p className="muted small">{t("cost.none")}</p>
@@ -117,25 +154,36 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
             )}
             <div className="cost-mini">
               <span>{t("cost.wasted")}</span>
-              <b className={data.wasted.cost_usd > 0 ? "cost-waste" : ""}>{usd(data.wasted.cost_usd)}</b>
+              <b className={data.wasted.cost_usd > 0 ? "cost-waste" : ""}>
+                {usd(data.wasted.cost_usd)}
+              </b>
               {data.wasted.pct != null && <small className="muted">{data.wasted.pct}%</small>}
             </div>
             <div className="cost-mini">
               <span>{t("cost.tokensIn")}</span>
               <b>{compact(tk.input)}</b>
               {tk.cache_read + tk.cache_creation > 0 && (
-                <small className="muted">{t("cost.cache", { read: compact(tk.cache_read), write: compact(tk.cache_creation) })}</small>
+                <small className="muted">
+                  {t("cost.cache", {
+                    read: compact(tk.cache_read),
+                    write: compact(tk.cache_creation),
+                  })}
+                </small>
               )}
             </div>
             <div className="cost-mini">
               <span>{t("cost.tokensOut")}</span>
               <b>{compact(tk.output)}</b>
-              {tk.reasoning > 0 && <small className="muted">{t("cost.reasoning", { n: compact(tk.reasoning) })}</small>}
+              {tk.reasoning > 0 && (
+                <small className="muted">{t("cost.reasoning", { n: compact(tk.reasoning) })}</small>
+              )}
             </div>
           </div>
           {data.wasted.cost_usd > 0 && (
             <p className="small muted cost-reasons">
-              {REASONS.filter((r) => data.wasted.by_reason[r]).map((r) => `${t(`cost.reason.${r}`)} ${usd(data.wasted.by_reason[r])}`).join(" · ")}
+              {REASONS.filter((r) => data.wasted.by_reason[r])
+                .map((r) => `${t(`cost.reason.${r}`)} ${usd(data.wasted.by_reason[r])}`)
+                .join(" · ")}
             </p>
           )}
         </>
@@ -157,28 +205,32 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
         <div className="cost-section">
           <div className="cost-h">{t("cost.byStep")}</div>
           <div className="table-wrap">
-          <table className="cost-table">
-            <thead>
-              <tr>
-                <th>{t("cost.step")}</th>
-                <th>{t("cost.attempts")}</th>
-                <th>{t("cost.cost")}</th>
-                <th>{t("cost.wasted")}</th>
-                <th>{t("cost.tokens")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.by_step.filter((s: any) => s.cost_usd != null || s.attempts_without_cost > 0).map((s: any) => (
-                <tr key={s.step_key}>
-                  <td>{s.step_name}</td>
-                  <td>{s.attempts}</td>
-                  <td>{usd(s.cost_usd)}</td>
-                  <td className={s.wasted_usd > 0 ? "cost-waste" : "muted"}>{s.wasted_usd > 0 ? usd(s.wasted_usd) : "—"}</td>
-                  <td className="muted">{compact(s.tokens.input + s.tokens.output)}</td>
+            <table className="cost-table">
+              <thead>
+                <tr>
+                  <th>{t("cost.step")}</th>
+                  <th>{t("cost.attempts")}</th>
+                  <th>{t("cost.cost")}</th>
+                  <th>{t("cost.wasted")}</th>
+                  <th>{t("cost.tokens")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.by_step
+                  .filter((s: any) => s.cost_usd != null || s.attempts_without_cost > 0)
+                  .map((s: any) => (
+                    <tr key={s.step_key}>
+                      <td>{s.step_name}</td>
+                      <td>{s.attempts}</td>
+                      <td>{usd(s.cost_usd)}</td>
+                      <td className={s.wasted_usd > 0 ? "cost-waste" : "muted"}>
+                        {s.wasted_usd > 0 ? usd(s.wasted_usd) : "—"}
+                      </td>
+                      <td className="muted">{compact(s.tokens.input + s.tokens.output)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -187,30 +239,41 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
         <div className="cost-section">
           <div className="cost-h">{t("cost.byRun")}</div>
           <div className="table-wrap">
-          <table className="cost-table">
-            <thead>
-              <tr>
-                <th>{t("cost.run")}</th>
-                <th>{t("cost.status")}</th>
-                <th>{t("cost.cost")}</th>
-                <th>{t("cost.wasted")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.runs.map((r: any) => (
-                <tr key={r.run_id}>
-                  <td>
-                    <a href={`#/runs/${r.run_id}`}>#{r.run_id}</a> <span className="muted small">{r.workflow}</span>
-                  </td>
-                  <td className="small">{r.status}</td>
-                  <td>{usd(r.cost_usd)}</td>
-                  <td className={r.status === "FAILED" || r.status === "CANCELED" || r.wasted_usd > 0 ? "cost-waste" : "muted"}>
-                    {r.status === "FAILED" || r.status === "CANCELED" ? usd(r.cost_usd) : r.wasted_usd > 0 ? usd(r.wasted_usd) : "—"}
-                  </td>
+            <table className="cost-table">
+              <thead>
+                <tr>
+                  <th>{t("cost.run")}</th>
+                  <th>{t("cost.status")}</th>
+                  <th>{t("cost.cost")}</th>
+                  <th>{t("cost.wasted")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.runs.map((r: any) => (
+                  <tr key={r.run_id}>
+                    <td>
+                      <a href={`#/runs/${r.run_id}`}>#{r.run_id}</a>{" "}
+                      <span className="muted small">{r.workflow}</span>
+                    </td>
+                    <td className="small">{r.status}</td>
+                    <td>{usd(r.cost_usd)}</td>
+                    <td
+                      className={
+                        r.status === "FAILED" || r.status === "CANCELED" || r.wasted_usd > 0
+                          ? "cost-waste"
+                          : "muted"
+                      }
+                    >
+                      {r.status === "FAILED" || r.status === "CANCELED"
+                        ? usd(r.cost_usd)
+                        : r.wasted_usd > 0
+                          ? usd(r.wasted_usd)
+                          : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -219,28 +282,28 @@ export function CostPanel({ kind, id, tick }: { kind: "run" | "work_item"; id: n
         <div className="cost-section">
           <div className="cost-h">{t("cost.byModel")}</div>
           <div className="table-wrap">
-          <table className="cost-table">
-            <thead>
-              <tr>
-                <th>{t("cost.model")}</th>
-                <th>{t("cost.attempts")}</th>
-                <th>{t("cost.cost")}</th>
-                <th>{t("cost.tokens")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.by_model.map((m: any) => (
-                <tr key={`${m.provider}|${m.model}`}>
-                  <td>
-                    {m.model} <span className="muted small">{m.provider}</span>
-                  </td>
-                  <td>{m.attempts}</td>
-                  <td>{usd(m.cost_usd)}</td>
-                  <td className="muted">{compact(m.tokens.input + m.tokens.output)}</td>
+            <table className="cost-table">
+              <thead>
+                <tr>
+                  <th>{t("cost.model")}</th>
+                  <th>{t("cost.attempts")}</th>
+                  <th>{t("cost.cost")}</th>
+                  <th>{t("cost.tokens")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.by_model.map((m: any) => (
+                  <tr key={`${m.provider}|${m.model}`}>
+                    <td>
+                      {m.model} <span className="muted small">{m.provider}</span>
+                    </td>
+                    <td>{m.attempts}</td>
+                    <td>{usd(m.cost_usd)}</td>
+                    <td className="muted">{compact(m.tokens.input + m.tokens.output)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

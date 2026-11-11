@@ -26,11 +26,7 @@ export function PerformanceDashboard({
       <div className="ins-stats">
         <Metric label="runs" value={s.runs} />
         <Metric label="attempts" value={s.attempts} />
-        <Metric
-          label="completion"
-          value={ratio(s.completed_runs, s.runs)}
-          style="pct"
-        />
+        <Metric label="completion" value={ratio(s.completed_runs, s.runs)} style="pct" />
         <Metric
           label="verified"
           value={ratio(s.verified_runs, s.evaluated_runs)}
@@ -38,30 +34,18 @@ export function PerformanceDashboard({
           hint={t("an.verifiedHint")}
         />
         <Metric label="verifiedTasks" value={s.verified_tasks} />
-        <Metric
-          label="retry"
-          value={ratio(s.retried_attempts, s.attempts)}
-          style="pct"
-        />
+        <Metric label="retry" value={ratio(s.retried_attempts, s.attempts)} style="pct" />
         <Metric label="executionP50" value={s.execution_p50_ms} style="ms" />
         <Metric label="executionP95" value={s.execution_p95_ms} style="ms" />
         <Metric label="workflowP95" value={s.workflow_p95_ms} style="ms" />
         <Metric label="queue" value={s.queue_ms} style="ms" />
         <Metric label="human" value={s.human_wait_ms} style="ms" />
         <Metric label="tools" value={s.tool_ms} style="ms" />
-        <Metric
-          label="toolError"
-          value={ratio(s.tool_failures, s.tool_calls)}
-          style="pct"
-        />
+        <Metric label="toolError" value={ratio(s.tool_failures, s.tool_calls)} style="pct" />
       </div>
       <div className="ins-grid">
         <Panel title={t("an.failures")}>
-          <BreakdownBars
-            rows={data.failures ?? []}
-            field="attempts"
-            labelKey="category"
-          />
+          <BreakdownBars rows={data.failures ?? []} field="attempts" labelKey="category" />
         </Panel>
         <Panel title={t("an.coverage")}>
           <DataTable

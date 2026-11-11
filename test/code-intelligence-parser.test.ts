@@ -23,11 +23,7 @@ test("Go packages, imports, functions, receivers, structs, interfaces, calls and
     (s) => s.qualified_name === "pay.S.Pay" && s.symbol_kind === "method",
   )!;
   assert.equal(method.qualified_name, "pay.S.Pay");
-  assert.ok(
-    e.symbols.some(
-      (s) => s.qualified_name === "pay.P.Pay" && s.symbol_kind === "method",
-    ),
-  );
+  assert.ok(e.symbols.some((s) => s.qualified_name === "pay.P.Pay" && s.symbol_kind === "method"));
   assert.equal(
     Buffer.from(source)
       .subarray(method.start_byte, method.end_byte)
@@ -35,16 +31,8 @@ test("Go packages, imports, functions, receivers, structs, interfaces, calls and
       .startsWith("func (s *S)"),
     true,
   );
-  assert.ok(
-    e.relations.some(
-      (r) => r.relation_type === "IMPORTS" && r.target_name === "fmt",
-    ),
-  );
-  assert.ok(
-    e.relations.some(
-      (r) => r.relation_type === "CALLS" && r.resolution === "candidate",
-    ),
-  );
+  assert.ok(e.relations.some((r) => r.relation_type === "IMPORTS" && r.target_name === "fmt"));
+  assert.ok(e.relations.some((r) => r.relation_type === "CALLS" && r.resolution === "candidate"));
 });
 test("TypeScript/TSX functions, classes, methods, interfaces, aliases and export imports", async () => {
   for (const path of ["a.ts", "a.tsx"]) {
@@ -85,11 +73,7 @@ test("Proto messages, nested enums, package, service and RPC request/response ca
         r.resolution === "candidate",
     ),
   );
-  assert.ok(
-    e.relations.some(
-      (r) => r.relation_type === "RPC_RESPONSE" && r.target_name === "Res",
-    ),
-  );
+  assert.ok(e.relations.some((r) => r.relation_type === "RPC_RESPONSE" && r.target_name === "Res"));
 });
 test("SQL objects, columns, foreign key references; unsupported dialect fragments fail softly", async () => {
   const e = (await extract(
@@ -107,35 +91,20 @@ test("SQL objects, columns, foreign key references; unsupported dialect fragment
       e.symbols.some((s) => s.symbol_name === name && s.symbol_kind === kind),
       name,
     );
+  assert.ok(e.relations.some((r) => r.target_name === "users" && r.relation_type === "REFERENCES"));
   assert.ok(
-    e.relations.some(
-      (r) => r.target_name === "users" && r.relation_type === "REFERENCES",
-    ),
-  );
-  assert.ok(
-    await extract(
-      "a.sql",
-      "DELIMITER $$ nonsense invalid GO; CREATE TABLE valid (id int);",
-    ),
+    await extract("a.sql", "DELIMITER $$ nonsense invalid GO; CREATE TABLE valid (id int);"),
   );
 });
 test("Invalid syntax, unsupported language, binary, oversized source and symbol limits", async () => {
-  assert.ok(
-    (await extract("a.go", "package p\nfunc Broken( {"))!.parse_errors > 0,
-  );
+  assert.ok((await extract("a.go", "package p\nfunc Broken( {"))!.parse_errors > 0);
   assert.equal(await extract("a.py", "def foo(): pass"), null);
   assert.equal(await extract("a.go", "\0"), null);
-  assert.equal(
-    await extract("a.go", "x".repeat(config.codeIntelligence.maxFileBytes + 1)),
-    null,
-  );
+  assert.equal(await extract("a.go", "x".repeat(config.codeIntelligence.maxFileBytes + 1)), null);
   const old = config.codeIntelligence.maxSymbols;
   config.codeIntelligence.maxSymbols = 2;
   try {
-    assert.ok(
-      (await extract("a.go", "package p\nfunc A() {}\nfunc B() {}"))!.symbols
-        .length <= 2,
-    );
+    assert.ok((await extract("a.go", "package p\nfunc A() {}\nfunc B() {}"))!.symbols.length <= 2);
   } finally {
     config.codeIntelligence.maxSymbols = old;
   }

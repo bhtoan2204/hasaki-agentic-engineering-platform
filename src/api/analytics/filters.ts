@@ -1,7 +1,14 @@
 import { HttpError } from "../../http/error.ts";
 import { AGENT_PROVIDERS } from "../../agent/provider.ts";
 
-export const DIMENSIONS = ["provider", "model", "user", "workflow", "repository", "project"] as const;
+export const DIMENSIONS = [
+  "provider",
+  "model",
+  "user",
+  "workflow",
+  "repository",
+  "project",
+] as const;
 export type Dimension = (typeof DIMENSIONS)[number];
 export interface AnalyticsFilters {
   from: string;
@@ -34,11 +41,15 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
   const date = (key: string, fallback: string) => {
     const value = p.get(key) || fallback;
     if (
-      !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value) ||
+      !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(
+        value,
+      ) ||
       !Number.isFinite(Date.parse(value))
     )
       bad(`Invalid ${key}: use a date or ISO timestamp with offset`);
-    if (value.slice(0, 10) !== new Date(`${value.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10))
+    if (
+      value.slice(0, 10) !== new Date(`${value.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10)
+    )
       bad(`Invalid ${key}`);
     return value;
   };
@@ -47,7 +58,8 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
   const from = date("from", new Date(end.getTime() - 30 * 86400000).toISOString());
   const to = date("to", end.toISOString());
   const span = Date.parse(to) - Date.parse(from);
-  if (span <= 0 || span > 366 * 86400000 + 2 * 3600000) bad("Date range must be positive and at most 366 days");
+  if (span <= 0 || span > 366 * 86400000 + 2 * 3600000)
+    bad("Date range must be positive and at most 366 days");
   const timezone = p.get("timezone") || "Asia/Bangkok";
   try {
     new Intl.DateTimeFormat("en", { timeZone: timezone }).format(now);
@@ -60,7 +72,8 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
     return v;
   };
   const provider = text("provider");
-  if (provider && !(AGENT_PROVIDERS as readonly string[]).includes(provider)) bad("Invalid provider");
+  if (provider && !(AGENT_PROVIDERS as readonly string[]).includes(provider))
+    bad("Invalid provider");
   const integer = (key: string, fallback: number, max: number) => {
     const value = p.has(key) ? Number(p.get(key)) : fallback;
     if (!Number.isSafeInteger(value) || value < 1 || value > max) bad(`Invalid ${key}`);
@@ -72,11 +85,14 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
   const groupBy = p.get("group_by") || "provider";
   if (!(DIMENSIONS as readonly string[]).includes(groupBy)) bad("Invalid group_by");
   const severity = text("severity");
-  if (severity && !["critical", "high", "medium", "low", "unknown"].includes(severity)) bad("Invalid severity");
+  if (severity && !["critical", "high", "medium", "low", "unknown"].includes(severity))
+    bad("Invalid severity");
   const incidentStatus = text("incident_status");
-  if (incidentStatus && !["open", "acknowledged", "resolved", "recurring"].includes(incidentStatus)) bad("Invalid incident_status");
+  if (incidentStatus && !["open", "acknowledged", "resolved", "recurring"].includes(incidentStatus))
+    bad("Invalid incident_status");
   const environment = text("environment");
-  if (environment && environment !== "production") bad("Invalid environment; production is the only configured production-error environment");
+  if (environment && environment !== "production")
+    bad("Invalid environment; production is the only configured production-error environment");
   return {
     from,
     to,

@@ -142,9 +142,7 @@ export function Transcript({
   }, [attemptId]);
   useEffect(() => {
     let stop = false;
-    api<Ev[]>(
-      `/api/attempts/${attemptId}/transcript?after=${last.current}`,
-    ).then((rows) => {
+    api<Ev[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
       if (stop || !rows.length) return;
       last.current = rows[rows.length - 1].id;
       setEvents((prev) => [...prev, ...rows]);
@@ -160,23 +158,18 @@ export function Transcript({
   const results = useMemo(() => {
     const m: Record<string, Ev> = {};
     for (const e of events)
-      if (e.kind === "tool_result" && e.data?.tool_use_id)
-        m[e.data.tool_use_id] = e;
+      if (e.kind === "tool_result" && e.data?.tool_use_id) m[e.data.tool_use_id] = e;
     return m;
   }, [events]);
   const tools = events.filter((e) => e.kind === "tool" && e.data?.name);
   const filesRead = [
     ...new Set(
-      tools
-        .filter((e) => READ_TOOLS.includes(e.data.name))
-        .map((e) => toolHint(e.data.input)),
+      tools.filter((e) => READ_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.input)),
     ),
   ];
   const filesModified = [
     ...new Set(
-      tools
-        .filter((e) => EDIT_TOOLS.includes(e.data.name))
-        .map((e) => toolHint(e.data.input)),
+      tools.filter((e) => EDIT_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.input)),
     ),
   ];
   const commands = tools.filter((e) => e.data.name === "Bash");
@@ -207,10 +200,7 @@ export function Transcript({
       case "commands":
         return e.kind === "tool" && e.data?.name === "Bash";
       case "errors":
-        return (
-          errors.includes(e) ||
-          (e.kind === "tool" && results[e.data?.id]?.data?.is_error)
-        );
+        return errors.includes(e) || (e.kind === "tool" && results[e.data?.id]?.data?.is_error);
       case "reasoning":
         return e.kind === "thinking";
       case "prompts":
@@ -221,22 +211,14 @@ export function Transcript({
   return (
     <div>
       <div className="tr-stats">
-        <StatTile
-          icon={FolderSearch}
-          n={filesRead.length}
-          label={t("tr.filesRead")}
-        >
+        <StatTile icon={FolderSearch} n={filesRead.length} label={t("tr.filesRead")}>
           <div className="mono" title={filesRead.join("\n")}>
             {filesRead.map((f) => (
               <div key={f}>{f}</div>
             ))}
           </div>
         </StatTile>
-        <StatTile
-          icon={Pencil}
-          n={filesModified.length}
-          label={t("tr.filesModified")}
-        >
+        <StatTile icon={Pencil} n={filesModified.length} label={t("tr.filesModified")}>
           <div className="mono" title={filesModified.join("\n")}>
             {filesModified.map((f) => (
               <div key={f}>{f}</div>
@@ -249,10 +231,7 @@ export function Transcript({
           label={
             <>
               {t("tr.commands")} ·{" "}
-              <b
-                className={errors.length ? "err" : ""}
-                style={{ fontSize: "inherit" }}
-              >
+              <b className={errors.length ? "err" : ""} style={{ fontSize: "inherit" }}>
                 {errors.length}
               </b>{" "}
               {t("tr.errors")}
@@ -261,8 +240,7 @@ export function Transcript({
         >
           {result && (
             <div className="muted small" style={{ marginTop: 4 }}>
-              {t("tr.turns", { n: result.data?.num_turns })} ·{" "}
-              {dur(result.data?.duration_ms)}
+              {t("tr.turns", { n: result.data?.num_turns })} · {dur(result.data?.duration_ms)}
               {result.data?.total_cost_usd != null &&
                 ` · $${Number(result.data.total_cost_usd).toFixed(3)}`}
             </div>
@@ -290,11 +268,7 @@ export function Transcript({
           className="small muted"
           style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
         >
-          <input
-            type="checkbox"
-            checked={follow}
-            onChange={(e) => setFollow(e.target.checked)}
-          />{" "}
+          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />{" "}
           {t("tr.follow")}
         </label>
       </div>
@@ -304,10 +278,7 @@ export function Transcript({
         onScroll={() => {
           if (!box.current) return;
           const isNearBottom =
-            box.current.scrollHeight -
-              box.current.scrollTop -
-              box.current.clientHeight <
-            50;
+            box.current.scrollHeight - box.current.scrollTop - box.current.clientHeight < 50;
           if (!isNearBottom && follow) setFollow(false);
           else if (isNearBottom && !follow) setFollow(true);
         }}
@@ -335,17 +306,7 @@ export function Transcript({
   );
 }
 
-function Entry({
-  e,
-  result,
-  live,
-  agent,
-}: {
-  e: Ev;
-  result?: Ev;
-  live: boolean;
-  agent: string;
-}) {
+function Entry({ e, result, live, agent }: { e: Ev; result?: Ev; live: boolean; agent: string }) {
   const { t } = useI18n();
   const sub = e.data?.parent ? " sub" : "";
   const when = <span>{time(e.created_at)}</span>;
@@ -354,8 +315,7 @@ function Entry({
       return (
         <details className="msg reason">
           <summary>
-            <Av icon={ScrollText} />{" "}
-            {t("tr.system", { tools: (e.data?.tools ?? []).join(", ") })}{" "}
+            <Av icon={ScrollText} /> {t("tr.system", { tools: (e.data?.tools ?? []).join(", ") })}{" "}
             {e.data?.knowledge?.length
               ? t("tr.knowledge", { items: e.data.knowledge.join(", ") })
               : ""}
@@ -373,18 +333,14 @@ function Entry({
           <div className="who">
             <Av icon={Send} />
             <b>{t("tr.toAgent", { name: agent })}</b>{" "}
-            {e.data?.resume_session && (
-              <Badge s="READY">{t("tr.resume")}</Badge>
-            )}{" "}
-            {when}
+            {e.data?.resume_session && <Badge s="READY">{t("tr.resume")}</Badge>} {when}
             <span className="grow" />
             <Copy text={e.content} label={t("tr.copyPrompt")} />
           </div>
           {e.content.length > 2500 ? (
             <details>
               <summary>
-                {e.content.slice(0, 160)}… (
-                {t("tr.chars", { n: e.content.length })})
+                {e.content.slice(0, 160)}… ({t("tr.chars", { n: e.content.length })})
               </summary>
               <div className="pre">{e.content}</div>
             </details>
@@ -468,10 +424,9 @@ function Entry({
           ) : (
             <CheckCircle2 size={15} color="var(--st-ok)" />
           )}
-          <b>{t("tr.finished")}</b> · {t("tr.turns", { n: d.num_turns ?? "?" })}{" "}
-          · {dur(d.duration_ms)}
-          {d.total_cost_usd != null &&
-            ` · $${Number(d.total_cost_usd).toFixed(3)}`}
+          <b>{t("tr.finished")}</b> · {t("tr.turns", { n: d.num_turns ?? "?" })} ·{" "}
+          {dur(d.duration_ms)}
+          {d.total_cost_usd != null && ` · $${Number(d.total_cost_usd).toFixed(3)}`}
           {d.usage &&
             ` · ${t("tr.tokens", { inn: d.usage.input_tokens ?? 0, out: d.usage.output_tokens ?? 0 })}`}{" "}
           <span className="muted small">{time(e.created_at)}</span>

@@ -1,24 +1,13 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  unlinkSync,
-  renameSync,
-  symlinkSync,
-} from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, unlinkSync, renameSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { config } from "../src/config.ts";
 import { pool, one, q } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { repositories, rankRepositories } from "../src/repos/service.ts";
-import {
-  indexRepository,
-  enqueue,
-  runIndexOnce,
-} from "../src/codeIntelligence/indexer.ts";
+import { indexRepository, enqueue, runIndexOnce } from "../src/codeIntelligence/indexer.ts";
 import {
   searchSymbols,
   findReferences,
@@ -59,11 +48,7 @@ const scope = (runId?: number) => ({
 });
 const names = async (run?: number) =>
   (
-    await searchSymbols(
-      "Original Modified Added Branch Committed Renamed",
-      scope(run),
-      100,
-    )
+    await searchSymbols("Original Modified Added Branch Committed Renamed", scope(run), 100)
   ).hits.map((h) => h.symbol_name);
 before(async () => {
   await migrate();
@@ -85,9 +70,7 @@ before(async () => {
     key: "ci-fixture",
     spec: {
       name: "CI fixture",
-      steps: [
-        { key: "hold", type: "human_input", config: { question: "hold" } },
-      ],
+      steps: [{ key: "hold", type: "human_input", config: { question: "hold" } }],
     },
   });
   for (const n of ["A", "B"]) {
@@ -117,17 +100,11 @@ before(async () => {
 });
 after(() => pool.end());
 test("Initial base snapshot, exact and qualified definitions; immutable publication deduplication", async () => {
-  const [a, b] = await Promise.all([
-    indexRepository(name),
-    indexRepository(name),
-  ]);
+  const [a, b] = await Promise.all([indexRepository(name), indexRepository(name)]);
   assert.equal(a.snapshot.id, b.snapshot.id);
   const exact = await searchSymbols("Original", scope());
   assert.equal(exact.hits[0].qualified_name, "pay.Original");
-  assert.equal(
-    (await searchSymbols("pay.Original", scope())).hits[0].match_type,
-    "qualified",
-  );
+  assert.equal((await searchSymbols("pay.Original", scope())).hits[0].match_type, "qualified");
   assert.equal(
     (await one(
       pool,
@@ -161,24 +138,35 @@ test("Stale overlay returns bounded live fallback, never old indexed symbols; co
   assert.equal(stale.hits.length, 0);
   assert.equal(stale.fallback_count, 1);
   assert.ok(
-    (await searchSymbols("Committed", scope(runA))).hits.every(
-      (h) => h.snapshot.id === null,
-    ),
+    (await searchSymbols("Committed", scope(runA))).hits.every((h) => h.snapshot.id === null),
   );
   // A stale index never yields "no definition" silently: text matches are surfaced as unresolved candidates.
   const defs = await findDefinitions("Committed", scope(runA));
   assert.equal(defs.fallback_count, 1);
   assert.equal(defs.hits.length, 0, "text matches are not definitions");
-  assert.ok(defs.text_candidates.length >= 1 && defs.text_candidates.every((h) => h.match_type === "text"));
+  assert.ok(
+    defs.text_candidates.length >= 1 && defs.text_candidates.every((h) => h.match_type === "text"),
+  );
   const report = { unavailable: [] as string[] };
   await findDependencies("Committed", scope(runA), 1, "out", report);
-  assert.deepEqual(report.unavailable, [name], "a repository without a fresh index is reported, not skipped silently");
+  assert.deepEqual(
+    report.unavailable,
+    [name],
+    "a repository without a fresh index is reported, not skipped silently",
+  );
   // Exact text search reaches config files outside the indexed languages, never secret files.
   writeFileSync(join(wtA, "app.yaml"), "payment_timeout: 30s\n");
   writeFileSync(join(wtA, ".env"), "payment_timeout=leaked\n");
   const cfgHits = await searchCodeExact("payment_timeout", scope(runA), 10, { anyFile: true });
-  assert.deepEqual(cfgHits.map((h) => h.file_path), ["app.yaml"]);
-  assert.deepEqual(await searchCodeExact("payment_timeout", scope(runA), 10), [], "code fallback stays on indexed languages");
+  assert.deepEqual(
+    cfgHits.map((h) => h.file_path),
+    ["app.yaml"],
+  );
+  assert.deepEqual(
+    await searchCodeExact("payment_timeout", scope(runA), 10),
+    [],
+    "code fallback stays on indexed languages",
+  );
   rmSync(join(wtA, "app.yaml"));
   rmSync(join(wtA, ".env"));
   await indexRepository(name, runA);
@@ -213,19 +201,14 @@ test("Commit, branch checkout and main advancement create new identities and reu
 });
 test("Proto dependency candidates and references retain evidence, cross-repo definitions discoverable", async () => {
   const deps = await findDependencies("pay.Payment.Charge", scope(), 2);
-  assert.ok(
-    deps.some((r) => r.target_name === "Req" && r.resolution === "candidate"),
-  );
+  assert.ok(deps.some((r) => r.target_name === "Req" && r.resolution === "candidate"));
   const refs = await findReferences("Req", scope());
   assert.ok(refs.some((r) => r.relation_type === "RPC_REQUEST"));
   const other = "ci-proto";
   const dir = join(config.reposRoot, other);
   mkdirSync(dir);
   git(dir, "init", "-q", "-b", config.baseBranch);
-  writeFileSync(
-    join(dir, "common.proto"),
-    'syntax="proto3"; package shared; message Req {}',
-  );
+  writeFileSync(join(dir, "common.proto"), 'syntax="proto3"; package shared; message Req {}');
   git(dir, "add", ".");
   git(dir, "commit", "-qm", "proto");
   await repositories.upsert(other, { projects: ["CI"] });
@@ -238,9 +221,7 @@ test("Proto dependency candidates and references retain evidence, cross-repo def
 });
 test("ripgrep exact fallback, unauthorized repositories, traversal and symlink access rejection", async () => {
   assert.ok(
-    (await searchCodeExact("Committed", scope(runA))).some(
-      (h) => h.file_path === "pay.go",
-    ),
+    (await searchCodeExact("Committed", scope(runA))).some((h) => h.file_path === "pay.go"),
   );
   await assert.rejects(
     searchSymbols("Original", { repositories: [name], allowed: [] }),
@@ -273,10 +254,8 @@ test("Deterministic ranking cap and tie handling; disabled feature preserves met
   );
   const hit = (await searchSymbols("Original", scope())).hits[0];
   assert.ok(
-    applyEvidence(
-      [{ repo: name, score: 0, reasons: [] }],
-      Array(20).fill(hit),
-    )[0].score <= config.codeIntelligence.weights.cap,
+    applyEvidence([{ repo: name, score: 0, reasons: [] }], Array(20).fill(hit))[0].score <=
+      config.codeIntelligence.weights.cap,
   );
 });
 test("Durable queue deduplication, expired lease restart recovery and cancellation fence", async () => {
@@ -290,17 +269,13 @@ test("Durable queue deduplication, expired lease restart recovery and cancellati
   );
   assert.equal(await runIndexOnce(), true);
   assert.equal(
-    (await one(pool, "SELECT status FROM code_intelligence.runs WHERE id=$1", [
-      a!.id,
-    ]))!.status,
+    (await one(pool, "SELECT status FROM code_intelligence.runs WHERE id=$1", [a!.id]))!.status,
     "done",
   );
   const c = await enqueue(name);
-  await q(
-    pool,
-    "UPDATE code_intelligence.runs SET status='canceled',fencing_token=3 WHERE id=$1",
-    [c!.id],
-  );
+  await q(pool, "UPDATE code_intelligence.runs SET status='canceled',fencing_token=3 WHERE id=$1", [
+    c!.id,
+  ]);
   await assert.rejects(
     publish(
       {
@@ -320,24 +295,18 @@ test("Durable queue deduplication, expired lease restart recovery and cancellati
   );
   await runIndexOnce();
   assert.equal(
-    (await one(pool, "SELECT status FROM code_intelligence.runs WHERE id=$1", [
-      c!.id,
-    ]))!.status,
+    (await one(pool, "SELECT status FROM code_intelligence.runs WHERE id=$1", [c!.id]))!.status,
     "failed",
   );
 });
 test("Index failure preserves last good snapshot; worktree recreation changes generation; parser upgrades change index identity", async () => {
-  const before = (await changes(wtB, git(root, "rev-parse", "HEAD")))
-    .generation;
+  const before = (await changes(wtB, git(root, "rev-parse", "HEAD"))).generation;
   const marker = join(wtB, ".git");
   const fs = await import("node:fs");
   const text = fs.readFileSync(marker, "utf8");
   unlinkSync(marker);
   writeFileSync(marker, text);
-  assert.notEqual(
-    (await changes(wtB, git(root, "rev-parse", "HEAD"))).generation,
-    before,
-  );
+  assert.notEqual((await changes(wtB, git(root, "rev-parse", "HEAD"))).generation, before);
   const old = config.codeIntelligence.maxScanBytes;
   config.codeIntelligence.maxScanBytes = 1;
   try {
@@ -348,12 +317,7 @@ test("Index failure preserves last good snapshot; worktree recreation changes ge
   } finally {
     config.codeIntelligence.maxScanBytes = old;
   }
-  assert.ok(
-    (await one(
-      pool,
-      "SELECT count(*)::int AS n FROM code_intelligence.snapshots",
-    ))!.n > 0,
-  );
+  assert.ok((await one(pool, "SELECT count(*)::int AS n FROM code_intelligence.snapshots"))!.n > 0);
   const version = parserVersion();
   config.codeIntelligence.maxSymbols++;
   assert.notEqual(parserVersion(), version);
@@ -361,8 +325,7 @@ test("Index failure preserves last good snapshot; worktree recreation changes ge
 });
 
 test("DAG coding step completes with an empty index using live source context", async () => {
-  const { registerExecutor } =
-    await import("../src/workflow/executors/registry.ts");
+  const { registerExecutor } = await import("../src/workflow/executors/registry.ts");
   const { drain } = await import("../src/workflow/scheduler.ts");
   const repo = "ci-unindexed";
   const path = join(config.reposRoot, repo);
@@ -401,8 +364,7 @@ test("DAG coding step completes with an empty index using live source context", 
   await drain();
   assert.ok(invoked);
   assert.equal(
-    (await one(pool, "SELECT status FROM workflow_runs WHERE id=$1", [run.id]))!
-      .status,
+    (await one(pool, "SELECT status FROM workflow_runs WHERE id=$1", [run.id]))!.status,
     "COMPLETED",
   );
 });

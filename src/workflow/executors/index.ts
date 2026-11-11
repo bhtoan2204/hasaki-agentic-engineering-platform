@@ -10,7 +10,11 @@ import {
 } from "./builtin.ts";
 import { registerExecutor } from "./registry.ts";
 import { registerBuiltinTools } from "../../agent/toolRegistry.ts";
-import { claudeReportReasoner, setReportReasoner, taskResultReportExecutor } from "../../report/executor.ts";
+import {
+  claudeReportReasoner,
+  setReportReasoner,
+  taskResultReportExecutor,
+} from "../../report/executor.ts";
 import { claudeTestFailureAdvisor, setTestFailureAdvisor } from "./testFailure.ts";
 import { setKnowledgeChangeAnalyzer, setSkillDrafter } from "../../knowledge/learning.ts";
 import { modelChangeAnalyzer, modelSkillDrafter } from "../../agent/learningModel.ts";

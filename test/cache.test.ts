@@ -4,7 +4,15 @@ import pg from "pg";
 import { pool, q, one, withTx } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
-import { CacheAside, StaleWhileRevalidate, cacheListenerState, cacheStats, singleflight, startCacheInvalidation, stopCacheInvalidation } from "../src/cache/index.ts";
+import {
+  CacheAside,
+  StaleWhileRevalidate,
+  cacheListenerState,
+  cacheStats,
+  singleflight,
+  startCacheInvalidation,
+  stopCacheInvalidation,
+} from "../src/cache/index.ts";
 import { repositories } from "../src/repos/service.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 
@@ -52,7 +60,11 @@ test("CacheAside: one load for concurrent misses, TTL expiry, no stale write-bac
   await sleep(5);
   c.clear();
   assert.equal((await slow).n, 7);
-  assert.equal((await c.get("x", async () => ({ n: 8 }))).n, 8, "the pre-invalidation value was not stored");
+  assert.equal(
+    (await c.get("x", async () => ({ n: 8 }))).n,
+    8,
+    "the pre-invalidation value was not stored",
+  );
 });
 
 test("singleflight and stale-while-revalidate", async () => {
@@ -64,7 +76,11 @@ test("singleflight and stale-while-revalidate", async () => {
   const swr = new StaleWhileRevalidate<number>("t.swr", 30, 10_000);
   assert.equal(await swr.get("k", async () => ++v), 1);
   await sleep(40);
-  assert.equal(await swr.get("k", async () => (await sleep(20), ++v)), 1, "stale value served at once");
+  assert.equal(
+    await swr.get("k", async () => (await sleep(20), ++v)),
+    1,
+    "stale value served at once",
+  );
   await sleep(40);
   assert.equal(await swr.get("k", async () => ++v), 2, "refreshed in the background");
 });
@@ -97,37 +113,75 @@ test("other processes: NOTIFY from the database trigger clears the cache; listen
   await repositories.upsert("cache-r2", { description: "a" });
   assert.equal((await repositories.get("cache-r2"))!.description, "a");
   // Another process writes (no local hook here): only the trigger + listener can tell this process.
-  await other.query("UPDATE repositories SET description = 'from another process' WHERE name = 'cache-r2'");
-  await until(async () => (await repositories.get("cache-r2"))!.description === "from another process");
+  await other.query(
+    "UPDATE repositories SET description = 'from another process' WHERE name = 'cache-r2'",
+  );
+  await until(
+    async () => (await repositories.get("cache-r2"))!.description === "from another process",
+  );
 
-  await knowledge.create({ key: "cache-k1", category: "business_rule", scope_type: "GLOBAL", title: "k", content: "one" });
-  const contentOf = async () => (await knowledge.candidates(pool, null)).find((k) => k.key === "cache-k1")?.content;
+  await knowledge.create({
+    key: "cache-k1",
+    category: "business_rule",
+    scope_type: "GLOBAL",
+    title: "k",
+    content: "one",
+  });
+  const contentOf = async () =>
+    (await knowledge.candidates(pool, null)).find((k) => k.key === "cache-k1")?.content;
   assert.equal(await contentOf(), "one");
-  await other.query("UPDATE knowledge_versions SET content = 'two' WHERE item_id = (SELECT id FROM knowledge_items WHERE key = 'cache-k1')");
+  await other.query(
+    "UPDATE knowledge_versions SET content = 'two' WHERE item_id = (SELECT id FROM knowledge_items WHERE key = 'cache-k1')",
+  );
   await until(async () => (await contentOf()) === "two");
 
   // Drop the listener's connection (VPN blip): caches are flushed and bypassed until it is back.
-  await other.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = 'LISTEN cache_invalidate' AND pid <> pg_backend_pid()");
+  await other.query(
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = 'LISTEN cache_invalidate' AND pid <> pg_backend_pid()",
+  );
   await until(() => cacheListenerState() === "down");
   const before = cacheStats.repositories.misses;
   await repositories.get("cache-r2");
   await repositories.get("cache-r2");
-  assert.equal(cacheStats.repositories.misses, before, "bypassed: neither a hit nor a cached miss while down");
+  assert.equal(
+    cacheStats.repositories.misses,
+    before,
+    "bypassed: neither a hit nor a cached miss while down",
+  );
   await other.query("UPDATE repositories SET description = 'while down' WHERE name = 'cache-r2'");
-  assert.equal((await repositories.get("cache-r2"))!.description, "while down", "never stale while the listener is down");
+  assert.equal(
+    (await repositories.get("cache-r2"))!.description,
+    "while down",
+    "never stale while the listener is down",
+  );
   await until(() => cacheListenerState() === "connected", 8000);
   assert.equal((await repositories.get("cache-r2"))!.description, "while down");
   await stopCacheInvalidation();
 });
 
 test("knowledge candidates from the cache honour effective dates exactly like the database query", async () => {
-  await knowledge.create({ key: "cache-k2", category: "business_rule", scope_type: "GLOBAL", title: "k2", content: "old" });
+  await knowledge.create({
+    key: "cache-k2",
+    category: "business_rule",
+    scope_type: "GLOBAL",
+    title: "k2",
+    content: "old",
+  });
   const future = new Date(Date.now() + 86400_000);
   await knowledge.update("cache-k2", { content: "new", effective_from: future.toISOString() });
-  const at = async (d: Date) => (await knowledge.candidates(pool, null, d)).find((k) => k.key === "cache-k2")?.content;
+  const at = async (d: Date) =>
+    (await knowledge.candidates(pool, null, d)).find((k) => k.key === "cache-k2")?.content;
   assert.equal(await at(new Date()), "old");
-  assert.equal(await at(new Date(future.getTime() + 1000)), "new", "the cached set keeps future-dated versions");
-  assert.equal(await at(new Date(Date.now() - 86400_000)), "old", "an instant before the load falls back to the database");
+  assert.equal(
+    await at(new Date(future.getTime() + 1000)),
+    "new",
+    "the cached set keeps future-dated versions",
+  );
+  assert.equal(
+    await at(new Date(Date.now() - 86400_000)),
+    "old",
+    "an instant before the load falls back to the database",
+  );
   const row = await one(pool, "SELECT current_version FROM knowledge_items WHERE key = 'cache-k2'");
   assert.equal(row.current_version, 2);
 });

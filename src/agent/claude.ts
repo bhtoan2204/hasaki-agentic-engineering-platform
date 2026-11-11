@@ -1,11 +1,7 @@
 import { resolveStepAgent } from "./stepAgent.ts";
 export { modelFor, codexModelFor } from "./stepAgent.ts";
 import { agentEnvironment } from "./environment.ts";
-import {
-  ensureContextPack,
-  ContextBudgetError,
-  contextPackFailure,
-} from "../context/pack.ts";
+import { ensureContextPack, ContextBudgetError, contextPackFailure } from "../context/pack.ts";
 import { captureContextContinuity } from "../context/continuity.ts";
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { randomUUID } from "node:crypto";
@@ -43,12 +39,14 @@ import {
 import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { workspaceKey, workspacesOf } from "../git/provider.ts";
-import { collectScopeState, renewedApprovalFor, scopeRevision, SCOPE_REVISION_TAG } from "./scopeGuard.ts";
+import {
+  collectScopeState,
+  renewedApprovalFor,
+  scopeRevision,
+  SCOPE_REVISION_TAG,
+} from "./scopeGuard.ts";
 import { runProvenanceEnv, withProvenance } from "./provenance.ts";
-import type {
-  ExecutionContext,
-  StepExecutor,
-} from "../workflow/executors/registry.ts";
+import type { ExecutionContext, StepExecutor } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 import {
   repositoryBaseBranch,
@@ -57,17 +55,9 @@ import {
   type RankedRepository,
   type RepositoryRow,
 } from "../repos/service.ts";
-import {
-  prepareRepository,
-  checkoutForRun,
-  runWorkingDirectory,
-} from "../repos/workspaces.ts";
+import { prepareRepository, checkoutForRun, runWorkingDirectory } from "../repos/workspaces.ts";
 import { downloadAttachments } from "./attachments.ts";
-import {
-  buildResumeMessage,
-  buildSystemAppend,
-  buildUserPrompt,
-} from "./stepPrompt.ts";
+import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "./stepPrompt.ts";
 import {
   decide,
   toolsFor,
@@ -78,10 +68,7 @@ import {
 import { integrationCatalog, integrationTools } from "./toolRegistry.ts";
 import { dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
 import { runCommand } from "../workflow/executors/builtin.ts";
-import {
-  goBaseline,
-  knownBaseFailures,
-} from "../workflow/executors/baseline.ts";
+import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
 import { branchFor } from "../workflow/branches.ts";
 import {
@@ -149,9 +136,7 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 const execP = promisify(execFile);
 
 /** Current state of each worktree (read-only git), so a re-executed coding step continues from it instead of redoing it. */
-async function worktreeState(
-  workspaces: Array<{ repo: string; path: string }>,
-): Promise<string> {
+async function worktreeState(workspaces: Array<{ repo: string; path: string }>): Promise<string> {
   const out: string[] = [];
   for (const w of workspaces) {
     const baseBranch = await repositoryBaseBranch(w.repo);
@@ -159,9 +144,7 @@ async function worktreeState(
     const g = (...a: string[]) =>
       execP("git", ["-C", w.path, ...a], { maxBuffer: 4 * 1024 * 1024 })
         .then((r) => r.stdout.trim())
-        .catch(
-          (e) => `(git ${a[0]} failed: ${String(e.message).split("\n")[0]})`,
-        );
+        .catch((e) => `(git ${a[0]} failed: ${String(e.message).split("\n")[0]})`);
     const [status, log, stat] = await Promise.all([
       g("status", "--porcelain"),
       g("log", "--oneline", "-n", "15", `origin/${baseBranch}..HEAD`),
@@ -185,8 +168,7 @@ function summarize(input: unknown) {
 const MAX_RESULT_CHARS = 30_000;
 const cap = (t: string) =>
   t.length > MAX_RESULT_CHARS
-    ? t.slice(0, MAX_RESULT_CHARS) +
-    `\n… (${t.length - MAX_RESULT_CHARS} more chars)`
+    ? t.slice(0, MAX_RESULT_CHARS) + `\n… (${t.length - MAX_RESULT_CHARS} more chars)`
     : t;
 
 function toolResultText(content: unknown): string {
@@ -194,11 +176,7 @@ function toolResultText(content: unknown): string {
   if (Array.isArray(content))
     return content
       .map((c: any) =>
-        c?.type === "text"
-          ? c.text
-          : c?.type === "image"
-            ? "[image]"
-            : JSON.stringify(c),
+        c?.type === "text" ? c.text : c?.type === "image" ? "[image]" : JSON.stringify(c),
       )
       .join("\n");
   return JSON.stringify(content ?? "");
@@ -243,9 +221,7 @@ async function recordTranscript(ctx: ExecutionContext, msg: any, cwd: string) {
   } else if (msg.type === "result") {
     await ctx.log(
       "result",
-      msg.subtype === "success"
-        ? String(msg.result ?? "")
-        : `stopped: ${msg.subtype}`,
+      msg.subtype === "success" ? String(msg.result ?? "") : `stopped: ${msg.subtype}`,
       {
         subtype: msg.subtype,
         is_error: msg.is_error,
@@ -288,9 +264,7 @@ function platformServer(
               context: z
                 .string()
                 .optional()
-                .describe(
-                  "what you found in the code that makes this unclear (file:line)",
-                ),
+                .describe("what you found in the code that makes this unclear (file:line)"),
               options: z
                 .array(z.string())
                 .optional()
@@ -311,9 +285,7 @@ function platformServer(
       "submit_result",
       "Submit this step's output (an object matching the step's output contract). Call once, at the end.",
       {
-        output: z
-          .record(z.string(), z.any())
-          .describe("the step output object"),
+        output: z.record(z.string(), z.any()).describe("the step output object"),
       },
       call("submit_result"),
     ),
@@ -354,9 +326,7 @@ function platformServer(
     ),
   ];
   tools.push(
-    ...CONTEXT_TOOLS.map((t) =>
-      tool(t.name, t.description, t.input.shape, call(t.logicalName)),
-    ),
+    ...CONTEXT_TOOLS.map((t) => tool(t.name, t.description, t.input.shape, call(t.logicalName))),
   );
   if (mode === "coding") {
     tools.unshift(
@@ -391,20 +361,15 @@ export async function resumableSession(
       ctx.step.id,
       cwd,
       provider,
-      ctx.attempt?.effective_agent
-        ? JSON.stringify(ctx.attempt.effective_agent)
-        : null,
+      ctx.attempt?.effective_agent ? JSON.stringify(ctx.attempt.effective_agent) : null,
     ],
   );
   if (!candidates.length) return null;
-  const current = await one(
-    pool,
-    "SELECT content FROM context_snapshots WHERE id = $1",
-    [ctx.context.snapshot_id],
-  );
+  const current = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [
+    ctx.context.snapshot_id,
+  ]);
   const sameUpstream = (snap: any) =>
-    JSON.stringify(snap?.upstream ?? {}) ===
-    JSON.stringify(current?.content?.upstream ?? {});
+    JSON.stringify(snap?.upstream ?? {}) === JSON.stringify(current?.content?.upstream ?? {});
   // 1. resume after answers: the paused attempt's own session.
   if (resume?.from_attempt_id) {
     const c = candidates.find((x) => x.attempt_id === resume.from_attempt_id);
@@ -455,10 +420,8 @@ const agentExecutor: StepExecutor = {
       const { executeProviderPhase } = await import("../eval/providerPhase.ts");
       return executeProviderPhase(ctx);
     }
-    const mode: ToolMode =
-      ctx.step.type === "coding_agent" ? "coding" : "analysis";
-    const effective =
-      ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
+    const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
+    const effective = ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
     const provider = effective.provider;
     {
       for (const name of ctx.run.selected_repositories) {
@@ -468,14 +431,8 @@ const agentExecutor: StepExecutor = {
             !repo?.enabled ||
             !repo.allowed_actions.includes(mode === "coding" ? "write" : "read")
           )
-            throw new Error(
-              `Repository ${name} is unavailable or unauthorized`,
-            );
-          await prepareRepository(
-            repo,
-            false,
-            await checkoutForRun(repo, ctx.run.id),
-          );
+            throw new Error(`Repository ${name} is unavailable or unauthorized`);
+          await prepareRepository(repo, false, await checkoutForRun(repo, ctx.run.id));
         } catch (e) {
           const en = outputLocale(ctx.run) === "en";
           return {
@@ -488,9 +445,7 @@ const agentExecutor: StepExecutor = {
                 context: en
                   ? "Fix this installation's repositories mapping/checkout, then continue on the assigned worker. Shared authorization is unchanged."
                   : "Sửa cấu hình repositories/checkout trên máy được giao, sau đó tiếp tục. Quyền repository dùng chung không thay đổi.",
-                options: en
-                  ? ["Local checkout fixed — continue"]
-                  : ["Đã sửa checkout — tiếp tục"],
+                options: en ? ["Local checkout fixed — continue"] : ["Đã sửa checkout — tiếp tục"],
               },
             ],
             checkpoint: { local_setup: { repository: name } },
@@ -506,10 +461,7 @@ const agentExecutor: StepExecutor = {
             ? "This Cursor CLI"
             : "Google Antigravity CLI";
       // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
-      if (
-        (ctx.step.config.delegation as { enabled?: boolean } | undefined)
-          ?.enabled === true
-      )
+      if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
         return {
           kind: "failed",
           error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`,
@@ -518,15 +470,15 @@ const agentExecutor: StepExecutor = {
       const cap =
         provider === "codex"
           ? await codexCapabilities(false, {
-            model: effective.model ?? "",
-            effort: effective.reasoning_effort ?? "",
-          })
+              model: effective.model ?? "",
+              effort: effective.reasoning_effort ?? "",
+            })
           : provider === "cursor"
             ? await cursorCapabilities()
             : await antigravityCapabilities(false, {
-              model: effective.model ?? "",
-              effort: effective.reasoning_effort ?? "",
-            });
+                model: effective.model ?? "",
+                effort: effective.reasoning_effort ?? "",
+              });
       if (!cap.ok)
         return {
           kind: "failed",
@@ -545,8 +497,7 @@ const agentExecutor: StepExecutor = {
     }
     const ws = (await workspacesOf(ctx.run.id)).filter(
       (w) =>
-        !ctx.run.selected_repositories.length ||
-        ctx.run.selected_repositories.includes(w.repo),
+        !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
     const delegationCfg = ctx.step.config.delegation as
       | { enabled?: boolean; agents?: string[] }
@@ -556,10 +507,7 @@ const agentExecutor: StepExecutor = {
       mode,
       workspaces: ws.map((w) => w.path),
       baseBranch: config.baseBranch,
-      protectedRoots: [
-        config.reposRoot,
-        ...(ctx.context.repoPaths ?? []).map((r) => r.path),
-      ],
+      protectedRoots: [config.reposRoot, ...(ctx.context.repoPaths ?? []).map((r) => r.path)],
       delegation,
       isReadOnlyIntegration: (name) =>
         integrationTools().find((t) => t.name === name)?.readOnly === true,
@@ -569,29 +517,20 @@ const agentExecutor: StepExecutor = {
     const nativeTools = toolsFor(mode, {
       delegation,
       claudeSkills: settingSources.length > 0,
-    }).filter(
-      (t) =>
-        effective.allowed_tools == null || effective.allowed_tools.includes(t),
-    );
+    }).filter((t) => effective.allowed_tools == null || effective.allowed_tools.includes(t));
     const agents = delegation
       ? Object.fromEntries(
-        (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
-          .filter((n) => SUBAGENTS[n])
-          .map((n) => [
-            n,
-            {
-              ...SUBAGENTS[n],
-              prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`,
-              tools: [
-                "Read",
-                "Grep",
-                "Glob",
-                "Bash",
-                ...SUBAGENT_PLATFORM_TOOLS,
-              ],
-            },
-          ]),
-      )
+          (delegationCfg?.agents ?? Object.keys(SUBAGENTS))
+            .filter((n) => SUBAGENTS[n])
+            .map((n) => [
+              n,
+              {
+                ...SUBAGENTS[n],
+                prompt: `${SUBAGENTS[n].prompt}\n\n${languagePolicy(outputLocale(ctx.run))}`,
+                tools: ["Read", "Grep", "Glob", "Bash", ...SUBAGENT_PLATFORM_TOOLS],
+              },
+            ]),
+        )
       : undefined;
     // Each provider resolves its own model: a Claude model id is never sent to Cursor or Codex.
     const routed: { model: string; source: string; effort?: string } = {
@@ -599,9 +538,7 @@ const agentExecutor: StepExecutor = {
       source: effective.source,
       effort: effective.reasoning_effort ?? undefined,
     };
-    const metrics = newMetrics(
-      routed.model || (provider === "claude" ? "default" : ""),
-    );
+    const metrics = newMetrics(routed.model || (provider === "claude" ? "default" : ""));
     metrics.model_source = routed.source;
     metrics.provider = provider;
     if (routed.effort) metrics.reasoning_effort = routed.effort;
@@ -610,8 +547,7 @@ const agentExecutor: StepExecutor = {
       metrics.tokens = null;
     }
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
-    for (const u of Object.values(ctx.context.upstream.plan))
-      metrics.upstream[u.mode]++;
+    for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
     const cwd = await runWorkingDirectory(ctx.run.id, ctx.step.id);
     let submitted: Record<string, unknown> | undefined;
 
@@ -624,9 +560,7 @@ const agentExecutor: StepExecutor = {
       throw error;
     }
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
-    const resume = independent
-      ? null
-      : await resumableSession(ctx, cwd, provider);
+    const resume = independent ? null : await resumableSession(ctx, cwd, provider);
     let reviewKey: string | null = null;
     let evidence: {
       heads: Record<string, string>;
@@ -634,10 +568,7 @@ const agentExecutor: StepExecutor = {
       text: string;
     } | null = null;
     if (independent) {
-      if (
-        ctx.step.config.strict === true &&
-        !hasTestEvidence(ctx.input.upstream)
-      )
+      if (ctx.step.config.strict === true && !hasTestEvidence(ctx.input.upstream))
         return enforceVerdict(
           {
             verdict: "BLOCKED",
@@ -671,14 +602,15 @@ const agentExecutor: StepExecutor = {
           },
           { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} },
         );
-      if (!ws.length)
-        evidence.text = "(no worktree: the coding step changed no code)";
+      if (!ws.length) evidence.text = "(no worktree: the coding step changed no code)";
       // Skip a redundant review only when the exact commits, base, diff, test evidence, approved scope and review policy
       // already produced a PASS; any relevant change yields a new key and a fresh review.
       const baseTips: Record<string, string> = {};
       for (const w of ws) {
         const base = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);
-        baseTips[w.repo] = (await execP("git", ["-C", w.path, "rev-parse", `origin/${base}`]).then((r) => r.stdout.trim()).catch(() => ""));
+        baseTips[w.repo] = await execP("git", ["-C", w.path, "rev-parse", `origin/${base}`])
+          .then((r) => r.stdout.trim())
+          .catch(() => "");
       }
       const scopeNow = approvedScopeIn(ctx.input.upstream);
       reviewKey = verificationKey({
@@ -686,7 +618,14 @@ const agentExecutor: StepExecutor = {
         baseTips,
         diffText: evidence.text,
         tests: testDigestOf(ctx.input.upstream),
-        scope: scopeNow ? [scopeNow.proposal_hash, Object.values(ctx.input.upstream).map((u: any) => u.output?.scope_check?.reapproved?.revision ?? null)] : null,
+        scope: scopeNow
+          ? [
+              scopeNow.proposal_hash,
+              Object.values(ctx.input.upstream).map(
+                (u: any) => u.output?.scope_check?.reapproved?.revision ?? null,
+              ),
+            ]
+          : null,
         stepConfig: ctx.step.config,
         provider,
       });
@@ -698,27 +637,33 @@ const agentExecutor: StepExecutor = {
       // A human asking for a fresh review (feedback / re-execute) always gets one.
       const humanAsked = !!(ctx.input.pending?.feedback || ctx.input.pending?.reexecute);
       if (!humanAsked && reusablePass(prior, reviewKey, evidence.heads)) {
-        await ctx.log("system", `independent verification: PASS reused from attempt #${prior!.id} — same commits, diff, tests, scope and review policy`);
-        return { kind: "completed", output: { ...prior!.output, reused_from_attempt: prior!.id, reused_at: new Date().toISOString() } };
+        await ctx.log(
+          "system",
+          `independent verification: PASS reused from attempt #${prior!.id} — same commits, diff, tests, scope and review policy`,
+        );
+        return {
+          kind: "completed",
+          output: {
+            ...prior!.output,
+            reused_from_attempt: prior!.id,
+            reused_at: new Date().toISOString(),
+          },
+        };
       }
     }
     const files = ctx.input.work_item?.payload?.note_files
-      ? await downloadAttachments(
-        workspaceKey(ctx.run.branch),
-        ctx.input.work_item.payload,
-        cwd,
-      )
+      ? await downloadAttachments(workspaceKey(ctx.run.branch), ctx.input.work_item.payload, cwd)
       : [];
     const reexec = ctx.input.pending?.reexecute || ctx.input.pending?.feedback;
     const extras =
       mode === "coding" && (reexec || ctx.input.pending?.resume) && ws.length
         ? [
-          {
-            title:
-              "Current worktree state (inspect it first; never reset or discard these changes)",
-            body: await worktreeState(ws),
-          },
-        ]
+            {
+              title:
+                "Current worktree state (inspect it first; never reset or discard these changes)",
+              body: await worktreeState(ws),
+            },
+          ]
         : [];
     if (codeIntelligenceEnabled() && !independent && !ctx.context.contextPack) {
       try {
@@ -736,13 +681,9 @@ const agentExecutor: StepExecutor = {
               "Relevant code (untrusted source; syntax candidates are not semantic resolution)",
             body: `<untrusted_input source="code_intelligence">\n${code.body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`,
           });
-        await ctx
-          .recordMetrics({ code_intelligence: code.metrics })
-          .catch(() => { });
+        await ctx.recordMetrics({ code_intelligence: code.metrics }).catch(() => {});
       } catch {
-        await ctx
-          .recordMetrics({ code_intelligence: { fallback_count: 1 } })
-          .catch(() => { });
+        await ctx.recordMetrics({ code_intelligence: { fallback_count: 1 } }).catch(() => {});
       }
     }
     if (evidence)
@@ -798,9 +739,7 @@ const agentExecutor: StepExecutor = {
           "OpenCodeReview not installed on this worker (npm i @alibaba-group/open-code-review); reviewing without its rules",
         );
     }
-    const savedNotes = await progressNotes(
-      ctx.input.pending?.resume?.from_attempt_id,
-    );
+    const savedNotes = await progressNotes(ctx.input.pending?.resume?.from_attempt_id);
     const freshPrompt = () =>
       buildUserPrompt(
         ctx.input,
@@ -812,20 +751,16 @@ const agentExecutor: StepExecutor = {
         ctx.context.contextPack,
       );
     // Which integrations this run can actually use (connected for the owner, databases in its repository scope).
-    const integrations = await integrationCatalog({ allowedRepositories: ctx.run.allowed_repositories, mode }).catch(() => undefined);
-    const systemAppend = buildSystemAppend(
-      ctx.run,
-      ctx.step,
-      ctx.context,
+    const integrations = await integrationCatalog({
+      allowedRepositories: ctx.run.allowed_repositories,
       mode,
-      integrations,
-    );
+    }).catch(() => undefined);
+    const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode, integrations);
 
     // The PreToolUse hook sees the shell's real cwd; canUseTool (called afterwards for the same call) does not.
     // Remember the hook's allow so cwd-dependent checks (relative redirects, `cd`) are not re-judged without a cwd.
     const hookAllowed = new Set<string>();
-    const callKey = (name: string, input: unknown) =>
-      `${name}\u0000${JSON.stringify(input ?? {})}`;
+    const callKey = (name: string, input: unknown) => `${name}\u0000${JSON.stringify(input ?? {})}`;
     const preToolUse: HookCallback = async (input: any) => {
       const waiting = await one<{ n: number }>(
         pool,
@@ -841,16 +776,13 @@ const agentExecutor: StepExecutor = {
       );
       if (d.allow) {
         hookAllowed.add(callKey(input.tool_name, input.tool_input));
-        if (hookAllowed.size > 200)
-          hookAllowed.delete(hookAllowed.values().next().value!);
+        if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
         return {};
       }
       metrics.denied.push({
         tool: input.tool_name,
         reason: d.reason,
-        ...(input.agent_id
-          ? { subagent: input.agent_type ?? input.agent_id }
-          : {}),
+        ...(input.agent_id ? { subagent: input.agent_type ?? input.agent_id } : {}),
       });
       await ctx.log(
         "tool",
@@ -887,8 +819,7 @@ const agentExecutor: StepExecutor = {
     };
     const canUseTool: CanUseTool = async (name, input) => {
       const k = callKey(name, input);
-      if (hookAllowed.delete(k))
-        return { behavior: "allow", updatedInput: input };
+      if (hookAllowed.delete(k)) return { behavior: "allow", updatedInput: input };
       const d = decide(name, input, policy, cwd);
       return d.allow
         ? { behavior: "allow", updatedInput: input }
@@ -1014,10 +945,9 @@ const agentExecutor: StepExecutor = {
             env: agentEnvironment(process.env, "claude"),
             ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
               ? {
-                pathToClaudeCodeExecutable:
-                  process.env.CLAUDE_CODE_EXECUTABLE ||
-                  config.agent.claudeBin,
-              }
+                  pathToClaudeCodeExecutable:
+                    process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin,
+                }
               : {}),
             additionalDirectories: [
               config.reposRoot,
@@ -1026,13 +956,8 @@ const agentExecutor: StepExecutor = {
             resume: resumeId,
             ...(effective.reasoning_effort
               ? {
-                effort: effective.reasoning_effort as
-                  | "low"
-                  | "medium"
-                  | "high"
-                  | "xhigh"
-                  | "max",
-              }
+                  effort: effective.reasoning_effort as "low" | "medium" | "high" | "xhigh" | "max",
+                }
               : {}),
             abortController: ac,
             model: routed.model || undefined,
@@ -1045,13 +970,7 @@ const agentExecutor: StepExecutor = {
             // Skills come from the platform registry (read_knowledge); Claude Code settings layers only if configured.
             settingSources,
             mcpServers: {
-              platform: platformServer(
-                ctx,
-                mode,
-                policy,
-                (o) => (submitted = o),
-                metrics,
-              ),
+              platform: platformServer(ctx, mode, policy, (o) => (submitted = o), metrics),
             },
             tools: nativeTools,
             ...(agents ? { agents } : {}),
@@ -1069,12 +988,10 @@ const agentExecutor: StepExecutor = {
                   .split("\n")
                   .filter(Boolean)
                   .map(
-                    (l) =>
-                      `[+${((Date.now() - startedAt) / 1000).toFixed(1)}s] ${l.slice(0, 300)}`,
+                    (l) => `[+${((Date.now() - startedAt) / 1000).toFixed(1)}s] ${l.slice(0, 300)}`,
                   ),
               );
-              if (stderrTail.length > 40)
-                stderrTail.splice(0, stderrTail.length - 40);
+              if (stderrTail.length > 40) stderrTail.splice(0, stderrTail.length - 40);
             },
           },
         })) {
@@ -1094,17 +1011,13 @@ const agentExecutor: StepExecutor = {
           }
           await recordTranscript(ctx, msg, cwd);
           accumulateMetrics(metrics, msg);
-          if (msg.type === "result")
-            await persistSession(msg.is_error ? msg : undefined);
-          else if (msg.type === "system" && msg.subtype === "init")
-            await persistSession();
+          if (msg.type === "result") await persistSession(msg.is_error ? msg : undefined);
+          else if (msg.type === "system" && msg.subtype === "init") await persistSession();
           if (msg.type === "assistant") result.assistantTurns++;
           else if (msg.type === "result") {
             result.isError = msg.is_error;
             result.text =
-              msg.subtype === "success"
-                ? msg.result
-                : msg.errors?.join("\n") || msg.subtype;
+              msg.subtype === "success" ? msg.result : msg.errors?.join("\n") || msg.subtype;
             if (msg.is_error) result.failure = normalizeProviderFailure(msg);
           }
         }
@@ -1132,26 +1045,22 @@ const agentExecutor: StepExecutor = {
         ...providerSessions[sessionKey],
         complete: false,
         provider,
-        model:
-          metrics.model && metrics.model !== "default" ? metrics.model : null,
+        model: metrics.model && metrics.model !== "default" ? metrics.model : null,
         start_time: new Date(sessionStart).toISOString(),
         provider_execution_ms: Date.now() - sessionStart,
         tokens: metrics.tokens,
         reported_cost_usd: metrics.cost_usd,
-        cost_source:
-          metrics.cost_usd == null ? "unavailable" : "provider_reported",
-        cost_availability:
-          metrics.cost_usd == null ? "unavailable" : "reported",
+        cost_source: metrics.cost_usd == null ? "unavailable" : "provider_reported",
+        cost_availability: metrics.cost_usd == null ? "unavailable" : "reported",
         ...(error
           ? {
-            normalized_failure_category:
-              providerSessions[sessionKey]?.normalized_failure_category &&
-                providerSessions[sessionKey].normalized_failure_category !==
-                "UNKNOWN"
-                ? providerSessions[sessionKey].normalized_failure_category
-                : normalizeProviderFailure(error),
-            diagnostics: safeDiagnostics(error),
-          }
+              normalized_failure_category:
+                providerSessions[sessionKey]?.normalized_failure_category &&
+                providerSessions[sessionKey].normalized_failure_category !== "UNKNOWN"
+                  ? providerSessions[sessionKey].normalized_failure_category
+                  : normalizeProviderFailure(error),
+              diagnostics: safeDiagnostics(error),
+            }
           : {}),
       };
       await writeTelemetry({ provider_sessions: providerSessions });
@@ -1183,12 +1092,12 @@ const agentExecutor: StepExecutor = {
             metrics,
             t
               ? {
-                input_tokens: t.input,
-                output_tokens: t.output,
-                cache_read_input_tokens: t.cache_read,
-                cache_creation_input_tokens: t.cache_creation,
-                reasoning_output_tokens: t.reasoning_output,
-              }
+                  input_tokens: t.input,
+                  output_tokens: t.output,
+                  cache_read_input_tokens: t.cache_read,
+                  cache_creation_input_tokens: t.cache_creation,
+                  reasoning_output_tokens: t.reasoning_output,
+                }
               : null,
             session.reported_cost_usd,
           );
@@ -1207,11 +1116,7 @@ const agentExecutor: StepExecutor = {
     let result;
     try {
       if (resume && existsSync(cwd)) {
-        await ctx.log(
-          "system",
-          `resuming ${provider} session ${resume.sessionId}`,
-          { provider },
-        );
+        await ctx.log("system", `resuming ${provider} session ${resume.sessionId}`, { provider });
         try {
           result = await run(
             buildResumeMessage(
@@ -1267,24 +1172,22 @@ const agentExecutor: StepExecutor = {
         result = await run(
           resume
             ? buildUserPrompt(
-              ctx.input,
-              files,
-              await progressNotes(resume.fromAttempt),
-              ctx.context.upstream,
-              ctx.context.fileRefs,
-              extras,
-              ctx.context.contextPack,
-            )
+                ctx.input,
+                files,
+                await progressNotes(resume.fromAttempt),
+                ctx.context.upstream,
+                ctx.context.fileRefs,
+                extras,
+                ctx.context.contextPack,
+              )
             : freshPrompt(),
         );
       }
     } finally {
       if (codeIntelligenceEnabled())
         for (const w of await workspacesOf(ctx.run.id).catch(() => []))
-          await enqueueIndex(w.repo, ctx.run.id).catch(() => { });
-      await ctx
-        .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => { });
+          await enqueueIndex(w.repo, ctx.run.id).catch(() => {});
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
     }
 
     // Verification rounds from before a pause (questions asked during a repair) keep counting against the budget.
@@ -1350,10 +1253,7 @@ const agentExecutor: StepExecutor = {
             "Codex finished the turn without calling submit_result; no step output was recorded.",
           retryable: true,
         };
-      const missing = missingContractKeys(
-        ctx.step.config.output_contract,
-        submitted,
-      );
+      const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
       if (missing.length)
         return {
           kind: "failed",
@@ -1366,10 +1266,19 @@ const agentExecutor: StepExecutor = {
     // A coding step that produced nothing — no submitted result AND no workspace — is blocked, not done (e.g. the
     // branch it must continue from does not exist). Completing it would send an empty diff to review and burn repair
     // rounds; a legitimate "no change needed" outcome is reported through submit_result.
-    if (mode === "coding" && !independent && !submitted && !(await workspacesOf(ctx.run.id).catch(() => [])).length)
+    if (
+      mode === "coding" &&
+      !independent &&
+      !submitted &&
+      !(await workspacesOf(ctx.run.id).catch(() => [])).length
+    )
       return {
         kind: "failed",
-        error: `coding step ended without a submitted result and without a workspace (no code was changed): ${String(result.text ?? "").replace(/\s+/g, " ").slice(0, 600)}`,
+        error: `coding step ended without a submitted result and without a workspace (no code was changed): ${String(
+          result.text ?? "",
+        )
+          .replace(/\s+/g, " ")
+          .slice(0, 600)}`,
         retryable: false,
       };
 
@@ -1379,7 +1288,13 @@ const agentExecutor: StepExecutor = {
       // Platform provenance first (repo/commit/file/lines/staleness, this run's tool calls and artifacts): it may only
       // lower a claim's status, so the root-cause caps and the evidence gate below never rest on fake or stale citations.
       if (Array.isArray((output as any).claims))
-        output = { ...output, claims: await withProvenance((output as any).claims, await runProvenanceEnv(ctx.run as any)) };
+        output = {
+          ...output,
+          claims: await withProvenance(
+            (output as any).claims,
+            await runProvenanceEnv(ctx.run as any),
+          ),
+        };
       output = normalizeInvestigationOutput(
         role,
         output,
@@ -1396,7 +1311,7 @@ const agentExecutor: StepExecutor = {
         fix_risk: ev.fix_assessment?.risk ?? null,
         gate_satisfied: ev.evidence_gate?.satisfied ?? null,
       };
-      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => { });
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
     }
     if (independent) {
       let v = normalizeVerdict(submitted ?? {});
@@ -1404,10 +1319,18 @@ const agentExecutor: StepExecutor = {
         v = enforceScopeReview(v, (submitted as any)?.scope_check, ctx.input.upstream);
       // Deterministic scope violations without a renewed approval: a reviewer PASS never overrides them.
       const unresolved = unresolvedScope(
-        await q<{ key: string; sc: any }>(pool, "SELECT key, output->'scope_check' AS sc FROM workflow_steps WHERE run_id = $1 AND output ? 'scope_check'", [ctx.run.id]),
+        await q<{ key: string; sc: any }>(
+          pool,
+          "SELECT key, output->'scope_check' AS sc FROM workflow_steps WHERE run_id = $1 AND output ? 'scope_check'",
+          [ctx.run.id],
+        ),
       );
       if (unresolved.length && v.verdict === "PASS")
-        v = { ...v, verdict: "BLOCKED", blocked_reason: `deterministic scope violation without renewed approval: ${unresolved.join(" | ")}` };
+        v = {
+          ...v,
+          verdict: "BLOCKED",
+          blocked_reason: `deterministic scope violation without renewed approval: ${unresolved.join(" | ")}`,
+        };
       const drift = await evidenceDrift(
         ws.map((w) => ({ repo: w.repo, path: w.path })),
         evidence?.heads ?? {},
@@ -1428,10 +1351,7 @@ const agentExecutor: StepExecutor = {
               AND (e.content LIKE '%(re-executed by user)%' OR e.content LIKE '%(re-executed with %' OR e.content LIKE '%(re-executed after rejection%')), '-infinity'::timestamptz)`,
         [ctx.step.id, ctx.run.id],
       ))!.n;
-      const maxRepairs = Math.max(
-        0,
-        Math.min(5, Number(ctx.step.config.max_repairs ?? 2)),
-      );
+      const maxRepairs = Math.max(0, Math.min(5, Number(ctx.step.config.max_repairs ?? 2)));
       metrics.independent_verification = {
         verdict: v.verdict,
         findings: v.findings.length,
@@ -1439,9 +1359,7 @@ const agentExecutor: StepExecutor = {
         repairs_used: repairsUsed,
         max_repairs: maxRepairs,
       };
-      await ctx
-        .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => { });
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
       await ctx.log(
         "system",
         `independent verification: ${v.verdict}${v.findings.length ? ` (${v.findings.length} finding(s))` : ""}`,
@@ -1454,13 +1372,16 @@ const agentExecutor: StepExecutor = {
         heads: evidence?.heads ?? {},
       });
       if (decided.kind === "completed" && reviewKey)
-        (decided as any).output = { ...(decided as any).output, verification_key: reviewKey, review_policy_version: REVIEW_POLICY_VERSION };
+        (decided as any).output = {
+          ...(decided as any).output,
+          verification_key: reviewKey,
+          review_policy_version: REVIEW_POLICY_VERSION,
+        };
       return decided;
     }
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
-    const vcfg =
-      mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
+    const vcfg = mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
     if (mode === "coding" && !vcfg) {
       // Only the versioned workflow definition can turn the gate off; record it so evaluation never counts it as passed.
       await ctx.log(
@@ -1472,9 +1393,7 @@ const agentExecutor: StepExecutor = {
         status: "disabled",
         passed: null,
       };
-      await ctx
-        .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => { });
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
       output = {
         ...output,
         verification: { outcome: "disabled", status: "disabled", passed: null },
@@ -1483,8 +1402,7 @@ const agentExecutor: StepExecutor = {
     if (vcfg) {
       const trees = (await workspacesOf(ctx.run.id)).filter(
         (w) =>
-          !ctx.run.selected_repositories.length ||
-          ctx.run.selected_repositories.includes(w.repo),
+          !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
       );
       if (!trees.length) {
         await ctx.log(
@@ -1496,9 +1414,7 @@ const agentExecutor: StepExecutor = {
           status: "skipped",
           passed: null,
         };
-        await ctx
-          .recordMetrics(metrics as unknown as Record<string, unknown>)
-          .catch(() => { });
+        await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
         return {
           kind: "completed",
           output: {
@@ -1518,12 +1434,7 @@ const agentExecutor: StepExecutor = {
       };
       const deps: VerifyDeps = {
         run: async (cmd, cwd, vars, ...args) =>
-          runCommand(
-            cmd,
-            cwd,
-            { ...vars, BASE_BRANCH: await workspaceBaseBranch(cwd) },
-            ...args,
-          ),
+          runCommand(cmd, cwd, { ...vars, BASE_BRANCH: await workspaceBaseBranch(cwd) }, ...args),
         knownFailures: (p) => knownBaseFailures(p),
         baseline: async (repo, failing) =>
           (
@@ -1538,17 +1449,14 @@ const agentExecutor: StepExecutor = {
                 },
                 vcfg.timeoutMs,
                 ctx.signal,
-                (c) =>
-                  void ctx.log("log", c, { repo: repo.repo, baseline: true }),
+                (c) => void ctx.log("log", c, { repo: repo.repo, baseline: true }),
               ),
             )
           ).report,
-        diffTests: async (p) =>
-          diffTestsAgainstBase(p, await workspaceBaseBranch(p)),
+        diffTests: async (p) => diffTestsAgainstBase(p, await workspaceBaseBranch(p)),
         artifact: (name, content, data) =>
           ctx.artifact("log", name, content, { ...data, verification: true }),
-        log: (text, data) =>
-          void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
+        log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
       };
       let accepted = output;
       const loop = await verificationLoop<ExecResult>({
@@ -1589,20 +1497,18 @@ const agentExecutor: StepExecutor = {
           submitted = undefined;
           let r: Awaited<ReturnType<typeof run>> | null = sid
             ? await run(msg, sid).catch((e) => {
-              if (ctx.signal.aborted) throw e;
-              return {
-                isError: true,
-                text: (e as Error).message,
-                assistantTurns: 0,
-              };
-            })
+                if (ctx.signal.aborted) throw e;
+                return {
+                  isError: true,
+                  text: (e as Error).message,
+                  assistantTurns: 0,
+                };
+              })
             : null;
           // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
           if (
             !r ||
-            (r.isError &&
-              r.assistantTurns === 0 &&
-              !TERMINAL_FAILURES.has(r.failure ?? ""))
+            (r.isError && r.assistantTurns === 0 && !TERMINAL_FAILURES.has(r.failure ?? ""))
           ) {
             if (sid)
               await ctx.log(
@@ -1625,9 +1531,7 @@ const agentExecutor: StepExecutor = {
       });
       const summary = verificationSummary(vcfg, loop);
       metrics.verification = summary;
-      await ctx
-        .recordMetrics(metrics as unknown as Record<string, unknown>)
-        .catch(() => { });
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
       if (loop.outcome === "canceled") throw new Error("verification canceled");
       if (loop.stop) return loop.stop;
       if (loop.outcome === "error")
@@ -1669,18 +1573,27 @@ const agentExecutor: StepExecutor = {
     if (mode === "coding" && !independent) {
       const all = await workspacesOf(ctx.run.id).catch(() => []);
       const state = await collectScopeState(
-        await Promise.all(all.map(async (w) => ({ repo: w.repo, path: w.path, base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}` }))),
+        await Promise.all(
+          all.map(async (w) => ({
+            repo: w.repo,
+            path: w.path,
+            base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}`,
+          })),
+        ),
       );
       // Time to the first useful code location: first read/edit of a file the step finally changed (measured events).
       const changed = Object.values(state.files).flat();
       if (changed.length) {
         metrics.first_useful_location_ms = firstUsefulLocationMs(metrics, changed);
-        await ctx.recordMetrics({ first_useful_location_ms: metrics.first_useful_location_ms }).catch(() => { });
+        await ctx
+          .recordMetrics({ first_useful_location_ms: metrics.first_useful_location_ms })
+          .catch(() => {});
       }
       if (Object.keys(state.heads).length) {
         output = { ...output, commits: state.heads };
         // The harness tested exactly this state (nothing changes after the last verification round).
-        if ((output as any).verification?.passed === true) output = { ...output, tested_heads: state.heads };
+        if ((output as any).verification?.passed === true)
+          output = { ...output, tested_heads: state.heads };
       }
       const scope = approvedScopeIn(ctx.input.upstream);
       if (scope) {
@@ -1690,16 +1603,26 @@ const agentExecutor: StepExecutor = {
           check.requires_reapproval = true;
           check.reasons.unshift(...state.unreadable);
         }
-        const reapproved = check.requires_reapproval ? renewedApprovalFor(ctx.input.answers, SCOPE_REAPPROVAL_QUESTION, revision) : null;
+        const reapproved = check.requires_reapproval
+          ? renewedApprovalFor(ctx.input.answers, SCOPE_REAPPROVAL_QUESTION, revision)
+          : null;
         output = { ...output, scope_check: { ...check, reapproved } };
-        await ctx.log("system", `scope check vs approved proposal ${check.approved_proposal_hash} (revision ${revision}): ${check.out_of_scope_files.length} out-of-scope file(s), ${check.invalid_paths.length} invalid path(s), ${check.unauthorized_repos.length} unauthorized repo(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? (reapproved ? " — renewed approval on record for this revision" : " — renewed approval required") : ""}`, { scope_check: check });
+        await ctx.log(
+          "system",
+          `scope check vs approved proposal ${check.approved_proposal_hash} (revision ${revision}): ${check.out_of_scope_files.length} out-of-scope file(s), ${check.invalid_paths.length} invalid path(s), ${check.unauthorized_repos.length} unauthorized repo(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? (reapproved ? " — renewed approval on record for this revision" : " — renewed approval required") : ""}`,
+          { scope_check: check },
+        );
         if (check.requires_reapproval && !reapproved)
           return {
             kind: "waiting_input",
             output,
             questions: [
               {
-                question: `${SCOPE_REAPPROVAL_QUESTION} ${SCOPE_REVISION_TAG(revision)}: ${check.reasons.join("; ")}`.slice(0, 4000),
+                question:
+                  `${SCOPE_REAPPROVAL_QUESTION} ${SCOPE_REVISION_TAG(revision)}: ${check.reasons.join("; ")}`.slice(
+                    0,
+                    4000,
+                  ),
                 context: `Approved (${check.approved_risk}): ${scope.summary}`.slice(0, 1500),
                 options: [
                   "Approve this exact change set (recorded as a renewed approval for this revision only)",
@@ -1735,11 +1658,11 @@ export async function rankRepositoriesWithClaude(
     "Rank these repositories by how likely they must change for the engineering request. Use ONLY the listed repository names.",
     ...(project
       ? [
-        `The request belongs to project "${project}"; repositories of related projects are listed too because those projects integrate with it.`,
-      ]
+          `The request belongs to project "${project}"; repositories of related projects are listed too because those projects integrate with it.`,
+        ]
       : []),
     'Consider the whole flow across project boundaries: when the request names a system (e.g. "phía OMS") or the defect sits in a call between systems ' +
-    "(duplicate or missing calls, retries, wrong payloads), rank the caller/producer side as well as the callee — the fix is often on the side that initiates the call.",
+      "(duplicate or missing calls, retries, wrong payloads), rank the caller/producer side as well as the callee — the fix is often on the side that initiates the call.",
     'Reply with JSON only: [{"repo": "...", "score": 0-10, "reasons": ["why this repo is relevant"]}]. Each reason is natural language and follows the output language above.',
     "",
     "Repositories:",
@@ -1751,14 +1674,12 @@ export async function rankRepositoriesWithClaude(
     '<untrusted_input source="work_item">',
     `${ctx.input.work_item?.title ?? ctx.run.title}\n${ctx.input.work_item?.description ?? ""}`,
     JSON.stringify(
-      Object.fromEntries(
-        Object.entries(ctx.input.upstream).map(([k, u]) => [k, u.output]),
-      ),
+      Object.fromEntries(Object.entries(ctx.input.upstream).map(([k, u]) => [k, u.output])),
     ).slice(0, 8000),
     "</untrusted_input>",
   ].join("\n");
   const done = await completeForRun(ctx.run, prompt, ctx.signal);
-  await ctx.recordMetrics({ ranking: done.metrics }).catch(() => { });
+  await ctx.recordMetrics({ ranking: done.metrics }).catch(() => {});
   const out = done.text;
   const json = out.match(/\[[\s\S]*\]/)?.[0];
   if (!json) throw new Error("no JSON in ranking reply");
@@ -1783,8 +1704,8 @@ function codexEnvironmentNotes(mode: ToolMode): string {
   return [
     "## Execution environment (OpenAI Codex on the platform worker)",
     "- The platform tools are on the MCP server named `platform` (ask_user, post_update, submit_result, read_knowledge, search_knowledge, read_step_output, list_tools, describe_tool, call_tool" +
-    (mode === "coding" ? ", prepare_branch, commit_changes" : "") +
-    "). Where these instructions say mcp__platform__<tool>, call that tool on the `platform` server.",
+      (mode === "coding" ? ", prepare_branch, commit_changes" : "") +
+      "). Where these instructions say mcp__platform__<tool>, call that tool on the `platform` server.",
     "- Every command and file edit is checked by the platform before it runs; a denied call returns the reason. Do not retry a denied call in another form.",
     mode === "coding"
       ? "- You can write only inside the worktrees returned by prepare_branch. `.git` is read-only in your sandbox: do NOT run git add/commit; commit with the platform tool commit_changes (repo, message). The network is disabled."
@@ -1803,9 +1724,7 @@ export const claudeExecutor: StepExecutor = {
       return result;
     } finally {
       await captureContextContinuity(ctx, result).catch((error) =>
-        console.error(
-          `context continuity persistence failed: ${contextPackFailure(error)}`,
-        ),
+        console.error(`context continuity persistence failed: ${contextPackFailure(error)}`),
       );
     }
   },

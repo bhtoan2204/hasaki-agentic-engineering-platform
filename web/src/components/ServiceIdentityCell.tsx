@@ -9,11 +9,7 @@ export function ServiceIdentityCell({
   onSelect?: () => void;
 }) {
   const name = onSelect ? (
-    <button
-      type="button"
-      className="link-button service-identity-name"
-      onClick={onSelect}
-    >
+    <button type="button" className="link-button service-identity-name" onClick={onSelect}>
       {service}
     </button>
   ) : (

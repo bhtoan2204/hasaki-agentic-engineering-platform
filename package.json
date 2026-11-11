@@ -18,6 +18,7 @@
     "serve": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "knowledge:import": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts",
+    "knowledge:rescope": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/rescope-knowledge.ts",
     "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts",
     "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts",
     "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
@@ -30,7 +31,11 @@
     "bench:live-updates": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/live-updates.bench.ts",
     "smoke:live-updates": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/live-updates.browser.ts",
     "smoke:run-view": "node --disable-warning=ExperimentalWarning test/run-view.smoke.ts",
-    "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts"
+    "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "1.13.6",
