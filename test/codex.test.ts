@@ -431,6 +431,37 @@ test("Codex ask_user pauses the step, blocks edits while waiting, then resumes t
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });
 
+test("missing provider session rebuilds from durable answers without restarting the completed upstream step", async () => {
+  const key = await workflow([
+    { key: "before", type: "agent", config: { output_contract: "{ goal, requirements }" } },
+    { key: "plan", type: "agent", depends_on: ["before"], config: { output_contract: "{ goal, requirements }" } },
+  ]);
+  const run = await startRun({ definitionKey: key, agentProvider: "codex" });
+  // Execute only the upstream step before selecting ask behavior.
+  const { runOnce } = await import("../src/workflow/scheduler.ts");
+  await runOnce();
+  process.env.FAKE_CODEX_MODE = "ask";
+  process.env.FAKE_CODEX_THREAD = "th-missing";
+  await drain();
+  delete process.env.FAKE_CODEX_THREAD;
+  const question = await one(pool, "SELECT id FROM workflow_questions WHERE run_id=$1 AND status='open'", [run.id]);
+  assert.ok(question);
+  process.env.FAKE_CODEX_MODE = "resume-missing";
+  await answerQuestions({ [question.id]: "Không" }, "dev");
+  await drain();
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  assert.equal((await attemptsOf(run.id, "before")).length, 1);
+  const attempts = await attemptsOf(run.id, "plan");
+  assert.deepEqual(attempts.map((a) => a.status), ["WAITING_INPUT", "COMPLETED"]);
+  const oldSession = await one(pool, "SELECT resumable FROM agent_sessions WHERE session_id='th-missing' AND provider='codex' ORDER BY id LIMIT 1");
+  assert.equal(oldSession.resumable, false);
+  const logs = fakeLog().filter((l) => l.argv);
+  assert.equal(logs.at(-2).resumeId, "th-missing");
+  assert.equal(logs.at(-1).resumeId, null);
+  assert.ok(logs.at(-1).prompt.includes("Không"), "fresh session receives stored answer");
+  assert.ok((await q(pool, "SELECT content FROM workflow_events WHERE run_id=$1 AND kind='system'", [run.id])).some((e) => e.content.includes("rebuilding context from persisted step history")));
+});
+
 test("no submit_result or output missing contract keys fails the step; retry keeps provider", async () => {
   const key = await workflow([{ key: "analyze", type: "agent", config: { output_contract: "{ goal, requirements: string[] }" } }]);
   process.env.FAKE_CODEX_MODE = "no-submit";

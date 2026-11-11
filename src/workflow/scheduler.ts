@@ -1,3 +1,4 @@
+import { reapExpiredLeases, releaseAttempt } from "./recovery.ts";
 import { runIndexOnce } from "../codeIntelligence/indexer.ts";
 import { randomUUID } from "node:crypto";
 import { instanceSession } from "../instances.ts";
@@ -5,7 +6,7 @@ import { config } from "../config.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
-import { beginAttempt, finishAttempt, heartbeat, reapExpiredLeases, releaseAttempt, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
+import { beginAttempt, finishAttempt, heartbeat, prepareProviderPause, processAutomaticHandoff } from "./engine.ts";
 import { dispatchRunEffects } from "./effects.ts";
 import { getExecutor, makeContext } from "./executors/registry.ts";
 import { enforceRunRepositoryAccess } from "../repos/access.ts";

@@ -97,6 +97,12 @@ const resumeAt = argv.indexOf("resume");
 const resumeId = resumeAt >= 0 ? argv[argv.length - 2] : null;
 log({ argv, prompt, resumeId, cwd: process.cwd(), env: { DATABASE_URL: !!process.env.DATABASE_URL, AUTH_SECRET: !!process.env.AUTH_SECRET, OPENAI_API_KEY: !!process.env.OPENAI_API_KEY, BROKER: !!process.env.PLATFORM_BROKER_TOKEN } });
 
+if (mode === "resume-missing" && resumeId) {
+  out({ type: "error", message: "Session missing from local storage" });
+  out({ type: "turn.failed", error: { message: "Session missing from local storage" } });
+  process.exit(1);
+}
+
 const thread = resumeId || process.env.FAKE_CODEX_THREAD || "th-1";
 out({ type: "thread.started", thread_id: thread });
 out({ type: "turn.started" });
