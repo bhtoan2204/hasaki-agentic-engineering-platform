@@ -10,7 +10,7 @@
   "scripts": {
     "start": "npm run build && node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "dev": "node --watch --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
-    "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/*.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 --test-force-exit test/*.test.ts",
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",
     "smoke:codex": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/codex.live.ts",
     "typecheck": "tsc -p . && tsc -p web",

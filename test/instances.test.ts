@@ -1,7 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,6 +59,40 @@ const child = async (id: string, mode: string, data?: unknown) => {
   );
   return stdout.trim() ? JSON.parse(stdout.trim()) : null;
 };
+/** Keeps the winner alive so a peer cannot treat its PID as gone and take the registration over. */
+function registerAndHold(id: string) {
+  const proc = spawn(
+    process.execPath,
+    ["--disable-warning=ExperimentalWarning", "test/fixtures/instance-worker.ts", "register-hold"],
+    { env: { ...process.env, PLATFORM_INSTANCE: id } },
+  );
+  let out = "";
+  let err = "";
+  proc.stdout!.setEncoding("utf8");
+  proc.stderr!.setEncoding("utf8");
+  return new Promise<ChildProcess>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => finish(false), 15000);
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (ok) resolve(proc);
+      else {
+        proc.kill("SIGKILL");
+        reject(new Error(err || out || "register-hold failed"));
+      }
+    };
+    proc.stdout!.on("data", (chunk: string) => {
+      out += chunk;
+      if (out.includes("registered")) finish(true);
+    });
+    proc.stderr!.on("data", (chunk: string) => {
+      err += chunk;
+    });
+    proc.on("exit", () => finish(false));
+  });
+}
 let seq = 0;
 async function run(type: string) {
   const key = `recovery-${++seq}`;
@@ -281,15 +316,25 @@ test("replacement session fences an old worker with an unexpired job lease; same
 });
 
 test("registry rejects concurrent duplicate live IDs; replacement fences jobs; health uses database time", async () => {
-  const results = await Promise.allSettled([
-    child(config.instanceId, "register"),
-    child(config.instanceId, "register"),
-  ]);
-  assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
-  assert.match(
-    String((results.find((r) => r.status === "rejected") as PromiseRejectedResult).reason),
-    /identity conflict/,
-  );
+  const pending = [registerAndHold(config.instanceId), registerAndHold(config.instanceId)];
+  const results = await Promise.allSettled(pending);
+  const live = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  try {
+    assert.equal(live.length, 1);
+    assert.match(
+      String((results.find((r) => r.status === "rejected") as PromiseRejectedResult).reason),
+      /identity conflict/,
+    );
+  } finally {
+    await Promise.all(
+      live.map((proc) => {
+        if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+        const exited = once(proc, "exit");
+        proc.kill("SIGKILL");
+        return exited;
+      }),
+    );
+  }
   assert.equal((await instanceHealth(config.instanceId)).health, "ONLINE");
   await q(
     pool,
