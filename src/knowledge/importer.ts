@@ -391,21 +391,23 @@ export async function scanRepositories(): Promise<{
       sha256: sha(text),
     });
     const isWiki = /wiki/i.test(r.name);
-    // Code repositories living next to a wiki (same group folder, e.g. payment-src/*): the wiki's conventions apply to them.
+    // Code repositories a wiki documents: same group folder (e.g. payment-src/*) OR a project in common in the registry.
+    // The project test also covers platform-managed checkouts, whose path is empty (e.g. a repository registered by URL).
     const group = r.path.includes("/") ? r.path.split("/")[0] : "";
-    const siblings =
-      isWiki && group
-        ? all
-            .filter(
-              (x) =>
-                x.enabled &&
-                x.name !== r.name &&
-                !/wiki/i.test(x.name) &&
-                x.path.split("/")[0] === group,
-            )
-            .map((x) => x.name)
-            .sort()
-        : [];
+    const wikiProjects = new Set(r.projects ?? []);
+    const siblings = isWiki
+      ? all
+          .filter(
+            (x) =>
+              x.enabled &&
+              x.name !== r.name &&
+              !/wiki/i.test(x.name) &&
+              ((group && x.path.split("/")[0] === group) ||
+                (x.projects ?? []).some((p) => wikiProjects.has(p))),
+          )
+          .map((x) => x.name)
+          .sort()
+      : [];
 
     // 1. Agent instructions / conventions: inlined for that repository (identical copies, e.g. AGENTS.md = CLAUDE.md, once).
     const seenText = new Set<string>();

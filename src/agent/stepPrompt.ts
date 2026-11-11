@@ -217,7 +217,10 @@ export function developerDecisions(input: StepInput): string | null {
     "## Developer decisions for this run (binding)",
     "The developer made these decisions while re-executing steps of this run. They are business rules and scope rulings for this task: they override earlier conclusions, review findings and default assumptions. Do not raise a finding, plan or change that contradicts them; when one only conflicts in part, keep the part they do not cover. A later decision overrides an earlier one where they conflict.",
     items
-      .map((d, i) => `${i + 1}. [${d.step ?? "?"}${d.at ? `, ${String(d.at).slice(0, 16).replace("T", " ")}` : ""}${d.by ? `, ${d.by}` : ""}]\n${d.text!.trim()}`)
+      .map(
+        (d, i) =>
+          `${i + 1}. [${d.step ?? "?"}${d.at ? `, ${String(d.at).slice(0, 16).replace("T", " ")}` : ""}${d.by ? `, ${d.by}` : ""}]\n${d.text!.trim()}`,
+      )
       .join("\n\n"),
   ].join("\n");
 }
@@ -332,6 +335,10 @@ export function buildResumeMessage(
     (a) => newAnswerAttemptId === undefined || a.attempt_id === newAnswerAttemptId,
   );
   const lines: string[] = [languageReminder(locale)];
+  // A resumed session may predate some of the run's developer decisions (added while re-executing other steps): repeat
+  // the full current list so the continued conversation follows them too.
+  const decided = developerDecisions(input);
+  if (decided) lines.push("", decided, "");
   if (contextPack) {
     lines.push(
       "Current bound context pack (retained across provider changes):",

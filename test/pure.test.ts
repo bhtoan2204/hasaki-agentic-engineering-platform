@@ -528,6 +528,25 @@ test("baseline classification: old failures are pre-existing, new tests/compile 
   );
 });
 
+test("a resumed session gets the run's current developer decisions (incl. ones added after the session started)", () => {
+  const input = {
+    answers: [],
+    pending: null,
+    run: {
+      inputs: {
+        developer_decisions: [
+          { step: "review", text: "Nhiều phiên new/processing song song là hợp lệ.", by: "toan", at: "2026-11-11T08:48:10Z" },
+          { step: "review", text: "Phiên SUCCESS thứ hai vẫn ghi paid, gắn cờ trả thừa.", by: "toan", at: "2026-11-11T09:44:00Z" },
+        ],
+      },
+    },
+  } as any;
+  const msg = buildResumeMessage(input, undefined, [], "vi");
+  assert.match(msg, /Developer decisions for this run \(binding\)/);
+  assert.match(msg, /1\. \[review[\s\S]*song song là hợp lệ[\s\S]*2\. \[review[\s\S]*cờ trả thừa/);
+  assert.doesNotMatch(buildResumeMessage({ answers: [], pending: null } as any, undefined, [], "vi"), /Developer decisions/, "no section without decisions");
+});
+
 test("resume message after re-execute carries instructions, skills and worktree state", () => {
   const input = {
     answers: [],

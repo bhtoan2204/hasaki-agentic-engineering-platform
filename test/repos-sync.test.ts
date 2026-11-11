@@ -484,3 +484,20 @@ test("looksSecret ignores config-path references but still catches literal value
   assert.ok(looksSecret("secretB64 = c2VjcmV0dmFsdWVfMTIzNDU2Nzg5"));
   assert.ok(looksSecret("api_key: 9f8e7d6c5b4a39281706"));
 });
+
+test("wiki conventions also reach code repos of the same project registered without a local path (managed checkouts)", async () => {
+  const wiki = join(config.reposRoot, "sib-src/sib-wiki"),
+    core = join(config.reposRoot, "sib-src/sib-core");
+  for (const d of [wiki, core]) mkdirSync(join(d, ".git"), { recursive: true });
+  mkdirSync(join(wiki, "docs/development"), { recursive: true });
+  writeFileSync(join(wiki, "docs/development/business-conventions.md"), "# Business rules\n\nProvider services only write the event store.\n");
+  await repositories.upsert("sib-wiki", { path: "sib-src/sib-wiki", projects: ["Sib"] });
+  await repositories.upsert("sib-core", { path: "sib-src/sib-core", projects: ["Sib"] });
+  await repositories.upsert("sib-managed", { path: "", projects: ["Sib"] }); // e.g. registered by URL: no group folder
+  await repositories.upsert("other-proj", { path: "", projects: ["Other"] });
+  await importFromRepositories({ only: "sib-wiki." });
+  const conv = (await knowledge.get("sib-wiki.business-conventions"))!;
+  assert.equal(conv.versions[0].metadata.load, "inline");
+  assert.deepEqual(conv.versions[0].applicability.repos.sort(), ["sib-core", "sib-managed"], "same project counts even without a shared folder; other projects do not");
+  assert.equal(`${conv.scope_type}:${conv.scope_ref}`, "PROJECT:Sib");
+});
