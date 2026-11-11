@@ -56,6 +56,29 @@ export type Decision = { allow: true } | { allow: false; reason: string };
 const allow: Decision = { allow: true };
 const deny = (reason: string): Decision => ({ allow: false, reason });
 
+/** Secret files in a protected checkout stay unreadable. `.env.example` is source, not a secret. */
+export function isSecretPath(path: string): boolean {
+  const base = path.split(/[/\\]/).pop() ?? "";
+  if (base === ".env.example" || base === ".env.sample") return false;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  return (
+    /^(config\.json|credentials\.json|auth\.json|id_rsa|id_ed25519)$/i.test(base) ||
+    /\.(pem|key)$/i.test(base)
+  );
+}
+
+function secretPathViolation(paths: string[], ctx: PolicyContext): string | null {
+  const roots = ctx.protectedRoots ?? [];
+  for (const raw of paths) {
+    if (!raw) continue;
+    const abs = raw.startsWith("~") ? expandHome(raw) : resolve(raw);
+    if (!isSecretPath(abs)) continue;
+    if (isInside(abs, roots) && !isInside(abs, ctx.workspaces))
+      return `refusing to read secret file ${abs}`;
+  }
+  return null;
+}
+
 export function isInside(path: string, roots: string[]) {
   const p = resolve(path);
   return roots.some((r) => {
@@ -681,6 +704,16 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
   const p = parseShell(command);
   if (p.error)
     return deny(`cannot parse this command safely (${p.error}); split it into simpler commands`);
+  const leaked = secretPathViolation(pathsIn(command), ctx);
+  if (leaked) return deny(leaked);
+  if (
+    cwd &&
+    isInside(cwd, ctx.protectedRoots ?? []) &&
+    !isInside(cwd, ctx.workspaces) &&
+    /(^|[\s'"=])\.env(\.[A-Za-z0-9_-]+)?\b/.test(command) &&
+    !/\.env\.(example|sample)\b/.test(command)
+  )
+    return deny("refusing to read secret files in a protected checkout");
   const scan = scanText(p);
   for (const [re, why] of ALWAYS_DENIED) if (re.test(scan)) return deny(why);
   const rm = rmRfViolation(p, ctx, cwd);
@@ -836,7 +869,20 @@ export function decide(
     case "Read":
     case "Grep":
     case "Glob":
-    case "LS":
+    case "LS": {
+      const paths = ["file_path", "path", "notebook_path"].flatMap((key) => {
+        const value = input[key];
+        return typeof value === "string" ? [value] : [];
+      });
+      const leaked = secretPathViolation(
+        paths.map((raw) =>
+          raw.startsWith("/") || raw.startsWith("~") ? raw : cwd ? resolve(cwd, raw) : raw,
+        ),
+        ctx,
+      );
+      if (leaked) return deny(leaked);
+      return allow;
+    }
     case "TodoWrite":
     case "WebFetch":
     case "WebSearch":

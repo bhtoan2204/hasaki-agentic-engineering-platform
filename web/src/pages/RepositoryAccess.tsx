@@ -18,6 +18,7 @@ type Matrix = {
     enabled: boolean;
     shared_access: Level;
     bitbucket: boolean;
+    host_policy?: "strict" | "personal" | "trusted";
   }>;
   users: Array<{ id: number; username: string; role: string; active: boolean }>;
   grants: Array<{
@@ -91,15 +92,21 @@ export function BitbucketState({
   state,
   reason,
   stale,
+  host,
 }: {
   state: string;
   reason?: string;
   stale?: boolean;
+  host?: string;
 }) {
   const { t } = useI18n();
+  const key =
+    host === "github" && (state === "denied" || state === "not_applicable")
+      ? `repo.gh.${state}`
+      : `repo.bb.${state}`;
   return (
     <span className={`repo-bb is-${state}${stale ? " is-stale" : ""}`} title={reason || undefined}>
-      {t(`repo.bb.${state}`)}
+      {t(key)}
       {stale ? ` · ${t("repo.bb.stale")}` : ""}
     </span>
   );
@@ -261,10 +268,11 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                           onChange={(l) => grant(r.name, u.id, l)}
                         />
                         {r.bitbucket &&
-                          m.policy !== "trusted" &&
+                          (r.host_policy ?? m.policy) !== "trusted" &&
                           (level !== "none" || r.shared_access !== "none") && (
                             <div>
                               <BitbucketState
+                                host={r.provider}
                                 state={check?.state ?? "unknown"}
                                 reason={check?.reason}
                                 stale={check?.expired}

@@ -12,7 +12,8 @@ import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { gitProvider, workspacesOf } from "../../git/provider.ts";
+import { gitProviderFor, workspacesOf } from "../../git/provider.ts";
+import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   repositoryReference,
   repositoryBaseBranch,
@@ -173,7 +174,7 @@ export const conditionExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- command
 
-export function runCommand(
+export async function runCommand(
   command: string,
   cwd: string,
   env: Record<string, string>,
@@ -181,13 +182,21 @@ export function runCommand(
   signal: AbortSignal,
   onChunk?: (text: string) => void,
 ) {
+  const proc = await commandProcessEnv(cwd, env);
+  const useBwrap = proc.isolation?.mode === "bwrap";
   return new Promise<{ code: number | null; output: string; timedOut: boolean }>((resolve) => {
-    const child = spawn("bash", ["-lc", command], {
-      cwd,
-      env: { ...process.env, ...env },
-      signal,
-      detached: true,
-    });
+    const child = spawn(
+      useBwrap ? "bwrap" : "bash",
+      useBwrap
+        ? [...bwrapArguments(cwd, proc.isolation?.liveRoot ?? null), "bash", "-lc", command]
+        : ["-lc", command],
+      {
+        cwd,
+        env: proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env },
+        signal,
+        detached: true,
+      },
+    );
     // Kill the whole process group (bash + go test + test binaries) on abort/timeout, not only bash.
     const killTree = () => {
       try {
@@ -362,21 +371,41 @@ export const commandExecutor: StepExecutor = {
           `skipping ${known.tests.length} test(s) known to fail on ${baseBranch}@${known.sha.slice(0, 9)}: ${known.tests.join(", ")}`,
           { skipped_known_failures: known.tests },
         );
-      const r = await runCommand(
-        String(cfg.command),
-        t.path,
-        {
-          BASE_BRANCH: baseBranch,
-          REPO: t.repo,
-          BRANCH: t.branch,
-          RUN_ID: String(ctx.run.id),
-          ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}),
-          ...((cfg.env as Record<string, string>) ?? {}),
-        },
-        timeoutMs,
-        ctx.signal,
-        (chunk) => void ctx.log("log", chunk, { repo: t.repo }),
-      );
+      let r: { code: number | null; output: string; timedOut: boolean };
+      try {
+        const plan = await commandProcessEnv(t.path, {});
+        if (plan.isolation?.mode === "bwrap")
+          await ctx.log(
+            "system",
+            `${t.repo}: self-development command is sandboxed; the running checkout is read-only and the application database is not in the environment`,
+          );
+        else if (plan.isolation?.mode === "trusted")
+          await ctx.log(
+            "system",
+            `${t.repo}: self-development command is policy-isolated on a trusted workstation (no bubblewrap). Secrets and the application database are removed from the environment. The process still runs as the worker user.`,
+          );
+        r = await runCommand(
+          String(cfg.command),
+          t.path,
+          {
+            BASE_BRANCH: baseBranch,
+            REPO: t.repo,
+            BRANCH: t.branch,
+            RUN_ID: String(ctx.run.id),
+            ...(known?.skipRegex ? { GO_TEST_SKIP: known.skipRegex } : {}),
+            ...((cfg.env as Record<string, string>) ?? {}),
+          },
+          timeoutMs,
+          ctx.signal,
+          (chunk) => void ctx.log("log", chunk, { repo: t.repo }),
+        );
+      } catch (e) {
+        return {
+          kind: "failed",
+          error: `${t.repo}: ${(e as Error).message}`,
+          retryable: false,
+        };
+      }
       await ctx.log(
         "system",
         `■ ${t.repo}: exit ${r.timedOut ? "timeout" : r.code} after ${Math.round((Date.now() - started) / 1000)}s`,
@@ -831,7 +860,6 @@ export const pullRequestExecutor: StepExecutor = {
       ctx.input.upstream[String(cfg.content_from ?? "")]?.output ??
       Object.values(ctx.input.upstream).find((u) => u.output?.pull_requests)?.output ??
       {};
-    const provider = gitProvider();
     const code = ctx.input.work_item?.code;
     const out: any[] = [];
     // Pre-publish gate, always on (deterministic, re-read from git right now — after any approval of this step):
@@ -915,6 +943,8 @@ export const pullRequestExecutor: StepExecutor = {
         await ctx.log("system", `${w.repo}: publication refused: ${(e as Error).message}`);
         return { kind: "failed", error: `${w.repo}: ${(e as Error).message}`, retryable: false };
       }
+      const registry = await repositories.get(w.repo);
+      const provider = gitProviderFor(registry?.provider);
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {
@@ -938,7 +968,6 @@ export const pullRequestExecutor: StepExecutor = {
         testExceptions: await testExceptionsOf(ctx.run.id),
         verificationNotes: await verificationNotesOf(ctx.run.id),
       });
-      const registry = await repositories.get(w.repo);
       const slug = registry ? repositoryReference(registry) : w.repo;
       const destination = registry?.default_branch || config.baseBranch;
       if (ctx.signal.aborted)

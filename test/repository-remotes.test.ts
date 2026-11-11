@@ -488,7 +488,7 @@ test("local Git URL rewrites cannot redirect credentials and repository hooks ca
   git(path, "config", "url.https://evil.example/.insteadOf", "https://bitbucket.org/");
   await assert.rejects(
     asA(() => prepareRepository(repo, true)),
-    /permissions/,
+    /Unsafe local Git network configuration/,
   );
   git(path, "config", "--remove-section", "url.https://evil.example/");
   const run = await startRun({

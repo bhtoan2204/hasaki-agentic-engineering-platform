@@ -4,17 +4,37 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveBitbucket } from "../bitbucket.ts";
-import { repositoryRemote } from "./remote.ts";
+import { resolveGithub } from "../github.ts";
+import { repositoryRemote, type GitHost } from "./remote.ts";
 
 const exec = promisify(execFile);
 /** Secrets exist only in the short-lived child environment, never arguments, config, or error objects. */
-export async function remoteGit(url: string, args: string[], cwd?: string): Promise<string> {
-  repositoryRemote(url);
+async function credentialsFor(
+  url: string,
+): Promise<{ user: string; token: string; provider: GitHost }> {
+  const remote = repositoryRemote(url);
+  if (remote.provider === "github") {
+    const creds = await resolveGithub();
+    if (!creds)
+      throw new Error(
+        "GitHub authentication required: save a personal access token in Integrations. A shared token is used only when github.allowSharedCredentials is true, and it is not a permission grant.",
+      );
+    return { user: "x-access-token", token: creds.token, provider: "github" };
+  }
   const creds = await resolveBitbucket();
   if (!creds)
     throw new Error(
       "Bitbucket authentication required: save personal credentials in Integrations or configure the authorized service account",
     );
+  return {
+    user: creds.user.includes("@") ? "x-bitbucket-api-token-auth" : creds.user,
+    token: creds.token,
+    provider: "bitbucket",
+  };
+}
+
+export async function remoteGit(url: string, args: string[], cwd?: string): Promise<string> {
+  const creds = await credentialsFor(url);
   const dir = await mkdtemp(join(tmpdir(), "platform-git-"));
   try {
     if (cwd) {
@@ -49,7 +69,7 @@ export async function remoteGit(url: string, args: string[], cwd?: string): Prom
       GIT_TERMINAL_PROMPT: "0",
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
-      PLATFORM_GIT_USER: creds.user.includes("@") ? "x-bitbucket-api-token-auth" : creds.user,
+      PLATFORM_GIT_USER: creds.user,
       PLATFORM_GIT_TOKEN: creds.token,
     });
     const result = await exec(
@@ -73,24 +93,26 @@ export async function remoteGit(url: string, args: string[], cwd?: string): Prom
     );
     return result.stdout.trim();
   } catch (e) {
+    const host = creds.provider === "github" ? "GitHub" : "Bitbucket";
     // Preserve the existing lease-protected recovery signal without exposing server output.
     if (
       /non-fast-forward|fetch first|\[rejected\]/i.test(
         String((e as { stderr?: string }).stderr ?? ""),
       )
     )
-      throw new Error("Bitbucket push rejected: non-fast-forward");
+      throw new Error(`${host} push rejected: non-fast-forward`);
     if (
       /authentication failed|access denied|permission denied|\b40[13]\b/i.test(
         String((e as { stderr?: string }).stderr ?? ""),
       )
     )
       throw new Error(
-        "Bitbucket authentication required: update personal credentials and check repository permissions in Integrations",
+        `${host} authentication required: update personal credentials and check repository permissions in Integrations`,
       );
+    if (/Unsafe local Git network configuration/.test((e as Error).message)) throw e;
     // Never propagate a child_process error: it includes command/output and potentially server-echoed credentials.
     throw new Error(
-      "Bitbucket Git operation failed: verify repository URL, repository permissions and network connectivity in Integrations",
+      `${host} Git operation failed: verify repository URL, repository permissions and network connectivity in Integrations`,
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

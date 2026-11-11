@@ -22,6 +22,8 @@ export interface RepositoryRow {
   tags: string[];
   dependencies: string[];
   architecture: string;
+  /** Operator label. Empty when unset. Not an authorization grant. */
+  category?: string;
   allowed_actions: string[];
   enabled: boolean;
   /** Explicit access for every active user ('none' = only per-user grants; see repos/access.ts). */
@@ -46,6 +48,7 @@ const EDITABLE = [
   "tags",
   "dependencies",
   "architecture",
+  "category",
   "allowed_actions",
   "enabled",
   "remote_slug",
@@ -76,7 +79,16 @@ export const repositories = {
       const remote = repositoryRemote(patch.repository_url);
       patch.repository_url = remote.url;
       patch.remote_slug = `${remote.workspace}/${remote.slug}`;
-      patch.provider = "bitbucket";
+      patch.provider = remote.provider;
+    }
+    if (patch.category != null) {
+      if (
+        typeof patch.category !== "string" ||
+        patch.category.trim().length > 80 ||
+        /[\x00-\x1f]/.test(patch.category)
+      )
+        throw new Error("Invalid repository category");
+      patch.category = patch.category.trim();
     }
     if (patch.default_branch) repositoryBranch(patch.default_branch);
     const existing = await repositories.get(name, db);
@@ -95,7 +107,7 @@ export const repositories = {
     if (existing?.repository_url && patch.repository_url === undefined) {
       const remote = repositoryRemote(existing.repository_url);
       patch.remote_slug = `${remote.workspace}/${remote.slug}`;
-      patch.provider = "bitbucket";
+      patch.provider = remote.provider;
     }
     const cols = EDITABLE.filter((k) => patch[k] !== undefined);
     if (!existing) {
@@ -322,6 +334,7 @@ export function rankRepositories(
         ["tags", r.tags.flatMap(tokens), 2],
         ["description", tokens(r.description), 1],
         ["architecture", tokens(r.architecture), 1],
+        ["category", tokens(r.category ?? ""), 1],
       ];
       for (const [field, fieldTokens, weight] of fields) {
         const hits = fieldTokens.filter((t) => words.has(t));

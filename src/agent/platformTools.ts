@@ -19,6 +19,7 @@ import { execFile } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { config, codeIntelligenceEnabled } from "../config.ts";
+import { protectedRootsFor } from "../platform/selfDevelopment.ts";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { repositories, repoPath } from "../repos/service.ts";
@@ -653,7 +654,7 @@ export async function envFromDatabase(
       mode,
       workspaces: ws.map((w: { path: string }) => w.path),
       baseBranch: config.baseBranch,
-      protectedRoots: [config.reposRoot, ...localPaths],
+      protectedRoots: protectedRootsFor([config.reposRoot, ...localPaths]),
     },
     log: (kind, text, data) =>
       runEvents.add(pool, run.id, kind, text, step.id, attempt.id, data ?? null),

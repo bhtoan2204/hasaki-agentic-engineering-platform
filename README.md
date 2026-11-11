@@ -3,7 +3,7 @@
 Workflow-driven AI engineering platform. Engineering requests (**work items**: manual, Hasaki Work, Jira) are executed
 by reusable, versioned **workflows** made of typed steps (AI agent, coding agent, human input, approval, command,
 condition, integration, pull request). Every step has durable state, attempt history, questions, checkpoints and
-context snapshots in PostgreSQL. Claude Code (Agent SDK) is the executor for agent steps; Bitbucket is the Git provider.
+context snapshots in PostgreSQL. Claude Code (Agent SDK) is the executor for agent steps. Bitbucket and GitHub are the Git providers.
 
 Importing a task **never** executes anything. You pick a workflow and start a run (or set an explicit automation policy).
 
@@ -73,6 +73,14 @@ proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` c
 
 The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a free client
 (`database.poolMax` / `database.connectionTimeoutMillis` in config.json, or `DATABASE_POOL_MAX` / `DATABASE_CONNECTION_TIMEOUT_MS`).
+
+## Self-development
+
+The running installation can be a normal registered repository. An administrator registers its GitHub (or Bitbucket) URL, default branch and category, then grants access per user. Admin rights do not grant source access. The workflow `platform-self-development` is the built-in template: analyse, confirm repositories, plan, approve, implement in a worktree, targeted tests, independent review, full `npm test`, then a pull request. It uses the existing engine, checkpoints and UI.
+
+The live checkout is never the worktree. Git operations refuse that directory, edits outside the run worktree are denied, and test commands for that repository do not receive `DATABASE_URL`, `AUTH_SECRET` or Git tokens. When `bwrap` is installed, those commands run with the live tree mounted read-only. Without it, set `platform.trustedOperatorIsolation` only on a single-operator workstation; Claude and Cursor coding stay policy-enforced and are refused until that flag is set. Codex coding uses its OS sandbox. The server is not restarted and nothing is merged automatically.
+
+Details, the gap analysis and the limitations are in [`docs/architecture/self-development.md`](docs/architecture/self-development.md).
 
 ## Language
 

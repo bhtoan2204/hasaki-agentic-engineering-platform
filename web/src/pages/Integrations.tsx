@@ -1066,6 +1066,58 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
   );
 }
 
+function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
+  const { t } = useI18n();
+  const { data: st, reload } = useApi<any>("/api/integrations/github");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const r = await act(() => api<any>("/api/integrations/github", { token }), t("ig.gh.saved"));
+    setBusy(false);
+    if (r) (setToken(""), reload());
+  };
+  return (
+    <Row
+      id="github"
+      icon={GitPullRequest}
+      title="GitHub"
+      health={!st ? "loading" : st.configured ? "ok" : "off"}
+      {...p}
+      summary={st?.configured ? st.token : t("ig.gh.summaryOff")}
+    >
+      <p className="muted small">{t("ig.gh.body")}</p>
+      <Field label={t("ig.gh.token")}>
+        <input
+          type="password"
+          autoComplete="off"
+          value={token}
+          placeholder={st?.configured ? t("ig.keep") : t("ig.gh.tokenPh")}
+          onChange={(e) => setToken(e.target.value)}
+        />
+      </Field>
+      <div className="ig-actions">
+        <button className="sm" disabled={busy || !token} onClick={save}>
+          <KeyRound size={14} strokeWidth={2} />
+          {busy ? t("ig.checking") : t("ig.save")}
+        </button>
+        {st?.personal && (
+          <button
+            className="sm ghost"
+            onClick={async () =>
+              (await act(() => api("/api/integrations/github/clear", {}), t("ig.removed"))) &&
+              (setToken(""), reload())
+            }
+          >
+            <LogOut size={14} strokeWidth={2} />
+            {t("ig.removePlatform")}
+          </button>
+        )}
+      </div>
+    </Row>
+  );
+}
+
 function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/telegram");
@@ -1376,6 +1428,7 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
         <h3 className="ig-group-title">{t("ig.accounts")}</h3>
         <div className="ig-list">
           <Bitbucket {...row("bitbucket")} />
+          <GitHubAccount {...row("github")} />
           <Telegram {...row("telegram")} />
         </div>
       </section>

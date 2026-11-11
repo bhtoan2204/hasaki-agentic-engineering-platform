@@ -90,6 +90,26 @@ export interface Config {
     token: string;
     reviewers: string[]; // Bitbucket account UUIDs, e.g. "{xxxxxxxx-...}"
   };
+  /**
+   * GitHub operations for repositories registered with a github.com URL. Personal tokens live in user secrets.
+   * The process token is used for clone/push/PR only when allowSharedCredentials is true, and never as a permission grant.
+   */
+  github: {
+    allowSharedCredentials?: boolean;
+    /** Same meanings as bitbucket.accessVerification, checked with the user's GitHub token. */
+    accessVerification?: "strict" | "personal" | "trusted";
+    token: string;
+  };
+  /**
+   * This installation's own source repository. Empty repositoryUrl is detected from the live checkout's origin.
+   * trustedOperatorIsolation allows Claude/Cursor coding and unsandboxed test commands on a single-operator machine.
+   */
+  platform: {
+    repositoryUrl: string;
+    trustedOperatorIsolation: boolean;
+    /** Local PostgreSQL URL used only to CREATE DATABASE for self-development tests. Empty derives database `postgres`. */
+    testDatabaseAdminUrl: string;
+  };
   /** Optional: POST {text} here on question / PR / failure (Google Chat, Slack incoming webhook...). */
   notifyWebhook: string;
   /** Public URL of this platform, used in notifications. */
@@ -335,6 +355,8 @@ const defaults: Config = {
   relatedProjects: {},
   fileBaseUrl: "",
   bitbucket: { workspace: "hasaki-tech", user: "", token: "", reviewers: [] },
+  github: { allowSharedCredentials: false, accessVerification: "strict", token: "" },
+  platform: { repositoryUrl: "", trustedOperatorIsolation: false, testDatabaseAdminUrl: "" },
   notifyWebhook: "",
   publicUrl: "",
   model: "",
@@ -454,6 +476,8 @@ function load(): Config {
       },
     },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
+    github: { ...defaults.github, ...(fromFile.github ?? {}) },
+    platform: { ...defaults.platform, ...(fromFile.platform ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
     instance: { ...defaults.instance, ...(fromFile.instance ?? {}) },
@@ -577,6 +601,15 @@ function load(): Config {
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
   cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;
+  cfg.github.token = process.env.GITHUB_TOKEN ?? cfg.github.token;
+  if (process.env.PLATFORM_REPOSITORY_URL)
+    cfg.platform.repositoryUrl = process.env.PLATFORM_REPOSITORY_URL;
+  if (process.env.PLATFORM_TRUSTED_OPERATOR_ISOLATION === "1")
+    cfg.platform.trustedOperatorIsolation = true;
+  if (process.env.PLATFORM_TRUSTED_OPERATOR_ISOLATION === "0")
+    cfg.platform.trustedOperatorIsolation = false;
+  if (process.env.PLATFORM_TEST_DATABASE_ADMIN_URL)
+    cfg.platform.testDatabaseAdminUrl = process.env.PLATFORM_TEST_DATABASE_ADMIN_URL;
   cfg.notifyWebhook = process.env.NOTIFY_WEBHOOK ?? cfg.notifyWebhook;
   if (process.env.PORT) cfg.port = Number(process.env.PORT);
   if (!cfg.publicUrl) cfg.publicUrl = `http://localhost:${cfg.port}`;

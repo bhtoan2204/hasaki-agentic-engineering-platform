@@ -23,6 +23,7 @@ import { CacheAside, singleflight } from "../cache/index.ts";
 import { getUserSecret } from "../auth/secrets.ts";
 import { repositories, projectScope, type RepositoryRow } from "./service.ts";
 import { repositoryRemote } from "./remote.ts";
+import { githubRepositoryAccess } from "../github.ts";
 
 export type RepoAction = "read" | "write" | "pull_request";
 export type AccessLevel = "none" | RepoAction;
@@ -109,10 +110,14 @@ function loadUser(userId: number, db: Db) {
   return db === pool ? userCache.get(String(userId), load) : load();
 }
 
-const policy = () => config.bitbucket.accessVerification ?? "strict";
 const ttlSeconds = () => Math.max(30, Number(config.bitbucket.permissionTtlSeconds ?? 900));
-/** Repositories whose permissions Bitbucket can tell us about: a registered Bitbucket remote. */
-const onBitbucket = (r: RepositoryRow) => !!r.repository_url && r.provider === "bitbucket";
+/** Hosted remotes whose permissions are checked with the user's own token. Local and benchmark rows are not. */
+const onHosted = (r: RepositoryRow) =>
+  !!r.repository_url && (r.provider === "bitbucket" || r.provider === "github");
+const hostPolicy = (r: RepositoryRow) =>
+  (r.provider === "github"
+    ? config.github.accessVerification
+    : config.bitbucket.accessVerification) ?? "strict";
 
 function compute(
   userId: number,
@@ -147,16 +152,16 @@ function compute(
   }
   // 2. Bitbucket
   let bitbucket: EffectivePermissions["bitbucket"];
-  if (!onBitbucket(r))
+  if (!onHosted(r))
     bitbucket = {
       state: "not_applicable",
       read: true,
       write: true,
-      reason: "no Bitbucket remote registered",
+      reason: "no hosted Git remote registered",
       checked_at: null,
       stale: false,
     };
-  else if (policy() === "trusted")
+  else if (hostPolicy(r) === "trusted")
     bitbucket = {
       state: "trusted",
       read: true,
@@ -194,7 +199,7 @@ function compute(
     bitbucket.state === "not_applicable" ||
     bitbucket.state === "trusted" ||
     (bitbucket.state === "verified" &&
-      (bitbucket.write === true || (bitbucket.write == null && policy() === "personal")));
+      (bitbucket.write === true || (bitbucket.write == null && hostPolicy(r) === "personal")));
   // 3. repository
   const repository_actions = {
     read: r.enabled && r.allowed_actions.includes("read"),
@@ -455,6 +460,12 @@ export function setBitbucketPermissionChecker(fn: typeof checker | null) {
   checker = fn ?? askBitbucket;
 }
 
+let githubChecker: (token: string, owner: string, repo: string) => Promise<Verdict> =
+  githubRepositoryAccess;
+export function setGithubPermissionChecker(fn: typeof githubChecker | null) {
+  githubChecker = fn ?? githubRepositoryAccess;
+}
+
 async function askBitbucket(
   creds: { user: string; token: string },
   ws: string,
@@ -515,13 +526,13 @@ async function askBitbucket(
 
 /** Refresh missing/expired checks of `userId` for `repos` (all of them with `force`). One flight per user at a time. */
 export async function refreshBitbucket(userId: number, repos: RepositoryRow[], force: boolean) {
-  if (policy() === "trusted") return;
   const now = Date.now();
   const { checks } = await loadUser(userId, pool);
   const known = new Map(checks.map((c) => [c.repository_id, c]));
   const due = repos.filter(
     (r) =>
-      onBitbucket(r) &&
+      onHosted(r) &&
+      hostPolicy(r) !== "trusted" &&
       (force ||
         !known.has(Number(r.id)) ||
         new Date(known.get(Number(r.id))!.expires_at).getTime() <= now),
@@ -532,6 +543,7 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
     async () => {
       const user = await getUserSecret(userId, "bitbucket_user");
       const token = await getUserSecret(userId, "bitbucket_token");
+      const githubToken = await getUserSecret(userId, "github_token");
       // A shared service account proves nothing about this user: without personal credentials the state is unknown.
       const creds = user && token ? { user, token } : null;
       const verdicts: Array<[RepositoryRow, Verdict]> = [];
@@ -539,6 +551,20 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
         verdicts.push(
           ...(await Promise.all(
             due.slice(i, i + 4).map(async (r): Promise<[RepositoryRow, Verdict]> => {
+              const remote = repositoryRemote(r.repository_url!);
+              if (r.provider === "github") {
+                if (!githubToken)
+                  return [
+                    r,
+                    {
+                      state: "unknown",
+                      can_read: null,
+                      can_write: null,
+                      reason: "no personal GitHub token (Integrations → GitHub)",
+                    },
+                  ];
+                return [r, await githubChecker(githubToken, remote.workspace, remote.slug)];
+              }
               if (!creds)
                 return [
                   r,
@@ -549,7 +575,6 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
                     reason: "no personal Bitbucket credentials (Integrations → Bitbucket)",
                   },
                 ];
-              const remote = repositoryRemote(r.repository_url!);
               return [r, await checker(creds, remote.workspace, remote.slug)];
             }),
           )),
@@ -749,7 +774,7 @@ export async function accessMatrix() {
     "SELECT user_id, repository_id, state, can_read, can_write, reason, checked_at, expires_at FROM repository_bitbucket_permissions",
   );
   return {
-    policy: policy(),
+    policy: config.bitbucket.accessVerification ?? "strict",
     repositories: repos.map((r) => ({
       id: Number(r.id),
       name: r.name,
@@ -758,7 +783,8 @@ export async function accessMatrix() {
       enabled: r.enabled,
       allowed_actions: r.allowed_actions,
       shared_access: r.shared_access ?? "none",
-      bitbucket: onBitbucket(r),
+      bitbucket: onHosted(r),
+      host_policy: hostPolicy(r),
     })),
     users: users.map((u) => ({ ...u, id: Number(u.id) })),
     grants: grants.map((g) => ({

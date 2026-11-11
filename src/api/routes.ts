@@ -86,8 +86,11 @@ import {
   adoptEnv,
   bitbucketStatus,
   clearBitbucket,
+  clearGithub,
   clearTelegram,
+  githubStatus,
   setBitbucket,
+  setGithub,
   setTelegram,
   setTelegramMode,
   setTelegramDestination,
@@ -1640,9 +1643,9 @@ export const routes: Route[] = [
     async ({ p, body, actor }) => {
       requireAdmin(actor);
       if (!(await repositories.get(p[0]))) {
-        if (body.provider && body.provider !== "bitbucket")
-          throw new HttpError(400, "Only Bitbucket HTTPS repositories can be registered");
-        repositoryRemote(body.repository_url);
+        const remote = repositoryRemote(body.repository_url);
+        if (body.provider && body.provider !== remote.provider)
+          throw new HttpError(400, `Provider must match the repository URL (${remote.provider})`);
       }
       // Registration never grants access; shared access is a separate, explicit admin action.
       const { shared_access: _ignored, ...patch } = body;
@@ -1897,6 +1900,9 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/bitbucket$/, ({ actor }) => bitbucketStatus(actor.id)],
   ["POST", /^\/api\/integrations\/bitbucket$/, ({ body, actor }) => setBitbucket(body, actor.id)],
   ["POST", /^\/api\/integrations\/bitbucket\/clear$/, ({ actor }) => clearBitbucket(actor.id)],
+  ["GET", /^\/api\/integrations\/github$/, ({ actor }) => githubStatus(actor.id)],
+  ["POST", /^\/api\/integrations\/github$/, ({ body, actor }) => setGithub(body, actor.id)],
+  ["POST", /^\/api\/integrations\/github\/clear$/, ({ actor }) => clearGithub(actor.id)],
   [
     "POST",
     /^\/api\/integrations\/bitbucket\/adopt-env$/,

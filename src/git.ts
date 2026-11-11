@@ -2,8 +2,14 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { remoteGit } from "./repos/git.ts";
-import { legacyBitbucketHttpsUrl, repositoryBranch } from "./repos/remote.ts";
+import {
+  canonicalizeDetectedUrl,
+  legacyBitbucketHttpsUrl,
+  repositoryBranch,
+  repositoryRemote,
+} from "./repos/remote.ts";
 import { resolveRepoPath, unsafeRelativePath } from "./repos/paths.ts";
+import { overlapsLiveApplication } from "./platform/selfDevelopment.ts";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
 
@@ -11,15 +17,15 @@ const exec = promisify(execFile);
 
 async function git(cwd: string, ...args: string[]) {
   if (["fetch", "push"].includes(args[0])) {
-    const remote = legacyBitbucketHttpsUrl(
-      (
-        await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])
-      ).stdout.trim(),
-    );
-    if (remote.startsWith("https://bitbucket.org/")) {
+    const raw = (
+      await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])
+    ).stdout.trim();
+    const remote = canonicalizeDetectedUrl(legacyBitbucketHttpsUrl(raw)) ?? "";
+    if (remote.startsWith("https://bitbucket.org/") || remote.startsWith("https://github.com/")) {
       // Use the validated explicit URL, not mutable pushurl or URL rewrite configuration.
-      const safe = args.map((a) => (a === "origin" ? remote : a));
-      return remoteGit(remote, safe, cwd);
+      const canonical = repositoryRemote(remote).url;
+      const safe = args.map((a) => (a === "origin" ? canonical : a));
+      return remoteGit(canonical, safe, cwd);
     }
   }
   const { stdout } = await exec(
@@ -83,8 +89,14 @@ export async function prepareBranch(
   repositoryBranch(branch);
   const baseBranch = repositoryBranch(opts.defaultBranch || config.baseBranch);
   const repoPath = opts.checkoutPath ?? resolveRepoPath({ name: repo, path: relPath });
+  if (overlapsLiveApplication(repoPath))
+    throw new Error(
+      "Refusing to run Git operations against the running application checkout. Workflows use an isolated clone and worktree.",
+    );
   if (!existsSync(join(repoPath, ".git"))) throw new Error(`repo not found: ${repoPath}`);
   const wt = opts.workspacePath ?? join(taskDir(code), repo);
+  if (overlapsLiveApplication(wt))
+    throw new Error("Refusing to place a worktree inside the running application checkout");
   mkdirSync(join(wt, ".."), { recursive: true });
   const parent = relative(realpathSync(config.dataDir), realpathSync(join(wt, "..")));
   if (unsafeRelativePath(parent)) throw new Error("Worktree parent escapes local dataDir");
@@ -114,7 +126,9 @@ export async function prepareBranch(
     // If the developer has this branch checked out in the main tree, git refuses a second worktree: reuse theirs.
     const mainBranch = await git(repoPath, "branch", "--show-current");
     if (mainBranch === branch)
-      return { repo, branch, path: repoPath, createdFrom: "developer's own checkout" };
+      throw new Error(
+        `${repo}: branch ${branch} is checked out in the primary checkout. Workflows do not write that tree; use another branch or move the checkout.`,
+      );
     await git(repoPath, "worktree", "add", wt, branch);
     // Continuing an existing branch: catch up with origin when the local copy is only behind (never rewrites history).
     if (opts.mustExist && (await refExists(repoPath, `refs/remotes/origin/${branch}`)))

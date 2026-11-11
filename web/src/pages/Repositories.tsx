@@ -95,7 +95,7 @@ function Actions({ items }: { items?: string[] }) {
 const repoDir = (r: any) => r.repository_url || r.path || r.name;
 
 /** The caller's effective access to one repository (platform grant ∩ Bitbucket ∩ repository policy). */
-function AccessCard({ access }: { access: any }) {
+function AccessCard({ access, provider }: { access: any; provider?: string }) {
   const { t } = useI18n();
   if (!access) return null;
   return (
@@ -112,9 +112,10 @@ function AccessCard({ access }: { access: any }) {
           <dd>{access.source ? t(`repo.source.${access.source}`) : "—"}</dd>
         </div>
         <div>
-          <dt>Bitbucket</dt>
+          <dt>{provider === "github" ? "GitHub" : "Bitbucket"}</dt>
           <dd>
             <BitbucketState
+              host={provider}
               state={access.bitbucket.state}
               reason={access.bitbucket.reason}
               stale={access.bitbucket.stale}
@@ -223,6 +224,7 @@ export function RepositoriesPage({
             provider: "bitbucket",
             repository_url: "",
             default_branch: "",
+            category: "",
             description: "",
             architecture: "",
             enabled: true,
@@ -384,6 +386,10 @@ export function RepositoriesPage({
                     <dd>{r.provider || <span className="muted">—</span>}</dd>
                   </div>
                   <div>
+                    <dt>{t("repo.category")}</dt>
+                    <dd>{r.category || <span className="muted">—</span>}</dd>
+                  </div>
+                  <div>
                     <dt>{t("repo.defaultBranch")}</dt>
                     <dd className="mono">
                       {r.default_branch || (
@@ -394,7 +400,11 @@ export function RepositoriesPage({
                 </dl>
               </div>
 
-              {manage ? <RepositoryAccessAdmin only={r.name} /> : <AccessCard access={r.access} />}
+              {manage ? (
+                <RepositoryAccessAdmin only={r.name} />
+              ) : (
+                <AccessCard access={r.access} provider={r.provider} />
+              )}
               {!manage && (
                 <>
                   <section className="card">
@@ -793,8 +803,11 @@ export function RepositoriesPage({
                     {r.access?.bitbucket?.state &&
                       r.access.bitbucket.state !== "not_applicable" && (
                         <div>
-                          <span className="repo-label-inline">Bitbucket</span>
+                          <span className="repo-label-inline">
+                            {r.provider === "github" ? "GitHub" : "Bitbucket"}
+                          </span>
                           <BitbucketState
+                            host={r.provider}
                             state={r.access.bitbucket.state}
                             reason={r.access.bitbucket.reason}
                             stale={r.access.bitbucket.stale}
@@ -942,12 +955,17 @@ function RepoForm({
           onChange={(e) => setForm({ ...form, provider: e.target.value })}
         >
           <option value="bitbucket">Bitbucket</option>
+          <option value="github">GitHub</option>
         </select>
       </Field>
       <Field label={t("repo.url")}>
         <input
           value={form.repository_url ?? ""}
-          placeholder="https://bitbucket.org/workspace/repository.git"
+          placeholder={
+            form.provider === "github"
+              ? "https://github.com/owner/repository.git"
+              : "https://bitbucket.org/workspace/repository.git"
+          }
           onChange={(e) => setForm({ ...form, repository_url: e.target.value })}
         />
       </Field>
@@ -970,6 +988,13 @@ function RepoForm({
         <input
           value={form.default_branch ?? ""}
           onChange={(e) => setForm({ ...form, default_branch: e.target.value })}
+        />
+      </Field>
+      <Field label={t("repo.category")}>
+        <input
+          value={form.category ?? ""}
+          placeholder={t("repo.categoryPh")}
+          onChange={(e) => setForm({ ...form, category: e.target.value })}
         />
       </Field>
       <Field label={t("repo.desc")}>

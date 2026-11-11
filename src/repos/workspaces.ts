@@ -16,6 +16,7 @@ import {
 } from "./paths.ts";
 import { remoteGit } from "./git.ts";
 import { repositoryRemote } from "./remote.ts";
+import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 
 const exec = promisify(execFile);
 
@@ -66,6 +67,10 @@ export async function prepareRepository(
   const remote = repositoryRemote(repo.repository_url);
   return repositoryLock(repo, async () => {
     const path = persistedPath ?? resolveRepoPath(repo);
+    if (overlapsLiveApplication(path))
+      throw new Error(
+        `Refusing to prepare ${repo.name}: the checkout overlaps the running application source tree`,
+      );
     const sync = () =>
       remoteGit(
         remote.url,

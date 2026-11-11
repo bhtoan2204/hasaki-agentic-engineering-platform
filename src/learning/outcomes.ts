@@ -16,7 +16,7 @@
  */
 import { config } from "../config.ts";
 import { pool, q, one, json, type Db } from "../db/pool.ts";
-import { gitProvider, workspacesOf } from "../git/provider.ts";
+import { gitProviderFor, workspacesOf } from "../git/provider.ts";
 import { repositoryBaseBranch, repositoryReference } from "../repos/service.ts";
 import { collectScopeState, TEST_FILE } from "../agent/scopeGuard.ts";
 import { costTotalsForRuns } from "../report/cost.ts";
@@ -498,8 +498,7 @@ export async function collectOutcomeFacts(
  * A merge is recorded only when the provider says MERGED; failures leave the state unknown, never guessed.
  */
 export async function syncPullRequestStates(opts: { runId?: number; limit?: number } = {}) {
-  const provider = gitProvider();
-  if (!provider.pullRequestState)
+  if (!gitProviderFor("bitbucket").pullRequestState && !gitProviderFor("github").pullRequestState)
     return { checked: 0, updated: 0, errors: ["the git provider cannot report PR states"] };
   const rows = await q<any>(
     pool,
@@ -513,6 +512,8 @@ export async function syncPullRequestStates(opts: { runId?: number; limit?: numb
   for (const r of rows) {
     try {
       const reg = await one<any>(pool, "SELECT * FROM repositories WHERE name = $1", [r.repo]);
+      const provider = gitProviderFor(reg?.provider);
+      if (!provider.pullRequestState) continue;
       const st = await provider.pullRequestState({
         repo: reg ? repositoryReference(reg) : r.repo,
         url: r.url,

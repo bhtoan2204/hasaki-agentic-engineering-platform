@@ -124,8 +124,9 @@ export const WorkflowSpec = z.object({
   /**
    * read_only: the workflow may not contain steps that change code or external state (coding_agent, command,
    * git_pull_request); its agent steps run with read-only tools only. Enforced by validateSpec.
+   * self_development: same steps as standard, but FAST keeps the independent review.
    */
-  execution_mode: z.enum(["standard", "read_only"]).optional(),
+  execution_mode: z.enum(["standard", "read_only", "self_development"]).optional(),
   /** Intent routing: suggest this workflow when a request matches (see investigation/request.ts scoreTriggers). */
   triggers: z
     .object({

@@ -4,9 +4,7 @@
   "baseBranch": "release/prod",
   "projects": {},
   "relatedProjects": {
-    "OMS": [
-      "Payment"
-    ]
+    "OMS": ["Payment"]
   },
   "fileBaseUrl": "",
   "bitbucket": {
@@ -17,6 +15,16 @@
     "allowSharedCredentials": false,
     "accessVerification": "strict",
     "permissionTtlSeconds": 900
+  },
+  "github": {
+    "token": "",
+    "allowSharedCredentials": false,
+    "accessVerification": "strict"
+  },
+  "platform": {
+    "repositoryUrl": "",
+    "trustedOperatorIsolation": false,
+    "testDatabaseAdminUrl": ""
   },
   "notifyWebhook": "",
   "database": {
@@ -100,12 +108,8 @@
     "locale": "en-US",
     "environment": "production",
     "timezone": "Asia/Ho_Chi_Minh",
-    "allowedIndexes": [
-      "k8s_prod"
-    ],
-    "defaultIndexes": [
-      "k8s_prod"
-    ],
+    "allowedIndexes": ["k8s_prod"],
+    "defaultIndexes": ["k8s_prod"],
     "maxMinutes": 10080,
     "maxResults": 500,
     "timeoutSeconds": 60,

@@ -2,7 +2,7 @@ import { networkCode } from "../telegram/client.ts";
 import { forgetBitbucketChecks } from "../repos/access.ts";
 import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
 import { botKey } from "../telegram/client.ts";
-import { pool, one } from "../db/pool.ts";
+import { pool, one, q } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { config } from "../config.ts";
 import { settings } from "../db.ts";
@@ -324,6 +324,67 @@ export async function setBitbucket(
     ...(await bitbucketStatus(userId)),
     account: me?.ok ? (me.body.display_name ?? me.body.username ?? null) : null,
   };
+}
+
+export async function githubStatus(userId?: number) {
+  const personal = userId ? await getUserSecret(userId, "github_token") : null;
+  const shared =
+    config.github.allowSharedCredentials && config.github.token ? config.github.token : "";
+  const token = personal || shared || "";
+  return {
+    configured: !!token,
+    source: personal ? "user" : shared ? "shared" : "none",
+    personal: !!personal,
+    token: mask(token),
+  };
+}
+
+/** Save a personal GitHub token. A classic token must include repo or public_repo. Fine-grained tokens omit scopes. */
+export async function setGithub(input: { token?: string }, userId?: number) {
+  const token = String(input.token ?? "").trim();
+  if (!token) throw new Error("GitHub token is required");
+  if (!userId) throw new Error("GitHub credentials are saved per user");
+  const res = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "hasaki-agentic-engineering-platform",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (res.status === 401) throw new Error("GitHub token was rejected");
+  if (!res.ok) throw new Error(`GitHub ${res.status} while checking the token`);
+  const scopes = res.headers.get("x-oauth-scopes");
+  if (scopes && scopes.trim()) {
+    const list = scopes.split(",").map((s) => s.trim());
+    if (!list.some((s) => s === "repo" || s === "public_repo"))
+      throw new Error(
+        "GitHub token needs the repo or public_repo scope, or use a fine-grained token with Contents and Pull requests on this repository only",
+      );
+  }
+  const body = await res.json().catch(() => ({}));
+  await putUserSecret(userId, "github_token", token);
+  await q(
+    pool,
+    `DELETE FROM repository_bitbucket_permissions p USING repositories r
+     WHERE p.repository_id = r.id AND p.user_id = $1 AND r.provider = 'github'`,
+    [userId],
+  );
+  return { ...(await githubStatus(userId)), login: body.login ?? null };
+}
+
+export async function clearGithub(userId?: number) {
+  if (userId) {
+    await deleteUserSecret(userId, "github_token");
+    await q(
+      pool,
+      `DELETE FROM repository_bitbucket_permissions p USING repositories r
+       WHERE p.repository_id = r.id AND p.user_id = $1 AND r.provider = 'github'`,
+      [userId],
+    );
+  }
+  return githubStatus(userId);
 }
 
 export async function clearBitbucket(userId?: number) {

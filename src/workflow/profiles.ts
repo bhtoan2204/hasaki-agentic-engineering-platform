@@ -343,7 +343,10 @@ export function applyProfile(
     (s) => anc.has(s.key) && s.type === "human_approval" && !s.config.select_repositories,
   );
   const reviews = spec.steps.filter(
-    (s) => downstream(spec.steps, coding.key).has(s.key) && s.type === "agent",
+    (s) =>
+      spec.execution_mode !== "self_development" &&
+      downstream(spec.steps, coding.key).has(s.key) &&
+      s.type === "agent",
   );
   // A configured agent boundary carries provider, permissions and verification semantics that cannot be folded away.
   const configured = [...merged, ...reviews].find(

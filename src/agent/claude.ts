@@ -1,3 +1,8 @@
+import {
+  assertSelfCodingIsolation,
+  isSelfRepository,
+  protectedRootsFor,
+} from "../platform/selfDevelopment.ts";
 import { resolveStepAgent } from "./stepAgent.ts";
 export { modelFor, codexModelFor } from "./stepAgent.ts";
 import { agentEnvironment } from "./environment.ts";
@@ -455,7 +460,9 @@ const agentExecutor: StepExecutor = {
         kind: "failed",
         error: `Assigned skill cannot run with provider ${provider} on this platform: ${unavailable
           .map((u) => `${u.key} (${u.reason})`)
-          .join("; ")}. Remove the assignment or run the step with a provider/runtime that supports it.`,
+          .join(
+            "; ",
+          )}. Remove the assignment or run the step with a provider/runtime that supports it.`,
         retryable: false,
       };
     {
@@ -530,6 +537,18 @@ const agentExecutor: StepExecutor = {
           },
         };
     }
+    if (mode === "coding") {
+      for (const name of ctx.run.selected_repositories ?? []) {
+        const row = await repositories.get(name);
+        if (!row || !(await isSelfRepository(row))) continue;
+        try {
+          assertSelfCodingIsolation(provider);
+        } catch (e) {
+          return { kind: "failed", error: (e as Error).message, retryable: false };
+        }
+        break;
+      }
+    }
     const ws = (await workspacesOf(ctx.run.id)).filter(
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
@@ -542,7 +561,10 @@ const agentExecutor: StepExecutor = {
       mode,
       workspaces: ws.map((w) => w.path),
       baseBranch: config.baseBranch,
-      protectedRoots: [config.reposRoot, ...(ctx.context.repoPaths ?? []).map((r) => r.path)],
+      protectedRoots: protectedRootsFor([
+        config.reposRoot,
+        ...(ctx.context.repoPaths ?? []).map((r) => r.path),
+      ]),
       delegation,
       isReadOnlyIntegration: (name) =>
         integrationTools().find((t) => t.name === name)?.readOnly === true,

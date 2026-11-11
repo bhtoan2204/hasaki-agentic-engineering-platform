@@ -30,6 +30,49 @@ export const TEST_POLICY =
   "it only exercised the infrastructure and has no business assertion left. Never add a new test that needs remote infrastructure. " +
   "List every rewritten or deleted test with the reason under verification.";
 
+/**
+ * Verification for this platform (TypeScript). The parent process strips DATABASE_URL and other secrets before the
+ * shell starts; these guards refuse to continue if that isolation is missing. Targeted tests map changed modules to
+ * test files. The full `npm test` script runs once, later, on the same commit.
+ */
+const SELF_TEST_GUARD = `set -euo pipefail
+if [ -n "\${DATABASE_URL:-}" ]; then echo "refusing verification: DATABASE_URL is set" >&2; exit 2; fi
+admin="\${TEST_DATABASE_ADMIN_URL:-}"
+case "$admin" in
+  */platform|*/platform\\?*) echo "refusing verification: admin URL names the application database" >&2; exit 2 ;;
+esac
+if [ ! -f package.json ]; then echo "package.json is required" >&2; exit 1; fi
+if [ ! -x node_modules/.bin/tsc ]; then npm ci --ignore-scripts --no-audit --no-fund; fi`;
+
+export const PLATFORM_TARGETED_COMMAND = `${SELF_TEST_GUARD}
+base="origin/$BASE_BRANCH"
+changed=$(git diff --name-only "$base...HEAD" || true)
+echo "== typecheck"
+npx --no-install tsc -p . --pretty false --noEmit --incremental false
+files=$(printf '%s\\n' "$changed" | grep -E '\\.(ts|tsx)$' || true)
+if [ -n "$files" ]; then
+  echo "== eslint (changed files)"
+  printf '%s\\n' "$files" | xargs -r npx --no-install eslint --no-error-on-unmatched-pattern
+fi
+tests=$(
+  {
+    printf '%s\\n' "$changed" | grep -E '^test/.*\\.test\\.ts$' || true
+    printf '%s\\n' "$changed" | sed -n 's|^src/\\(.*\\)\\.ts$|test/\\1.test.ts|p'
+    printf '%s\\n' "$changed" | sed -n 's|.*/\\([^/]*\\)\\.ts$|test/\\1.test.ts|p'
+  } | sort -u | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && printf '%s\\n' "$f"; done
+)
+if [ -n "$tests" ]; then
+  echo "== targeted tests"
+  # shellcheck disable=SC2086
+  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 $tests
+else
+  echo "no matching test files for the diff; targeted suite skipped"
+fi`;
+
+export const PLATFORM_REGRESSION_COMMAND = `${SELF_TEST_GUARD}
+echo "== full regression (npm test)"
+npm test`;
+
 const ANALYZE = {
   instructions:
     "Analyse the engineering request. Restate the goal, list functional requirements, acceptance criteria, " +
@@ -55,6 +98,16 @@ const IMPLEMENT = {
     TEST_POLICY,
   output_contract:
     "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }",
+};
+
+const SELF_IMPLEMENT = {
+  ...IMPLEMENT,
+  instructions:
+    IMPLEMENT.instructions +
+    " This run targets the platform that is executing it. Call prepare_branch and edit only the returned worktree. " +
+    "Do not write the running checkout, restart the server, deploy, merge, or run schema migrations against the application database. " +
+    "Do not read .env, config.json or credential files. Do not weaken tool policy, authorization or test isolation to make the task pass. " +
+    "A later step runs the full test script in a separate process with an isolated database.",
 };
 
 /** Code review follow-up: fix what the review found, on the reviewed branch. */
@@ -804,4 +857,109 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     },
   },
   { key: "production-incident-investigation", spec: PRODUCTION_INVESTIGATION },
+  {
+    key: "platform-self-development",
+    spec: {
+      name: "Platform Self-Development",
+      description:
+        "Change this platform in an isolated worktree: analyse, plan, approve, implement, targeted tests, independent review, full regression, GitHub or Bitbucket pull request. The running checkout is not modified.",
+      category: "Platform / Internal Tooling",
+      execution_mode: "self_development",
+      feedback_step: "implement",
+      steps: [
+        { key: "analyze", type: "agent", name: "Requirement Analysis", config: ANALYZE },
+        {
+          key: "discover",
+          type: "integration",
+          name: "Repository Discovery",
+          depends_on: ["analyze"],
+          config: DISCOVER,
+        },
+        {
+          key: "confirm_repos",
+          type: "human_approval",
+          name: "Confirm Repositories",
+          depends_on: ["discover"],
+          config: CONFIRM_REPOS,
+        },
+        {
+          key: "plan",
+          type: "agent",
+          name: "Architecture Review & Plan",
+          depends_on: ["confirm_repos"],
+          config: {
+            instructions:
+              "Design the change for the confirmed repositories. Name the modules and dependencies affected, the test strategy " +
+              "(targeted checks first, full npm test before the pull request), and rollout risks. Do not plan a restart, deploy, " +
+              "merge, or migration of the running application's database. Reference concrete files (path:line).",
+            output_contract:
+              "{ summary, changes: [{ repo, files: string[], description }], tests: string[], risks: string[], alternatives: string[] }",
+          },
+        },
+        {
+          key: "approve_plan",
+          type: "human_approval",
+          name: "Approve Plan",
+          depends_on: ["plan"],
+          config: {
+            message: "Duyệt kế hoạch trước khi sửa mã nguồn của chính nền tảng.",
+            show_outputs: ["plan"],
+            on_reject: { reexecute: "plan" },
+          },
+        },
+        {
+          key: "implement",
+          type: "coding_agent",
+          name: "Implementation",
+          depends_on: ["approve_plan"],
+          config: SELF_IMPLEMENT,
+          max_attempts: 2,
+        },
+        {
+          key: "targeted_test",
+          type: "command",
+          name: "Targeted Tests",
+          depends_on: ["implement"],
+          config: {
+            command: PLATFORM_TARGETED_COMMAND,
+            timeout_seconds: 900,
+            on_failure: "ask",
+            require_workspace: true,
+          },
+        },
+        {
+          key: "review",
+          type: "agent",
+          name: "Code Review",
+          depends_on: ["targeted_test"],
+          config: {
+            ...REVIEW,
+            instructions:
+              REVIEW.instructions +
+              " This diff is to the platform that is running the review. Fail the review if it weakens authorization, " +
+              "tool policy, worktree isolation, secret handling, or makes tests use the application database.",
+          },
+        },
+        {
+          key: "regression_test",
+          type: "command",
+          name: "Full Regression",
+          depends_on: ["review"],
+          config: {
+            command: PLATFORM_REGRESSION_COMMAND,
+            timeout_seconds: 1800,
+            on_failure: "ask",
+            require_workspace: true,
+          },
+        },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["regression_test"],
+          config: { mode: "approval", content_from: "implement" },
+        },
+      ],
+    },
+  },
 ];

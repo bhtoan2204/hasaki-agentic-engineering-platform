@@ -9,13 +9,15 @@ import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest, pullRequestState } from "../bitbucket.ts";
+import { openGithubPullRequest, githubPullRequestState } from "../github.ts";
 import { prepareBranch, pushBranch } from "../git.ts";
+import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { validateCheckout } from "../repos/paths.ts";
 import { branchFor } from "../workflow/branches.ts";
 
 /**
- * Seam for Git hosting. Bitbucket is the only implementation today; a GitHub provider would implement the
- * same two calls. Worktree management stays provider-independent (src/git.ts).
+ * Seam for Git hosting. Bitbucket and GitHub implement the same calls. Worktree management stays in src/git.ts.
+ * Tests replace both hosts at once via setGitProvider.
  */
 export interface GitProvider {
   name: string;
@@ -41,28 +43,32 @@ export interface GitProvider {
   }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
 }
 
+async function pushFromWorktree(path: string, branch: string) {
+  const row = await one(
+    pool,
+    "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1",
+    [path],
+  );
+  if (
+    !row?.enabled ||
+    !row.allowed_actions.includes("write") ||
+    !row.allowed_actions.includes("pull_request")
+  )
+    throw new Error("Repository publication permission required");
+  // Re-checked at the moment of writing: the run owner's own permission, never the credentials' reach.
+  await requireRunRepositoryAccess(Number(row.workspace_run_id), row.name, "write");
+  if (overlapsLiveApplication(path))
+    throw new Error("Refusing to push from the running application checkout");
+  await validateCheckout(row, path);
+  await prepareRepository(row);
+  return repositoryLock(row, () =>
+    pushBranch(path, branch, row.default_branch || config.baseBranch),
+  );
+}
+
 export const bitbucketProvider: GitProvider = {
   name: "bitbucket",
-  push: async (path, branch) => {
-    const row = await one(
-      pool,
-      "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1",
-      [path],
-    );
-    if (
-      !row?.enabled ||
-      !row.allowed_actions.includes("write") ||
-      !row.allowed_actions.includes("pull_request")
-    )
-      throw new Error("Repository publication permission required");
-    // Re-checked at the moment of writing: the run owner's own permission, never the credentials' reach.
-    await requireRunRepositoryAccess(Number(row.workspace_run_id), row.name, "write");
-    await validateCheckout(row, path);
-    await prepareRepository(row);
-    return repositoryLock(row, () =>
-      pushBranch(path, branch, row.default_branch || config.baseBranch),
-    );
-  },
+  push: (path, branch) => pushFromWorktree(path, branch),
   openOrUpdatePullRequest: (pr) =>
     openPullRequest(pr.repo, pr.source, pr.title, pr.description, {
       draft: pr.draft,
@@ -71,11 +77,27 @@ export const bitbucketProvider: GitProvider = {
   pullRequestState: (pr) => pullRequestState(pr.repo, pr.url),
 };
 
-let current: GitProvider = bitbucketProvider;
-export const gitProvider = () => current;
-/** Replace the provider (tests, or a future GitHub provider chosen by config). */
+export const githubProvider: GitProvider = {
+  name: "github",
+  push: (path, branch) => pushFromWorktree(path, branch),
+  openOrUpdatePullRequest: (pr) =>
+    openGithubPullRequest(pr.repo, pr.source, pr.title, pr.description, {
+      draft: pr.draft,
+      dest: pr.target,
+    }),
+  pullRequestState: (pr) => githubPullRequestState(pr.repo, pr.url),
+};
+
+/** When set, tests and benchmarks handle every host. Production dispatches by repository provider. */
+let override: GitProvider | null = null;
+export const gitProvider = () => override ?? bitbucketProvider;
+export function gitProviderFor(provider?: string | null): GitProvider {
+  if (override) return override;
+  return provider === "github" ? githubProvider : bitbucketProvider;
+}
+/** Replace the provider for every host (tests and benchmarks). Pass bitbucketProvider to restore production dispatch. */
 export function setGitProvider(p: GitProvider) {
-  current = p;
+  override = p === bitbucketProvider ? null : p;
 }
 
 /** Filesystem-safe worktree directory key for a branch ("wf/run-12" → "wf_run-12"). */
