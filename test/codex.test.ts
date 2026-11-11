@@ -35,6 +35,7 @@ import {
   checkModel,
   redact,
 } from "../src/agent/codex/run.ts";
+import { npmCacheDir } from "../src/git/provider.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { contractKeys, missingContractKeys } from "../src/agent/contract.ts";
 import { claudeTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
@@ -447,7 +448,20 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
   }
   assert.ok(a.includes('sandbox_mode="read-only"'));
   assert.ok(c.includes('sandbox_mode="workspace-write"'));
-  assert.ok(c.includes('sandbox_workspace_write.writable_roots=["/w","/tmp/s"]'));
+  const cache = JSON.stringify(npmCacheDir());
+  assert.ok(c.includes(`sandbox_workspace_write.writable_roots=["/w","/tmp/s",${cache}]`));
+  assert.ok(c.some((x) => x.includes(`npm_config_cache=${cache}`)));
+  assert.ok(!c.some((x) => x.includes("ctp-agent-tmp") && x.includes("npm_config_cache")));
+  const worktree = codexArgs({
+    mode: "coding",
+    cwd: "/data/worktrees/inst/79/agent-720",
+    scratch: "/tmp/s",
+  });
+  assert.ok(
+    worktree.includes(
+      `sandbox_workspace_write.writable_roots=["/data/worktrees/inst/79","/data/worktrees/inst/79/agent-720","/tmp/s",${cache}]`,
+    ),
+  );
   assert.deepEqual(c.slice(0, 2), ["exec", "resume"]);
   assert.deepEqual(c.slice(-2), ["th-9", "-"]);
   assert.ok(c.includes('model="gpt-test"') && c.includes('model_reasoning_effort="high"'));

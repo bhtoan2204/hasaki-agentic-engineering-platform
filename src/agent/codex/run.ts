@@ -3,12 +3,12 @@ import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { codexConfig } from "../../config.ts";
 import { pool, one } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
-import { workspacesOf } from "../../git/provider.ts";
+import { npmCacheDir, workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
 import { CONTEXT_TOOLS } from "../contextToolSchemas.ts";
@@ -30,8 +30,9 @@ const exec = promisify(execFile);
  *
  * Execution policy, per invocation and never in the user's ~/.codex:
  *  - --ignore-user-config / --ignore-rules / --strict-config: only the platform's -c overrides apply; unknown keys fail.
- *  - OS sandbox: read-only for analysis; workspace-write for coding with the task directory (which holds the run's
- *    worktrees, including ones prepare_branch creates later) as the only writable root besides a per-attempt temp dir.
+ *  - OS sandbox: read-only for analysis; workspace-write for coding. The writable roots are the agent session
+ *    directory, its run directory (the parent, which holds worktrees prepare_branch creates beside the session),
+ *    and a per-attempt temp dir. Network off.
  *    Network off. .git stays read-only, so commits go through the platform's commit_changes tool.
  *  - approval_policy = never: nothing leaves the sandbox; PermissionRequest is denied by the platform hook as well.
  *  - PreToolUse hook → worker decide(): forbidden commands, edits outside worktrees, unknown tools and subagents are
@@ -294,6 +295,26 @@ export interface CodexInvocation {
   resumeId?: string;
 }
 
+/**
+ * Coding writes must include the run directory. The agent session (`…/<run>/agent-<step>`) is a sibling of the
+ * git worktree (`…/<run>/<repoId>`), not its parent. A root of only the session makes `mkdir node_modules` in the
+ * worktree fail with ENOENT.
+ */
+export function codingWritableRoots(cwd: string, scratch: string): string[] {
+  const cache = npmCacheDir();
+  const roots = [cwd, scratch];
+  if (!roots.includes(cache)) roots.push(cache);
+  const name = basename(cwd);
+  const runDir = dirname(cwd);
+  if (
+    (name === "agent" || /^agent-\d+$/.test(name)) &&
+    runDir !== cwd &&
+    runDir.split(/[/\\]/).includes("worktrees")
+  )
+    roots.unshift(runDir);
+  return roots;
+}
+
 /** Full argv for one Codex turn. Pure (unit-tested). The prompt is passed on stdin ("-"). */
 export function codexArgs(inv: CodexInvocation): string[] {
   const node = process.execPath;
@@ -306,7 +327,10 @@ export function codexArgs(inv: CodexInvocation): string[] {
     ["approval_policy", "never"],
     ["web_search", "disabled"],
     ["sandbox_workspace_write.network_access", false],
-    ["sandbox_workspace_write.writable_roots", inv.mode === "coding" ? [inv.cwd, inv.scratch] : []],
+    [
+      "sandbox_workspace_write.writable_roots",
+      inv.mode === "coding" ? codingWritableRoots(inv.cwd, inv.scratch) : [],
+    ],
     ["shell_environment_policy.inherit", "all"],
     ["shell_environment_policy.ignore_default_excludes", false],
     [
@@ -319,7 +343,7 @@ export function codexArgs(inv: CodexInvocation): string[] {
         TMPDIR: inv.scratch,
         GOCACHE: join(inv.scratch, "go-build"),
         GOTMPDIR: inv.scratch,
-        npm_config_cache: join(inv.scratch, "npm"),
+        npm_config_cache: npmCacheDir(),
         XDG_CACHE_HOME: join(inv.scratch, "cache"),
       },
     ],

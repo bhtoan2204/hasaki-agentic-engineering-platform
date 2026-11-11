@@ -43,7 +43,7 @@ import {
 } from "./metrics.ts";
 import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
-import { workspaceKey, workspacesOf } from "../git/provider.ts";
+import { installNodeDependencies, workspaceKey, workspacesOf } from "../git/provider.ts";
 import {
   collectScopeState,
   renewedApprovalFor,
@@ -553,6 +553,12 @@ const agentExecutor: StepExecutor = {
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
+    if (mode === "coding") {
+      for (const w of ws) {
+        if (await installNodeDependencies(w.path))
+          await ctx.log("system", `installed Node dependencies in ${w.repo}`);
+      }
+    }
     const delegationCfg = ctx.step.config.delegation as
       | { enabled?: boolean; agents?: string[] }
       | undefined;
@@ -1784,7 +1790,7 @@ function codexEnvironmentNotes(mode: ToolMode): string {
       "). Where these instructions say mcp__platform__<tool>, call that tool on the `platform` server.",
     "- Every command and file edit is checked by the platform before it runs; a denied call returns the reason. Do not retry a denied call in another form.",
     mode === "coding"
-      ? "- You can write only inside the worktrees returned by prepare_branch. `.git` is read-only in your sandbox: do NOT run git add/commit; commit with the platform tool commit_changes (repo, message). The network is disabled."
+      ? "- You can write only inside the worktrees returned by prepare_branch. `.git` is read-only in your sandbox: do NOT run git add/commit; commit with the platform tool commit_changes (repo, message). The network is disabled. Node dependencies are installed by the worker before this turn. Do not run npm ci, npm install, or npm --offline: that deletes node_modules and then fails with ENOTCACHED because the sandbox cannot reach the registry."
       : "- This step is read-only: no file edits, no state-changing commands.",
     "- After ask_user, end your turn immediately: do not edit files or call other tools while the developer has not answered.",
     "- Finish by calling submit_result with the step's output object. A final chat message alone does not complete the step.",

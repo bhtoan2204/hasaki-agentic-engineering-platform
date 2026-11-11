@@ -13,6 +13,10 @@ if [ -f go.mod ]; then
   # GO_TEST_SKIP (set by the platform): tests already known to fail on the same base commit — not re-run.
   if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m \${GO_TEST_SKIP:+-skip $GO_TEST_SKIP} $pkgs"; go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} $pkgs; else echo "no Go packages changed"; fi
 elif [ -f package.json ]; then
+  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit 2>/dev/null)" ]; then
+    echo "== install dependencies"
+    if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund; else npm install --ignore-scripts --no-audit --no-fund; fi
+  fi
   npm test --if-present
 else
   echo "no test runner detected"
@@ -91,6 +95,10 @@ if [ -f go.mod ]; then
   go build ./...
   if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m \${GO_TEST_SKIP:+-skip $GO_TEST_SKIP} $pkgs"; go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} $pkgs; else echo "no Go packages changed"; fi
 elif [ -f package.json ]; then
+  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit 2>/dev/null)" ]; then
+    echo "== install dependencies"
+    if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund; else npm install --ignore-scripts --no-audit --no-fund; fi
+  fi
   echo "== typecheck"
   if [ -x node_modules/.bin/tsc ]; then npx --no-install tsc -p . --pretty false --noEmit --incremental false; else echo "tsc not installed; typecheck skipped"; fi
   changed=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" || true)
@@ -130,6 +138,10 @@ if [ -f go.mod ]; then
   echo "== go test -short -timeout 8m ./..."
   go test -short -timeout 8m ./...
 elif [ -f package.json ]; then
+  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit 2>/dev/null)" ]; then
+    echo "== install dependencies"
+    if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund; else npm install --ignore-scripts --no-audit --no-fund; fi
+  fi
   echo "== regression (npm test)"
   npm test --if-present
 else

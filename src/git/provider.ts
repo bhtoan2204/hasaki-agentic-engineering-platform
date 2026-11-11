@@ -1,5 +1,8 @@
+import { execFile } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
+import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
 import { repositories } from "../repos/service.ts";
 import { requireRunRepositoryAccess } from "../repos/access.ts";
@@ -14,6 +17,43 @@ import { prepareBranch, pushBranch } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { validateCheckout } from "../repos/paths.ts";
 import { branchFor } from "../workflow/branches.ts";
+
+const exec = promisify(execFile);
+
+/** Cache shared by the worker install and the coding sandbox. The sandbox cannot reach the registry. */
+export function npmCacheDir() {
+  return join(config.dataDir, "npm-cache");
+}
+
+/** A failed `npm ci` leaves an empty node_modules. That is not an install. */
+function nodeModulesReady(workspace: string) {
+  const dir = join(workspace, "node_modules");
+  if (!existsSync(dir)) return false;
+  try {
+    return readdirSync(dir).some((name) => !name.startsWith("."));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A git worktree does not contain node_modules. The coding sandbox has no network, so the worker installs here.
+ * Lifecycle scripts are not run: this executes for whatever repository the run was allowed to prepare.
+ * Returns true when it actually installed.
+ */
+export async function installNodeDependencies(workspace: string): Promise<boolean> {
+  if (!existsSync(join(workspace, "package.json")) || nodeModulesReady(workspace)) return false;
+  const cache = npmCacheDir();
+  await mkdir(cache, { recursive: true });
+  const ci = existsSync(join(workspace, "package-lock.json"));
+  await exec("npm", [ci ? "ci" : "install", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    cwd: workspace,
+    timeout: 10 * 60_000,
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, npm_config_cache: cache },
+  });
+  return true;
+}
 
 /**
  * Seam for Git hosting. Bitbucket and GitHub implement the same calls. Worktree management stays in src/git.ts.
@@ -187,6 +227,7 @@ export async function prepareWorkspace(
     path: b.path,
     created_from: b.createdFrom,
   });
+  await installNodeDependencies(b.path);
   if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => {});
   return { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
 }
