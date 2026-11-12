@@ -50,6 +50,7 @@ import { background } from "./background.ts";
 import { downstream, topoOrder } from "./graph.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
+import { materializeSubtasks } from "./decomposition.ts";
 import { DONE, RETRYABLE } from "./stateMachine.ts";
 import { buildStepInput, resolveContext, type ResolvedContext, type StepInput } from "./context.ts";
 import type {
@@ -436,6 +437,34 @@ export async function startRun(input: StartRunInput) {
     }
     return getRun(id, c);
   });
+}
+
+/**
+ * Expand the run graph with an approved decomposition plan. One transaction under the run lock; idempotent per plan.
+ * Allowed repositories are the run's selected repositories (never caller-supplied).
+ */
+export async function expandSubtasks(
+  runId: number,
+  planStepKey: string,
+  plan: unknown,
+  opts: { by: string; reason: string; kind?: "decomposition" | "replan"; guard?: WorkflowActionGuard },
+) {
+  let result!: Awaited<ReturnType<typeof materializeSubtasks>>;
+  await txThenRun(runId, async (c, afterCommit) => {
+    const run = await lockRun(c, runId);
+    await opts.guard?.(c);
+    if (["COMPLETED", "CANCELED", "FAILED"].includes(run.status)) throw new EngineError(`run ${runId} is ${run.status}`, 409);
+    result = await materializeSubtasks(c, runId, planStepKey, plan, {
+      actor: opts.by,
+      reason: opts.reason,
+      kind: opts.kind,
+      allowedRepositories: run.selected_repositories.filter((r: string) =>
+        run.allowed_repositories.includes(r),
+      ),
+    });
+    if (!result.replayed) await advance(c, runId, afterCommit);
+  });
+  return result;
 }
 
 export async function startPendingRun(

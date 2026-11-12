@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Handle, Position, type Edge, type Node, type NodeProps, MarkerType } from "@xyflow/react";
 import {
   Bot,
@@ -74,6 +75,9 @@ export interface StepLike {
   config?: Record<string, any>;
   handoff?: { failure_category?: string; status?: string };
   effective_agent?: { provider?: string; model?: string | null };
+  /** Dynamic subtask nodes (migration 050). */
+  subtask_id?: string | null;
+  parent_step_key?: string | null;
 }
 
 /** Vertical layered layout by longest-path depth (later steps below); used when a definition has no saved node positions. */
@@ -124,11 +128,13 @@ export function toEdges(steps: StepLike[], statusOf?: (k: string) => string | un
         source: d,
         target: s.key,
         animated: dst === "RUNNING",
+        className: (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "ge-parallel" : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
         style: {
           stroke,
           strokeWidth: statusOf && (active || dst === "RUNNING") ? 2 : 1.6,
           opacity: statusOf && !active && stroke === "var(--line-strong)" ? 0.85 : 1,
+          strokeDasharray: (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "6 4" : undefined,
         },
         label:
           (s.run_if as any)?.step === d
@@ -152,7 +158,7 @@ export type StepNodeData = {
   invalid?: boolean;
 };
 
-export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
+function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
   const { t, status: statusName } = useI18n();
   const { step, status } = data;
   const color = data.invalid
@@ -233,6 +239,15 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
               {t("handoff.paused")}
             </span>
           )}
+          {step.subtask_id && (
+            <span className="gn-pill" title={`subtask of ${step.parent_step_key ?? ""}`}>
+              <Split size={10} strokeWidth={2.4} />
+              {step.subtask_id}
+              {Array.isArray(step.config?.subtask?.target_repos)
+                ? ` · ${step.config.subtask.target_repos.join(", ")}`
+                : ""}
+            </span>
+          )}
           {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
           {!!data.attempts && (
             <span className="gn-pill" title={t("graph.attempts", { n: data.attempts })}>
@@ -269,4 +284,6 @@ export function StepNode({ data }: NodeProps<Node<StepNodeData>>) {
   );
 }
 
+/** Memoized: progress events only re-render nodes whose data object changed. */
+export const StepNode = memo(StepNodeImpl);
 export const nodeTypes = { step: StepNode };
