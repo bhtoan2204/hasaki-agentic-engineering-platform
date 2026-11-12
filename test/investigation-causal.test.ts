@@ -70,10 +70,10 @@ test("unrelated error near the same time is not merged by proximity", () => {
   for (const op of a.operations) assert.equal(op.attempts.length, 1);
 });
 
-test("engine is not payment-specific: shipment retries with different request ids join via shipment_id", () => {
+test("engine is not payment-specific: shipment retries with different request ids join via an operation identifier", () => {
   const rows = [
-    row("2026-11-10T09:00:00+07:00", "wms", "carrier request sent", { request_id: "req-s-1111", shipment_id: "SHP-778899" }),
-    row("2026-11-10T09:01:00+07:00", "wms", "carrier request sent again", { request_id: "req-s-2222", shipment_id: "SHP-778899" }),
+    row("2026-11-10T09:00:00+07:00", "wms", "carrier request sent", { request_id: "req-s-1111", idempotency_key: "idem-778899", shipment_id: "SHP-778899" }),
+    row("2026-11-10T09:01:00+07:00", "wms", "carrier request sent again", { request_id: "req-s-2222", idempotency_key: "idem-778899", shipment_id: "SHP-778899" }),
   ];
   const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "PARTNER_REQUEST_SENT"]], ["SHP-778899"]);
   const a = analyzeCausality(c.timeline);
@@ -92,4 +92,39 @@ test("a confirmed success on a later attempt after a failed first attempt is suc
   const a = analyzeCausality(c.timeline);
   assert.equal(a.operations[0].outcome, "success");
   assert.equal(a.has_unknown_outcome, false);
+});
+
+test("log lines without request ids are not split into fake retry attempts", () => {
+  const rows = [
+    row("2026-11-10T09:00:00+07:00", "payment-api", "refund request sent to gateway", { business_ref: "RF-300400" }),
+    row("2026-11-10T09:00:30+07:00", "payment-api", "refund call failed: context deadline exceeded", { business_ref: "RF-300400" }),
+  ];
+  const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "REQUEST_TIMEOUT"]], ["RF-300400"]);
+  const a = analyzeCausality(c.timeline);
+  assert.ok(!a.patterns.includes("duplicate_retry"));
+  assert.equal(a.chain.root_cause, null);
+  assert.equal(a.has_unknown_outcome, true);
+});
+
+test("negated or qualified success messages never count as success", () => {
+  for (const msg of ["refund result success=false", "refund not approved", "refund partially completed", "refund not completed"]) {
+    const rows = [
+      row("2026-11-10T09:00:00+07:00", "payment-api", "refund request sent", { request_id: "req-ccc333", business_ref: "RF-500600" }),
+      row("2026-11-10T09:00:02+07:00", "payment-api", msg, { request_id: "req-ccc333", business_ref: "RF-500600" }),
+    ];
+    const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "PARTNER_RESPONSE_RECEIVED"]], ["RF-500600"]);
+    const a = analyzeCausality(c.timeline);
+    assert.notEqual(a.operations[0].outcome, "success", msg);
+  }
+});
+
+test("same order, different business refs stay separate operations", () => {
+  const rows = [
+    row("2026-11-10T09:00:00+07:00", "payment-api", "partial refund 1 sent", { request_id: "req-d1d1d1", business_ref: "RF-700001", order_code: "ORD-900100" }),
+    row("2026-11-10T09:10:00+07:00", "payment-api", "partial refund 2 sent", { request_id: "req-d2d2d2", business_ref: "RF-700002", order_code: "ORD-900100" }),
+  ];
+  const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "PARTNER_REQUEST_SENT"]], ["ORD-900100"]);
+  const a = analyzeCausality(c.timeline);
+  assert.equal(a.operations.length, 2);
+  assert.ok(!a.patterns.includes("duplicate_retry"));
 });

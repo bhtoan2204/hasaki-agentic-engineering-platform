@@ -17,6 +17,8 @@ export type AttemptRole = "initial" | "retry" | "redelivery";
 
 export interface AttemptAnalysis {
   attempt_key: string;
+  /** false when the events carry no request/correlation/trace id: such events are never counted as a retry. */
+  attributed: boolean;
   role: AttemptRole;
   evidence_refs: string[];
   outcome: Outcome;
@@ -62,6 +64,9 @@ const TIMEOUT = /context deadline exceeded|timed? ?out|deadline exceeded|ETIMEDO
 const REJECTION =
   /too many (?:refund|retry|request)|duplicate|already (?:processed|refunded|exists|paid)|idempot/i;
 const SUCCESS = /\b(success|succeeded|completed|approved|code["']?\s*[:=]\s*["']?00)\b/i;
+/** Any negation / qualification makes a success claim unreliable: treat as no confirmation (stay UNKNOWN). */
+const NOT_SUCCESS =
+  /\b(not|no|never|cannot|can't|couldn't|unsuccessful|failed|failure|fail|partial|partially|incomplete|pending|rejected|denied|declined|error|errors)\b|n't\b|success["']?\s*[:=]\s*["']?(false|0|no)\b/i;
 
 const isTimeout = (t: TimelineEvent) =>
   t.event_type === "REQUEST_TIMEOUT" || TIMEOUT.test(t.excerpt);
@@ -71,7 +76,8 @@ const isSuccess = (t: TimelineEvent) =>
   !isTimeout(t) &&
   !isRejection(t) &&
   ["PARTNER_RESPONSE_RECEIVED", "PARTNER_CALLBACK_RECEIVED", "STATE_CHANGED"].includes(t.event_type) &&
-  SUCCESS.test(t.excerpt);
+  SUCCESS.test(t.excerpt) &&
+  !NOT_SUCCESS.test(t.excerpt);
 
 class DSU {
   p = new Map<string, string>();
@@ -104,8 +110,11 @@ function groupOperations(timeline: TimelineEvent[]) {
   return [...groups.values()];
 }
 
+const UNATTRIBUTED = "unattributed";
+
+/** Events without a request/correlation/trace id are pooled, never split into fake attempts. */
 function attemptKey(t: TimelineEvent): string {
-  return t.request_id ?? t.correlation_id ?? t.trace_id ?? `ref:${t.evidence_ref}`;
+  return t.request_id ?? t.correlation_id ?? t.trace_id ?? UNATTRIBUTED;
 }
 
 function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperation {
@@ -129,7 +138,10 @@ function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperat
   const ordered = [...byAttempt.entries()].sort(
     (a, b) => Math.min(...a[1].map((e) => e.epoch_us ?? Infinity)) - Math.min(...b[1].map((e) => e.epoch_us ?? Infinity)),
   );
-  const attempts: AttemptAnalysis[] = ordered.map(([key, evs], i) => {
+  const hasAttributed = ordered.some(([k]) => k !== UNATTRIBUTED);
+  const attempts: AttemptAnalysis[] = ordered
+    .filter(([k, evs]) => !(hasAttributed && k === UNATTRIBUTED && !evs.some((e) => isTimeout(e) || isRejection(e) || isSuccess(e))))
+    .map(([key, evs], i) => {
     const timeout = evs.some(isTimeout);
     const rejected = evs.some(isRejection);
     const success = evs.some(isSuccess);
@@ -151,6 +163,7 @@ function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperat
     }
     return {
       attempt_key: key,
+      attributed: key !== UNATTRIBUTED,
       role: i === 0 ? "initial" : evs.every((e) => e.delivery && e.delivery.n > 1) ? "redelivery" : "retry",
       evidence_refs: evs.map((e) => e.evidence_ref),
       outcome,
@@ -195,8 +208,10 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
   const lastError = [...sorted].reverse().find((t) => t.event_type === "ERROR" || isRejection(t)) ?? null;
 
   for (const op of ops) {
-    const first = op.attempts[0];
-    const later = op.attempts.slice(1);
+    // Only attributed attempts can prove a retry; pooled unattributed events never do.
+    const attributed = op.attempts.filter((a) => a.attributed);
+    const first = attributed[0];
+    const later = attributed.slice(1);
     if (first?.outcome === "UNKNOWN" && timelineHas(timeline, first, isTimeout)) {
       patterns.push("client_timeout_unknown_outcome");
       trigger = `attempt ${first.attempt_key} hit a client timeout/deadline; its provider-side outcome is UNKNOWN`;

@@ -91,27 +91,15 @@ export interface Rejection {
 
 /** Strong identifiers that relate two log lines of the same request/message. */
 const REQUEST_SCOPE: IdField[] = ["request_id", "correlation_id", "message_id", "trace_id"];
-/** Strong business identifiers: tie different requests/attempts to the same logical operation. Domain-agnostic. */
+/** Operation identifiers (not entity ids such as order/shipment: one entity has many operations): tie different requests/attempts to the same logical operation. Domain-agnostic. */
 export const OPERATION_SCOPE: IdField[] = [
   "transaction_code",
   "provider_transaction_id",
   "idempotency_key",
   "business_ref",
-  "order_code",
-  "shipment_code",
-  "shipment_id",
 ];
 /** Business identifiers: tie events to the same entity, but not to the same request attempt. */
-const ENTITY_SCOPE: IdField[] = [
-  "order_code",
-  "shipment_code",
-  "shipment_id",
-  "tracking_no",
-  "transaction_code",
-  "provider_transaction_id",
-  "idempotency_key",
-  "business_ref",
-];
+const ENTITY_SCOPE: IdField[] = ["order_code", "shipment_code", "shipment_id", "tracking_no"];
 const MIN_KEY_LEN = 6;
 const PAYLOAD_TYPES = new Set([
   "OUTBOUND_MESSAGE_CREATED",
