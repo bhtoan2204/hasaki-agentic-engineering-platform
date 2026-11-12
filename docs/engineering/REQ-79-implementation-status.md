@@ -1,6 +1,6 @@
 # REQ-79 implementation status
 
-This is a partial security and test-isolation increment. It does **not** satisfy the full approved T0–T6 plan or the initiative's acceptance criteria.
+This is a partial security, test-isolation and component-measurement increment. It does **not** satisfy the full approved T0–T6 plan or the initiative's acceptance criteria.
 
 ## Implemented
 
@@ -23,7 +23,7 @@ Extend the current route and renderer instead of replacing the HTTP or Markdown 
 
 ## Remaining approved work
 
-- T0: instrumentation and reproducible paired small/medium/large baselines, including query counts and provider/cache metrics.
+- T0 remaining: extend the component baselines below to active queues, heartbeat/recovery, real context retrieval, pool-wait separation and approved live-provider measurements. Component fixtures establish idle-claim/context baselines, not end-to-end engineering-task performance.
 - T1: full writer/consumer and access-control audit, revoked/support/cross-owner raw/metadata regressions, workspace traversal/symlink coverage, and browser execution tests. Current helper-level tests do not establish absence of stored XSS across the application.
 - T2: scheduler profiling and measurement-justified query reductions with fencing, recovery and cancellation regressions.
 - T3: context profiling and measured reuse/accounting improvements across providers.
@@ -75,3 +75,27 @@ Fresh verification after the assertion correction:
 - `npm run typecheck` passes. ESLint on `test/codex.test.ts` has zero errors and 18 existing warnings. `git diff --check` passes.
 
 No tests were removed or newly skipped. The Codex assertion correction is a test-fixture repair, not a remote-infrastructure rewrite; the earlier PostgreSQL/MySQL isolation changes remain listed above. No production code changed in this retest increment. These fresh passes supersede earlier local suite failures for the current candidate; they do not establish the cause of all five unnamed historical failures or completion of the broader REQ-79 plan.
+
+## T0 measurement repair
+
+The measurement omission is addressed with `platform-performance-v1` in the existing benchmark CLI. Reuse decision: extend `src/cli/bench.ts` rather than add a second command framework; call the existing `claimJob` (`src/workflow/scheduler.ts:58`), `planKnowledge` (`src/context/plan.ts:65`), `renderContextPack` (`src/context/pack.ts:867`), `estimateTokens` and `noteToolUse` (`src/agent/metrics.ts:90`). Reuse the versioned evaluation's `sha256` utility. The existing `backend-v1` evaluation remains unchanged, including its live-provider restrictions. Its task-quality comparisons and this narrowly scoped component baseline answer different questions.
+
+Run from the worktree with installed dependencies and local PostgreSQL binaries on PATH:
+
+```sh
+node --import ./test/setup.ts src/cli/bench.ts --suite=platform-performance-v1 --baseline-ref=origin/main --repetitions=5 --output=docs/engineering/REQ-79-performance-baseline.json
+```
+
+The CLI refuses to run without the test-owned preload's database name, flag and private Unix socket. It exports only committed source/migration/package files from the pinned Git revision into a temporary directory inside the authorized worktree, then removes it. No primary checkout is executed or modified. Both source subjects use the candidate's installed dependencies, one process, one disposable database and serial execution. There are three warm-ups, five alternating paired warm repetitions per size, plus explicitly labeled first-use samples. These are component workload sizes, not completed engineering tasks or independent cold-process runs.
+
+The committed JSON report compares baseline `68d360020081864e39c42055eee0df50086a3511` with candidate `4058f8cbb896ff2bc1ab0fc60bd92ba890568389`. It records fixture/harness/preload/lockfile hashes, both source trees and measured-module hashes, Node v22.23.2, PostgreSQL 18.6, OS/CPU information, raw samples and paired median/p95 distributions. Every pair has matching output hashes. The five measured production modules are byte-identical between subjects: this is an unchanged-code control, and timing variation demonstrates why no speedup is claimed.
+
+| Fixture | Knowledge items / context entries / idle claims | Baseline warm median / p95 (ms) | Candidate warm median / p95 (ms) | SQL calls, both subjects |
+| --- | --- | --- | --- | --- |
+| small | 10 / 8 / 2 | 4.026 / 4.413 | 3.966 / 4.969 | 4 |
+| medium | 100 / 80 / 8 | 14.854 / 17.052 | 16.178 / 19.547 | 16 |
+| large | 1000 / 800 / 32 | 63.412 / 70.081 | 61.036 / 67.525 | 64 |
+
+The measured idle claim path makes two SQL calls per claim in both revisions. This is concrete baseline evidence for investigating claim/handoff overhead, not justification to remove reconciliation without recovery tests. Numeric phase timings cover knowledge planning, context rendering, serialization, token estimation, tool accounting and idle claiming. Query counts/failures and elapsed time contain no SQL, parameters or prompts. Query time includes pool acquisition; separate pool wait is unavailable. Token estimates refer to the serialized fixture payload, not actual provider usage. Provider latency, input/output/cache tokens and cost remain null. Repeated-read counts come from synthetic tool events through the existing metrics implementation. Active queues, heartbeat/recovery, real retrieval, cancellations and live providers remain outside this component baseline.
+
+Verification: all three new measurement tests pass (including an observed failing even-sample median assertion before correction); `npm run typecheck`, build and changed-file ESLint pass (zero lint errors, nine existing warnings in the legacy benchmark CLI). Final full suite: 779 passed, zero failed/skipped, 142672.52008 ms; log `/tmp/req79-performance-final-tests.log`. The benchmark command passes with 18 matched pairs. No remote-infrastructure tests were added, rewritten or deleted in this measurement repair. Earlier PostgreSQL/MySQL isolation changes remain documented above. The additional report/documentation commit changes no executable code.
