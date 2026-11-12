@@ -354,6 +354,10 @@ export async function executeContextTool(
       const entries = pack.content.entries.filter(
         (e: any) => args.section === "all" || e.section === args.section,
       );
+      const clamp = (n: number, min: number, max: number) =>
+        Math.min(max, Math.max(min, n));
+      const offset = clamp(args.offset, 0, 1000);
+      const entryLimit = clamp(args.limit, 1, 20);
       return {
         pack_id: pack.id,
         snapshot_id: pack.snapshot_id,
@@ -361,7 +365,7 @@ export async function executeContextTool(
         created_at: pack.created_at,
         estimated_tokens: pack.content.estimated_tokens,
         budget_tokens: pack.content.budget_tokens,
-        entries: entries.slice(args.offset, args.offset + args.limit),
+        entries: entries.slice(offset, offset + entryLimit),
         total: entries.length,
         omitted: pack.content.omitted,
         provider_handoff:
@@ -391,8 +395,8 @@ export async function executeContextTool(
                 const text = original
                     ? JSON.stringify(original.content)
                     : (details?.content ?? JSON.stringify(h.package)),
-                  offset = args.handoff_offset ?? 0,
-                  limit = args.handoff_limit ?? 6000;
+                  offset = clamp(args.handoff_offset, 0, 1000000),
+                  limit = clamp(args.handoff_limit, 100, 12000);
                 return {
                   id: h.id,
                   content: text.slice(offset, offset + limit),

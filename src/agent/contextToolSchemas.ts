@@ -1,6 +1,8 @@
 import { z } from "zod";
 const query = z.string().trim().min(1).max(512);
 const limit = z.number().int().min(1).max(20).default(8);
+/** Any integer is accepted; get_run_context clamps it. A hard range error makes the agent guess the other field. */
+const page = (fallback: number) => z.number().int().default(fallback);
 const repos = z.array(z.string().min(1).max(160)).min(1).max(30).optional();
 const definition = <S extends z.ZodRawShape>(
   name: string,
@@ -66,7 +68,7 @@ export const CONTEXT_TOOLS = [
   ),
   definition(
     "get_run_context",
-    "Read the current durable context pack and its source references, including unfinished work. Paginate entries; no full run history.",
+    "Read the current durable context pack and its source references, including unfinished work. Paginate entries; no full run history. offset/limit select entries (limit is clamped to 1–20). handoff_offset/handoff_limit select characters of a handoff (handoff_limit is clamped to 100–12000).",
     {
       section: z
         .enum([
@@ -83,10 +85,10 @@ export const CONTEXT_TOOLS = [
         .default("all"),
       handoff_workspace: z.boolean().default(false),
       handoff_source_pack: z.boolean().default(false),
-      handoff_offset: z.number().int().min(0).max(1000000).default(0),
-      handoff_limit: z.number().int().min(100).max(12000).default(6000),
-      offset: z.number().int().min(0).max(1000).default(0),
-      limit,
+      handoff_offset: page(0),
+      handoff_limit: page(6000),
+      offset: page(0),
+      limit: page(8),
     },
   ),
   definition(
