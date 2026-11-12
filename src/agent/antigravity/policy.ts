@@ -158,11 +158,14 @@ export function writeAntigravityWorkspaceConfig(
   return { hookConfigPath, mcpConfigPath };
 }
 
-/** Session-only allow-rules so headless print mode can call the platform MCP server.
- * Without these, agy soft-denies McpTool and the step never reaches submit_result. */
+/** Session-only settings for headless print mode.
+ * request-review soft-denies every tool confirmation (ReadFile, then McpTool), so the
+ * turn ends before submit_result. always-proceed approves that CLI prompt; the platform
+ * PreToolUse hook and the broker still allow or refuse each call. */
 export function antigravityHeadlessSettings(toolNames: readonly string[]) {
   const names = [...new Set(toolNames.filter(Boolean))].sort();
   return {
+    toolPermission: "always-proceed",
     permissions: {
       allow: ["mcp(platform/*)", ...names.map((name) => `mcp(platform/${name})`)],
     },

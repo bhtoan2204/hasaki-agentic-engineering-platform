@@ -455,6 +455,7 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
   assert.ok(args.includes("--conversation"));
   assert.ok(args.includes("conv-123"));
   const settings = antigravityHeadlessSettings(["submit_result", "ask_user"]);
+  assert.equal(settings.toolPermission, "always-proceed");
   assert.ok(settings.permissions.allow.includes("mcp(platform/submit_result)"));
   assert.ok(settings.permissions.allow.includes("mcp(platform/*)"));
   assert.ok(!JSON.stringify(settings).includes("dangerously-skip-permissions"));
