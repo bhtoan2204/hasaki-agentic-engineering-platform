@@ -35,6 +35,16 @@ No scheduler, context, parallel-execution, feedback or performance improvement i
 
 Applied skills: test-driven-development (including writing-good-tests), verification-before-completion, and commit. The task's explicit convention to omit an unavailable function code takes precedence over the commit skill's generic request to obtain one.
 
+## Fresh verification on e5874c3
+
+The resumed execution context permits test-owned PostgreSQL. `node test/local-postgres.test.ts` passes (1/1), superseding the earlier socket-bind limitation for this context. `npm run typecheck`, `npm run build`, and `node --test test/artifact-security.test.ts test/markdown-security.test.ts` pass (5/5 security assertions).
+
+`npm test` exits 1: 775 tests, 774 passed, one failed, zero skipped, 129043.296402 ms. The rewritten MySQL business-flow test passes. The sole failure is `codex argv: per-invocation config, sandbox by mode, no bypass flags, resume by explicit id` at `test/codex.test.ts:452`: its assertion rejects an npm cache path containing `ctp-agent-tmp`. It also fails when selected alone. `npmCacheDir` derives its path from `config.dataDir` (`src/git/provider.ts:24`); this outer coding context uses temporary directories with that name. The test and Codex implementation are unchanged from `origin/main`; this is baseline-file evidence, not a separately executed baseline suite. No test or sandbox policy was weakened.
+
+Targeted ESLint on all nine changed TypeScript/TSX files exits 0 with zero errors and 14 warnings. Repository-wide `npm run lint` exits 1 with 1847 errors and 1404 warnings, including generated output. These results do not establish a clean full-suite or lint gate. Logs for this attempt are `/tmp/req79-current-tests.log`, `/tmp/req79-current-lint.log`, and `/tmp/req79-codex-check.log`.
+
+The coding process has no nonempty DATABASE_URL (checked as a boolean without reading credentials). Whether the separate mandatory verification launcher now omits that variable remains unverified. The previous launcher refusal below is historical evidence. The full approved initiative remains incomplete; this verification refresh adds no performance or feature implementation.
+
 ## Verification repair 1: launcher environment refusal
 
 The mandatory platform check returned exit 2 with `refusing verification: DATABASE_URL is set`. This is the first guard in the fixed shell command (`src/workflow/templates.ts:43`), before candidate code or tests execute. In this coding process, a boolean-only environment probe confirmed that DATABASE_URL is absent; executing that exact guard succeeded. Supplying a harmless sentinel reproduced the reported exit 2 without accessing any database.
