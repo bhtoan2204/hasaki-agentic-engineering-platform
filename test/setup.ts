@@ -164,6 +164,8 @@ process.env.PLATFORM_TEST = "1";
 process.env.AUTH_SECRET = "test-auth-secret-not-for-production";
 process.env.COOKIE_SECURE = "0";
 delete process.env.NOTIFY_WEBHOOK;
+// Budget limits from the developer shell would change cost assertions; tests set budgets explicitly.
+for (const k of Object.keys(process.env)) if (k.startsWith("COST_BUDGET_")) delete process.env[k];
 process.env.TEST_ROOT = root;
 mkdirSync(join(root, "empty-user-skills"));
 process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never read the developer's real ~/.claude
