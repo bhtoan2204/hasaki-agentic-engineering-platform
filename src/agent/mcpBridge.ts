@@ -94,6 +94,20 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
     },
   },
   {
+    name: "read_artifact",
+    description:
+      "Read a log or report artifact stored for this run. Pass the artifact_id cited by an ancestor step (a test or verification log). This returns the command output. Independent review can only read artifacts those ancestor outputs cite.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        artifact_id: { type: "integer", minimum: 1 },
+        offset: { type: "integer", minimum: 0, maximum: 1000000 },
+        limit: { type: "integer", minimum: 1, maximum: 24000 },
+      },
+      required: ["artifact_id"],
+    },
+  },
+  {
     name: "list_tools",
     description:
       "Discover integration tools: Splunk production logs, project QC databases, Kafka, Vault, Argo CD, Jira, Hasaki Work, Bitbucket, code intelligence, repository registry, run history.",

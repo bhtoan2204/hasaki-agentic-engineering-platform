@@ -313,18 +313,19 @@ export function BreakdownBars({
   const max = Math.max(...rows.map((r) => Number(r[field] ?? 0)), 1);
   return (
     <ul className="ins-bars">
-      {rows.map((r, i) => (
-        <li className="ins-bar" key={i}>
-          <span className="mono">{r[labelKey] ?? t("an.unknown")}</span>
-          <div className="ins-bar-track" aria-hidden>
-            <span
-              className="ins-bar-fill"
-              style={{ width: `${(100 * Number(r[field] ?? 0)) / max}%` }}
-            />
-          </div>
-          <span>{fmt(r[field])}</span>
-        </li>
-      ))}
+      {rows.map((r, i) => {
+        const n = Number(r[field] ?? 0);
+        const width = n > 0 ? Math.max(2, (100 * n) / max) : 0;
+        return (
+          <li className="ins-bar" key={i}>
+            <span className="mono">{r[labelKey] ?? t("an.unknown")}</span>
+            <div className="ins-bar-track" aria-hidden>
+              <span className="ins-bar-fill" style={{ width: `${width}%` }} />
+            </div>
+            <span className="ins-bar-value">{fmt(r[field])}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

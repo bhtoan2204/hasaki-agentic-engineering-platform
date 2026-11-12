@@ -44,8 +44,14 @@ export function antigravityHookDecision(
       /^(mcp__platform__|mcp_platform_|platform\.|platform_)/,
       "",
     );
-    return decide(canonicalName, args, policy, sessionCwd);
+    if (!canonicalName) return deny("empty platform tool name");
+    // decide() allows mcp__platform__* before its name switch. The bare name falls through to deny,
+    // which blocked read_artifact even though the broker would have served it.
+    return decide(`mcp__platform__${canonicalName}`, args, policy, sessionCwd);
   }
+
+  // The CLI wraps platform tools as call_mcp_tool. The broker still fences and authorizes the inner call.
+  if (lower === "call_mcp_tool" || lower === "mcptool") return { allow: true };
 
   // 2. Subagents restriction
   if (lower.includes("subagent")) {
@@ -117,19 +123,9 @@ export function writeAntigravityWorkspaceConfig(
   const node = process.execPath;
 
   const hookCommand = `${JSON.stringify(node)} --disable-warning=ExperimentalWarning ${JSON.stringify(hookScript)}`;
+  // Named hooks only. A top-level PreToolUse array is not a hook spec, and agy
+  // then refuses the whole file, so the platform policy never loads.
   const hooksConfig = {
-    PreToolUse: [
-      {
-        matcher: "*",
-        hooks: [
-          {
-            type: "command",
-            command: hookCommand,
-            timeout: 60,
-          },
-        ],
-      },
-    ],
     "platform-security": {
       enabled: true,
       PreToolUse: [
@@ -166,6 +162,20 @@ export function writeAntigravityWorkspaceConfig(
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
   return { hookConfigPath, mcpConfigPath };
+}
+
+/** Session-only settings for headless print mode.
+ * request-review soft-denies every tool confirmation (ReadFile, then McpTool), so the
+ * turn ends before submit_result. always-proceed approves that CLI prompt; the platform
+ * PreToolUse hook and the broker still allow or refuse each call. */
+export function antigravityHeadlessSettings(toolNames: readonly string[]) {
+  const names = [...new Set(toolNames.filter(Boolean))].sort();
+  return {
+    toolPermission: "always-proceed",
+    permissions: {
+      allow: ["mcp(platform/*)", ...names.map((name) => `mcp(platform/${name})`)],
+    },
+  };
 }
 
 export function excludeFromGit(gitDir: string) {

@@ -1,6 +1,6 @@
 # Project QC databases
 
-Agents can read a project's QC database (MySQL / MariaDB) during a run, with Claude, Codex and Cursor alike. The
+Agents can read a project's QC database (MySQL / MariaDB) during a run, with Claude, Codex, Cursor and Antigravity alike. The
 databases are tools of the platform's per-run tool bridge (MCP `call_tool`), next to Splunk, Kafka, Vault and Argo CD:
 
 | Tool | Does |

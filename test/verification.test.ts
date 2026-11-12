@@ -1,14 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  citedArtifactIds,
   enforceVerdict,
+  evidenceExcerpt,
   findingsFeedback,
+  independentSubmissionGap,
   independentUpstream,
   normalizeVerdict,
   repairTargetFor,
   staleVerification,
   verificationGate,
 } from "../src/agent/independentReview.ts";
+import { buildSystemAppend } from "../src/agent/stepPrompt.ts";
 import { backoff, classifyFailure } from "../src/workflow/failures.ts";
 import { applyProfile } from "../src/workflow/profiles.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
@@ -22,6 +26,43 @@ const graph = [
   { key: "lint_review", type: "agent", depends_on: ["implement"] },
   { key: "review", type: "agent", depends_on: ["test", "lint_review"] },
 ] as any;
+
+test("cited artifact ids are the ancestor logs an independent verifier may read", () => {
+  const ids = citedArtifactIds({
+    targeted_test: {
+      output: {
+        passed: true,
+        results: [{ exit_code: 0, artifact_id: 852 }],
+        note: "artifact_id mentioned in prose is not an id",
+      },
+    },
+    implement: { output: { verification: { log_artifact_id: 851 } } },
+  });
+  assert.deepEqual(ids.sort((a, b) => a - b), [851, 852]);
+  const short = evidenceExcerpt("hello", 20);
+  assert.equal(short.truncated, false);
+  assert.equal(short.text, "hello");
+  const long = evidenceExcerpt("a".repeat(50), 20);
+  assert.equal(long.truncated, true);
+  assert.match(long.text, /call read_artifact/);
+  assert.ok(long.text.startsWith("a") && long.text.endsWith("a"));
+});
+
+test("independent review is told to read platform artifacts instead of asking the developer", () => {
+  const sys = buildSystemAppend(
+    { id: 95, definition_key: "feature", title: "t", allowed_repositories: [] } as any,
+    {
+      key: "review",
+      name: "Review",
+      type: "agent",
+      config: { independent: true, instructions: "Review the change." },
+    } as any,
+    { repositories: [], knowledge: [], overridden: [], disclosure: [] } as any,
+    "analysis",
+  );
+  assert.match(sys, /mcp__platform__read_artifact/);
+  assert.match(sys, /Do not ask the developer to paste a log/);
+});
 
 test("context isolation: the verifier never sees the author's claims, only requirements and platform evidence", () => {
   const up = {
@@ -44,6 +85,26 @@ test("context isolation: the verifier never sees the author's claims, only requi
   assert.deepEqual((f.implement.output as any).verification, { status: "clean", passed: true });
   assert.deepEqual(f.test.output, up.test.output, "real test evidence kept");
   assert.equal(JSON.stringify(f).includes("I am sure it works"), false);
+});
+
+test("independent review refuses a finished turn that never recorded a verdict", () => {
+  assert.match(
+    independentSubmissionGap(undefined) ?? "",
+    /without calling submit_result/,
+  );
+  assert.match(
+    independentSubmissionGap(undefined, { toolNames: ["call_mcp_tool"], note: "auto-denied" }) ?? "",
+    /not recorded/,
+  );
+  assert.match(
+    independentSubmissionGap({ summary: "looks fine" }) ?? "",
+    /missing verdict/,
+  );
+  assert.equal(
+    independentSubmissionGap({ verdict: "FAIL", findings: [], summary: "no" }),
+    null,
+  );
+  assert.equal(independentSubmissionGap({ approved: true, findings: [], summary: "ok" }), null);
 });
 
 test("verdicts: structured, legacy approved mapped, malformed or unactionable never silently pass", () => {

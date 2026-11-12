@@ -88,6 +88,35 @@ export class AntigravityStream {
   }
 }
 
+/** Join streamed text until a line break or a word boundary, instead of one log row per token. */
+export class TextBatch {
+  private buf = "";
+
+  push(delta: string, limit = 480): string | null {
+    if (!delta) return null;
+    this.buf += delta;
+    const nl = this.buf.lastIndexOf("\n");
+    if (nl >= 0) return this.take(nl + 1);
+    if (this.buf.length >= limit) {
+      const sp = this.buf.lastIndexOf(" ");
+      return this.take(sp >= 80 ? sp + 1 : this.buf.length);
+    }
+    return null;
+  }
+
+  flush(): string {
+    const rest = this.buf;
+    this.buf = "";
+    return rest;
+  }
+
+  private take(end: number): string {
+    const done = this.buf.slice(0, end);
+    this.buf = this.buf.slice(end);
+    return done;
+  }
+}
+
 function parseAntigravityLine(
   line: string,
 ): { event: AntigravityEvent } | { error: AntigravityParseError } {

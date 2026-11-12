@@ -93,7 +93,7 @@ export function ProfilePreview({
       position: pos[s.key],
       data: { step: s },
     }));
-    return { nodes, edges: toEdges(steps) };
+    return { nodes, edges: toEdges(steps, undefined, pos) };
   }, [data]);
   return (
     <div>

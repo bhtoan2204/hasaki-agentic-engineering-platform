@@ -31,6 +31,10 @@ run_candidates AS MATERIALIZED (
 ),
 attempt_candidates AS MATERIALIZED (
  SELECT t.*, a.metrics, COALESCE(a.input->'pending' ? 'resume',false) AS is_resume, a.invalidated_at, a.context_snapshot_id, s.key AS step_key, s.type AS step_type,
+        NULLIF(a.effective_agent->>'model','') AS configured_model,
+        NULLIF(a.agent_model,'') AS requested_model,
+        (SELECT string_agg(DISTINCT NULLIF(v->>'model',''), ', ' ORDER BY NULLIF(v->>'model',''))
+          FROM jsonb_each(COALESCE(t.provider_sessions,'{}'::jsonb)) e(k,v)) AS session_models,
         r.definition_key, r.username, r.project, r.selected_repositories, r.work_item_id, r.verified, r.status AS run_status,
         (SELECT sum(value::numeric) FROM jsonb_each_text(COALESCE(t.tool_calls,'{}'::jsonb))) AS tool_call_count,
         COALESCE((a.metrics->>'context_preparation_ms')::double precision,(cs.content->>'preparation_duration_ms')::double precision) AS context_preparation_ms
@@ -39,10 +43,10 @@ attempt_candidates AS MATERIALIZED (
  LEFT JOIN context_snapshots cs ON cs.id=a.context_snapshot_id
 ),
 usage_candidates AS MATERIALIZED (
- SELECT a.attempt_id,a.run_id,a.step_id,a.step_key,a.start_time,a.definition_key,a.owner_id,a.username,a.project,a.selected_repositories,
+ SELECT a.attempt_id,a.run_id,a.step_id,a.step_key,a.step_type,a.start_time,a.definition_key,a.owner_id,a.username,a.project,a.selected_repositories,
   a.work_item_id,a.verified,a.run_status,s.k AS invocation_id,(s.v->>'start_time')::timestamptz AS invocation_time,
   COALESCE(s.v->>'provider',a.provider) AS provider,
-  CASE WHEN s.v IS NOT NULL THEN s.v->>'model' ELSE a.model END AS model,
+  COALESCE(NULLIF(s.v->>'model',''), NULLIF(a.model,''), NULLIF(a.configured_model,''), NULLIF(a.requested_model,'')) AS model,
   CASE WHEN s.v IS NOT NULL THEN (s.v->'tokens'->>'input')::numeric ELSE a.input_tokens END AS input_tokens,
   CASE WHEN s.v IS NOT NULL THEN (s.v->'tokens'->>'output')::numeric ELSE a.output_tokens END AS output_tokens,
   CASE WHEN s.v IS NOT NULL THEN (s.v->'tokens'->>'cache_read')::numeric ELSE a.cache_read_tokens END AS cache_read_tokens,
@@ -136,135 +140,170 @@ export async function usageAnalytics(f: AnalyticsFilters, scope: AnalyticsScope)
 
 export async function performanceAnalytics(f: AnalyticsFilters, scope: AnalyticsScope) {
   const params = filterParams(f, scope);
-  const [summary, comparison, failures, details] = await Promise.all([
-    one(
-      pool,
-      `${executionCte} SELECT
-      (SELECT count(*)::int FROM runs) AS runs,
-      (SELECT count(DISTINCT (provider,model))::int FROM usage) AS comparison_total,
-      (SELECT count(*)::int FROM runs WHERE status='COMPLETED') AS completed_runs,
-      (SELECT count(*)::int FROM runs WHERE verified AND status='COMPLETED') AS verified_runs,
-      (SELECT count(*)::int FROM runs WHERE checked_steps=coding_steps AND coding_steps>0) AS evaluated_runs,
-      (SELECT count(DISTINCT work_item_id)::int FROM runs WHERE verified AND status='COMPLETED') AS verified_tasks,
-      (SELECT percentile_cont(0.95) WITHIN GROUP(ORDER BY extract(epoch FROM(finished_at-started_at))*1000) FROM runs WHERE finished_at IS NOT NULL) AS workflow_p95_ms,
-      count(*)::int AS attempts,count(*) FILTER(WHERE number>1 AND NOT is_resume)::int AS retried_attempts,
-      (SELECT percentile_cont(0.5) WITHIN GROUP(ORDER BY provider_execution_ms) FROM usage) AS execution_p50_ms,
-      (SELECT percentile_cont(0.95) WITHIN GROUP(ORDER BY provider_execution_ms) FROM usage) AS execution_p95_ms,
-      avg(queue_duration_ms) AS queue_ms,avg(human_wait_ms) AS human_wait_ms,avg(tool_execution_ms) AS tool_ms,
-      sum(tool_failures) AS tool_failures,sum(tool_call_count) AS tool_calls,
-      count(*) FILTER(WHERE provider_execution_ms IS NULL)::int AS missing_execution,
-      count(*) FILTER(WHERE queue_duration_ms IS NULL)::int AS missing_queue,
-      count(*) FILTER(WHERE human_wait_ms IS NULL)::int AS missing_human,
-      count(*) FILTER(WHERE tool_execution_ms IS NULL)::int AS missing_tools
-      FROM attempts`,
-      params,
-    ),
-    q(
-      pool,
-      `${executionCte} SELECT provider,model,count(*)::int AS invocations,count(DISTINCT run_id)::int AS runs,
-      percentile_cont(0.5) WITHIN GROUP(ORDER BY provider_execution_ms) AS execution_p50_ms,
-      percentile_cont(0.95) WITHIN GROUP(ORDER BY provider_execution_ms) AS execution_p95_ms,
-      count(*) FILTER(WHERE failure_category IS NOT NULL)::int AS failures,
-      count(DISTINCT run_id) FILTER(WHERE run_status='COMPLETED')::int AS completed_runs,
-      count(DISTINCT run_id) FILTER(WHERE run_status='COMPLETED' AND verified)::int AS verified_runs,
-      count(*) OVER()::int AS total_rows FROM usage GROUP BY 1,2 ORDER BY count(*) DESC,1,2 ${pagination(f)}`,
-      params,
-    ),
-    q(
-      pool,
-      `${executionCte} SELECT COALESCE(normalized_failure_category,'UNKNOWN') AS category,count(*)::int AS attempts FROM attempts WHERE normalized_failure_category IS NOT NULL OR status IN ('FAILED','CANCELED') GROUP BY 1 ORDER BY 2 DESC`,
-      params,
-    ),
-    q(
-      pool,
-      `${executionCte} SELECT attempt_id,run_id,step_key,provider,model,status,provider_execution_ms,wall_duration_ms,queue_duration_ms,human_wait_ms,tool_execution_ms,normalized_failure_category,
-       count(*) OVER()::int AS total_rows FROM attempts ORDER BY start_time DESC,attempt_id DESC ${pagination(f)}`,
-      params,
-    ),
-  ]);
-  return { summary, comparison, failures, details };
+  // One pass over the cohort. Comparison lists provider invocations only and is not tied to the attempt page.
+  const row = await one<{
+    summary: Record<string, unknown>;
+    comparison: Record<string, unknown>[];
+    failures: { category: string; attempts: number }[];
+    details: Record<string, unknown>[];
+  }>(
+    pool,
+    `${executionCte},
+invocations AS (
+  SELECT * FROM usage WHERE step_type IN ('agent','coding_agent') OR invocation_id IS NOT NULL
+),
+summary AS (
+  SELECT
+    (SELECT count(*)::int FROM runs) AS runs,
+    (SELECT count(*)::int FROM (SELECT 1 FROM invocations GROUP BY provider, model) g) AS comparison_total,
+    (SELECT count(*)::int FROM runs WHERE status='COMPLETED') AS completed_runs,
+    (SELECT count(*)::int FROM runs WHERE verified AND status='COMPLETED') AS verified_runs,
+    (SELECT count(*)::int FROM runs WHERE checked_steps=coding_steps AND coding_steps>0) AS evaluated_runs,
+    (SELECT count(DISTINCT work_item_id)::int FROM runs WHERE verified AND status='COMPLETED') AS verified_tasks,
+    (SELECT percentile_cont(0.95) WITHIN GROUP(ORDER BY extract(epoch FROM(finished_at-started_at))*1000) FROM runs WHERE finished_at IS NOT NULL) AS workflow_p95_ms,
+    count(*)::int AS attempts,count(*) FILTER(WHERE number>1 AND NOT is_resume)::int AS retried_attempts,
+    (SELECT percentile_cont(0.5) WITHIN GROUP(ORDER BY provider_execution_ms) FROM usage) AS execution_p50_ms,
+    (SELECT percentile_cont(0.95) WITHIN GROUP(ORDER BY provider_execution_ms) FROM usage) AS execution_p95_ms,
+    avg(queue_duration_ms) AS queue_ms,avg(human_wait_ms) AS human_wait_ms,avg(tool_execution_ms) AS tool_ms,
+    sum(tool_failures) AS tool_failures,sum(tool_call_count) AS tool_calls,
+    count(*) FILTER(WHERE provider_execution_ms IS NULL)::int AS missing_execution,
+    count(*) FILTER(WHERE queue_duration_ms IS NULL)::int AS missing_queue,
+    count(*) FILTER(WHERE human_wait_ms IS NULL)::int AS missing_human,
+    count(*) FILTER(WHERE tool_execution_ms IS NULL)::int AS missing_tools
+  FROM attempts
+),
+comparison AS (
+  SELECT provider, model, count(*)::int AS invocations, count(DISTINCT run_id)::int AS runs,
+    percentile_cont(0.5) WITHIN GROUP(ORDER BY provider_execution_ms) AS execution_p50_ms,
+    percentile_cont(0.95) WITHIN GROUP(ORDER BY provider_execution_ms) AS execution_p95_ms,
+    count(*) FILTER(WHERE failure_category IS NOT NULL)::int AS failures,
+    count(DISTINCT run_id) FILTER(WHERE run_status='COMPLETED')::int AS completed_runs,
+    count(DISTINCT run_id) FILTER(WHERE run_status='COMPLETED' AND verified)::int AS verified_runs
+  FROM invocations GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 200
+),
+failure_rows AS (
+  SELECT COALESCE(normalized_failure_category,'UNKNOWN') AS category, count(*)::int AS attempts
+  FROM attempts WHERE normalized_failure_category IS NOT NULL OR status IN ('FAILED','CANCELED')
+  GROUP BY 1 ORDER BY 2 DESC
+),
+detail_page AS (
+  SELECT attempt_id, run_id, step_key, step_type, provider,
+    COALESCE(NULLIF(model,''), NULLIF(configured_model,''), NULLIF(requested_model,''), NULLIF(session_models,'')) AS model,
+    status, provider_execution_ms, wall_duration_ms, queue_duration_ms, human_wait_ms, tool_execution_ms,
+    normalized_failure_category, start_time
+  FROM attempts ORDER BY start_time DESC, attempt_id DESC ${pagination(f)}
+)
+SELECT
+  (SELECT to_jsonb(s) FROM summary s) AS summary,
+  COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.invocations DESC, c.provider, c.model) FROM comparison c), '[]'::jsonb) AS comparison,
+  COALESCE((SELECT jsonb_agg(to_jsonb(f) ORDER BY f.attempts DESC, f.category) FROM failure_rows f), '[]'::jsonb) AS failures,
+  COALESCE((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.start_time DESC, d.attempt_id DESC) FROM detail_page d), '[]'::jsonb) AS details`,
+    params,
+  );
+  if (!row) throw new Error("performance analytics returned no row");
+  return row;
 }
 
 export async function workflowAnalytics(f: AnalyticsFilters, scope: AnalyticsScope) {
   const params = filterParams(f, scope);
-  const [workflows, steps, trend, evidence, details] = await Promise.all([
-    q(
-      pool,
-      `${executionCte} SELECT definition_key AS workflow,count(*)::int AS runs,count(*) FILTER(WHERE status='COMPLETED')::int AS completed_runs,
-      count(*) FILTER(WHERE verified AND status='COMPLETED')::int AS verified_runs,
-      avg(extract(epoch FROM(finished_at-started_at))*1000) AS workflow_ms,
-      count(*) OVER()::int AS total_rows FROM runs GROUP BY 1 ORDER BY count(*) DESC,1 ${pagination(f)}`,
-      params,
-    ),
-    q(
-      pool,
-      `${executionCte} SELECT definition_key AS workflow,step_key,count(*)::int AS attempts,
-      count(*) FILTER(WHERE number>1 AND NOT is_resume)::int AS retries,
-      count(*) FILTER(WHERE status IN ('WAITING_INPUT','WAITING_APPROVAL') OR human_wait_ms>0)::int AS blocked,
-      avg(provider_execution_ms) AS execution_ms,avg(context_preparation_ms) AS context_preparation_ms,
-      count(context_preparation_ms)::int AS measured_context,
-      avg(human_wait_ms) FILTER(WHERE step_type='human_approval' OR status='WAITING_APPROVAL') AS approval_wait_ms,
-      avg(human_wait_ms) AS human_wait_ms,count(*) OVER()::int AS total_rows
-      FROM attempts GROUP BY 1,2 ORDER BY avg(provider_execution_ms) DESC NULLS LAST,1,2 ${pagination(f)}`,
-      params,
-    ),
-    q(
-      pool,
-      `${executionCte} SELECT ${bucketSql("r.finished_at")} AS bucket,count(*)::int AS completed_runs,
-      count(*) FILTER(WHERE r.verified)::int AS verified_runs
-      FROM runs r CROSS JOIN bounds b WHERE r.status='COMPLETED' AND r.finished_at>=b.lo AND r.finished_at<b.hi GROUP BY 1 ORDER BY 1`,
-      params,
-    ),
-    one(
-      pool,
-      `${executionCte} SELECT
-      (SELECT count(*)::int FROM runs) AS runs,
-      (SELECT count(DISTINCT definition_key)::int FROM runs) AS workflows,
-      (SELECT count(DISTINCT (definition_key,step_key))::int FROM attempts) AS step_groups,
-      (SELECT avg((er.data->'evidence'->>'repository_correct')::boolean::int) FROM eval_results er JOIN evaluation_case_runs cr ON cr.id=er.case_run_id
-        JOIN evaluation_runs e ON e.id=cr.evaluation_id JOIN runs r ON r.id=e.workflow_run_id
-        WHERE er.owner_id=r.owner_id AND er.data->'evidence'->>'repository_correct' IN ('true','false')) AS repository_accuracy,
-      (SELECT count(*)::int FROM eval_results er JOIN evaluation_case_runs cr ON cr.id=er.case_run_id JOIN evaluation_runs e ON e.id=cr.evaluation_id JOIN runs r ON r.id=e.workflow_run_id
-        WHERE er.owner_id=r.owner_id AND er.data->'evidence'->>'repository_correct' IN ('true','false')) AS labeled_repositories,
-      (SELECT sum(switches)::int FROM (SELECT count(*) FILTER(WHERE previous IS NOT NULL AND provider<>previous) AS switches
-        FROM (SELECT run_id,provider,lag(provider) OVER(PARTITION BY run_id ORDER BY invocation_time,attempt_id,invocation_id) AS previous FROM usage WHERE invocation_time IS NOT NULL) x GROUP BY run_id) x) AS agent_switches,
-      count(*) FILTER(WHERE context_preparation_ms IS NULL)::int AS missing_context FROM attempts`,
-      params,
-    ),
-    q(
-      pool,
-      `${executionCte} SELECT id AS run_id,title,definition_key AS workflow,status,verified,work_item_id,created_at,
-      count(*) OVER()::int AS total_rows FROM runs ORDER BY created_at DESC,id DESC ${pagination(f)}`,
-      params,
-    ),
-  ]);
-  // Include failures even on days with no completed runs.
-  const verificationTrend = await q(
+  // One pass over the cohort. Verification failures stay on attempt days even when no run completed.
+  const row = await one<{
+    workflows: Record<string, unknown>[];
+    steps: Record<string, unknown>[];
+    trend: Record<string, unknown>[];
+    verification_trend: Record<string, unknown>[];
+    evidence: Record<string, unknown>;
+    details: Record<string, unknown>[];
+    hotspots: {
+      retries: Record<string, unknown>[];
+      blocked: Record<string, unknown>[];
+      approvals: Record<string, unknown>[];
+    };
+  }>(
     pool,
-    `${executionCte} SELECT ${bucketSql("start_time")} AS bucket,count(*) FILTER(WHERE metrics->'verification'->>'passed'='false' OR metrics->'independent_verification'->>'verdict'='FAIL')::int AS failures,
-    count(*) FILTER(WHERE metrics->'verification'->>'passed' IN ('true','false') OR metrics->'independent_verification'->>'verdict' IN ('PASS','FAIL'))::int AS evaluated FROM attempts GROUP BY 1 ORDER BY 1`,
+    `${executionCte},
+workflow_page AS (
+  SELECT definition_key AS workflow, count(*)::int AS runs,
+    count(*) FILTER(WHERE status='COMPLETED')::int AS completed_runs,
+    count(*) FILTER(WHERE verified AND status='COMPLETED')::int AS verified_runs,
+    avg(extract(epoch FROM(finished_at-started_at))*1000) AS workflow_ms,
+    count(*) OVER()::int AS total_rows
+  FROM runs GROUP BY 1 ORDER BY count(*) DESC, 1 ${pagination(f)}
+),
+step_page AS (
+  SELECT definition_key AS workflow, step_key, count(*)::int AS attempts,
+    count(*) FILTER(WHERE number>1 AND NOT is_resume)::int AS retries,
+    count(*) FILTER(WHERE status IN ('WAITING_INPUT','WAITING_APPROVAL') OR human_wait_ms>0)::int AS blocked,
+    avg(provider_execution_ms) AS execution_ms, avg(context_preparation_ms) AS context_preparation_ms,
+    count(context_preparation_ms)::int AS measured_context,
+    avg(human_wait_ms) FILTER(WHERE step_type='human_approval' OR status='WAITING_APPROVAL') AS approval_wait_ms,
+    avg(human_wait_ms) AS human_wait_ms, count(*) OVER()::int AS total_rows
+  FROM attempts GROUP BY 1, 2 ORDER BY avg(provider_execution_ms) DESC NULLS LAST, 1, 2 ${pagination(f)}
+),
+trend_rows AS (
+  SELECT ${bucketSql("r.finished_at")} AS bucket, count(*)::int AS completed_runs,
+    count(*) FILTER(WHERE r.verified)::int AS verified_runs
+  FROM runs r CROSS JOIN bounds b
+  WHERE r.status='COMPLETED' AND r.finished_at>=b.lo AND r.finished_at<b.hi
+  GROUP BY 1 ORDER BY 1
+),
+verification_rows AS (
+  SELECT ${bucketSql("start_time")} AS bucket,
+    count(*) FILTER(WHERE metrics->'verification'->>'passed'='false' OR metrics->'independent_verification'->>'verdict'='FAIL')::int AS failures,
+    count(*) FILTER(WHERE metrics->'verification'->>'passed' IN ('true','false') OR metrics->'independent_verification'->>'verdict' IN ('PASS','FAIL'))::int AS evaluated
+  FROM attempts GROUP BY 1 ORDER BY 1
+),
+evidence_row AS (
+  SELECT
+    (SELECT count(*)::int FROM runs) AS runs,
+    (SELECT count(DISTINCT definition_key)::int FROM runs) AS workflows,
+    (SELECT count(DISTINCT (definition_key, step_key))::int FROM attempts) AS step_groups,
+    (SELECT avg((er.data->'evidence'->>'repository_correct')::boolean::int) FROM eval_results er
+      JOIN evaluation_case_runs cr ON cr.id=er.case_run_id
+      JOIN evaluation_runs e ON e.id=cr.evaluation_id JOIN runs r ON r.id=e.workflow_run_id
+      WHERE er.owner_id=r.owner_id AND er.data->'evidence'->>'repository_correct' IN ('true','false')) AS repository_accuracy,
+    (SELECT count(*)::int FROM eval_results er JOIN evaluation_case_runs cr ON cr.id=er.case_run_id
+      JOIN evaluation_runs e ON e.id=cr.evaluation_id JOIN runs r ON r.id=e.workflow_run_id
+      WHERE er.owner_id=r.owner_id AND er.data->'evidence'->>'repository_correct' IN ('true','false')) AS labeled_repositories,
+    (SELECT sum(switches)::int FROM (
+      SELECT count(*) FILTER(WHERE previous IS NOT NULL AND provider<>previous) AS switches
+      FROM (
+        SELECT run_id, provider, lag(provider) OVER(PARTITION BY run_id ORDER BY invocation_time, attempt_id, invocation_id) AS previous
+        FROM usage WHERE invocation_time IS NOT NULL
+      ) x GROUP BY run_id
+    ) x) AS agent_switches,
+    count(*) FILTER(WHERE context_preparation_ms IS NULL)::int AS missing_context
+  FROM attempts
+),
+detail_page AS (
+  SELECT id AS run_id, title, definition_key AS workflow, status, verified, work_item_id, created_at,
+    count(*) OVER()::int AS total_rows
+  FROM runs ORDER BY created_at DESC, id DESC ${pagination(f)}
+),
+step_stats AS (
+  SELECT definition_key||' / '||step_key AS dimension,
+    count(*) FILTER(WHERE number>1 AND NOT is_resume)::int AS retries,
+    count(*) FILTER(WHERE human_wait_ms>0 OR status IN ('WAITING_INPUT','WAITING_APPROVAL'))::int AS blocked,
+    avg(human_wait_ms) FILTER(WHERE step_type='human_approval' OR status='WAITING_APPROVAL') AS approval_ms
+  FROM attempts GROUP BY definition_key, step_key
+)
+SELECT
+  COALESCE((SELECT jsonb_agg(to_jsonb(w) ORDER BY w.runs DESC, w.workflow) FROM workflow_page w), '[]'::jsonb) AS workflows,
+  COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.execution_ms DESC NULLS LAST, s.workflow, s.step_key) FROM step_page s), '[]'::jsonb) AS steps,
+  COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.bucket) FROM trend_rows t), '[]'::jsonb) AS trend,
+  COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v.bucket) FROM verification_rows v), '[]'::jsonb) AS verification_trend,
+  (SELECT to_jsonb(e) FROM evidence_row e) AS evidence,
+  COALESCE((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.created_at DESC, d.run_id DESC) FROM detail_page d), '[]'::jsonb) AS details,
+  jsonb_build_object(
+    'retries', COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.retries DESC, x.dimension) FROM (
+      SELECT * FROM step_stats WHERE retries>0 ORDER BY retries DESC, dimension LIMIT 10) x), '[]'::jsonb),
+    'blocked', COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.blocked DESC, x.dimension) FROM (
+      SELECT * FROM step_stats WHERE blocked>0 ORDER BY blocked DESC, dimension LIMIT 10) x), '[]'::jsonb),
+    'approvals', COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.approval_ms DESC NULLS LAST, x.dimension) FROM (
+      SELECT * FROM step_stats WHERE approval_ms>0 ORDER BY approval_ms DESC NULLS LAST, dimension LIMIT 10) x), '[]'::jsonb)
+  ) AS hotspots`,
     params,
   );
-  const hotspots = await one(
-    pool,
-    `${executionCte}, step_stats AS (
-    SELECT definition_key||' / '||step_key AS dimension,
-      count(*) FILTER(WHERE number>1 AND NOT is_resume)::int AS retries,
-      count(*) FILTER(WHERE human_wait_ms>0 OR status IN ('WAITING_INPUT','WAITING_APPROVAL'))::int AS blocked,
-      avg(human_wait_ms) FILTER(WHERE step_type='human_approval' OR status='WAITING_APPROVAL') AS approval_ms
-    FROM attempts GROUP BY definition_key,step_key)
-    SELECT (SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT * FROM step_stats WHERE retries>0 ORDER BY retries DESC,dimension LIMIT 10) x) AS retries,
-      (SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT * FROM step_stats WHERE blocked>0 ORDER BY blocked DESC,dimension LIMIT 10) x) AS blocked,
-      (SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT * FROM step_stats WHERE approval_ms>0 ORDER BY approval_ms DESC,dimension LIMIT 10) x) AS approvals`,
-    params,
-  );
-  return {
-    workflows,
-    steps,
-    trend,
-    verification_trend: verificationTrend,
-    evidence,
-    details,
-    hotspots,
-  };
+  if (!row) throw new Error("workflow analytics returned no row");
+  return row;
 }

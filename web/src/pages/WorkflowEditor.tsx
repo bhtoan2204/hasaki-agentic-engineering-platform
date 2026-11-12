@@ -199,6 +199,11 @@ function Editor({ wfKey }: { wfKey: string }) {
     () => new Set(errors.flatMap((e) => [...e.matchAll(/"([a-z0-9_-]+)"/g)].map((m) => m[1]))),
     [errors],
   );
+  const pickedAt = useRef(0);
+  const pickStep = useCallback((key: string) => {
+    pickedAt.current = performance.now();
+    setSelected(key);
+  }, []);
   const nodes: Node<StepNodeData>[] = useMemo(
     () =>
       (spec?.steps ?? []).map((s) => ({
@@ -210,18 +215,19 @@ function Editor({ wfKey }: { wfKey: string }) {
           step: s,
           selected: s.key === selected,
           invalid: invalidKeys.has(s.key),
+          onPick: pickStep,
         },
       })),
-    [spec, positions, selected, invalidKeys],
+    [spec, positions, selected, invalidKeys, pickStep],
   );
   const edges: Edge[] = useMemo(
     () =>
-      toEdges(spec?.steps ?? []).map((e) => ({
+      toEdges(spec?.steps ?? [], undefined, positions).map((e) => ({
         ...e,
         deletable: true,
         selectable: true,
       })),
-    [spec],
+    [spec, positions],
   );
 
   // Ctrl+S / ⌘S publishes the workflow (same as the Publish button: validate, save, publish a new version) instead of
@@ -527,9 +533,14 @@ function Editor({ wfKey }: { wfKey: string }) {
             onConnect={onConnect}
             onEdgesDelete={removeEdges}
             onNodesDelete={(ns) => removeSteps(ns.map((n) => n.id))}
-            onNodeClick={(_, n) => setSelected(n.id)}
-            onPaneClick={() => setSelected(null)}
+            onNodeClick={(_, n) => pickStep(n.id)}
+            onPaneClick={() => {
+              if (performance.now() - pickedAt.current < 500) return;
+              setSelected(null);
+            }}
             deleteKeyCode={["Delete", "Backspace"]}
+            nodeClickDistance={8}
+            nodeDragThreshold={8}
             fitView
             fitViewOptions={{
               padding: 0.25,

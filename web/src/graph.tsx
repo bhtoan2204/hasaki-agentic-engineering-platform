@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { STATUS_COLORS } from "./api.ts";
+import { autoLayout, edgeEnds } from "./dagLayout.ts";
 import { useI18n } from "./i18n/index.tsx";
 // Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
 import "./pages/RunView.css";
@@ -81,30 +82,7 @@ export interface StepLike {
   parent_step_key?: string | null;
 }
 
-/** Vertical layered layout by longest-path depth (later steps below); used when a definition has no saved node positions. */
-export function autoLayout(steps: StepLike[]): Record<string, { x: number; y: number }> {
-  const byKey = new Map(steps.map((s) => [s.key, s]));
-  const depth = new Map<string, number>();
-  const d = (k: string, seen = new Set<string>()): number => {
-    if (depth.has(k)) return depth.get(k)!;
-    if (seen.has(k)) return 0;
-    seen.add(k);
-    const deps = byKey.get(k)?.depends_on ?? [];
-    const v = deps.length ? Math.max(...deps.map((x) => d(x, seen) + 1)) : 0;
-    depth.set(k, v);
-    return v;
-  };
-  steps.forEach((s) => d(s.key));
-  const layers = new Map<number, string[]>();
-  for (const s of steps)
-    (
-      layers.get(depth.get(s.key)!) ?? layers.set(depth.get(s.key)!, []).get(depth.get(s.key)!)!
-    ).push(s.key);
-  const pos: Record<string, { x: number; y: number }> = {};
-  for (const [l, keys] of layers)
-    keys.forEach((k, i) => (pos[k] = { x: (i - (keys.length - 1) / 2) * 250, y: l * 140 }));
-  return pos;
-}
+export { autoLayout };
 
 /** Edge colour from the statuses at both ends: done = green, flowing into a live step = berry, failed = red, waiting = amber. */
 function edgeColor(src?: string, dst?: string) {
@@ -116,7 +94,11 @@ function edgeColor(src?: string, dst?: string) {
   return "var(--line-strong)";
 }
 
-export function toEdges(steps: StepLike[], statusOf?: (k: string) => string | undefined): Edge[] {
+export function toEdges(
+  steps: StepLike[],
+  statusOf?: (k: string) => string | undefined,
+  pos?: Record<string, { x: number; y: number }>,
+): Edge[] {
   const edges: Edge[] = [];
   for (const s of steps)
     for (const d of s.depends_on ?? []) {
@@ -124,10 +106,13 @@ export function toEdges(steps: StepLike[], statusOf?: (k: string) => string | un
       const dst = statusOf?.(s.key);
       const active = st === "COMPLETED" || st === "SKIPPED";
       const stroke = statusOf ? edgeColor(st, dst) : "var(--muted)";
+      const ends = pos?.[d] && pos?.[s.key] ? edgeEnds(pos[d], pos[s.key]) : {};
       edges.push({
         id: `${d}->${s.key}`,
         source: d,
         target: s.key,
+        type: "smoothstep",
+        ...ends,
         animated: dst === "RUNNING",
         className:
           (s as StepLike).config?.subtask?.execution_strategy === "parallel"
@@ -165,6 +150,8 @@ export type StepNodeData = {
   generation?: number;
   /** After feedback: this step was invalidated and runs again, or its earlier result is reused. */
   replan?: "rerun" | "reused";
+  /** Open this step on pointerdown. A click is often swallowed by node drag. */
+  onPick?: (key: string) => void;
 };
 
 function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
@@ -196,8 +183,17 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
     ? (step as any).config.merged_from
     : [];
   return (
-    <div className={cls} style={{ ["--gn-c" as any]: color }}>
+    <div
+      className={cls}
+      style={{ ["--gn-c" as any]: color }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        data.onPick?.(step.key);
+      }}
+    >
       <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} id="tl" />
+      <Handle type="target" position={Position.Right} id="tr" />
       <span className="gn-rail" aria-hidden />
       <div className="gn-head">
         <span className="gn-type" title={step.type}>
@@ -318,6 +314,8 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
         </div>
       )}
       <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Left} id="sl" />
+      <Handle type="source" position={Position.Right} id="sr" />
     </div>
   );
 }

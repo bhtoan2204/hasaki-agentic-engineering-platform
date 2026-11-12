@@ -35,7 +35,7 @@ orchestration layer.
 | Deterministic precedence and conflicts | `resolveKnowledge` (scope, `conflict_key`, enforced security policies) |
 | What each execution was given | immutable `context_snapshots` (key, version and content of every item) and the item "Usage" tab |
 | Verified vs agent memory | `knowledge/memory.ts`: facts trusted, agent conclusions disabled until a human approves them |
-| Model calls inside a run | `completeForRun` (the run's provider: Claude, Codex or Cursor) |
+| Model calls inside a run | `completeForRun` (the run's provider: Claude, Codex, Cursor or Antigravity) |
 | Non-blocking side effects | `background()` after commit (failures are logged and never fail the workflow) |
 | Ownership and authorization | knowledge edit rights: shared knowledge needs an admin, private knowledge needs its owner |
 | Repository knowledge | `importFromRepositories` (CLAUDE.md, SKILL.md, wiki docs), keyed by file sha |

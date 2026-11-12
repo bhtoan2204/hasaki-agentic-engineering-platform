@@ -24,7 +24,7 @@ export interface AgentMetrics {
   verification?: Record<string, unknown>;
   /** Where the model came from: step config / routing / global default. */
   model_source?: string;
-  /** Agent provider that produced these metrics (claude | cursor | codex). */
+  /** Agent provider that produced these metrics (claude | cursor | codex | antigravity). */
   provider?: string;
   /** Codex model_reasoning_effort, when one was configured. */
   reasoning_effort?: string;

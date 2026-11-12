@@ -35,7 +35,7 @@ export async function analyticsFixtures() {
     },
   });
   const make = async (
-    provider: "claude" | "codex" | "cursor",
+    provider: "claude" | "codex" | "cursor" | "antigravity",
     user = owner,
     at = "2026-11-01T00:00:00Z",
     verified: boolean | null = true,

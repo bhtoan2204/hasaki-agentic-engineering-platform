@@ -12,7 +12,7 @@ Use `config.agent.fallback` on an agent/coding-agent step (`config.fallback` is 
     "provider": "claude",
     "fallback": {
       "mode": "manual",
-      "providers": ["claude", "codex", "cursor"],
+      "providers": ["claude", "codex", "cursor", "antigravity"],
       "max_switches": 2,
       "allow_unknown_cost": false,
       "allow_budget_failure": false

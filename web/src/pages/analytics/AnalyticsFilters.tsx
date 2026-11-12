@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { SlidersHorizontal, X } from "lucide-react";
 import { useI18n } from "../../i18n/index.tsx";
+import { Drawer } from "../../ui.tsx";
 import type { Row } from "./shared.tsx";
 export function defaultFilters() {
   const now = new Date();
@@ -28,11 +30,13 @@ export function AnalyticsFilters({
   options,
   onApply,
   domain = "insights",
+  compact = false,
 }: {
   domain?: "insights" | "production";
   query: string;
   options: Row | null;
   onApply: (params: URLSearchParams) => void;
+  compact?: boolean;
 }) {
   const { t } = useI18n();
   const initial = () => {
@@ -41,6 +45,7 @@ export function AnalyticsFilters({
     return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, p.get(k) ?? v]));
   };
   const [draft, setDraft] = useState(initial);
+  const [advanced, setAdvanced] = useState(false);
   useEffect(() => {
     setDraft(initial());
   }, [query]); // URL is the applied filter state shared by the domain dashboards.
@@ -50,8 +55,7 @@ export function AnalyticsFilters({
       [k]: v,
       ...(k === "namespace" ? { service: "" } : {}),
     }));
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
+  const applyDraft = () => {
     const p = new URLSearchParams();
     const old = new URLSearchParams(query);
     for (const [k, v] of Object.entries(draft)) {
@@ -62,10 +66,21 @@ export function AnalyticsFilters({
         p.set(k, v === originalDate ? original : v);
       } else p.set(k, v);
     }
-    if (old.has("group_by")) p.set("group_by", old.get("group_by")!);
-    for (const key of ["view", "return_query", "return_tab", "scope"])
+    for (const key of ["group_by", "view", "return_query", "return_tab", "scope"])
       if (old.has(key)) p.set(key, old.get(key)!);
     onApply(p);
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    applyDraft();
+  };
+  const reset = () => {
+    const next = new URLSearchParams(defaultFilters());
+    const old = new URLSearchParams(query);
+    for (const key of ["view", "group_by", "return_query", "return_tab", "scope"])
+      if (old.has(key)) next.set(key, old.get(key)!);
+    setDraft(defaultFilters());
+    onApply(next);
   };
   const select = (key: string, values: Array<[string, string]>) => (
     <label key={key}>
@@ -84,59 +99,127 @@ export function AnalyticsFilters({
       </select>
     </label>
   );
-  return (
-    <form className="card an-filter" onSubmit={submit}>
-      <details open>
-        <summary>{t("an.filters")}</summary>
-        <div className="an-filter-grid">
-          <label>
-            {t("an.from")}
-            <input
-              required
-              type="date"
-              value={datePart(draft.from, draft.timezone)}
-              onChange={(e) => set("from", e.target.value)}
-            />
-          </label>
-          <label>
-            {t("an.to")}
-            <input
-              required
-              type="date"
-              value={datePart(draft.to, draft.timezone)}
-              onChange={(e) => set("to", e.target.value)}
-            />
-          </label>
-          <label>
-            {t("an.timezone")}
-            <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
-              {[
-                ...new Set([
-                  draft.timezone,
-                  "Asia/Bangkok",
-                  "Asia/Ho_Chi_Minh",
-                  "UTC",
-                  "America/New_York",
-                  "Europe/London",
-                ]),
-              ].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {t("an.bucket")}
-            <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
-              <option value="day">{t("an.day")}</option>
-              <option value="hour">{t("an.hour")}</option>
-            </select>
-          </label>
-          {domain === "insights" && (
-            <>
-              {select(
-                "provider",
-                ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
-              )}
+  const zones = [
+    ...new Set([
+      draft.timezone,
+      "Asia/Bangkok",
+      "Asia/Ho_Chi_Minh",
+      "UTC",
+      "America/New_York",
+      "Europe/London",
+    ]),
+  ];
+  const dates = (
+    <>
+      <label>
+        {t("an.from")}
+        <input
+          required
+          type="date"
+          value={datePart(draft.from, draft.timezone)}
+          onChange={(e) => set("from", e.target.value)}
+        />
+      </label>
+      <label>
+        {t("an.to")}
+        <input
+          required
+          type="date"
+          value={datePart(draft.to, draft.timezone)}
+          onChange={(e) => set("to", e.target.value)}
+        />
+      </label>
+    </>
+  );
+  if (domain === "insights" && compact) {
+    const applied = new URLSearchParams(query);
+    const defaults = defaultFilters();
+    const dirty = Object.entries(defaults).some(([k, v]) => (applied.get(k) ?? "") !== v);
+    const chips = (["provider", "model", "user", "workflow", "repository", "project"] as const).flatMap(
+      (key) => {
+        const value = applied.get(key);
+        if (!value) return [];
+        const shown =
+          key === "user"
+            ? ((options?.users ?? []).find((u: Row) => String(u.id) === value)?.username ?? value)
+            : value;
+        return [{ key, shown }];
+      },
+    );
+    const advancedCount =
+      (["model", "user", "repository", "project"] as const).filter((key) => applied.get(key)).length +
+      (applied.get("timezone") && applied.get("timezone") !== defaults.timezone ? 1 : 0) +
+      (applied.get("bucket") && applied.get("bucket") !== defaults.bucket ? 1 : 0);
+    return (
+      <form className="card an-filter an-filter-compact" onSubmit={submit}>
+        <div className="an-filter-bar">
+          {dates}
+          {select(
+            "provider",
+            ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
+          )}
+          {select(
+            "workflow",
+            (options?.workflows ?? []).map((v: string) => [v, v]),
+          )}
+          <div className="an-filter-actions">
+            <button type="button" className="ghost sm" onClick={() => setAdvanced(true)}>
+              <SlidersHorizontal size={14} />
+              {t("an.moreFilters")}
+              {advancedCount > 0 ? ` (${advancedCount})` : ""}
+            </button>
+            <button type="submit" className="sm">
+              {t("an.apply")}
+            </button>
+            {dirty && (
+              <button className="ghost sm" type="button" onClick={reset}>
+                {t("an.reset")}
+              </button>
+            )}
+          </div>
+        </div>
+        {chips.length > 0 && (
+          <div className="an-chips" aria-label={t("an.activeFilters")}>
+            {chips.map((chip) => (
+              <span className="an-chip" key={chip.key}>
+                <span>
+                  {t(`an.${chip.key}`)}: {chip.shown}
+                </span>
+                <button
+                  type="button"
+                  className="quiet icon"
+                  aria-label={t("an.removeFilter", { name: t(`an.${chip.key}`) })}
+                  onClick={() => {
+                    const next = new URLSearchParams(query);
+                    next.delete(chip.key);
+                    next.delete("page");
+                    onApply(next);
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {advanced && (
+          <Drawer title={t("an.moreFilters")} onClose={() => setAdvanced(false)} width={440}>
+            <div className="an-filter-grid an-filter-drawer">
+              <label>
+                {t("an.timezone")}
+                <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
+                  {zones.map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t("an.bucket")}
+                <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
+                  <option value="day">{t("an.day")}</option>
+                  <option value="hour">{t("an.hour")}</option>
+                </select>
+              </label>
               <label>
                 {t("an.model")}
                 <input
@@ -149,87 +232,166 @@ export function AnalyticsFilters({
                 "user",
                 (options?.users ?? []).map((u: Row) => [String(u.id), u.username]),
               )}
-              {(["workflow", "repository", "project"] as const).map((k) =>
+              {(["repository", "project"] as const).map((k) =>
                 select(
                   k,
-                  (
-                    options?.[
-                      {
-                        workflow: "workflows",
-                        repository: "repositories",
-                        project: "projects",
-                      }[k]
-                    ] ?? []
-                  ).map((v: string) => [v, v]),
+                  (options?.[k === "repository" ? "repositories" : "projects"] ?? []).map((v: string) => [
+                    v,
+                    v,
+                  ]),
                 ),
               )}
-            </>
+            </div>
+            <p className="muted small">{t("an.scopeHint")}</p>
+            <div className="an-filter-footer">
+              <button
+                type="button"
+                className="sm"
+                onClick={() => {
+                  applyDraft();
+                  setAdvanced(false);
+                }}
+              >
+                {t("an.apply")}
+              </button>
+            </div>
+          </Drawer>
+        )}
+      </form>
+    );
+  }
+  if (domain === "insights") {
+    return (
+      <form className="card an-filter" onSubmit={submit}>
+        <details open>
+          <summary>{t("an.filters")}</summary>
+          <div className="an-filter-grid">
+            {dates}
+            <label>
+              {t("an.timezone")}
+              <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
+                {zones.map((v) => (
+                  <option key={v}>{v}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("an.bucket")}
+              <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
+                <option value="day">{t("an.day")}</option>
+                <option value="hour">{t("an.hour")}</option>
+              </select>
+            </label>
+            {select(
+              "provider",
+              ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
+            )}
+            <label>
+              {t("an.model")}
+              <input
+                value={draft.model}
+                onChange={(e) => set("model", e.target.value)}
+                placeholder={t("an.all")}
+              />
+            </label>
+            {select(
+              "user",
+              (options?.users ?? []).map((u: Row) => [String(u.id), u.username]),
+            )}
+            {(["workflow", "repository", "project"] as const).map((k) =>
+              select(
+                k,
+                (options?.[k === "workflow" ? "workflows" : k === "repository" ? "repositories" : "projects"] ??
+                  []).map((v: string) => [v, v]),
+              ),
+            )}
+          </div>
+          <div className="an-filter-footer">
+            <p className="muted small">{t("an.scopeHint")}</p>
+            <button className="ghost sm" type="button" onClick={reset}>
+              {t("an.reset")}
+            </button>
+            <button type="submit" className="sm">
+              {t("an.apply")}
+            </button>
+          </div>
+        </details>
+      </form>
+    );
+  }
+  return (
+    <form className="card an-filter" onSubmit={submit}>
+      <details open>
+        <summary>{t("an.filters")}</summary>
+        <div className="an-filter-grid">
+          {dates}
+          <label>
+            {t("an.timezone")}
+            <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
+              {zones.map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t("an.bucket")}
+            <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
+              <option value="day">{t("an.day")}</option>
+              <option value="hour">{t("an.hour")}</option>
+            </select>
+          </label>
+          {select(
+            "namespace",
+            (options?.namespaces ?? []).map((v: string) => [v, v]),
           )}
-          {domain === "production" && (
-            <>
-              {select(
-                "namespace",
-                (options?.namespaces ?? []).map((v: string) => [v, v]),
-              )}
-              {select(
-                "environment",
-                (options?.environments ?? []).map((v: string) => [v, v]),
-              )}
-              {select(
-                "severity",
-                ["critical", "high", "medium", "low", "unknown"].map((v) => [v, v]),
-              )}
-              {select(
-                "incident_status",
-                ["open", "acknowledged", "resolved", "recurring"].map((v) => [
-                  v,
-                  t(
-                    `an.${v === "recurring" ? "recurringIncidents" : v === "open" ? "openIncidents" : v === "acknowledged" ? "acknowledgedIncidents" : "resolvedIncidents"}`,
-                  ),
-                ]),
-              )}
-              <label>
-                {t("an.service")}
-                <select
-                  value={draft.service ? `${draft.namespace || "*"}\u001f${draft.service}` : ""}
-                  onChange={(e) => {
-                    const [namespace, service] = e.target.value.split("\u001f");
-                    setDraft((d) => ({
-                      ...d,
-                      service: service ?? "",
-                      ...(namespace && namespace !== "*" ? { namespace } : {}),
-                    }));
-                  }}
-                  aria-label={t("an.service")}
-                >
-                  <option value="">{t("an.all")}</option>
-                  {(options?.services ?? [])
-                    .filter((v: Row) => !draft.namespace || v.namespace === draft.namespace)
-                    .map((v: Row) => (
-                      <option
-                        key={`${v.namespace}\u001f${v.service}`}
-                        value={`${v.namespace}\u001f${v.service}`}
-                      >
-                        {v.service} · {v.namespace}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </>
+          {select(
+            "environment",
+            (options?.environments ?? []).map((v: string) => [v, v]),
           )}
+          {select(
+            "severity",
+            ["critical", "high", "medium", "low", "unknown"].map((v) => [v, v]),
+          )}
+          {select(
+            "incident_status",
+            ["open", "acknowledged", "resolved", "recurring"].map((v) => [
+              v,
+              t(
+                `an.${v === "recurring" ? "recurringIncidents" : v === "open" ? "openIncidents" : v === "acknowledged" ? "acknowledgedIncidents" : "resolvedIncidents"}`,
+              ),
+            ]),
+          )}
+          <label>
+            {t("an.service")}
+            <select
+              value={draft.service ? `${draft.namespace || "*"}\u001f${draft.service}` : ""}
+              onChange={(e) => {
+                const [namespace, service] = e.target.value.split("\u001f");
+                setDraft((d) => ({
+                  ...d,
+                  service: service ?? "",
+                  ...(namespace && namespace !== "*" ? { namespace } : {}),
+                }));
+              }}
+              aria-label={t("an.service")}
+            >
+              <option value="">{t("an.all")}</option>
+              {(options?.services ?? [])
+                .filter((v: Row) => !draft.namespace || v.namespace === draft.namespace)
+                .map((v: Row) => (
+                  <option
+                    key={`${v.namespace}\u001f${v.service}`}
+                    value={`${v.namespace}\u001f${v.service}`}
+                  >
+                    {v.service} · {v.namespace}
+                  </option>
+                ))}
+            </select>
+          </label>
         </div>
         <div className="an-filter-footer">
-          <p className="muted small">
-            {t(domain === "production" ? "an.productionFilterHint" : "an.scopeHint")}
-          </p>
-          <button
-            className="ghost sm"
-            type="button"
-            onClick={() => {
-              setDraft(defaultFilters());
-              onApply(new URLSearchParams(defaultFilters()));
-            }}
-          >
+          <p className="muted small">{t("an.productionFilterHint")}</p>
+          <button className="ghost sm" type="button" onClick={reset}>
             {t("an.reset")}
           </button>
           <button type="submit" className="sm">

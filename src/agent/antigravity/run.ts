@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactSecrets } from "../../integrations/redact.ts";
@@ -17,8 +17,15 @@ import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
   excludeFromGit,
+  antigravityHeadlessSettings,
 } from "./policy.ts";
-import { AntigravityStream, classifyAntigravityError, type AntigravityEvent } from "./stream.ts";
+import { bridgeToolsFor } from "../mcpBridge.ts";
+import {
+  AntigravityStream,
+  TextBatch,
+  classifyAntigravityError,
+  type AntigravityEvent,
+} from "./stream.ts";
 
 export interface AntigravityTurnResult {
   isError: boolean;
@@ -193,13 +200,16 @@ export function buildAntigravityArgs(opts: {
   timeoutSeconds?: number;
   conversationId?: string;
   additionalDirs?: string[];
+  settingsPath?: string;
 }): string[] {
   const args = ["--output-format", "stream-json", "--input-format", "stream-json"];
   if (opts.model) args.push("--model", opts.model);
   if (opts.effort) args.push("--effort", opts.effort);
   if (opts.sandbox !== false) args.push("--sandbox");
+  // agy uses Go's time.ParseDuration. A bare millisecond count is rejected and the
+  // process exits before stdin is read, which surfaces as EPIPE.
   if (opts.timeoutSeconds && opts.timeoutSeconds > 0) {
-    args.push("--print-timeout", String(opts.timeoutSeconds * 1000));
+    args.push("--print-timeout", `${opts.timeoutSeconds}s`);
   }
   if (opts.conversationId) {
     args.push("--conversation", opts.conversationId);
@@ -209,6 +219,7 @@ export function buildAntigravityArgs(opts: {
       if (d) args.push("--add-dir", d);
     }
   }
+  if (opts.settingsPath) args.push("--settings", opts.settingsPath);
   return args;
 }
 
@@ -296,6 +307,15 @@ export async function antigravityAgentTurn(
     const timeoutMs = cfg.timeoutMs;
     const timeoutSec = Math.floor(timeoutMs / 1000);
 
+    const settingsPath = join(scratchDir, "settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        antigravityHeadlessSettings(
+          bridgeToolsFor("coding", { commit: true }).map((tool) => tool.name),
+        ),
+      ),
+    );
     const args = buildAntigravityArgs({
       model: input.model || undefined,
       effort: input.effort || undefined,
@@ -303,6 +323,7 @@ export async function antigravityAgentTurn(
       timeoutSeconds: timeoutSec,
       conversationId: input.resumeId || undefined,
       additionalDirs,
+      settingsPath,
     });
 
     const env = antigravityEnv(process.env, {
@@ -332,6 +353,19 @@ export async function antigravityAgentTurn(
     if (child.pid) childGroups.add(child.pid);
 
     const parser = new AntigravityStream();
+    const agentText = new TextBatch();
+    const thinkingText = new TextBatch();
+    const logPiece = async (kind: "agent" | "thinking", text: string) => {
+      if (!text) return;
+      await input.ctx.log(kind, text, {
+        provider: "antigravity",
+        ...(kind === "agent" ? { model } : {}),
+      });
+    };
+    const flushSpeech = async () => {
+      await logPiece("agent", agentText.flush());
+      await logPiece("thinking", thinkingText.flush());
+    };
     let pendingLogs = Promise.resolve();
     let stderr = "";
     let streamError: Error | undefined;
@@ -352,30 +386,42 @@ export async function antigravityAgentTurn(
       if (ev.type === "result") {
         assistantTurns = ev.turns ?? 1;
         if (ev.text != null) fullText = ev.text.slice(0, MAX_RESPONSE_CHARS);
+        await flushSpeech();
       } else if (ev.text) {
         if (!ev.type.startsWith("step_update.")) assistantTurns++;
         const remaining = MAX_RESPONSE_CHARS - fullText.length;
-        if (remaining > 0) fullText += ev.text.slice(0, remaining);
-        await input.ctx.log("agent", ev.text.slice(0, Math.max(0, remaining)), {
-          provider: "antigravity",
-          model,
-        });
+        if (remaining > 0) {
+          const piece = ev.text.slice(0, remaining);
+          fullText += piece;
+          const ready = agentText.push(piece);
+          if (ready) await logPiece("agent", ready);
+        }
       }
 
       if (ev.thinking) {
-        await input.ctx.log("thinking", ev.thinking, {
-          provider: "antigravity",
-        });
+        const ready = thinkingText.push(ev.thinking);
+        if (ready) await logPiece("thinking", ready);
       }
+
+      if (ev.tool || ev.type === "result") await flushSpeech();
 
       if (ev.tool) {
         if (input.metrics) {
           input.metrics.tool_calls[ev.tool] = (input.metrics.tool_calls[ev.tool] ?? 0) + 1;
         }
-        await input.ctx.log("tool", `called ${ev.tool}`, {
+        const args = ev.toolArgs;
+        const raw =
+          args && typeof args === "object"
+            ? ((args as { command?: unknown }).command ??
+              (args as { CommandLine?: unknown }).CommandLine ??
+              (args as { cmd?: unknown }).cmd)
+            : args;
+        const command = typeof raw === "string" ? raw : "";
+        await input.ctx.log("tool", command ? `${ev.tool} ${command.slice(0, 300)}` : ev.tool, {
           provider: "antigravity",
+          name: ev.tool,
           tool: ev.tool,
-          args: ev.toolArgs,
+          input: args ?? {},
         });
       }
 
@@ -473,6 +519,7 @@ export async function antigravityAgentTurn(
 
     const tail = parser.flush();
     for (const ev of tail.events) await handleEvent(ev);
+    await flushSpeech();
     for (const err of tail.errors)
       await input.ctx.log("system", `Antigravity stream: ${err.error}`, {
         provider: "antigravity",

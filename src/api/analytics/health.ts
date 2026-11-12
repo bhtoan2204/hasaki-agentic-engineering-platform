@@ -3,16 +3,42 @@ import { config } from "../../config.ts";
 import { HttpError } from "../../http/error.ts";
 import { requireAdmin, type Actor } from "../../authz/access.ts";
 import { safeDiagnostics } from "../../agent/telemetry.ts";
-import {
-  boundsSql,
-  bucketSql,
-  filterParams,
-  type AnalyticsFilters,
-  type AnalyticsScope,
-} from "./filters.ts";
+import { bucketSql, filterParams, type AnalyticsFilters, type AnalyticsScope } from "./filters.ts";
 import { executionCte } from "./execution.ts";
 
-const healthCte = `${executionCte},
+/** Provider, model, user, workflow, and repository filters are the only reason health looks at workflow runs. */
+function engineeringFilters(f: AnalyticsFilters) {
+  return (
+    f.provider != null ||
+    f.model != null ||
+    f.user != null ||
+    f.workflow != null ||
+    f.repository != null
+  );
+}
+
+function healthFrom(f: AnalyticsFilters, pair = false) {
+  const engineering = engineeringFilters(f);
+  const runGate = engineering
+    ? `AND (($7::text IS NULL AND $8::text IS NULL AND $9::bigint IS NULL AND $10::text IS NULL AND $11::text IS NULL)
+   OR EXISTS(SELECT 1 FROM runs r WHERE r.work_item_id=g.work_item_id))`
+    : "";
+  const bounds = `bounds AS (SELECT $4::text AS bucket,
+ CASE WHEN length($1::text)=10 THEN $1::timestamp AT TIME ZONE $3 ELSE $1::timestamptz END AS lo,
+ CASE WHEN length($2::text)=10 THEN $2::timestamp AT TIME ZONE $3 ELSE $2::timestamptz END AS hi${
+   pair
+     ? `,
+ CASE WHEN length($19::text)=10 THEN $19::timestamp AT TIME ZONE $3 ELSE $19::timestamptz END AS prev_lo,
+ CASE WHEN length($20::text)=10 THEN $20::timestamp AT TIME ZONE $3 ELSE $20::timestamptz END AS prev_hi`
+     : ""
+ })`;
+  const periods = pair
+    ? `periods AS (
+ SELECT 'current'::text AS period, lo, hi FROM bounds
+ UNION ALL SELECT 'previous'::text, prev_lo, prev_hi FROM bounds)`
+    : `periods AS (SELECT 'current'::text AS period, lo, hi FROM bounds)`;
+  return `${engineering ? executionCte : `WITH ${bounds}`},
+${periods},
 visible_groups AS MATERIALIZED (
  SELECT g.*, CASE WHEN w.owner_id IS NOT NULL AND ($6::boolean OR w.owner_id=$5) THEN w.id END AS visible_work_item_id,
    CASE WHEN w.owner_id IS NOT NULL AND ($6::boolean OR w.owner_id=$5) THEN w.code END AS work_item_code
@@ -22,40 +48,59 @@ visible_groups AS MATERIALIZED (
  AND ($15::text IS NULL OR COALESCE(NULLIF(lower(g.severity),''),'unknown')=$15)
  AND ($17::text IS NULL OR COALESCE(NULLIF(g.namespace,''),'unknown')=$17)
  AND ($18::text IS NULL OR $18='production')
- AND (($7::text IS NULL AND $8::text IS NULL AND $9::bigint IS NULL AND $10::text IS NULL AND $11::text IS NULL)
-   OR EXISTS(SELECT 1 FROM runs r WHERE r.work_item_id=g.work_item_id))
+ ${runGate}
+ -- Bound parameters stay typed when this request does not filter on them.
+ AND ($7::text IS NULL OR $7::text IS NOT NULL) AND ($8::text IS NULL OR $8::text IS NOT NULL)
+ AND ($9::bigint IS NULL OR $9::bigint IS NOT NULL) AND ($10::text IS NULL OR $10::text IS NOT NULL)
+ AND ($11::text IS NULL OR $11::text IS NOT NULL)
 ),
 observations AS MATERIALIZED (
- SELECT o.*,s.window_start,s.window_end,g.namespace,g.service,g.signature,g.lifecycle_status,g.acknowledged_at,g.resolved_at,g.first_seen_at,g.visible_work_item_id,g.work_item_code,
-   false AS legacy FROM prod_error_observations o JOIN prod_error_scans s ON s.id=o.scan_id JOIN visible_groups g ON g.fingerprint=o.fingerprint CROSS JOIN bounds b
- WHERE s.ok AND s.window_start<b.hi AND s.window_end>b.lo
+ SELECT o.scan_id,o.fingerprint,o.event_count,o.baseline_count,o.first_at,o.last_at,o.severity,o.hourly,
+   s.window_start,s.window_end,p.period,p.lo AS period_lo,p.hi AS period_hi
+ FROM prod_error_observations o
+ JOIN prod_error_scans s ON s.id=o.scan_id
+ JOIN visible_groups g ON g.fingerprint=o.fingerprint
+ JOIN periods p ON s.window_start<p.hi AND s.window_end>p.lo
+ WHERE s.ok
  UNION ALL
  SELECT COALESCE(g.last_scan_id,0),g.fingerprint,g.today_count,g.yesterday_count,g.first_at,g.last_at,g.severity,'[]'::jsonb,
-   g.day::timestamp AT TIME ZONE $3,(g.day+1)::timestamp AT TIME ZONE $3,g.namespace,g.service,g.signature,g.lifecycle_status,g.acknowledged_at,g.resolved_at,g.first_seen_at,g.visible_work_item_id,g.work_item_code,true
- FROM visible_groups g CROSS JOIN bounds b WHERE NOT EXISTS(SELECT 1 FROM prod_error_observations o WHERE o.fingerprint=g.fingerprint)
- AND g.day::timestamp AT TIME ZONE $3<b.hi AND (g.day+1)::timestamp AT TIME ZONE $3>b.lo
+   g.day::timestamp AT TIME ZONE $3,(g.day+1)::timestamp AT TIME ZONE $3,p.period,p.lo,p.hi
+ FROM visible_groups g
+ JOIN periods p ON g.day::timestamp AT TIME ZONE $3<p.hi AND (g.day+1)::timestamp AT TIME ZONE $3>p.lo
+ WHERE NOT EXISTS(SELECT 1 FROM prod_error_observations o WHERE o.fingerprint=g.fingerprint)
 ),
 hour_candidates AS (
- SELECT o.fingerprint,(h->>'hour')::timestamptz AS hour,(h->>'count')::bigint AS events,o.scan_id,
+ SELECT o.period,o.fingerprint,(h->>'hour')::timestamptz AS hour,(h->>'count')::bigint AS events,o.scan_id,
    least(o.window_end,(h->>'hour')::timestamptz+interval '1 hour')-greatest(o.window_start,(h->>'hour')::timestamptz) AS covered
- FROM observations o CROSS JOIN LATERAL jsonb_array_elements(o.hourly) h CROSS JOIN bounds b
- WHERE (h->>'hour')::timestamptz>=b.lo AND (h->>'hour')::timestamptz+interval '1 hour'<=b.hi
+ FROM observations o CROSS JOIN LATERAL jsonb_array_elements(o.hourly) h
+ WHERE (h->>'hour')::timestamptz>=o.period_lo AND (h->>'hour')::timestamptz+interval '1 hour'<=o.period_hi
 ),
-hours AS MATERIALIZED (SELECT DISTINCT ON(fingerprint,hour) * FROM hour_candidates ORDER BY fingerprint,hour,covered DESC,scan_id DESC),
+hours AS MATERIALIZED (
+ SELECT DISTINCT ON(period,fingerprint,hour) * FROM hour_candidates ORDER BY period,fingerprint,hour,covered DESC,scan_id DESC
+),
+hour_totals AS (
+ SELECT period,fingerprint,sum(events) AS events FROM hours GROUP BY period,fingerprint
+),
+obs_stats AS (
+ SELECT o.period,o.fingerprint,
+   (array_agg(o.event_count ORDER BY o.window_end DESC,o.scan_id DESC) FILTER(WHERE o.window_start>=o.period_lo AND o.window_end<=o.period_hi))[1] AS snapshot_events,
+   (array_agg(o.severity ORDER BY o.window_end DESC,o.scan_id DESC))[1] AS severity,
+   min(o.first_at) AS first_at,max(o.last_at) AS last_at,
+   bool_or(o.baseline_count>0) OR count(DISTINCT (o.window_start AT TIME ZONE $3)::date)>1 AS recurring,
+   count(*)::int AS snapshots,count(*) FILTER(WHERE jsonb_array_length(o.hourly)=0)::int AS missing_hourly
+ FROM observations o GROUP BY o.period,o.fingerprint
+),
 incidents AS MATERIALIZED (
- SELECT g.*,o.events,o.severity AS observed_severity,o.first_at AS observed_first_at,o.last_at AS observed_last_at,o.recurring,o.snapshots,o.missing_hourly,
+ SELECT g.*,s.period,COALESCE(h.events,s.snapshot_events) AS events,s.severity AS observed_severity,
+   s.first_at AS observed_first_at,s.last_at AS observed_last_at,s.recurring,s.snapshots,s.missing_hourly,
    CASE WHEN g.acknowledged_at>=g.first_seen_at THEN extract(epoch FROM(g.acknowledged_at-g.first_seen_at))*1000 END AS acknowledge_ms,
    CASE WHEN g.resolved_at>=g.first_seen_at THEN extract(epoch FROM(g.resolved_at-g.first_seen_at))*1000 END AS resolve_ms
- FROM visible_groups g JOIN LATERAL (
-  SELECT COALESCE((SELECT sum(events) FROM hours h WHERE h.fingerprint=g.fingerprint),
-    (array_agg(event_count ORDER BY window_end DESC,scan_id DESC) FILTER(WHERE window_start>=b.lo AND window_end<=b.hi))[1]) AS events,
-    (array_agg(severity ORDER BY window_end DESC,scan_id DESC))[1] AS severity,
-    min(first_at) AS first_at,max(last_at) AS last_at,bool_or(baseline_count>0) OR count(DISTINCT (window_start AT TIME ZONE $3)::date)>1 AS recurring,
-    count(*)::int AS snapshots,count(*) FILTER(WHERE jsonb_array_length(hourly)=0)::int AS missing_hourly
-  FROM observations o CROSS JOIN bounds b WHERE o.fingerprint=g.fingerprint HAVING count(*)>0
- ) o ON true
- WHERE ($16::text IS NULL OR ($16='recurring' AND o.recurring) OR ($16<>'recurring' AND g.lifecycle_status=$16))
+ FROM visible_groups g
+ JOIN obs_stats s ON s.fingerprint=g.fingerprint
+ LEFT JOIN hour_totals h ON h.fingerprint=g.fingerprint AND h.period=s.period
+ WHERE ($16::text IS NULL OR ($16='recurring' AND s.recurring) OR ($16<>'recurring' AND g.lifecycle_status=$16))
 )`;
+}
 
 const projectMap = () =>
   JSON.stringify(
@@ -110,162 +155,253 @@ function previousPeriod(f: AnalyticsFilters): AnalyticsFilters {
   return { ...f, from: new Date(lo - width).toISOString(), to: new Date(lo).toISOString() };
 }
 
-async function healthSet(f: AnalyticsFilters, scope: AnalyticsScope, includeDetails = true) {
+type HealthParts = {
+  summary: any;
+  trend: any[];
+  severity: any[];
+  serviceTrends: any[];
+  services: any[];
+  lifecycle: any[];
+  details: any[];
+  topFingerprints: any[];
+  remediation: any;
+  freshness: any;
+};
+type HealthPair = { current: HealthParts; previous: HealthParts };
+
+async function healthSet(
+  f: AnalyticsFilters,
+  scope: AnalyticsScope,
+  includeDetails: boolean,
+  pair: true,
+): Promise<HealthPair>;
+async function healthSet(
+  f: AnalyticsFilters,
+  scope: AnalyticsScope,
+  includeDetails?: boolean,
+  pair?: false,
+): Promise<HealthParts>;
+async function healthSet(
+  f: AnalyticsFilters,
+  scope: AnalyticsScope,
+  includeDetails = true,
+  pair: boolean = false,
+): Promise<HealthParts | HealthPair> {
   const params = paramsFor(f, scope);
-  const jobs = [
-    one(
-      pool,
-      `${healthCte} SELECT
-      CASE WHEN EXISTS(SELECT 1 FROM prod_error_scans s CROSS JOIN bounds b WHERE s.ok AND s.window_start<b.hi AND s.window_end>b.lo) THEN CASE WHEN count(*)=0 THEN 0 ELSE sum(events) END ELSE NULL END AS total_errors,
-      CASE WHEN EXISTS(SELECT 1 FROM prod_error_scans s CROSS JOIN bounds b WHERE s.ok AND s.window_start<b.hi AND s.window_end>b.lo) THEN count(*)::int ELSE NULL END AS fingerprints,
-      count(*) FILTER(WHERE first_seen_at>=b.lo AND first_seen_at<b.hi)::int AS new_incidents,
-      count(*) FILTER(WHERE lifecycle_status<>'resolved')::int AS active_incidents,
-      count(*) FILTER(WHERE lifecycle_status='resolved')::int AS resolved_incidents,
-      count(*) FILTER(WHERE observed_severity IN ('critical','high'))::int AS critical_high_incidents,
-      count(*) FILTER(WHERE recurring)::int AS recurring_incidents,
-      count(DISTINCT (COALESCE(NULLIF(namespace,''),'unknown'),COALESCE(NULLIF(service,''),'unknown')))::int AS affected_services,
-      avg(acknowledge_ms) AS acknowledge_ms, avg(resolve_ms) AS resolve_ms,
-      count(*) FILTER(WHERE acknowledge_ms IS NULL)::int AS missing_acknowledged,
-      count(*) FILTER(WHERE resolve_ms IS NULL)::int AS missing_resolved,
-      sum(missing_hourly)::int AS snapshots_missing_hourly,
-      (SELECT count(*)::int FROM hours WHERE covered<interval '1 hour') AS partial_hours
-      FROM incidents CROSS JOIN bounds b`,
-      params,
-    ),
-    q(
-      pool,
-      `${healthCte} SELECT ${bucketSql("hour")} AS bucket,sum(events) AS events,count(DISTINCT fingerprint)::int AS fingerprints
-      FROM hours GROUP BY 1 ORDER BY 1`,
-      params,
-    ),
-    includeDetails
-      ? q(
-          pool,
-          `${healthCte} SELECT COALESCE(NULLIF(lower(observed_severity),''),'unknown') AS severity,count(*)::int AS fingerprints,sum(events) AS events
-      FROM incidents GROUP BY 1 ORDER BY CASE COALESCE(NULLIF(lower(observed_severity),''),'unknown') WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END`,
-          params,
-        )
-      : Promise.resolve([]),
-    includeDetails
-      ? q(
-          pool,
-          `${healthCte} SELECT ${bucketSql("hour")} AS bucket,COALESCE(NULLIF(namespace,''),'unknown') AS namespace,
-      COALESCE(NULLIF(service,''),'unknown') AS service,sum(h.events) AS events
-      FROM hours h JOIN incidents i USING(fingerprint) GROUP BY 1,2,3 ORDER BY 1,2,3`,
-          params,
-        )
-      : Promise.resolve([]),
-    q(
-      pool,
-      `${healthCte}, grouped AS (
-      SELECT COALESCE(NULLIF(namespace,''),'unknown') AS namespace,COALESCE(NULLIF(service,''),'unknown') AS service,
-        count(*)::int AS fingerprints,sum(events) AS events,
-        count(*) FILTER(WHERE first_seen_at>=b.lo AND first_seen_at<b.hi)::int AS new_incidents,
-        count(*) FILTER(WHERE lifecycle_status<>'resolved')::int AS unresolved_incidents,
-      count(*) FILTER(WHERE observed_severity IN ('critical','high'))::int AS critical_high_incidents,
-      sum(events) FILTER(WHERE observed_severity IN ('critical','high')) AS critical_high_errors,
-        count(*) FILTER(WHERE recurring)::int AS recurring_incidents,max(observed_last_at) AS last_observed_error
-      FROM incidents CROSS JOIN bounds b GROUP BY 1,2
-    ) SELECT *,CASE WHEN sum(events) OVER()>0 THEN events*100.0/sum(events) OVER() END AS error_share_pct
-      FROM grouped ORDER BY events DESC NULLS LAST,namespace,service`,
-      params,
-    ),
-    includeDetails
-      ? q(
-          pool,
-          `${healthCte}, status_counts AS (
-      SELECT lifecycle_status AS status,count(*)::int AS incidents FROM incidents GROUP BY lifecycle_status
-    ), reopen_counts AS (
-      SELECT 'reopened' AS status,count(*)::int AS incidents FROM incidents i WHERE EXISTS(
-        SELECT 1 FROM prod_error_lifecycle_events e WHERE e.fingerprint=i.fingerprint AND e.action='reopen'
-        AND e.id=(SELECT max(e2.id) FROM prod_error_lifecycle_events e2 WHERE e2.fingerprint=i.fingerprint)
-      )
-      ) SELECT status,incidents FROM (SELECT * FROM status_counts UNION ALL SELECT * FROM reopen_counts) x
-      ORDER BY CASE status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END`,
-          params,
-        )
-      : Promise.resolve([]),
-    includeDetails
-      ? q(
-          pool,
-          `${healthCte} SELECT g.fingerprint,g.namespace,COALESCE(NULLIF(g.service,''),'unknown') AS service,g.signature,g.observed_severity AS severity,g.lifecycle_status,g.status AS triage_status,
-      g.events,g.recurring,g.first_seen_at,g.observed_first_at AS first_at,g.observed_last_at AS last_at,g.acknowledged_at,g.resolved_at,
-      g.visible_work_item_id AS work_item_id,g.work_item_code,g.missing_hourly,
-      (SELECT COALESCE(jsonb_agg(e),'[]') FROM (SELECT action,evidence,created_at FROM prod_error_lifecycle_events WHERE fingerprint=g.fingerprint ORDER BY id DESC LIMIT 3) e) AS lifecycle_events,
-      COALESCE(links.runs,'[]'::jsonb) AS runs,count(*) OVER()::int AS total_rows
-      FROM incidents g LEFT JOIN LATERAL (
-        SELECT jsonb_agg(jsonb_build_object('id',r.id,'status',r.status,'verified',r.verified,'changes',r.summary->'changes',
-          'pull_requests',(SELECT COALESCE(jsonb_agg(jsonb_build_object('url',p.url,'repo',p.repo,'title',p.title)),'[]'::jsonb) FROM pull_requests p WHERE p.run_id=r.id))) AS runs
-        FROM (SELECT * FROM runs WHERE work_item_id=g.visible_work_item_id ORDER BY id DESC LIMIT 5) r
-      ) links ON true ORDER BY g.recurring DESC,g.events DESC NULLS LAST,g.fingerprint LIMIT ${f.pageSize} OFFSET ${(f.page - 1) * f.pageSize}`,
-          params,
-        )
-      : Promise.resolve([]),
-    includeDetails
-      ? q(
-          pool,
-          `${healthCte} SELECT fingerprint,namespace,COALESCE(NULLIF(service,''),'unknown') AS service,signature,observed_severity AS severity,
-      events,recurring,observed_first_at AS first_at,observed_last_at AS last_at,visible_work_item_id AS work_item_id,work_item_code
-      FROM incidents ORDER BY events DESC NULLS LAST LIMIT 10`,
-          params,
-        )
-      : Promise.resolve([]),
-    includeDetails
-      ? one(
-          pool,
-          `${healthCte} SELECT count(*) FILTER(WHERE visible_work_item_id IS NOT NULL)::int AS linked_incidents,
-      count(DISTINCT visible_work_item_id) FILTER(WHERE visible_work_item_id IS NOT NULL AND EXISTS(SELECT 1 FROM runs r WHERE r.work_item_id=incidents.visible_work_item_id))::int AS work_items_with_runs,
-      count(DISTINCT r.id) FILTER(WHERE r.status='COMPLETED')::int AS completed_runs,
-      count(DISTINCT r.id) FILTER(WHERE r.verified IS TRUE)::int AS verified_runs,
-      count(DISTINCT p.id) FILTER(WHERE p.created IS TRUE)::int AS prs_created
-      FROM incidents LEFT JOIN runs r ON r.work_item_id=incidents.visible_work_item_id
-      LEFT JOIN pull_requests p ON (p.run_id=r.id OR p.work_item_id=incidents.visible_work_item_id)`,
-          params,
-        )
-      : Promise.resolve(null),
-    one(
-      pool,
-      `WITH ${boundsSql}, scan_windows AS (
-      SELECT greatest(s.window_start,b.lo) AS lo,least(s.window_end,b.hi) AS hi
-      FROM prod_error_scans s CROSS JOIN bounds b WHERE s.window_start<b.hi AND s.window_end>b.lo AND s.ok
-    ), ordered_windows AS (
-      SELECT lo,hi,max(hi) OVER(ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_hi FROM scan_windows
-    ), coverage AS (
-      SELECT COALESCE(sum(greatest(extract(epoch FROM(hi-greatest(lo,COALESCE(prior_hi,lo)))),0))*1000,0)::bigint AS window_coverage_ms FROM ordered_windows
-    ) SELECT
-      (SELECT row_to_json(s) FROM (SELECT id,trigger,started_at,finished_at,ok,error,groups,events,window_start,window_end,namespaces FROM prod_error_scans ORDER BY id DESC LIMIT 1) s) AS latest_scan,
-      (SELECT row_to_json(s) FROM (SELECT id,trigger,started_at,finished_at,ok,window_start,window_end,namespaces FROM prod_error_scans WHERE ok ORDER BY finished_at DESC NULLS LAST,id DESC LIMIT 1) s) AS last_successful_scan,
-      (SELECT max(o.last_at) FROM prod_error_observations o JOIN prod_error_scans s ON s.id=o.scan_id WHERE s.ok AND s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS latest_observation_at,
-      (SELECT count(*)::int FROM prod_error_scans s WHERE s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS scans_in_range,
-      (SELECT count(*)::int FROM prod_error_scans s WHERE s.ok AND s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS successful_scans_in_range,
-      (SELECT count(*)::int FROM prod_error_scans s WHERE s.ok IS FALSE AND s.window_start<(SELECT hi FROM bounds) AND s.window_end>(SELECT lo FROM bounds)) AS failed_scans_in_range,
-      (SELECT window_coverage_ms FROM coverage) AS window_coverage_ms`,
-      [f.from, f.to, f.timezone, f.bucket],
-    ),
-  ] as const;
-  const [
-    summary,
-    trend,
-    severity,
-    serviceTrends,
-    services,
-    lifecycle,
-    details,
-    topFingerprints,
-    remediation,
-    freshness,
-  ] = await Promise.all(jobs);
+  if (pair) {
+    const prev = previousPeriod(f);
+    params.push(prev.from, prev.to);
+  }
+  const page = `LIMIT ${f.pageSize} OFFSET ${(f.page - 1) * f.pageSize}`;
+  const linkedRuns =
+    includeDetails && !engineeringFilters(f)
+      ? `,
+runs AS (
+ SELECT r.id,r.work_item_id,r.status,r.summary,
+   CASE WHEN v.coding_steps>0 AND v.checked_steps=v.coding_steps THEN v.passed_steps=v.coding_steps END AS verified
+ FROM workflow_runs r CROSS JOIN bounds b
+ LEFT JOIN LATERAL (
+   SELECT count(*)::int AS coding_steps,
+     count(*) FILTER (WHERE a.metrics->'verification'->>'passed' IN ('true','false') OR a.metrics->'independent_verification'->>'verdict' IN ('PASS','FAIL'))::int AS checked_steps,
+     count(*) FILTER (WHERE a.metrics->'verification'->>'passed'='true' OR a.metrics->'independent_verification'->>'verdict'='PASS')::int AS passed_steps
+   FROM workflow_steps s LEFT JOIN LATERAL (
+     SELECT a.metrics FROM workflow_step_attempts a WHERE a.step_id=s.id AND a.invalidated_at IS NULL ORDER BY a.id DESC LIMIT 1
+   ) a ON true WHERE s.run_id=r.id AND s.type='coding_agent'
+ ) v ON true
+ WHERE r.created_at>=b.lo AND r.created_at<b.hi AND r.owner_id IS NOT NULL AND ($6::boolean OR r.owner_id=$5::bigint)
+   AND r.work_item_id IN (SELECT visible_work_item_id FROM incidents WHERE period='current' AND visible_work_item_id IS NOT NULL)
+)`
+      : "";
+  const detailCtes = includeDetails
+    ? `,
+severity AS (
+ SELECT COALESCE(NULLIF(lower(observed_severity),''),'unknown') AS severity,count(*)::int AS fingerprints,sum(events) AS events
+ FROM incidents WHERE period='current' GROUP BY 1
+),
+service_trends AS (
+ SELECT ${bucketSql("h.hour")} AS bucket,COALESCE(NULLIF(i.namespace,''),'unknown') AS namespace,
+   COALESCE(NULLIF(i.service,''),'unknown') AS service,sum(h.events) AS events
+ FROM hours h JOIN incidents i ON i.fingerprint=h.fingerprint AND i.period=h.period AND i.period='current'
+ WHERE (COALESCE(NULLIF(i.namespace,''),'unknown'),COALESCE(NULLIF(i.service,''),'unknown')) IN (
+   SELECT COALESCE(NULLIF(namespace,''),'unknown'),COALESCE(NULLIF(service,''),'unknown')
+   FROM incidents WHERE period='current' GROUP BY 1,2 ORDER BY sum(events) DESC NULLS LAST,1,2 LIMIT 5
+ )
+ GROUP BY 1,2,3
+),
+lifecycle AS (
+ SELECT lifecycle_status AS status,count(*)::int AS incidents FROM incidents WHERE period='current' GROUP BY lifecycle_status
+ UNION ALL
+ SELECT 'reopened',count(*)::int FROM incidents i WHERE i.period='current' AND EXISTS(
+   SELECT 1 FROM prod_error_lifecycle_events e WHERE e.fingerprint=i.fingerprint AND e.action='reopen'
+   AND e.id=(SELECT max(e2.id) FROM prod_error_lifecycle_events e2 WHERE e2.fingerprint=i.fingerprint)
+ )
+),
+incident_rows AS (
+ SELECT paged.*,COALESCE(links.runs,'[]'::jsonb) AS runs
+ FROM (
+   SELECT g.fingerprint,g.namespace,COALESCE(NULLIF(g.service,''),'unknown') AS service,g.signature,g.observed_severity AS severity,g.lifecycle_status,g.status AS triage_status,
+     g.events,g.recurring,g.first_seen_at,g.observed_first_at AS first_at,g.observed_last_at AS last_at,g.acknowledged_at,g.resolved_at,
+     g.visible_work_item_id AS work_item_id,g.work_item_code,g.missing_hourly,
+     (SELECT COALESCE(jsonb_agg(e),'[]') FROM (SELECT action,evidence,created_at FROM prod_error_lifecycle_events WHERE fingerprint=g.fingerprint ORDER BY id DESC LIMIT 3) e) AS lifecycle_events,
+     count(*) OVER()::int AS total_rows
+   FROM incidents g WHERE g.period='current' ORDER BY g.recurring DESC,g.events DESC NULLS LAST,g.fingerprint ${page}
+ ) paged LEFT JOIN LATERAL (
+   SELECT jsonb_agg(jsonb_build_object('id',r.id,'status',r.status,'verified',r.verified,'changes',r.summary->'changes',
+     'pull_requests',(SELECT COALESCE(jsonb_agg(jsonb_build_object('url',p.url,'repo',p.repo,'title',p.title)),'[]'::jsonb) FROM pull_requests p WHERE p.run_id=r.id))) AS runs
+   FROM (SELECT * FROM runs WHERE work_item_id=paged.work_item_id ORDER BY id DESC LIMIT 5) r
+ ) links ON true
+),
+top_rows AS (
+ SELECT fingerprint,namespace,COALESCE(NULLIF(service,''),'unknown') AS service,signature,observed_severity AS severity,
+   events,recurring,observed_first_at AS first_at,observed_last_at AS last_at,visible_work_item_id AS work_item_id,work_item_code
+ FROM incidents WHERE period='current' ORDER BY events DESC NULLS LAST LIMIT 10
+),
+remediation AS (
+ SELECT count(*) FILTER(WHERE visible_work_item_id IS NOT NULL)::int AS linked_incidents,
+   count(DISTINCT visible_work_item_id) FILTER(WHERE visible_work_item_id IS NOT NULL AND EXISTS(SELECT 1 FROM runs r WHERE r.work_item_id=incidents.visible_work_item_id))::int AS work_items_with_runs,
+   count(DISTINCT r.id) FILTER(WHERE r.status='COMPLETED')::int AS completed_runs,
+   count(DISTINCT r.id) FILTER(WHERE r.verified IS TRUE)::int AS verified_runs,
+   count(DISTINCT p.id) FILTER(WHERE p.created IS TRUE)::int AS prs_created
+ FROM incidents LEFT JOIN runs r ON r.work_item_id=incidents.visible_work_item_id
+ LEFT JOIN pull_requests p ON (p.run_id=r.id OR p.work_item_id=incidents.visible_work_item_id)
+ WHERE incidents.period='current'
+)`
+    : "";
+  const row = await one(
+    pool,
+    `${healthFrom(f, pair)},
+scan_windows AS (
+ SELECT p.period,greatest(s.window_start,p.lo) AS lo,least(s.window_end,p.hi) AS hi
+ FROM prod_error_scans s JOIN periods p ON s.window_start<p.hi AND s.window_end>p.lo WHERE s.ok
+),
+ordered_windows AS (
+ SELECT period,lo,hi,max(hi) OVER(PARTITION BY period ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_hi
+ FROM scan_windows
+),
+coverage AS (
+ SELECT p.period,COALESCE(sum(greatest(extract(epoch FROM(w.hi-greatest(w.lo,COALESCE(w.prior_hi,w.lo)))),0))*1000,0)::bigint AS window_coverage_ms
+ FROM periods p LEFT JOIN ordered_windows w ON w.period=p.period GROUP BY p.period
+),
+summary AS (
+ SELECT p.period,s.* FROM periods p CROSS JOIN LATERAL (
+  SELECT
+   CASE WHEN EXISTS(SELECT 1 FROM prod_error_scans sc WHERE sc.ok AND sc.window_start<p.hi AND sc.window_end>p.lo) THEN CASE WHEN count(*)=0 THEN 0 ELSE sum(i.events) END ELSE NULL END AS total_errors,
+   CASE WHEN EXISTS(SELECT 1 FROM prod_error_scans sc WHERE sc.ok AND sc.window_start<p.hi AND sc.window_end>p.lo) THEN count(*)::int ELSE NULL END AS fingerprints,
+   count(*) FILTER(WHERE i.first_seen_at>=p.lo AND i.first_seen_at<p.hi)::int AS new_incidents,
+   count(*) FILTER(WHERE i.lifecycle_status<>'resolved')::int AS active_incidents,
+   count(*) FILTER(WHERE i.lifecycle_status='resolved')::int AS resolved_incidents,
+   count(*) FILTER(WHERE i.observed_severity IN ('critical','high'))::int AS critical_high_incidents,
+   count(*) FILTER(WHERE i.recurring)::int AS recurring_incidents,
+   count(DISTINCT (COALESCE(NULLIF(i.namespace,''),'unknown'),COALESCE(NULLIF(i.service,''),'unknown')))::int AS affected_services,
+   avg(i.acknowledge_ms) AS acknowledge_ms, avg(i.resolve_ms) AS resolve_ms,
+   count(*) FILTER(WHERE i.acknowledge_ms IS NULL)::int AS missing_acknowledged,
+   count(*) FILTER(WHERE i.resolve_ms IS NULL)::int AS missing_resolved,
+   sum(i.missing_hourly)::int AS snapshots_missing_hourly,
+   (SELECT count(*)::int FROM hours h WHERE h.period=p.period AND h.covered<interval '1 hour') AS partial_hours
+  FROM incidents i WHERE i.period=p.period
+ ) s
+),
+trend AS (
+ SELECT h.period,${bucketSql("h.hour")} AS bucket,sum(h.events) AS events,count(DISTINCT h.fingerprint)::int AS fingerprints
+ FROM hours h GROUP BY 1,2
+),
+services AS (
+ SELECT grouped.*,CASE WHEN sum(events) OVER(PARTITION BY period)>0 THEN events*100.0/sum(events) OVER(PARTITION BY period) END AS error_share_pct FROM (
+  SELECT i.period,COALESCE(NULLIF(i.namespace,''),'unknown') AS namespace,COALESCE(NULLIF(i.service,''),'unknown') AS service,
+    count(*)::int AS fingerprints,sum(i.events) AS events,
+    count(*) FILTER(WHERE i.first_seen_at>=p.lo AND i.first_seen_at<p.hi)::int AS new_incidents,
+    count(*) FILTER(WHERE i.lifecycle_status<>'resolved')::int AS unresolved_incidents,
+    count(*) FILTER(WHERE i.observed_severity IN ('critical','high'))::int AS critical_high_incidents,
+    sum(i.events) FILTER(WHERE i.observed_severity IN ('critical','high')) AS critical_high_errors,
+    count(*) FILTER(WHERE i.recurring)::int AS recurring_incidents,max(i.observed_last_at) AS last_observed_error
+  FROM incidents i JOIN periods p ON p.period=i.period GROUP BY 1,2,3
+ ) grouped
+),
+global_scans AS (
+ SELECT
+  (SELECT row_to_json(s) FROM (SELECT id,trigger,started_at,finished_at,ok,error,groups,events,window_start,window_end,namespaces FROM prod_error_scans ORDER BY id DESC LIMIT 1) s) AS latest_scan,
+  (SELECT row_to_json(s) FROM (SELECT id,trigger,started_at,finished_at,ok,window_start,window_end,namespaces FROM prod_error_scans WHERE ok ORDER BY finished_at DESC NULLS LAST,id DESC LIMIT 1) s) AS last_successful_scan
+),
+freshness AS (
+ SELECT p.period,g.latest_scan,g.last_successful_scan,
+  (SELECT max(o.last_at) FROM prod_error_observations o JOIN prod_error_scans s ON s.id=o.scan_id WHERE s.ok AND s.window_start<p.hi AND s.window_end>p.lo) AS latest_observation_at,
+  (SELECT count(*)::int FROM prod_error_scans s WHERE s.window_start<p.hi AND s.window_end>p.lo) AS scans_in_range,
+  (SELECT count(*)::int FROM prod_error_scans s WHERE s.ok AND s.window_start<p.hi AND s.window_end>p.lo) AS successful_scans_in_range,
+  (SELECT count(*)::int FROM prod_error_scans s WHERE s.ok IS FALSE AND s.window_start<p.hi AND s.window_end>p.lo) AS failed_scans_in_range,
+  c.window_coverage_ms
+ FROM periods p JOIN coverage c ON c.period=p.period CROSS JOIN global_scans g
+)
+${linkedRuns}
+${detailCtes}
+SELECT
+ (SELECT to_jsonb(s) - 'period' FROM summary s WHERE s.period='current') AS summary,
+ COALESCE((SELECT jsonb_agg((to_jsonb(x) - 'period') ORDER BY x.bucket) FROM trend x WHERE x.period='current'),'[]'::jsonb) AS trend,
+ ${
+   includeDetails
+     ? `COALESCE((SELECT jsonb_agg(jsonb_build_object('severity',severity,'fingerprints',fingerprints,'events',events) ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END) FROM severity),'[]'::jsonb)`
+     : `'[]'::jsonb`
+ } AS severity,
+ ${
+   includeDetails
+     ? `COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.bucket,x.namespace,x.service) FROM service_trends x),'[]'::jsonb)`
+     : `'[]'::jsonb`
+ } AS service_trends,
+ COALESCE((SELECT jsonb_agg((to_jsonb(x) - 'period') ORDER BY x.events DESC NULLS LAST,x.namespace,x.service) FROM services x WHERE x.period='current'),'[]'::jsonb) AS services,
+ ${
+   includeDetails
+     ? `COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY CASE x.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END) FROM lifecycle x),'[]'::jsonb)`
+     : `'[]'::jsonb`
+ } AS lifecycle,
+ ${
+   includeDetails
+     ? `COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.recurring DESC,x.events DESC NULLS LAST,x.fingerprint) FROM incident_rows x),'[]'::jsonb)`
+     : `'[]'::jsonb`
+ } AS details,
+ ${
+   includeDetails
+     ? `COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.events DESC NULLS LAST) FROM top_rows x),'[]'::jsonb)`
+     : `'[]'::jsonb`
+ } AS top_fingerprints,
+ ${includeDetails ? "(SELECT to_jsonb(r) FROM remediation r)" : "NULL::jsonb"} AS remediation,
+ (SELECT to_jsonb(f) - 'period' FROM freshness f WHERE f.period='current') AS freshness
+ ${
+   pair
+     ? `,
+ (SELECT to_jsonb(s) - 'period' FROM summary s WHERE s.period='previous') AS previous_summary,
+ COALESCE((SELECT jsonb_agg((to_jsonb(x) - 'period') ORDER BY x.bucket) FROM trend x WHERE x.period='previous'),'[]'::jsonb) AS previous_trend,
+ COALESCE((SELECT jsonb_agg((to_jsonb(x) - 'period') ORDER BY x.events DESC NULLS LAST,x.namespace,x.service) FROM services x WHERE x.period='previous'),'[]'::jsonb) AS previous_services,
+ (SELECT to_jsonb(f) - 'period' FROM freshness f WHERE f.period='previous') AS previous_freshness`
+     : ""
+ }`,
+    params,
+  );
+  const current = {
+    summary: row?.summary,
+    trend: row?.trend ?? [],
+    severity: row?.severity ?? [],
+    serviceTrends: row?.service_trends ?? [],
+    services: row?.services ?? [],
+    lifecycle: row?.lifecycle ?? [],
+    details: row?.details ?? [],
+    topFingerprints: row?.top_fingerprints ?? [],
+    remediation: row?.remediation ?? null,
+    freshness: row?.freshness,
+  };
+  if (!pair) return current;
   return {
-    summary,
-    trend,
-    severity,
-    serviceTrends,
-    services,
-    lifecycle,
-    details,
-    topFingerprints,
-    remediation,
-    freshness,
+    current,
+    previous: {
+      summary: row?.previous_summary,
+      trend: row?.previous_trend ?? [],
+      severity: [],
+      serviceTrends: [],
+      services: row?.previous_services ?? [],
+      lifecycle: [],
+      details: [],
+      topFingerprints: [],
+      remediation: null,
+      freshness: row?.previous_freshness,
+    },
   };
 }
 
@@ -291,12 +427,27 @@ const sameCoverage = (a: any, b: any) =>
 export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope) {
   const prev = previousPeriod(f);
   const serviceScope = { ...f, service: null };
-  const [current, previous, currentServices, previousServices] = await Promise.all([
-    healthSet(f, scope, true),
-    healthSet(prev, scope, false),
-    f.service ? healthSet(serviceScope, scope, false) : Promise.resolve(null),
-    f.service ? healthSet({ ...prev, service: null }, scope, false) : Promise.resolve(null),
-  ]);
+  let current: HealthParts;
+  let previous: HealthParts;
+  let currentServices: HealthParts | null;
+  let previousServices: HealthParts | null;
+  if (engineeringFilters(f)) {
+    [current, previous, currentServices, previousServices] = await Promise.all([
+      healthSet(f, scope, true),
+      healthSet(prev, scope, false),
+      f.service ? healthSet(serviceScope, scope, false) : Promise.resolve(null),
+      f.service ? healthSet({ ...prev, service: null }, scope, false) : Promise.resolve(null),
+    ]);
+  } else {
+    const [scoped, open] = await Promise.all([
+      healthSet(f, scope, true, true),
+      f.service ? healthSet(serviceScope, scope, false, true) : Promise.resolve(null),
+    ]);
+    current = scoped.current;
+    previous = scoped.previous;
+    currentServices = open?.current ?? null;
+    previousServices = open?.previous ?? null;
+  }
   const markEmptyPartialUnknown = (set: any, period: AnalyticsFilters) => {
     const width =
       boundaryInstant(period.to, period.timezone) - boundaryInstant(period.from, period.timezone);

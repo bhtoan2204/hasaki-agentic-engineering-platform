@@ -18,11 +18,16 @@ import {
   checkModel,
   resetCapabilitiesCache,
 } from "../src/agent/antigravity/capabilities.ts";
-import { AntigravityStream, classifyAntigravityError } from "../src/agent/antigravity/stream.ts";
+import {
+  AntigravityStream,
+  TextBatch,
+  classifyAntigravityError,
+} from "../src/agent/antigravity/stream.ts";
 import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
   excludeFromGit,
+  antigravityHeadlessSettings,
 } from "../src/agent/antigravity/policy.ts";
 import {
   antigravityAgentTurn,
@@ -286,6 +291,16 @@ test("AntigravityStream parses split documented stream-json events and cumulativ
   });
 });
 
+test("TextBatch keeps token fragments together until a line or a tool boundary", () => {
+  const batch = new TextBatch();
+  assert.equal(batch.push("Looking"), null);
+  assert.equal(batch.push(" into test results to i"), null);
+  assert.equal(batch.push("dentify the failing subtest."), null);
+  assert.equal(batch.flush(), "Looking into test results to identify the failing subtest.");
+  assert.equal(batch.push("hello\nwor"), "hello\n");
+  assert.equal(batch.flush(), "wor");
+});
+
 test("classifyAntigravityError accurately identifies error classes", () => {
   assert.equal(
     classifyAntigravityError("Resource has been exhausted (quota limit reached)"),
@@ -368,6 +383,30 @@ test("antigravityHookDecision enforces read-only mode and denies mutations", () 
   assert.match(denyEnv.reason ?? "", /credentials/i);
 });
 
+test("antigravityHookDecision allows the platform artifact reader", () => {
+  const named = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "mcp__platform__read_artifact",
+      tool_input: { artifact_id: 852 },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(named.allow, true);
+
+  const wrapped = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "call_mcp_tool",
+      tool_input: { server: "platform", tool: "read_artifact", arguments: { artifact_id: 852 } },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(wrapped.allow, true);
+});
+
 test("PreToolUse hook fails closed without valid broker token", async () => {
   const broker = await startBroker({
     policy: analysisPolicy,
@@ -409,10 +448,8 @@ test("workspace config writes .agents/hooks.json and .agents/mcp_config.json, an
   assert.ok(existsSync(join(dir, ".agents", "mcp_config.json")));
 
   const hooks = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
-  const hookCmd =
-    hooks.PreToolUse?.[0]?.hooks?.[0]?.command ??
-    hooks.PreToolUse?.command ??
-    hooks["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command;
+  assert.equal(hooks.PreToolUse, undefined);
+  const hookCmd = hooks["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command;
   assert.ok(hookCmd && hookCmd.includes("hook.ts"));
 
   const mcp = JSON.parse(readFileSync(join(dir, ".agents", "mcp_config.json"), "utf8"));
@@ -431,6 +468,7 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
     effort: "high",
     conversationId: "conv-123",
     sandbox: true,
+    timeoutSeconds: 2700,
   });
   assert.ok(args.includes("--output-format"));
   assert.deepEqual(args.slice(0, 4), [
@@ -445,12 +483,20 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
   assert.ok(args.includes("--effort"));
   assert.ok(args.includes("high"));
   assert.ok(args.includes("--sandbox"));
+  assert.ok(args.includes("--print-timeout"));
+  assert.ok(args.includes("2700s"));
+  assert.ok(!args.includes("2700000"));
   assert.ok(
     !args.includes("--dangerously-skip-permissions"),
     "unrestricted permission mode is never enabled by default",
   );
   assert.ok(args.includes("--conversation"));
   assert.ok(args.includes("conv-123"));
+  const settings = antigravityHeadlessSettings(["submit_result", "ask_user"]);
+  assert.equal(settings.toolPermission, "always-proceed");
+  assert.ok(settings.permissions.allow.includes("mcp(platform/submit_result)"));
+  assert.ok(settings.permissions.allow.includes("mcp(platform/*)"));
+  assert.ok(!JSON.stringify(settings).includes("dangerously-skip-permissions"));
 
   // Check env scrubbing
   const env = antigravityEnv({

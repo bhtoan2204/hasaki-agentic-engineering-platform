@@ -8,8 +8,8 @@ import {
 } from "../knowledge/learning.ts";
 
 /**
- * Model-backed halves of continuous learning: one tool-less completion through the RUN's provider (Claude, Codex or
- * Cursor — same routing as repository ranking), no tools, no repository access. Their output is only a candidate:
+ * Model-backed halves of continuous learning: one tool-less completion through the RUN's provider (Claude, Codex,
+ * Cursor or Antigravity — same routing as repository ranking), no tools, no repository access. Their output is only a candidate:
  * knowledge/learning.ts verifies quotes, targets and scope, and nothing becomes authoritative without human approval.
  */
 export const modelChangeAnalyzer: ChangeAnalyzer = async (input, run) =>

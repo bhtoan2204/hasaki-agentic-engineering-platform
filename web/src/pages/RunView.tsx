@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
@@ -122,7 +122,14 @@ function useInspectorWidth() {
 export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const pane = useInspectorWidth();
   const { t, status } = useI18n();
-  const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
+  const {
+    data: run,
+    error,
+    loading,
+    refreshing,
+    reload,
+    reloadFresh,
+  } = useApi<any>(`/api/runs/${id}`);
   const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
   // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
   const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
@@ -148,11 +155,24 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const [feedbackMode, setFeedbackMode] = useState<"auto" | "reimplement" | "replan" | "restart">(
     "auto",
   );
+  // Node drag (and a pane pan that starts on a block) cancels the click when the pointer moves at all.
+  // Record the press so the mouseup that lands on the pane does not immediately close the step.
+  const pickedAt = useRef(0);
+  const pickStep = useCallback(
+    (key: string) => {
+      pickedAt.current = performance.now();
+      navigate(`/runs/${id}/${key}`);
+    },
+    [id],
+  );
 
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
     const specSteps = run.graph.steps as any[];
     const pos = autoLayout(specSteps);
+    const placed = Object.fromEntries(
+      specSteps.map((s) => [s.key, s.ui ?? pos[s.key] ?? { x: 0, y: 0 }]),
+    );
     const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
@@ -178,7 +198,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       return {
         id: s.key,
         type: "step",
-        position: s.ui ?? pos[s.key],
+        className: "nopan",
+        position: placed[s.key],
+        selected: s.key === stepKey,
         data: {
           step: {
             ...s,
@@ -200,11 +222,34 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 ? "reused"
                 : undefined
             : undefined,
+          onPick: pickStep,
         },
       };
     });
-    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status) };
-  }, [run, stepKey]);
+    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
+  }, [run, stepKey, pickStep]);
+  const fitViewOptions = useMemo(
+    () => ({
+      padding: 0.25,
+      maxZoom: 1,
+      minZoom: 0.7,
+      nodes: focusNodes(
+        nodes.map((n) => n.id),
+        stepKey,
+      ),
+    }),
+    [nodes, stepKey],
+  );
+  const flowLabels = useMemo(
+    () => ({
+      "controls.ariaLabel": t("flow.controls"),
+      "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
+      "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
+      "controls.fitView.ariaLabel": t("flow.fit"),
+      "controls.interactive.ariaLabel": t("flow.interactive"),
+    }),
+    [t],
+  );
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
@@ -221,7 +266,10 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   const runAction = async (a: string, body: any = {}) => {
     if (a === "cancel" && !confirm(t("rv.cancelConfirm"))) return;
-    if (await act(() => api(`/api/runs/${id}/${a}`, body))) reload();
+    await act(async () => {
+      await api(`/api/runs/${id}/${a}`, body);
+      await reloadFresh();
+    });
   };
   const blocked = run.steps.filter(
     (s: any) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL",
@@ -267,13 +315,19 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               </>
             )}
           </nav>
-          <span className={`rv-live is-${live}`} title={t("rv.channel")}>
+          <span
+            className={`rv-live is-${live}${refreshing ? " is-refreshing" : ""}`}
+            title={t("rv.channel")}
+            role="status"
+          >
             <i />
-            {live === "sse"
-              ? t("rv.live")
-              : live === "polling"
-                ? t("rv.polling")
-                : t("rv.connecting")}
+            {refreshing
+              ? t("rv.updating")
+              : live === "sse"
+                ? t("rv.live")
+                : live === "polling"
+                  ? t("rv.polling")
+                  : t("rv.connecting")}
           </span>
         </div>
 
@@ -512,28 +566,23 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, n) => navigate(`/runs/${id}/${n.id}`)}
-            onPaneClick={() => stepKey && navigate(`/runs/${id}`)}
+            onNodeClick={(_, n) => pickStep(n.id)}
+            onPaneClick={() => {
+              if (performance.now() - pickedAt.current < 500) return;
+              if (stepKey) navigate(`/runs/${id}`);
+            }}
+            nodesDraggable={false}
             nodesConnectable={false}
+            elementsSelectable={false}
+            elevateEdgesOnSelect={false}
+            autoPanOnNodeFocus={false}
+            nodeClickDistance={8}
+            nodeDragThreshold={8}
             fitView
             // Long workflows: fit around the selected step (or the start) at a readable zoom instead of shrinking everything.
-            fitViewOptions={{
-              padding: 0.25,
-              maxZoom: 1,
-              minZoom: 0.7,
-              nodes: focusNodes(
-                nodes.map((n) => n.id),
-                stepKey,
-              ),
-            }}
+            fitViewOptions={fitViewOptions}
             minZoom={0.2}
-            ariaLabelConfig={{
-              "controls.ariaLabel": t("flow.controls"),
-              "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
-              "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
-              "controls.fitView.ariaLabel": t("flow.fit"),
-              "controls.interactive.ariaLabel": t("flow.interactive"),
-            }}
+            ariaLabelConfig={flowLabels}
           >
             <Background gap={18} />
             <Controls showInteractive={false} />
@@ -562,7 +611,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         >
           {stepKey === "~changes" ? (
             <div className="rv-pane">
-              <Changes run={run} tick={tick} activity={activity} onChanged={reload} />
+              <Changes run={run} tick={tick} activity={activity} onChanged={reloadFresh} />
             </div>
           ) : stepKey ? (
             <StepInspector
@@ -571,7 +620,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               stepKey={stepKey}
               tick={tick}
               activity={activity}
-              onChanged={reload}
+              onChanged={reloadFresh}
             />
           ) : (
             <div className="rv-pane">
@@ -714,16 +763,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                       <button
                         className="sm"
                         disabled={!feedback.trim()}
-                        onClick={async () =>
-                          (await act(
-                            () =>
-                              api(`/api/runs/${id}/feedback`, {
-                                message: feedback,
-                                mode: feedbackMode,
-                              }),
-                            t("rv.feedbackSent"),
-                          )) && (setFeedback(""), reload())
-                        }
+                        onClick={async () => {
+                          const r = await act(async () => {
+                            const result = await api(`/api/runs/${id}/feedback`, {
+                              message: feedback,
+                              mode: feedbackMode,
+                            });
+                            await reloadFresh();
+                            return result;
+                          }, t("rv.feedbackSent"));
+                          if (r) setFeedback("");
+                        }}
                       >
                         <Send size={13} /> {t("rv.sendFeedback")}
                       </button>

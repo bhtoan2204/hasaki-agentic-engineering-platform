@@ -154,6 +154,17 @@
   border: 2px solid var(--line-strong);
 }
 
+/* The edge's invisible hit stroke is drawn above the blocks and eats the click. */
+.split>.canvas .react-flow__edge,
+.split>.canvas .react-flow__edge-interaction {
+  pointer-events: none;
+}
+
+/* Blocks stay fixed so a small pointer move is still a click. The hand cursor is the click affordance. */
+.split>.canvas .react-flow__node {
+  cursor: pointer;
+}
+
 .node.gn.has-status .react-flow__handle {
   border-color: var(--gn-c);
 }
@@ -252,7 +263,7 @@
   color: var(--muted);
 }
 
-.rv-meta > span {
+.rv-meta>span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -314,6 +325,15 @@
   background: var(--st-wait);
 }
 
+.rv-live.is-refreshing {
+  color: var(--brand-400);
+}
+
+.rv-live.is-refreshing i {
+  background: var(--brand-400);
+  animation: livepulse 0.8s infinite;
+}
+
 .rv-summary {
   display: flex;
   align-items: center;
@@ -328,7 +348,7 @@
   height: 8px;
 }
 
-.rv-progress > span {
+.rv-progress>span {
   transition: width 0.3s;
 }
 
@@ -357,7 +377,7 @@
   border-bottom: 1px solid var(--line);
 }
 
-.rv-banner > svg {
+.rv-banner>svg {
   flex: none;
 }
 
@@ -366,7 +386,7 @@
   color: var(--ink);
 }
 
-.rv-banner.wait > svg {
+.rv-banner.wait>svg {
   color: var(--st-wait);
 }
 
@@ -375,7 +395,7 @@
   color: var(--ink);
 }
 
-.rv-banner.brand > svg {
+.rv-banner.brand>svg {
   color: var(--brand);
 }
 
@@ -384,7 +404,7 @@
   color: var(--ink-2);
 }
 
-.rv-banner.idle > svg {
+.rv-banner.idle>svg {
   color: var(--muted);
 }
 
@@ -469,12 +489,12 @@
   font-size: 13px;
 }
 
-.rv-kv > :nth-child(odd) {
+.rv-kv> :nth-child(odd) {
   color: var(--muted);
   font-size: 12.5px;
 }
 
-.rv-kv > :nth-child(even) {
+.rv-kv> :nth-child(even) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -617,7 +637,7 @@
   padding: 4px 20px 28px;
 }
 
-.si-body > .tabs {
+.si-body>.tabs {
   position: sticky;
   top: 0;
   background: var(--surface);
@@ -630,11 +650,9 @@
 .rv-attn {
   position: relative;
   border: 1px solid color-mix(in srgb, var(--st-wait) 50%, var(--line));
-  background: linear-gradient(
-    180deg,
-    var(--st-wait-bg),
-    color-mix(in srgb, var(--st-wait-bg) 35%, var(--surface))
-  );
+  background: linear-gradient(180deg,
+      var(--st-wait-bg),
+      color-mix(in srgb, var(--st-wait-bg) 35%, var(--surface)));
   border-radius: var(--r-lg);
   padding: 16px 18px;
   margin: 14px 0;
@@ -1269,12 +1287,9 @@
   border-radius: var(--r-lg);
   overflow: hidden;
   background:
-    radial-gradient(
-        circle at 1px 1px,
-        color-mix(in srgb, var(--line-strong) 70%, transparent) 1px,
-        transparent 0
-      )
-      0 0 / 18px 18px,
+    radial-gradient(circle at 1px 1px,
+      color-mix(in srgb, var(--line-strong) 70%, transparent) 1px,
+      transparent 0) 0 0 / 18px 18px,
     var(--surface-2);
   margin-top: 8px;
 }
@@ -1287,7 +1302,7 @@
   gap: 3px;
 }
 
-.pp-changes > div {
+.pp-changes>div {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -1353,7 +1368,7 @@
     gap: 2px 0;
   }
 
-  .rv-kv > :nth-child(even) {
+  .rv-kv> :nth-child(even) {
     margin-bottom: 6px;
   }
 
@@ -1433,14 +1448,14 @@ body.rv-resizing .react-flow {
 }
 
 /* Tabs wrap onto a second row when the pane is narrow, so every tab stays one click away (no sideways scrolling). */
-.si-body > .tabs {
+.si-body>.tabs {
   flex-wrap: wrap;
   row-gap: 0;
   column-gap: 0;
   box-shadow: 0 8px 8px -8px color-mix(in srgb, var(--ink) 25%, transparent);
 }
 
-.si-body > .tabs .tab {
+.si-body>.tabs .tab {
   flex: none;
   white-space: nowrap;
   padding: 8px 9px;

@@ -40,6 +40,13 @@
       "model": "",
       "reasoningEffort": "",
       "models": {}
+    },
+    "antigravity": {
+      "bin": "agy",
+      "timeoutMs": 2700000,
+      "model": "",
+      "effort": "",
+      "models": {}
     }
   },
   "maxConcurrent": 1,

@@ -32,7 +32,7 @@ test("agent provider defaults to claude and rejects unknown values", () => {
   assert.equal(resolveAgentProvider("cursor"), "cursor");
   assert.throws(
     () => resolveAgentProvider("openai"),
-    /agent_provider must be one of claude, cursor, codex/,
+    /agent_provider must be one of claude, cursor, codex, antigravity/,
   );
 });
 
@@ -57,7 +57,7 @@ test("a new run stores the provider and legacy creates stay on claude", async ()
         agentProvider: "gpt" as "claude",
         start: false,
       }),
-    /agent_provider must be one of claude, cursor, codex/,
+    /agent_provider must be one of claude, cursor, codex, antigravity/,
   );
 });
 

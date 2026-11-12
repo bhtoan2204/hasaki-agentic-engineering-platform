@@ -113,7 +113,7 @@ export function QuestionsForm({
   provider = "claude",
 }: {
   questions: any[];
-  onDone: () => void;
+  onDone: () => void | Promise<unknown>;
   provider?: AgentProvider;
 }) {
   const { t } = useI18n();
@@ -122,12 +122,13 @@ export function QuestionsForm({
   if (!questions.length) return null;
   const submit = async () => {
     setBusy(true);
-    const r = await act(() => api("/api/questions/answers", { answers }));
+    const r = await act(async () => {
+      const result = await api("/api/questions/answers", { answers });
+      if (result) await onDone();
+      return result;
+    });
     setBusy(false);
-    if (r) {
-      setAnswers({});
-      onDone();
-    }
+    if (r) setAnswers({});
   };
   return (
     <section className="rv-attn" aria-label={t("si.questionsWaiting")}>
@@ -206,7 +207,15 @@ export function QuestionsForm({
   );
 }
 
-export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDone: () => void }) {
+export function ApprovalPanel({
+  run,
+  step,
+  onDone,
+}: {
+  run: any;
+  step: any;
+  onDone: () => void | Promise<unknown>;
+}) {
   const { t } = useI18n();
   const req = step.approval?.request;
   const gate = step.approval?.gate && !step.approval?.granted;
@@ -259,11 +268,14 @@ export function ApprovalPanel({ run, step, onDone }: { run: any; step: any; onDo
       };
     if (approve && req?.requires_risk_acknowledgement)
       body.data = { ...(body.data ?? {}), acknowledge_risk: ackRisk };
-    const r = await act(
-      () => api(`/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`, body),
-      approve ? t("si.approved") : t("si.rejected"),
-    );
-    if (r) onDone();
+    await act(async () => {
+      const result = await api(
+        `/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`,
+        body,
+      );
+      await onDone();
+      return result;
+    }, approve ? t("si.approved") : t("si.rejected"));
   };
   const reexec = step.config?.on_reject?.reexecute;
   return (
@@ -465,7 +477,7 @@ export function StepInspector({
   onChanged: () => void;
 }) {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any>(`/api/runs/${run.id}/steps/${stepKey}`);
+  const { data, error, loading, reload, reloadFresh } = useApi<any>(`/api/runs/${run.id}/steps/${stepKey}`);
   const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
   const [attemptId, setAttemptId] = useState<number | null>(null);
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -499,15 +511,13 @@ export function StepInspector({
   const open = questions.filter((q: any) => q.status === "open");
   const live = step.status === "RUNNING" && attempt?.id === step.current_attempt_id;
   const runActive = run.status !== "CANCELED";
-  const refresh = () => {
-    reload();
-    onChanged();
-  };
-  const action = async (path: string, body: any = {}, ok?: string) => {
-    const r = await act(() => api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body), ok);
-    if (r) refresh();
-    return r;
-  };
+  const refresh = () => Promise.all([reloadFresh(), Promise.resolve(onChanged())]);
+  const action = async (path: string, body: any = {}, ok?: string) =>
+    act(async () => {
+      const result = await api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body);
+      await refresh();
+      return result;
+    }, ok);
   const canRun =
     run.worker?.local && run.status === "PAUSED" && ["READY", "RETRYING"].includes(step.status);
   const canRetry = run.worker?.local && runActive && ["FAILED", "CANCELED"].includes(step.status);

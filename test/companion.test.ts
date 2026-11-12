@@ -34,7 +34,7 @@ const state = (
   );
 
 test("companion: provider and model come from the selected attempt and completed history is preserved", () => {
-  for (const provider of ["claude", "codex", "cursor"]) {
+  for (const provider of ["claude", "codex", "cursor", "antigravity"]) {
     const activity = state({
       attempt: { provider, model: `${provider}-model`, status: "RUNNING" },
     });

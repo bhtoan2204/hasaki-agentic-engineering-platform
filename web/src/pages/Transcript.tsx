@@ -69,7 +69,7 @@ function toolIcon(name: string): LucideIcon {
     ? FolderSearch
     : EDIT_TOOLS.includes(name)
       ? Pencil
-      : name === "Bash"
+      : name === "Bash" || name === "run_command" || name === "exec_command"
         ? SquareTerminal
         : Wrench;
 }
@@ -97,13 +97,21 @@ function StatTile({
   );
 }
 
+function toolName(data: any): string {
+  return String(data?.name ?? data?.tool ?? "");
+}
+
 function toolHint(input: any = {}) {
+  const args = input.args && typeof input.args === "object" ? input.args : {};
   return String(
     input.file_path ??
       input.notebook_path ??
       input.path ??
       input.pattern ??
       input.command ??
+      args.command ??
+      args.CommandLine ??
+      args.cmd ??
       input.repo ??
       input.url ??
       input.query ??
@@ -111,6 +119,20 @@ function toolHint(input: any = {}) {
       input.step_key ??
       "",
   ).split("\n")[0];
+}
+
+/** Token deltas were stored as separate rows. Show one message until a tool or another kind interrupts. */
+export function coalesceStream<T extends { kind: string; content: string }>(events: T[]): T[] {
+  const out: T[] = [];
+  for (const e of events) {
+    const prev = out[out.length - 1];
+    if (prev && (e.kind === "agent" || e.kind === "thinking") && prev.kind === e.kind) {
+      out[out.length - 1] = { ...prev, content: prev.content + e.content };
+      continue;
+    }
+    out.push(e);
+  }
+  return out;
 }
 
 /**
@@ -155,24 +177,31 @@ export function Transcript({
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [events, follow, filter]);
 
+  const stream = useMemo(() => coalesceStream(events), [events]);
   const results = useMemo(() => {
     const m: Record<string, Ev> = {};
     for (const e of events)
       if (e.kind === "tool_result" && e.data?.tool_use_id) m[e.data.tool_use_id] = e;
     return m;
   }, [events]);
-  const tools = events.filter((e) => e.kind === "tool" && e.data?.name);
+  const tools = stream.filter((e) => e.kind === "tool" && toolName(e.data));
   const filesRead = [
     ...new Set(
-      tools.filter((e) => READ_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.input)),
+      tools
+        .filter((e) => READ_TOOLS.includes(toolName(e.data)))
+        .map((e) => toolHint(e.data.input ?? e.data.args)),
     ),
   ];
   const filesModified = [
     ...new Set(
-      tools.filter((e) => EDIT_TOOLS.includes(e.data.name)).map((e) => toolHint(e.data.input)),
+      tools
+        .filter((e) => EDIT_TOOLS.includes(toolName(e.data)))
+        .map((e) => toolHint(e.data.input ?? e.data.args)),
     ),
   ];
-  const commands = tools.filter((e) => e.data.name === "Bash");
+  const commands = tools.filter((e) =>
+    ["Bash", "run_command", "exec_command"].includes(toolName(e.data)),
+  );
   const errors = events.filter(
     (e) =>
       (e.kind === "tool_result" && e.data?.is_error) ||
@@ -181,7 +210,8 @@ export function Transcript({
   );
   const result = [...events].reverse().find((e) => e.kind === "result");
 
-  const visible = events.filter((e) => {
+  const visible = stream.filter((e) => {
+    const name = toolName(e.data);
     switch (filter) {
       case "all":
         return (
@@ -194,11 +224,11 @@ export function Transcript({
       case "tools":
         return e.kind === "tool";
       case "read":
-        return e.kind === "tool" && READ_TOOLS.includes(e.data?.name);
+        return e.kind === "tool" && READ_TOOLS.includes(name);
       case "modified":
-        return e.kind === "tool" && EDIT_TOOLS.includes(e.data?.name);
+        return e.kind === "tool" && EDIT_TOOLS.includes(name);
       case "commands":
-        return e.kind === "tool" && e.data?.name === "Bash";
+        return e.kind === "tool" && ["Bash", "run_command", "exec_command"].includes(name);
       case "errors":
         return errors.includes(e) || (e.kind === "tool" && results[e.data?.id]?.data?.is_error);
       case "reasoning":
@@ -371,27 +401,28 @@ function Entry({ e, result, live, agent }: { e: Ev; result?: Ev; live: boolean; 
         </details>
       );
     case "tool": {
-      if (!e.data?.name)
+      const name = toolName(e.data);
+      if (!name)
         return (
           <div className={"msg note" + sub}>
             {when} {e.content}
           </div>
         );
       const err = result?.data?.is_error;
-      const TI = toolIcon(e.data.name);
+      const TI = toolIcon(name);
       return (
         <div className={"msg tool" + sub + (err ? " toolerr" : "")}>
           <div className="who">
             <Av icon={TI} />
-            <b>{e.data.name.replace(/^mcp__platform__/, "platform·")}</b>
-            <span className="mono">{toolHint(e.data.input).slice(0, 160)}</span>
+            <b>{name.replace(/^mcp__platform__/, "platform·")}</b>
+            <span className="mono">{toolHint(e.data.input ?? e.data.args).slice(0, 160)}</span>
             {when}
             {err && <Badge s="FAILED">{t("common.error")}</Badge>}
             {!result && live && <Badge s="RUNNING">{t("tr.running")}</Badge>}
           </div>
           <details>
             <summary>{t("tr.input")}</summary>
-            <pre>{JSON.stringify(e.data.input, null, 2)}</pre>
+            <pre>{JSON.stringify(e.data.input ?? e.data.args ?? {}, null, 2)}</pre>
           </details>
           {result && (
             <details open={err}>

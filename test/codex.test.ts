@@ -107,7 +107,7 @@ test("codex is a valid provider; omitted stays claude; unknown values are reject
   assert.equal(resolveAgentProvider(undefined), "claude");
   assert.throws(
     () => resolveAgentProvider("openai"),
-    /agent_provider must be one of claude, cursor, codex/,
+    /agent_provider must be one of claude, cursor, codex, antigravity/
   );
 });
 

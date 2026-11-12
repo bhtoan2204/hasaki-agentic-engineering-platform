@@ -561,7 +561,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.title": "Database QC theo dự án",
     "ig.db.summaryOff": "chưa cấu hình",
     "ig.db.body":
-      "Agent truy vấn database QC (MySQL) của dự án qua công cụ platform: database.list, database.schema, database.query, cho Claude, Codex và Cursor. Chỉ đọc: một câu SELECT / SHOW / DESCRIBE / EXPLAIN / WITH, chạy trong transaction READ ONLY, có giới hạn số dòng và thời gian; cột giống mật khẩu/token bị che. Chỉ run có repository thuộc dự án đó (theo quyền repository của chủ run) mới dùng được.",
+      "Agent truy vấn database QC (MySQL) của dự án qua công cụ platform: database.list, database.schema, database.query, cho Claude, Codex, Cursor và Antigravity. Chỉ đọc: một câu SELECT / SHOW / DESCRIBE / EXPLAIN / WITH, chạy trong transaction READ ONLY, có giới hạn số dòng và thời gian; cột giống mật khẩu/token bị che. Chỉ run có repository thuộc dự án đó (theo quyền repository của chủ run) mới dùng được.",
     "ig.db.emptyAdmin":
       "Chưa có database nào. Thêm database QC của OMS, Payment, Warranty bên dưới.",
     "ig.db.emptyMember":
@@ -893,6 +893,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.channel": "kênh cập nhật",
     "rv.live": "Trực tiếp",
     "rv.polling": "Đang hỏi lại",
+    "rv.updating": "Đang cập nhật",
     "rv.connecting": "Đang kết nối",
     "rv.continueTip": "Làm tiếp branch có sẵn{source} — không tạo branch mới",
     "rv.from": " (từ {source})",
@@ -2816,7 +2817,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.db.title": "Project QC databases",
     "ig.db.summaryOff": "not configured",
     "ig.db.body":
-      "Agents query a project's QC database (MySQL) through the platform tools database.list, database.schema and database.query, with Claude, Codex and Cursor alike. Read only: one SELECT / SHOW / DESCRIBE / EXPLAIN / WITH statement in a READ ONLY transaction, with row and time limits; password/token-like columns are masked. Only runs whose repositories belong to that project (per the run owner's repository access) can use it.",
+      "Agents query a project's QC database (MySQL) through the platform tools database.list, database.schema and database.query, with Claude, Codex, Cursor and Antigravity alike. Read only: one SELECT / SHOW / DESCRIBE / EXPLAIN / WITH statement in a READ ONLY transaction, with row and time limits; password/token-like columns are masked. Only runs whose repositories belong to that project (per the run owner's repository access) can use it.",
     "ig.db.emptyAdmin": "No database yet. Add the OMS, Payment and Warranty QC databases below.",
     "ig.db.emptyMember":
       "No database is available to you: it needs access to the matching project's repositories.",
@@ -3150,6 +3151,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.channel": "update channel",
     "rv.live": "Live",
     "rv.polling": "Polling",
+    "rv.updating": "Updating",
     "rv.connecting": "Connecting",
     "rv.continueTip": "Continue an existing branch{source} — do not create a new branch",
     "rv.from": " (from {source})",
