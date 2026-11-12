@@ -215,3 +215,81 @@ export function planUpstream(
   }
   return { plan, text };
 }
+
+// ---------------------------------------------------------------- code retrieval ranking
+
+export interface CodeHit {
+  repo: string;
+  path: string;
+  line?: number;
+  endLine?: number;
+  symbol?: string;
+  /** Raw retrieval score from the index (symbol match / keyword match). */
+  score: number;
+  via: "symbol" | "keyword" | "dependency";
+}
+export interface RankedCodeHit extends CodeHit {
+  confidence: number;
+  evidence: string[];
+}
+
+/**
+ * Rank code hits for a task (pure, deterministic): direct matches keep their score, files that the best direct hits
+ * depend on get a discounted one-step expansion, duplicates (same repo, path, range) collapse to the strongest hit
+ * with merged evidence, and every hit carries a 0..1 confidence relative to the best one plus the reasons it ranked.
+ * `deps` maps "repo:path" to the files it imports/calls. Nothing is fetched here; the caller applies its own budget.
+ */
+export function rankCodeHits(
+  hits: CodeHit[],
+  deps: Record<string, Array<{ repo: string; path: string }>>,
+  opts: { limit: number; expandTop?: number; dependencyWeight?: number },
+): RankedCodeHit[] {
+  const weight = opts.dependencyWeight ?? 0.5;
+  const keyOf = (h: { repo: string; path: string; line?: number; endLine?: number }) =>
+    `${h.repo}:${h.path}:${h.line ?? ""}-${h.endLine ?? ""}`;
+  const byKey = new Map<string, RankedCodeHit>();
+  const add = (h: CodeHit, evidence: string) => {
+    const k = keyOf(h);
+    const cur = byKey.get(k);
+    if (!cur) return void byKey.set(k, { ...h, confidence: 0, evidence: [evidence] });
+    if (!cur.evidence.includes(evidence)) cur.evidence.push(evidence);
+    if (h.score > cur.score) Object.assign(cur, { score: h.score, via: h.via, symbol: h.symbol ?? cur.symbol });
+  };
+  const direct = [...hits].sort((a, b) => b.score - a.score || keyOf(a).localeCompare(keyOf(b)));
+  for (const h of direct) add(h, `${h.via} match${h.symbol ? ` "${h.symbol}"` : ""} (score ${h.score})`);
+  for (const h of direct.slice(0, opts.expandTop ?? 3)) {
+    for (const d of deps[`${h.repo}:${h.path}`] ?? [])
+      add(
+        { repo: d.repo, path: d.path, score: h.score * weight, via: "dependency" },
+        `dependency of ${h.repo}:${h.path}`,
+      );
+  }
+  const ranked = [...byKey.values()].sort(
+    (a, b) => b.score - a.score || keyOf(a).localeCompare(keyOf(b)),
+  );
+  const best = ranked[0]?.score || 1;
+  for (const r of ranked) r.confidence = Math.round(Math.min(1, Math.max(0, r.score / best)) * 100) / 100;
+  return ranked.slice(0, Math.max(0, opts.limit));
+}
+
+// ---------------------------------------------------------------- knowledge tiers
+
+export type KnowledgeTier =
+  | "organizational_rule"
+  | "approved_knowledge"
+  | "task_observation"
+  | "unverified_suggestion";
+
+/** Label an item with its authority tier. Only enforced rules are authoritative; unknown or unverified never are. */
+export function knowledgeTier(k: {
+  category: string;
+  enforced?: boolean;
+  metadata?: any;
+}): KnowledgeTier {
+  if (k.category === "task_memory") {
+    const t = String(k.metadata?.trust ?? "unverified");
+    return t === "approved" || t === "verified" ? "task_observation" : "unverified_suggestion";
+  }
+  if (k.enforced === true) return "organizational_rule";
+  return "approved_knowledge";
+}
