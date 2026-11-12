@@ -1,6 +1,6 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
@@ -13,6 +13,7 @@ import { cursorToolDecision } from "../src/agent/cursor/policyWatch.ts";
 import { cursorAgentTurn, cursorCapabilities } from "../src/agent/cursor/run.ts";
 import { attemptIsLive, dispatchPlatformTool } from "../src/agent/platformTools.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import { nodeModulesReady } from "../src/git/provider.ts";
 
 before(async () => {
   await migrate();
@@ -292,4 +293,21 @@ test("Cursor shares the attempt collector across invocations without overwriting
   );
   assert.equal(metrics.tokens, null);
   assert.equal(metrics.cost_usd, null);
+});
+
+test("node_modules counts as installed only after a package manager finished", () => {
+  const ws = mkdtempSync(join(tmpdir(), "node-modules-ready-"));
+  assert.equal(nodeModulesReady(ws), false);
+  mkdirSync(join(ws, "node_modules", "zod"), { recursive: true });
+  assert.equal(
+    nodeModulesReady(ws),
+    false,
+    "a partial install has packages but no completion marker",
+  );
+  writeFileSync(join(ws, "node_modules", ".package-lock.json"), "{}");
+  assert.equal(nodeModulesReady(ws), true);
+  const pnpm = mkdtempSync(join(tmpdir(), "node-modules-ready-"));
+  mkdirSync(join(pnpm, "node_modules"));
+  writeFileSync(join(pnpm, "node_modules", ".modules.yaml"), "");
+  assert.equal(nodeModulesReady(pnpm), true);
 });

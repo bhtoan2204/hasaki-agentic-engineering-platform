@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -26,14 +26,12 @@ export function npmCacheDir() {
 }
 
 /** A failed `npm ci` leaves an empty node_modules. That is not an install. */
-function nodeModulesReady(workspace: string) {
+// Package managers write these only when an install completes; an interrupted install leaves packages without one.
+export function nodeModulesReady(workspace: string) {
   const dir = join(workspace, "node_modules");
-  if (!existsSync(dir)) return false;
-  try {
-    return readdirSync(dir).some((name) => !name.startsWith("."));
-  } catch {
-    return false;
-  }
+  return [".package-lock.json", ".modules.yaml", ".yarn-integrity"].some((marker) =>
+    existsSync(join(dir, marker)),
+  );
 }
 
 /**
