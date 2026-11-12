@@ -34,3 +34,9 @@ Extend the current route and renderer instead of replacing the HTTP or Markdown 
 No scheduler, context, parallel-execution, feedback or performance improvement is claimed. No push, deployment, server restart or migration against the application database was performed.
 
 Applied skills: test-driven-development (including writing-good-tests), verification-before-completion, and commit. The task's explicit convention to omit an unavailable function code takes precedence over the commit skill's generic request to obtain one.
+
+## Verification repair 1: launcher environment refusal
+
+The mandatory platform check returned exit 2 with `refusing verification: DATABASE_URL is set`. This is the first guard in the fixed shell command (`src/workflow/templates.ts:43`), before candidate code or tests execute. In this coding process, a boolean-only environment probe confirmed that DATABASE_URL is absent; executing that exact guard succeeded. Supplying a harmless sentinel reproduced the reported exit 2 without accessing any database.
+
+The existing isolated command environment already deletes DATABASE_URL (`src/platform/selfDevelopment.ts:239`). The observed refusal establishes that the external verification shell received a nonempty variable; it does not identify the exact launcher call path responsible. The safe remediation is for the platform operator to ensure the verification child process starts with DATABASE_URL omitted, using its existing isolated environment construction, and rerun the unchanged command with test-owned local infrastructure. Application/test code in this candidate cannot run before the shell guard or change its parent environment. Editing the fixed verification scripts, weakening the guard, changing the running checkout, or restarting/deploying the platform is outside this task's authorization. No such change was made. This infrastructure failure remains unresolved and no mandatory-verification pass is claimed.
