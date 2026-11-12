@@ -190,6 +190,15 @@ for (const key of [
 ])
   delete process.env[key];
 
+// Commits made by tests need an identity even when the environment sets GIT_CONFIG_GLOBAL=/dev/null.
+for (const [key, value] of [
+  ["GIT_AUTHOR_NAME", "Test"],
+  ["GIT_AUTHOR_EMAIL", "test@example.invalid"],
+  ["GIT_COMMITTER_NAME", "Test"],
+  ["GIT_COMMITTER_EMAIL", "test@example.invalid"],
+] as const)
+  process.env[key] ??= value;
+
 // Each file gets its own database. Drop it when the process is otherwise finished so catalogs do not
 // accumulate (hundreds of leftover databases make the next CREATE DATABASE collide on template1).
 let dropping = false;

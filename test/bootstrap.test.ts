@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { cookieSecure, readCookie } from "../src/auth/sessions.ts";
@@ -23,6 +25,18 @@ function bootstrap(username = "toan") {
   });
 }
 after(() => pool.end());
+
+// serveStatic answers 503 when web/dist is missing (clean checkout, no `npm run build`). Provide a minimal stand-in
+// index.html for the duration of the test and remove only what this test created.
+const webDist = fileURLToPath(new URL("../web/dist/", import.meta.url));
+const createdDist = !existsSync(webDist);
+const createdIndex = createdDist || !existsSync(webDist + "index.html");
+if (createdDist) mkdirSync(webDist, { recursive: true });
+if (createdIndex) writeFileSync(webDist + "index.html", "<!doctype html><title>test</title>");
+after(() => {
+  if (createdDist) rmSync(webDist, { recursive: true, force: true });
+  else if (createdIndex) rmSync(webDist + "index.html", { force: true });
+});
 
 test("bootstrap script migrates an empty database, preserves existing admin, and HTTP sessions enforce CSRF", async () => {
   assert.equal((await pool.query("SELECT to_regclass('public.users') AS t")).rows[0].t, null);
