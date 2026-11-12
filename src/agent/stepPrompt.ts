@@ -104,6 +104,21 @@ export function buildSystemAppend(
       renderContextPack(ctx.contextPack, true),
       "If a rule is marked truncated, retrieve its complete version with read_knowledge before acting. Context estimates are not provider token reports.",
     );
+  // Skills offered by name/description only must be loaded to be applied: say so even when the pack lists them.
+  const skillsToLoad = onDemand.filter((k) => k.category === "agent_skill");
+  if (ctx.contextPack && skillsToLoad.length)
+    lines.push(
+      "",
+      "## Skills to load before acting",
+      "These skills are offered by description only. When one matches what you are about to do, call " +
+        "mcp__platform__read_knowledge with its key BEFORE acting, follow it, and name the skills you applied in your result.",
+      ...skillsToLoad.map(
+        (k) =>
+          `- \`${k.key}\`: ${String((k.metadata as any)?.description ?? k.title)
+            .replace(/\s+/g, " ")
+            .slice(0, 240)}`,
+      ),
+    );
   if (inline.length && !ctx.contextPack) {
     lines.push("", "## Applicable knowledge (platform-curated, trusted)");
     for (const k of inline) {

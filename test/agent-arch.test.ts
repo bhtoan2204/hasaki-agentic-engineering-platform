@@ -195,6 +195,16 @@ test("system prompt shows inline bodies, index lines, a search hint, tool discov
   );
   assert.ok(sys.includes("mcp__platform__list_tools"));
   assert.ok(!sys.includes("Delegation"));
+  // With a context pack (every agent step) description-only skills must still come with the "load before acting" rule.
+  const packed = buildSystemAppend(
+    run,
+    { key: "s", name: "S", type: "agent", config: {} } as any,
+    { ...ctx, contextPack: { id: "p", snapshot_id: 1, entries: [], omitted: [] } },
+    "analysis",
+  );
+  assert.match(packed, /## Skills to load before acting/);
+  assert.match(packed, /- `skill\.a`: does A/);
+  assert.ok(!packed.includes("SKILL A BODY"));
   assert.ok(
     buildSystemAppend(
       run,
@@ -384,7 +394,11 @@ test("post-submit reaper: stops a session that outlives its submitted result, on
   assert.equal(r.armed, true);
   await new Promise((res) => setTimeout(res, 60));
   assert.equal(stops, 1);
-  assert.equal(r.fired, true, "the caller can tell the abort was the platform's, not a provider failure");
+  assert.equal(
+    r.fired,
+    true,
+    "the caller can tell the abort was the platform's, not a provider failure",
+  );
   const quick = postSubmitReaper(() => stops++, 20);
   quick.arm();
   quick.disarm(); // the CLI exited on its own within the grace period

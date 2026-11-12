@@ -144,6 +144,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     setActivity((a) => a + 1);
   });
   const [feedback, setFeedback] = useState("");
+  const [feedbackMode, setFeedbackMode] = useState<"auto" | "reimplement" | "replan" | "restart">(
+    "auto",
+  );
 
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
@@ -155,6 +158,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       if (q.status === "open") openQ[q.step_key] = (openQ[q.step_key] ?? 0) + 1;
     const attempts: Record<string, number> = {};
     for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
+    const lastReplan = (run.inputs?.replans as any[] | undefined)?.at(-1);
+    const rerun = new Set<string>(lastReplan?.invalidated ?? []);
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
       const latestAttempt = [...run.attempts].reverse().find((a: any) => a.step_key === s.key);
@@ -186,6 +191,14 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],
           selected: s.key === stepKey,
+          generation: row?.generation,
+          replan: lastReplan
+            ? rerun.has(s.key)
+              ? "rerun"
+              : row?.status === "COMPLETED" || row?.status === "SKIPPED"
+                ? "reused"
+                : undefined
+            : undefined,
         },
       };
     });
@@ -647,11 +660,47 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     <MessageSquareText size={14} /> {t("rv.feedbackTitle")}
                   </div>
                   <div className="rv-card">
-                    <div className="muted small">
-                      {t("rv.feedbackBody", {
-                        step: run.graph.feedback_step ?? t("rv.codingStep"),
-                      })}
+                    <div className="muted small">{t("rv.feedbackBody")}</div>
+                    <div className="rv-fb-modes" role="radiogroup" style={{ marginTop: 8 }}>
+                      {(["auto", "reimplement", "replan", "restart"] as const).map((m) => (
+                        <label key={m} className="rv-fb-mode" style={{ display: "block" }}>
+                          <input
+                            type="radio"
+                            name="rv-feedback-mode"
+                            value={m}
+                            checked={feedbackMode === m}
+                            onChange={() => setFeedbackMode(m)}
+                          />{" "}
+                          <b>{t(`rv.fbMode.${m}`)}</b>
+                          <span className="muted small">
+                            {" "}
+                            —{" "}
+                            {t(`rv.fbMode.${m}.d`, {
+                              step:
+                                m === "replan"
+                                  ? (run.graph.replan_step ?? "plan")
+                                  : (run.graph.feedback_step ?? t("rv.codingStep")),
+                            })}
+                          </span>
+                        </label>
+                      ))}
                     </div>
+                    {(() => {
+                      const last = (run.inputs?.replans as any[] | undefined)?.at(-1);
+                      return last ? (
+                        <div
+                          className="muted small"
+                          style={{ marginTop: 6 }}
+                          title={(last.reasons ?? []).join("\n")}
+                        >
+                          {t("rv.lastReplan", {
+                            route: t(`rv.fbMode.${last.route}`),
+                            source: t(`rv.replanSource.${last.source}`),
+                            targets: (last.targets ?? []).join(", "),
+                          })}
+                        </div>
+                      ) : null;
+                    })()}
                     <textarea
                       id="rv-feedback"
                       rows={3}
@@ -669,6 +718,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                             () =>
                               api(`/api/runs/${id}/feedback`, {
                                 message: feedback,
+                                mode: feedbackMode,
                               }),
                             t("rv.feedbackSent"),
                           )) && (setFeedback(""), reload())

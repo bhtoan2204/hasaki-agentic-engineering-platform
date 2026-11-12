@@ -459,6 +459,7 @@ export function applyProfile(
       steps,
       feedback_step:
         spec.feedback_step && removed.has(spec.feedback_step) ? coding.key : spec.feedback_step,
+      replan_step: spec.replan_step && removed.has(spec.replan_step) ? undefined : spec.replan_step,
     },
     changes,
   };

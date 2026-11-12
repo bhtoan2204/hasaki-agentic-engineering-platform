@@ -109,6 +109,8 @@ export const WorkflowSpec = z.object({
   description: z.string().default(""),
   /** Step that receives review feedback ("Nhắn cho agent"); default: first coding_agent step. */
   feedback_step: z.string().optional(),
+  /** Step a "re-plan" feedback re-executes (analysis/planning after repository selection); default: derived from the graph. */
+  replan_step: z.string().optional(),
   /** Inputs the run form asks for (purely descriptive; values land in run.inputs). */
   inputs: z
     .record(

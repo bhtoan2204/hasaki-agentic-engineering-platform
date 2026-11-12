@@ -17,6 +17,9 @@ export interface AgentMetrics {
   tool_errors: number;
   denied: Array<{ tool: string; reason: string; subagent?: string }>;
   skills_loaded: string[];
+  /** Skills offered to the agent this attempt, "key:tier" (inline = full body in the prompt; index = description only,
+   * loaded only if the agent calls read_knowledge — then it also appears in skills_loaded). */
+  skills_provided?: string[];
   /** Harness verification outcome of a coding attempt (see verify.ts). */
   verification?: Record<string, unknown>;
   /** Where the model came from: step config / routing / global default. */

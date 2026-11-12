@@ -419,6 +419,96 @@
         }
       ],
       "block_reason": "needs a globally installed playwright-cli, a real browser with network access and optional use of the user's Chrome profile/cookies; not provisioned on platform workers and not covered by the tool policy"
+    },
+    {
+      "key": "skill.ext.brainstorming",
+      "name": "brainstorming",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/obra/superpowers",
+        "commit": "v7.0.0",
+        "path": "skills/brainstorming",
+        "license": "MIT",
+        "attribution": "Copyright (c) 2025 Jesse Vincent. MIT License (skills/external/LICENSE.superpowers-MIT).",
+        "adapted": true,
+        "adaptation_notes": [
+          "workflow-step adaptation: the conversation is the task, developer decisions and approvals; questions only through the platform question tool when the answer changes the design",
+          "removed the visual companion, its scripts and the spike flow (scripts are not allowed in workflow steps)",
+          "removed the design-document file, builder-check subagent and writing-plans handoff: the design is the step result and the workflow approval step is the gate"
+        ]
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "understand",
+          "architecture",
+          "plan"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "9a3ef4b51332da0b79c674a7caec0d20ff4b037d6c0a8c1db81ab374a09fed90",
+          "upstream_sha256": "6ee10d1481b8a2580d5336ff66c5c08acc9d4b251b13bbc3bfd31be99c261d43",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.receiving-code-review",
+      "name": "receiving-code-review",
+      "origin": {
+        "type": "external",
+        "repo": "https://github.com/obra/superpowers",
+        "commit": "v7.0.0",
+        "path": "skills/receiving-code-review",
+        "license": "MIT",
+        "attribution": "Copyright (c) 2025 Jesse Vincent. MIT License (skills/external/LICENSE.superpowers-MIT).",
+        "adapted": true,
+        "adaptation_notes": [
+          "sources mapped to workflow inputs: developer feedback/decisions and review-step findings",
+          "clarifications go through the platform question tool; removed GitHub thread replies and instruction-file references",
+          "condensed acknowledgement and examples sections"
+        ]
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor"
+        ]
+      },
+      "supersedes": [],
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "282a114c7c8704674b775e483b864dd1b5eb6c76f6915ff69af5c05833668682",
+          "upstream_sha256": "091df1629510af1b92fc4abd6f96732ebedb4cb2c0f3457e8f2740b0504a2438",
+          "modified": true
+        }
+      ]
     }
   ]
 }

@@ -133,6 +133,12 @@
   background: color-mix(in srgb, var(--st-err) 5%, var(--surface));
 }
 
+/* Reused after feedback: the earlier result stands, the step did not run again. */
+.node.gn.reused {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
 .node.gn.running {
   border-color: color-mix(in srgb, var(--st-run) 55%, var(--line));
 }

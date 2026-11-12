@@ -48,6 +48,19 @@ import { detectBranchDirectives, normalizeBranchMap, WORK_ITEM_BRANCH_SOURCE } f
 import { classifyFailure } from "./failures.ts";
 import { background } from "./background.ts";
 import { downstream, topoOrder } from "./graph.ts";
+import {
+  classificationPrompt,
+  decideFeedbackRoute,
+  FEEDBACK_MODES,
+  feedbackSignals,
+  heuristicJudgement,
+  parseJudgement,
+  replanAnchors,
+  routeTargets,
+  type FeedbackJudgement,
+  type FeedbackMode,
+} from "./replan.ts";
+import { snapshotUncommitted } from "../git.ts";
 import { localJobs } from "./local.ts";
 import { runEvents } from "./events.ts";
 import { materializeSubtasks } from "./decomposition.ts";
@@ -641,6 +654,8 @@ async function reexecuteTx(
   pending: Record<string, unknown> | null,
   afterCommit: AfterCommit,
   why: string,
+  /** Pending input for specific invalidated dependants (e.g. "rediscover" for the discovery step). */
+  dependantInput?: Record<string, Record<string, unknown>>,
 ) {
   if (run.status === "CANCELED") throw new EngineError("run is canceled");
   const steps = await stepsOf(c, run.id);
@@ -685,7 +700,7 @@ async function reexecuteTx(
         output: null,
         error: null,
         approval: null,
-        pending_input: s === target ? pending : null,
+        pending_input: s === target ? pending : (dependantInput?.[s.key] ?? null),
         ready_at: to === "READY" ? new Date() : null,
         finished_at: null,
       },
@@ -722,15 +737,32 @@ export async function reexecuteStep(
     const run = await lockRun(c, runId);
     const feedback = opts.feedback?.trim() || undefined;
     const keys = [...new Set((opts.skills ?? []).map(String).filter(Boolean))];
-    const pinned = keys.length
+    // Only skills the run can actually load: enabled, and shared or owned by the run owner (resolution applies the
+    // same rule; anything else would be pinned and then silently dropped).
+    const pinnedNew = keys.length
       ? await q<{ key: string; version: number; title: string }>(
           c,
-          "SELECT key, current_version AS version, title FROM knowledge_items WHERE key = ANY($1) ORDER BY key",
-          [keys],
+          `SELECT DISTINCT ON (key) key, current_version AS version, title FROM knowledge_items
+            WHERE key = ANY($1) AND enabled AND (owner_id IS NULL OR owner_id = $2)
+            ORDER BY key, (owner_id IS NULL)`,
+          [keys, run.owner_id ?? null],
         )
       : [];
-    const unknown = keys.filter((k) => !pinned.some((p) => p.key === k));
-    if (unknown.length) throw new EngineError(`unknown skill(s): ${unknown.join(", ")}`, 400);
+    const unknown = keys.filter((k) => !pinnedNew.some((p) => p.key === k));
+    if (unknown.length)
+      throw new EngineError(
+        `unknown skill(s) or not available to this run (disabled or private to another user): ${unknown.join(", ")}`,
+        400,
+      );
+    // A retry or feedback without a skill choice keeps the skills pinned for the current re-execution.
+    const current = await one<{ pending_input: any }>(
+      c,
+      "SELECT pending_input FROM workflow_steps WHERE run_id = $1 AND key = $2",
+      [runId, stepKey],
+    );
+    const pinned = keys.length
+      ? pinnedNew
+      : ((current?.pending_input?.reexecute?.skills ?? []) as typeof pinnedNew);
     const reexecute =
       feedback || pinned.length
         ? {
@@ -775,13 +807,167 @@ export async function reexecuteStep(
 export const retryStep = (runId: number, stepKey: string, input?: Record<string, unknown>) =>
   reexecuteStep(runId, stepKey, { input });
 
-/** Review feedback ("Nhắn cho agent"): re-run the workflow's feedback step; downstream test/PR re-run too. */
-export async function sendFeedback(runId: number, message: string) {
+/** One model call that judges feedback (injected: the agent layer provides it; null → fallback cues only). */
+let feedbackModel: ((run: RunRow, prompt: string) => Promise<string>) | null = null;
+export function setFeedbackModel(fn: typeof feedbackModel) {
+  feedbackModel = fn;
+}
+
+/** Decide where feedback sends the run (no state change). Exposed so the UI can preview the route. */
+export async function classifyRunFeedback(runId: number, message: string, mode: FeedbackMode) {
   const run = await getRun(runId);
-  const key =
-    run.graph.feedback_step ?? run.graph.steps.find((s) => s.type === "coding_agent")?.key;
-  if (!key) throw new EngineError("this workflow has no step that accepts feedback");
-  return reexecuteStep(runId, key, { feedback: message });
+  const signals = feedbackSignals(message, run.allowed_repositories, run.selected_repositories);
+  let judgement: FeedbackJudgement | null = null;
+  let modelError: string | undefined;
+  if (mode === "auto" && feedbackModel) {
+    const steps = await stepsOf(pool, runId);
+    const wi = run.work_item_id
+      ? await one<{ title: string; description: string }>(
+          pool,
+          "SELECT title, description FROM work_items WHERE id = $1",
+          [run.work_item_id],
+        )
+      : null;
+    try {
+      judgement = parseJudgement(
+        await feedbackModel(
+          run,
+          classificationPrompt({
+            message,
+            task: [run.title, wi?.title, wi?.description].filter(Boolean).join("\n"),
+            selected: run.selected_repositories,
+            completed: steps
+              .filter((x) => x.status === "COMPLETED" && x.output)
+              .map((x) => ({
+                key: x.key,
+                summary: String(x.output?.summary ?? JSON.stringify(x.output)).slice(0, 400),
+              })),
+          }),
+        ),
+      );
+      if (!judgement) modelError = "unparseable classification reply";
+    } catch (e) {
+      modelError = (e as Error).message.slice(0, 200);
+    }
+  }
+  const decision = decideFeedbackRoute({
+    mode,
+    signals,
+    judgement,
+    fallback: heuristicJudgement(message),
+  });
+  if (modelError)
+    decision.reasons.push(`model classification unavailable (${modelError}); fallback cues used`);
+  return { run, decision, ...routeTargets(run.graph, decision.route) };
+}
+
+/**
+ * Developer feedback. Auto mode judges how far back the run must go (code fix → coding step; design → planning;
+ * repository scope → discovery; requirement / full recheck → first steps); an explicit mode is the developer's call.
+ * The chosen steps are re-executed through the normal re-execution path (dependants invalidated, history kept), the
+ * feedback becomes a developer decision for every later step, and uncommitted work is snapshotted to a ref first.
+ */
+export async function sendFeedback(
+  runId: number,
+  message: string,
+  opts: { mode?: FeedbackMode; by?: string } = {},
+) {
+  const mode = opts.mode ?? "auto";
+  if (!FEEDBACK_MODES.includes(mode)) throw new EngineError(`unknown feedback mode: ${mode}`, 400);
+  const { run, decision, route, targets } = await classifyRunFeedback(runId, message, mode);
+  if (!targets.length) throw new EngineError("this workflow has no step that accepts feedback");
+  if (run.status === "CANCELED") throw new EngineError("run is canceled");
+  const id = `${Date.now().toString(36)}`;
+  // Re-planning may discard the approach the code was written for: keep the uncommitted part retrievable.
+  const snapshots: Array<{ repo: string; ref: string; commit: string; files: string[] }> = [];
+  if (route !== "reimplement")
+    for (const w of await workspacesOf(runId))
+      try {
+        const snap = await snapshotUncommitted(
+          w.path,
+          `refs/platform/replan/run-${runId}/${id}`,
+          `platform: uncommitted work before ${route} (run ${runId})`,
+        );
+        if (snap) snapshots.push({ repo: w.repo, ...snap });
+      } catch (e) {
+        throw new EngineError(
+          `${w.repo}: cannot snapshot uncommitted changes before ${route} (${(e as Error).message.split("\n")[0]}); commit or resolve them first`,
+          409,
+        );
+      }
+  const discovery = replanAnchors(run.graph).rediscover;
+  const rediscover = route === "rediscover" || route === "restart";
+  const replan = {
+    id,
+    at: new Date().toISOString(),
+    by: opts.by ?? "",
+    mode,
+    route,
+    source: decision.source,
+    reasons: decision.reasons,
+    signals: decision.signals,
+    judgement: decision.judgement ?? null,
+    targets,
+    invalidated: [
+      ...new Set(targets.flatMap((t) => [t, ...downstream(run.graph.steps, t)])),
+    ].filter((k) => run.graph.steps.some((s) => s.key === k)),
+    snapshots,
+    feedback: message.slice(0, 4000),
+  };
+  return txThenRun(runId, async (c, afterCommit) => {
+    let locked = await lockRun(c, runId);
+    await adoptRun(c, runId);
+    await q(
+      c,
+      `UPDATE workflow_runs SET inputs = coalesce(inputs, '{}'::jsonb)
+         || jsonb_build_object('developer_decisions', coalesce(inputs->'developer_decisions', '[]'::jsonb) || jsonb_build_array($2::jsonb))
+         || jsonb_build_object('replans', coalesce(inputs->'replans', '[]'::jsonb) || jsonb_build_array($3::jsonb)),
+         updated_at = now() WHERE id = $1`,
+      [
+        runId,
+        json({ step: targets[0], text: message, by: opts.by ?? "", at: replan.at, route }),
+        json(replan),
+      ],
+    );
+    const pending = { feedback: message, replan: { id, route, reasons: decision.reasons } };
+    const rediscoverInput =
+      rediscover && discovery ? { rediscover: { id, feedback: message } } : null;
+    for (const t of targets) {
+      locked = await lockRun(c, runId);
+      const prev = await one<{ pending_input: any }>(
+        c,
+        "SELECT pending_input FROM workflow_steps WHERE run_id = $1 AND key = $2",
+        [runId, t],
+      );
+      const skills = prev?.pending_input?.reexecute?.skills;
+      const own = {
+        ...pending,
+        ...(Array.isArray(skills) && skills.length
+          ? {
+              reexecute: { instructions: null, skills, requested_by: opts.by ?? "", at: replan.at },
+            }
+          : {}),
+      };
+      await reexecuteTx(
+        c,
+        locked,
+        t,
+        t === discovery && rediscoverInput ? { ...own, ...rediscoverInput } : own,
+        afterCommit,
+        `feedback → ${route} (${decision.source})`,
+        rediscoverInput && discovery ? { [discovery]: rediscoverInput } : undefined,
+      );
+    }
+    await runEvents.add(
+      c,
+      runId,
+      "user",
+      `Feedback → ${route} [${decision.source}]: re-executing ${targets.join(", ")}${snapshots.length ? `; uncommitted work kept at ${snapshots.map((x) => `${x.repo}@${x.ref}`).join(", ")}` : ""}\n${decision.reasons.map((r) => `- ${r}`).join("\n")}\n\n${message}`,
+      null,
+      null,
+      { replan },
+    );
+  });
 }
 
 /**

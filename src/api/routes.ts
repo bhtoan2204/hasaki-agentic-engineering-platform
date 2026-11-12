@@ -190,6 +190,7 @@ import {
   runDetail,
   selectRepositories,
   sendFeedback,
+  classifyRunFeedback,
   skipStep,
   startPendingRun,
   startRun,
@@ -212,6 +213,7 @@ import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
 import { metricsSummary, runMetrics } from "./metrics.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
+import type { FeedbackMode } from "../workflow/replan.ts";
 
 export { HttpError };
 
@@ -879,8 +881,24 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/feedback$/,
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
-      sendFeedback(num(c.p[0]), String(c.body.message ?? "").trim() || fail("empty message"))
+      sendFeedback(num(c.p[0]), String(c.body.message ?? "").trim() || fail("empty message"), {
+        mode: (c.body.mode ?? "auto") as FeedbackMode,
+        by: c.actor.username,
+      })
     ),
+  ],
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/feedback\/preview$/,
+    async (c) => {
+      await requireRun(c.actor, num(c.p[0]), support(c));
+      const r = await classifyRunFeedback(
+        num(c.p[0]),
+        String(c.body.message ?? "").trim() || fail("empty message"),
+        (c.body.mode ?? "auto") as FeedbackMode,
+      );
+      return { decision: r.decision, route: r.route, targets: r.targets };
+    },
   ],
   [
     "GET",

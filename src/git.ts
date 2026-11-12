@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { remoteGit } from "./repos/git.ts";
 import {
@@ -219,4 +220,38 @@ async function rewriteOwnBranch(path: string, branch: string, original: Error) {
   const dropped = await git(path, "log", "--format=%h %s", `${branch}..${remoteTip}`);
   await git(path, "push", "-u", `--force-with-lease=${branch}:${remoteTip}`, "origin", branch);
   return `branch history was rewritten locally; replaced remote ${remoteTip.slice(0, 9)} (lease-protected). Commits removed from the remote branch:\n${dropped}`;
+}
+
+/**
+ * Preserve uncommitted work (staged, unstaged, untracked) as a commit under `ref` without touching the worktree, the
+ * index or any branch: a temporary index is filled and written as a tree. Returns null when the worktree is clean.
+ */
+export async function snapshotUncommitted(path: string, ref: string, message: string) {
+  if (!ref.startsWith("refs/platform/"))
+    throw new Error(`snapshot ref must be under refs/platform/: ${ref}`);
+  const dirty = await git(path, "status", "--porcelain");
+  if (!dirty) return null;
+  const dir = mkdtempSync(join(tmpdir(), "snapshot-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
+  const run = async (...args: string[]) =>
+    (
+      await exec("git", ["-c", "core.hooksPath=/dev/null", "-C", path, ...args], { env })
+    ).stdout.trim();
+  try {
+    await run("read-tree", "HEAD");
+    await run("add", "-A");
+    const tree = await run("write-tree");
+    const commit = await run("commit-tree", tree, "-p", "HEAD", "-m", message);
+    await run("update-ref", ref, commit);
+    return {
+      ref,
+      commit,
+      files: dirty
+        .split("\n")
+        .map((l) => l.slice(3))
+        .filter(Boolean),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

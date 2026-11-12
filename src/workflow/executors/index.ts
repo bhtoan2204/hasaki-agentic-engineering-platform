@@ -18,6 +18,8 @@ import {
 import { claudeTestFailureAdvisor, setTestFailureAdvisor } from "./testFailure.ts";
 import { setKnowledgeChangeAnalyzer, setSkillDrafter } from "../../knowledge/learning.ts";
 import { modelChangeAnalyzer, modelSkillDrafter } from "../../agent/learningModel.ts";
+import { completeForRun } from "../../agent/complete.ts";
+import { setFeedbackModel } from "../engine.ts";
 
 /** StepExecutorRegistry defaults. Tests replace individual entries with registerExecutor(). */
 export function registerDefaultExecutors() {
@@ -37,4 +39,6 @@ export function registerDefaultExecutors() {
   // Continuous learning (knowledge/learning.ts): change detection and skill drafting through the run's provider.
   setKnowledgeChangeAnalyzer(modelChangeAnalyzer);
   setSkillDrafter(modelSkillDrafter);
+  // Feedback routing: one classification call through the run's provider (engine falls back to cues without it).
+  setFeedbackModel(async (run, prompt) => (await completeForRun(run, prompt)).text);
 }

@@ -992,3 +992,31 @@ test("backward compatibility: legacy items (no dates, no supersession) resolve e
     ["old", "sec"],
   );
 });
+
+test("reuse-first-development is seeded as a managed skill and applies to analysis, planning and review steps", async () => {
+  const { seedKnowledge } = await import("../src/knowledge/service.ts");
+  await seedKnowledge();
+  const item = await knowledge.get("reuse-first-development");
+  assert.ok(item, "registered in Knowledge & Skills");
+  const at = new Date();
+  const forStep = async (stepKey: string, stepType: string) =>
+    resolveKnowledge(await knowledge.candidates(pool, null, at), {
+      organization: "hasaki",
+      project: "OMS",
+      repositories: ["oms-api"],
+      workflowKey: "feature-implementation",
+      stepKey,
+      stepType,
+      text: "return shipment amazon",
+      explicit: [],
+      now: at,
+    }).applied.map((k) => k.key);
+  for (const [k, t] of [
+    ["analyze", "agent"],
+    ["plan", "agent"],
+    ["review", "agent"],
+    ["implement", "coding_agent"],
+  ])
+    assert.ok((await forStep(k, t)).includes("reuse-first-development"), `${k} gets it`);
+  assert.ok(!(await forStep("discover", "integration")).includes("reuse-first-development"));
+});

@@ -16,6 +16,7 @@ import {
   PauseCircle,
   PenLine,
   Plug,
+  RefreshCw,
   RotateCcw,
   ShieldCheck,
   SkipForward,
@@ -128,13 +129,17 @@ export function toEdges(steps: StepLike[], statusOf?: (k: string) => string | un
         source: d,
         target: s.key,
         animated: dst === "RUNNING",
-        className: (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "ge-parallel" : undefined,
+        className:
+          (s as StepLike).config?.subtask?.execution_strategy === "parallel"
+            ? "ge-parallel"
+            : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
         style: {
           stroke,
           strokeWidth: statusOf && (active || dst === "RUNNING") ? 2 : 1.6,
           opacity: statusOf && !active && stroke === "var(--line-strong)" ? 0.85 : 1,
-          strokeDasharray: (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "6 4" : undefined,
+          strokeDasharray:
+            (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "6 4" : undefined,
         },
         label:
           (s.run_if as any)?.step === d
@@ -156,6 +161,10 @@ export type StepNodeData = {
   openQuestions?: number;
   selected?: boolean;
   invalid?: boolean;
+  /** Execution generation of the step (> 1 after a retry, re-execution or feedback). */
+  generation?: number;
+  /** After feedback: this step was invalidated and runs again, or its earlier result is reused. */
+  replan?: "rerun" | "reused";
 };
 
 function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
@@ -175,6 +184,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
     blocked && "blocked",
     status === "RUNNING" && "running",
     data.invalid && "invalid",
+    data.replan === "reused" && "reused",
   ]
     .filter(Boolean)
     .join(" ");
@@ -213,6 +223,8 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
         status ||
         !!data.attempts ||
         !!data.openQuestions ||
+        !!data.replan ||
+        (data.generation ?? 1) > 1 ||
         step.requires_approval ||
         !!step.run_if ||
         merged.length > 0) && (
@@ -249,6 +261,22 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
             </span>
           )}
           {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
+          {data.replan === "rerun" && (
+            <span className="gn-pill gn-pill-wait" title={t("graph.rerun")}>
+              <RefreshCw size={10} strokeWidth={2.4} />
+              {t("graph.rerun")}
+            </span>
+          )}
+          {data.replan === "reused" && (
+            <span className="gn-pill" title={t("graph.reused")}>
+              {t("graph.reused")}
+            </span>
+          )}
+          {(data.generation ?? 1) > 1 && (
+            <span className="gn-pill" title={t("graph.gen", { n: data.generation! })}>
+              gen {data.generation}
+            </span>
+          )}
           {!!data.attempts && (
             <span className="gn-pill" title={t("graph.attempts", { n: data.attempts })}>
               <RotateCcw size={10} strokeWidth={2.4} />

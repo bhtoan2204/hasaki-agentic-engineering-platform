@@ -1200,6 +1200,12 @@ const agentExecutor: StepExecutor = {
       subagents: agents ? Object.keys(agents) : [],
       knowledge: ctx.context.disclosure.map((d) => `${d.key}:${d.disclosure}`),
     });
+    metrics.skills_provided = ctx.context.knowledge
+      .filter((k) => k.category === "agent_skill")
+      .map(
+        (k) =>
+          `${k.key}:${ctx.context.disclosure.find((d) => d.key === k.key)?.disclosure ?? "inline"}`,
+      );
     let result;
     try {
       if (resume && existsSync(cwd)) {

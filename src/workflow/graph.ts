@@ -38,6 +38,8 @@ export function validateSpec(raw: unknown): WorkflowSpec {
   }
   if (spec.feedback_step && !keys.has(spec.feedback_step))
     errors.push(`feedback_step "${spec.feedback_step}" is not a step`);
+  if (spec.replan_step && !keys.has(spec.replan_step))
+    errors.push(`replan_step "${spec.replan_step}" is not a step`);
   if (spec.execution_mode === "read_only")
     for (const s of spec.steps)
       if (["coding_agent", "command", "git_pull_request"].includes(s.type))

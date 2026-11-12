@@ -33,6 +33,7 @@ import {
   type PublishState,
 } from "../../agent/independentReview.ts";
 import { collectScopeState, prePublishProblems, samePatch } from "../../agent/scopeGuard.ts";
+import { feedbackSignals } from "../replan.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -97,7 +98,9 @@ export const humanApprovalExecutor: StepExecutor = {
       const preselected = (
         ctx.run.selected_repositories.length ? ctx.run.selected_repositories : fromInput
       ).filter((r) => ctx.run.allowed_repositories.includes(r));
-      if (cfg.auto_approve_preselected && preselected.length)
+      // After feedback-driven rediscovery the scope is the developer's call again: never auto-approve.
+      const rediscovered = !!discovery?.rediscovered;
+      if (cfg.auto_approve_preselected && preselected.length && !rediscovered)
         return {
           kind: "completed",
           output: {
@@ -125,7 +128,13 @@ export const humanApprovalExecutor: StepExecutor = {
         ambiguous: discovery?.ambiguous ?? true,
         allowed: ctx.run.allowed_repositories,
       });
-      if (cfg.auto_approve_unambiguous && discovery && !discovery.ambiguous && recommended.length)
+      if (
+        cfg.auto_approve_unambiguous &&
+        discovery &&
+        !discovery.ambiguous &&
+        !rediscovered &&
+        recommended.length
+      )
         return {
           kind: "completed",
           output: {
@@ -571,10 +580,13 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
   const keywords = Object.values(ctx.input.upstream).flatMap((u) =>
     Array.isArray(u.output?.keywords) ? u.output.keywords : [],
   );
+  // Feedback-driven rediscovery: rank again with the feedback, never reuse the earlier selection silently.
+  const rediscover = ctx.input.pending?.rediscover as { id: string; feedback: string } | undefined;
   const text = [
     ctx.input.work_item?.title,
     ctx.input.work_item?.description,
     ctx.input.run.title,
+    rediscover?.feedback,
     JSON.stringify(ctx.input.run.inputs ?? {}),
   ]
     .filter(Boolean)
@@ -589,7 +601,7 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
       .catch(() => {});
   let method = "deterministic";
   // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
-  if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false) {
+  if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false && !rediscover) {
     await ctx.log(
       "system",
       `repository discovery: reusing ${ctx.run.selected_repositories.join(", ")} (no re-ranking)`,
@@ -633,6 +645,42 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
     .filter((c) => c.score > 0 && c.score >= (candidates[0]?.score ?? 0) * 0.75)
     .map((c) => c.repo);
   const output: Record<string, unknown> = { candidates, recommended, ambiguous, method };
+  if (rediscover) {
+    // Keep what was selected before (code may exist there) and add what the feedback now points at; the confirm
+    // step always asks, so the developer settles the final scope.
+    const previous = ctx.run.selected_repositories;
+    const named = feedbackSignals(
+      rediscover.feedback,
+      [...allowed],
+      previous,
+    ).unselected_repositories;
+    const merged = [...new Set([...previous, ...recommended, ...named])].filter((r) =>
+      allowed.has(r),
+    );
+    for (const r of merged)
+      if (!candidates.some((c) => c.repo === r))
+        candidates.push({
+          repo: r,
+          score: 0,
+          reasons: [
+            previous.includes(r) ? "selected before the feedback" : "named in the feedback",
+          ],
+        } as (typeof candidates)[number]);
+    Object.assign(output, {
+      recommended: merged,
+      rediscovered: {
+        id: rediscover.id,
+        previous,
+        added: merged.filter((r) => !previous.includes(r)),
+      },
+      ambiguous: true,
+    });
+    await ctx.log(
+      "system",
+      `repository rediscovery after feedback: previously ${previous.join(", ") || "none"}, recommended now ${merged.join(", ")}`,
+    );
+    return { kind: "completed", output };
+  }
   // Provisional selection unless the user already chose; the confirm step finalises it.
   if (!ctx.run.selected_repositories.length && recommended.length)
     output.selected_repositories = recommended;

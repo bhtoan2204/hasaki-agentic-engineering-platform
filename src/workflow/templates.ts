@@ -587,6 +587,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       description:
         "Requirement analysis → repository discovery → architecture plan → approval → implementation → tests → review → PR",
       feedback_step: "implement",
+      replan_step: "plan",
       steps: [
         { key: "analyze", type: "agent", name: "Requirement Analysis", config: ANALYZE },
         {
@@ -665,6 +666,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       description:
         "Problem analysis → repository discovery → root cause → fix proposal → approval → fix → regression tests → code review → PR",
       feedback_step: "implement",
+      replan_step: "root_cause",
       steps: [
         { key: "analyze", type: "agent", name: "Problem Analysis", config: BUG_ANALYZE },
         {
@@ -866,6 +868,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       description:
         "Select repository → analyse code → refactoring plan → human approval → refactor → regression tests → PR",
       feedback_step: "refactor",
+      replan_step: "analyze",
       inputs: {
         repositories: { description: "repository to refactor", required: true },
         goal: { description: "refactoring goal", required: true },
@@ -946,6 +949,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       category: "Platform / Internal Tooling",
       execution_mode: "self_development",
       feedback_step: "implement",
+      replan_step: "plan",
       steps: [
         { key: "analyze", type: "agent", name: "Requirement Analysis", config: ANALYZE },
         {
@@ -1051,6 +1055,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       category: "Engineering",
       execution_mode: "standard",
       feedback_step: "implement",
+      replan_step: "architecture",
       inputs: {
         goal: {
           description: "Feature goal when it is narrower than the work item text",

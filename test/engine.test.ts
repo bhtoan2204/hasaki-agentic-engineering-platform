@@ -4227,3 +4227,196 @@ test("re-execute instructions are kept as run-level developer decisions: later s
   await drain();
   assert.equal(((await getRun(run.id)).inputs.developer_decisions as any[]).length, 1);
 });
+
+// ---------------------------------------------------------------- feedback-driven replanning
+
+/** Feature run driven to the PR gate: oms-api selected, plan approved, implemented, verified. */
+async function featureRunAtPr(title: string) {
+  scripts.implement = codingDone;
+  scripts.review = liveVerifier(() => ({ approved: true, findings: [] }));
+  const wi = await workItems.createManual({ title, project: "OMS", description: title });
+  const run = await startRun({ definitionKey: "feature-implementation", workItemId: wi.id });
+  await drain();
+  await approveStep(run.id, "confirm_repos", { repositories: ["oms-api"] });
+  await drain();
+  await approveStep(run.id, "approve_plan");
+  await drain();
+  assert.equal((await stepOf(run.id, "pr")).status, "WAITING_APPROVAL");
+  return run;
+}
+
+test("feedback: a design change plus a missing repository restarts from discovery (Return Shipment scenario)", async () => {
+  const { setFeedbackModel } = await import("../src/workflow/engine.ts");
+  await repositories.upsert("oms-frontend", {
+    projects: ["OMS"],
+    services: ["web", "ui"],
+    description: "OMS web frontend (React)",
+  });
+  let prompt = "";
+  setFeedbackModel(async (_run, p) => {
+    prompt = p;
+    return '{"route":"replan","architecture_change":true,"scope_change":false,"reasons":["Amazon-only function instead of the shared return flow"]}';
+  });
+  try {
+    const run = await featureRunAtPr("Return Shipment cho Amazon");
+    assert.ok(run.allowed_repositories.includes("oms-frontend"));
+    const before = Object.fromEntries(
+      (await getRun(run.id)).steps.map((s) => [s.key, s.generation]),
+    );
+    const implementCalls = calls.implement;
+
+    await sendFeedback(
+      run.id,
+      "Thiết kế chưa generic: không viết function riêng cho Amazon, làm Create Global Return Shipment dùng chung. Thiếu oms-frontend.",
+      { by: "dev" },
+    );
+    let r = await getRun(run.id);
+    const replan = (r.inputs.replans as any[]).at(-1);
+    assert.equal(replan.route, "restart", "design change + unselected repository → full replan");
+    assert.equal(replan.source, "model");
+    assert.deepEqual(replan.signals.unselected_repositories, ["oms-frontend"]);
+    assert.deepEqual(replan.targets, ["analyze"]);
+    for (const k of [
+      "discover",
+      "confirm_repos",
+      "plan",
+      "approve_plan",
+      "implement",
+      "review",
+      "pr",
+    ])
+      assert.ok(replan.invalidated.includes(k), `${k} invalidated`);
+    assert.match(prompt, /untrusted_input source="feedback"/);
+    assert.match(
+      (r.inputs.developer_decisions as any[]).at(-1).text,
+      /Create Global Return Shipment/,
+      "the feedback binds every later step",
+    );
+    assert.equal(r.steps.find((s) => s.key === "analyze")!.generation, before.analyze + 1);
+    assert.equal(r.steps.find((s) => s.key === "discover")!.pending_input.rediscover.id, replan.id);
+
+    await drain();
+    const confirm = await stepOf(run.id, "confirm_repos");
+    assert.equal(confirm.status, "WAITING_APPROVAL", "rediscovered scope is never auto-approved");
+    assert.ok(confirm.approval.request.recommended.includes("oms-api"), "earlier selection kept");
+    assert.ok(
+      confirm.approval.request.recommended.includes("oms-frontend"),
+      "feedback repository added",
+    );
+    assert.deepEqual((await stepOf(run.id, "discover")).output.rediscovered.added, [
+      "oms-frontend",
+    ]);
+    assert.equal(
+      calls.implement,
+      implementCalls,
+      "no implementation before the new plan is approved",
+    );
+
+    await approveStep(run.id, "confirm_repos", { repositories: ["oms-api", "oms-frontend"] });
+    await drain();
+    r = await getRun(run.id);
+    assert.deepEqual([...r.selected_repositories].sort(), ["oms-api", "oms-frontend"]);
+    assert.equal(r.steps.find((s) => s.key === "plan")!.status, "COMPLETED");
+    assert.equal(
+      r.steps.find((s) => s.key === "approve_plan")!.status,
+      "WAITING_APPROVAL",
+      "the new plan needs approval again",
+    );
+    const planCtx = seen.plan.at(-1)!;
+    assert.match(
+      JSON.stringify(planCtx.input.run.inputs.developer_decisions),
+      /Create Global Return Shipment/,
+    );
+    // history kept: the first analyze attempt is invalidated, not deleted
+    const analyzeAttempts = await attemptsOf(run.id, "analyze");
+    assert.equal(analyzeAttempts.length, 2);
+    assert.ok(analyzeAttempts[0].invalidated_at);
+    assert.equal(analyzeAttempts[1].invalidated_at, null);
+  } finally {
+    setFeedbackModel(null);
+  }
+});
+
+test("feedback: a small code fix re-runs only the coding step and its dependants", async () => {
+  const run = await featureRunAtPr("Small fix routing");
+  const before = Object.fromEntries((await getRun(run.id)).steps.map((s) => [s.key, s.generation]));
+  await sendFeedback(run.id, "đổi tên biến shipmentID cho đúng convention"); // no model: fallback cues
+  const r = await getRun(run.id);
+  const replan = (r.inputs.replans as any[]).at(-1);
+  assert.equal(replan.route, "reimplement");
+  assert.equal(replan.source, "heuristic");
+  assert.deepEqual(replan.targets, ["implement"]);
+  for (const k of ["analyze", "discover", "confirm_repos", "plan", "approve_plan"])
+    assert.equal(r.steps.find((s) => s.key === k)!.generation, before[k], `${k} reused`);
+  assert.equal(r.steps.find((s) => s.key === "implement")!.generation, before.implement + 1);
+  assert.equal(
+    r.steps.find((s) => s.key === "implement")!.pending_input.feedback,
+    "đổi tên biến shipmentID cho đúng convention",
+  );
+});
+
+test("feedback: explicit Re-plan keeps the repository selection; a duplicate submit does not run twice", async () => {
+  const run = await featureRunAtPr("Explicit replan");
+  await sendFeedback(run.id, "xem lại phương án", { mode: "replan" });
+  let r = await getRun(run.id);
+  assert.deepEqual((r.inputs.replans as any[]).at(-1).targets, ["plan"]);
+  assert.equal(
+    r.steps.find((s) => s.key === "confirm_repos")!.status,
+    "COMPLETED",
+    "selection reused",
+  );
+  const count = (r.inputs.replans as any[]).length;
+  await assert.rejects(
+    sendFeedback(run.id, "xem lại phương án", { mode: "replan" }),
+    /only .* steps can be re-executed/,
+  );
+  r = await getRun(run.id);
+  assert.equal((r.inputs.replans as any[]).length, count, "the rejected submit left no record");
+  await assert.rejects(
+    sendFeedback(run.id, "x", { mode: "bogus" as any }),
+    /unknown feedback mode/,
+  );
+});
+
+test("re-execute: skills that the run cannot load are refused; a retry keeps the pinned skills", async () => {
+  await knowledge.create({
+    key: "test.skill.off",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "off",
+    content: "x",
+    change_note: "test",
+  } as any);
+  await q(pool, "UPDATE knowledge_items SET enabled = false WHERE key = 'test.skill.off'");
+  await knowledge.create({
+    key: "test.skill.on",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "on",
+    content: "y",
+    change_note: "test",
+  } as any);
+  scripts.implement = codingDone;
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  const run = await startRun({
+    definitionKey: key,
+    repositories: ["oms-api"],
+    inputs: { project: "OMS" },
+  });
+  await drain();
+  await assert.rejects(
+    reexecuteStep(run.id, "implement", { skills: ["test.skill.off"] }),
+    /not available to this run.*test\.skill\.off/,
+  );
+  scripts.implement = () => ({ kind: "failed", error: "boom", retryable: false });
+  await reexecuteStep(run.id, "implement", { skills: ["test.skill.on"] });
+  await drain();
+  assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
+  await retryStep(run.id, "implement");
+  const pinned = (await stepOf(run.id, "implement")).pending_input.reexecute.skills;
+  assert.deepEqual(
+    pinned.map((s: any) => s.key),
+    ["test.skill.on"],
+    "the retry keeps the skills pinned for this re-execution",
+  );
+});
