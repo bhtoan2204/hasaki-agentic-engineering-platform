@@ -24,7 +24,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -74,7 +75,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -139,7 +141,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -196,7 +199,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -243,7 +247,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -308,7 +313,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -358,7 +364,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -401,7 +408,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -446,7 +454,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -491,7 +500,8 @@
       "providers": {
         "claude": "supported",
         "codex": "supported",
-        "cursor": "supported"
+        "cursor": "supported",
+        "antigravity": "supported"
       },
       "applicability": {
         "step_keys": [

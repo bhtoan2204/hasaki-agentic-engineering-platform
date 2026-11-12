@@ -600,7 +600,7 @@ const agentExecutor: StepExecutor = {
             ]),
         )
       : undefined;
-    // Each provider resolves its own model: a Claude model id is never sent to Cursor or Codex.
+    // Each provider resolves its own model: a Claude model id is never sent to Cursor, Codex or Antigravity.
     const routed: { model: string; source: string; effort?: string } = {
       model: effective.model ?? "",
       source: effective.source,

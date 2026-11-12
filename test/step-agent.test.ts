@@ -68,7 +68,10 @@ after(async () => {
   await settleBackground();
   await pool.end();
 });
-async function run(steps: any[], provider: "claude" | "codex" | "cursor" = "claude") {
+async function run(
+  steps: any[],
+  provider: "claude" | "codex" | "cursor" | "antigravity" = "claude",
+) {
   const key = `routing-${++seq}`;
   await definitions.create({ key, spec: { name: key, steps } });
   const r = await startRun({

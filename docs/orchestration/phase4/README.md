@@ -1,6 +1,6 @@
 # Step-level agent orchestration
 
-Agent and coding-agent nodes can select Claude, Codex, or Cursor within one durable DAG run. Existing definitions without `config.agent` continue to inherit their stored run provider. No additional scheduler, execution queue, or dashboard is introduced.
+Agent and coding-agent nodes can select Claude, Codex, Cursor or Antigravity within one durable DAG run. Existing definitions without `config.agent` continue to inherit their stored run provider. No additional scheduler, execution queue, or dashboard is introduced.
 
 ## Configuration
 

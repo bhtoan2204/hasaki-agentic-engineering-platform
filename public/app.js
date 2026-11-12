@@ -173,7 +173,7 @@ async function act(fn, okMsg) {
   }
 }
 const drafts = {}; // survive re-renders while typing
-const AGENT_PROVIDERS = ["claude", "cursor", "codex"];
+const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity"];
 const providerOf = (p) => (AGENT_PROVIDERS.includes(p) ? p : "claude");
 const providerSelect = (id) =>
   `<select ${keep(id)}>${AGENT_PROVIDERS.map((p) => `<option value="${p}" ${(drafts[id] || "claude") === p ? "selected" : ""}>${esc(tr("run.agent." + p))}</option>`).join("")}</select>` +

@@ -64,7 +64,7 @@ token. Telegram's bot is admin-managed; private step notifications go only to th
 monitors stay shared, and a member who investigates gets their own work item. The shared error list does not
 link to another member's task.
 
-Claude, Cursor and Codex credentials are the worker machine's admin-managed logins in this version. Personal agent
+Claude, Cursor, Codex and Antigravity credentials are the worker machine's admin-managed logins in this version. Personal agent
 accounts per user are not included. Agents share one OS user, so this is application isolation for a trusted
 team, not a sandbox: tools are checked against the run owner, but a process on the host can still read the disk.
 
@@ -96,12 +96,12 @@ Runs created before the column existed have `output_locale` NULL: the UI shows â
 rewrite saved text; new generation for those runs falls back to Vietnamese. `/classic` uses the same
 dictionary. Historical translation of stored agent output is not in this version.
 
-## Agents (Claude Code, Cursor and OpenAI Codex)
+## Agents (Claude Code, Cursor, OpenAI Codex and Google Antigravity)
 
-A run stores `agent_provider`: `claude` (default), `cursor` or `codex`. It is chosen on the start form in the React app and
+A run stores `agent_provider`: `claude` (default), `cursor`, `codex` or `antigravity`. It is chosen on the start form in the React app and
 `/classic`, and on `POST /api/runs` as `agent_provider`. Omitted means Claude. Any other value is rejected. Retries,
 resume, repair, re-execution and every auxiliary AI call of the run (repository ranking, test-failure explanation and
-answer interpretation, report reasoning) stay on that provider. Claude model ids are not sent to Cursor or Codex.
+answer interpretation, report reasoning) stay on that provider. Claude model ids are not sent to Cursor, Codex or Antigravity.
 AI calls that do not belong to a run keep the global default (Claude, `model`). Switching provider inside a run or
 per step is not supported.
 
@@ -190,6 +190,19 @@ new thread.
 
 **Live smoke test (opt-in, uses quota):** `docker compose up -d postgres`, then
 `CODEX_LIVE=1 CODEX_BIN=$(which codex) CODEX_REASONING_EFFORT=low npm run smoke:codex`. `npm test` never calls a model.
+
+### Google Antigravity
+
+Antigravity runs through the installed CLI (`agy`, or `agent.antigravity.bin` / `AGY_BIN` / `ANTIGRAVITY_BIN`) with
+`--input-format stream-json --output-format stream-json`. Log in on the worker with `agy`. The probe
+(`GET /api/agent-providers`, also shown when Antigravity is selected) checks the version, required flags, login and the
+model catalog. It does not call a model.
+
+Every Antigravity step runs as the Google account logged in on the worker. Run ownership does not create an account per
+user, and the platform does not fall back to another provider. Configuration lives in `agent.antigravity`: `bin`,
+`timeoutMs` (`AGY_TIMEOUT_MS`), `model` (`AGY_MODEL`), `effort` (`AGY_EFFORT`) and `models` (Antigravity slugs only,
+same shape as `agent.models`). Streaming and the review repair loop are in
+[`docs/reliability/antigravity-streaming-and-review-repair.md`](docs/reliability/antigravity-streaming-and-review-repair.md).
 
 ## UI (React + XYFlow, `web/`)
 

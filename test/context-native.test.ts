@@ -144,7 +144,10 @@ after(async () => {
   await settleBackground();
   await pool.end();
 });
-async function live(provider: "claude" | "codex" | "cursor" = "claude", pending?: unknown) {
+async function live(
+  provider: "claude" | "codex" | "cursor" | "antigravity" = "claude",
+  pending?: unknown,
+) {
   const item = await workItems.createManual({
     title: "Prevent duplicate stock refund events",
     description: "Keep refunds idempotent. api_key=supersecretvalue",
@@ -593,7 +596,7 @@ test("provider environments keep only their own configured authentication and no
     OPENAI_API_KEY: "do-not-switch-codex-billing",
     PLATFORM_CONFIG: "private-config.json",
   };
-  for (const provider of ["claude", "codex", "cursor"] as const) {
+  for (const provider of ["claude", "codex", "cursor", "antigravity"] as const) {
     const env = agentEnvironment(input, provider);
     assert.equal(env.DATABASE_URL, undefined);
     assert.equal(env.AUTH_SECRET, undefined);

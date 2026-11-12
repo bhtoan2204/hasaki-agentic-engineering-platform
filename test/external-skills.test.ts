@@ -34,7 +34,12 @@ const ext = (over: Record<string, unknown> = {}) => ({
   },
   status: "active",
   runtime: { binaries: [], network: false, scripts: false },
-  providers: { claude: "supported", codex: "supported", cursor: "supported" },
+  providers: {
+    claude: "supported",
+    codex: "supported",
+    cursor: "supported",
+    antigravity: "supported",
+  },
   ...over,
 });
 
@@ -43,6 +48,7 @@ const ext = (over: Record<string, unknown> = {}) => ({
 test("availability: non-external always; blocked, scripts, network, missing binary and unsupported provider are explicit", () => {
   assert.deepEqual(skillAvailability({ load: "on_demand" }, "codex"), { available: true });
   assert.deepEqual(skillAvailability(ext(), "cursor"), { available: true });
+  assert.deepEqual(skillAvailability(ext(), "antigravity"), { available: true });
   const no = (m: unknown, p: string | null, has = (_: string) => true) => {
     const a = skillAvailability(m, p, has);
     assert.equal(a.available, false);
@@ -89,6 +95,7 @@ test("plan: every active skill passes hash and scan checks; adapted text has no 
   for (const c of plan.candidates) {
     const m = c.metadata as any;
     assert.equal(m.origin.type, "external");
+    assert.equal(m.providers?.antigravity, "supported", c.key);
     assert.ok(m.origin.repo && m.origin.commit && m.origin.license, c.key);
     assert.equal(c.scope_type, "GLOBAL");
     assert.doesNotMatch(c.content, /^allowed-tools:/m, c.key);
@@ -215,7 +222,10 @@ after(async () => {
   await pool.end();
 });
 
-async function begin(definitionKey: string, provider: "claude" | "codex" | "cursor" = "claude") {
+async function begin(
+  definitionKey: string,
+  provider: "claude" | "codex" | "cursor" | "antigravity" = "claude",
+) {
   const item = await workItems.createManual({
     title: "Add a refund endpoint",
     description: "Implement the refund endpoint",
