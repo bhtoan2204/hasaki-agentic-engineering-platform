@@ -4,6 +4,7 @@ import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { measureQueries } from "../src/eval/performance.ts";
 import { claimJob, reconcileAutomaticHandoff } from "../src/workflow/scheduler.ts";
+import { heartbeat } from "../src/workflow/engine.ts";
 
 before(async () => {
   await migrate();
@@ -31,4 +32,12 @@ test("concurrent handoff reconciliation shares one scan and the next call scans 
     await reconcileAutomaticHandoff();
   });
   assert.equal(sequential.query_calls, 2);
+});
+
+test("heartbeat executes one query to extend the lease and check stopping handoff", async () => {
+  const observed = await measureQueries(pool, async () => {
+    assert.equal(await heartbeat(999999, 1, 30, 999999), false);
+  });
+  assert.equal(observed.query_calls, 1);
+  assert.equal(observed.query_failures, 0);
 });

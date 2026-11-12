@@ -630,7 +630,14 @@ test("cancellation and timeout kill the Codex process tree, including detached c
     for (let i = 0; i < 50 && alive; i++) {
       try {
         process.kill(pid, 0);
-        await new Promise((r) => setTimeout(r, 20));
+        try {
+          const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+          const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+          if (state === "Z") alive = false;
+        } catch {
+          alive = false;
+        }
+        if (alive) await new Promise((r) => setTimeout(r, 20));
       } catch {
         alive = false;
       }

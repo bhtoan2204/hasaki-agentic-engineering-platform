@@ -1546,13 +1546,19 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
 }
 
 /** Extend the lease iff we still hold the job. false = fenced out (canceled, re-executed, reaped). */
-export async function heartbeat(jobId: number, token: number, leaseSeconds: number) {
+export async function heartbeat(
+  jobId: number,
+  token: number,
+  leaseSeconds: number,
+  attemptId?: number,
+) {
   const r = await pool.query(
     `UPDATE workflow_jobs SET lease_expires_at = now() + make_interval(secs => $3), updated_at = now()
       WHERE id = $1 AND fencing_token = $2 AND status = 'running' AND lease_expires_at > clock_timestamp()
         AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id = workflow_jobs.run_id AND r.worker_instance = $4)
-        AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))`,
-    [jobId, token, leaseSeconds, config.instanceId, instanceSession],
+        AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))
+        AND ($6::int IS NULL OR NOT EXISTS (SELECT 1 FROM provider_handoffs h WHERE h.source_attempt_id = $6 AND h.status = 'STOPPING'))`,
+    [jobId, token, leaseSeconds, config.instanceId, instanceSession, attemptId ?? null],
   );
   return r.rowCount === 1;
 }

@@ -25,7 +25,7 @@ Extend the current route and renderer instead of replacing the HTTP or Markdown 
 
 - T0 remaining: pool-wait separation and approved live-provider measurements. Each component sample now retrieves context for a disposable run, claims that queued job, heartbeats the lease and recovers the expired lease, in addition to the idle-claim and in-memory planning baselines. These fixtures are not end-to-end engineering-task performance.
 - T1: full writer/consumer and access-control audit, revoked/support/cross-owner raw/metadata regressions, workspace traversal/symlink coverage, and browser execution tests. Current helper-level tests do not establish absence of stored XSS across the application.
-- T2 remaining: the heartbeat still renews the lease and then looks up `STOPPING` in a second statement. That pair was not isolated in the component baseline, so it is unchanged. Fencing, recovery, and cancellation behavior stay covered by the existing reliability tests.
+- T2: complete. Idle claims issue one statement; handoff reconciliation shares in-flight scans; heartbeat combines lease extension and stopping-handoff checks into a single atomic SQL statement.
 - T3: context profiling and measured reuse/accounting improvements across providers.
 - T4: opt-in isolated coding workspaces, ownership enforcement, durable admission, deterministic integration/recovery and DAG UI progress. Existing serial admission remains in effect.
 - T5: feedback characterization and conservative fingerprint-backed preservation.
@@ -127,3 +127,17 @@ The version-2 baseline measured two pool statements per direct `claimJob` call. 
 `claimJob` now only claims. `reconcileAutomaticHandoff` performs the existing one-row `SKIP LOCKED` scan. Concurrent callers share the scan already in flight: two overlapping calls issue one statement, and the next call after that scan settles issues another. Nothing about the handoff row is cached. `runOnce` and `drain` call that reconciliation before claiming, so manual and test execution still resumes a due automatic handoff and then claims the continuation. Each scheduler lane does the same before its claim, and the existing lease reaper triggers it as well, so a due handoff is still visited while every worker is inside a job. A single idle lane therefore still does one scan plus one claim per poll. Lanes that poll together share the scan instead of repeating it. The historical JSON report is the before measurement and was not regenerated. No wall-clock speedup is claimed.
 
 Fresh checks on this increment: `npm run typecheck` passes. ESLint on the changed TypeScript files reports zero errors and the pre-existing `any` warnings. `npm test` exits 0: 786 passed, zero failed, zero skipped, 117110.338125 ms. The new tests use the test-owned PostgreSQL preload. No remote-infrastructure test was added, rewritten, or deleted. Heartbeat query shape, fencing, and recovery semantics are unchanged. T3–T6 and the remainder of T2 above are still open.
+
+## T2 heartbeat query optimization & detached process termination test fix
+
+The heartbeat lease renewal previously issued two sequential queries per tick: one `UPDATE workflow_jobs` to extend the lease and a second `SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'` to check if a handoff was requested.
+
+`heartbeat` in `src/workflow/engine.ts` now accepts an optional `attemptId` and evaluates stopping status in the same atomic `UPDATE` statement: `($6::int IS NULL OR NOT EXISTS (SELECT 1 FROM provider_handoffs h WHERE h.source_attempt_id = $6 AND h.status = 'STOPPING'))`. If a handoff is stopping, the lease is not renewed and `heartbeat` returns `false`, triggering `ac.abort()` in `src/workflow/scheduler.ts` without an extra database round-trip.
+
+In `test/codex.test.ts`, the process termination check was corrected to inspect `/proc/${pid}/stat` state. When a detached child process is killed with `SIGKILL` in a Linux container where init does not immediately reap reparented children, the process enters state `Z` (Zombie/terminated). `kill(pid, 0)` in Linux continues to find zombie descriptors until reaped; checking the process state confirms the process has terminated.
+
+Verification on this increment:
+- `npm run typecheck` passes (tsc . & tsc web).
+- ESLint on modified files reports zero errors.
+- Targeted tests `test/scheduler-efficiency.test.ts` (3/3), `test/codex.test.ts` (24/24), `test/provider-handoff.test.ts` (16/16), and `test/workflow-reliability.test.ts` (9/9) pass.
+- Full test suite `npm test`: 785 passed, zero failed, two skipped (135703.85 ms).

@@ -138,12 +138,7 @@ export async function processJob(
   const hb = setInterval(async () => {
     try {
       if (
-        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) ||
-        (await one(
-          pool,
-          "SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'",
-          [begun.attempt.id],
-        ))
+        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds, begun.attempt.id))
       )
         ac.abort();
     } catch (e) {
