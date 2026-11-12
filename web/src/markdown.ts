@@ -7,8 +7,16 @@ function safeUrl(value: string, image = false): boolean {
   if (/[\s\\]/.test(value) || [...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) return false;
   if (/^https?:\/\//i.test(value)) return true;
   if (!image && /^mailto:/i.test(value)) return true;
-  // Relative references have no scheme. Reject encoded/HTML-entity schemes conservatively.
-  return !value.startsWith("//") && /^[^:/?#&%]*(?:[/?#].*)?$/.test(value);
+  // Check decoded relative references for disguised schemes, but retain the original URL in HTML.
+  // Decoding also catches nested encodings without rejecting ordinary encoded filenames.
+  let decoded = value;
+  try {
+    for (let i = 0; i < 5 && decoded.includes("%"); i++) decoded = decodeURIComponent(decoded);
+  } catch {
+    return false;
+  }
+  if (decoded.includes("%") || decoded.includes("\\") || [...decoded].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) return false;
+  return !decoded.startsWith("//") && /^[^:/?#&]*(?:[/?#].*)?$/.test(decoded);
 }
 const markdown = new Marked({
   renderer: {

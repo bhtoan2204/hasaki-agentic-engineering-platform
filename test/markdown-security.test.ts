@@ -21,3 +21,13 @@ test("Markdown escapes raw HTML and retains passive formatting and safe URLs", (
   assert.match(html, /href="mailto:user@example.invalid"/);
   assert.match(html, /<img src="https:\/\/example.invalid\/image.png"/);
 });
+
+test("Markdown preserves percent-encoded relative filenames without admitting encoded schemes", () => {
+  const html = renderMarkdownSafe('[report](report%20final.pdf) ![plot](plot%20one.png) [unicode](r%C3%A9sum%C3%A9.pdf)');
+  assert.match(html, /href="report%20final.pdf"/);
+  assert.match(html, /src="plot%20one.png"/);
+  assert.match(html, /href="r%C3%A9sum%C3%A9.pdf"/);
+  for (const url of ['javascript%3Aalert(1)', 'javascript%253Aalert(1)', '%2F%2Fevil.invalid/x', 'java%09script%3Aevil', 'javascript%26colon%3Bevil']) {
+    assert.doesNotMatch(renderMarkdownSafe(`[link](${url}) ![image](${url})`), /<a\b|<img\b/);
+  }
+});
