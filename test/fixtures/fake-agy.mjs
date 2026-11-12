@@ -31,7 +31,7 @@ Options:
   --effort <effort>              Reasoning effort: low, medium, high, xhigh, max
   --sandbox                      Run inside sandbox isolation
   --conversation <id>            Resume existing conversation session
-  --print-timeout <ms>           Maximum print execution timeout in milliseconds
+  --print-timeout <duration>     Maximum print execution timeout, for example 2700s
   --add-dir <path>               Add workspace directory
 `);
   }

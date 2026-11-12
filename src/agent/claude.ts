@@ -565,8 +565,7 @@ const agentExecutor: StepExecutor = {
       }
     }
     const delegationCfg = ctx.step.config.delegation as
-      | { enabled?: boolean; agents?: string[] }
-      | undefined;
+      { enabled?: boolean; agents?: string[] } | undefined;
     const delegation = delegationCfg?.enabled === true;
     const policy: PolicyContext = {
       mode,
@@ -1444,7 +1443,7 @@ const agentExecutor: StepExecutor = {
               AND (e.content LIKE '%(re-executed by user)%' OR e.content LIKE '%(re-executed with %' OR e.content LIKE '%(re-executed after rejection%')), '-infinity'::timestamptz)`,
         [ctx.step.id, ctx.run.id],
       ))!.n;
-      const maxRepairs = Math.max(0, Math.min(5, Number(ctx.step.config.max_repairs ?? 2)));
+      const maxRepairs = Math.max(0, Math.min(10, Number(ctx.step.config.max_repairs ?? 2)));
       metrics.independent_verification = {
         verdict: v.verdict,
         findings: v.findings.length,

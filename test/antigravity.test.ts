@@ -431,6 +431,7 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
     effort: "high",
     conversationId: "conv-123",
     sandbox: true,
+    timeoutSeconds: 2700,
   });
   assert.ok(args.includes("--output-format"));
   assert.deepEqual(args.slice(0, 4), [
@@ -445,6 +446,9 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
   assert.ok(args.includes("--effort"));
   assert.ok(args.includes("high"));
   assert.ok(args.includes("--sandbox"));
+  assert.ok(args.includes("--print-timeout"));
+  assert.ok(args.includes("2700s"));
+  assert.ok(!args.includes("2700000"));
   assert.ok(
     !args.includes("--dangerously-skip-permissions"),
     "unrestricted permission mode is never enabled by default",

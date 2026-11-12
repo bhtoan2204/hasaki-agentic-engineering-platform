@@ -198,8 +198,10 @@ export function buildAntigravityArgs(opts: {
   if (opts.model) args.push("--model", opts.model);
   if (opts.effort) args.push("--effort", opts.effort);
   if (opts.sandbox !== false) args.push("--sandbox");
+  // agy uses Go's time.ParseDuration. A bare millisecond count is rejected and the
+  // process exits before stdin is read, which surfaces as EPIPE.
   if (opts.timeoutSeconds && opts.timeoutSeconds > 0) {
-    args.push("--print-timeout", String(opts.timeoutSeconds * 1000));
+    args.push("--print-timeout", `${opts.timeoutSeconds}s`);
   }
   if (opts.conversationId) {
     args.push("--conversation", opts.conversationId);
