@@ -186,6 +186,7 @@ for (const key of [
   "HASAKI_WORK_CHROME_PROFILE",
   "HASAKI_WORK_CHROME_PATH",
   "HASAKI_WORK_EXISTING_CHROME_USER",
+  "PLATFORM_INSTANCE",
 ])
   delete process.env[key];
 
