@@ -310,7 +310,10 @@ export function rankRetrievedCode(search: any, dependencies: any[] | undefined, 
   const hits: CodeHit[] = raw.map((h) => {
     const line = h.line_range?.[0];
     const endLine = h.line_range?.[1];
-    original.set(keyOf(h.repository, h.file_path, line, endLine), h);
+    const k = keyOf(h.repository, h.file_path, line, endLine);
+    const prev = original.get(k);
+    // Duplicates collapse to the strongest hit, so its snippet/metadata are the ones kept.
+    if (!prev || (Number(h.confidence) || 0) > (Number(prev.confidence) || 0)) original.set(k, h);
     return {
       repo: h.repository,
       path: h.file_path,
@@ -339,3 +342,9 @@ export function rankRetrievedCode(search: any, dependencies: any[] | undefined, 
     }),
   };
 }
+
+/** Explicit label for items that must never be read as authoritative. */
+export const tierNotice = (t: KnowledgeTier) =>
+  t === "unverified_suggestion"
+    ? "quan sát chưa xác minh (unverified observation): không phải rule"
+    : undefined;

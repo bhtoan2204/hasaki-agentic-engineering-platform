@@ -5,6 +5,7 @@ import {
   rankCodeHits,
   rankRetrievedCode,
   planKnowledge,
+  tierNotice,
 } from "../src/context/plan.ts";
 
 const hit = (path: string, score: number, extra: object = {}) => ({
@@ -89,4 +90,37 @@ test("unverified task memory is never inline or mandatory, even when enforced or
     indexSize: 5,
   });
   assert.notEqual(plan[0].disclosure, "inline");
+});
+
+test("dedupe keeps the strongest duplicate's metadata, regardless of input order", () => {
+  for (const order of [
+    [0.9, 0.5],
+    [0.5, 0.9],
+  ]) {
+    const out = rankRetrievedCode(
+      {
+        hits: order.map((c) => ({
+          repository: "svc",
+          file_path: "a.ts",
+          line_range: [1, 5],
+          qualified_name: "fn",
+          confidence: c,
+          snippet: `snippet-${c}`,
+        })),
+      },
+      [],
+    );
+    assert.equal(out.hits.length, 1);
+    assert.equal(out.hits[0].snippet, "snippet-0.9");
+    assert.equal(out.hits[0].confidence, 0.9);
+  }
+});
+
+test("only unverified observations carry the explicit unverified notice", () => {
+  assert.match(tierNotice("unverified_suggestion")!, /quan sát chưa xác minh/);
+  assert.equal(tierNotice("organizational_rule"), undefined);
+  assert.equal(
+    tierNotice(knowledgeTier({ category: "task_memory", metadata: {} })) !== undefined,
+    true,
+  );
 });

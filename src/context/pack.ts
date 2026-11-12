@@ -7,6 +7,7 @@ import {
   summarizeValue,
   scoreKnowledge,
   knowledgeTier,
+  tierNotice,
   rankRetrievedCode,
 } from "./plan.ts";
 import { dispatchPlatformTool, envFromExecution } from "../agent/platformTools.ts";
@@ -384,6 +385,7 @@ export async function ensureContextPack(
                 title: k.title,
                 category: k.category,
                 tier: tierLabel,
+                ...(tierNotice(tierLabel) ? { notice: tierNotice(tierLabel) } : {}),
                 disclosure: "index",
                 description:
                   (isExternal(k.metadata) ? "[third-party] " : "") +
