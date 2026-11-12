@@ -172,6 +172,7 @@ import {
   answeredQuestions,
   answerQuestions,
   approveStep,
+  expandSubtasks,
   cancelRun,
   EngineError,
   listRuns,
@@ -940,6 +941,19 @@ export const routes: Route[] = [
         by: c.actor.username,
         repositories: c.body.repositories,
         data: c.body.data,
+      })
+    ),
+  ],
+  // Expand the run DAG with a decomposition plan (subtasks become durable steps; idempotent, bounded, approval-gated).
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/expand$/,
+    async (c) => (
+      await requireRun(c.actor, num(c.p[0]), support(c)),
+      expandSubtasks(num(c.p[0]), c.p[1], c.body.plan, {
+        by: c.actor.username,
+        reason: String(c.body.reason ?? ""),
+        kind: c.body.kind === "replan" ? "replan" : "decomposition",
       })
     ),
   ],

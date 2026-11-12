@@ -97,6 +97,7 @@ function fakeDb(steps: Row[]) {
 const baseSteps = (): Row[] => [
   { id: 1, key: "plan", position: 0, depends_on: [], status: "COMPLETED", subtask_id: null },
   { id: 2, key: "integration", position: 1, depends_on: ["plan"], status: "PENDING", subtask_id: null },
+  { id: 3, key: "approve", type: "human_approval", position: 2, depends_on: ["plan"], status: "COMPLETED", subtask_id: null, approval: { granted: true, by: "toan" } },
 ];
 const opts = { actor: "u", reason: "r", allowedRepositories: ["repo-a"] };
 
@@ -139,4 +140,25 @@ test("materialize enforces depth and replan limits", async () => {
   const steps = baseSteps();
   steps[0].subtask_id = "a";
   await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", plan(sub("z")), opts), /depth/);
+});
+
+test("materialize requires a human approval gate that records who approved", async () => {
+  const steps = baseSteps();
+  steps[2].approval = { granted: true };
+  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", plan(sub("a")), opts), /approval gate/);
+});
+
+test("materialize refuses to rewire downstream steps that already started", async () => {
+  const steps = baseSteps();
+  steps[1].status = "READY";
+  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", plan(sub("a")), opts), /already active/);
+});
+
+test("limits cannot be raised above the hard ceiling and scope is stored per subtask", async () => {
+  const f = fakeDb(baseSteps());
+  const many = Array.from({ length: 21 }, (_, i) => sub(`s${i}`));
+  await assert.rejects(
+    materializeSubtasks(f.db, 1, "plan", plan(...many), { ...opts, limits: { max_subtasks: 1000 } }),
+    /limit is 20/,
+  );
 });

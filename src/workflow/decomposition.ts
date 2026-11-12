@@ -39,6 +39,14 @@ export interface DecompositionLimits {
   /** Maximum number of replan revisions per run. */
   max_replans: number;
 }
+/** Hard ceilings: callers may tighten the limits but never raise them above these. */
+export const HARD_LIMITS: DecompositionLimits = { max_subtasks: 20, max_depth: 2, max_replans: 5 };
+const clampLimits = (l: DecompositionLimits): DecompositionLimits => ({
+  max_subtasks: Math.min(l.max_subtasks, HARD_LIMITS.max_subtasks),
+  max_depth: Math.min(l.max_depth, HARD_LIMITS.max_depth),
+  max_replans: Math.min(l.max_replans, HARD_LIMITS.max_replans),
+});
+
 /** Conservative defaults; decomposition itself is opt-in per step config. */
 export const DEFAULT_LIMITS: DecompositionLimits = { max_subtasks: 8, max_depth: 1, max_replans: 2 };
 
@@ -172,7 +180,7 @@ export async function materializeSubtasks(
   opts: { actor: string; reason: string; allowedRepositories: string[]; approvedBy?: string; limits?: Partial<DecompositionLimits>; kind?: "decomposition" | "replan" },
 ): Promise<{ created: string[]; revision: number; replayed: boolean }> {
   const kind = opts.kind ?? "decomposition";
-  const limits = { ...DEFAULT_LIMITS, ...opts.limits };
+  const limits = clampLimits({ ...DEFAULT_LIMITS, ...opts.limits });
   const parsed = DecompositionPlan.safeParse(rawPlan);
   if (!parsed.success)
     throw new EngineError("invalid decomposition plan: " + parsed.error.issues.map((i) => i.message).join("; "), 422);
@@ -188,8 +196,29 @@ export async function materializeSubtasks(
   // The plan must have been approved by a human: the plan step has to be completed first.
   if (planStep.status !== "COMPLETED")
     throw new EngineError(`plan step "${planStepKey}" is not approved/completed (status ${planStep.status})`, 409);
+  // Proof of human approval: a completed approval gate that depends on the plan step and records who granted it.
+  const gate = steps.find(
+    (s) =>
+      s.type === "human_approval" &&
+      s.status === "COMPLETED" &&
+      s.depends_on.includes(planStepKey) &&
+      s.approval?.granted === true &&
+      !!s.approval?.by,
+  );
+  if (!gate)
+    throw new EngineError(`plan step "${planStepKey}" has no completed human approval gate`, 403);
   if (kind === "replan" && !opts.approvedBy)
     throw new EngineError("replan requires explicit human approval (approvedBy)", 403);
+  // Downstream steps that already started cannot be made to wait for new subtasks.
+  const started = steps.filter(
+    (s) =>
+      s.depends_on.includes(planStepKey) &&
+      !s.subtask_id &&
+      s.id !== gate.id &&
+      !["PENDING", "COMPLETED", "SKIPPED"].includes(s.status),
+  );
+  if (started.length)
+    throw new EngineError(`steps already active after the plan step: ${started.map((s) => s.key).join(", ")}`, 409);
   const depth = planStep.subtask_id ? 2 : 1;
   if (depth > limits.max_depth)
     throw new EngineError(`expansion depth ${depth} exceeds limit ${limits.max_depth}`, 409);
@@ -225,7 +254,11 @@ export async function materializeSubtasks(
       c,
       `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, requires_approval, max_attempts, retry_backoff_s, status, parent_step_key, subtask_id, graph_revision)
        VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, $10, 2, 5, 'PENDING', $7, $8, $9)`,
-      [runId, stepKey(s.id), s.title, position++, deps, json({ subtask: s }), planStepKey, s.id, revision, s.risk === "high"],
+      [runId, stepKey(s.id), s.title, position++, deps, json({
+        subtask: s,
+        // Scope: a subtask may only touch its own target repositories (validated ⊆ the run's allowed set).
+        scope: { repositories: s.target_repos, permissions: s.permissions, owned_files: s.owned_files },
+      }), planStepKey, s.id, revision, s.risk === "high"],
     );
     created.push(stepKey(s.id));
   }
