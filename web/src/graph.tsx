@@ -260,6 +260,16 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
                 : ""}
             </span>
           )}
+          {step.config?.subtask?.execution_strategy === "parallel" && (
+            <span className="gn-pill gn-pill-run" title="parallel subtask">
+              parallel
+            </span>
+          )}
+          {step.config?.isolated_workspace && (
+            <span className="gn-pill" title="isolated worktree">
+              isolated
+            </span>
+          )}
           {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
           {data.replan === "rerun" && (
             <span className="gn-pill gn-pill-wait" title={t("graph.rerun")}>

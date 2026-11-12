@@ -149,3 +149,27 @@ When targeted verification executes tests for `src/workflow/engine.ts`, `test/en
 `test/setup.ts` now isolates `$HOME`, `$GOCACHE`, and `$GOPATH` to dedicated subdirectories inside the test's temporary root (`root`), ensuring that tool cache initialization succeeds independently of host/runner filesystem restrictions.
 
 Targeted verification command (144 tests) passes with 0 failures under restricted `HOME=/nonexistent`.
+
+## T4 concurrent subtask execution and heartbeat behavioral regression
+
+### T4: Opt-in concurrent coding subtasks & deterministic integration
+- **Durable Admission in `beginAttempt` (`src/workflow/engine.ts`)**: The reader/writer gate over run worktrees now supports opt-in concurrent coding subtasks (`step.config.isolated_workspace`, `step.config.concurrent`, or `step.subtask_id`). When multiple concurrent subtasks are active, admission validates that:
+  1. The concurrency limit (`max_concurrent_subtasks`, default 4) is not exceeded.
+  2. Subtasks declare disjoint file ownership (`owned_files`), target separate repositories, or configure isolated workspaces.
+  3. No active attempt is a global writer (such as `git_pull_request`, non-isolated commands, or standard non-concurrent coding agents).
+  Standard non-concurrent steps continue to obey strict mutual exclusion.
+- **Decomposition Materialization (`src/workflow/decomposition.ts`)**: `materializeSubtasks` and `validateExpansion` now accept `isolatedWorkspaces` opt-in, preserving parallel execution strategy for independent subtasks without injecting artificial serialization dependencies.
+- **Deterministic Integration Executor (`src/workflow/executors/builtin.ts`)**: `integrateSubtasks` handles `integrate_subtasks` / `subtask_integration` actions, verifying upstream subtask outputs, detecting overlapping file modifications, and returning clean diagnostics for conflict recovery.
+- **DAG UI Indicators (`web/src/graph.tsx`)**: Step nodes visually display badges for parallel subtasks and isolated worktrees.
+
+### T2: Heartbeat combined lease renewal & STOPPING behavioral regression
+- `test/scheduler-efficiency.test.ts` includes full behavioral regression testing on live database records:
+  1. Healthy active jobs extend `lease_expires_at` and return `true`.
+  2. Active jobs with a `STOPPING` provider handoff refuse renewal and return `false` without modifying the lease expiration.
+  3. Heartbeats without an attempt ID continue to evaluate correctly.
+
+### Verification
+- `npm run typecheck` (`tsc -p . && tsc -p web`) passes with zero errors.
+- ESLint reports zero errors on touched files.
+- `web` production build (`npm run build`) completes successfully.
+- Targeted suites `test/concurrent-subtasks.test.ts` (3/3), `test/scheduler-efficiency.test.ts` (4/4), `test/decomposition.test.ts` (17/17), `test/provider-handoff.test.ts` (16/16), `test/workflow-reliability.test.ts` (9/9), and `test/codex.test.ts` (24/24) pass with 100% success.

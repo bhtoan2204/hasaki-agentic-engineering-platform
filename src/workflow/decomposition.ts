@@ -190,7 +190,14 @@ export async function materializeSubtasks(
   runId: number,
   planStepKey: string,
   rawPlan: unknown,
-  opts: { actor: string; reason: string; allowedRepositories: string[]; limits?: Partial<DecompositionLimits>; kind?: "decomposition" | "replan" },
+  opts: {
+    actor: string;
+    reason: string;
+    allowedRepositories: string[];
+    limits?: Partial<DecompositionLimits>;
+    kind?: "decomposition" | "replan";
+    isolatedWorkspaces?: boolean;
+  },
 ): Promise<{ created: string[]; revision: number; replayed: boolean }> {
   const kind = opts.kind ?? "decomposition";
   const limits = clampLimits({ ...DEFAULT_LIMITS, ...opts.limits });
@@ -255,6 +262,7 @@ export async function materializeSubtasks(
     existingSubtasks: steps.filter((s) => s.subtask_id).length,
     existingSteps: steps,
     planStepKey,
+    isolatedWorkspaces: opts.isolatedWorkspaces,
   });
   if (errors.length) throw new EngineError("invalid expansion: " + errors.join("; "), 422);
 
@@ -276,6 +284,8 @@ export async function materializeSubtasks(
        VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, $10, 2, 5, 'PENDING', $7, $8, $9)`,
       [runId, stepKey(s.id), s.title, position++, deps, json({
         subtask: s,
+        isolated_workspace: opts.isolatedWorkspaces ?? (s.execution_strategy === "parallel"),
+        concurrent: s.execution_strategy === "parallel",
         // Scope (recorded, not yet a runtime sandbox): target repositories are validated ⊆ the run's allowed set; runtime
         // still confines coding agents to run.selected_repositories and the single run worktree.
         scope: { repositories: s.target_repos, permissions: s.permissions, owned_files: s.owned_files },

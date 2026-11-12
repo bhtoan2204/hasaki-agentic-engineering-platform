@@ -1463,24 +1463,116 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       return null;
     }
     // Run lock makes this a durable reader/writer gate over the existing shared run worktrees.
+    // For opt-in independent coding subtasks (T4), admit concurrent writers when workspaces/files
+    // do not conflict and concurrency limits are respected.
     const consumers = ["agent", "coding_agent", "command", "git_pull_request"];
     const writers = ["coding_agent", "command", "git_pull_request"];
-    if (
-      consumers.includes(step.type) &&
-      (await one(
+    if (consumers.includes(step.type)) {
+      const active = await q<{
+        id: number;
+        step_id: number;
+        step_type: string;
+        config: Record<string, any>;
+        subtask_id: string | null;
+      }>(
         c,
-        `SELECT a.id FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id
-      WHERE a.run_id=$1 AND (a.status='RUNNING' OR a.job_id=ANY($5::bigint[])) AND s.type=ANY($2::text[])
-      AND ($3::boolean OR s.type=ANY($4::text[])) LIMIT 1`,
-        [run.id, consumers, writers.includes(step.type), writers, localJobs.activeIds()],
-      ))
-    ) {
-      await q(
-        c,
-        "UPDATE workflow_jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL, available_at=now()+interval '1 second', updated_at=now() WHERE id=$1",
-        [j.id],
+        `SELECT a.id, s.id AS step_id, s.type AS step_type, s.config, s.subtask_id
+         FROM workflow_step_attempts a
+         JOIN workflow_steps s ON s.id = a.step_id
+         WHERE a.run_id = $1 AND (a.status = 'RUNNING' OR a.job_id = ANY($2::bigint[])) AND s.type = ANY($3::text[])`,
+        [run.id, localJobs.activeIds(), consumers],
       );
-      return null;
+
+      if (active.length > 0) {
+        const isConcurrentCandidate =
+          step.type === "coding_agent" &&
+          (step.config?.isolated_workspace === true ||
+            step.config?.concurrent === true ||
+            step.config?.independent === true ||
+            step.config?.subtask?.execution_strategy === "parallel" ||
+            !!step.subtask_id);
+
+        let conflict = false;
+        if (!isConcurrentCandidate) {
+          const isWriter = writers.includes(step.type);
+          conflict = active.some((a) => isWriter || writers.includes(a.step_type));
+        } else {
+          const maxConcurrent = Number(
+            (run as any).config?.max_concurrent_subtasks ??
+              step.config?.max_concurrent_subtasks ??
+              4,
+          );
+          if (active.length >= maxConcurrent) {
+            conflict = true;
+          } else {
+            for (const a of active) {
+              const aIsConcurrent =
+                a.step_type === "coding_agent" &&
+                (a.config?.isolated_workspace === true ||
+                  a.config?.concurrent === true ||
+                  a.config?.independent === true ||
+                  a.config?.subtask?.execution_strategy === "parallel" ||
+                  !!a.subtask_id);
+              if (!aIsConcurrent) {
+                conflict = true;
+                break;
+              }
+              const stepFiles: string[] =
+                step.config?.scope?.owned_files ??
+                step.config?.subtask?.owned_files ??
+                step.config?.owned_files ??
+                [];
+              const activeFiles: string[] =
+                a.config?.scope?.owned_files ??
+                a.config?.subtask?.owned_files ??
+                a.config?.owned_files ??
+                [];
+              if (stepFiles.length > 0 && activeFiles.length > 0) {
+                if (stepFiles.some((f) => activeFiles.includes(f))) {
+                  conflict = true;
+                  break;
+                }
+              }
+              const stepRepos: string[] =
+                step.config?.scope?.repositories ??
+                step.config?.subtask?.target_repos ??
+                step.config?.target_repos ??
+                [];
+              const activeRepos: string[] =
+                a.config?.scope?.repositories ??
+                a.config?.subtask?.target_repos ??
+                a.config?.target_repos ??
+                [];
+              const disjointRepos =
+                stepRepos.length > 0 &&
+                activeRepos.length > 0 &&
+                !stepRepos.some((r) => activeRepos.includes(r));
+              const isolated =
+                step.config?.isolated_workspace === true ||
+                a.config?.isolated_workspace === true ||
+                (!!step.subtask_id && !!a.subtask_id);
+
+              if (
+                !disjointRepos &&
+                !isolated &&
+                (stepFiles.length === 0 || activeFiles.length === 0)
+              ) {
+                conflict = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (conflict) {
+          await q(
+            c,
+            "UPDATE workflow_jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL, available_at=now()+interval '1 second', updated_at=now() WHERE id=$1",
+            [j.id],
+          );
+          return null;
+        }
+      }
     }
     const effective = resolveStepAgent(run, step);
     step.config = effectiveStepConfig(step.config, effective);

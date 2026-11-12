@@ -210,7 +210,9 @@ export async function runCommand(
     const killTree = () => {
       try {
         if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {}
+      } catch {
+        // ignore errors when child process group is already terminated
+      }
     };
     signal.addEventListener("abort", killTree, { once: true });
     if (child.pid) childGroups.add(child.pid);
@@ -743,9 +745,61 @@ async function publishReport(ctx: ExecutionContext): Promise<ExecResult> {
   };
 }
 
+export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResult> {
+  const upstream = ctx.input.upstream ?? {};
+  const subtaskOutputs = Object.entries(upstream)
+    .filter(([k]) => k.startsWith("subtask-"))
+    .map(([k, v]) => ({ key: k, ...(v as any) }));
+
+  await ctx.log("system", `integrating ${subtaskOutputs.length} completed subtask(s)...`);
+
+  // Detect conflicts across subtask outputs and owned files
+  const modifiedFiles: Record<string, string[]> = {};
+  const conflicts: Array<{ file: string; subtasks: string[] }> = [];
+
+  for (const s of subtaskOutputs) {
+    const files: string[] =
+      s.output?.files ?? s.output?.owned_files ?? s.output?.modified_files ?? [];
+    for (const f of files) {
+      if (!modifiedFiles[f]) modifiedFiles[f] = [];
+      modifiedFiles[f].push(s.key);
+      if (modifiedFiles[f].length > 1 && !conflicts.some((c) => c.file === f)) {
+        conflicts.push({ file: f, subtasks: modifiedFiles[f] });
+      }
+    }
+  }
+
+  if (conflicts.length > 0) {
+    await ctx.log(
+      "system",
+      `conflict detected during subtask integration in ${conflicts.length} file(s)`,
+      { conflicts },
+    );
+    return {
+      kind: "failed",
+      error: `Subtask merge conflict: files modified by multiple subtasks: ${conflicts.map((c) => c.file).join(", ")}`,
+      retryable: false,
+      details: { conflicts },
+    };
+  }
+
+  return {
+    kind: "completed",
+    output: {
+      status: "integrated",
+      subtasks_integrated: subtaskOutputs.map((s) => s.key),
+      count: subtaskOutputs.length,
+      modified_files: Object.keys(modifiedFiles),
+    },
+  };
+}
+
 export const integrationExecutor: StepExecutor = {
   async execute(ctx) {
     switch (ctx.step.config.action) {
+      case "integrate_subtasks":
+      case "subtask_integration":
+        return integrateSubtasks(ctx);
       case "benchmark_case":
         return executeBenchmarkCase(ctx);
       case "repository_discovery":
