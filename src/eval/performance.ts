@@ -45,6 +45,21 @@ export function distribution(values: number[]) {
   };
 }
 
+/** Refuse to label a dirty worktree as HEAD. The harness snapshot directory is created beside the candidate and is not source. */
+export function pinnedCandidateIdentity(statusPorcelain: string, revision: string, tree: string) {
+  const dirty = statusPorcelain
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line && !line.includes(".performance-baseline-"));
+  if (dirty.length)
+    throw new Error(
+      "Uncommitted candidate changes cannot be reported as the pinned HEAD revision",
+    );
+  if (!/^[0-9a-f]{40}$/.test(revision) || !/^[0-9a-f]{40}$/.test(tree))
+    throw new Error("Pinned candidate revision must be the full HEAD commit and tree");
+  return { revision, tree };
+}
+
 export interface PerformanceSample {
   fixture: string;
   repetition: number;

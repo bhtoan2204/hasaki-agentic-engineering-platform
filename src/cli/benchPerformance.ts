@@ -8,10 +8,12 @@ import { sha256 } from "../eval/dataset.ts";
 import {
   measureQueries,
   pairedSummary,
+  pinnedCandidateIdentity,
   platformPerformanceFixtures,
   type PerformanceSample,
 } from "../eval/performance.ts";
 import type { ContextPack } from "../context/pack.ts";
+import { investigateSchedulerAndContext } from "../eval/performanceProbe.ts";
 
 const args = Object.fromEntries(process.argv.slice(2).map((s) => s.replace(/^--/, "").split("=")));
 // Only the existing test-owned preload can authorize this measurement process. Never accept an admin URL.
@@ -33,6 +35,9 @@ const git = (root: string, ...argv: string[]) =>
   execFileSync("git", ["-C", root, ...argv], { encoding: "utf8" }).trim();
 const files = [
   "src/workflow/scheduler.ts",
+  "src/workflow/engine.ts",
+  "src/workflow/recovery.ts",
+  "src/workflow/context.ts",
   "src/context/plan.ts",
   "src/context/pack.ts",
   "src/agent/metrics.ts",
@@ -40,26 +45,67 @@ const files = [
 ];
 async function subject(root: string, revision?: string) {
   root = resolve(root);
-  if (!revision && git(root, "diff", "HEAD", "--", ...files))
-    throw new Error("Benchmark subject modules must be committed");
   const load = (path: string) => import(pathToFileURL(join(root, path)).href);
+  let identityRevision: string;
+  let tree: string;
+  if (revision) {
+    identityRevision = git(process.cwd(), "rev-parse", "--verify", `${revision}^{commit}`);
+    tree = git(process.cwd(), "rev-parse", "--verify", `${identityRevision}^{tree}`);
+  } else {
+    const head = git(root, "rev-parse", "--verify", "HEAD");
+    const headTree = git(root, "rev-parse", "--verify", "HEAD^{tree}");
+    ({ revision: identityRevision, tree } = pinnedCandidateIdentity(
+      git(root, "status", "--porcelain=v1", "--untracked-files=all"),
+      head,
+      headTree,
+    ));
+    for (const file of files) {
+      const committed = execFileSync("git", ["-C", root, "show", `${identityRevision}:${file}`]);
+      const working = readFileSync(join(root, file));
+      if (!committed.equals(working))
+        throw new Error(
+          `${file} on disk is not ${identityRevision}; refusing to report that candidate as HEAD`,
+        );
+    }
+  }
   const scheduler = (await load(
     "src/workflow/scheduler.ts",
   )) as typeof import("../workflow/scheduler.ts");
   const context = (await load("src/context/plan.ts")) as typeof import("../context/plan.ts");
   const packs = (await load("src/context/pack.ts")) as typeof import("../context/pack.ts");
   const metrics = (await load("src/agent/metrics.ts")) as typeof import("../agent/metrics.ts");
-  const { pool } = (await load("src/db/pool.ts")) as typeof import("../db/pool.ts");
+  const engine = (await load("src/workflow/engine.ts")) as typeof import("../workflow/engine.ts");
+  const recovery = (await load(
+    "src/workflow/recovery.ts",
+  )) as typeof import("../workflow/recovery.ts");
+  const retrieval = (await load(
+    "src/workflow/context.ts",
+  )) as typeof import("../workflow/context.ts");
+  const db = (await load("src/db/pool.ts")) as typeof import("../db/pool.ts");
+  const { config } = (await load("src/config.ts")) as typeof import("../config.ts");
   const identity = {
-    revision: revision ?? git(root, "rev-parse", "HEAD"),
-    tree: git(process.cwd(), "rev-parse", `${revision ?? "HEAD"}^{tree}`),
+    revision: identityRevision,
+    tree,
     modules: Object.fromEntries(
       files.map((file) => [file, sha256(readFileSync(join(root, file), "utf8"))]),
     ),
   };
-  return { scheduler, context, packs, metrics, pool, identity };
+  return {
+    scheduler,
+    context,
+    packs,
+    metrics,
+    pool: db.pool,
+    withTx: db.withTx,
+    heartbeat: engine.heartbeat,
+    reapExpiredLeases: recovery.reapExpiredLeases,
+    resolveContext: retrieval.resolveContext,
+    config,
+    identity,
+  };
 }
 type Subject = Awaited<ReturnType<typeof subject>>;
+
 async function sample(
   s: Subject,
   fixture: (typeof platformPerformanceFixtures)[number],
@@ -144,11 +190,18 @@ async function sample(
           throw new Error("Expected empty test-owned job queue");
       }
       phases.scheduler_idle_claim_ms = performance.now() - claimStart;
+      const investigation = await investigateSchedulerAndContext(s, phases);
       return {
-        output_hash: sha256(serialized + JSON.stringify(metrics.tool_repeats)),
+        output_hash: sha256(
+          serialized + JSON.stringify(metrics.tool_repeats) + JSON.stringify(investigation),
+        ),
         estimated_serialized_tokens: estimated,
         token_measurement: "character_estimate_not_provider_usage",
         tool_repeats: metrics.tool_repeats,
+        scheduler_claimed: investigation.claimed,
+        scheduler_heartbeat: investigation.heartbeat,
+        scheduler_reaped: investigation.reaped,
+        context_knowledge: investigation.knowledge,
       };
     },
   );
@@ -252,8 +305,8 @@ try {
       "No performance optimization is selected or speedup claimed by this baseline report.",
       "First-use samples include pool warm-up only for the first fixture; warm samples follow three warm-ups.",
       "Input generation, source loading, snapshot extraction and database startup are outside the measured wall time.",
-      "Pool query elapsed time includes acquisition; separate pool wait and client transaction queries are not measured.",
-      "No active jobs, handoffs, retries, cancellations or provider requests; unavailable metrics remain null.",
+      "Pool query elapsed time includes acquisition. Context retrieval and lease recovery run in transactions, so their client queries are timed in context_retrieval_ms and scheduler_active_ms and are not all included in pool_query_calls. Separate pool wait remains null.",
+      "Each sample retrieves context for a disposable run, claims that queued job, heartbeats the lease, then recovers the expired lease. Live provider latency, tokens and cost remain null.",
       "Baseline is a source-only snapshot of the pinned local ref; remote main freshness is not asserted.",
     ],
   };

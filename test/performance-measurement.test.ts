@@ -1,7 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { distribution, measureQueries, pairedSummary } from "../src/eval/performance.ts";
+import {
+  distribution,
+  measureQueries,
+  pairedSummary,
+  pinnedCandidateIdentity,
+} from "../src/eval/performance.ts";
+import { investigateSchedulerAndContext } from "../src/eval/performanceProbe.ts";
+import { pool, withTx } from "../src/db/pool.ts";
+import { config } from "../src/config.ts";
+import * as scheduler from "../src/workflow/scheduler.ts";
+import { heartbeat } from "../src/workflow/engine.ts";
+import { reapExpiredLeases } from "../src/workflow/recovery.ts";
+import { resolveContext } from "../src/workflow/context.ts";
 
 test("query measurement counts completed and failed operations without retaining SQL or parameters", async () => {
   const target = {
@@ -45,6 +57,48 @@ test("paired reports retain slower samples and reject unmatched workloads or cha
     /Output mismatch/,
   );
   assert.throws(() => distribution([NaN]), /Invalid/);
+});
+
+test("a dirty worktree is not reported as the pinned HEAD revision", () => {
+  const revision = "a".repeat(40);
+  const tree = "b".repeat(40);
+  assert.deepEqual(pinnedCandidateIdentity("", revision, tree), { revision, tree });
+  assert.deepEqual(
+    pinnedCandidateIdentity("?? .performance-baseline-abc/\n", revision, tree),
+    { revision, tree },
+  );
+  assert.throws(
+    () => pinnedCandidateIdentity(" M src/workflow/engine.ts\n", revision, tree),
+    /cannot be reported as the pinned HEAD revision/,
+  );
+  assert.throws(() => pinnedCandidateIdentity("", "HEAD", tree), /full HEAD commit/);
+});
+
+test("scheduler and context probe claims, heartbeats, recovers and retrieves context", async () => {
+  const phases: Record<string, number> = {};
+  const summary = await investigateSchedulerAndContext(
+    {
+      pool,
+      withTx,
+      scheduler,
+      heartbeat,
+      reapExpiredLeases,
+      resolveContext,
+      config,
+    },
+    phases,
+  );
+  assert.equal(summary.claimed, 1);
+  assert.equal(summary.heartbeat, 1);
+  assert.ok(summary.reaped >= 1);
+  assert.ok(summary.knowledge >= 0);
+  assert.ok(phases.context_retrieval_ms >= 0);
+  assert.ok(phases.scheduler_active_ms >= 0);
+  assert.equal(
+    (await pool.query("SELECT count(*)::int AS n FROM workflow_runs WHERE title = 'performance fixture'"))
+      .rows[0].n,
+    0,
+  );
 });
 
 test("platform benchmark refuses inherited application endpoints before loading platform code", () => {
