@@ -71,12 +71,15 @@ export function planKnowledge(
     ...scoreKnowledge(k, opts.requestText, opts.stepType),
     tokens: estimateTokens(k.content),
   }));
+  // Unverified AI observations are never authoritative: they cannot be mandatory or inline, whatever their load flag.
+  const unverified = (x: (typeof scored)[number]) => knowledgeTier(x.k) === "unverified_suggestion";
   const mandatory = (x: (typeof scored)[number]) =>
-    x.k.reason === "assigned to step" ||
-    x.k.reason.startsWith("selected for this re-execution") ||
-    x.k.enforced === true;
+    !unverified(x) &&
+    (x.k.reason === "assigned to step" ||
+      x.k.reason.startsWith("selected for this re-execution") ||
+      x.k.enforced === true);
   const wantsInline = (x: (typeof scored)[number]) =>
-    mandatory(x) || x.k.metadata?.load !== "on_demand";
+    !unverified(x) && (mandatory(x) || x.k.metadata?.load !== "on_demand");
   const out: DisclosureEntry[] = [];
   let used = 0;
   // inline: mandatory first, then the most relevant inline-type items while the budget lasts; overflow → index
@@ -253,10 +256,12 @@ export function rankCodeHits(
     const cur = byKey.get(k);
     if (!cur) return void byKey.set(k, { ...h, confidence: 0, evidence: [evidence] });
     if (!cur.evidence.includes(evidence)) cur.evidence.push(evidence);
-    if (h.score > cur.score) Object.assign(cur, { score: h.score, via: h.via, symbol: h.symbol ?? cur.symbol });
+    if (h.score > cur.score)
+      Object.assign(cur, { score: h.score, via: h.via, symbol: h.symbol ?? cur.symbol });
   };
   const direct = [...hits].sort((a, b) => b.score - a.score || keyOf(a).localeCompare(keyOf(b)));
-  for (const h of direct) add(h, `${h.via} match${h.symbol ? ` "${h.symbol}"` : ""} (score ${h.score})`);
+  for (const h of direct)
+    add(h, `${h.via} match${h.symbol ? ` "${h.symbol}"` : ""} (score ${h.score})`);
   for (const h of direct.slice(0, opts.expandTop ?? 3)) {
     for (const d of deps[`${h.repo}:${h.path}`] ?? [])
       add(
@@ -268,17 +273,15 @@ export function rankCodeHits(
     (a, b) => b.score - a.score || keyOf(a).localeCompare(keyOf(b)),
   );
   const best = ranked[0]?.score || 1;
-  for (const r of ranked) r.confidence = Math.round(Math.min(1, Math.max(0, r.score / best)) * 100) / 100;
+  for (const r of ranked)
+    r.confidence = Math.round(Math.min(1, Math.max(0, r.score / best)) * 100) / 100;
   return ranked.slice(0, Math.max(0, opts.limit));
 }
 
 // ---------------------------------------------------------------- knowledge tiers
 
 export type KnowledgeTier =
-  | "organizational_rule"
-  | "approved_knowledge"
-  | "task_observation"
-  | "unverified_suggestion";
+  "organizational_rule" | "approved_knowledge" | "task_observation" | "unverified_suggestion";
 
 /** Label an item with its authority tier. Only enforced rules are authoritative; unknown or unverified never are. */
 export function knowledgeTier(k: {
@@ -292,4 +295,47 @@ export function knowledgeTier(k: {
   }
   if (k.enforced === true) return "organizational_rule";
   return "approved_knowledge";
+}
+
+/**
+ * Apply rankCodeHits to a search_code result using the edges of a find_dependencies result: hits are deduplicated,
+ * files the best hits depend on are added as discounted candidates, and every hit carries rank_confidence + evidence.
+ * Pure; a body without a hits array is returned unchanged.
+ */
+export function rankRetrievedCode(search: any, dependencies: any[] | undefined, limit = 12): any {
+  const raw: any[] = Array.isArray(search?.hits) ? search.hits : [];
+  if (!raw.length) return search;
+  const keyOf = (r: string, p: string, a?: number, b?: number) => `${r}:${p}:${a ?? ""}-${b ?? ""}`;
+  const original = new Map<string, any>();
+  const hits: CodeHit[] = raw.map((h) => {
+    const line = h.line_range?.[0];
+    const endLine = h.line_range?.[1];
+    original.set(keyOf(h.repository, h.file_path, line, endLine), h);
+    return {
+      repo: h.repository,
+      path: h.file_path,
+      line,
+      endLine,
+      symbol: h.qualified_name ?? h.symbol_name,
+      score: Number(h.confidence) || 0,
+      via: h.qualified_name || h.symbol_name ? "symbol" : "keyword",
+    };
+  });
+  const deps: Record<string, Array<{ repo: string; path: string }>> = {};
+  for (const e of dependencies ?? []) {
+    const k = `${e.repository}:${e.file_path}`;
+    for (const c of e.candidate_definitions ?? [])
+      (deps[k] ??= []).push({ repo: c.repository, path: c.file_path });
+  }
+  const ranked = rankCodeHits(hits, deps, { limit });
+  return {
+    ...search,
+    hits: ranked.map((r) => {
+      const o = original.get(keyOf(r.repo, r.path, r.line, r.endLine));
+      const extra = { rank_confidence: r.confidence, evidence: r.evidence };
+      return o
+        ? { ...o, ...extra }
+        : { repository: r.repo, file_path: r.path, match_type: r.via, ...extra };
+    }),
+  };
 }

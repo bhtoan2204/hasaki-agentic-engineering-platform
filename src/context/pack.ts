@@ -2,7 +2,13 @@ import { validateToolBinding } from "../agent/toolRuntime.ts";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { hashOf } from "../workflow/definitions.ts";
-import { estimateTokens, summarizeValue, scoreKnowledge } from "./plan.ts";
+import {
+  estimateTokens,
+  summarizeValue,
+  scoreKnowledge,
+  knowledgeTier,
+  rankRetrievedCode,
+} from "./plan.ts";
 import { dispatchPlatformTool, envFromExecution } from "../agent/platformTools.ts";
 import { safeDiagnostics } from "../agent/telemetry.ts";
 import { redactContextText, redactContextValue } from "./redact.ts";
@@ -66,6 +72,8 @@ export interface ContextPack {
     key: string;
     entries: Record<string, string>;
     reused_from_pack?: number | null;
+    /** Cached retrieval results reused instead of read again (re-read telemetry). */
+    reread_avoided?: number;
   };
 }
 export class ContextBudgetError extends Error {}
@@ -86,14 +94,13 @@ export function roleBudget(step: { type: string; config: Record<string, any> }):
 }
 
 /**
- * Deterministic key for reusing expensive code retrievals across attempts of the same step: owner, authorization
+ * Deterministic key for reusing expensive code retrievals across attempts and steps of the same run: owner, authorization
  * scope, query, exact repository state (HEAD + uncommitted fingerprint + base tip) and the code-index version.
  * Any change → a different key → fresh retrieval.
  */
 export function codeRetrievalKey(input: {
   ownerId: number;
   runId: number;
-  stepId: number;
   allowed: string[];
   query: string;
   repos: Record<string, string>;
@@ -103,10 +110,9 @@ export function codeRetrievalKey(input: {
     .sort()
     .map((k) => [k, input.repos[k]]);
   return hashOf({
-    v: 1,
+    v: 2,
     owner: input.ownerId,
     run: input.runId,
-    step: input.stepId,
     allowed: [...input.allowed].sort(),
     query: input.query,
     repos,
@@ -354,11 +360,13 @@ export async function ensureContextPack(
       const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
       for (const k of ctx.context.knowledge) {
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
+        const tierLabel = knowledgeTier(k);
         const mandatory =
-          k.enforced ||
-          k.category === "business_rule" ||
-          k.reason === "assigned to step" ||
-          k.reason.startsWith("selected for this re-execution");
+          tierLabel !== "unverified_suggestion" &&
+          (k.enforced ||
+            k.category === "business_rule" ||
+            k.reason === "assigned to step" ||
+            k.reason.startsWith("selected for this re-execution"));
         const mode = tier.get(k.key) ?? "inline";
         // Search-tier bodies stay on the snapshot and read_knowledge. Copying them into the pack
         // paid for text the disclosure plan had already decided not to show.
@@ -375,6 +383,7 @@ export async function ensureContextPack(
                 key: k.key,
                 title: k.title,
                 category: k.category,
+                tier: tierLabel,
                 disclosure: "index",
                 description:
                   (isExternal(k.metadata) ? "[third-party] " : "") +
@@ -386,6 +395,7 @@ export async function ensureContextPack(
                 key: k.key,
                 title: k.title,
                 category: k.category,
+                tier: tierLabel,
                 content: isExternal(k.metadata)
                   ? `${externalNotice(k.metadata)}\n\n${k.content}`
                   : k.content,
@@ -643,7 +653,6 @@ export async function ensureContextPack(
           ? codeRetrievalKey({
               ownerId: ctx.run.owner_id!,
               runId: ctx.run.id,
-              stepId: ctx.step.id,
               allowed: ctx.run.allowed_repositories,
               query,
               repos: repoState,
@@ -653,8 +662,8 @@ export async function ensureContextPack(
         const prior = key
           ? await one<{ id: number; cache: any }>(
               pool,
-              "SELECT id, content->'retrieval_cache' AS cache FROM agent_context_packs WHERE run_id=$1 AND step_id=$2 AND owner_id=$3 AND content->'retrieval_cache'->>'key'=$4 ORDER BY id DESC LIMIT 1",
-              [ctx.run.id, ctx.step.id, ctx.run.owner_id, key],
+              "SELECT id, content->'retrieval_cache' AS cache FROM agent_context_packs WHERE run_id=$1 AND owner_id=$2 AND content->'retrieval_cache'->>'key'=$3 ORDER BY id DESC LIMIT 1",
+              [ctx.run.id, ctx.run.owner_id, key],
             )
           : null;
         const cached =
@@ -679,7 +688,12 @@ export async function ensureContextPack(
                 "observed",
               ),
             });
-          retrievalCache = { key: key!, entries: cached, reused_from_pack: prior!.id };
+          retrievalCache = {
+            key: key!,
+            entries: cached,
+            reused_from_pack: prior!.id,
+            reread_avoided: Object.keys(cached).length,
+          };
         } else {
           await retrieve("search_code", { query, operation: "context", limit: 8 }, "code", 65);
           const first = entries.find((e) => e.id === "search_code");
@@ -691,6 +705,19 @@ export async function ensureContextPack(
               "code",
               55,
             );
+          // Rank + dedupe the hits with the dependency edges before caching, so reuse keeps the ranking.
+          const searchEntry = entries.find((e) => e.id === "search_code");
+          const depsEntry = entries.find((e) => e.id === "find_dependencies");
+          if (searchEntry) {
+            try {
+              const edges = depsEntry ? JSON.parse(depsEntry.body)?.dependencies : undefined;
+              searchEntry.body = JSON.stringify(
+                rankRetrievedCode(JSON.parse(searchEntry.body), edges),
+              );
+            } catch {
+              /* keep the unranked body */
+            }
+          }
           // Cache only successful, already-redacted results; failures are never reused.
           const ok = Object.fromEntries(
             entries
@@ -799,6 +826,7 @@ export async function ensureContextPack(
           budget_tokens: pack.budget_tokens,
           budget_source: pack.budget_source,
           code_retrieval_reused_from_pack: pack.retrieval_cache?.reused_from_pack ?? null,
+          reread_avoided: pack.retrieval_cache?.reread_avoided ?? 0,
         },
       });
       return { ...pack, id: persisted.id };

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { knowledgeTier, rankCodeHits } from "../src/context/plan.ts";
+import {
+  knowledgeTier,
+  rankCodeHits,
+  rankRetrievedCode,
+  planKnowledge,
+} from "../src/context/plan.ts";
 
 const hit = (path: string, score: number, extra: object = {}) => ({
   repo: "r",
@@ -11,7 +16,11 @@ const hit = (path: string, score: number, extra: object = {}) => ({
 });
 
 test("rankCodeHits dedupes, keeps best score and merges evidence", () => {
-  const out = rankCodeHits([hit("a.ts", 2, { line: 1 }), hit("a.ts", 5, { line: 1 }), hit("b.ts", 1)], {}, { limit: 10 });
+  const out = rankCodeHits(
+    [hit("a.ts", 2, { line: 1 }), hit("a.ts", 5, { line: 1 }), hit("b.ts", 1)],
+    {},
+    { limit: 10 },
+  );
   assert.equal(out.length, 2);
   assert.equal(out[0].path, "a.ts");
   assert.equal(out[0].evidence.length, 2);
@@ -29,7 +38,55 @@ test("rankCodeHits expands one dependency step with discounted score and respect
 
 test("knowledgeTier never promotes unverified memory to a rule", () => {
   assert.equal(knowledgeTier({ category: "task_memory", enforced: true }), "unverified_suggestion");
-  assert.equal(knowledgeTier({ category: "task_memory", metadata: { trust: "approved" } }), "task_observation");
+  assert.equal(
+    knowledgeTier({ category: "task_memory", metadata: { trust: "approved" } }),
+    "task_observation",
+  );
   assert.equal(knowledgeTier({ category: "business_rule", enforced: true }), "organizational_rule");
   assert.equal(knowledgeTier({ category: "agent_skill" }), "approved_knowledge");
+});
+
+test("rankRetrievedCode dedupes hits, expands one dependency step and labels confidence and evidence", () => {
+  const rawHit = (path: string, confidence: number) => ({
+    repository: "svc",
+    file_path: path,
+    line_range: [1, 5],
+    qualified_name: `${path}.fn`,
+    confidence,
+  });
+  const out = rankRetrievedCode(
+    { hits: [rawHit("a.ts", 0.9), rawHit("a.ts", 0.5), rawHit("b.ts", 0.4)] },
+    [
+      {
+        repository: "svc",
+        file_path: "a.ts",
+        candidate_definitions: [{ repository: "svc", file_path: "dep.ts" }],
+      },
+    ],
+  );
+  const paths = out.hits.map((h: any) => h.file_path);
+  assert.deepEqual(paths, ["a.ts", "dep.ts", "b.ts"]);
+  assert.equal(paths.filter((p: string) => p === "a.ts").length, 1);
+  const dep = out.hits.find((h: any) => h.file_path === "dep.ts");
+  assert.match(dep.evidence[0], /dependency of svc:a.ts/);
+  assert.ok(out.hits.every((h: any) => h.rank_confidence > 0 && h.rank_confidence <= 1));
+});
+
+test("unverified task memory is never inline or mandatory, even when enforced or assigned", () => {
+  const mem = {
+    key: "memory.x",
+    title: "observation",
+    category: "task_memory",
+    content: "something",
+    reason: "assigned to step",
+    enforced: true,
+    metadata: { trust: "unverified", load: "inline" },
+  };
+  const plan = planKnowledge([mem], {
+    requestText: "x",
+    stepType: "agent",
+    inlineTokens: 1000,
+    indexSize: 5,
+  });
+  assert.notEqual(plan[0].disclosure, "inline");
 });
