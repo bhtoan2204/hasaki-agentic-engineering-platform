@@ -141,3 +141,11 @@ Verification on this increment:
 - ESLint on modified files reports zero errors.
 - Targeted tests `test/scheduler-efficiency.test.ts` (3/3), `test/codex.test.ts` (24/24), `test/provider-handoff.test.ts` (16/16), and `test/workflow-reliability.test.ts` (9/9) pass.
 - Full test suite `npm test`: 785 passed, zero failed, two skipped (135703.85 ms).
+
+## Verification repair: test build cache and home directory isolation
+
+When targeted verification executes tests for `src/workflow/engine.ts`, `test/engine.test.ts` runs integration tests using real `go test` and `git` commands against a temporary repository. In restricted test runner environments where `$HOME` points to an unwritable or nonexistent directory, `go test` failed before package compilation with `failed to initialize build cache: mkdir /...: read-only file system`, which caused baseline comparison in `src/workflow/executors/builtin.ts` to report no parseable failures (`(exit 1, no go test failure to compare)`).
+
+`test/setup.ts` now isolates `$HOME`, `$GOCACHE`, and `$GOPATH` to dedicated subdirectories inside the test's temporary root (`root`), ensuring that tool cache initialization succeeds independently of host/runner filesystem restrictions.
+
+Targeted verification command (144 tests) passes with 0 failures under restricted `HOME=/nonexistent`.

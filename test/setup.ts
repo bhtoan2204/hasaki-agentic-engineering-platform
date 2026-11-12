@@ -5,7 +5,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -241,6 +241,29 @@ for (const k of Object.keys(process.env)) if (k.startsWith("COST_BUDGET_")) dele
 process.env.TEST_ROOT = root;
 mkdirSync(join(root, "empty-user-skills"));
 process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never read the developer's real ~/.claude
+
+// Isolate test build caches and user home directory so subprocess tests (e.g. go test, git) do not fail when
+// the execution environment lacks a writable $HOME or GOCACHE.
+const testHome = join(root, "home");
+mkdirSync(testHome, { recursive: true });
+let homeWritable = false;
+if (process.env.HOME) {
+  try {
+    accessSync(process.env.HOME, constants.W_OK);
+    homeWritable = true;
+  } catch {
+    homeWritable = false;
+  }
+}
+if (!homeWritable) {
+  process.env.HOME = testHome;
+}
+const testGoCache = join(root, "gocache");
+mkdirSync(testGoCache, { recursive: true });
+process.env.GOCACHE = testGoCache;
+const testGoPath = join(root, "gopath");
+mkdirSync(testGoPath, { recursive: true });
+process.env.GOPATH = testGoPath;
 
 // Tests must never inherit a developer's live Telegram bot or receiver settings. Individual Telegram tests
 // explicitly point config at their local mocked Bot API after the isolated database is ready.
