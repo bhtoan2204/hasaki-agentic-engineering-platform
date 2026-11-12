@@ -18,6 +18,7 @@ import { getExecutor, makeContext } from "./executors/registry.ts";
 import { enforceRunRepositoryAccess } from "../repos/access.ts";
 import { repositories, repoPath } from "../repos/service.ts";
 import { localJobs } from "./local.ts";
+import { deferIfBranchBusy } from "./branchLeases.ts";
 import { settleBackground } from "./background.ts";
 import type { ExecResult, JobRow } from "./types.ts";
 
@@ -112,6 +113,10 @@ export async function processJob(
   workerId: string,
   opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds">,
 ) {
+  const step = await one<{ type: string }>(pool, "SELECT type FROM workflow_steps WHERE id = $1", [
+    job.step_id,
+  ]);
+  if (step && (await deferIfBranchBusy(job, step.type))) return;
   const begun = await beginAttempt(job, workerId);
   if (!begun) return;
   const ac = new AbortController();
