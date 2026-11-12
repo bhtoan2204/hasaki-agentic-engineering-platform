@@ -65,6 +65,10 @@ export interface ExpansionContext {
   limits: DecompositionLimits;
   /** Subtasks already materialized (counted against max_subtasks). */
   existingSubtasks?: number;
+  /** Live steps with their dependencies; used to reject cycles introduced by the downstream rewire. */
+  existingSteps?: { key: string; depends_on: string[]; subtask_id?: string | null; status?: string }[];
+  /** Step the plan expands; steps waiting on it are rewired to wait for the leaf subtasks. */
+  planStepKey?: string;
 }
 
 const stepKey = (id: string) => `subtask-${id}`;
@@ -107,7 +111,23 @@ export function validateExpansion(
     }
   if (!errors.length) {
     try {
-      topoOrder(subtasks.map((s) => ({ key: s.id, depends_on: s.depends_on.filter((d) => ids.has(d)) })));
+      const toKey = (d: string) => (ids.has(d) ? stepKey(d) : d);
+      const referenced = new Set(subtasks.flatMap((s) => s.depends_on));
+      const leaves = subtasks.filter((s) => !referenced.has(s.id)).map((s) => stepKey(s.id));
+      const live = (ctx.existingSteps ?? []).map((st) => ({
+        key: st.key,
+        depends_on:
+          ctx.planStepKey && st.depends_on.includes(ctx.planStepKey) && st.status === "PENDING" && !st.subtask_id
+            ? [...new Set([...st.depends_on, ...leaves])]
+            : st.depends_on,
+      }));
+      topoOrder([
+        ...live,
+        ...subtasks.map((s) => ({
+          key: stepKey(s.id),
+          depends_on: s.depends_on.length ? s.depends_on.map(toKey) : ctx.planStepKey ? [ctx.planStepKey] : [],
+        })),
+      ]);
     } catch (e) {
       errors.push((e as Error).message);
     }
@@ -149,7 +169,7 @@ export async function materializeSubtasks(
   runId: number,
   planStepKey: string,
   rawPlan: unknown,
-  opts: { actor: string; reason: string; allowedRepositories: string[]; limits?: Partial<DecompositionLimits>; kind?: "decomposition" | "replan" },
+  opts: { actor: string; reason: string; allowedRepositories: string[]; approvedBy?: string; limits?: Partial<DecompositionLimits>; kind?: "decomposition" | "replan" },
 ): Promise<{ created: string[]; revision: number; replayed: boolean }> {
   const kind = opts.kind ?? "decomposition";
   const limits = { ...DEFAULT_LIMITS, ...opts.limits };
@@ -165,6 +185,14 @@ export async function materializeSubtasks(
   const steps = await stepsOf(c, runId);
   const planStep = steps.find((s) => s.key === planStepKey);
   if (!planStep) throw new EngineError(`plan step "${planStepKey}" not found`, 404);
+  // The plan must have been approved by a human: the plan step has to be completed first.
+  if (planStep.status !== "COMPLETED")
+    throw new EngineError(`plan step "${planStepKey}" is not approved/completed (status ${planStep.status})`, 409);
+  if (kind === "replan" && !opts.approvedBy)
+    throw new EngineError("replan requires explicit human approval (approvedBy)", 403);
+  const depth = planStep.subtask_id ? 2 : 1;
+  if (depth > limits.max_depth)
+    throw new EngineError(`expansion depth ${depth} exceeds limit ${limits.max_depth}`, 409);
   const revs = await q<{ kind: string }>(c, "SELECT kind FROM workflow_graph_revisions WHERE run_id = $1", [runId]);
   if (kind === "replan" && revs.filter((r) => r.kind === "replan").length >= limits.max_replans)
     throw new EngineError(`replan limit (${limits.max_replans}) reached`, 409);
@@ -176,6 +204,8 @@ export async function materializeSubtasks(
     allowedRepositories: opts.allowedRepositories,
     limits,
     existingSubtasks: steps.filter((s) => s.subtask_id).length,
+    existingSteps: steps,
+    planStepKey,
   });
   if (errors.length) throw new EngineError("invalid expansion: " + errors.join("; "), 422);
 
@@ -194,8 +224,8 @@ export async function materializeSubtasks(
     await q(
       c,
       `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, requires_approval, max_attempts, retry_backoff_s, status, parent_step_key, subtask_id, graph_revision)
-       VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, false, 2, 5, 'PENDING', $7, $8, $9)`,
-      [runId, stepKey(s.id), s.title, position++, deps, json({ subtask: s }), planStepKey, s.id, revision],
+       VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, $10, 2, 5, 'PENDING', $7, $8, $9)`,
+      [runId, stepKey(s.id), s.title, position++, deps, json({ subtask: s }), planStepKey, s.id, revision, s.risk === "high"],
     );
     created.push(stepKey(s.id));
   }
