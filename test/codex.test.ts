@@ -435,10 +435,7 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
     assert.ok(!args.includes("--last"));
     assert.ok(
       !args.some(
-        (x) =>
-          x.includes("danger-full-access") ||
-          x === "--dangerously-bypass-approvals-and-sandbox" ||
-          x === "--full-auto",
+        (x) => x === "--dangerously-bypass-approvals-and-sandbox" || x === "--full-auto",
       ),
     );
     assert.ok(args.includes('approval_policy="never"'));
@@ -447,21 +444,12 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
     assert.ok(!args.join(" ").includes("DATABASE_URL="), "no secrets on the command line");
   }
   assert.ok(a.includes('sandbox_mode="read-only"'));
-  assert.ok(c.includes('sandbox_mode="workspace-write"'));
+  assert.ok(!a.some((x) => x.includes("danger-full-access")));
+  assert.ok(c.includes('sandbox_mode="danger-full-access"'));
+  assert.ok(!c.some((x) => x.includes("sandbox_workspace_write")));
   const cache = JSON.stringify(npmCacheDir());
-  assert.ok(c.includes(`sandbox_workspace_write.writable_roots=["/w","/tmp/s",${cache}]`));
   assert.ok(c.some((x) => x.includes(`npm_config_cache=${cache}`)));
   assert.ok(!c.some((x) => x.includes("ctp-agent-tmp") && x.includes("npm_config_cache")));
-  const worktree = codexArgs({
-    mode: "coding",
-    cwd: "/data/worktrees/inst/79/agent-720",
-    scratch: "/tmp/s",
-  });
-  assert.ok(
-    worktree.includes(
-      `sandbox_workspace_write.writable_roots=["/data/worktrees/inst/79","/data/worktrees/inst/79/agent-720","/tmp/s",${cache}]`,
-    ),
-  );
   assert.deepEqual(c.slice(0, 2), ["exec", "resume"]);
   assert.deepEqual(c.slice(-2), ["th-9", "-"]);
   assert.ok(c.includes('model="gpt-test"') && c.includes('model_reasoning_effort="high"'));
@@ -731,7 +719,7 @@ test("Codex ask_user pauses the step, blocks edits while waiting, then resumes t
   const resumed = fakeLog().find((l) => l.argv && l.resumeId);
   assert.equal(resumed.resumeId, "th-ask");
   assert.ok(!resumed.argv.includes("--last"));
-  assert.ok(resumed.argv.includes('sandbox_mode="workspace-write"'));
+  assert.ok(resumed.argv.includes('sandbox_mode="danger-full-access"'));
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });
 

@@ -6,8 +6,8 @@ import { decide, type Decision, type PolicyContext } from "../toolPolicy.ts";
  * (tool_name Bash / exec_command), apply_patch file edits and MCP tools; the hook asks the worker, which answers with the
  * same decide() Claude's PreToolUse hook uses. A deny stops the call before it runs.
  *
- * The OS sandbox is the second layer (read-only for analysis; workspace-write limited to the task directory for coding),
- * so a missing or crashing hook cannot widen what the process can write.
+ * Analysis still has an OS read-only sandbox. Coding runs without one (`danger-full-access`), so this hook is the
+ * write boundary: a missing or crashing hook can widen what a coding process can write.
  *
  * Unknown tools are denied (fail closed). Escalation requests (PermissionRequest) are always denied: the platform never
  * lets a command leave the sandbox; commits go through the platform's commit_changes tool instead.
