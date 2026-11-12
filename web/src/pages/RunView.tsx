@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
@@ -148,6 +148,13 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const [feedbackMode, setFeedbackMode] = useState<"auto" | "reimplement" | "replan" | "restart">(
     "auto",
   );
+  // Node drag (and a pane pan that starts on a block) cancels the click when the pointer moves at all.
+  // Record the press so the mouseup that lands on the pane does not immediately close the step.
+  const pickedAt = useRef(0);
+  const pickStep = useCallback((key: string) => {
+    pickedAt.current = performance.now();
+    navigate(`/runs/${id}/${key}`);
+  }, [id]);
 
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
@@ -178,7 +185,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       return {
         id: s.key,
         type: "step",
+        className: "nopan",
         position: s.ui ?? pos[s.key],
+        selected: s.key === stepKey,
         data: {
           step: {
             ...s,
@@ -200,11 +209,34 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 ? "reused"
                 : undefined
             : undefined,
+          onPick: pickStep,
         },
       };
     });
     return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status) };
-  }, [run, stepKey]);
+  }, [run, stepKey, pickStep]);
+  const fitViewOptions = useMemo(
+    () => ({
+      padding: 0.25,
+      maxZoom: 1,
+      minZoom: 0.7,
+      nodes: focusNodes(
+        nodes.map((n) => n.id),
+        stepKey,
+      ),
+    }),
+    [nodes, stepKey],
+  );
+  const flowLabels = useMemo(
+    () => ({
+      "controls.ariaLabel": t("flow.controls"),
+      "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
+      "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
+      "controls.fitView.ariaLabel": t("flow.fit"),
+      "controls.interactive.ariaLabel": t("flow.interactive"),
+    }),
+    [t],
+  );
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
@@ -512,28 +544,23 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, n) => navigate(`/runs/${id}/${n.id}`)}
-            onPaneClick={() => stepKey && navigate(`/runs/${id}`)}
+            onNodeClick={(_, n) => pickStep(n.id)}
+            onPaneClick={() => {
+              if (performance.now() - pickedAt.current < 500) return;
+              if (stepKey) navigate(`/runs/${id}`);
+            }}
+            nodesDraggable={false}
             nodesConnectable={false}
+            elementsSelectable={false}
+            elevateEdgesOnSelect={false}
+            autoPanOnNodeFocus={false}
+            nodeClickDistance={8}
+            nodeDragThreshold={8}
             fitView
             // Long workflows: fit around the selected step (or the start) at a readable zoom instead of shrinking everything.
-            fitViewOptions={{
-              padding: 0.25,
-              maxZoom: 1,
-              minZoom: 0.7,
-              nodes: focusNodes(
-                nodes.map((n) => n.id),
-                stepKey,
-              ),
-            }}
+            fitViewOptions={fitViewOptions}
             minZoom={0.2}
-            ariaLabelConfig={{
-              "controls.ariaLabel": t("flow.controls"),
-              "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
-              "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
-              "controls.fitView.ariaLabel": t("flow.fit"),
-              "controls.interactive.ariaLabel": t("flow.interactive"),
-            }}
+            ariaLabelConfig={flowLabels}
           >
             <Background gap={18} />
             <Controls showInteractive={false} />

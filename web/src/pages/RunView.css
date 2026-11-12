@@ -154,6 +154,12 @@
   border: 2px solid var(--line-strong);
 }
 
+/* The edge's invisible hit stroke is drawn above the blocks and eats the click. */
+.split > .canvas .react-flow__edge,
+.split > .canvas .react-flow__edge-interaction {
+  pointer-events: none;
+}
+
 .node.gn.has-status .react-flow__handle {
   border-color: var(--gn-c);
 }

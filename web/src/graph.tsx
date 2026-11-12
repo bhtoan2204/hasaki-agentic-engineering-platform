@@ -165,6 +165,8 @@ export type StepNodeData = {
   generation?: number;
   /** After feedback: this step was invalidated and runs again, or its earlier result is reused. */
   replan?: "rerun" | "reused";
+  /** Open this step on pointerdown. A click is often swallowed by node drag. */
+  onPick?: (key: string) => void;
 };
 
 function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
@@ -196,7 +198,14 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
     ? (step as any).config.merged_from
     : [];
   return (
-    <div className={cls} style={{ ["--gn-c" as any]: color }}>
+    <div
+      className={cls}
+      style={{ ["--gn-c" as any]: color }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        data.onPick?.(step.key);
+      }}
+    >
       <Handle type="target" position={Position.Top} />
       <span className="gn-rail" aria-hidden />
       <div className="gn-head">
