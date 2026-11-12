@@ -194,6 +194,9 @@ export interface StepRow {
   attempt_count: number;
   current_attempt_id: number | null;
   agent_override?: unknown;
+  parent_step_key?: string | null;
+  subtask_id?: string | null;
+  graph_revision?: number | null;
   output: any;
   pending_input: any;
   approval: any;
