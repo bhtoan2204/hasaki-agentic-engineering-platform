@@ -1,11 +1,26 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { cookieSecure, readCookie } from "../src/auth/sessions.ts";
+
+// A clean worktree has no UI build (web/dist is not committed); the static routes only need an index.html to serve.
+const webDist = join(import.meta.dirname, "..", "web", "dist");
+const webIndex = join(webDist, "index.html");
+const distExisted = existsSync(webDist);
+const stubbedIndex = !existsSync(webIndex);
+if (stubbedIndex) {
+  mkdirSync(webDist, { recursive: true });
+  writeFileSync(webIndex, "<!doctype html><title>test</title>");
+}
+after(() => {
+  if (stubbedIndex) rmSync(distExisted ? webIndex : webDist, { recursive: true, force: true });
+});
 
 const password = randomBytes(24).toString("hex");
 function bootstrap(username = "toan") {

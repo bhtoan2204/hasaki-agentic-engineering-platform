@@ -237,6 +237,12 @@ for (const key of [
 ])
   delete process.env[key];
 
+// Workflow verification runs with GIT_CONFIG_GLOBAL=/dev/null, so commits made by tests need an explicit identity.
+process.env.GIT_AUTHOR_NAME ??= "Test";
+process.env.GIT_AUTHOR_EMAIL ??= "test@example.invalid";
+process.env.GIT_COMMITTER_NAME ??= "Test";
+process.env.GIT_COMMITTER_EMAIL ??= "test@example.invalid";
+
 // Each file gets its own database. Drop it when the process is otherwise finished so catalogs do not
 // accumulate (hundreds of leftover databases make the next CREATE DATABASE collide on template1).
 let dropping = false;
