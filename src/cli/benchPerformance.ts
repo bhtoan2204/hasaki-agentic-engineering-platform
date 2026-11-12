@@ -97,9 +97,11 @@ async function subject(root: string, revision?: string) {
     metrics,
     pool: db.pool,
     withTx: db.withTx,
+    q: db.q,
     heartbeat: engine.heartbeat,
     reapExpiredLeases: recovery.reapExpiredLeases,
     resolveContext: retrieval.resolveContext,
+    buildStepInput: retrieval.buildStepInput,
     config,
     identity,
   };
@@ -190,7 +192,7 @@ async function sample(
           throw new Error("Expected empty test-owned job queue");
       }
       phases.scheduler_idle_claim_ms = performance.now() - claimStart;
-      const investigation = await investigateSchedulerAndContext(s, phases);
+      const investigation = await investigateSchedulerAndContext(s, phases, fixture);
       return {
         output_hash: sha256(
           serialized + JSON.stringify(metrics.tool_repeats) + JSON.stringify(investigation),
@@ -202,6 +204,10 @@ async function sample(
         scheduler_heartbeat: investigation.heartbeat,
         scheduler_reaped: investigation.reaped,
         context_knowledge: investigation.knowledge,
+        context_repositories: investigation.repositories,
+        context_upstream: investigation.upstream,
+        context_answers: investigation.answers,
+        context_hidden_excluded: investigation.hidden_excluded,
       };
     },
   );
@@ -270,7 +276,7 @@ try {
   const report = {
     suite: "platform-performance-v1",
     evidence_kind: "component_fixture_control",
-    fixture_version: 1,
+    fixture_version: 2,
     conditions: {
       node: process.version,
       os: platform(),
@@ -292,7 +298,8 @@ try {
       fixture_hash: sha256(JSON.stringify(platformPerformanceFixtures)),
       harness_hash: sha256(
         readFileSync(new URL(import.meta.url), "utf8") +
-          readFileSync(new URL("../eval/performance.ts", import.meta.url), "utf8"),
+          readFileSync(new URL("../eval/performance.ts", import.meta.url), "utf8") +
+          readFileSync(new URL("../eval/performanceProbe.ts", import.meta.url), "utf8"),
       ),
     },
     fixtures: platformPerformanceFixtures,
@@ -305,6 +312,8 @@ try {
       "No performance optimization is selected or speedup claimed by this baseline report.",
       "First-use samples include pool warm-up only for the first fixture; warm samples follow three warm-ups.",
       "Input generation, source loading, snapshot extraction and database startup are outside the measured wall time.",
+      "Persisted context fixture setup and cleanup are inside wall time but outside context_retrieval_ms, which covers buildStepInput and resolveContext in a transaction.",
+      "Every size persists its declared knowledge, repository grants, upstream outputs and answers; one explicitly requested inaccessible repository item must be excluded.",
       "Pool query elapsed time includes acquisition. Context retrieval and lease recovery run in transactions, so their client queries are timed in context_retrieval_ms and scheduler_active_ms and are not all included in pool_query_calls. Separate pool wait remains null.",
       "Each sample retrieves context for a disposable run, claims that queued job, heartbeats the lease, then recovers the expired lease. Live provider latency, tokens and cost remain null.",
       "Baseline is a source-only snapshot of the pinned local ref; remote main freshness is not asserted.",

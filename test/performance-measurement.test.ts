@@ -6,14 +6,15 @@ import {
   measureQueries,
   pairedSummary,
   pinnedCandidateIdentity,
+  platformPerformanceFixtures,
 } from "../src/eval/performance.ts";
 import { investigateSchedulerAndContext } from "../src/eval/performanceProbe.ts";
-import { pool, withTx } from "../src/db/pool.ts";
+import { pool, withTx, q } from "../src/db/pool.ts";
 import { config } from "../src/config.ts";
 import * as scheduler from "../src/workflow/scheduler.ts";
 import { heartbeat } from "../src/workflow/engine.ts";
 import { reapExpiredLeases } from "../src/workflow/recovery.ts";
-import { resolveContext } from "../src/workflow/context.ts";
+import { resolveContext, buildStepInput } from "../src/workflow/context.ts";
 
 test("query measurement counts completed and failed operations without retaining SQL or parameters", async () => {
   const target = {
@@ -63,10 +64,10 @@ test("a dirty worktree is not reported as the pinned HEAD revision", () => {
   const revision = "a".repeat(40);
   const tree = "b".repeat(40);
   assert.deepEqual(pinnedCandidateIdentity("", revision, tree), { revision, tree });
-  assert.deepEqual(
-    pinnedCandidateIdentity("?? .performance-baseline-abc/\n", revision, tree),
-    { revision, tree },
-  );
+  assert.deepEqual(pinnedCandidateIdentity("?? .performance-baseline-abc/\n", revision, tree), {
+    revision,
+    tree,
+  });
   assert.throws(
     () => pinnedCandidateIdentity(" M src/workflow/engine.ts\n", revision, tree),
     /cannot be reported as the pinned HEAD revision/,
@@ -75,30 +76,50 @@ test("a dirty worktree is not reported as the pinned HEAD revision", () => {
 });
 
 test("scheduler and context probe claims, heartbeats, recovers and retrieves context", async () => {
-  const phases: Record<string, number> = {};
-  const summary = await investigateSchedulerAndContext(
-    {
-      pool,
-      withTx,
-      scheduler,
-      heartbeat,
-      reapExpiredLeases,
-      resolveContext,
-      config,
-    },
-    phases,
-  );
-  assert.equal(summary.claimed, 1);
-  assert.equal(summary.heartbeat, 1);
-  assert.ok(summary.reaped >= 1);
-  assert.ok(summary.knowledge >= 0);
-  assert.ok(phases.context_retrieval_ms >= 0);
-  assert.ok(phases.scheduler_active_ms >= 0);
-  assert.equal(
-    (await pool.query("SELECT count(*)::int AS n FROM workflow_runs WHERE title = 'performance fixture'"))
-      .rows[0].n,
-    0,
-  );
+  for (const fixture of platformPerformanceFixtures) {
+    const phases: Record<string, number> = {};
+    const summary = await investigateSchedulerAndContext(
+      {
+        pool,
+        withTx,
+        q,
+        scheduler,
+        heartbeat,
+        reapExpiredLeases,
+        resolveContext,
+        buildStepInput,
+        config,
+      },
+      phases,
+      fixture,
+    );
+    assert.equal(summary.claimed, 1);
+    assert.equal(summary.heartbeat, 1);
+    assert.ok(summary.reaped >= 1);
+    assert.equal(summary.knowledge, fixture.knowledge_items);
+    assert.equal(summary.repositories, fixture.repositories);
+    assert.equal(summary.upstream, fixture.context_entries);
+    assert.equal(summary.answers, fixture.answers);
+    assert.equal(summary.hidden_excluded, true);
+    assert.ok(phases.context_retrieval_ms >= 0);
+    assert.ok(phases.scheduler_active_ms >= 0);
+    assert.equal(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM workflow_runs WHERE title = 'performance fixture'",
+        )
+      ).rows[0].n,
+      0,
+    );
+    assert.equal(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM users WHERE password_hash = 'fixture-no-login'",
+        )
+      ).rows[0].n,
+      0,
+    );
+  }
 });
 
 test("platform benchmark refuses inherited application endpoints before loading platform code", () => {

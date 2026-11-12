@@ -1,8 +1,29 @@
 /** Numeric-only measurements for serial fixture evaluations. Never stores statements, parameters or prompts. */
 export const platformPerformanceFixtures = [
-  { id: "small", knowledge_items: 10, context_entries: 8, idle_claims: 2 },
-  { id: "medium", knowledge_items: 100, context_entries: 80, idle_claims: 8 },
-  { id: "large", knowledge_items: 1000, context_entries: 800, idle_claims: 32 },
+  {
+    id: "small",
+    knowledge_items: 10,
+    context_entries: 8,
+    idle_claims: 2,
+    repositories: 2,
+    answers: 2,
+  },
+  {
+    id: "medium",
+    knowledge_items: 100,
+    context_entries: 80,
+    idle_claims: 8,
+    repositories: 8,
+    answers: 8,
+  },
+  {
+    id: "large",
+    knowledge_items: 1000,
+    context_entries: 800,
+    idle_claims: 32,
+    repositories: 32,
+    answers: 32,
+  },
 ] as const;
 
 export async function measureQueries<A extends unknown[], R, T>(
@@ -52,9 +73,7 @@ export function pinnedCandidateIdentity(statusPorcelain: string, revision: strin
     .map((line) => line.trimEnd())
     .filter((line) => line && !line.includes(".performance-baseline-"));
   if (dirty.length)
-    throw new Error(
-      "Uncommitted candidate changes cannot be reported as the pinned HEAD revision",
-    );
+    throw new Error("Uncommitted candidate changes cannot be reported as the pinned HEAD revision");
   if (!/^[0-9a-f]{40}$/.test(revision) || !/^[0-9a-f]{40}$/.test(tree))
     throw new Error("Pinned candidate revision must be the full HEAD commit and tree");
   return { revision, tree };
