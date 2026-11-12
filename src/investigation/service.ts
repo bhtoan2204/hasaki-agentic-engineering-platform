@@ -28,9 +28,14 @@ export async function investigationDetail(runId: number) {
       )
       .find((s) => s.status === "COMPLETED")?.output ?? null;
   const summaries = searchSummaries(rows);
+  const run = await one<{ inputs: Record<string, any> | null }>(
+    pool,
+    "SELECT inputs FROM workflow_runs WHERE id = $1",
+    [runId],
+  );
   return {
     timezone: config.splunk.timezone,
-    environment: config.splunk.environment,
+    environment: String(run?.inputs?.environment ?? config.splunk.environment),
     splunk_connected: splunkConnected(),
     parsed: byAction("investigation_parse"),
     correlation:

@@ -18,6 +18,7 @@ import {
   setSplunkToken,
   splunkStatus,
   splunkTestConnection,
+  storeExternalSearch,
   submitManualResults,
   validateInvestigationSpl,
 } from "../src/integrations/splunk.ts";
@@ -826,4 +827,53 @@ test("continue to fix: hands the findings to Bug Investigation (same owner, loca
     ).length,
     0,
   );
+});
+
+test("QC (no Splunk): Argo CD log lines are stored as run evidence with refs, readable like Splunk events, without a Splunk link", async () => {
+  const runId = await bareRun();
+  const now = Date.now();
+  const input = {
+    source: "argocd" as const,
+    query: `argocd app=oms-api-qc target=Deployment/oms-api filter="${F.ORDER}" since=60m`,
+    earliest: now - 3_600_000,
+    latest: now,
+    rows: [
+      {
+        _time: "2026-11-10T08:40:00.000+07:00",
+        _raw: JSON.stringify({
+          message: "create shipment",
+          order_code: F.ORDER,
+          shipment_id: F.SHIPMENT,
+        }),
+        "kubernetes.container_name": "oms-api",
+        index: "argocd-qc",
+        sourcetype: "argocd:pod_log",
+      },
+      {
+        _time: "2026-11-10T08:40:02.000+07:00",
+        _raw: `ERROR partner timeout order=${F.ORDER}`,
+        "kubernetes.container_name": "oms-api",
+        index: "argocd-qc",
+        sourcetype: "argocd:pod_log",
+      },
+    ],
+  };
+  const r: any = await storeExternalSearch(input, { runId, stepKey: "search_logs" });
+  assert.equal(r.environment, "qc");
+  assert.equal(r.mode, "argocd");
+  assert.equal(r.splunk_url, undefined, "QC has no Splunk link");
+  assert.equal(r.events.length, 2);
+  const ref = r.events[0].event_ref ?? r.events[0].ref;
+  assert.match(ref, new RegExp(`^S${r.search_id}:0$`));
+  const ev: any = await getEvent(ref, { runId });
+  assert.match(JSON.stringify(ev), new RegExp(F.ORDER));
+  // the same query moments later reuses the stored lines (no second search against the budget)
+  const again: any = await storeExternalSearch(input, { runId, stepKey: "search_logs" });
+  assert.equal(again.search_id, r.search_id);
+  assert.equal(again.cached, true);
+  // the investigation panel lists it with the run's environment and no Splunk link
+  const inv: any = await investigationDetail(runId);
+  const s = inv.searches.find((x: any) => x.id === r.search_id);
+  assert.equal(s.splunk_url, null);
+  assert.equal(s.mode, "argocd");
 });

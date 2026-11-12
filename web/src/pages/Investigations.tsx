@@ -135,6 +135,8 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
   const [earliest, setEarliest] = useState("");
   const [latest, setLatest] = useState("");
   const [outputLocale, setOutputLocale] = useState(locale);
+  const [environment, setEnvironment] = useState<string>(splunk?.environment ?? "production");
+  const { data: argo } = useApi<any>("/api/integrations/argocd");
   const [route, setRoute] = useState<any>(null);
   useEffect(() => {
     if (request.trim().length < 12) return setRoute(null);
@@ -161,8 +163,8 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
           title: request.trim().split("\n")[0].slice(0, 120),
           inputs: {
             request: request.trim(),
-            environment: splunk?.environment ?? "production",
-            ...(indexes.trim() ? { indexes: indexes.trim() } : {}),
+            environment,
+            ...(indexes.trim() && environment !== "qc" ? { indexes: indexes.trim() } : {}),
             ...(earliest ? { earliest: iso(earliest) } : {}),
             ...(latest ? { latest: iso(latest) } : {}),
           },
@@ -186,7 +188,12 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
           <ShieldCheck size={12} /> {t("inv.readOnly")}
         </span>
       </div>
-      {splunk && !splunk.connected && <p className="inv-warn small">{t("inv.notConnected")}</p>}
+      {environment !== "qc" && splunk && !splunk.connected && (
+        <p className="inv-warn small">{t("inv.notConnected")}</p>
+      )}
+      {environment === "qc" && argo && !argo.loggedIn && (
+        <p className="inv-warn small">{t("inv.qcNotConnected")}</p>
+      )}
       <Field label={t("inv.requestLabel")} hint={t("inv.requestHint")}>
         <textarea
           rows={5}
@@ -200,17 +207,25 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
         <summary className="small">{t("inv.filters")}</summary>
         <div className="inv-filter-grid">
           <Field label={t("inv.environment")}>
-            <select value={splunk?.environment ?? "production"} disabled>
-              <option>{splunk?.environment ?? "production"}</option>
+            <select value={environment} onChange={(e) => setEnvironment(e.target.value)}>
+              <option value={splunk?.environment ?? "production"}>
+                {splunk?.environment ?? "production"} · Splunk
+              </option>
+              <option value="qc">qc · Argo CD, Kafka UI, QC DB</option>
             </select>
           </Field>
-          <Field label={t("inv.indexes")} hint={(splunk?.limits?.defaultIndexes ?? []).join(", ")}>
-            <input
-              value={indexes}
-              onChange={(e) => setIndexes(e.target.value)}
-              placeholder="k8s_prod"
-            />
-          </Field>
+          {environment !== "qc" && (
+            <Field
+              label={t("inv.indexes")}
+              hint={(splunk?.limits?.defaultIndexes ?? []).join(", ")}
+            >
+              <input
+                value={indexes}
+                onChange={(e) => setIndexes(e.target.value)}
+                placeholder="k8s_prod"
+              />
+            </Field>
+          )}
           <Field label={`${t("inv.from")} (${tz})`}>
             <input
               type="datetime-local"
@@ -615,9 +630,13 @@ function SearchCard({
           {s.truncated ? "+" : ""}
           {s.duration_ms != null ? ` · ${s.duration_ms} ms` : ""} · {s.mode}
         </span>
-        <a className="small" href={s.splunk_url} target="_blank" rel="noreferrer">
-          Splunk <ExternalLink size={11} />
-        </a>
+        {s.splunk_url ? (
+          <a className="small" href={s.splunk_url} target="_blank" rel="noreferrer">
+            Splunk <ExternalLink size={11} />
+          </a>
+        ) : (
+          <span className="small muted">Argo CD (QC)</span>
+        )}
         <Copy text={s.query} />
       </div>
       <code className="inv-spl">{s.query}</code>

@@ -684,3 +684,12 @@ test("language follows the run's chosen output locale, not the language of the r
   const e = parseRequest("Kiểm tra log đơn hàng 2611095VL160RW01", { ...opts, locale: "en" });
   assert.match(e.time.notes.join(" "), /last 24 hours/);
 });
+
+test("QC environment: no Splunk queries are planned, the plan says logs come from Argo CD", async () => {
+  const { planInvestigation } = await import("../src/investigation/steps.ts");
+  const prod: any = planInvestigation(F.REQUEST_VI, {});
+  assert.ok(prod.initial_queries.length > 0, "production plans SPL");
+  const qc: any = planInvestigation(F.REQUEST_VI, { environment: "qc" });
+  assert.deepEqual(qc.initial_queries, []);
+  assert.match(JSON.stringify(qc.notes), /Argo CD/);
+});

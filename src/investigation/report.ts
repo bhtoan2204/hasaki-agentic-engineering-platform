@@ -20,7 +20,8 @@ export interface SearchSummary {
   mode: string;
   result_count: number | null;
   duration_ms: number | null;
-  splunk_url: string;
+  /** null for QC (Argo CD) searches: there is no Splunk link. */
+  splunk_url: string | null;
   error?: string | null;
   step_key?: string | null;
 }
@@ -492,7 +493,7 @@ export function buildReport(i: ReportInput) {
   md.push(`## ${L.queries}`, "");
   for (const s of i.searches)
     md.push(
-      `- #${s.id} [${s.status}${s.mode === "manual" ? ", manual" : ""}] ${s.result_count ?? 0} ${L.rows}${s.duration_ms != null ? `, ${s.duration_ms} ms` : ""} · ${s.earliest} → ${s.latest} · [Splunk](${s.splunk_url})${s.error ? ` — ${esc(s.error)}` : ""}`,
+      `- #${s.id} [${s.status}${s.mode === "manual" ? ", manual" : ""}] ${s.result_count ?? 0} ${L.rows}${s.duration_ms != null ? `, ${s.duration_ms} ms` : ""} · ${s.earliest} → ${s.latest} · ${s.splunk_url ? `[Splunk](${s.splunk_url})` : "Argo CD (QC)"}${s.error ? ` — ${esc(s.error)}` : ""}`,
       "",
       "  ```spl",
       `  ${s.query}`,

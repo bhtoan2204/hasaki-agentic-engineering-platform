@@ -19,6 +19,7 @@ import {
   buildSearchUrl,
   getEvent,
   investigationSearch,
+  storeExternalSearch,
   resolveWindow,
   searchResults,
   searchStatus,
@@ -403,6 +404,64 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: argoAvailable,
     handler: ({ app, app_namespace }) => appPods(app, app_namespace),
+  });
+  registerIntegrationTool({
+    name: "qc_log_search",
+    summary:
+      "QC logs for an investigation (Argo CD pod logs; QC has no Splunk): lines matching an identifier, stored as evidence with refs like splunk_search.",
+    description:
+      "Read-only. Reads container logs of an Argo CD QC application (`pod` or `workload` {kind, name} from argocd.app_pods) filtered by `filter` " +
+      "(a concrete identifier: order code, shipment id, request/trace id, or an error text) over the last `since_minutes` (default 60, max 7 days). " +
+      "Each matching line is stored as an event of this run with an event_ref (S<search>:<n>), timestamp, service, identifiers and a sanitized excerpt, " +
+      "exactly like splunk_search events: cite them by event_ref and read one in full with splunk_get_event. Searches count against the run's search budget.",
+    input: z.object({
+      app: z.string().min(1),
+      app_namespace: z.string().optional(),
+      namespace: z.string().optional(),
+      pod: z.string().optional(),
+      workload: z
+        .object({ kind: z.string(), name: z.string(), group: z.string().optional() })
+        .optional(),
+      container: z.string().optional(),
+      filter: z.string().min(3),
+      since_minutes: z
+        .number()
+        .positive()
+        .max(7 * 24 * 60)
+        .optional(),
+      tail_lines: z.number().int().positive().max(2000).optional(),
+      previous: z.boolean().optional(),
+    }),
+    readOnly: true,
+    available: argoAvailable,
+    handler: async (args, ctx) => {
+      const since = args.since_minutes ?? 60;
+      const r = await podLogs({ ...args, since_minutes: since });
+      const target =
+        args.pod ?? (args.workload ? `${args.workload.kind}/${args.workload.name}` : "");
+      const service = args.container ?? args.workload?.name ?? args.app;
+      const latest = Date.now();
+      return storeExternalSearch(
+        {
+          source: "argocd",
+          query: `argocd app=${args.app} target=${target}${args.container ? ` container=${args.container}` : ""} filter=${JSON.stringify(args.filter)} since=${since}m${args.previous ? " previous" : ""}`,
+          earliest: latest - since * 60_000,
+          latest,
+          error: r.error ? String(r.error) : undefined,
+          rows: r.lines.map((l) => ({
+            _time: l.ts,
+            _raw: l.line,
+            host: l.pod ?? null,
+            index: "argocd-qc",
+            source: `argocd:${args.app}`,
+            sourcetype: "argocd:pod_log",
+            "kubernetes.container_name": service,
+            "kubernetes.pod_name": l.pod ?? null,
+          })),
+        },
+        { runId: ctx.runId || null, stepKey: ctx.stepKey ?? null },
+      );
+    },
   });
   registerIntegrationTool({
     name: "argocd.pod_logs",

@@ -1377,6 +1377,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Yêu cầu này có vẻ là việc code, không phải điều tra log production. Vẫn có thể chạy nếu bạn chắc chắn.",
     "inv.filters": "Bộ lọc (tuỳ chọn): môi trường, index, khoảng thời gian, ngôn ngữ báo cáo",
     "inv.environment": "Môi trường",
+    "inv.qcNotConnected":
+      "QC không có Splunk: log được đọc qua Argo CD, nhưng Argo CD chưa kết nối. Dán argocd.token ở trang Integrations trước khi chạy.",
     "inv.indexes": "Index",
     "inv.from": "Từ",
     "inv.to": "Đến",
@@ -3634,6 +3636,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "This looks like a coding task rather than a production log investigation. You can still run it if you are sure.",
     "inv.filters": "Filters (optional): environment, indexes, time range, report language",
     "inv.environment": "Environment",
+    "inv.qcNotConnected":
+      "QC has no Splunk: logs are read through Argo CD, which is not connected. Paste argocd.token on the Integrations page first.",
     "inv.indexes": "Indexes",
     "inv.from": "From",
     "inv.to": "To",

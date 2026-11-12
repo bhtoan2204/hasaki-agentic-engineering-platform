@@ -109,7 +109,16 @@ export function planInvestigation(
       );
   }
   const environment = String(inputs.environment ?? config.splunk.environment);
-  if (environment !== config.splunk.environment)
+  const qc = environment === "qc";
+  if (qc)
+    notes.push(
+      say(
+        locale,
+        "môi trường QC không có Splunk: log được đọc qua Argo CD (qc_log_search), kèm Kafka UI và QC database",
+        "QC has no Splunk: logs are read through Argo CD (qc_log_search), with Kafka UI and the QC databases",
+      ),
+    );
+  else if (environment !== config.splunk.environment)
     notes.push(
       say(
         locale,
@@ -118,7 +127,7 @@ export function planInvestigation(
       ),
     );
   const ids = parsed.anchors.slice(0, 3);
-  const initial_queries = indexes.slice(0, 3).flatMap((idx) =>
+  const initial_queries = (qc ? [] : indexes.slice(0, 3)).flatMap((idx) =>
     ids.length
       ? ids.slice(0, 2).map((id) => ({
           query: `index=${idx} "${id.replace(/"/g, "")}" | table _time index source sourcetype host kubernetes.container_name message _raw | sort 0 _time | head 500`,
@@ -201,7 +210,10 @@ export function searchSummaries(rows: Awaited<ReturnType<typeof runSearches>>): 
     mode: r.mode,
     result_count: r.result_count,
     duration_ms: r.duration_ms,
-    splunk_url: buildSearchUrl(r.query, r.earliest.getTime(), r.latest.getTime()),
+    splunk_url:
+      r.mode === "argocd"
+        ? null
+        : buildSearchUrl(r.query, r.earliest.getTime(), r.latest.getTime()),
     error: r.error,
     step_key: r.step_key,
   }));

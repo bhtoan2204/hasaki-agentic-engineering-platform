@@ -883,14 +883,14 @@ function view(row: SearchRow, extra: Record<string, unknown> = {}, pageSize = 50
       latest: formatInZone(l * 1000, tz, "s"),
       timezone: tz,
     },
-    environment: config.splunk.environment,
+    environment: row.mode === "argocd" ? "qc" : config.splunk.environment,
     mode: row.mode,
     result_count: row.result_count,
     truncated: row.truncated,
     duration_ms: row.duration_ms,
     ...(row.error ? { error: row.error } : {}),
     ...(row.messages?.length ? { messages: row.messages } : {}),
-    splunk_url: buildSearchUrl(row.query, e, l),
+    ...(row.mode === "argocd" ? {} : { splunk_url: buildSearchUrl(row.query, e, l) }),
     events,
     ...((row.events?.length ?? 0) > pageSize || row.truncated
       ? {
@@ -1047,6 +1047,76 @@ export async function investigationSearch(args: InvestigationSearchArgs, scope: 
           note: "no events matched — widen the window step by step, try another identifier, or check the index/field names found in code",
         },
     args.page_size,
+  );
+}
+
+/**
+ * Store log lines read from another source (QC: Argo CD pod logs) as a search of the run, normalized like Splunk events,
+ * so they get evidence refs and flow through correlation, timeline and report. Same dedup and per-run budget.
+ */
+export async function storeExternalSearch(
+  input: {
+    source: "argocd";
+    query: string;
+    earliest: number;
+    latest: number;
+    rows: Array<Record<string, unknown>>;
+    error?: string;
+  },
+  scope: SearchScope = {},
+  pageSize = 50,
+) {
+  const runId = scope.runId || null;
+  const hash = hashOf(input.query, input.earliest, input.latest, input.rows.length);
+  if (runId) {
+    const prior = await one<SearchRow>(
+      pool,
+      `${selectRow} WHERE run_id = $1 AND query = $2 AND mode = $3 AND status = 'done' AND finished_at > now() - interval '2 minutes' ORDER BY id DESC LIMIT 1`,
+      [runId, input.query, input.source],
+    );
+    if (prior) return view(prior, { cached: true }, pageSize);
+    const used = await one<{ n: number }>(
+      pool,
+      "SELECT count(*)::int AS n FROM splunk_searches WHERE run_id = $1 AND mode <> 'manual' AND status IN ('done', 'failed', 'running')",
+      [runId],
+    );
+    if ((used?.n ?? 0) >= config.splunk.queryBudget)
+      throw new Error(
+        `query budget exhausted: this investigation already ran ${used!.n} log searches (limit ${config.splunk.queryBudget}); work with the evidence collected or report what is missing`,
+      );
+  }
+  const row = await one<SearchRow>(
+    pool,
+    `INSERT INTO splunk_searches (user_id, run_id, step_key, query, query_hash, earliest, latest, mode, status, auth, result_count, events, messages, error, finished_at)
+     VALUES ($1, $2, $3, $4, $5, to_timestamp($6 / 1000.0), to_timestamp($7 / 1000.0), $8, 'done', $8, $9, '[]', $10, $11, now()) RETURNING *`,
+    [
+      await actorId(),
+      runId,
+      scope.stepKey ?? null,
+      input.query,
+      hash,
+      input.earliest,
+      input.latest,
+      input.source,
+      input.rows.length,
+      json(input.error ? [redactPii(`ERROR: ${input.error}`)] : []),
+      input.error ?? null,
+    ],
+  );
+  const events = input.rows.map((x, i) => normalizeEvent(x, i, row!.id, config.splunk.timezone));
+  const done = await one<SearchRow>(
+    pool,
+    "UPDATE splunk_searches SET events = $2 WHERE id = $1 RETURNING *",
+    [row!.id, json(events)],
+  );
+  return view(
+    done!,
+    events.length
+      ? {}
+      : {
+          note: "no log lines matched — check the app/workload, widen since_minutes or try another identifier",
+        },
+    pageSize,
   );
 }
 
