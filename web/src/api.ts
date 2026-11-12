@@ -155,46 +155,58 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
     [scopedKey],
   );
 
-  const reload = useCallback(async () => {
-    if (!path) return;
-    const key = withScope(path);
-    const n = ++seq.current;
+  const load = useCallback(
+    async (fresh: boolean) => {
+      if (!path) return;
+      const key = withScope(path);
+      const n = ++seq.current;
 
-    setDataState((prev) => {
-      if (prev === null) setLoading(true);
-      else setRefreshing(true);
-      return prev;
-    });
+      setDataState((prev) => {
+        if (prev === null) setLoading(true);
+        else setRefreshing(true);
+        return prev;
+      });
 
-    try {
-      let p = inFlight.get(key);
-      if (!p) {
-        p = api<T>(path);
-        inFlight.set(key, p);
-        p.finally(() => inFlight.delete(key));
+      try {
+        // A mutation must not reuse a GET that started before it committed: that response is the
+        // previous screen, and the view would sit there until the next live tick (up to one poll).
+        if (fresh) inFlight.delete(key);
+        let p = inFlight.get(key);
+        if (!p) {
+          p = api<T>(path);
+          inFlight.set(key, p);
+          const flight = p;
+          flight.finally(() => {
+            if (inFlight.get(key) === flight) inFlight.delete(key);
+          });
+        }
+        const d = await p;
+        if (n === seq.current) {
+          apiCache.set(key, { data: d, timestamp: Date.now() });
+          setDataState(d);
+          setError(null);
+        }
+      } catch (e) {
+        if (n === seq.current) setError((e as Error).message);
+      } finally {
+        if (n === seq.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-      const d = await p;
-      if (n === seq.current) {
-        apiCache.set(key, { data: d, timestamp: Date.now() });
-        setDataState(d);
-        setError(null);
-      }
-    } catch (e) {
-      if (n === seq.current) setError((e as Error).message);
-    } finally {
-      if (n === seq.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [path]);
+    },
+    [path],
+  );
+
+  const reload = useCallback(() => load(false), [load]);
+  const reloadFresh = useCallback(() => load(true), [load]);
 
   useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, ...deps]);
 
-  return { data, error, loading, refreshing, reload, setData };
+  return { data, error, loading, refreshing, reload, reloadFresh, setData };
 }
 
 export type LiveState = "sse" | "polling" | "connecting";
@@ -259,7 +271,7 @@ let reopenDelay = 2000;
 let cursor: number | null = null;
 const seen = new Set<number>();
 
-const POLL_MS = 5000;
+const POLL_MS = 1500;
 const REOPEN_MAX_MS = 30_000;
 
 function setShared(s: LiveState) {
@@ -299,7 +311,9 @@ function stopPolling() {
 }
 function startPolling() {
   setShared("polling");
-  if (!poll) poll = setInterval(() => void pollOnce(), POLL_MS);
+  if (poll) return;
+  void pollOnce();
+  poll = setInterval(() => void pollOnce(), POLL_MS);
 }
 function streamUrl() {
   const q = new URLSearchParams();

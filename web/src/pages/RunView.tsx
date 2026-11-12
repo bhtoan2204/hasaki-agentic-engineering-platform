@@ -122,7 +122,9 @@ function useInspectorWidth() {
 export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const pane = useInspectorWidth();
   const { t, status } = useI18n();
-  const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
+  const { data: run, error, loading, refreshing, reload, reloadFresh } = useApi<any>(
+    `/api/runs/${id}`,
+  );
   const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
   // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
   const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
@@ -253,7 +255,10 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   const runAction = async (a: string, body: any = {}) => {
     if (a === "cancel" && !confirm(t("rv.cancelConfirm"))) return;
-    if (await act(() => api(`/api/runs/${id}/${a}`, body))) reload();
+    await act(async () => {
+      await api(`/api/runs/${id}/${a}`, body);
+      await reloadFresh();
+    });
   };
   const blocked = run.steps.filter(
     (s: any) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL",
@@ -299,13 +304,19 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               </>
             )}
           </nav>
-          <span className={`rv-live is-${live}`} title={t("rv.channel")}>
+          <span
+            className={`rv-live is-${live}${refreshing ? " is-refreshing" : ""}`}
+            title={t("rv.channel")}
+            role="status"
+          >
             <i />
-            {live === "sse"
-              ? t("rv.live")
-              : live === "polling"
-                ? t("rv.polling")
-                : t("rv.connecting")}
+            {refreshing
+              ? t("rv.updating")
+              : live === "sse"
+                ? t("rv.live")
+                : live === "polling"
+                  ? t("rv.polling")
+                  : t("rv.connecting")}
           </span>
         </div>
 
@@ -589,7 +600,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         >
           {stepKey === "~changes" ? (
             <div className="rv-pane">
-              <Changes run={run} tick={tick} activity={activity} onChanged={reload} />
+              <Changes run={run} tick={tick} activity={activity} onChanged={reloadFresh} />
             </div>
           ) : stepKey ? (
             <StepInspector
@@ -598,7 +609,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               stepKey={stepKey}
               tick={tick}
               activity={activity}
-              onChanged={reload}
+              onChanged={reloadFresh}
             />
           ) : (
             <div className="rv-pane">
@@ -741,16 +752,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                       <button
                         className="sm"
                         disabled={!feedback.trim()}
-                        onClick={async () =>
-                          (await act(
-                            () =>
-                              api(`/api/runs/${id}/feedback`, {
-                                message: feedback,
-                                mode: feedbackMode,
-                              }),
-                            t("rv.feedbackSent"),
-                          )) && (setFeedback(""), reload())
-                        }
+                        onClick={async () => {
+                          const r = await act(async () => {
+                            const result = await api(`/api/runs/${id}/feedback`, {
+                              message: feedback,
+                              mode: feedbackMode,
+                            });
+                            await reloadFresh();
+                            return result;
+                          }, t("rv.feedbackSent"));
+                          if (r) setFeedback("");
+                        }}
                       >
                         <Send size={13} /> {t("rv.sendFeedback")}
                       </button>

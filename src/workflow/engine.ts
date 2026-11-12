@@ -2018,7 +2018,15 @@ export async function runDetail(runId: number) {
       stepsOf(pool, runId),
       q(
         pool,
-        "SELECT a.*, s.key AS step_key FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 ORDER BY a.id",
+        `SELECT a.id, a.step_id, a.run_id, a.number, a.generation, a.status,
+                a.agent_provider, a.agent_model, a.metrics, a.error,
+                a.invalidated_at, a.resolved_at, a.started_at, a.finished_at,
+                a.executor_stopped_at, a.context_snapshot_id, a.agent_session_id,
+                CASE WHEN a.output ? 'verification'
+                     THEN jsonb_build_object('verification', a.output->'verification') END AS output,
+                s.key AS step_key
+           FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
+          WHERE a.run_id = $1 ORDER BY a.id`,
         [runId],
       ),
       q(

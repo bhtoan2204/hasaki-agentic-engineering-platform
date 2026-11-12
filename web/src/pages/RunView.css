@@ -325,6 +325,15 @@
   background: var(--st-wait);
 }
 
+.rv-live.is-refreshing {
+  color: var(--brand-400);
+}
+
+.rv-live.is-refreshing i {
+  background: var(--brand-400);
+  animation: livepulse 0.8s infinite;
+}
+
 .rv-summary {
   display: flex;
   align-items: center;
