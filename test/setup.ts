@@ -20,7 +20,11 @@ const dbName = `platform_test_${randomUUID().replaceAll("-", "")}`;
 if (!/^platform_test_[0-9a-f]+$/.test(dbName))
   throw new Error("Refusing unexpected test database name");
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const TEMPLATE = "platform_test_tpl";
+const TEMPLATE_PREFIX = "platform_test_tpl_";
+// Locks: 727002 (exclusive) serialises template creation and cleanup; (727003, hashtext(name)) is held shared while
+// databases are copied from a template, so cleanup never drops a template another test process is using.
+const TEMPLATE_LOCK = 727002;
+const TEMPLATE_USE_LOCK = 727003;
 
 function migrationChecksum() {
   const dir = fileURLToPath(new URL("../migrations/", import.meta.url));
@@ -80,39 +84,55 @@ writeFileSync(
   }),
 );
 
-if (!needsEmptyDatabase()) await ensureMigratedTemplate(migrationChecksum(), cfgPath);
+const checksum = migrationChecksum();
+// Per migration set: branches with different migrations (parallel workflow runs) never rebuild each other's template.
+const TEMPLATE = TEMPLATE_PREFIX + checksum.slice(0, 16);
+const templateUse = needsEmptyDatabase() ? null : await ensureMigratedTemplate(checksum, cfgPath);
 
-for (let attempt = 0; ; attempt++) {
-  const client = new pg.Client({ connectionString: admin, connectionTimeoutMillis: 5000 });
-  try {
-    await client.connect();
-    await client.query(
-      needsEmptyDatabase()
-        ? `CREATE DATABASE ${dbName}`
-        : `CREATE DATABASE ${dbName} TEMPLATE ${TEMPLATE}`,
-    );
-    await client.end();
-    break;
-  } catch (error) {
-    await client.end().catch(() => {});
-    const code = (error as { code?: string }).code;
-    if (code === "42P04") break;
-    if (!retryable(error) || attempt >= 7) throw error;
-    await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+try {
+  for (let attempt = 0; ; attempt++) {
+    const client = new pg.Client({ connectionString: admin, connectionTimeoutMillis: 5000 });
+    try {
+      await client.connect();
+      await client.query(
+        templateUse
+          ? `CREATE DATABASE ${dbName} TEMPLATE ${TEMPLATE}`
+          : `CREATE DATABASE ${dbName}`,
+      );
+      await client.end();
+      break;
+    } catch (error) {
+      await client.end().catch(() => {});
+      const code = (error as { code?: string }).code;
+      if (code === "42P04") break;
+      if (!retryable(error) || attempt >= 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
   }
+} finally {
+  await templateUse?.end().catch(() => {});
 }
 
-async function ensureMigratedTemplate(checksum: string, configPath: string) {
+/** Returns a connection holding the template's shared use lock; close it once the test database is copied. */
+async function ensureMigratedTemplate(checksum: string, configPath: string): Promise<pg.Client> {
+  const use = new pg.Client({ connectionString: admin, connectionTimeoutMillis: 5000 });
+  await use.connect();
   const client = new pg.Client({ connectionString: admin, connectionTimeoutMillis: 5000 });
   await client.connect();
-  await client.query("SELECT pg_advisory_lock(727002)");
+  await client.query("SELECT pg_advisory_lock($1)", [TEMPLATE_LOCK]);
   try {
+    await dropUnusedTemplates(client);
+    // Taken before the creation lock is released, so no cleanup can drop the template before it is copied.
+    await use.query("SELECT pg_advisory_lock_shared($1, hashtext($2))", [
+      TEMPLATE_USE_LOCK,
+      TEMPLATE,
+    ]);
     const current = await client.query(
       `SELECT pg_catalog.shobj_description(oid, 'pg_database') AS comment
        FROM pg_database WHERE datname = $1`,
       [TEMPLATE],
     );
-    if (current.rows[0]?.comment === checksum) return;
+    if (current.rows[0]?.comment === checksum) return use;
     if (current.rowCount) await client.query(`DROP DATABASE ${TEMPLATE} WITH (FORCE)`);
     await client.query(`CREATE DATABASE ${TEMPLATE}`);
     const url = new URL(admin);
@@ -151,9 +171,36 @@ await pool.end();`,
       [TEMPLATE, checksum],
     );
     await client.query(comment.rows[0].sql);
+    return use;
+  } catch (error) {
+    await use.end().catch(() => {});
+    throw error;
   } finally {
-    await client.query("SELECT pg_advisory_unlock(727002)").catch(() => {});
+    await client.query("SELECT pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => {});
     await client.end().catch(() => {});
+  }
+}
+
+/** Keeps the newest few templates of other migration sets; skips any that a test process is copying right now. */
+async function dropUnusedTemplates(client: pg.Client, keep = 4) {
+  const others = await client.query<{ datname: string }>(
+    `SELECT datname FROM pg_database WHERE datname LIKE $1 AND datname <> $2 ORDER BY oid DESC OFFSET $3`,
+    [TEMPLATE_PREFIX.replaceAll("_", "\\_") + "%", TEMPLATE, keep],
+  );
+  for (const { datname } of others.rows) {
+    const free = await client.query("SELECT pg_try_advisory_lock($1, hashtext($2)) AS ok", [
+      TEMPLATE_USE_LOCK,
+      datname,
+    ]);
+    if (!free.rows[0].ok) continue;
+    try {
+      await client.query(`DROP DATABASE IF EXISTS ${datname} WITH (FORCE)`);
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1, hashtext($2))", [
+        TEMPLATE_USE_LOCK,
+        datname,
+      ]);
+    }
   }
 }
 const u = new URL(admin);
