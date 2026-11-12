@@ -731,7 +731,7 @@ const fmtDur = (ms: number | null) => {
 };
 
 /** "What did the run do?" — a factual summary of a finished run (steps, code, tests, PRs, decisions, problems). */
-function RunSummaryCard({ runs }: { runs: any[] }) {
+export function RunSummaryCard({ runs }: { runs: any[] }) {
   const { t } = useI18n();
   const finished = useMemo(
     () => (runs ?? []).filter((r) => FINISHED.includes(r.status)).sort((a, b) => b.id - a.id),

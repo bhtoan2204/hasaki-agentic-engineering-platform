@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
 import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
@@ -730,6 +731,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                   </div>
                 </div>
               )}
+              {/* Result summary + copyable markdown for every finished run (runs without a work item had none). */}
+              <RunSummaryCard runs={[run]} />
               <RunTimeline runId={id} activity={activity} />
             </div>
           )}
