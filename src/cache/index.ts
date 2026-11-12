@@ -223,6 +223,7 @@ onCommittedWrite(invalidateTables);
 let client: ListenerClient | null = null;
 let stopped = false;
 let retryMs = 1000;
+let retryTimer: NodeJS.Timeout | null = null;
 
 /** Start listening for other processes' writes. While not connected, caches are bypassed (never trusted stale). */
 export type ListenerClient = Pick<pg.Client, "on" | "connect" | "query" | "end">;
@@ -245,7 +246,10 @@ export async function startCacheInvalidation(
     flushAllCaches();
     if (stopped) return;
     console.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
-    setTimeout(() => void startCacheInvalidation(connectionString, makeClient).catch(() => {}), retryMs);
+    retryTimer = setTimeout(
+      () => void startCacheInvalidation(connectionString, makeClient).catch(() => {}),
+      retryMs,
+    );
     retryMs = Math.min(30_000, retryMs * 2);
   };
   c.on(
@@ -270,6 +274,8 @@ export async function startCacheInvalidation(
 
 export async function stopCacheInvalidation() {
   stopped = true;
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
   const c = client;
   client = null;
   listener = "none";
