@@ -74,7 +74,7 @@ export interface ContextPack {
     entries: Record<string, string>;
     reused_from_pack?: number | null;
     /** Cached retrieval results reused instead of read again (re-read telemetry). */
-    reread_avoided?: number;
+    reread_count?: number;
   };
 }
 export class ContextBudgetError extends Error {}
@@ -371,7 +371,7 @@ export async function ensureContextPack(
         const mode = tier.get(k.key) ?? "inline";
         // Search-tier bodies stay on the snapshot and read_knowledge. Copying them into the pack
         // paid for text the disclosure plan had already decided not to show.
-        if (!mandatory && mode === "search") {
+        if (!mandatory && mode === "search" && tierLabel !== "unverified_suggestion") {
           searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
           continue;
         }
@@ -694,19 +694,48 @@ export async function ensureContextPack(
             key: key!,
             entries: cached,
             reused_from_pack: prior!.id,
-            reread_avoided: Object.keys(cached).length,
+            reread_count: Object.keys(cached).length,
           };
         } else {
           await retrieve("search_code", { query, operation: "context", limit: 8 }, "code", 65);
           const first = entries.find((e) => e.id === "search_code");
-          const symbol = first && JSON.parse(first.body)?.hits?.[0]?.qualified_name;
-          if (symbol)
+          let topHits: any[] = [];
+          try {
+            topHits = first ? (JSON.parse(first.body)?.hits ?? []) : [];
+          } catch {
+            /* no usable hits */
+          }
+          // Dependency expansion for the top-3 distinct symbols, not just the first hit.
+          const symbols = [
+            ...new Set(
+              topHits
+                .slice(0, 3)
+                .map((h) => h?.qualified_name)
+                .filter((n): n is string => typeof n === "string" && n.length > 0),
+            ),
+          ];
+          for (const symbol of symbols)
             await retrieve(
               "find_dependencies",
               { symbol: String(symbol).slice(0, 512), depth: 1 },
               "code",
               55,
             );
+          // Merge the per-symbol results into a single find_dependencies entry.
+          const depEntries = entries.filter((e) => e.id === "find_dependencies");
+          if (depEntries.length > 1) {
+            try {
+              const merged = depEntries.flatMap((e) => JSON.parse(e.body)?.dependencies ?? []);
+              depEntries[0].body = JSON.stringify({
+                ...JSON.parse(depEntries[0].body),
+                dependencies: merged,
+              });
+              for (const extra of depEntries.slice(1)) entries.splice(entries.indexOf(extra), 1);
+            } catch {
+              /* keep the first result only */
+              for (const extra of depEntries.slice(1)) entries.splice(entries.indexOf(extra), 1);
+            }
+          }
           // Rank + dedupe the hits with the dependency edges before caching, so reuse keeps the ranking.
           const searchEntry = entries.find((e) => e.id === "search_code");
           const depsEntry = entries.find((e) => e.id === "find_dependencies");
@@ -828,7 +857,7 @@ export async function ensureContextPack(
           budget_tokens: pack.budget_tokens,
           budget_source: pack.budget_source,
           code_retrieval_reused_from_pack: pack.retrieval_cache?.reused_from_pack ?? null,
-          reread_avoided: pack.retrieval_cache?.reread_avoided ?? 0,
+          reread_count: pack.retrieval_cache?.reread_count ?? 0,
         },
       });
       return { ...pack, id: persisted.id };

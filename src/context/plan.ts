@@ -112,8 +112,10 @@ export function planKnowledge(
   let indexed = 0;
   for (const x of rest) {
     const companion = !!x.k.metadata?.parent_skill;
-    const disclosure = !companion && indexed < opts.indexSize ? "index" : "search";
-    if (disclosure === "index") indexed++;
+    // Unverified observations always stay visible as an index line (with notice) and never use a slot.
+    const pinned = unverified(x) && !companion;
+    const disclosure = pinned || (!companion && indexed < opts.indexSize) ? "index" : "search";
+    if (disclosure === "index" && !pinned) indexed++;
     out.push({
       key: x.k.key,
       disclosure,

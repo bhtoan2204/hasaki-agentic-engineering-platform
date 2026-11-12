@@ -124,3 +124,27 @@ test("only unverified observations carry the explicit unverified notice", () => 
     true,
   );
 });
+
+test("unverified task memory always stays at the index tier, even when the index is full", () => {
+  const doc = (key: string, category: string, metadata: object = {}) => ({
+    key,
+    title: key,
+    category,
+    content: "text",
+    reason: "applies",
+    metadata,
+  });
+  const items = [
+    doc("a", "reference_doc", { load: "on_demand", description: "request words" }),
+    doc("b", "reference_doc", { load: "on_demand", description: "request words" }),
+    doc("memory.x", "task_memory", { trust: "unverified", load: "on_demand" }),
+  ];
+  const plan = planKnowledge(items, {
+    requestText: "request words",
+    stepType: "agent",
+    inlineTokens: 1000,
+    indexSize: 1,
+  });
+  assert.equal(plan.find((p) => p.key === "memory.x")!.disclosure, "index");
+  assert.equal(plan.filter((p) => p.disclosure === "index" && p.key !== "memory.x").length, 1);
+});
