@@ -21,7 +21,11 @@ import {
   resetSelfRepositoryCache,
   setBwrapForTests,
 } from "../src/platform/selfDevelopment.ts";
-import { requireRepositoryAccess, setGithubPermissionChecker, setRepositoryAccess } from "../src/repos/access.ts";
+import {
+  requireRepositoryAccess,
+  setGithubPermissionChecker,
+  setRepositoryAccess,
+} from "../src/repos/access.ts";
 import { repositories } from "../src/repos/service.ts";
 import { definitions, seedTemplates } from "../src/workflow/definitions.ts";
 import { startRun } from "../src/workflow/engine.ts";
@@ -178,26 +182,26 @@ test("self-development registers GitHub, isolates the live tree and stays recove
       decide("Write", { file_path: join(live, "src/agent/toolPolicy.ts") }, policy).allow,
       false,
     );
-    assert.equal(
-      decide("Write", { file_path: join(first.path, "src/ok.ts") }, policy).allow,
-      true,
-    );
+    assert.equal(decide("Write", { file_path: join(first.path, "src/ok.ts") }, policy).allow, true);
     assert.equal(decideBash("echo secret > src/pwn.ts", policy, live).allow, false);
     assert.equal(decideBash(`git -C ${live} reset --hard`, policy, first.path).allow, false);
     assert.equal(decideBash(`git -C ${live} clean -fd`, policy, first.path).allow, false);
     assert.equal(isSecretPath(".env"), true);
     assert.equal(isSecretPath(".env.example"), false);
-    assert.equal(
-      decide("Read", { file_path: join(live, ".env") }, policy, live).allow,
-      false,
-    );
+    assert.equal(decide("Read", { file_path: join(live, ".env") }, policy, live).allow, false);
 
     sh(repoPath, "remote", "set-url", "origin", PLATFORM_URL);
     setBwrapForTests(null);
     config.platform.trustedOperatorIsolation = false;
-    await assert.rejects(() => commandProcessEnv(repoPath, {}), /trustedOperatorIsolation|bubblewrap/);
+    await assert.rejects(
+      () => commandProcessEnv(repoPath, {}),
+      /trustedOperatorIsolation|bubblewrap/,
+    );
     config.platform.trustedOperatorIsolation = true;
+    process.env.NODE_EXTRA_CA_CERTS = "/etc/ssl/certs/ca-certificates.crt";
     const isolated = await commandProcessEnv(repoPath, {});
+    delete process.env.NODE_EXTRA_CA_CERTS;
+    assert.equal(isolated.env.NODE_EXTRA_CA_CERTS, "/etc/ssl/certs/ca-certificates.crt");
     assert.equal("DATABASE_URL" in isolated.env, false);
     assert.equal("AUTH_SECRET" in isolated.env, false);
     assert.equal(isolated.env.TEST_DATABASE_ADMIN_URL?.endsWith("/platform"), false);
@@ -223,7 +227,8 @@ test("self-development registers GitHub, isolates the live tree and stays recove
       assert.equal(auth, "Bearer gh-test");
       if (method === "GET" && target.includes("/pulls?")) {
         pulls += 1;
-        const body = pulls === 1 ? [] : [{ number: 7, html_url: "https://github.com/acme/app/pull/7" }];
+        const body =
+          pulls === 1 ? [] : [{ number: 7, html_url: "https://github.com/acme/app/pull/7" }];
         return new Response(JSON.stringify(body), { status: 200 });
       }
       if (method === "POST" || method === "PATCH")
@@ -232,11 +237,14 @@ test("self-development registers GitHub, isolates the live tree and stays recove
         });
       return new Response("{}", { status: 404 });
     }) as typeof fetch;
-    const [created, updated] = await execution.run({ userId: member.id, kind: "user" }, async () => {
-      const firstPr = await openGithubPullRequest("acme/app", branch, "Self", "body");
-      const secondPr = await openGithubPullRequest("acme/app", branch, "Self", "body");
-      return [firstPr, secondPr] as const;
-    });
+    const [created, updated] = await execution.run(
+      { userId: member.id, kind: "user" },
+      async () => {
+        const firstPr = await openGithubPullRequest("acme/app", branch, "Self", "body");
+        const secondPr = await openGithubPullRequest("acme/app", branch, "Self", "body");
+        return [firstPr, secondPr] as const;
+      },
+    );
     assert.equal(created.created, true);
     assert.equal(updated.created, false);
     assert.equal(updated.url, "https://github.com/acme/app/pull/7");

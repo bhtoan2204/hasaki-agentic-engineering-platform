@@ -227,6 +227,8 @@ export function selfTestEnvironment(extra: Record<string, string>): NodeJS.Proce
     npm_config_fund: "false",
     npm_config_update_notifier: "false",
   };
+  // TLS-intercepting proxies (corporate WARP) need their CA, or npm/npx cannot reach the registry.
+  if (process.env.NODE_EXTRA_CA_CERTS) env.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS;
   for (const [key, value] of Object.entries(extra)) {
     if (!key || SECRET_ENV.test(key) || key.startsWith("PLATFORM_") || key.startsWith("GIT_"))
       continue;

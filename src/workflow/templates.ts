@@ -54,16 +54,18 @@ changed=$(git diff --name-only "$base...HEAD" || true)
 echo "== typecheck"
 npx --no-install tsc -p . --pretty false --noEmit --incremental false
 files=$(printf '%s\\n' "$changed" | grep -E '\\.(ts|tsx)$' || true)
-if [ -n "$files" ]; then
+if [ -n "$files" ] && [ -x node_modules/.bin/eslint ]; then
   echo "== eslint (changed files)"
   printf '%s\\n' "$files" | xargs -r npx --no-install eslint --no-error-on-unmatched-pattern
+elif [ -n "$files" ]; then
+  echo "eslint not installed; lint skipped"
 fi
 tests=$(
   {
     printf '%s\\n' "$changed" | grep -E '^test/.*\\.test\\.ts$' || true
     printf '%s\\n' "$changed" | sed -n 's|^src/\\(.*\\)\\.ts$|test/\\1.test.ts|p'
     printf '%s\\n' "$changed" | sed -n 's|.*/\\([^/]*\\)\\.ts$|test/\\1.test.ts|p'
-  } | sort -u | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && printf '%s\\n' "$f"; done
+  } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
 )
 if [ -n "$tests" ]; then
   echo "== targeted tests"
@@ -114,7 +116,7 @@ elif [ -f package.json ]; then
       {
         printf '%s\\n' "$changed" | grep -E '^test/.*\\.test\\.ts$' || true
         printf '%s\\n' "$changed" | sed -n 's|^src/\\(.*\\)\\.ts$|test/\\1.test.ts|p'
-      } | sort -u | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && printf '%s\\n' "$f"; done
+      } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
     )
     if [ -n "$tests" ]; then
       echo "== targeted tests"
