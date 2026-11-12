@@ -204,7 +204,7 @@ export async function dispatchPlatformTool(
           const parsed = native.input.safeParse(nativeArgs ?? {});
           if (!parsed.success)
             throw new Error(
-              `Invalid arguments: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+              `Invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ")}`,
             );
           const timeout = Math.min(
             60000,
