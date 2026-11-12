@@ -220,6 +220,12 @@ export function parseShell(command: string): ShellParse {
       add(c);
       continue;
     }
+    // An unquoted word starting with # comments out the rest of the line: it runs nothing (`${#x}` / `$#` are not words).
+    if (c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+      const nl = command.indexOf("\n", i);
+      i = (nl < 0 ? command.length : nl) - 1;
+      continue;
+    }
     if (c === "\\") {
       if (command[i + 1] === "\n") return fail("line continuation");
       add(c + (command[i + 1] ?? ""));

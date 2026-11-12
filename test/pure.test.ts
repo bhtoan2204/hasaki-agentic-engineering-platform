@@ -820,6 +820,18 @@ describe("Bash policy: loops in analysis steps", () => {
       assert.deepEqual(decideBash(c, A), { allow: true }, c);
   });
 
+  test("shell comments run nothing; a comment does not hide a command on the next line", () => {
+    for (const c of [
+      "# try common base env\nls -la",
+      "ls # list ; rm -rf src",
+      "for f in a b; do # check each\n  rg -n x \"$f\"\ndone",
+      'echo "${#PATH}" $# "a # b"',
+    ])
+      assert.deepEqual(decideBash(c, A), { allow: true }, c);
+    for (const c of ["# note\nrm -rf src", "ls #x\ntouch a", "echo a#b; rm x"])
+      assert.equal(decideBash(c, A).allow, false, c);
+  });
+
   test("read-only if / elif / else (alone, in loops, multi-line) is allowed", () => {
     for (const c of [
       `for f in a; do if rg -q x "$f"; then echo "$f"; fi; done`,
