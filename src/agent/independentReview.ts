@@ -79,6 +79,41 @@ export function independentUpstream<T extends { output: any }>(
   return out;
 }
 
+/** Artifact ids already cited by sanitized ancestor outputs (command logs, verification records). */
+export function citedArtifactIds(value: unknown): number[] {
+  const out = new Set<number>();
+  const walk = (v: unknown) => {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) walk(item);
+      return;
+    }
+    for (const [key, val] of Object.entries(v as Record<string, unknown>)) {
+      if (
+        (key === "artifact_id" || key.endsWith("_artifact_id")) &&
+        typeof val === "number" &&
+        Number.isInteger(val) &&
+        val > 0
+      )
+        out.add(val);
+      else if (val && typeof val === "object") walk(val);
+    }
+  };
+  walk(value);
+  return [...out];
+}
+
+/** Head and tail of a stored log. The tail is where command runners print the pass/fail summary. */
+export function evidenceExcerpt(content: string, limit = 20_000) {
+  if (content.length <= limit) return { text: content, truncated: false };
+  const head = Math.floor(limit * 0.65);
+  const tail = limit - head;
+  return {
+    text: `${content.slice(0, head)}\n… [truncated; call read_artifact for the rest] …\n${content.slice(-tail)}`,
+    truncated: true,
+  };
+}
+
 const SEVERITIES = new Set(["high", "medium", "low"]);
 
 /**

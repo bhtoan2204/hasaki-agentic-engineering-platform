@@ -369,6 +369,30 @@ test("antigravityHookDecision enforces read-only mode and denies mutations", () 
   assert.match(denyEnv.reason ?? "", /credentials/i);
 });
 
+test("antigravityHookDecision allows the platform artifact reader", () => {
+  const named = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "mcp__platform__read_artifact",
+      tool_input: { artifact_id: 852 },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(named.allow, true);
+
+  const wrapped = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "call_mcp_tool",
+      tool_input: { server: "platform", tool: "read_artifact", arguments: { artifact_id: 852 } },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(wrapped.allow, true);
+});
+
 test("PreToolUse hook fails closed without valid broker token", async () => {
   const broker = await startBroker({
     policy: analysisPolicy,

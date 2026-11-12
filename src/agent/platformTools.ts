@@ -25,6 +25,7 @@ import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { repositories, repoPath } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
+import { citedArtifactIds, evidenceExcerpt } from "./independentReview.ts";
 import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
 import { scoreKnowledge } from "../context/plan.ts";
 import { externalNotice, isExternal } from "../knowledge/external.ts";
@@ -306,6 +307,8 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       return searchKnowledge(args, env);
     case "read_step_output":
       return readStepOutput(args, env);
+    case "read_artifact":
+      return readArtifact(args, env);
     case "list_tools":
       return JSON.stringify(
         [
@@ -497,6 +500,59 @@ async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string>
   return hits.length
     ? JSON.stringify(hits, null, 2)
     : "No applicable knowledge matches. Try other words.";
+}
+
+async function readArtifact(
+  args: { artifact_id: number; offset?: number; limit?: number },
+  env: PlatformToolEnv,
+): Promise<string> {
+  const id = args.artifact_id;
+  if (env.independent && !citedArtifactIds(env.upstream).includes(id))
+    return "ERROR: independent review can only read artifacts cited by its ancestor outputs";
+  const row = await one(
+    pool,
+    "SELECT id, kind, name, content, data FROM workflow_artifacts WHERE id = $1 AND run_id = $2",
+    [id, env.runId],
+  );
+  if (!row) return "ERROR: artifact is not part of this run";
+  if (row.kind !== "log" && row.kind !== "report")
+    return "ERROR: only log and report artifacts are readable as verification evidence";
+  const content = redactContextText(String(row.content ?? ""));
+  const offset = args.offset ?? 0;
+  const limit = args.limit ?? 16000;
+  return JSON.stringify({
+    id: Number(row.id),
+    kind: row.kind,
+    name: row.name,
+    bytes: content.length,
+    exit_code: row.data?.exit_code ?? null,
+    offset,
+    truncated: offset + limit < content.length,
+    content: content.slice(offset, offset + limit),
+  });
+}
+
+/** Command output for artifact ids already cited by this step's ancestor outputs. */
+export async function citedEvidenceLogs(runId: number, upstream: unknown): Promise<string> {
+  const ids = citedArtifactIds(upstream);
+  if (!ids.length) return "";
+  const rows = await q(
+    pool,
+    `SELECT id, kind, name, content, data FROM workflow_artifacts
+      WHERE run_id = $1 AND id = ANY($2::bigint[]) AND kind IN ('log', 'report')
+      ORDER BY id`,
+    [runId, ids],
+  );
+  return rows
+    .map((row) => {
+      const content = redactContextText(String(row.content ?? ""));
+      const excerpt = evidenceExcerpt(content);
+      return [
+        `# artifact ${row.id} ${row.kind} ${row.name} exit_code=${row.data?.exit_code ?? "unknown"} bytes=${content.length}${excerpt.truncated ? " truncated=true" : ""}`,
+        excerpt.text,
+      ].join("\n");
+    })
+    .join("\n\n");
 }
 
 async function readStepOutput(args: any, env: PlatformToolEnv): Promise<string> {
@@ -712,6 +768,11 @@ const legacyInputs: Record<string, z.ZodType> = {
   read_step_output: z.strictObject({
     step_key: z.string().min(1).max(160),
     attempt: z.number().int().positive().optional(),
+  }),
+  read_artifact: z.strictObject({
+    artifact_id: z.number().int().positive(),
+    offset: z.number().int().min(0).max(1000000).optional(),
+    limit: z.number().int().min(1).max(24000).optional(),
   }),
   list_tools: z.strictObject({ query: z.string().max(512).optional() }),
   describe_tool: z.strictObject({ name: z.string().min(1).max(200) }),

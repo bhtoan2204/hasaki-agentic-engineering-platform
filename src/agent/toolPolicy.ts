@@ -32,6 +32,7 @@ export const SUBAGENT_PLATFORM_TOOLS = [
   "read_knowledge",
   "search_knowledge",
   "read_step_output",
+  "read_artifact",
   "list_tools",
   "describe_tool",
   "call_tool",

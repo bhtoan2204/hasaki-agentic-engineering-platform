@@ -44,8 +44,14 @@ export function antigravityHookDecision(
       /^(mcp__platform__|mcp_platform_|platform\.|platform_)/,
       "",
     );
-    return decide(canonicalName, args, policy, sessionCwd);
+    if (!canonicalName) return deny("empty platform tool name");
+    // decide() allows mcp__platform__* before its name switch. The bare name falls through to deny,
+    // which blocked read_artifact even though the broker would have served it.
+    return decide(`mcp__platform__${canonicalName}`, args, policy, sessionCwd);
   }
+
+  // The CLI wraps platform tools as call_mcp_tool. The broker still fences and authorizes the inner call.
+  if (lower === "call_mcp_tool" || lower === "mcptool") return { allow: true };
 
   // 2. Subagents restriction
   if (lower.includes("subagent")) {
