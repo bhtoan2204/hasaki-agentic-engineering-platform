@@ -117,19 +117,9 @@ export function writeAntigravityWorkspaceConfig(
   const node = process.execPath;
 
   const hookCommand = `${JSON.stringify(node)} --disable-warning=ExperimentalWarning ${JSON.stringify(hookScript)}`;
+  // Named hooks only. A top-level PreToolUse array is not a hook spec, and agy
+  // then refuses the whole file, so the platform policy never loads.
   const hooksConfig = {
-    PreToolUse: [
-      {
-        matcher: "*",
-        hooks: [
-          {
-            type: "command",
-            command: hookCommand,
-            timeout: 60,
-          },
-        ],
-      },
-    ],
     "platform-security": {
       enabled: true,
       PreToolUse: [
@@ -166,6 +156,17 @@ export function writeAntigravityWorkspaceConfig(
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
   return { hookConfigPath, mcpConfigPath };
+}
+
+/** Session-only allow-rules so headless print mode can call the platform MCP server.
+ * Without these, agy soft-denies McpTool and the step never reaches submit_result. */
+export function antigravityHeadlessSettings(toolNames: readonly string[]) {
+  const names = [...new Set(toolNames.filter(Boolean))].sort();
+  return {
+    permissions: {
+      allow: ["mcp(platform/*)", ...names.map((name) => `mcp(platform/${name})`)],
+    },
+  };
 }
 
 export function excludeFromGit(gitDir: string) {

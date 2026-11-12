@@ -6,7 +6,7 @@ The adapter uses the documented `agy --input-format stream-json --output-format 
 
 The parser accepts the CLI's `init`, `step_update`, and terminal `result` events, including partial NDJSON chunks. Step usage is accumulated, while terminal result usage replaces it because that value is cumulative. Missing token fields remain unknown; Antigravity does not report cost here, so cost remains unavailable. Auxiliary completions use the same transport.
 
-The adapter does not pass `--dangerously-skip-permissions`. Coding execution retains configured sandboxing and platform hooks/broker authorization. The CLI's normal permission behavior therefore remains in force; the adapter does not auto-approve tool access.
+The adapter does not pass `--dangerously-skip-permissions`. Each turn passes a session-only `--settings` file that allow-lists the platform MCP server (`mcp(platform/*)` and each bridge tool). Headless print mode otherwise soft-denies `McpTool`, so `submit_result` never runs and an independent review has no PASS/FAIL/BLOCKED verdict. Coding execution retains configured sandboxing and platform hooks/broker authorization. The broker still accepts or refuses each platform tool; the allow-list only stops the CLI from blocking the call before it reaches the broker.
 
 ## Feature implementation review flow
 

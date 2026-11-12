@@ -90,6 +90,31 @@ const SEVERITIES = new Set(["high", "medium", "low"]);
  *  - Missing, unknown or contradictory output (PASS + high/medium findings, verdict vs `approved` disagreeing, malformed
  *    findings) → BLOCKED: a human decides, it is never treated as success.
  */
+/**
+ * Adapter gate for an independent review turn. A missing or contract-less submit_result is not a verifier
+ * BLOCKED decision: chat text, a denied MCP call, and a timeout are different failures. Timeouts stay on the
+ * provider error path; this only inspects a turn the provider reported as finished.
+ */
+export function independentSubmissionGap(
+  submitted: Record<string, unknown> | undefined,
+  hints?: { toolNames?: string[]; note?: string },
+): string | null {
+  const note = hints?.note ?? "";
+  const tools = hints?.toolNames ?? [];
+  const denied = /auto-denied|soft-deny|cannot prompt|mcp permission/i.test(note);
+  const calledSubmit = tools.some((tool) => /submit_result/i.test(tool));
+  const calledMcp = tools.some((tool) => /mcp/i.test(tool));
+  if (!submitted) {
+    if (denied || (calledMcp && !calledSubmit))
+      return "Independent verification called a platform tool but submit_result was not recorded. A denied or failed MCP call is not a verdict.";
+    return "Independent verification finished without calling submit_result. A text reply is not a PASS/FAIL/BLOCKED verdict.";
+  }
+  const named = typeof submitted.verdict === "string" ? submitted.verdict.trim() : "";
+  if (!named && typeof submitted.approved !== "boolean")
+    return "Independent verification submit_result does not match the verdict contract (missing verdict).";
+  return null;
+}
+
 export function normalizeVerdict(raw: any): VerdictOutput {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const summary = typeof o.summary === "string" ? o.summary : "";

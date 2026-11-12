@@ -93,6 +93,7 @@ import {
   hasTestEvidence,
   isIndependent,
   enforceScopeReview,
+  independentSubmissionGap,
   normalizeVerdict,
   repairTargetFor,
   REVIEW_POLICY_VERSION,
@@ -1406,6 +1407,17 @@ const agentExecutor: StepExecutor = {
       await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
     }
     if (independent) {
+      const gap = independentSubmissionGap(submitted, {
+        toolNames: Object.keys(metrics.tool_calls),
+        note: result.text,
+      });
+      if (gap)
+        return {
+          kind: "failed",
+          error: gap,
+          retryable: true,
+          details: submitted ? { submitted } : undefined,
+        };
       let v = normalizeVerdict(submitted ?? {});
       if (ctx.step.config.scope_review === true)
         v = enforceScopeReview(v, (submitted as any)?.scope_check, ctx.input.upstream);

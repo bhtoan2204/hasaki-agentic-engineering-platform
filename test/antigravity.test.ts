@@ -23,6 +23,7 @@ import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
   excludeFromGit,
+  antigravityHeadlessSettings,
 } from "../src/agent/antigravity/policy.ts";
 import {
   antigravityAgentTurn,
@@ -409,10 +410,8 @@ test("workspace config writes .agents/hooks.json and .agents/mcp_config.json, an
   assert.ok(existsSync(join(dir, ".agents", "mcp_config.json")));
 
   const hooks = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
-  const hookCmd =
-    hooks.PreToolUse?.[0]?.hooks?.[0]?.command ??
-    hooks.PreToolUse?.command ??
-    hooks["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command;
+  assert.equal(hooks.PreToolUse, undefined);
+  const hookCmd = hooks["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command;
   assert.ok(hookCmd && hookCmd.includes("hook.ts"));
 
   const mcp = JSON.parse(readFileSync(join(dir, ".agents", "mcp_config.json"), "utf8"));
@@ -455,6 +454,10 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
   );
   assert.ok(args.includes("--conversation"));
   assert.ok(args.includes("conv-123"));
+  const settings = antigravityHeadlessSettings(["submit_result", "ask_user"]);
+  assert.ok(settings.permissions.allow.includes("mcp(platform/submit_result)"));
+  assert.ok(settings.permissions.allow.includes("mcp(platform/*)"));
+  assert.ok(!JSON.stringify(settings).includes("dangerously-skip-permissions"));
 
   // Check env scrubbing
   const env = antigravityEnv({

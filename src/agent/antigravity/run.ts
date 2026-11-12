@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactSecrets } from "../../integrations/redact.ts";
@@ -17,7 +17,9 @@ import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
   excludeFromGit,
+  antigravityHeadlessSettings,
 } from "./policy.ts";
+import { bridgeToolsFor } from "../mcpBridge.ts";
 import { AntigravityStream, classifyAntigravityError, type AntigravityEvent } from "./stream.ts";
 
 export interface AntigravityTurnResult {
@@ -193,6 +195,7 @@ export function buildAntigravityArgs(opts: {
   timeoutSeconds?: number;
   conversationId?: string;
   additionalDirs?: string[];
+  settingsPath?: string;
 }): string[] {
   const args = ["--output-format", "stream-json", "--input-format", "stream-json"];
   if (opts.model) args.push("--model", opts.model);
@@ -211,6 +214,7 @@ export function buildAntigravityArgs(opts: {
       if (d) args.push("--add-dir", d);
     }
   }
+  if (opts.settingsPath) args.push("--settings", opts.settingsPath);
   return args;
 }
 
@@ -298,6 +302,15 @@ export async function antigravityAgentTurn(
     const timeoutMs = cfg.timeoutMs;
     const timeoutSec = Math.floor(timeoutMs / 1000);
 
+    const settingsPath = join(scratchDir, "settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        antigravityHeadlessSettings(
+          bridgeToolsFor("coding", { commit: true }).map((tool) => tool.name),
+        ),
+      ),
+    );
     const args = buildAntigravityArgs({
       model: input.model || undefined,
       effort: input.effort || undefined,
@@ -305,6 +318,7 @@ export async function antigravityAgentTurn(
       timeoutSeconds: timeoutSec,
       conversationId: input.resumeId || undefined,
       additionalDirs,
+      settingsPath,
     });
 
     const env = antigravityEnv(process.env, {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   enforceVerdict,
   findingsFeedback,
+  independentSubmissionGap,
   independentUpstream,
   normalizeVerdict,
   repairTargetFor,
@@ -44,6 +45,26 @@ test("context isolation: the verifier never sees the author's claims, only requi
   assert.deepEqual((f.implement.output as any).verification, { status: "clean", passed: true });
   assert.deepEqual(f.test.output, up.test.output, "real test evidence kept");
   assert.equal(JSON.stringify(f).includes("I am sure it works"), false);
+});
+
+test("independent review refuses a finished turn that never recorded a verdict", () => {
+  assert.match(
+    independentSubmissionGap(undefined) ?? "",
+    /without calling submit_result/,
+  );
+  assert.match(
+    independentSubmissionGap(undefined, { toolNames: ["call_mcp_tool"], note: "auto-denied" }) ?? "",
+    /not recorded/,
+  );
+  assert.match(
+    independentSubmissionGap({ summary: "looks fine" }) ?? "",
+    /missing verdict/,
+  );
+  assert.equal(
+    independentSubmissionGap({ verdict: "FAIL", findings: [], summary: "no" }),
+    null,
+  );
+  assert.equal(independentSubmissionGap({ approved: true, findings: [], summary: "ok" }), null);
 });
 
 test("verdicts: structured, legacy approved mapped, malformed or unactionable never silently pass", () => {
