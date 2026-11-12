@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
@@ -52,6 +54,15 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
     original,
   );
   assert.equal(await bootstrap("another"), 1);
+  // A clean worktree has no built UI; provide a minimal stand-in where serveStatic reads it, and remove it afterwards.
+  const distDir = join(import.meta.dirname, "..", "web", "dist");
+  const indexFile = join(distDir, "index.html");
+  const hadDist = existsSync(distDir);
+  const hadIndex = existsSync(indexFile);
+  if (!hadIndex) {
+    mkdirSync(distDir, { recursive: true });
+    writeFileSync(indexFile, "<!doctype html><title>test</title>");
+  }
   const server = createServer(handle);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -89,6 +100,8 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
     assert.equal((await (await fetch(base + "/api/auth/status")).json()).bootstrapRequired, true);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (!hadIndex) rmSync(indexFile, { force: true });
+    if (!hadDist) rmSync(distDir, { recursive: true, force: true });
   }
   // Exercise the real server entrypoint (migrations, shared seeds, workers, static serving)
   // using only the temporary test config/database from setup.ts.

@@ -1,5 +1,6 @@
 import type { LatencyResult, TimelineEvent, Rejection, Confidence } from "./correlate.ts";
 import type { ParsedRequest } from "./request.ts";
+import { analyzeCausality } from "./causal.ts";
 
 /**
  * Investigation report: a business summary and a developer report, Vietnamese or English. Pure.
@@ -86,6 +87,7 @@ const T = {
     hypotheses: "Giả thuyết (chưa xác nhận)",
     missing: "Thiếu hoặc mâu thuẫn",
     next: "Bước điều tra tiếp theo",
+    causal: "Chuỗi nhân quả (xác định, không dùng thời gian để gộp)",
     queries: "Các truy vấn SPL đã chạy",
     code: "Repository và vị trí code liên quan",
     rejected: "Nhãn bị loại (không có bằng chứng)",
@@ -140,6 +142,7 @@ const T = {
     hypotheses: "Hypotheses (not confirmed)",
     missing: "Missing or conflicting evidence",
     next: "Recommended next steps",
+    causal: "Causal chain (deterministic; time is never used to merge)",
     queries: "SPL queries executed",
     code: "Relevant repositories and code locations",
     rejected: "Rejected labels (no evidence)",
@@ -432,7 +435,33 @@ export function buildReport(i: ReportInput) {
       );
     md.push("");
   }
+  const causal = analyzeCausality(i.timeline);
+  if (causal.operations.some((o) => o.attempts.length)) {
+    const c = causal.chain;
+    md.push(`## ${L.causal}`, "");
+    for (const [k, val] of [
+      ["observed_error", c.observed_error],
+      ["symptom", c.symptom],
+      ["trigger", c.trigger],
+    ] as const)
+      md.push(`- **${k}:** ${val ? esc(val) : L.unknown}`);
+    md.push(
+      c.root_cause
+        ? `- **root_cause (${c.root_cause.confidence}, unverified):** ${esc(c.root_cause.statement)} (${c.root_cause.evidence_refs.map((r) => `\`${r}\``).join(", ")})`
+        : `- **root_cause:** ${L.unknown}`,
+    );
+    for (const f of c.contributing_factors) md.push(`- **contributing_factor:** ${esc(f)}`);
+    for (const f of c.downstream_effects) md.push(`- **downstream_effect:** ${esc(f)}`);
+    for (const o of causal.operations)
+      md.push(
+        `- **${o.operation_id}** outcome=${o.outcome}; attempts: ${o.attempts.map((a) => `${esc(a.attempt_key)}=${a.outcome}`).join(", ")}`,
+      );
+    for (const r of causal.recommendations) md.push(`- ${esc(r)}`);
+    for (const m of causal.missing_evidence) md.push(`- missing: ${esc(m)}`);
+    md.push("");
+  }
   const missingLines = [
+    ...causal.operations.flatMap((o) => o.missing_evidence.map((m) => `${o.operation_id}: ${m}`)),
     ...i.completeness.missing.map((m) => `${m.objective}: ${m.needed}`),
     ...i.timeline.flatMap((t) => (t.conflicts ?? []).map((c) => `${t.evidence_ref}: ${c}`)),
     ...(Array.isArray(i.findings?.missing_evidence) ? i.findings.missing_evidence.map(String) : []),
@@ -500,6 +529,7 @@ export function buildReport(i: ReportInput) {
     summary,
     business_summary: businessLines.join("\n"),
     markdown: md.join("\n"),
+    causal,
     findings: v.findings,
     hypotheses: v.hypotheses,
   };

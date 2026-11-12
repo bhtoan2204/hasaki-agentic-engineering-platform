@@ -26,6 +26,8 @@ export const EVENT_TYPES = [
   "SHIPPING_LABEL_URL_PERSISTED",
   "STATE_CHANGED",
   "RETRY_SCHEDULED",
+  "REQUEST_TIMEOUT",
+  "PROVIDER_BUSINESS_REJECTION",
   "ERROR",
   "OTHER",
 ] as const;
@@ -89,6 +91,13 @@ export interface Rejection {
 
 /** Strong identifiers that relate two log lines of the same request/message. */
 const REQUEST_SCOPE: IdField[] = ["request_id", "correlation_id", "message_id", "trace_id"];
+/** Operation identifiers (not entity ids such as order/shipment: one entity has many operations): tie different requests/attempts to the same logical operation. Domain-agnostic. */
+export const OPERATION_SCOPE: IdField[] = [
+  "transaction_code",
+  "provider_transaction_id",
+  "idempotency_key",
+  "business_ref",
+];
 /** Business identifiers: tie events to the same entity, but not to the same request attempt. */
 const ENTITY_SCOPE: IdField[] = ["order_code", "shipment_code", "shipment_id", "tracking_no"];
 const MIN_KEY_LEN = 6;

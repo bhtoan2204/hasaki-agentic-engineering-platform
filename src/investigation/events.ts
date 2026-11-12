@@ -16,6 +16,10 @@ export const ID_FIELDS = [
   "trace_id",
   "correlation_id",
   "message_id",
+  "transaction_code",
+  "provider_transaction_id",
+  "idempotency_key",
+  "business_ref",
 ] as const;
 export type IdField = (typeof ID_FIELDS)[number];
 export type Ids = Partial<Record<IdField, string[]>>;
@@ -41,6 +45,16 @@ const ALIASES: Record<IdField, string[]> = {
   trace_id: ["traceid", "xb3traceid", "ddtraceid", "otteltraceid"],
   correlation_id: ["correlationid", "xcorrelationid", "corrid"],
   message_id: ["messageid", "msgid", "eventid", "kafkakey", "kafkamessageid", "outboxid"],
+  transaction_code: ["transactioncode", "transactionno", "txncode", "txnno", "transcode"],
+  provider_transaction_id: [
+    "providertransactionid",
+    "providertxnid",
+    "providerref",
+    "gatewaytransactionid",
+    "vnptransactionno",
+  ],
+  idempotency_key: ["idempotencykey", "xidempotencykey", "idemkey"],
+  business_ref: ["refundcode", "refundid", "paymentcode", "paymentid", "txnref", "businessref"],
 };
 const BY_ALIAS = new Map<string, IdField>();
 for (const f of ID_FIELDS) {
