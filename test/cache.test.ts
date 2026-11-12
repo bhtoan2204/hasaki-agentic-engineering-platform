@@ -1,48 +1,37 @@
-import { test, before, after } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import pg from "pg";
-import { pool, q, one, withTx } from "../src/db/pool.ts";
-import { migrate } from "../src/db/migrate.ts";
-import { config } from "../src/config.ts";
+import { EventEmitter } from "node:events";
 import {
   CacheAside,
   StaleWhileRevalidate,
   cacheListenerState,
   cacheStats,
+  invalidateTables,
   singleflight,
   startCacheInvalidation,
   stopCacheInvalidation,
+  type ListenerClient,
 } from "../src/cache/index.ts";
-import { repositories } from "../src/repos/service.ts";
-import { knowledge } from "../src/knowledge/service.ts";
 
 /**
- * In-process caches: hit/miss/TTL, no stale write-back after an invalidation, isolation of returned values, local
- * write invalidation (commit only), cross-process invalidation through NOTIFY, bypass while the listener is down.
+ * In-process caches, business flow only (no database): hit/miss/TTL, no stale write-back after an invalidation,
+ * isolation of returned values, table invalidation, listener notifications, bypass while the listener is down.
  */
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(cond: () => Promise<boolean> | boolean, ms = 5000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await cond()) return;
-    await sleep(25);
-  }
-  throw new Error("condition not reached");
-}
-/** A raw connection: writes through it bypass q()/one(), like another platform process would. */
-let other: pg.Client;
 
-before(async () => {
-  await migrate();
-  other = new pg.Client({ connectionString: config.databaseUrl });
-  await other.connect();
-});
-after(async () => {
-  await stopCacheInvalidation();
-  await other.end();
-  await pool.end();
-});
+class FakeListener extends EventEmitter {
+  queries: string[] = [];
+  failConnect = false;
+  async connect() {
+    if (this.failConnect) throw new Error("connect refused");
+  }
+  async query(sql: string) {
+    this.queries.push(sql);
+    return {} as never;
+  }
+  async end() {}
+}
 
 test("CacheAside: one load for concurrent misses, TTL expiry, no stale write-back, clones", async () => {
   let loads = 0;
@@ -85,103 +74,63 @@ test("singleflight and stale-while-revalidate", async () => {
   assert.equal(await swr.get("k", async () => ++v), 2, "refreshed in the background");
 });
 
-test("this process: a committed write clears the cache at once; a rolled-back one does not", async () => {
-  await repositories.upsert("cache-r1", { description: "v1" });
-  assert.equal((await repositories.get("cache-r1"))!.description, "v1");
-  const misses = cacheStats.repositories?.misses ?? 0;
-  await repositories.get("cache-r1");
-  assert.equal(cacheStats.repositories.misses, misses, "served from cache");
-  await repositories.upsert("cache-r1", { description: "v2" });
-  assert.equal((await repositories.get("cache-r1"))!.description, "v2", "read your own write");
-  const inval = cacheStats.repositories.invalidations;
-  await assert.rejects(
-    withTx(async (c) => {
-      await q(c, "UPDATE repositories SET description = 'rolled back' WHERE name = 'cache-r1'");
-      // Inside the writing transaction the cache is bypassed: it sees its own write.
-      assert.equal((await repositories.get("cache-r1", c))!.description, "rolled back");
-      throw new Error("boom");
-    }),
-    /boom/,
-  );
-  assert.equal(cacheStats.repositories.invalidations, inval, "no invalidation for a rollback");
-  assert.equal((await repositories.get("cache-r1"))!.description, "v2");
+test("NOTIFY from another process clears matching caches; listener down → bypass; reconnect → flush", async () => {
+  const fakes: FakeListener[] = [];
+  const make = () => {
+    const f = new FakeListener();
+    fakes.push(f);
+    return f as unknown as ListenerClient;
+  };
+  const c = new CacheAside<{ v: number }>("t.listener", ["t_listener"], 60_000);
+  let v = 0;
+  const load = async () => ({ v: ++v });
+  await startCacheInvalidation("fake://", make);
+  assert.equal(cacheListenerState(), "connected");
+  assert.deepEqual(fakes[0].queries, ["LISTEN cache_invalidate"]);
+  assert.equal((await c.get("k", load)).v, 1);
+  assert.equal((await c.get("k", load)).v, 1, "served from cache");
+  fakes[0].emit("notification", { channel: "cache_invalidate", payload: "other_table" });
+  assert.equal((await c.get("k", load)).v, 1, "unrelated table does not clear it");
+  fakes[0].emit("notification", { channel: "cache_invalidate", payload: "t_listener" });
+  assert.equal((await c.get("k", load)).v, 2, "cross-process write cleared the cache");
+
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    fakes[0].emit("error", new Error("vpn drop"));
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(cacheListenerState(), "down");
+  const misses = cacheStats["t.listener"].misses;
+  assert.equal((await c.get("k", load)).v, 3);
+  assert.equal((await c.get("k", load)).v, 4, "bypassed while down: never cached");
+  assert.equal(cacheStats["t.listener"].misses, misses, "bypass counts neither hit nor miss");
+  await stopCacheInvalidation();
+  assert.equal(cacheListenerState(), "none");
 });
 
-test("other processes: NOTIFY from the database trigger clears the cache; listener down → caches bypassed", async () => {
-  await startCacheInvalidation();
-  assert.equal(cacheListenerState(), "connected");
-  await repositories.upsert("cache-r2", { description: "a" });
-  assert.equal((await repositories.get("cache-r2"))!.description, "a");
-  // Another process writes (no local hook here): only the trigger + listener can tell this process.
-  await other.query(
-    "UPDATE repositories SET description = 'from another process' WHERE name = 'cache-r2'",
-  );
-  await until(
-    async () => (await repositories.get("cache-r2"))!.description === "from another process",
-  );
-
-  await knowledge.create({
-    key: "cache-k1",
-    category: "business_rule",
-    scope_type: "GLOBAL",
-    title: "k",
-    content: "one",
-  });
-  const contentOf = async () =>
-    (await knowledge.candidates(pool, null)).find((k) => k.key === "cache-k1")?.content;
-  assert.equal(await contentOf(), "one");
-  await other.query(
-    "UPDATE knowledge_versions SET content = 'two' WHERE item_id = (SELECT id FROM knowledge_items WHERE key = 'cache-k1')",
-  );
-  await until(async () => (await contentOf()) === "two");
-
-  // Drop the listener's connection (VPN blip): caches are flushed and bypassed until it is back.
-  await other.query(
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = 'LISTEN cache_invalidate' AND pid <> pg_backend_pid()",
-  );
-  await until(() => cacheListenerState() === "down");
-  const before = cacheStats.repositories.misses;
-  await repositories.get("cache-r2");
-  await repositories.get("cache-r2");
-  assert.equal(
-    cacheStats.repositories.misses,
-    before,
-    "bypassed: neither a hit nor a cached miss while down",
-  );
-  await other.query("UPDATE repositories SET description = 'while down' WHERE name = 'cache-r2'");
-  assert.equal(
-    (await repositories.get("cache-r2"))!.description,
-    "while down",
-    "never stale while the listener is down",
-  );
-  await until(() => cacheListenerState() === "connected", 8000);
-  assert.equal((await repositories.get("cache-r2"))!.description, "while down");
+test("a failed initial listener connect leaves caches bypassed", async () => {
+  const f = new FakeListener();
+  f.failConnect = true;
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    await startCacheInvalidation("fake://", () => f as unknown as ListenerClient);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(cacheListenerState(), "down");
   await stopCacheInvalidation();
 });
 
-test("knowledge candidates from the cache honour effective dates exactly like the database query", async () => {
-  await knowledge.create({
-    key: "cache-k2",
-    category: "business_rule",
-    scope_type: "GLOBAL",
-    title: "k2",
-    content: "old",
-  });
-  const future = new Date(Date.now() + 86400_000);
-  await knowledge.update("cache-k2", { content: "new", effective_from: future.toISOString() });
-  const at = async (d: Date) =>
-    (await knowledge.candidates(pool, null, d)).find((k) => k.key === "cache-k2")?.content;
-  assert.equal(await at(new Date()), "old");
-  assert.equal(
-    await at(new Date(future.getTime() + 1000)),
-    "new",
-    "the cached set keeps future-dated versions",
-  );
-  assert.equal(
-    await at(new Date(Date.now() - 86400_000)),
-    "old",
-    "an instant before the load falls back to the database",
-  );
-  const row = await one(pool, "SELECT current_version FROM knowledge_items WHERE key = 'cache-k2'");
-  assert.equal(row.current_version, 2);
+test("invalidateTables (what a committed local write triggers) clears only bound caches", async () => {
+  const a = new CacheAside<number>("t.inv.a", ["t_a"], 60_000);
+  const b = new CacheAside<number>("t.inv.b", ["t_b"], 60_000);
+  let n = 0;
+  await a.get("k", async () => ++n);
+  await b.get("k", async () => ++n);
+  invalidateTables(["t_a"]);
+  assert.equal(await a.get("k", async () => ++n), 3, "reloaded");
+  assert.equal(await b.get("k", async () => ++n), 2, "untouched");
 });

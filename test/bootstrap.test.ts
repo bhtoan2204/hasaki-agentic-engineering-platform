@@ -1,28 +1,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { cookieSecure, readCookie } from "../src/auth/sessions.ts";
-
-// A clean worktree has no UI build (web/dist is not committed); the static routes only need an index.html to serve.
-const webDist = join(import.meta.dirname, "..", "web", "dist");
-const webIndex = join(webDist, "index.html");
-const distExisted = existsSync(webDist);
-const stubbedIndex = !existsSync(webIndex);
-if (stubbedIndex) {
-  mkdirSync(webDist, { recursive: true });
-  writeFileSync(webIndex, "<!doctype html><title>test</title>");
-}
-after(() => {
-  if (stubbedIndex) rmSync(distExisted ? webIndex : webDist, { recursive: true, force: true });
-});
 
 const password = randomBytes(24).toString("hex");
 function bootstrap(username = "toan") {
@@ -54,14 +39,14 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
     original,
   );
   assert.equal(await bootstrap("another"), 1);
-  // A clean worktree has no built UI; provide a minimal stand-in where serveStatic reads it, and remove it afterwards.
-  const distDir = join(import.meta.dirname, "..", "web", "dist");
-  const indexFile = join(distDir, "index.html");
-  const hadDist = existsSync(distDir);
-  const hadIndex = existsSync(indexFile);
-  if (!hadIndex) {
-    mkdirSync(distDir, { recursive: true });
-    writeFileSync(indexFile, "<!doctype html><title>test</title>");
+  // A clean checkout has no built UI (web/dist); serve a minimal stand-in so the static route is hermetic.
+  const dist = join(import.meta.dirname, "..", "web", "dist");
+  const index = join(dist, "index.html");
+  const distExisted = existsSync(dist);
+  const fakeDist = !existsSync(index);
+  if (fakeDist) {
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(index, "<!doctype html><title>test</title>");
   }
   const server = createServer(handle);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -100,8 +85,7 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
     assert.equal((await (await fetch(base + "/api/auth/status")).json()).bootstrapRequired, true);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (!hadIndex) rmSync(indexFile, { force: true });
-    if (!hadDist) rmSync(distDir, { recursive: true, force: true });
+    if (fakeDist) rmSync(distExisted ? index : dist, { recursive: true, force: true });
   }
   // Exercise the real server entrypoint (migrations, shared seeds, workers, static serving)
   // using only the temporary test config/database from setup.ts.
