@@ -9,22 +9,10 @@ import {
 import { Search, X, LoaderCircle, type LucideIcon } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { marked } from "marked";
+import { renderMarkdownSafe } from "./markdown.ts";
 import { LIVE_STATUSES, STATUS_COLORS } from "./api.ts";
 import { BrandLogo } from "./brand/BrandLogo.tsx";
 import { uiLocale, useI18n } from "./i18n/index.tsx";
-
-const escapeHtml = (s: string) =>
-  s.replace(
-    /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
-// Agent output may contain raw HTML: render it as text, never as markup.
-marked.use({
-  renderer: { html: (t: any) => escapeHtml(t.text ?? t.raw ?? "") },
-  gfm: true,
-  breaks: true,
-});
 
 export const time = (t?: string | null) =>
   t
@@ -85,7 +73,7 @@ export function Markdown({ text }: { text: string }) {
     <div
       className="md"
       dangerouslySetInnerHTML={{
-        __html: marked.parse(text ?? "", { async: false }) as string,
+        __html: renderMarkdownSafe(text),
       }}
     />
   );

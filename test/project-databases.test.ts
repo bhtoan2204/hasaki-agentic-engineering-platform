@@ -1,9 +1,7 @@
 /**
  * Project QC databases (migration 046, src/integrations/database.ts): read-only statement check, run-scope
- * authorization through the agent tool registry, admin API, and — when TEST_MYSQL_HOST is set — a real MySQL/MariaDB.
- *
- *   docker run -d --name ctp-mariadb -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:53306:3306 mariadb:10.7
- *   TEST_MYSQL_HOST=127.0.0.1 TEST_MYSQL_PORT=53306 TEST_MYSQL_ROOT_PASSWORD=root npm test
+ * authorization through the agent tool registry and admin API. MySQL uses the existing driver fake;
+ * platform persistence uses PostgreSQL started by the test preload. No external service is required.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -416,114 +414,58 @@ test("deleting a database removes its stored password", async () => {
   assert.equal((await admin("/api/integrations/databases/temp-qc/delete", {})).status, 404);
 });
 
-const live = process.env.TEST_MYSQL_HOST;
-test(
-  "real MySQL/MariaDB: rows, cap, masking, READ ONLY transaction and the write-privilege warning",
-  { skip: !live && "set TEST_MYSQL_HOST to run against a real server" },
-  async () => {
-    const mysql = (await import("mysql2/promise")).default;
-    const root = await mysql.createConnection({
-      host: live,
-      port: Number(process.env.TEST_MYSQL_PORT ?? 3306),
-      user: "root",
-      password: process.env.TEST_MYSQL_ROOT_PASSWORD ?? "",
+test("database results preserve literals, mask credentials, propagate caps and warn on write privileges", async () => {
+  await saveDatabase({
+    key: "fake-results", project: "OMS", host: "unused.invalid", database_name: "orders",
+    username: "fixture", password: "fixture-only", max_rows: 5,
+  }, ids["db-admin"]);
+  const db = (await listDatabases()).find((d) => d.key === "fake-results")!;
+  const statements: Array<{ sql: string; cap: number }> = [];
+  let writable = false;
+  setDatabaseDriver(async (_db, sql, cap) => {
+    statements.push({ sql, cap });
+    if (sql === "SHOW GRANTS") return {
+      columns: ["grant"], rows: [{ grant: writable
+        ? "GRANT SELECT, UPDATE ON orders.* TO fixture"
+        : "GRANT SELECT ON orders.* TO fixture" }], truncated: false,
+    };
+    if (sql.startsWith("SELECT VERSION()")) return {
+      columns: ["version", "account"], rows: [{ version: "fixture", account: "fixture@local" }], truncated: false,
+    };
+    if (sql === "SELECT * FROM no_such_table")
+      throw Object.assign(new Error("Table does not exist"), { code: "ER_NO_SUCH_TABLE" });
+    return {
+      columns: ["id", "code", "api_token"],
+      rows: [{ id: 7, code: "ORD7", api_token: "fixture-token" }], truncated: true,
+    };
+  });
+  try {
+    const result = await runQuery(db, "SELECT id, code, api_token FROM orders WHERE code = 'ORD7';", 50);
+    assert.deepEqual(statements[0], {
+      sql: "SELECT id, code, api_token FROM orders WHERE code = 'ORD7'", cap: 5,
     });
-    await root.query("DROP DATABASE IF EXISTS ctp_qc");
-    await root.query("CREATE DATABASE ctp_qc");
-    await root.query(
-      "CREATE TABLE ctp_qc.orders (id INT PRIMARY KEY, code VARCHAR(20), api_token VARCHAR(40), INDEX code_idx (code))",
-    );
-    await root.query(
-      "INSERT INTO ctp_qc.orders VALUES " +
-        Array.from({ length: 30 }, (_, i) => `(${i + 1}, 'ORD${i + 1}', 'tok-${i}')`).join(","),
-    );
-    await root.query("DROP USER IF EXISTS 'ctp_ro'@'%'");
-    await root.query("CREATE USER 'ctp_ro'@'%' IDENTIFIED BY 'ro-pw'");
-    await root.query("GRANT SELECT ON ctp_qc.* TO 'ctp_ro'@'%'");
-    await root.end();
-    const port = Number(process.env.TEST_MYSQL_PORT ?? 3306);
-    await saveDatabase(
-      {
-        key: "live-ro",
-        project: "OMS",
-        host: live,
-        port,
-        database_name: "ctp_qc",
-        username: "ctp_ro",
-        password: "ro-pw",
-        max_rows: 5,
-      },
-      ids["db-admin"],
-    );
-    await saveDatabase(
-      {
-        key: "live-root",
-        project: "OMS",
-        host: live,
-        port,
-        database_name: "ctp_qc",
-        username: "root",
-        password: process.env.TEST_MYSQL_ROOT_PASSWORD ?? "",
-      },
-      ids["db-admin"],
-    );
-    const ro = (await listDatabases()).find((d) => d.key === "live-ro")!;
-    const rootDb = (await listDatabases()).find((d) => d.key === "live-root")!;
-
-    const one_ = await runQuery(ro, "SELECT code FROM orders WHERE code = 'ORD7'");
-    assert.deepEqual(one_.rows, [["ORD7"]], "string literals reach the server unchanged");
-    const r = await runQuery(ro, "SELECT id, code, api_token FROM orders ORDER BY id");
-    assert.equal(r.row_count, 5);
-    assert.equal(r.truncated, true, "stopped at the database row cap");
-    assert.deepEqual(r.rows[0], [1, "ORD1", "[masked]"]);
-    const schema = await callTool(
-      "database.schema",
-      { database: "live-ro", table: "orders" },
-      { runId: 1, allowedRepositories: ["oms-api"], mode: "analysis" },
-    );
-    assert.ok(schema.ok, schema.error ?? "");
-    assert.deepEqual(
-      (schema.result as any).columns.map((c: any) => c.name),
-      ["id", "code", "api_token"],
-    );
-    assert.ok((schema.result as any).indexes.some((i: any) => i.name === "code_idx"));
-    const tables = await callTool(
-      "database.schema",
-      { database: "live-ro" },
-      { runId: 1, allowedRepositories: ["oms-api"], mode: "analysis" },
-    );
-    assert.deepEqual(
-      (tables.result as any).tables.map((t: any) => t.name),
-      ["orders"],
-    );
-
-    // Second layer, as the driver uses it: inside START TRANSACTION READ ONLY the server refuses a write even for a
-    // write-capable account, should a statement ever get past the parser.
-    const c = await mysql.createConnection({
-      host: live,
-      port,
-      user: "root",
-      password: process.env.TEST_MYSQL_ROOT_PASSWORD ?? "",
-      database: "ctp_qc",
-    });
-    await c.query("START TRANSACTION READ ONLY");
-    await assert.rejects(
-      c.query("UPDATE orders SET code = 'X' WHERE id = 1"),
-      /READ ONLY|read-only|1792/i,
-    );
-    await c.query("ROLLBACK");
-    await c.end();
-
-    assert.equal(((await testDatabase("live-ro")) as any).can_write, false);
-    const t = (await testDatabase("live-root")) as any;
-    assert.equal(t.can_write, true);
-    assert.match(t.warning!, /write privileges/);
-    await assert.rejects(
-      runQuery(rootDb, "SELECT * FROM no_such_table"),
-      /ER_NO_SUCH_TABLE|doesn't exist/,
-    );
-  },
-);
+    assert.deepEqual(result.rows, [[7, "ORD7", "[masked]"]]);
+    assert.equal(result.row_count, 1);
+    assert.equal(result.truncated, true);
+    const readOnly = await testDatabase(db.key);
+    assert.equal(readOnly.ok, true);
+    if (!readOnly.ok) throw new Error("fixture connection failed");
+    assert.equal(readOnly.can_write, false);
+    assert.equal(readOnly.warning, null);
+    writable = true;
+    const writeCapable = await testDatabase(db.key);
+    assert.equal(writeCapable.ok, true);
+    if (!writeCapable.ok) throw new Error("fixture connection failed");
+    assert.equal(writeCapable.can_write, true);
+    assert.match(writeCapable.warning!, /write privileges/);
+    const callsBeforeWrite = statements.length;
+    await assert.rejects(runQuery(db, "UPDATE orders SET code = 'X'"), /read|SELECT/i);
+    assert.equal(statements.length, callsBeforeWrite, "writes never reach the driver");
+    await assert.rejects(runQuery(db, "SELECT * FROM no_such_table"), /ER_NO_SUCH_TABLE/);
+  } finally {
+    setDatabaseDriver(null);
+  }
+});
 
 test("the step prompt tells the agent which integrations THIS run can use, and which it cannot", async () => {
   const { integrationCatalog } = await import("../src/agent/toolRegistry.ts");

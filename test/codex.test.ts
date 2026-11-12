@@ -393,8 +393,10 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
   child.stdout.on("data", (b) => {
     buf += b;
     let nl;
-    while ((nl = buf.indexOf("\n")) >= 0)
-      (replies.push(JSON.parse(buf.slice(0, nl))), (buf = buf.slice(nl + 1)));
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      replies.push(JSON.parse(buf.slice(0, nl)));
+      buf = buf.slice(nl + 1);
+    }
   });
   const send = (id: number, method: string, params: unknown) =>
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
@@ -420,11 +422,12 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
 // ------------------------------------------------------------------ invocation
 
 test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resume by explicit id", () => {
+  const scratch = "/tmp/ctp-agent-tmp-invocation";
   const a = codexArgs({ mode: "analysis", cwd: "/w", scratch: "/tmp/s" });
   const c = codexArgs({
     mode: "coding",
     cwd: "/w",
-    scratch: "/tmp/s",
+    scratch,
     model: "gpt-test",
     effort: "high",
     resumeId: "th-9",
@@ -449,7 +452,10 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
   assert.ok(!c.some((x) => x.includes("sandbox_workspace_write")));
   const cache = JSON.stringify(npmCacheDir());
   assert.ok(c.some((x) => x.includes(`npm_config_cache=${cache}`)));
-  assert.ok(!c.some((x) => x.includes("ctp-agent-tmp") && x.includes("npm_config_cache")));
+  // The outer test environment may itself live under ctp-agent-tmp. Reject this invocation's
+  // scratch cache, not an unrelated ancestor name in the configured shared cache directory.
+  assert.ok(!c.some((x) => x.includes(`npm_config_cache=${JSON.stringify(scratch)}`)));
+  assert.ok(!c.some((x) => x.includes(`npm_config_cache=${JSON.stringify(scratch).slice(0, -1)}/`)));
   assert.deepEqual(c.slice(0, 2), ["exec", "resume"]);
   assert.deepEqual(c.slice(-2), ["th-9", "-"]);
   assert.ok(c.includes('model="gpt-test"') && c.includes('model_reasoning_effort="high"'));
@@ -624,7 +630,14 @@ test("cancellation and timeout kill the Codex process tree, including detached c
     for (let i = 0; i < 50 && alive; i++) {
       try {
         process.kill(pid, 0);
-        await new Promise((r) => setTimeout(r, 20));
+        try {
+          const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+          const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+          if (state === "Z") alive = false;
+        } catch {
+          alive = false;
+        }
+        if (alive) await new Promise((r) => setTimeout(r, 20));
       } catch {
         alive = false;
       }

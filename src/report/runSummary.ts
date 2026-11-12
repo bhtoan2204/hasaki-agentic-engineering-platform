@@ -215,7 +215,7 @@ async function git(cwd: string, ...args: string[]) {
 async function changesOf(runId: number): Promise<RepoChange[]> {
   const ws = await q<{ repo: string; branch: string; path: string }>(
     pool,
-    "SELECT repo, branch, path FROM execution_workspaces WHERE run_id = $1 ORDER BY repo",
+    "SELECT repo, branch, path FROM execution_workspaces WHERE run_id = $1 AND subtask_id IS NULL ORDER BY repo",
     [runId],
   );
   const out: RepoChange[] = [];

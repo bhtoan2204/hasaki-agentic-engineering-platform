@@ -12,7 +12,8 @@ import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { gitProviderFor, workspaceBase, workspacesOf } from "../../git/provider.ts";
+import { prepareWorkspace, gitProviderFor, subtaskWorkspacesOf, workspaceBase, workspacesOf } from "../../git/provider.ts";
+import { mergeBranchInto, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   repositoryReference,
@@ -210,7 +211,9 @@ export async function runCommand(
     const killTree = () => {
       try {
         if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {}
+      } catch {
+        // ignore errors when child process group is already terminated
+      }
     };
     signal.addEventListener("abort", killTree, { once: true });
     if (child.pid) childGroups.add(child.pid);
@@ -743,9 +746,116 @@ async function publishReport(ctx: ExecutionContext): Promise<ExecResult> {
   };
 }
 
+/** Fold each subtask branch into the run worktree. Declared file conflicts are handled by the caller first. */
+async function mergeIsolatedSubtasks(ctx: ExecutionContext): Promise<ExecResult | null> {
+  if (!ctx.run?.id) return null;
+  const subs = await subtaskWorkspacesOf(ctx.run.id);
+  if (!subs.length) return null;
+  for (const sub of subs) {
+    if (await worktreePorcelain(sub.path))
+      return {
+        kind: "failed",
+        error: `Subtask ${sub.subtask_id} in ${sub.repo} has uncommitted changes; commit them before integration`,
+        retryable: false,
+      };
+  }
+  const gitConflicts: Array<{ repo: string; branch: string; error: string }> = [];
+  const repos = [...new Set(subs.map((s) => s.repo))];
+  for (const repo of repos) {
+    let parent;
+    try {
+      parent = await prepareWorkspace(ctx.run, repo, async () => {
+        if (ctx.signal?.aborted) throw new Error("aborted");
+      });
+    } catch (e) {
+      return {
+        kind: "failed",
+        error: `cannot prepare integration worktree for ${repo}: ${(e as Error).message}`,
+        retryable: true,
+      };
+    }
+    for (const sub of subs.filter((s) => s.repo === repo)) {
+      try {
+        await mergeBranchInto(parent.path, sub.branch);
+        await ctx.log("system", `merged ${sub.branch} into ${parent.branch} (${repo})`);
+      } catch (e) {
+        gitConflicts.push({ repo, branch: sub.branch, error: (e as Error).message });
+        break;
+      }
+    }
+  }
+  if (gitConflicts.length) {
+    await ctx.log("system", `git merge failed for ${gitConflicts.length} subtask branch(es)`, {
+      conflicts: gitConflicts,
+    });
+    return {
+      kind: "failed",
+      error: `Subtask merge conflict: ${gitConflicts.map((c) => `${c.repo} ${c.branch}`).join(", ")}`,
+      retryable: false,
+      details: { conflicts: gitConflicts },
+    };
+  }
+  return null;
+}
+
+export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResult> {
+  const upstream = ctx.input.upstream ?? {};
+  const subtaskOutputs = Object.entries(upstream)
+    .filter(([k]) => k.startsWith("subtask-"))
+    .map(([k, v]) => ({ key: k, ...(v as any) }));
+
+  await ctx.log("system", `integrating ${subtaskOutputs.length} completed subtask(s)...`);
+
+  // Detect conflicts across subtask outputs and owned files
+  const modifiedFiles: Record<string, string[]> = {};
+  const conflicts: Array<{ file: string; subtasks: string[] }> = [];
+
+  for (const s of subtaskOutputs) {
+    const files: string[] =
+      s.output?.files ?? s.output?.owned_files ?? s.output?.modified_files ?? [];
+    for (const f of files) {
+      if (!modifiedFiles[f]) modifiedFiles[f] = [];
+      modifiedFiles[f].push(s.key);
+      if (modifiedFiles[f].length > 1 && !conflicts.some((c) => c.file === f)) {
+        conflicts.push({ file: f, subtasks: modifiedFiles[f] });
+      }
+    }
+  }
+
+  if (conflicts.length > 0) {
+    await ctx.log(
+      "system",
+      `conflict detected during subtask integration in ${conflicts.length} file(s)`,
+      { conflicts },
+    );
+    return {
+      kind: "failed",
+      error: `Subtask merge conflict: files modified by multiple subtasks: ${conflicts.map((c) => c.file).join(", ")}`,
+      retryable: false,
+      details: { conflicts },
+    };
+  }
+
+  const merged = await mergeIsolatedSubtasks(ctx);
+  if (merged) return merged;
+
+  return {
+    kind: "completed",
+    output: {
+      status: "integrated",
+      subtasks_integrated: subtaskOutputs.map((s) => s.key),
+      count: subtaskOutputs.length,
+      modified_files: Object.keys(modifiedFiles),
+    },
+  };
+}
+
 export const integrationExecutor: StepExecutor = {
   async execute(ctx) {
     switch (ctx.step.config.action) {
+      case "integrate_subtasks":
+      case "subtask_integration":
+        return integrateSubtasks(ctx);
       case "benchmark_case":
         return executeBenchmarkCase(ctx);
       case "repository_discovery":

@@ -55,13 +55,27 @@ export const LIGHT_STEP_TYPES = [
   "git_pull_request",
 ];
 
+let automaticHandoff: Promise<void> | null = null;
+
+/**
+ * Scan at most one due automatic handoff. Concurrent callers share the scan already in flight.
+ * A caller that arrives after it settles scans again; durable handoff state is not cached.
+ */
+export function reconcileAutomaticHandoff(): Promise<void> {
+  if (automaticHandoff) return automaticHandoff;
+  const run = processAutomaticHandoff().finally(() => {
+    if (automaticHandoff === run) automaticHandoff = null;
+  });
+  automaticHandoff = run;
+  return run;
+}
+
 /** `onlyTypes`: restrict the claim to these step types (light lane). */
 export async function claimJob(
   workerId: string,
   leaseSeconds: number,
   onlyTypes?: string[],
 ): Promise<JobRow | undefined> {
-  await processAutomaticHandoff();
   return one<JobRow>(
     pool,
     `UPDATE workflow_jobs j
@@ -124,12 +138,7 @@ export async function processJob(
   const hb = setInterval(async () => {
     try {
       if (
-        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds)) ||
-        (await one(
-          pool,
-          "SELECT id FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'",
-          [begun.attempt.id],
-        ))
+        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds, begun.attempt.id))
       )
         ac.abort();
     } catch (e) {
@@ -250,6 +259,7 @@ export async function runOnce(
   workerId = `${processId}:once`,
   opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds"> = config.scheduler,
 ) {
+  await reconcileAutomaticHandoff();
   const job = await claimJob(workerId, opts.leaseSeconds);
   if (!job) return runIndexOnce();
   await processJob(job, workerId, opts);
@@ -286,6 +296,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
       (async () => {
         while (!stopped) {
           try {
+            await reconcileAutomaticHandoff();
             const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
             if (job) await processJob(job, workerId, opts);
             else if (!lane.types && (await runIndexOnce(indexAbort.signal))) {
@@ -302,6 +313,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   const reconcile = () => {
     reapExpiredLeases().catch((e) => console.error("reaper:", e.message));
     dispatchRunEffects().catch((e) => console.error("run effects:", e.message));
+    reconcileAutomaticHandoff().catch((e) => console.error("automatic handoff:", e.message));
   };
   const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);
   void reconcile();

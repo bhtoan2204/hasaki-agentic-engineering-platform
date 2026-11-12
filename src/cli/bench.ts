@@ -18,6 +18,10 @@ const args = Object.fromEntries(
     .map((a) => a.replace(/^--/, "").split("="))
     .map(([k, v]) => [k, v ?? "true"]),
 );
+if (args.suite === "platform-performance-v1") {
+  await import("./benchPerformance.ts");
+  process.exit(0);
+}
 if (args.suite === "backend-v1" || args.p2 === "true") {
   await import("./evaluate.ts");
   process.exit(0);
@@ -272,7 +276,9 @@ const SCENARIOS: Record<
 async function drive(runId: number, timeoutMs: number) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    while (await runOnce()) {}
+    while (await runOnce()) {
+      // Drain ready jobs before inspecting human gates or terminal status.
+    }
     const run = await getRun(runId);
     if (["COMPLETED", "FAILED", "CANCELED"].includes(run.status)) return run.status;
     for (const s of run.steps) {

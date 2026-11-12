@@ -34,7 +34,7 @@ import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts
 import type pg from "pg";
 import { config } from "../config.ts";
 import { executionPolicyVersions } from "../learning/policyVersions.ts";
-import { workspacesOf } from "../git/provider.ts";
+import { allWorkspacesOf } from "../git/provider.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
@@ -528,7 +528,7 @@ export async function setRunBranches(runId: number, branches: unknown, by: strin
     } catch (e) {
       throw new EngineError((e as Error).message, 400);
     }
-    const prepared = (await workspacesOf(run.id, c)).map((w) => w.repo);
+    const prepared = [...new Set((await allWorkspacesOf(run.id, c)).map((w) => w.repo))];
     const touched = Object.keys(raw).flatMap((k) =>
       k === "*" ? prepared : prepared.includes(k) ? [k] : [],
     );
@@ -881,11 +881,11 @@ export async function sendFeedback(
   // Re-planning may discard the approach the code was written for: keep the uncommitted part retrievable.
   const snapshots: Array<{ repo: string; ref: string; commit: string; files: string[] }> = [];
   if (route !== "reimplement")
-    for (const w of await workspacesOf(runId))
+    for (const w of await allWorkspacesOf(runId))
       try {
         const snap = await snapshotUncommitted(
           w.path,
-          `refs/platform/replan/run-${runId}/${id}`,
+          `refs/platform/replan/run-${runId}/${id}${w.subtask_id ? `--${w.subtask_id}` : ""}`,
           `platform: uncommitted work before ${route} (run ${runId})`,
         );
         if (snap) snapshots.push({ repo: w.repo, ...snap });
@@ -1462,25 +1462,97 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
         );
       return null;
     }
-    // Run lock makes this a durable reader/writer gate over the existing shared run worktrees.
+    // Run lock makes this a durable reader/writer gate. Concurrent coding is admitted only when
+    // each step will get its own worktree (isolated_workspace and a distinct subtask id). A separate
+    // checkout still does not name the files a step may edit, so an empty file list stays queued.
     const consumers = ["agent", "coding_agent", "command", "git_pull_request"];
     const writers = ["coding_agent", "command", "git_pull_request"];
-    if (
-      consumers.includes(step.type) &&
-      (await one(
+    const isolatedCoding = (
+      type: string,
+      config: Record<string, any> | null | undefined,
+      subtaskId: string | null | undefined,
+    ) =>
+      type === "coding_agent" &&
+      config?.isolated_workspace === true &&
+      typeof subtaskId === "string" &&
+      /^[a-z0-9][a-z0-9_-]*$/.test(subtaskId);
+    const filesOf = (config: Record<string, any> | null | undefined): string[] =>
+      config?.scope?.owned_files ?? config?.subtask?.owned_files ?? config?.owned_files ?? [];
+    const reposOf = (config: Record<string, any> | null | undefined): string[] =>
+      config?.scope?.repositories ??
+      config?.subtask?.target_repos ??
+      config?.target_repos ??
+      [];
+    if (consumers.includes(step.type)) {
+      const active = await q<{
+        id: number;
+        step_id: number;
+        step_type: string;
+        config: Record<string, any>;
+        subtask_id: string | null;
+      }>(
         c,
-        `SELECT a.id FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id
-      WHERE a.run_id=$1 AND (a.status='RUNNING' OR a.job_id=ANY($5::bigint[])) AND s.type=ANY($2::text[])
-      AND ($3::boolean OR s.type=ANY($4::text[])) LIMIT 1`,
-        [run.id, consumers, writers.includes(step.type), writers, localJobs.activeIds()],
-      ))
-    ) {
-      await q(
-        c,
-        "UPDATE workflow_jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL, available_at=now()+interval '1 second', updated_at=now() WHERE id=$1",
-        [j.id],
+        `SELECT a.id, s.id AS step_id, s.type AS step_type, s.config, s.subtask_id
+         FROM workflow_step_attempts a
+         JOIN workflow_steps s ON s.id = a.step_id
+         WHERE a.run_id = $1 AND (a.status = 'RUNNING' OR a.job_id = ANY($2::bigint[])) AND s.type = ANY($3::text[])`,
+        [run.id, localJobs.activeIds(), consumers],
       );
-      return null;
+
+      if (active.length > 0) {
+        const isConcurrentCandidate = isolatedCoding(step.type, step.config, step.subtask_id);
+
+        let conflict = false;
+        if (!isConcurrentCandidate) {
+          const isWriter = writers.includes(step.type);
+          conflict = active.some((a) => isWriter || writers.includes(a.step_type));
+        } else {
+          const maxConcurrent = Number(
+            (run as any).config?.max_concurrent_subtasks ??
+              step.config?.max_concurrent_subtasks ??
+              4,
+          );
+          if (active.length >= maxConcurrent) {
+            conflict = true;
+          } else {
+            const stepFiles = filesOf(step.config);
+            const stepRepos = reposOf(step.config);
+            for (const a of active) {
+              if (!isolatedCoding(a.step_type, a.config, a.subtask_id) || a.subtask_id === step.subtask_id) {
+                conflict = true;
+                break;
+              }
+              const activeFiles = filesOf(a.config);
+              if (
+                stepFiles.length > 0 &&
+                activeFiles.length > 0 &&
+                stepFiles.some((f) => activeFiles.includes(f))
+              ) {
+                conflict = true;
+                break;
+              }
+              const activeRepos = reposOf(a.config);
+              const disjointRepos =
+                stepRepos.length > 0 &&
+                activeRepos.length > 0 &&
+                !stepRepos.some((r) => activeRepos.includes(r));
+              if (!disjointRepos && (stepFiles.length === 0 || activeFiles.length === 0)) {
+                conflict = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (conflict) {
+          await q(
+            c,
+            "UPDATE workflow_jobs SET status='queued', lease_owner=NULL, lease_expires_at=NULL, available_at=now()+interval '1 second', updated_at=now() WHERE id=$1",
+            [j.id],
+          );
+          return null;
+        }
+      }
     }
     const effective = resolveStepAgent(run, step);
     step.config = effectiveStepConfig(step.config, effective);
@@ -1546,13 +1618,19 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
 }
 
 /** Extend the lease iff we still hold the job. false = fenced out (canceled, re-executed, reaped). */
-export async function heartbeat(jobId: number, token: number, leaseSeconds: number) {
+export async function heartbeat(
+  jobId: number,
+  token: number,
+  leaseSeconds: number,
+  attemptId?: number,
+) {
   const r = await pool.query(
     `UPDATE workflow_jobs SET lease_expires_at = now() + make_interval(secs => $3), updated_at = now()
       WHERE id = $1 AND fencing_token = $2 AND status = 'running' AND lease_expires_at > clock_timestamp()
         AND EXISTS (SELECT 1 FROM workflow_runs r WHERE r.id = workflow_jobs.run_id AND r.worker_instance = $4)
-        AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))`,
-    [jobId, token, leaseSeconds, config.instanceId, instanceSession],
+        AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))
+        AND ($6::int IS NULL OR NOT EXISTS (SELECT 1 FROM provider_handoffs h WHERE h.source_attempt_id = $6 AND h.status = 'STOPPING'))`,
+    [jobId, token, leaseSeconds, config.instanceId, instanceSession, attemptId ?? null],
   );
   return r.rowCount === 1;
 }
@@ -2840,7 +2918,7 @@ export async function resumeProviderHandoff(
   });
 }
 
-/** Existing scheduler polls durable eligible handoffs too, so restart cannot lose an automatic continuation. */
+/** One non-overlapping scheduler reconciliation reads the next persisted due handoff, so restart cannot lose an automatic continuation. */
 export async function processAutomaticHandoff() {
   const h = await one(
     pool,

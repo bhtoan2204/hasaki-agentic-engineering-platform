@@ -21,6 +21,7 @@ import {
 } from "../auth/sessions.ts";
 import { setPassword } from "../auth/users.ts";
 import { wantsSupport } from "../authz/access.ts";
+import { artifactResponseHeaders } from "./artifactResponse.ts";
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 const publicDir = join(import.meta.dirname, "..", "..", "public");
@@ -195,12 +196,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       ).rows[0];
       if (!a) return res.writeHead(404).end();
       const bin = a.data?.encoding === "base64";
-      res.writeHead(200, {
-        "Content-Type": bin ? a.data.mime : "text/plain; charset=utf-8",
-        "Content-Disposition": `inline; filename="${String(a.name).replace(/"/g, "")}"`,
-        "X-Content-Type-Options": "nosniff",
-      });
-      return res.end(bin ? Buffer.from(a.content, "base64") : a.content);
+      const bytes = bin ? Buffer.from(a.content, "base64") : null;
+      res.writeHead(200, artifactResponseHeaders(a.name, a.data?.mime, bytes));
+      return res.end(bytes ?? a.content);
     }
 
     for (const [routeMethod, pattern, handler] of routes) {
