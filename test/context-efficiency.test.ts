@@ -64,11 +64,10 @@ test("adaptive budgets: sized by role, explicit config wins (handled by the call
   assert.equal(roleBudget({ type: "agent", config: {} }), null);
 });
 
-test("context cache key: deterministic, and changes with owner, authorization, query, repository state or index version", () => {
+test("context cache key: shared across steps of a run, deterministic, and changes with owner, authorization, query, repository state or index version", () => {
   const base = {
     ownerId: 1,
     runId: 2,
-    stepId: 3,
     allowed: ["b", "a"],
     query: "refund",
     repos: { a: "fp1:tip1", b: "fp2:tip2" },
@@ -87,7 +86,7 @@ test("context cache key: deterministic, and changes with owner, authorization, q
     { repos: { a: "fp1-dirty:tip1", b: "fp2:tip2" } },
     { repos: { a: "fp1:tip-moved", b: "fp2:tip2" } },
     { indexVersion: "v2" },
-    { stepId: 4 },
+    { runId: 3 },
   ])
     assert.notEqual(codeRetrievalKey({ ...base, ...change }), k, JSON.stringify(change));
 });

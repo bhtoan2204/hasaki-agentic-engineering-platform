@@ -71,12 +71,15 @@ export function planKnowledge(
     ...scoreKnowledge(k, opts.requestText, opts.stepType),
     tokens: estimateTokens(k.content),
   }));
+  // Unverified AI observations are never authoritative: they cannot be mandatory or inline, whatever their load flag.
+  const unverified = (x: (typeof scored)[number]) => knowledgeTier(x.k) === "unverified_suggestion";
   const mandatory = (x: (typeof scored)[number]) =>
-    x.k.reason === "assigned to step" ||
-    x.k.reason.startsWith("selected for this re-execution") ||
-    x.k.enforced === true;
+    !unverified(x) &&
+    (x.k.reason === "assigned to step" ||
+      x.k.reason.startsWith("selected for this re-execution") ||
+      x.k.enforced === true);
   const wantsInline = (x: (typeof scored)[number]) =>
-    mandatory(x) || x.k.metadata?.load !== "on_demand";
+    !unverified(x) && (mandatory(x) || x.k.metadata?.load !== "on_demand");
   const out: DisclosureEntry[] = [];
   let used = 0;
   // inline: mandatory first, then the most relevant inline-type items while the budget lasts; overflow → index
@@ -109,8 +112,10 @@ export function planKnowledge(
   let indexed = 0;
   for (const x of rest) {
     const companion = !!x.k.metadata?.parent_skill;
-    const disclosure = !companion && indexed < opts.indexSize ? "index" : "search";
-    if (disclosure === "index") indexed++;
+    // Unverified observations always stay visible as an index line (with notice) and never use a slot.
+    const pinned = unverified(x) && !companion;
+    const disclosure = pinned || (!companion && indexed < opts.indexSize) ? "index" : "search";
+    if (disclosure === "index" && !pinned) indexed++;
     out.push({
       key: x.k.key,
       disclosure,
@@ -215,3 +220,134 @@ export function planUpstream(
   }
   return { plan, text };
 }
+
+// ---------------------------------------------------------------- code retrieval ranking
+
+export interface CodeHit {
+  repo: string;
+  path: string;
+  line?: number;
+  endLine?: number;
+  symbol?: string;
+  /** Raw retrieval score from the index (symbol match / keyword match). */
+  score: number;
+  via: "symbol" | "keyword" | "dependency";
+}
+export interface RankedCodeHit extends CodeHit {
+  confidence: number;
+  evidence: string[];
+}
+
+/**
+ * Rank code hits for a task (pure, deterministic): direct matches keep their score, files that the best direct hits
+ * depend on get a discounted one-step expansion, duplicates (same repo, path, range) collapse to the strongest hit
+ * with merged evidence, and every hit carries a 0..1 confidence relative to the best one plus the reasons it ranked.
+ * `deps` maps "repo:path" to the files it imports/calls. Nothing is fetched here; the caller applies its own budget.
+ */
+export function rankCodeHits(
+  hits: CodeHit[],
+  deps: Record<string, Array<{ repo: string; path: string }>>,
+  opts: { limit: number; expandTop?: number; dependencyWeight?: number },
+): RankedCodeHit[] {
+  const weight = opts.dependencyWeight ?? 0.5;
+  const keyOf = (h: { repo: string; path: string; line?: number; endLine?: number }) =>
+    `${h.repo}:${h.path}:${h.line ?? ""}-${h.endLine ?? ""}`;
+  const byKey = new Map<string, RankedCodeHit>();
+  const add = (h: CodeHit, evidence: string) => {
+    const k = keyOf(h);
+    const cur = byKey.get(k);
+    if (!cur) return void byKey.set(k, { ...h, confidence: 0, evidence: [evidence] });
+    if (!cur.evidence.includes(evidence)) cur.evidence.push(evidence);
+    if (h.score > cur.score)
+      Object.assign(cur, { score: h.score, via: h.via, symbol: h.symbol ?? cur.symbol });
+  };
+  const direct = [...hits].sort((a, b) => b.score - a.score || keyOf(a).localeCompare(keyOf(b)));
+  for (const h of direct)
+    add(h, `${h.via} match${h.symbol ? ` "${h.symbol}"` : ""} (score ${h.score})`);
+  for (const h of direct.slice(0, opts.expandTop ?? 3)) {
+    for (const d of deps[`${h.repo}:${h.path}`] ?? [])
+      add(
+        { repo: d.repo, path: d.path, score: h.score * weight, via: "dependency" },
+        `dependency of ${h.repo}:${h.path}`,
+      );
+  }
+  const ranked = [...byKey.values()].sort(
+    (a, b) => b.score - a.score || keyOf(a).localeCompare(keyOf(b)),
+  );
+  const best = ranked[0]?.score || 1;
+  for (const r of ranked)
+    r.confidence = Math.round(Math.min(1, Math.max(0, r.score / best)) * 100) / 100;
+  return ranked.slice(0, Math.max(0, opts.limit));
+}
+
+// ---------------------------------------------------------------- knowledge tiers
+
+export type KnowledgeTier =
+  "organizational_rule" | "approved_knowledge" | "task_observation" | "unverified_suggestion";
+
+/** Label an item with its authority tier. Only enforced rules are authoritative; unknown or unverified never are. */
+export function knowledgeTier(k: {
+  category: string;
+  enforced?: boolean;
+  metadata?: any;
+}): KnowledgeTier {
+  if (k.category === "task_memory") {
+    // Production task_memory stores provenance under metadata.memory (see knowledge/memory.ts); missing = unverified.
+    const t = String(k.metadata?.memory?.trust ?? "unverified");
+    return t === "approved" || t === "verified" ? "task_observation" : "unverified_suggestion";
+  }
+  if (k.enforced === true) return "organizational_rule";
+  return "approved_knowledge";
+}
+
+/**
+ * Apply rankCodeHits to a search_code result using the edges of a find_dependencies result: hits are deduplicated,
+ * files the best hits depend on are added as discounted candidates, and every hit carries rank_confidence + evidence.
+ * Pure; a body without a hits array is returned unchanged.
+ */
+export function rankRetrievedCode(search: any, dependencies: any[] | undefined, limit = 12): any {
+  const raw: any[] = Array.isArray(search?.hits) ? search.hits : [];
+  if (!raw.length) return search;
+  const keyOf = (r: string, p: string, a?: number, b?: number) => `${r}:${p}:${a ?? ""}-${b ?? ""}`;
+  const original = new Map<string, any>();
+  const hits: CodeHit[] = raw.map((h) => {
+    const line = h.line_range?.[0];
+    const endLine = h.line_range?.[1];
+    const k = keyOf(h.repository, h.file_path, line, endLine);
+    const prev = original.get(k);
+    // Duplicates collapse to the strongest hit, so its snippet/metadata are the ones kept.
+    if (!prev || (Number(h.confidence) || 0) > (Number(prev.confidence) || 0)) original.set(k, h);
+    return {
+      repo: h.repository,
+      path: h.file_path,
+      line,
+      endLine,
+      symbol: h.qualified_name ?? h.symbol_name,
+      score: Number(h.confidence) || 0,
+      via: h.qualified_name || h.symbol_name ? "symbol" : "keyword",
+    };
+  });
+  const deps: Record<string, Array<{ repo: string; path: string }>> = {};
+  for (const e of dependencies ?? []) {
+    const k = `${e.repository}:${e.file_path}`;
+    for (const c of e.candidate_definitions ?? [])
+      (deps[k] ??= []).push({ repo: c.repository, path: c.file_path });
+  }
+  const ranked = rankCodeHits(hits, deps, { limit });
+  return {
+    ...search,
+    hits: ranked.map((r) => {
+      const o = original.get(keyOf(r.repo, r.path, r.line, r.endLine));
+      const extra = { rank_confidence: r.confidence, evidence: r.evidence };
+      return o
+        ? { ...o, ...extra }
+        : { repository: r.repo, file_path: r.path, match_type: r.via, ...extra };
+    }),
+  };
+}
+
+/** Explicit label for items that must never be read as authoritative. */
+export const tierNotice = (t: KnowledgeTier) =>
+  t === "unverified_suggestion"
+    ? "quan sát chưa xác minh (unverified observation): không phải rule"
+    : undefined;
