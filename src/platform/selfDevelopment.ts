@@ -119,8 +119,8 @@ export function protectedRootsFor(paths: string[]): string[] {
 }
 
 /**
- * Coding agents other than Codex have no OS write sandbox. Codex's workspace-write roots are the agent directory
- * and a scratch dir under dataDir, which must itself sit outside the live checkout.
+ * dataDir must sit outside the live checkout. Codex coding has no OS write sandbox; the tool-policy hook is its
+ * write boundary. Other providers are enforced by tool policy only.
  */
 export function assertSelfCodingIsolation(provider: string) {
   if (overlapsLiveApplication(config.dataDir))
@@ -130,7 +130,7 @@ export function assertSelfCodingIsolation(provider: string) {
   if (provider === "codex") return;
   if (config.platform.trustedOperatorIsolation) return;
   throw new Error(
-    "Self-development coding with this provider is refused. Codex confines writes with its OS sandbox. " +
+    "Self-development coding with this provider is refused. Codex coding is allowed on this workstation without an OS sandbox. " +
       "Claude, Cursor and Antigravity are enforced by tool policy only. On a single-operator workstation set " +
       "platform.trustedOperatorIsolation (or PLATFORM_TRUSTED_OPERATOR_ISOLATION=1). Do not enable that for untrusted users.",
   );

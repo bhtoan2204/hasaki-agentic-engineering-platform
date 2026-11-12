@@ -3,7 +3,7 @@ import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { codexConfig } from "../../config.ts";
 import { pool, one } from "../../db/pool.ts";
@@ -30,11 +30,10 @@ const exec = promisify(execFile);
  *
  * Execution policy, per invocation and never in the user's ~/.codex:
  *  - --ignore-user-config / --ignore-rules / --strict-config: only the platform's -c overrides apply; unknown keys fail.
- *  - OS sandbox: read-only for analysis; workspace-write for coding. The writable roots are the agent session
- *    directory, its run directory (the parent, which holds worktrees prepare_branch creates beside the session),
- *    and a per-attempt temp dir. Network off.
- *    Network off. .git stays read-only, so commits go through the platform's commit_changes tool.
- *  - approval_policy = never: nothing leaves the sandbox; PermissionRequest is denied by the platform hook as well.
+ *  - OS sandbox: read-only for analysis. Coding runs danger-full-access (no OS sandbox, network allowed) so local
+ *    PostgreSQL sockets and the test suite can run. .git stays read-only to the tool policy, so commits go through
+ *    the platform's commit_changes tool.
+ *  - approval_policy = never. PermissionRequest is denied by the platform hook as well.
  *  - PreToolUse hook → worker decide(): forbidden commands, edits outside worktrees, unknown tools and subagents are
  *    denied BEFORE they run. --dangerously-bypass-hook-trust is required because Codex skips hooks it has not persisted
  *    trust for; the only hooks loaded are the platform's own (user config is ignored). It does not bypass the sandbox
@@ -295,26 +294,6 @@ export interface CodexInvocation {
   resumeId?: string;
 }
 
-/**
- * Coding writes must include the run directory. The agent session (`…/<run>/agent-<step>`) is a sibling of the
- * git worktree (`…/<run>/<repoId>`), not its parent. A root of only the session makes `mkdir node_modules` in the
- * worktree fail with ENOENT.
- */
-export function codingWritableRoots(cwd: string, scratch: string): string[] {
-  const cache = npmCacheDir();
-  const roots = [cwd, scratch];
-  if (!roots.includes(cache)) roots.push(cache);
-  const name = basename(cwd);
-  const runDir = dirname(cwd);
-  if (
-    (name === "agent" || /^agent-\d+$/.test(name)) &&
-    runDir !== cwd &&
-    runDir.split(/[/\\]/).includes("worktrees")
-  )
-    roots.unshift(runDir);
-  return roots;
-}
-
 /** Full argv for one Codex turn. Pure (unit-tested). The prompt is passed on stdin ("-"). */
 export function codexArgs(inv: CodexInvocation): string[] {
   const node = process.execPath;
@@ -322,15 +301,20 @@ export function codexArgs(inv: CodexInvocation): string[] {
   const hookCfg = [
     { hooks: [{ type: "command", command: hook, timeout: 120, statusMessage: "platform policy" }] },
   ];
+  const coding = inv.mode === "coding";
   const cfg: Array<[string, unknown]> = [
-    ["sandbox_mode", inv.mode === "coding" ? "workspace-write" : "read-only"],
+    ["sandbox_mode", coding ? "danger-full-access" : "read-only"],
     ["approval_policy", "never"],
     ["web_search", "disabled"],
-    ["sandbox_workspace_write.network_access", false],
-    [
-      "sandbox_workspace_write.writable_roots",
-      inv.mode === "coding" ? codingWritableRoots(inv.cwd, inv.scratch) : [],
-    ],
+  ];
+  // Analysis stays inside the read-only sandbox. Coding does not: workspace-write blocks Unix socket binds
+  // (local PostgreSQL) and network, which made the agent ask a human to run the suite.
+  if (!coding)
+    cfg.push(
+      ["sandbox_workspace_write.network_access", false],
+      ["sandbox_workspace_write.writable_roots", []],
+    );
+  cfg.push(
     ["shell_environment_policy.inherit", "all"],
     ["shell_environment_policy.ignore_default_excludes", false],
     [
@@ -362,7 +346,7 @@ export function codexArgs(inv: CodexInvocation): string[] {
     ["mcp_servers.platform.tool_timeout_sec", 1800],
     ["mcp_servers.platform.enabled_tools", codexEnabledTools(inv.mode)],
     ["mcp_servers.platform.default_tools_approval_mode", "approve"],
-  ];
+  );
   if (inv.model) cfg.push(["model", inv.model]);
   if (inv.effort) cfg.push(["model_reasoning_effort", inv.effort]);
   const flags = [

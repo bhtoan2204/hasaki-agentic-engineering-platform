@@ -162,9 +162,9 @@ A step can override with `codex_model` / `codex_reasoning_effort` (the Claude-on
 
 - `--ignore-user-config --ignore-rules --strict-config`: only the platform's `-c` settings apply (no user MCP servers,
   hooks, plugins or rules); an unknown key is an error.
-- OS sandbox: analysis/review steps run `read-only`; coding steps run `workspace-write` whose only writable roots are
-  the run's task directory (its worktrees, including ones `prepare_branch` creates later) and a per-attempt temp dir.
-  Network is off. `approval_policy = never`: nothing is escalated out of the sandbox.
+- OS sandbox: analysis/review steps run `read-only`. Coding steps run `danger-full-access` (no OS sandbox, network
+  allowed) so a local PostgreSQL test cluster can bind a Unix socket. Tool policy still refuses `git push`, edits
+  outside the run's worktrees, and reads of `.env`. `approval_policy = never`: a `PermissionRequest` is denied.
 - A `PreToolUse` hook runs **before** every shell command, `apply_patch` edit and MCP tool and asks the worker, which
   applies the same `decide()` rules as Claude (no `git push`/`reset --hard`/branch changes, edits only inside the run's
   worktrees, read-only shell in analysis, no reading `.env`/Codex credentials). Unknown tools and subagents are denied;
