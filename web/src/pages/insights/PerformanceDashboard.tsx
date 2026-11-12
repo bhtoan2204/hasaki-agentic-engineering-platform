@@ -62,21 +62,39 @@ export function PerformanceDashboard({
           />
         </Panel>
       </div>
-      <Panel title={t("an.compare")}>
+      <Panel title={t("an.compare")} hint={t("an.compareHint")}>
         <DataTable
           rows={data.comparison ?? []}
-          total={s.comparison_total}
-          page={page}
-          onPage={onPage}
           columns={[
             { key: "provider", label: "provider" },
             { key: "model", label: "model" },
             { key: "invocations", label: "invocations", style: "number" },
             { key: "runs", label: "runs", style: "number" },
-            { key: "completed_runs", label: "completed", style: "number" },
-            { key: "verified_runs", label: "verifiedRuns", style: "number" },
-            { key: "execution_p50_ms", label: "executionP50", style: "ms" },
-            { key: "execution_p95_ms", label: "executionP95", style: "ms" },
+            { key: "failures", label: "failureCount", style: "number" },
+            {
+              key: "completed_runs",
+              label: "completed",
+              style: "number",
+              responsivePriority: "secondary",
+            },
+            {
+              key: "verified_runs",
+              label: "verifiedRuns",
+              style: "number",
+              responsivePriority: "secondary",
+            },
+            {
+              key: "execution_p50_ms",
+              label: "executionP50",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
+            {
+              key: "execution_p95_ms",
+              label: "executionP95",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
           ]}
         />
       </Panel>
@@ -88,15 +106,35 @@ export function PerformanceDashboard({
           onPage={onPage}
           columns={[
             { key: "run_id", label: "run", render: runLink },
+            { key: "step_type", label: "step" },
             { key: "provider", label: "provider" },
             { key: "model", label: "model" },
             { key: "status", label: "status", render: (r) => status(r.status) },
             { key: "provider_execution_ms", label: "execution", style: "ms" },
-            { key: "wall_duration_ms", label: "wall", style: "ms" },
-            { key: "queue_duration_ms", label: "queue", style: "ms" },
-            { key: "human_wait_ms", label: "human", style: "ms" },
-            { key: "tool_execution_ms", label: "tools", style: "ms" },
-            { key: "normalized_failure_category", label: "failures" },
+            {
+              key: "wall_duration_ms",
+              label: "wall",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
+            {
+              key: "queue_duration_ms",
+              label: "queue",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
+            { key: "human_wait_ms", label: "human", style: "ms", responsivePriority: "secondary" },
+            {
+              key: "tool_execution_ms",
+              label: "tools",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
+            {
+              key: "normalized_failure_category",
+              label: "failures",
+              responsivePriority: "secondary",
+            },
           ]}
         />
       </Panel>

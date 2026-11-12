@@ -90,6 +90,13 @@ test("performance distinguishes completion from verified tasks and reports measu
   assert.equal(p.summary.execution_p50_ms, 1000);
   assert.equal(p.summary.queue_ms, null);
   assert.equal(p.failures[0].category, "RATE_LIMIT");
+  assert.ok(p.comparison.length >= 1);
+  const claude = p.details.find((r) => r.provider === "claude");
+  assert.equal(claude?.step_type, "coding_agent");
+  assert.match(String(claude?.model), /claude-test/);
+  const paged = await performanceAnalytics(filters("&page=2&page_size=1"), scope());
+  assert.equal(paged.details.length, 1);
+  assert.ok(paged.comparison.length >= 1);
   const w = await workflowAnalytics(filters(), scope());
   assert.equal(w.steps[0].context_preparation_ms, 42);
   assert.equal(w.evidence.repository_accuracy, null);

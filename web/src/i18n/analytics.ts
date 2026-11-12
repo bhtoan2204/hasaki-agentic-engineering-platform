@@ -259,6 +259,12 @@ const copy: Record<string, [string, string]> = {
   toolError: ["Tỷ lệ lỗi tool", "Tool error rate"],
   failures: ["Nhóm lỗi provider", "Provider failure categories"],
   compare: ["So sánh provider / model", "Provider / model comparison"],
+  compareHint: [
+    "Chỉ tính lần gọi provider (bước agent hoặc phiên đã ghi). Bước lệnh, phê duyệt và tích hợp không có model nên không vào bảng này.",
+    "Only provider invocations (agent steps or recorded sessions). Command, approval, and integration steps have no model and stay out of this table.",
+  ],
+  failureCount: ["Lỗi", "Failures"],
+  step: ["Bước", "Step"],
   attemptDetails: ["Chi tiết lần thực thi", "Attempt details"],
   run: ["Run / bước", "Run / step"],
   wall: ["Thời gian attempt end-to-end", "Attempt end-to-end time"],
