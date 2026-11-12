@@ -77,6 +77,8 @@ export interface ExpansionContext {
   existingSteps?: { key: string; depends_on: string[]; subtask_id?: string | null; status?: string }[];
   /** Step the plan expands; steps waiting on it are rewired to wait for the leaf subtasks. */
   planStepKey?: string;
+  /** True only when each subtask gets its own worktree. Not implemented yet: expansions are always serialized. */
+  isolatedWorkspaces?: boolean;
 }
 
 const stepKey = (id: string) => `subtask-${id}`;
@@ -117,6 +119,17 @@ export function validateExpansion(
         b.execution_strategy = "sequential";
       }
     }
+  // Workspaces are one worktree per run (src/git/provider.ts keys on run.branch), so two coding subtasks running at the
+  // same time would write the same checkout. Until per-subtask worktrees exist, every subtask is serialized: any pair
+  // with no dependency path between them gets one, and nothing is left as "parallel".
+  if (!ctx.isolatedWorkspaces) {
+    for (let i = 0; i < subtasks.length; i++)
+      for (let j = i + 1; j < subtasks.length; j++) {
+        const a = subtasks[i], b = subtasks[j];
+        if (!reaches(subtasks, b.id, a.id) && !reaches(subtasks, a.id, b.id)) b.depends_on.push(a.id);
+      }
+    for (const st of subtasks) st.execution_strategy = "sequential";
+  }
   if (!errors.length) {
     try {
       const toKey = (d: string) => (ids.has(d) ? stepKey(d) : d);
@@ -263,7 +276,8 @@ export async function materializeSubtasks(
        VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, $10, 2, 5, 'PENDING', $7, $8, $9)`,
       [runId, stepKey(s.id), s.title, position++, deps, json({
         subtask: s,
-        // Scope: a subtask may only touch its own target repositories (validated ⊆ the run's allowed set).
+        // Scope (recorded, not yet a runtime sandbox): target repositories are validated ⊆ the run's allowed set; runtime
+        // still confines coding agents to run.selected_repositories and the single run worktree.
         scope: { repositories: s.target_repos, permissions: s.permissions, owned_files: s.owned_files },
       }), planStepKey, s.id, revision, s.risk === "high"],
     );

@@ -195,3 +195,20 @@ test("limits cannot be raised above the hard ceiling", async () => {
   const f = fakeDb(baseSteps({ p: many }));
   await assert.rejects(materializeSubtasks(f.db, 1, "plan", many, { ...opts, limits: { max_subtasks: 1000 } }), /limit is 20/);
 });
+
+test("independent subtasks are serialized while the run has a single shared worktree", () => {
+  const p = plan(sub("a"), sub("b"), sub("c", { depends_on: ["a"] }));
+  const r = validateExpansion(p, { existingKeys: [], allowedRepositories: ["repo-a"], limits: DEFAULT_LIMITS });
+  assert.deepEqual(r.errors, []);
+  assert.ok(r.subtasks.every((s) => s.execution_strategy === "sequential"));
+  const dep = (id: string) => r.subtasks.find((s) => s.id === id)!.depends_on;
+  assert.ok(dep("b").includes("a"));
+  assert.ok(dep("c").includes("a") && dep("c").includes("b"));
+});
+
+test("parallel execution is only kept when isolated workspaces are declared", () => {
+  const p = plan(sub("a"), sub("b"));
+  const r = validateExpansion(p, { existingKeys: [], allowedRepositories: ["repo-a"], limits: DEFAULT_LIMITS, isolatedWorkspaces: true });
+  assert.deepEqual(r.subtasks.map((s) => s.depends_on), [[], []]);
+  assert.ok(r.subtasks.every((s) => s.execution_strategy === "parallel"));
+});
