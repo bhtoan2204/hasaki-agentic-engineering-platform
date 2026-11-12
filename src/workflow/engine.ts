@@ -2832,7 +2832,7 @@ export async function resumeProviderHandoff(
   });
 }
 
-/** Existing scheduler polls durable eligible handoffs too, so restart cannot lose an automatic continuation. */
+/** One non-overlapping scheduler reconciliation reads the next persisted due handoff, so restart cannot lose an automatic continuation. */
 export async function processAutomaticHandoff() {
   const h = await one(
     pool,

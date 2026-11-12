@@ -24,7 +24,13 @@ import {
   stepDetail,
 } from "../src/workflow/engine.ts";
 import { settleBackground } from "../src/workflow/background.ts";
-import { claimJob, processJob } from "../src/workflow/scheduler.ts";
+import {
+  claimJob,
+  processJob,
+  reconcileAutomaticHandoff,
+  runOnce,
+  startScheduler,
+} from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { repositories } from "../src/repos/service.ts";
@@ -715,4 +721,95 @@ test("ordinary step cancellation retains termination proof for a later safe hand
   );
   assert.equal(handoff.status, "READY");
   await resume(r.id, handoff, "cursor");
+});
+
+async function readyAutomaticHandoff() {
+  const r = await run("claude", {
+    mode: "automatic",
+    allow_unknown_cost: true,
+    providers: ["claude", "codex"],
+  });
+  await quota();
+  await once();
+  const h = await checkpoint(r.id);
+  assert.equal(h.status, "READY");
+  assert.equal(h.target_provider, null);
+  await q(
+    pool,
+    "UPDATE provider_handoffs SET next_check_at = now() + interval '1 hour' WHERE id = $1",
+    [h.id],
+  );
+  return r;
+}
+
+test("claiming a job does not resume a due automatic handoff; runOnce still does", async () => {
+  const r = await readyAutomaticHandoff();
+  await q(pool, "UPDATE provider_handoffs SET next_check_at = now() WHERE run_id = $1", [r.id]);
+  assert.equal(await claimJob("idle-claim", 120), undefined);
+  assert.equal((await checkpoint(r.id)).status, "READY");
+  assert.equal((await checkpoint(r.id)).target_provider, null);
+  execute = async () => ({ kind: "completed", output: { continued: true } });
+  assert.equal(
+    await runOnce("manual-maintenance", { leaseSeconds: 120, heartbeatSeconds: 30 }),
+    true,
+  );
+  assert.equal((await checkpoint(r.id)).target_provider, "codex");
+  assert.equal((await getRun(r.id)).steps[0].status, "COMPLETED");
+});
+
+test("the scheduler reconciles one due automatic handoff without a per-claim scan", async () => {
+  const r = await readyAutomaticHandoff();
+  await q(pool, "UPDATE provider_handoffs SET next_check_at = now() WHERE run_id = $1", [r.id]);
+  execute = async () => ({ kind: "completed", output: { continued: true } });
+  const sched = startScheduler({
+    workers: 1,
+    lightWorkers: 0,
+    leaseSeconds: 30,
+    heartbeatSeconds: 5,
+    pollMs: 30,
+  });
+  let provider: string | null = null;
+  try {
+    for (let i = 0; i < 40 && provider == null; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      provider = (await checkpoint(r.id)).target_provider;
+    }
+  } finally {
+    await sched.stop();
+  }
+  assert.equal(provider, "codex");
+});
+
+test("an in-flight automatic handoff scan does not start another, and the following scan is not skipped", async () => {
+  const first = await readyAutomaticHandoff();
+  const second = await readyAutomaticHandoff();
+  await q(pool, "UPDATE provider_handoffs SET next_check_at = now() WHERE run_id = ANY($1)", [
+    [first.id, second.id],
+  ]);
+  let release!: (value: { ok: true; quota: "unknown"; cost: "unknown" }) => void;
+  let calls = 0;
+  setHandoffReadinessForTests(
+    () =>
+      new Promise((resolve) => {
+        calls += 1;
+        release = resolve;
+      }),
+  );
+  const started = reconcileAutomaticHandoff();
+  for (let i = 0; i < 50 && calls < 1; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls, 1);
+  const overlapped = reconcileAutomaticHandoff();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(calls, 1);
+  assert.equal(overlapped, started);
+  release({ ok: true, quota: "unknown", cost: "unknown" });
+  await started;
+  const resumed = [await checkpoint(first.id), await checkpoint(second.id)].filter(
+    (h) => h.target_provider,
+  );
+  assert.equal(resumed.length, 1);
+  setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
+  await reconcileAutomaticHandoff();
+  assert.equal((await checkpoint(first.id)).target_provider, "codex");
+  assert.equal((await checkpoint(second.id)).target_provider, "codex");
 });
