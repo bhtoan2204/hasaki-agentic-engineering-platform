@@ -130,7 +130,7 @@ import {
 } from "../knowledge/proposals.ts";
 import { detectKnowledgeChanges, proposeSkillUpdates } from "../knowledge/learning.ts";
 import { background } from "../workflow/background.ts";
-import { StaleWhileRevalidate } from "../cache/index.ts";
+import { StaleWhileRevalidate, cacheSnapshot, singleflightInflight } from "../cache/index.ts";
 
 const metricsSwr = new StaleWhileRevalidate<Awaited<ReturnType<typeof metricsSummary>>>(
   "metrics.summary",
@@ -614,6 +614,19 @@ export const routes: Route[] = [
       return metricsSwr.get(`${days}|${scope.ownerId}|${scope.all}`, () =>
         metricsSummary(days, scope),
       );
+    },
+  ],
+  // Cache + pool gauges (fixed cache names, no keys or user ids). Admin only: process-wide state.
+  [
+    "GET",
+    /^\/api\/metrics\/cache$/,
+    (c) => {
+      requireAdmin(c.actor);
+      return {
+        caches: cacheSnapshot(),
+        singleflightInflight: singleflightInflight(),
+        pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+      };
     },
   ],
   [

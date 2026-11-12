@@ -49,6 +49,7 @@ const stat = (name: string): CacheStat =>
   });
 
 const registry = new Set<CacheAside<any>>();
+const swrRegistry = new Set<StaleWhileRevalidate<any>>();
 
 export class CacheAside<V> {
   private entries = new Map<string, { at: number; value: V }>();
@@ -131,6 +132,7 @@ export class StaleWhileRevalidate<V> {
     this.freshMs = freshMs;
     this.maxStaleMs = maxStaleMs;
     this.max = max;
+    swrRegistry.add(this);
   }
   get size() {
     return this.entries.size;
@@ -284,8 +286,9 @@ export async function stopCacheInvalidation() {
 
 /** Bounded-cardinality snapshot for metrics: one row per cache (fixed names), no keys. */
 export function cacheSnapshot() {
-  return [...registry].map((c) => ({
+  return [...registry, ...swrRegistry].map((c) => ({
     name: c.name,
+    kind: c instanceof StaleWhileRevalidate ? "swr" : "aside",
     entries: c.size,
     max: c.max,
     inflight: c.inflightCount,
