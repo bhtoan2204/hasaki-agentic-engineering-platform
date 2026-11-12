@@ -42,22 +42,6 @@ jobs:
         # The suite runs one file at a time against its own database; three shards run in parallel jobs.
         shard: [1, 2, 3]
     name: test (${{ matrix.shard }}/3)
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: platform
-          POSTGRES_PASSWORD: platform
-          POSTGRES_DB: platform
-        ports:
-          - 5432:5432
-        # Every test file creates its own database: the default 64 MB /dev/shm is too small for that.
-        options: >-
-          --shm-size=256m
-          --health-cmd "pg_isready -U platform -d platform"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -85,9 +69,20 @@ jobs:
           tar -xzf "/tmp/$f" -C ~/.local/ripgrep --strip-components=1
       - run: echo "$HOME/.local/ripgrep" >> "$GITHUB_PATH"
       - run: rg --version
+      # test/setup.ts starts a private cluster with initdb/pg_ctl. Those binaries are not on the runner image.
+      - name: Install PostgreSQL 17
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/initdb --version
       - name: npm test (shard ${{ matrix.shard }}/3)
         run: >-
           node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1
           --test-shard=${{ matrix.shard }}/3 test/*.test.ts
-        env:
-          TEST_DATABASE_ADMIN_URL: postgres://platform:platform@localhost:5432/platform
