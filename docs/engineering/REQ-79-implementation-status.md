@@ -60,3 +60,18 @@ The existing isolated command environment already deletes DATABASE_URL (`src/pla
 - Fresh `npm test`: 776 tests, 775 passed, one failed, zero skipped (131734.16934 ms). The only failure remains the unchanged Codex cache-path assertion at `test/codex.test.ts:452`. The new Markdown regression passes. Log: `/tmp/req79-repair-tests.log`. Typecheck, build, targeted ESLint for this repair and `git diff --check` pass. The separate platform gate remains authoritative for baseline-aware classification; this local full-suite result is not reported as green.
 
 Applied receiving-code-review, test-driven-development (writing-good-tests), verification-before-completion and commit guidance. This repair fixes the two review findings for the preserved increment; it does not implement the remaining initiative scope listed above. No tests were deleted or rewritten for remote infrastructure in this repair; the earlier harness/MySQL changes remain documented above.
+
+## Full Regression retest
+
+The returned regression-step history (`run.step_history`, `regression_test`, artifact 837) contains only a tail with 769 passes, five failures and two skips. It has no individual failure names or diagnostic blocks. A fresh original-context run reproduced only the previously documented Codex argv assertion (775 passes, one failure). The five unnamed historical failures cannot be individually classified from that evidence.
+
+Corrected the Codex test fixture: its negative assertion rejected every ancestor directory named `ctp-agent-tmp`, although the outer coding environment legitimately puts the shared configured cache beneath such a directory. It now supplies a named invocation scratch directory and rejects that exact directory and its children as cache targets. The existing exact `npmCacheDir()` argument assertion remains. Provider configuration and sandbox/authorization behavior are unchanged. The same file's pre-existing comma-expression loop was expanded into equivalent statements to satisfy lint without suppressing the rule.
+
+Fresh verification after the assertion correction:
+
+- Clean environment with the current HOME: `env -i PATH="$PATH" HOME="$HOME" LANG=C.UTF-8 TMPDIR=/tmp PLATFORM_SELF_TEST=1 npm test` exits 0: 776 passes, zero failures/skips, 162876.612096 ms. Log: `/tmp/req79-isolated-retest.log`.
+- Private empty HOME plus launcher Git isolation: the same command with a test-only HOME, `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0` exits 0: 774 passes, zero failures, two existing evaluation-container skips, 97081.259758 ms. The skipped tests are `six provider plans use durable attempts and equivalent pinned fixtures with objective validation` and `A/B/C isolates pack/tool access and paired comparisons reject multiple changing factors`; their locally started validation container is unavailable under that HOME. The unskipped run above covers both. Log: `/tmp/req79-launcher-retest.log`.
+- All 24 tests in `test/codex.test.ts` pass, including the broker stream parser and invocation assertions. Log: `/tmp/req79-codex-retest.log`.
+- `npm run typecheck` passes. ESLint on `test/codex.test.ts` has zero errors and 18 existing warnings. `git diff --check` passes.
+
+No tests were removed or newly skipped. The Codex assertion correction is a test-fixture repair, not a remote-infrastructure rewrite; the earlier PostgreSQL/MySQL isolation changes remain listed above. No production code changed in this retest increment. These fresh passes supersede earlier local suite failures for the current candidate; they do not establish the cause of all five unnamed historical failures or completion of the broader REQ-79 plan.
