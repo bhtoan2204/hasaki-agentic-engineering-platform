@@ -51,8 +51,10 @@ test("VNPay-style refund: attempts join one logical operation, outcome stays UNK
 test("VNPay-style refund: root cause is the retry design, not the provider; no unsafe advice", () => {
   const c = build(refundRows, [[1, "PARTNER_REQUEST_SENT"], [2, "REQUEST_TIMEOUT"], [3, "PARTNER_REQUEST_SENT"], [4, "PROVIDER_BUSINESS_REJECTION"]], ["RF-100200"]);
   const a = analyzeCausality(c.timeline);
-  assert.match(a.chain.root_cause ?? "", /without first resolving the unknown outcome/);
-  assert.doesNotMatch(a.chain.root_cause ?? "", /vnpay|provider (is|caused)/i);
+  assert.equal(a.chain.root_cause?.confidence, "hypothesis");
+  assert.match(a.chain.root_cause?.statement ?? "", /HYPOTHESIS.*without first resolving the unknown outcome/);
+  assert.ok((a.chain.root_cause?.evidence_refs.length ?? 0) >= 2);
+  assert.doesNotMatch(a.chain.root_cause?.statement ?? "", /vnpay|provider (is|caused)/i);
   assert.match(a.chain.downstream_effects.join(" "), /not proof/);
   assert.ok(a.patterns.includes("client_timeout_unknown_outcome"));
   assert.ok(a.patterns.includes("duplicate_retry"));
@@ -127,4 +129,56 @@ test("same order, different business refs stay separate operations", () => {
   const a = analyzeCausality(c.timeline);
   assert.equal(a.operations.length, 2);
   assert.ok(!a.patterns.includes("duplicate_retry"));
+});
+
+const one = (time: string, message: string, ids: Record<string, string>) => row(time, "payment-api", message, ids);
+
+test("retries with different operation identifiers are not merged", () => {
+  const rows = [
+    one("2026-11-10T09:00:00+07:00", "refund request sent", { request_id: "req-e1e1e1", business_ref: "RF-810001" }),
+    one("2026-11-10T09:00:30+07:00", "refund call failed: context deadline exceeded", { request_id: "req-e1e1e1", business_ref: "RF-810001" }),
+    one("2026-11-10T09:05:00+07:00", "refund request sent", { request_id: "req-e2e2e2", business_ref: "RF-810002" }),
+  ];
+  const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "REQUEST_TIMEOUT"], [3, "PARTNER_REQUEST_SENT"]], ["RF-810001", "RF-810002"]);
+  const a = analyzeCausality(c.timeline);
+  assert.equal(a.operations.length, 2);
+  assert.ok(!a.patterns.includes("duplicate_retry"));
+  assert.equal(a.chain.root_cause, null);
+});
+
+test("A timeout + B success is UNKNOWN_POSSIBLE_DUPLICATE with missing evidence, never plain success", () => {
+  const rows = [
+    one("2026-11-10T09:00:00+07:00", "refund request sent", { request_id: "req-f1f1f1", business_ref: "RF-820001" }),
+    one("2026-11-10T09:00:30+07:00", "refund call failed: context deadline exceeded", { request_id: "req-f1f1f1", business_ref: "RF-820001" }),
+    one("2026-11-10T09:05:00+07:00", "refund request sent", { request_id: "req-f2f2f2", business_ref: "RF-820001" }),
+    one("2026-11-10T09:05:02+07:00", "refund completed success", { request_id: "req-f2f2f2", business_ref: "RF-820001" }),
+  ];
+  const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "REQUEST_TIMEOUT"], [3, "PARTNER_REQUEST_SENT"], [4, "PARTNER_RESPONSE_RECEIVED"]], ["RF-820001"]);
+  const a = analyzeCausality(c.timeline);
+  assert.equal(a.operations[0].outcome, "UNKNOWN_POSSIBLE_DUPLICATE");
+  assert.equal(a.has_unknown_outcome, true);
+  assert.match(a.missing_evidence.join(" "), /earlier UNKNOWN attempt/);
+});
+
+test("a database duplicate-key error is not a provider rejection", () => {
+  const rows = [
+    one("2026-11-10T09:00:00+07:00", "refund request sent", { request_id: "req-g1g1g1", business_ref: "RF-830001" }),
+    one("2026-11-10T09:00:02+07:00", "duplicate key value violates unique constraint refunds_pkey", { request_id: "req-g1g1g1", business_ref: "RF-830001" }),
+  ];
+  const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "ERROR"]], ["RF-830001"]);
+  const a = analyzeCausality(c.timeline);
+  assert.notEqual(a.operations[0].attempts[0].outcome, "failed");
+  assert.ok(!a.chain.downstream_effects.length);
+});
+
+test("a timeout=30s configuration line is not a timeout", () => {
+  const rows = [
+    one("2026-11-10T09:00:00+07:00", "refund request sent timeout=30s", { request_id: "req-h1h1h1", business_ref: "RF-840001" }),
+    one("2026-11-10T09:00:02+07:00", "refund request sent timeout=30s", { request_id: "req-h2h2h2", business_ref: "RF-840001" }),
+  ];
+  const c = build(rows, [[1, "PARTNER_REQUEST_SENT"], [2, "PARTNER_REQUEST_SENT"]], ["RF-840001"]);
+  const a = analyzeCausality(c.timeline);
+  assert.ok(!a.patterns.includes("client_timeout_unknown_outcome"));
+  assert.equal(a.chain.root_cause, null);
+  assert.ok(a.missing_evidence.length > 0);
 });

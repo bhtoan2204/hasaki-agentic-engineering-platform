@@ -443,9 +443,13 @@ export function buildReport(i: ReportInput) {
       ["observed_error", c.observed_error],
       ["symptom", c.symptom],
       ["trigger", c.trigger],
-      ["root_cause", c.root_cause],
     ] as const)
       md.push(`- **${k}:** ${val ? esc(val) : L.unknown}`);
+    md.push(
+      c.root_cause
+        ? `- **root_cause (${c.root_cause.confidence}, unverified):** ${esc(c.root_cause.statement)} (${c.root_cause.evidence_refs.map((r) => `\`${r}\``).join(", ")})`
+        : `- **root_cause:** ${L.unknown}`,
+    );
     for (const f of c.contributing_factors) md.push(`- **contributing_factor:** ${esc(f)}`);
     for (const f of c.downstream_effects) md.push(`- **downstream_effect:** ${esc(f)}`);
     for (const o of causal.operations)
@@ -453,6 +457,7 @@ export function buildReport(i: ReportInput) {
         `- **${o.operation_id}** outcome=${o.outcome}; attempts: ${o.attempts.map((a) => `${esc(a.attempt_key)}=${a.outcome}`).join(", ")}`,
       );
     for (const r of causal.recommendations) md.push(`- ${esc(r)}`);
+    for (const m of causal.missing_evidence) md.push(`- missing: ${esc(m)}`);
     md.push("");
   }
   const missingLines = [

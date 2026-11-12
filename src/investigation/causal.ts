@@ -12,7 +12,11 @@ import type { IdField } from "./events.ts";
  *  - the recommendation is always to verify authoritative status first; never to blindly retry a non-idempotent call.
  */
 
-export type Outcome = "success" | "failed" | "partial" | "UNKNOWN";
+/**
+ * UNKNOWN_POSSIBLE_DUPLICATE: an attempt succeeded but an earlier attempt of the same operation is still UNKNOWN,
+ * so the provider may have executed the operation twice. It is never reported as plain success.
+ */
+export type Outcome = "success" | "failed" | "UNKNOWN" | "UNKNOWN_POSSIBLE_DUPLICATE";
 export type AttemptRole = "initial" | "retry" | "redelivery";
 
 export interface AttemptAnalysis {
@@ -41,11 +45,19 @@ export interface LogicalOperation {
   missing_evidence: string[];
 }
 
+export interface RootCauseHypothesis {
+  statement: string;
+  confidence: "hypothesis";
+  evidence_refs: string[];
+  missing_evidence: string[];
+}
+
 export interface CausalChain {
   observed_error: string | null;
   symptom: string | null;
   trigger: string | null;
-  root_cause: string | null;
+  /** An unverified hypothesis with its evidence, never a confirmed fact. */
+  root_cause: RootCauseHypothesis | null;
   contributing_factors: string[];
   downstream_effects: string[];
 }
@@ -58,20 +70,28 @@ export interface CausalAnalysis {
   /** Statements the report must never make for this incident. */
   forbidden_conclusions: string[];
   has_unknown_outcome: boolean;
+  /** Evidence still needed, including why no root-cause hypothesis was formed. */
+  missing_evidence: string[];
 }
 
-const TIMEOUT = /context deadline exceeded|timed? ?out|deadline exceeded|ETIMEDOUT|ECONNRESET|i\/o timeout/i;
+// Narrow on purpose: a bare "timeout=30s" (configuration) or a database "duplicate key" error must not match.
+const TIMEOUT =
+  /context deadline exceeded|deadline exceeded|timed out|timeout (?:exceeded|reached|occurred|error)|ETIMEDOUT|ECONNRESET|i\/o timeout/i;
 const REJECTION =
-  /too many (?:refund|retry|request)|duplicate|already (?:processed|refunded|exists|paid)|idempot/i;
+  /too many (?:refund|retry|request)|duplicate (?:request|transaction|refund|payment|order|submission)|already (?:processed|refunded|paid)|idempotency (?:key|violation|conflict)/i;
+/** Datastore / infrastructure errors are never provider business rejections. */
+const INFRA_ERROR = /unique constraint|duplicate key|sqlstate|violates|deadlock|\bpq:|ER_DUP_ENTRY|E11000/i;
 const SUCCESS = /\b(success|succeeded|completed|approved|code["']?\s*[:=]\s*["']?00)\b/i;
 /** Any negation / qualification makes a success claim unreliable: treat as no confirmation (stay UNKNOWN). */
 const NOT_SUCCESS =
   /\b(not|no|never|cannot|can't|couldn't|unsuccessful|failed|failure|fail|partial|partially|incomplete|pending|rejected|denied|declined|error|errors)\b|n't\b|success["']?\s*[:=]\s*["']?(false|0|no)\b/i;
 
+const TEXT_TYPES = new Set(["ERROR", "OTHER", "PARTNER_RESPONSE_RECEIVED"]);
 const isTimeout = (t: TimelineEvent) =>
-  t.event_type === "REQUEST_TIMEOUT" || TIMEOUT.test(t.excerpt);
+  t.event_type === "REQUEST_TIMEOUT" || (TEXT_TYPES.has(t.event_type) && TIMEOUT.test(t.excerpt));
 const isRejection = (t: TimelineEvent) =>
-  t.event_type === "PROVIDER_BUSINESS_REJECTION" || (t.event_type === "ERROR" && REJECTION.test(t.excerpt));
+  t.event_type === "PROVIDER_BUSINESS_REJECTION" ||
+  (TEXT_TYPES.has(t.event_type) && REJECTION.test(t.excerpt) && !INFRA_ERROR.test(t.excerpt));
 const isSuccess = (t: TimelineEvent) =>
   !isTimeout(t) &&
   !isRejection(t) &&
@@ -175,15 +195,20 @@ function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperat
   const ok = attempts.some((a) => a.outcome === "success");
   const unresolved = attempts.some((a) => a.outcome === "UNKNOWN");
   const operation: Outcome = ok
-    ? attempts.every((a) => a.outcome === "success" || a.outcome === "UNKNOWN") && unresolved
-      ? "partial"
+    ? unresolved
+      ? "UNKNOWN_POSSIBLE_DUPLICATE"
       : "success"
     : unresolved
       ? "UNKNOWN"
       : "failed";
 
   const missing: string[] = [];
-  if (unresolved && !ok)
+  if (ok && unresolved)
+    missing.push(
+      "authoritative provider-side status of the earlier UNKNOWN attempt: did it also execute (possible duplicate side effect)?",
+      "reconciliation of our persisted records against the provider for every attempt of this logical operation",
+    );
+  else if (unresolved)
     missing.push(
       "authoritative provider-side status of the unresolved attempt (query/inquiry API by the business identifier)",
       "provider callback or settlement/reconciliation record for the logical operation",
@@ -202,7 +227,8 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
   const contributing: string[] = [];
   const downstream: string[] = [];
   let trigger: string | null = null;
-  let root: string | null = null;
+  let root: RootCauseHypothesis | null = null;
+  const missingAll: string[] = [];
 
   const sorted = [...timeline].sort((a, b) => (a.epoch_us ?? Infinity) - (b.epoch_us ?? Infinity));
   const lastError = [...sorted].reverse().find((t) => t.event_type === "ERROR" || isRejection(t)) ?? null;
@@ -220,8 +246,22 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
       patterns.push("duplicate_retry");
       const rejectedLater = later.find((a) => a.outcome === "failed");
       if (first?.outcome === "UNKNOWN") {
-        root =
-          "the retry path starts a new attempt for the same logical operation without first resolving the unknown outcome of the previous attempt (missing idempotency/reconciliation safeguard)";
+        const timedOut = timelineHas(timeline, first, isTimeout);
+        if (timedOut)
+          root = {
+            statement:
+              "HYPOTHESIS (unverified): the retry path may start a new attempt for the same logical operation without first resolving the unknown outcome of the previous attempt (missing idempotency/reconciliation safeguard). Code and persisted state must be inspected to confirm.",
+            confidence: "hypothesis",
+            evidence_refs: [...first.evidence_refs, ...later.flatMap((a) => a.evidence_refs)],
+            missing_evidence: [
+              "the retry/timeout handling code path (does it check provider status or reuse an idempotency key?)",
+              "our persisted state for the first attempt at the time of the retry",
+            ],
+          };
+        else
+          missingAll.push(
+            `no timeout/deadline evidence for attempt ${first.attempt_key}: cannot form a root-cause hypothesis about the retry`,
+          );
         contributing.push("no authoritative status check between the timeout and the retry");
         if (rejectedLater) {
           patterns.push("idempotency_violation_or_duplicate_rejection");
@@ -237,7 +277,7 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
     contributing.push("the same message id was delivered more than once");
   }
 
-  const unknown = ops.some((o) => o.outcome === "UNKNOWN" || o.outcome === "partial");
+  const unknown = ops.some((o) => o.outcome !== "success" && o.outcome !== "failed");
   if (unknown) {
     recs.push(
       "Verify the authoritative provider status for the logical operation (inquiry API / callback / reconciliation) before deciding its outcome.",
@@ -270,6 +310,7 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
     recommendations: recs,
     forbidden_conclusions: forbidden,
     has_unknown_outcome: unknown,
+    missing_evidence: [...new Set([...missingAll, ...ops.flatMap((o) => o.missing_evidence), ...(root?.missing_evidence ?? [])])],
   };
 }
 
