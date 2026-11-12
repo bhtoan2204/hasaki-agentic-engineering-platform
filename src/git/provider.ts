@@ -44,12 +44,21 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
   const cache = npmCacheDir();
   await mkdir(cache, { recursive: true });
   const ci = existsSync(join(workspace, "package-lock.json"));
-  await exec("npm", [ci ? "ci" : "install", "--ignore-scripts", "--no-audit", "--no-fund"], {
+  const opts = {
     cwd: workspace,
     timeout: 10 * 60_000,
     maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, npm_config_cache: cache },
-  });
+  };
+  const flags = ["--ignore-scripts", "--no-audit", "--no-fund"];
+  try {
+    await exec("npm", [ci ? "ci" : "install", ...flags], opts);
+  } catch (e) {
+    // The repository's own lock file is out of sync with package.json (npm ci EUSAGE): install from package.json
+    // without reading or rewriting the lock, so the worktree stays clean.
+    if (!ci || !/EUSAGE|in sync/.test(String((e as any).stderr ?? (e as Error).message))) throw e;
+    await exec("npm", ["install", "--no-package-lock", ...flags], opts);
+  }
   return true;
 }
 

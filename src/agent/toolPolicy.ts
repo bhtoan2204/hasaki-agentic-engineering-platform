@@ -125,6 +125,7 @@ const ALWAYS_DENIED: Array<[RegExp, string]> = [
 // First word(s) of each pipeline segment allowed in analysis steps.
 const READ_ONLY = [
   /^(ls|cat|head|tail|wc|grep|rg|tree|file|stat|pwd|echo|sort|uniq|cut|tr|jq|diff|basename|dirname|realpath|which|date)\b/,
+  /^(true|false)(\s|$)|^:$/, // no-ops: `grep x f || true`; a bare `:` only (`: ${X:=y}` assigns)
   // find reads, unless it deletes, runs commands or writes files through its own actions.
   /^find\b(?!.*\s-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)\b)/,
   /^sed\b(?!.*(\s-[a-zA-Z]*i|--in-place|\/w\s|;\s*w\s|^sed\s+(-\S+\s+)*['"]?w\s))/, // no in-place edit, no `w file`
@@ -425,17 +426,21 @@ export function extractSubstitutions(seg: string): { text: string; inner: string
 
 export const loopUnsupported = (detail: string) =>
   `cú pháp vòng lặp chưa được hỗ trợ (${detail}). Tách vòng lặp thành các lệnh đơn rồi chạy lại: mỗi lệnh một lần gọi Bash, ` +
-  `hoặc nối các lệnh chỉ đọc bằng && / ; (chỉ hỗ trợ "for NAME in WORDS; do CMD; done" và "... | while read VAR; do CMD; done")`;
+  `hoặc nối các lệnh chỉ đọc bằng && / ; (chỉ hỗ trợ "for NAME in WORDS; do CMD; done", "... | while read VAR; do CMD; done" và "if CMD; then CMD; [elif CMD; then CMD;] [else CMD;] fi")`;
 
 /**
  * Validates loop structure over simple commands and returns the indexes of the commands that actually run (loop
- * bodies, plain commands). Supported: `for NAME in WORDS; do ...; done` and `while [IFS=..] read [-r] VAR...; do ...;
- * done`, nested when balanced. Anything else that looks like control flow is reported as unsupported, never guessed.
+ * bodies, plain commands). Supported: `for NAME in WORDS; do ...; done`, `while [IFS=..] read [-r] VAR...; do ...;
+ * done` and `if CMD; then ...; [elif CMD; then ...;] [else ...;] fi` (conditions are commands too), nested when
+ * balanced. Anything else that looks like control flow is reported as unsupported, never guessed.
  */
 function loopStructure(input: string[]): { commands: string[] } | { error: string } {
   const commands: string[] = [];
   // "do CMD" on one line is "do" followed by CMD (which may itself open a nested loop)
-  const segs = input.flatMap((s) => (/^do\s+\S/.test(s) ? ["do", s.slice(2).trim()] : [s]));
+  const segs = input.flatMap((s) => {
+    const m = s.match(/^(do|then|else)\s+(\S[\s\S]*)$/);
+    return m ? [m[1], m[2].trim()] : [s];
+  });
   const stack: Array<{ kind: string; open: boolean }> = []; // open = `do` seen
   for (const s of segs) {
     const top = stack.at(-1);
@@ -456,22 +461,55 @@ function loopStructure(input: string[]): { commands: string[] } | { error: strin
       stack.push({ kind: "while", open: false });
       continue;
     }
+    const cond = s.match(/^(if|elif)\s+(?:!\s+)?(\S[\s\S]*)$/);
+    if (cond) {
+      if (cond[1] === "if") {
+        if (top && !top.open && top.kind !== "if") return { error: "if lồng trước do" };
+        stack.push({ kind: "if", open: false });
+      } else {
+        if (top?.kind !== "if" || !top.open) return { error: '"elif" không thuộc if nào' };
+        top.open = false;
+      }
+      commands.push(cond[2]); // the condition runs: checked like any command
+      continue;
+    }
+    if (/^then$/.test(s)) {
+      if (top?.kind !== "if" || top.open) return { error: '"then" không khớp với if' };
+      top.open = true;
+      continue;
+    }
+    if (/^else$/.test(s)) {
+      if (top?.kind !== "if" || !top.open) return { error: '"else" không thuộc if nào' };
+      continue;
+    }
+    if (/^fi$/.test(s)) {
+      if (top?.kind !== "if" || !top.open) return { error: '"fi" không khớp với if' };
+      stack.pop();
+      continue;
+    }
     if (/^do(\s|$)/.test(s)) {
-      if (!top || top.open) return { error: '"do" không thuộc vòng lặp nào' };
+      if (!top || top.open || top.kind === "if") return { error: '"do" không thuộc vòng lặp nào' };
       top.open = true;
       continue;
     }
     if (/^done(\s+<\s*\S+)?$/.test(s)) {
-      if (!top || !top.open) return { error: '"done" không khớp với do' };
+      if (!top || !top.open || top.kind === "if") return { error: '"done" không khớp với do' };
       stack.pop();
       continue;
     }
     if (/^(until|select|if|then|elif|else|fi|case|esac|function)\b|^[{}()]|^\(\(/.test(s))
       return { error: `"${s.slice(0, 40)}" không được hỗ trợ` };
-    if (top && !top.open) return { error: `có lệnh giữa "${top.kind}" và "do"` };
+    // `if a && b; then`: every part of the condition list is a command; loops take nothing before `do`.
+    if (top && !top.open && top.kind !== "if") return { error: `có lệnh giữa "${top.kind}" và "do"` };
     commands.push(s);
   }
-  if (stack.length) return { error: `vòng lặp "${stack.at(-1)!.kind}" chưa được đóng bằng done` };
+  if (stack.length)
+    return {
+      error:
+        stack.at(-1)!.kind === "if"
+          ? '"if" chưa được đóng bằng fi'
+          : `vòng lặp "${stack.at(-1)!.kind}" chưa được đóng bằng done`,
+    };
   return { commands };
 }
 

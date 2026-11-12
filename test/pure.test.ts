@@ -308,6 +308,11 @@ test("tool policy: no machine-wide recursive scans; timeout-bounded reads allowe
     "a bounded go test is a read-only verification",
   );
   assert.ok(!decideBash("timeout 60 go generate ./...", analysis).allow);
+  // no-op builtins are read-only (`|| true` was refused for a Cursor analysis step); `: ${X:=y}` is not a no-op.
+  for (const cmd of ["rg TODO src || true", "true", "false", "grep -c x a.go; :"])
+    assert.ok(decideBash(cmd, analysis).allow, cmd);
+  assert.ok(!decideBash(": ${X:=y}", analysis).allow);
+  assert.ok(!decideBash("true && rm -rf src", analysis).allow);
   // find that deletes / runs commands / writes files is not a read-only command.
   for (const cmd of [
     "find . -name '*.tmp' -delete",
@@ -815,6 +820,25 @@ describe("Bash policy: loops in analysis steps", () => {
       assert.deepEqual(decideBash(c, A), { allow: true }, c);
   });
 
+  test("read-only if / elif / else (alone, in loops, multi-line) is allowed", () => {
+    for (const c of [
+      `for f in a; do if rg -q x "$f"; then echo "$f"; fi; done`,
+      `for b in u1-HSK-1 u1-HSK-2; do if git -C "$wt" rev-parse --verify "$b" >/dev/null 2>&1; then echo "$b yes"; else echo "$b no"; fi; done`,
+      `if [ -d app ]; then ls app; elif test -f go.mod; then cat go.mod; else pwd; fi`,
+      `if ! rg -q TODO src; then echo clean; fi`,
+      `if rg -q a x && rg -q b x; then echo both; fi`,
+      `if [ -f a ]\nthen\n  cat a\nfi`,
+    ])
+      assert.deepEqual(decideBash(c, A), { allow: true }, c);
+    for (const c of [
+      `if rg -q x a; then rm a; fi`,
+      `if touch a; then echo y; fi`,
+      `if rg -q x a; then echo; else git add a; fi`,
+      `if rg -q x a; then sed -i 's/a/b/' a; fi`,
+    ])
+      assert.match(reason(c) ?? "", /read-only/, c);
+  });
+
   test("loops that write files are denied as non read-only", () => {
     for (const c of [
       `for f in *.go; do sed -i 's/a/b/' "$f"; done`,
@@ -852,7 +876,10 @@ describe("Bash policy: loops in analysis steps", () => {
       `for f in a b; rg x; do echo; done`,
       `while true; do rg x; done`,
       `until false; do rg x; done`,
-      `for f in a; do if rg -q x "$f"; then echo "$f"; fi; done`,
+      `if rg -q x a; then echo y`, // not closed
+      `then echo y; fi`,
+      `if rg -q x a; echo y; fi`, // no then
+      `for f in a; if rg x; then echo; fi; do echo; done`,
     ]) {
       const r = reason(c);
       assert.ok(r, c);
