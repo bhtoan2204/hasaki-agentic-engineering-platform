@@ -203,3 +203,9 @@ process.on("beforeExit", () => {
     .then(() => client.end())
     .catch(() => client.end().catch(() => {}));
 });
+
+// Verification environments may set GIT_CONFIG_GLOBAL=/dev/null; commits made by tests still need an identity.
+process.env.GIT_AUTHOR_NAME ||= "Test";
+process.env.GIT_AUTHOR_EMAIL ||= "test@example.invalid";
+process.env.GIT_COMMITTER_NAME ||= "Test";
+process.env.GIT_COMMITTER_EMAIL ||= "test@example.invalid";
