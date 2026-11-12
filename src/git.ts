@@ -84,6 +84,8 @@ export async function prepareBranch(
     workspacePath?: string;
     defaultBranch?: string;
     skipFetch?: boolean;
+    /** Cut a new branch from this existing branch instead of the base (stacked on a parent task's branch). */
+    from?: string;
   } = {},
 ): Promise<PreparedBranch> {
   repositoryBranch(branch);
@@ -138,6 +140,27 @@ export async function prepareBranch(
   if (await refExists(repoPath, `refs/remotes/origin/${branch}`)) {
     await git(repoPath, "worktree", "add", "--track", "-b", branch, wt, `origin/${branch}`);
     return { repo, branch, path: wt, createdFrom: `origin/${branch}` };
+  }
+  if (opts.from) {
+    repositoryBranch(opts.from);
+    const local = await refExists(repoPath, `refs/heads/${opts.from}`);
+    const remote = await refExists(repoPath, `refs/remotes/origin/${opts.from}`);
+    if (!local && !remote)
+      throw new Error(
+        `${repo}: branch ${opts.from} does not exist locally or on origin — check the name (nothing was created)`,
+      );
+    // Unpushed parent work counts: start from the local branch unless origin has moved past it.
+    const start =
+      local &&
+      (!remote ||
+        (await git(repoPath, "merge-base", "--is-ancestor", `origin/${opts.from}`, opts.from).then(
+          () => true,
+          () => false,
+        )))
+        ? opts.from
+        : `origin/${opts.from}`;
+    await git(repoPath, "worktree", "add", "--no-track", "-b", branch, wt, start);
+    return { repo, branch, path: wt, createdFrom: start };
   }
   // An explicitly requested existing branch is never invented from the base.
   if (opts.mustExist)

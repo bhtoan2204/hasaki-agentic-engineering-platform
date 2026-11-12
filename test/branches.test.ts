@@ -77,6 +77,18 @@ test("branchFor: per-repo override, then '*', then the run branch", () => {
   });
 });
 
+test("branchFor: a work item 'continue from branch X' directive stacks the run's own branch on X", () => {
+  const run = {
+    branch: "u1-HSK-QPO43707",
+    inputs: { branches: { "*": "u1-HSK-98F6LYK8" }, branches_source: "work item description" },
+  };
+  assert.deepEqual(branchFor(run, "oms-api"), {
+    branch: "u1-HSK-QPO43707",
+    existing: false,
+    parent: "u1-HSK-98F6LYK8",
+  });
+});
+
 test("prepareBranch: a requested existing branch is checked out (tracking origin), never re-created from the base", async () => {
   const sh = (cwd: string, ...a: string[]) =>
     execFileSync("git", ["-C", cwd, ...a], {
@@ -122,6 +134,17 @@ test("prepareBranch: a requested existing branch is checked out (tracking origin
     sh(repo, "branch", "--list", "HSK-DOES-NOT-EXIST"),
     "",
     "nothing created from the base",
+  );
+  // stacked: a new branch cut from the parent branch, the parent itself untouched
+  const stacked = await prepareBranch("HSK-CHILD", name, "HSK-CHILD", name, {
+    from: "HSK-QA679L33",
+  });
+  assert.equal(stacked.branch, "HSK-CHILD");
+  assert.ok(existsSync(join(stacked.path, "feature.txt")), "parent work is in the child worktree");
+  assert.equal(sh(stacked.path, "branch", "--show-current"), "HSK-CHILD");
+  await assert.rejects(
+    prepareBranch("HSK-CHILD2", name, "HSK-CHILD2", name, { from: "HSK-NOPE" }),
+    /does not exist locally or on origin/,
   );
   // without a directive the old behaviour is unchanged: a new branch from origin/<base>
   const fresh = await prepareBranch("HSK-FRESH", name, "HSK-FRESH", name);

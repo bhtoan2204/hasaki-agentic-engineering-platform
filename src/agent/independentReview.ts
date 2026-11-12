@@ -299,6 +299,7 @@ export interface PublishState {
   head: string; // worktree HEAD ("" = unreadable)
   branchTip: string; // tip of the branch that is pushed ("" = unreadable)
   dirty: string; // `git status --porcelain` ("" = clean)
+  equivalent?: string[]; // commits whose net change vs the base equals branchTip's (rebased / base merged in)
 }
 
 /**
@@ -348,7 +349,9 @@ export function verificationGate(
     const current = Object.fromEntries(
       Object.entries(publish).map(([repo, st]) => [repo, st.branchTip]),
     );
-    for (const repo of staleVerification(heads, current))
+    for (const repo of staleVerification(heads, current).filter(
+      (r) => !heads[r] || !publish[r]?.equivalent?.includes(heads[r]),
+    ))
       problems.push(
         heads[repo]
           ? `${repo}: changed after independent verification "${v.key}" (verified ${heads[repo].slice(0, 12)}, now ${current[repo]?.slice(0, 12) || "unknown"})`

@@ -12,7 +12,7 @@ import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { gitProviderFor, workspacesOf } from "../../git/provider.ts";
+import { gitProviderFor, workspaceBase, workspacesOf } from "../../git/provider.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   repositoryReference,
@@ -32,7 +32,7 @@ import {
   verificationGate,
   type PublishState,
 } from "../../agent/independentReview.ts";
-import { collectScopeState, prePublishProblems } from "../../agent/scopeGuard.ts";
+import { collectScopeState, prePublishProblems, samePatch } from "../../agent/scopeGuard.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -868,18 +868,43 @@ export const pullRequestExecutor: StepExecutor = {
     //  - the actual diff still fits the approved scope, or a renewed approval names this exact revision.
     // Then the independent verification gate: steps marked `independent: true` make verification REQUIRED — every one
     // must hold a valid PASS covering every published repo at exactly that commit. A BLOCKED verdict stays blocking.
-    const publish: Record<string, PublishState> = {};
-    for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo)))
-      publish[w.repo] = {
-        head: await headOf(w.path).catch(() => ""),
-        branchTip: await revParse(w.path, `refs/heads/${w.branch}`),
-        dirty: await dirtyOf(w.path),
-      };
+    const bases = Object.fromEntries(
+      await Promise.all(
+        workspaces.map(async (w) => [w.repo, await workspaceBase(ctx.run, w)] as const),
+      ),
+    );
     const steps = await q<{ key: string; status: string; output: any; independent: boolean }>(
       pool,
       "SELECT key, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
       [ctx.run.id],
     );
+    const publish: Record<string, PublishState> = {};
+    for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo))) {
+      const branchTip = await revParse(w.path, `refs/heads/${w.branch}`);
+      // Commits tested / verified before a rebase or a base merge still count when the branch's own change is unchanged.
+      const recorded = [
+        ...new Set(
+          steps
+            .flatMap((x) => [x.output?.tested_heads?.[w.repo], x.output?.verified_heads?.[w.repo]])
+            .filter((h): h is string => typeof h === "string" && !!h && h !== branchTip),
+        ),
+      ];
+      const equivalent: string[] = [];
+      for (const h of recorded)
+        if (branchTip && (await samePatch(w.path, bases[w.repo].ref, h, branchTip)))
+          equivalent.push(h);
+      if (equivalent.length)
+        await ctx.log(
+          "system",
+          `${w.repo}: ${equivalent.map((h) => h.slice(0, 12)).join(", ")} carries the same change as ${branchTip.slice(0, 12)} relative to ${bases[w.repo].ref} (rebased or base merged in): its tests and verification still count`,
+        );
+      publish[w.repo] = {
+        head: await headOf(w.path).catch(() => ""),
+        branchTip,
+        dirty: await dirtyOf(w.path),
+        equivalent,
+      };
+    }
     const scope =
       [...steps]
         .reverse()
@@ -887,13 +912,7 @@ export const pullRequestExecutor: StepExecutor = {
         .approved_scope ?? null;
     const state = scope
       ? await collectScopeState(
-          await Promise.all(
-            workspaces.map(async (w) => ({
-              repo: w.repo,
-              path: w.path,
-              base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}`,
-            })),
-          ),
+          workspaces.map((w) => ({ repo: w.repo, path: w.path, base: bases[w.repo].ref })),
         )
       : null;
     const renewedRevision =
@@ -948,7 +967,7 @@ export const pullRequestExecutor: StepExecutor = {
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
       let commits: string;
       try {
-        const pushed = await provider.push(w.path, w.branch);
+        const pushed = await provider.push(w.path, w.branch, bases[w.repo]?.target);
         commits = pushed.commits;
         if (pushed.note) await ctx.log("system", `${w.repo}: ${pushed.note}`);
       } catch (e) {
@@ -969,7 +988,7 @@ export const pullRequestExecutor: StepExecutor = {
         verificationNotes: await verificationNotesOf(ctx.run.id),
       });
       const slug = registry ? repositoryReference(registry) : w.repo;
-      const destination = registry?.default_branch || config.baseBranch;
+      const destination = bases[w.repo]?.target || registry?.default_branch || config.baseBranch;
       if (ctx.signal.aborted)
         return {
           kind: "failed",

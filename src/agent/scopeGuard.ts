@@ -158,8 +158,12 @@ export async function changedFiles(path: string, base: string) {
 /** HEAD plus a fingerprint of uncommitted content: any edit, staged or not, changes it. */
 export async function worktreeFingerprint(path: string) {
   const head = (await git(path, ["rev-parse", "HEAD"])).trim();
+  return { head, fingerprint: await uncommittedHash(path, head) };
+}
+
+async function uncommittedHash(path: string, prefix: string) {
   const h = createHash("sha256")
-    .update(head)
+    .update(prefix)
     .update("\0")
     .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]));
   for (const f of z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"]))
@@ -168,7 +172,40 @@ export async function worktreeFingerprint(path: string) {
     const blob = (await git(path, ["hash-object", "--", f]).catch(() => "?")).trim();
     h.update(`\0${f}\0${blob}`);
   }
-  return { head, fingerprint: h.digest("hex") };
+  return h.digest("hex");
+}
+
+/**
+ * Stable patch-id of everything `rev` changes relative to `base` (merge-base diff). It stays the same when the branch
+ * is rebased or the base is merged into it without touching the branch's own changes; "" = no change.
+ */
+export async function netPatchId(path: string, base: string, rev = "HEAD") {
+  const diff = await git(path, [
+    "diff",
+    "--no-color",
+    "--binary",
+    "--no-renames",
+    `${base}...${rev}`,
+  ]);
+  if (!diff) return "";
+  const out = await new Promise<string>((resolve, reject) => {
+    const p = execFile("git", ["-C", path, "patch-id", "--stable"], (e, stdout) =>
+      e ? reject(e) : resolve(stdout),
+    );
+    p.stdin!.end(diff);
+  });
+  return out.split(" ")[0].trim();
+}
+
+/** `a` and `b` publish the same change: equal commits, or equal non-empty net patches relative to `base`. */
+export async function samePatch(path: string, base: string, a: string, b: string) {
+  if (a === b) return true;
+  try {
+    const [x, y] = await Promise.all([netPatchId(path, base, a), netPatchId(path, base, b)]);
+    return !!x && x === y;
+  } catch {
+    return false;
+  }
 }
 
 /** Revision a renewed approval must name: the approved proposal + exact changed files + exact code state. */
@@ -206,10 +243,10 @@ export async function collectScopeState(
   for (const w of workspaces) {
     try {
       const ch = await changedFiles(w.path, w.base);
-      const fp = await worktreeFingerprint(w.path);
       if (ch.all.length) st.files[w.repo] = ch.all;
-      st.states[w.repo] = fp.fingerprint;
-      st.heads[w.repo] = fp.head;
+      // Content, not commit ids: a rebase or a base merge that keeps the change keeps the approved revision.
+      st.states[w.repo] = await uncommittedHash(w.path, await netPatchId(w.path, w.base));
+      st.heads[w.repo] = (await git(w.path, ["rev-parse", "HEAD"])).trim();
     } catch (e) {
       st.unreadable.push(
         `${w.repo}: cannot read changes (${(e as Error).message.split("\n")[0].slice(0, 200)})`,
@@ -242,7 +279,10 @@ export function renewedApprovalFor(
  * independent verifier. `scope` null = legacy run without an approved scope (no scope check). Returns problems.
  */
 export function prePublishProblems(input: {
-  publish: Record<string, { head: string; branchTip: string; dirty: string }>;
+  publish: Record<
+    string,
+    { head: string; branchTip: string; dirty: string; equivalent?: string[] }
+  >;
   scope: Pick<ApprovedScope, "changes" | "required_tests" | "proposal_hash"> | null;
   state: WorkspaceScopeState | null;
   renewedRevision: string | null;
@@ -264,7 +304,11 @@ export function prePublishProblems(input: {
   // Tested commit == published commit: every test record bound to commits must cover exactly what is pushed.
   for (const t of input.tested)
     for (const [repo, st] of Object.entries(input.publish))
-      if (t.heads[repo] !== undefined && t.heads[repo] !== st.branchTip)
+      if (
+        t.heads[repo] !== undefined &&
+        t.heads[repo] !== st.branchTip &&
+        !st.equivalent?.includes(t.heads[repo])
+      )
         problems.push(
           `${repo}: tests in "${t.step}" ran on ${t.heads[repo].slice(0, 12) || "an unknown commit"}, but ${st.branchTip.slice(0, 12)} would be published`,
         );

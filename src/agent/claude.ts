@@ -43,7 +43,12 @@ import {
 } from "./metrics.ts";
 import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
-import { installNodeDependencies, workspaceKey, workspacesOf } from "../git/provider.ts";
+import {
+  installNodeDependencies,
+  workspaceBase,
+  workspaceKey,
+  workspacesOf,
+} from "../git/provider.ts";
 import {
   collectScopeState,
   renewedApprovalFor,
@@ -1659,7 +1664,7 @@ const agentExecutor: StepExecutor = {
           all.map(async (w) => ({
             repo: w.repo,
             path: w.path,
-            base: `origin/${await repositoryBaseBranch(w.repo).catch(() => config.baseBranch)}`,
+            base: (await workspaceBase(ctx.run, w)).ref,
           })),
         ),
       );

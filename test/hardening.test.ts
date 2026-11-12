@@ -11,6 +11,7 @@ import {
   normalizeScopePath,
   prePublishProblems,
   renewedApprovalFor,
+  samePatch,
   scopeRevision,
   SCOPE_REVISION_TAG,
   worktreeFingerprint,
@@ -600,5 +601,69 @@ test("recovery: a rate-limited side-effecting step marked non-retryable is never
     classifyFailure("Bitbucket 429: too many requests", ctx).action,
     "retry",
     "pure / idempotent work still backs off and retries",
+  );
+});
+
+test("pre-publish gate: a rebase or a base merge that keeps the change keeps tests, verification and the scope revision (run #87)", async () => {
+  const path = repo();
+  write(path, "app/ledger.go", "package app // fix\n");
+  g(path, "add", "-A");
+  g(path, "commit", "-qm", "fix");
+  const tested = g(path, "rev-parse", "HEAD");
+  const st1 = await collectScopeState([{ repo: "svc", path, base: "origin/main" }]);
+  const rev1 = scopeRevision(SCOPE.proposal_hash, st1.files, st1.states);
+
+  // the base moves on (someone else's file), then the branch is rebased onto it
+  g(path, "checkout", "-q", "-b", "main-next", "origin/main");
+  write(path, "app/other.go", "package app // teammate\n");
+  g(path, "add", "-A");
+  g(path, "commit", "-qm", "teammate");
+  g(path, "update-ref", "refs/remotes/origin/main", "HEAD");
+  g(path, "checkout", "-q", "feature");
+  g(path, "rebase", "-q", "origin/main");
+  const rebased = g(path, "rev-parse", "HEAD");
+  assert.notEqual(rebased, tested);
+  assert.equal(await samePatch(path, "origin/main", tested, rebased), true);
+
+  const st2 = await collectScopeState([{ repo: "svc", path, base: "origin/main" }]);
+  assert.equal(
+    scopeRevision(SCOPE.proposal_hash, st2.files, st2.states),
+    rev1,
+    "same change, same revision: the renewed approval still covers it",
+  );
+  const publish = { svc: { head: rebased, branchTip: rebased, dirty: "", equivalent: [tested] } };
+  assert.deepEqual(
+    prePublishProblems({
+      publish,
+      scope: SCOPE,
+      state: st2,
+      renewedRevision: rev1,
+      tested: [{ step: "implement", heads: { svc: tested } }],
+    }),
+    [],
+  );
+  const pass = {
+    key: "review",
+    status: "COMPLETED",
+    output: { verdict: "PASS", approved: true, independent: true, verified_heads: { svc: tested } },
+  };
+  assert.deepEqual(verificationGate([pass], publish), []);
+
+  // a real change after the tests is never equivalent
+  write(path, "app/ledger.go", "package app // fix + untested edit\n");
+  g(path, "commit", "-qam", "untested");
+  const changed = g(path, "rev-parse", "HEAD");
+  assert.equal(await samePatch(path, "origin/main", tested, changed), false);
+  const st3 = await collectScopeState([{ repo: "svc", path, base: "origin/main" }]);
+  assert.notEqual(scopeRevision(SCOPE.proposal_hash, st3.files, st3.states), rev1);
+  assert.match(
+    prePublishProblems({
+      publish: { svc: { head: changed, branchTip: changed, dirty: "", equivalent: [] } },
+      scope: null,
+      state: null,
+      renewedRevision: null,
+      tested: [{ step: "implement", heads: { svc: tested } }],
+    }).join(" | "),
+    /tests in "implement" ran on/,
   );
 });

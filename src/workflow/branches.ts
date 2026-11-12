@@ -72,19 +72,25 @@ export function normalizeBranchMap(v: unknown, baseBranch: string): BranchMap | 
   return Object.keys(out).length ? out : null;
 }
 
+export const WORK_ITEM_BRANCH_SOURCE = "work item description";
+
 /**
  * Branch to use for `repo` in a run: per-repo override, then "*", then `inputs.branch` (the branch a code review run
- * reviewed — its fixes are committed on top of it), then the run's own branch.
+ * reviewed — its fixes are committed on top of it), then the run's own branch. A "continue from branch X" directive
+ * of the work item stacks instead: the run's own branch is cut from X (`parent`), so X is never written by two runs.
  */
 export function branchFor(
   run: { branch: string; inputs?: Record<string, any> | null },
   repo: string,
-): { branch: string; existing: boolean } {
+): { branch: string; existing: boolean; parent?: string } {
   const m = (run.inputs?.branches ?? null) as BranchMap | null;
   const reviewed =
     typeof run.inputs?.branch === "string" && run.inputs.branch.trim()
       ? run.inputs.branch.trim()
       : undefined;
-  const b = m?.[repo] ?? m?.["*"] ?? reviewed;
+  const mapped = m?.[repo] ?? m?.["*"];
+  if (mapped && run.inputs?.branches_source === WORK_ITEM_BRANCH_SOURCE)
+    return { branch: run.branch, existing: false, parent: mapped };
+  const b = mapped ?? reviewed;
   return b ? { branch: b, existing: true } : { branch: run.branch, existing: false };
 }

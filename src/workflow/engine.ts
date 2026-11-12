@@ -44,7 +44,7 @@ import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts
 import { allowedRepositoriesForRun, effectivePermissions } from "../repos/access.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
-import { detectBranchDirectives, normalizeBranchMap } from "./branches.ts";
+import { detectBranchDirectives, normalizeBranchMap, WORK_ITEM_BRANCH_SOURCE } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
 import { background } from "./background.ts";
 import { downstream, topoOrder } from "./graph.ts";
@@ -338,7 +338,7 @@ export async function startRun(input: StartRunInput) {
         config.baseBranch,
       );
       if (Object.keys(detected).length)
-        Object.assign(inputs, { branches: detected, branches_source: "work item description" });
+        Object.assign(inputs, { branches: detected, branches_source: WORK_ITEM_BRANCH_SOURCE });
     }
     const optimized = await applyOptimizationDefaults(
       c,
@@ -447,13 +447,19 @@ export async function expandSubtasks(
   runId: number,
   planStepKey: string,
   plan: unknown,
-  opts: { by: string; reason: string; kind?: "decomposition" | "replan"; guard?: WorkflowActionGuard },
+  opts: {
+    by: string;
+    reason: string;
+    kind?: "decomposition" | "replan";
+    guard?: WorkflowActionGuard;
+  },
 ) {
   let result!: Awaited<ReturnType<typeof materializeSubtasks>>;
   await txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
     await opts.guard?.(c);
-    if (["COMPLETED", "CANCELED", "FAILED"].includes(run.status)) throw new EngineError(`run ${runId} is ${run.status}`, 409);
+    if (["COMPLETED", "CANCELED", "FAILED"].includes(run.status))
+      throw new EngineError(`run ${runId} is ${run.status}`, 409);
     result = await materializeSubtasks(c, runId, planStepKey, plan, {
       actor: opts.by,
       reason: opts.reason,

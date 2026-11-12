@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
-import { repositories } from "../repos/service.ts";
+import { repositories, repositoryBaseBranch } from "../repos/service.ts";
 import { requireRunRepositoryAccess } from "../repos/access.ts";
 import { execution } from "../auth/execution.ts";
 import { instanceDirectory } from "../repos/paths.ts";
@@ -60,7 +60,7 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
 export interface GitProvider {
   name: string;
   /** Push `branch` from a worktree; must refuse dirty trees / branches without commits. Returns the commit list. */
-  push(path: string, branch: string): Promise<{ commits: string; note?: string }>;
+  push(path: string, branch: string, base?: string): Promise<{ commits: string; note?: string }>;
   /** Idempotent: updates the open PR for source → target if there is one. */
   openOrUpdatePullRequest(pr: {
     repo: string;
@@ -81,7 +81,7 @@ export interface GitProvider {
   }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
 }
 
-async function pushFromWorktree(path: string, branch: string) {
+async function pushFromWorktree(path: string, branch: string, base?: string) {
   const row = await one(
     pool,
     "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1",
@@ -100,13 +100,13 @@ async function pushFromWorktree(path: string, branch: string) {
   await validateCheckout(row, path);
   await prepareRepository(row);
   return repositoryLock(row, () =>
-    pushBranch(path, branch, row.default_branch || config.baseBranch),
+    pushBranch(path, branch, base || row.default_branch || config.baseBranch),
   );
 }
 
 export const bitbucketProvider: GitProvider = {
   name: "bitbucket",
-  push: (path, branch) => pushFromWorktree(path, branch),
+  push: (path, branch, base) => pushFromWorktree(path, branch, base),
   openOrUpdatePullRequest: (pr) =>
     openPullRequest(pr.repo, pr.source, pr.title, pr.description, {
       draft: pr.draft,
@@ -117,7 +117,7 @@ export const bitbucketProvider: GitProvider = {
 
 export const githubProvider: GitProvider = {
   name: "github",
-  push: (path, branch) => pushFromWorktree(path, branch),
+  push: (path, branch, base) => pushFromWorktree(path, branch, base),
   openOrUpdatePullRequest: (pr) =>
     openGithubPullRequest(pr.repo, pr.source, pr.title, pr.description, {
       draft: pr.draft,
@@ -172,13 +172,14 @@ export async function prepareWorkspace(
   // A worktree is where the agent writes: the owner needs write permission now, not only at run creation.
   await requireRunRepositoryAccess(run.id, repo, "write");
   const checkout = await prepareRepository(reg, true, await checkoutForRun(reg, run.id));
-  const target = branchFor(run, repo);
   // Preserve persisted workspaces for resumable runs. New remote workspaces use stable IDs.
-  const saved = await one<{ path: string }>(
+  const saved = await one<{ path: string; branch: string }>(
     pool,
-    "SELECT path FROM execution_workspaces WHERE run_id=$1 AND repo=$2",
+    "SELECT path, branch FROM execution_workspaces WHERE run_id=$1 AND repo=$2",
     [run.id, repo],
   );
+  // A prepared workspace keeps its branch (runs started before stacking stay on the parent branch they continued).
+  const target = saved?.branch ? { branch: saved.branch, existing: true } : branchFor(run, repo);
   const workspacePath =
     saved?.path ??
     (reg.repository_url
@@ -208,6 +209,7 @@ export async function prepareWorkspace(
       throw new Error("Repository write permission required");
     return prepareBranch(workspaceKey(run.branch), repo, target.branch, reg.path || repo, {
       mustExist: target.existing,
+      from: "parent" in target ? target.parent : undefined,
       checkoutPath: checkout,
       workspacePath,
       defaultBranch: reg.default_branch,
@@ -245,4 +247,30 @@ export function workspacesOf(runId: number, db: Db = pool) {
     "SELECT repo, branch, path, created_from FROM execution_workspaces WHERE run_id = $1 ORDER BY repo",
     [runId],
   );
+}
+
+/**
+ * Where a workspace's own work starts (`ref`, for scope and patch comparisons) and where its PR goes (`target`): the
+ * parent branch of a stacked run while that branch is unmerged, else the repository's default branch.
+ */
+export async function workspaceBase(
+  run: { branch: string; inputs?: Record<string, any> | null },
+  w: { repo: string; branch: string; path: string },
+): Promise<{ ref: string; target: string }> {
+  const fallback = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);
+  const def = { ref: `origin/${fallback}`, target: fallback };
+  const parent = branchFor(run, w.repo).parent;
+  if (!parent || parent === w.branch) return def;
+  const ok = (...args: string[]) =>
+    exec("git", ["-C", w.path, ...args]).then(
+      () => true,
+      () => false,
+    );
+  if (!(await ok("rev-parse", "--verify", "-q", `refs/remotes/origin/${parent}`)))
+    return (await ok("rev-parse", "--verify", "-q", `refs/heads/${parent}`))
+      ? { ref: parent, target: fallback }
+      : def;
+  return (await ok("merge-base", "--is-ancestor", `origin/${parent}`, `origin/${fallback}`))
+    ? def
+    : { ref: `origin/${parent}`, target: parent };
 }

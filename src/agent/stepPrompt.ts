@@ -386,14 +386,17 @@ export function buildResumeMessage(
 
 /** Which branch each repository's worktree is on: a requested existing branch (continue it) or the run branch. */
 function branchRule(run: RunRow, repos: string[]) {
-  const existing = repos.map((r) => [r, branchFor(run, r)] as const).filter(([, b]) => b.existing);
+  const existing = repos
+    .map((r) => [r, branchFor(run, r)] as const)
+    .filter(([, b]) => b.existing || b.parent);
   const fresh = `branch "${run.branch}", cut from the repository’s registered default branch`;
   if (!existing.length) return `Worktrees are on ${fresh}.`;
   return (
     existing
-      .map(
-        ([r, b]) =>
-          `${r}: CONTINUE the existing branch "${b.branch}" (its worktree is on that branch; commit there — do not create or merge another branch into it)`,
+      .map(([r, b]) =>
+        b.parent
+          ? `${r}: branch "${b.branch}", cut from the existing branch "${b.parent}" (the earlier work on it is already in your worktree; commit on "${b.branch}" — never push to or merge into "${b.parent}")`
+          : `${r}: CONTINUE the existing branch "${b.branch}" (its worktree is on that branch; commit there — do not create or merge another branch into it)`,
       )
       .join("; ") + (existing.length < repos.length ? `; other repositories: ${fresh}.` : ".")
   );
