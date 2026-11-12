@@ -18,7 +18,11 @@ import {
   checkModel,
   resetCapabilitiesCache,
 } from "../src/agent/antigravity/capabilities.ts";
-import { AntigravityStream, classifyAntigravityError } from "../src/agent/antigravity/stream.ts";
+import {
+  AntigravityStream,
+  TextBatch,
+  classifyAntigravityError,
+} from "../src/agent/antigravity/stream.ts";
 import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
@@ -285,6 +289,16 @@ test("AntigravityStream parses split documented stream-json events and cumulativ
     cache_read: 3,
     cache_creation: null,
   });
+});
+
+test("TextBatch keeps token fragments together until a line or a tool boundary", () => {
+  const batch = new TextBatch();
+  assert.equal(batch.push("Looking"), null);
+  assert.equal(batch.push(" into test results to i"), null);
+  assert.equal(batch.push("dentify the failing subtest."), null);
+  assert.equal(batch.flush(), "Looking into test results to identify the failing subtest.");
+  assert.equal(batch.push("hello\nwor"), "hello\n");
+  assert.equal(batch.flush(), "wor");
 });
 
 test("classifyAntigravityError accurately identifies error classes", () => {

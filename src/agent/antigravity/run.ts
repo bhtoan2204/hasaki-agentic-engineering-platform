@@ -20,7 +20,12 @@ import {
   antigravityHeadlessSettings,
 } from "./policy.ts";
 import { bridgeToolsFor } from "../mcpBridge.ts";
-import { AntigravityStream, classifyAntigravityError, type AntigravityEvent } from "./stream.ts";
+import {
+  AntigravityStream,
+  TextBatch,
+  classifyAntigravityError,
+  type AntigravityEvent,
+} from "./stream.ts";
 
 export interface AntigravityTurnResult {
   isError: boolean;
@@ -348,6 +353,19 @@ export async function antigravityAgentTurn(
     if (child.pid) childGroups.add(child.pid);
 
     const parser = new AntigravityStream();
+    const agentText = new TextBatch();
+    const thinkingText = new TextBatch();
+    const logPiece = async (kind: "agent" | "thinking", text: string) => {
+      if (!text) return;
+      await input.ctx.log(kind, text, {
+        provider: "antigravity",
+        ...(kind === "agent" ? { model } : {}),
+      });
+    };
+    const flushSpeech = async () => {
+      await logPiece("agent", agentText.flush());
+      await logPiece("thinking", thinkingText.flush());
+    };
     let pendingLogs = Promise.resolve();
     let stderr = "";
     let streamError: Error | undefined;
@@ -368,30 +386,42 @@ export async function antigravityAgentTurn(
       if (ev.type === "result") {
         assistantTurns = ev.turns ?? 1;
         if (ev.text != null) fullText = ev.text.slice(0, MAX_RESPONSE_CHARS);
+        await flushSpeech();
       } else if (ev.text) {
         if (!ev.type.startsWith("step_update.")) assistantTurns++;
         const remaining = MAX_RESPONSE_CHARS - fullText.length;
-        if (remaining > 0) fullText += ev.text.slice(0, remaining);
-        await input.ctx.log("agent", ev.text.slice(0, Math.max(0, remaining)), {
-          provider: "antigravity",
-          model,
-        });
+        if (remaining > 0) {
+          const piece = ev.text.slice(0, remaining);
+          fullText += piece;
+          const ready = agentText.push(piece);
+          if (ready) await logPiece("agent", ready);
+        }
       }
 
       if (ev.thinking) {
-        await input.ctx.log("thinking", ev.thinking, {
-          provider: "antigravity",
-        });
+        const ready = thinkingText.push(ev.thinking);
+        if (ready) await logPiece("thinking", ready);
       }
+
+      if (ev.tool || ev.type === "result") await flushSpeech();
 
       if (ev.tool) {
         if (input.metrics) {
           input.metrics.tool_calls[ev.tool] = (input.metrics.tool_calls[ev.tool] ?? 0) + 1;
         }
-        await input.ctx.log("tool", `called ${ev.tool}`, {
+        const args = ev.toolArgs;
+        const raw =
+          args && typeof args === "object"
+            ? ((args as { command?: unknown }).command ??
+              (args as { CommandLine?: unknown }).CommandLine ??
+              (args as { cmd?: unknown }).cmd)
+            : args;
+        const command = typeof raw === "string" ? raw : "";
+        await input.ctx.log("tool", command ? `${ev.tool} ${command.slice(0, 300)}` : ev.tool, {
           provider: "antigravity",
+          name: ev.tool,
           tool: ev.tool,
-          args: ev.toolArgs,
+          input: args ?? {},
         });
       }
 
@@ -489,6 +519,7 @@ export async function antigravityAgentTurn(
 
     const tail = parser.flush();
     for (const ev of tail.events) await handleEvent(ev);
+    await flushSpeech();
     for (const err of tail.errors)
       await input.ctx.log("system", `Antigravity stream: ${err.error}`, {
         provider: "antigravity",

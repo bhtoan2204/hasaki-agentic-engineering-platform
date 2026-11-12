@@ -222,12 +222,12 @@ function Editor({ wfKey }: { wfKey: string }) {
   );
   const edges: Edge[] = useMemo(
     () =>
-      toEdges(spec?.steps ?? []).map((e) => ({
+      toEdges(spec?.steps ?? [], undefined, positions).map((e) => ({
         ...e,
         deletable: true,
         selectable: true,
       })),
-    [spec],
+    [spec, positions],
   );
 
   // Ctrl+S / ⌘S publishes the workflow (same as the Publish button: validate, save, publish a new version) instead of

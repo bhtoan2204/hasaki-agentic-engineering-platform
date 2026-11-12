@@ -122,9 +122,14 @@ function useInspectorWidth() {
 export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const pane = useInspectorWidth();
   const { t, status } = useI18n();
-  const { data: run, error, loading, refreshing, reload, reloadFresh } = useApi<any>(
-    `/api/runs/${id}`,
-  );
+  const {
+    data: run,
+    error,
+    loading,
+    refreshing,
+    reload,
+    reloadFresh,
+  } = useApi<any>(`/api/runs/${id}`);
   const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
   // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
   const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
@@ -153,15 +158,21 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   // Node drag (and a pane pan that starts on a block) cancels the click when the pointer moves at all.
   // Record the press so the mouseup that lands on the pane does not immediately close the step.
   const pickedAt = useRef(0);
-  const pickStep = useCallback((key: string) => {
-    pickedAt.current = performance.now();
-    navigate(`/runs/${id}/${key}`);
-  }, [id]);
+  const pickStep = useCallback(
+    (key: string) => {
+      pickedAt.current = performance.now();
+      navigate(`/runs/${id}/${key}`);
+    },
+    [id],
+  );
 
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
     const specSteps = run.graph.steps as any[];
     const pos = autoLayout(specSteps);
+    const placed = Object.fromEntries(
+      specSteps.map((s) => [s.key, s.ui ?? pos[s.key] ?? { x: 0, y: 0 }]),
+    );
     const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
@@ -188,7 +199,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         id: s.key,
         type: "step",
         className: "nopan",
-        position: s.ui ?? pos[s.key],
+        position: placed[s.key],
         selected: s.key === stepKey,
         data: {
           step: {
@@ -215,7 +226,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         },
       };
     });
-    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status) };
+    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
   }, [run, stepKey, pickStep]);
   const fitViewOptions = useMemo(
     () => ({
