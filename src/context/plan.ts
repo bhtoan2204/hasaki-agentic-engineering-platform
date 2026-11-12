@@ -292,7 +292,8 @@ export function knowledgeTier(k: {
   metadata?: any;
 }): KnowledgeTier {
   if (k.category === "task_memory") {
-    const t = String(k.metadata?.trust ?? "unverified");
+    // Production task_memory stores provenance under metadata.memory (see knowledge/memory.ts); missing = unverified.
+    const t = String(k.metadata?.memory?.trust ?? "unverified");
     return t === "approved" || t === "verified" ? "task_observation" : "unverified_suggestion";
   }
   if (k.enforced === true) return "organizational_rule";

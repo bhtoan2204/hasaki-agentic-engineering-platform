@@ -40,7 +40,7 @@ test("rankCodeHits expands one dependency step with discounted score and respect
 test("knowledgeTier never promotes unverified memory to a rule", () => {
   assert.equal(knowledgeTier({ category: "task_memory", enforced: true }), "unverified_suggestion");
   assert.equal(
-    knowledgeTier({ category: "task_memory", metadata: { trust: "approved" } }),
+    knowledgeTier({ category: "task_memory", metadata: { memory: { trust: "approved" } } }),
     "task_observation",
   );
   assert.equal(knowledgeTier({ category: "business_rule", enforced: true }), "organizational_rule");
@@ -81,7 +81,7 @@ test("unverified task memory is never inline or mandatory, even when enforced or
     content: "something",
     reason: "assigned to step",
     enforced: true,
-    metadata: { trust: "unverified", load: "inline" },
+    metadata: { memory: { trust: "unverified" }, load: "inline" },
   };
   const plan = planKnowledge([mem], {
     requestText: "x",
@@ -137,7 +137,7 @@ test("unverified task memory always stays at the index tier, even when the index
   const items = [
     doc("a", "reference_doc", { load: "on_demand", description: "request words" }),
     doc("b", "reference_doc", { load: "on_demand", description: "request words" }),
-    doc("memory.x", "task_memory", { trust: "unverified", load: "on_demand" }),
+    doc("memory.x", "task_memory", { memory: { trust: "unverified" }, load: "on_demand" }),
   ];
   const plan = planKnowledge(items, {
     requestText: "request words",
@@ -147,4 +147,23 @@ test("unverified task memory always stays at the index tier, even when the index
   });
   assert.equal(plan.find((p) => p.key === "memory.x")!.disclosure, "index");
   assert.equal(plan.filter((p) => p.disclosure === "index" && p.key !== "memory.x").length, 1);
+});
+
+test("verified and approved task memory (production metadata.memory.trust) is a task observation, not unverified", () => {
+  for (const trust of ["verified", "approved"])
+    assert.equal(
+      knowledgeTier({ category: "task_memory", metadata: { memory: { trust } } }),
+      "task_observation",
+    );
+  assert.equal(
+    knowledgeTier({ category: "task_memory", metadata: { memory: { trust: "unverified" } } }),
+    "unverified_suggestion",
+  );
+  assert.equal(knowledgeTier({ category: "task_memory", metadata: {} }), "unverified_suggestion");
+  assert.equal(
+    tierNotice(
+      knowledgeTier({ category: "task_memory", metadata: { memory: { trust: "verified" } } }),
+    ),
+    undefined,
+  );
 });

@@ -375,7 +375,7 @@ export async function ensureContextPack(
           searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
           continue;
         }
-        const indexOnly = !mandatory && mode === "index";
+        const indexOnly = !mandatory && (mode === "index" || tierLabel === "unverified_suggestion");
         add(
           `knowledge:${k.id ?? k.key}:v${k.version}`,
           "knowledge",
