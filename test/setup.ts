@@ -1,21 +1,45 @@
 /**
  * Preloaded with `node --import ./test/setup.ts --test`. Creates a uniquely named `platform_test_<uuid>` database on the
- * PostgreSQL from docker-compose (override with TEST_DATABASE_ADMIN_URL) and an isolated config, BEFORE any
+ * PostgreSQL cluster started by this process and an isolated config, BEFORE any
  * platform module is imported (config and pool are created at import time).
  */
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
-const admin =
-  process.env.TEST_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform";
-const adminUrl = new URL(admin);
-if (!["localhost", "127.0.0.1", "[::1]"].includes(adminUrl.hostname))
-  throw new Error("Tests require a local isolated PostgreSQL; remote database refused.");
+// Never connect to an inherited database, even on localhost: another application may own it.
+const cluster = mkdtempSync(join(tmpdir(), "ctp-pg-"));
+const clusterData = join(cluster, "data");
+let clusterStarted = false;
+function stopCluster() {
+  if (clusterStarted) {
+    const stopped = spawnSync("pg_ctl", ["-D", clusterData, "-m", "immediate", "-w", "stop"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15000,
+    });
+    if (stopped.status !== 0) return; // Keep diagnostics if PostgreSQL could not stop.
+    clusterStarted = false;
+  }
+  rmSync(cluster, { recursive: true, force: true });
+}
+process.once("exit", stopCluster);
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.once(signal, () => { stopCluster(); process.exit(signal === "SIGINT" ? 130 : 143); });
+for (const [command, args] of [
+  ["initdb", ["-D", clusterData, "-U", "platform_test", "-A", "trust", "--no-locale", "--encoding=UTF8"]],
+  ["pg_ctl", ["-D", clusterData, "-l", join(cluster, "server.log"), "-o", `-c listen_addresses='' -c unix_socket_directories='${cluster}' -c shared_buffers=16MB`, "-w", "start"]],
+] as const) {
+  const result = spawnSync(command, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
+  if (result.status !== 0)
+    throw new Error(`Test-owned PostgreSQL ${command} failed (${result.status}): ${result.error?.message ?? ""} ${result.stderr}\n${existsSync(join(cluster, "server.log")) ? readFileSync(join(cluster, "server.log"), "utf8") : ""}`);
+  if (command === "pg_ctl") clusterStarted = true;
+}
+const admin = `postgres://platform_test@localhost/postgres?host=${encodeURIComponent(cluster)}`;
 const dbName = `platform_test_${randomUUID().replaceAll("-", "")}`;
 if (!/^platform_test_[0-9a-f]+$/.test(dbName))
   throw new Error("Refusing unexpected test database name");
@@ -158,6 +182,7 @@ await pool.end();`,
           AUTH_SECRET: "test-auth-secret-not-for-production",
         },
         encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
     if (child.status !== 0) {
