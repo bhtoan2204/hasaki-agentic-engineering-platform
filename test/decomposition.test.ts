@@ -75,7 +75,7 @@ function fakeDb(steps: Row[]) {
         return { rows: revisions.filter((r) => r.key === p[0]).map((r) => ({ revision: r.revision })) };
       if (/SELECT kind FROM workflow_graph_revisions/.test(sql)) return { rows: revisions.map((r) => ({ kind: r.kind })) };
       if (/INSERT INTO workflow_graph_revisions/.test(sql)) {
-        revisions.push({ revision: p[1], kind: p[2], key: p[6] });
+        revisions.push({ revision: p[1], kind: p[2], actor: p[4], key: p[6] });
         return { rows: [] };
       }
       if (/INSERT INTO workflow_steps/.test(sql)) {
@@ -94,71 +94,104 @@ function fakeDb(steps: Row[]) {
   };
   return { db, revisions, inserted };
 }
-const baseSteps = (): Row[] => [
+let gateId = 10;
+/** Plan step + one downstream step + a completed approval gate per approved plan (hash-bound, current generation). */
+const baseSteps = (...approved: { p: DecompositionPlan; kind?: string; by?: string }[]): Row[] => [
   { id: 1, key: "plan", position: 0, depends_on: [], status: "COMPLETED", subtask_id: null },
   { id: 2, key: "integration", position: 1, depends_on: ["plan"], status: "PENDING", subtask_id: null },
-  { id: 3, key: "approve", type: "human_approval", position: 2, depends_on: ["plan"], status: "COMPLETED", subtask_id: null, approval: { granted: true, by: "toan" } },
+  ...approved.map((a) => ({
+    id: gateId++,
+    key: `approve-${gateId}`,
+    type: "human_approval",
+    position: 2,
+    depends_on: ["plan"],
+    status: "COMPLETED",
+    generation: 1,
+    subtask_id: null,
+    approval: { granted: true, by: a.by ?? "toan", generation: 1, data: { plan_hash: planHash(a.p), kind: a.kind ?? "decomposition" } },
+  })),
 ];
 const opts = { actor: "u", reason: "r", allowedRepositories: ["repo-a"] };
 
 test("materialize rewires downstream steps and replays idempotently", async () => {
-  const f = fakeDb(baseSteps());
   const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
+  const f = fakeDb(baseSteps({ p }));
   const r1 = await materializeSubtasks(f.db, 1, "plan", p, opts);
   assert.deepEqual(r1.created, ["subtask-a", "subtask-b"]);
-  const integ = (f.db as any) && f.inserted.length === 2;
-  assert.ok(integ);
+  assert.equal(f.inserted.length, 2);
   const r2 = await materializeSubtasks(f.db, 1, "plan", p, opts);
   assert.equal(r2.replayed, true);
   assert.equal(f.inserted.length, 2);
 });
 
 test("materialize rejects a cycle through an existing downstream step", async () => {
-  const f = fakeDb(baseSteps());
+  const p = plan(sub("x", { depends_on: ["integration"] }));
+  const f = fakeDb(baseSteps({ p }));
+  await assert.rejects(materializeSubtasks(f.db, 1, "plan", p, opts), /cycle/);
+  assert.equal(f.inserted.length, 0);
+});
+
+test("materialize requires a completed plan step", async () => {
+  const p = plan(sub("a"));
+  const steps = baseSteps({ p });
+  steps[0].status = "PENDING";
+  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", p, opts), /not approved/);
+});
+
+test("approval is bound to the exact plan: a different plan is rejected", async () => {
+  const approved = plan(sub("a"));
+  const f = fakeDb(baseSteps({ p: approved }));
   await assert.rejects(
-    materializeSubtasks(f.db, 1, "plan", plan(sub("x", { depends_on: ["integration"] })), opts),
-    /cycle/,
+    materializeSubtasks(f.db, 1, "plan", plan(sub("a"), sub("evil")), opts),
+    /no completed human approval gate approves/,
   );
   assert.equal(f.inserted.length, 0);
 });
 
-test("materialize requires an approved plan step and approval for replans", async () => {
-  const pending = baseSteps();
-  pending[0].status = "PENDING";
-  await assert.rejects(materializeSubtasks(fakeDb(pending).db, 1, "plan", plan(sub("a")), opts), /not approved/);
-  const f = fakeDb(baseSteps());
-  await materializeSubtasks(f.db, 1, "plan", plan(sub("a")), opts);
-  await assert.rejects(
-    materializeSubtasks(f.db, 1, "plan", plan(sub("c")), { ...opts, kind: "replan" }),
-    /approval/,
-  );
-  const r = await materializeSubtasks(f.db, 1, "plan", plan(sub("c")), { ...opts, kind: "replan", approvedBy: "toan" });
+test("replan needs its own gate approving its own plan; the first gate does not cover it", async () => {
+  const first = plan(sub("a"));
+  const second = plan(sub("c"));
+  const f = fakeDb(baseSteps({ p: first }));
+  await materializeSubtasks(f.db, 1, "plan", first, opts);
+  await assert.rejects(materializeSubtasks(f.db, 1, "plan", second, { ...opts, kind: "replan" }), /approves this replan plan/);
+  // a replan-kind gate that names the replan plan hash authorizes it
+  const steps = baseSteps({ p: first }, { p: second, kind: "replan", by: "reviewer" });
+  const g = fakeDb(steps);
+  await materializeSubtasks(g.db, 1, "plan", first, opts);
+  const r = await materializeSubtasks(g.db, 1, "plan", second, { ...opts, kind: "replan" });
   assert.equal(r.revision, 2);
 });
 
-test("materialize enforces depth and replan limits", async () => {
-  const steps = baseSteps();
-  steps[0].subtask_id = "a";
-  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", plan(sub("z")), opts), /depth/);
+test("a stale approval (generation mismatch) is not accepted", async () => {
+  const p = plan(sub("a"));
+  const steps = baseSteps({ p });
+  steps[2].generation = 2;
+  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", p, opts), /no completed human approval gate/);
 });
 
-test("materialize requires a human approval gate that records who approved", async () => {
-  const steps = baseSteps();
-  steps[2].approval = { granted: true };
-  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", plan(sub("a")), opts), /approval gate/);
+test("approver is recorded from the gate, not the caller", async () => {
+  const p = plan(sub("a"));
+  const f = fakeDb(baseSteps({ p, by: "toan" }));
+  await materializeSubtasks(f.db, 1, "plan", p, { ...opts, actor: "someone-else" });
+  assert.match(f.revisions[0].actor, /approved by toan/);
+});
+
+test("materialize enforces depth limits", async () => {
+  const p = plan(sub("z"));
+  const steps = baseSteps({ p });
+  steps[0].subtask_id = "a";
+  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", p, opts), /depth/);
 });
 
 test("materialize refuses to rewire downstream steps that already started", async () => {
-  const steps = baseSteps();
+  const p = plan(sub("a"));
+  const steps = baseSteps({ p });
   steps[1].status = "READY";
-  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", plan(sub("a")), opts), /already active/);
+  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", p, opts), /already active/);
 });
 
-test("limits cannot be raised above the hard ceiling and scope is stored per subtask", async () => {
-  const f = fakeDb(baseSteps());
-  const many = Array.from({ length: 21 }, (_, i) => sub(`s${i}`));
-  await assert.rejects(
-    materializeSubtasks(f.db, 1, "plan", plan(...many), { ...opts, limits: { max_subtasks: 1000 } }),
-    /limit is 20/,
-  );
+test("limits cannot be raised above the hard ceiling", async () => {
+  const many = plan(...Array.from({ length: 21 }, (_, i) => sub(`s${i}`)));
+  const f = fakeDb(baseSteps({ p: many }));
+  await assert.rejects(materializeSubtasks(f.db, 1, "plan", many, { ...opts, limits: { max_subtasks: 1000 } }), /limit is 20/);
 });

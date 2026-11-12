@@ -458,7 +458,6 @@ export async function expandSubtasks(
       actor: opts.by,
       reason: opts.reason,
       kind: opts.kind,
-      approvedBy: opts.kind === "replan" ? opts.by : undefined,
       allowedRepositories: run.selected_repositories.filter((r: string) =>
         run.allowed_repositories.includes(r),
       ),

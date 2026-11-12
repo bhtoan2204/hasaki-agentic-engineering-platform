@@ -177,7 +177,7 @@ export async function materializeSubtasks(
   runId: number,
   planStepKey: string,
   rawPlan: unknown,
-  opts: { actor: string; reason: string; allowedRepositories: string[]; approvedBy?: string; limits?: Partial<DecompositionLimits>; kind?: "decomposition" | "replan" },
+  opts: { actor: string; reason: string; allowedRepositories: string[]; limits?: Partial<DecompositionLimits>; kind?: "decomposition" | "replan" },
 ): Promise<{ created: string[]; revision: number; replayed: boolean }> {
   const kind = opts.kind ?? "decomposition";
   const limits = clampLimits({ ...DEFAULT_LIMITS, ...opts.limits });
@@ -196,19 +196,26 @@ export async function materializeSubtasks(
   // The plan must have been approved by a human: the plan step has to be completed first.
   if (planStep.status !== "COMPLETED")
     throw new EngineError(`plan step "${planStepKey}" is not approved/completed (status ${planStep.status})`, 409);
-  // Proof of human approval: a completed approval gate that depends on the plan step and records who granted it.
+  // Proof of human approval, bound to THIS plan: a completed, current-generation approval gate on the plan step whose
+  // approval data names the sha256 of the exact plan (and kind) being materialized. The approver is read from the gate,
+  // never from the caller, so a replan needs its own gate approving its own plan.
+  const hash = planHash(plan);
   const gate = steps.find(
     (s) =>
       s.type === "human_approval" &&
       s.status === "COMPLETED" &&
       s.depends_on.includes(planStepKey) &&
       s.approval?.granted === true &&
-      !!s.approval?.by,
+      s.approval.generation === s.generation &&
+      !!s.approval.by &&
+      s.approval.data?.plan_hash === hash &&
+      (s.approval.data?.kind ?? "decomposition") === kind,
   );
   if (!gate)
-    throw new EngineError(`plan step "${planStepKey}" has no completed human approval gate`, 403);
-  if (kind === "replan" && !opts.approvedBy)
-    throw new EngineError("replan requires explicit human approval (approvedBy)", 403);
+    throw new EngineError(
+      `no completed human approval gate approves this ${kind} plan (plan_hash ${hash.slice(0, 12)}…)`,
+      403,
+    );
   // Downstream steps that already started cannot be made to wait for new subtasks.
   const started = steps.filter(
     (s) =>
@@ -243,7 +250,7 @@ export async function materializeSubtasks(
     c,
     `INSERT INTO workflow_graph_revisions (run_id, revision, kind, reason, actor, plan, idempotency_key)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [runId, revision, kind, opts.reason, opts.actor, json(plan), key],
+    [runId, revision, kind, opts.reason, `${opts.actor} (approved by ${gate.approval.by})`, json(plan), key],
   );
   const toKey = (d: string) => (subtasks.some((s) => s.id === d) ? stepKey(d) : d);
   const created: string[] = [];
