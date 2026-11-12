@@ -6,10 +6,13 @@ import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.
 import { AnalyticsSkeleton, type Row } from "../analytics/shared.tsx";
 import { UsageDashboard } from "./UsageDashboard.tsx";
 import { PerformanceDashboard } from "./PerformanceDashboard.tsx";
-import { WorkflowDashboard } from "./WorkflowDashboard.tsx";
+import { WorkflowDashboard, type WorkflowView } from "./WorkflowDashboard.tsx";
 import "../analytics/analytics.css";
 export const ANALYTICS_TABS = ["usage", "performance", "workflows"] as const;
 type Tab = (typeof ANALYTICS_TABS)[number];
+function workflowSection(value: string | null): WorkflowView {
+  return value === "workflows" || value === "bottlenecks" || value === "details" ? value : "overview";
+}
 function DashboardBody({
   tab,
   query,
@@ -22,7 +25,10 @@ function DashboardBody({
   const { t } = useI18n();
   const params = new URLSearchParams(query);
   const page = Number(params.get("page") || 1);
-  const { data, error, loading, reload } = useApi<Row>(`/api/analytics/${tab}?${query}`);
+  const workflowView = workflowSection(params.get("view"));
+  const request = new URLSearchParams(query);
+  if (tab === "workflows" && workflowView === "overview") request.delete("page");
+  const { data, error, loading, reload } = useApi<Row>(`/api/analytics/${tab}?${request}`);
   useLive(null, (p) => {
     if (p?.kind === "status" || p?.kind === "refresh") reload();
   });
@@ -59,7 +65,28 @@ function DashboardBody({
         />
       )}
       {tab === "performance" && <PerformanceDashboard data={data} page={page} onPage={onPage} />}
-      {tab === "workflows" && <WorkflowDashboard data={data} page={page} onPage={onPage} />}
+      {tab === "workflows" && (
+        <WorkflowDashboard
+          data={data}
+          page={page}
+          onPage={onPage}
+          view={workflowView}
+          onView={(view) => {
+            const p = new URLSearchParams(query);
+            if (view === "overview") p.delete("view");
+            else p.set("view", view);
+            p.delete("page");
+            onChange(p);
+          }}
+          onSelectWorkflow={(key) => {
+            const p = new URLSearchParams(query);
+            p.set("workflow", key);
+            p.set("view", "details");
+            p.delete("page");
+            onChange(p);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -113,7 +140,12 @@ export function AnalyticsInsights({ tabParam }: { tabParam?: string }) {
         }}
       />
       {optionsError && <ErrorBox error={optionsError} onRetry={reloadOptions} />}
-      <AnalyticsFilters query={query} options={options} onApply={change} />
+      <AnalyticsFilters
+        query={query}
+        options={options}
+        onApply={change}
+        compact={tab === "workflows"}
+      />
       <DashboardBody key={tab} tab={tab} query={query} onChange={change} />
     </div>
   );
