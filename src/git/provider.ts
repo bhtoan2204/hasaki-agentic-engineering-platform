@@ -16,7 +16,7 @@ import { openGithubPullRequest, githubPullRequestState } from "../github.ts";
 import { prepareBranch, pushBranch } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { validateCheckout } from "../repos/paths.ts";
-import { branchFor } from "../workflow/branches.ts";
+import { branchFor, subtaskBranchName } from "../workflow/branches.ts";
 
 const exec = promisify(execFile);
 
@@ -157,13 +157,40 @@ export interface Workspace {
   created_from: string;
 }
 
-/** Create (or reuse) the run's isolated worktree for `repo` and record it. Never touches reposRoot checkouts. */
+export interface PrepareWorkspaceOptions {
+  /** When set, allocate a worktree and branch that no other step of this run shares. */
+  subtaskId?: string | null;
+}
+
+function remoteWorkspacePath(
+  reg: { id: number; repository_url?: string | null },
+  runId: number,
+  subtaskId: string | null,
+) {
+  if (!reg.repository_url) return undefined;
+  return join(
+    config.dataDir,
+    "worktrees",
+    instanceDirectory(config.instanceId),
+    String(runId),
+    ...(subtaskId ? ["subtasks", subtaskId] : []),
+    String(reg.id),
+  );
+}
+
+/**
+ * Create (or reuse) one worktree for `repo` and record it. Never touches reposRoot checkouts.
+ * `subtaskId` cuts a branch from the run workspace so two coding steps cannot check out the same branch.
+ */
 export async function prepareWorkspace(
   run: { id: number; branch: string; inputs?: Record<string, any> | null },
   repo: string,
   checkLive?: () => Promise<void>,
+  opts: PrepareWorkspaceOptions = {},
 ): Promise<Workspace> {
   await checkLive?.();
+  const subtaskId = opts.subtaskId ?? null;
+  if (subtaskId) subtaskBranchName("placeholder", subtaskId);
   const owner = await one(
     pool,
     "SELECT worker_instance,allowed_repositories,owner_id FROM workflow_runs WHERE id = $1",
@@ -181,27 +208,7 @@ export async function prepareWorkspace(
   // A worktree is where the agent writes: the owner needs write permission now, not only at run creation.
   await requireRunRepositoryAccess(run.id, repo, "write");
   const checkout = await prepareRepository(reg, true, await checkoutForRun(reg, run.id));
-  // Preserve persisted workspaces for resumable runs. New remote workspaces use stable IDs.
-  const saved = await one<{ path: string; branch: string }>(
-    pool,
-    "SELECT path, branch FROM execution_workspaces WHERE run_id=$1 AND repo=$2",
-    [run.id, repo],
-  );
-  // A prepared workspace keeps its branch (runs started before stacking stay on the parent branch they continued).
-  const target = saved?.branch ? { branch: saved.branch, existing: true } : branchFor(run, repo);
-  const workspacePath =
-    saved?.path ??
-    (reg.repository_url
-      ? join(
-          config.dataDir,
-          "worktrees",
-          instanceDirectory(config.instanceId),
-          String(run.id),
-          String(reg.id),
-        )
-      : undefined);
-  if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
-  const b = await repositoryLock(reg, async () => {
+  const created = await repositoryLock(reg, async () => {
     await checkLive?.();
     const currentOwner = await one(
       pool,
@@ -216,44 +223,121 @@ export async function prepareWorkspace(
     const current = await repositories.get(repo);
     if (!current?.enabled || !current.allowed_actions.includes("write"))
       throw new Error("Repository write permission required");
-    return prepareBranch(workspaceKey(run.branch), repo, target.branch, reg.path || repo, {
+    const parent = await prepareLockedWorkspace(run, repo, current, checkout, null);
+    if (!subtaskId) return [parent];
+    return [parent, await prepareLockedWorkspace(run, repo, current, checkout, subtaskId)];
+  });
+  for (const w of created) await installNodeDependencies(w.path);
+  if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => {});
+  return created[created.length - 1];
+}
+
+async function prepareLockedWorkspace(
+  run: { id: number; branch: string; inputs?: Record<string, any> | null },
+  repo: string,
+  reg: { id: number; path?: string | null; repository_url?: string | null; default_branch?: string | null },
+  checkout: string,
+  subtaskId: string | null,
+): Promise<Workspace> {
+  const saved = await one<{ path: string; branch: string }>(
+    pool,
+    `SELECT path, branch FROM execution_workspaces
+     WHERE run_id=$1 AND repo=$2 AND subtask_id IS NOT DISTINCT FROM $3`,
+    [run.id, repo, subtaskId],
+  );
+  // A prepared workspace keeps its branch (runs started before stacking stay on the parent branch they continued).
+  let target: { branch: string; existing: boolean; parent?: string };
+  if (saved?.branch) target = { branch: saved.branch, existing: true };
+  else if (!subtaskId) target = branchFor(run, repo);
+  else {
+    const parent = await one<{ branch: string }>(
+      pool,
+      "SELECT branch FROM execution_workspaces WHERE run_id=$1 AND repo=$2 AND subtask_id IS NULL",
+      [run.id, repo],
+    );
+    if (!parent?.branch) throw new Error("Run workspace is required before a subtask worktree");
+    target = {
+      branch: subtaskBranchName(parent.branch, subtaskId),
+      existing: false,
+      parent: parent.branch,
+    };
+  }
+  const workspacePath = saved?.path ?? remoteWorkspacePath(reg, run.id, subtaskId);
+  if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
+  const b = await prepareBranch(
+    subtaskId ? workspaceKey(target.branch) : workspaceKey(run.branch),
+    repo,
+    target.branch,
+    reg.path || repo,
+    {
       mustExist: target.existing,
-      from: "parent" in target ? target.parent : undefined,
+      from: target.parent,
       checkoutPath: checkout,
       workspacePath,
-      defaultBranch: reg.default_branch,
+      defaultBranch: reg.default_branch ?? undefined,
       skipFetch: !!reg.repository_url,
-    });
-  });
-  await checkLive?.();
+    },
+  );
   if (b.path === checkout)
     throw new Error(
       `${repo}: branch is checked out in the primary checkout; switch it before continuing`,
     );
-  await recordWorkspace(run.id, {
-    repo,
-    branch: b.branch,
-    path: b.path,
-    created_from: b.createdFrom,
-  });
-  await installNodeDependencies(b.path);
-  if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => {});
-  return { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
+  const workspace = { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
+  await recordWorkspace(run.id, workspace, pool, subtaskId);
+  return workspace;
 }
 
-export async function recordWorkspace(runId: number, w: Workspace, db: Db = pool) {
+export async function recordWorkspace(
+  runId: number,
+  w: Workspace,
+  db: Db = pool,
+  subtaskId: string | null = null,
+) {
+  if (subtaskId) {
+    await q(
+      db,
+      `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from, subtask_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (run_id, repo, subtask_id) WHERE subtask_id IS NOT NULL
+       DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
+      [runId, w.repo, w.branch, w.path, w.created_from, subtaskId],
+    );
+    return;
+  }
   await q(
     db,
-    `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (run_id, repo) DO UPDATE SET path = excluded.path, branch = excluded.branch`,
+    `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (run_id, repo) WHERE subtask_id IS NULL
+     DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
     [runId, w.repo, w.branch, w.path, w.created_from],
   );
 }
 
+/** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */
 export function workspacesOf(runId: number, db: Db = pool) {
   return q<Workspace>(
     db,
-    "SELECT repo, branch, path, created_from FROM execution_workspaces WHERE run_id = $1 ORDER BY repo",
+    `SELECT repo, branch, path, created_from FROM execution_workspaces
+     WHERE run_id = $1 AND subtask_id IS NULL ORDER BY repo`,
+    [runId],
+  );
+}
+
+export function allWorkspacesOf(runId: number, db: Db = pool) {
+  return q<Workspace & { subtask_id: string | null }>(
+    db,
+    `SELECT repo, branch, path, created_from, subtask_id FROM execution_workspaces
+     WHERE run_id = $1 ORDER BY repo, subtask_id NULLS FIRST`,
+    [runId],
+  );
+}
+
+export function subtaskWorkspacesOf(runId: number, db: Db = pool) {
+  return q<Workspace & { subtask_id: string }>(
+    db,
+    `SELECT repo, branch, path, created_from, subtask_id FROM execution_workspaces
+     WHERE run_id = $1 AND subtask_id IS NOT NULL ORDER BY repo, subtask_id`,
     [runId],
   );
 }

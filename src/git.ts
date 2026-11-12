@@ -255,3 +255,36 @@ export async function snapshotUncommitted(path: string, ref: string, message: st
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+/** Uncommitted paths in a worktree. Empty when the tree matches HEAD. */
+export async function worktreePorcelain(path: string): Promise<string> {
+  return git(path, "status", "--porcelain");
+}
+
+/**
+ * Merge `branch` into the worktree at `path`. A conflict aborts the merge and leaves the worktree as it was.
+ * The commit identity is local to this command so integration does not depend on the machine's git config.
+ */
+export async function mergeBranchInto(path: string, branch: string): Promise<void> {
+  repositoryBranch(branch);
+  if (await worktreePorcelain(path))
+    throw new Error(`worktree ${path} has uncommitted changes`);
+  try {
+    await git(
+      path,
+      "-c",
+      "user.name=platform",
+      "-c",
+      "user.email=platform@local",
+      "merge",
+      "--no-ff",
+      "--no-edit",
+      branch,
+    );
+  } catch (e) {
+    await git(path, "merge", "--abort").catch(() => {});
+    throw new Error(
+      `merge of ${branch} failed: ${String((e as Error).message ?? e).split("\n")[0]}`,
+    );
+  }
+}

@@ -8,6 +8,8 @@
  * Whether the branch really exists is checked when the worktree is prepared — a named branch is never created.
  */
 
+import { repositoryBranch } from "../repos/remote.ts";
+
 const INTENT =
   /(làm tiếp|tiếp tục|dùng lại|không\s+(checkout|tạo|cắt)[^.\n]*branch\s+mới|continue|keep working|reuse|work on (the )?existing|based on (the )?existing)/i;
 const KEYWORD = /\b(?:branch|nhánh)\b/gi;
@@ -93,4 +95,10 @@ export function branchFor(
     return { branch: run.branch, existing: false, parent: mapped };
   const b = mapped ?? reviewed;
   return b ? { branch: b, existing: true } : { branch: run.branch, existing: false };
+}
+
+/** Branch checked out in a subtask worktree. It is never the run branch: git refuses the same branch in two worktrees. */
+export function subtaskBranchName(parentBranch: string, subtaskId: string): string {
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(subtaskId)) throw new Error("Invalid subtask id");
+  return repositoryBranch(`${parentBranch}--${subtaskId}`);
 }

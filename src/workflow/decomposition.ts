@@ -77,7 +77,7 @@ export interface ExpansionContext {
   existingSteps?: { key: string; depends_on: string[]; subtask_id?: string | null; status?: string }[];
   /** Step the plan expands; steps waiting on it are rewired to wait for the leaf subtasks. */
   planStepKey?: string;
-  /** True only when each subtask gets its own worktree. Not implemented yet: expansions are always serialized. */
+  /** When true, each parallel subtask gets its own worktree and branch. Otherwise the expansion is serialized onto the run worktree. */
   isolatedWorkspaces?: boolean;
 }
 
@@ -119,9 +119,8 @@ export function validateExpansion(
         b.execution_strategy = "sequential";
       }
     }
-  // Workspaces are one worktree per run (src/git/provider.ts keys on run.branch), so two coding subtasks running at the
-  // same time would write the same checkout. Until per-subtask worktrees exist, every subtask is serialized: any pair
-  // with no dependency path between them gets one, and nothing is left as "parallel".
+  // The run worktree is shared. Parallel coding is opt-in: without a per-subtask worktree, any pair with no
+  // dependency path is serialized and nothing is left as "parallel".
   if (!ctx.isolatedWorkspaces) {
     for (let i = 0; i < subtasks.length; i++)
       for (let j = i + 1; j < subtasks.length; j++) {
@@ -284,10 +283,10 @@ export async function materializeSubtasks(
        VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, $10, 2, 5, 'PENDING', $7, $8, $9)`,
       [runId, stepKey(s.id), s.title, position++, deps, json({
         subtask: s,
-        isolated_workspace: opts.isolatedWorkspaces ?? (s.execution_strategy === "parallel"),
+        isolated_workspace: opts.isolatedWorkspaces === true && s.execution_strategy === "parallel",
         concurrent: s.execution_strategy === "parallel",
-        // Scope (recorded, not yet a runtime sandbox): target repositories are validated ⊆ the run's allowed set; runtime
-        // still confines coding agents to run.selected_repositories and the single run worktree.
+        // isolated_workspace makes prepareWorkspace cut a branch and worktree for this subtask. The run worktree
+        // stays the integration target. Scope repositories are validated against the run's allowed set.
         scope: { repositories: s.target_repos, permissions: s.permissions, owned_files: s.owned_files },
       }), planStepKey, s.id, revision, s.risk === "high"],
     );

@@ -173,7 +173,7 @@ export async function checkoutForRun(
   const run = await one(
     pool,
     `SELECT r.worker_instance,r.allowed_repositories,w.path FROM workflow_runs r
-    LEFT JOIN execution_workspaces w ON w.run_id=r.id AND w.repo=$2 WHERE r.id=$1`,
+    LEFT JOIN execution_workspaces w ON w.run_id=r.id AND w.repo=$2 AND w.subtask_id IS NULL WHERE r.id=$1`,
     [runId, repo.name],
   );
   if (run?.worker_instance !== config.instanceId || !run.allowed_repositories.includes(repo.name))

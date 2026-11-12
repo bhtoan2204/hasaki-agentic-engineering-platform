@@ -12,7 +12,8 @@ import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { gitProviderFor, workspaceBase, workspacesOf } from "../../git/provider.ts";
+import { prepareWorkspace, gitProviderFor, subtaskWorkspacesOf, workspaceBase, workspacesOf } from "../../git/provider.ts";
+import { mergeBranchInto, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   repositoryReference,
@@ -745,6 +746,58 @@ async function publishReport(ctx: ExecutionContext): Promise<ExecResult> {
   };
 }
 
+/** Fold each subtask branch into the run worktree. Declared file conflicts are handled by the caller first. */
+async function mergeIsolatedSubtasks(ctx: ExecutionContext): Promise<ExecResult | null> {
+  if (!ctx.run?.id) return null;
+  const subs = await subtaskWorkspacesOf(ctx.run.id);
+  if (!subs.length) return null;
+  for (const sub of subs) {
+    if (await worktreePorcelain(sub.path))
+      return {
+        kind: "failed",
+        error: `Subtask ${sub.subtask_id} in ${sub.repo} has uncommitted changes; commit them before integration`,
+        retryable: false,
+      };
+  }
+  const gitConflicts: Array<{ repo: string; branch: string; error: string }> = [];
+  const repos = [...new Set(subs.map((s) => s.repo))];
+  for (const repo of repos) {
+    let parent;
+    try {
+      parent = await prepareWorkspace(ctx.run, repo, async () => {
+        if (ctx.signal?.aborted) throw new Error("aborted");
+      });
+    } catch (e) {
+      return {
+        kind: "failed",
+        error: `cannot prepare integration worktree for ${repo}: ${(e as Error).message}`,
+        retryable: true,
+      };
+    }
+    for (const sub of subs.filter((s) => s.repo === repo)) {
+      try {
+        await mergeBranchInto(parent.path, sub.branch);
+        await ctx.log("system", `merged ${sub.branch} into ${parent.branch} (${repo})`);
+      } catch (e) {
+        gitConflicts.push({ repo, branch: sub.branch, error: (e as Error).message });
+        break;
+      }
+    }
+  }
+  if (gitConflicts.length) {
+    await ctx.log("system", `git merge failed for ${gitConflicts.length} subtask branch(es)`, {
+      conflicts: gitConflicts,
+    });
+    return {
+      kind: "failed",
+      error: `Subtask merge conflict: ${gitConflicts.map((c) => `${c.repo} ${c.branch}`).join(", ")}`,
+      retryable: false,
+      details: { conflicts: gitConflicts },
+    };
+  }
+  return null;
+}
+
 export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResult> {
   const upstream = ctx.input.upstream ?? {};
   const subtaskOutputs = Object.entries(upstream)
@@ -782,6 +835,9 @@ export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResu
       details: { conflicts },
     };
   }
+
+  const merged = await mergeIsolatedSubtasks(ctx);
+  if (merged) return merged;
 
   return {
     kind: "completed",

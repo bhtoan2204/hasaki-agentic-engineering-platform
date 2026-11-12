@@ -34,7 +34,7 @@ import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts
 import type pg from "pg";
 import { config } from "../config.ts";
 import { executionPolicyVersions } from "../learning/policyVersions.ts";
-import { workspacesOf } from "../git/provider.ts";
+import { allWorkspacesOf } from "../git/provider.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
@@ -528,7 +528,7 @@ export async function setRunBranches(runId: number, branches: unknown, by: strin
     } catch (e) {
       throw new EngineError((e as Error).message, 400);
     }
-    const prepared = (await workspacesOf(run.id, c)).map((w) => w.repo);
+    const prepared = [...new Set((await allWorkspacesOf(run.id, c)).map((w) => w.repo))];
     const touched = Object.keys(raw).flatMap((k) =>
       k === "*" ? prepared : prepared.includes(k) ? [k] : [],
     );
@@ -881,11 +881,11 @@ export async function sendFeedback(
   // Re-planning may discard the approach the code was written for: keep the uncommitted part retrievable.
   const snapshots: Array<{ repo: string; ref: string; commit: string; files: string[] }> = [];
   if (route !== "reimplement")
-    for (const w of await workspacesOf(runId))
+    for (const w of await allWorkspacesOf(runId))
       try {
         const snap = await snapshotUncommitted(
           w.path,
-          `refs/platform/replan/run-${runId}/${id}`,
+          `refs/platform/replan/run-${runId}/${id}${w.subtask_id ? `--${w.subtask_id}` : ""}`,
           `platform: uncommitted work before ${route} (run ${runId})`,
         );
         if (snap) snapshots.push({ repo: w.repo, ...snap });
@@ -1462,11 +1462,27 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
         );
       return null;
     }
-    // Run lock makes this a durable reader/writer gate over the existing shared run worktrees.
-    // For opt-in independent coding subtasks (T4), admit concurrent writers when workspaces/files
-    // do not conflict and concurrency limits are respected.
+    // Run lock makes this a durable reader/writer gate. Concurrent coding is admitted only when
+    // each step will get its own worktree (isolated_workspace and a distinct subtask id). A separate
+    // checkout still does not name the files a step may edit, so an empty file list stays queued.
     const consumers = ["agent", "coding_agent", "command", "git_pull_request"];
     const writers = ["coding_agent", "command", "git_pull_request"];
+    const isolatedCoding = (
+      type: string,
+      config: Record<string, any> | null | undefined,
+      subtaskId: string | null | undefined,
+    ) =>
+      type === "coding_agent" &&
+      config?.isolated_workspace === true &&
+      typeof subtaskId === "string" &&
+      /^[a-z0-9][a-z0-9_-]*$/.test(subtaskId);
+    const filesOf = (config: Record<string, any> | null | undefined): string[] =>
+      config?.scope?.owned_files ?? config?.subtask?.owned_files ?? config?.owned_files ?? [];
+    const reposOf = (config: Record<string, any> | null | undefined): string[] =>
+      config?.scope?.repositories ??
+      config?.subtask?.target_repos ??
+      config?.target_repos ??
+      [];
     if (consumers.includes(step.type)) {
       const active = await q<{
         id: number;
@@ -1484,13 +1500,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       );
 
       if (active.length > 0) {
-        const isConcurrentCandidate =
-          step.type === "coding_agent" &&
-          (step.config?.isolated_workspace === true ||
-            step.config?.concurrent === true ||
-            step.config?.independent === true ||
-            step.config?.subtask?.execution_strategy === "parallel" ||
-            !!step.subtask_id);
+        const isConcurrentCandidate = isolatedCoding(step.type, step.config, step.subtask_id);
 
         let conflict = false;
         if (!isConcurrentCandidate) {
@@ -1505,58 +1515,28 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
           if (active.length >= maxConcurrent) {
             conflict = true;
           } else {
+            const stepFiles = filesOf(step.config);
+            const stepRepos = reposOf(step.config);
             for (const a of active) {
-              const aIsConcurrent =
-                a.step_type === "coding_agent" &&
-                (a.config?.isolated_workspace === true ||
-                  a.config?.concurrent === true ||
-                  a.config?.independent === true ||
-                  a.config?.subtask?.execution_strategy === "parallel" ||
-                  !!a.subtask_id);
-              if (!aIsConcurrent) {
+              if (!isolatedCoding(a.step_type, a.config, a.subtask_id) || a.subtask_id === step.subtask_id) {
                 conflict = true;
                 break;
               }
-              const stepFiles: string[] =
-                step.config?.scope?.owned_files ??
-                step.config?.subtask?.owned_files ??
-                step.config?.owned_files ??
-                [];
-              const activeFiles: string[] =
-                a.config?.scope?.owned_files ??
-                a.config?.subtask?.owned_files ??
-                a.config?.owned_files ??
-                [];
-              if (stepFiles.length > 0 && activeFiles.length > 0) {
-                if (stepFiles.some((f) => activeFiles.includes(f))) {
-                  conflict = true;
-                  break;
-                }
+              const activeFiles = filesOf(a.config);
+              if (
+                stepFiles.length > 0 &&
+                activeFiles.length > 0 &&
+                stepFiles.some((f) => activeFiles.includes(f))
+              ) {
+                conflict = true;
+                break;
               }
-              const stepRepos: string[] =
-                step.config?.scope?.repositories ??
-                step.config?.subtask?.target_repos ??
-                step.config?.target_repos ??
-                [];
-              const activeRepos: string[] =
-                a.config?.scope?.repositories ??
-                a.config?.subtask?.target_repos ??
-                a.config?.target_repos ??
-                [];
+              const activeRepos = reposOf(a.config);
               const disjointRepos =
                 stepRepos.length > 0 &&
                 activeRepos.length > 0 &&
                 !stepRepos.some((r) => activeRepos.includes(r));
-              const isolated =
-                step.config?.isolated_workspace === true ||
-                a.config?.isolated_workspace === true ||
-                (!!step.subtask_id && !!a.subtask_id);
-
-              if (
-                !disjointRepos &&
-                !isolated &&
-                (stepFiles.length === 0 || activeFiles.length === 0)
-              ) {
+              if (!disjointRepos && (stepFiles.length === 0 || activeFiles.length === 0)) {
                 conflict = true;
                 break;
               }

@@ -390,16 +390,36 @@ async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
   return "Result recorded. End your turn now.";
 }
 
+async function isolationFor(stepId: number): Promise<{ isolated: boolean; subtaskId: string | null }> {
+  const step = await one<{ subtask_id: string | null; config: { isolated_workspace?: boolean } }>(
+    pool,
+    "SELECT subtask_id, config FROM workflow_steps WHERE id = $1",
+    [stepId],
+  );
+  const isolated = step?.config?.isolated_workspace === true;
+  const subtaskId =
+    isolated && typeof step?.subtask_id === "string" && step.subtask_id ? step.subtask_id : null;
+  return { isolated, subtaskId };
+}
+
 async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
   const editable = env.selected.length ? env.selected : env.allowed;
   if (!editable.includes(repo))
     return `Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`;
+  const isolation = await isolationFor(env.stepId);
+  if (isolation.isolated && !isolation.subtaskId)
+    return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [env.runId]);
-  const w = await prepareWorkspace(run, repo, async () => {
-    const live = await attemptIsLive(env.attemptId, env.fencingToken);
-    if (!live.ok) throw new Error(live.reason);
-  });
+  const w = await prepareWorkspace(
+    run,
+    repo,
+    async () => {
+      const live = await attemptIsLive(env.attemptId, env.fencingToken);
+      if (!live.ok) throw new Error(live.reason);
+    },
+    { subtaskId: isolation.subtaskId },
+  );
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;
@@ -416,7 +436,19 @@ async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
   const message = String(args?.message ?? "").trim();
   if (!message) return "ERROR: commit_changes needs a commit message";
-  const w = (await workspacesOf(env.runId)).find((x) => x.repo === repo);
+  const isolation = await isolationFor(env.stepId);
+  if (isolation.isolated && !isolation.subtaskId)
+    return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
+  const w = isolation.subtaskId
+    ? (
+        await q<{ repo: string; branch: string; path: string }>(
+          pool,
+          `SELECT repo, branch, path FROM execution_workspaces
+           WHERE run_id = $1 AND repo = $2 AND subtask_id = $3`,
+          [env.runId, repo, isolation.subtaskId],
+        )
+      )[0]
+    : (await workspacesOf(env.runId)).find((x) => x.repo === repo);
   if (!w) return `ERROR: no worktree for "${repo}" in this run. Call prepare_branch first.`;
   const registered = await repositories.get(repo);
   if (registered && (!registered.enabled || !registered.allowed_actions.includes("write")))

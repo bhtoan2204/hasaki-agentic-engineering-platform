@@ -160,7 +160,7 @@ export async function extractRunMemory(runId: number) {
     })),
   ]);
   const written: string[] = [];
-  for (const w of await q(pool, "SELECT repo, path FROM execution_workspaces WHERE run_id = $1", [
+  for (const w of await q(pool, "SELECT repo, path FROM execution_workspaces WHERE run_id = $1 AND subtask_id IS NULL", [
     runId,
   ])) {
     if (!existsSync(w.path)) continue;
