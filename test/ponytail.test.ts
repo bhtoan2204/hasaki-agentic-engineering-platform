@@ -653,7 +653,7 @@ test("DEPRECATE rollback restores a duplicate supersession applied before it was
   assert.equal(restored.superseded_by, null);
 });
 
-test("DEPRECATE rollback keeps a supersession a newer proposal set identically", async () => {
+test("rollback is refused while a proposal approved at the same instant changed the same item", async () => {
   for (const key of ["r9-a", "r9-b"])
     await knowledge.create({
       key,
@@ -680,9 +680,11 @@ test("DEPRECATE rollback keeps a supersession a newer proposal set identically",
      FROM knowledge_proposals WHERE id=$1 RETURNING id`,
     [deprecated.proposalId, supersededBy],
   );
-  const rolledBack = await rollbackProposal(deprecated.proposalId!, { by: "admin" });
+  await assert.rejects(rollbackProposal(deprecated.proposalId!, { by: "admin" }), {
+    status: 409,
+    message: new RegExp(`#${twin.rows[0].id} changed the same knowledge later`),
+  });
   assert.equal(Number((await knowledge.get(deprecated.key)).superseded_by), Number(supersededBy));
-  assert.match(rolledBack.supersession_kept, new RegExp(`#${twin.rows[0].id}`));
 });
 
 test("third-party skills cannot be reverted away from their pinned manifest", async () => {

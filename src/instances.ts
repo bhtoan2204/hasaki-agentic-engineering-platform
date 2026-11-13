@@ -95,6 +95,7 @@ export async function registerInstance(id = config.instanceId, session = instanc
         );
     }
     const me = { host: hostname(), pid: process.pid };
+    const registration = { ...me, started: processStartTime(process.pid) };
     let row = await one(
       c,
       `INSERT INTO platform_instances (instance_id, session_id, metadata) VALUES ($1, $2, $4)
@@ -102,7 +103,7 @@ export async function registerInstance(id = config.instanceId, session = instanc
         metadata = coalesce(platform_instances.metadata, '{}'::jsonb) || excluded.metadata
       WHERE platform_instances.stopped_at IS NOT NULL OR platform_instances.last_seen_at < now() - make_interval(secs => $3)
       RETURNING instance_id`,
-      [id, session, config.instance.offlineSeconds, JSON.stringify(me)],
+      [id, session, config.instance.offlineSeconds, JSON.stringify(registration)],
     );
     if (!row) {
       // The live-looking registration may belong to a process of THIS machine that already exited without marking
@@ -118,7 +119,7 @@ export async function registerInstance(id = config.instanceId, session = instanc
           `UPDATE platform_instances SET session_id = $2, started_at = now(), last_seen_at = now(), stopped_at = NULL,
              metadata = coalesce(metadata, '{}'::jsonb) || $3::jsonb
            WHERE instance_id = $1 RETURNING instance_id`,
-          [id, session, JSON.stringify(me)],
+          [id, session, JSON.stringify(registration)],
         );
     }
     if (!row) {
