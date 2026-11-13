@@ -871,6 +871,7 @@ test("only pilot live arms resolve Ponytail skills, including arms frozen before
     assert.deepEqual(await resolved(false), []);
     assert.ok((await resolved(true)).length);
     assert.deepEqual(await resolved(false, true), []);
+    assert.ok((await resolved(true, true)).length);
   } finally {
     config.knowledge.ponytail.enabled = previous;
   }
