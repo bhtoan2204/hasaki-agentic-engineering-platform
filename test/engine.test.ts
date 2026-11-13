@@ -480,7 +480,7 @@ test("cost read model: totals, by step / model, failed retries counted as wasted
     { key: "analyze", type: "agent" },
     {
       key: "implement",
-      type: "agent",
+      type: "coding_agent",
       depends_on: ["analyze"],
       max_attempts: 2,
       retry_backoff_seconds: 0,
@@ -513,7 +513,8 @@ test("cost read model: totals, by step / model, failed retries counted as wasted
   await drain();
   const c = await runCost(run.id);
   assert.equal(c.total.cost_usd, 1.25);
-  assert.equal(c.availability, "complete");
+  assert.ok(c.by_step.some((s) => s.step_key === "cleanup"), "injected cleanup attempt counted");
+  assert.equal(c.availability, "complete", "a step that used no agent is not missing a cost");
   assert.deepEqual(c.total.tokens.input, 200);
   assert.equal(c.wasted.cost_usd, 0.5);
   assert.deepEqual(c.wasted.by_reason, { failed: 0.5 });
