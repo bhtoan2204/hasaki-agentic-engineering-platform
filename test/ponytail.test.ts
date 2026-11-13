@@ -575,6 +575,34 @@ test("live phase keeps the case workspace when it fails retryably", async () => 
   }
 });
 
+test("DEPRECATE rollback restores a duplicate supersession applied before it was recorded", async () => {
+  for (const key of ["r6-a", "r6-b"])
+    await knowledge.create({
+      key,
+      title: key,
+      category: "agent_skill",
+      scope_type: "GLOBAL",
+      content: "r6 twin body",
+      applicability: { step_keys: ["implement"] },
+    });
+  const items = (await knowledge.list()).filter((i) => i.key.startsWith("r6-")) as AuditItem[];
+  const result = await remediateKnowledgeAudit(
+    { items, steps: [{ key: "implement", type: "coding_agent" }], usage: {} },
+    { autoApply: true, operator: "tester" },
+  );
+  const deprecated = result.proposals.find((p) => p.status === "approved")!;
+  const target = await knowledge.get(deprecated.key);
+  assert.ok(target.superseded_by);
+  await pool.query(
+    "UPDATE knowledge_proposals SET applied = applied - 'superseded_to' WHERE id=$1",
+    [deprecated.proposalId],
+  );
+  await rollbackProposal(deprecated.proposalId!, { by: "admin" });
+  const restored = await knowledge.get(deprecated.key);
+  assert.equal(restored.enabled, true);
+  assert.equal(restored.superseded_by, null);
+});
+
 test("third-party skills cannot be reverted away from their pinned manifest", async () => {
   await assert.rejects(knowledge.revert("skill.ext.ponytail", 1, null, "admin"), /re-import/);
 });

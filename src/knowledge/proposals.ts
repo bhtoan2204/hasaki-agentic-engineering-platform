@@ -865,7 +865,16 @@ async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }
           a.previous_expires_at ?? null,
         ]);
         // Only undo a supersession this proposal set and nobody changed since.
-        if (a.superseded_to != null && Number(it.superseded_by) === Number(a.superseded_to))
+        const supersededTo =
+          a.superseded_to ??
+          (p.proposed?.superseded_by
+            ? (
+                await one(c, "SELECT id FROM knowledge_items WHERE key=$1 AND owner_id IS NULL", [
+                  p.proposed.superseded_by,
+                ])
+              )?.id
+            : null);
+        if (supersededTo != null && Number(it.superseded_by) === Number(supersededTo))
           await q(c, "UPDATE knowledge_items SET superseded_by=$2, superseded_at=$3 WHERE id=$1", [
             it.id,
             a.previous_superseded_by ?? null,
