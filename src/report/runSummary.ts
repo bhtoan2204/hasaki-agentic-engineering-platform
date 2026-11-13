@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { pool, q, one, json } from "../db/pool.ts";
-import { repositories } from "../repos/service.ts";
-import { workspaceRef, workspacesOf } from "../git/provider.ts";
+import { repoPath, repositories } from "../repos/service.ts";
 
 /**
  * "What did this run do?" — a detailed, factual summary of a finished run, shown on the work item page.
@@ -213,10 +213,15 @@ async function git(cwd: string, ...args: string[]) {
 
 /** Commits and files on the run's branch vs the base, read from the main checkout (works after worktree removal). */
 async function changesOf(runId: number): Promise<RepoChange[]> {
+  const ws = await q<{ repo: string; branch: string; path: string }>(
+    pool,
+    "SELECT repo, branch, path FROM execution_workspaces WHERE run_id = $1 AND subtask_id IS NULL ORDER BY repo",
+    [runId],
+  );
   const out: RepoChange[] = [];
-  for (const w of await workspacesOf(runId)) {
+  for (const w of ws) {
     const reg = await repositories.get(w.repo);
-    const at = await workspaceRef(runId, w);
+    const dir = [w.path, reg ? repoPath(reg) : ""].find((d) => d && existsSync(d));
     const base = `origin/${reg?.default_branch || config.baseBranch}`;
     const change: RepoChange = {
       repo: w.repo,
@@ -227,14 +232,14 @@ async function changesOf(runId: number): Promise<RepoChange[]> {
       additions: 0,
       deletions: 0,
     };
-    if (!at) {
+    if (!dir) {
       out.push({ ...change, note: "repository not available on this machine" });
       continue;
     }
     try {
       const [log, numstat] = await Promise.all([
-        git(at.cwd, "log", "--format=%h%x09%s", `${base}..${at.head}`),
-        git(at.cwd, "diff", "--numstat", `${base}...${at.head}`),
+        git(dir, "log", "--format=%h%x09%s", `${base}..${w.branch}`),
+        git(dir, "diff", "--numstat", `${base}...${w.branch}`),
       ]);
       change.commits = log.trim()
         ? log

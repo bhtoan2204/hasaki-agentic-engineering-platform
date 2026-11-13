@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
-import { repoPath, repositories, repositoryBaseBranch } from "../repos/service.ts";
+import { repositories, repositoryBaseBranch } from "../repos/service.ts";
 import { requireRunRepositoryAccess } from "../repos/access.ts";
 import { execution } from "../auth/execution.ts";
 import { instanceDirectory } from "../repos/paths.ts";
@@ -20,10 +20,8 @@ import {
   pushBranch,
   registeredWorktreeAt,
   releasableWorktree,
-  removeWorktree,
   taskDir,
   unregisterMissingWorktree,
-  worktreeHead,
 } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { unsafeRelativePath, validateCheckout } from "../repos/paths.ts";
@@ -454,15 +452,9 @@ async function prepareLockedWorkspace(
       if (!approved) throw new WorkspaceConflictError([conflict]);
       // Reuse the clean holder (keeps installed dependencies); a vanished one is only unregistered.
       if (conflict.holder_path && existsSync(conflict.holder_path)) {
-        const head = await worktreeHead(conflict.holder_path);
         const kept = await moveWorktree(conflict.holder_path, path);
         if (kept)
           throw new WorkspaceConflictError([{ ...conflict, release: "never", reason: kept }]);
-        await q(
-          pool,
-          "UPDATE execution_workspaces SET removed_head = $3 WHERE run_id = $1 AND path = $2 AND removed_head IS NULL",
-          [conflict.holder_run_id, conflict.holder_path, head],
-        );
       } else await unregisterMissingWorktree(checkout, conflict.holder_path);
       await opts.log?.(
         `${repo}: reconciled worktree ${conflict.holder_path} holding ${conflict.branch} (${conflict.reason}${conflict.release === "approval" ? ", release approved by the developer" : ""}) -> ${path}`,
@@ -498,7 +490,7 @@ export async function recordWorkspace(
       `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from, subtask_id)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (run_id, repo, subtask_id) WHERE subtask_id IS NOT NULL
-       DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from, removed_head = NULL`,
+       DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
       [runId, w.repo, w.branch, w.path, w.created_from, subtaskId],
     );
     return;
@@ -508,48 +500,9 @@ export async function recordWorkspace(
     `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (run_id, repo) WHERE subtask_id IS NULL
-     DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from, removed_head = NULL`,
+     DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
     [runId, w.repo, w.branch, w.path, w.created_from],
   );
-}
-
-export async function removeWorkspace(
-  runId: number,
-  w: Workspace & { subtask_id: string | null },
-): Promise<string | null> {
-  const owner = await otherOwner(runId, w.path);
-  if (owner) return `owned by run #${owner}`;
-  const head = await worktreeHead(w.path);
-  const kept = await removeWorktree(w.path);
-  if (!kept)
-    await q(
-      pool,
-      `UPDATE execution_workspaces SET removed_head = $4
-        WHERE run_id = $1 AND repo = $2 AND subtask_id IS NOT DISTINCT FROM $3`,
-      [runId, w.repo, w.subtask_id, head],
-    );
-  return kept;
-}
-
-async function otherOwner(runId: number, path: string): Promise<number | null> {
-  const last = await one<{ run_id: number }>(
-    pool,
-    "SELECT run_id FROM execution_workspaces WHERE path = $1 ORDER BY id DESC LIMIT 1",
-    [path],
-  );
-  return last && Number(last.run_id) !== runId ? Number(last.run_id) : null;
-}
-
-// A recorded head wins over the path: a later run on the shared branch may have recreated the worktree there.
-export async function workspaceRef(runId: number, w: Workspace & { removed_head: string | null }) {
-  const reg = await repositories.get(w.repo);
-  const primary = reg ? repoPath(reg) : null;
-  if (w.removed_head)
-    return primary && existsSync(primary) ? { cwd: primary, head: w.removed_head } : null;
-  if (existsSync(w.path) && !(await otherOwner(runId, w.path)))
-    return { cwd: w.path, head: "HEAD" };
-  const cwd = [w.path, primary].find((d) => d && existsSync(d));
-  return cwd ? { cwd, head: `refs/heads/${w.branch}`, branchTip: true } : null;
 }
 
 /** The attempt lost its lease while restoring: propagate, never report it as a restore failure. */
@@ -599,9 +552,9 @@ export async function restoreMissingWorkspaces(
 
 /** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */
 export function workspacesOf(runId: number, db: Db = pool) {
-  return q<Workspace & { removed_head: string | null }>(
+  return q<Workspace>(
     db,
-    `SELECT repo, branch, path, created_from, removed_head FROM execution_workspaces
+    `SELECT repo, branch, path, created_from FROM execution_workspaces
      WHERE run_id = $1 AND subtask_id IS NULL ORDER BY repo`,
     [runId],
   );

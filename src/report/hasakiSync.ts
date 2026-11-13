@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { pool, q } from "../db/pool.ts";
 import { workApi } from "../hasakiAuth.ts";
-import { repositoryBaseBranch } from "../repos/service.ts";
-import { workspaceRef, workspacesOf } from "../git/provider.ts";
+import { repoPath, repositories, repositoryBaseBranch } from "../repos/service.ts";
+import { workspacesOf } from "../git/provider.ts";
 
 /**
  * After a reviewer APPROVES the Task Result Report, write the outcome back to the Hasaki Work task with the three
@@ -51,13 +52,16 @@ export function functionCodes(messages: string[]): string[] {
 async function commitMessages(runId: number): Promise<string[]> {
   const out: string[] = [];
   for (const w of await workspacesOf(runId)) {
-    const at = await workspaceRef(runId, w);
-    if (!at) continue;
+    // The cleanup step removes the worktree: read the run branch from the repository checkout instead.
+    const reg = await repositories.get(w.repo);
+    const dir = [w.path, reg ? repoPath(reg) : ""].find((d) => d && existsSync(d));
+    if (!dir) continue;
+    const ref = dir === w.path ? "HEAD" : `refs/heads/${w.branch}`;
     try {
       const base = `origin/${await repositoryBaseBranch(w.repo)}`;
       const { stdout } = await exec(
         "git",
-        ["-C", at.cwd, "log", "--format=%B%x1e", `${base}..${at.head}`],
+        ["-C", dir, "log", "--format=%B%x1e", `${base}..${ref}`],
         {
           maxBuffer: 16 * 1024 * 1024,
         },

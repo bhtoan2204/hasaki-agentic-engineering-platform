@@ -308,10 +308,6 @@ async function worktreeState(path: string): Promise<{ common: string; inProgress
   return { common, inProgress: i < 0 ? null : `${IN_PROGRESS_MARKERS[i][1]} in progress` };
 }
 
-export async function worktreeHead(path: string): Promise<string> {
-  return git(path, "rev-parse", "HEAD");
-}
-
 export async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
   const inside = relative(realpathSync(config.dataDir), realpathSync(path));
   if (unsafeRelativePath(inside) || overlapsLiveApplication(path))

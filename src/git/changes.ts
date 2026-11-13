@@ -1,5 +1,6 @@
 import { effectivePermissions } from "../repos/access.ts";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { repositoryBaseBranch } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
@@ -9,7 +10,7 @@ import {
   testExceptionsOf,
   verificationNotesOf,
 } from "../workflow/executors/builtin.ts";
-import { workspaceRef, workspacesOf } from "./provider.ts";
+import { workspacesOf } from "./provider.ts";
 
 const exec = promisify(execFile);
 const MAX_DIFF = 600_000;
@@ -68,23 +69,17 @@ export async function runChanges(runId: number, viewerId?: number) {
     }
     const destination = await repositoryBaseBranch(w.repo);
     const base = `origin/${destination}`;
-    const ref = await workspaceRef(runId, w);
-    const at = ref && !ref.branchTip ? ref : null;
-    const live = at?.head === "HEAD";
-    const changes = at
-      ? await Promise.all([
-          git(at.cwd, "log", "--format=%h%x09%an%x09%ar%x09%s", `${base}..${at.head}`),
-          git(at.cwd, "diff", "--numstat", `${base}...${at.head}`),
-          git(at.cwd, "diff", "--no-color", `${base}...${at.head}`),
-          live ? git(at.cwd, "status", "--porcelain") : "",
-          live ? git(at.cwd, "diff", "--no-color", "HEAD") : "",
-        ])
-      : null;
-    if (!changes || (!live && changes.some((out) => out.startsWith("(git")))) {
+    if (!existsSync(w.path)) {
       repos.push({ ...w, exists: false });
       continue;
     }
-    const [commits, files, diff, status, uncommitted] = changes;
+    const [commits, files, diff, status, uncommitted] = await Promise.all([
+      git(w.path, "log", "--format=%h%x09%an%x09%ar%x09%s", `${base}..HEAD`),
+      git(w.path, "diff", "--numstat", `${base}...HEAD`),
+      git(w.path, "diff", "--no-color", `${base}...HEAD`),
+      git(w.path, "status", "--porcelain"),
+      git(w.path, "diff", "--no-color", "HEAD"),
+    ]);
     const commitList = commits.trim()
       ? commits
           .trim()
