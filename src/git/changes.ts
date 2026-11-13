@@ -2,7 +2,8 @@ import { effectivePermissions } from "../repos/access.ts";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
-import { repositoryBaseBranch } from "../repos/service.ts";
+import { repositories, repositoryBaseBranch } from "../repos/service.ts";
+import { validateCheckout } from "../repos/paths.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   prDescription,
@@ -27,6 +28,21 @@ const capped = (s: string) =>
   s.length > MAX_DIFF
     ? s.slice(0, MAX_DIFF) + `\n… diff truncated (${s.length - MAX_DIFF} more chars)`
     : s;
+
+/** The primary checkout of `repo`, when `branch` still exists there. */
+async function branchCheckout(repo: string, branch: string) {
+  const reg = await repositories.get(repo);
+  const primary = reg ? await validateCheckout(reg).catch(() => null) : null;
+  if (!primary) return null;
+  const head = await git(
+    primary,
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/heads/${branch}^{commit}`,
+  );
+  return head.startsWith("(git") ? null : primary;
+}
 
 /**
  * Read-only view of what a run changed, per workspace: commits ahead of the base branch, changed files, the diff,
@@ -69,17 +85,25 @@ export async function runChanges(runId: number, viewerId?: number) {
     }
     const destination = await repositoryBaseBranch(w.repo);
     const base = `origin/${destination}`;
+    const read = (cwd: string, head: string) =>
+      Promise.all([
+        git(cwd, "log", "--format=%h%x09%an%x09%ar%x09%s", `${base}..${head}`),
+        git(cwd, "diff", "--numstat", `${base}...${head}`),
+        git(cwd, "diff", "--no-color", `${base}...${head}`),
+        head === "HEAD" ? git(cwd, "status", "--porcelain") : "",
+        head === "HEAD" ? git(cwd, "diff", "--no-color", "HEAD") : "",
+      ]);
+    let changes = existsSync(w.path) ? await read(w.path, "HEAD") : null;
+    // The cleanup step may remove the worktree (only when clean) at any time: its commits stay on the branch.
     if (!existsSync(w.path)) {
+      const primary = await branchCheckout(w.repo, w.branch);
+      changes = primary ? await read(primary, `refs/heads/${w.branch}`) : null;
+    }
+    if (!changes) {
       repos.push({ ...w, exists: false });
       continue;
     }
-    const [commits, files, diff, status, uncommitted] = await Promise.all([
-      git(w.path, "log", "--format=%h%x09%an%x09%ar%x09%s", `${base}..HEAD`),
-      git(w.path, "diff", "--numstat", `${base}...HEAD`),
-      git(w.path, "diff", "--no-color", `${base}...HEAD`),
-      git(w.path, "status", "--porcelain"),
-      git(w.path, "diff", "--no-color", "HEAD"),
-    ]);
+    const [commits, files, diff, status, uncommitted] = changes;
     const commitList = commits.trim()
       ? commits
           .trim()

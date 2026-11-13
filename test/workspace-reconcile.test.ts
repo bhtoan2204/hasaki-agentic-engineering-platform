@@ -19,6 +19,7 @@ import {
 import { repositories } from "../src/repos/service.ts";
 import { restoreConflictSkips } from "../src/agent/verify.ts";
 import { removeWorktree } from "../src/git.ts";
+import { runChanges } from "../src/git/changes.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
 
 before(async () => {
@@ -443,6 +444,28 @@ test("worktree cleanup keeps dirty worktrees and ones with a git operation in pr
 
     assert.equal(await removeWorktree(s.holder), null);
     assert.equal(existsSync(s.holder), false);
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("a run's committed changes stay readable after cleanup removed its worktree", async () => {
+  const s = await scenario("COMPLETED");
+  try {
+    assert.equal(await removeWorktree(s.holder), null);
+    assert.equal(existsSync(s.holder), false);
+    const [repo] = (await runChanges(s.old.id)).repos;
+    assert.ok("commits" in repo && repo.exists, "changes read from the branch");
+    assert.deepEqual(
+      repo.commits.map((c) => c.subject),
+      ["earlier run work"],
+    );
+    assert.deepEqual(
+      repo.files.map((f) => f.path),
+      ["work.txt"],
+    );
+    assert.match(repo.diff, /\+earlier run/);
+    assert.equal(repo.status, "", "a removed worktree had nothing uncommitted");
   } finally {
     await s.cleanup();
   }

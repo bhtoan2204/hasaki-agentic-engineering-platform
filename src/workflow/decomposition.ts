@@ -4,6 +4,7 @@ import { q, one, json, type Db } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
 import { EngineError, lockRun, stepsOf } from "./mutations.ts";
 import { topoOrder } from "./graph.ts";
+import { isCleanupStep } from "./templates.ts";
 
 export const SubtaskSpec = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "subtask id must be lowercase [a-z0-9_-]"),
@@ -74,7 +75,14 @@ export interface ExpansionContext {
   /** Subtasks already materialized (counted against max_subtasks). */
   existingSubtasks?: number;
   /** Live steps with their dependencies; used to reject cycles introduced by the downstream rewire. */
-  existingSteps?: { key: string; depends_on: string[]; subtask_id?: string | null; status?: string }[];
+  existingSteps?: {
+    key: string;
+    depends_on: string[];
+    subtask_id?: string | null;
+    status?: string;
+    type?: string;
+    config?: Record<string, unknown> | null;
+  }[];
   /** Step the plan expands; steps waiting on it are rewired to wait for the leaf subtasks. */
   planStepKey?: string;
   /** When true, each parallel subtask gets its own worktree and branch. Otherwise the expansion is serialized onto the run worktree. */
@@ -82,6 +90,15 @@ export interface ExpansionContext {
 }
 
 const stepKey = (id: string) => `subtask-${id}`;
+
+/** Pending steps that must also wait for new subtasks: the plan's dependents and workspace cleanup. */
+const waitsForSubtasks = (
+  st: NonNullable<ExpansionContext["existingSteps"]>[number],
+  planStepKey: string | undefined,
+) =>
+  st.status === "PENDING" &&
+  !st.subtask_id &&
+  ((!!planStepKey && st.depends_on.includes(planStepKey)) || isCleanupStep(st));
 
 /** Validate a plan against the live graph. Returns the effective (possibly serialized) subtasks. */
 export function validateExpansion(
@@ -136,10 +153,9 @@ export function validateExpansion(
       const leaves = subtasks.filter((s) => !referenced.has(s.id)).map((s) => stepKey(s.id));
       const live = (ctx.existingSteps ?? []).map((st) => ({
         key: st.key,
-        depends_on:
-          ctx.planStepKey && st.depends_on.includes(ctx.planStepKey) && st.status === "PENDING" && !st.subtask_id
-            ? [...new Set([...st.depends_on, ...leaves])]
-            : st.depends_on,
+        depends_on: waitsForSubtasks(st, ctx.planStepKey)
+          ? [...new Set([...st.depends_on, ...leaves])]
+          : st.depends_on,
       }));
       topoOrder([
         ...live,
@@ -296,7 +312,7 @@ export async function materializeSubtasks(
   const referenced = new Set(subtasks.flatMap((s) => s.depends_on));
   const leaves = subtasks.filter((s) => !referenced.has(s.id)).map((s) => stepKey(s.id));
   for (const st of steps) {
-    if (st.depends_on.includes(planStepKey) && st.status === "PENDING" && !st.subtask_id)
+    if (waitsForSubtasks(st, planStepKey))
       await q(c, "UPDATE workflow_steps SET depends_on = $2, updated_at = now() WHERE id = $1", [
         st.id,
         [...new Set([...st.depends_on, ...leaves])],

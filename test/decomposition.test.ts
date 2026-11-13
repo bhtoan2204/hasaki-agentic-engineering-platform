@@ -124,6 +124,26 @@ test("materialize rewires downstream steps and replays idempotently", async () =
   assert.equal(f.inserted.length, 2);
 });
 
+test("materialize makes workspace cleanup wait for the new subtasks too", async () => {
+  const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
+  const steps = baseSteps({ p });
+  const cleanup = {
+    id: 3,
+    key: "cleanup",
+    type: "integration",
+    config: { action: "cleanup_workspaces" },
+    position: 3,
+    depends_on: [steps[2].key],
+    status: "PENDING",
+    subtask_id: null,
+  };
+  await materializeSubtasks(fakeDb([...steps, cleanup]).db, 1, "plan", p, opts);
+  assert.deepEqual(cleanup.depends_on, [steps[2].key, "subtask-b"]);
+  const loop = plan(sub("x", { depends_on: ["cleanup"] }));
+  const f = fakeDb([...baseSteps({ p: loop }), { ...cleanup, depends_on: [] }]);
+  await assert.rejects(materializeSubtasks(f.db, 1, "plan", loop, opts), /cycle/);
+});
+
 test("materialize rejects a cycle through an existing downstream step", async () => {
   const p = plan(sub("x", { depends_on: ["integration"] }));
   const f = fakeDb(baseSteps({ p }));

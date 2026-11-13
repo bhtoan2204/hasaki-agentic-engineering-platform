@@ -513,7 +513,10 @@ test("cost read model: totals, by step / model, failed retries counted as wasted
   await drain();
   const c = await runCost(run.id);
   assert.equal(c.total.cost_usd, 1.25);
-  assert.ok(c.by_step.some((s) => s.step_key === "cleanup"), "injected cleanup attempt counted");
+  assert.ok(
+    c.by_step.some((s) => s.step_key === "cleanup"),
+    "injected cleanup attempt counted",
+  );
   assert.equal(c.availability, "complete", "a step that used no agent is not missing a cost");
   assert.deepEqual(c.total.tokens.input, 200);
   assert.equal(c.wasted.cost_usd, 0.5);
@@ -1424,7 +1427,11 @@ test("report step: appended to the run graph only, last, depending on every term
   assert.equal(st.type, "task_result_report");
   assert.deepEqual([...st.depends_on].sort(), ["review", "test"], "all terminal steps");
   const clean = run.steps.find((s) => s.key === "cleanup")!;
-  assert.deepEqual(clean.depends_on, [REPORT_STEP_KEY], "workspace cleanup runs after the report");
+  assert.deepEqual(
+    [...clean.depends_on].sort(),
+    ["review", "test"],
+    "workspace cleanup does not wait for the report",
+  );
   assert.equal(st.position, Math.max(...run.steps.map((s) => s.position)) - 1, "last work node");
   assert.deepEqual(
     run.graph.steps.slice(-2).map((s) => s.key),
@@ -1468,7 +1475,7 @@ test("report step: never inserted twice (idempotent; custom workflow that alread
   await cancelRun(run.id);
 });
 
-test("cleanup step: appended after the report to coding graphs that lack one; idempotent; definition untouched", async () => {
+test("cleanup step: appended beside the report to coding graphs that lack one; idempotent; definition untouched", async () => {
   const { parseAiSuggest } = await import("../src/report/aiSuggest.ts");
   const ai = parseAiSuggest({ task_ai: { ai_suggest: AI } });
   const spec = WorkflowSpec.parse({
@@ -1483,7 +1490,7 @@ test("cleanup step: appended after the report to coding graphs that lack one; id
   assert.equal(last.key, "cleanup");
   assert.equal(last.type, "integration");
   assert.deepEqual(last.config, { action: "cleanup_workspaces", injected: true });
-  assert.deepEqual(last.depends_on, [REPORT_STEP_KEY], "runs after the report");
+  assert.deepEqual(last.depends_on, ["review"], "does not wait for the report");
   assert.equal(withCleanupStep(once), once, "idempotent");
   assert.deepEqual(withCleanupStep(spec).steps.at(-1)!.depends_on, ["review"]);
 
@@ -1525,14 +1532,72 @@ test("cleanup step: not injected without worktree-creating steps or when the gra
         depends_on: ["plan"],
         config: { action: "integrate_subtasks" },
       },
+      { key: "cleanup_2", type: "agent", depends_on: ["cleanup"] },
     ]),
   );
   assert.deepEqual(
     integrate.steps.map((s) => s.key),
-    ["plan", "cleanup", "workspace_cleanup"],
-    "subtask integration prepares worktrees; a taken key is not reused",
+    ["plan", "cleanup", "cleanup_2", "cleanup_3"],
+    "subtask integration prepares worktrees; taken keys are not reused",
   );
-  assert.deepEqual(integrate.steps.at(-1)!.depends_on, ["cleanup"]);
+  assert.deepEqual(integrate.steps.at(-1)!.depends_on, ["cleanup_2"]);
+  const lookalike = withCleanupStep(
+    graph([
+      { key: "implement", type: "coding_agent" },
+      {
+        key: "tidy",
+        type: "agent",
+        depends_on: ["implement"],
+        config: { action: "cleanup_workspaces" },
+      },
+    ]),
+  );
+  assert.deepEqual(
+    lookalike.steps.at(-1)!.config,
+    { action: "cleanup_workspaces", injected: true },
+    "only an integration step cleans up",
+  );
+  const planned = withCleanupStep(
+    graph([
+      { key: "plan", type: "agent" },
+      { key: "approve_plan", type: "human_approval", depends_on: ["plan"] },
+    ]),
+  );
+  assert.deepEqual(
+    planned.steps.at(-1)!.depends_on,
+    ["approve_plan"],
+    "an approved plan can be expanded into coding subtasks later",
+  );
+});
+
+test("cleanup step: still runs when the report is never approved or fails", async () => {
+  const key = await branchy();
+  scripts.implement = codingDone;
+  const waiting = await startRun({
+    definitionKey: key,
+    workItemId: (await reportItem()).id,
+    repositories: ["oms-api"],
+  });
+  await drain();
+  assert.equal((await stepOf(waiting.id, REPORT_STEP_KEY)).status, "WAITING_APPROVAL");
+  assert.equal((await stepOf(waiting.id, "cleanup")).status, "COMPLETED");
+  await cancelRun(waiting.id);
+
+  registerExecutor("task_result_report", {
+    execute: async () => ({ kind: "failed", error: "report broke", retryable: false }),
+  });
+  try {
+    const failed = await startRun({
+      definitionKey: key,
+      workItemId: (await reportItem()).id,
+      repositories: ["oms-api"],
+    });
+    await drain();
+    assert.equal((await stepOf(failed.id, REPORT_STEP_KEY)).status, "FAILED");
+    assert.equal((await stepOf(failed.id, "cleanup")).status, "COMPLETED");
+  } finally {
+    registerExecutor("task_result_report", taskResultReportExecutor);
+  }
 });
 
 test("report flow: draft waits for review (run not COMPLETED), evidence upload + regenerate, approve with limitations", async () => {
@@ -1794,7 +1859,11 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
   });
   assert.equal(fast.profile, "FAST");
   const r = fast.steps.find((s) => s.key === REPORT_STEP_KEY)!;
-  assert.deepEqual(r.depends_on, ["cleanup"], "report depends on the FAST graph's terminal step");
+  assert.deepEqual(
+    r.depends_on,
+    fast.steps.find((s) => s.key === "cleanup")!.depends_on,
+    "report and cleanup both follow the FAST graph's last work step",
+  );
   assert.equal(fast.steps.filter((s) => s.key === REPORT_STEP_KEY).length, 1);
   const cr = await startRun({
     definitionKey: "code-review",

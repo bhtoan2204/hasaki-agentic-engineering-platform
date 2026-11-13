@@ -626,6 +626,9 @@ export const cleanup = (...after: string[]) => ({
   config: { action: "cleanup_workspaces" },
 });
 
+export const isCleanupStep = (s: { type?: string; config?: Record<string, unknown> | null }) =>
+  s.type === "integration" && s.config?.action === "cleanup_workspaces";
+
 export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = [
   {
     key: "work-item-analysis",
