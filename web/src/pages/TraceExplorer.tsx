@@ -36,6 +36,8 @@ interface Finding {
 }
 
 const LEVELS = ["", "DEBUG", "INFO", "WARN", "ERROR"];
+const LOG_PAGE = 500;
+const REFRESH_MS = 1500;
 
 function flatten(n: TraceNode, depth = 0, out: Array<{ node: TraceNode; depth: number }> = []) {
   out.push({ node: n, depth });
@@ -47,7 +49,8 @@ const startOf = (n: TraceNode) => (n.startedAt ? new Date(n.startedAt).getTime()
 
 /**
  * Execution Trace Explorer: tree + waterfall of Run → Step → Attempt → Tool, structured logs and a deterministic
- * failure diagnosis. Reloads on every live event (`activity`, driven by the existing SSE stream); logs load incrementally.
+ * failure diagnosis. Reloads at most every REFRESH_MS on live events (`activity`, driven by the existing SSE stream);
+ * logs load incrementally, page after page until the server has no more.
  */
 export function TraceExplorer({ runId, activity }: { runId: number; activity: number }) {
   const { t } = useI18n();
@@ -59,30 +62,77 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
   const last = useRef(0);
+  const requested = useRef(0);
+  const applied = useRef(0);
+  const epoch = useRef(0);
+  const logsBusy = useRef(false);
+  const logsAgain = useRef(false);
+  const lastLoad = useRef(0);
 
   useEffect(() => {
     setRoot(null);
     setLogs([]);
     setFindings(null);
     last.current = 0;
+    applied.current = ++requested.current;
+    epoch.current++;
+    logsBusy.current = false;
+    logsAgain.current = false;
+    lastLoad.current = 0;
+  }, [runId]);
+
+  // A slower, older response never replaces a newer one; responses for a previous run are dropped.
+  const loadTrace = useCallback(() => {
+    const n = ++requested.current;
+    api<TraceNode>(`/api/runs/${runId}/trace`)
+      .then((r) => {
+        if (n <= applied.current) return;
+        applied.current = n;
+        setRoot(r);
+        setError(null);
+      })
+      .catch((e) => n > applied.current && setError(String(e?.message ?? e)));
+  }, [runId]);
+
+  const loadLogs = useCallback(async () => {
+    if (logsBusy.current) {
+      logsAgain.current = true;
+      return;
+    }
+    logsBusy.current = true;
+    const mine = epoch.current;
+    try {
+      do {
+        logsAgain.current = false;
+        for (;;) {
+          const rows = await api<LogRow[]>(
+            `/api/runs/${runId}/logs?after=${last.current}&limit=${LOG_PAGE}`,
+          );
+          if (mine !== epoch.current) return;
+          if (!rows.length) break;
+          last.current = rows[rows.length - 1].id;
+          setLogs((prev) => [...prev, ...rows]);
+          if (rows.length < LOG_PAGE) break;
+        }
+      } while (logsAgain.current);
+    } catch {
+      // the next live event retries
+    } finally {
+      if (mine === epoch.current) logsBusy.current = false;
+    }
   }, [runId]);
 
   useEffect(() => {
-    let stop = false;
-    api<TraceNode>(`/api/runs/${runId}/trace`)
-      .then((r) => !stop && (setRoot(r), setError(null)))
-      .catch((e) => !stop && setError(String(e?.message ?? e)));
-    api<LogRow[]>(`/api/runs/${runId}/logs?after=${last.current}&limit=500`)
-      .then((rows) => {
-        if (stop || !rows.length) return;
-        last.current = rows[rows.length - 1].id;
-        setLogs((prev) => [...prev, ...rows]);
-      })
-      .catch(() => undefined);
-    return () => {
-      stop = true;
-    };
-  }, [runId, activity]);
+    const timer = setTimeout(
+      () => {
+        lastLoad.current = Date.now();
+        loadTrace();
+        void loadLogs();
+      },
+      Math.max(0, lastLoad.current + REFRESH_MS - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [activity, loadTrace, loadLogs]);
 
   const diagnose = useCallback(async () => {
     setDiagnosing(true);
