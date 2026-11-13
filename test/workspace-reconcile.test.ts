@@ -15,6 +15,8 @@ import {
   LeaseLostError,
   restoreMissingWorkspaces,
   runWorkspaceConflict,
+  workspaceRef,
+  workspacesOf,
   WorkspaceConflictError,
 } from "../src/git/provider.ts";
 import { repositories } from "../src/repos/service.ts";
@@ -22,6 +24,7 @@ import { restoreConflictSkips } from "../src/agent/verify.ts";
 import { removeWorktree } from "../src/git.ts";
 import { runChanges } from "../src/git/changes.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
+import { buildRunSummary } from "../src/report/runSummary.ts";
 
 before(async () => {
   await migrate();
@@ -495,6 +498,70 @@ test("a removed worktree without a recorded head shows no changes, not the share
     assert.equal(await removeWorktree(s.holder), null);
     const [repo] = (await runChanges(s.old.id)).repos;
     assert.equal(repo.exists, false);
+  } finally {
+    await s.cleanup();
+  }
+});
+
+const summaryCommits = async (runId: number) =>
+  (await buildRunSummary(runId)).changes.flatMap((c) => c.commits.map((x) => x.subject));
+
+test("a run cleaned before removed heads were recorded still reports its branch commits", async () => {
+  const s = await scenario("COMPLETED");
+  try {
+    assert.equal(await removeWorktree(s.holder), null);
+    const [w] = await workspacesOf(s.old.id);
+    assert.deepEqual(await workspaceRef(s.old.id, w), {
+      cwd: s.repoPath,
+      head: `refs/heads/${s.branch}`,
+      branchTip: true,
+    });
+    assert.deepEqual(await summaryCommits(s.old.id), ["earlier run work"]);
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("moving a worktree to another run records the previous run's head", async () => {
+  const s = await scenario("CANCELED");
+  try {
+    const head = sh(s.holder, "rev-parse", "HEAD").trim();
+    const moved = await prepareWorkspace(s.run, s.name);
+    assert.equal(existsSync(s.holder), false);
+    const [w] = await workspacesOf(s.old.id);
+    assert.equal(w.removed_head, head);
+    writeFileSync(join(moved.path, "later.txt"), "later run\n");
+    sh(moved.path, "add", "later.txt");
+    sh(moved.path, "commit", "-qm", "later run work");
+    assert.deepEqual(await summaryCommits(s.old.id), ["earlier run work"]);
+    const [repo] = (await runChanges(s.old.id)).repos;
+    assert.ok("commits" in repo);
+    assert.deepEqual(
+      repo.commits.map((c) => c.subject),
+      ["earlier run work"],
+    );
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("cleanup and change reads leave a worktree a newer run recorded at the same path alone", async () => {
+  const s = await scenario("COMPLETED");
+  try {
+    const ws = { repo: s.name, branch: s.branch, path: s.holder, created_from: config.baseBranch };
+    await recordWorkspace(s.run.id, ws);
+    writeFileSync(join(s.holder, "wip.txt"), "newer run\n");
+    const [old] = await workspacesOf(s.old.id);
+    assert.equal((await workspaceRef(s.old.id, old))?.head, `refs/heads/${s.branch}`);
+    const [newer] = await workspacesOf(s.run.id);
+    assert.equal((await workspaceRef(s.run.id, newer))?.head, "HEAD");
+    rmSync(join(s.holder, "wip.txt"));
+    assert.equal(
+      await removeWorkspace(s.old.id, { ...ws, subtask_id: null }),
+      `owned by run #${s.run.id}`,
+    );
+    assert.equal(existsSync(s.holder), true);
+    assert.equal((await workspacesOf(s.old.id))[0].removed_head, null);
   } finally {
     await s.cleanup();
   }

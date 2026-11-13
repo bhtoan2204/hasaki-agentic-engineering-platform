@@ -454,9 +454,15 @@ async function prepareLockedWorkspace(
       if (!approved) throw new WorkspaceConflictError([conflict]);
       // Reuse the clean holder (keeps installed dependencies); a vanished one is only unregistered.
       if (conflict.holder_path && existsSync(conflict.holder_path)) {
+        const head = await worktreeHead(conflict.holder_path);
         const kept = await moveWorktree(conflict.holder_path, path);
         if (kept)
           throw new WorkspaceConflictError([{ ...conflict, release: "never", reason: kept }]);
+        await q(
+          pool,
+          "UPDATE execution_workspaces SET removed_head = $3 WHERE run_id = $1 AND path = $2 AND removed_head IS NULL",
+          [conflict.holder_run_id, conflict.holder_path, head],
+        );
       } else await unregisterMissingWorktree(checkout, conflict.holder_path);
       await opts.log?.(
         `${repo}: reconciled worktree ${conflict.holder_path} holding ${conflict.branch} (${conflict.reason}${conflict.release === "approval" ? ", release approved by the developer" : ""}) -> ${path}`,
@@ -511,6 +517,8 @@ export async function removeWorkspace(
   runId: number,
   w: Workspace & { subtask_id: string | null },
 ): Promise<string | null> {
+  const owner = await otherOwner(runId, w.path);
+  if (owner) return `owned by run #${owner}`;
   const head = await worktreeHead(w.path);
   const kept = await removeWorktree(w.path);
   if (!kept)
@@ -523,12 +531,25 @@ export async function removeWorkspace(
   return kept;
 }
 
+async function otherOwner(runId: number, path: string): Promise<number | null> {
+  const last = await one<{ run_id: number }>(
+    pool,
+    "SELECT run_id FROM execution_workspaces WHERE path = $1 ORDER BY id DESC LIMIT 1",
+    [path],
+  );
+  return last && Number(last.run_id) !== runId ? Number(last.run_id) : null;
+}
+
 // A recorded head wins over the path: a later run on the shared branch may have recreated the worktree there.
-export async function workspaceRef(w: Workspace & { removed_head: string | null }) {
-  if (!w.removed_head) return existsSync(w.path) ? { cwd: w.path, head: "HEAD" } : null;
+export async function workspaceRef(runId: number, w: Workspace & { removed_head: string | null }) {
   const reg = await repositories.get(w.repo);
-  const cwd = reg ? repoPath(reg) : null;
-  return cwd && existsSync(cwd) ? { cwd, head: w.removed_head } : null;
+  const primary = reg ? repoPath(reg) : null;
+  if (w.removed_head)
+    return primary && existsSync(primary) ? { cwd: primary, head: w.removed_head } : null;
+  if (existsSync(w.path) && !(await otherOwner(runId, w.path)))
+    return { cwd: w.path, head: "HEAD" };
+  const cwd = [w.path, primary].find((d) => d && existsSync(d));
+  return cwd ? { cwd, head: `refs/heads/${w.branch}`, branchTip: true } : null;
 }
 
 /** The attempt lost its lease while restoring: propagate, never report it as a restore failure. */

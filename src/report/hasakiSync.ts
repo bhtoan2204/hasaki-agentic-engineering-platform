@@ -51,7 +51,7 @@ export function functionCodes(messages: string[]): string[] {
 async function commitMessages(runId: number): Promise<string[]> {
   const out: string[] = [];
   for (const w of await workspacesOf(runId)) {
-    const at = await workspaceRef(w);
+    const at = await workspaceRef(runId, w);
     if (!at) continue;
     try {
       const base = `origin/${await repositoryBaseBranch(w.repo)}`;

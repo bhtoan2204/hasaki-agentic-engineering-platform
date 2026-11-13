@@ -68,7 +68,8 @@ export async function runChanges(runId: number, viewerId?: number) {
     }
     const destination = await repositoryBaseBranch(w.repo);
     const base = `origin/${destination}`;
-    const at = await workspaceRef(w);
+    const ref = await workspaceRef(runId, w);
+    const at = ref && !ref.branchTip ? ref : null;
     const live = at?.head === "HEAD";
     const changes = at
       ? await Promise.all([

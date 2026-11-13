@@ -216,7 +216,7 @@ async function changesOf(runId: number): Promise<RepoChange[]> {
   const out: RepoChange[] = [];
   for (const w of await workspacesOf(runId)) {
     const reg = await repositories.get(w.repo);
-    const at = await workspaceRef(w);
+    const at = await workspaceRef(runId, w);
     const base = `origin/${reg?.default_branch || config.baseBranch}`;
     const change: RepoChange = {
       repo: w.repo,
