@@ -653,6 +653,38 @@ test("DEPRECATE rollback restores a duplicate supersession applied before it was
   assert.equal(restored.superseded_by, null);
 });
 
+test("DEPRECATE rollback keeps a supersession a newer proposal set identically", async () => {
+  for (const key of ["r9-a", "r9-b"])
+    await knowledge.create({
+      key,
+      title: key,
+      category: "agent_skill",
+      scope_type: "GLOBAL",
+      content: "r9 twin body",
+      applicability: { step_keys: ["implement"] },
+    });
+  const items = (await knowledge.list()).filter((i) => i.key.startsWith("r9-")) as AuditItem[];
+  const result = await remediateKnowledgeAudit(
+    { items, steps: [{ key: "implement", type: "coding_agent" }], usage: {} },
+    { autoApply: true, operator: "tester" },
+  );
+  const deprecated = result.proposals.find((p) => p.status === "approved")!;
+  const supersededBy = (await knowledge.get(deprecated.key)).superseded_by;
+  await pool.query(
+    "UPDATE knowledge_proposals SET applied = applied - 'superseded_to', reviewed_at = date_trunc('milliseconds', reviewed_at) WHERE id=$1",
+    [deprecated.proposalId],
+  );
+  const twin = await pool.query(
+    `INSERT INTO knowledge_proposals(status,change_type,target_item_id,target_key,proposed,dedupe_key,created_by,reviewed_by,reviewed_at,applied)
+     SELECT status,change_type,target_item_id,target_key,proposed,dedupe_key||'-twin',created_by,reviewed_by,reviewed_at,applied || jsonb_build_object('superseded_to',$2::bigint)
+     FROM knowledge_proposals WHERE id=$1 RETURNING id`,
+    [deprecated.proposalId, supersededBy],
+  );
+  const rolledBack = await rollbackProposal(deprecated.proposalId!, { by: "admin" });
+  assert.equal(Number((await knowledge.get(deprecated.key)).superseded_by), Number(supersededBy));
+  assert.match(rolledBack.supersession_kept, new RegExp(`#${twin.rows[0].id}`));
+});
+
 test("third-party skills cannot be reverted away from their pinned manifest", async () => {
   await assert.rejects(knowledge.revert("skill.ext.ponytail", 1, null, "admin"), /re-import/);
 });

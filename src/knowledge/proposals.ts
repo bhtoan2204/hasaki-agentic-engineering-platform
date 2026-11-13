@@ -799,6 +799,7 @@ async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }
   );
   const note = `rollback of proposal #${id} by ${o.by}${o.comment ? `: ${o.comment}` : ""}`;
   const owner = a.owner_id ?? null;
+  let kept: string | undefined;
   const item = async (key: string) =>
     one(
       c,
@@ -874,7 +875,20 @@ async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }
                 ])
               )?.id
             : null);
-        if (supersededTo != null && Number(it.superseded_by) === Number(supersededTo))
+        const restorable =
+          supersededTo != null && Number(it.superseded_by) === Number(supersededTo);
+        const newer = restorable
+          ? await one(
+              c,
+              `SELECT id FROM knowledge_proposals WHERE status='approved' AND change_type='DEPRECATE'
+                AND (reviewed_at,id) > (SELECT reviewed_at,id FROM knowledge_proposals WHERE id=$1)
+                AND (target_key=$2 OR applied->>'item_key'=$2)
+                AND (applied->>'superseded_to'=$3 OR proposed->>'superseded_by'=$4) LIMIT 1`,
+              [id, it.key, String(supersededTo), p.proposed?.superseded_by ?? null],
+            )
+          : null;
+        if (newer) kept = `supersession kept: proposal #${newer.id} set it later`;
+        else if (restorable)
           await q(c, "UPDATE knowledge_items SET superseded_by=$2, superseded_at=$3 WHERE id=$1", [
             it.id,
             a.previous_superseded_by ?? null,
@@ -892,11 +906,12 @@ async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }
       break;
     }
   }
-  return one(
+  const rolledBack = await one(
     c,
     "UPDATE knowledge_proposals SET status = 'rolled_back', rolled_back_by = $2, rolled_back_at = now(), review_comment = COALESCE(review_comment, '') || $3, updated_at = now() WHERE id = $1 RETURNING *",
     [id, o.by, o.comment ? `\nrollback: ${o.comment}` : ""],
   );
+  return kept ? { ...rolledBack, supersession_kept: kept } : rolledBack;
 }
 
 /** Who may review a proposal: shared knowledge (target or result) needs an admin; private knowledge its owner. */
