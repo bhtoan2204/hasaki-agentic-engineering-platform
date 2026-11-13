@@ -23,6 +23,7 @@ import {
   PAUSABLE_FAILURES,
   AUTOMATIC_FAILURES,
   handoffReadiness,
+  handoffBlockReason,
   inspectHandoffWorkspace,
 } from "../agent/handoff.ts";
 import { fallbackPolicy } from "../agent/stepAgent.ts";
@@ -2426,7 +2427,7 @@ export async function prepareProviderPause(
     };
   } catch (error) {
     return {
-      blocked: `Workspace inspection failed: ${safeDiagnostics(error)}`,
+      blocked: handoffBlockReason(error),
       failure: requested ? null : failure,
     };
   }
@@ -2496,6 +2497,7 @@ async function persistProviderPause(
       source_attempt_id: attempt.id,
       failure_category: p.failure,
       status: handoff.status,
+      blocked_reason: blocked,
     },
     package_reference: `provider_handoffs:${handoff.id}`,
     workspace_fingerprint: p.fingerprint ?? null,
@@ -2640,7 +2642,7 @@ export async function requestProviderHandoff(
         input.reason,
       );
     } catch (e) {
-      prepared = { blocked: safeDiagnostics(e) };
+      prepared = { blocked: handoffBlockReason(e) };
     }
     await withTx(async (c, afterCommit) => {
       await lockRun(c, runId);
@@ -2685,6 +2687,9 @@ export async function requestProviderHandoff(
           provider_handoff: {
             id: requested.handoff.id,
             source_attempt_id: input.expected_attempt_id,
+            status: blocked ? "BLOCKED" : "READY",
+            failure_category: requested.handoff.failure_category ?? null,
+            blocked_reason: blocked,
           },
         },
         error: input.reason,

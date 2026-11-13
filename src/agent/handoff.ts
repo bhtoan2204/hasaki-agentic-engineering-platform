@@ -50,11 +50,47 @@ export async function providerFailure(
   return normalized !== "UNKNOWN" ? normalized : (reported ?? normalized);
 }
 const hash = (v: string | Buffer) => createHash("sha256").update(v).digest("hex");
+
+/** Agent repair caches are left in the worktree. They are not the change the next agent must preserve. */
+export function isHandoffScratch(name: string) {
+  return name === ".repair-tmp" || name.startsWith(".repair-tmp/");
+}
+
+/** Source untracked files stay inside the checkpoint bound. Scratch cache does not block the next agent. */
+export function classifyHandoffUntracked(repo: string, names: string[]) {
+  const scratch = names.filter(isHandoffScratch);
+  const source = names.filter((name) => !isHandoffScratch(name));
+  if (source.length > 100) {
+    const groups = new Map<string, number>();
+    for (const name of source) {
+      const top = name.split("/")[0] || name;
+      groups.set(top, (groups.get(top) ?? 0) + 1);
+    }
+    const largest = [...groups.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 5)
+      .map(([dir, count]) => `${dir} (${count})`)
+      .join(", ");
+    throw new Error(
+      `${repo} has ${source.length} untracked files, above the 100-file checkpoint limit, so the next agent cannot start. Largest groups: ${largest}. Commit, gitignore, or remove them, then reinspect. ${scratch.length} .repair-tmp cache files were ignored and stay on disk.`,
+    );
+  }
+  return { source, scratchOmitted: scratch.length };
+}
+
+export function handoffBlockReason(error: unknown) {
+  const message = error instanceof Error ? error.message : safeDiagnostics(error);
+  return message.startsWith("Workspace inspection failed:")
+    ? message
+    : `Workspace inspection failed: ${message}`;
+}
+
 export async function inspectHandoffWorkspace(runId: number) {
   const deadline = AbortSignal.timeout(30000);
   const workspaces = await workspacesOf(runId);
   if (workspaces.length > 30) throw new Error("Workspace count exceeds bounded handoff inspection");
   const state = [];
+  let scratchOmitted = 0;
   for (const w of workspaces) {
     const root = await realpath(w.path);
     const git = async (...args: string[]) =>
@@ -84,11 +120,11 @@ export async function inspectHandoffWorkspace(runId: number) {
     const names = (await git("ls-files", "--others", "--exclude-standard", "-z"))
       .split("\0")
       .filter(Boolean);
-    if (names.length > 100)
-      throw new Error("More than 100 untracked files; reconcile workspace before handoff");
+    const plan = classifyHandoffUntracked(w.repo, names);
+    scratchOmitted += plan.scratchOmitted;
     let bytes = 0;
     const untracked = [];
-    for (const name of names) {
+    for (const name of plan.source) {
       const path = resolve(root, name);
       const rel = relative(root, await realpath(path));
       if (rel.startsWith("..") || isAbsolute(rel))
@@ -116,7 +152,7 @@ export async function inspectHandoffWorkspace(runId: number) {
       untracked,
     });
   }
-  return { fingerprint: hash(JSON.stringify(state)), workspaces: state };
+  return { fingerprint: hash(JSON.stringify(state)), workspaces: state, scratchOmitted };
 }
 export async function buildHandoffPackage(
   run: RunRow,
@@ -266,6 +302,12 @@ export async function buildHandoffPackage(
       untracked_count: w.untracked.length,
       details_artifact_id: artifact.id,
     })),
+    scratch_omitted: workspace.scratchOmitted
+      ? {
+          count: workspace.scratchOmitted,
+          note: "Untracked .repair-tmp build cache was left on disk and excluded from the checkpoint hash. The next agent still sees those files. They are not the change to preserve.",
+        }
+      : null,
     progress: summarizeValue(
       continuity?.content ?? {
         available: false,

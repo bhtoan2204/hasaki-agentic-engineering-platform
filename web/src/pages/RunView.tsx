@@ -526,9 +526,19 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         .map((s: any) => (
           <div key={s.id} className="rv-banner wait">
             <b>
-              {t("handoff.paused")}: {s.name} ·{" "}
-              {s.pending_input.provider_handoff.failure_category ?? ""}
+              {s.pending_input.provider_handoff.status === "BLOCKED"
+                ? t("handoff.blocked")
+                : t("handoff.paused")}
+              : {s.name}
+              {s.pending_input.provider_handoff.status === "BLOCKED"
+                ? ""
+                : ` · ${s.pending_input.provider_handoff.failure_category ?? ""}`}
             </b>{" "}
+            {s.pending_input.provider_handoff.status === "BLOCKED" && (
+              <span>
+                {s.pending_input.provider_handoff.blocked_reason || t("handoff.blockedHint")}{" "}
+              </span>
+            )}
             <button className="ghost xs" onClick={() => navigate(`/runs/${id}/${s.key}`)}>
               {t("handoff.review")}
             </button>

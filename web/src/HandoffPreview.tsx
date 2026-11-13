@@ -22,6 +22,13 @@ export function HandoffPreview({ handoff }: { handoff: any }) {
           <p className="small muted">
             {en ? "Preserved at" : "Được giữ lại lúc"}: {time(handoff.ready_at)}
           </p>
+          {pack.scratch_omitted?.count > 0 && (
+            <p>
+              {en
+                ? `${pack.scratch_omitted.count} untracked .repair-tmp cache files were left on disk and left out of this checkpoint. The next agent still sees them. They are not the change being handed off.`
+                : `${pack.scratch_omitted.count} file cache .repair-tmp chưa theo dõi vẫn nằm trên đĩa và không được đưa vào checkpoint. Agent tiếp theo vẫn thấy chúng. Đó không phải phần thay đổi được bàn giao.`}
+            </p>
+          )}
           <b>{en ? "Original task" : "Nhiệm vụ ban đầu"}</b>
           <pre style={{ maxHeight: 140, overflow: "auto", whiteSpace: "pre-wrap" }}>
             {pack.original_task}

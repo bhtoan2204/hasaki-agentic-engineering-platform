@@ -75,7 +75,7 @@ export interface StepLike {
   run_if?: unknown;
   requires_approval?: boolean;
   config?: Record<string, any>;
-  handoff?: { failure_category?: string; status?: string };
+  handoff?: { failure_category?: string; status?: string; blocked_reason?: string | null };
   effective_agent?: { provider?: string; model?: string | null };
   /** Dynamic subtask nodes (migration 050). */
   subtask_id?: string | null;
@@ -245,8 +245,11 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
             </span>
           )}
           {step.handoff && (
-            <span className="gn-pill gn-pill-wait" title={step.handoff.failure_category}>
-              {t("handoff.paused")}
+            <span
+              className="gn-pill gn-pill-wait"
+              title={step.handoff.blocked_reason || step.handoff.failure_category}
+            >
+              {step.handoff.status === "BLOCKED" ? t("handoff.blocked") : t("handoff.paused")}
             </span>
           )}
           {step.subtask_id && (

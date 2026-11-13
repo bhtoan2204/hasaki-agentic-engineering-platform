@@ -82,7 +82,20 @@ export function ProviderHandoff({
           · {current.original_provider} · {current.status}
         </p>
       )}
-      {current?.blocked_reason && <p className="error">{current.blocked_reason}</p>}
+      {current?.status === "BLOCKED" && (
+        <div role="alert" className="error">
+          <strong>{en ? "The next agent has not started" : "Agent tiếp theo chưa được chạy"}</strong>
+          <p>
+            {en
+              ? "Cursor and the other agents stay unavailable until this checkpoint is ready. Reinspect after the workspace issue below is resolved, then choose the agent and confirm."
+              : "Cursor và các agent khác vẫn không chạy được cho đến khi checkpoint sẵn sàng. Xử lý vấn đề workspace bên dưới, bấm Kiểm tra lại, rồi chọn agent và xác nhận."}
+          </p>
+          {current.blocked_reason && <p>{current.blocked_reason}</p>}
+        </div>
+      )}
+      {current?.blocked_reason && current.status !== "BLOCKED" && (
+        <p className="error">{current.blocked_reason}</p>
+      )}
       {current?.status === "STOPPING" && (
         <p className="muted small">
           {en
@@ -175,6 +188,13 @@ export function ProviderHandoff({
                 : "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo."}
             </span>
           </label>
+          {current.status !== "READY" && (
+            <p className="muted small">
+              {en
+                ? "Confirm resume stays off until the checkpoint status is READY."
+                : "Nút xác nhận tiếp tục chỉ bật khi checkpoint ở trạng thái READY."}
+            </p>
+          )}
           <div className="handoff-actions">
             <button
               className="sm"
