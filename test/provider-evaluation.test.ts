@@ -109,6 +109,20 @@ test("fixture provider phases keep their own step key for knowledge applicabilit
   assert.ok(steps.length);
   for (const s of steps) assert.equal(s.phase.semantic_role, undefined);
 });
+test("Ponytail verification phases resolve the review skill by its semantic role", async () => {
+  const e = await evaluation(["claude", "codex"], "tools", { ponytail: true });
+  const steps = await q(
+    pool,
+    "SELECT config->'evaluation_phase' AS phase, config->'skills' AS skills FROM workflow_steps WHERE run_id=$1 AND config ? 'evaluation_phase' ORDER BY id",
+    [e.workflow_run_id],
+  );
+  const verification = steps.filter((s) => s.phase.role === "verification");
+  assert.ok(verification.length);
+  for (const s of verification) {
+    assert.equal(s.phase.semantic_role, "review");
+    assert.deepEqual(s.skills, ["skill.ext.ponytail-review"]);
+  }
+});
 test("provider models and context settings are strictly validated without cross-provider options", () => {
   assert.equal(
     ConfigurationSchema.safeParse({

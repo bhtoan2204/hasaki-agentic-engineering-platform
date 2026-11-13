@@ -210,6 +210,14 @@ export async function createEvaluation(
                   : ordinal === phases.length - 1
                     ? "verification"
                     : "implementation";
+          const semantic =
+            role === "verification"
+              ? "review"
+              : role === "implementation"
+                ? task.category === "review"
+                  ? "review"
+                  : "implement"
+                : null;
           tasks.push({
             key: phaseKey,
             type:
@@ -221,18 +229,16 @@ export async function createEvaluation(
                 case_run_id: cr!.id,
                 ordinal,
                 role,
-                ...((cfg.ponytail || cfg.mode === "live") && role === "implementation"
-                  ? { semantic_role: task.category === "review" ? "review" : "implement" }
+                ...((cfg.ponytail || cfg.mode === "live") && semantic
+                  ? { semantic_role: semantic }
                   : {}),
               },
               instructions: task.description,
               ...(task.category === "review" ? { independent: true } : {}),
-              ...(cfg.ponytail
+              ...(cfg.ponytail && semantic
                 ? {
                     skills: [
-                      task.category === "review"
-                        ? "skill.ext.ponytail-review"
-                        : "skill.ext.ponytail",
+                      semantic === "review" ? "skill.ext.ponytail-review" : "skill.ext.ponytail",
                     ],
                   }
                 : {}),
