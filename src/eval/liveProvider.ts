@@ -1,4 +1,4 @@
-import { mkdir, rm, readdir, lstat, readFile, writeFile } from "node:fs/promises";
+import { mkdir, rm, rmdir, readdir, lstat, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { execFile } from "node:child_process";
@@ -77,52 +77,48 @@ export async function removeEvaluationSecrets(root: string) {
 }
 async function stopIsolatedDatabase(data: string) {
   const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
-  try {
-    await exec("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { env, timeout: 15000 });
-  } finally {
-    await rm(data, { recursive: true, force: true });
-  }
+  await exec("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
+    env,
+    timeout: 15000,
+  }).catch(() => {});
+  const postmaster = Number(
+    (await readFile(join(data, "postmaster.pid"), "utf8").catch(() => "")).split("\n")[0],
+  );
+  if (postmaster && processAlive(postmaster, "postgres"))
+    throw new Error(`postmaster ${postmaster} still serves ${data}; left in place`);
+  await rm(data, { recursive: true, force: true });
 }
 const subdirectories = async (dir: string) =>
   (await readdir(dir, { withFileTypes: true }).catch(() => []))
     .filter((e) => e.isDirectory())
     .map((e) => e.name);
-async function ownerGone(data: string) {
-  if (!(await lstat(join(data, "PG_VERSION")).catch(() => null))) return false;
-  const me = { host: hostname(), pid: process.pid };
-  const owner = await readFile(join(data, EVALUATION_DATABASE_MARKER), "utf8").then(
-    (text) => JSON.parse(text),
-    () => null,
-  );
-  if (owner) return previousProcessGone(owner, me);
-  // Created before the owner marker existed: orphaned only when no postmaster still serves it.
-  const postmaster = Number(
-    (await readFile(join(data, "postmaster.pid"), "utf8").catch(() => "")).split("\n")[0],
-  );
-  return (
-    !postmaster ||
-    previousProcessGone({ host: me.host, pid: postmaster }, me, (pid) =>
-      processAlive(pid, "postgres"),
-    )
-  );
-}
-/** A crashed worker leaves throwaway postmasters behind; stop and remove them before claiming work. */
+const isDatabaseDir = (name: string) => /^database-[0-9a-f-]{36}$/.test(name);
+const logSweep = (message: string) => console.warn(`live evaluation sweep: ${message}`);
+/** A crashed worker leaves throwaway postmasters behind; stop and remove those whose recorded owner is provably gone. */
 export async function sweepEvaluationDatabases(root = join(config.dataDir, "evaluation-work")) {
+  const me = { host: hostname(), pid: process.pid };
   // Only liveWorkRoot()/database-* is ours; never descend into extracted repository workspaces.
   for (const evaluation of await subdirectories(root))
     for (const caseRun of await subdirectories(join(root, evaluation))) {
       const live = join(root, evaluation, caseRun, "live");
-      for (const name of await subdirectories(live)) {
+      for (const name of (await subdirectories(live)).filter(isDatabaseDir)) {
         const data = join(live, name);
-        if (/^database-[0-9a-f-]{36}$/.test(name) && (await ownerGone(data)))
-          await stopIsolatedDatabase(data).catch(() => {});
+        try {
+          const marker = await readFile(join(data, EVALUATION_DATABASE_MARKER), "utf8").catch(
+            () => null,
+          );
+          if (marker === null) {
+            logSweep(`${data} has no owner marker; left in place`);
+            continue;
+          }
+          if (previousProcessGone(JSON.parse(marker), me)) await stopIsolatedDatabase(data);
+        } catch (error) {
+          logSweep(`${data} left in place: ${(error as Error).message}`);
+        }
       }
     }
 }
-/**
- * Remove live work of cases whose chain has ended: the run is terminal, or nothing of the case is queued, running or
- * waiting while one of its steps failed, was canceled or skipped, or the case step itself completed.
- */
+/** Remove live work of cases that provably ended: run or case step terminal, and nothing of the case still active. */
 export async function sweepInactiveLiveWork(root = join(config.dataDir, "evaluation-work")) {
   const found = [];
   for (const evaluation of await subdirectories(root))
@@ -132,34 +128,41 @@ export async function sweepInactiveLiveWork(root = join(config.dataDir, "evaluat
   const rows = await q(
     pool,
     `WITH steps AS (
-       SELECT cr.id AS case_run_id, s.id, s.status, s.key=cr.workflow_step_key AS is_case
+       SELECT cr.id AS case_run_id, s.id, s.status
        FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
        JOIN workflow_steps s ON s.run_id=e.workflow_run_id AND (s.key=cr.workflow_step_key
          OR s.key IN (SELECT p.step_key FROM evaluation_provider_phases p WHERE p.case_run_id=cr.id))
        WHERE cr.id=ANY($1::bigint[]))
      SELECT cr.id::text AS case_run_id, cr.evaluation_id::text AS evaluation_id, e.workflow_run_id,
-       r.status NOT IN ('COMPLETED','FAILED','CANCELED') AND (
-         EXISTS(SELECT 1 FROM steps s JOIN workflow_jobs j ON j.step_id=s.id
-           WHERE s.case_run_id=cr.id AND j.status IN ('queued','running'))
-         OR EXISTS(SELECT 1 FROM steps s JOIN workflow_step_attempts a ON a.step_id=s.id
-           WHERE s.case_run_id=cr.id AND a.status IN ('RUNNING','WAITING_INPUT','WAITING_APPROVAL'))
-         OR NOT EXISTS(SELECT 1 FROM steps s WHERE s.case_run_id=cr.id
-           AND (s.status IN ('FAILED','CANCELED','SKIPPED') OR (s.is_case AND s.status='COMPLETED')))
-       ) AS active
+       (r.status IN ('COMPLETED','FAILED','CANCELED') OR c.status IN ('COMPLETED','FAILED','CANCELED'))
+       AND NOT EXISTS(SELECT 1 FROM steps s WHERE s.case_run_id=cr.id
+         AND s.status IN ('READY','RUNNING','RETRYING','WAITING_INPUT','WAITING_APPROVAL'))
+       AND NOT EXISTS(SELECT 1 FROM steps s JOIN workflow_jobs j ON j.step_id=s.id
+         WHERE s.case_run_id=cr.id AND j.status IN ('queued','running'))
+       AND NOT EXISTS(SELECT 1 FROM steps s JOIN workflow_step_attempts a ON a.step_id=s.id
+         WHERE s.case_run_id=cr.id AND a.status IN ('RUNNING','WAITING_INPUT','WAITING_APPROVAL')) AS ended
      FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
-     JOIN workflow_runs r ON r.id=e.workflow_run_id WHERE cr.id=ANY($1::bigint[])`,
+     JOIN workflow_runs r ON r.id=e.workflow_run_id
+     LEFT JOIN workflow_steps c ON c.run_id=r.id AND c.key=cr.workflow_step_key
+     WHERE cr.id=ANY($1::bigint[])`,
     [found.map((f) => f.caseRun)],
   );
   for (const { evaluation, caseRun } of found) {
     const row = rows.find((r) => r.case_run_id === caseRun && r.evaluation_id === evaluation);
-    if (row?.active) continue;
-    const live = join(root, evaluation, caseRun, "live");
-    for (const name of await subdirectories(live))
-      if (/^database-[0-9a-f-]{36}$/.test(name))
-        await stopIsolatedDatabase(join(live, name)).catch(() => {});
-    await cleanupLiveWork(Number(row?.workflow_run_id ?? 0), live).catch((error) =>
-      console.error(`live evaluation sweep failed: ${(error as Error).message}`),
-    );
+    const dir = join(root, evaluation, caseRun);
+    if (!row) logSweep(`${dir} has no matching case run; left in place`);
+    if (!row?.ended) continue;
+    const live = join(dir, "live");
+    try {
+      for (const name of (await subdirectories(live)).filter(isDatabaseDir))
+        await stopIsolatedDatabase(join(live, name));
+      await cleanupLiveWork(Number(row.workflow_run_id), live);
+      await rmdir(dir);
+      await rmdir(join(root, evaluation));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY")
+        logSweep(`${dir} left in place: ${(error as Error).message}`);
+    }
   }
 }
 async function isolatedDatabase(root: string) {
@@ -173,8 +176,9 @@ async function isolatedDatabase(root: string) {
   );
   let started = false;
   try {
+    const marker = join(data, EVALUATION_DATABASE_MARKER);
     await writeFile(
-      join(data, EVALUATION_DATABASE_MARKER),
+      `${marker}.tmp`,
       JSON.stringify({
         pid: process.pid,
         host: hostname(),
@@ -182,6 +186,7 @@ async function isolatedDatabase(root: string) {
         started: processStartTime(process.pid),
       }),
     );
+    await rename(`${marker}.tmp`, marker);
     await mkdir(socket, { mode: 0o700 });
     await exec(
       "pg_ctl",
@@ -246,8 +251,7 @@ export async function executeLiveProviderPhase(
     }
     return (result = await executeLiveProviderPhaseLocked(ctx, phase));
   } finally {
-    // Phases run once, so any unaborted failure ends the case; an abort may be a lease loss whose re-execution
-    // still needs the workspace, and sweepInactiveLiveWork removes it once the case is over.
+    // An abort may be a lease loss whose re-execution still needs the workspace.
     if ((!result || result.kind === "failed") && !ctx.signal.aborted)
       await cleanupLiveWork(ctx.run.id, liveWorkRoot(phase.evaluation_id, phase.case_run_id)).catch(
         (error) => console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
@@ -291,10 +295,6 @@ async function executeLiveProviderPhaseLocked(
         error: `Evaluation owner has no read access to repository ${name}`,
       };
   }
-  if (phase.ordinal === 0)
-    await sweepInactiveLiveWork().catch((error) =>
-      console.error(`live evaluation sweep failed: ${(error as Error).message}`),
-    );
   const root = liveWorkRoot(phase.evaluation_id, phase.case_run_id);
   const workspaces: Array<{ repo: string; path: string }> = [];
   await mkdir(root, { recursive: true, mode: 0o700 });

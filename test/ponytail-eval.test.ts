@@ -364,28 +364,30 @@ test("Database sweep leaves live owners, other hosts and repository content alon
     await rm(root, { recursive: true, force: true });
   }
 });
-test("Database sweep removes recycled-PID owners and legacy databases without a running postmaster", async () => {
+test("Database sweep removes recycled-PID owners and leaves marker-less or malformed ones alone", async () => {
   const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
   const other = await sleeper("node");
   try {
     const live = join(root, "1", "2", "live");
     const id = (n: number) => `database-00000000-0000-4000-8000-00000000000${n}`;
-    const recycledSelf = await fakeDatabase(join(live, id(1)), {
+    const malformed = await fakeDatabase(join(live, id(1)), null);
+    await writeFile(join(live, id(1), EVALUATION_DATABASE_MARKER), "");
+    const creating = await fakeDatabase(join(live, id(2)), null);
+    const creatingDeadPostmaster = await fakeDatabase(join(live, id(3)), null);
+    await writeFile(join(live, id(3), "postmaster.pid"), `${DEAD_PID}\n`);
+    const recycledSelf = await fakeDatabase(join(live, id(4)), {
       pid: process.pid,
       host: hostname(),
       started: "1",
     });
-    const recycledOther = await fakeDatabase(join(live, id(2)), {
+    const recycledOther = await fakeDatabase(join(live, id(5)), {
       pid: other.pid,
       host: hostname(),
       started: "1",
     });
-    const legacy = await fakeDatabase(join(live, id(3)), null);
-    const legacyDead = await fakeDatabase(join(live, id(4)), null);
-    await writeFile(join(live, id(4), "postmaster.pid"), `${DEAD_PID}\n`);
     await sweepEvaluationDatabases(root);
-    for (const path of [recycledSelf, recycledOther, legacy, legacyDead])
-      await assert.rejects(readFile(path), path);
+    for (const path of [malformed, creating, creatingDeadPostmaster]) await readFile(path);
+    for (const path of [recycledSelf, recycledOther]) await assert.rejects(readFile(path), path);
   } finally {
     other.kill();
     await rm(root, { recursive: true, force: true });

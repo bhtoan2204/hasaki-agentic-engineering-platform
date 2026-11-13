@@ -718,7 +718,7 @@ test("live work of a case is swept only once its chain is over", async () => {
   const { sweepInactiveLiveWork } = await import("../src/eval/liveProvider.ts");
   const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
   const { recordWorkspace } = await import("../src/git/provider.ts");
-  const { mkdir, writeFile, readFile, stat } = await import("node:fs/promises");
+  const { mkdir, writeFile, readFile, stat, rm } = await import("node:fs/promises");
   const { join } = await import("node:path");
   const e = await evaluation(["claude"]);
   const cr = await one(pool, "SELECT id FROM evaluation_case_runs WHERE evaluation_id=$1", [e.id]);
@@ -732,18 +732,61 @@ test("live work of a case is swept only once its chain is over", async () => {
     branch: "main",
     created_from: "base",
   });
-  const unknown = liveWorkRoot(e.id, 987654321);
+  const unknown = liveWorkRoot(987654321, 987654321);
   await mkdir(unknown, { recursive: true });
+  try {
+    await sweepInactiveLiveWork();
+    assert.equal(await readFile(edited, "utf8"), "phase 0 edits");
+    await stat(unknown);
+    await cancelEvaluation(e.id, owner.id);
+    await sweepInactiveLiveWork();
+    await assert.rejects(stat(join(root, "..", "..")));
+    await stat(unknown);
+    const rows = await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [
+      e.workflow_run_id,
+    ]);
+    assert.equal(rows.length, 0);
+  } finally {
+    await rm(join(unknown, "..", ".."), { recursive: true, force: true });
+  }
+});
+test("live work survives a skipped phase while its case still waits or the run is paused", async () => {
+  const { sweepInactiveLiveWork } = await import("../src/eval/liveProvider.ts");
+  const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
+  const { mkdir, writeFile, readFile, stat } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const e = await evaluation(["claude"]);
+  const cr = await one(
+    pool,
+    "SELECT id, workflow_step_key FROM evaluation_case_runs WHERE evaluation_id=$1",
+    [e.id],
+  );
+  const phase = await one(
+    pool,
+    "SELECT step_key FROM evaluation_provider_phases WHERE case_run_id=$1 ORDER BY ordinal LIMIT 1",
+    [cr!.id],
+  );
+  const step = (key: string, status: string) =>
+    q(pool, "UPDATE workflow_steps SET status=$3 WHERE run_id=$1 AND key=$2", [
+      e.workflow_run_id,
+      key,
+      status,
+    ]);
+  const root = liveWorkRoot(e.id, cr!.id);
+  const kept = join(root, "repo", "kept.txt");
+  await mkdir(join(root, "repo"), { recursive: true });
+  await writeFile(kept, "phase 0 edits");
+  await step(phase!.step_key, "SKIPPED");
+  await step(cr!.workflow_step_key, "WAITING_APPROVAL");
   await sweepInactiveLiveWork();
-  assert.equal(await readFile(edited, "utf8"), "phase 0 edits");
-  await assert.rejects(stat(unknown));
-  await cancelEvaluation(e.id, owner.id);
+  assert.equal(await readFile(kept, "utf8"), "phase 0 edits");
+  await step(cr!.workflow_step_key, "PENDING");
+  await q(pool, "UPDATE workflow_runs SET status='PAUSED' WHERE id=$1", [e.workflow_run_id]);
+  await sweepInactiveLiveWork();
+  assert.equal(await readFile(kept, "utf8"), "phase 0 edits");
+  await q(pool, "UPDATE workflow_runs SET status='CANCELED' WHERE id=$1", [e.workflow_run_id]);
   await sweepInactiveLiveWork();
   await assert.rejects(stat(root));
-  const rows = await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [
-    e.workflow_run_id,
-  ]);
-  assert.equal(rows.length, 0);
 });
 test("baseline live arm never resolves Ponytail skills even with the global pilot flag on", async () => {
   const { planExternalSkills, applyExternalSkills } =

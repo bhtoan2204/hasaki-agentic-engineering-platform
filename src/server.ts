@@ -88,10 +88,14 @@ await new Promise<void>((resolve, reject) => {
 });
 console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
 
-if (config.evaluation.enabled)
-  await sweepEvaluationDatabases()
-    .then(() => sweepInactiveLiveWork())
-    .catch((e) => console.warn(`evaluation database sweep failed: ${(e as Error).message}`));
+const evaluationSweep = async () => {
+  for (const sweep of [sweepEvaluationDatabases, sweepInactiveLiveWork])
+    await sweep().catch((e) => console.warn(`evaluation sweep failed: ${(e as Error).message}`));
+};
+if (config.evaluation.enabled) {
+  await evaluationSweep();
+  setInterval(() => void evaluationSweep(), 3_600_000).unref();
+}
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
