@@ -16,7 +16,7 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
   {
     name: "ask_user",
     description:
-      "Post questions to the developer and STOP. The step waits for answers; do not keep editing or call other tools.",
+      "Post the developer's real questions and STOP. The question text is shown as-is and pauses the step. Include context. Do not send a schema probe such as \"test\".",
     inputSchema: {
       type: "object",
       properties: {

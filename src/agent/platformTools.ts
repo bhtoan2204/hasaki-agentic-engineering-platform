@@ -6,6 +6,7 @@ import {
   boundedContextJson,
   visibleSnapshotKnowledge,
 } from "./contextTools.ts";
+import { developerQuestionIssue } from "./contextToolSchemas.ts";
 import {
   validateToolBinding,
   journalToolCall,
@@ -314,6 +315,7 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
     case "list_tools":
       return JSON.stringify(
         [
+          ...listOwnedTools(args?.query),
           ...listTools(args?.query, { mode: env.mode }),
           ...CONTEXT_TOOLS.map((t) => ({
             name: t.logicalName,
@@ -329,6 +331,8 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       );
     case "describe_tool":
       try {
+        const owned = describeOwnedTool(String(args?.name ?? ""));
+        if (owned) return JSON.stringify(owned, null, 2);
         const native = contextTool(String(args?.name ?? ""));
         return JSON.stringify(
           native
@@ -366,6 +370,10 @@ async function askUser(args: any, env: PlatformToolEnv): Promise<string> {
     )
     .min(1)
     .parse(args?.questions ?? args);
+  for (const item of questions) {
+    const issue = developerQuestionIssue(item.question);
+    if (issue) return `ERROR: ${issue}`;
+  }
   const n = await postClarification(env, questions);
   await env.log("system", `${n} question(s) posted`);
   return "Questions posted. Stop now and end your turn without further tool calls.";
@@ -838,13 +846,91 @@ export async function envFromDatabase(
   };
 }
 
+const PLATFORM_TOOL_DOCS: Record<string, { summary: string; read_only: boolean }> = {
+  ask_user: {
+    summary:
+      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step until they answer. Each question needs at least two words plus context (the SPL, the window, the error). Never send a schema probe such as "test".',
+    read_only: false,
+  },
+  post_update: {
+    summary: "Post a short progress note on the run timeline.",
+    read_only: false,
+  },
+  submit_result: {
+    summary: "Submit this step's output object once, then stop.",
+    read_only: false,
+  },
+  prepare_branch: {
+    summary: "Create the run branch worktree. Coding steps only.",
+    read_only: false,
+  },
+  commit_changes: {
+    summary: "Commit selected paths on the run branch. Coding steps only.",
+    read_only: false,
+  },
+  read_knowledge: { summary: "Read one knowledge document by key.", read_only: true },
+  search_knowledge: { summary: "Search knowledge titles and bodies.", read_only: true },
+  read_step_output: { summary: "Read the output of an earlier step in this run.", read_only: true },
+  read_artifact: { summary: "Read one artifact stored on this run.", read_only: true },
+  list_tools: { summary: "List integration tools and platform tools.", read_only: true },
+  describe_tool: {
+    summary: "Return the input schema of one integration or platform tool, including ask_user.",
+    read_only: true,
+  },
+  call_tool: { summary: "Call one integration tool by name.", read_only: false },
+};
+
+/** Platform control tools. describe_tool used to know only integrations, so agents probed ask_user with "test". */
+export function describeOwnedTool(name: string) {
+  const key = name
+    .trim()
+    .replace(/^mcp__platform__/, "")
+    .replace(/^platform\./, "");
+  const schema = legacyInputs[key];
+  const doc = PLATFORM_TOOL_DOCS[key];
+  if (!schema || !doc) return null;
+  return {
+    name: key,
+    description: doc.summary,
+    read_only: doc.read_only,
+    available: true,
+    input_schema: z.toJSONSchema(schema),
+  };
+}
+
+function listOwnedTools(query: unknown) {
+  const want = String(query ?? "")
+    .trim()
+    .toLowerCase();
+  return Object.entries(PLATFORM_TOOL_DOCS)
+    .filter(([name, doc]) => !want || `${name} ${doc.summary}`.toLowerCase().includes(want))
+    .map(([name, doc]) => ({
+      name,
+      summary: doc.summary,
+      read_only: doc.read_only,
+      available: true,
+      kind: "platform",
+      score: want ? 1 : 0,
+    }));
+}
+
 const legacyInputs: Record<string, z.ZodType> = {
   ask_user: z.strictObject({
     questions: z
       .array(
         z.strictObject({
-          question: z.string().min(1).max(2000),
-          context: z.string().max(4000).optional(),
+          question: z
+            .string()
+            .min(1)
+            .max(2000)
+            .describe(
+              'Exact text shown to the developer. A real question of at least two words, plus context. Not a schema probe such as "test".',
+            ),
+          context: z
+            .string()
+            .max(4000)
+            .optional()
+            .describe("What you already found: the error, the SPL, the time window, the link"),
           options: z.array(z.string().max(500)).max(8).optional(),
         }),
       )

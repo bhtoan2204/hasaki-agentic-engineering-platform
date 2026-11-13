@@ -20,6 +20,23 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
 
 const deny = (reason: string): Decision => ({ allow: false, reason });
 
+/**
+ * The CLI writes an oversized tool result under its brain directory and then reads that file back.
+ * That path is scratch for the current turn, not the OAuth token or settings under ~/.gemini.
+ */
+function withoutBrainStepOutputs(text: string): string {
+  return text.replace(
+    /(?:~|[/\\][\w.@+-]+)*[/\\]\.gemini[/\\]antigravity-cli[/\\]brain[/\\][0-9a-f-]{36}[/\\]\.system_generated[/\\]steps[/\\]\d+[/\\]output\.txt/gi,
+    " ",
+  );
+}
+
+function secretDenial(text: string): string | null {
+  const visible = withoutBrainStepOutputs(text);
+  for (const [re, why] of SECRET_PATTERNS) if (re.test(visible)) return why;
+  return null;
+}
+
 export function antigravityHookDecision(
   payload: any,
   policy: PolicyContext,
@@ -67,9 +84,8 @@ export function antigravityHookDecision(
   if (lower === "run_command" || lower === "bash" || lower === "exec_command") {
     const cmd = String(args.CommandLine ?? args.command ?? args.cmd ?? "");
     if (!cmd.trim()) return deny("empty shell command");
-    for (const [re, why] of SECRET_PATTERNS) {
-      if (re.test(cmd)) return deny(why);
-    }
+    const secret = secretDenial(cmd);
+    if (secret) return deny(secret);
     return decide("Bash", { command: cmd }, policy, sessionCwd);
   }
 
@@ -80,9 +96,8 @@ export function antigravityHookDecision(
     }
     const filePath = String(args.Path ?? args.path ?? "");
     if (!filePath.trim()) return deny("empty file path");
-    for (const [re, why] of SECRET_PATTERNS) {
-      if (re.test(filePath)) return deny(why);
-    }
+    const secret = secretDenial(filePath);
+    if (secret) return deny(secret);
     const resolved = isAbsolute(filePath) ? resolve(filePath) : resolve(sessionCwd, filePath);
     // Ensure path doesn't escape into sensitive roots
     if (resolved.includes("/.git/"))
@@ -93,9 +108,8 @@ export function antigravityHookDecision(
   // 6. File reading (read_file, view_file)
   if (lower === "read_file" || lower === "view_file") {
     const filePath = String(args.Path ?? args.path ?? "");
-    for (const [re, why] of SECRET_PATTERNS) {
-      if (re.test(filePath)) return deny(why);
-    }
+    const secret = secretDenial(filePath);
+    if (secret) return deny(secret);
     return decide("Read", { path: filePath }, policy, sessionCwd);
   }
 

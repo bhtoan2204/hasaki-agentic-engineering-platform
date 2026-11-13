@@ -381,6 +381,50 @@ test("antigravityHookDecision enforces read-only mode and denies mutations", () 
   );
   assert.equal(denyEnv.allow, false);
   assert.match(denyEnv.reason ?? "", /credentials/i);
+
+  const brain =
+    "/home/toan/.gemini/antigravity-cli/brain/def70acb-5a1a-4b79-94ba-b4a7487f8b92/.system_generated/steps/44/output.txt";
+  const allowBrain = antigravityHookDecision(
+    { hook_event_name: "PreToolUse", tool_name: "read_file", tool_input: { Path: brain } },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(allowBrain.allow, true);
+
+  const allowBrainCat = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "run_command",
+      tool_input: { CommandLine: `cat ${brain}` },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(allowBrainCat.allow, true);
+
+  const denyToken = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "read_file",
+      tool_input: { path: "/home/toan/.gemini/antigravity-cli/antigravity-oauth-token" },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(denyToken.allow, false);
+  assert.match(denyToken.reason ?? "", /credentials/i);
+
+  const denySettings = antigravityHookDecision(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "read_file",
+      tool_input: { path: "/home/toan/.gemini/antigravity-cli/settings.json" },
+    },
+    analysisPolicy,
+    "/repo",
+  );
+  assert.equal(denySettings.allow, false);
+  assert.match(denySettings.reason ?? "", /credentials/i);
 });
 
 test("antigravityHookDecision allows the platform artifact reader", () => {

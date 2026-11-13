@@ -1,4 +1,12 @@
 import { z } from "zod";
+
+/** Shown to the developer as-is. A one-word probe such as "test" must not pause the step. */
+export function developerQuestionIssue(question: string): string | null {
+  const value = question.trim();
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && value.length >= 12) return null;
+  return 'This text is shown to the developer and pauses the step. Send the real question in at least two words, with context (the SPL, the window, the error). Do not send a schema probe such as "test".';
+}
 const query = z.string().trim().min(1).max(512);
 const limit = z.number().int().min(1).max(20).default(8);
 /** Any integer is accepted; get_run_context clamps it. A hard range error makes the agent guess the other field. */
