@@ -147,6 +147,13 @@ export async function harnessHash() {
           "providerPhase.ts",
           "controls.ts",
           "contextEffect.ts",
+          "liveProvider.ts",
+          "liveRuntime.ts",
+          "livePrerequisites.ts",
+          "ponytailSuite.ts",
+          "liveCase.ts",
+          "ponytailMetrics.ts",
+          "ponytailReport.ts",
         ].map((p) => readFile(new URL(p, import.meta.url), "utf8")),
       )
     ).join("\n"),

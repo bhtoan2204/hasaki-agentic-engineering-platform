@@ -22,7 +22,7 @@ if (args.suite === "platform-performance-v1") {
   await import("./benchPerformance.ts");
   process.exit(0);
 }
-if (args.suite === "backend-v1" || args.p2 === "true") {
+if (args.suite === "backend-v1" || args.suite === "knowledge-ponytail-v1" || args.p2 === "true") {
   await import("./evaluate.ts");
   process.exit(0);
 }

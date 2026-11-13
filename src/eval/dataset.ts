@@ -20,15 +20,17 @@ export const CaseSchema = z.object({
   origin: z.enum(["synthetic", "real_derived"]),
   provenance: z.string().min(10),
   description: z.string().min(10),
-  repository: z.string().regex(/^fixture-[a-z-]+$/),
+  repository: z.string().regex(/^[A-Za-z0-9._-]+$/),
   repositories: z
-    .array(z.string().regex(/^fixture-[a-z-]+$/))
+    .array(z.string().regex(/^[A-Za-z0-9._-]+$/))
     .min(1)
-    .max(4),
+    .max(100),
   base_commit: z.string().regex(/^[a-f0-9]{40}$/),
+  repository_commits: z.record(z.string(), z.string().regex(/^[a-f0-9]{40}$/)).optional(),
   expected_behavior: z.array(z.string().min(3)).min(1),
   validation: z.object({
-    type: z.enum(["behavior", "proto", "sql", "navigation", "freshness"]),
+    type: z.enum(["behavior", "proto", "sql", "navigation", "freshness", "commands"]),
+    commands: z.array(z.string().min(1).max(8000)).min(1).max(4).optional(),
     path: relativePath,
     export_name: z.string().optional(),
     public_checks: z.array(z.object({ args: z.array(z.unknown()), expected: z.unknown() })),
@@ -56,7 +58,7 @@ export const SuiteSchema = z
         tree_hash: z.string(),
       }),
     ),
-    cases: z.array(CaseSchema).min(10).max(20),
+    cases: z.array(CaseSchema).min(6).max(20),
   })
   .superRefine((s, ctx) => {
     const ids = new Set<string>();

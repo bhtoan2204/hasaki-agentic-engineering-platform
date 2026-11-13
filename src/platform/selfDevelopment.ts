@@ -1,3 +1,5 @@
+import { liveRuntime } from "../eval/liveRuntime.ts";
+import { agentEnvironment } from "../agent/environment.ts";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -158,6 +160,7 @@ export async function bwrapAvailable(): Promise<string | null> {
 
 export function bwrapArguments(cwd: string, live: string | null): string[] {
   const args = [
+    ...(liveRuntime.getStore() ? ["--unshare-net"] : []),
     "--die-with-parent",
     "--unshare-pid",
     "--ro-bind",
@@ -289,6 +292,16 @@ export async function commandProcessEnv(
 ): Promise<CommandIsolation> {
   if (overlapsLiveApplication(cwd))
     throw new Error("Refusing to run a command in the running application checkout");
+  const runtime = liveRuntime.getStore();
+  if (runtime) {
+    if (!(await bwrapAvailable())) throw new Error("Live evaluation verification needs bubblewrap");
+    const env = agentEnvironment(process.env, "codex");
+    for (const key of Object.keys(env)) if (SECRET_ENV.test(key)) delete env[key];
+    return {
+      env: { ...env, ...extra, TEST_DATABASE_URL: runtime.databaseUrl },
+      isolation: { replaceEnv: true, mode: "bwrap", liveRoot: liveApplicationRoot() },
+    };
+  }
   if (!(await directoryIsSelfRepository(cwd))) return { env: { ...process.env, ...extra } };
   const bwrap = await bwrapAvailable();
   if (!bwrap && !config.platform.trustedOperatorIsolation)

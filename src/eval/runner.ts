@@ -1,3 +1,4 @@
+import { executeLiveCase } from "./liveCase.ts";
 import { ownsInstance } from "../instances.ts";
 import { mkdir, writeFile, rm, access } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -70,6 +71,7 @@ export async function executeBenchmarkCase(ctx: ExecutionContext): Promise<ExecR
         reused: true,
       },
     };
+  if (cr.configuration.mode === "live") return executeLiveCase(ctx, cr);
   const task = CaseSchema.parse(cr.definition),
     cfg = cr.configuration;
   if (

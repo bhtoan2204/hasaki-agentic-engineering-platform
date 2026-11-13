@@ -52,7 +52,10 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
       "Submit this step's output (an object matching the step's output contract) once, at the end.",
     inputSchema: {
       type: "object",
-      properties: { output: { type: "object" } },
+      properties: {
+        output: { type: "object" },
+        skills_applied: { type: "array", items: { type: "string" } },
+      },
       required: ["output"],
     },
   },

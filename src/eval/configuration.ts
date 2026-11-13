@@ -28,9 +28,13 @@ export const ConfigurationSchema = z
     context_strategy: z.enum(["none", "symbols"]).default("none"),
     repetitions: z.number().int().min(1).max(3).default(1),
     case_limit: z.number().int().min(1).max(20).default(15),
-    max_case_seconds: z.number().int().min(1).max(30).default(20),
-    max_tokens: z.number().int().min(1).max(20000).default(10000),
-    max_cost_usd: z.number().min(0).max(2).default(0),
+    max_case_seconds: z.number().int().min(1).max(7200).default(1800),
+    max_tokens: z.number().int().min(1).max(10000000).default(3000000),
+    ponytail: z.boolean().default(false),
+    budget_group: z.string().min(1).max(160).optional(),
+    estimated_usd_per_million: z.number().positive().max(1000).default(30),
+    max_suite_cost_usd: z.number().positive().max(1000).default(300),
+    max_cost_usd: z.number().min(0).max(100).default(10),
   })
   .strict()
   .superRefine((c, ctx) => {

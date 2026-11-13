@@ -1,0 +1,201 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { LiveBudget, liveRuntime, observeLiveUsage } from "../src/eval/liveRuntime.ts";
+import { livePrerequisites } from "../src/eval/livePrerequisites.ts";
+import { config } from "../src/config.ts";
+import { changedCloneCount, diffFootprint } from "../src/eval/ponytailMetrics.ts";
+import { ponytailConfigurations, eligiblePonytailRepositories } from "../src/eval/ponytailSuite.ts";
+import { agentEnvironment } from "../src/agent/environment.ts";
+import { removeEvaluationSecrets } from "../src/eval/liveProvider.ts";
+import { addUsage, newMetrics } from "../src/agent/metrics.ts";
+import { setBwrapForTests } from "../src/platform/selfDevelopment.ts";
+
+test("Live budget aborts on cumulative case tokens and costs across sessions, not snapshot sums", () => {
+  let aborted = 0;
+  const b = new LiveBudget(100, 5, () => aborted++);
+  const first = {},
+    second = {};
+  b.observe(30, 1, first);
+  b.observe(30, 1, first);
+  assert.equal(b.tokens, 30);
+  assert.equal(b.costUsd, 1);
+  b.observe(40, 2, second);
+  b.observe(70, 4, first);
+  assert.equal(b.tokens, 110);
+  assert.equal(b.costUsd, 6);
+  assert.ok(aborted);
+  assert.match(b.reason!, /budget/);
+});
+test("Live usage stream aborts the supplied signal and estimates unreported Antigravity cost", () => {
+  const controller = new AbortController();
+  const budget = new LiveBudget(100, 1, () => controller.abort(), 30);
+  liveRuntime.run(
+    {
+      cwd: "/tmp",
+      databaseUrl: "postgres://test/test",
+      observe: (...args) => budget.observe(...args),
+    },
+    () => {
+      const m = newMetrics("fake");
+      addUsage(m, { input_tokens: 80 });
+      assert.equal(controller.signal.aborted, false);
+      addUsage(m, { output_tokens: 30 });
+      assert.equal(controller.signal.aborted, true);
+      assert.equal(budget.tokens, 110);
+      observeLiveUsage(m);
+      assert.equal(budget.tokens, 110);
+    },
+  );
+});
+test("Live prerequisites fail closed for disabled connector, missing sequence and absent isolation", async () => {
+  const old = config.evaluation.liveEnabled;
+  try {
+    config.evaluation.liveEnabled = false;
+    const cfg = { max_tokens: 100, max_cost_usd: 1, provider_sequence: [{}] };
+    assert.match((await livePrerequisites(cfg))!, /off/);
+    config.evaluation.liveEnabled = true;
+    assert.match((await livePrerequisites({ ...cfg, provider_sequence: undefined }))!, /sequence/);
+    setBwrapForTests(null);
+    assert.match((await livePrerequisites(cfg))!, /bubblewrap/);
+  } finally {
+    config.evaluation.liveEnabled = old;
+    setBwrapForTests(undefined);
+  }
+});
+test("Ponytail A/B suite fixes four providers and two repetitions without enabling production", () => {
+  const configurations = ponytailConfigurations();
+  assert.equal(configurations.length, 8);
+  for (const provider of ["claude", "codex", "cursor", "antigravity"]) {
+    const pair = configurations.filter((c) => c.provider === provider);
+    assert.deepEqual(
+      pair.map((c) => c.ponytail),
+      [false, true],
+    );
+    assert.ok(pair.every((c) => c.repetitions === 2));
+  }
+  assert.deepEqual(eligiblePonytailRepositories([]), []);
+});
+test("Live child environment carries only throwaway database credentials", () => {
+  liveRuntime.run(
+    { cwd: "/tmp", databaseUrl: "postgres://test/platform_eval_test", observe: () => {} },
+    () => {
+      const env = agentEnvironment(
+        {
+          DATABASE_URL: "production",
+          AUTH_SECRET: "secret",
+          PGHOST: "production",
+          NODE_OPTIONS: "--require bad",
+          PATH: "/bin",
+        },
+        "codex",
+      );
+      assert.equal(env.DATABASE_URL, undefined);
+      assert.equal(env.AUTH_SECRET, undefined);
+      assert.equal(env.PGHOST, undefined);
+      assert.equal(env.NODE_OPTIONS, undefined);
+      assert.equal(env.TEST_DATABASE_URL, "postgres://test/platform_eval_test");
+    },
+  );
+});
+test("Evaluation archives remove credential files and symlinks before provider execution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ponytail-sanitize-"));
+  try {
+    await mkdir(join(root, "nested"));
+    await writeFile(join(root, "nested", ".env"), "secret");
+    await writeFile(join(root, "nested", "source.ts"), "export const n = 1;");
+    await symlink("/etc/passwd", join(root, "outside"));
+    await removeEvaluationSecrets(root);
+    await assert.rejects(readFile(join(root, "nested", ".env")));
+    await assert.rejects(readFile(join(root, "outside")));
+    assert.match(await readFile(join(root, "nested", "source.ts"), "utf8"), /export/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test("Ponytail metrics count changed-file token clones and added/removed LOC", () => {
+  const text = Array.from({ length: 60 }, (_, i) => `value${i}`).join(" ");
+  assert.equal(changedCloneCount({ a: text }, { a: text, b: text }), 2);
+  assert.deepEqual(diffFootprint("3\t2\ta.ts\n1\t0\tb.ts"), { added: 4, removed: 2, files: 2 });
+});
+
+test("Cursor incremental raw usage can abort before final result and unknown usage is not zero", async () => {
+  const { cursorUsage } = await import("../src/agent/cursor/stream.ts");
+  assert.equal(cursorUsage({ type: "assistant" }), null);
+  const usage = cursorUsage({ type: "assistant", usage: { input_tokens: 80, output_tokens: 40 } });
+  assert.ok(usage);
+  const controller = new AbortController();
+  const b = new LiveBudget(100, 1, () => controller.abort());
+  liveRuntime.run(
+    { cwd: "/tmp", databaseUrl: "test", observe: (...args) => b.observe(...args) },
+    () => observeLiveUsage({ tokens: usage.tokens, cost_usd: usage.cost }),
+  );
+  assert.equal(controller.signal.aborted, true);
+});
+
+test("Shared cohort budget limits the next arm by previous suite spend and uses configured estimates", async () => {
+  const { remainingLiveBudgets } = await import("../src/eval/liveRuntime.ts");
+  const limits = { max_tokens: 1000, max_cost_usd: 10, max_suite_cost_usd: 300 };
+  assert.deepEqual(remainingLiveBudgets(limits, { caseTokens: 100, caseCost: 1, suiteCost: 298 }), {
+    tokens: 900,
+    costUsd: 2,
+  });
+  assert.equal(
+    remainingLiveBudgets(limits, { caseTokens: 0, caseCost: 0, suiteCost: 300 }).costUsd,
+    0,
+  );
+  const budget = new LiveBudget(10000, 1, () => {}, 100);
+  budget.observe(5000, null);
+  assert.equal(budget.costUsd, 0.5);
+});
+
+test("Ponytail report aggregates actual persisted measurements and missing coverage remains unknown", async () => {
+  const { aggregatePonytailArm, renderPonytailReport, ponytailAcceptance } =
+    await import("../src/eval/ponytailReport.ts");
+  const configuration = { provider: "codex" as const, ponytail: false, repetitions: 2 };
+  const row = {
+    correct: true,
+    status: "PASS",
+    tokens: "120",
+    cost_usd: "0.5",
+    repairs: 1,
+    regression: false,
+    data: {
+      evidence: {
+        duration_ms: 2000,
+        details: {
+          evidence_kind: "live_provider",
+          footprint: { added: 10, removed: 5, files: 2 },
+          new_clones: 1,
+          context_tokens: [30, 20],
+          activation: [{ state: "activated" }, { state: "injected" }],
+        },
+      },
+    },
+  };
+  const result = aggregatePonytailArm(configuration, [row, row]);
+  assert.equal(result.tokens, 240);
+  assert.equal(result.contextTokens, 100);
+  assert.equal(result.costUsd, 1);
+  assert.equal(result.addedLoc, 20);
+  assert.equal(result.newClones, 2);
+  assert.equal(result.latencyMs, 2000);
+  assert.equal(result.activated, 2);
+  assert.equal(result.skills, 4);
+  assert.equal(result.coverageSignal, null);
+  assert.equal(
+    ponytailAcceptance(result, { ...result, ponytail: true, addedLoc: 5 }),
+    "INCONCLUSIVE",
+  );
+  assert.equal(
+    ponytailAcceptance(result, { ...result, ponytail: true, verificationPassRate: 0.5 }),
+    "FAIL",
+  );
+  assert.equal(aggregatePonytailArm(configuration, [{ ...row, status: "BLOCKED" }]).tokens, null);
+  const report = renderPonytailReport([result], "2026-11-13");
+  assert.match(report, /240/);
+  assert.match(report, /Activated \/ skills/);
+  assert.match(report, /n=2/);
+});

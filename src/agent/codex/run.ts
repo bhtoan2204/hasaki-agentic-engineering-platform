@@ -1,3 +1,4 @@
+import { liveRuntime } from "../../eval/liveRuntime.ts";
 import { agentEnvironment } from "../environment.ts";
 import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
@@ -303,13 +304,16 @@ export function codexArgs(inv: CodexInvocation): string[] {
   ];
   const coding = inv.mode === "coding";
   const cfg: Array<[string, unknown]> = [
-    ["sandbox_mode", coding ? "danger-full-access" : "read-only"],
+    [
+      "sandbox_mode",
+      coding ? (liveRuntime.getStore() ? "workspace-write" : "danger-full-access") : "read-only",
+    ],
     ["approval_policy", "never"],
     ["web_search", "disabled"],
   ];
   // Analysis stays inside the read-only sandbox. Coding does not: workspace-write blocks Unix socket binds
   // (local PostgreSQL) and network, which made the agent ask a human to run the suite.
-  if (!coding)
+  if (!coding || liveRuntime.getStore())
     cfg.push(
       ["sandbox_workspace_write.network_access", false],
       ["sandbox_workspace_write.writable_roots", []],

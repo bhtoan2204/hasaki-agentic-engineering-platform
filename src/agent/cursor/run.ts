@@ -1,3 +1,5 @@
+import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
+import { cursorUsage } from "./stream.ts";
 import { startBroker } from "../codex/broker.ts";
 import { agentEnvironment } from "../environment.ts";
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
@@ -132,6 +134,8 @@ export interface CursorTurnInput {
 }
 
 export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTurnResult> {
+  const usageBase = { ...input.metrics?.tokens };
+  const usageCostBase = input.metrics?.cost_usd ?? 0;
   const cap = await cursorCapabilities();
   if (!cap.ok)
     return { isError: true, text: cap.error || "Cursor CLI is not usable", assistantTurns: 0 };
@@ -182,7 +186,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       "--workspace",
       input.cwd,
       "--sandbox",
-      input.mode === "analysis" ? "enabled" : "disabled",
+      input.mode === "analysis" || liveRuntime.getStore() ? "enabled" : "disabled",
     ];
     if (input.mode === "analysis") args.push("--mode", "ask");
     else args.push("--force");
@@ -211,6 +215,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     };
     const onAbort = () => kill();
     input.ctx.signal.addEventListener("abort", onAbort, { once: true });
+    if (input.ctx.signal.aborted) kill();
     const timeoutMs = Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000);
     const timer = setTimeout(kill, timeoutMs);
 
@@ -255,6 +260,30 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       const toolId = ev.call_id
         ? `${input.invocationId ?? input.ctx.attempt.id}:${ev.call_id}`
         : undefined;
+      const usage = cursorUsage(ev.raw);
+      if (input.metrics && usage) {
+        input.metrics.tokens ??= {
+          input: null,
+          output: null,
+          cache_read: null,
+          cache_creation: null,
+        };
+        for (const [field, value] of Object.entries(usage.tokens)) {
+          if (value != null) {
+            const key = field as keyof NonNullable<AgentMetrics["tokens"]>;
+            input.metrics.tokens[key] = Math.max(
+              input.metrics.tokens[key] ?? 0,
+              (usageBase[key] ?? 0) + value,
+            );
+          }
+        }
+        if (usage.cost != null)
+          input.metrics.cost_usd = Math.max(
+            input.metrics.cost_usd ?? 0,
+            usageCostBase + usage.cost,
+          );
+        observeLiveUsage(input.metrics);
+      }
       if (ev.type === "system" && ev.subtype === "init" && ev.session_id) {
         sessionId = ev.session_id;
         model = ev.model || "";
