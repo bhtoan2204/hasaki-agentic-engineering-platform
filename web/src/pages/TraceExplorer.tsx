@@ -37,6 +37,7 @@ interface Finding {
 
 const LEVELS = ["", "DEBUG", "INFO", "WARN", "ERROR"];
 const LOG_PAGE = 500;
+const LOG_BUDGET = 4 * LOG_PAGE;
 const REFRESH_MS = 1500;
 
 function flatten(n: TraceNode, depth = 0, out: Array<{ node: TraceNode; depth: number }> = []) {
@@ -47,16 +48,13 @@ function flatten(n: TraceNode, depth = 0, out: Array<{ node: TraceNode; depth: n
 
 const startOf = (n: TraceNode) => (n.startedAt ? new Date(n.startedAt).getTime() : null);
 
-/**
- * Execution Trace Explorer: tree + waterfall of Run → Step → Attempt → Tool, structured logs and a deterministic
- * failure diagnosis. Reloads at most every REFRESH_MS on live events (`activity`, driven by the existing SSE stream);
- * logs load incrementally, page after page until the server has no more.
- */
+/** Logs load LOG_BUDGET rows at a time; "load more" raises the budget instead of paging without bound. */
 export function TraceExplorer({ runId, activity }: { runId: number; activity: number }) {
   const { t } = useI18n();
   const [root, setRoot] = useState<TraceNode | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<LogRow[]>([]);
+  const [logPages, setLogPages] = useState<LogRow[][]>([]);
+  const [moreLogs, setMoreLogs] = useState(false);
   const [level, setLevel] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [findings, setFindings] = useState<Finding[] | null>(null);
@@ -68,10 +66,15 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
   const logsBusy = useRef(false);
   const logsAgain = useRef(false);
   const lastLoad = useRef(0);
+  const loaded = useRef(0);
+  const budget = useRef(LOG_BUDGET);
 
   useEffect(() => {
     setRoot(null);
-    setLogs([]);
+    setLogPages([]);
+    setMoreLogs(false);
+    loaded.current = 0;
+    budget.current = LOG_BUDGET;
     setFindings(null);
     last.current = 0;
     applied.current = ++requested.current;
@@ -105,13 +108,19 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
       do {
         logsAgain.current = false;
         for (;;) {
+          if (loaded.current >= budget.current) {
+            setMoreLogs(true);
+            break;
+          }
           const rows = await api<LogRow[]>(
             `/api/runs/${runId}/logs?after=${last.current}&limit=${LOG_PAGE}`,
           );
           if (mine !== epoch.current) return;
+          if (rows.length < LOG_PAGE) setMoreLogs(false);
           if (!rows.length) break;
           last.current = rows[rows.length - 1].id;
-          setLogs((prev) => [...prev, ...rows]);
+          loaded.current += rows.length;
+          setLogPages((prev) => [...prev, rows]);
           if (rows.length < LOG_PAGE) break;
         }
       } while (logsAgain.current);
@@ -146,7 +155,13 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
     }
   }, [runId]);
 
+  const loadMoreLogs = useCallback(() => {
+    budget.current = loaded.current + LOG_BUDGET;
+    void loadLogs();
+  }, [loadLogs]);
+
   const rows = useMemo(() => (root ? flatten(root) : []), [root]);
+  const logs = useMemo(() => logPages.flat(), [logPages]);
   const origin = root ? (startOf(root) ?? Math.min(...rows.map((r) => startOf(r.node) ?? Infinity))) : 0;
   const span = Math.max(
     1,
@@ -254,6 +269,11 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
             </span>
           </div>
         ))}
+        {moreLogs && (
+          <button className="sm" onClick={loadMoreLogs}>
+            {t("trace.loadMore")}
+          </button>
+        )}
       </div>
     </div>
   );
