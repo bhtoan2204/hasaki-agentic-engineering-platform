@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoLayout, edgeEnds } from "../web/src/dagLayout.ts";
+import { autoLayout, edgeEnds, placeSteps } from "../web/src/dagLayout.ts";
 
 const chain = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -60,4 +60,33 @@ test("a diamond inside a long chain keeps every band aligned", () => {
   assert.ok(pos.test.y > pos.sec.y);
   assert.ok(["pr", "cleanup", "result"].every((k) => pos[k].y === pos.test.y));
   assert.ok(pos.result.x < pos.cleanup.x && pos.cleanup.x < pos.pr.x);
+});
+
+test("steps added without a saved position go under their parent; nothing placed earlier moves", () => {
+  const saved = chain(3).map((s, i) => ({ ...s, ui: { x: i * 300, y: 0 } }));
+  const first = [...saved, { key: "report", depends_on: ["c"] }];
+  const pos = placeSteps(first);
+  for (const s of saved) assert.deepEqual(pos[s.key], s.ui);
+  assert.equal(pos.report.x, 600);
+  assert.ok(pos.report.y > 0);
+  const more = placeSteps([
+    ...first,
+    { key: "sub1", depends_on: ["b"] },
+    { key: "sub2", depends_on: ["b"] },
+  ]);
+  assert.deepEqual(more.report, pos.report);
+  assert.equal(more.sub1.x, 300);
+  assert.notDeepEqual(more.sub1, more.sub2);
+  const all = Object.values(more).map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(all).size, all.length);
+});
+
+test("without saved positions the graph is auto-laid out; a full saved layout is kept as is", () => {
+  assert.deepEqual(placeSteps(chain(6)), autoLayout(chain(6)));
+  const arranged = chain(3).map((s, i) => ({ ...s, ui: { x: i * 300, y: 50 } }));
+  assert.deepEqual(placeSteps(arranged), {
+    a: { x: 0, y: 50 },
+    b: { x: 300, y: 50 },
+    c: { x: 600, y: 50 },
+  });
 });

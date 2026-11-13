@@ -59,6 +59,27 @@ export function autoLayout(steps: LayoutStep[]): Record<string, { x: number; y: 
   return pos;
 }
 
+// Steps added later (report, subtasks) are placed in order, under their parent: earlier nodes never move.
+export function placeSteps(
+  steps: Array<LayoutStep & { ui?: { x: number; y: number } }>,
+): Record<string, { x: number; y: number }> {
+  const saved = steps.filter((s) => s.ui);
+  if (!saved.length) return autoLayout(steps);
+  const pos = Object.fromEntries(saved.map((s) => [s.key, s.ui!]));
+  const taken = new Set(saved.map((s) => `${s.ui!.x},${s.ui!.y}`));
+  const left = Math.min(...saved.map((s) => s.ui!.x));
+  const below = Math.max(...saved.map((s) => s.ui!.y)) + DY;
+  for (const s of steps.filter((x) => !x.ui)) {
+    const parents = (s.depends_on ?? []).map((d) => pos[d]).filter(Boolean);
+    const x = parents.length ? Math.max(...parents.map((p) => p.x)) : left;
+    let y = Math.max(below, ...parents.map((p) => p.y + DY));
+    while (taken.has(`${x},${y}`)) y += SY;
+    taken.add(`${x},${y}`);
+    pos[s.key] = { x, y };
+  }
+  return pos;
+}
+
 /** Side handles within a band; bottom to top where the band turns. */
 export function edgeEnds(
   src: { x: number; y: number },

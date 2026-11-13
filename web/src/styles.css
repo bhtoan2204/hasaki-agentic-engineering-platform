@@ -1855,6 +1855,9 @@ details > summary {
   overflow: hidden;
   box-shadow: var(--shadow-2);
 }
+.react-flow__controls-button.on {
+  color: var(--accent);
+}
 
 /* transcript */
 .tl-filters {
