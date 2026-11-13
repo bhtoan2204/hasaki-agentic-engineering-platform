@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promises";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { join } from "node:path";
-import { tmpdir, hostname } from "node:os";
+import { tmpdir } from "node:os";
 import {
   LiveBudget,
   liveRuntime,
@@ -12,7 +10,6 @@ import {
   setLiveUsageOffset,
 } from "../src/eval/liveRuntime.ts";
 import { livePrerequisites } from "../src/eval/livePrerequisites.ts";
-import { processStartTime } from "../src/instances.ts";
 import { config } from "../src/config.ts";
 import { changedCloneCount, diffFootprint } from "../src/eval/ponytailMetrics.ts";
 import {
@@ -21,12 +18,7 @@ import {
   materializePonytailSuite,
 } from "../src/eval/ponytailSuite.ts";
 import { agentEnvironment } from "../src/agent/environment.ts";
-import {
-  EVALUATION_DATABASE_MARKER,
-  liveAllowedTools,
-  removeEvaluationSecrets,
-  sweepEvaluationDatabases,
-} from "../src/eval/liveProvider.ts";
+import { liveAllowedTools, removeEvaluationSecrets } from "../src/eval/liveProvider.ts";
 import { liveClaudeSandbox } from "../src/eval/liveSandbox.ts";
 import { background, settleBackground } from "../src/workflow/background.ts";
 import type { RepositoryRow } from "../src/repos/service.ts";
@@ -307,90 +299,6 @@ test("Ponytail suite excludes repositories that are this platform under another 
     );
   } finally {
     config.platform.repositoryUrl = old;
-  }
-});
-const DEAD_PID = 2 ** 30;
-async function fakeDatabase(data: string, owner: object | null) {
-  await mkdir(data, { recursive: true });
-  await writeFile(join(data, "PG_VERSION"), "17");
-  if (owner) await writeFile(join(data, EVALUATION_DATABASE_MARKER), JSON.stringify(owner));
-  return join(data, "PG_VERSION");
-}
-test("Worker start sweeps orphaned evaluation databases", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
-  try {
-    const live = join(root, "1", "2", "live");
-    const orphan = await fakeDatabase(join(live, "database-00000000-0000-4000-8000-000000000001"), {
-      pid: DEAD_PID,
-      host: hostname(),
-    });
-    await writeFile(join(live, "keep.txt"), "x");
-    await sweepEvaluationDatabases(root);
-    await assert.rejects(readFile(orphan));
-    await readFile(join(live, "keep.txt"));
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-async function sleeper(argv0: string) {
-  const child = spawn("sleep", ["300"], { argv0, stdio: "ignore" });
-  await once(child, "spawn");
-  return child;
-}
-test("Database sweep leaves live owners, other hosts and repository content alone", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
-  const postmaster = await sleeper("postgres");
-  try {
-    const live = join(root, "1", "2", "live");
-    const id = (n: number) => `database-00000000-0000-4000-8000-00000000000${n}`;
-    const kept = [
-      await fakeDatabase(join(live, id(1)), { pid: process.pid, host: hostname() }),
-      await fakeDatabase(join(live, id(2)), { pid: DEAD_PID, host: `${hostname()}-other` }),
-      await fakeDatabase(join(live, id(3)), null),
-      await fakeDatabase(join(live, "repo", id(4)), { pid: DEAD_PID, host: hostname() }),
-      await fakeDatabase(join(live, id(6)), {
-        pid: process.pid,
-        host: hostname(),
-        started: processStartTime(process.pid),
-      }),
-      await fakeDatabase(join(live, "database-tool"), { pid: DEAD_PID, host: hostname() }),
-      await fakeDatabase(join(root, id(5)), { pid: DEAD_PID, host: hostname() }),
-    ];
-    await writeFile(join(live, id(3), "postmaster.pid"), `${postmaster.pid}\n${live}\n`);
-    await sweepEvaluationDatabases(root);
-    for (const path of kept) await readFile(path);
-  } finally {
-    postmaster.kill();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-test("Database sweep removes recycled-PID owners and leaves marker-less or malformed ones alone", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
-  const other = await sleeper("node");
-  try {
-    const live = join(root, "1", "2", "live");
-    const id = (n: number) => `database-00000000-0000-4000-8000-00000000000${n}`;
-    const malformed = await fakeDatabase(join(live, id(1)), null);
-    await writeFile(join(live, id(1), EVALUATION_DATABASE_MARKER), "");
-    const creating = await fakeDatabase(join(live, id(2)), null);
-    const creatingDeadPostmaster = await fakeDatabase(join(live, id(3)), null);
-    await writeFile(join(live, id(3), "postmaster.pid"), `${DEAD_PID}\n`);
-    const recycledSelf = await fakeDatabase(join(live, id(4)), {
-      pid: process.pid,
-      host: hostname(),
-      started: "1",
-    });
-    const recycledOther = await fakeDatabase(join(live, id(5)), {
-      pid: other.pid,
-      host: hostname(),
-      started: "1",
-    });
-    await sweepEvaluationDatabases(root);
-    for (const path of [malformed, creating, creatingDeadPostmaster]) await readFile(path);
-    for (const path of [recycledSelf, recycledOther]) await assert.rejects(readFile(path), path);
-  } finally {
-    other.kill();
-    await rm(root, { recursive: true, force: true });
   }
 });
 test("Live configurations can only narrow the sandboxed tool set", () => {

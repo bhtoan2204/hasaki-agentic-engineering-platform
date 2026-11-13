@@ -714,81 +714,122 @@ test("live configurations reject tools outside the sandboxed set instead of drop
   await assert.rejects(live([]), { status: 400 });
   assert.ok(await live(["Read", "Bash"]));
 });
-test("live work of a case is swept only once its chain is over", async () => {
-  const { sweepInactiveLiveWork } = await import("../src/eval/liveProvider.ts");
+async function leftover(status: string | null) {
   const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
-  const { recordWorkspace } = await import("../src/git/provider.ts");
-  const { mkdir, writeFile, readFile, stat, rm } = await import("node:fs/promises");
+  const { mkdir, writeFile } = await import("node:fs/promises");
   const { join } = await import("node:path");
   const e = await evaluation(["claude"]);
   const cr = await one(pool, "SELECT id FROM evaluation_case_runs WHERE evaluation_id=$1", [e.id]);
+  if (status)
+    await q(pool, "UPDATE workflow_runs SET status=$2 WHERE id=$1", [e.workflow_run_id, status]);
   const root = liveWorkRoot(e.id, cr!.id);
-  const edited = join(root, "repo", "edited.txt");
   await mkdir(join(root, "repo"), { recursive: true });
-  await writeFile(edited, "phase 0 edits");
-  await recordWorkspace(e.workflow_run_id, {
-    repo: "sweep-repo",
-    path: join(root, "repo"),
+  await writeFile(join(root, "repo", "edited.txt"), "phase edits");
+  return { e, caseRunId: String(cr!.id), root };
+}
+test("eval:cleanup lists by default and with --yes removes only COMPLETED or CANCELED cases inside evaluation-work", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { recordWorkspace } = await import("../src/git/provider.ts");
+  const { mkdtemp, writeFile, symlink, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const completed = await leftover("COMPLETED");
+  const canceled = await leftover(null);
+  await cancelEvaluation(canceled.e.id, owner.id);
+  const failed = await leftover("FAILED");
+  const running = await leftover(null);
+  await recordWorkspace(completed.e.workflow_run_id, {
+    repo: "cleanup-repo",
+    path: join(completed.root, "repo"),
     branch: "main",
     created_from: "base",
   });
-  const unknown = liveWorkRoot(987654321, 987654321);
-  await mkdir(unknown, { recursive: true });
+  const outside = await mkdtemp(join(tmpdir(), "eval-cleanup-outside-"));
+  await writeFile(join(outside, "keep.txt"), "x");
+  const linked = await leftover("COMPLETED");
+  await rm(linked.root, { recursive: true });
+  await symlink(outside, linked.root);
+  const all = [completed, canceled, failed, running];
   try {
-    await sweepInactiveLiveWork();
-    assert.equal(await readFile(edited, "utf8"), "phase 0 edits");
-    await stat(unknown);
-    await cancelEvaluation(e.id, owner.id);
-    await sweepInactiveLiveWork();
-    await assert.rejects(stat(join(root, "..", "..")));
-    await stat(unknown);
+    const listed = await evalCleanup();
+    for (const c of all) assert.ok(listed.some((r) => r.case_run_id === c.caseRunId && !r.removed));
+    assert.ok(!listed.some((r) => r.case_run_id === linked.caseRunId));
+    for (const c of all) await stat(join(c.root, "repo", "edited.txt"));
+    const report = await evalCleanup({ yes: true });
+    const removed = report.filter((r) => r.removed).map((r) => r.case_run_id);
+    for (const c of [completed, canceled]) {
+      assert.ok(removed.includes(c.caseRunId));
+      await assert.rejects(stat(dirname(dirname(c.root))));
+    }
+    for (const c of [failed, running]) {
+      assert.ok(!removed.includes(c.caseRunId));
+      await stat(join(c.root, "repo", "edited.txt"));
+    }
+    await stat(join(outside, "keep.txt"));
     const rows = await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [
-      e.workflow_run_id,
+      completed.e.workflow_run_id,
     ]);
     assert.equal(rows.length, 0);
   } finally {
-    await rm(join(unknown, "..", ".."), { recursive: true, force: true });
+    for (const c of [...all, linked])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
-test("live work survives a skipped phase while its case still waits or the run is paused", async () => {
-  const { sweepInactiveLiveWork } = await import("../src/eval/liveProvider.ts");
-  const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
-  const { mkdir, writeFile, readFile, stat } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const e = await evaluation(["claude"]);
-  const cr = await one(
-    pool,
-    "SELECT id, workflow_step_key FROM evaluation_case_runs WHERE evaluation_id=$1",
-    [e.id],
-  );
-  const phase = await one(
-    pool,
-    "SELECT step_key FROM evaluation_provider_phases WHERE case_run_id=$1 ORDER BY ordinal LIMIT 1",
-    [cr!.id],
-  );
-  const step = (key: string, status: string) =>
-    q(pool, "UPDATE workflow_steps SET status=$3 WHERE run_id=$1 AND key=$2", [
-      e.workflow_run_id,
-      key,
-      status,
-    ]);
-  const root = liveWorkRoot(e.id, cr!.id);
-  const kept = join(root, "repo", "kept.txt");
-  await mkdir(join(root, "repo"), { recursive: true });
-  await writeFile(kept, "phase 0 edits");
-  await step(phase!.step_key, "SKIPPED");
-  await step(cr!.workflow_step_key, "WAITING_APPROVAL");
-  await sweepInactiveLiveWork();
-  assert.equal(await readFile(kept, "utf8"), "phase 0 edits");
-  await step(cr!.workflow_step_key, "PENDING");
-  await q(pool, "UPDATE workflow_runs SET status='PAUSED' WHERE id=$1", [e.workflow_run_id]);
-  await sweepInactiveLiveWork();
-  assert.equal(await readFile(kept, "utf8"), "phase 0 edits");
-  await q(pool, "UPDATE workflow_runs SET status='CANCELED' WHERE id=$1", [e.workflow_run_id]);
-  await sweepInactiveLiveWork();
-  await assert.rejects(stat(root));
+test("eval:cleanup --case removes one case regardless of status, stopping its postmaster first", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { mkdtemp, readFile, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { randomUUID } = await import("node:crypto");
+  const { execFileSync } = await import("node:child_process");
+  const failed = await leftover("FAILED");
+  const other = await leftover("FAILED");
+  const data = join(failed.root, `database-${randomUUID()}`);
+  const socket = await mkdtemp(join(tmpdir(), "eval-cleanup-sock-"));
+  try {
+    execFileSync("initdb", ["-D", data, "-U", "platform_eval", "-A", "trust", "--no-locale"], {
+      stdio: "ignore",
+    });
+    execFileSync(
+      "pg_ctl",
+      [
+        "-D",
+        data,
+        "-l",
+        join(socket, "log"),
+        "-o",
+        `-c listen_addresses='' -c unix_socket_directories='${socket}'`,
+        "-w",
+        "start",
+      ],
+      { stdio: "ignore" },
+    );
+    const pid = Number((await readFile(join(data, "postmaster.pid"), "utf8")).split("\n")[0]);
+    const listed = await evalCleanup({ caseRunId: failed.caseRunId });
+    assert.equal(
+      listed.find((r) => r.case_run_id === failed.caseRunId)?.databases[0].postmaster,
+      true,
+    );
+    await stat(data);
+    const report = await evalCleanup({ yes: true, caseRunId: failed.caseRunId });
+    assert.equal(report.find((r) => r.case_run_id === failed.caseRunId)?.removed, true);
+    assert.equal(report.find((r) => r.case_run_id === other.caseRunId)?.removed, false);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assert.rejects(stat(failed.root));
+    await stat(join(other.root, "repo", "edited.txt"));
+  } finally {
+    try {
+      execFileSync("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
+    } catch {
+      // already stopped and removed
+    }
+    for (const c of [failed, other])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+    await rm(socket, { recursive: true, force: true });
+  }
 });
-test("baseline live arms, even those frozen before the ponytail flag, never resolve Ponytail skills", async () => {
+test("only pilot live arms resolve Ponytail skills, including arms frozen before the ponytail flag", async () => {
   const { planExternalSkills, applyExternalSkills } =
     await import("../src/knowledge/externalImport.ts");
   const { resolveContext, buildStepInput } = await import("../src/workflow/context.ts");

@@ -7,7 +7,6 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { config } from "./config.ts";
 import { startInstanceHeartbeat } from "./instances.ts";
-import { sweepEvaluationDatabases, sweepInactiveLiveWork } from "./eval/liveProvider.ts";
 import { validateLocalConfiguration } from "./startupValidation.ts";
 import { handle } from "./http/app.ts";
 import { migrate } from "./db/migrate.ts";
@@ -88,14 +87,6 @@ await new Promise<void>((resolve, reject) => {
 });
 console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
 
-const evaluationSweep = async () => {
-  for (const sweep of [sweepEvaluationDatabases, sweepInactiveLiveWork])
-    await sweep().catch((e) => console.warn(`evaluation sweep failed: ${(e as Error).message}`));
-};
-if (config.evaluation.enabled) {
-  await evaluationSweep();
-  setInterval(() => void evaluationSweep(), 3_600_000).unref();
-}
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();

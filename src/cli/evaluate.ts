@@ -73,9 +73,6 @@ let heartbeat: Awaited<ReturnType<typeof startInstanceHeartbeat>> | undefined;
 try {
   await migrate();
   heartbeat = await startInstanceHeartbeat();
-  const sweeps = await import("../eval/liveProvider.ts");
-  for (const sweep of [sweeps.sweepEvaluationDatabases, sweeps.sweepInactiveLiveWork])
-    await sweep().catch((e) => console.warn(`evaluation sweep failed: ${(e as Error).message}`));
   registerDefaultExecutors();
   let owner = (
     await pool.query("SELECT id FROM users WHERE username='benchmark-fixture-owner' AND active")

@@ -1,6 +1,8 @@
 import { ownsInstance } from "../instances.ts";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { pool, q, one, withTx } from "../db/pool.ts";
 import { config } from "../config.ts";
 import { CaseSchema } from "./dataset.ts";
@@ -10,6 +12,12 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 export const liveWorkRoot = (evaluationId: unknown, caseRunId: unknown) =>
   join(config.dataDir, "evaluation-work", String(evaluationId), String(caseRunId), "live");
+// pg_ctl status exits 3 (not running) or 4 (no data directory); anything else counts as running.
+export const postmasterRunning = (data: string) =>
+  promisify(execFile)("pg_ctl", ["status", "-D", data], { timeout: 15000 }).then(
+    () => true,
+    (error: { code?: unknown }) => error.code !== 3 && error.code !== 4,
+  );
 export async function cleanupLiveWork(runId: number, root: string) {
   await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path LIKE $2", [
     runId,

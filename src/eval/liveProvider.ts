@@ -1,14 +1,12 @@
-import { mkdir, rm, rmdir, readdir, lstat, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, rm, readdir, lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { hostname } from "node:os";
 import pg from "pg";
 import type { z } from "zod";
-import { config } from "../config.ts";
-import { one, pool, q } from "../db/pool.ts";
+import { one, pool } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { repositories } from "../repos/service.ts";
 import { effectivePermissions } from "../repos/access.ts";
@@ -16,11 +14,10 @@ import { resolveRepoPath } from "../repos/paths.ts";
 import { recordWorkspace } from "../git/provider.ts";
 import { claudeExecutor } from "../agent/claude.ts";
 import { isSecretPath } from "../agent/toolPolicy.ts";
-import { previousProcessGone, processAlive, processStartTime } from "../instances.ts";
 import { CaseSchema } from "./dataset.ts";
 import { fixtureGit, fixtureName, fixtureRoot } from "./fixtures.ts";
 import { livePrerequisites } from "./livePrerequisites.ts";
-import { cleanupLiveWork, liveWorkRoot } from "./liveCase.ts";
+import { cleanupLiveWork, liveWorkRoot, postmasterRunning } from "./liveCase.ts";
 import { LiveBudget, liveRuntime, remainingLiveBudgets } from "./liveRuntime.ts";
 import type { ConfigurationSchema } from "./configuration.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
@@ -46,7 +43,6 @@ const LIVE_ALLOWED_TOOLS = [
 // Wider than the agent tool policy: archives of real repositories also carry build/deploy credentials.
 const EVALUATION_SECRET =
   /^(credentials|\.npmrc|\.netrc|\.pgpass|\.git-credentials|\.pypirc|\.dockercfg|secrets?\..+|application[^/]*\.(ya?ml|properties))$|\.(p12|pfx|jks|keystore)$/i;
-export const EVALUATION_DATABASE_MARKER = "platform-evaluation-owner.json";
 export const liveAllowedTools = (requested?: string[] | null) =>
   requested ? LIVE_ALLOWED_TOOLS.filter((t) => requested.includes(t)) : LIVE_ALLOWED_TOOLS;
 export const unsupportedLiveTools = (requested: string[]) =>
@@ -81,89 +77,9 @@ async function stopIsolatedDatabase(data: string) {
     env,
     timeout: 15000,
   }).catch(() => {});
-  const postmaster = Number(
-    (await readFile(join(data, "postmaster.pid"), "utf8").catch(() => "")).split("\n")[0],
-  );
-  if (postmaster && processAlive(postmaster, "postgres"))
-    throw new Error(`postmaster ${postmaster} still serves ${data}; left in place`);
+  if (await postmasterRunning(data))
+    throw new Error(`postmaster still serves ${data}; left in place`);
   await rm(data, { recursive: true, force: true });
-}
-const subdirectories = async (dir: string) =>
-  (await readdir(dir, { withFileTypes: true }).catch(() => []))
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name);
-const isDatabaseDir = (name: string) => /^database-[0-9a-f-]{36}$/.test(name);
-const logSweep = (message: string) => console.warn(`live evaluation sweep: ${message}`);
-/** A crashed worker leaves throwaway postmasters behind; stop and remove those whose recorded owner is provably gone. */
-export async function sweepEvaluationDatabases(root = join(config.dataDir, "evaluation-work")) {
-  const me = { host: hostname(), pid: process.pid };
-  // Only liveWorkRoot()/database-* is ours; never descend into extracted repository workspaces.
-  for (const evaluation of await subdirectories(root))
-    for (const caseRun of await subdirectories(join(root, evaluation))) {
-      const live = join(root, evaluation, caseRun, "live");
-      for (const name of (await subdirectories(live)).filter(isDatabaseDir)) {
-        const data = join(live, name);
-        try {
-          const marker = await readFile(join(data, EVALUATION_DATABASE_MARKER), "utf8").catch(
-            () => null,
-          );
-          if (marker === null) {
-            logSweep(`${data} has no owner marker; left in place`);
-            continue;
-          }
-          if (previousProcessGone(JSON.parse(marker), me)) await stopIsolatedDatabase(data);
-        } catch (error) {
-          logSweep(`${data} left in place: ${(error as Error).message}`);
-        }
-      }
-    }
-}
-/** Remove live work of cases that provably ended: run or case step terminal, and nothing of the case still active. */
-export async function sweepInactiveLiveWork(root = join(config.dataDir, "evaluation-work")) {
-  const found = [];
-  for (const evaluation of await subdirectories(root))
-    for (const caseRun of await subdirectories(join(root, evaluation)))
-      if (/^\d+$/.test(evaluation) && /^\d+$/.test(caseRun)) found.push({ evaluation, caseRun });
-  if (!found.length) return;
-  const rows = await q(
-    pool,
-    `WITH steps AS (
-       SELECT cr.id AS case_run_id, s.id, s.status
-       FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
-       JOIN workflow_steps s ON s.run_id=e.workflow_run_id AND (s.key=cr.workflow_step_key
-         OR s.key IN (SELECT p.step_key FROM evaluation_provider_phases p WHERE p.case_run_id=cr.id))
-       WHERE cr.id=ANY($1::bigint[]))
-     SELECT cr.id::text AS case_run_id, cr.evaluation_id::text AS evaluation_id, e.workflow_run_id,
-       (r.status IN ('COMPLETED','FAILED','CANCELED') OR c.status IN ('COMPLETED','FAILED','CANCELED'))
-       AND NOT EXISTS(SELECT 1 FROM steps s WHERE s.case_run_id=cr.id
-         AND s.status IN ('READY','RUNNING','RETRYING','WAITING_INPUT','WAITING_APPROVAL'))
-       AND NOT EXISTS(SELECT 1 FROM steps s JOIN workflow_jobs j ON j.step_id=s.id
-         WHERE s.case_run_id=cr.id AND j.status IN ('queued','running'))
-       AND NOT EXISTS(SELECT 1 FROM steps s JOIN workflow_step_attempts a ON a.step_id=s.id
-         WHERE s.case_run_id=cr.id AND a.status IN ('RUNNING','WAITING_INPUT','WAITING_APPROVAL')) AS ended
-     FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
-     JOIN workflow_runs r ON r.id=e.workflow_run_id
-     LEFT JOIN workflow_steps c ON c.run_id=r.id AND c.key=cr.workflow_step_key
-     WHERE cr.id=ANY($1::bigint[])`,
-    [found.map((f) => f.caseRun)],
-  );
-  for (const { evaluation, caseRun } of found) {
-    const row = rows.find((r) => r.case_run_id === caseRun && r.evaluation_id === evaluation);
-    const dir = join(root, evaluation, caseRun);
-    if (!row) logSweep(`${dir} has no matching case run; left in place`);
-    if (!row?.ended) continue;
-    const live = join(dir, "live");
-    try {
-      for (const name of (await subdirectories(live)).filter(isDatabaseDir))
-        await stopIsolatedDatabase(join(live, name));
-      await cleanupLiveWork(Number(row.workflow_run_id), live);
-      await rmdir(dir);
-      await rmdir(join(root, evaluation));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY")
-        logSweep(`${dir} left in place: ${(error as Error).message}`);
-    }
-  }
 }
 async function isolatedDatabase(root: string) {
   const data = join(root, `database-${randomUUID()}`);
@@ -176,17 +92,6 @@ async function isolatedDatabase(root: string) {
   );
   let started = false;
   try {
-    const marker = join(data, EVALUATION_DATABASE_MARKER);
-    await writeFile(
-      `${marker}.tmp`,
-      JSON.stringify({
-        pid: process.pid,
-        host: hostname(),
-        instance: config.instanceId,
-        started: processStartTime(process.pid),
-      }),
-    );
-    await rename(`${marker}.tmp`, marker);
     await mkdir(socket, { mode: 0o700 });
     await exec(
       "pg_ctl",
