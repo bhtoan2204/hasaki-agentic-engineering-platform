@@ -34,6 +34,7 @@ import {
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import { integrationExecutor } from "../src/workflow/executors/builtin.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
+import { clearProviderHealthForTests } from "../src/agent/health.ts";
 import { repositories } from "../src/repos/service.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
 import { ensureContextPack } from "../src/context/pack.ts";
@@ -86,6 +87,7 @@ before(async () => {
   });
   registerExecutor("integration", integrationExecutor);
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
+  clearProviderHealthForTests();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -96,6 +98,7 @@ afterEach(async () => {
       await cancelRun(id);
   await settleBackground();
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
+  clearProviderHealthForTests();
 });
 after(async () => {
   setHandoffReadinessForTests(undefined);
@@ -115,7 +118,7 @@ async function run(provider = "claude", fallback: any = {}, extra: any = {}) {
           type: "coding_agent",
           config: {
             instructions: "Preserve original business constraints and finish the task",
-            agent: { provider, fallback, ...extra },
+            agent: { provider, fallback: { auto_health: false, ...fallback }, ...extra },
           },
         },
       ],
@@ -817,4 +820,46 @@ test("an in-flight automatic handoff scan does not start another, and the follow
   await reconcileAutomaticHandoff();
   assert.equal((await checkpoint(first.id)).target_provider, "codex");
   assert.equal((await checkpoint(second.id)).target_provider, "codex");
+});
+
+test("a disconnected agent starts on the next healthy provider without a switch step", async () => {
+  setHandoffReadinessForTests(async (agent) => ({
+    ok: agent.provider !== "claude",
+    error: agent.provider === "claude" ? "not connected" : undefined,
+    quota: "unknown",
+    cost: "unknown",
+  }));
+  const r = await run("claude", { auto_health: true, providers: ["claude", "codex", "cursor"] });
+  execute = async (ctx) => {
+    assert.equal(ctx.attempt.agent_provider, "codex");
+    return { kind: "completed", output: { continued: true } };
+  };
+  await once();
+  await settleBackground();
+  const finished = await getRun(r.id);
+  assert.equal(
+    finished.steps[0].status,
+    "COMPLETED",
+    JSON.stringify({
+      run: finished.status,
+      step: finished.steps[0].status,
+      error: finished.steps[0].error,
+      attempts: finished.attempts?.map((a: any) => ({
+        provider: a.agent_provider,
+        status: a.status,
+        error: a.error,
+      })),
+    }),
+  );
+});
+
+test("quota exhaustion continues on the next healthy provider without waiting for a manual switch", async () => {
+  const r = await run("claude", { auto_health: true, providers: ["claude", "codex", "cursor"] });
+  await quota();
+  await once();
+  const h = await checkpoint(r.id);
+  assert.equal(h.status, "RESUMED", h.blocked_reason ?? h.status);
+  assert.equal(h.failure_category, "QUOTA_EXHAUSTED");
+  assert.equal(h.target_provider, "codex");
+  assert.equal((await getRun(r.id)).steps[0].agent_override.provider, "codex");
 });

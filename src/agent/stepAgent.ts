@@ -14,6 +14,8 @@ export const FallbackPolicy = z
     max_switches: z.number().int().min(0).max(10).default(2),
     allow_unknown_cost: z.boolean().default(false),
     allow_budget_failure: z.boolean().default(false),
+    /** When the chosen agent is disconnected or out of quota, start the next healthy provider. No manual switch step. */
+    auto_health: z.boolean().default(true),
     max_reported_cost_usd: z.number().nonnegative().optional(),
     max_reported_tokens: z.number().int().nonnegative().optional(),
   })

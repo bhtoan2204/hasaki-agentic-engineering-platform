@@ -71,6 +71,21 @@ export function StepAgentFields({
           <label>
             <input
               type="checkbox"
+              checked={value.fallback?.auto_health ?? true}
+              onChange={(e) =>
+                set("fallback", {
+                  ...value.fallback,
+                  auto_health: e.target.checked,
+                })
+              }
+            />
+            {en
+              ? "Skip an agent that is disconnected or out of quota and use the next healthy one"
+              : "Bỏ agent mất kết nối hoặc hết hạn mức và dùng agent khỏe kế tiếp"}
+          </label>
+          <label>
+            <input
+              type="checkbox"
               checked={value.fallback?.allow_unknown_cost ?? false}
               onChange={(e) =>
                 set("fallback", {

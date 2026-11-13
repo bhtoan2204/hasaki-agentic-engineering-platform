@@ -9,6 +9,7 @@ import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
 import {
   beginAttempt,
+  continueHealthyHandoffForAttempt,
   finishAttempt,
   heartbeat,
   prepareProviderPause,
@@ -323,6 +324,9 @@ export async function processJob(
     clearInterval(hb);
     localJobs.unregister(job.id);
   }
+  await continueHealthyHandoffForAttempt(begun.attempt.id).catch((e) =>
+    console.error("healthy provider continuation:", (e as Error).message),
+  );
 }
 
 /** Claim and execute at most one job. Returns false when the queue had nothing runnable. Used by tests. */

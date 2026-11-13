@@ -26,6 +26,13 @@ import {
   handoffBlockReason,
   inspectHandoffWorkspace,
 } from "../agent/handoff.ts";
+import {
+  healthSkipReason,
+  isUsableAgent,
+  nextHealthyProvider,
+  probeAgentHealth,
+  rememberProviderQuota,
+} from "../agent/health.ts";
 import { fallbackPolicy } from "../agent/stepAgent.ts";
 import {
   resolveStepAgent,
@@ -1435,8 +1442,44 @@ export interface BegunAttempt {
   context: ResolvedContext;
 }
 
+/** Probe outside the run lock. A disconnected or quota-exhausted agent is replaced before the attempt starts. */
+async function healthyProviderSwitch(jobId: number) {
+  try {
+    const preview = await one<{
+      type: string;
+      config: Record<string, any>;
+      agent_override: Record<string, any> | null;
+      agent_provider: string | null;
+      profile: string | null;
+    }>(
+      pool,
+      `SELECT s.type, s.config, s.agent_override, r.agent_provider, r.profile
+         FROM workflow_jobs j
+         JOIN workflow_steps s ON s.id = j.step_id
+         JOIN workflow_runs r ON r.id = j.run_id
+        WHERE j.id = $1`,
+      [jobId],
+    );
+    if (!preview || !["agent", "coding_agent"].includes(preview.type)) return null;
+    if (preview.config?.delegation?.enabled) return null;
+    const policy = fallbackPolicy(preview);
+    if (policy.mode === "disabled" || !policy.auto_health) return null;
+    const effective = resolveStepAgent(preview, preview);
+    if (!effective) return null;
+    const health = await probeAgentHealth(policy.providers);
+    const mine = health.find((h) => h.provider === effective.provider);
+    if (isUsableAgent(mine)) return null;
+    const next = nextHealthyProvider(policy.providers, new Set([effective.provider]), health);
+    if (!next) return null;
+    return { from: effective.provider, to: next, reason: healthSkipReason(mine) };
+  } catch {
+    return null;
+  }
+}
+
 /** Claim-time validation + attempt creation. Returns null when the job is stale (nothing to do). */
 export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAttempt | null> {
+  const healthSwitch = await healthyProviderSwitch(job.id);
   return withTx(async (c) => {
     const run = await lockRun(c, job.run_id);
     if (run.worker_instance !== config.instanceId || !(await ownsInstance(c))) return null;
@@ -1581,6 +1624,39 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
           );
           return null;
         }
+      }
+    }
+    if (
+      healthSwitch &&
+      ["agent", "coding_agent"].includes(step.type) &&
+      !step.config.delegation?.enabled
+    ) {
+      const policy = fallbackPolicy(step);
+      const current = resolveStepAgent(run, step);
+      if (
+        policy.mode !== "disabled" &&
+        policy.auto_health &&
+        current?.provider === healthSwitch.from &&
+        policy.providers.includes(healthSwitch.to)
+      ) {
+        const override = {
+          ...((step.agent_override ?? {}) as object),
+          provider: healthSwitch.to,
+          model: null,
+          reasoning_effort: null,
+        };
+        await q(c, "UPDATE workflow_steps SET agent_override=$2 WHERE id=$1", [
+          step.id,
+          json(override),
+        ]);
+        step.agent_override = override;
+        await runEvents.add(
+          c,
+          run.id,
+          "provider_handoff",
+          `${healthSwitch.from} skipped (${healthSwitch.reason}); using ${healthSwitch.to}`,
+          step.id,
+        );
       }
     }
     const effective = resolveStepAgent(run, step);
@@ -2454,6 +2530,17 @@ async function persistProviderPause(
   const blocked =
     p.blocked ??
     (concurrent ? "Another attempt is running; workspace stability requires reconciliation" : null);
+  const policy = fallbackPolicy(step);
+  const failedProvider = attempt.agent_provider ?? run.agent_provider;
+  const healthFailover =
+    !request &&
+    !blocked &&
+    policy.mode !== "disabled" &&
+    policy.auto_health &&
+    ["AUTHENTICATION", "QUOTA_EXHAUSTED"].includes(String(p.failure)) &&
+    !step.config.delegation?.enabled;
+  if (healthFailover && p.failure === "QUOTA_EXHAUSTED" && failedProvider)
+    rememberProviderQuota(failedProvider);
   const handoff = await one(
     c,
     `INSERT INTO provider_handoffs(run_id,step_id,source_attempt_id,generation,original_provider,reason,failure_category,status,package,workspace_fingerprint,ready_at,automatic,blocked_reason)
@@ -2471,7 +2558,7 @@ async function persistProviderPause(
       blocked ? "BLOCKED" : "READY",
       json(p.content ?? null),
       p.fingerprint ?? null,
-      !request && fallbackPolicy(step).mode === "automatic",
+      !request && (policy.mode === "automatic" || healthFailover),
       blocked,
     ],
   );
@@ -2520,6 +2607,47 @@ async function persistProviderPause(
     failure_category: p.failure,
   });
   await advance(c, run.id, afterCommit);
+}
+
+/** Called after the worker has released the job, so termination is visible to the next provider. */
+export async function continueHealthyHandoffForAttempt(attemptId: number) {
+  const handoff = await one<{
+    id: number;
+    run_id: number;
+    source_attempt_id: number;
+    workspace_fingerprint: string | null;
+    original_provider: string;
+    failure_category: string;
+    key: string;
+  }>(
+    pool,
+    `SELECT h.id, h.run_id, h.source_attempt_id, h.workspace_fingerprint, h.original_provider, h.failure_category, s.key
+       FROM provider_handoffs h
+       JOIN workflow_steps s ON s.id = h.step_id
+      WHERE h.source_attempt_id = $1 AND h.status = 'READY' AND h.automatic
+        AND h.failure_category IN ('AUTHENTICATION', 'QUOTA_EXHAUSTED')`,
+    [attemptId],
+  );
+  if (!handoff?.workspace_fingerprint) return;
+  const step = await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE key=$1 AND run_id=$2", [
+    handoff.key,
+    handoff.run_id,
+  ]);
+  if (!step) return;
+  const policy = fallbackPolicy(step);
+  if (!policy.auto_health || policy.mode === "disabled" || step.config.delegation?.enabled) return;
+  await continueHealthyProvider(
+    handoff.run_id,
+    handoff.key,
+    {
+      id: handoff.id,
+      source_attempt_id: handoff.source_attempt_id,
+      workspace_fingerprint: handoff.workspace_fingerprint,
+    },
+    handoff.original_provider,
+    policy.providers,
+    handoff.failure_category,
+  );
 }
 
 const HandoffRequest = z
@@ -2842,11 +2970,13 @@ export async function resumeProviderHandoff(
       history.filter((v) => v.target_provider !== v.original_provider).length >= policy.max_switches
     )
       throw new EngineError("Provider switch budget exhausted", 409);
+    const healthFailover =
+      policy.auto_health && ["AUTHENTICATION", "QUOTA_EXHAUSTED"].includes(h.failure_category);
     if (automatic) {
       if (
-        policy.mode !== "automatic" ||
-        !AUTOMATIC_FAILURES.includes(h.failure_category) ||
-        h.requested_by != null
+        h.requested_by != null ||
+        (!healthFailover &&
+          (policy.mode !== "automatic" || !AUTOMATIC_FAILURES.includes(h.failure_category)))
       )
         throw new EngineError("Failure requires manual recovery", 409);
       if (
@@ -2856,12 +2986,15 @@ export async function resumeProviderHandoff(
         ].includes(input.provider)
       )
         throw new EngineError("Automatic provider loop prevented", 409);
-      const usage = await q(
-        c,
-        "SELECT reported_cost_usd,input_tokens,output_tokens FROM execution_attempt_telemetry WHERE step_id=$1",
-        [s.id],
-      );
+      const usage = healthFailover
+        ? []
+        : await q(
+            c,
+            "SELECT reported_cost_usd,input_tokens,output_tokens FROM execution_attempt_telemetry WHERE step_id=$1",
+            [s.id],
+          );
       if (
+        !healthFailover &&
         !policy.allow_unknown_cost &&
         (usage.some((u) => u.reported_cost_usd == null) || ready.cost === "unknown")
       )
@@ -2869,7 +3002,11 @@ export async function resumeProviderHandoff(
           "Unknown provider cost requires explicit fallback policy permission",
           409,
         );
-      if (/budget|billing|credit|cost/i.test(h.reason) && !policy.allow_budget_failure)
+      if (
+        !healthFailover &&
+        /budget|billing|credit|cost/i.test(h.reason) &&
+        !policy.allow_budget_failure
+      )
         throw new EngineError("Budget failure requires explicit fallback policy permission", 409);
       const cost = usage.reduce((n, u) => n + (u.reported_cost_usd ?? 0), 0),
         tokens = usage.reduce((n, u) => n + (u.input_tokens ?? 0) + (u.output_tokens ?? 0), 0);
@@ -2956,6 +3093,49 @@ export async function resumeProviderHandoff(
       duplicate: false,
     };
   });
+}
+
+/** Continue a disconnected or quota-exhausted agent on the next healthy provider. No manual switch. */
+async function continueHealthyProvider(
+  runId: number,
+  stepKey: string,
+  handoff: { id: number; source_attempt_id: number; workspace_fingerprint: string },
+  failedProvider: string,
+  order: readonly AgentProvider[],
+  failure: string,
+) {
+  try {
+    const health = (await probeAgentHealth(order)).map((row) =>
+      row.provider === failedProvider
+        ? {
+            ...row,
+            connected: failure === "AUTHENTICATION" ? false : row.connected,
+            quota: failure === "QUOTA_EXHAUSTED" ? ("exhausted" as const) : row.quota,
+            reason: failure === "QUOTA_EXHAUSTED" ? "quota exhausted" : row.reason,
+          }
+        : row,
+    );
+    const next = nextHealthyProvider(order, new Set([failedProvider]), health);
+    if (!next) return;
+    await resumeProviderHandoff(
+      runId,
+      stepKey,
+      {
+        handoff_id: handoff.id,
+        expected_attempt_id: handoff.source_attempt_id,
+        provider: next,
+        confirm: true,
+        checkpoint_fingerprint: handoff.workspace_fingerprint,
+      },
+      null,
+      true,
+    );
+  } catch (error) {
+    await q(pool, "UPDATE provider_handoffs SET blocked_reason=$2 WHERE id=$1 AND status='READY'", [
+      handoff.id,
+      safeDiagnostics(error),
+    ]);
+  }
 }
 
 /** One non-overlapping scheduler reconciliation reads the next persisted due handoff, so restart cannot lose an automatic continuation. */

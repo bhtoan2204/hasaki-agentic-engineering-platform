@@ -18,10 +18,38 @@ interface ProviderStatus {
   id: AgentProvider;
   ok: boolean;
   error?: string;
+  quota?: "ok" | "exhausted" | "unknown";
   version?: string;
   auth?: string;
   model?: string | null;
   reasoning_effort?: string | null;
+}
+
+function AgentHealthList() {
+  const { t } = useI18n();
+  const { data, error } = useApi<ProviderStatus[]>("/api/agent-providers");
+  if (error)
+    return (
+      <p className="agent-notice-err">
+        {t("run.codex.statusUnknown")}: {error}
+      </p>
+    );
+  if (!data) return <p className="muted">{t("run.health.checking")}</p>;
+  return (
+    <ul className="agent-health">
+      {AGENT_PROVIDERS.map((id) => {
+        const row = data.find((p) => p.id === id);
+        const state =
+          row?.quota === "exhausted" ? "quota" : row?.ok ? "connected" : "down";
+        return (
+          <li key={id}>
+            <b>{t(agentKey(id, true))}</b> · {t(`run.health.${state}`)}
+            {state !== "connected" && row?.error ? ` — ${row.error}` : ""}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** Provider select for run forms. For Codex and Antigravity it states readiness and account context. */
@@ -44,6 +72,7 @@ export function AgentProviderField({
           ))}
         </select>
       </Field>
+      <AgentHealthList />
       {value === "codex" && <CodexNotice />}
       {value === "antigravity" && <AntigravityNotice />}
     </>

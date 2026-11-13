@@ -2157,9 +2157,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.agentShort.codex": "Codex",
     "run.agentShort.antigravity": "Antigravity",
     "run.agentHint":
-      "Nhà cung cấp mặc định của lượt chạy. Mỗi bước agent có thể chọn nhà cung cấp riêng.",
+      "Nhà cung cấp mặc định của lượt chạy. Mỗi bước agent có thể chọn nhà cung cấp riêng. Agent mất kết nối hoặc hết hạn mức được thay bằng agent ưu tiên kế tiếp, không cần bước chuyển tay.",
+    "run.health.checking": "Đang kiểm tra kết nối các agent…",
+    "run.health.connected": "đã kết nối",
+    "run.health.quota": "hết hạn mức",
+    "run.health.down": "chưa kết nối",
     "run.codex.account":
-      "Codex chạy bằng tài khoản Codex đã đăng nhập trên máy worker (ví dụ tài khoản ChatGPT của người vận hành), không phải tài khoản riêng của bạn. Quyền sở hữu run trên platform không tạo tài khoản Codex cho từng người dùng; hạn mức dùng chung của tài khoản worker. Khi hết hạn mức, bước sẽ dừng với lỗi rõ ràng — platform không tự chuyển sang API key hay agent khác.",
+      "Codex chạy bằng tài khoản Codex đã đăng nhập trên máy worker (ví dụ tài khoản ChatGPT của người vận hành), không phải tài khoản riêng của bạn. Quyền sở hữu run trên platform không tạo tài khoản Codex cho từng người dùng; hạn mức dùng chung của tài khoản worker. Khi hết hạn mức hoặc mất kết nối, bước dùng agent ưu tiên kế tiếp còn khỏe, không chuyển sang API key.",
     "run.codex.checking": "Đang kiểm tra Codex CLI trên worker…",
     "run.codex.ready": "Sẵn sàng: {version}, đăng nhập bằng {auth}",
     "run.codex.model": "model {model}, reasoning {effort}",
@@ -2168,7 +2172,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.codex.notReady": "Codex chưa dùng được trên worker",
     "run.codex.statusUnknown": "Không kiểm tra được Codex",
     "run.antigravity.account":
-      "Antigravity chạy bằng tài khoản Google đã đăng nhập trên máy worker, không phải tài khoản riêng của bạn. Quyền sở hữu run trên platform không tạo tài khoản Antigravity cho từng người dùng; hạn mức dùng chung của worker. Khi hết hạn mức, bước sẽ dừng với lỗi rõ ràng — platform không tự chuyển sang API key hay agent khác.",
+      "Antigravity chạy bằng tài khoản Google đã đăng nhập trên máy worker, không phải tài khoản riêng của bạn. Quyền sở hữu run trên platform không tạo tài khoản Antigravity cho từng người dùng; hạn mức dùng chung của worker. Khi hết hạn mức hoặc mất kết nối, bước dùng agent ưu tiên kế tiếp còn khỏe, không chuyển sang API key.",
     "run.antigravity.checking": "Đang kiểm tra Antigravity CLI trên worker…",
     "run.antigravity.ready": "Sẵn sàng: {version}, đăng nhập bằng {auth}",
     "run.antigravity.model": "model {model}, reasoning {effort}",
@@ -4419,9 +4423,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.agentShort.codex": "Codex",
     "run.agentShort.antigravity": "Antigravity",
     "run.agentHint":
-      "Default provider for the run. Individual agent steps can select their own provider.",
+      "Default provider for the run. Individual agent steps can select their own provider. An agent that is disconnected or out of quota is replaced by the next healthy provider, without a manual switch.",
+    "run.health.checking": "Checking agent connections…",
+    "run.health.connected": "connected",
+    "run.health.quota": "out of quota",
+    "run.health.down": "not connected",
     "run.codex.account":
-      "Codex runs with the Codex account logged in on the worker machine (for example the operator's ChatGPT account), not your own account. Run ownership on the platform does not create a Codex account per user; the worker account's usage limits are shared. When the limit is reached the step stops with a clear error — the platform never switches to an API key or another agent.",
+      "Codex runs with the Codex account logged in on the worker machine (for example the operator's ChatGPT account), not your own account. Run ownership on the platform does not create a Codex account per user; the worker account's usage limits are shared. When the limit is reached or the CLI is disconnected, the step uses the next healthy agent instead of an API key.",
     "run.codex.checking": "Checking the Codex CLI on the worker…",
     "run.codex.ready": "Ready: {version}, logged in with {auth}",
     "run.codex.model": "model {model}, reasoning {effort}",
@@ -4430,7 +4438,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.codex.notReady": "Codex is not usable on the worker",
     "run.codex.statusUnknown": "Could not check Codex",
     "run.antigravity.account":
-      "Antigravity runs with the Google account logged in on the worker machine, not your own account. Run ownership on the platform does not create an Antigravity account per user; usage limits are shared on the worker. When quota is exhausted, the step stops with a clear error — the platform never switches to an API key or another agent.",
+      "Antigravity runs with the Google account logged in on the worker machine, not your own account. Run ownership on the platform does not create an Antigravity account per user; usage limits are shared on the worker. When quota is exhausted or the CLI is disconnected, the step uses the next healthy agent instead of an API key.",
     "run.antigravity.checking": "Checking the Antigravity CLI on the worker…",
     "run.antigravity.ready": "Ready: {version}, logged in with {auth}",
     "run.antigravity.model": "model {model}, reasoning {effort}",

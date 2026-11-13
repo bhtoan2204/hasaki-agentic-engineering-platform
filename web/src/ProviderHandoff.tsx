@@ -25,6 +25,7 @@ export function ProviderHandoff({
   const [provider, setProvider] = useState("codex"),
     [model, setModel] = useState(""),
     [confirmed, setConfirmed] = useState(false),
+    [providerTouched, setProviderTouched] = useState(false),
     [busy, setBusy] = useState(false);
   const [show, setShow] = useState(false);
   const current = handoffs.find((h) => h.source_attempt_id === step.current_attempt_id);
@@ -38,6 +39,13 @@ export function ProviderHandoff({
     show || pending ? `/api/runs/${runId}/steps/${step.key}/handoff-providers` : null,
   );
   const target = options?.find((p) => p.provider === provider);
+  useEffect(() => {
+    if (providerTouched || !options?.length || !current) return;
+    const selected = options.find((p) => p.provider === provider);
+    if (selected?.ok && provider !== current.original_provider) return;
+    const next = options.find((p) => p.ok && p.provider !== current.original_provider);
+    if (next) setProvider(next.provider);
+  }, [options, providerTouched, provider, current]);
   const send = async (path: string, body: any) => {
     setBusy(true);
     try {
@@ -48,6 +56,27 @@ export function ProviderHandoff({
     }
   };
 
+  const resumeHold =
+    !current || !pending
+      ? null
+      : current.status !== "READY"
+        ? en
+          ? "The button stays off until the checkpoint status is READY."
+          : "Nút tắt cho đến khi checkpoint ở trạng thái READY."
+        : !options
+          ? en
+            ? "The button stays off while agent availability is still loading."
+            : "Nút tắt trong lúc đang kiểm tra agent nào chạy được."
+          : !target?.ok
+            ? (target?.error ??
+              (en
+                ? "The button stays off because this agent is not ready."
+                : "Nút tắt vì agent này chưa sẵn sàng."))
+            : !confirmed
+              ? en
+                ? "Tick the checkpoint review box to enable Confirm resume."
+                : "Tick ô đã xem checkpoint để bật nút Xác nhận tiếp tục."
+              : null;
   const hasBody =
     pending ||
     !!current?.blocked_reason ||
@@ -84,7 +113,9 @@ export function ProviderHandoff({
       )}
       {current?.status === "BLOCKED" && (
         <div role="alert" className="error">
-          <strong>{en ? "The next agent has not started" : "Agent tiếp theo chưa được chạy"}</strong>
+          <strong>
+            {en ? "The next agent has not started" : "Agent tiếp theo chưa được chạy"}
+          </strong>
           <p>
             {en
               ? "Cursor and the other agents stay unavailable until this checkpoint is ready. Reinspect after the workspace issue below is resolved, then choose the agent and confirm."
@@ -137,6 +168,7 @@ export function ProviderHandoff({
                 aria-label={en ? "Target provider" : "Agent tiếp theo"}
                 value={provider}
                 onChange={(e) => {
+                  setProviderTouched(true);
                   setProvider(e.target.value);
                   setModel("");
                   setConfirmed(false);
@@ -188,17 +220,15 @@ export function ProviderHandoff({
                 : "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo."}
             </span>
           </label>
-          {current.status !== "READY" && (
-            <p className="muted small">
-              {en
-                ? "Confirm resume stays off until the checkpoint status is READY."
-                : "Nút xác nhận tiếp tục chỉ bật khi checkpoint ở trạng thái READY."}
+          {resumeHold && (
+            <p className="muted small" role="status">
+              {resumeHold}
             </p>
           )}
           <div className="handoff-actions">
             <button
               className="sm"
-              disabled={busy || !confirmed || !target?.ok || current.status !== "READY"}
+              disabled={busy || current.status !== "READY" || !target?.ok || !confirmed}
               onClick={() =>
                 send("handoff-resume", {
                   handoff_id: current.id,
