@@ -163,6 +163,32 @@ test("materialize makes workspace cleanup wait for the new subtasks too", async 
   await assert.rejects(materializeSubtasks(f.db, 1, "plan", loop, opts), /cycle/);
 });
 
+test("materialize sends a cleanup that is ready but not dispatched back behind the subtasks", async () => {
+  const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
+  const steps = baseSteps({ p });
+  const ready = {
+    id: 3,
+    key: "cleanup",
+    type: "integration",
+    config: { action: "cleanup_workspaces", injected: true },
+    position: 3,
+    depends_on: [steps[2].key],
+    status: "READY",
+    generation: 1,
+    subtask_id: null,
+  };
+  const f = fakeDb([...steps, ready]);
+  await materializeSubtasks(f.db, 1, "plan", p, opts);
+  assert.equal(ready.status, "PENDING");
+  assert.equal(ready.generation, 2, "its queued job is fenced out");
+  assert.deepEqual(ready.depends_on, [steps[2].key, "subtask-b"]);
+  assert.deepEqual(
+    f.inserted.map((s) => s.key),
+    ["subtask-a", "subtask-b"],
+    "no second cleanup",
+  );
+});
+
 test("materialize adds a cleanup after the subtasks when the run's cleanup already ran", async () => {
   const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
   const steps = baseSteps({ p });

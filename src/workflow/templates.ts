@@ -636,6 +636,7 @@ type GraphStep = {
   config?: Record<string, unknown> | null;
 };
 
+/** Terminal steps of the work itself: cleanup and report steps are siblings after it, never dependencies. */
 export const workTerminals = (
   steps: GraphStep[],
   exclude: (s: GraphStep) => boolean = isCleanupStep,

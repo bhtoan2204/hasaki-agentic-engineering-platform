@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { q, one, json, type Db } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
-import { EngineError, lockRun, stepsOf } from "./mutations.ts";
+import { cancelStepJobs, EngineError, lockRun, setStepStatus, stepsOf } from "./mutations.ts";
 import { topoOrder } from "./graph.ts";
 import { injectedCleanup, isCleanupStep } from "./templates.ts";
 
@@ -91,11 +91,12 @@ export interface ExpansionContext {
 
 const stepKey = (id: string) => `subtask-${id}`;
 
+/** Pending steps that must also wait for new subtasks: the plan's dependents and workspace cleanup not yet dispatched. */
 const waitsForSubtasks = (
   st: NonNullable<ExpansionContext["existingSteps"]>[number],
   planStepKey: string | undefined,
 ) =>
-  st.status === "PENDING" &&
+  (st.status === "PENDING" || (st.status === "READY" && isCleanupStep(st))) &&
   !st.subtask_id &&
   ((!!planStepKey && st.depends_on.includes(planStepKey)) || isCleanupStep(st));
 
@@ -256,6 +257,7 @@ export async function materializeSubtasks(
       s.depends_on.includes(planStepKey) &&
       !s.subtask_id &&
       s.id !== gate.id &&
+      !waitsForSubtasks(s, planStepKey) &&
       !["PENDING", "COMPLETED", "SKIPPED"].includes(s.status),
   );
   if (started.length)
@@ -310,20 +312,29 @@ export async function materializeSubtasks(
   // Steps that were waiting on the plan step must also wait for every leaf subtask.
   const referenced = new Set(subtasks.flatMap((s) => s.depends_on));
   const leaves = subtasks.filter((s) => !referenced.has(s.id)).map((s) => stepKey(s.id));
-  for (const st of steps) {
-    if (waitsForSubtasks(st, planStepKey))
-      await q(c, "UPDATE workflow_steps SET depends_on = $2, updated_at = now() WHERE id = $1", [
-        st.id,
-        [...new Set([...st.depends_on, ...leaves])],
-      ]);
+  const waiting = steps.filter((st) => waitsForSubtasks(st, planStepKey));
+  const rewired = steps.map((st) =>
+    waiting.includes(st) ? { ...st, depends_on: [...new Set([...st.depends_on, ...leaves])] } : st,
+  );
+  for (const st of waiting) {
+    if (st.status === "READY") {
+      await cancelStepJobs(c, st.id, "cleanup rewired behind new subtasks");
+      await setStepStatus(
+        c,
+        st,
+        "PENDING",
+        { generation: st.generation + 1, ready_at: null },
+        "waits for new subtasks",
+      );
+    }
+    await q(c, "UPDATE workflow_steps SET depends_on = $2, updated_at = now() WHERE id = $1", [
+      st.id,
+      rewired[steps.indexOf(st)].depends_on,
+    ]);
   }
-  if (!steps.some((st) => isCleanupStep(st) && waitsForSubtasks(st, planStepKey))) {
+  if (!waiting.some(isCleanupStep)) {
     const cleanup = injectedCleanup([
-      ...steps.map((st) =>
-        waitsForSubtasks(st, planStepKey)
-          ? { ...st, depends_on: [...st.depends_on, ...leaves] }
-          : st,
-      ),
+      ...rewired,
       ...subtasks.map((s) => ({
         key: stepKey(s.id),
         depends_on: s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey],

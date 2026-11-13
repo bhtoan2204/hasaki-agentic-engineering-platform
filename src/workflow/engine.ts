@@ -126,6 +126,7 @@ const createsWorktrees = (s: StepSpec) =>
   (s.type === "integration" &&
     ["integrate_subtasks", "subtask_integration"].includes(String(s.config.action)));
 
+/** Append a workspace cleanup step to a run's resolved graph that creates worktrees but never releases them. */
 export function withCleanupStep(spec: WorkflowSpec): WorkflowSpec {
   if (!spec.steps.some(createsWorktrees) || spec.steps.some(isCleanupStep)) return spec;
   return { ...spec, steps: [...spec.steps, StepSpec.parse(injectedCleanup(spec.steps))] };

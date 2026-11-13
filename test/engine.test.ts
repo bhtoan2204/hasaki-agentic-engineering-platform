@@ -543,6 +543,18 @@ test("cost read model: totals, by step / model, failed retries counted as wasted
   const advised = await runCost(run.id);
   assert.equal(advised.availability, "partial", "a step's advisor spend is not hidden");
   assert.ok(advised.by_model.some((m) => m.provider === "codex" && m.model === "unknown"));
+  await q(
+    pool,
+    `UPDATE workflow_step_attempts a SET metrics = a.metrics ||
+       '{"advisor":{"provider":"codex","model":"m-adv","tokens":{"input":7,"output":1},"cost_usd":0.1},"advisor_cost_usd":0.1}'
+      FROM workflow_steps s WHERE s.id = a.step_id AND s.run_id = $1 AND s.key = 'cleanup'`,
+    [run.id],
+  );
+  const costed = await runCost(run.id);
+  assert.equal(costed.availability, "complete", "the advisor's reported cost counts");
+  assert.equal(costed.total.cost_usd, 1.35);
+  assert.equal(costed.total.tokens.input, 207);
+  assert.ok(costed.by_model.some((m) => m.model === "m-adv" && m.cost_usd === 0.1));
 });
 
 test("cost budget: warning is logged once; exceeding pauses the run once, resume continues past it", async () => {
