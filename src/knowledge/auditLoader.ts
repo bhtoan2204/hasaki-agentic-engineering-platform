@@ -60,9 +60,9 @@ export async function loadKnowledgeAuditData(
       "SELECT p.content,s.type,s.config,cs.content AS snapshot FROM agent_context_packs p JOIN workflow_steps s ON s.id=p.step_id JOIN context_snapshots cs ON cs.id=p.snapshot_id WHERE p.created_at >= now()-$1::int*interval '1 day'",
       [windowDays],
     );
-    const attempts = await q(
+    const loaded = await q<{ key: string; n: number }>(
       pool,
-      "SELECT metrics FROM workflow_step_attempts WHERE started_at >= now()-$1::int*interval '1 day'",
+      "SELECT k.key, count(*)::int AS n FROM workflow_step_attempts a CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(a.metrics->'skills_loaded')='array' THEN a.metrics->'skills_loaded' ELSE '[]'::jsonb END) AS k(key) WHERE a.started_at >= now()-$1::int*interval '1 day' GROUP BY k.key",
       [windowDays],
     );
     const entry = (key: string) =>
@@ -90,8 +90,7 @@ export async function loadKnowledgeAuditData(
         if (!indexOnly && entries.some((e: { truncated?: boolean }) => e.truncated))
           entry(item.key).truncated++;
       }
-    for (const row of attempts)
-      for (const key of row.metrics?.skills_loaded ?? []) entry(key).loaded++;
+    for (const row of loaded) entry(row.key).loaded += row.n;
   }
   const providerAvailability = Object.fromEntries(
     items.map((i) => [

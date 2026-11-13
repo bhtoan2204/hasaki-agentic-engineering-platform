@@ -1088,7 +1088,7 @@ export const routes: Route[] = [
       requireAdmin(c.actor);
       return loadKnowledgeAudit({
         userId: c.actor.id,
-        windowDays: Number(c.url.searchParams.get("days") ?? 7),
+        windowDays: Math.min(90, Number(c.url.searchParams.get("days") ?? 7)),
       });
     },
   ],

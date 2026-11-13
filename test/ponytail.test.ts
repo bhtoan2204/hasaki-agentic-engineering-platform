@@ -238,7 +238,7 @@ test("audit proposal auto-apply and rollback preserve duplicate state and histor
   const duplicate = await knowledge.get("audit-new");
   assert.equal(duplicate.enabled, false);
   assert.equal(duplicate.superseded_by_item.key, "audit-old");
-  await rollbackProposal(report.proposals[0].proposalId, { by: "test" });
+  await rollbackProposal(report.proposals[0].proposalId!, { by: "test" });
   assert.equal((await knowledge.get("audit-new")).enabled, true);
   assert.equal((await knowledge.get("audit-new")).superseded_by, null);
   const pending = await remediateKnowledgeAudit(
@@ -250,7 +250,8 @@ test("audit proposal auto-apply and rollback preserve duplicate state and histor
     },
     { autoApply: true },
   );
-  assert.ok(pending.proposals.every((p) => p.status === "pending"));
+  for (const p of pending.proposals)
+    assert.equal(p.status, p.key === "audit-protected" ? "skipped" : "pending", p.key);
   assert.equal((await knowledge.get("audit-protected")).enabled, true);
 });
 test("revert appends version and audit excludes other owners' private keys and content", async () => {
@@ -338,7 +339,7 @@ test("audit refuses stale canonical proposals without losing either item", async
   await knowledge.update("stale-old", { content: "canonical changed" });
   const { approveProposal } = await import("../src/knowledge/proposals.ts");
   await assert.rejects(
-    approveProposal(result.proposals[0].proposalId, { by: "system:knowledge-audit" }),
+    approveProposal(result.proposals[0].proposalId!, { by: "system:knowledge-audit" }),
     /canonical item changed/,
   );
   assert.equal((await knowledge.get("stale-new")).enabled, true);
@@ -381,4 +382,121 @@ test("re-import converges and keeps admin-tuned priority and conflict keys", asy
   );
   assert.equal((await knowledge.get("skill.ext.ponytail")).priority, 3);
   assert.equal((await knowledge.get("skill.ext.brainstorming")).conflict_key, "admin.choice");
+});
+
+test("audit remediation only deprecates unprotected duplicates and survives approval drift", async () => {
+  for (const [key, category] of [
+    ["r1-rule-a", "business_rule"],
+    ["r1-rule-b", "business_rule"],
+    ["r1-skill-a", "agent_skill"],
+    ["r1-skill-b", "agent_skill"],
+    ["r1-unused", "agent_skill"],
+  ] as const)
+    await knowledge.create({
+      key,
+      title: key,
+      category,
+      scope_type: "GLOBAL",
+      content: key.startsWith("r1-rule")
+        ? "rule twin body"
+        : key === "r1-unused"
+          ? "lonely"
+          : "skill twin body",
+      applicability: { step_keys: ["implement"] },
+    });
+  const items = (await knowledge.list()).filter((i) => i.key.startsWith("r1-")) as AuditItem[];
+  const steps = [{ key: "implement", type: "coding_agent" }];
+  const usage = {};
+  const planned = await remediateKnowledgeAudit({ items, steps, usage }, { dryRun: true });
+  assert.deepEqual(planned.proposals.map((p) => [p.key, p.status]).sort(), [
+    ["r1-rule-b", "skipped"],
+    ["r1-skill-b", "planned"],
+  ]);
+  await knowledge.update("r1-skill-a", { content: "canonical drifted" });
+  const applied = await remediateKnowledgeAudit(
+    { items, steps, usage },
+    { autoApply: true, operator: "tester" },
+  );
+  const skill = applied.proposals.find((p) => p.key === "r1-skill-b")!;
+  assert.equal(skill.status, "skipped");
+  assert.match(skill.reason!, /canonical item changed/);
+  assert.equal((await knowledge.get("r1-skill-b")).enabled, true);
+  assert.equal((await knowledge.get("r1-rule-b")).enabled, true);
+  const evidence = (
+    await pool.query("SELECT evidence FROM knowledge_proposals WHERE id=$1", [skill.proposalId])
+  ).rows[0].evidence;
+  assert.equal(evidence[0].ref.operator, "tester");
+});
+
+test("audit actor cannot deprecate business rules or bypass the enforced guard", async () => {
+  const { createProposal, approveProposal, AUDIT_ACTOR } =
+    await import("../src/knowledge/proposals.ts");
+  await knowledge.create({
+    key: "r4-rule",
+    title: "r4",
+    category: "business_rule",
+    scope_type: "GLOBAL",
+    content: "r4 rule",
+  });
+  await knowledge.create({
+    key: "r4-enforced",
+    title: "r4e",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    content: "r4 enforced",
+    enforced: true,
+  });
+  const evidence = [
+    { source: "knowledge_audit", ref: {}, author: AUDIT_ACTOR, trust: "platform", quote: "x" },
+  ];
+  const base = {
+    ownerId: null,
+    changeType: "DEPRECATE" as const,
+    proposed: {},
+    createdBy: AUDIT_ACTOR,
+    auditReviewOnly: true,
+    sourceKind: "manual",
+    evidence,
+  };
+  await assert.rejects(createProposal({ ...base, targetKey: "r4-enforced" } as any), /enforced/);
+  const { proposal } = await createProposal({ ...base, targetKey: "r4-rule" } as any);
+  await assert.rejects(approveProposal(proposal.id, { by: AUDIT_ACTOR }), /business rule/);
+  assert.equal((await knowledge.get("r4-rule")).enabled, true);
+});
+
+test("DEPRECATE rollback leaves supersession it did not set untouched", async () => {
+  const { createProposal, approveProposal } = await import("../src/knowledge/proposals.ts");
+  for (const key of ["r3-old", "r3-new"])
+    await knowledge.create({
+      key,
+      title: key,
+      category: "agent_skill",
+      scope_type: "GLOBAL",
+      content: key,
+      applicability: { step_keys: ["implement"] },
+    });
+  const successor = await knowledge.get("r3-new");
+  await pool.query(
+    "UPDATE knowledge_items SET superseded_by=$2 WHERE key=$1 AND owner_id IS NULL",
+    ["r3-old", successor.id],
+  );
+  const { proposal } = await createProposal({
+    ownerId: null,
+    changeType: "DEPRECATE",
+    targetKey: "r3-old",
+    proposed: {},
+    createdBy: "admin",
+    sourceKind: "manual",
+    evidence: [{ source: "requirement", ref: {}, author: "admin", trust: "human", quote: "old" }],
+  } as any);
+  await approveProposal(proposal.id, { by: "admin" });
+  // Proposals applied before supersession was recorded carry no previous_superseded_by.
+  await pool.query(
+    "UPDATE knowledge_proposals SET applied = applied - 'previous_superseded_by' - 'previous_superseded_at' WHERE id=$1",
+    [proposal.id],
+  );
+  await rollbackProposal(proposal.id, { by: "admin" });
+  const old = await knowledge.get("r3-old");
+  assert.equal(old.enabled, true);
+  assert.equal(Number(old.superseded_by), Number(successor.id));
 });

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import type { Applicability } from "./resolve.ts";
+import { isCodebaseMap, isRestricted, type Applicability } from "./resolve.ts";
+import { MAX_CHARS } from "./importer.ts";
+import { duplicateCoverage, isLive } from "./proposals.ts";
 
 export interface AuditItem {
   id?: number;
@@ -66,17 +68,6 @@ export function textSimilarity(a: string, b: string): number {
   return intersection / (new Set([...x, ...y]).size || 1);
 }
 
-export function duplicateCoverage(items: AuditItem[]): boolean {
-  const canonical = items[0];
-  return items.every(
-    (i) =>
-      i.scope_type === canonical.scope_type &&
-      (i.scope_ref ?? "") === (canonical.scope_ref ?? "") &&
-      i.conflict_key === canonical.conflict_key &&
-      JSON.stringify(Object.entries(i.applicability ?? {}).sort()) ===
-        JSON.stringify(Object.entries(canonical.applicability ?? {}).sort()),
-  );
-}
 export function highImpact(
   item: AuditItem,
   usage: AuditUsage | undefined,
@@ -109,8 +100,7 @@ export function auditKnowledge(input: AuditInput) {
       kind === "exact_duplicate" &&
       duplicateCoverage(rows) &&
       !rows[0].superseded_by &&
-      (!rows[0].expires_at || new Date(rows[0].expires_at) > now) &&
-      (!rows[0].effective_from || new Date(rows[0].effective_from) <= now) &&
+      isLive(rows[0], now) &&
       rows.every(
         (r) => r.owner_id == null && !highImpact(r, input.usage?.[r.key], input.totalPacks ?? 0),
       );
@@ -127,11 +117,12 @@ export function auditKnowledge(input: AuditInput) {
       detail,
     });
   };
+  const hashes = new Map(items.map((i) => [i, hash(i.content)]));
   for (let i = 0; i < items.length; i++) {
     const a = items[i];
     for (const b of items.slice(i + 1)) {
       if ((a.owner_id ?? null) !== (b.owner_id ?? null)) continue;
-      if (hash(a.content) === hash(b.content))
+      if (hashes.get(a) === hashes.get(b))
         add(
           "exact_duplicate",
           [a, b].sort((x, y) => (x.id ?? 0) - (y.id ?? 0) || x.key.localeCompare(y.key)),
@@ -189,7 +180,7 @@ export function auditKnowledge(input: AuditInput) {
         "Review deprecation proposal",
         "Enabled but superseded or expired",
       );
-    if (a.content.length === 60000)
+    if (a.content.length === MAX_CHARS)
       add(
         "truncated_import",
         [a],
@@ -207,26 +198,28 @@ export function auditKnowledge(input: AuditInput) {
       );
     const targets = a.applicability?.step_keys;
     const types = a.applicability?.step_types;
-    if (
-      (targets?.length || types?.length) &&
-      !input.steps.some(
+    const reaches = (key?: string) =>
+      input.steps.some(
         (s) =>
           ["agent", "coding_agent"].includes(s.type) &&
-          (!targets?.length || targets.includes(s.key)) &&
+          (key === undefined || s.key === key) &&
           (!types?.length || types.includes(s.type)),
-      )
-    )
+      );
+    const deadKeys = targets?.length ? targets.filter((k) => !reaches(k)) : [];
+    if (deadKeys.length || (types?.length && !reaches()))
       add(
         "unreachable",
         [a],
         "verified",
         "Review applicability proposal",
-        "No matching agent step; command steps cannot load skills",
+        deadKeys.length
+          ? `Step keys with no matching agent step (command steps cannot load skills): ${deadKeys.join(", ")}`
+          : "No matching agent step; command steps cannot load skills",
       );
     if (
       a.category === "agent_skill" &&
       a.scope_type === "GLOBAL" &&
-      !Object.values(a.applicability ?? {}).some((v) => v?.length)
+      !isRestricted(a.applicability ?? {})
     )
       add(
         "unrestricted_global",
@@ -269,7 +262,7 @@ export function auditKnowledge(input: AuditInput) {
         "Review pending suppression proposal; do not change native files automatically",
         "Native AGENTS.md or .cursor/rules matches registry SHA-256",
       );
-    if (/codebase[ ._-]?map/i.test(a.key + " " + a.title))
+    if (isCodebaseMap(a))
       add(
         "codebase_map_consolidation",
         [a],

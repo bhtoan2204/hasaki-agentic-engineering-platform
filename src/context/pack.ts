@@ -1,4 +1,5 @@
-import { indexedCodebaseMap, isCodebaseMap } from "../knowledge/codebaseMap.ts";
+import { indexedCodebaseMap } from "../knowledge/codebaseMap.ts";
+import { isCodebaseMap } from "../knowledge/resolve.ts";
 import { isMandatory } from "./plan.ts";
 import { validateToolBinding } from "../agent/toolRuntime.ts";
 import { config } from "../config.ts";

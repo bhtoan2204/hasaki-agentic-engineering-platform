@@ -148,7 +148,9 @@ export function applicabilityMatches(a: Applicability, ctx: ResolutionContext): 
 const rank = (s: Scope) => SCOPES.indexOf(s);
 
 const RESTRICTING = ["repos", "projects", "workflows", "step_keys", "step_types"] as const;
-const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
+export const isCodebaseMap = (k: { key: string; title: string }) =>
+  /codebase[ ._-]?map/i.test(k.key + " " + k.title);
+export const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
 const describeRestriction = (a: Applicability) =>
   RESTRICTING.filter((k) => a[k]?.length)
     .map((k) => `${k} ${a[k]!.join(", ")}`)

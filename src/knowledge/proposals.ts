@@ -29,6 +29,35 @@ import { CATEGORIES, SCOPES } from "./resolve.ts";
  */
 
 export type ChangeType = "CREATE" | "UPDATE" | "SUPERSEDE" | "DEPRECATE";
+export const AUDIT_ACTOR = "system:knowledge-audit";
+
+type Coverage = {
+  scope_type: string;
+  scope_ref?: string | null;
+  conflict_key?: string | null;
+  applicability?: object | null;
+};
+/** Items cover the same targets: same scope, conflict key and applicability (key order ignored). */
+export function duplicateCoverage(items: Coverage[]): boolean {
+  const canonical = items[0];
+  return items.every(
+    (i) =>
+      i.scope_type === canonical.scope_type &&
+      (i.scope_ref ?? "") === (canonical.scope_ref ?? "") &&
+      (i.conflict_key ?? null) === (canonical.conflict_key ?? null) &&
+      JSON.stringify(Object.entries(i.applicability ?? {}).sort()) ===
+        JSON.stringify(Object.entries(canonical.applicability ?? {}).sort()),
+  );
+}
+export function isLive(
+  item: { expires_at?: string | Date | null; effective_from?: string | Date | null },
+  now = new Date(),
+): boolean {
+  return (
+    (!item.expires_at || new Date(item.expires_at) > now) &&
+    (!item.effective_from || new Date(item.effective_from) <= now)
+  );
+}
 export const CHANGE_TYPES: ChangeType[] = ["CREATE", "UPDATE", "SUPERSEDE", "DEPRECATE"];
 export type ProposalStatus = "pending" | "approved" | "rejected" | "rolled_back" | "obsolete";
 /** Categories a proposal may create or change. Security policies stay human-authored. */
@@ -231,7 +260,7 @@ export async function createProposal(
       [x.targetKey, x.ownerId],
     );
     if (!target) throw new HttpError(404, `knowledge item "${x.targetKey}" not found`);
-    if (!x.auditReviewOnly && (target.enforced || target.category === "security_policy"))
+    if (target.enforced || target.category === "security_policy")
       throw new HttpError(
         409,
         `"${target.key}" is an enforced/security item: change it by hand, not through a proposal`,
@@ -249,7 +278,9 @@ export async function createProposal(
   };
   validateProposed(
     x.changeType,
-    x.auditReviewOnly ? { ...proposed, category: undefined } : proposed,
+    x.auditReviewOnly && x.changeType === "DEPRECATE"
+      ? { ...proposed, category: undefined }
+      : proposed,
     true,
   );
   if (
@@ -448,14 +479,11 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
     const prop: ProposedChange = { ...p.proposed, ...edits };
     if (prop.scope_type === "GLOBAL") prop.scope_ref = "";
     if (prop.effective_from === "") prop.effective_from = null;
+    const auditDeprecation =
+      o.by === AUDIT_ACTOR && p.created_by === AUDIT_ACTOR && p.change_type === "DEPRECATE";
     validateProposed(
       p.change_type,
-      o.by === "system:knowledge-audit" &&
-        p.created_by === o.by &&
-        p.change_type === "DEPRECATE" &&
-        prop.category === "task_memory"
-        ? { ...prop, category: undefined }
-        : prop,
+      auditDeprecation && prop.category === "task_memory" ? { ...prop, category: undefined } : prop,
       true,
     );
     const target = p.target_item_id
@@ -467,6 +495,11 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
         throw new HttpError(
           409,
           `"${target.key}" is enforced/security knowledge: not changeable through proposals`,
+        );
+      if (auditDeprecation && target.category === "business_rule")
+        throw new HttpError(
+          409,
+          `"${target.key}" is a business rule: the audit cannot deprecate it`,
         );
       if (
         p.target_version != null &&
@@ -617,8 +650,7 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
             target.owner_id != null ||
             canonical.id === target.id ||
             canonical.superseded_by ||
-            (canonical.expires_at && new Date(canonical.expires_at) <= new Date()) ||
-            (canonical.effective_from && new Date(canonical.effective_from) > new Date())
+            !isLive(canonical)
           )
             throw new HttpError(409, "invalid shared canonical item");
           if (
@@ -633,10 +665,10 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
           );
           if (
             currentVersion.content !== canonical.content ||
-            target.scope_type !== canonical.scope_type ||
-            target.scope_ref !== canonical.scope_ref ||
-            target.conflict_key !== canonical.conflict_key ||
-            json(currentVersion.applicability) !== json(canonical.applicability)
+            !duplicateCoverage([
+              canonical,
+              { ...target, applicability: currentVersion.applicability },
+            ])
           )
             throw new HttpError(409, "duplicate coverage changed since the audit");
           await q(
@@ -644,6 +676,7 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
             "UPDATE knowledge_items SET superseded_by=$2, superseded_at=now() WHERE id=$1",
             [target.id, canonical.id],
           );
+          applied.superseded_to = canonical.id;
         }
         await audit(c, target.id, "deprecated", {
           proposal_id: id,
@@ -831,11 +864,13 @@ async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }
           it.id,
           a.previous_expires_at ?? null,
         ]);
-        await q(c, "UPDATE knowledge_items SET superseded_by=$2, superseded_at=$3 WHERE id=$1", [
-          it.id,
-          a.previous_superseded_by ?? null,
-          a.previous_superseded_at ?? null,
-        ]);
+        // Only undo a supersession this proposal set and nobody changed since.
+        if (a.superseded_to != null && Number(it.superseded_by) === Number(a.superseded_to))
+          await q(c, "UPDATE knowledge_items SET superseded_by=$2, superseded_at=$3 WHERE id=$1", [
+            it.id,
+            a.previous_superseded_by ?? null,
+            a.previous_superseded_at ?? null,
+          ]);
         if (a.previous_enabled && !it.enabled)
           await knowledge.update(
             it.key,

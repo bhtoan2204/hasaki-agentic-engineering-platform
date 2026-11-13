@@ -10,8 +10,6 @@ export interface MapSymbol {
   parent_symbol: string | null;
   exported?: boolean;
 }
-export const isCodebaseMap = (k: { key: string; title: string }) =>
-  /codebase[ ._-]?map/i.test(k.key + " " + k.title);
 export function renderCodebaseMap(symbols: MapSymbol[], maxChars = 2000): string {
   const budget = Math.max(0, Math.min(2000, Math.floor(maxChars)));
   let text = "";

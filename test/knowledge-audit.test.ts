@@ -32,17 +32,13 @@ test("audit detects exact, near, conflict, command targets, truncated and excess
       item("after", { content: "test-after" }),
     ],
   });
-  for (const kind of [
-    "exact_duplicate",
-    "unreachable",
-    "truncated_import",
-    "excessive_context",
-    "conflict",
-  ])
-    assert.ok(
-      result.findings.some((f) => f.kind === kind),
-      kind,
-    );
+  const keysOf = (kind: string) =>
+    result.findings.filter((f) => f.kind === kind).map((f) => f.keys.join("+"));
+  assert.deepEqual(keysOf("exact_duplicate"), ["one+two"]);
+  assert.deepEqual(keysOf("unreachable"), ["command"]);
+  assert.deepEqual(keysOf("truncated_import"), ["truncated"]);
+  assert.deepEqual(keysOf("excessive_context"), ["truncated"]);
+  assert.deepEqual(keysOf("conflict"), ["after+before"]);
   assert.equal(result.findings.find((f) => f.kind === "exact_duplicate")?.autoApply, true);
   assert.equal(textSimilarity("one two three four", "ONE two three four!"), 1);
 });
@@ -129,4 +125,24 @@ test("audit separates semantic overlap, stale entries and usage waste", () => {
     );
   assert.equal(report.roleFootprint.coding_agent.tokens, 500);
   assert.ok(report.findings.every((f) => !f.autoApply));
+});
+
+test("audit reports each step key that reaches no agent step and ignores keyword-only restriction", () => {
+  const report = auditKnowledge({
+    steps,
+    items: [
+      item("mixed", { applicability: { step_keys: ["implement", "test", "gone"] } }),
+      item("keywords", { applicability: { keywords: ["refund"] } }),
+    ],
+  });
+  const unreachable = report.findings.filter((f) => f.kind === "unreachable");
+  assert.deepEqual(
+    unreachable.map((f) => f.keys),
+    [["mixed"]],
+  );
+  assert.match(unreachable[0].detail, /test, gone/);
+  assert.deepEqual(
+    report.findings.filter((f) => f.kind === "unrestricted_global").map((f) => f.keys),
+    [["keywords"]],
+  );
 });
