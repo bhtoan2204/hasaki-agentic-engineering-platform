@@ -18,6 +18,7 @@ import {
 } from "../src/git/provider.ts";
 import { repositories } from "../src/repos/service.ts";
 import { restoreConflictSkips } from "../src/agent/verify.ts";
+import { removeWorktree } from "../src/git.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
 
 before(async () => {
@@ -400,6 +401,34 @@ test("restore: a release the developer approved is honoured, and fenced-out atte
     assert.equal(existsSync(s.holder), false);
   } finally {
     rmSync(join(path, ".."), { recursive: true, force: true });
+    await s.cleanup();
+  }
+});
+
+test("worktree cleanup keeps dirty worktrees and ones with a merge or rebase in progress, saying why", async () => {
+  const s = await scenario("COMPLETED");
+  try {
+    writeFileSync(join(s.holder, "scratch.txt"), "wip\n");
+    assert.equal(await removeWorktree(s.holder), "uncommitted changes");
+    rmSync(join(s.holder, "scratch.txt"));
+
+    sh(s.repoPath, "checkout", "-q", "-b", "side", config.baseBranch);
+    writeFileSync(join(s.repoPath, "side.txt"), "side\n");
+    sh(s.repoPath, "add", "side.txt");
+    sh(s.repoPath, "commit", "-qm", "side");
+    sh(s.holder, "merge", "-q", "--no-ff", "--no-commit", "side");
+    assert.equal(await removeWorktree(s.holder), "merge in progress");
+    sh(s.holder, "merge", "--abort");
+
+    assert.throws(() => sh(s.holder, "rebase", "-q", "--exec", "false", "HEAD~1"));
+    assert.equal(sh(s.holder, "status", "--porcelain"), "", "clean tree, rebase stopped");
+    assert.equal(await removeWorktree(s.holder), "rebase in progress");
+    sh(s.holder, "rebase", "--abort");
+    assert.ok(existsSync(s.holder), "kept worktrees stay in place");
+
+    assert.equal(await removeWorktree(s.holder), null);
+    assert.equal(existsSync(s.holder), false);
+  } finally {
     await s.cleanup();
   }
 });

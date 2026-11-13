@@ -284,6 +284,12 @@ export async function moveWorktree(path: string, to: string): Promise<string | n
   return null;
 }
 
+const IN_PROGRESS_MARKERS = [
+  ["MERGE_HEAD", "merge"],
+  ["rebase-merge", "rebase"],
+  ["rebase-apply", "rebase"],
+] as const;
+
 async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
   const inside = relative(realpathSync(config.dataDir), realpathSync(path));
   if (unsafeRelativePath(inside) || overlapsLiveApplication(path))
@@ -291,6 +297,10 @@ async function releasableWorktree(path: string): Promise<{ primary: string } | s
   const common = await git(path, "rev-parse", "--path-format=absolute", "--git-common-dir");
   const primary = join(common, "..");
   if (realpathSync(primary) === realpathSync(path)) return "primary checkout, not a worktree";
+  for (const [marker, operation] of IN_PROGRESS_MARKERS) {
+    const at = await git(path, "rev-parse", "--path-format=absolute", "--git-path", marker);
+    if (existsSync(at)) return `${operation} in progress`;
+  }
   if (await worktreePorcelain(path)) return "uncommitted changes";
   return { primary };
 }
