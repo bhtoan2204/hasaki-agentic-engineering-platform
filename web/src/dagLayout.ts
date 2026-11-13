@@ -59,24 +59,24 @@ export function autoLayout(steps: LayoutStep[]): Record<string, { x: number; y: 
   return pos;
 }
 
-/** Keep saved positions; lay out steps added without one (report, subtasks) below them instead of on top. */
+// Steps added later (report, subtasks) are placed in order, under their parent: earlier nodes never move.
 export function placeSteps(
   steps: Array<LayoutStep & { ui?: { x: number; y: number } }>,
 ): Record<string, { x: number; y: number }> {
   const saved = steps.filter((s) => s.ui);
   if (!saved.length) return autoLayout(steps);
   const pos = Object.fromEntries(saved.map((s) => [s.key, s.ui!]));
-  const missing = steps.filter((s) => !s.ui);
-  const keys = new Set(missing.map((s) => s.key));
-  const sub = autoLayout(
-    missing.map((s) => ({
-      key: s.key,
-      depends_on: (s.depends_on ?? []).filter((d) => keys.has(d)),
-    })),
-  );
+  const taken = new Set(saved.map((s) => `${s.ui!.x},${s.ui!.y}`));
   const left = Math.min(...saved.map((s) => s.ui!.x));
   const below = Math.max(...saved.map((s) => s.ui!.y)) + DY;
-  for (const s of missing) pos[s.key] = { x: left + sub[s.key].x, y: below + sub[s.key].y };
+  for (const s of steps.filter((x) => !x.ui)) {
+    const parents = (s.depends_on ?? []).map((d) => pos[d]).filter(Boolean);
+    const x = parents.length ? Math.max(...parents.map((p) => p.x)) : left;
+    let y = Math.max(below, ...parents.map((p) => p.y + DY));
+    while (taken.has(`${x},${y}`)) y += SY;
+    taken.add(`${x},${y}`);
+    pos[s.key] = { x, y };
+  }
   return pos;
 }
 

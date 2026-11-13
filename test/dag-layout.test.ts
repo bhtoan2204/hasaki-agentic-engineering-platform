@@ -62,17 +62,23 @@ test("a diamond inside a long chain keeps every band aligned", () => {
   assert.ok(pos.result.x < pos.cleanup.x && pos.cleanup.x < pos.pr.x);
 });
 
-test("steps added without a saved position go below the saved layout, which stays put", () => {
-  const saved = chain(3).map((s, i) => ({ ...s, ui: { x: 40 + (i % 2) * 300, y: i * 140 } }));
-  const pos = placeSteps([
-    ...saved,
-    { key: "report", depends_on: ["c"] },
-    { key: "after", depends_on: ["report"] },
-  ]);
+test("steps added without a saved position go under their parent; nothing placed earlier moves", () => {
+  const saved = chain(3).map((s, i) => ({ ...s, ui: { x: i * 300, y: 0 } }));
+  const first = [...saved, { key: "report", depends_on: ["c"] }];
+  const pos = placeSteps(first);
   for (const s of saved) assert.deepEqual(pos[s.key], s.ui);
-  assert.ok(pos.report.y > 280 && pos.after.y > 280);
-  assert.equal(pos.report.x, 40);
-  assert.notDeepEqual(pos.report, pos.after);
+  assert.equal(pos.report.x, 600);
+  assert.ok(pos.report.y > 0);
+  const more = placeSteps([
+    ...first,
+    { key: "sub1", depends_on: ["b"] },
+    { key: "sub2", depends_on: ["b"] },
+  ]);
+  assert.deepEqual(more.report, pos.report);
+  assert.equal(more.sub1.x, 300);
+  assert.notDeepEqual(more.sub1, more.sub2);
+  const all = Object.values(more).map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(all).size, all.length);
 });
 
 test("without saved positions the graph is auto-laid out; a full saved layout is kept as is", () => {

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Badge, Segmented } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
-import { nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
+import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
 
 export type ProfileChoice = "AUTO" | "FAST" | "STANDARD" | "DEEP";
@@ -86,7 +86,7 @@ export function ProfilePreview({
   const { nodes, edges } = useMemo(() => {
     const steps = Array.isArray(data?.graph?.steps) ? data.graph.steps : [];
     if (!steps.length) return { nodes: [], edges: [] };
-    const pos = placeSteps(steps);
+    const pos = autoLayout(steps);
     const nodes: Node<StepNodeData>[] = steps.map((s: any) => ({
       id: s.key,
       type: "step",

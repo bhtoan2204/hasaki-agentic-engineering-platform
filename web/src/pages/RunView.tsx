@@ -175,17 +175,18 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       return false;
     }
   });
-  const toggleArranged = () =>
-    setArranged((on) => {
-      try {
-        localStorage.setItem(ARRANGE_KEY, on ? "0" : "1");
-      } catch {}
-      return !on;
-    });
+  const toggleArranged = () => {
+    const next = !arranged;
+    setArranged(next);
+    try {
+      localStorage.setItem(ARRANGE_KEY, next ? "1" : "0");
+    } catch {}
+  };
+  const hasSavedLayout = !!(run?.graph.steps as any[] | undefined)?.some((s) => s.ui);
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
     const specSteps = run.graph.steps as any[];
-    const placed = arranged ? autoLayout(specSteps) : placeSteps(specSteps);
+    const placed = arranged && hasSavedLayout ? autoLayout(specSteps) : placeSteps(specSteps);
     const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
@@ -240,7 +241,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       };
     });
     return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
-  }, [run, stepKey, pickStep, arranged]);
+  }, [run, stepKey, pickStep, arranged, hasSavedLayout]);
   const fitViewOptions = useMemo(
     () => ({
       padding: 0.25,
@@ -576,7 +577,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       <div className="split">
         <div className="canvas">
           <ReactFlow
-            key={arranged ? "arranged" : "saved"}
+            key={arranged && hasSavedLayout ? "arranged" : "saved"}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
@@ -600,15 +601,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           >
             <Background gap={18} />
             <Controls showInteractive={false}>
-              <ControlButton
-                onClick={toggleArranged}
-                title={t("rv.autoLayout")}
-                aria-label={t("rv.autoLayout")}
-                aria-pressed={arranged}
-                className={arranged ? "on" : undefined}
-              >
-                <LayoutGrid size={14} />
-              </ControlButton>
+              {hasSavedLayout && (
+                <ControlButton
+                  onClick={toggleArranged}
+                  title={t("rv.autoLayout")}
+                  aria-label={t("rv.autoLayout")}
+                  aria-pressed={arranged}
+                  className={arranged ? "on" : undefined}
+                >
+                  <LayoutGrid size={14} />
+                </ControlButton>
+              )}
             </Controls>
           </ReactFlow>
         </div>
