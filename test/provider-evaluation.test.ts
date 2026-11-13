@@ -788,7 +788,7 @@ test("live work survives a skipped phase while its case still waits or the run i
   await sweepInactiveLiveWork();
   await assert.rejects(stat(root));
 });
-test("baseline live arm never resolves Ponytail skills even with the global pilot flag on", async () => {
+test("baseline live arms, even those frozen before the ponytail flag, never resolve Ponytail skills", async () => {
   const { planExternalSkills, applyExternalSkills } =
     await import("../src/knowledge/externalImport.ts");
   const { resolveContext, buildStepInput } = await import("../src/workflow/context.ts");
@@ -797,7 +797,7 @@ test("baseline live arm never resolves Ponytail skills even with the global pilo
   const previous = config.knowledge.ponytail.enabled;
   config.knowledge.ponytail.enabled = true;
   try {
-    const resolved = async (ponytail: boolean) => {
+    const resolved = async (ponytail: boolean, frozenBeforeFlag = false) => {
       const e = await createEvaluation(
         owner.id,
         {
@@ -817,7 +817,11 @@ test("baseline live arm never resolves Ponytail skills even with the global pilo
       );
       const run = await getRun(e.workflow_run_id);
       const keys: string[] = [];
-      for (const step of run.steps.filter((s) => s.config.evaluation_phase)) {
+      for (const frozen of run.steps.filter((s) => s.config.evaluation_phase)) {
+        const { ponytail: _flag, ...phase } = frozen.config.evaluation_phase;
+        const step = frozenBeforeFlag
+          ? { ...frozen, config: { ...frozen.config, evaluation_phase: phase } }
+          : frozen;
         const ctx = await resolveContext(pool, run, step, await buildStepInput(pool, run, step));
         keys.push(...ctx.knowledge.map((k) => k.key));
       }
@@ -825,6 +829,7 @@ test("baseline live arm never resolves Ponytail skills even with the global pilo
     };
     assert.deepEqual(await resolved(false), []);
     assert.ok((await resolved(true)).length);
+    assert.deepEqual(await resolved(false, true), []);
   } finally {
     config.knowledge.ponytail.enabled = previous;
   }

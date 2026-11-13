@@ -231,7 +231,8 @@ export async function resolveContext(
       explicit,
       now: at,
       ponytailEnabled:
-        cfg.evaluation_phase?.ponytail !== false && config.knowledge.ponytail.enabled,
+        (!cfg.evaluation_phase || cfg.evaluation_phase.ponytail === true) &&
+        config.knowledge.ponytail.enabled,
     },
   );
   // Skills selected for this re-execution, at the exact version pinned when it was requested.
