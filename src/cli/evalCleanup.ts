@@ -2,7 +2,7 @@
  * Lists live-evaluation leftovers under <dataDir>/evaluation-work and, with --yes, removes those of COMPLETED or
  * CANCELED runs (never FAILED: it can be retried). --case=<case_run_id> --yes removes that one case regardless.
  */
-import { lstat, readdir, rm, rmdir } from "node:fs/promises";
+import { lstat, rmdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { parseArgs, promisify } from "node:util";
 import { join } from "node:path";
@@ -11,15 +11,11 @@ import { pool, q } from "../db/pool.ts";
 import {
   cleanupLiveWork,
   liveDatabases,
-  postmasterRunning,
-  stopPostmaster,
+  postmasterState,
+  subdirectories,
 } from "../eval/liveCase.ts";
 
 const exec = promisify(execFile);
-const subdirectories = async (dir: string) =>
-  (await readdir(dir, { withFileTypes: true }).catch(() => []))
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name);
 const sizesKb = async (path: string) =>
   new Map(
     (await exec("du", ["-k", "--max-depth=1", path]).catch(() => ({ stdout: "" }))).stdout
@@ -27,7 +23,7 @@ const sizesKb = async (path: string) =>
       .filter(Boolean)
       .map((line) => {
         const [size, ...name] = line.split("\t");
-        return [name.join("\t"), Number(size) || 0];
+        return [name.join("\t"), Number.isFinite(Number(size)) ? Number(size) : null];
       }),
   );
 const USAGE = "Usage: eval:cleanup [--yes] [--case <case_run_id>]";
@@ -42,14 +38,20 @@ export function parseCleanupArgs(args: string[]) {
     throw new Error(`invalid --case ${values.case}`);
   return { yes: values.yes ?? false, caseRunId: values.case };
 }
-const runActive = async (runId: unknown) =>
+// Cancel bumps the fencing token so leases stop renewing: give a stopping executor one more lease.
+const caseActive = async (caseRunId: string) =>
   !!(
     await q(
       pool,
-      `SELECT 1 FROM workflow_jobs j WHERE j.run_id=$1 AND (j.status IN ('queued','running')
-       OR (j.lease_expires_at>now() AND EXISTS (SELECT 1 FROM workflow_step_attempts a WHERE a.job_id=j.id AND a.executor_stopped_at IS NULL)))
-     UNION ALL SELECT 1 FROM workflow_step_attempts WHERE run_id=$1 AND status='RUNNING' LIMIT 1`,
-      [runId],
+      `SELECT 1 FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
+       JOIN workflow_steps s ON s.run_id=e.workflow_run_id AND (s.key=cr.workflow_step_key
+         OR s.key IN (SELECT step_key FROM evaluation_provider_phases WHERE case_run_id=cr.id))
+       JOIN workflow_jobs j ON j.step_id=s.id
+       WHERE cr.id=$1 AND (j.status='queued' OR (j.status='running' AND j.lease_expires_at>now())
+         OR (j.lease_expires_at>now()-make_interval(secs=>$2)
+           AND EXISTS (SELECT 1 FROM workflow_step_attempts a WHERE a.job_id=j.id AND a.executor_stopped_at IS NULL)))
+       LIMIT 1`,
+      [caseRunId, config.scheduler.leaseSeconds],
     )
   )[0];
 
@@ -86,38 +88,38 @@ export async function evalCleanup(
       case_run_id: caseRun,
       run_status: row?.run_status ?? null,
       case_status: row?.case_status ?? null,
-      size_kb: sizes.get(live) ?? 0,
-      databases: [] as Array<{ path: string; postmaster: boolean; size_kb: number }>,
+      size_kb: sizes.get(live) ?? null,
+      databases: [] as Array<{ path: string; postmaster: string; size_kb: number | null }>,
       removed: false,
       note: null as string | null,
     };
     for (const path of await liveDatabases(live))
       entry.databases.push({
         path,
-        postmaster: await postmasterRunning(path),
-        size_kb: sizes.get(path) ?? 0,
+        postmaster: await postmasterState(path),
+        size_kb: sizes.get(path) ?? null,
       });
     report.push(entry);
     const selected = options.caseRunId
       ? options.caseRunId === caseRun
       : ["COMPLETED", "CANCELED"].includes(entry.run_status);
     if (!options.yes || !selected) continue;
-    // Cancel flips jobs and attempts at once; the executor may still be writing until it records its stop.
-    if (row && (await runActive(row.workflow_run_id))) {
-      entry.note = "still active; retry later";
-      continue;
-    }
     try {
-      for (const db of entry.databases) await stopPostmaster(db.path);
+      if (row && (await caseActive(caseRun))) {
+        if (!options.caseRunId) {
+          entry.note = "still active; retry later";
+          continue;
+        }
+        entry.note = "warning: run may still be active";
+      }
+      await cleanupLiveWork(row ? Number(row.workflow_run_id) : null, live);
+      entry.removed = true;
+      for (const dir of [join(root, evaluation, caseRun), join(root, evaluation)])
+        await rmdir(dir).catch(() => {});
     } catch (error) {
       entry.note = (error as Error).message;
-      continue;
     }
-    if (row) await cleanupLiveWork(Number(row.workflow_run_id), live);
-    else await rm(live, { recursive: true, force: true });
-    entry.removed = true;
-    for (const dir of [join(root, evaluation, caseRun), join(root, evaluation)])
-      await rmdir(dir).catch(() => {});
+    for (const db of entry.databases) db.postmaster = await postmasterState(db.path);
   }
   return report;
 }

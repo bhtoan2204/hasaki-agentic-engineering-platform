@@ -13,24 +13,31 @@ import type { ExecResult } from "../workflow/types.ts";
 export const liveWorkRoot = (evaluationId: unknown, caseRunId: unknown) =>
   join(config.dataDir, "evaluation-work", String(evaluationId), String(caseRunId), "live");
 // postmaster.pid may name a reused pid: only a postgres process serving this directory counts.
-async function postmasterPid(data: string) {
-  const pid = Number(
-    (await readFile(join(data, "postmaster.pid"), "utf8").catch(() => "")).split("\n")[0],
-  );
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  const [cmdline, cwd, dir] = await Promise.all([
-    readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => ""),
-    realpath(`/proc/${pid}/cwd`).catch(() => null),
-    realpath(data).catch(() => null),
-  ]);
-  const args = cmdline.split("\0");
-  return args.some((a) => a.includes("postgres")) && (cwd === dir || args.includes(data))
-    ? pid
-    : null;
+export async function postmasterState(data: string): Promise<"running" | "stopped" | "unknown"> {
+  const missing = (error: { code?: unknown }) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  };
+  try {
+    const pidFile = await readFile(join(data, "postmaster.pid"), "utf8").catch(missing);
+    if (pidFile === null) return "stopped";
+    const pid = Number(pidFile.split("\n")[0]);
+    if (!Number.isInteger(pid) || pid <= 0) return "unknown";
+    await readdir("/proc/self");
+    const cmdline = await readFile(`/proc/${pid}/cmdline`, "utf8").catch(missing);
+    const args = cmdline?.split("\0") ?? [];
+    if (!args.some((a) => a.includes("postgres"))) return "stopped";
+    if (args.includes(data)) return "running";
+    return (await realpath(`/proc/${pid}/cwd`)) === (await realpath(data)) ? "running" : "stopped";
+  } catch {
+    return "unknown";
+  }
 }
-export const postmasterRunning = async (data: string) => (await postmasterPid(data)) !== null;
 export async function stopPostmaster(data: string) {
-  if (!(await postmasterRunning(data))) return;
+  const state = await postmasterState(data);
+  if (state === "stopped") return;
+  if (state === "unknown")
+    throw new Error(`cannot tell whether a postmaster serves ${data}; left in place`);
   const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
   await promisify(execFile)("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
     env,
@@ -38,14 +45,18 @@ export async function stopPostmaster(data: string) {
   }).catch((error: { code?: unknown }) => {
     if (error.code === "ENOENT") throw new Error("pg_ctl not found on PATH");
   });
-  if (await postmasterRunning(data))
+  if ((await postmasterState(data)) !== "stopped")
     throw new Error(`postmaster still serves ${data}; left in place`);
 }
+export const subdirectories = async (dir: string) =>
+  (await readdir(dir, { withFileTypes: true }).catch(() => []))
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
 export const liveDatabases = async (root: string) =>
-  (await readdir(root, { withFileTypes: true }).catch(() => []))
-    .filter((e) => e.isDirectory() && /^database-[0-9a-f-]{36}$/.test(e.name))
-    .map((e) => join(root, e.name));
-export async function cleanupLiveWork(runId: number, root: string) {
+  (await subdirectories(root))
+    .filter((name) => /^database-[0-9a-f-]{36}$/.test(name))
+    .map((name) => join(root, name));
+export async function cleanupLiveWork(runId: number | null, root: string) {
   for (const data of await liveDatabases(root)) await stopPostmaster(data);
   await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path LIKE $2", [
     runId,
@@ -176,7 +187,9 @@ export async function executeLiveCase(
       error: "Evaluation result fenced",
       retryable: false,
     };
-  await cleanupLiveWork(ctx.run.id, root);
+  await cleanupLiveWork(ctx.run.id, root).catch((error) =>
+    console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
+  );
   return {
     kind: "completed",
     output: { evaluation_result_id: saved?.id, verdict: status, evidence },

@@ -75,7 +75,7 @@ async function stopIsolatedDatabase(data: string) {
   await stopPostmaster(data);
   await rm(data, { recursive: true, force: true });
 }
-async function isolatedDatabase(root: string) {
+export async function isolatedDatabase(root: string) {
   const data = join(root, `database-${randomUUID()}`);
   const socket = join(data, "socket");
   const env = { PATH: process.env.PATH, HOME: root, LANG: "C.UTF-8" };
@@ -84,7 +84,6 @@ async function isolatedDatabase(root: string) {
     ["-D", data, "-U", "platform_eval", "-A", "trust", "--no-locale", "--encoding=UTF8"],
     { env, timeout: 30000 },
   );
-  let started = false;
   try {
     await mkdir(socket, { mode: 0o700 });
     await exec(
@@ -101,7 +100,6 @@ async function isolatedDatabase(root: string) {
       ],
       { env, timeout: 30000 },
     );
-    started = true;
     const url = `postgres://platform_eval@localhost/postgres?host=${encodeURIComponent(socket)}`;
     const admin = new pg.Client({ connectionString: url });
     await admin.connect();
@@ -116,8 +114,9 @@ async function isolatedDatabase(root: string) {
       dispose: () => stopIsolatedDatabase(data),
     };
   } catch (error) {
-    if (started) await stopPostmaster(data).catch(() => {});
-    await rm(data, { recursive: true, force: true });
+    await stopIsolatedDatabase(data).catch((cleanup) =>
+      console.error(`isolated database cleanup failed: ${(cleanup as Error).message}`),
+    );
     throw error;
   }
 }

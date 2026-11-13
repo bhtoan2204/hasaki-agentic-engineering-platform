@@ -816,7 +816,7 @@ test("eval:cleanup --case removes one case regardless of status, stopping its po
     const listed = await evalCleanup({ caseRunId: failed.caseRunId });
     assert.equal(
       listed.find((r) => r.case_run_id === failed.caseRunId)?.databases[0].postmaster,
-      true,
+      "running",
     );
     await stat(data);
     const report = await evalCleanup({ yes: true, caseRunId: failed.caseRunId });
@@ -838,7 +838,7 @@ test("eval:cleanup --case removes one case regardless of status, stopping its po
 });
 test("eval:cleanup never signals a stale postmaster.pid whose pid now belongs to another process", async () => {
   const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
-  const { postmasterRunning } = await import("../src/eval/liveCase.ts");
+  const { postmasterState } = await import("../src/eval/liveCase.ts");
   const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
   const { join, dirname } = await import("node:path");
   const { randomUUID } = await import("node:crypto");
@@ -850,10 +850,10 @@ test("eval:cleanup never signals a stale postmaster.pid whose pid now belongs to
     await mkdir(data);
     await writeFile(join(data, "PG_VERSION"), "17\n");
     await writeFile(join(data, "postmaster.pid"), `${unrelated.pid}\n${data}\n`);
-    assert.equal(await postmasterRunning(data), false);
+    assert.equal(await postmasterState(data), "stopped");
     const report = await evalCleanup({ yes: true, caseRunId: stale.caseRunId });
     const entry = report.find((r) => r.case_run_id === stale.caseRunId);
-    assert.equal(entry?.databases[0].postmaster, false);
+    assert.equal(entry?.databases[0].postmaster, "stopped");
     assert.equal(entry?.removed, true);
     await assert.rejects(stat(stale.root));
     process.kill(unrelated.pid!, 0);
@@ -862,42 +862,168 @@ test("eval:cleanup never signals a stale postmaster.pid whose pid now belongs to
     await rm(dirname(dirname(stale.root)), { recursive: true, force: true });
   }
 });
-test("eval:cleanup --yes skips a canceled run whose executor has not stopped yet", async () => {
+async function unstoppedAttempt(c: Awaited<ReturnType<typeof leftover>>, status = "canceled") {
+  const step = await one(
+    pool,
+    `SELECT s.id, s.generation FROM workflow_steps s JOIN evaluation_case_runs cr ON cr.workflow_step_key=s.key
+     WHERE s.run_id=$1 AND cr.id=$2`,
+    [c.e.workflow_run_id, c.caseRunId],
+  );
+  const job = await one(
+    pool,
+    `INSERT INTO workflow_jobs(run_id,step_id,generation,idempotency_key,status,lease_expires_at,fencing_token)
+     VALUES($1,$2,$3,$4,$5,now()+interval '1 hour',7) RETURNING id`,
+    [c.e.workflow_run_id, step!.id, step!.generation, `cleanup-active-${++seq}`, status],
+  );
+  const attempt = await one(
+    pool,
+    `INSERT INTO workflow_step_attempts(step_id,run_id,number,generation,status,job_id)
+     VALUES($1,$2,1000,$3,'CANCELED',$4) RETURNING id`,
+    [step!.id, c.e.workflow_run_id, step!.generation, job!.id],
+  );
+  return { step: step!, job: job!, attempt: attempt! };
+}
+test("eval:cleanup --yes skips a case whose canceled executor may still run until its lease has long expired", async () => {
   const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
   const { stat, rm } = await import("node:fs/promises");
   const { join, dirname } = await import("node:path");
   const canceled = await leftover(null);
   await cancelEvaluation(canceled.e.id, owner.id);
   try {
-    const step = await one(
+    const { job } = await unstoppedAttempt(canceled);
+    const entry = async () =>
+      (await evalCleanup({ yes: true })).find((r) => r.case_run_id === canceled.caseRunId);
+    assert.equal((await entry())?.note, "still active; retry later");
+    await q(
       pool,
-      "SELECT id, generation FROM workflow_steps WHERE run_id=$1 LIMIT 1",
-      [canceled.e.workflow_run_id],
+      "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",
+      [job.id],
     );
-    const job = await one(
-      pool,
-      `INSERT INTO workflow_jobs(run_id,step_id,generation,idempotency_key,status,lease_expires_at)
-       VALUES($1,$2,$3,$4,'canceled',now()+interval '1 hour') RETURNING id`,
-      [canceled.e.workflow_run_id, step!.id, step!.generation, `cleanup-active-${++seq}`],
-    );
-    const attempt = await one(
-      pool,
-      `INSERT INTO workflow_step_attempts(step_id,run_id,number,generation,status,job_id)
-       VALUES($1,$2,1000,$3,'CANCELED',$4) RETURNING id`,
-      [step!.id, canceled.e.workflow_run_id, step!.generation, job!.id],
-    );
-    const report = await evalCleanup({ yes: true });
-    const entry = report.find((r) => r.case_run_id === canceled.caseRunId);
-    assert.equal(entry?.removed, false);
-    assert.equal(entry?.note, "still active; retry later");
+    assert.equal((await entry())?.note, "still active; retry later");
     await stat(join(canceled.root, "repo", "edited.txt"));
-    await q(pool, "UPDATE workflow_step_attempts SET executor_stopped_at=now() WHERE id=$1", [
-      attempt!.id,
-    ]);
-    const retried = await evalCleanup({ yes: true });
-    assert.equal(retried.find((r) => r.case_run_id === canceled.caseRunId)?.removed, true);
+    await q(
+      pool,
+      "UPDATE workflow_jobs SET lease_expires_at=now()-make_interval(secs=>$2+1) WHERE id=$1",
+      [job.id, config.scheduler.leaseSeconds],
+    );
+    assert.equal((await entry())?.removed, true);
   } finally {
     await rm(dirname(dirname(canceled.root)), { recursive: true, force: true });
+  }
+});
+test("eval:cleanup --case removes a crash leftover even while its run still looks active", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const crashed = await leftover(null);
+  await cancelEvaluation(crashed.e.id, owner.id);
+  try {
+    await unstoppedAttempt(crashed);
+    const report = await evalCleanup({ yes: true, caseRunId: crashed.caseRunId });
+    const entry = report.find((r) => r.case_run_id === crashed.caseRunId);
+    assert.equal(entry?.removed, true);
+    assert.equal(entry?.note, "warning: run may still be active");
+    await assert.rejects(stat(crashed.root));
+  } finally {
+    await rm(dirname(dirname(crashed.root)), { recursive: true, force: true });
+  }
+});
+test("eval:cleanup never deletes a database of unknown liveness and keeps processing other cases", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const unknown = await leftover("COMPLETED");
+  const done = await leftover("COMPLETED");
+  const data = join(unknown.root, `database-${randomUUID()}`);
+  try {
+    await mkdir(data);
+    await writeFile(join(data, "postmaster.pid"), "garbage\n");
+    const report = await evalCleanup({ yes: true });
+    const entry = report.find((r) => r.case_run_id === unknown.caseRunId);
+    assert.equal(entry?.removed, false);
+    assert.equal(entry?.databases[0].postmaster, "unknown");
+    assert.match(entry?.note ?? "", /cannot tell whether a postmaster serves/);
+    await stat(data);
+    assert.equal(report.find((r) => r.case_run_id === done.caseRunId)?.removed, true);
+    await assert.rejects(stat(done.root));
+  } finally {
+    for (const c of [unknown, done])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+  }
+});
+test("a live case stays completed when removing its workspace fails after the result is stored", async () => {
+  const { executeLiveCase } = await import("../src/eval/liveCase.ts");
+  const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const c = await leftover(null);
+  const data = join(c.root, `database-${randomUUID()}`);
+  try {
+    await mkdir(data);
+    await writeFile(join(data, "postmaster.pid"), "garbage\n");
+    const { step, job, attempt } = await unstoppedAttempt(c, "running");
+    await q(pool, "UPDATE workflow_steps SET status='RUNNING', current_attempt_id=$2 WHERE id=$1", [
+      step.id,
+      attempt.id,
+    ]);
+    const caseRun = await one(
+      pool,
+      `SELECT cr.*,c.definition,s.suite_key,s.version FROM evaluation_case_runs cr
+       JOIN benchmark_cases c ON c.id=cr.case_id JOIN evaluation_runs e ON e.id=cr.evaluation_id
+       JOIN benchmark_suites s ON s.id=e.suite_id WHERE cr.id=$1`,
+      [c.caseRunId],
+    );
+    const result = await executeLiveCase(
+      {
+        run: { id: Number(c.e.workflow_run_id), owner_id: owner.id },
+        step: { id: step.id },
+        attempt: { id: attempt.id, job_id: job.id, fencing_token: 7 },
+      } as unknown as Parameters<typeof executeLiveCase>[0],
+      { ...caseRun, configuration: { blocked: "cleanup test", ponytail: false } },
+    );
+    assert.equal(result.kind, "completed");
+    assert.ok(await one(pool, "SELECT 1 FROM eval_results WHERE case_run_id=$1", [c.caseRunId]));
+    await stat(data);
+  } finally {
+    await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+  }
+});
+test("a failed isolated database start stops a started postmaster and keeps a directory of unknown liveness", async () => {
+  const { isolatedDatabase } = await import("../src/eval/liveProvider.ts");
+  const { liveDatabases } = await import("../src/eval/liveCase.ts");
+  const { mkdtemp, writeFile, readFile, readdir, rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const real = execFileSync("sh", ["-c", "command -v pg_ctl"], { encoding: "utf8" }).trim();
+  const bin = await mkdtemp(join(tmpdir(), "eval-pgctl-"));
+  const path = process.env.PATH;
+  const fakeStart = async (onStart: string) => {
+    await writeFile(
+      join(bin, "pg_ctl"),
+      `#!/bin/sh\ncase "$*" in *start) ${onStart}; exit 1;; esac\nexec ${real} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const root = await mkdtemp(join(tmpdir(), "eval-isolated-"));
+    await assert.rejects(isolatedDatabase(root));
+    return root;
+  };
+  process.env.PATH = `${bin}:${path}`;
+  const roots: string[] = [];
+  try {
+    const started = await fakeStart(`${real} "$@" >/dev/null`);
+    roots.push(started);
+    assert.deepEqual(await liveDatabases(started), []);
+    const unknown = await fakeStart(`echo garbage > "$2/postmaster.pid"`);
+    roots.push(unknown);
+    const [data] = await liveDatabases(unknown);
+    assert.equal(await readFile(join(data, "postmaster.pid"), "utf8"), "garbage\n");
+    assert.ok((await readdir(data)).includes("PG_VERSION"));
+  } finally {
+    process.env.PATH = path;
+    for (const root of roots) await rm(root, { recursive: true, force: true });
+    await rm(bin, { recursive: true, force: true });
   }
 });
 test("eval:cleanup rejects unknown or invalid arguments and accepts both --case forms", async () => {
@@ -946,7 +1072,7 @@ test("live cleanup stops an orphaned postmaster first and reports a missing pg_c
     assert.equal(entry?.note, "pg_ctl not found on PATH");
     assert.equal(
       missing.find((r) => r.case_run_id === idle.caseRunId)?.databases[0].postmaster,
-      false,
+      "stopped",
     );
     await assert.rejects(cleanupLiveWork(Number(orphan.e.workflow_run_id), orphan.root), {
       message: "pg_ctl not found on PATH",
