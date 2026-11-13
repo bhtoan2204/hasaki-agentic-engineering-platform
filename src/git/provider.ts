@@ -517,11 +517,20 @@ export async function restoreMissingWorkspaces(
   },
 ): Promise<ExecResult | null> {
   const { log, checkLive, approvedReleases } = opts;
+  let lost: unknown;
+  const live =
+    checkLive &&
+    (() =>
+      checkLive().catch((e) => {
+        lost = e;
+        throw e;
+      }));
   for (const w of await workspacesOf(run.id)) {
     if (existsSync(w.path) || (repos.length && !repos.includes(w.repo))) continue;
     try {
-      await prepareWorkspace(run, w.repo, checkLive, { log, approvedReleases });
+      await prepareWorkspace(run, w.repo, live, { log, approvedReleases });
     } catch (e) {
+      if (lost) throw lost;
       if (e instanceof WorkspaceConflictError)
         return workspaceConflictQuestion(e.conflicts, opts.en);
       return {

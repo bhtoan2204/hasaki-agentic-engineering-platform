@@ -16,6 +16,7 @@ import {
   WorkspaceConflictError,
 } from "../src/git/provider.ts";
 import { repositories } from "../src/repos/service.ts";
+import { restoreConflictVerification } from "../src/agent/verify.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
 
 before(async () => {
@@ -341,16 +342,21 @@ test("restore: a release the developer approved is honoured, and fenced-out atte
       path,
       created_from: config.baseBranch,
     });
-    const fenced = await restoreMissingWorkspaces(s.run, [], {
-      log: async () => {},
-      en: true,
-      approvedReleases: [s.holder],
-      checkLive: async () => {
-        throw new Error("attempt is no longer live");
-      },
-    });
-    assert.equal(fenced?.kind, "failed");
-    assert.match(fenced?.kind === "failed" ? fenced.error : "", /no longer live/);
+    for (const liveChecks of [0, 1]) {
+      let calls = 0;
+      await assert.rejects(
+        restoreMissingWorkspaces(s.run, [], {
+          log: async () => {},
+          en: true,
+          approvedReleases: [s.holder],
+          checkLive: async () => {
+            if (calls++ >= liveChecks) throw new Error("attempt is no longer live");
+          },
+        }),
+        /^Error: attempt is no longer live$/,
+        "a lost lease propagates like on the platform-tool path, not as a non-retryable restore failure",
+      );
+    }
     assert.equal(existsSync(path), false);
     assert.equal(existsSync(s.holder), true);
 
@@ -363,6 +369,13 @@ test("restore: a release the developer approved is honoured, and fenced-out atte
       s.holder,
     );
     assert.equal(existsSync(path), false);
+    const skipped = restoreConflictVerification(asked!.kind === "waiting_input" ? asked! : {});
+    assert.deepEqual(
+      [skipped.status, skipped.passed, skipped.needs_review],
+      ["skipped", null, true],
+      "after submit the conflict skips verification instead of re-asking (resume would re-run the agent)",
+    );
+    assert.match(skipped.reason, new RegExp(`conflict .*tests not run: [\\s\\S]*${s.holder}`));
 
     let live = 0;
     const restored = await restoreMissingWorkspaces(s.run, [], {

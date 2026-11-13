@@ -122,6 +122,7 @@ import {
 import {
   diffTestsAgainstBase,
   repairPrompt,
+  restoreConflictVerification,
   verificationLoop,
   verificationSummary,
   verifyConfig,
@@ -1567,9 +1568,20 @@ const agentExecutor: StepExecutor = {
         verification: { outcome: "disabled", status: "disabled", passed: null },
       };
     }
-    if (vcfg) {
-      const blocked = await restoreWorkspaces();
-      if (blocked) return blocked;
+    const restoreBlocked = vcfg ? await restoreWorkspaces() : null;
+    if (restoreBlocked?.kind === "waiting_input") {
+      // The agent already submitted: a question now would re-run it from scratch on resume.
+      const verification = restoreConflictVerification(restoreBlocked);
+      await ctx.log(
+        "system",
+        `verification skipped (no repair was attempted) — needs human review: ${verification.reason}`,
+        { verification: "skipped" },
+      );
+      metrics.verification = verification;
+      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      output = { ...output, verification };
+    } else if (restoreBlocked) return restoreBlocked;
+    if (vcfg && !restoreBlocked) {
       const trees = (await workspacesOf(ctx.run.id)).filter(
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),

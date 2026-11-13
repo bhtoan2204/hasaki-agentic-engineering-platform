@@ -301,14 +301,19 @@ export async function branchWorktree(
   branch: string,
 ): Promise<{ path: string; missing: boolean } | null> {
   repositoryBranch(branch);
+  const found = (await listWorktrees(repoPath)).find((w) => w.branch === branch);
+  return found ? { path: found.path, missing: !existsSync(found.path) } : null;
+}
+
+/** Linked worktrees (the primary checkout excluded) as git spells their paths; `branch` is null when detached. */
+async function listWorktrees(repoPath: string): Promise<{ path: string; branch: string | null }[]> {
   const blocks = (await git(repoPath, "worktree", "list", "--porcelain")).split(/\n\s*\n/).slice(1);
-  for (const block of blocks) {
+  return blocks.flatMap((block) => {
     const lines = block.split("\n");
-    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
     const path = lines[0].replace(/^worktree /, "");
-    return { path, missing: !existsSync(path) };
-  }
-  return null;
+    const head = lines.find((l) => l.startsWith("branch refs/heads/"));
+    return path ? [{ path, branch: head ? head.slice("branch refs/heads/".length) : null }] : [];
+  });
 }
 
 const resolvedPath = (path: string) => {
@@ -327,12 +332,7 @@ const resolvedPath = (path: string) => {
 /** The registered worktree (any branch or detached) whose path resolves to `path`, as git spells it. */
 export async function registeredWorktreeAt(repoPath: string, path: string): Promise<string | null> {
   const target = resolvedPath(path);
-  const blocks = (await git(repoPath, "worktree", "list", "--porcelain")).split(/\n\s*\n/).slice(1);
-  for (const block of blocks) {
-    const registered = block.split("\n")[0].replace(/^worktree /, "");
-    if (registered && resolvedPath(registered) === target) return registered;
-  }
-  return null;
+  return (await listWorktrees(repoPath)).find((w) => resolvedPath(w.path) === target)?.path ?? null;
 }
 
 /** Drop the registration of a worktree whose directory no longer exists (nothing on disk is deleted). */
