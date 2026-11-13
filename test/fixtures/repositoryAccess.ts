@@ -4,7 +4,7 @@
  * documented policies an installation could choose, instead of a bypass in production code:
  *  - every (non-benchmark) repository registered in this test database is shared with every user, now and later;
  *  - Bitbucket verification is "trusted" (platform grants are not cross-checked against Bitbucket).
- * Authorization itself is covered by test/repository-access.test.ts.
+ * Authorization itself is covered by test/repository-access.integration.ts.
  */
 import { pool } from "../../src/db/pool.ts";
 import { config } from "../../src/config.ts";

@@ -46,10 +46,10 @@ every other tool call.
 
 ## Tests
 
-`test/project-databases.test.ts`. The real-server case runs when `TEST_MYSQL_HOST` is set:
+`test/project-databases.integration.ts`. The real-server case runs when `TEST_MYSQL_HOST` is set:
 
 ```bash
 docker run -d --name ctp-mariadb -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:53306:3306 mariadb:10.7
 TEST_MYSQL_HOST=127.0.0.1 TEST_MYSQL_PORT=53306 TEST_MYSQL_ROOT_PASSWORD=root \
-  node --import ./test/setup.ts --test test/project-databases.test.ts
+  node --import ./test/setup.ts --test test/project-databases.integration.ts
 ```

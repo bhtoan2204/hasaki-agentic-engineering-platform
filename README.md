@@ -69,7 +69,7 @@ accounts per user are not included. Agents share one OS user, so this is applica
 team, not a sandbox: tools are checked against the run owner, but a process on the host can still read the disk.
 
 Development: `npm run dev` (backend with --watch) + `npm run dev:web` (Vite hot reload on http://localhost:5173,
-proxying /api to :4545). `npm run typecheck` checks backend and UI, `npm test` creates a fresh, uniquely named `platform_test_<uuid>` database per test process on local PostgreSQL. It never drops or resets an existing database. Generated test databases are retained for inspection.
+proxying /api to :4545). `npm run typecheck` checks backend and UI. `npm test` runs the unit tests (`test/*.test.ts`) in seconds: no PostgreSQL, no real CLIs or agents. `npm run test:integration` runs `test/*.integration.ts` (PostgreSQL, real git/go/CLI processes) on one private PostgreSQL cluster (initdb, from `PATH`) started for the run, with a fresh `platform_test_<uuid>` database per test file; `npm run test:all` runs both, as CI does. A single integration file runs alone with `node --import ./test/setup.ts --test test/<name>.integration.ts`.
 
 The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a free client
 (`database.poolMax` / `database.connectionTimeoutMillis` in config.json, or `DATABASE_POOL_MAX` / `DATABASE_CONNECTION_TIMEOUT_MS`).

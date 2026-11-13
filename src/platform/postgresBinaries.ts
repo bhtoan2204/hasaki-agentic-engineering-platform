@@ -148,13 +148,15 @@ export function setPostgresBinForTests(
   lastNix = null;
 }
 
-/** The repository's test preload starts its own PostgreSQL with initdb (this platform's test/setup.ts). */
+/** The repository's tests start their own PostgreSQL with initdb (this platform's test/pg-cluster.ts or test/setup.ts). */
 export function needsTestPostgres(cwd: string): boolean {
-  try {
-    return /\binitdb\b/.test(readFileSync(join(cwd, "test", "setup.ts"), "utf8"));
-  } catch {
-    return false;
-  }
+  return ["pg-cluster.ts", "setup.ts"].some((file) => {
+    try {
+      return /\binitdb\b/.test(readFileSync(join(cwd, "test", file), "utf8"));
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**

@@ -10,7 +10,9 @@
   "scripts": {
     "start": "npm run build && node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "dev": "node --watch --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
-    "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/*.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import ./test/env.ts --test test/*.test.ts",
+    "test:integration": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=8 test/*.integration.ts",
+    "test:all": "npm test && npm run test:integration",
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",
     "eval:cleanup": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalCleanup.ts",
     "smoke:codex": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/codex.live.ts",
