@@ -122,7 +122,7 @@ import {
 import {
   diffTestsAgainstBase,
   repairPrompt,
-  restoreConflictVerification,
+  restoreConflictSkips,
   verificationLoop,
   verificationSummary,
   verifyConfig,
@@ -1569,19 +1569,10 @@ const agentExecutor: StepExecutor = {
       };
     }
     const restoreBlocked = vcfg ? await restoreWorkspaces() : null;
-    if (restoreBlocked?.kind === "waiting_input") {
-      // The agent already submitted: a question now would re-run it from scratch on resume.
-      const verification = restoreConflictVerification(restoreBlocked);
-      await ctx.log(
-        "system",
-        `verification skipped (no repair was attempted) — needs human review: ${verification.reason}`,
-        { verification: "skipped" },
-      );
-      metrics.verification = verification;
-      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
-      output = { ...output, verification };
-    } else if (restoreBlocked) return restoreBlocked;
-    if (vcfg && !restoreBlocked) {
+    if (restoreBlocked && restoreBlocked.kind !== "waiting_input") return restoreBlocked;
+    // The agent already submitted: a question now would re-run it from scratch on resume, so conflicted repos are skipped.
+    const unrestored = restoreConflictSkips(restoreBlocked);
+    if (vcfg) {
       const trees = (await workspacesOf(ctx.run.id)).filter(
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
@@ -1651,6 +1642,7 @@ const agentExecutor: StepExecutor = {
               repo: w.repo,
               path: w.path,
               branch: w.branch,
+              skip: unrestored.get(w.repo),
             })),
             trees.map((w) => w.path),
             vcfg,
@@ -1729,7 +1721,7 @@ const agentExecutor: StepExecutor = {
       if (loop.outcome === "skipped")
         await ctx.log(
           "system",
-          `verification skipped: the environment could not run the tests in ${skipped.join(", ")}, so they were not verified (${loop.repairs ? `${loop.repairs} repair(s) ran for other failures` : "no repair was attempted"}) — needs human review: ${summary.review_reasons.join("; ")}`,
+          `verification skipped: the tests could not run in ${skipped.join(", ")}, so they were not verified (${loop.repairs ? `${loop.repairs} repair(s) ran for other failures` : "no repair was attempted"}) — needs human review: ${summary.review_reasons.join("; ")}`,
           { verification: "skipped" },
         );
       else if (!summary.passed) {
@@ -1761,7 +1753,9 @@ const agentExecutor: StepExecutor = {
     // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact
     // revision; the PR step re-validates it. The agent's own deviation report is recorded but never relied on.
     if (mode === "coding" && !independent) {
-      const all = await workspacesOf(ctx.run.id).catch(() => []);
+      const all = (await workspacesOf(ctx.run.id).catch(() => [])).filter(
+        (w) => !unrestored.has(w.repo),
+      );
       const state = await collectScopeState(
         await Promise.all(
           all.map(async (w) => ({
@@ -1796,7 +1790,15 @@ const agentExecutor: StepExecutor = {
         const reapproved = check.requires_reapproval
           ? renewedApprovalFor(ctx.input.answers, SCOPE_REAPPROVAL_QUESTION, revision)
           : null;
-        output = { ...output, scope_check: { ...check, reapproved } };
+        const unchecked = [...unrestored].map(([repo, note]) => `${repo}: ${note}`);
+        output = {
+          ...output,
+          scope_check: {
+            ...check,
+            reapproved,
+            ...(unchecked.length ? { needs_review: true, review_reasons: unchecked } : {}),
+          },
+        };
         await ctx.log(
           "system",
           `scope check vs approved proposal ${check.approved_proposal_hash} (revision ${revision}): ${check.out_of_scope_files.length} out-of-scope file(s), ${check.invalid_paths.length} invalid path(s), ${check.unauthorized_repos.length} unauthorized repo(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? (reapproved ? " — renewed approval on record for this revision" : " — renewed approval required") : ""}`,

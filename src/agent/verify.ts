@@ -9,6 +9,7 @@ import {
   type GoTestReport,
 } from "../workflow/executors/baseline.ts";
 import { languageReminder, type OutputLocale } from "./language.ts";
+import type { WorkspaceConflict } from "../git/provider.ts";
 import {
   ENVIRONMENT_UNAVAILABLE_EXIT,
   ENVIRONMENT_UNAVAILABLE_MARKER,
@@ -64,7 +65,8 @@ export function verifyConfig(
  *   tests excluded (anything else still failing → failed). Explicitly listed, never reported as a clean pass.
  * failed: regressions, unclassified failures, timeouts or hard test weakening — sent back to the agent for repair.
  * error: verification itself could not complete (integrity check or tooling failure) — not repairable by the agent.
- * skipped: the command reported that its environment cannot run the tests (e.g. no PostgreSQL) — nothing was tested,
+ * skipped: the command reported that its environment cannot run the tests (e.g. no PostgreSQL), or the worktree could
+ *   not be restored — nothing was tested,
  *   never counted as passed, not repairable by the agent.
  */
 export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error" | "skipped";
@@ -242,7 +244,7 @@ const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Run verification once in every worktree. Refuses to run anywhere else. */
 export async function verifyWorkspaces(
-  workspaces: Array<{ repo: string; path: string; branch?: string }>,
+  workspaces: Array<{ repo: string; path: string; branch?: string; skip?: string }>,
   allowedRoots: string[],
   cfg: VerifyConfig,
   round: number,
@@ -253,6 +255,30 @@ export async function verifyWorkspaces(
   const t0 = Date.now();
   const repos: RepoVerification[] = [];
   for (const w of workspaces) {
+    if (w.skip) {
+      await deps.log?.(`■ verify ${w.repo}: SKIPPED (${w.skip})`, {
+        repo: w.repo,
+        verification: round,
+        status: "skipped",
+      });
+      repos.push({
+        repo: w.repo,
+        status: "skipped",
+        passed: false,
+        exit_code: null,
+        timed_out: false,
+        duration_ms: 0,
+        regressions: [],
+        pre_existing: 0,
+        pre_existing_tests: [],
+        weakened: [],
+        suspected: [],
+        needs_review: true,
+        excerpt: "",
+        note: w.skip,
+      });
+      continue;
+    }
     const p = await authorizeWorkspace(w.path, allowedRoots);
     const known =
       cfg.baseline === "go" && deps.knownFailures
@@ -511,17 +537,21 @@ export function repairPrompt(
   return parts.join("\n\n");
 }
 
-/** A worktree could not be restored for verification (branch held elsewhere): nothing was tested, a human decides. */
-export function restoreConflictVerification(blocked: { questions?: Array<{ question: string }> }) {
-  const reason = `workspace conflict while restoring worktrees, tests not run: ${(blocked.questions ?? []).map((x) => x.question).join("; ")}`;
-  return {
-    outcome: "skipped",
-    status: "skipped",
-    passed: null,
-    needs_review: true,
-    review_reasons: [reason],
-    reason,
-  };
+/** Repos whose worktree could not be restored (branch held elsewhere) → why they are not verified; a human decides. */
+export function restoreConflictSkips(
+  blocked: { kind: string; checkpoint?: unknown } | null,
+): Map<string, string> {
+  const conflicts =
+    blocked?.kind === "waiting_input"
+      ? ((blocked.checkpoint as { workspace_conflict?: WorkspaceConflict[] } | undefined)
+          ?.workspace_conflict ?? [])
+      : [];
+  return new Map(
+    conflicts.map((c) => [
+      c.repo,
+      `workspace conflict while restoring the worktree, tests not run: ${c.branch} is checked out at ${c.holder_path} (${c.reason})`,
+    ]),
+  );
 }
 
 /** Compact record for outputs, metrics and the checkpoint. */

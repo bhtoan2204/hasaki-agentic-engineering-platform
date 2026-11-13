@@ -11,12 +11,13 @@ import { createUser } from "../src/auth/users.ts";
 import {
   prepareWorkspace,
   recordWorkspace,
+  LeaseLostError,
   restoreMissingWorkspaces,
   runWorkspaceConflict,
   WorkspaceConflictError,
 } from "../src/git/provider.ts";
 import { repositories } from "../src/repos/service.ts";
-import { restoreConflictVerification } from "../src/agent/verify.ts";
+import { restoreConflictSkips } from "../src/agent/verify.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
 
 before(async () => {
@@ -264,7 +265,11 @@ test("a deleted worktree whose branch is gone everywhere fails clearly and creat
     rmSync(s.holder, { recursive: true, force: true });
     sh(s.repoPath, "worktree", "prune");
     sh(s.repoPath, "branch", "-D", s.branch);
-    const r = await restoreMissingWorkspaces(s.old, [], { log: async () => {}, en: true });
+    const r = await restoreMissingWorkspaces(s.old, [], {
+      log: async () => {},
+      en: true,
+      checkLive: async () => {},
+    });
     assert.equal(r?.kind, "failed");
     assert.equal(r?.kind === "failed" && r.retryable, false);
     assert.match(
@@ -353,7 +358,10 @@ test("restore: a release the developer approved is honoured, and fenced-out atte
             if (calls++ >= liveChecks) throw new Error("attempt is no longer live");
           },
         }),
-        /^Error: attempt is no longer live$/,
+        (e) =>
+          e instanceof LeaseLostError &&
+          e.message === "attempt is no longer live" &&
+          (e.cause as Error).message === "attempt is no longer live",
         "a lost lease propagates like on the platform-tool path, not as a non-retryable restore failure",
       );
     }
@@ -369,13 +377,14 @@ test("restore: a release the developer approved is honoured, and fenced-out atte
       s.holder,
     );
     assert.equal(existsSync(path), false);
-    const skipped = restoreConflictVerification(asked!.kind === "waiting_input" ? asked! : {});
+    const skipped = restoreConflictSkips(asked);
     assert.deepEqual(
-      [skipped.status, skipped.passed, skipped.needs_review],
-      ["skipped", null, true],
-      "after submit the conflict skips verification instead of re-asking (resume would re-run the agent)",
+      [...skipped.keys()],
+      [s.name],
+      "after submit only the conflicted repo is skipped (verification and scope), nothing is re-asked",
     );
-    assert.match(skipped.reason, new RegExp(`conflict .*tests not run: [\\s\\S]*${s.holder}`));
+    assert.match(skipped.get(s.name)!, new RegExp(`conflict .*tests not run: .*${s.holder}`));
+    assert.equal(restoreConflictSkips(null).size, 0);
 
     let live = 0;
     const restored = await restoreMissingWorkspaces(s.run, [], {

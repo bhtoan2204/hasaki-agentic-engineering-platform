@@ -163,7 +163,7 @@ test("postgres env: only repositories whose test preload runs initdb get the bin
       PLATFORM_TEST_POSTGRES_BIN: join(store, "bin"),
     });
     setPostgresBinForTests({ dir: "/usr/bin", source: "path" });
-    assert.deepEqual(await testPostgresEnv(harness()), { PLATFORM_TEST_POSTGRES_BIN: "/usr/bin" });
+    assert.deepEqual(await testPostgresEnv(harness()), {}, "already on PATH: nothing to add");
     setPostgresBinForTests({ dir: null, reason: "nix is not installed" });
     assert.deepEqual(await testPostgresEnv(harness()), {
       PLATFORM_POSTGRES_UNAVAILABLE: "nix is not installed",
@@ -218,7 +218,7 @@ const loginHarness = (script: string) => {
 };
 const never = new AbortController().signal;
 const missingInitdb =
-  "echo 'Test-owned PostgreSQL initdb failed: spawnSync initdb ENOENT' >&2; exit 1";
+  "echo 'Error: Test-owned PostgreSQL initdb failed (null): spawnSync initdb ENOENT undefined' >&2; exit 1";
 
 test("runCommand: every command in a harness repo finds the bin dir after a login profile reset PATH", async () => {
   const store = fakePrefix("run-store");
@@ -236,6 +236,13 @@ test("runCommand: every command in a harness repo finds the bin dir after a logi
       never,
     );
     assert.doesNotMatch(plain.output, /run-store/, "repos without the harness are untouched");
+    setPostgresBinForTests({ dir: join(store, "bin"), source: "path" });
+    const onPath = await runCommand('printf %s "$PATH"', repo, env, 30_000, never);
+    assert.equal(
+      onPath.output,
+      `/usr/bin:/bin:${dirname(process.execPath)}`,
+      "initdb found on the platform PATH is not prepended ahead of the user's toolchains",
+    );
   } finally {
     setPostgresBinForTests(undefined);
   }
@@ -269,6 +276,18 @@ test("runCommand: without PostgreSQL a harness run that hits the missing initdb 
       never,
     );
     assert.equal(broken.code, 1, "a code failure stays a code failure");
+    const quoted = await runCommand(
+      "printf '%s\\n' \"not ok 1 - reports the setup error\" \"  + 'spawnSync initdb ENOENT'\" \"  - 'Error: Test-owned PostgreSQL initdb failed (null): spawnSync initdb ENOENT'\" \"  actual: 'bash: line 1: initdb: command not found'\"; exit 1",
+      repo,
+      env,
+      30_000,
+      never,
+    );
+    assert.equal(
+      quoted.code,
+      1,
+      `a test that quotes the message in a diff stays a failure: ${quoted.output}`,
+    );
     const elsewhere = await runCommand(missingInitdb, dir("plain"), env, 30_000, never);
     assert.equal(elsewhere.code, 1, "only harness repos");
     assert.equal(environmentUnavailable(78, "exit 78 from a test"), null, "the marker is required");

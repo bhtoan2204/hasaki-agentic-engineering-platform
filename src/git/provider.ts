@@ -505,6 +505,9 @@ export async function recordWorkspace(
   );
 }
 
+/** The attempt lost its lease while restoring: propagate, never report it as a restore failure. */
+export class LeaseLostError extends Error {}
+
 /** Recreate deleted run worktrees on their recorded branch (never re-cut from base); returns what stops the step. */
 export async function restoreMissingWorkspaces(
   run: Parameters<typeof prepareWorkspace>[0],
@@ -517,22 +520,23 @@ export async function restoreMissingWorkspaces(
   },
 ): Promise<ExecResult | null> {
   const { log, checkLive, approvedReleases } = opts;
-  let lost: unknown;
   const live =
     checkLive &&
     (() =>
       checkLive().catch((e) => {
-        lost = e;
-        throw e;
+        throw new LeaseLostError((e as Error).message, { cause: e });
       }));
+  const conflicts: WorkspaceConflict[] = [];
   for (const w of await workspacesOf(run.id)) {
     if (existsSync(w.path) || (repos.length && !repos.includes(w.repo))) continue;
     try {
       await prepareWorkspace(run, w.repo, live, { log, approvedReleases });
     } catch (e) {
-      if (lost) throw lost;
-      if (e instanceof WorkspaceConflictError)
-        return workspaceConflictQuestion(e.conflicts, opts.en);
+      if (e instanceof LeaseLostError) throw e;
+      if (e instanceof WorkspaceConflictError) {
+        conflicts.push(...e.conflicts);
+        continue;
+      }
       return {
         kind: "failed",
         error: `${w.repo}: worktree ${w.path} no longer exists and could not be restored on ${w.branch}: ${(e as Error).message}`,
@@ -543,7 +547,7 @@ export async function restoreMissingWorkspaces(
       `restored missing worktree ${w.repo} at ${w.path} on ${w.branch} (committed work kept; uncommitted changes in the deleted directory are lost)`,
     );
   }
-  return null;
+  return conflicts.length ? workspaceConflictQuestion(conflicts, opts.en) : null;
 }
 
 /** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */

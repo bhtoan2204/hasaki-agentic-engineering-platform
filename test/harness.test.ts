@@ -478,6 +478,55 @@ test("loop: an environment that cannot run the tests is skipped — never passed
   assert.equal(plain.repos[0].status, "failed", "exit 78 without the marker is a normal failure");
 });
 
+test("loop: a repo whose worktree could not be restored is skipped; the others are still verified and repaired", async () => {
+  const gone = join(WT, "gone");
+  const ws = [...WS, { repo: "api", path: gone, skip: "workspace conflict while restoring" }];
+  const ran: string[] = [];
+  let repairs = 0;
+  const run: VerifyDeps["run"] = async (_c, cwd) => (
+    ran.push(cwd),
+    repairs
+      ? { code: 0, output: "ok", timedOut: false }
+      : { code: 1, output: GO_FAIL("TestA"), timedOut: false }
+  );
+  const res = await verificationLoop({
+    cfg: CFG,
+    signal: never,
+    verify: (n) => verifyWorkspaces(ws, ROOTS, CFG, n, never, { run }),
+    repair: async () => void repairs++,
+  });
+  assert.deepEqual(
+    [res.outcome, res.repairs],
+    ["skipped", 1],
+    "the verified repo's failure is repaired",
+  );
+  assert.ok(
+    ran.length && ran.every((p) => p === WT),
+    "the conflicted repo is never run or authorized",
+  );
+  const s = verificationSummary(CFG, res);
+  assert.deepEqual(
+    s.last.map((x) => [x.repo, x.status]),
+    [
+      ["svc", "passed"],
+      ["api", "skipped"],
+    ],
+  );
+  assert.deepEqual([s.passed, s.needs_review], [null, true]);
+  assert.match(s.review_reasons.join(), /api: workspace conflict/);
+
+  const failing = await verificationLoop({
+    cfg: { ...CFG, maxRepairs: 0 },
+    signal: never,
+    verify: (n) =>
+      verifyWorkspaces(ws, ROOTS, CFG, n, never, {
+        run: async () => ({ code: 1, output: GO_FAIL("TestB"), timedOut: false }),
+      }),
+    repair: async () => assert.fail("no budget"),
+  });
+  assert.equal(failing.outcome, "failed", "a failing verified repo still fails the step");
+});
+
 test("loop: accepted pre-existing is a pass, but reported distinctly from a clean pass", async () => {
   const res = await verificationLoop({
     cfg: CFG,

@@ -1189,7 +1189,7 @@ test("regression step without a test PostgreSQL is not passed: the reason reache
     JSON.stringify({
       name: "x",
       scripts: {
-        test: "echo 'Test-owned PostgreSQL initdb failed: spawnSync initdb ENOENT' >&2; exit 1",
+        test: "echo 'Error: Test-owned PostgreSQL initdb failed (null): spawnSync initdb ENOENT undefined' >&2; exit 1",
       },
     }),
   );

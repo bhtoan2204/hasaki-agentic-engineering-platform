@@ -184,16 +184,17 @@ export async function testPostgresEnv(
   try {
     const pg = await Promise.race([postgresBinDir(), stop]);
     if (!pg) return null;
-    return pg.dir === null
-      ? { PLATFORM_POSTGRES_UNAVAILABLE: pg.reason }
-      : { [TEST_POSTGRES_BIN_ENV]: pg.dir };
+    if (pg.dir === null) return { PLATFORM_POSTGRES_UNAVAILABLE: pg.reason };
+    // Already reachable: prepending a system dir would outrank toolchains earlier on PATH (nvm, gvm).
+    return pg.source === "path" ? {} : { [TEST_POSTGRES_BIN_ENV]: pg.dir };
   } finally {
     clearTimeout(timer);
     if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
 
-const MISSING_INITDB = /\binitdb\b[^\n]*\bENOENT\b|\binitdb: (command )?not found/;
+const MISSING_INITDB =
+  /^[#\s]*(?:Error: Test-owned PostgreSQL initdb failed \(null\): spawnSync initdb ENOENT\b|[\w./-]+: (?:line )?\d+: initdb: (?:command )?not found$)/m;
 
 /** A harness run that failed because initdb is missing, while the platform had none to offer, ran no test at all. */
 export function postgresUnavailableResult<
