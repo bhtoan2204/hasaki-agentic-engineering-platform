@@ -1,45 +1,18 @@
 /**
  * Preloaded with `node --import ./test/setup.ts --test`. Creates a uniquely named `platform_test_<uuid>` database on the
- * PostgreSQL cluster started by this process and an isolated config, BEFORE any
+ * PostgreSQL cluster shared by test/run-integration.ts, or on one this process starts with initdb when run alone, BEFORE any
  * platform module is imported (config and pool are created at import time).
  */
+import { cfgPath } from "./env.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { adminUrl, sharedTestCluster, startTestCluster } from "./pg-cluster.ts";
 
-// Never connect to an inherited database, even on localhost: another application may own it.
-const cluster = mkdtempSync(join(tmpdir(), "ctp-pg-"));
-const clusterData = join(cluster, "data");
-let clusterStarted = false;
-function stopCluster() {
-  if (clusterStarted) {
-    const stopped = spawnSync("pg_ctl", ["-D", clusterData, "-m", "immediate", "-w", "stop"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 15000,
-    });
-    if (stopped.status !== 0) return; // Keep diagnostics if PostgreSQL could not stop.
-    clusterStarted = false;
-  }
-  rmSync(cluster, { recursive: true, force: true });
-}
-process.once("exit", stopCluster);
-for (const signal of ["SIGINT", "SIGTERM"] as const)
-  process.once(signal, () => { stopCluster(); process.exit(signal === "SIGINT" ? 130 : 143); });
-for (const [command, args] of [
-  ["initdb", ["-D", clusterData, "-U", "platform_test", "-A", "trust", "--no-locale", "--encoding=UTF8"]],
-  ["pg_ctl", ["-D", clusterData, "-l", join(cluster, "server.log"), "-o", `-c listen_addresses='' -c unix_socket_directories='${cluster}' -c shared_buffers=16MB`, "-w", "start"]],
-] as const) {
-  const result = spawnSync(command, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
-  if (result.status !== 0)
-    throw new Error(`Test-owned PostgreSQL ${command} failed (${result.status}): ${result.error?.message ?? ""} ${result.stderr}\n${existsSync(join(cluster, "server.log")) ? readFileSync(join(cluster, "server.log"), "utf8") : ""}`);
-  if (command === "pg_ctl") clusterStarted = true;
-}
-const admin = `postgres://platform_test@localhost/postgres?host=${encodeURIComponent(cluster)}`;
+const admin = adminUrl(sharedTestCluster() ?? startTestCluster());
 const dbName = `platform_test_${randomUUID().replaceAll("-", "")}`;
 if (!/^platform_test_[0-9a-f]+$/.test(dbName))
   throw new Error("Refusing unexpected test database name");
@@ -66,7 +39,7 @@ function migrationChecksum() {
 /** These files apply a prefix of the migrations themselves and must start from an empty database. */
 function needsEmptyDatabase() {
   return process.argv.some((arg) =>
-    /(?:^|\/)(?:migrations|repository-remotes|bootstrap)\.test\.ts$/.test(arg),
+    /(?:^|\/)(?:migrations|repository-remotes|bootstrap)\.integration\.ts$/.test(arg),
   );
 }
 
@@ -93,20 +66,6 @@ function retryable(error: unknown) {
     err.message ?? "",
   );
 }
-
-const root = mkdtempSync(join(tmpdir(), "ctp-test-"));
-mkdirSync(join(root, "repos"));
-const cfgPath = join(root, "config.json");
-writeFileSync(
-  cfgPath,
-  JSON.stringify({
-    reposRoot: join(root, "repos"),
-    dataDir: join(root, "data"),
-    projects: { OMS: ["oms-api", "oms-background"], Payment: ["payment-src"] },
-    scheduler: { workers: 1, leaseSeconds: 30, heartbeatSeconds: 5, pollMs: 50 },
-    notifyWebhook: "",
-  }),
-);
 
 const checksum = migrationChecksum();
 // Per migration set: branches with different migrations (parallel workflow runs) never rebuild each other's template.
@@ -231,59 +190,6 @@ async function dropUnusedTemplates(client: pg.Client, keep = 4) {
 const u = new URL(admin);
 u.pathname = "/" + dbName;
 process.env.DATABASE_URL = u.toString();
-process.env.PLATFORM_CONFIG = cfgPath;
-process.env.PLATFORM_TEST = "1";
-process.env.AUTH_SECRET = "test-auth-secret-not-for-production";
-process.env.COOKIE_SECURE = "0";
-delete process.env.NOTIFY_WEBHOOK;
-// Budget limits from the developer shell would change cost assertions; tests set budgets explicitly.
-for (const k of Object.keys(process.env)) if (k.startsWith("COST_BUDGET_")) delete process.env[k];
-process.env.TEST_ROOT = root;
-mkdirSync(join(root, "empty-user-skills"));
-process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never read the developer's real ~/.claude
-
-// Isolate test build caches and user home directory so subprocess tests (e.g. go test, git) do not fail when
-// the execution environment lacks a writable $HOME or GOCACHE.
-const testHome = join(root, "home");
-mkdirSync(testHome, { recursive: true });
-let homeWritable = false;
-if (process.env.HOME) {
-  try {
-    accessSync(process.env.HOME, constants.W_OK);
-    homeWritable = true;
-  } catch {
-    homeWritable = false;
-  }
-}
-if (!homeWritable) {
-  process.env.HOME = testHome;
-}
-const testGoCache = join(root, "gocache");
-mkdirSync(testGoCache, { recursive: true });
-process.env.GOCACHE = testGoCache;
-const testGoPath = join(root, "gopath");
-mkdirSync(testGoPath, { recursive: true });
-process.env.GOPATH = testGoPath;
-
-// Tests must never inherit a developer's live Telegram bot or receiver settings. Individual Telegram tests
-// explicitly point config at their local mocked Bot API after the isolated database is ready.
-for (const key of [
-  "TELEGRAM_BOT_TOKEN",
-  "TELEGRAM_CHAT_ID",
-  "TELEGRAM_MODE",
-  "TELEGRAM_API_BASE",
-  "TELEGRAM_WEBHOOK_URL",
-  "TELEGRAM_WEBHOOK_SECRET",
-  "BITBUCKET_USER",
-  "BITBUCKET_TOKEN",
-  "GITHUB_TOKEN",
-  "HASAKI_WORK_BROWSER_MODE",
-  "HASAKI_WORK_CHROME_PROFILE",
-  "HASAKI_WORK_CHROME_PATH",
-  "HASAKI_WORK_EXISTING_CHROME_USER",
-  "PLATFORM_INSTANCE",
-])
-  delete process.env[key];
 
 // Each file gets its own database. Drop it when the process is otherwise finished so catalogs do not
 // accumulate (hundreds of leftover databases make the next CREATE DATABASE collide on template1).
@@ -298,9 +204,3 @@ process.on("beforeExit", () => {
     .then(() => client.end())
     .catch(() => client.end().catch(() => {}));
 });
-
-// Verification environments may set GIT_CONFIG_GLOBAL=/dev/null; commits made by tests still need an identity.
-process.env.GIT_AUTHOR_NAME ||= "Test";
-process.env.GIT_AUTHOR_EMAIL ||= "test@example.invalid";
-process.env.GIT_COMMITTER_NAME ||= "Test";
-process.env.GIT_COMMITTER_EMAIL ||= "test@example.invalid";

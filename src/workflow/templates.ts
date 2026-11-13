@@ -37,7 +37,8 @@ export const TEST_POLICY =
 /**
  * Verification for this platform (TypeScript). The parent process strips DATABASE_URL and other secrets before the
  * shell starts; these guards refuse to continue if that isolation is missing. Targeted tests map changed modules to
- * test files. The full `npm test` script runs once, later, on the same commit.
+ * unit test files (no PostgreSQL) and integration test files (one shared cluster, only when one matches). The full `npm run test:all` script, integration tests included, runs once, later,
+ * on the same commit.
  */
 const SELF_TEST_GUARD = `set -euo pipefail
 if [ -n "\${DATABASE_URL:-}" ]; then echo "refusing verification: DATABASE_URL is set" >&2; exit 2; fi
@@ -114,17 +115,36 @@ tests=$(
     printf '%s\\n' "$changed" | sed -n 's|.*/\\([^/]*\\)\\.ts$|test/\\1.test.ts|p'
   } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
 )
+integration=$(
+  {
+    printf '%s\\n' "$changed" | grep -E '^test/.*\\.integration\\.ts$' || true
+    printf '%s\\n' "$changed" | sed -n 's|^src/\\(.*\\)\\.ts$|test/\\1.integration.ts|p'
+    printf '%s\\n' "$changed" | sed -n 's|.*/\\([^/]*\\)\\.ts$|test/\\1.integration.ts|p'
+  } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
+)
 if [ -n "$tests" ]; then
   echo "== targeted tests"
+  preload=./test/env.ts; [ -f test/env.ts ] || preload=./test/setup.ts
   # shellcheck disable=SC2086
-  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
-else
+  node --disable-warning=ExperimentalWarning --import "$preload" --test $tests
+fi
+if [ -n "$integration" ]; then
+  echo "== targeted integration tests"
+  # shellcheck disable=SC2086
+  node --disable-warning=ExperimentalWarning test/run-integration.ts $integration
+fi
+if [ -z "$tests" ] && [ -z "$integration" ]; then
   echo "no matching test files for the diff; targeted suite skipped"
 fi`;
 
 export const PLATFORM_REGRESSION_COMMAND = `${SELF_TEST_GUARD}
-echo "== full regression (npm test)"
-npm test`;
+if node -e 'process.exit(require("./package.json").scripts?.["test:all"] ? 0 : 1)'; then
+  echo "== full regression (npm run test:all)"
+  npm run test:all
+else
+  echo "== full regression (npm test)"
+  npm test
+fi`;
 
 /** Refuses the application database only when the command runner already marked this checkout as the live platform. */
 const FEATURE_SELF_GUARD = `if [ "\${PLATFORM_SELF_TEST:-}" = "1" ]; then
@@ -166,7 +186,8 @@ elif [ -f package.json ]; then
     )
     if [ -n "$tests" ]; then
       echo "== targeted tests"
-      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
+      preload=./test/env.ts; [ -f test/env.ts ] || preload=./test/setup.ts
+      node --disable-warning=ExperimentalWarning --import "$preload" --test $tests
     else
       echo "no matching test files; targeted suite skipped"
     fi

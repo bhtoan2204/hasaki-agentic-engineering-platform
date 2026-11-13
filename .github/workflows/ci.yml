@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The suite runs one file at a time against its own database; three shards run in parallel jobs.
+        # Each shard runs a third of `npm run test:all`: unit files, then integration files on one shared cluster.
         shard: [1, 2, 3]
     name: test (${{ matrix.shard }}/3)
     steps:
@@ -69,7 +69,7 @@ jobs:
           tar -xzf "/tmp/$f" -C ~/.local/ripgrep --strip-components=1
       - run: echo "$HOME/.local/ripgrep" >> "$GITHUB_PATH"
       - run: rg --version
-      # test/setup.ts starts a private cluster with initdb/pg_ctl. Those binaries are not on the runner image.
+      # test/pg-cluster.ts starts a private cluster with initdb/pg_ctl. Those binaries are not on the runner image.
       - name: Install PostgreSQL 17
         run: |
           sudo apt-get update
@@ -82,7 +82,11 @@ jobs:
           sudo apt-get install -y postgresql-17
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
           /usr/lib/postgresql/17/bin/initdb --version
-      - name: npm test (shard ${{ matrix.shard }}/3)
+      - name: npm test (unit, shard ${{ matrix.shard }}/3)
         run: >-
-          node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1
+          node --disable-warning=ExperimentalWarning --import ./test/env.ts --test
           --test-shard=${{ matrix.shard }}/3 test/*.test.ts
+      - name: npm run test:integration (shard ${{ matrix.shard }}/3)
+        run: >-
+          node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=1
+          --test-shard=${{ matrix.shard }}/3 test/*.integration.ts

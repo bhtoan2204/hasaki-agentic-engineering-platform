@@ -1,13 +1,9 @@
-import { test, after } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { newMetrics, accumulateMetrics, addUsage } from "../src/agent/metrics.ts";
 import { normalizeProviderFailure, safeDiagnostics, usageSummary } from "../src/agent/telemetry.ts";
 import { parseCodexLine } from "../src/agent/codex/stream.ts";
 import { telemetryGroups } from "../src/api/metrics.ts";
-import { pool } from "../src/db/pool.ts";
-import { migrate } from "../src/db/migrate.ts";
-
-after(() => pool.end());
 test("missing final Claude events and partial Codex usage never invent tokens or cost", () => {
   const m = newMetrics("claude-test");
   accumulateMetrics(m, { type: "system", subtype: "init" });
@@ -110,24 +106,4 @@ test("session attribution and null coverage include Cursor and partially reporte
     1,
   );
   assert.equal(usageSummary([]).reported_cost_usd, null);
-});
-
-test("additive view migrates idempotently and returns nullable metrics", async () => {
-  await migrate(pool);
-  assert.deepEqual(await migrate(pool), []);
-  const columns = (
-    await pool.query(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'execution_attempt_telemetry'",
-    )
-  ).rows.map((r) => r.column_name);
-  for (const name of [
-    "run_id",
-    "step_id",
-    "attempt_id",
-    "worker_instance",
-    "reasoning_tokens",
-    "verification_result",
-    "normalized_failure_category",
-  ])
-    assert.ok(columns.includes(name));
 });

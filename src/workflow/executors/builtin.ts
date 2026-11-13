@@ -38,6 +38,7 @@ import {
   type RepositoryRow,
 } from "../../repos/service.ts";
 import { getPath } from "../graph.ts";
+import { FEATURE_TARGETED_COMMAND, PLATFORM_TARGETED_COMMAND } from "../templates.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
 import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
@@ -211,7 +212,9 @@ export async function runCommand(
   const proc = await commandProcessEnv(cwd, env);
   const useBwrap = proc.isolation?.mode === "bwrap";
   const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
-  const pg = await testPostgresEnv(cwd, signal);
+  const pg = await testPostgresEnv(cwd, signal, {
+    build: command !== PLATFORM_TARGETED_COMMAND && command !== FEATURE_TARGETED_COMMAND,
+  });
   if (!pg)
     return {
       code: null,
