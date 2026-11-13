@@ -97,6 +97,7 @@ export function diagnose(input: {
     artifact_id: number;
     passed?: boolean;
     baseline?: any;
+    environment_unavailable?: string;
   }>;
 }): Diagnosis {
   const failures: Failure[] = [];
@@ -114,7 +115,7 @@ export function diagnose(input: {
     const failing = Object.entries(parsed).filter(([, p]) => p.status === "fail");
     if (!failing.length || r.timed_out) {
       const log = extractLog(out, null, null);
-      const env = ENV.test(log);
+      const env = !!r.environment_unavailable || ENV.test(log);
       failures.push({
         repo: r.repo,
         package: null,
@@ -123,7 +124,9 @@ export function diagnose(input: {
         category: env ? "environment" : "insufficient",
         reason: r.timed_out
           ? "the command timed out; no per-test result"
-          : "no per-test failure could be parsed (build/script error?)",
+          : r.environment_unavailable
+            ? `environment unavailable, tests did not run: ${r.environment_unavailable}`
+            : "no per-test failure could be parsed (build/script error?)",
         env_signal: env,
         log,
       });

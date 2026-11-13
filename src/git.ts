@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { remoteGit } from "./repos/git.ts";
 import {
   canonicalizeDetectedUrl,
@@ -301,20 +301,47 @@ export async function branchWorktree(
   branch: string,
 ): Promise<{ path: string; missing: boolean } | null> {
   repositoryBranch(branch);
+  const found = (await listWorktrees(repoPath)).find((w) => w.branch === branch);
+  return found ? { path: found.path, missing: !existsSync(found.path) } : null;
+}
+
+/** Linked worktrees (the primary checkout excluded) as git spells their paths; `branch` is null when detached. */
+async function listWorktrees(repoPath: string): Promise<{ path: string; branch: string | null }[]> {
   const blocks = (await git(repoPath, "worktree", "list", "--porcelain")).split(/\n\s*\n/).slice(1);
-  for (const block of blocks) {
+  return blocks.flatMap((block) => {
     const lines = block.split("\n");
-    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
     const path = lines[0].replace(/^worktree /, "");
-    return { path, missing: !existsSync(path) };
-  }
-  return null;
+    const head = lines.find((l) => l.startsWith("branch refs/heads/"));
+    return path ? [{ path, branch: head ? head.slice("branch refs/heads/".length) : null }] : [];
+  });
+}
+
+const resolvedPath = (path: string) => {
+  for (const resolve of [
+    () => realpathSync(path),
+    () => join(realpathSync(dirname(path)), basename(path)),
+  ])
+    try {
+      return resolve();
+    } catch {
+      /* missing: try the parent */
+    }
+  return path;
+};
+
+/** The registered worktree (any branch or detached) whose path resolves to `path`, as git spells it. */
+export async function registeredWorktreeAt(repoPath: string, path: string): Promise<string | null> {
+  const target = resolvedPath(path);
+  return (await listWorktrees(repoPath)).find((w) => resolvedPath(w.path) === target)?.path ?? null;
 }
 
 /** Drop the registration of a worktree whose directory no longer exists (nothing on disk is deleted). */
 export async function unregisterMissingWorktree(repoPath: string, path: string) {
   if (existsSync(path)) throw new Error(`${path} still exists`);
-  if (unsafeRelativePath(relative(config.dataDir, path)))
+  if (
+    unsafeRelativePath(relative(config.dataDir, path)) &&
+    unsafeRelativePath(relative(resolvedPath(config.dataDir), path))
+  )
     throw new Error("outside the platform's worktree storage");
   await git(repoPath, "worktree", "remove", "--force", path);
 }

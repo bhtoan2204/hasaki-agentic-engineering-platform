@@ -18,6 +18,7 @@ import {
   moveWorktree,
   prepareBranch,
   pushBranch,
+  registeredWorktreeAt,
   taskDir,
   unregisterMissingWorktree,
   worktreePorcelain,
@@ -439,6 +440,9 @@ async function prepareLockedWorkspace(
   if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
   const path = workspacePath ?? join(taskDir(key), repo);
   if (!existsSync(path)) {
+    // git refuses to add a worktree at a path a deleted one is still registered at: drop only that entry.
+    const stale = await registeredWorktreeAt(checkout, path);
+    if (stale) await unregisterMissingWorktree(checkout, stale);
     const conflict = await workspaceConflict(run, repo, checkout, target.branch, path);
     if (conflict) {
       const approved =
@@ -499,6 +503,51 @@ export async function recordWorkspace(
      DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
     [runId, w.repo, w.branch, w.path, w.created_from],
   );
+}
+
+/** The attempt lost its lease while restoring: propagate, never report it as a restore failure. */
+export class LeaseLostError extends Error {}
+
+/** Recreate deleted run worktrees on their recorded branch (never re-cut from base); returns what stops the step. */
+export async function restoreMissingWorkspaces(
+  run: Parameters<typeof prepareWorkspace>[0],
+  repos: string[],
+  opts: {
+    log: (message: string) => Promise<void>;
+    en: boolean;
+    approvedReleases?: string[];
+    checkLive?: () => Promise<void>;
+  },
+): Promise<ExecResult | null> {
+  const { log, checkLive, approvedReleases } = opts;
+  const live =
+    checkLive &&
+    (() =>
+      checkLive().catch((e) => {
+        throw new LeaseLostError((e as Error).message, { cause: e });
+      }));
+  const conflicts: WorkspaceConflict[] = [];
+  for (const w of await workspacesOf(run.id)) {
+    if (existsSync(w.path) || (repos.length && !repos.includes(w.repo))) continue;
+    try {
+      await prepareWorkspace(run, w.repo, live, { log, approvedReleases });
+    } catch (e) {
+      if (e instanceof LeaseLostError) throw e;
+      if (e instanceof WorkspaceConflictError) {
+        conflicts.push(...e.conflicts);
+        continue;
+      }
+      return {
+        kind: "failed",
+        error: `${w.repo}: worktree ${w.path} no longer exists and could not be restored on ${w.branch}: ${(e as Error).message}`,
+        retryable: false,
+      };
+    }
+    await log(
+      `restored missing worktree ${w.repo} at ${w.path} on ${w.branch} (committed work kept; uncommitted changes in the deleted directory are lost)`,
+    );
+  }
+  return conflicts.length ? workspaceConflictQuestion(conflicts, opts.en) : null;
 }
 
 /** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */

@@ -194,6 +194,36 @@ test("outcome ladder: tests and review must be bound to the final commits; agent
   );
 });
 
+test("outcome ladder: skipped verification (passed: null) is unknown, not a failed test", () => {
+  const skipped = facts();
+  skipped.steps[0].output.verification = {
+    passed: null,
+    status: "skipped",
+    needs_review: true,
+    repairs: 0,
+  };
+  skipped.steps.splice(1, 1);
+  const o = deriveOutcome(skipped);
+  assert.equal(o.ladder.tests_passed.state, "unknown");
+  assert.match(o.ladder.tests_passed.evidence!, /tests not verified in implement .*skipped/);
+  for (const verification of [
+    { passed: null, status: "skipped", reason: "no worktree: no code was changed" },
+    { passed: null, status: "disabled" },
+  ]) {
+    const quiet = facts();
+    quiet.steps[0].output.verification = verification;
+    quiet.steps.splice(1, 1);
+    assert.equal(
+      deriveOutcome(quiet).ladder.tests_passed.evidence,
+      "no test step ran",
+      "a skip without a review need is not an environment problem",
+    );
+  }
+  const withRegression = facts();
+  withRegression.steps[0].output.verification = { passed: null, status: "skipped", repairs: 0 };
+  assert.equal(deriveOutcome(withRegression).ladder.tests_passed.state, "proven");
+});
+
 test("failure categories are deterministic and evidence-backed", () => {
   const f = facts({
     steps: [

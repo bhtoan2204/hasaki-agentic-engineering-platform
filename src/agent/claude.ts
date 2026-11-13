@@ -53,6 +53,7 @@ import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   installNodeDependencies,
+  restoreMissingWorkspaces,
   runWorkspaceConflict,
   workspaceBase,
   workspaceConflictQuestion,
@@ -87,7 +88,12 @@ import {
   type ToolMode,
 } from "./toolPolicy.ts";
 import { integrationCatalog, integrationTools } from "./toolRegistry.ts";
-import { citedEvidenceLogs, dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
+import {
+  attemptIsLive,
+  citedEvidenceLogs,
+  dispatchPlatformTool,
+  envFromExecution,
+} from "./platformTools.ts";
 import { runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
@@ -124,6 +130,7 @@ import {
 import {
   diffTestsAgainstBase,
   repairPrompt,
+  restoreConflictSkips,
   verificationLoop,
   verificationSummary,
   verifyConfig,
@@ -604,6 +611,20 @@ const agentExecutor: StepExecutor = {
         }
         break;
       }
+    }
+    const restoreWorkspaces = () =>
+      restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, {
+        log: (m) => ctx.log("system", m),
+        en: outputLocale(ctx.run) === "en",
+        approvedReleases: (ctx.input.pending?.workspace_release?.holders ?? []) as string[],
+        checkLive: async () => {
+          const live = await attemptIsLive(ctx.attempt.id, ctx.attempt.fencing_token);
+          if (!live.ok) throw new Error(live.reason);
+        },
+      });
+    if (mode === "coding") {
+      const blocked = await restoreWorkspaces();
+      if (blocked) return blocked;
     }
     const ws = (await workspacesOf(ctx.run.id)).filter(
       (w) =>
@@ -1604,6 +1625,10 @@ const agentExecutor: StepExecutor = {
         verification: { outcome: "disabled", status: "disabled", passed: null },
       };
     }
+    const restoreBlocked = vcfg ? await restoreWorkspaces() : null;
+    if (restoreBlocked && restoreBlocked.kind !== "waiting_input") return restoreBlocked;
+    // The agent already submitted: a question now would re-run it from scratch on resume, so conflicted repos are skipped.
+    const unrestored = restoreConflictSkips(restoreBlocked);
     if (vcfg) {
       const trees = (await workspacesOf(ctx.run.id)).filter(
         (w) =>
@@ -1674,6 +1699,7 @@ const agentExecutor: StepExecutor = {
               repo: w.repo,
               path: w.path,
               branch: w.branch,
+              skip: unrestored.get(w.repo),
             })),
             trees.map((w) => w.path),
             vcfg,
@@ -1746,9 +1772,18 @@ const agentExecutor: StepExecutor = {
           retryable: false,
           details: { verification: summary },
         };
-      if (!summary.passed) {
+      const skipped = summary.last
+        .filter((x) => x.status === "skipped")
+        .map((x) => `${x.repo} (${x.note})`);
+      if (loop.outcome === "skipped")
+        await ctx.log(
+          "system",
+          `verification skipped: the tests could not run in ${skipped.join(", ")}, so they were not verified (${loop.repairs ? `${loop.repairs} repair(s) ran for other failures` : "no repair was attempted"}) — needs human review: ${summary.review_reasons.join("; ")}`,
+          { verification: "skipped" },
+        );
+      else if (!summary.passed) {
         const failing = summary.last
-          .filter((x) => !x.passed)
+          .filter((x) => !x.passed && x.status !== "skipped")
           .map(
             (x) =>
               `${x.repo}: ${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
@@ -1759,12 +1794,11 @@ const agentExecutor: StepExecutor = {
             : `still failing after ${loop.repairs} repair(s)`;
         return {
           kind: "failed",
-          error: `verification ${why} — ${failing.join(" | ")}`,
+          error: `verification ${why} — ${failing.join(" | ")}${skipped.length ? ` — tests did not run in ${skipped.join(", ")}` : ""}`,
           retryable: false,
           details: { verification: summary },
         };
-      }
-      if (summary.needs_review)
+      } else if (summary.needs_review)
         await ctx.log(
           "system",
           `verification passed but needs human review: ${summary.review_reasons.join("; ")}`,
@@ -1776,7 +1810,9 @@ const agentExecutor: StepExecutor = {
     // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact
     // revision; the PR step re-validates it. The agent's own deviation report is recorded but never relied on.
     if (mode === "coding" && !independent) {
-      const all = await workspacesOf(ctx.run.id).catch(() => []);
+      const all = (await workspacesOf(ctx.run.id).catch(() => [])).filter(
+        (w) => !unrestored.has(w.repo),
+      );
       const state = await collectScopeState(
         await Promise.all(
           all.map(async (w) => ({
@@ -1811,7 +1847,15 @@ const agentExecutor: StepExecutor = {
         const reapproved = check.requires_reapproval
           ? renewedApprovalFor(ctx.input.answers, SCOPE_REAPPROVAL_QUESTION, revision)
           : null;
-        output = { ...output, scope_check: { ...check, reapproved } };
+        const unchecked = [...unrestored].map(([repo, note]) => `${repo}: ${note}`);
+        output = {
+          ...output,
+          scope_check: {
+            ...check,
+            reapproved,
+            ...(unchecked.length ? { needs_review: true, review_reasons: unchecked } : {}),
+          },
+        };
         await ctx.log(
           "system",
           `scope check vs approved proposal ${check.approved_proposal_hash} (revision ${revision}): ${check.out_of_scope_files.length} out-of-scope file(s), ${check.invalid_paths.length} invalid path(s), ${check.unauthorized_repos.length} unauthorized repo(s), ${check.deviations.length} declared deviation(s)${check.requires_reapproval ? (reapproved ? " — renewed approval on record for this revision" : " — renewed approval required") : ""}`,
