@@ -1,4 +1,5 @@
-import { liveRuntime } from "../eval/liveRuntime.ts";
+import { liveRuntime, setLiveUsageOffset } from "../eval/liveRuntime.ts";
+import { liveClaudeSandbox } from "../eval/liveSandbox.ts";
 import {
   selectedSkills,
   injectSkills,
@@ -475,7 +476,8 @@ const TERMINAL_FAILURES = new Set([
  */
 const agentExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
-    if (ctx.step.config?.evaluation_phase && !liveRuntime.getStore()) {
+    const live = liveRuntime.getStore();
+    if (ctx.step.config?.evaluation_phase && !live) {
       const { executeProviderPhase } = await import("../eval/providerPhase.ts");
       return executeProviderPhase(ctx);
     }
@@ -496,7 +498,7 @@ const agentExecutor: StepExecutor = {
       };
     }
     {
-      for (const name of liveRuntime.getStore() ? [] : ctx.run.selected_repositories) {
+      for (const name of live ? [] : ctx.run.selected_repositories) {
         const repo = await repositories.get(name);
         try {
           if (
@@ -583,7 +585,7 @@ const agentExecutor: StepExecutor = {
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
-    if (mode === "coding" && !liveRuntime.getStore()) {
+    if (mode === "coding" && !live) {
       for (const w of ws) {
         if (await installNodeDependencies(w.path))
           await ctx.log("system", `installed Node dependencies in ${w.repo}`);
@@ -604,7 +606,7 @@ const agentExecutor: StepExecutor = {
       isReadOnlyIntegration: (name) =>
         integrationTools().find((t) => t.name === name)?.readOnly === true,
     };
-    const settingSources = config.agent.settingSources;
+    const settingSources = live ? [] : config.agent.settingSources;
     policy.allowedTools = effective.allowed_tools;
     const nativeTools = toolsFor(mode, {
       delegation,
@@ -641,7 +643,7 @@ const agentExecutor: StepExecutor = {
     }
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
     for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
-    const cwd = liveRuntime.getStore()?.cwd ?? (await runWorkingDirectory(ctx.run.id, ctx.step.id));
+    const cwd = live?.cwd ?? (await runWorkingDirectory(ctx.run.id, ctx.step.id));
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
@@ -858,7 +860,7 @@ const agentExecutor: StepExecutor = {
       mode,
     }).catch(() => undefined);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode, integrations);
-    if (liveRuntime.getStore())
+    if (live)
       await ctx.recordMetrics({
         evaluation_context: {
           system_append_tokens: Math.ceil(systemAppend.length / 4),
@@ -1089,9 +1091,7 @@ const agentExecutor: StepExecutor = {
             },
             tools: nativeTools,
             ...(agents ? { agents } : {}),
-            ...(liveRuntime.getStore()
-              ? { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } }
-              : {}),
+            ...(live ? { sandbox: liveClaudeSandbox(live.databaseUrl) } : {}),
             permissionMode: "default",
             canUseTool,
             hooks: {
@@ -1202,6 +1202,7 @@ const agentExecutor: StepExecutor = {
       sessionKey = randomUUID();
       sessionStart = Date.now();
       metrics.model = routed.model || (provider === "claude" ? "default" : "");
+      setLiveUsageOffset(metrics);
       metrics.tokens = null;
       metrics.cost_usd = null;
       await persistSession();
@@ -1217,6 +1218,7 @@ const agentExecutor: StepExecutor = {
         providerSessions[sessionKey].complete = true;
         await writeTelemetry({ provider_sessions: providerSessions });
         // Legacy Insights fields remain known subtotals; canonical API carries coverage.
+        setLiveUsageOffset(metrics, true);
         metrics.tokens = null;
         metrics.cost_usd = null;
         for (const session of Object.values(providerSessions)) {

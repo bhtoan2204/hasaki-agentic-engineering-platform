@@ -72,7 +72,7 @@ export function newMetrics(model: string): AgentMetrics {
   };
 }
 
-const streamedUsage = new WeakMap<AgentMetrics, number>();
+const streamedUsage = new WeakMap<AgentMetrics, Map<string, number>>();
 const seenMessages = new WeakMap<AgentMetrics, Set<string>>();
 /** Side state for repetition / first-touch measurement (not persisted itself). */
 const toolState = new WeakMap<
@@ -148,8 +148,11 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
       const sum = Object.values(usage)
         .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0)
         .reduce((n, v) => n + v, 0);
-      const total = (streamedUsage.get(m) ?? 0) + sum;
-      streamedUsage.set(m, total);
+      // Every content block of one API message repeats that message's usage: count each message id once.
+      const perMessage = streamedUsage.get(m) ?? new Map<string, number>();
+      streamedUsage.set(m, perMessage);
+      perMessage.set(String(msg.message?.id ?? msg.uuid ?? perMessage.size), sum);
+      const total = [...perMessage.values()].reduce((n, v) => n + v, 0);
       liveRuntime.getStore()!.observe(total, null, m);
     }
     for (const b of msg.message?.content ?? [])

@@ -45,14 +45,27 @@ export class LiveBudget {
   }
 }
 
-export function observeLiveUsage(metrics: {
+type UsageMetrics = {
   tokens: Record<string, number | null | undefined> | null;
   cost_usd: number | null;
-}) {
+};
+const sumTokens = (m: UsageMetrics) =>
+  Object.values(m.tokens ?? {}).reduce<number>((n, v) => n + (v ?? 0), 0);
+const sessionOffsets = new WeakMap<object, { tokens: number; cost: number }>();
+/** Carry usage of earlier sessions before a caller resets the shared metrics for a new session; `clear` drops it. */
+export function setLiveUsageOffset(metrics: UsageMetrics, clear = false) {
+  if (clear) sessionOffsets.delete(metrics);
+  else sessionOffsets.set(metrics, { tokens: sumTokens(metrics), cost: metrics.cost_usd ?? 0 });
+}
+export function observeLiveUsage(metrics: UsageMetrics) {
   const runtime = liveRuntime.getStore();
   if (!runtime) return;
-  const tokens = Object.values(metrics.tokens ?? {}).reduce<number>((n, v) => n + (v ?? 0), 0);
-  runtime.observe(tokens, metrics.cost_usd, metrics);
+  const base = sessionOffsets.get(metrics) ?? { tokens: 0, cost: 0 };
+  runtime.observe(
+    base.tokens + sumTokens(metrics),
+    metrics.cost_usd == null ? null : base.cost + metrics.cost_usd,
+    metrics,
+  );
 }
 
 export function remainingLiveBudgets(

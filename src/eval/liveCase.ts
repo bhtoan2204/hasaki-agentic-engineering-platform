@@ -8,6 +8,15 @@ import { fixtureGit } from "./fixtures.ts";
 import { changedCloneCount, diffFootprint } from "./ponytailMetrics.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
+export const liveWorkRoot = (evaluationId: unknown, caseRunId: unknown) =>
+  join(config.dataDir, "evaluation-work", String(evaluationId), String(caseRunId), "live");
+export async function cleanupLiveWork(runId: number, root: string) {
+  await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path LIKE $2", [
+    runId,
+    `${root}/%`,
+  ]);
+  await rm(root, { recursive: true, force: true });
+}
 export async function executeLiveCase(
   ctx: ExecutionContext,
   caseRun: Record<string, unknown>,
@@ -19,13 +28,7 @@ export async function executeLiveCase(
     `SELECT a.metrics,a.status FROM evaluation_provider_phases p JOIN workflow_steps s ON s.key=p.step_key AND s.run_id=$2 JOIN workflow_step_attempts a ON a.id=s.current_attempt_id WHERE p.case_run_id=$1 ORDER BY p.ordinal`,
     [caseRun.id, ctx.run.id],
   );
-  const root = join(
-    config.dataDir,
-    "evaluation-work",
-    String(caseRun.evaluation_id),
-    String(caseRun.id),
-    "live",
-  );
+  const root = liveWorkRoot(caseRun.evaluation_id, caseRun.id);
   let footprint = { added: 0, removed: 0, files: 0 },
     newClones = 0;
   const before: Record<string, string> = {},
@@ -103,7 +106,7 @@ export async function executeLiveCase(
       [ctx.step.id, ctx.attempt.id],
     );
     if (!lease || !(await ownsInstance(c)) || !active || run?.status === "CANCELED") return null;
-    return one(
+    const inserted = await one(
       c,
       `INSERT INTO eval_results(suite,scenario,candidate,status,correct,regression,verdict,repairs,human_gates,wall_s,cost_usd,tokens,run_id,data,case_run_id,owner_id,quality_score,hard_gates_passed,failure_class) VALUES($1,$2,$3,$4,$5,$6,$4,$7,0,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(case_run_id) DO NOTHING RETURNING id`,
       [
@@ -126,18 +129,18 @@ export async function executeLiveCase(
         status === "BLOCKED" ? "infrastructure" : passed ? null : "validation_failure",
       ],
     );
+    // A retry after a crash between commit and completion finds its own result already stored.
+    return (
+      inserted ?? (await one(c, "SELECT id FROM eval_results WHERE case_run_id=$1", [caseRun.id]))
+    );
   });
   if (!saved)
     return {
       kind: "failed",
-      error: "Evaluation result fenced or already persisted",
+      error: "Evaluation result fenced",
       retryable: false,
     };
-  await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path LIKE $2", [
-    ctx.run.id,
-    `${root}/%`,
-  ]);
-  await rm(root, { recursive: true, force: true });
+  await cleanupLiveWork(ctx.run.id, root);
   return {
     kind: "completed",
     output: { evaluation_result_id: saved?.id, verdict: status, evidence },

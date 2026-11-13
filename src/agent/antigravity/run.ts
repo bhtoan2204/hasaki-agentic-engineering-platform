@@ -443,9 +443,7 @@ export async function antigravityAgentTurn(
           value: number | null | undefined,
         ) => {
           if (value == null) return;
-          tok[key] = ev.cumulativeUsage
-            ? value + (liveRuntime.getStore() ? (usageBase[key] ?? 0) : 0)
-            : (tok[key] ?? 0) + value;
+          tok[key] = ev.cumulativeUsage ? value + (usageBase[key] ?? 0) : (tok[key] ?? 0) + value;
         };
         update("input", ev.tokens.input);
         update("output", ev.tokens.output);

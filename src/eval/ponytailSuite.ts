@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveRepoPath } from "../repos/paths.ts";
+import { directoryIsSelfRepository, isSelfRepository } from "../platform/selfDevelopment.ts";
 import { repositories, type RepositoryRow } from "../repos/service.ts";
 import { SuiteSchema, sha256 } from "./dataset.ts";
 import { harnessHash } from "./fixtures.ts";
@@ -23,8 +24,8 @@ export function ponytailConfigurations() {
     })),
   );
 }
-export function eligiblePonytailRepositories(rows: RepositoryRow[]) {
-  return rows
+export async function eligiblePonytailRepositories(rows: RepositoryRow[]) {
+  const named = rows
     .filter(
       (r) =>
         r.enabled &&
@@ -32,9 +33,20 @@ export function eligiblePonytailRepositories(rows: RepositoryRow[]) {
         !/^(?:hasaki-agentic-engineering-platform|claude-task-platform)$/.test(r.name),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
+  // A renamed or re-registered copy of this platform must never become a benchmark target; unknown means excluded.
+  const self = await Promise.all(
+    named.map(async (r) => {
+      try {
+        return (await isSelfRepository(r)) || (await directoryIsSelfRepository(resolveRepoPath(r)));
+      } catch {
+        return true;
+      }
+    }),
+  );
+  return named.filter((_, i) => !self[i]);
 }
 export async function materializePonytailSuite(rows?: RepositoryRow[]) {
-  const registry = eligiblePonytailRepositories(rows ?? (await repositories.list()));
+  const registry = await eligiblePonytailRepositories(rows ?? (await repositories.list()));
   if (!registry.length)
     throw new Error("Ponytail suite requires registered repositories other than this platform");
   const entries = await Promise.all(

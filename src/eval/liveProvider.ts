@@ -1,5 +1,6 @@
 import { mkdir, rm, readdir, lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -9,6 +10,7 @@ import { config } from "../config.ts";
 import { one, pool } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { repositories } from "../repos/service.ts";
+import { listAccessibleRepositories } from "../repos/access.ts";
 import { resolveRepoPath } from "../repos/paths.ts";
 import { recordWorkspace } from "../git/provider.ts";
 import { claudeExecutor } from "../agent/claude.ts";
@@ -16,11 +18,34 @@ import { isSecretPath } from "../agent/toolPolicy.ts";
 import { CaseSchema } from "./dataset.ts";
 import { fixtureGit, fixtureName, fixtureRoot } from "./fixtures.ts";
 import { livePrerequisites } from "./livePrerequisites.ts";
+import { cleanupLiveWork, liveWorkRoot } from "./liveCase.ts";
 import { LiveBudget, liveRuntime, remainingLiveBudgets } from "./liveRuntime.ts";
 import type { ConfigurationSchema } from "./configuration.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 const exec = promisify(execFile);
+const LIVE_ALLOWED_TOOLS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "Write",
+  "Bash",
+  "TodoWrite",
+  "platform.read_knowledge",
+  "platform.search_knowledge",
+  "platform.submit_result",
+  "platform.report_progress",
+  "platform.get_run_context",
+  "platform.search_code",
+  "platform.get_symbol",
+  "platform.find_references",
+];
+// Wider than the agent tool policy: archives of real repositories also carry build/deploy credentials.
+const EVALUATION_SECRET =
+  /^(credentials|\.npmrc|\.netrc|\.pgpass|\.git-credentials|\.pypirc|\.dockercfg|secrets?\..+|application[^/]*\.(ya?ml|properties))$|\.(p12|pfx|jks|keystore)$/i;
+export const isEvaluationSecretPath = (name: string) =>
+  isSecretPath(name) || EVALUATION_SECRET.test(name);
 type Phase = {
   case_run_id: number;
   evaluation_id: number;
@@ -38,10 +63,33 @@ export async function removeEvaluationSecrets(root: string) {
     if (name === ".git") continue;
     const path = join(root, name);
     const stat = await lstat(path);
-    if (stat.isSymbolicLink() || isSecretPath(name))
+    if (stat.isSymbolicLink() || isEvaluationSecretPath(name))
       await rm(path, { recursive: true, force: true });
     else if (stat.isDirectory()) await removeEvaluationSecrets(path);
   }
+}
+export async function ownerCanRead(ownerId: number, repository: string) {
+  return (await listAccessibleRepositories(ownerId)).some((r) => r.repository.name === repository);
+}
+async function stopIsolatedDatabase(data: string) {
+  const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
+  try {
+    await exec("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { env, timeout: 15000 });
+  } finally {
+    await rm(data, { recursive: true, force: true });
+  }
+}
+/** A crashed worker leaves throwaway postmasters behind; stop and remove them before claiming work. */
+export async function sweepEvaluationDatabases(root = join(config.dataDir, "evaluation-work")) {
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isDirectory()) continue;
+      const path = join(dir, entry.name);
+      if (entry.name.startsWith("database-")) await stopIsolatedDatabase(path).catch(() => {});
+      else if (depth < 4) await walk(path, depth + 1);
+    }
+  };
+  await walk(root, 0);
 }
 async function isolatedDatabase(root: string) {
   const data = join(root, `database-${randomUUID()}`);
@@ -81,16 +129,7 @@ async function isolatedDatabase(root: string) {
     }
     return {
       url: `postgres://platform_eval@localhost/${name}?host=${encodeURIComponent(socket)}`,
-      async dispose() {
-        try {
-          await exec("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
-            env,
-            timeout: 15000,
-          });
-        } finally {
-          await rm(data, { recursive: true, force: true });
-        }
-      },
+      dispose: () => stopIsolatedDatabase(data),
     };
   } catch (error) {
     if (started)
@@ -108,13 +147,34 @@ export async function executeLiveProviderPhase(
 ): Promise<ExecResult> {
   const connection = await pool.connect();
   const group = `eval-budget:${ctx.run.owner_id}:${phase.configuration.budget_group ?? phase.evaluation_id}`;
+  let locked = false,
+    result: ExecResult | undefined;
   try {
-    await connection.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [group]);
-    return await executeLiveProviderPhaseLocked(ctx, phase);
+    for (let delay = 100; ; delay = Math.min(delay * 2, 5000)) {
+      const { rows } = await connection.query(
+        "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS ok",
+        [group],
+      );
+      if ((locked = rows[0].ok)) break;
+      if (ctx.signal.aborted)
+        return (result = {
+          kind: "failed",
+          retryable: false,
+          error: "Aborted while waiting for the evaluation budget lock",
+        });
+      await sleep(delay, undefined, { signal: ctx.signal }).catch(() => {});
+    }
+    return (result = await executeLiveProviderPhaseLocked(ctx, phase));
   } finally {
-    await connection
-      .query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [group])
-      .catch(() => {});
+    // A failed phase ends the case chain, so nothing else will remove its workspaces.
+    if (!result || result.kind === "failed")
+      await cleanupLiveWork(ctx.run.id, liveWorkRoot(phase.evaluation_id, phase.case_run_id)).catch(
+        (error) => console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
+      );
+    if (locked)
+      await connection
+        .query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [group])
+        .catch(() => {});
     connection.release();
   }
 }
@@ -133,13 +193,7 @@ async function executeLiveProviderPhaseLocked(
       },
     };
   const task = CaseSchema.parse(phase.definition);
-  const root = join(
-    config.dataDir,
-    "evaluation-work",
-    String(phase.evaluation_id),
-    String(phase.case_run_id),
-    "live",
-  );
+  const root = liveWorkRoot(phase.evaluation_id, phase.case_run_id);
   const workspaces: Array<{ repo: string; path: string }> = [];
   await mkdir(root, { recursive: true, mode: 0o700 });
   for (const logical of task.repositories) {
@@ -147,6 +201,12 @@ async function executeLiveProviderPhaseLocked(
     const name = registered ? logical : fixtureName(logical);
     const row = await repositories.get(name);
     if (!row?.enabled) throw new Error(`Evaluation repository unavailable: ${name}`);
+    if (registered && !(await ownerCanRead(Number(ctx.run.owner_id), name)))
+      return {
+        kind: "failed",
+        retryable: false,
+        error: `Evaluation owner has no read access to repository ${name}`,
+      };
     const primary = registered ? resolveRepoPath(row) : fixtureRoot(name);
     const path = join(root, logical);
     if (phase.ordinal === 0) {
@@ -230,12 +290,30 @@ async function executeLiveProviderPhaseLocked(
   const db = await isolatedDatabase(root);
   const started = Date.now();
   let observed: Record<string, unknown> = {};
+  let persisted = 0,
+    persisting: Promise<unknown> = Promise.resolve();
   try {
     const runtime = {
       cwd: workspaces[0].path,
       databaseUrl: db.url,
-      observe: (tokens: number, cost: number | null, key?: object) =>
-        budget.observe(tokens, cost, key),
+      observe: (tokens: number, cost: number | null, key?: object) => {
+        budget.observe(tokens, cost, key);
+        // Spend must survive a worker crash: the suite budget sums these rows.
+        if (Date.now() - persisted < 5000) return;
+        persisted = Date.now();
+        persisting = persisting
+          .then(() =>
+            ctx.recordMetrics({
+              evaluation_live: {
+                tokens: budget.tokens,
+                cost_usd: budget.costUsd,
+                duration_ms: Date.now() - started,
+                partial: true,
+              },
+            }),
+          )
+          .catch(() => {});
+      },
     };
     const agent = ctx.step.config.agent ?? {};
     const result = await execution.run(
@@ -257,23 +335,7 @@ async function executeLiveProviderPhaseLocked(
               effective_agent: ctx.attempt.effective_agent
                 ? {
                     ...ctx.attempt.effective_agent,
-                    allowed_tools: [
-                      "Read",
-                      "Grep",
-                      "Glob",
-                      "Edit",
-                      "Write",
-                      "Bash",
-                      "TodoWrite",
-                      "platform.read_knowledge",
-                      "platform.search_knowledge",
-                      "platform.submit_result",
-                      "platform.report_progress",
-                      "platform.get_run_context",
-                      "platform.search_code",
-                      "platform.get_symbol",
-                      "platform.find_references",
-                    ],
+                    allowed_tools: cfg.allowed_tools ?? LIVE_ALLOWED_TOOLS,
                   }
                 : ctx.attempt.effective_agent,
             },
@@ -284,23 +346,7 @@ async function executeLiveProviderPhaseLocked(
                 ...ctx.step.config,
                 agent: {
                   ...agent,
-                  allowed_tools: [
-                    "Read",
-                    "Grep",
-                    "Glob",
-                    "Edit",
-                    "Write",
-                    "Bash",
-                    "TodoWrite",
-                    "platform.read_knowledge",
-                    "platform.search_knowledge",
-                    "platform.submit_result",
-                    "platform.report_progress",
-                    "platform.get_run_context",
-                    "platform.search_code",
-                    "platform.get_symbol",
-                    "platform.find_references",
-                  ],
+                  allowed_tools: cfg.allowed_tools ?? LIVE_ALLOWED_TOOLS,
                 },
               },
             },
@@ -336,6 +382,7 @@ async function executeLiveProviderPhaseLocked(
         : {}),
     };
   } finally {
+    await persisting;
     try {
       await ctx.recordMetrics({
         evaluation_live: {

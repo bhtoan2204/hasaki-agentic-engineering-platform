@@ -154,6 +154,7 @@ export async function harnessHash() {
           "liveCase.ts",
           "ponytailMetrics.ts",
           "ponytailReport.ts",
+          "liveSandbox.ts",
         ].map((p) => readFile(new URL(p, import.meta.url), "utf8")),
       )
     ).join("\n"),

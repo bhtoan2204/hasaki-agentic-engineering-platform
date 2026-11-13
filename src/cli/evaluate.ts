@@ -1,4 +1,9 @@
-/** Versioned fixture and explicitly approved live evaluation through the durable scheduler. */
+/**
+ * Versioned fixture and explicitly approved live evaluation through the durable scheduler.
+ * --paid-approval, --admin and --attest-<cursor|codex>-usage are operator attestations recorded with the run, not
+ * authorization: whoever runs this CLI with database access is trusted to have that approval. Codex reports usage
+ * only per turn, so its budget is post-hoc and bounded by the per-case wall clock.
+ */
 import pg from "pg";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,7 +19,7 @@ if (args.candidate)
 const live = args.live === "true" || args.mode === "live";
 if (live && (args["paid-approval"] !== "true" || args.admin !== "true"))
   throw new Error(
-    "Live benchmark execution requires --paid-approval --admin and verified connector prerequisites",
+    "Live benchmark execution requires the operator attestations --paid-approval --admin (recorded, not an authorization check) and verified connector prerequisites",
   );
 const url = new URL(
   process.env.BENCH_DATABASE_ADMIN_URL ?? "postgres://platform:platform@localhost:55432/platform",
@@ -68,6 +73,7 @@ let heartbeat: Awaited<ReturnType<typeof startInstanceHeartbeat>> | undefined;
 try {
   await migrate();
   heartbeat = await startInstanceHeartbeat();
+  await (await import("../eval/liveProvider.ts")).sweepEvaluationDatabases();
   registerDefaultExecutors();
   let owner = (
     await pool.query("SELECT id FROM users WHERE username='benchmark-fixture-owner' AND active")

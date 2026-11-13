@@ -3,14 +3,22 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LiveBudget, liveRuntime, observeLiveUsage } from "../src/eval/liveRuntime.ts";
+import {
+  LiveBudget,
+  liveRuntime,
+  observeLiveUsage,
+  setLiveUsageOffset,
+} from "../src/eval/liveRuntime.ts";
 import { livePrerequisites } from "../src/eval/livePrerequisites.ts";
 import { config } from "../src/config.ts";
 import { changedCloneCount, diffFootprint } from "../src/eval/ponytailMetrics.ts";
 import { ponytailConfigurations, eligiblePonytailRepositories } from "../src/eval/ponytailSuite.ts";
 import { agentEnvironment } from "../src/agent/environment.ts";
-import { removeEvaluationSecrets } from "../src/eval/liveProvider.ts";
-import { addUsage, newMetrics } from "../src/agent/metrics.ts";
+import { removeEvaluationSecrets, sweepEvaluationDatabases } from "../src/eval/liveProvider.ts";
+import { liveClaudeSandbox } from "../src/eval/liveSandbox.ts";
+import { background, settleBackground } from "../src/workflow/background.ts";
+import type { RepositoryRow } from "../src/repos/service.ts";
+import { addUsage, newMetrics, accumulateMetrics } from "../src/agent/metrics.ts";
 import { setBwrapForTests } from "../src/platform/selfDevelopment.ts";
 
 test("Live budget aborts on cumulative case tokens and costs across sessions, not snapshot sums", () => {
@@ -65,7 +73,7 @@ test("Live prerequisites fail closed for disabled connector, missing sequence an
     setBwrapForTests(undefined);
   }
 });
-test("Ponytail A/B suite fixes four providers and two repetitions without enabling production", () => {
+test("Ponytail A/B suite fixes four providers and two repetitions without enabling production", async () => {
   const configurations = ponytailConfigurations();
   assert.equal(configurations.length, 8);
   for (const provider of ["claude", "codex", "cursor", "antigravity"]) {
@@ -76,7 +84,7 @@ test("Ponytail A/B suite fixes four providers and two repetitions without enabli
     );
     assert.ok(pair.every((c) => c.repetitions === 2));
   }
-  assert.deepEqual(eligiblePonytailRepositories([]), []);
+  assert.deepEqual(await eligiblePonytailRepositories([]), []);
 });
 test("Live child environment carries only throwaway database credentials", () => {
   liveRuntime.run(
@@ -202,4 +210,119 @@ test("Ponytail report aggregates actual persisted measurements and missing cover
 });
 test("Codex is not attested for incremental live usage by default", () => {
   assert.equal(config.evaluation.liveUsageProviders.includes("codex"), false);
+});
+
+test("Live budget counts later sessions on top of earlier ones and each streamed message once", () => {
+  const budget = new LiveBudget(1_000_000, 100, () => {});
+  liveRuntime.run(
+    { cwd: "/tmp", databaseUrl: "test", observe: (...args) => budget.observe(...args) },
+    () => {
+      const m = newMetrics("fake");
+      addUsage(m, { input_tokens: 100 });
+      setLiveUsageOffset(m);
+      m.tokens = null;
+      m.cost_usd = null;
+      addUsage(m, { input_tokens: 50 });
+      assert.equal(budget.tokens, 150);
+      const streamed = new LiveBudget(1_000_000, 100, () => {});
+      liveRuntime.run(
+        { cwd: "/tmp", databaseUrl: "test", observe: (...args) => streamed.observe(...args) },
+        () => {
+          const s = newMetrics("fake");
+          const block = (uuid: string) => ({
+            type: "assistant",
+            uuid,
+            message: { id: "msg_1", usage: { input_tokens: 100, output_tokens: 10 }, content: [] },
+          });
+          accumulateMetrics(s, block("a"));
+          accumulateMetrics(s, block("b"));
+          assert.equal(streamed.tokens, 110);
+        },
+      );
+    },
+  );
+});
+
+test("Evaluation sanitizing removes build and deploy credentials beyond the agent denylist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ponytail-secrets-"));
+  try {
+    const secrets = [
+      "credentials",
+      ".npmrc",
+      ".netrc",
+      ".pgpass",
+      ".git-credentials",
+      "client.p12",
+      "client.pfx",
+      "store.jks",
+      "secrets.yaml",
+      "application-prod.yml",
+      "application.properties",
+    ];
+    for (const name of [...secrets, "main.go", "package.json"])
+      await writeFile(join(root, name), "x");
+    await removeEvaluationSecrets(root);
+    for (const name of secrets) await assert.rejects(readFile(join(root, name)), name);
+    for (const name of ["main.go", "package.json"]) await readFile(join(root, name));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test("Ponytail suite excludes repositories that are this platform under another name", async () => {
+  const old = config.platform.repositoryUrl;
+  config.platform.repositoryUrl = "https://github.com/acme/platform.git";
+  try {
+    const row = (name: string, url: string) =>
+      ({
+        id: 7,
+        name,
+        path: "",
+        provider: "github",
+        repository_url: url,
+        enabled: true,
+      }) as RepositoryRow;
+    const eligible = await eligiblePonytailRepositories([
+      row("renamed-platform", "https://github.com/acme/platform.git"),
+      row("service", "https://github.com/acme/service.git"),
+    ]);
+    assert.deepEqual(
+      eligible.map((r) => r.name),
+      ["service"],
+    );
+  } finally {
+    config.platform.repositoryUrl = old;
+  }
+});
+test("Worker start sweeps orphaned evaluation databases", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
+  try {
+    const data = join(root, "1", "2", "live", "database-orphan");
+    await mkdir(data, { recursive: true });
+    await writeFile(join(data, "PG_VERSION"), "17");
+    await writeFile(join(root, "1", "2", "live", "keep.txt"), "x");
+    await sweepEvaluationDatabases(root);
+    await assert.rejects(readFile(join(data, "PG_VERSION")));
+    await readFile(join(root, "1", "2", "live", "keep.txt"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test("Live Claude sandbox fails closed without network and denies credential reads", () => {
+  const sandbox = liveClaudeSandbox("postgres://eval@localhost/db?host=%2Ftmp%2Fsock");
+  assert.equal(sandbox.failIfUnavailable, true);
+  assert.equal(sandbox.allowUnsandboxedCommands, false);
+  assert.deepEqual(sandbox.network.allowedDomains, []);
+  assert.deepEqual(sandbox.network.allowUnixSockets, ["/tmp/sock"]);
+  assert.ok(sandbox.filesystem.denyRead.some((p) => p.endsWith("/.pgpass")));
+  assert.ok(sandbox.filesystem.denyRead.includes(config.reposRoot));
+});
+test("Background work started inside a live phase does not inherit the live runtime", async () => {
+  let seen: unknown = "unset";
+  liveRuntime.run({ cwd: "/tmp", databaseUrl: "test", observe: () => {} }, () =>
+    background("probe", () => {
+      seen = liveRuntime.getStore();
+    }),
+  );
+  await settleBackground();
+  assert.equal(seen, undefined);
 });

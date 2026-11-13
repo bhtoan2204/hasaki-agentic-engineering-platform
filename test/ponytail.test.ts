@@ -501,6 +501,43 @@ test("DEPRECATE rollback leaves supersession it did not set untouched", async ()
   assert.equal(Number(old.superseded_by), Number(successor.id));
 });
 
+test("live phase checks the evaluation owner's repository read access", async () => {
+  const { ownerCanRead } = await import("../src/eval/liveProvider.ts");
+  const { repositories } = await import("../src/repos/service.ts");
+  const member = await createUser({
+    username: "live-eval-member",
+    password: "live-eval-pass-123",
+    role: "member",
+  });
+  await repositories.upsert("live-eval-private", { description: "private" });
+  await pool.query("UPDATE repositories SET shared_access='none' WHERE name='live-eval-private'");
+  assert.equal(await ownerCanRead(member.id, "live-eval-private"), false);
+  assert.equal(await ownerCanRead(member.id, "not-registered"), false);
+});
+
+test("live phase stops waiting for a held budget lock when aborted", async () => {
+  const { executeLiveProviderPhase } = await import("../src/eval/liveProvider.ts");
+  const holder = await pool.connect();
+  const group = "eval-budget:1:lock-wait-test";
+  await holder.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [group]);
+  try {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 150);
+    const result = await executeLiveProviderPhase(
+      { run: { id: 0, owner_id: 1 }, signal: ac.signal } as any,
+      {
+        evaluation_id: 0,
+        case_run_id: 0,
+        configuration: { budget_group: "lock-wait-test" },
+      } as any,
+    );
+    assert.equal(result.kind, "failed");
+  } finally {
+    await holder.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [group]);
+    holder.release();
+  }
+});
+
 test("third-party skills cannot be reverted away from their pinned manifest", async () => {
   await assert.rejects(knowledge.revert("skill.ext.ponytail", 1, null, "admin"), /re-import/);
 });

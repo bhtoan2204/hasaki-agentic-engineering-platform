@@ -31,6 +31,7 @@ export async function indexedCodebaseMap(
   maxChars: number,
 ): Promise<string> {
   const started = performance.now();
+  let expired = false;
   const work = async () => {
     const found: Array<{ id: number; name: string }> = [];
     try {
@@ -44,24 +45,27 @@ export async function indexedCodebaseMap(
     }
     if (!found.length || performance.now() - started >= 45) return "";
     const client = await pool.connect();
+    let failed: Error | undefined;
     try {
+      if (expired) return "";
       await client.query("BEGIN READ ONLY");
       await client.query("SET LOCAL statement_timeout='35ms'");
       const symbols: MapSymbol[] = [];
       for (const index of found) {
         if (performance.now() - started >= 45) return "";
         const result = await client.query(
-          `WITH f AS (${effectiveSql}) SELECT $2::text AS repository,f.file_path,s.symbol_name,s.signature,s.parent_symbol,EXISTS (SELECT 1 FROM code_intelligence.relations rel WHERE rel.extraction_id=s.extraction_id AND rel.source_name='export' AND rel.target_name=s.qualified_name AND rel.relation_type='REFERENCES') AS exported FROM f JOIN code_intelligence.symbols s ON s.extraction_id=f.extraction_id WHERE s.parent_symbol IS NULL ORDER BY f.file_path,s.start_line LIMIT 100`,
+          `WITH f AS (${effectiveSql}) SELECT $2::text AS repository,f.file_path,s.symbol_name,s.signature,s.parent_symbol,EXISTS (SELECT 1 FROM code_intelligence.relations rel WHERE rel.extraction_id=s.extraction_id AND rel.source_name='export' AND rel.target_name=s.qualified_name AND rel.relation_type='REFERENCES') AS exported FROM f JOIN code_intelligence.symbols s ON s.extraction_id=f.extraction_id WHERE s.parent_symbol IS NULL AND (EXISTS (SELECT 1 FROM code_intelligence.relations rel WHERE rel.extraction_id=s.extraction_id AND rel.source_name='export' AND rel.target_name=s.qualified_name AND rel.relation_type='REFERENCES') OR (f.file_path LIKE '%.go' AND s.symbol_name ~ '^[A-Z]')) ORDER BY f.file_path,s.start_line LIMIT 100`,
           [index.id, index.name],
         );
         symbols.push(...result.rows);
       }
       return performance.now() - started < 50 ? renderCodebaseMap(symbols, maxChars) : "";
-    } catch {
+    } catch (error) {
+      failed = error as Error;
       return "";
     } finally {
       await client.query("ROLLBACK").catch(() => {});
-      client.release();
+      client.release(failed);
     }
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -69,7 +73,10 @@ export async function indexedCodebaseMap(
     return await Promise.race([
       work().catch(() => ""),
       new Promise<string>((resolve) => {
-        timer = setTimeout(() => resolve(""), 50);
+        timer = setTimeout(() => {
+          expired = true;
+          resolve("");
+        }, 50);
       }),
     ]);
   } finally {
