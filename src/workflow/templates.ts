@@ -37,7 +37,8 @@ export const TEST_POLICY =
 /**
  * Verification for this platform (TypeScript). The parent process strips DATABASE_URL and other secrets before the
  * shell starts; these guards refuse to continue if that isolation is missing. Targeted tests map changed modules to
- * test files. The full `npm test` script runs once, later, on the same commit.
+ * unit test files (no PostgreSQL). The full `npm run test:all` script, integration tests included, runs once, later,
+ * on the same commit.
  */
 const SELF_TEST_GUARD = `set -euo pipefail
 if [ -n "\${DATABASE_URL:-}" ]; then echo "refusing verification: DATABASE_URL is set" >&2; exit 2; fi
@@ -116,15 +117,16 @@ tests=$(
 )
 if [ -n "$tests" ]; then
   echo "== targeted tests"
+  preload=./test/env.ts; [ -f test/env.ts ] || preload=./test/setup.ts
   # shellcheck disable=SC2086
-  node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
+  node --disable-warning=ExperimentalWarning --import "$preload" --test $tests
 else
   echo "no matching test files for the diff; targeted suite skipped"
 fi`;
 
 export const PLATFORM_REGRESSION_COMMAND = `${SELF_TEST_GUARD}
-echo "== full regression (npm test)"
-npm test`;
+echo "== full regression (npm run test:all)"
+npm run test:all`;
 
 /** Refuses the application database only when the command runner already marked this checkout as the live platform. */
 const FEATURE_SELF_GUARD = `if [ "\${PLATFORM_SELF_TEST:-}" = "1" ]; then
@@ -166,7 +168,8 @@ elif [ -f package.json ]; then
     )
     if [ -n "$tests" ]; then
       echo "== targeted tests"
-      node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
+      preload=./test/env.ts; [ -f test/env.ts ] || preload=./test/setup.ts
+      node --disable-warning=ExperimentalWarning --import "$preload" --test $tests
     else
       echo "no matching test files; targeted suite skipped"
     fi
@@ -190,8 +193,13 @@ elif [ -f package.json ]; then
     echo "== install dependencies"
     if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund || { echo "npm ci refused (package-lock.json out of sync with package.json?): installing from package.json, lock file untouched"; npm install --no-package-lock --ignore-scripts --no-audit --no-fund; }; else npm install --ignore-scripts --no-audit --no-fund; fi
   fi
-  echo "== regression (npm test)"
-  npm test --if-present
+  if node -e 'process.exit(require("./package.json").scripts?.["test:all"] ? 0 : 1)'; then
+    echo "== regression (npm run test:all)"
+    npm run test:all
+  else
+    echo "== regression (npm test)"
+    npm test --if-present
+  fi
 else
   echo "no regression runner detected"
 fi`;
