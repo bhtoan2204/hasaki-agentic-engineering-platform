@@ -28,7 +28,12 @@ export async function postmasterState(data: string): Promise<"running" | "stoppe
     const args = cmdline?.split("\0") ?? [];
     if (!args.some((a) => a.includes("postgres"))) return "stopped";
     if (args.includes(data)) return "running";
-    return (await realpath(`/proc/${pid}/cwd`)) === (await realpath(data)) ? "running" : "stopped";
+    // Another user's process (EACCES/EPERM) cannot be our postmaster.
+    const cwd = await realpath(`/proc/${pid}/cwd`).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "EACCES" || e.code === "EPERM") return null;
+      throw e;
+    });
+    return cwd !== null && cwd === (await realpath(data)) ? "running" : "stopped";
   } catch {
     return "unknown";
   }

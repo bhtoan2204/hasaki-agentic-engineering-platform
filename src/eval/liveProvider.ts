@@ -391,7 +391,13 @@ async function executeLiveProviderPhaseLocked(
         },
       });
     } finally {
-      await db.dispose();
+      await db
+        .dispose()
+        .catch((error) =>
+          console.error(
+            `live evaluation database left for eval:cleanup: ${(error as Error).message}`,
+          ),
+        );
     }
   }
 }

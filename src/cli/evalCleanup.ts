@@ -39,21 +39,23 @@ export function parseCleanupArgs(args: string[]) {
   return { yes: values.yes ?? false, caseRunId: values.case };
 }
 // Cancel bumps the fencing token so leases stop renewing: give a stopping executor one more lease.
-const caseActive = async (caseRunId: string) =>
-  !!(
+const caseActive = async (caseRunId: string): Promise<"running" | "stopping" | undefined> =>
+  (
     await q(
       pool,
-      `SELECT 1 FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
+      `SELECT CASE WHEN j.status='queued' OR (j.status='running' AND j.lease_expires_at>now())
+         THEN 'running' ELSE 'stopping' END AS state
+       FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
        JOIN workflow_steps s ON s.run_id=e.workflow_run_id AND (s.key=cr.workflow_step_key
          OR s.key IN (SELECT step_key FROM evaluation_provider_phases WHERE case_run_id=cr.id))
        JOIN workflow_jobs j ON j.step_id=s.id
        WHERE cr.id=$1 AND (j.status='queued' OR (j.status='running' AND j.lease_expires_at>now())
          OR (j.lease_expires_at>now()-make_interval(secs=>$2)
            AND EXISTS (SELECT 1 FROM workflow_step_attempts a WHERE a.job_id=j.id AND a.executor_stopped_at IS NULL)))
-       LIMIT 1`,
+       ORDER BY 1 LIMIT 1`,
       [caseRunId, config.scheduler.leaseSeconds],
     )
-  )[0];
+  )[0]?.state;
 
 export async function evalCleanup(
   options: { yes?: boolean; caseRunId?: string } = {},
@@ -91,6 +93,7 @@ export async function evalCleanup(
       size_kb: sizes.get(live) ?? null,
       databases: [] as Array<{ path: string; postmaster: string; size_kb: number | null }>,
       removed: false,
+      failed: false,
       note: null as string | null,
     };
     for (const path of await liveDatabases(live))
@@ -105,19 +108,20 @@ export async function evalCleanup(
       : ["COMPLETED", "CANCELED"].includes(entry.run_status);
     if (!options.yes || !selected) continue;
     try {
-      if (row && (await caseActive(caseRun))) {
-        if (!options.caseRunId) {
-          entry.note = "still active; retry later";
-          continue;
-        }
-        entry.note = "warning: run may still be active";
+      const active = row ? await caseActive(caseRun) : undefined;
+      if (active === "running" || (active && !options.caseRunId)) {
+        entry.note = "still active; retry later";
+        entry.failed = true;
+        continue;
       }
+      if (active) entry.note = "warning: run may still be active";
       await cleanupLiveWork(row ? Number(row.workflow_run_id) : null, live);
       entry.removed = true;
       for (const dir of [join(root, evaluation, caseRun), join(root, evaluation)])
         await rmdir(dir).catch(() => {});
     } catch (error) {
-      entry.note = (error as Error).message;
+      entry.note = [entry.note, (error as Error).message].filter(Boolean).join("; ");
+      entry.failed = true;
     }
     for (const db of entry.databases) db.postmaster = await postmasterState(db.path);
   }
@@ -136,6 +140,7 @@ if (process.argv[1]?.endsWith("evalCleanup.ts")) {
     if (options) {
       const report = await evalCleanup(options);
       console.log(JSON.stringify(report, null, 2));
+      if (report.some((e) => e.failed)) process.exitCode = 1;
       if (!options.yes)
         console.log(
           "Dry run: nothing removed. Re-run with --yes (COMPLETED/CANCELED runs) or --case=<id> --yes.",

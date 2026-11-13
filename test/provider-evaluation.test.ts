@@ -928,6 +928,23 @@ test("eval:cleanup --case removes a crash leftover even while its run still look
     await rm(dirname(dirname(crashed.root)), { recursive: true, force: true });
   }
 });
+test("eval:cleanup --case refuses a case whose job is running under a fresh lease", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const running = await leftover(null);
+  try {
+    await unstoppedAttempt(running, "running");
+    const report = await evalCleanup({ yes: true, caseRunId: running.caseRunId });
+    const entry = report.find((r) => r.case_run_id === running.caseRunId);
+    assert.equal(entry?.removed, false);
+    assert.equal(entry?.failed, true);
+    assert.equal(entry?.note, "still active; retry later");
+    await stat(running.root);
+  } finally {
+    await rm(dirname(dirname(running.root)), { recursive: true, force: true });
+  }
+});
 test("eval:cleanup never deletes a database of unknown liveness and keeps processing other cases", async () => {
   const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
   const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
