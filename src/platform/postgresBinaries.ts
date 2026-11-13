@@ -162,10 +162,12 @@ export function needsTestPostgres(cwd: string): boolean {
 /**
  * Environment additions for a command in `cwd`: the PostgreSQL bin dir, or PLATFORM_POSTGRES_UNAVAILABLE with the reason
  * (also when resolving takes too long). null only once `signal` aborts; a nix build in progress keeps running.
+ * `build: false` uses only an installed or cached PostgreSQL and never waits for a nix build.
  */
 export async function testPostgresEnv(
   cwd: string,
   signal?: AbortSignal,
+  { build = true }: { build?: boolean } = {},
 ): Promise<Record<string, string> | null> {
   if (!needsTestPostgres(cwd)) return {};
   if (signal?.aborted) return null;
@@ -184,7 +186,15 @@ export async function testPostgresEnv(
     );
   });
   try {
-    const pg = await Promise.race([postgresBinDir(), stop]);
+    const lookup = build
+      ? postgresBinDir()
+      : (override ??
+        installedPostgresBin() ?? {
+          dir: null,
+          reason:
+            "initdb is not on PATH or cached, and this step does not build PostgreSQL with nix",
+        });
+    const pg = await Promise.race([lookup, stop]);
     if (!pg) return null;
     if (pg.dir === null) return { PLATFORM_POSTGRES_UNAVAILABLE: pg.reason };
     // Already reachable: prepending a system dir would outrank toolchains earlier on PATH (nvm, gvm).
@@ -206,6 +216,6 @@ export function postgresUnavailableResult<
   return {
     ...r,
     code: ENVIRONMENT_UNAVAILABLE_EXIT,
-    output: `${r.output}\n${ENVIRONMENT_UNAVAILABLE_MARKER} test PostgreSQL unavailable, so no test ran (test/setup.ts preloads every test file): ${reason}\n`,
+    output: `${r.output}\n${ENVIRONMENT_UNAVAILABLE_MARKER} test PostgreSQL unavailable, so the tests that need it could not run (unit tests may have passed): ${reason}\n`,
   };
 }

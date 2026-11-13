@@ -178,6 +178,20 @@ test("postgres env: only repositories whose test preload runs initdb get the bin
   }
 });
 
+test("postgres env: without build it never starts nix and reports PostgreSQL as unavailable", async () => {
+  setPostgresBinForTests(undefined);
+  const path = process.env.PATH;
+  process.env.PATH = dir("empty-path");
+  try {
+    assert.deepEqual(await testPostgresEnv(harness(), undefined, { build: false }), {
+      PLATFORM_POSTGRES_UNAVAILABLE:
+        "initdb is not on PATH or cached, and this step does not build PostgreSQL with nix",
+    });
+  } finally {
+    process.env.PATH = path;
+  }
+});
+
 test("postgres binaries: the nix throttle runs from when the failed attempt ended", async () => {
   setPostgresBinForTests(undefined);
   let ended = 0;
@@ -256,7 +270,7 @@ test("runCommand: without PostgreSQL a harness run that hits the missing initdb 
     assert.equal(r.code, ENVIRONMENT_UNAVAILABLE_EXIT, r.output);
     assert.match(
       environmentUnavailable(r.code, r.output) ?? "",
-      /no test ran.*nix build failed: boom/,
+      /could not run.*nix build failed: boom/,
     );
     const shell = await runCommand("initdb -D x", repo, env, 30_000, never);
     assert.equal(shell.code, ENVIRONMENT_UNAVAILABLE_EXIT, shell.output);
