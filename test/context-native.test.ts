@@ -835,3 +835,41 @@ test("context pack follows the disclosure plan instead of repeating full knowled
     `context pack budget: omitted ${fullSkillTokens}+${narrativeTokens}+${notesTokens} estimated tokens; notes entry ${notesEntry!.body.length} chars`,
   );
 });
+
+test("all provider bridges preserve skill read and structured activation evidence", async () => {
+  const { selectedSkills, injectSkills, deriveSkillActivation } =
+    await import("../src/agent/skillTracing.ts");
+  for (const provider of ["claude", "codex", "cursor", "antigravity"] as const) {
+    const { ctx, env } = await live(provider);
+    const traces = selectedSkills(ctx.context);
+    injectSkills(traces, ctx.context);
+    await dispatchPlatformTool("read_knowledge", { key: "stock-on-demand", limit: 24000 }, env);
+    const body = ctx.context.knowledge.find((k) => k.key === "stock-on-demand")!;
+    if (body.content.length > 24000)
+      await dispatchPlatformTool(
+        "read_knowledge",
+        { key: body.key, offset: 24000, limit: 24000 },
+        env,
+      );
+    assert.match(
+      await dispatchPlatformTool(
+        "submit_result",
+        { output: { summary: "applied guide" }, skills_applied: [body.key] },
+        env,
+      ),
+      /Result recorded/,
+    );
+    const rows = await q(
+      pool,
+      "SELECT reason,data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason IN ('skill_read','submit_result') ORDER BY id",
+      [ctx.attempt.id],
+    );
+    const reads = rows.filter((r) => r.reason === "skill_read").map((r) => r.data);
+    const declaration = rows.filter((r) => r.reason === "submit_result").at(-1)!.data
+      .skills_applied;
+    const skill = deriveSkillActivation(traces, ctx.context.knowledge, reads, declaration).find(
+      (k) => k.key === body.key,
+    )!;
+    assert.deepEqual(skill.states, ["selected", "injected", "loaded", "activated"], provider);
+  }
+});

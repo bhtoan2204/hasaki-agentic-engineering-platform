@@ -21,6 +21,7 @@ export interface KnowledgeInput {
   ownerId?: number | null;
   /** The new version takes effect at this instant (ISO); null/absent = immediately. */
   effective_from?: string | null;
+  forceVersion?: boolean;
 }
 
 function check(x: Partial<KnowledgeInput>) {
@@ -37,7 +38,7 @@ export const knowledge = {
     const scoped = filter.ownerId != null || filter.all === true;
     return q(
       db,
-      `SELECT i.*, v.content, v.applicability, v.metadata, v.created_at AS version_created_at
+      `SELECT i.*, v.content, v.applicability, v.metadata, v.effective_from, v.created_at AS version_created_at
          FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
         WHERE ($1::text IS NULL OR i.category = $1)
           AND (
@@ -100,6 +101,37 @@ export const knowledge = {
       supersedes,
       effective_version,
     };
+  },
+
+  async revert(key: string, version: number, ownerId: number | null, by: string) {
+    return withTx(async (c) => {
+      const item = await one(
+        c,
+        "SELECT id FROM knowledge_items WHERE key=$1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE",
+        [key, ownerId],
+      );
+      if (!item) throw new Error("knowledge item not found");
+      const previous = await one(
+        c,
+        "SELECT * FROM knowledge_versions WHERE item_id=$1 AND version=$2",
+        [item.id, version],
+      );
+      if (!previous) throw new Error("knowledge version not found");
+      return knowledge.update(
+        key,
+        {
+          forceVersion: true,
+          content: previous.content,
+          applicability: previous.applicability,
+          metadata: previous.metadata,
+          effective_from: null,
+          created_by: by,
+          change_note: `revert to version ${version}`,
+        },
+        ownerId,
+        c,
+      );
+    });
   },
 
   /** `db`: run inside the caller's transaction (proposal approval), else a new one. */
@@ -172,6 +204,7 @@ export const knowledge = {
       const applicability = x.applicability ?? cur.applicability;
       const metadata = x.metadata ?? cur.metadata;
       if (
+        x.forceVersion === true ||
         content !== cur.content ||
         json(applicability) !== json(cur.applicability) ||
         json(metadata) !== json(cur.metadata) ||
@@ -436,152 +469,153 @@ function pickEffective(items: CandidateSet["items"], at: Date): KnowledgeCandida
 }
 
 /** A few starter items so a fresh install shows how scopes and skills work. Only inserted when missing. */
+export const KNOWLEDGE_SEEDS: KnowledgeInput[] = [
+  {
+    key: "commit-convention",
+    category: "repository_convention",
+    scope_type: "ORGANIZATION",
+    scope_ref: "hasaki",
+    title: "Hasaki commit convention (TECH-HD-001)",
+    content:
+      "Commit message: `<type>(<scope>): <imperative summary, < 50 chars>`, blank line, body explaining WHY, then footer lines " +
+      "`func: <FUNCTION_CODE>` (only if the task or git log of the touched files gives a real code; never invent one) and " +
+      "`task: <task code>`. Types: feat | fix | refactor | perf | test | docs | style | build | ci | chore. No Co-Authored-By trailer.",
+    applicability: { step_types: ["coding_agent"] },
+  },
+  {
+    key: "no-secrets-in-code",
+    category: "security_policy",
+    scope_type: "GLOBAL",
+    title: "Never commit secrets or customer PII",
+    conflict_key: "security.secrets",
+    enforced: true,
+    content:
+      "Never commit credentials, tokens, private keys or customer personal data (phone, address, email) to code, tests, logs or PR text.",
+  },
+  {
+    key: "security-review",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "Security Review",
+    content:
+      "Check: injection (SQL, command, template), missing authorization on new endpoints, secrets in code/config, PII in logs, " +
+      "unsafe deserialisation, SSRF in outbound calls, missing input validation at trust boundaries. Report each finding with " +
+      "severity, file:line, exploit scenario and a concrete fix.",
+    metadata: {
+      required_tools: ["Read", "Grep", "Glob"],
+      output_contract: "{ findings: [{ severity, file, line, issue, suggestion }] }",
+    },
+  },
+  {
+    key: "latency-service-boundaries",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "Latency & Service Boundaries",
+    content: [
+      "Before adding a synchronous call to another service:",
+      "1. Trace the request path end to end and list the data each step needs.",
+      "2. Check whether that data is already available locally: in the incoming request/payload, in domain state already loaded",
+      "   for this request, or in a database owned by the current service.",
+      "3. Prefer local handling when the local data is sufficient AND meets the requirements for freshness, consistency and",
+      "   ownership (the owning service remains the source of truth; do not copy data you do not own just to avoid a call).",
+      "",
+      "If a call to another service is still needed:",
+      "- State why (freshness, consistency, ownership, missing data).",
+      "- Reuse results already fetched within the same request; batch calls; run independent calls in parallel.",
+      "- Report the number of sequential round trips before and after the change (e.g. 3 → 1).",
+      "- Quote latency in milliseconds only when it was measured (logs, traces, benchmarks); otherwise say it is unmeasured.",
+    ].join("\n"),
+    metadata: {
+      description:
+        "Avoid unnecessary synchronous service calls: trace the request path, use data already in the request/domain/own DB, justify remaining calls, batch/parallelize, report round trips (ms only when measured).",
+      required_tools: ["Read", "Grep", "Glob"],
+      output_contract:
+        "{ call_analysis: [{ call, needed: boolean, reason, data_source }], round_trips: { before, after }, latency_ms_measured?: number }",
+    },
+  },
+  {
+    key: "reuse-first-development",
+    conflict_key: "engineering.reuse",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "Reuse-First Development",
+    content: [
+      "Before designing or writing new code, find what already exists and decide how to build on it.",
+      "",
+      "## 1. Search first (mandatory, before proposing a new function, flow or type)",
+      "- Code intelligence (Tree-sitter index) via mcp__platform__call_tool: `code_intelligence.search` for similar flows,",
+      "  `code_intelligence.symbols` for functions/types by name, `code_intelligence.relations` for call sites and dependencies.",
+      "- ripgrep (`rg -n`) for the business terms of the task (entity, action, status, error codes) and for sibling",
+      "  implementations: when the task names one provider/marketplace/channel, search the same flow for the others.",
+      "- Read the closest matches and their call sites. Record what you found (file:line) in your result, including",
+      '  "nothing comparable found" with the searches you ran.',
+      "",
+      "## 2. Decide in this order (take the first that fits; say why the earlier ones do not)",
+      "1. Reuse the existing implementation as it is.",
+      "2. Extend it (a parameter, a branch, a field) without changing what current callers get.",
+      "3. Extract the shared logic into one function/module used by the old and the new caller.",
+      "4. Introduce an adapter/strategy for the part that genuinely differs per provider, around a shared core.",
+      "5. A separate implementation: only when behaviour, data or ownership really differ; state the difference.",
+      "",
+      "## 3. Separate the three kinds of logic",
+      "- Domain invariants (always true: amounts, states, transitions, validation) live once, in the shared core.",
+      "- Shared workflows (the steps every provider follows) live once; providers plug into them.",
+      "- Provider/marketplace-specific policy (mapping, endpoints, field rules, limits) lives in that provider's adapter.",
+      "Do not create one function per marketplace when most of the behaviour is the same. Do not push one provider's",
+      "special case into the shared core as an `if provider == X`: give it an adapter hook instead.",
+      "",
+      "## 4. Do not over-generalise",
+      "No abstraction without at least two real users today; no speculative parameters, registries or plugin points.",
+      "Duplication of a few lines is cheaper than the wrong abstraction.",
+      "",
+      "## 5. Preserve what callers rely on",
+      "Transaction boundaries and atomicity, idempotency keys and duplicate handling, retry/recovery behaviour, API and",
+      "event contracts (fields, types, status codes), and backward compatibility for existing callers and stored data.",
+      "A refactor that moves shared logic must keep these identical for the existing provider; cover it with tests.",
+      "",
+      "## Output",
+      "Analysis/plan/architecture steps: include `reuse_decision` { found: [file:line…], choice: reuse|extend|extract|adapter|",
+      "separate, why, shared_core, provider_specific } so the implementation step builds exactly that.",
+      "Implementation: follow the approved reuse_decision; if the code proves it wrong, say so instead of silently diverging.",
+      "Review: flag new per-provider copies of shared behaviour, provider conditions in shared code and abstractions with a",
+      "single user.",
+    ].join("\n"),
+    applicability: {
+      step_keys: [
+        "analyze",
+        "understand",
+        "architecture",
+        "plan",
+        "root_cause",
+        "fix_proposal",
+        "review",
+        "implement",
+        "fix",
+        "refactor",
+      ],
+    },
+    metadata: {
+      description:
+        "Search for existing implementations (code intelligence + ripgrep) before writing new code; prefer reuse → extend → extract shared logic → adapter/strategy → separate; keep domain invariants and shared workflows in one core and provider/marketplace policy in adapters; no speculative abstraction; preserve transactions, idempotency, retries, contracts and compatibility.",
+      required_tools: ["Read", "Grep", "Glob"],
+      output_contract:
+        "{ reuse_decision: { found: string[], choice: 'reuse'|'extend'|'extract'|'adapter'|'separate', why: string, shared_core?: string, provider_specific?: string } }",
+    },
+  },
+  {
+    key: "unit-test-generation",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "Unit Test Generation",
+    content:
+      "Write table-driven tests next to the code under test, covering the happy path, each error branch and boundary values. " +
+      "Prefer real collaborators over mocks unless they cross a process boundary.",
+    metadata: { required_tools: ["Read", "Edit", "Write", "Bash"] },
+  },
+];
 export async function seedKnowledge() {
-  const seeds: KnowledgeInput[] = [
-    {
-      key: "commit-convention",
-      category: "repository_convention",
-      scope_type: "ORGANIZATION",
-      scope_ref: "hasaki",
-      title: "Hasaki commit convention (TECH-HD-001)",
-      content:
-        "Commit message: `<type>(<scope>): <imperative summary, < 50 chars>`, blank line, body explaining WHY, then footer lines " +
-        "`func: <FUNCTION_CODE>` (only if the task or git log of the touched files gives a real code; never invent one) and " +
-        "`task: <task code>`. Types: feat | fix | refactor | perf | test | docs | style | build | ci | chore. No Co-Authored-By trailer.",
-      applicability: { step_types: ["coding_agent"] },
-    },
-    {
-      key: "no-secrets-in-code",
-      category: "security_policy",
-      scope_type: "GLOBAL",
-      title: "Never commit secrets or customer PII",
-      conflict_key: "security.secrets",
-      enforced: true,
-      content:
-        "Never commit credentials, tokens, private keys or customer personal data (phone, address, email) to code, tests, logs or PR text.",
-    },
-    {
-      key: "security-review",
-      category: "agent_skill",
-      scope_type: "GLOBAL",
-      title: "Security Review",
-      content:
-        "Check: injection (SQL, command, template), missing authorization on new endpoints, secrets in code/config, PII in logs, " +
-        "unsafe deserialisation, SSRF in outbound calls, missing input validation at trust boundaries. Report each finding with " +
-        "severity, file:line, exploit scenario and a concrete fix.",
-      metadata: {
-        required_tools: ["Read", "Grep", "Glob"],
-        output_contract: "{ findings: [{ severity, file, line, issue, suggestion }] }",
-      },
-    },
-    {
-      key: "latency-service-boundaries",
-      category: "agent_skill",
-      scope_type: "GLOBAL",
-      title: "Latency & Service Boundaries",
-      content: [
-        "Before adding a synchronous call to another service:",
-        "1. Trace the request path end to end and list the data each step needs.",
-        "2. Check whether that data is already available locally: in the incoming request/payload, in domain state already loaded",
-        "   for this request, or in a database owned by the current service.",
-        "3. Prefer local handling when the local data is sufficient AND meets the requirements for freshness, consistency and",
-        "   ownership (the owning service remains the source of truth; do not copy data you do not own just to avoid a call).",
-        "",
-        "If a call to another service is still needed:",
-        "- State why (freshness, consistency, ownership, missing data).",
-        "- Reuse results already fetched within the same request; batch calls; run independent calls in parallel.",
-        "- Report the number of sequential round trips before and after the change (e.g. 3 → 1).",
-        "- Quote latency in milliseconds only when it was measured (logs, traces, benchmarks); otherwise say it is unmeasured.",
-      ].join("\n"),
-      metadata: {
-        description:
-          "Avoid unnecessary synchronous service calls: trace the request path, use data already in the request/domain/own DB, justify remaining calls, batch/parallelize, report round trips (ms only when measured).",
-        required_tools: ["Read", "Grep", "Glob"],
-        output_contract:
-          "{ call_analysis: [{ call, needed: boolean, reason, data_source }], round_trips: { before, after }, latency_ms_measured?: number }",
-      },
-    },
-    {
-      key: "reuse-first-development",
-      category: "agent_skill",
-      scope_type: "GLOBAL",
-      title: "Reuse-First Development",
-      content: [
-        "Before designing or writing new code, find what already exists and decide how to build on it.",
-        "",
-        "## 1. Search first (mandatory, before proposing a new function, flow or type)",
-        "- Code intelligence (Tree-sitter index) via mcp__platform__call_tool: `code_intelligence.search` for similar flows,",
-        "  `code_intelligence.symbols` for functions/types by name, `code_intelligence.relations` for call sites and dependencies.",
-        "- ripgrep (`rg -n`) for the business terms of the task (entity, action, status, error codes) and for sibling",
-        "  implementations: when the task names one provider/marketplace/channel, search the same flow for the others.",
-        "- Read the closest matches and their call sites. Record what you found (file:line) in your result, including",
-        '  "nothing comparable found" with the searches you ran.',
-        "",
-        "## 2. Decide in this order (take the first that fits; say why the earlier ones do not)",
-        "1. Reuse the existing implementation as it is.",
-        "2. Extend it (a parameter, a branch, a field) without changing what current callers get.",
-        "3. Extract the shared logic into one function/module used by the old and the new caller.",
-        "4. Introduce an adapter/strategy for the part that genuinely differs per provider, around a shared core.",
-        "5. A separate implementation: only when behaviour, data or ownership really differ; state the difference.",
-        "",
-        "## 3. Separate the three kinds of logic",
-        "- Domain invariants (always true: amounts, states, transitions, validation) live once, in the shared core.",
-        "- Shared workflows (the steps every provider follows) live once; providers plug into them.",
-        "- Provider/marketplace-specific policy (mapping, endpoints, field rules, limits) lives in that provider's adapter.",
-        "Do not create one function per marketplace when most of the behaviour is the same. Do not push one provider's",
-        "special case into the shared core as an `if provider == X`: give it an adapter hook instead.",
-        "",
-        "## 4. Do not over-generalise",
-        "No abstraction without at least two real users today; no speculative parameters, registries or plugin points.",
-        "Duplication of a few lines is cheaper than the wrong abstraction.",
-        "",
-        "## 5. Preserve what callers rely on",
-        "Transaction boundaries and atomicity, idempotency keys and duplicate handling, retry/recovery behaviour, API and",
-        "event contracts (fields, types, status codes), and backward compatibility for existing callers and stored data.",
-        "A refactor that moves shared logic must keep these identical for the existing provider; cover it with tests.",
-        "",
-        "## Output",
-        "Analysis/plan/architecture steps: include `reuse_decision` { found: [file:line…], choice: reuse|extend|extract|adapter|",
-        "separate, why, shared_core, provider_specific } so the implementation step builds exactly that.",
-        "Implementation: follow the approved reuse_decision; if the code proves it wrong, say so instead of silently diverging.",
-        "Review: flag new per-provider copies of shared behaviour, provider conditions in shared code and abstractions with a",
-        "single user.",
-      ].join("\n"),
-      applicability: {
-        step_keys: [
-          "analyze",
-          "understand",
-          "architecture",
-          "plan",
-          "root_cause",
-          "fix_proposal",
-          "review",
-          "implement",
-          "fix",
-          "refactor",
-        ],
-      },
-      metadata: {
-        description:
-          "Search for existing implementations (code intelligence + ripgrep) before writing new code; prefer reuse → extend → extract shared logic → adapter/strategy → separate; keep domain invariants and shared workflows in one core and provider/marketplace policy in adapters; no speculative abstraction; preserve transactions, idempotency, retries, contracts and compatibility.",
-        required_tools: ["Read", "Grep", "Glob"],
-        output_contract:
-          "{ reuse_decision: { found: string[], choice: 'reuse'|'extend'|'extract'|'adapter'|'separate', why: string, shared_core?: string, provider_specific?: string } }",
-      },
-    },
-    {
-      key: "unit-test-generation",
-      category: "agent_skill",
-      scope_type: "GLOBAL",
-      title: "Unit Test Generation",
-      content:
-        "Write table-driven tests next to the code under test, covering the happy path, each error branch and boundary values. " +
-        "Prefer real collaborators over mocks unless they cross a process boundary.",
-      metadata: { required_tools: ["Read", "Edit", "Write", "Bash"] },
-    },
-  ];
   const deleted = await knowledge.deletedKeys();
-  for (const s of seeds)
+  for (const s of KNOWLEDGE_SEEDS)
     if (!deleted.has(s.key) && !(await knowledge.get(s.key)))
       await knowledge.create({ ...s, change_note: "seed" });
 }

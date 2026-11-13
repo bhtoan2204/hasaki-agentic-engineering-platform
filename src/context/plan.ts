@@ -73,11 +73,7 @@ export function planKnowledge(
   }));
   // Unverified AI observations are never authoritative: they cannot be mandatory or inline, whatever their load flag.
   const unverified = (x: (typeof scored)[number]) => knowledgeTier(x.k) === "unverified_suggestion";
-  const mandatory = (x: (typeof scored)[number]) =>
-    !unverified(x) &&
-    (x.k.reason === "assigned to step" ||
-      x.k.reason.startsWith("selected for this re-execution") ||
-      x.k.enforced === true);
+  const mandatory = (x: (typeof scored)[number]) => isMandatory(x.k);
   const wantsInline = (x: (typeof scored)[number]) =>
     !unverified(x) && (mandatory(x) || x.k.metadata?.load !== "on_demand");
   const out: DisclosureEntry[] = [];
@@ -351,3 +347,15 @@ export const tierNotice = (t: KnowledgeTier) =>
   t === "unverified_suggestion"
     ? "quan sát chưa xác minh (unverified observation): không phải rule"
     : undefined;
+
+export function isMandatory(k: KnowledgeLike): boolean {
+  return (
+    knowledgeTier(k) !== "unverified_suggestion" &&
+    (k.enforced === true ||
+      k.category === "security_policy" ||
+      k.category === "business_rule" ||
+      k.reason === "assigned to step" ||
+      k.reason.startsWith("selected for this re-execution") ||
+      k.metadata?.mandatory === true)
+  );
+}

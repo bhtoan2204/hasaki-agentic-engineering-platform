@@ -89,6 +89,7 @@ export interface ResolutionContext {
   explicit: string[];
   /** Evaluation instant for expiry (default: now). */
   now?: Date;
+  ponytailEnabled?: boolean;
 }
 
 export interface Resolution {
@@ -154,7 +155,20 @@ const describeRestriction = (a: Applicability) =>
     .join("; ");
 
 /** Total order: negative when `a` beats `b`. */
+export const PRECEDENCE_STATEMENT =
+  "Instruction precedence: security/business invariants (enforced, security_policy, business_rule) > mandatory engineering rules > task requirements > applicable skills > optional guidance. Tests and verification remain governed by the TDD and verification skills and platform gates.";
+
+export function authorityTier(
+  k: Pick<KnowledgeCandidate, "category" | "enforced" | "metadata">,
+): number {
+  if (k.enforced || k.category === "security_policy" || k.category === "business_rule") return 0;
+  if (k.metadata.mandatory === true) return 1;
+  if (k.metadata.task_requirement === true) return 2;
+  return k.category === "agent_skill" ? 3 : 4;
+}
+
 export function compareCandidates(a: KnowledgeCandidate, b: KnowledgeCandidate): number {
+  if (authorityTier(a) !== authorityTier(b)) return authorityTier(a) - authorityTier(b);
   if (a.enforced !== b.enforced) return a.enforced ? -1 : 1;
   if (rank(a.scope_type) !== rank(b.scope_type))
     return a.enforced
@@ -173,6 +187,13 @@ export function resolveKnowledge(
   let eligible: Array<KnowledgeCandidate & { reason: string }> = [];
   const overridden: Resolution["overridden"] = [];
   for (const c of candidates) {
+    if (c.metadata.pilot === "ponytail" && !ctx.explicit.includes(c.key) && !ctx.ponytailEnabled)
+      continue;
+    if (
+      c.metadata.pilot === "ponytail" &&
+      (ctx.stepType === "command" || !applicabilityMatches(c.applicability, ctx))
+    )
+      continue;
     if (c.expires_at && new Date(c.expires_at).getTime() <= now) {
       if (ctx.explicit.includes(c.key))
         overridden.push({
@@ -209,6 +230,24 @@ export function resolveKnowledge(
             : `skill for ${describeRestriction(c.applicability)}`,
       });
   }
+  if (eligible.some((c) => c.metadata.pilot === "ponytail")) {
+    const maps = eligible.filter(
+      (c) =>
+        /codebase[ ._-]?map/i.test(c.key + " " + c.title) &&
+        !c.enforced &&
+        c.category !== "business_rule" &&
+        c.category !== "security_policy",
+    );
+    for (const c of maps)
+      overridden.push({
+        key: c.key,
+        version: c.version,
+        by: "code-intelligence:index",
+        conflict_key: c.conflict_key ?? "",
+        reason: "superseded",
+      });
+    eligible = eligible.filter((c) => !maps.includes(c));
+  }
   // Supersession: drop an item when its successor applies here too (never an enforced policy).
   const eligibleKeys = new Set(eligible.map((c) => c.key));
   const superseded = eligible.filter(
@@ -226,6 +265,7 @@ export function resolveKnowledge(
   const applied: Resolution["applied"] = [];
   const groups = new Map<string, typeof eligible>();
   for (const c of eligible) {
+    if (c.key === "reuse-first-development") c.conflict_key ??= "engineering.reuse";
     if (!c.conflict_key) applied.push(c);
     else
       (groups.get(c.conflict_key) ?? groups.set(c.conflict_key, []).get(c.conflict_key)!).push(c);
@@ -245,6 +285,7 @@ export function resolveKnowledge(
   // Stable presentation order: category, then scope (broad first), then key.
   applied.sort(
     (a, b) =>
+      authorityTier(a) - authorityTier(b) ||
       a.category.localeCompare(b.category) ||
       rank(a.scope_type) - rank(b.scope_type) ||
       a.key.localeCompare(b.key),

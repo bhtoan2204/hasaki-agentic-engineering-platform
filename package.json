@@ -38,7 +38,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "knowledge:audit": "node --disable-warning=ExperimentalWarning src/cli/knowledge-audit.ts"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "1.13.6",
