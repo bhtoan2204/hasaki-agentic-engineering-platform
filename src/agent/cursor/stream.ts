@@ -163,3 +163,32 @@ export function toolCallShape(
   const name = base.charAt(0).toLowerCase() + base.slice(1);
   return { name, body: toolCall[key] };
 }
+
+export function cursorUsage(raw: unknown): {
+  tokens: {
+    input: number | null;
+    output: number | null;
+    cache_read: number | null;
+    cache_creation: number | null;
+  };
+  cost: number | null;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const event = raw as Record<string, unknown>;
+  const message =
+    event.message && typeof event.message === "object"
+      ? (event.message as Record<string, unknown>)
+      : {};
+  const usage = event.usage ?? message.usage;
+  if (!usage || typeof usage !== "object") return null;
+  const u = usage as Record<string, unknown>;
+  const number = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+  const tokens = {
+    input: number(u.input_tokens ?? u.inputTokens),
+    output: number(u.output_tokens ?? u.outputTokens),
+    cache_read: number(u.cache_read_input_tokens ?? u.cached_input_tokens),
+    cache_creation: number(u.cache_creation_input_tokens),
+  };
+  if (Object.values(tokens).every((v) => v === null)) return null;
+  return { tokens, cost: number(event.total_cost_usd ?? event.cost_usd) };
+}

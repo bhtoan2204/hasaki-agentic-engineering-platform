@@ -89,6 +89,7 @@ export interface ResolutionContext {
   explicit: string[];
   /** Evaluation instant for expiry (default: now). */
   now?: Date;
+  ponytailEnabled?: boolean;
 }
 
 export interface Resolution {
@@ -147,11 +148,27 @@ export function applicabilityMatches(a: Applicability, ctx: ResolutionContext): 
 const rank = (s: Scope) => SCOPES.indexOf(s);
 
 const RESTRICTING = ["repos", "projects", "workflows", "step_keys", "step_types"] as const;
-const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
+export const isCodebaseMap = (k: { key: string; title: string }) =>
+  /codebase[ ._-]?map/i.test(k.key + " " + k.title);
+export const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
 const describeRestriction = (a: Applicability) =>
   RESTRICTING.filter((k) => a[k]?.length)
     .map((k) => `${k} ${a[k]!.join(", ")}`)
     .join("; ");
+
+export const PRECEDENCE_STATEMENT =
+  "Instruction precedence: security/business invariants (enforced, security_policy, business_rule) > mandatory engineering rules > task requirements > applicable skills > optional guidance. Tests and verification remain governed by the TDD and verification skills and platform gates.";
+
+export function authorityTier(
+  k: Pick<KnowledgeCandidate, "category" | "enforced" | "metadata">,
+): number {
+  if (k.enforced || k.category === "security_policy" || k.category === "business_rule") return 0;
+  if (k.metadata.mandatory === true) return 1;
+  if (k.metadata.task_requirement === true) return 2;
+  return k.category === "agent_skill" ? 3 : 4;
+}
+
+const isPonytail = (k: Pick<KnowledgeCandidate, "metadata">) => k.metadata.pilot === "ponytail";
 
 /** Total order: negative when `a` beats `b`. */
 export function compareCandidates(a: KnowledgeCandidate, b: KnowledgeCandidate): number {
@@ -173,6 +190,12 @@ export function resolveKnowledge(
   let eligible: Array<KnowledgeCandidate & { reason: string }> = [];
   const overridden: Resolution["overridden"] = [];
   for (const c of candidates) {
+    if (isPonytail(c) && !ctx.explicit.includes(c.key) && !ctx.ponytailEnabled) continue;
+    if (
+      isPonytail(c) &&
+      (ctx.stepType === "command" || !applicabilityMatches(c.applicability, ctx))
+    )
+      continue;
     if (c.expires_at && new Date(c.expires_at).getTime() <= now) {
       if (ctx.explicit.includes(c.key))
         overridden.push({
@@ -231,7 +254,11 @@ export function resolveKnowledge(
       (groups.get(c.conflict_key) ?? groups.set(c.conflict_key, []).get(c.conflict_key)!).push(c);
   }
   for (const [ck, group] of groups) {
-    group.sort(compareCandidates);
+    // Precedence tiers only arbitrate groups a Ponytail item joins; existing groups keep their winners.
+    const tiered = group.some(isPonytail);
+    group.sort(
+      (a, b) => (tiered ? authorityTier(a) - authorityTier(b) : 0) || compareCandidates(a, b),
+    );
     applied.push(group[0]);
     for (const loser of group.slice(1))
       overridden.push({
@@ -243,8 +270,10 @@ export function resolveKnowledge(
       });
   }
   // Stable presentation order: category, then scope (broad first), then key.
+  const tiered = applied.some(isPonytail);
   applied.sort(
     (a, b) =>
+      (tiered ? authorityTier(a) - authorityTier(b) : 0) ||
       a.category.localeCompare(b.category) ||
       rank(a.scope_type) - rank(b.scope_type) ||
       a.key.localeCompare(b.key),

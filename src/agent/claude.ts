@@ -1,3 +1,11 @@
+import { liveRuntime, setLiveUsageOffset } from "../eval/liveRuntime.ts";
+import { liveClaudeSandbox } from "../eval/liveSandbox.ts";
+import {
+  selectedSkills,
+  injectSkills,
+  deriveSkillActivation,
+  type SkillRead,
+} from "./skillTracing.ts";
 import {
   assertSelfCodingIsolation,
   isSelfRepository,
@@ -326,6 +334,11 @@ function platformServer(
       "Submit this step's output (an object matching the step's output contract). Call once, at the end.",
       {
         output: z.record(z.string(), z.any()).describe("the step output object"),
+        skills_applied: z
+          .array(z.string().max(300))
+          .max(100)
+          .optional()
+          .describe("Registry keys of skills actually applied; omit unused skills"),
       },
       call("submit_result"),
     ),
@@ -466,7 +479,8 @@ const TERMINAL_FAILURES = new Set([
  */
 const agentExecutor: StepExecutor = {
   async execute(ctx): Promise<ExecResult> {
-    if (ctx.step.config?.evaluation_phase) {
+    const live = liveRuntime.getStore();
+    if (ctx.step.config?.evaluation_phase && !live) {
       const { executeProviderPhase } = await import("../eval/providerPhase.ts");
       return executeProviderPhase(ctx);
     }
@@ -474,7 +488,8 @@ const agentExecutor: StepExecutor = {
     const effective = ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
     const provider = effective.provider;
     const unavailable = ctx.context?.unavailableSkills ?? [];
-    if (unavailable.length)
+    if (unavailable.length) {
+      await ctx.recordMetrics({ skills: selectedSkills(ctx.context) });
       return {
         kind: "failed",
         error: `Assigned skill cannot run with provider ${provider} on this platform: ${unavailable
@@ -484,9 +499,10 @@ const agentExecutor: StepExecutor = {
           )}. Remove the assignment or run the step with a provider/runtime that supports it.`,
         retryable: false,
       };
+    }
     {
       const checkouts: Record<string, string> = {};
-      for (const name of ctx.run.selected_repositories) {
+      for (const name of live ? [] : ctx.run.selected_repositories) {
         const repo = await repositories.get(name);
         try {
           if (
@@ -593,7 +609,7 @@ const agentExecutor: StepExecutor = {
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
-    if (mode === "coding") {
+    if (mode === "coding" && !live) {
       for (const w of ws) {
         if (await installNodeDependencies(w.path))
           await ctx.log("system", `installed Node dependencies in ${w.repo}`);
@@ -615,7 +631,7 @@ const agentExecutor: StepExecutor = {
       isReadOnlyIntegration: (name) =>
         integrationTools().find((t) => t.name === name)?.readOnly === true,
     };
-    const settingSources = config.agent.settingSources;
+    const settingSources = live ? [] : config.agent.settingSources;
     policy.allowedTools = effective.allowed_tools;
     const nativeTools = toolsFor(mode, {
       delegation,
@@ -642,6 +658,7 @@ const agentExecutor: StepExecutor = {
       effort: effective.reasoning_effort ?? undefined,
     };
     const metrics = newMetrics(routed.model || (provider === "claude" ? "default" : ""));
+    metrics.skills = selectedSkills(ctx.context);
     metrics.model_source = routed.source;
     metrics.provider = provider;
     if (routed.effort) metrics.reasoning_effort = routed.effort;
@@ -651,7 +668,7 @@ const agentExecutor: StepExecutor = {
     }
     for (const d of ctx.context.disclosure) metrics.disclosure[d.disclosure]++;
     for (const u of Object.values(ctx.context.upstream.plan)) metrics.upstream[u.mode]++;
-    const cwd = await runWorkingDirectory(ctx.run.id, ctx.step.id);
+    const cwd = live?.cwd ?? (await runWorkingDirectory(ctx.run.id, ctx.step.id));
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
@@ -868,6 +885,14 @@ const agentExecutor: StepExecutor = {
       mode,
     }).catch(() => undefined);
     const systemAppend = buildSystemAppend(ctx.run, ctx.step, ctx.context, mode, integrations);
+    if (live)
+      await ctx.recordMetrics({
+        evaluation_context: {
+          system_append_tokens: Math.ceil(systemAppend.length / 4),
+          pack_tokens: ctx.context.contextPack?.estimated_tokens ?? 0,
+        },
+      });
+    injectSkills(metrics.skills!, ctx.context, ctx.context.contextPack);
 
     // The PreToolUse hook sees the shell's real cwd; canUseTool (called afterwards for the same call) does not.
     // Remember the hook's allow so cwd-dependent checks (relative redirects, `cd`) are not re-judged without a cwd.
@@ -1031,6 +1056,7 @@ const agentExecutor: StepExecutor = {
       const ac = new AbortController();
       const onAbort = () => ac.abort();
       ctx.signal.addEventListener("abort", onAbort);
+      if (ctx.signal.aborted) ac.abort();
       // Once the result is submitted and the turn ended, the CLI should exit. A background shell task (e.g. a command
       // that outlived its 120 s timeout) keeps it alive and re-invokes the agent later: stop it after a grace period.
       const graceSeconds = Math.max(0, Number(config.agent.postSubmitGraceSeconds ?? 30));
@@ -1090,6 +1116,9 @@ const agentExecutor: StepExecutor = {
             },
             tools: nativeTools,
             ...(agents ? { agents } : {}),
+            ...(live
+              ? { sandbox: liveClaudeSandbox(live.databaseUrl, live.root ?? live.cwd) }
+              : {}),
             permissionMode: "default",
             canUseTool,
             hooks: {
@@ -1200,6 +1229,7 @@ const agentExecutor: StepExecutor = {
       sessionKey = randomUUID();
       sessionStart = Date.now();
       metrics.model = routed.model || (provider === "claude" ? "default" : "");
+      setLiveUsageOffset(metrics);
       metrics.tokens = null;
       metrics.cost_usd = null;
       await persistSession();
@@ -1215,6 +1245,7 @@ const agentExecutor: StepExecutor = {
         providerSessions[sessionKey].complete = true;
         await writeTelemetry({ provider_sessions: providerSessions });
         // Legacy Insights fields remain known subtotals; canonical API carries coverage.
+        setLiveUsageOffset(metrics, true);
         metrics.tokens = null;
         metrics.cost_usd = null;
         for (const session of Object.values(providerSessions)) {
@@ -1231,6 +1262,32 @@ const agentExecutor: StepExecutor = {
                 }
               : null,
             session.reported_cost_usd,
+          );
+        }
+        try {
+          const skillEvents = await q<{
+            reason: string;
+            data: SkillRead & { skills_applied?: unknown };
+          }>(
+            pool,
+            "SELECT reason, data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason IN ('skill_read', 'submit_result') ORDER BY id",
+            [ctx.attempt.id],
+          );
+          const reads = skillEvents.filter((e) => e.reason === "skill_read").map((e) => e.data);
+          const declaration = skillEvents.filter((e) => e.reason === "submit_result").at(-1)
+            ?.data.skills_applied;
+          metrics.skills = deriveSkillActivation(
+            metrics.skills ?? [],
+            ctx.context.knowledge,
+            reads,
+            declaration,
+          );
+          metrics.skills_loaded = [
+            ...new Set([...metrics.skills_loaded, ...reads.map((r) => r.key)]),
+          ];
+        } catch (error) {
+          console.error(
+            `attempt ${ctx.attempt.id}: skill tracing failed: ${safeDiagnostics(error)}`,
           );
         }
         await writeTelemetry(metrics as unknown as Record<string, unknown>);

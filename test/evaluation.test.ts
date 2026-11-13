@@ -5,7 +5,7 @@ import { migrate } from "../src/db/migrate.ts";
 import { config, codeIntelligenceEnabled } from "../src/config.ts";
 import { execution } from "../src/auth/execution.ts";
 import { createUser } from "../src/auth/users.ts";
-import { SuiteSchema } from "../src/eval/dataset.ts";
+import { SuiteSchema, sha256 } from "../src/eval/dataset.ts";
 import { fixtureGit, fixtureRoot, fixtureName, materializeSuite } from "../src/eval/fixtures.ts";
 import {
   publishBuiltinSuite,
@@ -234,6 +234,42 @@ test("Configuration is bounded, live execution needs approval, and fixture repos
     ),
   ]);
   assert.equal(codeIntelligenceEnabled(), original);
+});
+test("Non-live requests keep legacy limit defaults and request-key hashes; live gets realistic limits", async () => {
+  const fixture = ConfigurationSchema.parse({});
+  assert.deepEqual(
+    [fixture.max_case_seconds, fixture.max_tokens, fixture.max_cost_usd],
+    [20, 10000, 0],
+  );
+  const live = ConfigurationSchema.parse({ mode: "live", provider: "claude" });
+  assert.deepEqual(
+    [live.max_case_seconds, live.max_tokens, live.max_cost_usd],
+    [1800, 3000000, 10],
+  );
+  const row = await createEvaluation(owner.id, {
+    suite_id: suite.id,
+    request_key: "legacy-hash",
+    configuration: { adapter: "reference" },
+  });
+  const legacy = {
+    mode: "fixture",
+    adapter: "reference",
+    provider: "fixture",
+    model: null,
+    prompt_version: "p2-task-v1",
+    workflow_version: "p2-workflow-v1",
+    code_intelligence: false,
+    context_strategy: "none",
+    repetitions: 1,
+    case_limit: 15,
+    max_case_seconds: 20,
+    max_tokens: 10000,
+    max_cost_usd: 0,
+  };
+  assert.equal(
+    row.configuration_hash,
+    sha256(JSON.stringify({ ...legacy, scoring: defaultScoring })),
+  );
 });
 test("Fixture evaluations use existing jobs, objective validators, checkpoints, artifacts, retry recovery and paired P1 comparisons", async () => {
   const baseline = await createEvaluation(owner.id, {

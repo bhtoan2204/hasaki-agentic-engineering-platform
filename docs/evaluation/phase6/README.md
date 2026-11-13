@@ -87,13 +87,23 @@ Typecheck and production build pass. Final regression results are recorded below
 
 Final validation on the fetched main baseline `2cd4dc1`:
 
-| Check | Result |
-| --- | --- |
-| `npm run typecheck` | Pass: server and web |
-| `npm run build` | Pass |
-| `npm test` | **460 passed, 0 failed, 0 skipped**; 423.45 seconds |
-| New provider evaluation integration tests | **11 passed** within the full suite |
-| `npm run smoke:provider-evaluation` | **5 browser checks passed**, EN/VI screenshots above |
-| `git diff --check` | Pass |
+| Check                                     | Result                                               |
+| ----------------------------------------- | ---------------------------------------------------- |
+| `npm run typecheck`                       | Pass: server and web                                 |
+| `npm run build`                           | Pass                                                 |
+| `npm test`                                | **460 passed, 0 failed, 0 skipped**; 423.45 seconds  |
+| New provider evaluation integration tests | **11 passed** within the full suite                  |
+| `npm run smoke:provider-evaluation`       | **5 browser checks passed**, EN/VI screenshots above |
+| `git diff --check`                        | Pass                                                 |
 
 The final full run used a fresh local PostgreSQL instance and test temporary directory on disk. Earlier interrupted runs encountered changing harness hashes during development and exhausted `/tmp` database storage; those runs were superseded by the clean, frozen-harness full run. Synthetic positive recommendation fixtures test SQL/statistical behavior only; they are not empirical provider evidence.
+
+## Controlled live Ponytail connector
+
+`knowledge-ponytail-v1` is defined from a registered-repository snapshot with an absolute `local_path` per row. The platform repository and synthetic benchmark repositories are excluded. Six pinned exploratory tasks cover Go bugfix/feature, TypeScript feature, refactor, review and regression work. All eligible repositories participate in the task cohort. Baseline/pilot configurations hold the provider fixed, use two repetitions, and cover Claude, Codex, Cursor and Antigravity.
+
+The shared agent executor supplies the live path. `evaluation.liveEnabled` defaults off. Prerequisites require explicit administrator paid approval, local provider executables, PostgreSQL `initdb`/`pg_ctl`, bubblewrap and attested incremental usage support. `evaluation.liveUsageProviders` excludes Cursor until its installed stream protocol has been checked against mocked incremental-usage fixtures; add it only after that compatibility check. Unknown usage blocks acceptance. Token/cost limits accumulate across case phases and sessions. Unreported costs use `evaluation.estimatedUsdPerMillion` (default $30 per million tokens), frozen into each evaluation configuration; Antigravity does not report actual spend. These estimates are not invoice totals.
+
+Each live phase uses a secret-scrubbed archive of its pinned commit, never the original checkout or Git history. Provider sandboxes stay enabled. Verification retains the normal verification and test-weakening gates, with a scrubbed environment and network-isolated bubblewrap. A new socket-only PostgreSQL cluster is created and destroyed per phase; platform database credentials never enter the provider environment. A phase that fails without being aborted removes its case workspace at once, and a finished case removes it after storing its result. Nothing is swept automatically: live leftovers after a timeout, cancel, lease loss or crash stay under `<dataDir>/evaluation-work/<evaluation>/<case>/live` and are cleaned with `npm run eval:cleanup` (a dry-run listing of runs, statuses, running postmasters and sizes), then `npm run eval:cleanup -- --yes` for COMPLETED or CANCELED runs, or `--case <case_run_id> --yes` for one case regardless of status. `--yes` skips a case whose worker may still be active (one extra lease after cancel); `--case` proceeds with a warning. A database whose postmaster cannot be stopped, or whose liveness cannot be verified, is kept and reported. FAILED runs are never removed by `--yes` because they can be retried. No run pushes or opens a PR. A shared `budget_group` serializes accounting across the eight A/B arms so suite spend cannot reset between providers. Defaults are 1800 seconds, 3M tokens, $10 per case and $300 per suite; local administrator limits remain authoritative.
+
+The code path is `npm run bench -- --suite=knowledge-ponytail-v1 --registry-file=/absolute/repositories.json --live --paid-approval --admin`. Without `--live`, it records blocked dry-run controls. This implementation session did not execute that command or call any provider. Reports are written to `docs/evaluation/<date>-ponytail-ab.md`; missing verification/coverage measurements keep acceptance inconclusive, and any quality regression fails regardless of LOC/token gain. n=2 supports descriptive comparisons only.

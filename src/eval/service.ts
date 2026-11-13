@@ -1,3 +1,6 @@
+import { livePrerequisites } from "./livePrerequisites.ts";
+import { unsupportedLiveTools } from "./liveProvider.ts";
+import { materializePonytailSuite } from "./ponytailSuite.ts";
 import { compareContextEffect } from "./contextEffect.ts";
 import { contextInventory } from "./controls.ts";
 import { pool, q, one, withTx } from "../db/pool.ts";
@@ -19,10 +22,15 @@ import { HttpError } from "../http/error.ts";
 
 export { ConfigurationSchema } from "./configuration.ts";
 import { ConfigurationSchema } from "./configuration.ts";
-export async function publishBuiltinSuite() {
+export async function publishBuiltinSuite(
+  variant: "backend-v1" | "knowledge-ponytail-v1" = "backend-v1",
+) {
   return withTx(async (c) => {
     await q(c, "SELECT pg_advisory_xact_lock($1)", [727_027]);
-    const suite = await materializeSuite(),
+    const suite =
+        variant === "knowledge-ponytail-v1"
+          ? await materializePonytailSuite()
+          : await materializeSuite(),
       content = JSON.stringify(suite),
       hash = sha256(content);
     const old = await one(c, "SELECT * FROM benchmark_suites WHERE suite_key=$1 AND version=$2", [
@@ -54,7 +62,7 @@ export async function publishBuiltinSuite() {
           JSON.stringify(task),
         ],
       );
-    for (const logical of Object.keys(suite.repositories))
+    for (const logical of variant === "backend-v1" ? Object.keys(suite.repositories) : [])
       await repositories.upsert(
         fixtureName(logical),
         {
@@ -96,11 +104,22 @@ export async function createEvaluation(
     cfg.repetitions > config.evaluation.maxRepetitions ||
     cfg.max_case_seconds > config.evaluation.maxCaseSeconds ||
     cfg.max_tokens > config.evaluation.maxTokens ||
-    cfg.max_cost_usd > config.evaluation.maxCostUsd
+    cfg.max_cost_usd > config.evaluation.maxCostUsd ||
+    cfg.max_suite_cost_usd > config.evaluation.maxSuiteCostUsd
   )
     throw new HttpError(400, "Evaluation exceeds local execution limits");
   if (cfg.mode === "live" && (!input.paid_approval || !isAdmin))
     throw new HttpError(403, "Live paid evaluation requires explicit administrator approval");
+  if (cfg.mode === "live" && cfg.allowed_tools) {
+    const unsupported = unsupportedLiveTools(cfg.allowed_tools);
+    if (!cfg.allowed_tools.length || unsupported.length)
+      throw new HttpError(
+        400,
+        unsupported.length
+          ? `Live evaluations cannot allow: ${unsupported.join(", ")}`
+          : "Live evaluations need at least one allowed tool",
+      );
+  }
   const row = await one(pool, "SELECT * FROM benchmark_suites WHERE id=$1", [input.suite_id]);
   if (!row) throw new HttpError(404, "Suite not found");
   const suite = SuiteSchema.parse(row.manifest),
@@ -113,8 +132,7 @@ export async function createEvaluation(
     blocked = (e as Error).message;
   }
   if (cfg.mode === "live")
-    blocked =
-      "Live execution is BLOCKED: this installation has no verified provider connector enforcing both hard token/cost budgets and outbound API isolation. Approval is recorded, not treated as a sandbox guarantee.";
+    blocked = blocked ? `Live execution is BLOCKED: ${blocked}` : await livePrerequisites(cfg);
   const inventory = cfg.provider_sequence ? await contextInventory(ownerId) : null;
   const frozen = {
     context_inventory_hash: inventory,
@@ -123,9 +141,12 @@ export async function createEvaluation(
     blocked,
     paid_approval: cfg.mode === "live" ? { by: ownerId, at: new Date().toISOString() } : null,
     harness_hash: suite.harness_hash,
+    estimated_usd_per_million: config.evaluation.estimatedUsdPerMillion,
   };
   const hashConfiguration: Record<string, unknown> = { ...cfg };
   if (!cfg.provider_sequence) delete hashConfiguration.context_tokens; // Preserve legacy request-key hashes.
+  if (!cfg.ponytail) delete hashConfiguration.ponytail;
+  if (cfg.max_suite_cost_usd === 300) delete hashConfiguration.max_suite_cost_usd;
   const hash = sha256(JSON.stringify({ ...hashConfiguration, scoring }));
   return withTx(async (c) => {
     await q(c, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
@@ -200,16 +221,51 @@ export async function createEvaluation(
                   : ordinal === phases.length - 1
                     ? "verification"
                     : "implementation";
+          const semantic =
+            role === "verification"
+              ? "review"
+              : role === "implementation"
+                ? task.category === "review"
+                  ? "review"
+                  : "implement"
+                : null;
           tasks.push({
             key: phaseKey,
-            type: role === "implementation" ? "coding_agent" : "agent",
+            type:
+              role === "implementation" && task.category !== "review" ? "coding_agent" : "agent",
             name: `${task.task_id}: ${agent.provider} · ${role}`,
             depends_on: ordinal ? [`${key}_p${ordinal}`] : previous ? [previous] : [],
             config: {
-              evaluation_phase: { case_run_id: cr!.id, ordinal, role },
+              evaluation_phase: {
+                case_run_id: cr!.id,
+                ordinal,
+                role,
+                ponytail: cfg.ponytail,
+                ...((cfg.ponytail || cfg.mode === "live") && semantic
+                  ? { semantic_role: semantic }
+                  : {}),
+              },
               instructions: task.description,
+              ...(task.category === "review" ? { independent: true } : {}),
+              ...(cfg.ponytail && semantic
+                ? {
+                    skills: [
+                      semantic === "review" ? "skill.ext.ponytail-review" : "skill.ext.ponytail",
+                    ],
+                  }
+                : {}),
               agent: {
                 ...agent,
+                ...(task.validation.commands
+                  ? {
+                      verification: {
+                        command: task.validation.commands.join(" && "),
+                        max_repairs: 1,
+                        baseline: false,
+                        timeout_seconds: cfg.max_case_seconds,
+                      },
+                    }
+                  : {}),
                 fallback: { mode: "disabled" },
                 model: agent.model ?? null,
                 execution_profile: "STANDARD",
@@ -249,7 +305,9 @@ export async function createEvaluation(
       definitionKey: definition.key,
       ownerId,
       title: `Evaluation ${evaluation!.id}: ${suite.key}`,
-      repositories: Object.keys(suite.repositories).map(fixtureName),
+      repositories: Object.keys(suite.repositories).map((name) =>
+        suite.key === "knowledge-ponytail-v1" ? name : fixtureName(name),
+      ),
       inputs: { project: `__benchmark:${suite.key}` },
       start: false,
       agentProvider: "codex",

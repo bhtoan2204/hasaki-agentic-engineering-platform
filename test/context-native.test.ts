@@ -835,3 +835,94 @@ test("context pack follows the disclosure plan instead of repeating full knowled
     `context pack budget: omitted ${fullSkillTokens}+${narrativeTokens}+${notesTokens} estimated tokens; notes entry ${notesEntry!.body.length} chars`,
   );
 });
+
+test("all provider bridges preserve skill read and structured activation evidence", async () => {
+  const { selectedSkills, injectSkills, deriveSkillActivation } =
+    await import("../src/agent/skillTracing.ts");
+  for (const provider of ["claude", "codex", "cursor", "antigravity"] as const) {
+    const { ctx, env } = await live(provider);
+    const traces = selectedSkills(ctx.context);
+    injectSkills(traces, ctx.context);
+    await dispatchPlatformTool("read_knowledge", { key: "stock-on-demand", limit: 24000 }, env);
+    const body = ctx.context.knowledge.find((k) => k.key === "stock-on-demand")!;
+    if (body.content.length > 24000)
+      await dispatchPlatformTool(
+        "read_knowledge",
+        { key: body.key, offset: 24000, limit: 24000 },
+        env,
+      );
+    assert.match(
+      await dispatchPlatformTool(
+        "submit_result",
+        { output: { summary: "applied guide" }, skills_applied: [body.key] },
+        env,
+      ),
+      /Result recorded/,
+    );
+    const rows = await q(
+      pool,
+      "SELECT reason,data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason IN ('skill_read','submit_result') ORDER BY id",
+      [ctx.attempt.id],
+    );
+    const reads = rows.filter((r) => r.reason === "skill_read").map((r) => r.data);
+    const declaration = rows.filter((r) => r.reason === "submit_result").at(-1)!.data
+      .skills_applied;
+    const skill = deriveSkillActivation(traces, ctx.context.knowledge, reads, declaration).find(
+      (k) => k.key === body.key,
+    )!;
+    assert.deepEqual(skill.states, ["selected", "injected", "loaded", "activated"], provider);
+  }
+});
+
+test("Ponytail step keeps legacy codebase map knowledge when no generated map is available", async () => {
+  const { ctx, metrics } = await live();
+  const base = ctx.context.knowledge[0];
+  ctx.context.knowledge = [
+    ...ctx.context.knowledge,
+    {
+      ...base,
+      id: undefined,
+      key: "skill.ext.ponytail",
+      title: "Ponytail",
+      category: "agent_skill",
+      enforced: false,
+      content: "Ponytail body",
+      metadata: { pilot: "ponytail" },
+      reason: "assigned to step",
+    },
+    {
+      ...base,
+      id: undefined,
+      key: "legacy-codebase-map",
+      title: "Codebase map",
+      category: "repository_convention",
+      enforced: false,
+      content: "LEGACY_MAP_BODY",
+      metadata: {},
+      reason: "GLOBAL scope",
+    },
+  ];
+  const pack = await ensureContextPack(ctx, metrics, policy);
+  assert.ok(!pack.entries.some((e) => e.id === "codebase-map"));
+  assert.ok(pack.entries.some((e) => e.id.startsWith("knowledge:legacy-codebase-map")));
+});
+
+test("read_knowledge returns the skill body even when the read trace cannot be stored", async () => {
+  const { env } = await live();
+  await q(
+    pool,
+    "CREATE OR REPLACE FUNCTION fail_skill_read() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.reason = 'skill_read' THEN RAISE EXCEPTION 'trace store down'; END IF; RETURN NEW; END $$",
+  );
+  await q(
+    pool,
+    "CREATE TRIGGER fail_skill_read BEFORE INSERT ON workflow_checkpoints FOR EACH ROW EXECUTE FUNCTION fail_skill_read()",
+  );
+  try {
+    assert.match(
+      await dispatchPlatformTool("read_knowledge", { key: "stock-on-demand", limit: 100 }, env),
+      /ON_DEMAND_SECRET_BODY/,
+    );
+  } finally {
+    await q(pool, "DROP TRIGGER fail_skill_read ON workflow_checkpoints");
+  }
+});

@@ -31,6 +31,7 @@ export interface CodeIntelligenceConfig {
 }
 
 export interface Config {
+  knowledge: { ponytail: { enabled: boolean; mapChars: number } };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
   evaluation: {
@@ -40,6 +41,10 @@ export interface Config {
     maxCaseSeconds: number;
     maxTokens: number;
     maxCostUsd: number;
+    maxSuiteCostUsd: number;
+    liveEnabled: boolean;
+    liveUsageProviders: string[];
+    estimatedUsdPerMillion: number;
     sandboxImage: string;
     maxLiveAgents: number;
   };
@@ -301,6 +306,7 @@ export interface Config {
 }
 
 const defaults: Config = {
+  knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   codeIntelligence: {
     enabled: false,
     includeGenerated: false,
@@ -328,9 +334,13 @@ const defaults: Config = {
     enabled: false,
     maxCases: 20,
     maxRepetitions: 3,
-    maxCaseSeconds: 30,
-    maxTokens: 20000,
-    maxCostUsd: 2,
+    maxCaseSeconds: 1800,
+    maxTokens: 3000000,
+    maxCostUsd: 10,
+    maxSuiteCostUsd: 300,
+    liveEnabled: false,
+    liveUsageProviders: ["claude", "antigravity"],
+    estimatedUsdPerMillion: 30,
     sandboxImage: "docker.io/library/postgres:17-alpine",
     maxLiveAgents: 1,
   },
@@ -466,6 +476,9 @@ function load(): Config {
   const cfg: Config = {
     ...defaults,
     ...fromFile,
+    knowledge: {
+      ponytail: { ...defaults.knowledge.ponytail, ...(fromFile.knowledge?.ponytail ?? {}) },
+    },
     evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
     codeIntelligence: {
       ...defaults.codeIntelligence,
@@ -499,6 +512,18 @@ function load(): Config {
     "maxLiveAgents",
   ] as const)
     cfg.evaluation[k] = positiveInt(`evaluation.${k}`, cfg.evaluation[k]);
+  if (
+    !Number.isFinite(cfg.evaluation.estimatedUsdPerMillion) ||
+    cfg.evaluation.estimatedUsdPerMillion <= 0 ||
+    cfg.evaluation.estimatedUsdPerMillion > 1000
+  )
+    throw new Error("evaluation.estimatedUsdPerMillion must be positive and at most 1000");
+  if (
+    !Number.isFinite(cfg.evaluation.maxSuiteCostUsd) ||
+    cfg.evaluation.maxSuiteCostUsd <= 0 ||
+    cfg.evaluation.maxSuiteCostUsd > 1000
+  )
+    throw new Error("evaluation.maxSuiteCostUsd must be positive and at most 1000");
   if (!Number.isFinite(cfg.evaluation.maxCostUsd) || cfg.evaluation.maxCostUsd < 0)
     throw new Error("evaluation.maxCostUsd must be nonnegative");
   for (const k of [

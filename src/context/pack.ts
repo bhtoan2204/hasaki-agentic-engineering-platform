@@ -1,3 +1,6 @@
+import { indexedCodebaseMap } from "../knowledge/codebaseMap.ts";
+import { isCodebaseMap } from "../knowledge/resolve.ts";
+import { isMandatory } from "./plan.ts";
 import { validateToolBinding } from "../agent/toolRuntime.ts";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
@@ -368,16 +371,48 @@ export async function ensureContextPack(
           ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, ""))
           : [],
       );
+      const ponytail = ctx.context.knowledge.some((k) => k.metadata.pilot === "ponytail");
+      const map = ponytail
+        ? await indexedCodebaseMap(
+            ctx.run.selected_repositories,
+            ctx.run.id,
+            config.knowledge.ponytail.mapChars,
+          )
+        : "";
+      // Legacy map items are replaced only once a generated map is actually in the pack.
+      const replacedMaps = new Set(
+        map
+          ? ctx.context.knowledge
+              .filter(
+                (k) => isCodebaseMap(k) && !isMandatory(k) && k.category !== "security_policy",
+              )
+              .map((k) => k.key)
+          : [],
+      );
+      if (map)
+        add(
+          "codebase-map",
+          "code",
+          map,
+          80,
+          false,
+          source(
+            "code-intelligence:index",
+            hashOf(map),
+            new Date().toISOString(),
+            "owner",
+            "bounded indexed exported symbols; no live scan",
+          ),
+        );
       const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
       for (const k of ctx.context.knowledge) {
+        if (replacedMaps.has(k.key)) {
+          searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
+          continue;
+        }
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
         const tierLabel = knowledgeTier(k);
-        const mandatory =
-          tierLabel !== "unverified_suggestion" &&
-          (k.enforced ||
-            k.category === "business_rule" ||
-            k.reason === "assigned to step" ||
-            k.reason.startsWith("selected for this re-execution"));
+        const mandatory = isMandatory(k);
         const mode = tier.get(k.key) ?? "inline";
         // Search-tier bodies stay on the snapshot and read_knowledge. Copying them into the pack
         // paid for text the disclosure plan had already decided not to show.

@@ -13,6 +13,7 @@ import {
   evaluationDetail,
   ConfigurationSchema,
   createComparison,
+  cancelEvaluation,
 } from "../src/eval/service.ts";
 import {
   chooseRecommendation,
@@ -99,6 +100,30 @@ async function finish(id: number) {
   return evaluationDetail(id, owner.id);
 }
 
+test("fixture provider phases keep their own step key for knowledge applicability", async () => {
+  const e = await evaluation(["claude", "codex"]);
+  const steps = await q(
+    pool,
+    "SELECT config->'evaluation_phase' AS phase FROM workflow_steps WHERE run_id=$1 AND config ? 'evaluation_phase'",
+    [e.workflow_run_id],
+  );
+  assert.ok(steps.length);
+  for (const s of steps) assert.equal(s.phase.semantic_role, undefined);
+});
+test("Ponytail verification phases resolve the review skill by its semantic role", async () => {
+  const e = await evaluation(["claude", "codex"], "tools", { ponytail: true });
+  const steps = await q(
+    pool,
+    "SELECT config->'evaluation_phase' AS phase, config->'skills' AS skills FROM workflow_steps WHERE run_id=$1 AND config ? 'evaluation_phase' ORDER BY id",
+    [e.workflow_run_id],
+  );
+  const verification = steps.filter((s) => s.phase.role === "verification");
+  assert.ok(verification.length);
+  for (const s of verification) {
+    assert.equal(s.phase.semantic_role, "review");
+    assert.deepEqual(s.skills, ["skill.ext.ponytail-review"]);
+  }
+});
 test("provider models and context settings are strictly validated without cross-provider options", () => {
   assert.equal(
     ConfigurationSchema.safeParse({
@@ -662,4 +687,480 @@ test("context value assessment uses paired task outcomes, not fixture or agent c
       ?.status,
     "INSUFFICIENT_EVIDENCE",
   );
+});
+test("live configurations reject tools outside the sandboxed set instead of dropping them", async () => {
+  const live = (allowed_tools: string[]) =>
+    createEvaluation(
+      owner.id,
+      {
+        suite_id: suite.id,
+        request_key: `live-tools-${++seq}`,
+        paid_approval: true,
+        configuration: {
+          mode: "live",
+          provider: "claude",
+          provider_sequence: plan(["claude"]),
+          context_variant: "tools",
+          case_limit: 1,
+          allowed_tools,
+        },
+      },
+      true,
+    );
+  await assert.rejects(live(["Read", "WebFetch", "integration:jira"]), {
+    status: 400,
+    message: /WebFetch, integration:jira/,
+  });
+  await assert.rejects(live([]), { status: 400 });
+  assert.ok(await live(["Read", "Bash"]));
+});
+async function leftover(status: string | null) {
+  const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const e = await evaluation(["claude"]);
+  const cr = await one(pool, "SELECT id FROM evaluation_case_runs WHERE evaluation_id=$1", [e.id]);
+  if (status)
+    await q(pool, "UPDATE workflow_runs SET status=$2 WHERE id=$1", [e.workflow_run_id, status]);
+  const root = liveWorkRoot(e.id, cr!.id);
+  await mkdir(join(root, "repo"), { recursive: true });
+  await writeFile(join(root, "repo", "edited.txt"), "phase edits");
+  return { e, caseRunId: String(cr!.id), root };
+}
+test("eval:cleanup lists by default and with --yes removes only COMPLETED or CANCELED cases inside evaluation-work", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { recordWorkspace } = await import("../src/git/provider.ts");
+  const { mkdtemp, writeFile, symlink, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const completed = await leftover("COMPLETED");
+  const canceled = await leftover(null);
+  await cancelEvaluation(canceled.e.id, owner.id);
+  const failed = await leftover("FAILED");
+  const running = await leftover(null);
+  await recordWorkspace(completed.e.workflow_run_id, {
+    repo: "cleanup-repo",
+    path: join(completed.root, "repo"),
+    branch: "main",
+    created_from: "base",
+  });
+  const outside = await mkdtemp(join(tmpdir(), "eval-cleanup-outside-"));
+  await writeFile(join(outside, "keep.txt"), "x");
+  const linked = await leftover("COMPLETED");
+  await rm(linked.root, { recursive: true });
+  await symlink(outside, linked.root);
+  const all = [completed, canceled, failed, running];
+  try {
+    const listed = await evalCleanup();
+    for (const c of all) assert.ok(listed.some((r) => r.case_run_id === c.caseRunId && !r.removed));
+    assert.ok(!listed.some((r) => r.case_run_id === linked.caseRunId));
+    for (const c of all) await stat(join(c.root, "repo", "edited.txt"));
+    const report = await evalCleanup({ yes: true });
+    const removed = report.filter((r) => r.removed).map((r) => r.case_run_id);
+    for (const c of [completed, canceled]) {
+      assert.ok(removed.includes(c.caseRunId));
+      await assert.rejects(stat(dirname(dirname(c.root))));
+    }
+    for (const c of [failed, running]) {
+      assert.ok(!removed.includes(c.caseRunId));
+      await stat(join(c.root, "repo", "edited.txt"));
+    }
+    await stat(join(outside, "keep.txt"));
+    const rows = await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [
+      completed.e.workflow_run_id,
+    ]);
+    assert.equal(rows.length, 0);
+  } finally {
+    for (const c of [...all, linked])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+async function startPostmaster(root: string) {
+  const { mkdtemp, readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { randomUUID } = await import("node:crypto");
+  const { execFileSync } = await import("node:child_process");
+  const data = join(root, `database-${randomUUID()}`);
+  const socket = await mkdtemp(join(tmpdir(), "eval-cleanup-sock-"));
+  execFileSync("initdb", ["-D", data, "-U", "platform_eval", "-A", "trust", "--no-locale"], {
+    stdio: "ignore",
+  });
+  execFileSync(
+    "pg_ctl",
+    [
+      "-D",
+      data,
+      "-l",
+      join(socket, "log"),
+      "-o",
+      `-c listen_addresses='' -c unix_socket_directories='${socket}'`,
+      "-w",
+      "start",
+    ],
+    { stdio: "ignore" },
+  );
+  const pid = Number((await readFile(join(data, "postmaster.pid"), "utf8")).split("\n")[0]);
+  return { data, socket, pid };
+}
+test("eval:cleanup --case removes one case regardless of status, stopping its postmaster first", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const failed = await leftover("FAILED");
+  const other = await leftover("FAILED");
+  const { data, socket, pid } = await startPostmaster(failed.root);
+  try {
+    const listed = await evalCleanup({ caseRunId: failed.caseRunId });
+    assert.equal(
+      listed.find((r) => r.case_run_id === failed.caseRunId)?.databases[0].postmaster,
+      "running",
+    );
+    await stat(data);
+    const report = await evalCleanup({ yes: true, caseRunId: failed.caseRunId });
+    assert.equal(report.find((r) => r.case_run_id === failed.caseRunId)?.removed, true);
+    assert.equal(report.find((r) => r.case_run_id === other.caseRunId)?.removed, false);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assert.rejects(stat(failed.root));
+    await stat(join(other.root, "repo", "edited.txt"));
+  } finally {
+    try {
+      execFileSync("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
+    } catch {
+      // already stopped and removed
+    }
+    for (const c of [failed, other])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+    await rm(socket, { recursive: true, force: true });
+  }
+});
+test("eval:cleanup never signals a stale postmaster.pid whose pid now belongs to another process", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { postmasterState } = await import("../src/eval/liveCase.ts");
+  const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const { spawn } = await import("node:child_process");
+  const stale = await leftover("FAILED");
+  const data = join(stale.root, `database-${randomUUID()}`);
+  const unrelated = spawn("sleep", ["60"], { stdio: "ignore" });
+  try {
+    await mkdir(data);
+    await writeFile(join(data, "PG_VERSION"), "17\n");
+    await writeFile(join(data, "postmaster.pid"), `${unrelated.pid}\n${data}\n`);
+    assert.equal(await postmasterState(data), "stopped");
+    const report = await evalCleanup({ yes: true, caseRunId: stale.caseRunId });
+    const entry = report.find((r) => r.case_run_id === stale.caseRunId);
+    assert.equal(entry?.databases[0].postmaster, "stopped");
+    assert.equal(entry?.removed, true);
+    await assert.rejects(stat(stale.root));
+    process.kill(unrelated.pid!, 0);
+  } finally {
+    unrelated.kill();
+    await rm(dirname(dirname(stale.root)), { recursive: true, force: true });
+  }
+});
+async function unstoppedAttempt(c: Awaited<ReturnType<typeof leftover>>, status = "canceled") {
+  const step = await one(
+    pool,
+    `SELECT s.id, s.generation FROM workflow_steps s JOIN evaluation_case_runs cr ON cr.workflow_step_key=s.key
+     WHERE s.run_id=$1 AND cr.id=$2`,
+    [c.e.workflow_run_id, c.caseRunId],
+  );
+  const job = await one(
+    pool,
+    `INSERT INTO workflow_jobs(run_id,step_id,generation,idempotency_key,status,lease_expires_at,fencing_token)
+     VALUES($1,$2,$3,$4,$5,now()+interval '1 hour',7) RETURNING id`,
+    [c.e.workflow_run_id, step!.id, step!.generation, `cleanup-active-${++seq}`, status],
+  );
+  const attempt = await one(
+    pool,
+    `INSERT INTO workflow_step_attempts(step_id,run_id,number,generation,status,job_id)
+     VALUES($1,$2,1000,$3,'CANCELED',$4) RETURNING id`,
+    [step!.id, c.e.workflow_run_id, step!.generation, job!.id],
+  );
+  return { step: step!, job: job!, attempt: attempt! };
+}
+test("eval:cleanup --yes skips a case whose canceled executor may still run until its lease has long expired", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const canceled = await leftover(null);
+  await cancelEvaluation(canceled.e.id, owner.id);
+  try {
+    const { job } = await unstoppedAttempt(canceled);
+    const entry = async () =>
+      (await evalCleanup({ yes: true })).find((r) => r.case_run_id === canceled.caseRunId);
+    assert.equal((await entry())?.note, "still active; retry later");
+    await q(
+      pool,
+      "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",
+      [job.id],
+    );
+    assert.equal((await entry())?.note, "still active; retry later");
+    await stat(join(canceled.root, "repo", "edited.txt"));
+    await q(
+      pool,
+      "UPDATE workflow_jobs SET lease_expires_at=now()-make_interval(secs=>$2+1) WHERE id=$1",
+      [job.id, config.scheduler.leaseSeconds],
+    );
+    assert.equal((await entry())?.removed, true);
+  } finally {
+    await rm(dirname(dirname(canceled.root)), { recursive: true, force: true });
+  }
+});
+test("eval:cleanup --case removes a crash leftover even while its run still looks active", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const crashed = await leftover(null);
+  await cancelEvaluation(crashed.e.id, owner.id);
+  try {
+    await unstoppedAttempt(crashed);
+    const report = await evalCleanup({ yes: true, caseRunId: crashed.caseRunId });
+    const entry = report.find((r) => r.case_run_id === crashed.caseRunId);
+    assert.equal(entry?.removed, true);
+    assert.equal(entry?.note, "warning: run may still be active");
+    await assert.rejects(stat(crashed.root));
+  } finally {
+    await rm(dirname(dirname(crashed.root)), { recursive: true, force: true });
+  }
+});
+test("eval:cleanup --case refuses a case whose job is running under a fresh lease", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const running = await leftover(null);
+  try {
+    await unstoppedAttempt(running, "running");
+    const report = await evalCleanup({ yes: true, caseRunId: running.caseRunId });
+    const entry = report.find((r) => r.case_run_id === running.caseRunId);
+    assert.equal(entry?.removed, false);
+    assert.equal(entry?.failed, true);
+    assert.equal(entry?.note, "still active; retry later");
+    await stat(running.root);
+  } finally {
+    await rm(dirname(dirname(running.root)), { recursive: true, force: true });
+  }
+});
+test("eval:cleanup never deletes a database of unknown liveness and keeps processing other cases", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const unknown = await leftover("COMPLETED");
+  const done = await leftover("COMPLETED");
+  const data = join(unknown.root, `database-${randomUUID()}`);
+  try {
+    await mkdir(data);
+    await writeFile(join(data, "postmaster.pid"), "garbage\n");
+    const report = await evalCleanup({ yes: true });
+    const entry = report.find((r) => r.case_run_id === unknown.caseRunId);
+    assert.equal(entry?.removed, false);
+    assert.equal(entry?.databases[0].postmaster, "unknown");
+    assert.match(entry?.note ?? "", /cannot tell whether a postmaster serves/);
+    await stat(data);
+    assert.equal(report.find((r) => r.case_run_id === done.caseRunId)?.removed, true);
+    await assert.rejects(stat(done.root));
+  } finally {
+    for (const c of [unknown, done])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+  }
+});
+test("a live case stays completed when removing its workspace fails after the result is stored", async () => {
+  const { executeLiveCase } = await import("../src/eval/liveCase.ts");
+  const { mkdir, writeFile, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const c = await leftover(null);
+  const data = join(c.root, `database-${randomUUID()}`);
+  try {
+    await mkdir(data);
+    await writeFile(join(data, "postmaster.pid"), "garbage\n");
+    const { step, job, attempt } = await unstoppedAttempt(c, "running");
+    await q(pool, "UPDATE workflow_steps SET status='RUNNING', current_attempt_id=$2 WHERE id=$1", [
+      step.id,
+      attempt.id,
+    ]);
+    const caseRun = await one(
+      pool,
+      `SELECT cr.*,c.definition,s.suite_key,s.version FROM evaluation_case_runs cr
+       JOIN benchmark_cases c ON c.id=cr.case_id JOIN evaluation_runs e ON e.id=cr.evaluation_id
+       JOIN benchmark_suites s ON s.id=e.suite_id WHERE cr.id=$1`,
+      [c.caseRunId],
+    );
+    const result = await executeLiveCase(
+      {
+        run: { id: Number(c.e.workflow_run_id), owner_id: owner.id },
+        step: { id: step.id },
+        attempt: { id: attempt.id, job_id: job.id, fencing_token: 7 },
+      } as unknown as Parameters<typeof executeLiveCase>[0],
+      { ...caseRun, configuration: { blocked: "cleanup test", ponytail: false } },
+    );
+    assert.equal(result.kind, "completed");
+    assert.ok(await one(pool, "SELECT 1 FROM eval_results WHERE case_run_id=$1", [c.caseRunId]));
+    await stat(data);
+  } finally {
+    await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+  }
+});
+test("a failed isolated database start stops a started postmaster and keeps a directory of unknown liveness", async () => {
+  const { isolatedDatabase } = await import("../src/eval/liveProvider.ts");
+  const { liveDatabases } = await import("../src/eval/liveCase.ts");
+  const { mkdtemp, writeFile, readFile, readdir, rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const real = execFileSync("sh", ["-c", "command -v pg_ctl"], { encoding: "utf8" }).trim();
+  const bin = await mkdtemp(join(tmpdir(), "eval-pgctl-"));
+  const path = process.env.PATH;
+  const fakeStart = async (onStart: string) => {
+    await writeFile(
+      join(bin, "pg_ctl"),
+      `#!/bin/sh\ncase "$*" in *start) ${onStart}; exit 1;; esac\nexec ${real} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const root = await mkdtemp(join(tmpdir(), "eval-isolated-"));
+    await assert.rejects(isolatedDatabase(root));
+    return root;
+  };
+  process.env.PATH = `${bin}:${path}`;
+  const roots: string[] = [];
+  try {
+    const started = await fakeStart(`${real} "$@" >/dev/null`);
+    roots.push(started);
+    assert.deepEqual(await liveDatabases(started), []);
+    const unknown = await fakeStart(`echo garbage > "$2/postmaster.pid"`);
+    roots.push(unknown);
+    const [data] = await liveDatabases(unknown);
+    assert.equal(await readFile(join(data, "postmaster.pid"), "utf8"), "garbage\n");
+    assert.ok((await readdir(data)).includes("PG_VERSION"));
+  } finally {
+    process.env.PATH = path;
+    for (const root of roots) await rm(root, { recursive: true, force: true });
+    await rm(bin, { recursive: true, force: true });
+  }
+});
+test("eval:cleanup rejects unknown or invalid arguments and accepts both --case forms", async () => {
+  const { parseCleanupArgs } = await import("../src/cli/evalCleanup.ts");
+  const { stat, rm } = await import("node:fs/promises");
+  const { join, dirname, resolve } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  assert.deepEqual(parseCleanupArgs(["--case", "42", "--yes"]), { yes: true, caseRunId: "42" });
+  assert.deepEqual(parseCleanupArgs(["--case=42"]), { yes: false, caseRunId: "42" });
+  for (const bad of [["--cases=1"], ["--case", "abc"], ["--case"], ["--yes", "42"]])
+    assert.throws(() => parseCleanupArgs(bad));
+  const completed = await leftover("COMPLETED");
+  try {
+    const exit = await new Promise<{ code: number | null; stderr: string }>((done) =>
+      execFile(
+        process.execPath,
+        ["--disable-warning=ExperimentalWarning", "src/cli/evalCleanup.ts", "--yes", "--cases=1"],
+        { cwd: resolve(import.meta.dirname, "..") },
+        (error, _stdout, stderr) => done({ code: error ? Number(error.code) : 0, stderr }),
+      ),
+    );
+    assert.equal(exit.code, 2);
+    assert.match(exit.stderr, /Usage: eval:cleanup/);
+    await stat(join(completed.root, "repo", "edited.txt"));
+  } finally {
+    await rm(dirname(dirname(completed.root)), { recursive: true, force: true });
+  }
+});
+test("live cleanup stops an orphaned postmaster first and reports a missing pg_ctl instead of a running one", async () => {
+  const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
+  const { cleanupLiveWork } = await import("../src/eval/liveCase.ts");
+  const { mkdir, stat, rm } = await import("node:fs/promises");
+  const { join, dirname } = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const { execFileSync } = await import("node:child_process");
+  const orphan = await leftover("FAILED");
+  const idle = await leftover("FAILED");
+  const { data, socket, pid } = await startPostmaster(orphan.root);
+  const path = process.env.PATH;
+  try {
+    await mkdir(join(idle.root, `database-${randomUUID()}`));
+    process.env.PATH = "/nonexistent";
+    const missing = await evalCleanup({ yes: true, caseRunId: orphan.caseRunId });
+    const entry = missing.find((r) => r.case_run_id === orphan.caseRunId);
+    assert.equal(entry?.removed, false);
+    assert.equal(entry?.note, "pg_ctl not found on PATH");
+    assert.equal(
+      missing.find((r) => r.case_run_id === idle.caseRunId)?.databases[0].postmaster,
+      "stopped",
+    );
+    await assert.rejects(cleanupLiveWork(Number(orphan.e.workflow_run_id), orphan.root), {
+      message: "pg_ctl not found on PATH",
+    });
+    await stat(data);
+    process.env.PATH = path;
+    await cleanupLiveWork(Number(orphan.e.workflow_run_id), orphan.root);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assert.rejects(stat(orphan.root));
+  } finally {
+    process.env.PATH = path;
+    try {
+      execFileSync("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
+    } catch {
+      // already stopped and removed
+    }
+    for (const c of [orphan, idle])
+      await rm(dirname(dirname(c.root)), { recursive: true, force: true });
+    await rm(socket, { recursive: true, force: true });
+  }
+});
+test("only pilot live arms resolve Ponytail skills, including arms frozen before the ponytail flag", async () => {
+  const { planExternalSkills, applyExternalSkills } =
+    await import("../src/knowledge/externalImport.ts");
+  const { resolveContext, buildStepInput } = await import("../src/workflow/context.ts");
+  const { resolve } = await import("node:path");
+  await applyExternalSkills(planExternalSkills(resolve(import.meta.dirname, "../skills/external")));
+  const previous = config.knowledge.ponytail.enabled;
+  config.knowledge.ponytail.enabled = true;
+  try {
+    const resolved = async (ponytail: boolean, frozenBeforeFlag = false, skills?: string[]) => {
+      const e = await createEvaluation(
+        owner.id,
+        {
+          suite_id: suite.id,
+          request_key: `live-ponytail-${++seq}`,
+          paid_approval: true,
+          configuration: {
+            mode: "live",
+            provider: "claude",
+            provider_sequence: plan(["claude", "codex"]),
+            context_variant: "tools",
+            case_limit: 1,
+            ponytail,
+          },
+        },
+        true,
+      );
+      const run = await getRun(e.workflow_run_id);
+      const keys: string[] = [];
+      for (const frozen of run.steps.filter((s) => s.config.evaluation_phase)) {
+        const { ponytail: _flag, ...phase } = frozen.config.evaluation_phase;
+        const step = frozenBeforeFlag
+          ? { ...frozen, config: { ...frozen.config, evaluation_phase: phase } }
+          : skills
+            ? { ...frozen, config: { ...frozen.config, skills } }
+            : frozen;
+        const ctx = await resolveContext(pool, run, step, await buildStepInput(pool, run, step));
+        keys.push(...ctx.knowledge.map((k) => k.key));
+      }
+      return keys.filter((k) => k.startsWith("skill.ext.ponytail"));
+    };
+    assert.deepEqual(await resolved(false), []);
+    assert.ok((await resolved(true)).length);
+    assert.deepEqual(await resolved(false, true), []);
+    assert.ok((await resolved(true, true)).length);
+    assert.deepEqual(
+      [...new Set(await resolved(false, false, ["skill.ext.ponytail-review"]))],
+      ["skill.ext.ponytail-review"],
+    );
+  } finally {
+    config.knowledge.ponytail.enabled = previous;
+  }
 });

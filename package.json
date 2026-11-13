@@ -12,6 +12,7 @@
     "dev": "node --watch --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/*.test.ts",
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",
+    "eval:cleanup": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalCleanup.ts",
     "smoke:codex": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/codex.live.ts",
     "typecheck": "tsc -p . && tsc -p web",
     "build": "vite build --config web/vite.config.ts",
@@ -38,7 +39,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "knowledge:audit": "node --disable-warning=ExperimentalWarning src/cli/knowledge-audit.ts"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "1.13.6",

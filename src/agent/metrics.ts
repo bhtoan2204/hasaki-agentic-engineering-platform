@@ -1,3 +1,5 @@
+import { liveRuntime, observeLiveUsage } from "../eval/liveRuntime.ts";
+import type { SkillTrace } from "./skillTracing.ts";
 /** Per-attempt metrics, accumulated across provider messages and session resume, without orchestration dependencies. */
 export interface AgentMetrics {
   model: string;
@@ -17,6 +19,7 @@ export interface AgentMetrics {
   tool_errors: number;
   denied: Array<{ tool: string; reason: string; subagent?: string }>;
   skills_loaded: string[];
+  skills?: SkillTrace[];
   /** Skills offered to the agent this attempt, "key:tier" (inline = full body in the prompt; index = description only,
    * loaded only if the agent calls read_knowledge — then it also appears in skills_loaded). */
   skills_provided?: string[];
@@ -69,6 +72,7 @@ export function newMetrics(model: string): AgentMetrics {
   };
 }
 
+const streamedUsage = new WeakMap<AgentMetrics, Map<string, number>>();
 const seenMessages = new WeakMap<AgentMetrics, Set<string>>();
 /** Side state for repetition / first-touch measurement (not persisted itself). */
 const toolState = new WeakMap<
@@ -139,6 +143,18 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
     m.sessions++;
     if (typeof msg.model === "string" && msg.model) m.model = msg.model;
   } else if (msg.type === "assistant") {
+    const usage = msg.message?.usage;
+    if (usage && liveRuntime.getStore()) {
+      const sum = Object.values(usage)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0)
+        .reduce((n, v) => n + v, 0);
+      // Every content block of one API message repeats that message's usage: count each message id once.
+      const perMessage = streamedUsage.get(m) ?? new Map<string, number>();
+      streamedUsage.set(m, perMessage);
+      perMessage.set(String(msg.message?.id ?? msg.uuid ?? perMessage.size), sum);
+      const total = [...perMessage.values()].reduce((n, v) => n + v, 0);
+      liveRuntime.getStore()!.observe(total, null, m);
+    }
     for (const b of msg.message?.content ?? [])
       if (b.type === "tool_use") {
         m.tool_calls[b.name] = (m.tool_calls[b.name] ?? 0) + 1;
@@ -157,7 +173,10 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
 /** Add only fields actually reported. Unknown fields remain null, including optional cache/reasoning usage. */
 export function addUsage(m: AgentMetrics, usage?: Record<string, unknown> | null, cost?: unknown) {
   if (validMetric(cost)) m.cost_usd = Math.round(((m.cost_usd ?? 0) + cost) * 1e6) / 1e6;
-  if (!usage) return;
+  if (!usage) {
+    observeLiveUsage(m);
+    return;
+  }
   const fields = {
     input: "input_tokens",
     output: "output_tokens",
@@ -172,6 +191,7 @@ export function addUsage(m: AgentMetrics, usage?: Record<string, unknown> | null
     const k = key as keyof NonNullable<AgentMetrics["tokens"]>;
     m.tokens[k] = (m.tokens[k] ?? 0) + value;
   }
+  observeLiveUsage(m);
 }
 export function validMetric(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0;

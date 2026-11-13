@@ -1,3 +1,4 @@
+import { loadKnowledgeAudit } from "../knowledge/auditLoader.ts";
 import {
   createBinding,
   disconnect as disconnectTelegram,
@@ -1080,6 +1081,17 @@ export const routes: Route[] = [
     ),
   ],
 
+  [
+    "GET",
+    /^\/api\/knowledge\/audit$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      return loadKnowledgeAudit({
+        userId: c.actor.id,
+        windowDays: Math.min(90, Number(c.url.searchParams.get("days") ?? 7)),
+      });
+    },
+  ],
   // ------------------------------------------------------------ knowledge
   [
     "GET",
@@ -1431,6 +1443,18 @@ export const routes: Route[] = [
         by: c.actor.username,
         reason: String(c.body.reason ?? ""),
       });
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/knowledge\/([a-z0-9_.-]+)\/revert$/,
+    async (c) => {
+      const item = await readableKnowledge(c, c.p[0]);
+      if (item.owner_id == null) requireAdmin(c.actor);
+      else await requireOwner(c.actor, Number(item.owner_id), support(c), "knowledge", c.p[0]);
+      const version = Number(c.body.version);
+      if (!Number.isInteger(version) || version < 1) throw new HttpError(400, "invalid version");
+      return knowledge.revert(c.p[0], version, item.owner_id ?? null, c.actor.username);
     },
   ],
   ["GET", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, (c) => readableKnowledge(c, c.p[0])],

@@ -1,0 +1,939 @@
+{
+  "generatedAt": "2026-11-13T05:52:49.483Z",
+  "windowDays": 7,
+  "itemCount": 175,
+  "roleFootprint": {
+    "agent": {
+      "packs": 164,
+      "tokens": 2971473
+    },
+    "coding_agent": {
+      "packs": 213,
+      "tokens": 4243627
+    },
+    "review": {
+      "packs": 162,
+      "tokens": 2470820
+    }
+  },
+  "findingCounts": {
+    "codebase_map_consolidation": 4,
+    "conflict": 1,
+    "exact_duplicate": 1,
+    "excessive_context": 6,
+    "provider_unavailable": 2,
+    "repeated_truncation": 40,
+    "truncated_import": 2,
+    "unreachable": 8,
+    "unrestricted_global": 3,
+    "unused": 19
+  },
+  "counts": {
+    "category": {
+      "agent_skill": 88,
+      "architecture_guideline": 6,
+      "coding_standard": 10,
+      "domain_knowledge": 41,
+      "repository_convention": 19,
+      "security_policy": 1,
+      "task_memory": 10
+    },
+    "scope": {
+      "GLOBAL": 25,
+      "ORGANIZATION": 9,
+      "PROJECT": 64,
+      "REPOSITORY": 77
+    },
+    "ownership": {
+      "shared": 175,
+      "private": 0
+    }
+  },
+  "findings": [
+    {
+      "kind": "unrestricted_global",
+      "keys": [
+        "security-review"
+      ],
+      "classification": "verified",
+      "action": "Assign explicitly or restrict applicability",
+      "autoApply": false,
+      "detail": "GLOBAL skills without restrictions are opt-in only"
+    },
+    {
+      "kind": "exact_duplicate",
+      "keys": [
+        "inside-product-worker-usa.claude",
+        "oms-background.claude"
+      ],
+      "classification": "needs human approval",
+      "action": "Keep the older canonical item; deprecate the duplicate through a proposal",
+      "autoApply": false,
+      "detail": "Identical SHA-256 content"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "inside-product-worker-usa.claude"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "7 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-api.claude"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "5 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-background.claude"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "9 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-frontend.rule.oms-frontend"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "4 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-gateway.claude"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "6 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-vnpay.claude"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "excessive_context",
+      "keys": [
+        "payment-wiki.docs.partners.fiserv.index"
+      ],
+      "classification": "verified",
+      "action": "Review splitting or on-demand disclosure",
+      "autoApply": false,
+      "detail": "8414 estimated tokens"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.amazon-sp-api"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "2 truncated packs"
+    },
+    {
+      "kind": "codebase_map_consolidation",
+      "keys": [
+        "skill.oms-codebase-map.inside-product-worker-usa"
+      ],
+      "classification": "needs human approval",
+      "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
+      "autoApply": false,
+      "detail": "Avoid multiple map sources on pilot steps"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-codebase-map.inside-product-worker-usa"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "2 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-es-search"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "15 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-grpc-endpoint"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "4 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-money-model"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "7 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-outbox-async"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "7 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-shipment-order-status"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "6 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-test-baseline"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "2 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-write-path.inside-product-worker-usa"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "5 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.solid"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "6 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.tiktok-shop-us"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.uber-go-style"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "4 truncated packs"
+    },
+    {
+      "kind": "codebase_map_consolidation",
+      "keys": [
+        "skill.oms-codebase-map.oms-background"
+      ],
+      "classification": "needs human approval",
+      "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
+      "autoApply": false,
+      "detail": "Avoid multiple map sources on pilot steps"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-kafka-consumer"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "5 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-merchant-connector"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "2 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-ops-endpoint"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "3 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-outbox-es-sync"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "8 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-write-path.oms-background"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "12 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "skill.oms-gateway-auth"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "codebase_map_consolidation",
+      "keys": [
+        "skill.oms-gateway-codebase-map"
+      ],
+      "classification": "needs human approval",
+      "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
+      "autoApply": false,
+      "detail": "Avoid multiple map sources on pilot steps"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "user.skill.commit"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "user.skill.investigate"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "user.skill.yagni"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "9 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-consistency-and-service-boundaries"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "3 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-search-read-model"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "oms-es-db-read-audit"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "memory.run-10.oms-api.facts"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "go-tests-use-mockgen"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "14 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-wiki.inventory.conflicts"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-wiki.docs.architecture.event-sourcing.payment-order-aggregate"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-wiki.docs.async.asynq-tasks"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-wiki.docs.development.add-gateway-endpoint"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-wiki.docs.overview.how-it-works"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "payment-wiki.docs.overview.service-catalog"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "1 truncated packs"
+    },
+    {
+      "kind": "truncated_import",
+      "keys": [
+        "payment-wiki.docs.partners.fiserv.fiserv-commercehub-apis"
+      ],
+      "classification": "suspected",
+      "action": "Review original source before restoring",
+      "autoApply": false,
+      "detail": "Content equals the import cap"
+    },
+    {
+      "kind": "excessive_context",
+      "keys": [
+        "payment-wiki.docs.partners.fiserv.fiserv-commercehub-apis"
+      ],
+      "classification": "verified",
+      "action": "Review splitting or on-demand disclosure",
+      "autoApply": false,
+      "detail": "15000 estimated tokens"
+    },
+    {
+      "kind": "excessive_context",
+      "keys": [
+        "user.skill.oms-carrier-ghn"
+      ],
+      "classification": "verified",
+      "action": "Review splitting or on-demand disclosure",
+      "autoApply": false,
+      "detail": "9263 estimated tokens"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "user.skill.oms-carrier-ghn"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "3 truncated packs"
+    },
+    {
+      "kind": "excessive_context",
+      "keys": [
+        "user.skill.oms-carrier-ghtk"
+      ],
+      "classification": "verified",
+      "action": "Review splitting or on-demand disclosure",
+      "autoApply": false,
+      "detail": "8734 estimated tokens"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "user.skill.oms-carrier-ghtk"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "22 truncated packs"
+    },
+    {
+      "kind": "excessive_context",
+      "keys": [
+        "user.skill.oms-carrier-spx"
+      ],
+      "classification": "verified",
+      "action": "Review splitting or on-demand disclosure",
+      "autoApply": false,
+      "detail": "10511 estimated tokens"
+    },
+    {
+      "kind": "repeated_truncation",
+      "keys": [
+        "user.skill.oms-carrier-spx"
+      ],
+      "classification": "verified",
+      "action": "Review splitting proposal",
+      "autoApply": false,
+      "detail": "16 truncated packs"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "payment-techcom.claude"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.verification-before-completion"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): test, regression_test, fix_test"
+    },
+    {
+      "kind": "conflict",
+      "keys": [
+        "skill.ext.systematic-debugging",
+        "skill.ext.test-driven-development"
+      ],
+      "classification": "needs human approval",
+      "action": "Review conflicting shared guidance; retain pending proposal",
+      "autoApply": false,
+      "detail": "Shared conflict key"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.systematic-debugging"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): correlate"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.systematic-debugging.condition-based-waiting"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): correlate"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.systematic-debugging.defense-in-depth"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): correlate"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.systematic-debugging.root-cause-tracing"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): correlate"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.test-driven-development"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): regression_test, test, fix_test"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.test-driven-development.writing-good-tests"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): regression_test, test, fix_test"
+    },
+    {
+      "kind": "provider_unavailable",
+      "keys": [
+        "skill.ext.supply-chain-risk-auditor"
+      ],
+      "classification": "verified",
+      "action": "Review provider availability",
+      "autoApply": false,
+      "detail": "Unavailable on all four providers"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.ext.supply-chain-risk-auditor"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unreachable",
+      "keys": [
+        "skill.ext.playwright-cli"
+      ],
+      "classification": "verified",
+      "action": "Review applicability proposal",
+      "autoApply": false,
+      "detail": "Step keys with no matching agent step (command steps cannot load skills): test, regression_test"
+    },
+    {
+      "kind": "provider_unavailable",
+      "keys": [
+        "skill.ext.playwright-cli"
+      ],
+      "classification": "verified",
+      "action": "Review provider availability",
+      "autoApply": false,
+      "detail": "Unavailable on all four providers"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.ext.playwright-cli"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "codebase_map_consolidation",
+      "keys": [
+        "skill.oms-codebase-map.oms-background.references.architecture"
+      ],
+      "classification": "needs human approval",
+      "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
+      "autoApply": false,
+      "detail": "Avoid multiple map sources on pilot steps"
+    },
+    {
+      "kind": "truncated_import",
+      "keys": [
+        "skill.uber-go-style.references.uber-go-guide"
+      ],
+      "classification": "suspected",
+      "action": "Review original source before restoring",
+      "autoApply": false,
+      "detail": "Content equals the import cap"
+    },
+    {
+      "kind": "excessive_context",
+      "keys": [
+        "skill.uber-go-style.references.uber-go-guide"
+      ],
+      "classification": "verified",
+      "action": "Review splitting or on-demand disclosure",
+      "autoApply": false,
+      "detail": "15000 estimated tokens"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.stripe-best-practices.references.billing"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.stripe-best-practices.references.connect"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.stripe-best-practices.references.payments"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.stripe-best-practices.references.security"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.stripe-best-practices.references.tax"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.stripe-best-practices.references.treasury"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.fiserv-commercehub.reference.api-catalog"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.fiserv-commercehub.reference.authentication"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.fiserv-commercehub.reference.checkouts-hpp"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.fiserv-commercehub.reference.pix-qr"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.fiserv-commercehub.reference.project-integration"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unrestricted_global",
+      "keys": [
+        "latency-service-boundaries"
+      ],
+      "classification": "verified",
+      "action": "Assign explicitly or restrict applicability",
+      "autoApply": false,
+      "detail": "GLOBAL skills without restrictions are opt-in only"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "latency-service-boundaries"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.ext.ponytail"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.ext.ponytail-review"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unrestricted_global",
+      "keys": [
+        "unit-test-generation"
+      ],
+      "classification": "verified",
+      "action": "Assign explicitly or restrict applicability",
+      "autoApply": false,
+      "detail": "GLOBAL skills without restrictions are opt-in only"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "unit-test-generation"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    }
+  ],
+  "sources": {
+    "database": true,
+    "external": true,
+    "seeds": true
+  },
+  "privateAggregates": {
+    "category": {
+      "business_rule": 5,
+      "task_memory": 160
+    },
+    "scope": {
+      "GLOBAL": 1,
+      "PROJECT": 3,
+      "REPOSITORY": 161
+    },
+    "ownership": {
+      "shared": 0,
+      "private": 165
+    },
+    "findings": {
+      "near_duplicate": 3
+    }
+  }
+}

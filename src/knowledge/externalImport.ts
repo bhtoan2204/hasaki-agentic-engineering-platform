@@ -11,6 +11,8 @@ import { knowledge } from "./service.ts";
 export interface ExternalManifestSkill {
   key: string;
   name: string;
+  conflict_key?: string;
+  pilot?: string;
   origin: Record<string, unknown> & { repo: string; commit: string; path: string; license: string };
   status: "active" | "blocked";
   block_reason?: string;
@@ -44,6 +46,7 @@ export function planExternalSkills(root: string, only?: string): ExternalPlan {
     const meta = {
       origin: { type: "external", ...s.origin },
       status: s.status,
+      ...(s.pilot ? { pilot: s.pilot } : {}),
       ...(s.block_reason ? { block_reason: s.block_reason } : {}),
       runtime: s.runtime,
       providers: s.providers,
@@ -114,6 +117,8 @@ export function planExternalSkills(root: string, only?: string): ExternalPlan {
       sources: [{ repo: s.origin.repo, dir: s.origin.path, mainFile: "SKILL.md" }],
     });
     for (const c of items) {
+      if (s.conflict_key) c.conflict_key = s.conflict_key;
+      if (s.pilot === "ponytail") c.priority = 10;
       const file = (c.metadata as any)?.skill_file ?? "SKILL.md";
       const f = s.files.find((x) => x.file === file);
       c.source = c.source.map((x) => ({ ...x, sha256: f?.upstream_sha256 ?? x.sha256 }));
@@ -185,7 +190,8 @@ export async function applyExternalSkills(
       hashOf(v.applicability ?? {}) === hashOf(c.applicability ?? {}) &&
       hashOf(v.metadata ?? {}) === hashOf(metadata) &&
       existing.scope_type === c.scope_type &&
-      existing.title === c.title;
+      existing.title === c.title &&
+      (c.conflict_key === undefined || existing.conflict_key === c.conflict_key);
     const action = !existing ? "create" : same ? "unchanged" : "update";
     report.rows.push({ key: c.key, action });
     if (opts.dryRun || action === "unchanged") continue;
@@ -200,6 +206,7 @@ export async function applyExternalSkills(
     else
       await knowledge.update(c.key, {
         title: c.title,
+        conflict_key: c.conflict_key,
         content: c.content,
         applicability: c.applicability ?? {},
         metadata,

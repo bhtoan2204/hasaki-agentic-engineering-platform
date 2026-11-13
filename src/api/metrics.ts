@@ -66,6 +66,14 @@ export async function runMetrics(runId: number) {
     tool_calls: 0,
     integration_calls: 0,
     skills_loaded: 0,
+    skill_states: {
+      selected: 0,
+      injected: 0,
+      loaded: 0,
+      activated: 0,
+      loaded_unused: 0,
+      provider_limited: 0,
+    },
     subagents: 0,
     denied: 0,
     claude_sessions: 0,
@@ -117,6 +125,12 @@ export async function runMetrics(runId: number) {
     totals.tool_calls += Object.values<number>(m.tool_calls ?? {}).reduce((x, y) => x + y, 0);
     totals.integration_calls += (m.integration_calls ?? []).length;
     totals.skills_loaded += (m.skills_loaded ?? []).length;
+    for (const skill of m.skills ?? []) {
+      for (const state of ["selected", "injected", "loaded", "activated"] as const)
+        if (skill.states?.includes(state)) totals.skill_states[state]++;
+      if (skill.loaded_unused) totals.skill_states.loaded_unused++;
+      if (skill.provider_limited) totals.skill_states.provider_limited++;
+    }
     totals.subagents += (m.subagents ?? []).length;
     totals.denied += (m.denied ?? []).length;
     const ci = m.code_intelligence_usage;
@@ -278,6 +292,10 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
               WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1, 2 ORDER BY times DESC LIMIT 25`,
     ),
   ]);
+  const skillActivation = await q(
+    pool,
+    `SELECT skill->>'key' AS key, skill->>'state' AS state, count(*)::int AS attempts, count(*) FILTER (WHERE skill->>'loaded_unused'='true')::int AS loaded_unused, count(*) FILTER (WHERE skill->>'provider_limited'='true')::int AS provider_limited FROM workflow_step_attempts a, jsonb_array_elements(COALESCE(a.metrics->'skills', '[]'::jsonb)) skill WHERE a.started_at > ${since} ${attemptOwn} GROUP BY 1, 2 ORDER BY attempts DESC`,
+  );
   const telemetry = await q(
     pool,
     `SELECT t.* FROM execution_attempt_telemetry t JOIN workflow_runs r ON r.id = t.run_id WHERE t.start_time > ${since} ${own}`,
@@ -291,6 +309,7 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
     tools,
     integrations,
     skills,
+    skill_activation: skillActivation,
     failures,
     denied,
     evaluation,

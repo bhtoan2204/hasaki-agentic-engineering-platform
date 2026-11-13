@@ -149,6 +149,7 @@ const emptyDraft = (category = "business_rule"): Draft => ({
 
 export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: string }) {
   const { t } = useI18n();
+  const me = useApi<{ user: { role: string } }>("/api/auth/me");
   const pendingProposals = useApi<any[]>("/api/knowledge-proposals?status=pending");
   const [cat, setCat] = useState("");
   const { data, error, loading, reload } = useApi<any[]>(
@@ -203,6 +204,12 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                 <span className="kn-cat-count kp-count">{pendingProposals.data.length}</span>
               ) : null}
             </button>
+            {me.data?.user.role === "admin" && (
+              <button className="ghost" onClick={() => navigate("/knowledge/~audit")}>
+                <ScanSearch size={15} />
+                Audit
+              </button>
+            )}
             <RepoImport onDone={reloadAll} />
             <button onClick={() => navigate("/knowledge/~new")}>
               <Plus size={15} strokeWidth={2.2} />
@@ -304,7 +311,9 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
           )}
         </aside>
         <section className="kn-detail">
-          {itemKey === "~proposals" ? (
+          {itemKey === "~audit" ? (
+            <KnowledgeAuditPanel />
+          ) : itemKey === "~proposals" ? (
             <ProposalsPanel id={subKey} onChanged={reloadAll} />
           ) : itemKey ? (
             <KnowledgeEditor
@@ -565,10 +574,7 @@ function KnowledgeEditor({
   // blocks it (409) until the reviewer confirms a forced delete.
   const remove = async () => {
     const companions: string[] = cur?.metadata?.companions ?? [];
-    const reason = prompt(
-      t("kn.delete.confirm", { key: item.key, n: companions.length }),
-      "",
-    );
+    const reason = prompt(t("kn.delete.confirm", { key: item.key, n: companions.length }), "");
     if (reason === null) return;
     const call = (force: boolean) =>
       api<{ deleted: string[] }>(`/api/knowledge/${itemKey}/delete`, { reason, force });
@@ -577,7 +583,10 @@ function KnowledgeEditor({
       r = await call(false);
     } catch (e) {
       const msg = (e as Error).message;
-      if (!/still assigned/.test(msg)) return act(async () => { throw e; });
+      if (!/still assigned/.test(msg))
+        return act(async () => {
+          throw e;
+        });
       if (!confirm(t("kn.delete.force", { detail: msg }))) return;
       r = await act(() => call(true));
     }
@@ -945,6 +954,22 @@ function KnowledgeEditor({
                         {v.created_by ? ` · ${v.created_by}` : ""}
                       </span>
                       <span className="grow" />
+                      {v.version !== item.current_version && (
+                        <button
+                          className="xs ghost"
+                          onClick={async () => {
+                            await act(async () => {
+                              await api(`/api/knowledge/${item.key}/revert`, {
+                                version: v.version,
+                              });
+                              reload();
+                              onSaved();
+                            });
+                          }}
+                        >
+                          Revert to v{v.version}
+                        </button>
+                      )}
                       <button
                         className={open ? "xs" : "xs ghost"}
                         onClick={() => setViewVersion(open ? null : v.version)}
@@ -1183,6 +1208,40 @@ function Evolution({ item }: { item: any }) {
             </a>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+interface KnowledgeAuditView {
+  itemCount: number;
+  windowDays: number;
+  counts: Record<string, unknown>;
+  findings: Array<{ kind: string; classification: string; keys: string[]; action: string }>;
+}
+function KnowledgeAuditPanel() {
+  const { data, error, loading, reload } = useApi<KnowledgeAuditView>("/api/knowledge/audit");
+  return (
+    <div className="card">
+      <h2>Knowledge audit</h2>
+      <p>Read-only checks. Private findings appear only as aggregate counts.</p>
+      <button onClick={reload}>Refresh audit</button>
+      {error && <ErrorBox error={error} onRetry={reload} />}
+      {loading && <p>Loading…</p>}
+      {data && (
+        <>
+          <p>
+            {data.itemCount} items · {data.windowDays} day window
+          </p>
+          <JsonBlock value={data.counts} />
+          {data.findings.map((f, i) => (
+            <div key={i}>
+              <b>{f.kind}</b> · {f.classification}
+              <p>{f.keys.join(", ")}</p>
+              <p>{f.action}</p>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );

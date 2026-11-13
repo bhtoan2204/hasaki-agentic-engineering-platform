@@ -1,3 +1,4 @@
+import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -226,6 +227,7 @@ export function buildAntigravityArgs(opts: {
 export async function antigravityAgentTurn(
   input: AntigravityTurnInput,
 ): Promise<AntigravityTurnResult> {
+  const usageBase = { ...input.metrics?.tokens };
   const cap = await antigravityCapabilities(false, {
     model: input.model ?? "",
     effort: input.effort ?? "",
@@ -319,7 +321,7 @@ export async function antigravityAgentTurn(
     const args = buildAntigravityArgs({
       model: input.model || undefined,
       effort: input.effort || undefined,
-      sandbox: cfg.sandbox,
+      sandbox: liveRuntime.getStore() ? true : cfg.sandbox,
       timeoutSeconds: timeoutSec,
       conversationId: input.resumeId || undefined,
       additionalDirs,
@@ -441,13 +443,14 @@ export async function antigravityAgentTurn(
           value: number | null | undefined,
         ) => {
           if (value == null) return;
-          tok[key] = ev.cumulativeUsage ? value : (tok[key] ?? 0) + value;
+          tok[key] = ev.cumulativeUsage ? value + (usageBase[key] ?? 0) : (tok[key] ?? 0) + value;
         };
         update("input", ev.tokens.input);
         update("output", ev.tokens.output);
         update("reasoning_output", ev.tokens.reasoning);
         update("cache_read", ev.tokens.cache_read);
         update("cache_creation", ev.tokens.cache_creation);
+        observeLiveUsage(input.metrics);
       }
 
       if (ev.error || ev.status === "ERROR") lastError = ev.error || "Antigravity returned ERROR";
@@ -487,6 +490,7 @@ export async function antigravityAgentTurn(
       if (child) killAntigravity(child);
     };
     input.ctx.signal.addEventListener("abort", onAbort, { once: true });
+    if (input.ctx.signal.aborted) onAbort();
     timer = setTimeout(() => {
       timedOut = true;
       onAbort();

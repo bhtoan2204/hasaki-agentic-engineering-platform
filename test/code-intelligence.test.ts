@@ -1,3 +1,4 @@
+import { indexedCodebaseMap } from "../src/knowledge/codebaseMap.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync, unlinkSync, renameSync, symlinkSync } from "node:fs";
@@ -134,6 +135,7 @@ test("Concurrent worktrees: modified tracked, untracked, deleted, renamed and un
 test("Stale overlay returns bounded live fallback, never old indexed symbols; context is bounded", async () => {
   writeFileSync(join(wtA, "pay.go"), source("Committed"));
   assert.equal((await fresh(name, runA)).index, null);
+  assert.equal(await indexedCodebaseMap([name], runA, 2000), "");
   const stale = await searchSymbols("Modified", scope(runA));
   assert.equal(stale.hits.length, 0);
   assert.equal(stale.fallback_count, 1);

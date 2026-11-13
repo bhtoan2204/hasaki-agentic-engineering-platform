@@ -25,7 +25,7 @@ import { createProposal } from "./proposals.ts";
  * files are never written by the platform.
  */
 
-const MAX_CHARS = 60_000;
+export const MAX_CHARS = 60_000;
 const SECRET_ASSIGNMENT =
   /\b[\w-]*(password|passwd|secret|api[_-]?key|token|client[_-]?secret)[\w-]*\s*[:=]\s*["']?(?!<|\$\{|\{\{|xxx|\.\.\.|your|example|changeme)([A-Za-z0-9/+_\-.]{12,})/gi;
 /** `secret = payment_client.ecom_global.secret`: a reference to a field/config path, not a value. */

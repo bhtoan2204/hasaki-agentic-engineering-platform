@@ -519,6 +519,98 @@
           "modified": true
         }
       ]
+    },
+    {
+      "key": "skill.ext.ponytail",
+      "name": "ponytail",
+      "origin": {
+        "repo": "https://github.com/DietrichGebert/ponytail",
+        "commit": "7801d061243d7b753bad0e0b3c057cd250b11755",
+        "path": "skills/ponytail",
+        "license": "MIT",
+        "attribution": "Dietrich Gebert",
+        "adapted": true,
+        "adaptation_notes": "Removed test-sufficiency exceptions, shortcut comment requirement and exemptions, modes, session persistence and slash-command references. TDD and verification retain authority."
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported",
+        "antigravity": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor"
+        ],
+        "step_types": [
+          "agent",
+          "coding_agent"
+        ]
+      },
+      "supersedes": [],
+      "conflict_key": "engineering.reuse",
+      "pilot": "ponytail",
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "03cfa2410395970d6d44686acad8b6ccaa287ec218e3c3127a3f84294de2f1d2",
+          "upstream_sha256": "9badd22a32e19cb884e46dfa8d3aae82bb81dfa5484105b8b4f0262df823a509",
+          "modified": true
+        }
+      ]
+    },
+    {
+      "key": "skill.ext.ponytail-review",
+      "name": "ponytail-review",
+      "origin": {
+        "repo": "https://github.com/DietrichGebert/ponytail",
+        "commit": "7801d061243d7b753bad0e0b3c057cd250b11755",
+        "path": "skills/ponytail-review",
+        "license": "MIT",
+        "attribution": "Dietrich Gebert",
+        "adapted": true,
+        "adaptation_notes": "Removed the /ponytail-review trigger phrase, the 'one good test, not coverage' test-sufficiency line (replaced by deferring to the TDD and verification skills and platform gates) and the exemption for code marked with a shortcut:/ponytail: comment. No other text changed."
+      },
+      "status": "active",
+      "runtime": {
+        "binaries": [],
+        "network": false,
+        "scripts": false
+      },
+      "providers": {
+        "claude": "supported",
+        "codex": "supported",
+        "cursor": "supported",
+        "antigravity": "supported"
+      },
+      "applicability": {
+        "step_keys": [
+          "review"
+        ],
+        "step_types": [
+          "agent",
+          "coding_agent"
+        ]
+      },
+      "supersedes": [],
+      "conflict_key": "engineering.review.lean",
+      "pilot": "ponytail",
+      "files": [
+        {
+          "file": "SKILL.md",
+          "sha256": "570357cf9f0d60f6539e4ea6bbab158847ad7d075564aaaf234cc0b859be04bc",
+          "upstream_sha256": "33fe4ebe22a460924e5d4a261e223df22e409cc94ab76182bee9fb91a3ef022e",
+          "modified": true
+        }
+      ]
     }
   ]
 }

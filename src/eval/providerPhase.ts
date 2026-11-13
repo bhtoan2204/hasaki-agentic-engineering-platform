@@ -1,3 +1,4 @@
+import { executeLiveProviderPhase } from "./liveProvider.ts";
 import { contextInventory } from "./controls.ts";
 import { pool, one } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
@@ -13,7 +14,7 @@ import type { ExecResult } from "../workflow/types.ts";
 export async function executeProviderPhase(ctx: ExecutionContext): Promise<ExecResult> {
   const p = await one(
     pool,
-    `SELECT p.*,cr.workflow_step_key AS case_step_key,c.definition,e.configuration FROM evaluation_provider_phases p JOIN evaluation_case_runs cr ON cr.id=p.case_run_id JOIN benchmark_cases c ON c.id=cr.case_id JOIN evaluation_runs e ON e.id=cr.evaluation_id
+    `SELECT p.*,cr.evaluation_id,cr.workflow_step_key AS case_step_key,c.definition,e.configuration FROM evaluation_provider_phases p JOIN evaluation_case_runs cr ON cr.id=p.case_run_id JOIN benchmark_cases c ON c.id=cr.case_id JOIN evaluation_runs e ON e.id=cr.evaluation_id
  WHERE p.case_run_id=$1 AND p.ordinal=$2 AND p.step_key=$3 AND e.workflow_run_id=$4 AND e.owner_id=$5`,
     [
       ctx.step.config.evaluation_phase?.case_run_id,
@@ -47,6 +48,8 @@ export async function executeProviderPhase(ctx: ExecutionContext): Promise<ExecR
     },
   };
   const cfg = p.configuration;
+  if (cfg.mode === "live" && !cfg.blocked)
+    return executeLiveProviderPhase(ctx, p as Parameters<typeof executeLiveProviderPhase>[1]);
   if (cfg.blocked || cfg.mode !== "fixture" || cfg.adapter !== "provider_fixture")
     return {
       kind: "completed",
