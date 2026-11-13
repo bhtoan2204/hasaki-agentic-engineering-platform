@@ -79,7 +79,17 @@ function fakeDb(steps: Row[]) {
         return { rows: [] };
       }
       if (/INSERT INTO workflow_steps/.test(sql)) {
-        const row = { key: p[1], depends_on: p[4], requires_approval: p[9], position: p[3], status: "PENDING", subtask_id: p[7] };
+        const row = {
+          id: 100 + steps.length,
+          key: p[1],
+          type: sql.includes("'integration'") ? "integration" : "coding_agent",
+          config: JSON.parse(p[5]),
+          depends_on: p[4],
+          requires_approval: p[9],
+          position: p[3],
+          status: "PENDING",
+          subtask_id: p[7] ?? null,
+        };
         inserted.push(row);
         steps.push(row);
         return { rows: [] };
@@ -118,10 +128,93 @@ test("materialize rewires downstream steps and replays idempotently", async () =
   const f = fakeDb(baseSteps({ p }));
   const r1 = await materializeSubtasks(f.db, 1, "plan", p, opts);
   assert.deepEqual(r1.created, ["subtask-a", "subtask-b"]);
-  assert.equal(f.inserted.length, 2);
+  assert.deepEqual(
+    f.inserted.map((s) => s.key),
+    ["subtask-a", "subtask-b", "cleanup"],
+  );
   const r2 = await materializeSubtasks(f.db, 1, "plan", p, opts);
   assert.equal(r2.replayed, true);
-  assert.equal(f.inserted.length, 2);
+  assert.equal(f.inserted.length, 3);
+});
+
+test("materialize makes workspace cleanup wait for the new subtasks too", async () => {
+  const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
+  const steps = baseSteps({ p });
+  const cleanup = {
+    id: 3,
+    key: "cleanup",
+    type: "integration",
+    config: { action: "cleanup_workspaces" },
+    position: 3,
+    depends_on: [steps[2].key],
+    status: "PENDING",
+    subtask_id: null,
+  };
+  const wired = fakeDb([...steps, cleanup]);
+  await materializeSubtasks(wired.db, 1, "plan", p, opts);
+  assert.deepEqual(cleanup.depends_on, [steps[2].key, "subtask-b"]);
+  assert.deepEqual(
+    wired.inserted.map((s) => s.key),
+    ["subtask-a", "subtask-b"],
+    "the pending cleanup is reused",
+  );
+  const loop = plan(sub("x", { depends_on: ["cleanup"] }));
+  const f = fakeDb([...baseSteps({ p: loop }), { ...cleanup, depends_on: [] }]);
+  await assert.rejects(materializeSubtasks(f.db, 1, "plan", loop, opts), /cycle/);
+});
+
+test("materialize sends a cleanup that is ready but not dispatched back behind the subtasks", async () => {
+  const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
+  const steps = baseSteps({ p });
+  const ready = {
+    id: 3,
+    key: "cleanup",
+    type: "integration",
+    config: { action: "cleanup_workspaces", injected: true },
+    position: 3,
+    depends_on: [steps[2].key],
+    status: "READY",
+    generation: 1,
+    subtask_id: null,
+  };
+  const f = fakeDb([...steps, ready]);
+  await materializeSubtasks(f.db, 1, "plan", p, opts);
+  assert.equal(ready.status, "PENDING");
+  assert.equal(ready.generation, 2, "its queued job is fenced out");
+  assert.deepEqual(ready.depends_on, [steps[2].key, "subtask-b"]);
+  assert.deepEqual(
+    f.inserted.map((s) => s.key),
+    ["subtask-a", "subtask-b"],
+    "no second cleanup",
+  );
+});
+
+test("materialize adds a cleanup after the subtasks when the run's cleanup already ran", async () => {
+  const p = plan(sub("a"), sub("b", { depends_on: ["a"] }));
+  const steps = baseSteps({ p });
+  const ran = {
+    id: 3,
+    key: "cleanup",
+    type: "integration",
+    config: { action: "cleanup_workspaces", injected: true },
+    position: 3,
+    depends_on: [steps[2].key],
+    status: "COMPLETED",
+    subtask_id: null,
+  };
+  const f = fakeDb([...steps, ran]);
+  await materializeSubtasks(f.db, 1, "plan", p, opts);
+  assert.deepEqual(ran.depends_on, [steps[2].key], "a cleanup that ran is never rewired");
+  const added = f.inserted.at(-1)!;
+  assert.equal(added.key, "cleanup_2");
+  assert.equal(added.type, "integration");
+  assert.deepEqual(added.config, { action: "cleanup_workspaces", injected: true });
+  assert.deepEqual(
+    [...added.depends_on].sort(),
+    [steps[2].key, "integration"].sort(),
+    "waits for the work after the subtasks, not just the leaves",
+  );
+  assert.deepEqual(steps[1].depends_on, ["plan", "subtask-b"]);
 });
 
 test("materialize rejects a cycle through an existing downstream step", async () => {

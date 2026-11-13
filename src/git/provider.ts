@@ -19,9 +19,9 @@ import {
   prepareBranch,
   pushBranch,
   registeredWorktreeAt,
+  releasableWorktree,
   taskDir,
   unregisterMissingWorktree,
-  worktreePorcelain,
 } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { unsafeRelativePath, validateCheckout } from "../repos/paths.ts";
@@ -291,8 +291,8 @@ export async function workspaceConflict(
   if (owner && owner.worker_instance !== config.instanceId)
     return never(`run #${owner.run_id} belongs to another worker`);
   if (owner?.status === "RUNNING") return never(`run #${owner.run_id} is still running`);
-  if (await worktreePorcelain(holder.path).catch(() => "unreadable"))
-    return never("it has uncommitted changes");
+  const releasable = await releasableWorktree(holder.path).catch(() => "its state is unreadable");
+  if (typeof releasable === "string") return never(releasable);
   if (owner && ["COMPLETED", "CANCELED"].includes(owner.status) && owner.same_owner)
     return {
       ...info,

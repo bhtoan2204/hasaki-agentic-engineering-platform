@@ -32,6 +32,7 @@ import {
   startScheduler,
 } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
+import { integrationExecutor } from "../src/workflow/executors/builtin.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { repositories } from "../src/repos/service.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
@@ -83,6 +84,7 @@ before(async () => {
       return execute(ctx);
     },
   });
+  registerExecutor("integration", integrationExecutor);
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -271,6 +273,7 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.equal(claims.filter(Boolean).length, 1);
   const continuation = claims.find(Boolean)!;
   await processJob(continuation, "competing-one", { leaseSeconds: 120, heartbeatSeconds: 1 });
+  await once();
   assert.equal((await getRun(r.id)).status, "COMPLETED");
   assert.equal(
     (
@@ -283,7 +286,7 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   );
   const rows = await q(
     pool,
-    "SELECT agent_provider,status FROM workflow_step_attempts WHERE run_id=$1 ORDER BY id",
+    "SELECT agent_provider,status FROM workflow_step_attempts WHERE run_id=$1 AND step_id=(SELECT id FROM workflow_steps WHERE run_id=$1 AND key='implement') ORDER BY id",
     [r.id],
   );
   assert.deepEqual(
@@ -355,6 +358,7 @@ test("manual in-progress Codex → Cursor waits for cancellation and creates a f
     assert.notEqual(ctx.attempt.id, source.attempt.id);
     return { kind: "completed", output: { summary: "Cursor finished" } };
   };
+  await once();
   await once();
   assert.equal((await getRun(r.id)).status, "COMPLETED");
 });
@@ -495,6 +499,7 @@ test("durable ready checkpoint survives scheduler restart; recovery blocks uncon
   );
   assert.equal(restarted.trim(), "RESUMED");
   execute = async () => ({ kind: "completed", output: { resumed_after_restart: true } });
+  await once();
   await once();
   const interrupted = await run("codex");
   const j = await claimJob("old-process", 120);

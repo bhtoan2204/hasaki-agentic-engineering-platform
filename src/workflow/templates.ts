@@ -618,13 +618,41 @@ const PRODUCTION_INVESTIGATION = {
   ],
 };
 
-const cleanup = (after: string) => ({
+export const cleanup = (...after: string[]) => ({
   key: "cleanup",
   type: "integration",
   name: "Cleanup",
-  depends_on: [after],
+  depends_on: after,
   config: { action: "cleanup_workspaces" },
 });
+
+export const isCleanupStep = (s: { type?: string; config?: Record<string, unknown> | null }) =>
+  s.type === "integration" && s.config?.action === "cleanup_workspaces";
+
+type GraphStep = {
+  key: string;
+  depends_on: string[];
+  type?: string;
+  config?: Record<string, unknown> | null;
+};
+
+/** Terminal steps of the work itself: cleanup and report steps are siblings after it, never dependencies. */
+export const workTerminals = (
+  steps: GraphStep[],
+  exclude: (s: GraphStep) => boolean = isCleanupStep,
+) => {
+  const work = steps.filter((s) => !exclude(s));
+  return work.filter((s) => !work.some((o) => o.depends_on.includes(s.key))).map((s) => s.key);
+};
+
+export function injectedCleanup(steps: GraphStep[]) {
+  const step = cleanup(
+    ...workTerminals(steps, (s) => isCleanupStep(s) || s.type === "task_result_report"),
+  );
+  let key = step.key;
+  for (let n = 2; steps.some((s) => s.key === key); n++) key = `${step.key}_${n}`;
+  return { ...step, key, config: { ...step.config, injected: true } };
+}
 
 export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = [
   {

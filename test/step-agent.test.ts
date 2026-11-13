@@ -187,6 +187,7 @@ test("one durable DAG executes Claude → Codex → Cursor and keeps portable co
     ["claude", "codex", "cursor"],
   );
   assert.ok(rows.every((a) => a.reported_cost_usd === null));
+  await finish(await begin());
   assert.equal((await getRun(r.id)).status, "COMPLETED");
   await assert.rejects(
     () =>
@@ -548,7 +549,7 @@ test("FAST run optimization preserves explicit provider boundaries", async () =>
   assert.equal(r.profile, "STANDARD");
   assert.deepEqual(
     r.graph.steps.map((s) => s.key),
-    steps.map((s) => s.key),
+    [...steps.map((s) => s.key), "cleanup"],
   );
   assert.match(JSON.stringify(r.profile_decision), /execution boundary/);
 });

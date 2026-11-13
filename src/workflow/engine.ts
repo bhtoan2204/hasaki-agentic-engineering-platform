@@ -71,6 +71,8 @@ import { runEvents } from "./events.ts";
 import { materializeSubtasks } from "./decomposition.ts";
 import { DONE, RETRYABLE } from "./stateMachine.ts";
 import { buildStepInput, resolveContext, type ResolvedContext, type StepInput } from "./context.ts";
+import { StepSpec } from "./types.ts";
+import { injectedCleanup, isCleanupStep, workTerminals } from "./templates.ts";
 import type {
   AttemptRow,
   ExecResult,
@@ -101,9 +103,6 @@ export const REPORT_STEP_KEY = "task_result_report";
 export function withReportStep(spec: WorkflowSpec, ai: ReportSpec | null): WorkflowSpec {
   if (!ai || spec.steps.some((s) => s.key === REPORT_STEP_KEY || s.type === "task_result_report"))
     return spec;
-  const terminals = spec.steps
-    .filter((s) => !spec.steps.some((o) => o.depends_on.includes(s.key)))
-    .map((s) => s.key);
   return {
     ...spec,
     steps: [
@@ -112,7 +111,7 @@ export function withReportStep(spec: WorkflowSpec, ai: ReportSpec | null): Workf
         key: REPORT_STEP_KEY,
         type: "task_result_report",
         name: "Task Result Report",
-        depends_on: terminals,
+        depends_on: workTerminals(spec.steps),
         config: { ai_suggest: ai, injected: true },
         requires_approval: false,
         max_attempts: 2,
@@ -120,6 +119,17 @@ export function withReportStep(spec: WorkflowSpec, ai: ReportSpec | null): Workf
       },
     ],
   };
+}
+
+const createsWorktrees = (s: StepSpec) =>
+  s.type === "coding_agent" ||
+  (s.type === "integration" &&
+    ["integrate_subtasks", "subtask_integration"].includes(String(s.config.action)));
+
+/** Append a workspace cleanup step to a run's resolved graph that creates worktrees but never releases them. */
+export function withCleanupStep(spec: WorkflowSpec): WorkflowSpec {
+  if (!spec.steps.some(createsWorktrees) || spec.steps.some(isCleanupStep)) return spec;
+  return { ...spec, steps: [...spec.steps, StepSpec.parse(injectedCleanup(spec.steps))] };
 }
 
 /**
@@ -292,7 +302,8 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
     };
     resolved = { spec: dv.spec, changes: [] };
   }
-  const graph = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
+  const reported = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
+  const graph = withCleanupStep(reported);
   return {
     dv,
     wi,
@@ -303,7 +314,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
     decision,
     changes: resolved.changes,
     graph,
-    reportAdded: graph !== resolved.spec,
+    reportAdded: reported !== resolved.spec,
     ownerId: ownerId!,
   };
 }

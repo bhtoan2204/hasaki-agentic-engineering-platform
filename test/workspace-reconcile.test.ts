@@ -18,6 +18,7 @@ import {
 } from "../src/git/provider.ts";
 import { repositories } from "../src/repos/service.ts";
 import { restoreConflictSkips } from "../src/agent/verify.ts";
+import { removeWorktree } from "../src/git.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
 
 before(async () => {
@@ -400,6 +401,53 @@ test("restore: a release the developer approved is honoured, and fenced-out atte
     assert.equal(existsSync(s.holder), false);
   } finally {
     rmSync(join(path, ".."), { recursive: true, force: true });
+    await s.cleanup();
+  }
+});
+
+test("worktree cleanup keeps dirty worktrees and ones with a git operation in progress, saying why", async () => {
+  const s = await scenario("COMPLETED");
+  try {
+    writeFileSync(join(s.holder, "scratch.txt"), "wip\n");
+    assert.equal(await removeWorktree(s.holder), "uncommitted changes");
+    assert.equal(
+      (await runWorkspaceConflict(s.run, s.name, s.repoPath))?.reason,
+      "uncommitted changes",
+    );
+    rmSync(join(s.holder, "scratch.txt"));
+
+    sh(s.repoPath, "checkout", "-q", "-b", "side", config.baseBranch);
+    writeFileSync(join(s.repoPath, "side.txt"), "side\n");
+    sh(s.repoPath, "add", "side.txt");
+    sh(s.repoPath, "commit", "-qm", "side");
+    sh(s.holder, "merge", "-q", "--no-ff", "--no-commit", "side");
+    assert.equal(await removeWorktree(s.holder), "merge in progress");
+    sh(s.holder, "merge", "--abort");
+
+    assert.throws(() => sh(s.holder, "rebase", "-q", "--exec", "false", "HEAD~1"));
+    assert.equal(sh(s.holder, "status", "--porcelain"), "", "clean tree, rebase stopped");
+    assert.equal(await removeWorktree(s.holder), "rebase in progress");
+    sh(s.holder, "rebase", "--abort");
+
+    sh(s.repoPath, "checkout", "-q", "side");
+    writeFileSync(join(s.repoPath, "work.txt"), "side wins\n");
+    sh(s.repoPath, "add", "work.txt");
+    sh(s.repoPath, "commit", "-qm", "conflicting side");
+    sh(s.repoPath, "checkout", "-q", config.baseBranch);
+    assert.throws(() => sh(s.holder, "cherry-pick", "side"));
+    sh(s.holder, "checkout", "-q", "--ours", "work.txt");
+    sh(s.holder, "add", "work.txt");
+    assert.equal(sh(s.holder, "status", "--porcelain"), "", "clean tree, cherry-pick stopped");
+    assert.equal(await removeWorktree(s.holder), "cherry-pick in progress");
+    const conflict = await runWorkspaceConflict(s.run, s.name, s.repoPath);
+    assert.equal(conflict?.release, "never", "not offered for release when the move would refuse");
+    assert.equal(conflict?.reason, "cherry-pick in progress");
+    sh(s.holder, "cherry-pick", "--abort");
+    assert.ok(existsSync(s.holder), "kept worktrees stay in place");
+
+    assert.equal(await removeWorktree(s.holder), null);
+    assert.equal(existsSync(s.holder), false);
+  } finally {
     await s.cleanup();
   }
 });

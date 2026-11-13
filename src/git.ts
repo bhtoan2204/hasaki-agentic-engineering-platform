@@ -284,13 +284,38 @@ export async function moveWorktree(path: string, to: string): Promise<string | n
   return null;
 }
 
-async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
+const IN_PROGRESS_MARKERS = [
+  ["MERGE_HEAD", "merge"],
+  ["rebase-merge", "rebase"],
+  ["rebase-apply", "rebase"],
+  ["CHERRY_PICK_HEAD", "cherry-pick"],
+  ["REVERT_HEAD", "revert"],
+  ["sequencer", "cherry-pick or revert"],
+  ["BISECT_LOG", "bisect"],
+] as const;
+
+async function worktreeState(path: string): Promise<{ common: string; inProgress: string | null }> {
+  const [common, ...markers] = (
+    await git(
+      path,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+      ...IN_PROGRESS_MARKERS.flatMap(([marker]) => ["--git-path", marker]),
+    )
+  ).split("\n");
+  const i = markers.findIndex((at) => existsSync(at));
+  return { common, inProgress: i < 0 ? null : `${IN_PROGRESS_MARKERS[i][1]} in progress` };
+}
+
+export async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
   const inside = relative(realpathSync(config.dataDir), realpathSync(path));
   if (unsafeRelativePath(inside) || overlapsLiveApplication(path))
     return "outside the platform's worktree storage";
-  const common = await git(path, "rev-parse", "--path-format=absolute", "--git-common-dir");
+  const { common, inProgress } = await worktreeState(path);
   const primary = join(common, "..");
   if (realpathSync(primary) === realpathSync(path)) return "primary checkout, not a worktree";
+  if (inProgress) return inProgress;
   if (await worktreePorcelain(path)) return "uncommitted changes";
   return { primary };
 }

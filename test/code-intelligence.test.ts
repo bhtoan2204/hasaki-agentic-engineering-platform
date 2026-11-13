@@ -328,6 +328,7 @@ test("Index failure preserves last good snapshot; worktree recreation changes ge
 
 test("DAG coding step completes with an empty index using live source context", async () => {
   const { registerExecutor } = await import("../src/workflow/executors/registry.ts");
+  const { integrationExecutor } = await import("../src/workflow/executors/builtin.ts");
   const { drain } = await import("../src/workflow/scheduler.ts");
   const repo = "ci-unindexed";
   const path = join(config.reposRoot, repo);
@@ -338,6 +339,7 @@ test("DAG coding step completes with an empty index using live source context", 
   git(path, "commit", "-qm", "live");
   await repositories.upsert(repo, { projects: ["CI"] });
   let invoked = false;
+  registerExecutor("integration", integrationExecutor);
   registerExecutor("coding_agent", {
     execute: async (ctx) => {
       const result = await buildCodeContext("LiveFallback", {
