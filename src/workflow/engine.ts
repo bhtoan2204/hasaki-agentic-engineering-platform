@@ -72,7 +72,7 @@ import { materializeSubtasks } from "./decomposition.ts";
 import { DONE, RETRYABLE } from "./stateMachine.ts";
 import { buildStepInput, resolveContext, type ResolvedContext, type StepInput } from "./context.ts";
 import { StepSpec } from "./types.ts";
-import { cleanup, isCleanupStep } from "./templates.ts";
+import { injectedCleanup, isCleanupStep, workTerminals } from "./templates.ts";
 import type {
   AttemptRow,
   ExecResult,
@@ -111,7 +111,7 @@ export function withReportStep(spec: WorkflowSpec, ai: ReportSpec | null): Workf
         key: REPORT_STEP_KEY,
         type: "task_result_report",
         name: "Task Result Report",
-        depends_on: workTerminals(spec),
+        depends_on: workTerminals(spec.steps),
         config: { ai_suggest: ai, injected: true },
         requires_approval: false,
         max_attempts: 2,
@@ -121,34 +121,14 @@ export function withReportStep(spec: WorkflowSpec, ai: ReportSpec | null): Workf
   };
 }
 
-/** Terminal steps of the work itself: cleanup and report steps are siblings after it, never dependencies. */
-const workTerminals = (spec: WorkflowSpec, exclude: (s: StepSpec) => boolean = isCleanupStep) => {
-  const work = spec.steps.filter((s) => !exclude(s));
-  return work.filter((s) => !work.some((o) => o.depends_on.includes(s.key))).map((s) => s.key);
-};
-
 const createsWorktrees = (s: StepSpec) =>
   s.type === "coding_agent" ||
   (s.type === "integration" &&
-    ["integrate_subtasks", "subtask_integration"].includes(String(s.config.action))) ||
-  // An approval gate lets its upstream plan be expanded into coding subtasks later (expandSubtasks).
-  (s.type === "human_approval" && s.depends_on.length > 0);
+    ["integrate_subtasks", "subtask_integration"].includes(String(s.config.action)));
 
-/** Append a workspace cleanup step to a run's resolved graph that creates worktrees but never releases them. */
 export function withCleanupStep(spec: WorkflowSpec): WorkflowSpec {
   if (!spec.steps.some(createsWorktrees) || spec.steps.some(isCleanupStep)) return spec;
-  const step = cleanup(
-    ...workTerminals(spec, (s) => isCleanupStep(s) || s.type === "task_result_report"),
-  );
-  let key = step.key;
-  for (let n = 2; spec.steps.some((s) => s.key === key); n++) key = `${step.key}_${n}`;
-  return {
-    ...spec,
-    steps: [
-      ...spec.steps,
-      StepSpec.parse({ ...step, key, config: { ...step.config, injected: true } }),
-    ],
-  };
+  return { ...spec, steps: [...spec.steps, StepSpec.parse(injectedCleanup(spec.steps))] };
 }
 
 /**

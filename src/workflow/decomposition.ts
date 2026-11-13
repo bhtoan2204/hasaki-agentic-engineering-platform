@@ -4,7 +4,7 @@ import { q, one, json, type Db } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
 import { EngineError, lockRun, stepsOf } from "./mutations.ts";
 import { topoOrder } from "./graph.ts";
-import { isCleanupStep } from "./templates.ts";
+import { injectedCleanup, isCleanupStep } from "./templates.ts";
 
 export const SubtaskSpec = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "subtask id must be lowercase [a-z0-9_-]"),
@@ -91,7 +91,6 @@ export interface ExpansionContext {
 
 const stepKey = (id: string) => `subtask-${id}`;
 
-/** Pending steps that must also wait for new subtasks: the plan's dependents and workspace cleanup. */
 const waitsForSubtasks = (
   st: NonNullable<ExpansionContext["existingSteps"]>[number],
   planStepKey: string | undefined,
@@ -317,6 +316,33 @@ export async function materializeSubtasks(
         st.id,
         [...new Set([...st.depends_on, ...leaves])],
       ]);
+  }
+  if (!steps.some((st) => isCleanupStep(st) && waitsForSubtasks(st, planStepKey))) {
+    const cleanup = injectedCleanup([
+      ...steps.map((st) =>
+        waitsForSubtasks(st, planStepKey)
+          ? { ...st, depends_on: [...st.depends_on, ...leaves] }
+          : st,
+      ),
+      ...subtasks.map((s) => ({
+        key: stepKey(s.id),
+        depends_on: s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey],
+      })),
+    ]);
+    await q(
+      c,
+      `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, requires_approval, max_attempts, retry_backoff_s, status, graph_revision)
+       VALUES ($1, $2, 'integration', $3, $4, $5, $6, false, 1, 5, 'PENDING', $7)`,
+      [
+        runId,
+        cleanup.key,
+        cleanup.name,
+        position++,
+        cleanup.depends_on,
+        json(cleanup.config),
+        revision,
+      ],
+    );
   }
   await runEvents.add(c, runId, "graph", `graph revision ${revision} (${kind}): +${created.length} subtasks — ${opts.reason}`, planStep.id);
   return { created, revision, replayed: false };
