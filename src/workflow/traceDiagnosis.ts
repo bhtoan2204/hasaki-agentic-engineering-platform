@@ -42,7 +42,7 @@ const sourceOf = (c: FailureCategory): FailureSource =>
         : "provider";
 
 const errorText = (n: TraceNode) => {
-  const e = n.attrs.error as any;
+  const e = n.attrs.error as { message?: unknown; error?: unknown } | string | null;
   if (e == null) return "";
   return redactSecrets(typeof e === "string" ? e : String(e.message ?? e.error ?? JSON.stringify(e)));
 };

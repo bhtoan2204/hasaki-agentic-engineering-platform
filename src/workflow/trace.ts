@@ -190,7 +190,7 @@ export interface TraceInput {
     failure_category?: string | null;
   }>;
   /** `tool` events and their `tool_result` partners, ordered by id. */
-  events: Array<{ id: number; attempt_id: number | null; kind: string; content: string; data: any; created_at: string }>;
+  events: Array<{ id: number; attempt_id: number | null; kind: string; content: string; data: Record<string, unknown> | null; created_at: string }>;
   handoffs: Array<{ source_attempt_id: number; target_attempt_id: number | null; reason: string; status: string }>;
 }
 

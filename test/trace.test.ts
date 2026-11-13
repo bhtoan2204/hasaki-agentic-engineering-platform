@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { assembleTrace, redactTraceValue, traceLog, type TraceInput } from "../src/workflow/trace.ts";
+import type { Db } from "../src/db/pool.ts";
 import { diagnoseTrace } from "../src/workflow/traceDiagnosis.ts";
 
 const t = (s: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
@@ -56,8 +57,8 @@ describe("redaction and best-effort", () => {
   });
 
   test("traceLog writes level and trace block, redacted, and skips below threshold", async () => {
-    const calls: any[] = [];
-    const db: any = { query: async (_sql: string, v: unknown[]) => (calls.push(v), { rows: [] }) };
+    const calls: unknown[][] = [];
+    const db = { query: async (_sql: string, v: unknown[]) => (calls.push(v), { rows: [] }) } as unknown as Db;
     assert.equal(await traceLog({ runId: 1, level: "DEBUG", event: "x", message: "m" }, db, "INFO"), false);
     assert.equal(calls.length, 0);
     assert.equal(await traceLog({ runId: 1, attemptId: 5, level: "ERROR", event: "git.worktree", message: "token=abcd1234efgh", provider: "claude", data: { api_key: "supersecretvalue" } }, db, "INFO"), true);
@@ -66,11 +67,11 @@ describe("redaction and best-effort", () => {
     assert.equal(v[6], "ERROR");
     assert.ok(!String(v[4]).includes("abcd1234efgh"));
     assert.ok(!String(v[5]).includes("supersecretvalue"));
-    assert.equal(JSON.parse(v[5]).trace.event, "git.worktree");
+    assert.equal(JSON.parse(String(v[5])).trace.event, "git.worktree");
   });
 
   test("persistence failure never throws", async () => {
-    const db: any = { query: async () => { throw new Error("db down"); } };
+    const db = { query: async () => { throw new Error("db down"); } } as unknown as Db;
     const orig = console.error;
     console.error = () => {};
     try {
