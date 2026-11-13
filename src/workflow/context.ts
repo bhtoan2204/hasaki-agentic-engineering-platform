@@ -1,3 +1,4 @@
+import { detectNativeKnowledgeSources } from "../knowledge/nativeSources.ts";
 import { visibleKnowledge } from "../knowledge/visibility.ts";
 import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
@@ -224,11 +225,18 @@ export async function resolveContext(
       repositories,
       repositoryProjects: await projectsOfRepositories(repositories ?? [], c),
       workflowKey: run.definition_key,
-      stepKey: step.key,
+      stepKey:
+        cfg.evaluation_phase?.semantic_role ??
+        (cfg.evaluation_phase?.role === "implementation"
+          ? "implement"
+          : cfg.evaluation_phase
+            ? "review"
+            : step.key),
       stepType: step.type,
       text: requestText(input),
       explicit,
       now: at,
+      ponytailEnabled: config.knowledge.ponytail.enabled,
     },
   );
   // Skills selected for this re-execution, at the exact version pinned when it was requested.
@@ -320,7 +328,18 @@ export async function resolveContext(
     step.type === "agent" || step.type === "coding_agent"
       ? await collectFileRefs(c, input.upstream)
       : [];
+  const nativeSources =
+    step.type === "agent" || step.type === "coding_agent"
+      ? await detectNativeKnowledgeSources(
+          await q<{ repo: string; path: string }>(
+            c,
+            "SELECT repo, path FROM execution_workspaces WHERE run_id=$1 AND (subtask_id IS NULL OR subtask_id=$2) ORDER BY repo",
+            [run.id, step.subtask_id ?? null],
+          ),
+        )
+      : [];
   const content = {
+    native_sources: nativeSources,
     step: { key: step.key, type: step.type, generation: step.generation },
     // How the prompt was shaped — enough to reproduce/audit what the agent was shown.
     prompt_plan: {

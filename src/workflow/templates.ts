@@ -1269,3 +1269,35 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     },
   },
 ];
+
+export const PONYTAIL_PILOT_TEMPLATE = {
+  key: "ponytail-nonproduction-pilot",
+  spec: {
+    name: "Ponytail non-production pilot",
+    description: "Explicit opt-in only; evaluate against baseline before production rollout.",
+    steps: [
+      {
+        key: "implement",
+        type: "coding_agent",
+        name: "Pilot implementation",
+        config: {
+          skills: ["skill.ext.ponytail"],
+          instructions:
+            "Implement the requested change in this non-production pilot. Preserve all verification gates.",
+        },
+      },
+      {
+        key: "review",
+        type: "agent",
+        name: "Pilot review",
+        depends_on: ["implement"],
+        config: {
+          skills: ["skill.ext.ponytail-review"],
+          instructions: "Review the implementation independently and report concrete findings.",
+        },
+      },
+    ],
+  },
+};
+
+TEMPLATES.push(PONYTAIL_PILOT_TEMPLATE);

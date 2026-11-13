@@ -23,6 +23,7 @@ const verify = arg("verify");
 if (verify) {
   const base = resolve(verify);
   const clones = {
+    "https://github.com/DietrichGebert/ponytail": join(base, "ponytail"),
     "https://github.com/obra/superpowers": join(base, "obra-superpowers"),
     "https://github.com/trailofbits/skills": join(base, "trailofbits-skills"),
     "https://github.com/anthropics/skills": join(base, "anthropics-skills"),
