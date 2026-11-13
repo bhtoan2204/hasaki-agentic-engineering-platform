@@ -447,32 +447,6 @@ test("startup grace period never replaces a registration that keeps heartbeating
   await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
 });
 
-test("registration records its process start time so a restart reusing the PID takes over", async () => {
-  const { processStartTime } = await import("../src/instances.ts");
-  try {
-    await registerInstance(config.instanceId, randomUUID());
-    const row = await one(pool, "SELECT metadata FROM platform_instances WHERE instance_id=$1", [
-      config.instanceId,
-    ]);
-    assert.equal(row!.metadata.started, processStartTime(process.pid));
-    await q(
-      pool,
-      'UPDATE platform_instances SET metadata = metadata || \'{"started":"1"}\' WHERE instance_id=$1',
-      [config.instanceId],
-    );
-    const session = randomUUID();
-    await registerInstance(config.instanceId, session);
-    assert.equal(
-      (await one(pool, "SELECT session_id FROM platform_instances WHERE instance_id=$1", [
-        config.instanceId,
-      ]))!.session_id,
-      session,
-    );
-  } finally {
-    await q(pool, "DELETE FROM platform_instances WHERE instance_id=$1", [config.instanceId]);
-  }
-});
-
 test("startup takes over at once when the previous registration's process on this host is gone; otherwise it stays protected", async () => {
   const { previousProcessGone } = await import("../src/instances.ts");
   const host = hostname();

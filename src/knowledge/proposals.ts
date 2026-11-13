@@ -777,10 +777,9 @@ async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }
   const keys = [a.item_key, a.created_key, a.superseded_key].filter(Boolean);
   const later = await one(
     c,
-    `SELECT id FROM knowledge_proposals WHERE status = 'approved' AND parent_id IS DISTINCT FROM $1
-        AND (reviewed_at, id) > (SELECT reviewed_at, id FROM knowledge_proposals WHERE id = $1)
-        AND (target_key = ANY($2) OR applied->>'item_key' = ANY($2) OR applied->>'created_key' = ANY($2) OR applied->>'superseded_key' = ANY($2)) LIMIT 1`,
-    [id, keys],
+    `SELECT id FROM knowledge_proposals WHERE status = 'approved' AND id <> $1 AND reviewed_at > $2 AND parent_id IS DISTINCT FROM $1
+        AND (target_key = ANY($3) OR applied->>'item_key' = ANY($3) OR applied->>'created_key' = ANY($3) OR applied->>'superseded_key' = ANY($3)) LIMIT 1`,
+    [id, p.reviewed_at, keys],
   );
   if (later)
     throw new HttpError(
