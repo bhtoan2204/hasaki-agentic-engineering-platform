@@ -38,6 +38,8 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
  * Every call is bound to one attempt. A fenced, stale, or canceled attempt cannot mutate.
  * After ask_user has open questions, further mutations are refused until the engine resumes.
  */
+import { traceLog } from "../workflow/trace.ts";
+
 export interface PlatformToolEnv {
   contextPreparation?: boolean;
   attemptAllowedTools?: string[] | null;
@@ -445,9 +447,34 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
       },
     );
   } catch (e) {
+    void traceLog({
+      runId: env.runId,
+      stepId: env.stepId,
+      attemptId: env.attemptId,
+      level: "ERROR",
+      event: "tool.prepare_branch",
+      status: "FAILED",
+      message: `prepare_branch failed for ${repo}: ${(e as Error).message}`,
+      data: {
+        repo,
+        conflict: e instanceof WorkspaceConflictError,
+        isolated_subtask: isolation.subtaskId,
+        stack: (e as Error).stack,
+      },
+    });
     if (e instanceof WorkspaceConflictError) return `ERROR: ${e.message}`;
     throw e;
   }
+  void traceLog({
+    runId: env.runId,
+    stepId: env.stepId,
+    attemptId: env.attemptId,
+    level: "INFO",
+    event: "tool.prepare_branch",
+    status: "COMPLETED",
+    message: `prepare_branch ${repo}: ${w.branch}`,
+    data: { repo, branch: w.branch, created_from: w.created_from, path: w.path },
+  });
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;

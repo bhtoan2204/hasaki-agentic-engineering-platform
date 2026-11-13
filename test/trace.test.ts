@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { assembleTrace, redactTraceValue, traceLog, type TraceInput } from "../src/workflow/trace.ts";
+import { readFileSync } from "node:fs";
+import { assembleTrace, purgeDebugEvents, redactTraceValue, searchLogs, traceLog, type TraceInput } from "../src/workflow/trace.ts";
 import type { Db } from "../src/db/pool.ts";
 import { diagnoseTrace } from "../src/workflow/traceDiagnosis.ts";
 
@@ -106,5 +107,59 @@ describe("diagnosis", () => {
     assert.ok(loop.some((x) => x.kind === "retry_loop"));
     const stuck = diagnoseTrace(assembleTrace(input({ attempts: [a(1, 1, "COMPLETED")], steps: [{ id: 10, key: "s", type: "agent", status: "RUNNING" }], events: [] })));
     assert.ok(stuck.some((x) => x.kind === "stuck"));
+  });
+});
+
+/** Records every query; returns the canned rows. No database involved. */
+function fakeDb(rows: unknown[] = []) {
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  const db = {
+    query: async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      return { rows, rowCount: rows.length };
+    },
+  } as unknown as Db;
+  return { db, calls };
+}
+
+describe("log search", () => {
+  test("filters by step/attempt/provider/event/level/time and pages with afterId", async () => {
+    const { db, calls } = fakeDb([]);
+    await searchLogs(
+      5,
+      { stepId: 2, attemptId: 3, provider: "claude", event: "attempt.finished", level: "ERROR", from: t(0), to: t(9), afterId: 40, limit: 10 },
+      db,
+    );
+    const { sql, params } = calls[0];
+    for (const c of ["e.run_id = $1", "e.id > $2", "e.step_id =", "e.attempt_id =", "'provider'", "'event'", "e.level =", "created_at >=", "created_at <="])
+      assert.ok(sql.includes(c), c);
+    assert.equal(params[0], 5);
+    assert.equal(params[1], 40);
+    assert.equal(params.at(-1), 10);
+  });
+
+  test("clamps the page size and redacts secrets again on read", async () => {
+    const secret = "Zx9" + "q".repeat(30);
+    const { db, calls } = fakeDb([{ id: 1, content: `Bearer ${secret}`, data: { details: { api_key: secret } } }]);
+    const out = await searchLogs(1, { limit: 100000 }, db);
+    assert.equal(calls[0].params.at(-1), 500);
+    assert.ok(!JSON.stringify(out).includes(secret));
+  });
+});
+
+describe("retention", () => {
+  test("only DEBUG events are purged", async () => {
+    const { db, calls } = fakeDb([{ id: 1 }, { id: 2 }]);
+    assert.equal(await purgeDebugEvents(3, db), 2);
+    assert.match(calls[0].sql, /level = 'DEBUG'/);
+    assert.deepEqual(calls[0].params, [3]);
+  });
+});
+
+describe("migration 054", () => {
+  test("is additive: a nullable level column and an index, nothing dropped or rewritten", () => {
+    const sql = readFileSync(new URL("../migrations/054_trace_levels.sql", import.meta.url), "utf8");
+    assert.match(sql, /ADD COLUMN level TEXT CHECK \(level IS NULL OR/);
+    assert.doesNotMatch(sql, /\bDROP\b|\bUPDATE\b|ADD COLUMN[^;]*NOT NULL/i);
   });
 });

@@ -1,4 +1,4 @@
-import { traceLog } from "./trace.ts";
+import { purgeDebugEvents, TRACE_LIMITS, traceLog } from "./trace.ts";
 import { reapExpiredLeases, releaseAttempt } from "./recovery.ts";
 import { runIndexOnce } from "../codeIntelligence/indexer.ts";
 import { randomUUID } from "node:crypto";
@@ -55,6 +55,16 @@ export const LIGHT_STEP_TYPES = [
   "integration",
   "git_pull_request",
 ];
+
+let lastTracePurge = 0;
+
+/** DEBUG trace logs expire after `TRACE_DEBUG_RETENTION_DAYS` (default 7); checked at most once an hour. */
+export async function purgeDebugEventsThrottled(now = Date.now()) {
+  if (now - lastTracePurge < 3_600_000) return 0;
+  lastTracePurge = now;
+  const days = Number(process.env.TRACE_DEBUG_RETENTION_DAYS);
+  return purgeDebugEvents(Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays);
+}
 
 let automaticHandoff: Promise<void> | null = null;
 
@@ -145,6 +155,20 @@ export async function processJob(
   if (step && (await deferIfBranchBusy(job, step.type))) return;
   const begun = await beginAttempt(job, workerId);
   if (!begun) return;
+  const attemptTrace = {
+    runId: job.run_id,
+    stepId: job.step_id,
+    attemptId: begun.attempt.id,
+  };
+  const startedAt = Date.now();
+  void traceLog({
+    ...attemptTrace,
+    level: "INFO",
+    event: "attempt.started",
+    status: "RUNNING",
+    message: `attempt ${begun.attempt.id} started by ${workerId}`,
+    data: { job_id: job.id, fencing_token: job.fencing_token, step_type: begun.step.type },
+  });
   const ac = new AbortController();
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
@@ -258,6 +282,20 @@ export async function processJob(
       () => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff),
       `finish job ${job.id}`,
     );
+    void traceLog({
+      ...attemptTrace,
+      level: result.kind === "failed" ? "ERROR" : "INFO",
+      event: "attempt.finished",
+      status: result.kind,
+      durationMs: Date.now() - startedAt,
+      message: `attempt ${begun.attempt.id} ${result.kind}${result.kind === "failed" ? `: ${result.error}` : ""}`,
+      data: {
+        job_id: job.id,
+        retryable: result.kind === "failed" ? (result.retryable ?? null) : null,
+        handoff: Boolean(handoff),
+        details: result.kind === "failed" ? result.details : undefined,
+      },
+    });
   } finally {
     if (deadline) clearTimeout(deadline);
     ac.signal.removeEventListener("abort", forwardAbort);
@@ -326,6 +364,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     reapExpiredLeases().catch((e) => console.error("reaper:", e.message));
     dispatchRunEffects().catch((e) => console.error("run effects:", e.message));
     reconcileAutomaticHandoff().catch((e) => console.error("automatic handoff:", e.message));
+    purgeDebugEventsThrottled().catch((e) => console.error("trace retention:", e.message));
   };
   const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);
   void reconcile();

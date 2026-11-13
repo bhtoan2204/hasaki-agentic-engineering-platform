@@ -43,6 +43,7 @@ import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from ".
 import { StepInspector } from "./StepInspector.tsx";
 import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
+import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
 
 /** Display order of statuses in the run summary strip. */
@@ -267,7 +268,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
-    if (run && stepKey && stepKey !== "~changes" && !run.steps.some((s: any) => s.key === stepKey))
+    if (run && stepKey && stepKey !== "~changes" && stepKey !== "~trace" && !run.steps.some((s: any) => s.key === stepKey))
       navigate(`/runs/${id}`);
   }, [run, stepKey, id]);
   if (loading && !run) return <Loading />;
@@ -324,6 +325,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span className="rv-cur">
                   {stepKey === "~changes"
                     ? t("ch.title")
+                    : stepKey === "~trace"
+                      ? t("trace.title")
                     : (run.steps.find((s: any) => s.key === stepKey)?.name ?? stepKey)}
                 </span>
               </>
@@ -473,6 +476,12 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               onClick={() => navigate(`/runs/${id}/~changes`)}
             >
               <FileDiff size={14} /> {t("ch.title")}
+            </button>
+            <button
+              className={stepKey === "~trace" ? "sm" : "sm ghost"}
+              onClick={() => navigate(`/runs/${id}/~trace`)}
+            >
+              <Activity size={14} /> {t("trace.title")}
             </button>
             {!["CANCELED", "COMPLETED"].includes(run.status) && (
               <button className="sm danger" onClick={() => runAction("cancel")}>
@@ -636,7 +645,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               : undefined
           }
         >
-          {stepKey === "~changes" ? (
+          {stepKey === "~trace" ? (
+            <TraceExplorer runId={id} activity={activity} />
+          ) : stepKey === "~changes" ? (
             <div className="rv-pane">
               <Changes run={run} tick={tick} activity={activity} onChanged={reloadFresh} />
             </div>
