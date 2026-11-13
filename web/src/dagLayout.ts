@@ -59,12 +59,25 @@ export function autoLayout(steps: LayoutStep[]): Record<string, { x: number; y: 
   return pos;
 }
 
-// A step injected without a position would overlap saved ones; a single saved column is the old default layout.
+/** Keep saved positions; lay out steps added without one (report, subtasks) below them instead of on top. */
 export function placeSteps(
   steps: Array<LayoutStep & { ui?: { x: number; y: number } }>,
 ): Record<string, { x: number; y: number }> {
-  const saved = steps.every((s) => s.ui) && new Set(steps.map((s) => s.ui!.x)).size > 1;
-  return saved ? Object.fromEntries(steps.map((s) => [s.key, s.ui!])) : autoLayout(steps);
+  const saved = steps.filter((s) => s.ui);
+  if (!saved.length) return autoLayout(steps);
+  const pos = Object.fromEntries(saved.map((s) => [s.key, s.ui!]));
+  const missing = steps.filter((s) => !s.ui);
+  const keys = new Set(missing.map((s) => s.key));
+  const sub = autoLayout(
+    missing.map((s) => ({
+      key: s.key,
+      depends_on: (s.depends_on ?? []).filter((d) => keys.has(d)),
+    })),
+  );
+  const left = Math.min(...saved.map((s) => s.ui!.x));
+  const below = Math.max(...saved.map((s) => s.ui!.y)) + DY;
+  for (const s of missing) pos[s.key] = { x: left + sub[s.key].x, y: below + sub[s.key].y };
+  return pos;
 }
 
 /** Side handles within a band; bottom to top where the band turns. */

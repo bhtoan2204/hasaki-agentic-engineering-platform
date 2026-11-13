@@ -44,7 +44,7 @@ import {
 import { api, useApi } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
 import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
-import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
+import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import { WF_TYPE_ICON, WF_TYPE_TONE } from "./Workflows.tsx";
 import { useI18n } from "../i18n/index.tsx";
@@ -167,8 +167,7 @@ function Editor({ wfKey }: { wfKey: string }) {
         config: x.config ?? {},
       })),
     };
-    const auto = autoLayout(clean.steps);
-    setPositions(Object.fromEntries(clean.steps.map((x) => [x.key, x.ui ?? auto[x.key]])));
+    setPositions(placeSteps(clean.steps));
     setSpec(clean);
     setDirty(false);
     setErrors([]);

@@ -62,21 +62,21 @@ test("a diamond inside a long chain keeps every band aligned", () => {
   assert.ok(pos.result.x < pos.cleanup.x && pos.cleanup.x < pos.pr.x);
 });
 
-test("an injected step without a saved position never overlaps the saved ones", () => {
-  const steps = [
-    ...chain(3).map((s, i) => ({ ...s, ui: { x: (i % 2) * 300, y: i * 140 } })),
+test("steps added without a saved position go below the saved layout, which stays put", () => {
+  const saved = chain(3).map((s, i) => ({ ...s, ui: { x: 40 + (i % 2) * 300, y: i * 140 } }));
+  const pos = placeSteps([
+    ...saved,
     { key: "report", depends_on: ["c"] },
-  ];
-  const pos = placeSteps(steps);
-  const seen = new Set(Object.values(pos).map((p) => `${p.x},${p.y}`));
-  assert.equal(seen.size, steps.length);
-  assert.deepEqual(pos, autoLayout(steps));
+    { key: "after", depends_on: ["report"] },
+  ]);
+  for (const s of saved) assert.deepEqual(pos[s.key], s.ui);
+  assert.ok(pos.report.y > 280 && pos.after.y > 280);
+  assert.equal(pos.report.x, 40);
+  assert.notDeepEqual(pos.report, pos.after);
 });
 
-test("a single saved column is laid out across the canvas; a deliberate arrangement is kept", () => {
-  const column = chain(9).map((s, i) => ({ ...s, ui: { x: 0, y: i * 140 } }));
-  const pos = placeSteps(column);
-  assert.ok(new Set(Object.values(pos).map((p) => p.x)).size > 1);
+test("without saved positions the graph is auto-laid out; a full saved layout is kept as is", () => {
+  assert.deepEqual(placeSteps(chain(6)), autoLayout(chain(6)));
   const arranged = chain(3).map((s, i) => ({ ...s, ui: { x: i * 300, y: 50 } }));
   assert.deepEqual(placeSteps(arranged), {
     a: { x: 0, y: 50 },
