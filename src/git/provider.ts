@@ -21,6 +21,7 @@ import {
   registeredWorktreeAt,
   taskDir,
   unregisterMissingWorktree,
+  worktreeInProgress,
   worktreePorcelain,
 } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
@@ -291,6 +292,8 @@ export async function workspaceConflict(
   if (owner && owner.worker_instance !== config.instanceId)
     return never(`run #${owner.run_id} belongs to another worker`);
   if (owner?.status === "RUNNING") return never(`run #${owner.run_id} is still running`);
+  const inProgress = await worktreeInProgress(holder.path).catch(() => "its state is unreadable");
+  if (inProgress) return never(inProgress);
   if (await worktreePorcelain(holder.path).catch(() => "unreadable"))
     return never("it has uncommitted changes");
   if (owner && ["COMPLETED", "CANCELED"].includes(owner.status) && owner.same_owner)
