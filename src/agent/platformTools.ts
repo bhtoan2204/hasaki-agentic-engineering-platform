@@ -518,7 +518,7 @@ async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
         env.attemptId,
         JSON.stringify({ key, version: k.version, offset, end: offset + body.length }),
       ],
-    );
+    ).catch((error) => console.error(`skill read trace failed: ${safeDiagnostics(error)}`));
   const notice = isExternal(k.metadata) && offset === 0 ? `${externalNotice(k.metadata)}\n\n` : "";
   return `# ${k.title} (${k.key} v${k.version})\n\n${notice}${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
 }

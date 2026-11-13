@@ -906,3 +906,23 @@ test("Ponytail step keeps legacy codebase map knowledge when no generated map is
   assert.ok(!pack.entries.some((e) => e.id === "codebase-map"));
   assert.ok(pack.entries.some((e) => e.id.startsWith("knowledge:legacy-codebase-map")));
 });
+
+test("read_knowledge returns the skill body even when the read trace cannot be stored", async () => {
+  const { env } = await live();
+  await q(
+    pool,
+    "CREATE OR REPLACE FUNCTION fail_skill_read() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.reason = 'skill_read' THEN RAISE EXCEPTION 'trace store down'; END IF; RETURN NEW; END $$",
+  );
+  await q(
+    pool,
+    "CREATE TRIGGER fail_skill_read BEFORE INSERT ON workflow_checkpoints FOR EACH ROW EXECUTE FUNCTION fail_skill_read()",
+  );
+  try {
+    assert.match(
+      await dispatchPlatformTool("read_knowledge", { key: "stock-on-demand", limit: 100 }, env),
+      /ON_DEMAND_SECRET_BODY/,
+    );
+  } finally {
+    await q(pool, "DROP TRIGGER fail_skill_read ON workflow_checkpoints");
+  }
+});

@@ -1235,26 +1235,32 @@ const agentExecutor: StepExecutor = {
             session.reported_cost_usd,
           );
         }
-        const skillEvents = await q<{
-          reason: string;
-          data: SkillRead & { skills_applied?: unknown };
-        }>(
-          pool,
-          "SELECT reason, data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason IN ('skill_read', 'submit_result') ORDER BY id",
-          [ctx.attempt.id],
-        );
-        const reads = skillEvents.filter((e) => e.reason === "skill_read").map((e) => e.data);
-        const declaration = skillEvents.filter((e) => e.reason === "submit_result").at(-1)
-          ?.data.skills_applied;
-        metrics.skills = deriveSkillActivation(
-          metrics.skills ?? [],
-          ctx.context.knowledge,
-          reads,
-          declaration,
-        );
-        metrics.skills_loaded = [
-          ...new Set([...metrics.skills_loaded, ...reads.map((r) => r.key)]),
-        ];
+        try {
+          const skillEvents = await q<{
+            reason: string;
+            data: SkillRead & { skills_applied?: unknown };
+          }>(
+            pool,
+            "SELECT reason, data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason IN ('skill_read', 'submit_result') ORDER BY id",
+            [ctx.attempt.id],
+          );
+          const reads = skillEvents.filter((e) => e.reason === "skill_read").map((e) => e.data);
+          const declaration = skillEvents.filter((e) => e.reason === "submit_result").at(-1)
+            ?.data.skills_applied;
+          metrics.skills = deriveSkillActivation(
+            metrics.skills ?? [],
+            ctx.context.knowledge,
+            reads,
+            declaration,
+          );
+          metrics.skills_loaded = [
+            ...new Set([...metrics.skills_loaded, ...reads.map((r) => r.key)]),
+          ];
+        } catch (error) {
+          console.error(
+            `attempt ${ctx.attempt.id}: skill tracing failed: ${safeDiagnostics(error)}`,
+          );
+        }
         await writeTelemetry(metrics as unknown as Record<string, unknown>);
       }
     };
