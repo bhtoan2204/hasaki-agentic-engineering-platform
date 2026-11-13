@@ -28,7 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { STATUS_COLORS } from "./api.ts";
-import { autoLayout, edgeEnds } from "./dagLayout.ts";
+import { autoLayout, edgeEnds, placeSteps } from "./dagLayout.ts";
 import { useI18n } from "./i18n/index.tsx";
 // Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
 import "./pages/RunView.css";
@@ -82,7 +82,7 @@ export interface StepLike {
   parent_step_key?: string | null;
 }
 
-export { autoLayout };
+export { autoLayout, placeSteps };
 
 /** Edge colour from the statuses at both ends: done = green, flowing into a live step = berry, failed = red, waiting = amber. */
 function edgeColor(src?: string, dst?: string) {

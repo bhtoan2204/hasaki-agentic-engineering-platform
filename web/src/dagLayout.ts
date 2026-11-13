@@ -59,6 +59,14 @@ export function autoLayout(steps: LayoutStep[]): Record<string, { x: number; y: 
   return pos;
 }
 
+// A step injected without a position would overlap saved ones; a single saved column is the old default layout.
+export function placeSteps(
+  steps: Array<LayoutStep & { ui?: { x: number; y: number } }>,
+): Record<string, { x: number; y: number }> {
+  const saved = steps.every((s) => s.ui) && new Set(steps.map((s) => s.ui!.x)).size > 1;
+  return saved ? Object.fromEntries(steps.map((s) => [s.key, s.ui!])) : autoLayout(steps);
+}
+
 /** Side handles within a band; bottom to top where the band turns. */
 export function edgeEnds(
   src: { x: number; y: number },

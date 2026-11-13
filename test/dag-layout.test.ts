@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoLayout, edgeEnds } from "../web/src/dagLayout.ts";
+import { autoLayout, edgeEnds, placeSteps } from "../web/src/dagLayout.ts";
 
 const chain = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -60,4 +60,27 @@ test("a diamond inside a long chain keeps every band aligned", () => {
   assert.ok(pos.test.y > pos.sec.y);
   assert.ok(["pr", "cleanup", "result"].every((k) => pos[k].y === pos.test.y));
   assert.ok(pos.result.x < pos.cleanup.x && pos.cleanup.x < pos.pr.x);
+});
+
+test("an injected step without a saved position never overlaps the saved ones", () => {
+  const steps = [
+    ...chain(3).map((s, i) => ({ ...s, ui: { x: (i % 2) * 300, y: i * 140 } })),
+    { key: "report", depends_on: ["c"] },
+  ];
+  const pos = placeSteps(steps);
+  const seen = new Set(Object.values(pos).map((p) => `${p.x},${p.y}`));
+  assert.equal(seen.size, steps.length);
+  assert.deepEqual(pos, autoLayout(steps));
+});
+
+test("a single saved column is laid out across the canvas; a deliberate arrangement is kept", () => {
+  const column = chain(9).map((s, i) => ({ ...s, ui: { x: 0, y: i * 140 } }));
+  const pos = placeSteps(column);
+  assert.ok(new Set(Object.values(pos).map((p) => p.x)).size > 1);
+  const arranged = chain(3).map((s, i) => ({ ...s, ui: { x: i * 300, y: 50 } }));
+  assert.deepEqual(placeSteps(arranged), {
+    a: { x: 0, y: 50 },
+    b: { x: 300, y: 50 },
+    c: { x: 600, y: 50 },
+  });
 });

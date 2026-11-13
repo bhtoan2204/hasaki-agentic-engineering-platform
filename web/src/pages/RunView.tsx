@@ -38,7 +38,7 @@ import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
-import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
+import { nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
 import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
@@ -169,10 +169,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
     const specSteps = run.graph.steps as any[];
-    const pos = autoLayout(specSteps);
-    const placed = Object.fromEntries(
-      specSteps.map((s) => [s.key, s.ui ?? pos[s.key] ?? { x: 0, y: 0 }]),
-    );
+    const placed = placeSteps(specSteps);
     const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
