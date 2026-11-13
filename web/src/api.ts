@@ -234,6 +234,7 @@ const ACTIVITY_KINDS = new Set([
   "system_prompt",
   "result",
   "log",
+  "trace",
 ]);
 
 /**

@@ -169,6 +169,8 @@ import {
 import { definitions } from "../workflow/definitions.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { runEvents } from "../workflow/events.ts";
+import { buildTrace, isTraceLevel, searchLogs } from "../workflow/trace.ts";
+import { diagnoseTrace } from "../workflow/traceDiagnosis.ts";
 import {
   answeredQuestions,
   answerQuestions,
@@ -712,6 +714,49 @@ export const routes: Route[] = [
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
       runEvents.list(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0))
+    ),
+  ],
+  [
+    "GET",
+    /^\/api\/runs\/(\d+)\/trace$/,
+    async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), buildTrace(num(c.p[0]))),
+  ],
+  [
+    "GET",
+    /^\/api\/runs\/(\d+)\/logs$/,
+    async (c) => {
+      await requireRun(c.actor, num(c.p[0]), support(c));
+      const sp = c.url.searchParams;
+      const level = sp.get("level");
+      if (level && !isTraceLevel(level)) throw new HttpError(400, "invalid level");
+      const id = (k: string) => {
+        const raw = sp.get(k);
+        if (raw == null || raw === "") return undefined;
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 0) throw new HttpError(400, `invalid ${k}`);
+        return n;
+      };
+      for (const k of ["from", "to"])
+        if (sp.get(k) && Number.isNaN(Date.parse(sp.get(k)!))) throw new HttpError(400, `invalid ${k}`);
+      return searchLogs(num(c.p[0]), {
+        stepId: id("step"),
+        attemptId: id("attempt"),
+        provider: sp.get("provider") ?? undefined,
+        event: sp.get("event") ?? undefined,
+        level: level && isTraceLevel(level) ? level : undefined,
+        from: sp.get("from") ?? undefined,
+        to: sp.get("to") ?? undefined,
+        afterId: id("after"),
+        limit: id("limit"),
+      });
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/diagnose$/,
+    async (c) => (
+      await requireRun(c.actor, num(c.p[0]), support(c)),
+      { findings: diagnoseTrace(await buildTrace(num(c.p[0]))) }
     ),
   ],
   [
