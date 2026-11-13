@@ -12,7 +12,7 @@ import { languageReminder, type OutputLocale } from "./language.ts";
 import {
   ENVIRONMENT_UNAVAILABLE_EXIT,
   ENVIRONMENT_UNAVAILABLE_MARKER,
-} from "../workflow/templates.ts";
+} from "../platform/postgresBinaries.ts";
 
 /**
  * Verification-and-repair loop for coding steps (harness layer around the Claude executor).
@@ -64,7 +64,8 @@ export function verifyConfig(
  *   tests excluded (anything else still failing → failed). Explicitly listed, never reported as a clean pass.
  * failed: regressions, unclassified failures, timeouts or hard test weakening — sent back to the agent for repair.
  * error: verification itself could not complete (integrity check or tooling failure) — not repairable by the agent.
- * skipped: the environment could not run the tests (e.g. no PostgreSQL) — never a pass, not repairable by the agent.
+ * skipped: the command reported that its environment cannot run the tests (e.g. no PostgreSQL) — nothing was tested,
+ *   never counted as passed, not repairable by the agent.
  */
 export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error" | "skipped";
 
@@ -508,6 +509,19 @@ export function repairPrompt(
     languageReminder(locale),
   );
   return parts.join("\n\n");
+}
+
+/** A worktree could not be restored for verification (branch held elsewhere): nothing was tested, a human decides. */
+export function restoreConflictVerification(blocked: { questions?: Array<{ question: string }> }) {
+  const reason = `workspace conflict while restoring worktrees, tests not run: ${(blocked.questions ?? []).map((x) => x.question).join("; ")}`;
+  return {
+    outcome: "skipped",
+    status: "skipped",
+    passed: null,
+    needs_review: true,
+    review_reasons: [reason],
+    reason,
+  };
 }
 
 /** Compact record for outputs, metrics and the checkpoint. */

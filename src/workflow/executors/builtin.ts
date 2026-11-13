@@ -24,8 +24,11 @@ import {
 } from "../../git/provider.ts";
 import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
-import { testPostgresEnv } from "../../platform/postgresBinaries.ts";
-import { TEST_POSTGRES_BIN_ENV } from "../templates.ts";
+import {
+  postgresUnavailableResult,
+  testPostgresEnv,
+  TEST_POSTGRES_BIN_ENV,
+} from "../../platform/postgresBinaries.ts";
 import {
   repositoryReference,
   repositoryBaseBranch,
@@ -195,6 +198,8 @@ export const conditionExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- command
 
+type CommandResult = { code: number | null; output: string; timedOut: boolean };
+
 export async function runCommand(
   command: string,
   cwd: string,
@@ -206,26 +211,24 @@ export async function runCommand(
   const proc = await commandProcessEnv(cwd, env);
   const useBwrap = proc.isolation?.mode === "bwrap";
   const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
-  if (command.includes(TEST_POSTGRES_BIN_ENV)) {
-    const started = Date.now();
-    const pg = await testPostgresEnv(cwd, signal, timeoutMs);
-    if (!pg)
-      return {
-        code: null,
-        output: signal.aborted
-          ? "[canceled while resolving the test PostgreSQL]"
-          : `[timed out after ${Math.round(timeoutMs / 1000)}s while resolving the test PostgreSQL]`,
-        timedOut: !signal.aborted,
-      };
-    Object.assign(childEnv, pg);
-    timeoutMs -= Date.now() - started;
-  }
-  return new Promise<{ code: number | null; output: string; timedOut: boolean }>((resolve) => {
+  const pg = await testPostgresEnv(cwd, signal);
+  if (!pg)
+    return {
+      code: null,
+      output: "[canceled while resolving the test PostgreSQL]",
+      timedOut: false,
+    };
+  Object.assign(childEnv, pg);
+  // bash -l runs /etc/profile, which resets PATH on Debian/Ubuntu: prepend the bin dir after it.
+  const script = pg[TEST_POSTGRES_BIN_ENV]
+    ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n${command}`
+    : command;
+  const r = await new Promise<CommandResult>((resolve) => {
     const child = spawn(
       useBwrap ? "bwrap" : "bash",
       useBwrap
-        ? [...bwrapArguments(cwd, proc.isolation?.liveRoot ?? null), "bash", "-lc", command]
-        : ["-lc", command],
+        ? [...bwrapArguments(cwd, proc.isolation?.liveRoot ?? null), "bash", "-lc", script]
+        : ["-lc", script],
       {
         cwd,
         env: childEnv,
@@ -278,6 +281,9 @@ export async function runCommand(
       });
     });
   });
+  return pg.PLATFORM_POSTGRES_UNAVAILABLE
+    ? postgresUnavailableResult(r, pg.PLATFORM_POSTGRES_UNAVAILABLE)
+    : r;
 }
 
 /**

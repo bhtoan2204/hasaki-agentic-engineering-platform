@@ -1184,7 +1184,15 @@ test("regression step without a test PostgreSQL is not passed: the reason reache
   const cwd = mkdtempSync(join(process.env.TEST_ROOT!, "pg-unavailable-"));
   mkdirSync(join(cwd, "test"));
   writeFileSync(join(cwd, "test", "setup.ts"), 'spawnSync("initdb", []);\n');
-  writeFileSync(join(cwd, "package.json"), '{"name":"x","scripts":{"test":"echo SUITE-RAN"}}');
+  writeFileSync(
+    join(cwd, "package.json"),
+    JSON.stringify({
+      name: "x",
+      scripts: {
+        test: "echo 'Test-owned PostgreSQL initdb failed: spawnSync initdb ENOENT' >&2; exit 1",
+      },
+    }),
+  );
   mkdirSync(join(cwd, "node_modules", "x"), { recursive: true });
   setPostgresBinForTests({ dir: null, reason: "nix build nixpkgs#postgresql_17 failed: boom" });
   try {

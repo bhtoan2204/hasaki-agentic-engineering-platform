@@ -143,7 +143,9 @@ export function deriveOutcome(f: OutcomeFacts) {
         heads: s.output.tested_heads,
       })),
   ];
-  const unverified = coding.filter((s) => s.output?.verification?.passed === null);
+  const unverified = coding.filter(
+    (s) => s.output?.verification?.passed === null && s.output.verification.needs_review,
+  );
   const bound = testRecords.filter((t) => t.passed && sameHeads(t.heads, heads));
   ladder.tests_passed = bound.length
     ? proven(`${bound.map((t) => t.step).join(", ")} passed on the final commits`)

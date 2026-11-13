@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import {
   buildPostgresBin,
@@ -10,17 +10,11 @@ import {
   postgresBinDir,
   setPostgresBinForTests,
   testPostgresEnv,
+  ENVIRONMENT_UNAVAILABLE_EXIT,
   type NixResult,
 } from "../src/platform/postgresBinaries.ts";
 import { runCommand } from "../src/workflow/executors/builtin.ts";
-import {
-  ENVIRONMENT_UNAVAILABLE_EXIT,
-  FEATURE_REGRESSION_COMMAND,
-  PLATFORM_REGRESSION_COMMAND,
-  PLATFORM_TARGETED_COMMAND,
-  FEATURE_TARGETED_COMMAND,
-  TEST_POSTGRES_GUARD,
-} from "../src/workflow/templates.ts";
+import { TEST_COMMAND } from "../src/workflow/templates.ts";
 import { environmentUnavailable } from "../src/agent/verify.ts";
 
 after(() => pool.end());
@@ -139,7 +133,7 @@ test("postgres binaries: after a nix failure a fixed environment is used at once
     const again = await postgresBinDir({ pathEnv: "", outLink, nix: failingNix(calls) });
     assert.match(
       again.dir === null ? again.reason : "",
-      /Could not resolve host.*last nix attempt at \d{4}-\d\d-\d\dT/,
+      /Could not resolve host.*last nix attempt ended at \d{4}-\d\d-\d\dT/,
     );
     assert.equal(calls.length, 1, "nix is not re-run within the throttle");
     const onPath = fakePrefix("fixed");
@@ -184,53 +178,126 @@ test("postgres env: only repositories whose test preload runs initdb get the bin
   }
 });
 
-test("runCommand: the guard puts the bin dir on PATH after a login profile reset it; without PostgreSQL the suite exits 78", async () => {
-  const store = fakePrefix("run-store");
+test("postgres binaries: the nix throttle runs from when the failed attempt ended", async () => {
+  setPostgresBinForTests(undefined);
+  let ended = 0;
+  try {
+    await postgresBinDir({
+      pathEnv: "",
+      outLink: join(dir("data"), "postgres-17"),
+      nix: async (args) => {
+        await new Promise((r) => setTimeout(r, 50));
+        const r = await failingNix()(args);
+        ended = Date.now();
+        return r;
+      },
+    });
+    const again = await postgresBinDir({
+      pathEnv: "",
+      outLink: join(dir("data"), "postgres-17"),
+      nix: noNix,
+    });
+    const at = /ended at (\S+);/.exec(again.dir === null ? again.reason : "")?.[1];
+    assert.ok(at && Date.parse(at) >= ended, `${at} is not before the attempt ended`);
+  } finally {
+    setPostgresBinForTests(undefined);
+  }
+});
+
+/** A harness repo whose login profile resets PATH (Debian/Ubuntu /etc/profile) and whose `npm test` runs `script`. */
+const loginHarness = (script: string) => {
   const repo = harness();
-  const never = new AbortController().signal;
+  const home = dir("home");
+  writeFileSync(join(home, ".bash_profile"), `PATH=/usr/bin:/bin:${dirname(process.execPath)}\n`);
+  writeFileSync(
+    join(repo, "package.json"),
+    JSON.stringify({ name: "x", scripts: { test: script } }),
+  );
+  mkdirSync(join(repo, "node_modules", "x"), { recursive: true });
+  return { repo, env: { HOME: home } };
+};
+const never = new AbortController().signal;
+const missingInitdb =
+  "echo 'Test-owned PostgreSQL initdb failed: spawnSync initdb ENOENT' >&2; exit 1";
+
+test("runCommand: every command in a harness repo finds the bin dir after a login profile reset PATH", async () => {
+  const store = fakePrefix("run-store");
+  const { repo, env } = loginHarness("command -v initdb");
   try {
     setPostgresBinForTests({ dir: join(store, "bin"), source: "nix" });
-    // What Debian/Ubuntu /etc/profile does under bash -l.
-    const ok = await runCommand(
-      `PATH=/usr/bin:/bin\n${TEST_POSTGRES_GUARD}\ncommand -v initdb`,
-      repo,
-      {},
+    const r = await runCommand(TEST_COMMAND, repo, env, 30_000, never);
+    assert.equal(r.code, 0, r.output);
+    assert.match(r.output, new RegExp(`${join(store, "bin", "initdb")}\\s*$`));
+    const plain = await runCommand(
+      "command -v initdb || echo none",
+      dir("plain"),
+      env,
       30_000,
       never,
     );
-    assert.equal(ok.code, 0, ok.output);
-    assert.equal(ok.output.trim(), join(store, "bin", "initdb"));
-    const unrelated = await runCommand(
-      "printenv | grep -c '^PLATFORM_TEST_POSTGRES_BI[N]=' || true",
-      repo,
-      {},
-      30_000,
-      never,
-    );
-    assert.equal(unrelated.output.trim(), "0", "commands without the guard skip the resolution");
+    assert.doesNotMatch(plain.output, /run-store/, "repos without the harness are untouched");
+  } finally {
+    setPostgresBinForTests(undefined);
+  }
+});
 
+test("runCommand: without PostgreSQL a harness run that hits the missing initdb is an environment skip", async () => {
+  try {
     setPostgresBinForTests({ dir: null, reason: "nix build failed: boom" });
-    writeFileSync(
-      join(repo, "package.json"),
-      JSON.stringify({ name: "x", scripts: { test: "echo SUITE-RAN" } }),
-    );
-    mkdirSync(join(repo, "node_modules", "x"), { recursive: true });
-    const r = await runCommand(FEATURE_REGRESSION_COMMAND, repo, {}, 30_000, never);
+    const { repo, env } = loginHarness(missingInitdb);
+    const r = await runCommand(TEST_COMMAND, repo, env, 30_000, never);
     assert.equal(r.code, ENVIRONMENT_UNAVAILABLE_EXIT, r.output);
-    assert.doesNotMatch(r.output, /SUITE-RAN/);
-    assert.match(environmentUnavailable(r.code, r.output) ?? "", /nix build failed: boom/);
-    assert.match(environmentUnavailable(r.code, r.output) ?? "", /no test ran/);
+    assert.match(
+      environmentUnavailable(r.code, r.output) ?? "",
+      /no test ran.*nix build failed: boom/,
+    );
+    const shell = await runCommand("initdb -D x", repo, env, 30_000, never);
+    assert.equal(shell.code, ENVIRONMENT_UNAVAILABLE_EXIT, shell.output);
+    const env78 = await runCommand(
+      'printf %s "$PLATFORM_POSTGRES_UNAVAILABLE"',
+      repo,
+      env,
+      30_000,
+      never,
+    );
+    assert.equal(env78.output, "nix build failed: boom");
+    const broken = await runCommand(
+      "echo 'TypeError: x is not a function' >&2; exit 1",
+      repo,
+      env,
+      30_000,
+      never,
+    );
+    assert.equal(broken.code, 1, "a code failure stays a code failure");
+    const elsewhere = await runCommand(missingInitdb, dir("plain"), env, 30_000, never);
+    assert.equal(elsewhere.code, 1, "only harness repos");
     assert.equal(environmentUnavailable(78, "exit 78 from a test"), null, "the marker is required");
   } finally {
     setPostgresBinForTests(undefined);
   }
-  for (const command of [
-    PLATFORM_TARGETED_COMMAND,
-    PLATFORM_REGRESSION_COMMAND,
-    FEATURE_TARGETED_COMMAND,
-  ])
-    assert.match(
-      command,
-      /PLATFORM_POSTGRES_UNAVAILABLE[\s\S]*exit 78[\s\S]*PLATFORM_TEST_POSTGRES_BIN/,
+});
+
+test("runCommand: resolving PostgreSQL has its own limit, does not eat the command timeout, and timing out is unavailable", async () => {
+  const repo = harness();
+  try {
+    setPostgresBinForTests(new Promise(() => {}), 200);
+    const r = await runCommand(
+      'sleep 0.2; printf %s "$PLATFORM_POSTGRES_UNAVAILABLE"',
+      repo,
+      {},
+      300,
+      never,
     );
+    assert.equal(r.timedOut, false, r.output);
+    assert.equal(r.code, 0, r.output);
+    assert.match(r.output, /resolving the test PostgreSQL timed out/);
+    const failed = await runCommand(missingInitdb, repo, {}, 30_000, never);
+    assert.equal(failed.code, ENVIRONMENT_UNAVAILABLE_EXIT, failed.output);
+    assert.match(environmentUnavailable(failed.code, failed.output) ?? "", /timed out/);
+    const aborted = await runCommand("echo ran", repo, {}, 30_000, AbortSignal.abort());
+    assert.deepEqual([aborted.code, aborted.timedOut], [null, false]);
+    assert.doesNotMatch(aborted.output, /ran/);
+  } finally {
+    setPostgresBinForTests(undefined);
+  }
 });
