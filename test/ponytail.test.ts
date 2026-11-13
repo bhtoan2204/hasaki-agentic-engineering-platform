@@ -500,3 +500,18 @@ test("DEPRECATE rollback leaves supersession it did not set untouched", async ()
   assert.equal(old.enabled, true);
   assert.equal(Number(old.superseded_by), Number(successor.id));
 });
+
+test("third-party skills cannot be reverted away from their pinned manifest", async () => {
+  await assert.rejects(knowledge.revert("skill.ext.ponytail", 1, null, "admin"), /re-import/);
+});
+
+test("Ponytail pilot is not a public built-in template and reviews like the built-in review step", async () => {
+  const { TEMPLATES, PONYTAIL_PILOT_TEMPLATE } = await import("../src/workflow/templates.ts");
+  assert.ok(!TEMPLATES.some((t) => t.key === PONYTAIL_PILOT_TEMPLATE.key));
+  const review = PONYTAIL_PILOT_TEMPLATE.spec.steps.find((s) => s.key === "review")!
+    .config as Record<string, unknown>;
+  assert.equal(review.independent, true);
+  assert.equal(review.max_repairs, 2);
+  assert.ok(review.output_contract);
+  assert.deepEqual(review.skills, ["skill.ext.ponytail-review"]);
+});

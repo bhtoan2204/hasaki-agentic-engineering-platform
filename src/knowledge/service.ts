@@ -1,6 +1,8 @@
 import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
 import { CATEGORIES, SCOPES, type KnowledgeCandidate } from "./resolve.ts";
+import { isExternal } from "./external.ts";
+import { HttpError } from "../http/error.ts";
 
 export interface KnowledgeInput {
   key: string;
@@ -107,10 +109,15 @@ export const knowledge = {
     return withTx(async (c) => {
       const item = await one(
         c,
-        "SELECT id FROM knowledge_items WHERE key=$1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE",
+        "SELECT i.id, v.metadata FROM knowledge_items i JOIN knowledge_versions v ON v.item_id=i.id AND v.version=i.current_version WHERE i.key=$1 AND i.owner_id IS NOT DISTINCT FROM $2 FOR UPDATE OF i",
         [key, ownerId],
       );
       if (!item) throw new Error("knowledge item not found");
+      if (isExternal(item.metadata))
+        throw new HttpError(
+          409,
+          "third-party skills follow their pinned manifest: re-import instead of reverting",
+        );
       const previous = await one(
         c,
         "SELECT * FROM knowledge_versions WHERE item_id=$1 AND version=$2",

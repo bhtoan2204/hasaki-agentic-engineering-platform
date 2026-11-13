@@ -1270,6 +1270,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
   },
 ];
 
+// Not seeded: an admin installs it as a private workflow (POST /api/workflows with this key and spec) so only they run it.
 export const PONYTAIL_PILOT_TEMPLATE = {
   key: "ponytail-nonproduction-pilot",
   spec: {
@@ -1291,13 +1292,8 @@ export const PONYTAIL_PILOT_TEMPLATE = {
         type: "agent",
         name: "Pilot review",
         depends_on: ["implement"],
-        config: {
-          skills: ["skill.ext.ponytail-review"],
-          instructions: "Review the implementation independently and report concrete findings.",
-        },
+        config: { ...REVIEW, skills: ["skill.ext.ponytail-review"] },
       },
     ],
   },
 };
-
-TEMPLATES.push(PONYTAIL_PILOT_TEMPLATE);
