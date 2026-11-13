@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { existsSync } from "node:fs";
+import { join, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
@@ -18,6 +18,7 @@ import {
   moveWorktree,
   prepareBranch,
   pushBranch,
+  registeredWorktreeAt,
   taskDir,
   unregisterMissingWorktree,
   worktreePorcelain,
@@ -439,13 +440,9 @@ async function prepareLockedWorkspace(
   if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
   const path = workspacePath ?? join(taskDir(key), repo);
   if (!existsSync(path)) {
-    // A deleted worktree stays registered, and git refuses to add one at a registered path: drop only that entry.
-    const stale = await branchWorktree(checkout, target.branch);
-    if (
-      stale?.missing &&
-      [path, join(realpathSync(join(path, "..")), basename(path))].includes(stale.path)
-    )
-      await unregisterMissingWorktree(checkout, path);
+    // git refuses to add a worktree at a path a deleted one is still registered at: drop only that entry.
+    const stale = await registeredWorktreeAt(checkout, path);
+    if (stale) await unregisterMissingWorktree(checkout, stale);
     const conflict = await workspaceConflict(run, repo, checkout, target.branch, path);
     if (conflict) {
       const approved =
@@ -508,29 +505,36 @@ export async function recordWorkspace(
   );
 }
 
-/**
- * Recreate recorded run worktrees whose directory is gone (cleanup, manual delete, crash) at the same path on the same
- * branch, so neither the agent nor verification gets a missing cwd. The branch must still exist locally or on origin;
- * it is never cut again from the base.
- */
+/** Recreate deleted run worktrees on their recorded branch (never re-cut from base); returns what stops the step. */
 export async function restoreMissingWorkspaces(
   run: Parameters<typeof prepareWorkspace>[0],
   repos: string[],
-  log: (message: string) => Promise<void>,
-): Promise<void> {
+  opts: {
+    log: (message: string) => Promise<void>;
+    en: boolean;
+    approvedReleases?: string[];
+    checkLive?: () => Promise<void>;
+  },
+): Promise<ExecResult | null> {
+  const { log, checkLive, approvedReleases } = opts;
   for (const w of await workspacesOf(run.id)) {
     if (existsSync(w.path) || (repos.length && !repos.includes(w.repo))) continue;
     try {
-      await prepareWorkspace(run, w.repo, undefined, { log });
+      await prepareWorkspace(run, w.repo, checkLive, { log, approvedReleases });
     } catch (e) {
-      throw new Error(
-        `${w.repo}: worktree ${w.path} no longer exists and could not be restored on ${w.branch}: ${(e as Error).message}`,
-      );
+      if (e instanceof WorkspaceConflictError)
+        return workspaceConflictQuestion(e.conflicts, opts.en);
+      return {
+        kind: "failed",
+        error: `${w.repo}: worktree ${w.path} no longer exists and could not be restored on ${w.branch}: ${(e as Error).message}`,
+        retryable: false,
+      };
     }
     await log(
       `restored missing worktree ${w.repo} at ${w.path} on ${w.branch} (committed work kept; uncommitted changes in the deleted directory are lost)`,
     );
   }
+  return null;
 }
 
 /** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */

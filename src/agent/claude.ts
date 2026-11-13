@@ -80,7 +80,12 @@ import {
   type ToolMode,
 } from "./toolPolicy.ts";
 import { integrationCatalog, integrationTools } from "./toolRegistry.ts";
-import { citedEvidenceLogs, dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
+import {
+  attemptIsLive,
+  citedEvidenceLogs,
+  dispatchPlatformTool,
+  envFromExecution,
+} from "./platformTools.ts";
 import { runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
@@ -590,14 +595,20 @@ const agentExecutor: StepExecutor = {
         break;
       }
     }
-    if (mode === "coding")
-      try {
-        await restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, (m) =>
-          ctx.log("system", m),
-        );
-      } catch (e) {
-        return { kind: "failed", error: (e as Error).message, retryable: false };
-      }
+    const restoreWorkspaces = () =>
+      restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, {
+        log: (m) => ctx.log("system", m),
+        en: outputLocale(ctx.run) === "en",
+        approvedReleases: (ctx.input.pending?.workspace_release?.holders ?? []) as string[],
+        checkLive: async () => {
+          const live = await attemptIsLive(ctx.attempt.id, ctx.attempt.fencing_token);
+          if (!live.ok) throw new Error(live.reason);
+        },
+      });
+    if (mode === "coding") {
+      const blocked = await restoreWorkspaces();
+      if (blocked) return blocked;
+    }
     const ws = (await workspacesOf(ctx.run.id)).filter(
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
@@ -1557,13 +1568,8 @@ const agentExecutor: StepExecutor = {
       };
     }
     if (vcfg) {
-      try {
-        await restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, (m) =>
-          ctx.log("system", m),
-        );
-      } catch (e) {
-        return { kind: "failed", error: (e as Error).message, retryable: false };
-      }
+      const blocked = await restoreWorkspaces();
+      if (blocked) return blocked;
       const trees = (await workspacesOf(ctx.run.id)).filter(
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),

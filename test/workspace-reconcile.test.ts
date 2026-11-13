@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pool, q, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
@@ -225,7 +225,10 @@ test("a deleted worktree is restored at the same path on the same branch, with i
       "git keeps the registration of the deleted directory",
     );
     const logs: string[] = [];
-    await restoreMissingWorkspaces(s.old, [], async (m) => void logs.push(m));
+    assert.equal(
+      await restoreMissingWorkspaces(s.old, [], { log: async (m) => void logs.push(m), en: true }),
+      null,
+    );
     assert.equal(sh(s.holder, "branch", "--show-current").trim(), s.branch);
     assert.equal(sh(s.holder, "rev-parse", "HEAD"), head);
     assert.equal(sh(s.holder, "show", "HEAD:work.txt"), "earlier run\n");
@@ -247,7 +250,7 @@ test("a deleted worktree whose registration was already pruned is restored too",
   try {
     rmSync(s.holder, { recursive: true, force: true });
     sh(s.repoPath, "worktree", "prune");
-    await restoreMissingWorkspaces(s.old, [], async () => {});
+    await restoreMissingWorkspaces(s.old, [], { log: async () => {}, en: true });
     assert.equal(sh(s.holder, "show", "HEAD:work.txt"), "earlier run\n");
   } finally {
     await s.cleanup();
@@ -260,8 +263,11 @@ test("a deleted worktree whose branch is gone everywhere fails clearly and creat
     rmSync(s.holder, { recursive: true, force: true });
     sh(s.repoPath, "worktree", "prune");
     sh(s.repoPath, "branch", "-D", s.branch);
-    await assert.rejects(
-      restoreMissingWorkspaces(s.old, [], async () => {}),
+    const r = await restoreMissingWorkspaces(s.old, [], { log: async () => {}, en: true });
+    assert.equal(r?.kind, "failed");
+    assert.equal(r?.kind === "failed" && r.retryable, false);
+    assert.match(
+      r?.kind === "failed" ? r.error : "",
       new RegExp(
         `${s.name}: worktree .* no longer exists and could not be restored on ${s.branch}: .*does not exist locally or on origin`,
       ),
@@ -278,10 +284,100 @@ test("a present worktree is left untouched by the restore", async () => {
   try {
     writeFileSync(join(s.holder, "draft.txt"), "uncommitted\n");
     const logs: string[] = [];
-    await restoreMissingWorkspaces(s.old, [], async (m) => void logs.push(m));
+    assert.equal(
+      await restoreMissingWorkspaces(s.old, [], { log: async (m) => void logs.push(m), en: true }),
+      null,
+    );
     assert.deepEqual(logs, []);
     assert.equal(sh(s.holder, "status", "--porcelain"), "?? draft.txt\n");
   } finally {
+    await s.cleanup();
+  }
+});
+
+test("restore: a stale registration at the same path on another spelling or detached HEAD is dropped, others kept", async () => {
+  const s = await scenario("RUNNING");
+  const alias = join(config.dataDir, "worktrees", `alias-${s.name}`);
+  const other = join(config.dataDir, "worktrees", `other-${s.name}`);
+  try {
+    symlinkSync(join(s.holder, ".."), alias);
+    const aliased = join(alias, s.name);
+    await recordWorkspace(s.old.id, {
+      repo: s.name,
+      branch: s.branch,
+      path: aliased,
+      created_from: config.baseBranch,
+    });
+    sh(s.holder, "checkout", "-q", "--detach");
+    sh(s.repoPath, "worktree", "add", "-q", "--detach", other, config.baseBranch);
+    rmSync(s.holder, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+    assert.equal(
+      await restoreMissingWorkspaces(s.old, [], { log: async () => {}, en: true }),
+      null,
+    );
+    assert.equal(sh(aliased, "branch", "--show-current").trim(), s.branch);
+    assert.equal(sh(s.holder, "show", "HEAD:work.txt"), "earlier run\n");
+    const list = sh(s.repoPath, "worktree", "list", "--porcelain");
+    assert.match(
+      list,
+      new RegExp(`worktree ${other}\\n`),
+      "other missing registrations are not pruned",
+    );
+  } finally {
+    rmSync(alias, { force: true });
+    sh(s.repoPath, "worktree", "prune");
+    await s.cleanup();
+  }
+});
+
+test("restore: a release the developer approved is honoured, and fenced-out attempts create nothing", async () => {
+  const s = await scenario("FAILED");
+  const path = join(config.dataDir, "worktrees", `new-${s.name}`, s.name);
+  try {
+    await recordWorkspace(s.run.id, {
+      repo: s.name,
+      branch: s.branch,
+      path,
+      created_from: config.baseBranch,
+    });
+    const fenced = await restoreMissingWorkspaces(s.run, [], {
+      log: async () => {},
+      en: true,
+      approvedReleases: [s.holder],
+      checkLive: async () => {
+        throw new Error("attempt is no longer live");
+      },
+    });
+    assert.equal(fenced?.kind, "failed");
+    assert.match(fenced?.kind === "failed" ? fenced.error : "", /no longer live/);
+    assert.equal(existsSync(path), false);
+    assert.equal(existsSync(s.holder), true);
+
+    const asked = await restoreMissingWorkspaces(s.run, [], { log: async () => {}, en: true });
+    assert.equal(asked?.kind, "waiting_input", "the developer is asked, the step does not fail");
+    assert.deepEqual(
+      asked?.kind === "waiting_input" &&
+        (asked.checkpoint as { workspace_conflict: Array<{ holder_path: string }> })
+          .workspace_conflict[0].holder_path,
+      s.holder,
+    );
+    assert.equal(existsSync(path), false);
+
+    let live = 0;
+    const restored = await restoreMissingWorkspaces(s.run, [], {
+      log: async () => {},
+      en: true,
+      approvedReleases: [s.holder],
+      checkLive: async () => void live++,
+    });
+    assert.equal(restored, null);
+    assert.ok(live > 0, "fencing is checked");
+    assert.equal(sh(path, "branch", "--show-current").trim(), s.branch);
+    assert.equal(sh(path, "show", "HEAD:work.txt"), "earlier run\n");
+    assert.equal(existsSync(s.holder), false);
+  } finally {
+    rmSync(join(path, ".."), { recursive: true, force: true });
     await s.cleanup();
   }
 });
