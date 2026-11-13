@@ -1541,6 +1541,46 @@ tr.click:hover td {
   gap: 8px;
 }
 
+.tb-health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tb-health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.tb-health-item i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.tb-health-item.is-connected i {
+  background: var(--st-ok);
+}
+
+.tb-health-item.is-quota i {
+  background: var(--st-wait);
+}
+
+.tb-health-item.is-down i {
+  background: var(--st-err);
+}
+
 .lang-switch {
   display: inline-flex;
   gap: 2px;
@@ -2051,6 +2091,11 @@ details > summary {
 
   .topbar {
     padding: 0 12px;
+  }
+
+  .tb-health-item {
+    padding-inline: 6px;
+    font-size: 11px;
   }
 
   .page {

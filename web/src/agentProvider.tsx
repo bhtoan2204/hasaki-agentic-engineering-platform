@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useApi } from "./api.ts";
 import { useI18n } from "./i18n/index.tsx";
 import { Field } from "./ui.tsx";
@@ -25,9 +26,49 @@ interface ProviderStatus {
   reasoning_effort?: string | null;
 }
 
+function agentHealthState(row: ProviderStatus | undefined) {
+  if (row?.quota === "exhausted") return "quota" as const;
+  if (row?.ok) return "connected" as const;
+  return "down" as const;
+}
+
+function useAgentHealth() {
+  const health = useApi<ProviderStatus[]>("/api/agent-providers");
+  const { reloadFresh } = health;
+  useEffect(() => {
+    const id = setInterval(() => void reloadFresh(), 60_000);
+    return () => clearInterval(id);
+  }, [reloadFresh]);
+  return health;
+}
+
+/** Compact provider health for the top bar. Refreshes once a minute. */
+export function AgentHealthBar() {
+  const { t } = useI18n();
+  const { data, error } = useAgentHealth();
+  return (
+    <div className="tb-health" role="status" aria-label={t("run.health.label")}>
+      {AGENT_PROVIDERS.map((id) => {
+        const row = data?.find((p) => p.id === id);
+        const state = error ? "down" : data ? agentHealthState(row) : "checking";
+        const detail =
+          state === "checking"
+            ? t("run.health.checking")
+            : `${t(agentKey(id, true))}: ${t(`run.health.${state}`)}${state !== "connected" && row?.error ? ` — ${row.error}` : ""}`;
+        return (
+          <span key={id} className={`tb-health-item is-${state}`} title={detail}>
+            <i />
+            {t(agentKey(id, true))}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function AgentHealthList() {
   const { t } = useI18n();
-  const { data, error } = useApi<ProviderStatus[]>("/api/agent-providers");
+  const { data, error } = useAgentHealth();
   if (error)
     return (
       <p className="agent-notice-err">
@@ -39,8 +80,7 @@ function AgentHealthList() {
     <ul className="agent-health">
       {AGENT_PROVIDERS.map((id) => {
         const row = data.find((p) => p.id === id);
-        const state =
-          row?.quota === "exhausted" ? "quota" : row?.ok ? "connected" : "down";
+        const state = agentHealthState(row);
         return (
           <li key={id}>
             <b>{t(agentKey(id, true))}</b> · {t(`run.health.${state}`)}

@@ -2158,6 +2158,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.agentShort.antigravity": "Antigravity",
     "run.agentHint":
       "Nhà cung cấp mặc định của lượt chạy. Mỗi bước agent có thể chọn nhà cung cấp riêng. Agent mất kết nối hoặc hết hạn mức được thay bằng agent ưu tiên kế tiếp, không cần bước chuyển tay.",
+    "run.health.label": "Sức khỏe agent",
     "run.health.checking": "Đang kiểm tra kết nối các agent…",
     "run.health.connected": "đã kết nối",
     "run.health.quota": "hết hạn mức",
@@ -4424,6 +4425,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.agentShort.antigravity": "Antigravity",
     "run.agentHint":
       "Default provider for the run. Individual agent steps can select their own provider. An agent that is disconnected or out of quota is replaced by the next healthy provider, without a manual switch.",
+    "run.health.label": "Agent health",
     "run.health.checking": "Checking agent connections…",
     "run.health.connected": "connected",
     "run.health.quota": "out of quota",

@@ -32,6 +32,7 @@ import {
   useLive,
   type LiveState,
 } from "./api.ts";
+import { AgentHealthBar } from "./agentProvider.tsx";
 import { AccountMenu, AccountPage } from "./pages/Account.tsx";
 import { Loading } from "./ui.tsx";
 import "./shell-account.css";
@@ -468,6 +469,7 @@ export function App() {
             </span>
           </div>
           <div className="tb-right">
+            <AgentHealthBar />
             <span className={`live-pill is-${live}`} tabIndex={0} data-tip={t("live.tip")}>
               <i />{" "}
               <b>
