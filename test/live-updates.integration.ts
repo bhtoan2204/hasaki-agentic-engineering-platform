@@ -353,7 +353,7 @@ test("a LISTEN outage switches clients to the fallback and replays what was miss
   const s = await stream(A.cookie);
   await s.until(() => s.hello().length === 1);
   await pool.query(
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query = 'LISTEN workflow_events' AND pid <> pg_backend_pid()",
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND query = 'LISTEN workflow_events' AND pid <> pg_backend_pid()",
   );
   await s.until(() => s.hello().some((h) => h.data.live === false));
   await emit(runId, "status"); // no listener: this NOTIFY reaches nobody

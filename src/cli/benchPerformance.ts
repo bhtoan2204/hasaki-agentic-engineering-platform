@@ -294,7 +294,11 @@ try {
       lockfile_hash: sha256(readFileSync("package-lock.json", "utf8")),
       dependency_policy:
         "Both source subjects use the candidate's installed dependencies and lockfile; dependency upgrades are not compared.",
-      test_preload_hash: sha256(readFileSync("test/setup.ts", "utf8")),
+      test_preload_hash: sha256(
+        ["test/setup.ts", "test/env.ts", "test/pg-cluster.ts"]
+          .map((file) => readFileSync(file, "utf8"))
+          .join(""),
+      ),
       fixture_hash: sha256(JSON.stringify(platformPerformanceFixtures)),
       harness_hash: sha256(
         readFileSync(new URL(import.meta.url), "utf8") +

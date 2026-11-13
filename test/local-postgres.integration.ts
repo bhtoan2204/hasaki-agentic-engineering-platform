@@ -6,6 +6,7 @@ test("the test preload owns PostgreSQL and ignores inherited database endpoints"
   const env: NodeJS.ProcessEnv = { ...process.env, TEST_DATABASE_ADMIN_URL: "postgres://unused@remote.invalid/unused" };
   // The probe is an ordinary subprocess, not another worker in the parent's node:test protocol.
   delete env.NODE_TEST_CONTEXT;
+  delete env.CTP_TEST_PG_CLUSTER;
   const child = spawnSync(process.execPath, ["--import", "./test/setup.ts", "--input-type=module", "-e", `
     import pg from 'pg';
     const url = new URL(process.env.DATABASE_URL);

@@ -4,6 +4,7 @@
  * removes the cluster at the end, also on failure or Ctrl-C.
  */
 import { spawn } from "node:child_process";
+import { constants } from "node:os";
 import { CLUSTER_ENV, startTestCluster } from "./pg-cluster.ts";
 
 const cluster = startTestCluster();
@@ -18,8 +19,11 @@ const child = spawn(
   ],
   { stdio: "inherit", env: { ...process.env, [CLUSTER_ENV]: cluster } },
 );
-// Forward the signal and wait for the child, so the cluster outlives every test process; exit then stops it.
-for (const signal of ["SIGINT", "SIGTERM"] as const)
-  process.removeAllListeners(signal).on(signal, () => child.kill(signal));
+// Wait for the child, so the cluster outlives every test process; exit then stops it. Ctrl-C already reached the
+// child through the shared process group, so only SIGTERM is forwarded.
+process.removeAllListeners("SIGINT").on("SIGINT", () => {});
+process.removeAllListeners("SIGTERM").on("SIGTERM", () => child.kill("SIGTERM"));
 child.on("error", () => process.exit(1));
-child.on("exit", (code, signal) => process.exit(code ?? (signal === "SIGINT" ? 130 : 1)));
+child.on("exit", (code, signal) =>
+  process.exit(code ?? (signal ? 128 + constants.signals[signal] : 1)),
+);
