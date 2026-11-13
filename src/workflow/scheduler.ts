@@ -276,8 +276,18 @@ export async function processJob(
           ),
         `release job ${job.id}`,
       ))
-    )
+    ) {
+      void traceLog({
+        ...attemptTrace,
+        level: "WARN",
+        event: "attempt.released",
+        status: "released",
+        durationMs: Date.now() - startedAt,
+        message: `attempt ${begun.attempt.id} released: ${draining || "heartbeat unavailable or lease lost"}`,
+        data: { job_id: job.id, error: result.error },
+      });
       return;
+    }
     await retryTransient(
       () => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff),
       `finish job ${job.id}`,
@@ -296,6 +306,17 @@ export async function processJob(
         details: result.kind === "failed" ? result.details : undefined,
       },
     });
+  } catch (e) {
+    void traceLog({
+      ...attemptTrace,
+      level: "ERROR",
+      event: "attempt.finished",
+      status: "error",
+      durationMs: Date.now() - startedAt,
+      message: `attempt ${begun.attempt.id} could not be finished: ${(e as Error)?.message ?? e}`,
+      data: { job_id: job.id, result: result.kind },
+    });
+    throw e;
   } finally {
     if (deadline) clearTimeout(deadline);
     ac.signal.removeEventListener("abort", forwardAbort);

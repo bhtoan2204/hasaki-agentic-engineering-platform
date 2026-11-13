@@ -1,11 +1,11 @@
 import { pool, q, type Db } from "../db/pool.ts";
 import { redactSecrets } from "../integrations/redact.ts";
-import { safeDiagnostics } from "../agent/telemetry.ts";
+import { redactContextValue } from "../context/redact.ts";
 import { runEvents } from "./events.ts";
 
 /**
  * Execution tracing on top of the existing workflow_events / workflow_step_attempts tables.
- * Nothing here opens a second logging system: debug logs are `log` events with a level and a `data.trace` block.
+ * Nothing here opens a second logging system: debug logs are `trace` events with a level and a `data.trace` block.
  */
 export const TRACE_LEVELS = ["DEBUG", "INFO", "WARN", "ERROR"] as const;
 export type TraceLevel = (typeof TRACE_LEVELS)[number];
@@ -17,7 +17,15 @@ export const TRACE_LIMITS = {
   logPage: 500,
   /** DEBUG events older than this are purged; every other event is kept. */
   debugRetentionDays: 7,
+  /** DEBUG rows deleted per retention statement, and statements per retention pass. */
+  purgeBatch: 5000,
+  purgeBatches: 100,
+  /** Newest tool / tool_result events loaded into one trace tree. */
+  treeEvents: 20000,
 };
+
+/** pg_try_advisory_xact_lock key: one instance purges DEBUG events at a time. */
+const PURGE_LOCK = 727_057;
 
 const rank = (l: string | null | undefined) =>
   Math.max(0, TRACE_LEVELS.indexOf((l ?? "INFO") as TraceLevel));
@@ -35,16 +43,34 @@ function cap(s: string, max = TRACE_LIMITS.payloadBytes) {
   return s.length > max ? `${s.slice(0, max)}… [truncated ${s.length - max} chars]` : s;
 }
 
-/** Secrets are masked and the payload is bounded before anything is stored or returned. */
+function clip(v: unknown, max: number): unknown {
+  if (typeof v === "string") return cap(v, max);
+  if (Array.isArray(v)) return v.map((x) => clip(x, max));
+  if (v && typeof v === "object")
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clip(x, max)]));
+  return v;
+}
+
+/**
+ * Secrets are masked field by field and the payload is bounded before anything is stored or returned. Large nested
+ * strings are shortened first so the value keeps its shape (and `trace.event`); only what still exceeds the cap
+ * becomes a bounded preview string.
+ */
 export function redactTraceValue(value: unknown): unknown {
   if (value == null) return null;
-  const text = safeDiagnostics(value instanceof Error ? { message: value.message } : value);
-  const masked = cap(redactSecrets(text));
-  try {
-    return JSON.parse(masked);
-  } catch {
-    return masked; // cut mid-JSON (or plain text): keep the bounded string
+  const max = TRACE_LIMITS.payloadBytes;
+  const redacted = redactContextValue(value instanceof Error ? { message: value.message } : value);
+  let out = redacted;
+  for (const limit of [2000, 200, 40]) {
+    if (JSON.stringify(out).length <= max) return out;
+    out = clip(redacted, limit);
   }
+  const json = JSON.stringify(out);
+  if (json.length <= max) return out;
+  const trace = (redacted as { trace?: unknown } | null)?.trace;
+  return trace === undefined
+    ? cap(json, max)
+    : { trace: clip(trace, 200), truncated: cap(json, max - 1024) };
 }
 
 export interface TraceEventInput {
@@ -88,7 +114,7 @@ export async function traceLog(
     await runEvents.add(
       db,
       ev.runId,
-      "log",
+      "trace",
       cap(redactSecrets(ev.message)),
       ev.stepId ?? null,
       ev.attemptId ?? null,
@@ -117,7 +143,7 @@ export interface LogFilter {
 /** Structured logs of a run, filtered and paged by id (incremental with `afterId`). Output is redacted again on read. */
 export async function searchLogs(runId: number, f: LogFilter = {}, db: Db = pool) {
   const params: unknown[] = [runId, f.afterId ?? 0];
-  const where = ["e.run_id = $1", "e.id > $2", "e.level IS NOT NULL"];
+  const where = ["e.run_id = $1", "e.id > $2", "e.kind = 'trace'"];
   const add = (sql: string, v: unknown) => (params.push(v), where.push(sql.replace("?", `$${params.length}`)));
   if (f.stepId) add("e.step_id = ?", f.stepId);
   if (f.attemptId) add("e.attempt_id = ?", f.attemptId);
@@ -144,14 +170,25 @@ export function redactEventRow<T extends { content?: string; data?: unknown }>(r
   };
 }
 
-/** Retention: only DEBUG events expire; status, tool and transcript history is preserved. */
+/**
+ * Retention: only DEBUG events expire; status, tool and transcript history is preserved. Deletes in bounded batches;
+ * a batch runs only while this statement holds the purge lock, so concurrent instances do not purge the same rows.
+ */
 export async function purgeDebugEvents(days = TRACE_LIMITS.debugRetentionDays, db: Db = pool) {
-  const r = await q(
-    db,
-    "DELETE FROM workflow_events WHERE level = 'DEBUG' AND created_at < now() - make_interval(days => $1) RETURNING id",
-    [days],
-  );
-  return r.length;
+  let total = 0;
+  for (let i = 0; i < TRACE_LIMITS.purgeBatches; i++) {
+    const r = await db.query(
+      `DELETE FROM workflow_events WHERE id IN (
+         SELECT id FROM workflow_events
+          WHERE level = 'DEBUG' AND created_at < now() - make_interval(days => $1)
+          ORDER BY created_at LIMIT $2)
+         AND pg_try_advisory_xact_lock($3)`,
+      [days, TRACE_LIMITS.purgeBatch, PURGE_LOCK],
+    );
+    total += r.rowCount ?? 0;
+    if ((r.rowCount ?? 0) < TRACE_LIMITS.purgeBatch) break;
+  }
+  return total;
 }
 
 // ---- trace tree -------------------------------------------------------------------------------------------------
@@ -171,7 +208,14 @@ export interface TraceNode {
 
 export interface TraceInput {
   run: { id: number; status: string; created_at: string; finished_at?: string | null };
-  steps: Array<{ id: number; key: string; type: string; status: string }>;
+  steps: Array<{
+    id: number;
+    key: string;
+    type: string;
+    status: string;
+    live_job_status?: string | null;
+    live_job_available_at?: string | null;
+  }>;
   attempts: Array<{
     id: number;
     step_id: number;
@@ -189,7 +233,7 @@ export interface TraceInput {
     output_tokens?: number | null;
     failure_category?: string | null;
   }>;
-  /** `tool` events and their `tool_result` partners, ordered by id. */
+  /** `tool` events, their `tool_result` partners and `tool.prepare_branch` trace events, ordered by id. */
   events: Array<{ id: number; attempt_id: number | null; kind: string; content: string; data: Record<string, unknown> | null; created_at: string }>;
   handoffs: Array<{ source_attempt_id: number; target_attempt_id: number | null; reason: string; status: string }>;
 }
@@ -224,7 +268,12 @@ export function assembleTrace(input: TraceInput): TraceNode {
       startedAt: null,
       durationMs: null,
       ids: { runId, stepId: step.id },
-      attrs: { stepType: step.type },
+      attrs: {
+        stepType: step.type,
+        liveJob: step.live_job_status
+          ? { status: step.live_job_status, availableAt: step.live_job_available_at ?? null }
+          : null,
+      },
       children: [],
     };
     const attempts = input.attempts.filter((a) => a.step_id === step.id).sort((a, b) => a.number - b.number);
@@ -252,6 +301,7 @@ export function assembleTrace(input: TraceInput): TraceNode {
       };
       prev = a.id;
       const calls = new Map<string, TraceNode>();
+      const conflicts: string[] = [];
       const events = input.events.filter((e) => e.attempt_id === a.id);
       for (const e of events) {
         if (e.kind === "tool" && e.data?.id) {
@@ -275,8 +325,14 @@ export function assembleTrace(input: TraceInput): TraceNode {
             t.attrs.resultEventId = e.id;
             t.attrs.result = cap(redactSecrets(e.content), 1000);
           }
+        } else if (
+          e.kind === "trace" &&
+          (e.data?.details as { conflict?: unknown } | null)?.conflict === true
+        ) {
+          conflicts.push(`event:${e.id}`);
         }
       }
+      if (conflicts.length) node.attrs.worktreeConflicts = conflicts;
       for (const t of calls.values()) {
         const parent = t.attrs.parentToolUseId ? calls.get(String(t.attrs.parentToolUseId)) : undefined;
         (parent ?? node).children.push(t);
@@ -310,7 +366,13 @@ export function assembleTrace(input: TraceInput): TraceNode {
 export async function loadTraceInput(runId: number, db: Db = pool): Promise<TraceInput> {
   const [runs, steps, attempts, events, handoffs] = await Promise.all([
     q(db, "SELECT id, status, created_at, finished_at FROM workflow_runs WHERE id = $1", [runId]),
-    q(db, "SELECT id, key, type, status FROM workflow_steps WHERE run_id = $1 ORDER BY position, id", [runId]),
+    q(
+      db,
+      `SELECT s.id, s.key, s.type, s.status, j.status AS live_job_status, j.available_at AS live_job_available_at
+         FROM workflow_steps s LEFT JOIN workflow_jobs j ON j.step_id = s.id AND j.status IN ('queued', 'running')
+        WHERE s.run_id = $1 ORDER BY s.position, s.id`,
+      [runId],
+    ),
     q(
       db,
       `SELECT a.id, a.step_id, a.number, a.generation, a.status, a.job_id, a.started_at, a.finished_at, a.error,
@@ -321,9 +383,14 @@ export async function loadTraceInput(runId: number, db: Db = pool): Promise<Trac
     ),
     q(
       db,
-      `SELECT id, attempt_id, kind, left(content, 2000) AS content, data, created_at FROM workflow_events
-        WHERE run_id = $1 AND kind IN ('tool', 'tool_result') ORDER BY id LIMIT 20000`,
-      [runId],
+      `SELECT * FROM (
+         SELECT id, attempt_id, kind, left(content, 2000) AS content, data, created_at FROM workflow_events
+          WHERE run_id = $1
+            AND (kind IN ('tool', 'tool_result')
+                 OR (kind = 'trace' AND data->'trace'->>'event' = 'tool.prepare_branch'))
+          ORDER BY id DESC LIMIT $2) e
+        ORDER BY id`,
+      [runId, TRACE_LIMITS.treeEvents],
     ),
     q(db, "SELECT source_attempt_id, target_attempt_id, reason, status FROM provider_handoffs WHERE run_id = $1", [runId]),
   ]);

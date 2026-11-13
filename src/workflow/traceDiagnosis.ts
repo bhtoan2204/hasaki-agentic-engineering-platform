@@ -30,6 +30,9 @@ export interface DiagnosisOptions {
   /** An attempt that takes more than this share of the run's attempt time is a bottleneck. */
   bottleneckShare?: number;
   tokenThreshold?: number;
+  /** A RUNNING step without a running attempt or a live job is reported stuck only this long after its last attempt. */
+  stuckGraceMs?: number;
+  now?: number;
 }
 
 const sourceOf = (c: FailureCategory): FailureSource =>
@@ -61,6 +64,8 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
   const loopAttempts = opts.loopAttempts ?? 3;
   const share = opts.bottleneckShare ?? 0.6;
   const tokenThreshold = opts.tokenThreshold ?? 1_000_000;
+  const stuckGraceMs = opts.stuckGraceMs ?? 120_000;
+  const now = opts.now ?? Date.now();
   const findings: Finding[] = [];
   const nodes = flatten(root);
   const attempts = nodes.filter((n) => n.type === "attempt");
@@ -70,31 +75,32 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
     const failed = list.filter((a) => a.status === "FAILED");
     for (const a of failed) {
       const text = errorText(a);
-      const worktree = /worktree|already (checked out|exists)|is already used by|prepare_branch/i.test(text);
-      const cat = (a.attrs.failureCategory as FailureCategory | null) ?? normalizeProviderFailure({ message: text });
-      findings.push(
-        worktree
-          ? {
-              kind: "git_worktree_conflict",
-              source: "workflow_engine",
-              category: null,
-              summary: `Step ${step.label} failed in prepare_branch: git worktree conflict (job ${a.ids.jobId ?? "unknown"}, attempt ${a.ids.attemptId}).`,
-              evidence: [a.id, step.id],
-              suggestion:
-                "Remove the stale worktree or branch lease for this run and retry; a retry on the same branch fails again while the old worktree still holds it.",
-            }
-          : {
-              kind: "failure",
-              source: sourceOf(cat),
-              category: cat,
-              summary: `Attempt ${a.ids.attemptId} of ${step.label} failed (${cat}).`,
-              evidence: [a.id],
-              suggestion:
-                cat === "RATE_LIMIT" || cat === "PROVIDER_UNAVAILABLE"
-                  ? "Transient provider condition: retry later or hand off to another provider."
-                  : "Inspect the attempt error and its last tool calls.",
-            },
-      );
+      const conflicts = (a.attrs.worktreeConflicts as string[] | undefined) ?? [];
+      const recorded = a.attrs.failureCategory as FailureCategory | null;
+      const known = recorded != null && recorded !== "UNKNOWN";
+      const cat = known ? recorded : normalizeProviderFailure({ message: text });
+      if (conflicts.length)
+        findings.push({
+          kind: "git_worktree_conflict",
+          source: "workflow_engine",
+          category: null,
+          summary: `Step ${step.label}: prepare_branch hit a git worktree conflict (job ${a.ids.jobId ?? "unknown"}, attempt ${a.ids.attemptId}).`,
+          evidence: [a.id, step.id, ...conflicts],
+          suggestion:
+            "Remove the stale worktree or branch lease for this run and retry; a retry on the same branch fails again while the old worktree still holds it.",
+        });
+      if (!conflicts.length || known)
+        findings.push({
+          kind: "failure",
+          source: sourceOf(cat),
+          category: cat,
+          summary: `Attempt ${a.ids.attemptId} of ${step.label} failed (${cat}).`,
+          evidence: [a.id],
+          suggestion:
+            cat === "RATE_LIMIT" || cat === "PROVIDER_UNAVAILABLE"
+              ? "Transient provider condition: retry later or hand off to another provider."
+              : "Inspect the attempt error and its last tool calls.",
+        });
     }
     // Same error again and again: explains why a retry keeps failing.
     const texts = failed.map(errorText).filter(Boolean);
@@ -134,7 +140,16 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
           suggestion: "Check worker leases and fencing tokens for a double claim.",
         });
     }
-    if (step.status === "RUNNING" && list.length && list.every((a) => a.status !== "RUNNING"))
+    const lastEnd = Math.max(
+      ...list.map((a) => (a.startedAt ? new Date(a.startedAt).getTime() + (a.durationMs ?? 0) : 0)),
+    );
+    if (
+      step.status === "RUNNING" &&
+      list.length &&
+      list.every((a) => a.status !== "RUNNING") &&
+      !step.attrs.liveJob &&
+      now - lastEnd >= stuckGraceMs
+    )
       findings.push({
         kind: "stuck",
         source: "scheduler",

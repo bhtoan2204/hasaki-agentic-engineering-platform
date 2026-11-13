@@ -37,14 +37,14 @@ export const runEvents = {
               CASE WHEN length(e.content) > 600 THEN left(e.content, 600) || '…' ELSE e.content END AS content
          FROM workflow_events e LEFT JOIN workflow_steps s ON s.id = e.step_id
         WHERE e.run_id = $1 AND e.id > $2 AND e.kind <> ALL($3) ORDER BY e.id LIMIT 2000`,
-      [runId, afterId, TRANSCRIPT_ONLY],
+      [runId, afterId, [...TRANSCRIPT_ONLY, "trace"]],
     );
   },
-  /** Everything that happened inside one attempt, in order (incremental with `afterId`). */
+  /** Everything that happened inside one attempt, in order (incremental with `afterId`); trace logs have their own API. */
   transcript(attemptId: number, afterId = 0, db: Db = pool) {
     return q(
       db,
-      "SELECT id, kind, content, data, created_at FROM workflow_events WHERE attempt_id = $1 AND id > $2 ORDER BY id LIMIT 5000",
+      "SELECT id, kind, content, data, created_at FROM workflow_events WHERE attempt_id = $1 AND id > $2 AND kind <> 'trace' ORDER BY id LIMIT 5000",
       [attemptId, afterId],
     );
   },
