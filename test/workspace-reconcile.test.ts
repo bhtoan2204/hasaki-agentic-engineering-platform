@@ -11,6 +11,7 @@ import { createUser } from "../src/auth/users.ts";
 import {
   prepareWorkspace,
   recordWorkspace,
+  restoreMissingWorkspaces,
   runWorkspaceConflict,
   WorkspaceConflictError,
 } from "../src/git/provider.ts";
@@ -208,6 +209,79 @@ test("a worktree outside the platform's storage is never touched", async () => {
     assert.equal(existsSync(outside), true);
   } finally {
     rmSync(outside, { recursive: true, force: true });
+    await s.cleanup();
+  }
+});
+
+test("a deleted worktree is restored at the same path on the same branch, with its commits", async () => {
+  const s = await scenario("RUNNING");
+  try {
+    const head = sh(s.holder, "rev-parse", "HEAD");
+    writeFileSync(join(s.holder, "draft.txt"), "uncommitted\n");
+    rmSync(s.holder, { recursive: true, force: true });
+    assert.match(
+      sh(s.repoPath, "worktree", "list", "--porcelain"),
+      /prunable/,
+      "git keeps the registration of the deleted directory",
+    );
+    const logs: string[] = [];
+    await restoreMissingWorkspaces(s.old, [], async (m) => void logs.push(m));
+    assert.equal(sh(s.holder, "branch", "--show-current").trim(), s.branch);
+    assert.equal(sh(s.holder, "rev-parse", "HEAD"), head);
+    assert.equal(sh(s.holder, "show", "HEAD:work.txt"), "earlier run\n");
+    assert.equal(existsSync(join(s.holder, "draft.txt")), false);
+    assert.match(
+      logs.join("\n"),
+      new RegExp(
+        `restored missing worktree ${s.name} at ${s.holder} on ${s.branch} .*uncommitted changes .* are lost`,
+      ),
+    );
+    assert.doesNotMatch(sh(s.repoPath, "worktree", "list", "--porcelain"), /prunable/);
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("a deleted worktree whose registration was already pruned is restored too", async () => {
+  const s = await scenario("RUNNING");
+  try {
+    rmSync(s.holder, { recursive: true, force: true });
+    sh(s.repoPath, "worktree", "prune");
+    await restoreMissingWorkspaces(s.old, [], async () => {});
+    assert.equal(sh(s.holder, "show", "HEAD:work.txt"), "earlier run\n");
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("a deleted worktree whose branch is gone everywhere fails clearly and creates nothing", async () => {
+  const s = await scenario("RUNNING");
+  try {
+    rmSync(s.holder, { recursive: true, force: true });
+    sh(s.repoPath, "worktree", "prune");
+    sh(s.repoPath, "branch", "-D", s.branch);
+    await assert.rejects(
+      restoreMissingWorkspaces(s.old, [], async () => {}),
+      new RegExp(
+        `${s.name}: worktree .* no longer exists and could not be restored on ${s.branch}: .*does not exist locally or on origin`,
+      ),
+    );
+    assert.equal(existsSync(s.holder), false);
+    assert.equal(sh(s.repoPath, "branch", "--list", s.branch), "");
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("a present worktree is left untouched by the restore", async () => {
+  const s = await scenario("RUNNING");
+  try {
+    writeFileSync(join(s.holder, "draft.txt"), "uncommitted\n");
+    const logs: string[] = [];
+    await restoreMissingWorkspaces(s.old, [], async (m) => void logs.push(m));
+    assert.deepEqual(logs, []);
+    assert.equal(sh(s.holder, "status", "--porcelain"), "?? draft.txt\n");
+  } finally {
     await s.cleanup();
   }
 });

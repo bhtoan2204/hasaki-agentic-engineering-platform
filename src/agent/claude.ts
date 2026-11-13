@@ -45,6 +45,7 @@ import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   installNodeDependencies,
+  restoreMissingWorkspaces,
   runWorkspaceConflict,
   workspaceBase,
   workspaceConflictQuestion,
@@ -589,6 +590,14 @@ const agentExecutor: StepExecutor = {
         break;
       }
     }
+    if (mode === "coding")
+      try {
+        await restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, (m) =>
+          ctx.log("system", m),
+        );
+      } catch (e) {
+        return { kind: "failed", error: (e as Error).message, retryable: false };
+      }
     const ws = (await workspacesOf(ctx.run.id)).filter(
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
@@ -1548,6 +1557,13 @@ const agentExecutor: StepExecutor = {
       };
     }
     if (vcfg) {
+      try {
+        await restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, (m) =>
+          ctx.log("system", m),
+        );
+      } catch (e) {
+        return { kind: "failed", error: (e as Error).message, retryable: false };
+      }
       const trees = (await workspacesOf(ctx.run.id)).filter(
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),

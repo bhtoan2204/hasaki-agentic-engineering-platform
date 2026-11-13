@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, join, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
@@ -439,6 +439,13 @@ async function prepareLockedWorkspace(
   if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
   const path = workspacePath ?? join(taskDir(key), repo);
   if (!existsSync(path)) {
+    // A deleted worktree stays registered, and git refuses to add one at a registered path: drop only that entry.
+    const stale = await branchWorktree(checkout, target.branch);
+    if (
+      stale?.missing &&
+      [path, join(realpathSync(join(path, "..")), basename(path))].includes(stale.path)
+    )
+      await unregisterMissingWorktree(checkout, path);
     const conflict = await workspaceConflict(run, repo, checkout, target.branch, path);
     if (conflict) {
       const approved =
@@ -499,6 +506,31 @@ export async function recordWorkspace(
      DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
     [runId, w.repo, w.branch, w.path, w.created_from],
   );
+}
+
+/**
+ * Recreate recorded run worktrees whose directory is gone (cleanup, manual delete, crash) at the same path on the same
+ * branch, so neither the agent nor verification gets a missing cwd. The branch must still exist locally or on origin;
+ * it is never cut again from the base.
+ */
+export async function restoreMissingWorkspaces(
+  run: Parameters<typeof prepareWorkspace>[0],
+  repos: string[],
+  log: (message: string) => Promise<void>,
+): Promise<void> {
+  for (const w of await workspacesOf(run.id)) {
+    if (existsSync(w.path) || (repos.length && !repos.includes(w.repo))) continue;
+    try {
+      await prepareWorkspace(run, w.repo, undefined, { log });
+    } catch (e) {
+      throw new Error(
+        `${w.repo}: worktree ${w.path} no longer exists and could not be restored on ${w.branch}: ${(e as Error).message}`,
+      );
+    }
+    await log(
+      `restored missing worktree ${w.repo} at ${w.path} on ${w.branch} (committed work kept; uncommitted changes in the deleted directory are lost)`,
+    );
+  }
 }
 
 /** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */
