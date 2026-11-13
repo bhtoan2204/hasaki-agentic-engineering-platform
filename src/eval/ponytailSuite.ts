@@ -1,7 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolveRepoPath } from "../repos/paths.ts";
-import { directoryIsSelfRepository, isSelfRepository } from "../platform/selfDevelopment.ts";
+import {
+  directoryIsSelfRepository,
+  installationRepositoryUrl,
+  isSelfRepository,
+  overlapsLiveApplication,
+} from "../platform/selfDevelopment.ts";
 import { repositories, type RepositoryRow } from "../repos/service.ts";
 import { SuiteSchema, sha256 } from "./dataset.ts";
 import { harnessHash } from "./fixtures.ts";
@@ -34,10 +39,17 @@ export async function eligiblePonytailRepositories(rows: RepositoryRow[]) {
     )
     .sort((a, b) => a.name.localeCompare(b.name));
   // A renamed or re-registered copy of this platform must never become a benchmark target; unknown means excluded.
+  const known = await installationRepositoryUrl().catch(() => null);
   const self = await Promise.all(
     named.map(async (r) => {
       try {
-        return (await isSelfRepository(r)) || (await directoryIsSelfRepository(resolveRepoPath(r)));
+        const path = resolveRepoPath(r);
+        return (
+          !known ||
+          overlapsLiveApplication(path) ||
+          (await isSelfRepository(r)) ||
+          (await directoryIsSelfRepository(path))
+        );
       } catch {
         return true;
       }

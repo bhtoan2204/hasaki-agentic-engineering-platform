@@ -16,7 +16,7 @@ const HOME_CREDENTIALS = [
   ".config/gcloud",
 ];
 /** Fail-closed Claude sandbox for live evaluation: no network, only the throwaway database socket, no credentials. */
-export function liveClaudeSandbox(databaseUrl: string) {
+export function liveClaudeSandbox(databaseUrl: string, workRoot: string) {
   const socket = new URL(databaseUrl).searchParams.get("host");
   return {
     enabled: true,
@@ -33,8 +33,10 @@ export function liveClaudeSandbox(databaseUrl: string) {
         ...HOME_CREDENTIALS.map((p) => join(homedir(), p)),
         resolve(process.env.PLATFORM_CONFIG ?? "config.json"),
         config.reposRoot,
+        config.dataDir,
         ...Object.values(config.repositories),
       ],
+      allowRead: [workRoot],
     },
   };
 }

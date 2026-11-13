@@ -1091,7 +1091,9 @@ const agentExecutor: StepExecutor = {
             },
             tools: nativeTools,
             ...(agents ? { agents } : {}),
-            ...(live ? { sandbox: liveClaudeSandbox(live.databaseUrl) } : {}),
+            ...(live
+              ? { sandbox: liveClaudeSandbox(live.databaseUrl, live.root ?? live.cwd) }
+              : {}),
             permissionMode: "default",
             canUseTool,
             hooks: {

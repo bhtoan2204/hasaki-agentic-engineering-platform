@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, hostname } from "node:os";
 import {
   LiveBudget,
   liveRuntime,
@@ -14,12 +14,21 @@ import { config } from "../src/config.ts";
 import { changedCloneCount, diffFootprint } from "../src/eval/ponytailMetrics.ts";
 import { ponytailConfigurations, eligiblePonytailRepositories } from "../src/eval/ponytailSuite.ts";
 import { agentEnvironment } from "../src/agent/environment.ts";
-import { removeEvaluationSecrets, sweepEvaluationDatabases } from "../src/eval/liveProvider.ts";
+import {
+  EVALUATION_DATABASE_MARKER,
+  liveAllowedTools,
+  removeEvaluationSecrets,
+  sweepEvaluationDatabases,
+} from "../src/eval/liveProvider.ts";
 import { liveClaudeSandbox } from "../src/eval/liveSandbox.ts";
 import { background, settleBackground } from "../src/workflow/background.ts";
 import type { RepositoryRow } from "../src/repos/service.ts";
 import { addUsage, newMetrics, accumulateMetrics } from "../src/agent/metrics.ts";
-import { setBwrapForTests } from "../src/platform/selfDevelopment.ts";
+import {
+  liveApplicationRoot,
+  resetSelfRepositoryCache,
+  setBwrapForTests,
+} from "../src/platform/selfDevelopment.ts";
 
 test("Live budget aborts on cumulative case tokens and costs across sessions, not snapshot sums", () => {
   let aborted = 0;
@@ -293,28 +302,92 @@ test("Ponytail suite excludes repositories that are this platform under another 
     config.platform.repositoryUrl = old;
   }
 });
+const DEAD_PID = 2 ** 30;
+async function fakeDatabase(data: string, owner: object | null) {
+  await mkdir(data, { recursive: true });
+  await writeFile(join(data, "PG_VERSION"), "17");
+  if (owner) await writeFile(join(data, EVALUATION_DATABASE_MARKER), JSON.stringify(owner));
+  return join(data, "PG_VERSION");
+}
 test("Worker start sweeps orphaned evaluation databases", async () => {
   const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
   try {
-    const data = join(root, "1", "2", "live", "database-orphan");
-    await mkdir(data, { recursive: true });
-    await writeFile(join(data, "PG_VERSION"), "17");
-    await writeFile(join(root, "1", "2", "live", "keep.txt"), "x");
+    const live = join(root, "1", "2", "live");
+    const orphan = await fakeDatabase(join(live, "database-00000000-0000-4000-8000-000000000001"), {
+      pid: DEAD_PID,
+      host: hostname(),
+    });
+    await writeFile(join(live, "keep.txt"), "x");
     await sweepEvaluationDatabases(root);
-    await assert.rejects(readFile(join(data, "PG_VERSION")));
-    await readFile(join(root, "1", "2", "live", "keep.txt"));
+    await assert.rejects(readFile(orphan));
+    await readFile(join(live, "keep.txt"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
+test("Database sweep leaves live owners, other hosts and repository content alone", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
+  try {
+    const live = join(root, "1", "2", "live");
+    const id = (n: number) => `database-00000000-0000-4000-8000-00000000000${n}`;
+    const kept = [
+      await fakeDatabase(join(live, id(1)), { pid: process.pid, host: hostname() }),
+      await fakeDatabase(join(live, id(2)), { pid: DEAD_PID, host: `${hostname()}-other` }),
+      await fakeDatabase(join(live, id(3)), null),
+      await fakeDatabase(join(live, "repo", id(4)), { pid: DEAD_PID, host: hostname() }),
+      await fakeDatabase(join(live, "database-tool"), { pid: DEAD_PID, host: hostname() }),
+      await fakeDatabase(join(root, id(5)), { pid: DEAD_PID, host: hostname() }),
+    ];
+    await sweepEvaluationDatabases(root);
+    for (const path of kept) await readFile(path);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test("Live configurations can only narrow the sandboxed tool set", () => {
+  assert.deepEqual(liveAllowedTools(["Read", "WebFetch", "integration:jira", "Bash"]), [
+    "Read",
+    "Bash",
+  ]);
+  assert.ok(!liveAllowedTools(undefined).includes("WebFetch"));
+  assert.ok(liveAllowedTools(undefined).includes("Edit"));
+});
+test("Ponytail suite excludes the live checkout and everything when self identity is unknown", async () => {
+  const oldUrl = config.platform.repositoryUrl;
+  const oldRepos = config.repositories;
+  const oldGitDir = process.env.GIT_DIR;
+  const row = (name: string) =>
+    ({ id: 8, name, path: "", provider: "github", enabled: true }) as RepositoryRow;
+  try {
+    config.platform.repositoryUrl = "https://github.com/acme/platform.git";
+    config.repositories = { ...oldRepos, "live-copy": liveApplicationRoot()! };
+    assert.deepEqual(
+      (await eligiblePonytailRepositories([row("live-copy"), row("service")])).map((r) => r.name),
+      ["service"],
+    );
+    config.platform.repositoryUrl = "";
+    process.env.GIT_DIR = join(tmpdir(), "no-such-git-dir");
+    resetSelfRepositoryCache();
+    assert.deepEqual(await eligiblePonytailRepositories([row("service")]), []);
+  } finally {
+    config.platform.repositoryUrl = oldUrl;
+    config.repositories = oldRepos;
+    if (oldGitDir === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = oldGitDir;
+    resetSelfRepositoryCache();
+  }
+});
 test("Live Claude sandbox fails closed without network and denies credential reads", () => {
-  const sandbox = liveClaudeSandbox("postgres://eval@localhost/db?host=%2Ftmp%2Fsock");
+  const work = join(config.dataDir, "evaluation-work", "1", "2", "live");
+  const sandbox = liveClaudeSandbox("postgres://eval@localhost/db?host=%2Ftmp%2Fsock", work);
   assert.equal(sandbox.failIfUnavailable, true);
   assert.equal(sandbox.allowUnsandboxedCommands, false);
   assert.deepEqual(sandbox.network.allowedDomains, []);
   assert.deepEqual(sandbox.network.allowUnixSockets, ["/tmp/sock"]);
   assert.ok(sandbox.filesystem.denyRead.some((p) => p.endsWith("/.pgpass")));
   assert.ok(sandbox.filesystem.denyRead.includes(config.reposRoot));
+  assert.ok(sandbox.filesystem.denyRead.includes(config.dataDir));
+  assert.deepEqual(sandbox.filesystem.allowRead, [work]);
 });
 test("Background work started inside a live phase does not inherit the live runtime", async () => {
   let seen: unknown = "unset";

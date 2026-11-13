@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
@@ -543,6 +543,35 @@ test("live phase stops waiting for a held budget lock when aborted", async () =>
   } finally {
     await holder.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [group]);
     holder.release();
+  }
+});
+
+test("live phase keeps the case workspace when it fails retryably", async () => {
+  const { executeLiveProviderPhase } = await import("../src/eval/liveProvider.ts");
+  const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
+  const { mkdir, writeFile, readFile, rm } = await import("node:fs/promises");
+  const root = liveWorkRoot(9101, 9102);
+  await mkdir(join(root, "repo"), { recursive: true });
+  await writeFile(join(root, "repo", "edited.txt"), "phase 0 edits");
+  try {
+    await assert.rejects(
+      executeLiveProviderPhase(
+        {
+          run: { id: 0, owner_id: 1 },
+          signal: new AbortController().signal,
+        } as unknown as LivePhaseArgs[0],
+        {
+          evaluation_id: 9101,
+          case_run_id: 9102,
+          ordinal: 1,
+          definition: { invalid: true },
+          configuration: { blocked: "", paid_approval: true, budget_group: "retry-keep" },
+        } as unknown as LivePhaseArgs[1],
+      ),
+    );
+    assert.equal(await readFile(join(root, "repo", "edited.txt"), "utf8"), "phase 0 edits");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

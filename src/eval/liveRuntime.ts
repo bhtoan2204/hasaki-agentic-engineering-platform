@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 export interface LiveRuntime {
   cwd: string;
+  root?: string;
   databaseUrl: string;
   observe: (tokens: number, cost: number | null, key?: object) => void;
 }

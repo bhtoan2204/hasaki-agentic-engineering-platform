@@ -1,16 +1,17 @@
-import { mkdir, rm, readdir, lstat } from "node:fs/promises";
+import { mkdir, rm, readdir, lstat, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import pg from "pg";
 import type { z } from "zod";
 import { config } from "../config.ts";
 import { one, pool } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { repositories } from "../repos/service.ts";
-import { listAccessibleRepositories } from "../repos/access.ts";
+import { resolveEffectiveRepositoryPermissions } from "../repos/access.ts";
 import { resolveRepoPath } from "../repos/paths.ts";
 import { recordWorkspace } from "../git/provider.ts";
 import { claudeExecutor } from "../agent/claude.ts";
@@ -44,6 +45,9 @@ const LIVE_ALLOWED_TOOLS = [
 // Wider than the agent tool policy: archives of real repositories also carry build/deploy credentials.
 const EVALUATION_SECRET =
   /^(credentials|\.npmrc|\.netrc|\.pgpass|\.git-credentials|\.pypirc|\.dockercfg|secrets?\..+|application[^/]*\.(ya?ml|properties))$|\.(p12|pfx|jks|keystore)$/i;
+export const EVALUATION_DATABASE_MARKER = "platform-evaluation-owner.json";
+export const liveAllowedTools = (requested?: string[] | null) =>
+  requested ? LIVE_ALLOWED_TOOLS.filter((t) => requested.includes(t)) : LIVE_ALLOWED_TOOLS;
 export const isEvaluationSecretPath = (name: string) =>
   isSecretPath(name) || EVALUATION_SECRET.test(name);
 type Phase = {
@@ -69,7 +73,8 @@ export async function removeEvaluationSecrets(root: string) {
   }
 }
 export async function ownerCanRead(ownerId: number, repository: string) {
-  return (await listAccessibleRepositories(ownerId)).some((r) => r.repository.name === repository);
+  const access = await resolveEffectiveRepositoryPermissions(ownerId, repository);
+  return !!access?.effective.read && access.platform.source !== "benchmark";
 }
 async function stopIsolatedDatabase(data: string) {
   const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
@@ -79,17 +84,37 @@ async function stopIsolatedDatabase(data: string) {
     await rm(data, { recursive: true, force: true });
   }
 }
+const subdirectories = async (dir: string) =>
+  (await readdir(dir, { withFileTypes: true }).catch(() => []))
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+async function ownerGone(data: string) {
+  try {
+    await lstat(join(data, "PG_VERSION"));
+    const owner = JSON.parse(await readFile(join(data, EVALUATION_DATABASE_MARKER), "utf8"));
+    if (owner.host !== hostname() || !Number.isInteger(owner.pid)) return false;
+    try {
+      process.kill(owner.pid, 0);
+      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
+    }
+  } catch {
+    return false;
+  }
+}
 /** A crashed worker leaves throwaway postmasters behind; stop and remove them before claiming work. */
 export async function sweepEvaluationDatabases(root = join(config.dataDir, "evaluation-work")) {
-  const walk = async (dir: string, depth: number): Promise<void> => {
-    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-      if (!entry.isDirectory()) continue;
-      const path = join(dir, entry.name);
-      if (entry.name.startsWith("database-")) await stopIsolatedDatabase(path).catch(() => {});
-      else if (depth < 4) await walk(path, depth + 1);
+  // Only liveWorkRoot()/database-* is ours; never descend into extracted repository workspaces.
+  for (const evaluation of await subdirectories(root))
+    for (const caseRun of await subdirectories(join(root, evaluation))) {
+      const live = join(root, evaluation, caseRun, "live");
+      for (const name of await subdirectories(live)) {
+        const data = join(live, name);
+        if (/^database-[0-9a-f-]{36}$/.test(name) && (await ownerGone(data)))
+          await stopIsolatedDatabase(data).catch(() => {});
+      }
     }
-  };
-  await walk(root, 0);
 }
 async function isolatedDatabase(root: string) {
   const data = join(root, `database-${randomUUID()}`);
@@ -99,6 +124,10 @@ async function isolatedDatabase(root: string) {
     "initdb",
     ["-D", data, "-U", "platform_eval", "-A", "trust", "--no-locale", "--encoding=UTF8"],
     { env, timeout: 30000 },
+  );
+  await writeFile(
+    join(data, EVALUATION_DATABASE_MARKER),
+    JSON.stringify({ pid: process.pid, host: hostname(), instance: config.instanceId }),
   );
   await mkdir(socket, { mode: 0o700 });
   let started = false;
@@ -150,6 +179,15 @@ export async function executeLiveProviderPhase(
   let locked = false,
     result: ExecResult | undefined;
   try {
+    const task = CaseSchema.safeParse(phase.definition);
+    if (task.success && task.data.validation.type === "commands")
+      for (const name of task.data.repositories)
+        if (!(await ownerCanRead(Number(ctx.run.owner_id), name)))
+          return (result = {
+            kind: "failed",
+            retryable: false,
+            error: `Evaluation owner has no read access to repository ${name}`,
+          });
     for (let delay = 100; ; delay = Math.min(delay * 2, 5000)) {
       const { rows } = await connection.query(
         "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS ok",
@@ -166,8 +204,8 @@ export async function executeLiveProviderPhase(
     }
     return (result = await executeLiveProviderPhaseLocked(ctx, phase));
   } finally {
-    // A failed phase ends the case chain, so nothing else will remove its workspaces.
-    if (!result || result.kind === "failed")
+    // Only a terminal failure ends the case chain; a retry or a new lease holder still needs the workspace.
+    if (result?.kind === "failed" && result.retryable === false && !ctx.signal.aborted)
       await cleanupLiveWork(ctx.run.id, liveWorkRoot(phase.evaluation_id, phase.case_run_id)).catch(
         (error) => console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
       );
@@ -201,12 +239,6 @@ async function executeLiveProviderPhaseLocked(
     const name = registered ? logical : fixtureName(logical);
     const row = await repositories.get(name);
     if (!row?.enabled) throw new Error(`Evaluation repository unavailable: ${name}`);
-    if (registered && !(await ownerCanRead(Number(ctx.run.owner_id), name)))
-      return {
-        kind: "failed",
-        retryable: false,
-        error: `Evaluation owner has no read access to repository ${name}`,
-      };
     const primary = registered ? resolveRepoPath(row) : fixtureRoot(name);
     const path = join(root, logical);
     if (phase.ordinal === 0) {
@@ -249,7 +281,12 @@ async function executeLiveProviderPhaseLocked(
         branch: "main",
         created_from: await fixtureGit(path, ["rev-parse", "HEAD"]),
       });
-    }
+    } else if (!(await lstat(path).catch(() => null)))
+      return {
+        kind: "failed",
+        retryable: false,
+        error: `Live case workspace missing for ${logical}; rerun the case from its first phase`,
+      };
     workspaces.push({ repo: name, path });
   }
   const totals = await one(
@@ -289,12 +326,14 @@ async function executeLiveProviderPhaseLocked(
   if (!principal) throw new Error("Authenticated evaluation owner required");
   const db = await isolatedDatabase(root);
   const started = Date.now();
+  const allowedTools = liveAllowedTools(cfg.allowed_tools);
   let observed: Record<string, unknown> = {};
   let persisted = 0,
     persisting: Promise<unknown> = Promise.resolve();
   try {
     const runtime = {
       cwd: workspaces[0].path,
+      root,
       databaseUrl: db.url,
       observe: (tokens: number, cost: number | null, key?: object) => {
         budget.observe(tokens, cost, key);
@@ -322,7 +361,7 @@ async function executeLiveProviderPhaseLocked(
         evaluation: {
           codeIntelligence: cfg.code_intelligence,
           contextMode: cfg.context_variant,
-          allowedTools: cfg.allowed_tools,
+          allowedTools,
         },
       },
       () =>
@@ -335,7 +374,7 @@ async function executeLiveProviderPhaseLocked(
               effective_agent: ctx.attempt.effective_agent
                 ? {
                     ...ctx.attempt.effective_agent,
-                    allowed_tools: cfg.allowed_tools ?? LIVE_ALLOWED_TOOLS,
+                    allowed_tools: allowedTools,
                   }
                 : ctx.attempt.effective_agent,
             },
@@ -346,7 +385,7 @@ async function executeLiveProviderPhaseLocked(
                 ...ctx.step.config,
                 agent: {
                   ...agent,
-                  allowed_tools: cfg.allowed_tools ?? LIVE_ALLOWED_TOOLS,
+                  allowed_tools: allowedTools,
                 },
               },
             },
