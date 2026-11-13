@@ -669,6 +669,27 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                 })}
               />
             </Panel>
+            <Panel
+              icon={Sparkles}
+              title="Skill activation"
+              sub="Evidence from structured results and body reads"
+            >
+              {(data.skill_activation ?? []).map(
+                (s: {
+                  key: string;
+                  state: string;
+                  attempts: number;
+                  loaded_unused: number;
+                  provider_limited: number;
+                }) => (
+                  <div className="small" key={`${s.key}:${s.state}`}>
+                    <span className="mono">{s.key}</span> · {s.state} × {s.attempts}
+                    {s.loaded_unused ? ` · loaded_unused ${s.loaded_unused}` : ""}
+                    {s.provider_limited ? ` · provider_limited ${s.provider_limited}` : ""}
+                  </div>
+                ),
+              )}
+            </Panel>
             <Panel icon={Sparkles} title={t("ins.skillsLoaded")} sub={t("ins.loads")}>
               <Bars
                 rows={(data.skills ?? []).map((r: any) => ({

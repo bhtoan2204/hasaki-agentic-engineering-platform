@@ -268,14 +268,17 @@ export function ApprovalPanel({
       };
     if (approve && req?.requires_risk_acknowledgement)
       body.data = { ...(body.data ?? {}), acknowledge_risk: ackRisk };
-    await act(async () => {
-      const result = await api(
-        `/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`,
-        body,
-      );
-      await onDone();
-      return result;
-    }, approve ? t("si.approved") : t("si.rejected"));
+    await act(
+      async () => {
+        const result = await api(
+          `/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`,
+          body,
+        );
+        await onDone();
+        return result;
+      },
+      approve ? t("si.approved") : t("si.rejected"),
+    );
   };
   const reexec = step.config?.on_reject?.reexecute;
   return (
@@ -477,7 +480,9 @@ export function StepInspector({
   onChanged: () => void;
 }) {
   const { t } = useI18n();
-  const { data, error, loading, reload, reloadFresh } = useApi<any>(`/api/runs/${run.id}/steps/${stepKey}`);
+  const { data, error, loading, reload, reloadFresh } = useApi<any>(
+    `/api/runs/${run.id}/steps/${stepKey}`,
+  );
   const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
   const [attemptId, setAttemptId] = useState<number | null>(null);
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1714,6 +1719,31 @@ function AttemptMetrics({ m }: { m: any }) {
             ? ` · ${t("si.searched", { q: m.knowledge_searches.map((q: string) => `"${q}"`).join(", ") })}`
             : ""}
         </span>
+        {m.skills?.length > 0 && (
+          <>
+            <span>Skill activation</span>
+            <span className="small">
+              {m.skills.map(
+                (s: {
+                  key: string;
+                  version: number;
+                  tier: string;
+                  tokens: number;
+                  states: string[];
+                  evidence: string[];
+                  loaded_unused: boolean;
+                  provider_limited: boolean;
+                }) => (
+                  <div key={s.key} title={s.evidence.join(", ")}>
+                    {s.key}@v{s.version} · {s.tier} · {s.tokens} tokens · {s.states.join(" → ")}
+                    {s.loaded_unused ? " · loaded_unused" : ""}
+                    {s.provider_limited ? " · provider_limited" : ""}
+                  </div>
+                ),
+              )}
+            </span>
+          </>
+        )}
         <span>{t("si.integration")}</span>
         <span className="small">
           {(m.integration_calls ?? [])

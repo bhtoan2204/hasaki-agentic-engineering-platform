@@ -388,12 +388,22 @@ async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
   await q(
     pool,
     "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'submit_result', $4)",
-    [env.runId, env.stepId, env.attemptId, JSON.stringify({ output })],
+    [
+      env.runId,
+      env.stepId,
+      env.attemptId,
+      JSON.stringify({
+        output,
+        skills_applied: args.skills_applied ?? output.skills_applied ?? [],
+      }),
+    ],
   );
   return "Result recorded. End your turn now.";
 }
 
-async function isolationFor(stepId: number): Promise<{ isolated: boolean; subtaskId: string | null }> {
+async function isolationFor(
+  stepId: number,
+): Promise<{ isolated: boolean; subtaskId: string | null }> {
   const step = await one<{ subtask_id: string | null; config: { isolated_workspace?: boolean } }>(
     pool,
     "SELECT subtask_id, config FROM workflow_steps WHERE id = $1",
@@ -498,6 +508,17 @@ async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
   const offset = Number(args.offset ?? 0),
     limit = Number(args.limit ?? 18000);
   const body = k.content.slice(offset, offset + limit);
+  if (k.category === "agent_skill")
+    await q(
+      pool,
+      "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'skill_read', $4)",
+      [
+        env.runId,
+        env.stepId,
+        env.attemptId,
+        JSON.stringify({ key, version: k.version, offset, end: offset + body.length }),
+      ],
+    );
   const notice = isExternal(k.metadata) && offset === 0 ? `${externalNotice(k.metadata)}\n\n` : "";
   return `# ${k.title} (${k.key} v${k.version})\n\n${notice}${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
 }
@@ -781,7 +802,10 @@ const legacyInputs: Record<string, z.ZodType> = {
       .max(8),
   }),
   post_update: z.strictObject({ message: z.string().min(1).max(12000) }),
-  submit_result: z.strictObject({ output: z.record(z.string(), z.unknown()) }),
+  submit_result: z.strictObject({
+    output: z.record(z.string(), z.unknown()),
+    skills_applied: z.array(z.string().max(300)).max(100).optional(),
+  }),
   prepare_branch: z.strictObject({ repo: z.string().min(1).max(160) }),
   commit_changes: z.strictObject({
     repo: z.string().min(1).max(160),
