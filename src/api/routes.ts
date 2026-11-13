@@ -737,7 +737,7 @@ export const routes: Route[] = [
         attemptId: id("attempt"),
         provider: sp.get("provider") ?? undefined,
         event: sp.get("event") ?? undefined,
-        level: (level as any) ?? undefined,
+        level: level && isTraceLevel(level) ? level : undefined,
         from: sp.get("from") ?? undefined,
         to: sp.get("to") ?? undefined,
         afterId: id("after"),
