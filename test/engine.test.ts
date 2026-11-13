@@ -77,9 +77,14 @@ import { repositories } from "../src/repos/service.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 import { workItems } from "../src/workitems/service.ts";
 import { importHasakiTask } from "../src/work.ts";
-import type { ExecResult } from "../src/workflow/types.ts";
+import { WorkflowSpec, type ExecResult } from "../src/workflow/types.ts";
 import { setReportReasoner, taskResultReportExecutor } from "../src/report/executor.ts";
-import { withReportStep, REPORT_STEP_KEY, previewRun } from "../src/workflow/engine.ts";
+import {
+  withReportStep,
+  withCleanupStep,
+  REPORT_STEP_KEY,
+  previewRun,
+} from "../src/workflow/engine.ts";
 import { addEvidence } from "../src/report/evidenceStore.ts";
 import { costTotalsForRuns, runCost, workItemCost } from "../src/report/cost.ts";
 import { OPTIONS, setTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
@@ -475,7 +480,7 @@ test("cost read model: totals, by step / model, failed retries counted as wasted
     { key: "analyze", type: "agent" },
     {
       key: "implement",
-      type: "coding_agent",
+      type: "agent",
       depends_on: ["analyze"],
       max_attempts: 2,
       retry_backoff_seconds: 0,
@@ -1417,8 +1422,13 @@ test("report step: appended to the run graph only, last, depending on every term
   const st = run.steps.find((s) => s.key === REPORT_STEP_KEY)!;
   assert.equal(st.type, "task_result_report");
   assert.deepEqual([...st.depends_on].sort(), ["review", "test"], "all terminal steps");
-  assert.equal(st.position, Math.max(...run.steps.map((s) => s.position)), "last node");
-  assert.equal(run.graph.steps.at(-1)!.key, REPORT_STEP_KEY);
+  const clean = run.steps.find((s) => s.key === "cleanup")!;
+  assert.deepEqual(clean.depends_on, [REPORT_STEP_KEY], "workspace cleanup runs after the report");
+  assert.equal(st.position, Math.max(...run.steps.map((s) => s.position)) - 1, "last work node");
+  assert.deepEqual(
+    run.graph.steps.slice(-2).map((s) => s.key),
+    [REPORT_STEP_KEY, "cleanup"],
+  );
   const def = (await definitions.get(key))!;
   assert.ok(
     !def.versions[0].spec.steps.some((s: any) => s.key === REPORT_STEP_KEY),
@@ -1455,6 +1465,73 @@ test("report step: never inserted twice (idempotent; custom workflow that alread
   const run = await startRun({ definitionKey: key, workItemId: (await reportItem()).id });
   assert.equal(run.steps.filter((s) => s.type === "task_result_report").length, 1);
   await cancelRun(run.id);
+});
+
+test("cleanup step: appended after the report to coding graphs that lack one; idempotent; definition untouched", async () => {
+  const { parseAiSuggest } = await import("../src/report/aiSuggest.ts");
+  const ai = parseAiSuggest({ task_ai: { ai_suggest: AI } });
+  const spec = WorkflowSpec.parse({
+    name: "x",
+    steps: [
+      { key: "implement", type: "coding_agent" },
+      { key: "review", type: "agent", depends_on: ["implement"] },
+    ],
+  });
+  const once = withCleanupStep(withReportStep(spec, ai));
+  const last = once.steps.at(-1)!;
+  assert.equal(last.key, "cleanup");
+  assert.equal(last.type, "integration");
+  assert.deepEqual(last.config, { action: "cleanup_workspaces", injected: true });
+  assert.deepEqual(last.depends_on, [REPORT_STEP_KEY], "runs after the report");
+  assert.equal(withCleanupStep(once), once, "idempotent");
+  assert.deepEqual(withCleanupStep(spec).steps.at(-1)!.depends_on, ["review"]);
+
+  const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
+  scripts.implement = codingDone;
+  const run = await startRun({ definitionKey: key, repositories: ["oms-api"] });
+  await drain();
+  assert.equal((await stepOf(run.id, "cleanup")).status, "COMPLETED");
+  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  const def = (await definitions.get(key))!;
+  assert.deepEqual(
+    def.versions[0].spec.steps.map((s: { key: string }) => s.key),
+    ["implement"],
+    "published definition is not mutated",
+  );
+  assert.equal(def.latest_version, 1);
+});
+
+test("cleanup step: not injected without worktree-creating steps or when the graph already cleans up", async () => {
+  const graph = (steps: unknown[]) => WorkflowSpec.parse({ name: "x", steps });
+  const readOnly = graph([{ key: "a", type: "agent" }]);
+  assert.equal(withCleanupStep(readOnly), readOnly);
+  const explicit = graph([
+    { key: "implement", type: "coding_agent" },
+    {
+      key: "tidy",
+      type: "integration",
+      depends_on: ["implement"],
+      config: { action: "cleanup_workspaces" },
+    },
+  ]);
+  assert.equal(withCleanupStep(explicit), explicit);
+  const integrate = withCleanupStep(
+    graph([
+      { key: "plan", type: "agent" },
+      {
+        key: "cleanup",
+        type: "integration",
+        depends_on: ["plan"],
+        config: { action: "integrate_subtasks" },
+      },
+    ]),
+  );
+  assert.deepEqual(
+    integrate.steps.map((s) => s.key),
+    ["plan", "cleanup", "workspace_cleanup"],
+    "subtask integration prepares worktrees; a taken key is not reused",
+  );
+  assert.deepEqual(integrate.steps.at(-1)!.depends_on, ["cleanup"]);
 });
 
 test("report flow: draft waits for review (run not COMPLETED), evidence upload + regenerate, approve with limitations", async () => {

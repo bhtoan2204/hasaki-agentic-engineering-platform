@@ -166,6 +166,7 @@ test("Actual analysis → discovery → ranking → shared executor → Codex pr
   assert.equal(resumed.resumeId, "th-1");
   assert.match(block(resumed.prompt), /return 2/);
   assert.doesNotMatch(block(resumed.prompt), /return 1/);
+  assert.ok(await runOnce());
   assert.equal((await getRun(run.id)).status, "COMPLETED");
 });
 test("Disabling P1 keeps actual agent workflow functional and removes the code context block", async () => {

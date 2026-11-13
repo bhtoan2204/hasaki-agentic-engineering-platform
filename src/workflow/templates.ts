@@ -618,11 +618,11 @@ const PRODUCTION_INVESTIGATION = {
   ],
 };
 
-const cleanup = (after: string) => ({
+export const cleanup = (...after: string[]) => ({
   key: "cleanup",
   type: "integration",
   name: "Cleanup",
-  depends_on: [after],
+  depends_on: after,
   config: { action: "cleanup_workspaces" },
 });
 
