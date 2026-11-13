@@ -18,8 +18,10 @@ const osUser = () => {
 };
 const actor = process.argv.find((a) => a.startsWith("--actor="))?.slice(8) || osUser();
 try {
+  // The operator already has direct database access; repository restrictions would hide most shared items.
   const { input, report } = await loadKnowledgeAuditData({
     offline,
+    allShared: true,
     windowDays: days ? Number(days) : 7,
   });
   const root = resolve("docs/audits");

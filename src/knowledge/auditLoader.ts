@@ -10,7 +10,7 @@ import { knowledge, KNOWLEDGE_SEEDS } from "./service.ts";
 import { auditKnowledge, type AuditItem, type AuditUsage } from "./audit.ts";
 
 export async function loadKnowledgeAuditData(
-  options: { windowDays?: number; userId?: number; offline?: boolean } = {},
+  options: { windowDays?: number; userId?: number; offline?: boolean; allShared?: boolean } = {},
 ) {
   const windowDays = Number.isFinite(options.windowDays)
     ? Math.min(365, Math.max(1, Math.floor(options.windowDays!)))
@@ -39,7 +39,9 @@ export async function loadKnowledgeAuditData(
     const readable = await readableRepositoryNames(options.userId);
     const visible = rows.filter(
       (r) =>
-        (r.owner_id == null || r.owner_id === options.userId) && !knowledgeRestricted(r, readable),
+        (r.owner_id == null && options.allShared) ||
+        ((r.owner_id == null || r.owner_id === options.userId) &&
+          !knowledgeRestricted(r, readable)),
     );
     const present = new Set(visible.map((r) => r.key));
     items = [...visible, ...items.filter((i) => !present.has(i.key))];
