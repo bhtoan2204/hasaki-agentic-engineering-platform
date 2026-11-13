@@ -8,14 +8,15 @@ import { hostname } from "node:os";
 import pg from "pg";
 import type { z } from "zod";
 import { config } from "../config.ts";
-import { one, pool } from "../db/pool.ts";
+import { one, pool, q } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { repositories } from "../repos/service.ts";
-import { resolveEffectiveRepositoryPermissions } from "../repos/access.ts";
+import { effectivePermissions } from "../repos/access.ts";
 import { resolveRepoPath } from "../repos/paths.ts";
 import { recordWorkspace } from "../git/provider.ts";
 import { claudeExecutor } from "../agent/claude.ts";
 import { isSecretPath } from "../agent/toolPolicy.ts";
+import { previousProcessGone, processAlive, processStartTime } from "../instances.ts";
 import { CaseSchema } from "./dataset.ts";
 import { fixtureGit, fixtureName, fixtureRoot } from "./fixtures.ts";
 import { livePrerequisites } from "./livePrerequisites.ts";
@@ -72,10 +73,6 @@ export async function removeEvaluationSecrets(root: string) {
     else if (stat.isDirectory()) await removeEvaluationSecrets(path);
   }
 }
-export async function ownerCanRead(ownerId: number, repository: string) {
-  const access = await resolveEffectiveRepositoryPermissions(ownerId, repository);
-  return !!access?.effective.read && access.platform.source !== "benchmark";
-}
 async function stopIsolatedDatabase(data: string) {
   const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
   try {
@@ -89,19 +86,23 @@ const subdirectories = async (dir: string) =>
     .filter((e) => e.isDirectory())
     .map((e) => e.name);
 async function ownerGone(data: string) {
-  try {
-    await lstat(join(data, "PG_VERSION"));
-    const owner = JSON.parse(await readFile(join(data, EVALUATION_DATABASE_MARKER), "utf8"));
-    if (owner.host !== hostname() || !Number.isInteger(owner.pid)) return false;
-    try {
-      process.kill(owner.pid, 0);
-      return false;
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ESRCH";
-    }
-  } catch {
-    return false;
-  }
+  if (!(await lstat(join(data, "PG_VERSION")).catch(() => null))) return false;
+  const me = { host: hostname(), pid: process.pid };
+  const owner = await readFile(join(data, EVALUATION_DATABASE_MARKER), "utf8").then(
+    (text) => JSON.parse(text),
+    () => null,
+  );
+  if (owner) return previousProcessGone(owner, me);
+  // Created before the owner marker existed: orphaned only when no postmaster still serves it.
+  const postmaster = Number(
+    (await readFile(join(data, "postmaster.pid"), "utf8").catch(() => "")).split("\n")[0],
+  );
+  return (
+    !postmaster ||
+    previousProcessGone({ host: me.host, pid: postmaster }, me, (pid) =>
+      processAlive(pid, "postgres"),
+    )
+  );
 }
 /** A crashed worker leaves throwaway postmasters behind; stop and remove them before claiming work. */
 export async function sweepEvaluationDatabases(root = join(config.dataDir, "evaluation-work")) {
@@ -116,6 +117,49 @@ export async function sweepEvaluationDatabases(root = join(config.dataDir, "eval
       }
     }
 }
+/**
+ * Remove live work of cases whose chain has ended: the run is terminal, or nothing of the case is queued, running or
+ * waiting while one of its steps failed, was canceled or skipped, or the case step itself completed.
+ */
+export async function sweepInactiveLiveWork(root = join(config.dataDir, "evaluation-work")) {
+  const found = [];
+  for (const evaluation of await subdirectories(root))
+    for (const caseRun of await subdirectories(join(root, evaluation)))
+      if (/^\d+$/.test(evaluation) && /^\d+$/.test(caseRun)) found.push({ evaluation, caseRun });
+  if (!found.length) return;
+  const rows = await q(
+    pool,
+    `WITH steps AS (
+       SELECT cr.id AS case_run_id, s.id, s.status, s.key=cr.workflow_step_key AS is_case
+       FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
+       JOIN workflow_steps s ON s.run_id=e.workflow_run_id AND (s.key=cr.workflow_step_key
+         OR s.key IN (SELECT p.step_key FROM evaluation_provider_phases p WHERE p.case_run_id=cr.id))
+       WHERE cr.id=ANY($1::bigint[]))
+     SELECT cr.id::text AS case_run_id, cr.evaluation_id::text AS evaluation_id, e.workflow_run_id,
+       r.status NOT IN ('COMPLETED','FAILED','CANCELED') AND (
+         EXISTS(SELECT 1 FROM steps s JOIN workflow_jobs j ON j.step_id=s.id
+           WHERE s.case_run_id=cr.id AND j.status IN ('queued','running'))
+         OR EXISTS(SELECT 1 FROM steps s JOIN workflow_step_attempts a ON a.step_id=s.id
+           WHERE s.case_run_id=cr.id AND a.status IN ('RUNNING','WAITING_INPUT','WAITING_APPROVAL'))
+         OR NOT EXISTS(SELECT 1 FROM steps s WHERE s.case_run_id=cr.id
+           AND (s.status IN ('FAILED','CANCELED','SKIPPED') OR (s.is_case AND s.status='COMPLETED')))
+       ) AS active
+     FROM evaluation_case_runs cr JOIN evaluation_runs e ON e.id=cr.evaluation_id
+     JOIN workflow_runs r ON r.id=e.workflow_run_id WHERE cr.id=ANY($1::bigint[])`,
+    [found.map((f) => f.caseRun)],
+  );
+  for (const { evaluation, caseRun } of found) {
+    const row = rows.find((r) => r.case_run_id === caseRun && r.evaluation_id === evaluation);
+    if (row?.active) continue;
+    const live = join(root, evaluation, caseRun, "live");
+    for (const name of await subdirectories(live))
+      if (/^database-[0-9a-f-]{36}$/.test(name))
+        await stopIsolatedDatabase(join(live, name)).catch(() => {});
+    await cleanupLiveWork(Number(row?.workflow_run_id ?? 0), live).catch((error) =>
+      console.error(`live evaluation sweep failed: ${(error as Error).message}`),
+    );
+  }
+}
 async function isolatedDatabase(root: string) {
   const data = join(root, `database-${randomUUID()}`);
   const socket = join(data, "socket");
@@ -125,13 +169,18 @@ async function isolatedDatabase(root: string) {
     ["-D", data, "-U", "platform_eval", "-A", "trust", "--no-locale", "--encoding=UTF8"],
     { env, timeout: 30000 },
   );
-  await writeFile(
-    join(data, EVALUATION_DATABASE_MARKER),
-    JSON.stringify({ pid: process.pid, host: hostname(), instance: config.instanceId }),
-  );
-  await mkdir(socket, { mode: 0o700 });
   let started = false;
   try {
+    await writeFile(
+      join(data, EVALUATION_DATABASE_MARKER),
+      JSON.stringify({
+        pid: process.pid,
+        host: hostname(),
+        instance: config.instanceId,
+        started: processStartTime(process.pid),
+      }),
+    );
+    await mkdir(socket, { mode: 0o700 });
     await exec(
       "pg_ctl",
       [
@@ -179,15 +228,6 @@ export async function executeLiveProviderPhase(
   let locked = false,
     result: ExecResult | undefined;
   try {
-    const task = CaseSchema.safeParse(phase.definition);
-    if (task.success && task.data.validation.type === "commands")
-      for (const name of task.data.repositories)
-        if (!(await ownerCanRead(Number(ctx.run.owner_id), name)))
-          return (result = {
-            kind: "failed",
-            retryable: false,
-            error: `Evaluation owner has no read access to repository ${name}`,
-          });
     for (let delay = 100; ; delay = Math.min(delay * 2, 5000)) {
       const { rows } = await connection.query(
         "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS ok",
@@ -204,8 +244,9 @@ export async function executeLiveProviderPhase(
     }
     return (result = await executeLiveProviderPhaseLocked(ctx, phase));
   } finally {
-    // Only a terminal failure ends the case chain; a retry or a new lease holder still needs the workspace.
-    if (result?.kind === "failed" && result.retryable === false && !ctx.signal.aborted)
+    // Phases run once, so any unaborted failure ends the case; an abort may be a lease loss whose re-execution
+    // still needs the workspace, and sweepInactiveLiveWork removes it once the case is over.
+    if ((!result || result.kind === "failed") && !ctx.signal.aborted)
       await cleanupLiveWork(ctx.run.id, liveWorkRoot(phase.evaluation_id, phase.case_run_id)).catch(
         (error) => console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
       );
@@ -231,11 +272,31 @@ async function executeLiveProviderPhaseLocked(
       },
     };
   const task = CaseSchema.parse(phase.definition);
+  const registered = task.validation.type === "commands";
+  const access = registered ? await effectivePermissions(Number(ctx.run.owner_id)) : null;
+  for (const name of registered ? task.repositories : []) {
+    const permissions = access!.get(name);
+    if (!permissions)
+      return {
+        kind: "failed",
+        retryable: false,
+        error: `Evaluation repository unavailable: ${name}`,
+      };
+    if (!permissions.effective.read || permissions.platform.source === "benchmark")
+      return {
+        kind: "failed",
+        retryable: false,
+        error: `Evaluation owner has no read access to repository ${name}`,
+      };
+  }
+  if (phase.ordinal === 0)
+    await sweepInactiveLiveWork().catch((error) =>
+      console.error(`live evaluation sweep failed: ${(error as Error).message}`),
+    );
   const root = liveWorkRoot(phase.evaluation_id, phase.case_run_id);
   const workspaces: Array<{ repo: string; path: string }> = [];
   await mkdir(root, { recursive: true, mode: 0o700 });
   for (const logical of task.repositories) {
-    const registered = task.validation.type === "commands";
     const name = registered ? logical : fixtureName(logical);
     const row = await repositories.get(name);
     if (!row?.enabled) throw new Error(`Evaluation repository unavailable: ${name}`);

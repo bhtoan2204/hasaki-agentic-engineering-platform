@@ -27,24 +27,41 @@ export class InstanceConflictError extends Error {
  * alive, permission to signal it denied — keeps the registration protected.
  */
 export function previousProcessGone(
-  meta: { host?: unknown; pid?: unknown } | null | undefined,
+  meta: { host?: unknown; pid?: unknown; started?: unknown } | null | undefined,
   me: { host: string; pid: number },
   alive: (pid: number) => boolean = processAlive,
+  startedOf: (pid: number) => string | null = processStartTime,
 ): boolean {
   const pid = Number(meta?.pid);
-  if (meta?.host !== me.host || !Number.isInteger(pid) || pid <= 0 || pid === me.pid) return false;
+  if (meta?.host !== me.host || !Number.isInteger(pid) || pid <= 0) return false;
+  // A recorded start time tells a recycled PID (even our own, after a container restart) from the recorder.
+  if (typeof meta?.started === "string") {
+    const current = startedOf(pid);
+    if (current !== null) return current !== meta.started;
+  }
+  if (pid === me.pid) return false;
   return !alive(pid);
 }
 
-function processAlive(pid: number): boolean {
+/** Kernel start time of `pid` (clock ticks since boot), or null without /proc or when the process is gone. */
+export function processStartTime(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function processAlive(pid: number, command = "node"): boolean {
   try {
     process.kill(pid, 0);
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === "EPERM"; // exists but owned by someone else
   }
   try {
-    // A recycled PID: alive, but not a Node process, so not the previous platform server.
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("node");
+    // A recycled PID: alive, but not running `command`, so not the recorded process.
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(command);
   } catch {
     return true; // no /proc (macOS): trust the signal check
   }

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { join } from "node:path";
 import { tmpdir, hostname } from "node:os";
 import {
@@ -10,6 +12,7 @@ import {
   setLiveUsageOffset,
 } from "../src/eval/liveRuntime.ts";
 import { livePrerequisites } from "../src/eval/livePrerequisites.ts";
+import { processStartTime } from "../src/instances.ts";
 import { config } from "../src/config.ts";
 import { changedCloneCount, diffFootprint } from "../src/eval/ponytailMetrics.ts";
 import { ponytailConfigurations, eligiblePonytailRepositories } from "../src/eval/ponytailSuite.ts";
@@ -325,8 +328,14 @@ test("Worker start sweeps orphaned evaluation databases", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+async function sleeper(argv0: string) {
+  const child = spawn("sleep", ["300"], { argv0, stdio: "ignore" });
+  await once(child, "spawn");
+  return child;
+}
 test("Database sweep leaves live owners, other hosts and repository content alone", async () => {
   const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
+  const postmaster = await sleeper("postgres");
   try {
     const live = join(root, "1", "2", "live");
     const id = (n: number) => `database-00000000-0000-4000-8000-00000000000${n}`;
@@ -335,12 +344,46 @@ test("Database sweep leaves live owners, other hosts and repository content alon
       await fakeDatabase(join(live, id(2)), { pid: DEAD_PID, host: `${hostname()}-other` }),
       await fakeDatabase(join(live, id(3)), null),
       await fakeDatabase(join(live, "repo", id(4)), { pid: DEAD_PID, host: hostname() }),
+      await fakeDatabase(join(live, id(6)), {
+        pid: process.pid,
+        host: hostname(),
+        started: processStartTime(process.pid),
+      }),
       await fakeDatabase(join(live, "database-tool"), { pid: DEAD_PID, host: hostname() }),
       await fakeDatabase(join(root, id(5)), { pid: DEAD_PID, host: hostname() }),
     ];
+    await writeFile(join(live, id(3), "postmaster.pid"), `${postmaster.pid}\n${live}\n`);
     await sweepEvaluationDatabases(root);
     for (const path of kept) await readFile(path);
   } finally {
+    postmaster.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test("Database sweep removes recycled-PID owners and legacy databases without a running postmaster", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ponytail-sweep-"));
+  const other = await sleeper("node");
+  try {
+    const live = join(root, "1", "2", "live");
+    const id = (n: number) => `database-00000000-0000-4000-8000-00000000000${n}`;
+    const recycledSelf = await fakeDatabase(join(live, id(1)), {
+      pid: process.pid,
+      host: hostname(),
+      started: "1",
+    });
+    const recycledOther = await fakeDatabase(join(live, id(2)), {
+      pid: other.pid,
+      host: hostname(),
+      started: "1",
+    });
+    const legacy = await fakeDatabase(join(live, id(3)), null);
+    const legacyDead = await fakeDatabase(join(live, id(4)), null);
+    await writeFile(join(live, id(4), "postmaster.pid"), `${DEAD_PID}\n`);
+    await sweepEvaluationDatabases(root);
+    for (const path of [recycledSelf, recycledOther, legacy, legacyDead])
+      await assert.rejects(readFile(path), path);
+  } finally {
+    other.kill();
     await rm(root, { recursive: true, force: true });
   }
 });

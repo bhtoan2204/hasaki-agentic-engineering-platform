@@ -13,6 +13,7 @@ import {
   evaluationDetail,
   ConfigurationSchema,
   createComparison,
+  cancelEvaluation,
 } from "../src/eval/service.ts";
 import {
   chooseRecommendation,
@@ -686,4 +687,35 @@ test("context value assessment uses paired task outcomes, not fixture or agent c
       ?.status,
     "INSUFFICIENT_EVIDENCE",
   );
+});
+test("live work of a case is swept only once its chain is over", async () => {
+  const { sweepInactiveLiveWork } = await import("../src/eval/liveProvider.ts");
+  const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
+  const { recordWorkspace } = await import("../src/git/provider.ts");
+  const { mkdir, writeFile, readFile, stat } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const e = await evaluation(["claude"]);
+  const cr = await one(pool, "SELECT id FROM evaluation_case_runs WHERE evaluation_id=$1", [e.id]);
+  const root = liveWorkRoot(e.id, cr!.id);
+  const edited = join(root, "repo", "edited.txt");
+  await mkdir(join(root, "repo"), { recursive: true });
+  await writeFile(edited, "phase 0 edits");
+  await recordWorkspace(e.workflow_run_id, {
+    repo: "sweep-repo",
+    path: join(root, "repo"),
+    branch: "main",
+    created_from: "base",
+  });
+  const unknown = liveWorkRoot(e.id, 987654321);
+  await mkdir(unknown, { recursive: true });
+  await sweepInactiveLiveWork();
+  assert.equal(await readFile(edited, "utf8"), "phase 0 edits");
+  await assert.rejects(stat(unknown));
+  await cancelEvaluation(e.id, owner.id);
+  await sweepInactiveLiveWork();
+  await assert.rejects(stat(root));
+  const rows = await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [
+    e.workflow_run_id,
+  ]);
+  assert.equal(rows.length, 0);
 });

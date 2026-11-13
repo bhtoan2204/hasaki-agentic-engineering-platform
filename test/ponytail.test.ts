@@ -509,8 +509,31 @@ test("DEPRECATE rollback leaves supersession it did not set untouched", async ()
   assert.equal(Number(old.superseded_by), Number(successor.id));
 });
 
-test("live phase checks the evaluation owner's repository read access", async () => {
-  const { ownerCanRead } = await import("../src/eval/liveProvider.ts");
+const liveCaseDefinition = (repositories: string[]) => ({
+  task_id: "BENCH-901",
+  category: "implementation",
+  difficulty: "easy",
+  origin: "synthetic",
+  provenance: "live phase access ordering test",
+  description: "live phase access ordering test case",
+  repository: repositories[0],
+  repositories,
+  base_commit: "a".repeat(40),
+  expected_behavior: ["works"],
+  validation: {
+    type: "commands",
+    commands: ["true"],
+    path: "x.ts",
+    public_checks: [],
+    hidden_checks: [],
+    timeout_seconds: 1,
+  },
+  allowed_changes: [],
+  tags: [],
+  critical: false,
+});
+test("live phase reports blocked evidence before access and names unregistered repositories", async () => {
+  const { executeLiveProviderPhase } = await import("../src/eval/liveProvider.ts");
   const { repositories } = await import("../src/repos/service.ts");
   const member = await createUser({
     username: "live-eval-member",
@@ -519,8 +542,33 @@ test("live phase checks the evaluation owner's repository read access", async ()
   });
   await repositories.upsert("live-eval-private", { description: "private" });
   await pool.query("UPDATE repositories SET shared_access='none' WHERE name='live-eval-private'");
-  assert.equal(await ownerCanRead(member.id, "live-eval-private"), false);
-  assert.equal(await ownerCanRead(member.id, "not-registered"), false);
+  const phase = (repository: string, configuration: object) =>
+    executeLiveProviderPhase(
+      {
+        run: { id: 0, owner_id: member.id },
+        signal: new AbortController().signal,
+      } as unknown as LivePhaseArgs[0],
+      {
+        evaluation_id: 9201,
+        case_run_id: 9202,
+        ordinal: 1,
+        definition: liveCaseDefinition([repository]),
+        configuration: { budget_group: "access-order", ...configuration },
+      } as unknown as LivePhaseArgs[1],
+    );
+  const blocked = await phase("live-eval-private", { blocked: "connector disabled" });
+  assert.equal(blocked.kind, "completed");
+  assert.equal((blocked as { output: { evidence_kind: string } }).output.evidence_kind, "blocked");
+  const ready = { blocked: "", paid_approval: true };
+  assert.deepEqual(await phase("not-registered", ready), {
+    kind: "failed",
+    retryable: false,
+    error: "Evaluation repository unavailable: not-registered",
+  });
+  assert.match(
+    ((await phase("live-eval-private", ready)) as { error: string }).error,
+    /no read access to repository live-eval-private/,
+  );
 });
 
 test("live phase stops waiting for a held budget lock when aborted", async () => {
@@ -546,30 +594,32 @@ test("live phase stops waiting for a held budget lock when aborted", async () =>
   }
 });
 
-test("live phase keeps the case workspace when it fails retryably", async () => {
+test("live phase keeps the case workspace only when aborted, and removes it on any other failure", async () => {
   const { executeLiveProviderPhase } = await import("../src/eval/liveProvider.ts");
   const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
   const { mkdir, writeFile, readFile, rm } = await import("node:fs/promises");
   const root = liveWorkRoot(9101, 9102);
+  const edited = join(root, "repo", "edited.txt");
   await mkdir(join(root, "repo"), { recursive: true });
-  await writeFile(join(root, "repo", "edited.txt"), "phase 0 edits");
-  try {
-    await assert.rejects(
-      executeLiveProviderPhase(
-        {
-          run: { id: 0, owner_id: 1 },
-          signal: new AbortController().signal,
-        } as unknown as LivePhaseArgs[0],
-        {
-          evaluation_id: 9101,
-          case_run_id: 9102,
-          ordinal: 1,
-          definition: { invalid: true },
-          configuration: { blocked: "", paid_approval: true, budget_group: "retry-keep" },
-        } as unknown as LivePhaseArgs[1],
-      ),
+  await writeFile(edited, "phase 0 edits");
+  const phase = (signal: AbortSignal) =>
+    executeLiveProviderPhase(
+      { run: { id: 0, owner_id: 1 }, signal } as unknown as LivePhaseArgs[0],
+      {
+        evaluation_id: 9101,
+        case_run_id: 9102,
+        ordinal: 1,
+        definition: { invalid: true },
+        configuration: { blocked: "", paid_approval: true, budget_group: "retry-keep" },
+      } as unknown as LivePhaseArgs[1],
     );
-    assert.equal(await readFile(join(root, "repo", "edited.txt"), "utf8"), "phase 0 edits");
+  try {
+    const aborted = new AbortController();
+    aborted.abort();
+    await assert.rejects(phase(aborted.signal));
+    assert.equal(await readFile(edited, "utf8"), "phase 0 edits");
+    await assert.rejects(phase(new AbortController().signal));
+    await assert.rejects(readFile(edited));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
