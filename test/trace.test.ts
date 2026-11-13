@@ -108,6 +108,71 @@ describe("redaction and best-effort", () => {
     assert.equal(JSON.parse(String(v[5])).trace.event, "git.worktree");
   });
 
+  test("key+value secret patterns stay masked through traceLog, the logs API and the trace tree", async () => {
+    const calls: unknown[][] = [];
+    const db = {
+      query: async (_sql: string, v: unknown[]) => (calls.push(v), { rows: [] }),
+    } as unknown as Db;
+    const secrets = {
+      token: "tok-value-0001",
+      github_token: "ghp_" + "a".repeat(36),
+      db_password: "pw-value-0002",
+      webhook_secret: "wh-value-0003",
+      note: "Bearer abcdefghijklmnop123456",
+      other: "uses ghp_" + "b".repeat(36) + " here",
+    };
+    await traceLog(
+      { runId: 1, level: "INFO", event: "x", message: "m", data: { nested: secrets } },
+      db,
+      "INFO",
+    );
+    const stored = JSON.parse(String(calls[0][5]));
+    const logs = await searchLogs(1, {}, fakeDb([{ id: 1, content: "m", data: stored }]).db);
+    const tree = assembleTrace(
+      input({
+        events: [
+          {
+            id: 1,
+            attempt_id: 100,
+            kind: "tool",
+            content: "Bash",
+            data: { id: "tu1", name: "Bash", input: secrets },
+            created_at: t(2),
+          },
+        ],
+      }),
+    );
+    const toolInput = tree.children[0].children[0].children[0].attrs.input as Record<
+      string,
+      unknown
+    >;
+    for (const out of [JSON.stringify(stored), JSON.stringify(logs), JSON.stringify(toolInput)])
+      for (const v of [
+        "tok-value-0001",
+        "a".repeat(36),
+        "pw-value-0002",
+        "wh-value-0003",
+        "abcdefghijklmnop123456",
+        "b".repeat(36),
+      ])
+        assert.ok(!out.includes(v), `${v} leaked in ${out}`);
+    assert.equal(typeof stored.details, "object");
+    assert.equal(toolInput.token, "[redacted]");
+    assert.deepEqual(redactTraceValue({ input_tokens: "1200", fencing_token: 3 }), {
+      input_tokens: "1200",
+      fencing_token: 3,
+    });
+  });
+
+  test("a top-level string (error/stack) is clipped at the payload cap, not shorter", () => {
+    const stack = "s".repeat(5000);
+    assert.equal(redactTraceValue(stack), stack);
+    assert.equal(
+      String(redactTraceValue("s".repeat(20000))).startsWith("s".repeat(TRACE_LIMITS.payloadBytes)),
+      true,
+    );
+  });
+
   test("persistence failure never throws", async () => {
     const db = { query: async () => { throw new Error("db down"); } } as unknown as Db;
     const orig = console.error;
@@ -213,6 +278,127 @@ describe("diagnosis", () => {
     assert.ok(f.some((x) => x.kind === "failure" && x.category === "PROVIDER_UNAVAILABLE"));
   });
 
+  test("raw git worktree errors are still diagnosed without a recorded event", () => {
+    for (const message of [
+      "fatal: 'feature/x' is already checked out at '/w/other'",
+      "fatal: 'u1-REQ-83' is already used by worktree at /x",
+    ]) {
+      const f = diagnoseTrace(
+        assembleTrace(
+          input({
+            events: [],
+            attempts: [
+              {
+                id: 1,
+                step_id: 10,
+                number: 1,
+                generation: 1,
+                status: "FAILED",
+                job_id: 1,
+                started_at: t(1),
+                finished_at: t(2),
+                error: { message },
+              },
+            ],
+          }),
+        ),
+      );
+      assert.ok(
+        f.some((x) => x.kind === "git_worktree_conflict"),
+        message,
+      );
+      assert.ok(
+        f.some((x) => x.kind === "failure"),
+        message,
+      );
+    }
+  });
+
+  test("a conflict recorded on the attempt row is used without any trace event, and keeps the failure", () => {
+    const f = diagnoseTrace(
+      assembleTrace(
+        input({
+          events: [],
+          attempts: [
+            {
+              id: 1,
+              step_id: 10,
+              number: 1,
+              generation: 1,
+              status: "FAILED",
+              job_id: 1,
+              started_at: t(1),
+              finished_at: t(2),
+              error: { message: "agent ended without a result" },
+              failure_category: "UNKNOWN",
+              workspace_conflict: true,
+            },
+          ],
+        }),
+      ),
+    );
+    assert.ok(
+      f.some((x) => x.kind === "git_worktree_conflict" && x.evidence.includes("attempt:1")),
+    );
+    assert.ok(f.some((x) => x.kind === "failure" && x.evidence.includes("attempt:1")));
+  });
+
+  test("a recorded conflict event never drops the attempt's failure finding", () => {
+    const f = diagnoseTrace(assembleTrace(input()));
+    for (const id of ["attempt:100", "attempt:101"]) {
+      assert.ok(f.some((x) => x.kind === "git_worktree_conflict" && x.evidence.includes(id)));
+      assert.ok(f.some((x) => x.kind === "failure" && x.evidence.includes(id)));
+    }
+  });
+
+  test("a queued job nobody claims or a running job with an expired lease is stuck", () => {
+    const now = Date.parse(t(0)) + 60 * 60_000;
+    const diagnose = (job: Record<string, string>, attemptStatus = "FAILED") =>
+      diagnoseTrace(
+        assembleTrace(
+          input({
+            attempts: [
+              {
+                id: 1,
+                step_id: 10,
+                number: 1,
+                generation: 1,
+                status: attemptStatus,
+                job_id: 1,
+                started_at: t(1),
+                finished_at: t(2),
+              },
+            ],
+            steps: [{ id: 10, key: "s", type: "agent", status: "RUNNING", ...job }],
+            events: [],
+          }),
+        ),
+        { now },
+      ).some((x) => x.kind === "stuck");
+    assert.equal(diagnose({ live_job_status: "queued", live_job_available_at: t(5) }), true);
+    assert.equal(
+      diagnose({
+        live_job_status: "queued",
+        live_job_available_at: new Date(now - 1000).toISOString(),
+      }),
+      false,
+    );
+    assert.equal(
+      diagnose({ live_job_status: "running", live_job_lease_expires_at: t(5) }, "RUNNING"),
+      true,
+    );
+    assert.equal(
+      diagnose(
+        {
+          live_job_status: "running",
+          live_job_lease_expires_at: new Date(now + 30_000).toISOString(),
+        },
+        "RUNNING",
+      ),
+      false,
+    );
+  });
+
   test("detects duplicate execution, loops and stuck steps", () => {
     const a = (id: number, n: number, status: string) => ({ id, step_id: 10, number: n, generation: 1, status, job_id: id, started_at: t(n), finished_at: null });
     const dup = diagnoseTrace(assembleTrace(input({ attempts: [a(1, 1, "RUNNING"), a(2, 2, "RUNNING")], steps: [{ id: 10, key: "s", type: "agent", status: "RUNNING" }], events: [] })));
@@ -251,6 +437,7 @@ describe("diagnosis", () => {
           events: [],
         }),
       ),
+      { now: Date.parse(t(600)) },
     );
     assert.ok(!queued.some((x) => x.kind === "stuck"));
     const recent = diagnoseTrace(
@@ -380,7 +567,8 @@ describe("migration 057", () => {
       new URL("../migrations/057_trace_levels.sql", import.meta.url),
       "utf8",
     );
-    assert.match(sql, /ADD COLUMN level TEXT CHECK \(level IS NULL OR/);
+    assert.match(sql, /ADD COLUMN IF NOT EXISTS level TEXT CHECK \(level IS NULL OR/);
+    assert.doesNotMatch(sql, /CREATE INDEX (?!IF NOT EXISTS)/);
     assert.doesNotMatch(sql, /\bDROP\b|\bUPDATE\b|ADD COLUMN[^;]*NOT NULL/i);
     assert.match(sql, /ON workflow_events\(created_at\) WHERE level = 'DEBUG'/);
   });
@@ -473,6 +661,18 @@ describe("with a database", () => {
     assert.ok(
       (await searchLogs(runId, { event: "probe" })).some((r) => r.content === "trace-probe-line"),
     );
+  });
+
+  test("a workspace conflict recorded on the attempt row reaches the trace input", async () => {
+    const { runId, attemptId } = await runAgentStep();
+    await q(
+      pool,
+      `UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || '{"workspace_conflict": true}' WHERE id = $1`,
+      [attemptId],
+    );
+    const input = await loadTraceInput(runId);
+    assert.equal(input.attempts.find((a) => Number(a.id) === attemptId)?.workspace_conflict, true);
+    assert.equal(assembleTrace(input).children[0].children.at(-1)?.attrs.workspaceConflict, true);
   });
 
   test("the trace tree keeps the newest tool events when the run has more than the limit", async () => {

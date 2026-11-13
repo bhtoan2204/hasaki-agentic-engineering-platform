@@ -30,7 +30,6 @@ export interface DiagnosisOptions {
   /** An attempt that takes more than this share of the run's attempt time is a bottleneck. */
   bottleneckShare?: number;
   tokenThreshold?: number;
-  /** A RUNNING step without a running attempt or a live job is reported stuck only this long after its last attempt. */
   stuckGraceMs?: number;
   now?: number;
 }
@@ -43,6 +42,8 @@ const sourceOf = (c: FailureCategory): FailureSource =>
       : c === "CANCELED"
         ? "workflow_engine"
         : "provider";
+
+const RAW_GIT_CONFLICT = /is already checked out at|is already used by worktree/i;
 
 const errorText = (n: TraceNode) => {
   const e = n.attrs.error as { message?: unknown; error?: unknown } | string | null;
@@ -75,32 +76,33 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
     const failed = list.filter((a) => a.status === "FAILED");
     for (const a of failed) {
       const text = errorText(a);
-      const conflicts = (a.attrs.worktreeConflicts as string[] | undefined) ?? [];
+      const events = (a.attrs.worktreeConflicts as string[] | undefined) ?? [];
+      const conflict =
+        a.attrs.workspaceConflict === true || events.length > 0 || RAW_GIT_CONFLICT.test(text);
       const recorded = a.attrs.failureCategory as FailureCategory | null;
       const known = recorded != null && recorded !== "UNKNOWN";
       const cat = known ? recorded : normalizeProviderFailure({ message: text });
-      if (conflicts.length)
+      if (conflict)
         findings.push({
           kind: "git_worktree_conflict",
           source: "workflow_engine",
           category: null,
           summary: `Step ${step.label}: prepare_branch hit a git worktree conflict (job ${a.ids.jobId ?? "unknown"}, attempt ${a.ids.attemptId}).`,
-          evidence: [a.id, step.id, ...conflicts],
+          evidence: [a.id, step.id, ...events],
           suggestion:
             "Remove the stale worktree or branch lease for this run and retry; a retry on the same branch fails again while the old worktree still holds it.",
         });
-      if (!conflicts.length || known)
-        findings.push({
-          kind: "failure",
-          source: sourceOf(cat),
-          category: cat,
-          summary: `Attempt ${a.ids.attemptId} of ${step.label} failed (${cat}).`,
-          evidence: [a.id],
-          suggestion:
-            cat === "RATE_LIMIT" || cat === "PROVIDER_UNAVAILABLE"
-              ? "Transient provider condition: retry later or hand off to another provider."
-              : "Inspect the attempt error and its last tool calls.",
-        });
+      findings.push({
+        kind: "failure",
+        source: sourceOf(cat),
+        category: cat,
+        summary: `Attempt ${a.ids.attemptId} of ${step.label} failed (${cat}).`,
+        evidence: [a.id],
+        suggestion:
+          cat === "RATE_LIMIT" || cat === "PROVIDER_UNAVAILABLE"
+            ? "Transient provider condition: retry later or hand off to another provider."
+            : "Inspect the attempt error and its last tool calls.",
+      });
     }
     // Same error again and again: explains why a retry keeps failing.
     const texts = failed.map(errorText).filter(Boolean);
@@ -143,20 +145,35 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
     const lastEnd = Math.max(
       ...list.map((a) => (a.startedAt ? new Date(a.startedAt).getTime() + (a.durationMs ?? 0) : 0)),
     );
-    if (
-      step.status === "RUNNING" &&
-      list.length &&
-      list.every((a) => a.status !== "RUNNING") &&
-      !step.attrs.liveJob &&
-      now - lastEnd >= stuckGraceMs
-    )
+    const job = step.attrs.liveJob as {
+      status: string;
+      availableAt: string | null;
+      leaseExpiresAt: string | null;
+    } | null;
+    const at = (v: string | null) => (v ? new Date(v).getTime() : NaN);
+    const jobStalled = job
+      ? job.status === "queued"
+        ? now - at(job.availableAt) >= stuckGraceMs
+        : at(job.leaseExpiresAt) < now
+      : list.length > 0 &&
+        list.every((a) => a.status !== "RUNNING") &&
+        now - lastEnd >= stuckGraceMs;
+    if (step.status === "RUNNING" && jobStalled)
       findings.push({
         kind: "stuck",
         source: "scheduler",
         category: null,
-        summary: `Step ${step.label} is RUNNING but none of its attempts is.`,
+        summary: !job
+          ? `Step ${step.label} is RUNNING but none of its attempts is.`
+          : job.status === "queued"
+            ? `Step ${step.label} has a job queued since ${job.availableAt} that no worker has claimed.`
+            : `Step ${step.label} has a running job whose lease expired at ${job.leaseExpiresAt}.`,
         evidence: [step.id, ...list.map((a) => a.id)],
-        suggestion: "No attempt holds the step: recovery or the job queue has not picked it up.",
+        suggestion: !job
+          ? "No attempt holds the step: recovery or the job queue has not picked it up."
+          : job.status === "queued"
+            ? "Check that a worker with a matching step type is running and not saturated."
+            : "The worker holding the lease is gone: check that the lease reaper is running.",
       });
   }
 

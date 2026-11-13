@@ -51,22 +51,39 @@ function clip(v: unknown, max: number): unknown {
   return v;
 }
 
-/**
- * Secrets are masked field by field and the payload is bounded before anything is stored or returned. Large nested
- * strings are shortened first so the value keeps its shape (and `trace.event`); only what still exceeds the cap
- * becomes a bounded preview string.
- */
+const GITHUB_TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g;
+
+const secretKey = (k: string) => redactSecrets(`"${k}":"probe-value"`).endsWith('***"');
+
+// redactContextValue only masks exact key names; this restores the key+value patterns (github_token, db_password...).
+function maskFields(v: unknown): unknown {
+  if (typeof v === "string") return v.replace(GITHUB_TOKEN, "[redacted]");
+  if (Array.isArray(v)) return v.map(maskFields);
+  if (v && typeof v === "object")
+    return Object.fromEntries(
+      Object.entries(v).map(([k, x]) => [
+        k,
+        typeof x === "string" && secretKey(k) ? "[redacted]" : maskFields(x),
+      ]),
+    );
+  return v;
+}
+
 export function redactTraceValue(value: unknown): unknown {
   if (value == null) return null;
   const max = TRACE_LIMITS.payloadBytes;
-  const redacted = redactContextValue(value instanceof Error ? { message: value.message } : value);
-  let out = redacted;
+  const redacted = maskFields(
+    redactContextValue(value instanceof Error ? { message: value.message } : value),
+  );
+  if (typeof redacted === "string") return cap(redacted, max);
+  let json = JSON.stringify(redacted);
+  if (json.length <= max) return redacted;
+  let out: unknown = redacted;
   for (const limit of [2000, 200, 40]) {
-    if (JSON.stringify(out).length <= max) return out;
     out = clip(redacted, limit);
+    json = JSON.stringify(out);
+    if (json.length <= max) return out;
   }
-  const json = JSON.stringify(out);
-  if (json.length <= max) return out;
   const trace = (redacted as { trace?: unknown } | null)?.trace;
   return trace === undefined
     ? cap(json, max)
@@ -170,10 +187,7 @@ export function redactEventRow<T extends { content?: string; data?: unknown }>(r
   };
 }
 
-/**
- * Retention: only DEBUG events expire; status, tool and transcript history is preserved. Deletes in bounded batches;
- * a batch runs only while this statement holds the purge lock, so concurrent instances do not purge the same rows.
- */
+/** Retention: only DEBUG events expire, in bounded batches under a single-instance advisory lock. */
 export async function purgeDebugEvents(days = TRACE_LIMITS.debugRetentionDays, db: Db = pool) {
   let total = 0;
   for (let i = 0; i < TRACE_LIMITS.purgeBatches; i++) {
@@ -215,6 +229,7 @@ export interface TraceInput {
     status: string;
     live_job_status?: string | null;
     live_job_available_at?: string | null;
+    live_job_lease_expires_at?: string | null;
   }>;
   attempts: Array<{
     id: number;
@@ -232,6 +247,7 @@ export interface TraceInput {
     input_tokens?: number | null;
     output_tokens?: number | null;
     failure_category?: string | null;
+    workspace_conflict?: boolean | null;
   }>;
   /** `tool` events, their `tool_result` partners and `tool.prepare_branch` trace events, ordered by id. */
   events: Array<{ id: number; attempt_id: number | null; kind: string; content: string; data: Record<string, unknown> | null; created_at: string }>;
@@ -271,7 +287,11 @@ export function assembleTrace(input: TraceInput): TraceNode {
       attrs: {
         stepType: step.type,
         liveJob: step.live_job_status
-          ? { status: step.live_job_status, availableAt: step.live_job_available_at ?? null }
+          ? {
+              status: step.live_job_status,
+              availableAt: step.live_job_available_at ?? null,
+              leaseExpiresAt: step.live_job_lease_expires_at ?? null,
+            }
           : null,
       },
       children: [],
@@ -332,6 +352,7 @@ export function assembleTrace(input: TraceInput): TraceNode {
           conflicts.push(`event:${e.id}`);
         }
       }
+      if (a.workspace_conflict) node.attrs.workspaceConflict = true;
       if (conflicts.length) node.attrs.worktreeConflicts = conflicts;
       for (const t of calls.values()) {
         const parent = t.attrs.parentToolUseId ? calls.get(String(t.attrs.parentToolUseId)) : undefined;
@@ -368,7 +389,8 @@ export async function loadTraceInput(runId: number, db: Db = pool): Promise<Trac
     q(db, "SELECT id, status, created_at, finished_at FROM workflow_runs WHERE id = $1", [runId]),
     q(
       db,
-      `SELECT s.id, s.key, s.type, s.status, j.status AS live_job_status, j.available_at AS live_job_available_at
+      `SELECT s.id, s.key, s.type, s.status, j.status AS live_job_status, j.available_at AS live_job_available_at,
+              j.lease_expires_at AS live_job_lease_expires_at
          FROM workflow_steps s LEFT JOIN workflow_jobs j ON j.step_id = s.id AND j.status IN ('queued', 'running')
         WHERE s.run_id = $1 ORDER BY s.position, s.id`,
       [runId],
@@ -376,7 +398,8 @@ export async function loadTraceInput(runId: number, db: Db = pool): Promise<Trac
     q(
       db,
       `SELECT a.id, a.step_id, a.number, a.generation, a.status, a.job_id, a.started_at, a.finished_at, a.error,
-              t.provider, t.model, t.wall_duration_ms, t.input_tokens, t.output_tokens, t.normalized_failure_category AS failure_category
+              t.provider, t.model, t.wall_duration_ms, t.input_tokens, t.output_tokens, t.normalized_failure_category AS failure_category,
+              (a.metrics->>'workspace_conflict')::boolean AS workspace_conflict
          FROM workflow_step_attempts a LEFT JOIN execution_attempt_telemetry t ON t.attempt_id = a.id
         WHERE a.run_id = $1 ORDER BY a.id`,
       [runId],

@@ -462,7 +462,15 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
         stack: (e as Error).stack,
       },
     });
-    if (e instanceof WorkspaceConflictError) return `ERROR: ${e.message}`;
+    if (e instanceof WorkspaceConflictError) {
+      await q(
+        pool,
+        `UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || '{"workspace_conflict": true}'::jsonb
+          WHERE id = $1 AND status = 'RUNNING'`,
+        [env.attemptId],
+      ).catch(() => {});
+      return `ERROR: ${e.message}`;
+    }
     throw e;
   }
   void traceLog({
