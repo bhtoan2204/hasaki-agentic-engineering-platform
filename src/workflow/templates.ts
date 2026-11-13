@@ -48,6 +48,54 @@ esac
 if [ ! -f package.json ]; then echo "package.json is required" >&2; exit 1; fi
 if [ ! -x node_modules/.bin/tsc ]; then npm ci --ignore-scripts --no-audit --no-fund; fi`;
 
+/**
+ * Lints the changed files (paths on stdin) and fails only on errors the branch adds. Errors are matched to the merge
+ * base by rule + message count per file (line numbers shift), so debt already in a touched file does not block a
+ * repair loop that cannot and should not clean it up. Falls back to plain eslint when the Node API is unavailable.
+ * Runs inside shell single quotes: no single quotes, backticks or template placeholders in this source.
+ */
+export const ESLINT_NEW_ERRORS_JS = String.raw`const fs = require("fs");
+const cp = require("child_process");
+const files = fs.readFileSync(0, "utf8").split(/\r?\n/).filter((f) => f && fs.existsSync(f));
+let ESLint;
+try { ({ ESLint } = require("eslint")); } catch {}
+if (!ESLint) {
+  const r = cp.spawnSync("npx", ["--no-install", "eslint", "--no-error-on-unmatched-pattern", ...files], { stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
+(async () => {
+  const eslint = new ESLint();
+  const key = (m) => (m.ruleId || "parse") + " " + m.message;
+  const errors = (results) => results.flatMap((r) => r.messages).filter((m) => m.severity === 2);
+  const tally = (msgs) => msgs.reduce((c, m) => c.set(key(m), (c.get(key(m)) || 0) + 1), new Map());
+  const report = [];
+  let added = 0, known = 0;
+  for (const f of files) {
+    if (await eslint.isPathIgnored(f)) continue;
+    const head = await eslint.lintFiles([f]);
+    const now = errors(head);
+    if (!now.length) continue;
+    const old = cp.spawnSync("git", ["show", process.env.LINT_BASE + ":" + f], { encoding: "utf8", maxBuffer: 1 << 28 });
+    const before = old.status === 0 ? tally(errors(await eslint.lintText(old.stdout, { filePath: f }))) : new Map();
+    const after = tally(now);
+    let fileAdded = 0;
+    for (const [k, n] of after) fileAdded += Math.max(0, n - (before.get(k) || 0));
+    added += fileAdded;
+    known += now.length - fileAdded;
+    const grown = now.filter((m) => after.get(key(m)) > (before.get(key(m)) || 0));
+    if (grown.length) report.push({ ...head[0], messages: grown, errorCount: grown.length, warningCount: 0, fatalErrorCount: 0, fixableErrorCount: 0, fixableWarningCount: 0 });
+  }
+  if (report.length) {
+    console.log(await (await eslint.loadFormatter("stylish")).format(report));
+    console.log(added + " new eslint error(s) introduced by this branch (listed lines share a rule and message whose count grew vs the merge base)");
+  }
+  if (known) console.log("eslint: " + known + " error(s) already present on the merge base in changed files were ignored");
+  process.exit(added ? 1 : 0);
+})().catch((e) => { console.error(e && e.stack ? e.stack : e); process.exit(2); });`;
+
+const eslintNewErrors = (base: string) => `echo "== eslint (changed files, new errors only)"
+  printf '%s\\n' "$files" | LINT_BASE="$(git merge-base "${base}" HEAD 2>/dev/null || echo "${base}")" node -e '${ESLINT_NEW_ERRORS_JS}'`;
+
 export const PLATFORM_TARGETED_COMMAND = `${SELF_TEST_GUARD}
 base="origin/$BASE_BRANCH"
 changed=$(git diff --name-only "$base...HEAD" || true)
@@ -55,8 +103,7 @@ echo "== typecheck"
 npx --no-install tsc -p . --pretty false --noEmit --incremental false
 files=$(printf '%s\\n' "$changed" | grep -E '\\.(ts|tsx)$' || true)
 if [ -n "$files" ] && [ -x node_modules/.bin/eslint ]; then
-  echo "== eslint (changed files)"
-  printf '%s\\n' "$files" | xargs -r npx --no-install eslint --no-error-on-unmatched-pattern
+  ${eslintNewErrors("$base")}
 elif [ -n "$files" ]; then
   echo "eslint not installed; lint skipped"
 fi
@@ -106,8 +153,7 @@ elif [ -f package.json ]; then
   changed=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" || true)
   files=$(printf '%s\\n' "$changed" | grep -E '\\.(ts|tsx|js|jsx)$' || true)
   if [ -n "$files" ] && [ -x node_modules/.bin/eslint ]; then
-    echo "== eslint (changed files)"
-    printf '%s\\n' "$files" | xargs -r npx --no-install eslint --no-error-on-unmatched-pattern
+    ${eslintNewErrors("origin/$BASE_BRANCH")}
   else
     echo "eslint skipped"
   fi
