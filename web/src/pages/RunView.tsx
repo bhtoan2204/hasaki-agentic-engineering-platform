@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
-import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
+import { Background, ControlButton, Controls, ReactFlow, type Node } from "@xyflow/react";
 import {
   Activity,
   AlertTriangle,
@@ -15,6 +15,7 @@ import {
   GitPullRequest,
   Hand,
   Hourglass,
+  LayoutGrid,
   Info,
   ListTree,
   MessageCircleQuestion,
@@ -38,7 +39,7 @@ import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
-import { nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
+import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
 import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
@@ -66,6 +67,7 @@ const byOrder = (a: string, b: string) =>
 /** Live execution graph of one run + inspector. Route: #/runs/:id[/:stepKey | /~changes]. */
 const PANE_KEY = "rv.inspectorWidth";
 const PANE_MIN = 360;
+const ARRANGE_KEY = "rv.autoLayout";
 const paneMax = () => Math.round(window.innerWidth * 0.85);
 
 /** Width of the step inspector, set by dragging its left edge (or the arrow keys); remembered per browser. */
@@ -166,10 +168,24 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     [id],
   );
 
+  const [arranged, setArranged] = useState(() => {
+    try {
+      return localStorage.getItem(ARRANGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleArranged = () =>
+    setArranged((on) => {
+      try {
+        localStorage.setItem(ARRANGE_KEY, on ? "0" : "1");
+      } catch {}
+      return !on;
+    });
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
     const specSteps = run.graph.steps as any[];
-    const placed = placeSteps(specSteps);
+    const placed = arranged ? autoLayout(specSteps) : placeSteps(specSteps);
     const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
@@ -224,7 +240,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       };
     });
     return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
-  }, [run, stepKey, pickStep]);
+  }, [run, stepKey, pickStep, arranged]);
   const fitViewOptions = useMemo(
     () => ({
       padding: 0.25,
@@ -560,6 +576,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       <div className="split">
         <div className="canvas">
           <ReactFlow
+            key={arranged ? "arranged" : "saved"}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
@@ -582,7 +599,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             ariaLabelConfig={flowLabels}
           >
             <Background gap={18} />
-            <Controls showInteractive={false} />
+            <Controls showInteractive={false}>
+              <ControlButton
+                onClick={toggleArranged}
+                title={t("rv.autoLayout")}
+                aria-label={t("rv.autoLayout")}
+                aria-pressed={arranged}
+                className={arranged ? "on" : undefined}
+              >
+                <LayoutGrid size={14} />
+              </ControlButton>
+            </Controls>
           </ReactFlow>
         </div>
         <div
