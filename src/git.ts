@@ -262,6 +262,64 @@ export async function worktreePorcelain(path: string): Promise<string> {
 }
 
 /**
+ * Unregister and delete a clean worktree under dataDir. Its branch stays, so the worktree can be prepared again.
+ * Returns why it was kept instead, or null once removed.
+ */
+export async function removeWorktree(path: string): Promise<string | null> {
+  if (!existsSync(path)) return null;
+  const checked = await releasableWorktree(path);
+  if (typeof checked === "string") return checked;
+  await git(checked.primary, "worktree", "remove", path);
+  return null;
+}
+
+/** Move a clean worktree under dataDir to `to` (reused by another run). Returns why it was not moved, or null. */
+export async function moveWorktree(path: string, to: string): Promise<string | null> {
+  const checked = await releasableWorktree(path);
+  if (typeof checked === "string") return checked;
+  if (existsSync(to)) return `${to} already exists`;
+  if (unsafeRelativePath(relative(config.dataDir, to)) || overlapsLiveApplication(to))
+    return "target is outside the platform's worktree storage";
+  await git(checked.primary, "worktree", "move", path, to);
+  return null;
+}
+
+async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
+  const inside = relative(realpathSync(config.dataDir), realpathSync(path));
+  if (unsafeRelativePath(inside) || overlapsLiveApplication(path))
+    return "outside the platform's worktree storage";
+  const common = await git(path, "rev-parse", "--path-format=absolute", "--git-common-dir");
+  const primary = join(common, "..");
+  if (realpathSync(primary) === realpathSync(path)) return "primary checkout, not a worktree";
+  if (await worktreePorcelain(path)) return "uncommitted changes";
+  return { primary };
+}
+
+/** The linked worktree (never the primary checkout) that has `branch` checked out, and whether its directory is gone. */
+export async function branchWorktree(
+  repoPath: string,
+  branch: string,
+): Promise<{ path: string; missing: boolean } | null> {
+  repositoryBranch(branch);
+  const blocks = (await git(repoPath, "worktree", "list", "--porcelain")).split(/\n\s*\n/).slice(1);
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
+    const path = lines[0].replace(/^worktree /, "");
+    return { path, missing: !existsSync(path) };
+  }
+  return null;
+}
+
+/** Drop the registration of a worktree whose directory no longer exists (nothing on disk is deleted). */
+export async function unregisterMissingWorktree(repoPath: string, path: string) {
+  if (existsSync(path)) throw new Error(`${path} still exists`);
+  if (unsafeRelativePath(relative(config.dataDir, path)))
+    throw new Error("outside the platform's worktree storage");
+  await git(repoPath, "worktree", "remove", "--force", path);
+}
+
+/**
  * Merge `branch` into the worktree at `path`. A conflict aborts the merge and leaves the worktree as it was.
  * The commit identity is local to this command so integration does not depend on the machine's git config.
  */

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
@@ -13,10 +13,19 @@ import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest, pullRequestState } from "../bitbucket.ts";
 import { openGithubPullRequest, githubPullRequestState } from "../github.ts";
-import { prepareBranch, pushBranch } from "../git.ts";
+import {
+  branchWorktree,
+  moveWorktree,
+  prepareBranch,
+  pushBranch,
+  taskDir,
+  unregisterMissingWorktree,
+  worktreePorcelain,
+} from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
-import { validateCheckout } from "../repos/paths.ts";
+import { unsafeRelativePath, validateCheckout } from "../repos/paths.ts";
 import { branchFor, subtaskBranchName } from "../workflow/branches.ts";
+import type { ExecResult } from "../workflow/types.ts";
 
 const exec = promisify(execFile);
 
@@ -160,6 +169,163 @@ export interface Workspace {
 export interface PrepareWorkspaceOptions {
   /** When set, allocate a worktree and branch that no other step of this run shares. */
   subtaskId?: string | null;
+  /** Holder worktrees the developer approved releasing (structured answer to a workspace conflict question). */
+  approvedReleases?: string[];
+  /** Audit line for a reconciled worktree. */
+  log?: (message: string) => Promise<void>;
+}
+
+/**
+ * Another worktree holds the branch this run needs (git allows a branch in one worktree only).
+ * release: "auto" = provably safe (directory gone, or a clean worktree of a finished run of the same owner);
+ * "approval" = clean and not running, released only after the developer approves; "never" = left alone.
+ */
+export interface WorkspaceConflict {
+  repo: string;
+  branch: string;
+  holder_path: string;
+  holder_run_id: number | null;
+  holder_status: string | null;
+  release: "auto" | "approval" | "never";
+  reason: string;
+}
+
+export class WorkspaceConflictError extends Error {
+  readonly conflicts: WorkspaceConflict[];
+  constructor(conflicts: WorkspaceConflict[]) {
+    super(
+      conflicts
+        .map(
+          (c) =>
+            `${c.repo}: branch ${c.branch} is already checked out at ${c.holder_path} (${c.reason})`,
+        )
+        .join("; ") +
+        ". The platform pauses this step and asks the developer for a release decision: do not ask_user about it, end your turn.",
+    );
+    this.conflicts = conflicts;
+  }
+}
+
+export const WORKSPACE_RELEASE_OPTIONS = [
+  "Giải phóng worktree cũ (giữ nguyên branch và commit) — tiếp tục",
+  "Release the old worktree (branch and commits kept) — continue",
+];
+
+/**
+ * Pause the coding step on unresolved conflicts (no agent turn). Only "approval" conflicts get a release option; the
+ * engine turns that choice into a structured `workspace_release` approval instead of text for the agent.
+ */
+export function workspaceConflictQuestion(conflicts: WorkspaceConflict[], en: boolean): ExecResult {
+  const releasable = conflicts.every((c) => c.release === "approval");
+  const lines = conflicts.map(
+    (c) =>
+      `- ${c.repo}: ${c.branch} @ ${c.holder_path}${c.holder_run_id ? ` (run #${c.holder_run_id}, ${c.holder_status})` : ""}: ${c.reason}`,
+  );
+  return {
+    kind: "waiting_input",
+    questions: [
+      {
+        question: en
+          ? `The branch this run needs is checked out in another worktree:\n${lines.join("\n")}`
+          : `Branch mà run này cần đang được checkout ở worktree khác:\n${lines.join("\n")}`,
+        context: releasable
+          ? en
+            ? "Releasing moves the clean worktree to this run; the branch and its commits stay. Nothing uncommitted is discarded."
+            : "Giải phóng sẽ chuyển worktree sạch đó sang run này; branch và commit giữ nguyên, không mất thay đổi nào."
+          : en
+            ? "The platform will not release it (uncommitted changes, still running, or not managed by the platform). Resolve it, then re-check."
+            : "Nền tảng không tự giải phóng (còn thay đổi chưa commit, run đang chạy, hoặc không do nền tảng quản lý). Hãy xử lý rồi kiểm tra lại.",
+        options: releasable
+          ? [WORKSPACE_RELEASE_OPTIONS[en ? 1 : 0], en ? "Stop here" : "Dừng ở đây"]
+          : en
+            ? ["Resolved — re-check", "Stop here"]
+            : ["Đã xử lý xong — kiểm tra lại", "Dừng ở đây"],
+      },
+    ],
+    checkpoint: { workspace_conflict: conflicts },
+  };
+}
+
+/** Read-only: who holds `branch` in a worktree other than `target`, and whether it may be released. */
+export async function workspaceConflict(
+  run: { id: number },
+  repo: string,
+  checkout: string,
+  branch: string,
+  target: string,
+): Promise<WorkspaceConflict | null> {
+  const holder = await branchWorktree(checkout, branch);
+  if (!holder || holder.path === target) return null;
+  const base = { repo, branch, holder_path: holder.path };
+  if (unsafeRelativePath(relative(join(config.dataDir, "worktrees"), holder.path)))
+    return {
+      ...base,
+      holder_run_id: null,
+      holder_status: null,
+      release: "never",
+      reason: "not a platform-managed worktree",
+    };
+  const owner = await one<{
+    run_id: number;
+    status: string;
+    same_owner: boolean;
+    worker_instance: string | null;
+  }>(
+    pool,
+    `SELECT w.run_id, r.status, r.worker_instance,
+            r.owner_id IS NOT DISTINCT FROM (SELECT owner_id FROM workflow_runs WHERE id = $2) AS same_owner
+       FROM execution_workspaces w JOIN workflow_runs r ON r.id = w.run_id
+      WHERE w.path = $1 ORDER BY w.id DESC LIMIT 1`,
+    [holder.path, run.id],
+  );
+  const info = {
+    ...base,
+    holder_run_id: owner ? Number(owner.run_id) : null,
+    holder_status: owner?.status ?? null,
+  };
+  if (holder.missing) return { ...info, release: "auto", reason: "its directory no longer exists" };
+  const never = (reason: string): WorkspaceConflict => ({ ...info, release: "never", reason });
+  if (owner && Number(owner.run_id) === run.id)
+    return never("another workspace of this run holds it");
+  if (owner && owner.worker_instance !== config.instanceId)
+    return never(`run #${owner.run_id} belongs to another worker`);
+  if (owner?.status === "RUNNING") return never(`run #${owner.run_id} is still running`);
+  if (await worktreePorcelain(holder.path).catch(() => "unreadable"))
+    return never("it has uncommitted changes");
+  if (owner && ["COMPLETED", "CANCELED"].includes(owner.status) && owner.same_owner)
+    return {
+      ...info,
+      release: "auto",
+      reason: `run #${owner.run_id} is ${owner.status.toLowerCase()}`,
+    };
+  return {
+    ...info,
+    release: "approval",
+    reason: owner
+      ? `run #${owner.run_id} is ${owner.status.toLowerCase()}`
+      : "no workflow run records it",
+  };
+}
+
+/** Preflight for a coding step: the conflict that would stop preparing this run's own (non-subtask) worktree. */
+export async function runWorkspaceConflict(
+  run: { id: number; branch: string; inputs?: Record<string, unknown> | null },
+  repo: string,
+  checkout: string,
+): Promise<WorkspaceConflict | null> {
+  const reg = await repositories.get(repo);
+  if (!reg) return null;
+  const saved = await one<{ path: string; branch: string }>(
+    pool,
+    "SELECT path, branch FROM execution_workspaces WHERE run_id=$1 AND repo=$2 AND subtask_id IS NULL",
+    [run.id, repo],
+  );
+  const path =
+    saved?.path ??
+    remoteWorkspacePath(reg, run.id, null) ??
+    join(config.dataDir, "worktrees", workspaceKey(run.branch), repo);
+  if (existsSync(path)) return null;
+  return workspaceConflict(run, repo, checkout, saved?.branch ?? branchFor(run, repo).branch, path);
 }
 
 function remoteWorkspacePath(
@@ -223,9 +389,9 @@ export async function prepareWorkspace(
     const current = await repositories.get(repo);
     if (!current?.enabled || !current.allowed_actions.includes("write"))
       throw new Error("Repository write permission required");
-    const parent = await prepareLockedWorkspace(run, repo, current, checkout, null);
+    const parent = await prepareLockedWorkspace(run, repo, current, checkout, null, opts);
     if (!subtaskId) return [parent];
-    return [parent, await prepareLockedWorkspace(run, repo, current, checkout, subtaskId)];
+    return [parent, await prepareLockedWorkspace(run, repo, current, checkout, subtaskId, opts)];
   });
   for (const w of created) await installNodeDependencies(w.path);
   if (codeIntelligenceEnabled()) await enqueueIndex(repo, run.id).catch(() => {});
@@ -235,9 +401,15 @@ export async function prepareWorkspace(
 async function prepareLockedWorkspace(
   run: { id: number; branch: string; inputs?: Record<string, any> | null },
   repo: string,
-  reg: { id: number; path?: string | null; repository_url?: string | null; default_branch?: string | null },
+  reg: {
+    id: number;
+    path?: string | null;
+    repository_url?: string | null;
+    default_branch?: string | null;
+  },
   checkout: string,
   subtaskId: string | null,
+  opts: PrepareWorkspaceOptions = {},
 ): Promise<Workspace> {
   const saved = await one<{ path: string; branch: string }>(
     pool,
@@ -262,22 +434,37 @@ async function prepareLockedWorkspace(
       parent: parent.branch,
     };
   }
+  const key = subtaskId ? workspaceKey(target.branch) : workspaceKey(run.branch);
   const workspacePath = saved?.path ?? remoteWorkspacePath(reg, run.id, subtaskId);
   if (workspacePath) await mkdir(join(workspacePath, ".."), { recursive: true, mode: 0o700 });
-  const b = await prepareBranch(
-    subtaskId ? workspaceKey(target.branch) : workspaceKey(run.branch),
-    repo,
-    target.branch,
-    reg.path || repo,
-    {
-      mustExist: target.existing,
-      from: target.parent,
-      checkoutPath: checkout,
-      workspacePath,
-      defaultBranch: reg.default_branch ?? undefined,
-      skipFetch: !!reg.repository_url,
-    },
-  );
+  const path = workspacePath ?? join(taskDir(key), repo);
+  if (!existsSync(path)) {
+    const conflict = await workspaceConflict(run, repo, checkout, target.branch, path);
+    if (conflict) {
+      const approved =
+        conflict.release === "auto" ||
+        (conflict.release === "approval" &&
+          !!opts.approvedReleases?.includes(conflict.holder_path));
+      if (!approved) throw new WorkspaceConflictError([conflict]);
+      // Reuse the clean holder (keeps installed dependencies); a vanished one is only unregistered.
+      if (conflict.holder_path && existsSync(conflict.holder_path)) {
+        const kept = await moveWorktree(conflict.holder_path, path);
+        if (kept)
+          throw new WorkspaceConflictError([{ ...conflict, release: "never", reason: kept }]);
+      } else await unregisterMissingWorktree(checkout, conflict.holder_path);
+      await opts.log?.(
+        `${repo}: reconciled worktree ${conflict.holder_path} holding ${conflict.branch} (${conflict.reason}${conflict.release === "approval" ? ", release approved by the developer" : ""}) -> ${path}`,
+      );
+    }
+  }
+  const b = await prepareBranch(key, repo, target.branch, reg.path || repo, {
+    mustExist: target.existing,
+    from: target.parent,
+    checkoutPath: checkout,
+    workspacePath: path,
+    defaultBranch: reg.default_branch ?? undefined,
+    skipFetch: !!reg.repository_url,
+  });
   if (b.path === checkout)
     throw new Error(
       `${repo}: branch is checked out in the primary checkout; switch it before continuing`,

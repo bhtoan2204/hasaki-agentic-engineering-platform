@@ -45,9 +45,12 @@ import { missingContractKeys } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   installNodeDependencies,
+  runWorkspaceConflict,
   workspaceBase,
+  workspaceConflictQuestion,
   workspaceKey,
   workspacesOf,
+  type WorkspaceConflict,
 } from "../git/provider.ts";
 import {
   collectScopeState,
@@ -482,6 +485,7 @@ const agentExecutor: StepExecutor = {
         retryable: false,
       };
     {
+      const checkouts: Record<string, string> = {};
       for (const name of ctx.run.selected_repositories) {
         const repo = await repositories.get(name);
         try {
@@ -490,7 +494,11 @@ const agentExecutor: StepExecutor = {
             !repo.allowed_actions.includes(mode === "coding" ? "write" : "read")
           )
             throw new Error(`Repository ${name} is unavailable or unauthorized`);
-          await prepareRepository(repo, false, await checkoutForRun(repo, ctx.run.id));
+          checkouts[name] = await prepareRepository(
+            repo,
+            false,
+            await checkoutForRun(repo, ctx.run.id),
+          );
         } catch (e) {
           const en = outputLocale(ctx.run) === "en";
           return {
@@ -509,6 +517,22 @@ const agentExecutor: StepExecutor = {
             checkpoint: { local_setup: { repository: name } },
           };
         }
+      }
+      // A worktree another run left on this run's branch: decide before the agent starts, so no attempt is spent on it.
+      if (mode === "coding" && ctx.step.config?.isolated_workspace !== true) {
+        const approved = (ctx.input.pending?.workspace_release?.holders ?? []) as string[];
+        const blocking: WorkspaceConflict[] = [];
+        for (const [name, checkout] of Object.entries(checkouts)) {
+          const conflict = await runWorkspaceConflict(ctx.run, name, checkout);
+          if (
+            conflict &&
+            conflict.release !== "auto" &&
+            !(conflict.release === "approval" && approved.includes(conflict.holder_path))
+          )
+            blocking.push(conflict);
+        }
+        if (blocking.length)
+          return workspaceConflictQuestion(blocking, outputLocale(ctx.run) === "en");
       }
     }
     if (provider !== "claude") {
@@ -576,7 +600,8 @@ const agentExecutor: StepExecutor = {
       }
     }
     const delegationCfg = ctx.step.config.delegation as
-      { enabled?: boolean; agents?: string[] } | undefined;
+      | { enabled?: boolean; agents?: string[] }
+      | undefined;
     const delegation = delegationCfg?.enabled === true;
     const policy: PolicyContext = {
       mode,

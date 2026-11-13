@@ -26,6 +26,7 @@ const CHAIN = [
   "regression_test",
   "quality_gate",
   "pr",
+  "cleanup",
 ] as const;
 
 after(() => pool.end());
@@ -40,8 +41,7 @@ test("intelligent feature engineering is a valid executable template", async () 
     spec.steps.map((step) => step.key),
     [...CHAIN],
   );
-  for (let i = 1; i < CHAIN.length; i++)
-    assert.deepEqual(spec.steps[i].depends_on, [CHAIN[i - 1]]);
+  for (let i = 1; i < CHAIN.length; i++) assert.deepEqual(spec.steps[i].depends_on, [CHAIN[i - 1]]);
   const order = topoOrder(spec.steps);
   assert.deepEqual(order, [...CHAIN]);
 
@@ -52,8 +52,14 @@ test("intelligent feature engineering is a valid executable template", async () 
   const pr = spec.steps.find((step) => step.key === "pr")!;
   assert.equal(pr.config.mode, "approval");
   assert.equal(pr.config.content_from, "implement");
-  assert.equal(spec.steps.find((step) => step.key === "discover")!.config.action, "repository_discovery");
-  assert.match(String(spec.steps.find((step) => step.key === "plan")!.config.instructions), /not child runs/i);
+  assert.equal(
+    spec.steps.find((step) => step.key === "discover")!.config.action,
+    "repository_discovery",
+  );
+  assert.match(
+    String(spec.steps.find((step) => step.key === "plan")!.config.instructions),
+    /not child runs/i,
+  );
   assert.match(
     String(spec.steps.find((step) => step.key === "targeted_test")!.config.command),
     /typecheck/,
@@ -72,6 +78,7 @@ test("intelligent feature engineering is a valid executable template", async () 
       "test",
       "review",
       "pr",
+      "cleanup",
     ],
   );
 

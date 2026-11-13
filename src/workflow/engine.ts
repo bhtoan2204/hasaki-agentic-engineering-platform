@@ -1,4 +1,5 @@
 export { releaseAttempt, reapExpiredLeases, safeRecovery } from "./recovery.ts";
+import { existsSync } from "node:fs";
 import { advance } from "./progression.ts";
 export { advance } from "./progression.ts";
 import { budgetPreflight, enforceBudget } from "./budgets.ts";
@@ -34,7 +35,11 @@ import { normalizeProviderFailure, safeDiagnostics } from "../agent/telemetry.ts
 import type pg from "pg";
 import { config } from "../config.ts";
 import { executionPolicyVersions } from "../learning/policyVersions.ts";
-import { allWorkspacesOf } from "../git/provider.ts";
+import {
+  allWorkspacesOf,
+  WORKSPACE_RELEASE_OPTIONS,
+  type WorkspaceConflict,
+} from "../git/provider.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
@@ -881,7 +886,7 @@ export async function sendFeedback(
   // Re-planning may discard the approach the code was written for: keep the uncommitted part retrievable.
   const snapshots: Array<{ repo: string; ref: string; commit: string; files: string[] }> = [];
   if (route !== "reimplement")
-    for (const w of await allWorkspacesOf(runId))
+    for (const w of (await allWorkspacesOf(runId)).filter((x) => existsSync(x.path)))
       try {
         const snap = await snapshotUncommitted(
           w.path,
@@ -1152,16 +1157,19 @@ export async function answerQuestions(
                 409,
               );
           }
+          const replies = await q<{ id: number; answer: string }>(
+            c,
+            "SELECT id, answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'",
+            [s.current_attempt_id],
+          );
           // A step paused by failure recovery: "stop" ends it as FAILED; anything else runs it again.
           const stop =
-            (cp?.data?.failure || cp?.data?.recovery) &&
-            (
-              await q<{ answer: string }>(
-                c,
-                "SELECT answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'",
-                [s.current_attempt_id],
-              )
-            ).some((a) => /^\s*(dừng|stop)\b/i.test(a.answer));
+            (cp?.data?.failure || cp?.data?.recovery || cp?.data?.workspace_conflict) &&
+            replies.some((a) => /^\s*(dừng|stop)\b/i.test(a.answer));
+          // Choosing the release option is an approval the platform executes itself (prepare_branch moves the holder).
+          const release = Array.isArray(cp?.data?.workspace_conflict)
+            ? replies.find((a) => WORKSPACE_RELEASE_OPTIONS.includes(a.answer.trim()))
+            : undefined;
           if (stop) {
             await setStepStatus(
               c,
@@ -1177,13 +1185,22 @@ export async function answerQuestions(
             const pending = {
               ...(s.pending_input ?? {}),
               resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} },
+              ...(release && {
+                workspace_release: {
+                  holders: (cp.data.workspace_conflict as WorkspaceConflict[])
+                    .filter((x) => x.release === "approval")
+                    .map((x) => x.holder_path),
+                  question_id: release.id,
+                  approved_by: answeredBy,
+                },
+              }),
             };
             await setStepStatus(
               c,
               s,
               "READY",
               { pending_input: pending, ready_at: new Date() },
-              "answers received, resuming",
+              release ? "workspace release approved, resuming" : "answers received, resuming",
             );
           }
         }
@@ -1479,10 +1496,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     const filesOf = (config: Record<string, any> | null | undefined): string[] =>
       config?.scope?.owned_files ?? config?.subtask?.owned_files ?? config?.owned_files ?? [];
     const reposOf = (config: Record<string, any> | null | undefined): string[] =>
-      config?.scope?.repositories ??
-      config?.subtask?.target_repos ??
-      config?.target_repos ??
-      [];
+      config?.scope?.repositories ?? config?.subtask?.target_repos ?? config?.target_repos ?? [];
     if (consumers.includes(step.type)) {
       const active = await q<{
         id: number;
@@ -1518,7 +1532,10 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
             const stepFiles = filesOf(step.config);
             const stepRepos = reposOf(step.config);
             for (const a of active) {
-              if (!isolatedCoding(a.step_type, a.config, a.subtask_id) || a.subtask_id === step.subtask_id) {
+              if (
+                !isolatedCoding(a.step_type, a.config, a.subtask_id) ||
+                a.subtask_id === step.subtask_id
+              ) {
                 conflict = true;
                 break;
               }
@@ -1824,9 +1841,16 @@ async function applyResult(
       return;
     }
     case "failed": {
+      // Workspace-conflict pauses ran no agent turn: they do not consume the retry budget.
+      const pauses = await one<{ n: number }>(
+        c,
+        `SELECT count(*)::int AS n FROM workflow_checkpoints k JOIN workflow_step_attempts a ON a.id = k.attempt_id
+          WHERE a.step_id = $1 AND a.generation = $2 AND k.data ? 'workspace_conflict'`,
+        [step.id, step.generation],
+      );
       const decision = classifyFailure(result.error, {
         executorRetryable: result.retryable,
-        attempt: step.attempt_count,
+        attempt: step.attempt_count - (pauses?.n ?? 0),
         maxAttempts: attempt.effective_agent?.retry?.max_attempts ?? step.max_attempts,
         baseBackoff: attempt.effective_agent?.retry?.backoff_seconds ?? step.retry_backoff_s,
       });

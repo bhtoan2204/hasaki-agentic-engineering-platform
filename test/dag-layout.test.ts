@@ -26,15 +26,38 @@ test("a long chain folds into a serpentine instead of one column", () => {
   assert.deepEqual(edgeEnds(pos.e, pos.f), { sourceHandle: "sl", targetHandle: "tr" });
 });
 
-test("parallel steps stay on one row and the chain resumes underneath", () => {
+test("parallel steps stack in one column between their neighbours", () => {
   const pos = autoLayout([
     { key: "a", depends_on: [] },
     { key: "b", depends_on: ["a"] },
     { key: "c", depends_on: ["a"] },
     { key: "d", depends_on: ["b", "c"] },
   ]);
-  assert.equal(pos.b.y, pos.c.y);
-  assert.ok(pos.b.y > pos.a.y);
-  assert.ok(pos.d.y > pos.b.y);
-  assert.ok(pos.c.x > pos.b.x);
+  assert.equal(pos.b.x, pos.c.x);
+  assert.ok(pos.c.y > pos.b.y);
+  assert.ok(pos.b.x > pos.a.x);
+  assert.ok(pos.d.x > pos.b.x);
+  assert.equal(pos.a.y, (pos.b.y + pos.c.y) / 2);
+  assert.equal(pos.d.y, pos.a.y);
+});
+
+test("a diamond inside a long chain keeps every band aligned", () => {
+  const pos = autoLayout([
+    { key: "select" },
+    { key: "analyze", depends_on: ["select"] },
+    { key: "arch", depends_on: ["analyze"] },
+    { key: "sec", depends_on: ["analyze"] },
+    { key: "report", depends_on: ["arch", "sec"] },
+    { key: "fix", depends_on: ["report"] },
+    { key: "test", depends_on: ["fix"] },
+    { key: "pr", depends_on: ["test"] },
+    { key: "cleanup", depends_on: ["pr"] },
+    { key: "result", depends_on: ["cleanup"] },
+  ]);
+  const top = ["select", "analyze", "report", "fix"].map((k) => pos[k].y);
+  assert.ok(top.every((y) => y === top[0]));
+  assert.equal(pos.test.x, pos.fix.x);
+  assert.ok(pos.test.y > pos.sec.y);
+  assert.ok(["pr", "cleanup", "result"].every((k) => pos[k].y === pos.test.y));
+  assert.ok(pos.result.x < pos.cleanup.x && pos.cleanup.x < pos.pr.x);
 });

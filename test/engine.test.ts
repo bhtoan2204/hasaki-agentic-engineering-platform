@@ -48,7 +48,15 @@ import {
   pullRequestExecutor,
   setAiRepositoryRanker,
 } from "../src/workflow/executors/builtin.ts";
-import { gitProvider, recordWorkspace, setGitProvider, workspacesOf } from "../src/git/provider.ts";
+import {
+  gitProvider,
+  recordWorkspace,
+  setGitProvider,
+  WORKSPACE_RELEASE_OPTIONS,
+  workspaceConflictQuestion,
+  workspacesOf,
+  type WorkspaceConflict,
+} from "../src/git/provider.ts";
 import { recordRunOutcome, syncPullRequestStates } from "../src/learning/outcomes.ts";
 import {
   proposeImprovements,
@@ -1635,7 +1643,7 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
     start: false,
   });
   assert.equal(std.profile, "STANDARD");
-  assert.equal(std.steps.length, 10);
+  assert.equal(std.steps.length, 11);
   const pay = (
     await importHasakiTask({
       data: {
@@ -1662,7 +1670,7 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
   });
   assert.equal(fast.profile, "FAST");
   const r = fast.steps.find((s) => s.key === REPORT_STEP_KEY)!;
-  assert.deepEqual(r.depends_on, ["pr"], "report depends on the FAST graph's terminal step");
+  assert.deepEqual(r.depends_on, ["cleanup"], "report depends on the FAST graph's terminal step");
   assert.equal(fast.steps.filter((s) => s.key === REPORT_STEP_KEY).length, 1);
   const cr = await startRun({
     definitionKey: "code-review",
@@ -2563,6 +2571,60 @@ test("failure recovery: auth stops at once, workspace conflict pauses for a huma
   );
   assert.equal(job.later, true, "backoff delay applied");
   await cancelRun(r4.id, "test done");
+});
+
+test("workspace conflict: pause costs no retry budget, the release option becomes a structured approval", async () => {
+  const key = await customWorkflow([
+    { key: "a", type: "coding_agent", max_attempts: 2, retry_backoff_seconds: 0 },
+  ]);
+  const conflict: WorkspaceConflict = {
+    repo: "oms-api",
+    branch: "u1-REQ-1",
+    holder_path: "/data/worktrees/i/96/107",
+    holder_run_id: 96,
+    holder_status: "FAILED",
+    release: "approval",
+    reason: "run #96 is failed",
+  };
+  const pendings: Array<{ workspace_release?: { holders: string[]; approved_by: string } } | null> =
+    [];
+  let transient = 0;
+  scripts.a = (ctx) => {
+    pendings.push(ctx.input.pending);
+    if (!ctx.input.pending?.workspace_release) return workspaceConflictQuestion([conflict], false);
+    return transient++ === 0
+      ? { kind: "failed", error: "ECONNRESET", retryable: true }
+      : { kind: "completed", output: { ok: true } };
+  };
+  const run = await startRun({ definitionKey: key, title: "ws-release" } as any);
+  await drain();
+  let step = await stepOf(run.id, "a");
+  assert.equal(step.status, "WAITING_INPUT");
+  const [question] = await openQ(run.id);
+  assert.match(question.question, /96\/107/);
+  assert.deepEqual(question.options, [WORKSPACE_RELEASE_OPTIONS[0], "Dừng ở đây"]);
+  await answerQuestions({ [question.id]: WORKSPACE_RELEASE_OPTIONS[0] }, "dev");
+  await drain();
+  step = await stepOf(run.id, "a");
+  assert.equal(
+    step.status,
+    "COMPLETED",
+    "the transient failure was retried: the workspace pause did not use one of the 2 attempts",
+  );
+  assert.deepEqual(pendings.at(-1)?.workspace_release?.holders, [conflict.holder_path]);
+  assert.equal(pendings.at(-1)?.workspace_release?.approved_by, "dev");
+
+  scripts.a = () => workspaceConflictQuestion([{ ...conflict, release: "never" }], false);
+  const blocked = await startRun({ definitionKey: key, title: "ws-never" } as any);
+  await drain();
+  const [q2] = await openQ(blocked.id);
+  assert.ok(
+    !q2.options.includes(WORKSPACE_RELEASE_OPTIONS[0]),
+    "never-releasable: no release option",
+  );
+  await answerQuestions({ [q2.id]: "Dừng ở đây" }, "dev");
+  await drain();
+  assert.equal((await stepOf(blocked.id, "a")).status, "FAILED");
 });
 
 test("cross-task memory: only verified/approved AND provably FRESH memory reaches the context", async () => {

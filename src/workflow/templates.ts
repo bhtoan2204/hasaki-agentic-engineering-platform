@@ -618,6 +618,14 @@ const PRODUCTION_INVESTIGATION = {
   ],
 };
 
+const cleanup = (after: string) => ({
+  key: "cleanup",
+  type: "integration",
+  name: "Cleanup",
+  depends_on: [after],
+  config: { action: "cleanup_workspaces" },
+});
+
 export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = [
   {
     key: "work-item-analysis",
@@ -712,6 +720,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["review"],
           config: { mode: "approval", content_from: "implement" },
         },
+        cleanup("pr"),
       ],
     },
   },
@@ -798,6 +807,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["review"],
           config: { mode: "approval", content_from: "implement" },
         },
+        cleanup("pr"),
       ],
     },
   },
@@ -914,6 +924,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           run_if: { step: "fix", status: "COMPLETED" },
           config: { mode: "approval", content_from: "fix" },
         },
+        cleanup("fix_pr"),
       ],
     },
   },
@@ -992,6 +1003,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["regression_test"],
           config: { mode: "approval", content_from: "refactor" },
         },
+        cleanup("pr"),
       ],
     },
   },
@@ -1099,6 +1111,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["regression_test"],
           config: { mode: "approval", content_from: "implement" },
         },
+        cleanup("pr"),
       ],
     },
   },
@@ -1265,6 +1278,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["quality_gate"],
           config: { mode: "approval", content_from: "implement" },
         },
+        cleanup("pr"),
       ],
     },
   },

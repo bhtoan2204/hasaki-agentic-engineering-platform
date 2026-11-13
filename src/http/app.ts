@@ -22,6 +22,7 @@ import {
 import { setPassword } from "../auth/users.ts";
 import { wantsSupport } from "../authz/access.ts";
 import { artifactResponseHeaders } from "./artifactResponse.ts";
+import { config } from "../config.ts";
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 const publicDir = join(import.meta.dirname, "..", "..", "public");
@@ -143,7 +144,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         return send(res, status, { error: (e as Error).message });
       }
     }
-    if (method === "GET" && !url.pathname.startsWith("/api/") && serveStatic(url, res)) return;
+    if (method === "GET" && !url.pathname.startsWith("/api/")) {
+      // Telegram links use 127.0.0.1 (localhost isn't clickable there); bounce to publicUrl so the session cookie matches.
+      const pub = new URL(config.publicUrl);
+      if (pub.hostname === "localhost" && req.headers.host === `127.0.0.1:${pub.port || 80}`) {
+        res.writeHead(302, { Location: `${pub.origin}${url.pathname}${url.search}` });
+        return res.end();
+      }
+      if (serveStatic(url, res)) return;
+    }
 
     const actor = await sessionFromRequest(req);
     if (!actor) return send(res, 401, { error: "authentication required" });

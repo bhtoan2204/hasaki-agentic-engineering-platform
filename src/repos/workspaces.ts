@@ -178,7 +178,8 @@ export async function checkoutForRun(
   );
   if (run?.worker_instance !== config.instanceId || !run.allowed_repositories.includes(repo.name))
     throw new Error("Unauthorized run workspace");
-  if (!run.path) return undefined;
+  // Removed by the cleanup step: the worktree is prepared again from the default checkout.
+  if (!run.path || !existsSync(run.path)) return undefined;
   const rel = relative(await realpath(config.dataDir), await realpath(run.path));
   if (unsafeRelativePath(rel)) throw new Error("Run workspace escapes local dataDir");
   const common = (

@@ -127,9 +127,11 @@ export function toEdges(
             (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "6 4" : undefined,
         },
         label:
-          (s.run_if as any)?.step === d
-            ? `if = ${JSON.stringify((s.run_if as any).equals)}`
-            : undefined,
+          (s.run_if as any)?.step !== d
+            ? undefined
+            : (s.run_if as any).status
+              ? `if ${String((s.run_if as any).status).toLowerCase()}`
+              : `if = ${JSON.stringify((s.run_if as any).equals)}`,
         labelStyle: { fontSize: 10, fontWeight: 600, fill: "var(--ink-2)" },
         labelBgStyle: { fill: "var(--surface)", stroke: "var(--line)" },
         labelBgPadding: [6, 3],

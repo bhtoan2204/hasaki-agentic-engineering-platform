@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
-import { repositoryBaseBranch } from "../repos/service.ts";
+import { repoPath, repositories, repositoryBaseBranch } from "../repos/service.ts";
 import { knowledge } from "./service.ts";
 
 /**
@@ -160,15 +160,21 @@ export async function extractRunMemory(runId: number) {
     })),
   ]);
   const written: string[] = [];
-  for (const w of await q(pool, "SELECT repo, path FROM execution_workspaces WHERE run_id = $1 AND subtask_id IS NULL", [
-    runId,
-  ])) {
-    if (!existsSync(w.path)) continue;
-    const sha = await git(w.path, "rev-parse", "HEAD").catch(() => "");
+  for (const w of await q(
+    pool,
+    "SELECT repo, branch, path FROM execution_workspaces WHERE run_id = $1 AND subtask_id IS NULL",
+    [runId],
+  )) {
+    // The cleanup step removes the worktree: read the run branch from the repository checkout instead.
+    const reg = await repositories.get(w.repo);
+    const dir = [w.path, reg ? repoPath(reg) : ""].find((d) => d && existsSync(d));
+    if (!dir) continue;
+    const ref = dir === w.path ? "HEAD" : `refs/heads/${w.branch}`;
+    const sha = await git(dir, "rev-parse", ref).catch(() => "");
     if (!sha) continue;
     const baseBranch = await repositoryBaseBranch(w.repo);
     const files = (
-      await git(w.path, "diff", "--name-only", `origin/${baseBranch}...HEAD`).catch(() => "")
+      await git(dir, "diff", "--name-only", `origin/${baseBranch}...${sha}`).catch(() => "")
     )
       .split("\n")
       .filter(Boolean);

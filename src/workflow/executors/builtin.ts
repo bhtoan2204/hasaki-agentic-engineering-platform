@@ -10,10 +10,18 @@ import { approvedScopeFrom } from "../../agent/evidence.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { prepareWorkspace, gitProviderFor, subtaskWorkspacesOf, workspaceBase, workspacesOf } from "../../git/provider.ts";
-import { mergeBranchInto, worktreePorcelain } from "../../git.ts";
+import {
+  allWorkspacesOf,
+  prepareWorkspace,
+  gitProviderFor,
+  subtaskWorkspacesOf,
+  workspaceBase,
+  workspacesOf,
+} from "../../git/provider.ts";
+import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   repositoryReference,
@@ -850,6 +858,23 @@ export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResu
   };
 }
 
+/** Last step of coding workflows: delete the run's worktrees. Dirty ones are kept; branches always stay. */
+async function cleanupWorkspaces(ctx: ExecutionContext): Promise<ExecResult> {
+  const removed: string[] = [];
+  const kept: Array<{ repo: string; path: string; reason: string }> = [];
+  for (const w of await allWorkspacesOf(ctx.run.id)) {
+    if (!existsSync(w.path)) continue;
+    const label = w.subtask_id ? `${w.repo} (${w.subtask_id})` : w.repo;
+    const reason = await removeWorktree(w.path).catch((e) => (e as Error).message.split("\n")[0]);
+    if (reason) {
+      kept.push({ repo: label, path: w.path, reason });
+      await ctx.log("system", `${label}: worktree kept at ${w.path}: ${reason}`);
+    } else removed.push(label);
+  }
+  if (removed.length) await ctx.log("system", `removed worktrees: ${removed.join(", ")}`);
+  return { kind: "completed", output: { removed, kept } };
+}
+
 export const integrationExecutor: StepExecutor = {
   async execute(ctx) {
     switch (ctx.step.config.action) {
@@ -864,6 +889,8 @@ export const integrationExecutor: StepExecutor = {
         return selectRepositories(ctx);
       case "publish_report":
         return publishReport(ctx);
+      case "cleanup_workspaces":
+        return cleanupWorkspaces(ctx);
       case "investigation_parse":
         return investigationParse(ctx);
       case "investigation_correlate":

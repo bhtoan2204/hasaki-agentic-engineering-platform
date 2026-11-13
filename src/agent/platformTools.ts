@@ -26,7 +26,7 @@ import { repositories, repoPath } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
 import { citedArtifactIds, evidenceExcerpt } from "./independentReview.ts";
-import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
+import { prepareWorkspace, WorkspaceConflictError, workspacesOf } from "../git/provider.ts";
 import { scoreKnowledge } from "../context/plan.ts";
 import { externalNotice, isExternal } from "../knowledge/external.ts";
 import { callTool, capResult, describeTool, listTools } from "./toolRegistry.ts";
@@ -393,7 +393,9 @@ async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
   return "Result recorded. End your turn now.";
 }
 
-async function isolationFor(stepId: number): Promise<{ isolated: boolean; subtaskId: string | null }> {
+async function isolationFor(
+  stepId: number,
+): Promise<{ isolated: boolean; subtaskId: string | null }> {
   const step = await one<{ subtask_id: string | null; config: { isolated_workspace?: boolean } }>(
     pool,
     "SELECT subtask_id, config FROM workflow_steps WHERE id = $1",
@@ -414,15 +416,30 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   if (isolation.isolated && !isolation.subtaskId)
     return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [env.runId]);
-  const w = await prepareWorkspace(
-    run,
-    repo,
-    async () => {
-      const live = await attemptIsLive(env.attemptId, env.fencingToken);
-      if (!live.ok) throw new Error(live.reason);
-    },
-    { subtaskId: isolation.subtaskId },
+  const step = await one<{ holders: string[] | null }>(
+    pool,
+    "SELECT pending_input->'workspace_release'->'holders' AS holders FROM workflow_steps WHERE id = $1",
+    [env.stepId],
   );
+  let w;
+  try {
+    w = await prepareWorkspace(
+      run,
+      repo,
+      async () => {
+        const live = await attemptIsLive(env.attemptId, env.fencingToken);
+        if (!live.ok) throw new Error(live.reason);
+      },
+      {
+        subtaskId: isolation.subtaskId,
+        approvedReleases: Array.isArray(step?.holders) ? step.holders.map(String) : [],
+        log: (message) => env.log("system", message),
+      },
+    );
+  } catch (e) {
+    if (e instanceof WorkspaceConflictError) return `ERROR: ${e.message}`;
+    throw e;
+  }
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;

@@ -1,7 +1,11 @@
-/** A long chain used to stack in one column. Fold it into a serpentine so the canvas width is used. */
-const COLS = 4;
+/**
+ * Layered left-to-right layout: one column per dependency depth, parallel steps stacked in their column.
+ * A long graph folds into serpentine bands so the canvas width is used.
+ */
+const MAX_COLS = 5;
 const DX = 260;
 const DY = 168;
+const SY = 104;
 
 export interface LayoutStep {
   key: string;
@@ -26,39 +30,36 @@ export function autoLayout(steps: LayoutStep[]): Record<string, { x: number; y: 
     const level = depth.get(s.key)!;
     (layers.get(level) ?? layers.set(level, []).get(level)!).push(s.key);
   }
+  const levels = [...layers.keys()].sort((a, b) => a - b).map((l) => layers.get(l)!);
+  const bands = Math.max(1, Math.ceil(levels.length / MAX_COLS));
+  const perBand = Math.max(1, Math.ceil(levels.length / bands));
+
   const pos: Record<string, { x: number; y: number }> = {};
-  let row = 0;
-  let col = 0;
-  let dir: 1 | -1 = 1;
-  const xOf = (slot: number) => (dir === 1 ? slot : COLS - 1 - slot) * DX;
-  const wrap = () => {
-    row += 1;
-    dir = dir === 1 ? -1 : 1;
-    col = 0;
-  };
-  for (const level of [...layers.keys()].sort((a, b) => a - b)) {
-    const keys = layers.get(level)!;
-    if (keys.length === 1) {
-      if (col >= COLS) wrap();
-      pos[keys[0]] = { x: xOf(col), y: row * DY };
-      col += 1;
-      continue;
-    }
-    if (col !== 0) {
-      row += 1;
-      col = 0;
-      dir = 1;
-    }
-    const origin = keys.length <= COLS ? Math.floor((COLS - keys.length) / 2) : 0;
-    keys.forEach((k, i) => (pos[k] = { x: (origin + i) * DX, y: row * DY }));
-    row += 1;
-    col = 0;
-    dir = 1;
+  let bandTop = 0;
+  for (let b = 0; b * perBand < levels.length; b++) {
+    const band = levels.slice(b * perBand, (b + 1) * perBand);
+    const tallest = Math.max(...band.map((keys) => keys.length));
+    const mid = bandTop + ((tallest - 1) * SY) / 2;
+    band.forEach((keys, slot) => {
+      const x = (b % 2 === 0 ? slot : perBand - 1 - slot) * DX;
+      // Order a column by its parents' height to keep edges from crossing.
+      const anchor = (k: string) => {
+        const ys = (byKey.get(k)?.depends_on ?? []).map((p) => pos[p]?.y).filter((y) => y != null);
+        return ys.length ? ys.reduce((a, c) => a + c, 0) / ys.length : 0;
+      };
+      const ordered = keys
+        .map((k, i) => ({ k, i, a: anchor(k) }))
+        .sort((p, q) => p.a - q.a || p.i - q.i);
+      ordered.forEach(({ k }, i) => {
+        pos[k] = { x, y: mid + (i - (keys.length - 1) / 2) * SY };
+      });
+    });
+    bandTop += (tallest - 1) * SY + DY;
   }
   return pos;
 }
 
-/** Side handles along a row; top and bottom at a turn. */
+/** Side handles within a band; bottom to top where the band turns. */
 export function edgeEnds(
   src: { x: number; y: number },
   dst: { x: number; y: number },
