@@ -60,7 +60,11 @@ export async function eligiblePonytailRepositories(rows: RepositoryRow[]) {
 export async function materializePonytailSuite(rows?: RepositoryRow[]) {
   const registry = await eligiblePonytailRepositories(rows ?? (await repositories.list()));
   if (!registry.length)
-    throw new Error("Ponytail suite requires registered repositories other than this platform");
+    throw new Error(
+      (await installationRepositoryUrl().catch(() => null))
+        ? "Ponytail suite requires registered repositories other than this platform"
+        : "Ponytail suite cannot identify this platform's repository; set platform.repositoryUrl",
+    );
   const entries = await Promise.all(
     registry.map(async (repo) => {
       const cwd = resolveRepoPath(repo);

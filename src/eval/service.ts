@@ -1,4 +1,5 @@
 import { livePrerequisites } from "./livePrerequisites.ts";
+import { unsupportedLiveTools } from "./liveProvider.ts";
 import { materializePonytailSuite } from "./ponytailSuite.ts";
 import { compareContextEffect } from "./contextEffect.ts";
 import { contextInventory } from "./controls.ts";
@@ -109,6 +110,16 @@ export async function createEvaluation(
     throw new HttpError(400, "Evaluation exceeds local execution limits");
   if (cfg.mode === "live" && (!input.paid_approval || !isAdmin))
     throw new HttpError(403, "Live paid evaluation requires explicit administrator approval");
+  if (cfg.mode === "live" && cfg.allowed_tools) {
+    const unsupported = unsupportedLiveTools(cfg.allowed_tools);
+    if (!cfg.allowed_tools.length || unsupported.length)
+      throw new HttpError(
+        400,
+        unsupported.length
+          ? `Live evaluations cannot allow: ${unsupported.join(", ")}`
+          : "Live evaluations need at least one allowed tool",
+      );
+  }
   const row = await one(pool, "SELECT * FROM benchmark_suites WHERE id=$1", [input.suite_id]);
   if (!row) throw new HttpError(404, "Suite not found");
   const suite = SuiteSchema.parse(row.manifest),
@@ -229,6 +240,7 @@ export async function createEvaluation(
                 case_run_id: cr!.id,
                 ordinal,
                 role,
+                ponytail: cfg.ponytail,
                 ...((cfg.ponytail || cfg.mode === "live") && semantic
                   ? { semantic_role: semantic }
                   : {}),

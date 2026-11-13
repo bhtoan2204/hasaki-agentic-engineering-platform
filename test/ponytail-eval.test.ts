@@ -15,7 +15,11 @@ import { livePrerequisites } from "../src/eval/livePrerequisites.ts";
 import { processStartTime } from "../src/instances.ts";
 import { config } from "../src/config.ts";
 import { changedCloneCount, diffFootprint } from "../src/eval/ponytailMetrics.ts";
-import { ponytailConfigurations, eligiblePonytailRepositories } from "../src/eval/ponytailSuite.ts";
+import {
+  ponytailConfigurations,
+  eligiblePonytailRepositories,
+  materializePonytailSuite,
+} from "../src/eval/ponytailSuite.ts";
 import { agentEnvironment } from "../src/agent/environment.ts";
 import {
   EVALUATION_DATABASE_MARKER,
@@ -412,6 +416,7 @@ test("Ponytail suite excludes the live checkout and everything when self identit
     process.env.GIT_DIR = join(tmpdir(), "no-such-git-dir");
     resetSelfRepositoryCache();
     assert.deepEqual(await eligiblePonytailRepositories([row("service")]), []);
+    await assert.rejects(materializePonytailSuite([row("service")]), /set platform.repositoryUrl/);
   } finally {
     config.platform.repositoryUrl = oldUrl;
     config.repositories = oldRepos;

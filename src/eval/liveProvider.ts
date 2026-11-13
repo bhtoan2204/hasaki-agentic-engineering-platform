@@ -49,6 +49,8 @@ const EVALUATION_SECRET =
 export const EVALUATION_DATABASE_MARKER = "platform-evaluation-owner.json";
 export const liveAllowedTools = (requested?: string[] | null) =>
   requested ? LIVE_ALLOWED_TOOLS.filter((t) => requested.includes(t)) : LIVE_ALLOWED_TOOLS;
+export const unsupportedLiveTools = (requested: string[]) =>
+  requested.filter((t) => !LIVE_ALLOWED_TOOLS.includes(t));
 export const isEvaluationSecretPath = (name: string) =>
   isSecretPath(name) || EVALUATION_SECRET.test(name);
 type Phase = {

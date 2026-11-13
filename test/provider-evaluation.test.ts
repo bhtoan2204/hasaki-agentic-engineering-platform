@@ -688,6 +688,32 @@ test("context value assessment uses paired task outcomes, not fixture or agent c
     "INSUFFICIENT_EVIDENCE",
   );
 });
+test("live configurations reject tools outside the sandboxed set instead of dropping them", async () => {
+  const live = (allowed_tools: string[]) =>
+    createEvaluation(
+      owner.id,
+      {
+        suite_id: suite.id,
+        request_key: `live-tools-${++seq}`,
+        paid_approval: true,
+        configuration: {
+          mode: "live",
+          provider: "claude",
+          provider_sequence: plan(["claude"]),
+          context_variant: "tools",
+          case_limit: 1,
+          allowed_tools,
+        },
+      },
+      true,
+    );
+  await assert.rejects(live(["Read", "WebFetch", "integration:jira"]), {
+    status: 400,
+    message: /WebFetch, integration:jira/,
+  });
+  await assert.rejects(live([]), { status: 400 });
+  assert.ok(await live(["Read", "Bash"]));
+});
 test("live work of a case is swept only once its chain is over", async () => {
   const { sweepInactiveLiveWork } = await import("../src/eval/liveProvider.ts");
   const { liveWorkRoot } = await import("../src/eval/liveCase.ts");
@@ -718,4 +744,45 @@ test("live work of a case is swept only once its chain is over", async () => {
     e.workflow_run_id,
   ]);
   assert.equal(rows.length, 0);
+});
+test("baseline live arm never resolves Ponytail skills even with the global pilot flag on", async () => {
+  const { planExternalSkills, applyExternalSkills } =
+    await import("../src/knowledge/externalImport.ts");
+  const { resolveContext, buildStepInput } = await import("../src/workflow/context.ts");
+  const { resolve } = await import("node:path");
+  await applyExternalSkills(planExternalSkills(resolve(import.meta.dirname, "../skills/external")));
+  const previous = config.knowledge.ponytail.enabled;
+  config.knowledge.ponytail.enabled = true;
+  try {
+    const resolved = async (ponytail: boolean) => {
+      const e = await createEvaluation(
+        owner.id,
+        {
+          suite_id: suite.id,
+          request_key: `live-ponytail-${++seq}`,
+          paid_approval: true,
+          configuration: {
+            mode: "live",
+            provider: "claude",
+            provider_sequence: plan(["claude", "codex"]),
+            context_variant: "tools",
+            case_limit: 1,
+            ponytail,
+          },
+        },
+        true,
+      );
+      const run = await getRun(e.workflow_run_id);
+      const keys: string[] = [];
+      for (const step of run.steps.filter((s) => s.config.evaluation_phase)) {
+        const ctx = await resolveContext(pool, run, step, await buildStepInput(pool, run, step));
+        keys.push(...ctx.knowledge.map((k) => k.key));
+      }
+      return keys.filter((k) => k.startsWith("skill.ext.ponytail"));
+    };
+    assert.deepEqual(await resolved(false), []);
+    assert.ok((await resolved(true)).length);
+  } finally {
+    config.knowledge.ponytail.enabled = previous;
+  }
 });
