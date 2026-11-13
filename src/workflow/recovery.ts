@@ -1,3 +1,4 @@
+import { traceLog } from "./trace.ts";
 import type pg from "pg";
 import { config } from "../config.ts";
 import { ownsInstance } from "../instances.ts";
@@ -205,6 +206,16 @@ export async function reapExpiredLeases() {
         );
         return;
       }
+      void traceLog({
+        runId: run.id,
+        stepId: step.id,
+        attemptId: attempt.id,
+        level: "WARN",
+        event: "lease.expired",
+        status: "RECOVERING",
+        message: `worker lease expired (${j.lease_owner}); recovering attempt ${attempt.id}`,
+        data: { job_id: j.id, fencing_token: j.fencing_token, lease_expires_at: j.lease_expires_at },
+      });
       await recoverInterrupted(c, run, step, attempt, j, `worker lease expired (${j.lease_owner})`);
       await advance(c, run.id, afterCommit);
     });

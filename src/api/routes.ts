@@ -728,7 +728,13 @@ export const routes: Route[] = [
       const sp = c.url.searchParams;
       const level = sp.get("level");
       if (level && !isTraceLevel(level)) throw new HttpError(400, "invalid level");
-      const id = (k: string) => (sp.get(k) ? Number(sp.get(k)) : undefined);
+      const id = (k: string) => {
+        const raw = sp.get(k);
+        if (raw == null || raw === "") return undefined;
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 0) throw new HttpError(400, `invalid ${k}`);
+        return n;
+      };
       for (const k of ["from", "to"])
         if (sp.get(k) && Number.isNaN(Date.parse(sp.get(k)!))) throw new HttpError(400, `invalid ${k}`);
       return searchLogs(num(c.p[0]), {
