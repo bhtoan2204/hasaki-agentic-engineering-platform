@@ -1,6 +1,6 @@
 import { ownsInstance } from "../instances.ts";
-import { readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, realpath, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pool, q, one, withTx } from "../db/pool.ts";
@@ -12,13 +12,41 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 export const liveWorkRoot = (evaluationId: unknown, caseRunId: unknown) =>
   join(config.dataDir, "evaluation-work", String(evaluationId), String(caseRunId), "live");
-// pg_ctl status exits 3 (not running) or 4 (no data directory); anything else counts as running.
-export const postmasterRunning = (data: string) =>
-  promisify(execFile)("pg_ctl", ["status", "-D", data], { timeout: 15000 }).then(
-    () => true,
-    (error: { code?: unknown }) => error.code !== 3 && error.code !== 4,
+// postmaster.pid may name a reused pid: only a postgres process serving this directory counts.
+async function postmasterPid(data: string) {
+  const pid = Number(
+    (await readFile(join(data, "postmaster.pid"), "utf8").catch(() => "")).split("\n")[0],
   );
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const [cmdline, cwd, dir] = await Promise.all([
+    readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => ""),
+    realpath(`/proc/${pid}/cwd`).catch(() => null),
+    realpath(data).catch(() => null),
+  ]);
+  const args = cmdline.split("\0");
+  return args.some((a) => a.includes("postgres")) && (cwd === dir || args.includes(data))
+    ? pid
+    : null;
+}
+export const postmasterRunning = async (data: string) => (await postmasterPid(data)) !== null;
+export async function stopPostmaster(data: string) {
+  if (!(await postmasterRunning(data))) return;
+  const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
+  await promisify(execFile)("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
+    env,
+    timeout: 15000,
+  }).catch((error: { code?: unknown }) => {
+    if (error.code === "ENOENT") throw new Error("pg_ctl not found on PATH");
+  });
+  if (await postmasterRunning(data))
+    throw new Error(`postmaster still serves ${data}; left in place`);
+}
+export const liveDatabases = async (root: string) =>
+  (await readdir(root, { withFileTypes: true }).catch(() => []))
+    .filter((e) => e.isDirectory() && /^database-[0-9a-f-]{36}$/.test(e.name))
+    .map((e) => join(root, e.name));
 export async function cleanupLiveWork(runId: number, root: string) {
+  for (const data of await liveDatabases(root)) await stopPostmaster(data);
   await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path LIKE $2", [
     runId,
     `${root}/%`,

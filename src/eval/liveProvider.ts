@@ -1,5 +1,5 @@
 import { mkdir, rm, readdir, lstat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,7 +17,7 @@ import { isSecretPath } from "../agent/toolPolicy.ts";
 import { CaseSchema } from "./dataset.ts";
 import { fixtureGit, fixtureName, fixtureRoot } from "./fixtures.ts";
 import { livePrerequisites } from "./livePrerequisites.ts";
-import { cleanupLiveWork, liveWorkRoot, postmasterRunning } from "./liveCase.ts";
+import { cleanupLiveWork, liveWorkRoot, stopPostmaster } from "./liveCase.ts";
 import { LiveBudget, liveRuntime, remainingLiveBudgets } from "./liveRuntime.ts";
 import type { ConfigurationSchema } from "./configuration.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
@@ -72,13 +72,7 @@ export async function removeEvaluationSecrets(root: string) {
   }
 }
 async function stopIsolatedDatabase(data: string) {
-  const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
-  await exec("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
-    env,
-    timeout: 15000,
-  }).catch(() => {});
-  if (await postmasterRunning(data))
-    throw new Error(`postmaster still serves ${data}; left in place`);
+  await stopPostmaster(data);
   await rm(data, { recursive: true, force: true });
 }
 async function isolatedDatabase(root: string) {
@@ -122,11 +116,7 @@ async function isolatedDatabase(root: string) {
       dispose: () => stopIsolatedDatabase(data),
     };
   } catch (error) {
-    if (started)
-      await exec("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
-        env,
-        timeout: 15000,
-      }).catch(() => {});
+    if (started) await stopPostmaster(data).catch(() => {});
     await rm(data, { recursive: true, force: true });
     throw error;
   }

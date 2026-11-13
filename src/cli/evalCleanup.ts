@@ -4,20 +4,54 @@
  */
 import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import { join } from "node:path";
 import { config } from "../config.ts";
 import { pool, q } from "../db/pool.ts";
-import { cleanupLiveWork, postmasterRunning } from "../eval/liveCase.ts";
+import {
+  cleanupLiveWork,
+  liveDatabases,
+  postmasterRunning,
+  stopPostmaster,
+} from "../eval/liveCase.ts";
 
 const exec = promisify(execFile);
 const subdirectories = async (dir: string) =>
   (await readdir(dir, { withFileTypes: true }).catch(() => []))
     .filter((e) => e.isDirectory())
     .map((e) => e.name);
-const sizeKb = async (path: string) =>
-  Number((await exec("du", ["-sk", path]).catch(() => ({ stdout: "" }))).stdout.split("\t")[0]) ||
-  0;
+const sizesKb = async (path: string) =>
+  new Map(
+    (await exec("du", ["-k", "--max-depth=1", path]).catch(() => ({ stdout: "" }))).stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [size, ...name] = line.split("\t");
+        return [name.join("\t"), Number(size) || 0];
+      }),
+  );
+const USAGE = "Usage: eval:cleanup [--yes] [--case <case_run_id>]";
+export function parseCleanupArgs(args: string[]) {
+  const { values } = parseArgs({
+    args,
+    options: { yes: { type: "boolean" }, case: { type: "string" } },
+    strict: true,
+    allowPositionals: false,
+  });
+  if (values.case !== undefined && !/^\d+$/.test(values.case))
+    throw new Error(`invalid --case ${values.case}`);
+  return { yes: values.yes ?? false, caseRunId: values.case };
+}
+const runActive = async (runId: unknown) =>
+  !!(
+    await q(
+      pool,
+      `SELECT 1 FROM workflow_jobs j WHERE j.run_id=$1 AND (j.status IN ('queued','running')
+       OR (j.lease_expires_at>now() AND EXISTS (SELECT 1 FROM workflow_step_attempts a WHERE a.job_id=j.id AND a.executor_stopped_at IS NULL)))
+     UNION ALL SELECT 1 FROM workflow_step_attempts WHERE run_id=$1 AND status='RUNNING' LIMIT 1`,
+      [runId],
+    )
+  )[0];
 
 export async function evalCleanup(
   options: { yes?: boolean; caseRunId?: string } = {},
@@ -45,39 +79,38 @@ export async function evalCleanup(
   const report = [];
   for (const { evaluation, caseRun, live } of found) {
     const row = rows.find((r) => r.case_run_id === caseRun && r.evaluation_id === evaluation);
-    const databases = (await subdirectories(live))
-      .filter((n) => /^database-[0-9a-f-]{36}$/.test(n))
-      .map((n) => join(live, n));
+    const sizes = await sizesKb(live);
     const entry = {
       path: live,
       evaluation_id: evaluation,
       case_run_id: caseRun,
       run_status: row?.run_status ?? null,
       case_status: row?.case_status ?? null,
-      size_kb: await sizeKb(live),
+      size_kb: sizes.get(live) ?? 0,
       databases: [] as Array<{ path: string; postmaster: boolean; size_kb: number }>,
       removed: false,
       note: null as string | null,
     };
-    for (const path of databases)
+    for (const path of await liveDatabases(live))
       entry.databases.push({
         path,
         postmaster: await postmasterRunning(path),
-        size_kb: await sizeKb(path),
+        size_kb: sizes.get(path) ?? 0,
       });
     report.push(entry);
     const selected = options.caseRunId
       ? options.caseRunId === caseRun
       : ["COMPLETED", "CANCELED"].includes(entry.run_status);
     if (!options.yes || !selected) continue;
-    for (const db of entry.databases.filter((d) => d.postmaster))
-      await exec("pg_ctl", ["stop", "-D", db.path, "-m", "fast", "-w"], { timeout: 60000 }).catch(
-        () => {},
-      );
-    const serving = [];
-    for (const db of entry.databases) if (await postmasterRunning(db.path)) serving.push(db.path);
-    if (serving.length) {
-      entry.note = `postmaster still running: ${serving.join(", ")}`;
+    // Cancel flips jobs and attempts at once; the executor may still be writing until it records its stop.
+    if (row && (await runActive(row.workflow_run_id))) {
+      entry.note = "still active; retry later";
+      continue;
+    }
+    try {
+      for (const db of entry.databases) await stopPostmaster(db.path);
+    } catch (error) {
+      entry.note = (error as Error).message;
       continue;
     }
     if (row) await cleanupLiveWork(Number(row.workflow_run_id), live);
@@ -90,14 +123,22 @@ export async function evalCleanup(
 }
 
 if (process.argv[1]?.endsWith("evalCleanup.ts")) {
-  const caseRunId = process.argv.find((a) => a.startsWith("--case="))?.slice(7);
+  let options: ReturnType<typeof parseCleanupArgs> | undefined;
   try {
-    const report = await evalCleanup({ yes: process.argv.includes("--yes"), caseRunId });
-    console.log(JSON.stringify(report, null, 2));
-    if (!process.argv.includes("--yes"))
-      console.log(
-        "Dry run: nothing removed. Re-run with --yes (COMPLETED/CANCELED runs) or --case=<id> --yes.",
-      );
+    options = parseCleanupArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(`${(error as Error).message}\n${USAGE}`);
+    process.exitCode = 2;
+  }
+  try {
+    if (options) {
+      const report = await evalCleanup(options);
+      console.log(JSON.stringify(report, null, 2));
+      if (!options.yes)
+        console.log(
+          "Dry run: nothing removed. Re-run with --yes (COMPLETED/CANCELED runs) or --case=<id> --yes.",
+        );
+    }
   } finally {
     await pool.end();
   }
