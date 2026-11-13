@@ -838,7 +838,7 @@ test("only pilot live arms resolve Ponytail skills, including arms frozen before
   const previous = config.knowledge.ponytail.enabled;
   config.knowledge.ponytail.enabled = true;
   try {
-    const resolved = async (ponytail: boolean, frozenBeforeFlag = false) => {
+    const resolved = async (ponytail: boolean, frozenBeforeFlag = false, skills?: string[]) => {
       const e = await createEvaluation(
         owner.id,
         {
@@ -862,7 +862,9 @@ test("only pilot live arms resolve Ponytail skills, including arms frozen before
         const { ponytail: _flag, ...phase } = frozen.config.evaluation_phase;
         const step = frozenBeforeFlag
           ? { ...frozen, config: { ...frozen.config, evaluation_phase: phase } }
-          : frozen;
+          : skills
+            ? { ...frozen, config: { ...frozen.config, skills } }
+            : frozen;
         const ctx = await resolveContext(pool, run, step, await buildStepInput(pool, run, step));
         keys.push(...ctx.knowledge.map((k) => k.key));
       }
@@ -872,6 +874,10 @@ test("only pilot live arms resolve Ponytail skills, including arms frozen before
     assert.ok((await resolved(true)).length);
     assert.deepEqual(await resolved(false, true), []);
     assert.ok((await resolved(true, true)).length);
+    assert.deepEqual(
+      [...new Set(await resolved(false, false, ["skill.ext.ponytail-review"]))],
+      ["skill.ext.ponytail-review"],
+    );
   } finally {
     config.knowledge.ponytail.enabled = previous;
   }

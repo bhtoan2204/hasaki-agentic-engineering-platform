@@ -232,8 +232,8 @@ export async function resolveContext(
       now: at,
       ponytailEnabled:
         (!cfg.evaluation_phase ||
-          cfg.evaluation_phase.ponytail === true ||
-          ((cfg.skills as string[]) ?? []).some((k) => k.startsWith("skill.ext.ponytail"))) &&
+          (cfg.evaluation_phase.ponytail ??
+            ((cfg.skills as string[]) ?? []).some((k) => k.startsWith("skill.ext.ponytail")))) &&
         config.knowledge.ponytail.enabled,
     },
   );
