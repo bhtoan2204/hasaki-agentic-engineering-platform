@@ -1,8 +1,9 @@
 -- Only agent steps inherit the run's agent provider: integration, command, human and report attempts used no agent
--- unless they recorded one, so they must not count as agent attempts without a reported cost.
+-- unless they recorded one (a command step's test-failure advisor records metrics.advisor), so they must not count as
+-- agent attempts without a reported cost.
 CREATE OR REPLACE VIEW execution_attempt_telemetry AS
 SELECT a.id AS attempt_id, a.run_id, a.step_id, a.number,
-       COALESCE(a.agent_provider, a.metrics->>'provider', CASE WHEN s.type IN ('agent','coding_agent') THEN r.agent_provider END) AS provider,
+       COALESCE(a.agent_provider, a.metrics->>'provider', a.metrics->'advisor'->>'provider', CASE WHEN s.type IN ('agent','coding_agent') THEN r.agent_provider END) AS provider,
        CASE WHEN cardinality(ps.models) > 1 THEN NULL ELSE COALESCE(ps.models[1], NULLIF(a.metrics->>'model', '')) END AS model, COALESCE(a.effective_agent->>'execution_profile', r.profile) AS execution_profile,
        r.owner_id, r.worker_instance, a.worker,
        a.started_at AS start_time, COALESCE(a.resolved_at, lifecycle.canceled_at, a.finished_at) AS end_time,

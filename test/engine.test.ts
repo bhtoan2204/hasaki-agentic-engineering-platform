@@ -534,6 +534,15 @@ test("cost read model: totals, by step / model, failed retries counted as wasted
   assert.equal(c.budget!.run.status, "none");
   const listed = await costTotalsForRuns([run.id]);
   assert.equal(listed.get(run.id)!.cost_usd, 1.25);
+  await q(
+    pool,
+    `UPDATE workflow_step_attempts a SET metrics = a.metrics || '{"advisor":{"provider":"codex"}}'
+      FROM workflow_steps s WHERE s.id = a.step_id AND s.run_id = $1 AND s.key = 'cleanup'`,
+    [run.id],
+  );
+  const advised = await runCost(run.id);
+  assert.equal(advised.availability, "partial", "a step's advisor spend is not hidden");
+  assert.ok(advised.by_model.some((m) => m.provider === "codex" && m.model === "unknown"));
 });
 
 test("cost budget: warning is logged once; exceeding pauses the run once, resume continues past it", async () => {
@@ -1557,16 +1566,14 @@ test("cleanup step: not injected without worktree-creating steps or when the gra
     { action: "cleanup_workspaces", injected: true },
     "only an integration step cleans up",
   );
-  const planned = withCleanupStep(
-    graph([
-      { key: "plan", type: "agent" },
-      { key: "approve_plan", type: "human_approval", depends_on: ["plan"] },
-    ]),
-  );
-  assert.deepEqual(
-    planned.steps.at(-1)!.depends_on,
-    ["approve_plan"],
-    "an approved plan can be expanded into coding subtasks later",
+  const planned = graph([
+    { key: "plan", type: "agent" },
+    { key: "approve_plan", type: "human_approval", depends_on: ["plan"] },
+  ]);
+  assert.equal(
+    withCleanupStep(planned),
+    planned,
+    "subtask expansion adds its own cleanup; an analysis-only run needs none",
   );
 });
 
