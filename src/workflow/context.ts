@@ -225,13 +225,7 @@ export async function resolveContext(
       repositories,
       repositoryProjects: await projectsOfRepositories(repositories ?? [], c),
       workflowKey: run.definition_key,
-      stepKey:
-        cfg.evaluation_phase?.semantic_role ??
-        (cfg.evaluation_phase?.role === "implementation"
-          ? "implement"
-          : cfg.evaluation_phase
-            ? "review"
-            : step.key),
+      stepKey: cfg.evaluation_phase?.semantic_role ?? step.key,
       stepType: step.type,
       text: requestText(input),
       explicit,

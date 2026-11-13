@@ -99,6 +99,16 @@ async function finish(id: number) {
   return evaluationDetail(id, owner.id);
 }
 
+test("fixture provider phases keep their own step key for knowledge applicability", async () => {
+  const e = await evaluation(["claude", "codex"]);
+  const steps = await q(
+    pool,
+    "SELECT config->'evaluation_phase' AS phase FROM workflow_steps WHERE run_id=$1 AND config ? 'evaluation_phase'",
+    [e.workflow_run_id],
+  );
+  assert.ok(steps.length);
+  for (const s of steps) assert.equal(s.phase.semantic_role, undefined);
+});
 test("provider models and context settings are strictly validated without cross-provider options", () => {
   assert.equal(
     ConfigurationSchema.safeParse({

@@ -873,3 +873,36 @@ test("all provider bridges preserve skill read and structured activation evidenc
     assert.deepEqual(skill.states, ["selected", "injected", "loaded", "activated"], provider);
   }
 });
+
+test("Ponytail step keeps legacy codebase map knowledge when no generated map is available", async () => {
+  const { ctx, metrics } = await live();
+  const base = ctx.context.knowledge[0];
+  ctx.context.knowledge = [
+    ...ctx.context.knowledge,
+    {
+      ...base,
+      id: undefined,
+      key: "skill.ext.ponytail",
+      title: "Ponytail",
+      category: "agent_skill",
+      enforced: false,
+      content: "Ponytail body",
+      metadata: { pilot: "ponytail" },
+      reason: "assigned to step",
+    },
+    {
+      ...base,
+      id: undefined,
+      key: "legacy-codebase-map",
+      title: "Codebase map",
+      category: "repository_convention",
+      enforced: false,
+      content: "LEGACY_MAP_BODY",
+      metadata: {},
+      reason: "GLOBAL scope",
+    },
+  ];
+  const pack = await ensureContextPack(ctx, metrics, policy);
+  assert.ok(!pack.entries.some((e) => e.id === "codebase-map"));
+  assert.ok(pack.entries.some((e) => e.id.startsWith("knowledge:legacy-codebase-map")));
+});

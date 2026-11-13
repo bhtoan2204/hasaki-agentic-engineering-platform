@@ -1,4 +1,4 @@
-import { indexedCodebaseMap } from "../knowledge/codebaseMap.ts";
+import { indexedCodebaseMap, isCodebaseMap } from "../knowledge/codebaseMap.ts";
 import { isMandatory } from "./plan.ts";
 import { validateToolBinding } from "../agent/toolRuntime.ts";
 import { config } from "../config.ts";
@@ -371,33 +371,44 @@ export async function ensureContextPack(
           : [],
       );
       const ponytail = ctx.context.knowledge.some((k) => k.metadata.pilot === "ponytail");
-      if (
-        ponytail &&
-        !ctx.context.knowledge.some((k) => /codebase[ ._-]?map/i.test(k.key + " " + k.title))
-      ) {
-        const map = await indexedCodebaseMap(
-          ctx.run.selected_repositories,
-          ctx.run.id,
-          config.knowledge.ponytail.mapChars,
+      const map = ponytail
+        ? await indexedCodebaseMap(
+            ctx.run.selected_repositories,
+            ctx.run.id,
+            config.knowledge.ponytail.mapChars,
+          )
+        : "";
+      // Legacy map items are replaced only once a generated map is actually in the pack.
+      const replacedMaps = new Set(
+        map
+          ? ctx.context.knowledge
+              .filter(
+                (k) => isCodebaseMap(k) && !isMandatory(k) && k.category !== "security_policy",
+              )
+              .map((k) => k.key)
+          : [],
+      );
+      if (map)
+        add(
+          "codebase-map",
+          "code",
+          map,
+          80,
+          false,
+          source(
+            "code-intelligence:index",
+            hashOf(map),
+            new Date().toISOString(),
+            "owner",
+            "bounded indexed exported symbols; no live scan",
+          ),
         );
-        if (map)
-          add(
-            "codebase-map",
-            "code",
-            map,
-            80,
-            false,
-            source(
-              "code-intelligence:index",
-              hashOf(map),
-              new Date().toISOString(),
-              "owner",
-              "bounded indexed exported symbols; no live scan",
-            ),
-          );
-      }
       const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
       for (const k of ctx.context.knowledge) {
+        if (replacedMaps.has(k.key)) {
+          searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
+          continue;
+        }
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
         const tierLabel = knowledgeTier(k);
         const mandatory = isMandatory(k);

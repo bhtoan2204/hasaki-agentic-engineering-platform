@@ -107,8 +107,21 @@ test("precedence protects invariants and shares mandatory disclosure", () => {
   const skill = candidate("skill", { priority: 100 });
   const mandatory = candidate("mandatory", { metadata: { mandatory: true } });
   const invariant = candidate("invariant", { category: "business_rule" });
-  assert.ok(compareCandidates(invariant, mandatory) < 0);
-  assert.ok(compareCandidates(mandatory, skill) < 0);
+  const ponytail = candidate("skill.ext.ponytail", {
+    priority: 200,
+    metadata: { pilot: "ponytail" },
+  });
+  const explicit = [ponytail.key, skill.key, mandatory.key, invariant.key];
+  assert.deepEqual(
+    resolveKnowledge([ponytail, skill, mandatory, invariant], { ...ctx, explicit }).applied.map(
+      (k) => k.key,
+    ),
+    [invariant.key],
+  );
+  assert.deepEqual(
+    resolveKnowledge([ponytail, skill, mandatory], { ...ctx, explicit }).applied.map((k) => k.key),
+    [mandatory.key],
+  );
   const k = { ...invariant, reason: "GLOBAL scope" };
   assert.equal(isMandatory(k), true);
   assert.equal(
@@ -117,6 +130,55 @@ test("precedence protects invariants and shares mandatory disclosure", () => {
     "inline",
   );
   assert.equal(isMandatory({ ...k, category: "task_memory", metadata: {} }), false);
+});
+test("without Ponytail, existing conflict groups keep their enforced/scope/priority winners", () => {
+  const rule = candidate("global-rule", { category: "business_rule" });
+  const repoSkill = candidate("repo-skill", { scope_type: "REPOSITORY", scope_ref: "r" });
+  assert.ok(compareCandidates(repoSkill, rule) < 0);
+  const preferred = candidate("preferred", { priority: 50, metadata: { mandatory: true } });
+  const plain = candidate("plain-rule", { category: "business_rule" });
+  const explicit = [preferred.key, plain.key];
+  assert.deepEqual(
+    resolveKnowledge([plain, preferred], { ...ctx, explicit }).applied.map((k) => k.key),
+    [preferred.key],
+  );
+  assert.deepEqual(
+    resolveKnowledge(
+      [
+        candidate("b-rule", { category: "business_rule", conflict_key: null }),
+        candidate("a-skill", { conflict_key: null }),
+      ],
+      { ...ctx, explicit: ["a-skill", "b-rule"] },
+    ).applied.map((k) => k.key),
+    ["a-skill", "b-rule"],
+  );
+});
+test("non-enforced security policies and metadata.mandatory stay within the disclosure budget", () => {
+  const big = "rule ".repeat(4000);
+  const policy = candidate("soft-policy", {
+    category: "security_policy",
+    content: big,
+    reason: "GLOBAL scope",
+  } as Partial<KnowledgeCandidate>);
+  const flagged = candidate("flagged", {
+    category: "coding_standard",
+    content: big,
+    metadata: { mandatory: true },
+    reason: "GLOBAL scope",
+  } as Partial<KnowledgeCandidate>);
+  for (const k of [policy, flagged]) {
+    const item = { ...k, reason: "GLOBAL scope" };
+    assert.equal(isMandatory(item), false);
+    assert.notEqual(
+      planKnowledge([item], {
+        requestText: "",
+        stepType: "agent",
+        inlineTokens: 100,
+        indexSize: 1,
+      })[0].disclosure,
+      "inline",
+    );
+  }
 });
 test("codebase map bounds exported top-level symbols and omits missing index", async () => {
   const map = renderCodebaseMap(
@@ -222,7 +284,7 @@ test("Ponytail consolidates existing reuse guidance and map sources through reso
     priority: 10,
     metadata: { pilot: "ponytail" },
   });
-  const reuse = candidate("reuse-first-development", { conflict_key: null });
+  const reuse = candidate("reuse-first-development", { conflict_key: "engineering.reuse" });
   const map = candidate("map-legacy", {
     title: "Codebase map",
     conflict_key: null,
@@ -231,10 +293,31 @@ test("Ponytail consolidates existing reuse guidance and map sources through reso
   const resolved = resolveKnowledge([reuse, ponytail, map], { ...ctx, explicit: [ponytail.key] });
   assert.deepEqual(
     resolved.applied.map((k) => k.key),
-    [ponytail.key],
+    [ponytail.key, map.key],
   );
   assert.ok(resolved.overridden.some((k) => k.key === reuse.key && k.reason === "conflict"));
-  assert.ok(resolved.overridden.some((k) => k.key === map.key && k.reason === "superseded"));
+  // Legacy maps are only replaced in the pack once a generated map exists (stale index keeps them).
+  assert.ok(!resolved.overridden.some((k) => k.key === map.key));
+  const legacyReuse = candidate("reuse-first-development", { conflict_key: null });
+  resolveKnowledge([legacyReuse, ponytail], { ...ctx, explicit: [ponytail.key] });
+  assert.equal(legacyReuse.conflict_key, null);
+});
+test("migration gives the existing shared reuse seed row its conflict key", async () => {
+  const { loadMigrations } = await import("../src/db/migrate.ts");
+  const m = loadMigrations().find((x) => x.name === "054_reuse_conflict_key")!;
+  const { KNOWLEDGE_SEEDS } = await import("../src/knowledge/service.ts");
+  if (!(await knowledge.get("reuse-first-development")))
+    await knowledge.create(KNOWLEDGE_SEEDS.find((x) => x.key === "reuse-first-development")!);
+  await pool.query(
+    "UPDATE knowledge_items SET conflict_key=NULL WHERE key='reuse-first-development' AND owner_id IS NULL",
+  );
+  await pool.query(m.sql);
+  const row = (
+    await pool.query(
+      "SELECT conflict_key FROM knowledge_items WHERE key='reuse-first-development' AND owner_id IS NULL",
+    )
+  ).rows[0];
+  assert.equal(row.conflict_key, "engineering.reuse");
 });
 
 test("audit refuses stale canonical proposals without losing either item", async () => {
@@ -265,4 +348,37 @@ test("reverting identical historical text still appends a version", async () => 
   const old = await knowledge.get("audit-old");
   await knowledge.revert("audit-old", 1, null, "admin");
   assert.equal((await knowledge.get("audit-old")).current_version, old.current_version + 1);
+});
+
+test("TDD and verification keep their legacy step keys and target no command-only key", () => {
+  const manifest = JSON.parse(
+    readFileSync(resolve(import.meta.dirname, "../skills/external/manifest.json"), "utf8"),
+  );
+  for (const key of [
+    "skill.ext.test-driven-development",
+    "skill.ext.verification-before-completion",
+  ]) {
+    const keys: string[] = manifest.skills.find((s: { key: string }) => s.key === key).applicability
+      .step_keys;
+    for (const k of ["implement", "fix", "refactor", "test", "regression_test", "fix_test"])
+      assert.ok(keys.includes(k), `${key} ${k}`);
+    assert.equal(keys.includes("targeted_test"), false);
+  }
+});
+
+test("re-import converges and keeps admin-tuned priority and conflict keys", async () => {
+  const plan = planExternalSkills(resolve(import.meta.dirname, "../skills/external"));
+  const pick = plan.candidates.filter((c) =>
+    ["skill.ext.ponytail", "skill.ext.brainstorming"].includes(c.key),
+  );
+  await applyExternalSkills({ ...plan, candidates: pick, supersedes: [] });
+  await knowledge.update("skill.ext.ponytail", { priority: 3 });
+  await knowledge.update("skill.ext.brainstorming", { conflict_key: "admin.choice" });
+  const again = await applyExternalSkills({ ...plan, candidates: pick, supersedes: [] });
+  assert.deepEqual(
+    again.rows.map((r) => r.action),
+    pick.map(() => "unchanged"),
+  );
+  assert.equal((await knowledge.get("skill.ext.ponytail")).priority, 3);
+  assert.equal((await knowledge.get("skill.ext.brainstorming")).conflict_key, "admin.choice");
 });

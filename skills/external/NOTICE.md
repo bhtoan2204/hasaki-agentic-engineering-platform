@@ -35,6 +35,11 @@ No executable script from an upstream skill is copied or imported.
   comments explaining why, and the skipped/checks/risk summary.
   No upstream hooks, scripts, band, webhooks or provider rule files are bundled.
 
+test-driven-development and verification-before-completion apply to the agent steps that write and repair code
+(`implement`, `fix`, `refactor`). Their `test`/`regression_test`/`fix_test` keys only reach user-defined agent
+steps with those keys: in the built-in templates these, and `targeted_test`, are command steps, whose failures go
+back to the agent steps through the verify loop.
+
 ### Ponytail MIT license
 
 Copyright (c) Dietrich Gebert

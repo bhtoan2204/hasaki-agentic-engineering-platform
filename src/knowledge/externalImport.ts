@@ -191,7 +191,7 @@ export async function applyExternalSkills(
       hashOf(v.metadata ?? {}) === hashOf(metadata) &&
       existing.scope_type === c.scope_type &&
       existing.title === c.title &&
-      (existing.conflict_key ?? null) === (c.conflict_key ?? null);
+      (c.conflict_key === undefined || existing.conflict_key === c.conflict_key);
     const action = !existing ? "create" : same ? "unchanged" : "update";
     report.rows.push({ key: c.key, action });
     if (opts.dryRun || action === "unchanged") continue;
@@ -207,7 +207,6 @@ export async function applyExternalSkills(
       await knowledge.update(c.key, {
         title: c.title,
         conflict_key: c.conflict_key,
-        priority: c.priority,
         content: c.content,
         applicability: c.applicability ?? {},
         metadata,

@@ -32,7 +32,9 @@
           "implement",
           "fix",
           "refactor",
-          "targeted_test"
+          "test",
+          "regression_test",
+          "fix_test"
         ]
       },
       "supersedes": [],
@@ -147,7 +149,9 @@
           "implement",
           "fix",
           "refactor",
-          "targeted_test"
+          "regression_test",
+          "test",
+          "fix_test"
         ]
       },
       "supersedes": [
@@ -573,7 +577,7 @@
         "license": "MIT",
         "attribution": "Dietrich Gebert",
         "adapted": true,
-        "adaptation_notes": "Removed test-sufficiency exceptions, shortcut comment requirement and exemptions, modes, session persistence and slash-command references. TDD and verification retain authority."
+        "adaptation_notes": "Removed the /ponytail-review trigger phrase, the 'one good test, not coverage' test-sufficiency line (replaced by deferring to the TDD and verification skills and platform gates) and the exemption for code marked with a shortcut:/ponytail: comment. No other text changed."
       },
       "status": "active",
       "runtime": {

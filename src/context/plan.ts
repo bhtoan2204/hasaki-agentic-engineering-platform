@@ -352,10 +352,8 @@ export function isMandatory(k: KnowledgeLike): boolean {
   return (
     knowledgeTier(k) !== "unverified_suggestion" &&
     (k.enforced === true ||
-      k.category === "security_policy" ||
       k.category === "business_rule" ||
       k.reason === "assigned to step" ||
-      k.reason.startsWith("selected for this re-execution") ||
-      k.metadata?.mandatory === true)
+      k.reason.startsWith("selected for this re-execution"))
   );
 }

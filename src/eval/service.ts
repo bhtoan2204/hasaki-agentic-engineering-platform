@@ -221,7 +221,9 @@ export async function createEvaluation(
                 case_run_id: cr!.id,
                 ordinal,
                 role,
-                semantic_role: task.category === "review" ? "review" : "implement",
+                ...((cfg.ponytail || cfg.mode === "live") && role === "implementation"
+                  ? { semantic_role: task.category === "review" ? "review" : "implement" }
+                  : {}),
               },
               instructions: task.description,
               ...(task.category === "review" ? { independent: true } : {}),
