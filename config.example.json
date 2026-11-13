@@ -32,6 +32,23 @@
     "connectionTimeoutMillis": 5000
   },
   "model": "",
+  "decisionEngine": {
+    "enabled": false,
+    "primary": { "provider": "antigravity", "model": "gemini-flash", "effort": "medium" },
+    "highComplexityEffort": "high",
+    "overrides": {},
+    "fallback": {
+      "enabled": true,
+      "providers": ["codex", "claude"],
+      "models": {},
+      "maxSwitches": 2
+    },
+    "timeoutMs": 60000,
+    "rateLimitRetries": 1,
+    "cache": true,
+    "observability": true,
+    "maxInputChars": 24000
+  },
   "agent": {
     "cursorBin": "agent",
     "codex": {

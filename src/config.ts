@@ -1,3 +1,4 @@
+import { DecisionConfig } from "./decision/config.ts";
 import { execution } from "./auth/execution.ts";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -31,6 +32,7 @@ export interface CodeIntelligenceConfig {
 }
 
 export interface Config {
+  decisionEngine: DecisionConfig;
   knowledge: { ponytail: { enabled: boolean; mapChars: number } };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
@@ -306,6 +308,7 @@ export interface Config {
 }
 
 const defaults: Config = {
+  decisionEngine: DecisionConfig.parse({}),
   knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   codeIntelligence: {
     enabled: false,
@@ -476,6 +479,7 @@ function load(): Config {
   const cfg: Config = {
     ...defaults,
     ...fromFile,
+    decisionEngine: DecisionConfig.parse(fromFile.decisionEngine ?? {}),
     knowledge: {
       ponytail: { ...defaults.knowledge.ponytail, ...(fromFile.knowledge?.ponytail ?? {}) },
     },

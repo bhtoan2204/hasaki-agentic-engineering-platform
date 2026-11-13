@@ -854,10 +854,14 @@ export function redact(s: string): string {
  */
 export async function codexComplete(
   prompt: string,
-  opts: { signal?: AbortSignal; model?: string; effort?: string } = {},
+  opts: { signal?: AbortSignal; model?: string; effort?: string; decisionOnly?: boolean } = {},
 ): Promise<{ text: string; tokens: AgentMetrics["tokens"]; model: string }> {
-  const cap = await codexCapabilities();
+  const cap = await codexCapabilities(
+    false,
+    opts.decisionOnly ? { model: opts.model ?? "", effort: opts.effort ?? "" } : undefined,
+  );
   if (!cap.ok) throw new Error(cap.error);
+  opts.signal?.throwIfAborted();
   const cfg = codexConfig();
   const dir = mkdtempSync(join(tmpdir(), "ctp-codex-complete-"));
   const model = opts.model ?? cfg.model;
@@ -880,6 +884,17 @@ export async function codexComplete(
     ...(effort ? [["model_reasoning_effort", effort]] : []),
   ] as Array<[string, unknown]>)
     args.push("-c", `${k}=${toml(v)}`);
+  if (opts.decisionOnly) {
+    args.push("--dangerously-bypass-hook-trust");
+    const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(join(import.meta.dirname, "hook.ts"))}`;
+    const hooks = [{ hooks: [{ type: "command", command, timeout: 5 }] }];
+    args.push(
+      "-c",
+      `hooks.PreToolUse=${toml(hooks)}`,
+      "-c",
+      `hooks.PermissionRequest=${toml(hooks)}`,
+    );
+  }
   args.push("-C", dir, "-");
   const child = spawn(cap.bin, args, {
     cwd: dir,

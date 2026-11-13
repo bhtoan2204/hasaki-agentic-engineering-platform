@@ -41,6 +41,7 @@ import { cursorAgentTurn, cursorCapabilities } from "./cursor/run.ts";
 import { codexAgentTurn, codexCapabilities } from "./codex/run.ts";
 import { antigravityAgentTurn } from "./antigravity/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
+import { decisionEngine } from "../decision/index.ts";
 import { completeForRun } from "./complete.ts";
 import {
   addUsage,
@@ -637,8 +638,7 @@ const agentExecutor: StepExecutor = {
       }
     }
     const delegationCfg = ctx.step.config.delegation as
-      | { enabled?: boolean; agents?: string[] }
-      | undefined;
+      { enabled?: boolean; agents?: string[] } | undefined;
     const delegation = delegationCfg?.enabled === true;
     const policy: PolicyContext = {
       mode,
@@ -1927,6 +1927,22 @@ export async function rankRepositoriesWithClaude(
     ).slice(0, 8000),
     "</untrusted_input>",
   ].join("\n");
+  if (config.decisionEngine.enabled) {
+    const result = await decisionEngine.decide({
+      type: "repository_ranking",
+      input: prompt,
+      constraints: { allowedRepositories: repos.map((r) => r.name) },
+      scope: {
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        attemptId: ctx.attempt.id,
+        revision: ctx.step.generation,
+      },
+      signal: ctx.signal,
+    });
+    await ctx.recordMetrics({ ranking_decision: result });
+    return result.decision.sort((a, b) => b.score - a.score);
+  }
   const done = await completeForRun(ctx.run, prompt, ctx.signal);
   await ctx.recordMetrics({ ranking: done.metrics }).catch(() => {});
   const out = done.text;

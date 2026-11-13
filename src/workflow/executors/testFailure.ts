@@ -1,3 +1,4 @@
+import { decisionEngine } from "../../decision/index.ts";
 import { config } from "../../config.ts";
 import { ancestors } from "../graph.ts";
 import { parseGoTest } from "./baseline.ts";
@@ -272,6 +273,7 @@ export interface TestFailureAdvisor {
     answer: string,
     locale?: OutputLocale,
     provider?: AgentProvider,
+    ctx?: ExecutionContext,
   ): Promise<{ kind: DecisionKind; instructions?: string; question?: string; confirmed?: boolean }>;
 }
 let advisor: TestFailureAdvisor | null = null;
@@ -333,7 +335,29 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
       provider,
     );
   },
-  async interpret(d, history, answer, locale = "vi", provider: AgentProvider = "claude") {
+  async interpret(
+    d,
+    history,
+    answer,
+    locale = "vi",
+    provider: AgentProvider = "claude",
+    ctx?: ExecutionContext,
+  ) {
+    if (config.decisionEngine.enabled && ctx) {
+      const result = await decisionEngine.decide({
+        type: "test_recovery",
+        input: { diagnosis: compact(d), history: history.slice(-6), answer, locale },
+        constraints: { baselineAcceptanceConfirmed: false },
+        scope: {
+          runId: ctx.run.id,
+          stepId: ctx.step.id,
+          attemptId: ctx.attempt.id,
+          revision: ctx.step.generation,
+        },
+        signal: ctx.signal,
+      });
+      return result.decision;
+    }
     return askClaude(
       [
         languagePolicy(locale),
@@ -468,7 +492,7 @@ export async function handleDecision(
   if (answer === failureOptions(locale).accept || answer === OPTIONS.accept) p.confirmed = true;
   if (p.kind === "unclear" && advisor) {
     try {
-      const ai = await advisor.interpret(d, history, answer, locale, agentProvider(ctx.run));
+      const ai = await advisor.interpret(d, history, answer, locale, agentProvider(ctx.run), ctx);
       p = {
         kind: ai.kind,
         confirmed: !!ai.confirmed,

@@ -160,6 +160,10 @@ test("member A cannot read or mutate member B by id, and a mixed answer batch wr
   );
   assert.equal(still?.status, "open");
   assert.equal(
+    (await a.call(`/api/runs/${runB.id}/decisions/recommend`, { type: "decomposition" })).status,
+    404,
+  );
+  assert.equal(
     runA.owner_id,
     (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!.id,
   );

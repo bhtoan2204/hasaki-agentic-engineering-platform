@@ -116,8 +116,15 @@ if (mode === "quota") {
   process.exit(1);
 }
 
-if (mode === "aux_complete") {
-  out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
+if (mode === "aux_complete" || mode === "aux_wrong_model") {
+  out({
+    type: "init",
+    session_id: sessionId,
+    model:
+      mode === "aux_wrong_model"
+        ? "unexpected-model"
+        : argv[argv.indexOf("--model") + 1] || "gemini-3.8-flash-high",
+  });
   out({
     type: "message",
     role: "assistant",

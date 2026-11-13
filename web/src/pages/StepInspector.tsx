@@ -699,6 +699,21 @@ export function StepInspector({
       </div>
 
       <div className="si-body">
+        {data.decisions?.length > 0 && (
+          <details className="card" style={{ margin: 12, padding: 12 }}>
+            <summary>
+              {t("decision.history")} ({data.decisions.length})
+            </summary>
+            {data.decisions.map((d: { id: number; content: string; data: unknown }) => (
+              <details key={d.id} style={{ marginTop: 8 }}>
+                <summary>{d.content}</summary>
+                <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                  {JSON.stringify(d.data, null, 2)}
+                </pre>
+              </details>
+            ))}
+          </details>
+        )}
         {isAgent && (attempts.length > 0 || data.handoffs?.length > 0) && (
           <ProviderHandoff
             active={runActive}

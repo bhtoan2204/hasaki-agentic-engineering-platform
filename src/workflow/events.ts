@@ -33,7 +33,7 @@ export const runEvents = {
   list(runId: number, afterId = 0, db: Db = pool) {
     return q(
       db,
-      `SELECT e.id, e.run_id, e.step_id, e.attempt_id, e.kind, e.created_at, s.key AS step_key,
+      `SELECT e.id, e.run_id, e.step_id, e.attempt_id, e.kind, CASE WHEN e.kind='decision' THEN e.data || jsonb_build_object('downstream_status',s.status,'downstream_attempt_id',s.current_attempt_id) ELSE NULL END AS data, e.created_at, s.key AS step_key,
               CASE WHEN length(e.content) > 600 THEN left(e.content, 600) || '…' ELSE e.content END AS content
          FROM workflow_events e LEFT JOIN workflow_steps s ON s.id = e.step_id
         WHERE e.run_id = $1 AND e.id > $2 AND e.kind <> ALL($3) ORDER BY e.id LIMIT 2000`,

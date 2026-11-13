@@ -824,7 +824,7 @@ export const retryStep = (runId: number, stepKey: string, input?: Record<string,
   reexecuteStep(runId, stepKey, { input });
 
 /** One model call that judges feedback (injected: the agent layer provides it; null → fallback cues only). */
-let feedbackModel: ((run: RunRow, prompt: string) => Promise<string>) | null = null;
+let feedbackModel: ((run: RunRow, prompt: string, complexity?: "medium" | "high") => Promise<string>) | null = null;
 export function setFeedbackModel(fn: typeof feedbackModel) {
   feedbackModel = fn;
 }
@@ -859,6 +859,7 @@ export async function classifyRunFeedback(runId: number, message: string, mode: 
                 summary: String(x.output?.summary ?? JSON.stringify(x.output)).slice(0, 400),
               })),
           }),
+          heuristicJudgement(message).route === "reimplement" ? "medium" : "high",
         ),
       );
       if (!judgement) modelError = "unparseable classification reply";
@@ -2198,40 +2199,66 @@ export async function stepDetail(runId: number, stepKey: string) {
   // Every query addresses the step by (run, key) so all of them go out together.
   const sid = "(SELECT id FROM workflow_steps WHERE run_id = $1 AND key = $2)";
   const args = [runId, stepKey];
-  const [step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs, handoffs] =
-    await Promise.all([
-      one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
-      q(pool, `SELECT * FROM workflow_step_attempts WHERE step_id = ${sid} ORDER BY number`, args),
-      q(pool, `SELECT * FROM workflow_questions WHERE step_id = ${sid} ORDER BY id`, args),
-      q(pool, `SELECT * FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`, args),
-      q(
-        pool,
-        `SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = ${sid} ORDER BY id`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = ${sid} ORDER BY s.id`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = ${sid} ORDER BY id DESC LIMIT 10`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT h.*,m.previous_attempt_duration_ms,m.handoff_duration_ms,m.new_attempt_duration_ms,m.retry_count,m.reported_cost_usd,m.final_verification_result FROM provider_handoffs h LEFT JOIN provider_handoff_metrics m ON m.id=h.id WHERE h.step_id=${sid} ORDER BY h.id`,
-        args,
-      ),
-    ]);
+  const [
+    step,
+    attempts,
+    questions,
+    checkpoints,
+    artifacts,
+    sessions,
+    snapshots,
+    jobs,
+    handoffs,
+    decisions,
+  ] = await Promise.all([
+    one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
+    q(pool, `SELECT * FROM workflow_step_attempts WHERE step_id = ${sid} ORDER BY number`, args),
+    q(pool, `SELECT * FROM workflow_questions WHERE step_id = ${sid} ORDER BY id`, args),
+    q(pool, `SELECT * FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`, args),
+    q(
+      pool,
+      `SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = ${sid} ORDER BY id`,
+      args,
+    ),
+    q(
+      pool,
+      `SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = ${sid} ORDER BY s.id`,
+      args,
+    ),
+    q(
+      pool,
+      `SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`,
+      args,
+    ),
+    q(
+      pool,
+      `SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = ${sid} ORDER BY id DESC LIMIT 10`,
+      args,
+    ),
+    q(
+      pool,
+      `SELECT h.*,m.previous_attempt_duration_ms,m.handoff_duration_ms,m.new_attempt_duration_ms,m.retry_count,m.reported_cost_usd,m.final_verification_result FROM provider_handoffs h LEFT JOIN provider_handoff_metrics m ON m.id=h.id WHERE h.step_id=${sid} ORDER BY h.id`,
+      args,
+    ),
+    q(
+      pool,
+      `SELECT id,content,data,created_at FROM workflow_events WHERE step_id=${sid} AND kind='decision' ORDER BY id DESC LIMIT 100`,
+      args,
+    ),
+  ]);
   if (!step) throw new EngineError(`step "${stepKey}" not found`, 404);
-  return { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs, handoffs };
+  return {
+    step,
+    attempts,
+    questions,
+    checkpoints,
+    artifacts,
+    sessions,
+    snapshots,
+    jobs,
+    handoffs,
+    decisions,
+  };
 }
 
 export function openQuestions(db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {

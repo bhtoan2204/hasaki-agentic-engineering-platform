@@ -1,3 +1,4 @@
+import { recommendForRun } from "../decision/recommendations.ts";
 import { loadKnowledgeAudit } from "../knowledge/auditLoader.ts";
 import {
   createBinding,
@@ -921,6 +922,14 @@ export const routes: Route[] = [
       await requireRun(c.actor, num(c.p[0]), support(c)),
       selectRepositories(num(c.p[0]), c.body.repositories ?? [])
     ),
+  ],
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/decisions\/recommend$/,
+    async (c) => {
+      await requireRun(c.actor, num(c.p[0]), false);
+      return recommendForRun(num(c.p[0]), c.body);
+    },
   ],
   [
     "POST",

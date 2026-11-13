@@ -26,6 +26,8 @@
     "step:reexecute": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/reexecute-step.ts",
     "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts",
     "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts",
+    "bench:decisions": "node --disable-warning=ExperimentalWarning --import ./test/env.ts test/decision-engine.bench.ts",
+    "smoke:decisions": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning --test test/decision-engine.live.ts",
     "bench:cache": "node --disable-warning=ExperimentalWarning --expose-gc src/cli/benchCache.ts",
     "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
     "validate:code-intelligence": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/validate-code-intelligence.ts",

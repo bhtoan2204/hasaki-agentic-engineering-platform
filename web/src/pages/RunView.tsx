@@ -1243,6 +1243,14 @@ function RunTimeline({ runId, activity }: { runId: number; activity: number }) {
                 >
                   {e.content}
                 </span>
+                {e.kind === "decision" && e.data && (
+                  <details>
+                    <summary>{t("decision.details")}</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                      {JSON.stringify(e.data, null, 2)}
+                    </pre>
+                  </details>
+                )}
               </span>
             </div>
           ))}

@@ -18,6 +18,8 @@ import {
 import { claudeTestFailureAdvisor, setTestFailureAdvisor } from "./testFailure.ts";
 import { setKnowledgeChangeAnalyzer, setSkillDrafter } from "../../knowledge/learning.ts";
 import { modelChangeAnalyzer, modelSkillDrafter } from "../../agent/learningModel.ts";
+import { config } from "../../config.ts";
+import { decisionEngine } from "../../decision/index.ts";
 import { completeForRun } from "../../agent/complete.ts";
 import { setFeedbackModel } from "../engine.ts";
 
@@ -39,6 +41,15 @@ export function registerDefaultExecutors() {
   // Continuous learning (knowledge/learning.ts): change detection and skill drafting through the run's provider.
   setKnowledgeChangeAnalyzer(modelChangeAnalyzer);
   setSkillDrafter(modelSkillDrafter);
-  // Feedback routing: one classification call through the run's provider (engine falls back to cues without it).
-  setFeedbackModel(async (run, prompt) => (await completeForRun(run, prompt)).text);
+  // Feedback routing uses the shared decision engine when enabled; legacy provider routing remains unchanged otherwise.
+  setFeedbackModel(async (run, prompt, complexity = "medium") => {
+    if (!config.decisionEngine.enabled) return (await completeForRun(run, prompt)).text;
+    const result = await decisionEngine.decide({
+      type: "feedback",
+      input: prompt,
+      complexity,
+      scope: { runId: run.id, revision: JSON.stringify(run.graph) },
+    });
+    return JSON.stringify(result.decision);
+  });
 }

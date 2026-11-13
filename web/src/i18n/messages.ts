@@ -389,6 +389,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
 
 export const messages: Record<UiLocale, Record<string, string>> = {
   vi: {
+    "decision.history": "Lịch sử quyết định AI",
+    "decision.details": "Chi tiết quyết định",
     "optimization.provenance": "Nguồn gốc quyết định tối ưu",
     "optimization.evidence": "Bằng chứng khuyến nghị",
     "an.agentEvaluation": "Đánh giá agent",
@@ -402,6 +404,8 @@ export const messages: Record<UiLocale, Record<string, string>> = {
     ...analyticsMessages.vi,
   },
   en: {
+    "decision.history": "AI decision history",
+    "decision.details": "Decision details",
     "optimization.provenance": "Optimization decision provenance",
     "optimization.evidence": "Recommendation evidence",
     "an.agentEvaluation": "Agent Evaluation",

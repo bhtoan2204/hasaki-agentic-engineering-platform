@@ -775,3 +775,46 @@ test("end-to-end: workflow with antigravity agent completes and persists attempt
   assert.ok(metrics.tokens.input > 0);
   assert.ok(metrics.tokens.reasoning_output > 0);
 });
+
+test("decision completion uses explicit Flash variant, structured output and isolated session settings", async () => {
+  const { subscriptionTransport } = await import("../src/decision/providers.ts");
+  process.env.AGY_MODEL = "gemini-3.8-flash-high";
+  process.env.AGY_EFFORT = "high";
+  process.env.FAKE_AGY_MODE = "aux_complete";
+  process.env.FAKE_AGY_TEXT = '{"decision":"STANDARD","reasoningSummary":"simple"}';
+  const result = await subscriptionTransport.execute(
+    { provider: "antigravity", model: "gemini-3.8-flash-medium", effort: "medium" },
+    "Choose STANDARD",
+    '{"type":"object"}',
+    AbortSignal.timeout(5000),
+  );
+  assert.equal(JSON.parse(result.text).decision, "STANDARD");
+  const log = fakeLog().at(-1)!;
+  assert.equal(log.argv[log.argv.indexOf("--model") + 1], "gemini-3.8-flash-medium");
+  assert.equal(
+    log.argv.includes("--effort"),
+    false,
+    "published variant already encodes thinking effort",
+  );
+  assert.ok(log.argv.includes("--json-schema"));
+  assert.ok(log.argv.includes("--disable-slash-commands"));
+  const settings = JSON.parse(log.argv[log.argv.indexOf("--settings") + 1]);
+  assert.equal(settings.useG1Credits, false);
+  assert.equal(settings.modelProvider, "");
+  assert.equal(settings.toolPermission, "strict");
+  assert.ok(settings.permissions.deny.includes("mcp(*)"));
+  assert.ok(log.cwd.includes("ctp-decision-"));
+  assert.equal(existsSync(log.cwd), false, "scratch workspace cleaned");
+});
+
+test("decision completion rejects a different model reported by the CLI", async () => {
+  process.env.FAKE_AGY_MODE = "aux_wrong_model";
+  await assert.rejects(
+    antigravityComplete("Choose STANDARD", {
+      model: "gemini-3.8-flash-medium",
+      effort: "",
+      schema: '{"type":"object"}',
+    }),
+    /different model/,
+  );
+});

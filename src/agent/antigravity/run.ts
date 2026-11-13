@@ -633,27 +633,41 @@ export async function antigravityAgentTurn(
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function antigravityComplete(
   prompt: string,
-  opts?: { signal?: AbortSignal },
+  opts?: {
+    signal?: AbortSignal;
+    model?: string;
+    effort?: string;
+    cwd?: string;
+    settings?: string;
+    schema?: string;
+  },
 ): Promise<{
   text: string;
   model?: string;
   tokens: Record<string, number | null> | null;
 }> {
-  const cfg = antigravityConfig();
+  const cfg = {
+    ...antigravityConfig(),
+    ...(opts?.model !== undefined ? { model: opts.model } : {}),
+    ...(opts?.effort !== undefined ? { effort: opts.effort } : {}),
+  };
   if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
-  const cap = await antigravityCapabilities(false);
+  const cap = await antigravityCapabilities(false, { model: cfg.model, effort: cfg.effort });
   if (!cap.ok) {
     throw new Error(cap.error || "Antigravity CLI is not available on this worker");
   }
 
+  opts?.signal?.throwIfAborted();
   const args = buildAntigravityArgs({
     model: cfg.model || undefined,
     effort: cfg.effort || undefined,
-    sandbox: false,
+    sandbox: !!opts?.schema,
+    settingsPath: opts?.settings,
   });
 
+  if (opts?.schema) args.push("--json-schema", opts.schema, "--disable-slash-commands");
   const env = antigravityEnv(process.env);
-  const child = spawn(cfg.bin, args, { env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(cfg.bin, args, { env, cwd: opts?.cwd, stdio: ["pipe", "pipe", "pipe"] });
   if (child.pid) childGroups.add(child.pid);
 
   const onAbort = () => killAntigravity(child);
@@ -667,12 +681,27 @@ export async function antigravityComplete(
 
   let text = "";
   let stderr = "";
+  let providerError = "";
   let tokens: Record<string, number | null> | null = null;
   const parser = new AntigravityStream();
+
+  const observeDecisionEvent = (ev: AntigravityEvent) => {
+    if (!opts?.schema) return;
+    const raw = ev.raw as { model?: unknown; result?: { model?: unknown } };
+    const reportedModel = raw?.model ?? raw?.result?.model;
+    if (typeof reportedModel === "string" && reportedModel !== cfg.model)
+      providerError = "Decision CLI reported a different model than the selected catalog variant";
+    if (ev.error) providerError = ev.error;
+    if (ev.tool) {
+      providerError = "Decision provider attempted a tool call";
+      onAbort();
+    }
+  };
 
   child.stdout?.on("data", (chunk: Buffer) => {
     const { events } = parser.push(chunk);
     for (const ev of events) {
+      observeDecisionEvent(ev);
       if (ev.type === "result") {
         if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
       } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
@@ -709,6 +738,7 @@ export async function antigravityComplete(
 
   const tail = parser.flush();
   for (const ev of tail.events) {
+    observeDecisionEvent(ev);
     if (ev.type === "result") {
       if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
     } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
@@ -718,6 +748,9 @@ export async function antigravityComplete(
   if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
   if (timedOut) throw new Error("Antigravity auxiliary completion timed out");
   if (inputError) throw new Error(`Antigravity prompt delivery failed: ${inputError.message}`);
+  if (providerError) throw new Error(providerError);
+  if (opts?.schema && /fall(?:ing)? back|using (?:the )?default model/i.test(stderr))
+    throw new Error("Decision model was not honored by the CLI");
   if (exitCode !== 0) {
     throw new Error(
       redactSecrets(stderr.trim()) ||
