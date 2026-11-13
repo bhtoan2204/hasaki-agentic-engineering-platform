@@ -300,9 +300,6 @@ function platformServer(
   onSubmit: (o: Record<string, unknown>) => void,
   metrics: AgentMetrics,
 ) {
-  const editable = ctx.run.selected_repositories.length
-    ? ctx.run.selected_repositories
-    : ctx.run.allowed_repositories;
   const prose = outputLocale(ctx.run) === "vi" ? "Vietnamese" : "English";
   const env = envFromExecution(ctx, mode, policy, metrics, onSubmit);
   const call = (name: string) => async (args: any) =>
@@ -402,7 +399,7 @@ function platformServer(
     tools.unshift(
       tool(
         "prepare_branch",
-        `Create or reuse the branch "${ctx.run.branch}" for a repo in an isolated git worktree and return its path. Allowed repos: ${editable.join(", ")}`,
+        `Create or reuse the branch "${ctx.run.branch}" for a repo in an isolated git worktree and return its path. Automatically selects the repo after checking current write access; no manual selection update needed. Allowed repos: ${ctx.run.allowed_repositories.join(", ")}`,
         { repo: z.string().describe("repo directory name, e.g. oms-api") },
         call("prepare_branch"),
       ),
@@ -612,8 +609,20 @@ const agentExecutor: StepExecutor = {
         break;
       }
     }
-    const restoreWorkspaces = () =>
-      restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, {
+    const restoreWorkspaces = async () => {
+      // A provider bridge can select another allowed repository during its turn. Verification must include it.
+      const current = await one<{ selected_repositories: string[] }>(
+        pool,
+        "SELECT selected_repositories FROM workflow_runs WHERE id=$1",
+        [ctx.run.id],
+      );
+      if (!current) throw new Error("Run not found while refreshing verification repositories");
+      ctx.run.selected_repositories.splice(
+        0,
+        ctx.run.selected_repositories.length,
+        ...current.selected_repositories,
+      );
+      return restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, {
         log: (m) => ctx.log("system", m),
         en: outputLocale(ctx.run) === "en",
         approvedReleases: (ctx.input.pending?.workspace_release?.holders ?? []) as string[],
@@ -622,6 +631,7 @@ const agentExecutor: StepExecutor = {
           if (!live.ok) throw new Error(live.reason);
         },
       });
+    };
     if (mode === "coding") {
       const blocked = await restoreWorkspaces();
       if (blocked) return blocked;
@@ -637,8 +647,7 @@ const agentExecutor: StepExecutor = {
       }
     }
     const delegationCfg = ctx.step.config.delegation as
-      | { enabled?: boolean; agents?: string[] }
-      | undefined;
+      { enabled?: boolean; agents?: string[] } | undefined;
     const delegation = delegationCfg?.enabled === true;
     const policy: PolicyContext = {
       mode,

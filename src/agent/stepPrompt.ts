@@ -49,6 +49,11 @@ export function buildSystemAppend(
     mode === "coding"
       ? `- Read code anywhere, but edit ONLY inside worktrees returned by mcp__platform__prepare_branch. Never edit primary checkouts directly. ${branchRule(run, ctx.repositories.length ? ctx.repositories : run.allowed_repositories)}`
       : `- This step is READ-ONLY: do not modify files. Shell is limited to read-only commands.`,
+    ...(mode === "coding"
+      ? [
+          "- If implementation needs another repository in this run's allowed scope, call mcp__platform__prepare_branch for it directly. The platform checks write access and automatically adds it to selected repositories. Do not ask the developer to update selected_repositories or the platform database.",
+        ]
+      : []),
     `- Do NOT run git push. Pull requests are opened by a later workflow step.`,
     `- If business behaviour is genuinely ambiguous and cannot be settled by reading code, call mcp__platform__ask_user with ALL open questions at once (each with the context you found and your recommended option first), then END YOUR TURN. Answers arrive as the next message.`,
     `- Use mcp__platform__post_update for short progress notes at milestones.`,

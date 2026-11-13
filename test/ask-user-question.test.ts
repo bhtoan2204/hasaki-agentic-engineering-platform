@@ -13,10 +13,13 @@ test("ask_user rejects a schema probe and describe_tool returns its schema", () 
   const described = describeOwnedTool("ask_user");
   assert.ok(described);
   assert.match(described.description, /schema probe/);
-  assert.equal(described.input_schema.properties.questions.items.properties.question.type, "string");
-  assert.match(
-    String(described.input_schema.properties.questions.items.properties.question.description),
-    /Not a schema probe/,
-  );
+  const questions = described.input_schema.properties?.questions;
+  assert.ok(questions && typeof questions === "object");
+  const items = questions.items;
+  assert.ok(items && typeof items === "object" && !Array.isArray(items));
+  const question = items.properties?.question;
+  assert.ok(question && typeof question === "object");
+  assert.equal(question.type, "string");
+  assert.match(String(question.description), /Not a schema probe/);
   assert.equal(describeOwnedTool("splunk_search"), null);
 });

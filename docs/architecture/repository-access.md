@@ -83,7 +83,7 @@ Repositories without a Bitbucket remote (legacy local checkouts) are `not_applic
 | Repository selection (user, approval, agent output) | inside the persisted scope **and** still readable by the owner |
 | Step start (scheduler, covers retry, resume, re-execution) | `enforceRunRepositoryAccess`: revoked unselected repositories leave the scope; a revoked selected repository stops the step, not retried |
 | Every agent tool call (`validateToolBinding`) | `assertRunScopeReadable` on the attempt's scope |
-| Worktree preparation | `requireRunRepositoryAccess(run, repo, "write")` |
+| Worktree preparation | `prepare_branch` automatically adds a needed repository to `selected_repositories` when it is already in the run's allowed scope and `requireRunRepositoryAccess(run, repo, "write")` succeeds. Selection is persisted and logged under the live attempt's lease and fencing token; no manual database update or developer question is needed. |
 | Push | `requireRunRepositoryAccess(run, repo, "write")` |
 | Pull request | `requireRunRepositoryAccess(run, repo, "pull_request")` |
 | `GET /api/runs/:id/changes` | per workspace: the **viewer's** read access; otherwise `restricted`, no code |

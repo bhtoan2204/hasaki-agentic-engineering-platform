@@ -837,6 +837,7 @@ test("a disconnected agent starts on the next healthy provider without a switch 
   await once();
   await settleBackground();
   const finished = await getRun(r.id);
+  const detail = await stepDetail(r.id, finished.steps[0].key);
   assert.equal(
     finished.steps[0].status,
     "COMPLETED",
@@ -844,7 +845,7 @@ test("a disconnected agent starts on the next healthy provider without a switch 
       run: finished.status,
       step: finished.steps[0].status,
       error: finished.steps[0].error,
-      attempts: finished.attempts?.map((a: any) => ({
+      attempts: detail.attempts.map((a) => ({
         provider: a.agent_provider,
         status: a.status,
         error: a.error,
@@ -861,5 +862,7 @@ test("quota exhaustion continues on the next healthy provider without waiting fo
   assert.equal(h.status, "RESUMED", h.blocked_reason ?? h.status);
   assert.equal(h.failure_category, "QUOTA_EXHAUSTED");
   assert.equal(h.target_provider, "codex");
-  assert.equal((await getRun(r.id)).steps[0].agent_override.provider, "codex");
+  assert.partialDeepStrictEqual((await getRun(r.id)).steps[0].agent_override, {
+    provider: "codex",
+  });
 });

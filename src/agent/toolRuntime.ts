@@ -1,6 +1,10 @@
 import { execution } from "../auth/execution.ts";
-import { assertRunScopeReadable } from "../repos/access.ts";
-import { pool, q, one, withTx } from "../db/pool.ts";
+import { assertRunScopeReadable, requireRunRepositoryAccess } from "../repos/access.ts";
+import { pool, q, one, withTx, type Db } from "../db/pool.ts";
+import { runEvents } from "../workflow/events.ts";
+import type { RunRow } from "../workflow/types.ts";
+import { repositories } from "../repos/service.ts";
+import { assertSelfCodingIsolation, isSelfRepository } from "../platform/selfDevelopment.ts";
 import { config } from "../config.ts";
 import { instanceSession } from "../instances.ts";
 import { hashOf } from "../workflow/definitions.ts";
@@ -8,7 +12,7 @@ import { safeDiagnostics } from "./telemetry.ts";
 import type { PlatformToolEnv } from "./platformTools.ts";
 
 /** Identity comes from worker-owned attempt data, never tool arguments or provider-selected IDs. */
-export async function validateToolBinding(env: PlatformToolEnv) {
+export async function validateToolBinding(env: PlatformToolEnv, db: Db = pool) {
   const principal = execution.getStore();
   if (
     principal &&
@@ -16,7 +20,7 @@ export async function validateToolBinding(env: PlatformToolEnv) {
   )
     throw new Error("Authenticated principal does not own this run");
   const row = await one(
-    pool,
+    db,
     `SELECT a.effective_agent,a.run_id,a.step_id,a.status,a.fencing_token,a.generation AS attempt_generation,s.generation AS step_generation,s.type,s.current_attempt_id,s.status AS step_status,
     r.owner_id,r.worker_instance,r.status AS run_status,r.allowed_repositories,r.inputs->>'project' AS run_project,u.active,
     j.status AS job_status,j.fencing_token AS job_token,j.lease_expires_at>clock_timestamp() AS live,
@@ -62,6 +66,61 @@ export async function validateToolBinding(env: PlatformToolEnv) {
   // repositories in this attempt's scope (last known Bitbucket result; platform grants are always current).
   await assertRunScopeReadable(Number(row.owner_id), env.allowed, row.run_project ?? "");
 }
+/** Selection is execution bookkeeping; persisted scope and current write access remain authoritative. */
+export async function selectRepositoryForPreparation(env: PlatformToolEnv, repo: string) {
+  const run = await withTx(async (c) => {
+    const run = await one<RunRow>(c, "SELECT * FROM workflow_runs WHERE id=$1 FOR UPDATE", [
+      env.runId,
+    ]);
+    if (!run) throw new Error("Run not found");
+    // Serialize with lease fencing as well as cancellation, retries and concurrent preparations.
+    await q(
+      c,
+      "SELECT id FROM workflow_jobs WHERE id=(SELECT job_id FROM workflow_step_attempts WHERE id=$1) FOR UPDATE",
+      [env.attemptId],
+    );
+    await validateToolBinding(env, c);
+    if (env.mode !== "coding") throw new Error("Repository preparation requires a coding step");
+    if (!env.allowed.includes(repo) || !run.allowed_repositories.includes(repo))
+      throw new Error(`Repository outside run scope: ${repo}`);
+    const open = await one(
+      c,
+      "SELECT id FROM workflow_questions WHERE attempt_id=$1 AND status='open' LIMIT 1",
+      [env.attemptId],
+    );
+    if (open) throw new Error("This attempt is waiting for answers. Stop until it resumes.");
+    await requireRunRepositoryAccess(run.id, repo, "write", c);
+    const repository = await repositories.get(repo, c);
+    if (repository && (await isSelfRepository(repository))) {
+      const attempt = await one<{ agent_provider: string }>(
+        c,
+        "SELECT agent_provider FROM workflow_step_attempts WHERE id=$1",
+        [env.attemptId],
+      );
+      assertSelfCodingIsolation(attempt?.agent_provider ?? "");
+    }
+    if (!run.selected_repositories.includes(repo)) {
+      run.selected_repositories.push(repo);
+      await q(c, "UPDATE workflow_runs SET selected_repositories=$2,updated_at=now() WHERE id=$1", [
+        run.id,
+        run.selected_repositories,
+      ]);
+      await runEvents.add(
+        c,
+        run.id,
+        "system",
+        `automatically selected repository for prepare_branch: ${repo}`,
+        env.stepId,
+        env.attemptId,
+      );
+    }
+    return run;
+  });
+  // Preserve the array shared with the in-process execution context and later verification.
+  env.selected.splice(0, env.selected.length, ...run.selected_repositories);
+  return run;
+}
+
 export async function journalToolCall(
   env: PlatformToolEnv,
   name: string,

@@ -12,6 +12,7 @@ import {
   journalToolCall,
   auditToolDenial,
   postClarification,
+  selectRepositoryForPreparation,
 } from "./toolRuntime.ts";
 import { redactContextText } from "../context/redact.ts";
 import { safeDiagnostics } from "./telemetry.ts";
@@ -427,13 +428,10 @@ async function isolationFor(
 
 async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
-  const editable = env.selected.length ? env.selected : env.allowed;
-  if (!editable.includes(repo))
-    return `Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`;
   const isolation = await isolationFor(env.stepId);
   if (isolation.isolated && !isolation.subtaskId)
     return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
-  const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [env.runId]);
+  const run = await selectRepositoryForPreparation(env, repo);
   const step = await one<{ holders: string[] | null }>(
     pool,
     "SELECT pending_input->'workspace_release'->'holders' AS holders FROM workflow_steps WHERE id = $1",
@@ -861,7 +859,8 @@ const PLATFORM_TOOL_DOCS: Record<string, { summary: string; read_only: boolean }
     read_only: false,
   },
   prepare_branch: {
-    summary: "Create the run branch worktree. Coding steps only.",
+    summary:
+      "Create the run branch worktree; automatically select an allowed repo with current write access. Coding steps only.",
     read_only: false,
   },
   commit_changes: {

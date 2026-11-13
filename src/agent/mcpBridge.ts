@@ -16,7 +16,7 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
   {
     name: "ask_user",
     description:
-      "Post the developer's real questions and STOP. The question text is shown as-is and pauses the step. Include context. Do not send a schema probe such as \"test\".",
+      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step. Include context. Do not send a schema probe such as "test".',
     inputSchema: {
       type: "object",
       properties: {
@@ -62,7 +62,7 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
   {
     name: "prepare_branch",
     description:
-      "Create or reuse the run branch for a repo in an isolated git worktree and return its path. Coding steps only.",
+      "Create or reuse the run branch for an allowed repo in an isolated git worktree and return its path. Automatically adds the repo to selected repositories after checking current write access; no manual selection update needed. Coding steps only.",
     inputSchema: { type: "object", properties: { repo: { type: "string" } }, required: ["repo"] },
   },
   {
