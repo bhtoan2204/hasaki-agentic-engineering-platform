@@ -15,11 +15,13 @@ import {
 import { isMandatory, planKnowledge } from "../src/context/plan.ts";
 import { renderCodebaseMap, indexedCodebaseMap } from "../src/knowledge/codebaseMap.ts";
 import { remediateKnowledgeAudit } from "../src/knowledge/auditRemediation.ts";
-import { rollbackProposal } from "../src/knowledge/proposals.ts";
+import { rollbackProposal, type ProposalInput } from "../src/knowledge/proposals.ts";
+import type { executeLiveProviderPhase as LivePhase } from "../src/eval/liveProvider.ts";
 import { loadKnowledgeAudit } from "../src/knowledge/auditLoader.ts";
 import { createUser } from "../src/auth/users.ts";
 import type { AuditItem } from "../src/knowledge/audit.ts";
 
+type LivePhaseArgs = Parameters<typeof LivePhase>;
 before(() => migrate());
 after(() => pool.end());
 const ctx: ResolutionContext = {
@@ -458,8 +460,14 @@ test("audit actor cannot deprecate business rules or bypass the enforced guard",
     sourceKind: "manual",
     evidence,
   };
-  await assert.rejects(createProposal({ ...base, targetKey: "r4-enforced" } as any), /enforced/);
-  const { proposal } = await createProposal({ ...base, targetKey: "r4-rule" } as any);
+  await assert.rejects(
+    createProposal({ ...base, targetKey: "r4-enforced" } as unknown as ProposalInput),
+    /enforced/,
+  );
+  const { proposal } = await createProposal({
+    ...base,
+    targetKey: "r4-rule",
+  } as unknown as ProposalInput);
   await assert.rejects(approveProposal(proposal.id, { by: AUDIT_ACTOR }), /business rule/);
   assert.equal((await knowledge.get("r4-rule")).enabled, true);
 });
@@ -488,7 +496,7 @@ test("DEPRECATE rollback leaves supersession it did not set untouched", async ()
     createdBy: "admin",
     sourceKind: "manual",
     evidence: [{ source: "requirement", ref: {}, author: "admin", trust: "human", quote: "old" }],
-  } as any);
+  } as unknown as ProposalInput);
   await approveProposal(proposal.id, { by: "admin" });
   // Proposals applied before supersession was recorded carry no previous_superseded_by.
   await pool.query(
@@ -524,12 +532,12 @@ test("live phase stops waiting for a held budget lock when aborted", async () =>
     const ac = new AbortController();
     setTimeout(() => ac.abort(), 150);
     const result = await executeLiveProviderPhase(
-      { run: { id: 0, owner_id: 1 }, signal: ac.signal } as any,
+      { run: { id: 0, owner_id: 1 }, signal: ac.signal } as unknown as LivePhaseArgs[0],
       {
         evaluation_id: 0,
         case_run_id: 0,
         configuration: { budget_group: "lock-wait-test" },
-      } as any,
+      } as unknown as LivePhaseArgs[1],
     );
     assert.equal(result.kind, "failed");
   } finally {
