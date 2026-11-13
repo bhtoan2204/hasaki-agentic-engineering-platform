@@ -52,11 +52,16 @@ if [ ! -x node_modules/.bin/tsc ]; then npm ci --ignore-scripts --no-audit --no-
 export const ENVIRONMENT_UNAVAILABLE_EXIT = 78;
 export const ENVIRONMENT_UNAVAILABLE_MARKER = "PLATFORM_ENVIRONMENT_UNAVAILABLE:";
 
+/** The platform resolves PostgreSQL only for commands that use this variable (the guard below). */
+export const TEST_POSTGRES_BIN_ENV = "PLATFORM_TEST_POSTGRES_BIN";
+
 /** Runs right before a suite preloaded with test/setup.ts; the platform sets the variable when it found no PostgreSQL. */
-const TEST_POSTGRES_GUARD = `if [ -n "\${PLATFORM_POSTGRES_UNAVAILABLE:-}" ]; then
+export const TEST_POSTGRES_GUARD = `if [ -n "\${PLATFORM_POSTGRES_UNAVAILABLE:-}" ]; then
     echo "${ENVIRONMENT_UNAVAILABLE_MARKER} test PostgreSQL unavailable, so no test ran (test/setup.ts preloads every test file): $PLATFORM_POSTGRES_UNAVAILABLE" >&2
     exit ${ENVIRONMENT_UNAVAILABLE_EXIT}
-  fi`;
+  fi
+  # bash -l runs /etc/profile, which resets PATH on Debian/Ubuntu: prepend the bin dir after it.
+  if [ -n "\${PLATFORM_TEST_POSTGRES_BIN:-}" ]; then export PATH="$PLATFORM_TEST_POSTGRES_BIN:$PATH"; fi`;
 
 /**
  * Lints the changed files (paths on stdin) and fails only on errors the branch adds. Errors are matched to the merge

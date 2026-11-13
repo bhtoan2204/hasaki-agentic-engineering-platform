@@ -136,13 +136,14 @@ export function deriveOutcome(f: OutcomeFacts) {
         heads: s.output.tested_heads,
       })),
     ...coding
-      .filter((s) => s.output?.verification)
+      .filter((s) => s.output?.verification && s.output.verification.passed !== null)
       .map((s) => ({
         step: s.key,
         passed: s.output.verification.passed === true,
         heads: s.output.tested_heads,
       })),
   ];
+  const unverified = coding.filter((s) => s.output?.verification?.passed === null);
   const bound = testRecords.filter((t) => t.passed && sameHeads(t.heads, heads));
   ladder.tests_passed = bound.length
     ? proven(`${bound.map((t) => t.step).join(", ")} passed on the final commits`)
@@ -156,7 +157,9 @@ export function deriveOutcome(f: OutcomeFacts) {
       : unknown(
           testRecords.length
             ? "test records are not bound to the final commits"
-            : "no test step ran",
+            : unverified.length
+              ? `tests not verified in ${unverified.map((s) => s.key).join(", ")} (verification ${unverified.map((s) => s.output.verification.status).join(", ")})`
+              : "no test step ran",
         );
 
   const passes = verifiers.filter(

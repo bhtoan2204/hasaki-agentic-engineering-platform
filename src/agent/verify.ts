@@ -64,8 +64,7 @@ export function verifyConfig(
  *   tests excluded (anything else still failing → failed). Explicitly listed, never reported as a clean pass.
  * failed: regressions, unclassified failures, timeouts or hard test weakening — sent back to the agent for repair.
  * error: verification itself could not complete (integrity check or tooling failure) — not repairable by the agent.
- * skipped: the command reported that its environment cannot run the tests (e.g. no PostgreSQL) — nothing was tested,
- *   never counted as passed, not repairable by the agent.
+ * skipped: the environment could not run the tests (e.g. no PostgreSQL) — never a pass, not repairable by the agent.
  */
 export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error" | "skipped";
 

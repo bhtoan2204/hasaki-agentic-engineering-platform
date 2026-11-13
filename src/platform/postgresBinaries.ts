@@ -1,12 +1,10 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { delimiter, dirname, join } from "node:path";
+import { accessSync, constants, readFileSync, realpathSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { config } from "../config.ts";
+import { TEST_POSTGRES_BIN_ENV } from "../workflow/templates.ts";
 
-/**
- * PostgreSQL binaries for a repository test harness that starts its own throwaway cluster (initdb/pg_ctl), resolved in
- * the platform process: commands may run inside bubblewrap, where nix cannot build (read-only `/`, unwritable HOME).
- */
+// Resolved in the platform process: inside bubblewrap nix cannot build (read-only `/`, unwritable HOME).
 export type PostgresBin =
   { dir: string; source: "path" | "cache" | "nix" } | { dir: null; reason: string };
 
@@ -19,20 +17,21 @@ export interface NixResult {
 
 export interface PostgresResolveOptions {
   pathEnv?: string;
-  cacheFile?: string;
+  outLink?: string;
   nix?: (args: string[], timeoutMs: number) => Promise<NixResult>;
   timeoutMs?: number;
 }
 
-export const NIX_POSTGRES_ARGS = [
+export const nixPostgresArgs = (outLink: string) => [
   "build",
   "--extra-experimental-features",
   "nix-command flakes",
-  "--no-link",
+  "--out-link",
+  outLink,
   "--print-out-paths",
   "nixpkgs#postgresql_17",
 ];
-const FAILURE_TTL_MS = 5 * 60_000;
+export const NIX_RETRY_MS = 5 * 60_000;
 
 const executable = (file: string) => {
   try {
@@ -68,37 +67,35 @@ const tail = (text: string, max = 1200) => {
   return flat.length > max ? "…" + flat.slice(-max) : flat;
 };
 
-/** 1) initdb on PATH, 2) cached nix store path, 3) `nix build nixpkgs#postgresql_17` (cached), otherwise the reason. */
-export async function resolvePostgresBin(opts: PostgresResolveOptions = {}): Promise<PostgresBin> {
+const outLinkOf = (opts: PostgresResolveOptions) =>
+  opts.outLink ?? join(config.dataDir, "postgres-17");
+
+function linkedBin(outLink: string): string | null {
+  try {
+    const dir = join(realpathSync(outLink), "bin");
+    return executable(join(dir, "initdb")) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+export function installedPostgresBin(opts: PostgresResolveOptions = {}): PostgresBin | null {
   for (const dir of (opts.pathEnv ?? process.env.PATH ?? "").split(delimiter))
     if (dir && executable(join(dir, "initdb"))) return { dir, source: "path" };
-  const cacheFile = opts.cacheFile ?? join(config.dataDir, "postgres-bin.json");
-  try {
-    const cached = String(JSON.parse(readFileSync(cacheFile, "utf8")).dir ?? "");
-    if (cached && executable(join(cached, "initdb"))) return { dir: cached, source: "cache" };
-  } catch {
-    /* no usable cache */
-  }
+  const linked = linkedBin(outLinkOf(opts));
+  return linked ? { dir: linked, source: "cache" } : null;
+}
+
+export async function buildPostgresBin(opts: PostgresResolveOptions = {}): Promise<PostgresBin> {
+  const outLink = outLinkOf(opts);
   const timeoutMs = opts.timeoutMs ?? 300_000;
-  const r = await (opts.nix ?? runNix)(NIX_POSTGRES_ARGS, timeoutMs);
+  const r = await (opts.nix ?? runNix)(nixPostgresArgs(outLink), timeoutMs);
   if (r.code === 0) {
-    const out = r.stdout
-      .split("\n")
-      .map((l) => l.trim())
-      .find((p) => p && existsSync(join(p, "bin", "initdb")));
-    if (out) {
-      const dir = join(out, "bin");
-      try {
-        mkdirSync(dirname(cacheFile), { recursive: true });
-        writeFileSync(cacheFile, JSON.stringify({ dir }));
-      } catch {
-        /* the next resolution builds again */
-      }
-      return { dir, source: "nix" };
-    }
+    const dir = linkedBin(outLink);
+    if (dir) return { dir, source: "nix" };
     return {
       dir: null,
-      reason: `nix build nixpkgs#postgresql_17 printed no output with bin/initdb: ${tail(r.stdout)}`,
+      reason: `nix build nixpkgs#postgresql_17 left no bin/initdb at ${outLink}: ${tail(r.stdout)}`,
     };
   }
   if (/ENOENT/.test(r.error ?? ""))
@@ -109,28 +106,35 @@ export async function resolvePostgresBin(opts: PostgresResolveOptions = {}): Pro
   };
 }
 
-let memo: { at: number; value: PostgresBin } | null = null;
+let lastNix: { at: number; reason: string } | null = null;
 let inflight: Promise<PostgresBin> | null = null;
 let override: PostgresBin | undefined;
 
-/** Resolved once per process; a failure is retried after a few minutes, never on every command. */
-export async function postgresBinDir(): Promise<PostgresBin> {
+/** PATH and the out-link are re-checked on every call; only the nix build is throttled after a failure. */
+export async function postgresBinDir(opts: PostgresResolveOptions = {}): Promise<PostgresBin> {
   if (override) return override;
-  if (memo?.value.dir && executable(join(memo.value.dir, "initdb"))) return memo.value;
-  if (memo && !memo.value.dir && Date.now() - memo.at < FAILURE_TTL_MS) return memo.value;
-  inflight ??= resolvePostgresBin().finally(() => (inflight = null));
-  const value = await inflight;
-  memo = { at: Date.now(), value };
-  return value;
+  const found = installedPostgresBin(opts);
+  if (found) return found;
+  if (lastNix && Date.now() - lastNix.at < NIX_RETRY_MS)
+    return {
+      dir: null,
+      reason: `${lastNix.reason} (last nix attempt at ${new Date(lastNix.at).toISOString()}; tried again ${NIX_RETRY_MS / 60_000} min later)`,
+    };
+  const at = Date.now();
+  inflight ??= buildPostgresBin(opts)
+    .then((r) => {
+      lastNix = r.dir === null ? { at, reason: r.reason } : null;
+      return r;
+    })
+    .finally(() => (inflight = null));
+  return inflight;
 }
 
-/** `undefined` clears the override and the memo. */
 export function setPostgresBinForTests(value: PostgresBin | undefined) {
   override = value;
-  memo = null;
+  lastNix = null;
 }
 
-/** The repository's test preload starts its own PostgreSQL with initdb (this platform's test/setup.ts). */
 export function needsTestPostgres(cwd: string): boolean {
   try {
     return /\binitdb\b/.test(readFileSync(join(cwd, "test", "setup.ts"), "utf8"));
@@ -139,17 +143,29 @@ export function needsTestPostgres(cwd: string): boolean {
   }
 }
 
-/**
- * Environment additions for a command in `cwd`: the PostgreSQL bin dir in front of PATH, or
- * PLATFORM_POSTGRES_UNAVAILABLE with the reason, which the workflow test commands turn into a dedicated exit.
- */
+// null once `signal` aborts or `timeoutMs` passes; a nix build in progress keeps running for the next command.
 export async function testPostgresEnv(
   cwd: string,
-  basePath: string | undefined,
-): Promise<Record<string, string>> {
+  signal?: AbortSignal,
+  timeoutMs = Infinity,
+): Promise<Record<string, string> | null> {
   if (!needsTestPostgres(cwd)) return {};
-  const pg = await postgresBinDir();
-  if (pg.dir === null) return { PLATFORM_POSTGRES_UNAVAILABLE: pg.reason };
-  if (pg.source === "path") return {};
-  return { PATH: basePath ? `${pg.dir}${delimiter}${basePath}` : pg.dir };
+  if (signal?.aborted) return null;
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const stop = new Promise<null>((resolve) => {
+    onAbort = () => resolve(null);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (Number.isFinite(timeoutMs)) timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    const pg = await Promise.race([postgresBinDir(), stop]);
+    if (!pg) return null;
+    return pg.dir === null
+      ? { PLATFORM_POSTGRES_UNAVAILABLE: pg.reason }
+      : { [TEST_POSTGRES_BIN_ENV]: pg.dir };
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
 }

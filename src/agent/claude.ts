@@ -1711,15 +1711,18 @@ const agentExecutor: StepExecutor = {
           retryable: false,
           details: { verification: summary },
         };
+      const skipped = summary.last
+        .filter((x) => x.status === "skipped")
+        .map((x) => `${x.repo} (${x.note})`);
       if (loop.outcome === "skipped")
         await ctx.log(
           "system",
-          `verification skipped: the environment could not run the tests, so nothing was verified and no repair was attempted — needs human review: ${summary.review_reasons.join("; ")}`,
+          `verification skipped: the environment could not run the tests in ${skipped.join(", ")}, so they were not verified (${loop.repairs ? `${loop.repairs} repair(s) ran for other failures` : "no repair was attempted"}) — needs human review: ${summary.review_reasons.join("; ")}`,
           { verification: "skipped" },
         );
       else if (!summary.passed) {
         const failing = summary.last
-          .filter((x) => !x.passed)
+          .filter((x) => !x.passed && x.status !== "skipped")
           .map(
             (x) =>
               `${x.repo}: ${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
@@ -1730,7 +1733,7 @@ const agentExecutor: StepExecutor = {
             : `still failing after ${loop.repairs} repair(s)`;
         return {
           kind: "failed",
-          error: `verification ${why} — ${failing.join(" | ")}`,
+          error: `verification ${why} — ${failing.join(" | ")}${skipped.length ? ` — tests did not run in ${skipped.join(", ")}` : ""}`,
           retryable: false,
           details: { verification: summary },
         };

@@ -25,6 +25,7 @@ import {
 import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import { testPostgresEnv } from "../../platform/postgresBinaries.ts";
+import { TEST_POSTGRES_BIN_ENV } from "../templates.ts";
 import {
   repositoryReference,
   repositoryBaseBranch,
@@ -205,7 +206,20 @@ export async function runCommand(
   const proc = await commandProcessEnv(cwd, env);
   const useBwrap = proc.isolation?.mode === "bwrap";
   const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
-  Object.assign(childEnv, await testPostgresEnv(cwd, childEnv.PATH));
+  if (command.includes(TEST_POSTGRES_BIN_ENV)) {
+    const started = Date.now();
+    const pg = await testPostgresEnv(cwd, signal, timeoutMs);
+    if (!pg)
+      return {
+        code: null,
+        output: signal.aborted
+          ? "[canceled while resolving the test PostgreSQL]"
+          : `[timed out after ${Math.round(timeoutMs / 1000)}s while resolving the test PostgreSQL]`,
+        timedOut: !signal.aborted,
+      };
+    Object.assign(childEnv, pg);
+    timeoutMs -= Date.now() - started;
+  }
   return new Promise<{ code: number | null; output: string; timedOut: boolean }>((resolve) => {
     const child = spawn(
       useBwrap ? "bwrap" : "bash",

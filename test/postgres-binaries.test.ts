@@ -1,18 +1,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import {
-  NIX_POSTGRES_ARGS,
-  resolvePostgresBin,
+  buildPostgresBin,
+  installedPostgresBin,
+  nixPostgresArgs,
+  postgresBinDir,
   setPostgresBinForTests,
   testPostgresEnv,
   type NixResult,
@@ -24,6 +19,7 @@ import {
   PLATFORM_REGRESSION_COMMAND,
   PLATFORM_TARGETED_COMMAND,
   FEATURE_TARGETED_COMMAND,
+  TEST_POSTGRES_GUARD,
 } from "../src/workflow/templates.ts";
 import { environmentUnavailable } from "../src/agent/verify.ts";
 
@@ -47,6 +43,25 @@ const fakePrefix = (name: string) => {
 const noNix = async (): Promise<NixResult> => {
   throw new Error("nix must not run");
 };
+/** Behaves like `nix build --out-link <link> --print-out-paths`: links the store path, prints it. */
+const fakeNix =
+  (store: string, calls: Array<{ args: string[]; timeoutMs: number }> = []) =>
+  async (args: string[], timeoutMs: number): Promise<NixResult> => {
+    calls.push({ args, timeoutMs });
+    symlinkSync(store, args[args.indexOf("--out-link") + 1]);
+    return { code: 0, stdout: `${store}\n`, stderr: "" };
+  };
+const failingNix =
+  (calls: string[][] = []) =>
+  async (args: string[]): Promise<NixResult> => {
+    calls.push(args);
+    return {
+      code: 1,
+      stdout: "",
+      stderr: "error: unable to download 'https://cache.nixos.org': Could not resolve host\n",
+      error: "Command failed",
+    };
+  };
 const harness = (setup = 'spawnSync("initdb", []);\n') => {
   const repo = dir("repo");
   mkdirSync(join(repo, "test"));
@@ -54,66 +69,58 @@ const harness = (setup = 'spawnSync("initdb", []);\n') => {
   return repo;
 };
 
-test("postgres binaries: PATH first, then the cached store path, without running nix", async () => {
+test("postgres binaries: PATH first, then the nix out-link, without running nix", () => {
   const onPath = fakePrefix("path");
-  const cacheFile = join(dir("cache"), "postgres-bin.json");
+  const outLink = join(dir("data"), "postgres-17");
   assert.deepEqual(
-    await resolvePostgresBin({
-      pathEnv: `/nonexistent:${join(onPath, "bin")}`,
-      cacheFile,
-      nix: noNix,
-    }),
-    { dir: join(onPath, "bin"), source: "path" },
+    installedPostgresBin({ pathEnv: `/nonexistent:${join(onPath, "bin")}`, outLink }),
+    {
+      dir: join(onPath, "bin"),
+      source: "path",
+    },
   );
-  const cached = fakePrefix("cached");
-  writeFileSync(cacheFile, JSON.stringify({ dir: join(cached, "bin") }));
-  assert.deepEqual(await resolvePostgresBin({ pathEnv: "/nonexistent", cacheFile, nix: noNix }), {
-    dir: join(cached, "bin"),
+  assert.equal(installedPostgresBin({ pathEnv: "/nonexistent", outLink }), null);
+  const store = fakePrefix("store");
+  symlinkSync(store, outLink);
+  assert.deepEqual(installedPostgresBin({ pathEnv: "/nonexistent", outLink }), {
+    dir: join(store, "bin"),
     source: "cache",
   });
 });
 
-test("postgres binaries: nix builds postgresql_17 once, picks the output with bin/initdb and caches it", async () => {
-  const out = fakePrefix("store");
-  const man = dir("store-man");
-  const cacheFile = join(dir("cache"), "sub", "postgres-bin.json");
+test("postgres binaries: nix builds postgresql_17 into a GC-rooted out-link, validated on every use", async () => {
+  const store = fakePrefix("store");
+  const outLink = join(dir("data"), "postgres-17");
   const calls: Array<{ args: string[]; timeoutMs: number }> = [];
-  const nix = async (args: string[], timeoutMs: number): Promise<NixResult> => (
-    calls.push({ args, timeoutMs }),
-    { code: 0, stdout: `${man}\n${out}\n`, stderr: "" }
-  );
-  // A stale cache entry (store path garbage-collected) is ignored.
-  mkdirSync(join(cacheFile, ".."), { recursive: true });
-  writeFileSync(cacheFile, JSON.stringify({ dir: join(root, "gone", "bin") }));
-  const r = await resolvePostgresBin({ pathEnv: "", cacheFile, nix, timeoutMs: 1234 });
-  assert.deepEqual(r, { dir: join(out, "bin"), source: "nix" });
-  assert.deepEqual(calls, [{ args: NIX_POSTGRES_ARGS, timeoutMs: 1234 }]);
-  assert.ok(NIX_POSTGRES_ARGS.includes("nix-command flakes"), "works on stock nix installs");
-  assert.equal(JSON.parse(readFileSync(cacheFile, "utf8")).dir, join(out, "bin"));
-  assert.deepEqual(await resolvePostgresBin({ pathEnv: "", cacheFile, nix: noNix }), {
-    dir: join(out, "bin"),
+  const r = await buildPostgresBin({ outLink, nix: fakeNix(store, calls), timeoutMs: 1234 });
+  assert.deepEqual(r, { dir: join(store, "bin"), source: "nix" });
+  assert.deepEqual(calls, [{ args: nixPostgresArgs(outLink), timeoutMs: 1234 }]);
+  assert.ok(calls[0].args.includes("nix-command flakes"), "works on stock nix installs");
+  assert.ok(!calls[0].args.includes("--no-link"), "the out-link is the GC root");
+  assert.deepEqual(installedPostgresBin({ pathEnv: "", outLink }), {
+    dir: join(store, "bin"),
     source: "cache",
   });
+  rmSync(join(store, "bin", "initdb"));
+  assert.equal(
+    installedPostgresBin({ pathEnv: "", outLink }),
+    null,
+    "a collected store path is not used",
+  );
+  const empty = await buildPostgresBin({
+    outLink: join(dir("data"), "postgres-17"),
+    nix: async () => ({ code: 0, stdout: "/nix/store/x-postgresql-17\n", stderr: "" }),
+  });
+  assert.match(empty.dir === null ? empty.reason : "", /left no bin\/initdb at .*postgres-17/);
 });
 
-test("postgres binaries: a nix failure yields null with its stderr, and is not cached", async () => {
-  const cacheFile = join(dir("cache"), "postgres-bin.json");
-  const failed = await resolvePostgresBin({
-    pathEnv: "",
-    cacheFile,
-    nix: async () => ({
-      code: 1,
-      stdout: "",
-      stderr: "error: unable to download 'https://cache.nixos.org': Could not resolve host\n",
-      error: "Command failed",
-    }),
-  });
+test("postgres binaries: a nix failure yields null with its stderr", async () => {
+  const outLink = join(dir("data"), "postgres-17");
+  const failed = await buildPostgresBin({ outLink, nix: failingNix() });
   assert.equal(failed.dir, null);
   assert.match(failed.dir === null ? failed.reason : "", /Could not resolve host/);
-  assert.equal(existsSync(cacheFile), false);
-  const missing = await resolvePostgresBin({
-    pathEnv: "",
-    cacheFile,
+  const missing = await buildPostgresBin({
+    outLink,
     nix: async () => ({ code: null, stdout: "", stderr: "", error: "spawn nix ENOENT" }),
   });
   assert.deepEqual(missing, {
@@ -122,35 +129,85 @@ test("postgres binaries: a nix failure yields null with its stderr, and is not c
   });
 });
 
-test("postgres env: only repositories whose test preload runs initdb get PATH or the unavailable reason", async () => {
-  const store = fakePrefix("env-store");
+test("postgres binaries: after a nix failure a fixed environment is used at once; only nix is throttled", async () => {
+  setPostgresBinForTests(undefined);
+  const outLink = join(dir("data"), "postgres-17");
+  const calls: string[][] = [];
   try {
-    setPostgresBinForTests({ dir: join(store, "bin"), source: "nix" });
-    assert.deepEqual(await testPostgresEnv(dir("plain"), "/usr/bin"), {});
-    assert.deepEqual(await testPostgresEnv(harness("export {};\n"), "/usr/bin"), {});
-    assert.deepEqual(await testPostgresEnv(harness(), "/usr/bin"), {
-      PATH: `${join(store, "bin")}:/usr/bin`,
-    });
-    setPostgresBinForTests({ dir: "/usr/bin", source: "path" });
-    assert.deepEqual(await testPostgresEnv(harness(), "/usr/bin"), {});
-    setPostgresBinForTests({ dir: null, reason: "nix is not installed" });
-    assert.deepEqual(await testPostgresEnv(harness(), "/usr/bin"), {
-      PLATFORM_POSTGRES_UNAVAILABLE: "nix is not installed",
+    const first = await postgresBinDir({ pathEnv: "", outLink, nix: failingNix(calls) });
+    assert.match(first.dir === null ? first.reason : "", /Could not resolve host/);
+    const again = await postgresBinDir({ pathEnv: "", outLink, nix: failingNix(calls) });
+    assert.match(
+      again.dir === null ? again.reason : "",
+      /Could not resolve host.*last nix attempt at \d{4}-\d\d-\d\dT/,
+    );
+    assert.equal(calls.length, 1, "nix is not re-run within the throttle");
+    const onPath = fakePrefix("fixed");
+    assert.deepEqual(
+      await postgresBinDir({ pathEnv: join(onPath, "bin"), outLink, nix: noNix }),
+      { dir: join(onPath, "bin"), source: "path" },
+      "installing PostgreSQL and retrying works without waiting",
+    );
+    const store = fakePrefix("store");
+    symlinkSync(store, outLink);
+    assert.deepEqual(await postgresBinDir({ pathEnv: "", outLink, nix: noNix }), {
+      dir: join(store, "bin"),
+      source: "cache",
     });
   } finally {
     setPostgresBinForTests(undefined);
   }
 });
 
-test("runCommand: the resolved bin dir is on PATH for the test harness; without PostgreSQL the suite exits 78 with the reason", async () => {
+test("postgres env: only repositories whose test preload runs initdb get the bin dir or the unavailable reason", async () => {
+  const store = fakePrefix("env-store");
+  try {
+    setPostgresBinForTests({ dir: join(store, "bin"), source: "nix" });
+    assert.deepEqual(await testPostgresEnv(dir("plain")), {});
+    assert.deepEqual(await testPostgresEnv(harness("export {};\n")), {});
+    assert.deepEqual(await testPostgresEnv(harness()), {
+      PLATFORM_TEST_POSTGRES_BIN: join(store, "bin"),
+    });
+    setPostgresBinForTests({ dir: "/usr/bin", source: "path" });
+    assert.deepEqual(await testPostgresEnv(harness()), { PLATFORM_TEST_POSTGRES_BIN: "/usr/bin" });
+    setPostgresBinForTests({ dir: null, reason: "nix is not installed" });
+    assert.deepEqual(await testPostgresEnv(harness()), {
+      PLATFORM_POSTGRES_UNAVAILABLE: "nix is not installed",
+    });
+    assert.equal(
+      await testPostgresEnv(harness(), AbortSignal.abort()),
+      null,
+      "a canceled step does not wait",
+    );
+  } finally {
+    setPostgresBinForTests(undefined);
+  }
+});
+
+test("runCommand: the guard puts the bin dir on PATH after a login profile reset it; without PostgreSQL the suite exits 78", async () => {
   const store = fakePrefix("run-store");
   const repo = harness();
   const never = new AbortController().signal;
   try {
     setPostgresBinForTests({ dir: join(store, "bin"), source: "nix" });
-    const ok = await runCommand("command -v initdb", repo, {}, 30_000, never);
+    // What Debian/Ubuntu /etc/profile does under bash -l.
+    const ok = await runCommand(
+      `PATH=/usr/bin:/bin\n${TEST_POSTGRES_GUARD}\ncommand -v initdb`,
+      repo,
+      {},
+      30_000,
+      never,
+    );
     assert.equal(ok.code, 0, ok.output);
     assert.equal(ok.output.trim(), join(store, "bin", "initdb"));
+    const unrelated = await runCommand(
+      "printenv | grep -c '^PLATFORM_TEST_POSTGRES_BI[N]=' || true",
+      repo,
+      {},
+      30_000,
+      never,
+    );
+    assert.equal(unrelated.output.trim(), "0", "commands without the guard skip the resolution");
 
     setPostgresBinForTests({ dir: null, reason: "nix build failed: boom" });
     writeFileSync(
@@ -172,5 +229,8 @@ test("runCommand: the resolved bin dir is on PATH for the test harness; without 
     PLATFORM_REGRESSION_COMMAND,
     FEATURE_TARGETED_COMMAND,
   ])
-    assert.match(command, /PLATFORM_POSTGRES_UNAVAILABLE[\s\S]*exit 78/);
+    assert.match(
+      command,
+      /PLATFORM_POSTGRES_UNAVAILABLE[\s\S]*exit 78[\s\S]*PLATFORM_TEST_POSTGRES_BIN/,
+    );
 });
