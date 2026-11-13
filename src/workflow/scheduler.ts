@@ -1,3 +1,4 @@
+import { traceLog } from "./trace.ts";
 import { reapExpiredLeases, releaseAttempt } from "./recovery.ts";
 import { runIndexOnce } from "../codeIntelligence/indexer.ts";
 import { randomUUID } from "node:crypto";
@@ -76,7 +77,7 @@ export async function claimJob(
   leaseSeconds: number,
   onlyTypes?: string[],
 ): Promise<JobRow | undefined> {
-  return one<JobRow>(
+  const job = await one<JobRow>(
     pool,
     `UPDATE workflow_jobs j
         SET status = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
@@ -93,6 +94,17 @@ export async function claimJob(
       RETURNING j.*`,
     [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId, instanceSession],
   );
+  // Fire-and-forget: tracing must never delay or fail a claim.
+  if (job)
+    void traceLog({
+      runId: job.run_id,
+      stepId: job.step_id,
+      level: "DEBUG",
+      event: "job.claimed",
+      message: `job ${job.id} claimed by ${workerId}`,
+      data: { job_id: job.id, fencing_token: job.fencing_token, claims: job.claims, lease_seconds: leaseSeconds },
+    });
+  return job;
 }
 
 /** What the workers are doing right now (for "why is my step waiting?" in the UI). */

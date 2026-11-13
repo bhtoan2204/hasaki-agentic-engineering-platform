@@ -20,12 +20,13 @@ export const runEvents = {
     stepId: number | null = null,
     attemptId: number | null = null,
     data: unknown = null,
+    level: string | null = null,
   ) {
     await insertDeferred(
       db,
       "workflow_events",
-      ["run_id", "step_id", "attempt_id", "kind", "content", "data"],
-      [runId, stepId, attemptId, kind, content, json(data)],
+      ["run_id", "step_id", "attempt_id", "kind", "content", "data", "level"],
+      [runId, stepId, attemptId, kind, content, json(data), level],
     );
   },
   /** Run timeline: status changes, notes, tool calls (truncated); full transcripts are fetched per attempt. */
