@@ -18,11 +18,12 @@ import {
   allWorkspacesOf,
   prepareWorkspace,
   gitProviderFor,
+  removeWorkspace,
   subtaskWorkspacesOf,
   workspaceBase,
   workspacesOf,
 } from "../../git/provider.ts";
-import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
+import { mergeBranchInto, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   postgresUnavailableResult,
@@ -904,7 +905,9 @@ async function cleanupWorkspaces(ctx: ExecutionContext): Promise<ExecResult> {
   for (const w of await allWorkspacesOf(ctx.run.id)) {
     if (!existsSync(w.path)) continue;
     const label = w.subtask_id ? `${w.repo} (${w.subtask_id})` : w.repo;
-    const reason = await removeWorktree(w.path).catch((e) => (e as Error).message.split("\n")[0]);
+    const reason = await removeWorkspace(ctx.run.id, w).catch(
+      (e) => (e as Error).message.split("\n")[0],
+    );
     if (reason) {
       kept.push({ repo: label, path: w.path, reason });
       await ctx.log("system", `${label}: worktree kept at ${w.path}: ${reason}`);

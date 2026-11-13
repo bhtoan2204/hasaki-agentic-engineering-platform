@@ -1,9 +1,7 @@
 import { effectivePermissions } from "../repos/access.ts";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
 import { promisify } from "node:util";
-import { repositories, repositoryBaseBranch } from "../repos/service.ts";
-import { validateCheckout } from "../repos/paths.ts";
+import { repositoryBaseBranch } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   prDescription,
@@ -11,7 +9,7 @@ import {
   testExceptionsOf,
   verificationNotesOf,
 } from "../workflow/executors/builtin.ts";
-import { workspacesOf } from "./provider.ts";
+import { workspaceRef, workspacesOf } from "./provider.ts";
 
 const exec = promisify(execFile);
 const MAX_DIFF = 600_000;
@@ -28,21 +26,6 @@ const capped = (s: string) =>
   s.length > MAX_DIFF
     ? s.slice(0, MAX_DIFF) + `\n… diff truncated (${s.length - MAX_DIFF} more chars)`
     : s;
-
-/** The primary checkout of `repo`, when `branch` still exists there. */
-async function branchCheckout(repo: string, branch: string) {
-  const reg = await repositories.get(repo);
-  const primary = reg ? await validateCheckout(reg).catch(() => null) : null;
-  if (!primary) return null;
-  const head = await git(
-    primary,
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    `refs/heads/${branch}^{commit}`,
-  );
-  return head.startsWith("(git") ? null : primary;
-}
 
 /**
  * Read-only view of what a run changed, per workspace: commits ahead of the base branch, changed files, the diff,
@@ -85,21 +68,18 @@ export async function runChanges(runId: number, viewerId?: number) {
     }
     const destination = await repositoryBaseBranch(w.repo);
     const base = `origin/${destination}`;
-    const read = (cwd: string, head: string) =>
-      Promise.all([
-        git(cwd, "log", "--format=%h%x09%an%x09%ar%x09%s", `${base}..${head}`),
-        git(cwd, "diff", "--numstat", `${base}...${head}`),
-        git(cwd, "diff", "--no-color", `${base}...${head}`),
-        head === "HEAD" ? git(cwd, "status", "--porcelain") : "",
-        head === "HEAD" ? git(cwd, "diff", "--no-color", "HEAD") : "",
-      ]);
-    let changes = existsSync(w.path) ? await read(w.path, "HEAD") : null;
-    // The cleanup step may remove the worktree (only when clean) at any time: its commits stay on the branch.
-    if (!existsSync(w.path)) {
-      const primary = await branchCheckout(w.repo, w.branch);
-      changes = primary ? await read(primary, `refs/heads/${w.branch}`) : null;
-    }
-    if (!changes) {
+    const at = await workspaceRef(w);
+    const live = at?.head === "HEAD";
+    const changes = at
+      ? await Promise.all([
+          git(at.cwd, "log", "--format=%h%x09%an%x09%ar%x09%s", `${base}..${at.head}`),
+          git(at.cwd, "diff", "--numstat", `${base}...${at.head}`),
+          git(at.cwd, "diff", "--no-color", `${base}...${at.head}`),
+          live ? git(at.cwd, "status", "--porcelain") : "",
+          live ? git(at.cwd, "diff", "--no-color", "HEAD") : "",
+        ])
+      : null;
+    if (!changes || (!live && changes.some((out) => out.startsWith("(git")))) {
       repos.push({ ...w, exists: false });
       continue;
     }

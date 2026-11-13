@@ -308,12 +308,11 @@ async function worktreeState(path: string): Promise<{ common: string; inProgress
   return { common, inProgress: i < 0 ? null : `${IN_PROGRESS_MARKERS[i][1]} in progress` };
 }
 
-/** The git operation (merge, rebase, cherry-pick, …) left in progress in a worktree, or null. */
-export async function worktreeInProgress(path: string): Promise<string | null> {
-  return (await worktreeState(path)).inProgress;
+export async function worktreeHead(path: string): Promise<string> {
+  return git(path, "rev-parse", "HEAD");
 }
 
-async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
+export async function releasableWorktree(path: string): Promise<{ primary: string } | string> {
   const inside = relative(realpathSync(config.dataDir), realpathSync(path));
   if (unsafeRelativePath(inside) || overlapsLiveApplication(path))
     return "outside the platform's worktree storage";

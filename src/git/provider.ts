@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
-import { repositories, repositoryBaseBranch } from "../repos/service.ts";
+import { repoPath, repositories, repositoryBaseBranch } from "../repos/service.ts";
 import { requireRunRepositoryAccess } from "../repos/access.ts";
 import { execution } from "../auth/execution.ts";
 import { instanceDirectory } from "../repos/paths.ts";
@@ -19,10 +19,11 @@ import {
   prepareBranch,
   pushBranch,
   registeredWorktreeAt,
+  releasableWorktree,
+  removeWorktree,
   taskDir,
   unregisterMissingWorktree,
-  worktreeInProgress,
-  worktreePorcelain,
+  worktreeHead,
 } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { unsafeRelativePath, validateCheckout } from "../repos/paths.ts";
@@ -292,10 +293,8 @@ export async function workspaceConflict(
   if (owner && owner.worker_instance !== config.instanceId)
     return never(`run #${owner.run_id} belongs to another worker`);
   if (owner?.status === "RUNNING") return never(`run #${owner.run_id} is still running`);
-  const inProgress = await worktreeInProgress(holder.path).catch(() => "its state is unreadable");
-  if (inProgress) return never(inProgress);
-  if (await worktreePorcelain(holder.path).catch(() => "unreadable"))
-    return never("it has uncommitted changes");
+  const releasable = await releasableWorktree(holder.path).catch(() => "its state is unreadable");
+  if (typeof releasable === "string") return never(releasable);
   if (owner && ["COMPLETED", "CANCELED"].includes(owner.status) && owner.same_owner)
     return {
       ...info,
@@ -493,7 +492,7 @@ export async function recordWorkspace(
       `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from, subtask_id)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (run_id, repo, subtask_id) WHERE subtask_id IS NOT NULL
-       DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
+       DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from, removed_head = NULL`,
       [runId, w.repo, w.branch, w.path, w.created_from, subtaskId],
     );
     return;
@@ -503,9 +502,33 @@ export async function recordWorkspace(
     `INSERT INTO execution_workspaces (run_id, repo, branch, path, created_from)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (run_id, repo) WHERE subtask_id IS NULL
-     DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from`,
+     DO UPDATE SET path = excluded.path, branch = excluded.branch, created_from = excluded.created_from, removed_head = NULL`,
     [runId, w.repo, w.branch, w.path, w.created_from],
   );
+}
+
+export async function removeWorkspace(
+  runId: number,
+  w: Workspace & { subtask_id: string | null },
+): Promise<string | null> {
+  const head = await worktreeHead(w.path);
+  const kept = await removeWorktree(w.path);
+  if (!kept)
+    await q(
+      pool,
+      `UPDATE execution_workspaces SET removed_head = $4
+        WHERE run_id = $1 AND repo = $2 AND subtask_id IS NOT DISTINCT FROM $3`,
+      [runId, w.repo, w.subtask_id, head],
+    );
+  return kept;
+}
+
+// A recorded head wins over the path: a later run on the shared branch may have recreated the worktree there.
+export async function workspaceRef(w: Workspace & { removed_head: string | null }) {
+  if (!w.removed_head) return existsSync(w.path) ? { cwd: w.path, head: "HEAD" } : null;
+  const reg = await repositories.get(w.repo);
+  const cwd = reg ? repoPath(reg) : null;
+  return cwd && existsSync(cwd) ? { cwd, head: w.removed_head } : null;
 }
 
 /** The attempt lost its lease while restoring: propagate, never report it as a restore failure. */
@@ -555,9 +578,9 @@ export async function restoreMissingWorkspaces(
 
 /** Run-level worktrees only. Subtask checkouts are not the integration or pull-request target. */
 export function workspacesOf(runId: number, db: Db = pool) {
-  return q<Workspace>(
+  return q<Workspace & { removed_head: string | null }>(
     db,
-    `SELECT repo, branch, path, created_from FROM execution_workspaces
+    `SELECT repo, branch, path, created_from, removed_head FROM execution_workspaces
      WHERE run_id = $1 AND subtask_id IS NULL ORDER BY repo`,
     [runId],
   );

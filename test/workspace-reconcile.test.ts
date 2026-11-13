@@ -11,6 +11,7 @@ import { createUser } from "../src/auth/users.ts";
 import {
   prepareWorkspace,
   recordWorkspace,
+  removeWorkspace,
   LeaseLostError,
   restoreMissingWorkspaces,
   runWorkspaceConflict,
@@ -411,6 +412,10 @@ test("worktree cleanup keeps dirty worktrees and ones with a git operation in pr
   try {
     writeFileSync(join(s.holder, "scratch.txt"), "wip\n");
     assert.equal(await removeWorktree(s.holder), "uncommitted changes");
+    assert.equal(
+      (await runWorkspaceConflict(s.run, s.name, s.repoPath))?.reason,
+      "uncommitted changes",
+    );
     rmSync(join(s.holder, "scratch.txt"));
 
     sh(s.repoPath, "checkout", "-q", "-b", "side", config.baseBranch);
@@ -452,10 +457,16 @@ test("worktree cleanup keeps dirty worktrees and ones with a git operation in pr
 test("a run's committed changes stay readable after cleanup removed its worktree", async () => {
   const s = await scenario("COMPLETED");
   try {
-    assert.equal(await removeWorktree(s.holder), null);
+    const ws = { repo: s.name, branch: s.branch, path: s.holder, created_from: config.baseBranch };
+    assert.equal(await removeWorkspace(s.old.id, { ...ws, subtask_id: null }), null);
     assert.equal(existsSync(s.holder), false);
+    // A later run reuses the shared branch at the same path and commits on it.
+    sh(s.repoPath, "worktree", "add", "-q", s.holder, s.branch);
+    writeFileSync(join(s.holder, "later.txt"), "later run\n");
+    sh(s.holder, "add", "later.txt");
+    sh(s.holder, "commit", "-qm", "later run work");
     const [repo] = (await runChanges(s.old.id)).repos;
-    assert.ok("commits" in repo && repo.exists, "changes read from the branch");
+    assert.ok("commits" in repo && repo.exists, "changes read at the recorded head");
     assert.deepEqual(
       repo.commits.map((c) => c.subject),
       ["earlier run work"],
@@ -466,6 +477,24 @@ test("a run's committed changes stay readable after cleanup removed its worktree
     );
     assert.match(repo.diff, /\+earlier run/);
     assert.equal(repo.status, "", "a removed worktree had nothing uncommitted");
+
+    await q(pool, "UPDATE execution_workspaces SET removed_head = $2 WHERE run_id = $1", [
+      s.old.id,
+      "0".repeat(40),
+    ]);
+    const [broken] = (await runChanges(s.old.id)).repos;
+    assert.equal(broken.exists, false, "an unreadable head is not shown as commits");
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test("a removed worktree without a recorded head shows no changes, not the shared branch tip", async () => {
+  const s = await scenario("COMPLETED");
+  try {
+    assert.equal(await removeWorktree(s.holder), null);
+    const [repo] = (await runChanges(s.old.id)).repos;
+    assert.equal(repo.exists, false);
   } finally {
     await s.cleanup();
   }
