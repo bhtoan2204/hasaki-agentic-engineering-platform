@@ -198,6 +198,10 @@ Antigravity runs through the installed CLI (`agy`, or `agent.antigravity.bin` / 
 (`GET /api/agent-providers`, also shown when Antigravity is selected) checks the version, required flags, login and the
 model catalog. It does not call a model.
 
+Invocation analytics capture the reported model from Antigravity's `modelName` hook field, including a
+`PreInvocation` hook for turns without tool calls. Explicit models in stream `init` events are also recorded.
+Unknown historical models remain unknown unless a matching session log supplies evidence.
+
 Every Antigravity step runs as the Google account logged in on the worker. Run ownership does not create an account per
 user, and the platform does not fall back to another provider. Configuration lives in `agent.antigravity`: `bin`,
 `timeoutMs` (`AGY_TIMEOUT_MS`), `model` (`AGY_MODEL`), `effort` (`AGY_EFFORT`) and `models` (Antigravity slugs only,

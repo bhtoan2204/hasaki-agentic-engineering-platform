@@ -17,6 +17,7 @@ export interface AntigravityEvent {
   toolArgs?: unknown;
   toolResult?: unknown;
   conversationId?: string;
+  model?: string;
   tokens?: AntigravityTokens;
   /** Terminal result.usage is cumulative for the whole CLI session. */
   cumulativeUsage?: boolean;
@@ -139,7 +140,9 @@ function parseAntigravityLine(
       ? (raw.step_update ?? {})
       : protocolEvent === "result"
         ? (raw.result ?? {})
-        : raw;
+        : protocolEvent === "init"
+          ? (raw.init ?? raw)
+          : raw;
   const type =
     protocolEvent === "step_update"
       ? `step_update.${String(payload.step_type ?? "unknown")}`
@@ -216,6 +219,10 @@ function parseAntigravityLine(
       text,
       thinking,
       conversationId: typeof conversationId === "string" ? conversationId : undefined,
+      model:
+        typeof payload.model === "string" && payload.model.trim()
+          ? payload.model.trim()
+          : undefined,
       tokens,
       cumulativeUsage: protocolEvent === "result",
       status: typeof payload.status === "string" ? payload.status : undefined,

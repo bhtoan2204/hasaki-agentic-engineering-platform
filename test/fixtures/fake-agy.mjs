@@ -132,9 +132,11 @@ const hooksFile = join(process.cwd(), ".agents", "hooks.json");
 const mcpFile = join(process.cwd(), ".agents", "mcp_config.json");
 
 let hookCommand = null;
+let telemetryCommand = null;
 if (existsSync(hooksFile)) {
   try {
     const hooksCfg = JSON.parse(readFileSync(hooksFile, "utf8"));
+    telemetryCommand = hooksCfg["platform-model"]?.PreInvocation?.[0]?.command ?? null;
     hookCommand =
       hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ||
       hooksCfg["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command ||
@@ -149,7 +151,7 @@ const callHook = (payload) => {
     input: JSON.stringify({
       session_id: sessionId,
       cwd: process.cwd(),
-      model: "gemini-3.8-flash-high",
+      modelName: "gemini-3.8-flash-high",
       ...payload,
     }),
     env: process.env,
@@ -215,6 +217,26 @@ async function tool(mcp, name, args) {
   return r.result;
 }
 
+if (mode === "native-model") {
+  out({ event: "init", conversation_id: sessionId, init: { cwd: process.cwd() } });
+  if (telemetryCommand) {
+    const r = spawnSync("sh", ["-c", telemetryCommand], {
+      input: JSON.stringify({
+        conversationId: sessionId,
+        modelName: "gemini-native-reported",
+        invocationNum: 0,
+      }),
+      env: process.env,
+      encoding: "utf8",
+    });
+    log({ modelHook: r.status, response: r.stdout });
+  }
+  out({
+    event: "result",
+    result: { status: "SUCCESS", response: "no tools needed", num_turns: 1 },
+  });
+  process.exit(0);
+}
 out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
 out({ type: "thinking", thought: "Initializing Antigravity session..." });
 

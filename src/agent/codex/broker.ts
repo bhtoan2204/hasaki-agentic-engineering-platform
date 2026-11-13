@@ -30,7 +30,7 @@ export interface BrokerDeps {
   dispatch(name: string, args: unknown): Promise<string>;
   onDenied?(tool: string, reason: string): void | Promise<void>;
   /** Hook payloads carry the active model slug; JSONL events do not. */
-  onModel?(model: string): void;
+  onModel?(model: string): void | Promise<void>;
 }
 
 export interface Broker {
@@ -66,7 +66,7 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
     if (msg.kind === "hook") {
       hookCalls++;
       const payload = (msg.payload ?? {}) as CodexHookPayload;
-      if (typeof payload.model === "string" && payload.model) deps.onModel?.(payload.model);
+      if (typeof payload.model === "string" && payload.model) await deps.onModel?.(payload.model);
       let decision: Decision;
       try {
         decision = deps.decideHook

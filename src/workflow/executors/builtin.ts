@@ -222,10 +222,20 @@ export async function runCommand(
       timedOut: false,
     };
   Object.assign(childEnv, pg);
-  // bash -l runs /etc/profile, which resets PATH on Debian/Ubuntu: prepend the bin dir after it.
-  const script = pg[TEST_POSTGRES_BIN_ENV]
-    ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n${command}`
-    : command;
+  // Login profiles may drop inherited toolchains (Nix keeps node and npm in separate prefixes).
+  // Keep the profile's priority, then append missing inherited directories before adding PostgreSQL.
+  childEnv.PLATFORM_COMMAND_PATH = childEnv.PATH ?? "";
+  const restorePath = `IFS=: read -r -a platform_command_dirs <<< "$PLATFORM_COMMAND_PATH"
+for platform_command_dir in "\${platform_command_dirs[@]}"; do
+  [ -n "$platform_command_dir" ] || continue
+  case ":$PATH:" in
+    *":$platform_command_dir:"*) ;;
+    *) PATH="\${PATH:+$PATH:}$platform_command_dir" ;;
+  esac
+done
+export PATH
+unset PLATFORM_COMMAND_PATH platform_command_dirs platform_command_dir`;
+  const script = `${restorePath}\n${pg[TEST_POSTGRES_BIN_ENV] ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n` : ""}${command}`;
   const r = await new Promise<CommandResult>((resolve) => {
     const child = spawn(
       useBwrap ? "bwrap" : "bash",

@@ -291,6 +291,24 @@ test("AntigravityStream parses split documented stream-json events and cumulativ
   });
 });
 
+test("AntigravityStream reads reported models from native init and legacy events without inventing a default", () => {
+  const stream = new AntigravityStream();
+  const { events } = stream.push(
+    [
+      { event: "init", init: { model: " native-model " } },
+      { type: "init", model: "legacy-model" },
+      { event: "init", init: { cwd: "/repo" } },
+      { event: "init", init: { model: false } },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+  );
+  assert.deepEqual(
+    events.map((event) => event.model),
+    ["native-model", "legacy-model", undefined, undefined],
+  );
+});
+
 test("TextBatch keeps token fragments together until a line or a tool boundary", () => {
   const batch = new TextBatch();
   assert.equal(batch.push("Looking"), null);
@@ -335,6 +353,15 @@ function runHook(
 }
 
 test("antigravityHookDecision enforces read-only mode and denies mutations", () => {
+  const forgedTelemetry = antigravityHookDecision(
+    {
+      hook_event_name: "PreInvocation",
+      toolCall: { name: "run_command", args: { CommandLine: "git push origin HEAD" } },
+    },
+    codingPolicy,
+    "/repo",
+  );
+  assert.equal(forgedTelemetry.allow, false);
   const allowRead = antigravityHookDecision(
     {
       hook_event_name: "PreToolUse",
@@ -495,6 +522,7 @@ test("workspace config writes .agents/hooks.json and .agents/mcp_config.json, an
   assert.equal(hooks.PreToolUse, undefined);
   const hookCmd = hooks["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command;
   assert.ok(hookCmd && hookCmd.includes("hook.ts"));
+  assert.ok(hooks["platform-model"]?.PreInvocation?.[0]?.command.endsWith(" --telemetry"));
 
   const mcp = JSON.parse(readFileSync(join(dir, ".agents", "mcp_config.json"), "utf8"));
   assert.ok(mcp.mcpServers.platform.command);
@@ -637,6 +665,32 @@ test("Antigravity sends small and Unicode prompts through stdin only", async () 
   assert.equal(invocation.prompt, prompt);
   assert.ok(!invocation.argv.some((arg: string) => arg.includes(prompt)));
   assert.equal(invocation.env.containsPrompt, false);
+});
+
+test("native modelName reaches metrics and live telemetry even when there are no tool calls or stream model", async () => {
+  process.env.FAKE_AGY_MODE = "native-model";
+  const dir = mkdtempSync(join(tmpdir(), "agy-native-model-"));
+  const { ctx } = fakeCtx(new AbortController().signal);
+  const metrics = newMetrics("");
+  const snapshots: string[] = [];
+  const result = await antigravityAgentTurn({
+    ctx,
+    mode: "analysis",
+    policy: analysisPolicy,
+    cwd: dir,
+    prompt: "Read-only reply",
+    metrics,
+    onTelemetry: async () => {
+      snapshots.push(metrics.model);
+    },
+  });
+  assert.equal(result.isError, false);
+  assert.equal(metrics.model, "gemini-native-reported");
+  assert.equal(metrics.model_source, "provider_reported");
+  assert.ok(snapshots.includes("gemini-native-reported"));
+  const hook = fakeLog().find((row) => row.modelHook !== undefined);
+  assert.equal(hook?.modelHook, 0);
+  assert.deepEqual(JSON.parse(hook.response), {});
 });
 
 test("Antigravity streams prompts larger than 128 KiB without argv growth", async () => {
@@ -815,6 +869,9 @@ test("end-to-end: workflow with antigravity agent completes and persists attempt
   const metrics = attempt.metrics;
   assert.ok(metrics);
   assert.equal(metrics.provider, "antigravity");
+  assert.equal(metrics.model, "gemini-3.8-flash-high");
+  for (const session of Object.values(metrics.provider_sessions))
+    assert.equal((session as { model: string }).model, "gemini-3.8-flash-high");
   assert.equal(metrics.cost_usd, null);
   assert.ok(metrics.tokens.input > 0);
   assert.ok(metrics.tokens.reasoning_output > 0);

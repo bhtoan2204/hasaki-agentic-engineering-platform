@@ -16,6 +16,10 @@ function readStdin(): Promise<string> {
 }
 
 function respond(allow: boolean, reason: string) {
+  if (process.argv.includes("--telemetry") && allow) {
+    process.stdout.write("{}");
+    process.exit(0);
+  }
   const out = allow
     ? { decision: "allow" }
     : { decision: "deny", reason: `platform policy: ${reason}` };
@@ -30,7 +34,15 @@ function respond(allow: boolean, reason: string) {
 async function main() {
   try {
     const raw = await readStdin();
-    const payload = JSON.parse(raw || "{}");
+    const input = JSON.parse(raw || "{}");
+    const payload = {
+      ...input,
+      hook_event_name: process.argv.includes("--telemetry") ? "PreInvocation" : "PreToolUse",
+      model:
+        typeof input.modelName === "string" && input.modelName.trim()
+          ? input.modelName.trim()
+          : input.model,
+    };
     const socket = process.env.PLATFORM_BROKER_SOCKET;
     const token = process.env.PLATFORM_BROKER_TOKEN;
     if (!socket || !token)

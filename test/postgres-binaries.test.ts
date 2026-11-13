@@ -252,11 +252,47 @@ test("runCommand: every command in a harness repo finds the bin dir after a logi
     assert.doesNotMatch(plain.output, /run-store/, "repos without the harness are untouched");
     setPostgresBinForTests({ dir: join(store, "bin"), source: "path" });
     const onPath = await runCommand('printf %s "$PATH"', repo, env, 30_000, never);
-    assert.equal(
-      onPath.output,
-      `/usr/bin:/bin:${dirname(process.execPath)}`,
+    assert.ok(
+      onPath.output.startsWith(`/usr/bin:/bin:${dirname(process.execPath)}`),
       "initdb found on the platform PATH is not prepended ahead of the user's toolchains",
     );
+    for (const inherited of (process.env.PATH ?? "").split(":").filter(Boolean))
+      assert.ok(
+        onPath.output.split(":").includes(inherited),
+        `inherited toolchain retained: ${inherited}`,
+      );
+  } finally {
+    setPostgresBinForTests(undefined);
+  }
+});
+
+test("runCommand preserves login-profile priority and restores inherited tools outside the node bin directory", async () => {
+  const { repo, env } = loginHarness("");
+  const profileBin = dir("profile-bin");
+  const inheritedBin = dir("inherited-bin");
+  const executable = (path: string, output: string) => {
+    writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' '${output}'\n`);
+    chmodSync(path, 0o755);
+  };
+  executable(join(profileBin, "toolchain-choice"), "profile");
+  executable(join(inheritedBin, "toolchain-choice"), "inherited");
+  executable(join(inheritedBin, "inherited-only-tool"), "restored");
+  const profilePath = [profileBin, "/usr/bin", "/bin", dirname(process.execPath)].join(":");
+  writeFileSync(
+    join(env.HOME, ".bash_profile"),
+    `export PATH='${profilePath.replaceAll("'", "'\\''")}'\n`,
+  );
+  try {
+    setPostgresBinForTests({ dir: null, reason: "not needed by these commands" });
+    const result = await runCommand(
+      "toolchain-choice; inherited-only-tool",
+      repo,
+      { ...env, PATH: `${inheritedBin}:${process.env.PATH ?? ""}` },
+      30_000,
+      never,
+    );
+    assert.equal(result.code, 0, result.output);
+    assert.equal(result.output, "profile\nrestored\n");
   } finally {
     setPostgresBinForTests(undefined);
   }
@@ -272,7 +308,8 @@ test("runCommand: without PostgreSQL a harness run that hits the missing initdb 
       environmentUnavailable(r.code, r.output) ?? "",
       /could not run.*nix build failed: boom/,
     );
-    const shell = await runCommand("initdb -D x", repo, env, 30_000, never);
+    // Force the missing-binary case even when the host's inherited PATH contains PostgreSQL.
+    const shell = await runCommand("PATH=/nonexistent initdb -D x", repo, env, 30_000, never);
     assert.equal(shell.code, ENVIRONMENT_UNAVAILABLE_EXIT, shell.output);
     const env78 = await runCommand(
       'printf %s "$PLATFORM_POSTGRES_UNAVAILABLE"',

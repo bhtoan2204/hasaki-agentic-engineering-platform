@@ -49,6 +49,8 @@ export function antigravityHookDecision(
     unknown
   >;
   const lower = toolName.toLowerCase();
+  // This metadata hook carries the actual model even when the provider never calls a tool.
+  if (payload?.hook_event_name === "PreInvocation" && !toolName) return { allow: true };
 
   // 1. MCP Platform tools
   if (
@@ -140,6 +142,10 @@ export function writeAntigravityWorkspaceConfig(
   // Named hooks only. A top-level PreToolUse array is not a hook spec, and agy
   // then refuses the whole file, so the platform policy never loads.
   const hooksConfig = {
+    "platform-model": {
+      enabled: true,
+      PreInvocation: [{ type: "command", command: `${hookCommand} --telemetry`, timeout: 10 }],
+    },
     "platform-security": {
       enabled: true,
       PreToolUse: [

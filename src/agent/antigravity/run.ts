@@ -258,6 +258,21 @@ export async function antigravityAgentTurn(
     let conversationId = input.resumeId;
     let model = input.model || cfg.model;
     const metrics = input.metrics ?? newMetrics(model);
+    const recordModel = async (reported: string) => {
+      if (!reported.trim()) return;
+      if (reported.trim() === model && metrics.model_source === "provider_reported") return;
+      model = reported.trim();
+      metrics.model = model;
+      metrics.model_source = "provider_reported";
+      if (conversationId) {
+        await q(
+          pool,
+          "UPDATE agent_sessions SET model=$3 WHERE attempt_id=$1 AND session_id=$2 AND provider='antigravity'",
+          [input.ctx.attempt.id, conversationId, model],
+        );
+      }
+      await input.onTelemetry?.();
+    };
 
     // Start broker for tool relay and platform hooks
     const toolEnv = envFromExecution(
@@ -281,12 +296,7 @@ export async function antigravityAgentTurn(
         metrics.denied.push({ tool, reason });
         await input.ctx.log("tool", `denied ${tool}: ${reason}`);
       },
-      onModel: (m) => {
-        if (m) {
-          model = m;
-          metrics.model = m;
-        }
-      },
+      onModel: recordModel,
     });
 
     // Write .agents/hooks.json and .agents/mcp_config.json into cwd or scratch
@@ -376,6 +386,7 @@ export async function antigravityAgentTurn(
     let inputError: Error | undefined;
 
     const handleEvent = async (ev: AntigravityEvent) => {
+      if (ev.model) await recordModel(ev.model);
       if (ev.conversationId && ev.conversationId !== conversationId) {
         conversationId = ev.conversationId;
         await q(
@@ -666,6 +677,7 @@ export async function antigravityComplete(
   }, timeoutMs);
 
   let text = "";
+  let model = cfg.model;
   let stderr = "";
   let tokens: Record<string, number | null> | null = null;
   const parser = new AntigravityStream();
@@ -673,6 +685,7 @@ export async function antigravityComplete(
   child.stdout?.on("data", (chunk: Buffer) => {
     const { events } = parser.push(chunk);
     for (const ev of events) {
+      if (ev.model) model = ev.model;
       if (ev.type === "result") {
         if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
       } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
@@ -709,6 +722,7 @@ export async function antigravityComplete(
 
   const tail = parser.flush();
   for (const ev of tail.events) {
+    if (ev.model) model = ev.model;
     if (ev.type === "result") {
       if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
     } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
@@ -725,5 +739,5 @@ export async function antigravityComplete(
     );
   }
 
-  return { text: text.trim(), model: cfg.model || undefined, tokens };
+  return { text: text.trim(), model: model || undefined, tokens };
 }
