@@ -198,4 +198,8 @@ test("Ponytail report aggregates actual persisted measurements and missing cover
   assert.match(report, /240/);
   assert.match(report, /Activated \/ skills/);
   assert.match(report, /n=2/);
+  assert.match(report, /Codex .*post-hoc/);
+});
+test("Codex is not attested for incremental live usage by default", () => {
+  assert.equal(config.evaluation.liveUsageProviders.includes("codex"), false);
 });

@@ -111,10 +111,10 @@ try {
       !(await knowledge.get("skill.ext.ponytail-review"))
     )
       throw new Error("Ponytail pilot skills missing from the isolated evaluation registry");
-    if (args["attest-cursor-usage"] === "true") {
-      const { config } = await import("../config.ts");
-      config.evaluation.liveUsageProviders = [...config.evaluation.liveUsageProviders, "cursor"];
-    }
+    const { config } = await import("../config.ts");
+    for (const provider of ["cursor", "codex"])
+      if (args[`attest-${provider}-usage`] === "true")
+        config.evaluation.liveUsageProviders = [...config.evaluation.liveUsageProviders, provider];
   }
   const executions = [];
   const stamp = new Date().toISOString();

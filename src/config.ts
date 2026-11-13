@@ -339,7 +339,7 @@ const defaults: Config = {
     maxCostUsd: 10,
     maxSuiteCostUsd: 300,
     liveEnabled: false,
-    liveUsageProviders: ["claude", "codex", "antigravity"],
+    liveUsageProviders: ["claude", "antigravity"],
     estimatedUsdPerMillion: 30,
     sandboxImage: "docker.io/library/postgres:17-alpine",
     maxLiveAgents: 1,

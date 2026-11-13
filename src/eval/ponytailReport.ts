@@ -148,6 +148,8 @@ export function renderPonytailReport(
     "",
     "With n=2 repetitions, results are descriptive for these pinned exploratory tasks; they do not establish general provider superiority. Antigravity includes approximately 10.7k fixed input-token overhead per session. Review tasks require independent review evidence.",
     "",
+    "Codex reports usage only when a turn completes, so its token/cost budget is enforced post-hoc; within a turn it is bounded only by the per-case wall-clock cap.",
+    "",
   );
   return lines.join("\n");
 }

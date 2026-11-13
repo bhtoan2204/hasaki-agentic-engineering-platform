@@ -30,6 +30,7 @@ type Phase = {
   configuration: z.infer<typeof ConfigurationSchema> & {
     blocked?: string | null;
     paid_approval?: unknown;
+    estimated_usd_per_million: number;
   };
 };
 export async function removeEvaluationSecrets(root: string) {

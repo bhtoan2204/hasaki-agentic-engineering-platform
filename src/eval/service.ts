@@ -98,7 +98,6 @@ export async function createEvaluation(
     throw new HttpError(400, "A bounded request_key is required for idempotency");
   const cfg = ConfigurationSchema.parse(input.configuration ?? {}),
     scoring = ScoringSchema.parse(input.scoring ?? defaultScoring);
-  cfg.estimated_usd_per_million = config.evaluation.estimatedUsdPerMillion;
   if (
     cfg.case_limit > config.evaluation.maxCases ||
     cfg.repetitions > config.evaluation.maxRepetitions ||
@@ -131,9 +130,12 @@ export async function createEvaluation(
     blocked,
     paid_approval: cfg.mode === "live" ? { by: ownerId, at: new Date().toISOString() } : null,
     harness_hash: suite.harness_hash,
+    estimated_usd_per_million: config.evaluation.estimatedUsdPerMillion,
   };
   const hashConfiguration: Record<string, unknown> = { ...cfg };
   if (!cfg.provider_sequence) delete hashConfiguration.context_tokens; // Preserve legacy request-key hashes.
+  if (!cfg.ponytail) delete hashConfiguration.ponytail;
+  if (cfg.max_suite_cost_usd === 300) delete hashConfiguration.max_suite_cost_usd;
   const hash = sha256(JSON.stringify({ ...hashConfiguration, scoring }));
   return withTx(async (c) => {
     await q(c, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [

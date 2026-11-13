@@ -118,7 +118,7 @@ export async function materializeSuite(): Promise<BenchmarkSuite> {
   }
   return SuiteSchema.parse({
     key: "backend-v1",
-    version: 4,
+    version: 5,
     title: "Synthetic backend engineering and P1 navigation",
     fixture_version: FIXTURE_VERSION,
     harness_hash: await harnessHash(),
