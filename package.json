@@ -36,6 +36,8 @@
     "smoke:orchestration": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/step-agent.smoke.ts",
     "bench:live-updates": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/live-updates.bench.ts",
     "smoke:live-updates": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/live-updates.browser.ts",
+    "smoke:work-item": "node --disable-warning=ExperimentalWarning test/work-item-settings.smoke.ts",
+    "smoke:trace": "node --disable-warning=ExperimentalWarning test/trace-explorer.smoke.ts",
     "smoke:run-view": "node --disable-warning=ExperimentalWarning test/run-view.smoke.ts",
     "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts",
     "lint": "eslint .",

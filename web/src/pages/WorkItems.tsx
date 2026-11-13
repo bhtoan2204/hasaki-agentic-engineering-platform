@@ -988,6 +988,8 @@ export function WorkItemDetail({ id }: { id: number }) {
   // Intent routing: preselect a workflow whose triggers match the item (e.g. a production log investigation).
   // Only a suggestion: a workflow the user picked is never overridden.
   const [wfTouched, setWfTouched] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => setSettingsOpen(false), [id]);
   useEffect(() => {
     if (!w || wfTouched) return;
     api<any>("/api/workflows/route", { text: `${w.title ?? ""}\n${w.description ?? ""}` })
@@ -1029,6 +1031,23 @@ export function WorkItemDetail({ id }: { id: number }) {
           </span>
         </div>
       </PageHeader>
+
+      <div className="wi-item-toolbar" role="toolbar" aria-label={t("wi.settings")}>
+        <div className="wi-item-toolbar-context">
+          <span className="mono">{w.code || `#${id}`}</span>
+          <span title={w.title}>{w.title}</span>
+        </div>
+        <button
+          className="ghost sm"
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings2 size={16} strokeWidth={2} />
+          {t("wi.settings")}
+        </button>
+      </div>
 
       <div className="wi-detail">
         <div className="wi-detail-main">
@@ -1175,14 +1194,22 @@ export function WorkItemDetail({ id }: { id: number }) {
               </button>
             </div>
           </section>
-
-          <section className="card">
-            <div className="card-head">
-              <span className="wi-hicon">
-                <Settings2 size={16} strokeWidth={2} />
-              </span>
-              <h4>{t("wi.settings")}</h4>
-            </div>
+        </aside>
+      </div>
+      {settingsOpen && (
+        <Drawer
+          title={
+            <span className="wi-settings-title">
+              <Settings2 size={17} />
+              {t("wi.settings")}
+              <span className="mono muted small">{w.code || `#${id}`}</span>
+            </span>
+          }
+          onClose={() => setSettingsOpen(false)}
+          width={440}
+        >
+          <div className="wi-settings-body">
+            <p className="wi-settings-context">{w.title}</p>
             <Field label={t("wi.policy")} hint={t("wi.policyHint")}>
               <div className="wi-policy">
                 <span className="grow small">
@@ -1237,9 +1264,9 @@ export function WorkItemDetail({ id }: { id: number }) {
                 ))}
               </select>
             </Field>
-          </section>
-        </aside>
-      </div>
+          </div>
+        </Drawer>
+      )}
     </div>
   );
 }

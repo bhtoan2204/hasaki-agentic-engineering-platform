@@ -411,6 +411,69 @@
   font-size: var(--fs-sm);
 }
 
+.wi-item-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: var(--sp-4);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+.wi-item-toolbar-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.wi-item-toolbar-context > .mono {
+  flex: none;
+  color: var(--ink-2);
+}
+.wi-item-toolbar-context > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wi-item-toolbar > button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+}
+.wi-settings-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.wi-settings-context {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.wi-settings-body .wi-policy {
+  gap: 10px;
+}
+.wi-settings-body button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  min-height: 30px;
+}
+
 .wi-detail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 400px;
