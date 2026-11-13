@@ -1689,7 +1689,13 @@ const agentExecutor: StepExecutor = {
           retryable: false,
           details: { verification: summary },
         };
-      if (!summary.passed) {
+      if (loop.outcome === "skipped")
+        await ctx.log(
+          "system",
+          `verification skipped: the environment could not run the tests, so nothing was verified and no repair was attempted — needs human review: ${summary.review_reasons.join("; ")}`,
+          { verification: "skipped" },
+        );
+      else if (!summary.passed) {
         const failing = summary.last
           .filter((x) => !x.passed)
           .map(
@@ -1706,8 +1712,7 @@ const agentExecutor: StepExecutor = {
           retryable: false,
           details: { verification: summary },
         };
-      }
-      if (summary.needs_review)
+      } else if (summary.needs_review)
         await ctx.log(
           "system",
           `verification passed but needs human review: ${summary.review_reasons.join("; ")}`,

@@ -38,6 +38,8 @@ import {
   startScheduler,
 } from "../src/workflow/scheduler.ts";
 import { settleBackground } from "../src/workflow/background.ts";
+import { setPostgresBinForTests } from "../src/platform/postgresBinaries.ts";
+import { FEATURE_REGRESSION_COMMAND } from "../src/workflow/templates.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -1176,6 +1178,42 @@ test("command output streams while running; Stop kills the whole process tree an
     .map((e) => e.content)
     .join("");
   assert.ok(!all.includes("finished") && !all.includes("child-done"));
+});
+
+test("regression step without a test PostgreSQL is not passed: the reason reaches the developer, no automatic retry", async () => {
+  const cwd = mkdtempSync(join(process.env.TEST_ROOT!, "pg-unavailable-"));
+  mkdirSync(join(cwd, "test"));
+  writeFileSync(join(cwd, "test", "setup.ts"), 'spawnSync("initdb", []);\n');
+  writeFileSync(join(cwd, "package.json"), '{"name":"x","scripts":{"test":"echo SUITE-RAN"}}');
+  mkdirSync(join(cwd, "node_modules", "x"), { recursive: true });
+  setPostgresBinForTests({ dir: null, reason: "nix build nixpkgs#postgresql_17 failed: boom" });
+  try {
+    const step = (on_failure: string) => ({
+      key: "regression_test",
+      type: "command",
+      max_attempts: 2,
+      retry_backoff_seconds: 0,
+      config: { cwd, command: FEATURE_REGRESSION_COMMAND, on_failure },
+    });
+    const failRun = await startRun({ definitionKey: await customWorkflow([step("fail")]) });
+    await drain();
+    const failed = await stepOf(failRun.id, "regression_test");
+    assert.equal(failed.status, "FAILED");
+    assert.match(failed.error!, /environment unavailable, tests did not run: .*boom/);
+    assert.equal((await attemptsOf(failRun.id, "regression_test")).length, 1);
+
+    const askRun = await startRun({ definitionKey: await customWorkflow([step("ask")]) });
+    await drain();
+    const asked = await stepOf(askRun.id, "regression_test");
+    assert.equal(asked.status, "WAITING_INPUT");
+    const attempts = await attemptsOf(askRun.id, "regression_test");
+    assert.equal(attempts.length, 1, "no automatic retry");
+    assert.equal(attempts[0].output.passed, false);
+    assert.equal(attempts[0].output.diagnosis.failures[0].category, "environment");
+    assert.match(attempts[0].output.diagnosis.failures[0].reason, /tests did not run: .*boom/);
+  } finally {
+    setPostgresBinForTests(undefined);
+  }
 });
 
 test("regression test step compares Go failures with the base branch (real go + git)", async () => {

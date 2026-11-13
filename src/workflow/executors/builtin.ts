@@ -7,6 +7,7 @@ import {
   investigationReport,
 } from "../../investigation/steps.ts";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
+import { environmentUnavailable } from "../../agent/verify.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
@@ -23,6 +24,7 @@ import {
 } from "../../git/provider.ts";
 import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
+import { testPostgresEnv } from "../../platform/postgresBinaries.ts";
 import {
   repositoryReference,
   repositoryBaseBranch,
@@ -202,6 +204,8 @@ export async function runCommand(
 ) {
   const proc = await commandProcessEnv(cwd, env);
   const useBwrap = proc.isolation?.mode === "bwrap";
+  const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
+  Object.assign(childEnv, await testPostgresEnv(cwd, childEnv.PATH));
   return new Promise<{ code: number | null; output: string; timedOut: boolean }>((resolve) => {
     const child = spawn(
       useBwrap ? "bwrap" : "bash",
@@ -210,7 +214,7 @@ export async function runCommand(
         : ["-lc", command],
       {
         cwd,
-        env: proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env },
+        env: childEnv,
         signal,
         detached: true,
       },
@@ -375,6 +379,7 @@ export const commandExecutor: StepExecutor = {
       artifact_id: number;
       baseline?: any;
       passed?: boolean;
+      environment_unavailable?: string;
     }> = [];
     const outputs: Record<string, string> = {};
     for (const t of targets) {
@@ -435,6 +440,13 @@ export const commandExecutor: StepExecutor = {
         exit_code: r.code,
         timed_out: r.timedOut,
       });
+      const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
+      if (unavailable)
+        await ctx.log(
+          "system",
+          `${t.repo}: tests did not run, the environment is unavailable (not a code failure): ${unavailable}`,
+          { repo: t.repo, environment_unavailable: unavailable },
+        );
       const entry: (typeof results)[number] & { skipped_known_failures?: string[] } = {
         repo: t.repo,
         exit_code: r.code,
@@ -442,6 +454,7 @@ export const commandExecutor: StepExecutor = {
         artifact_id: artifactId,
         passed: r.code === 0,
         ...(known?.tests.length ? { skipped_known_failures: known.tests } : {}),
+        ...(unavailable ? { environment_unavailable: unavailable } : {}),
       };
       if (r.code !== 0 && !r.timedOut && cfg.baseline_compare === "go")
         entry.baseline = await compareWithBaseline(ctx, t, r.output, timeoutMs);
@@ -470,7 +483,11 @@ export const commandExecutor: StepExecutor = {
     };
     if (failed.length && !cfg.allow_failure && interactive) {
       // Automatic retries first (max_attempts); when they are exhausted, diagnose and ask the developer.
-      if (ctx.step.attempt_count < ctx.step.max_attempts)
+      // A retry cannot fix an unavailable environment: ask right away.
+      if (
+        ctx.step.attempt_count < ctx.step.max_attempts &&
+        !failed.every((f) => f.environment_unavailable)
+      )
         return {
           kind: "failed",
           error: `tests failed (attempt ${ctx.step.attempt_count}/${ctx.step.max_attempts}); retrying`,
@@ -481,6 +498,8 @@ export const commandExecutor: StepExecutor = {
     }
     if (failed.length && !cfg.allow_failure) {
       const why = (f: (typeof results)[number]) => {
+        if (f.environment_unavailable)
+          return `${f.repo} (environment unavailable, tests did not run: ${f.environment_unavailable})`;
         const reg = f.baseline?.regressions;
         if (reg?.length)
           return `${f.repo}: ${reg.length} regression(s) vs ${config.baseBranch} — ${reg.map((x: any) => [x.package.split("/").slice(-2).join("/"), ...x.tests, ...x.build_errors].slice(0, 4).join(" ")).join("; ")}`;

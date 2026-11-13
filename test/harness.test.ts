@@ -451,6 +451,33 @@ test("loop: infrastructure error → stops immediately, no repair, outcome error
   );
 });
 
+test("loop: an environment that cannot run the tests is skipped — never passed, no repair, needs review", async () => {
+  const output =
+    "== typecheck\nPLATFORM_ENVIRONMENT_UNAVAILABLE: test PostgreSQL unavailable, so no test ran: nix is not installed\n";
+  const res = await verificationLoop({
+    cfg: CFG,
+    signal: never,
+    verify: (n) =>
+      verifyWorkspaces(WS, ROOTS, CFG, n, never, {
+        run: fakeRun([{ code: 78, output }]),
+        baseline: async () => assert.fail("no baseline for an environment problem"),
+      }),
+    repair: async () => assert.fail("the agent cannot install PostgreSQL"),
+  });
+  assert.equal(res.outcome, "skipped");
+  const r = res.rounds[0].repos[0];
+  assert.deepEqual([res.rounds[0].passed, r.status, r.passed], [false, "skipped", false]);
+  assert.match(r.note!, /environment unavailable: .*nix is not installed/);
+  const s = verificationSummary(CFG, res);
+  assert.deepEqual([s.passed, s.status, s.repairs, s.needs_review], [null, "skipped", 0, true]);
+  assert.match(s.review_reasons.join(), /svc: environment unavailable/);
+
+  const plain = await verifyWorkspaces(WS, ROOTS, CFG, 1, never, {
+    run: fakeRun([{ code: 78, output: "a test exited 78" }]),
+  });
+  assert.equal(plain.repos[0].status, "failed", "exit 78 without the marker is a normal failure");
+});
+
 test("loop: accepted pre-existing is a pass, but reported distinctly from a clean pass", async () => {
   const res = await verificationLoop({
     cfg: CFG,

@@ -48,6 +48,16 @@ esac
 if [ ! -f package.json ]; then echo "package.json is required" >&2; exit 1; fi
 if [ ! -x node_modules/.bin/tsc ]; then npm ci --ignore-scripts --no-audit --no-fund; fi`;
 
+/** Exit status of a test command whose environment cannot run the tests (not a code failure): nothing was tested. */
+export const ENVIRONMENT_UNAVAILABLE_EXIT = 78;
+export const ENVIRONMENT_UNAVAILABLE_MARKER = "PLATFORM_ENVIRONMENT_UNAVAILABLE:";
+
+/** Runs right before a suite preloaded with test/setup.ts; the platform sets the variable when it found no PostgreSQL. */
+const TEST_POSTGRES_GUARD = `if [ -n "\${PLATFORM_POSTGRES_UNAVAILABLE:-}" ]; then
+    echo "${ENVIRONMENT_UNAVAILABLE_MARKER} test PostgreSQL unavailable, so no test ran (test/setup.ts preloads every test file): $PLATFORM_POSTGRES_UNAVAILABLE" >&2
+    exit ${ENVIRONMENT_UNAVAILABLE_EXIT}
+  fi`;
+
 /**
  * Lints the changed files (paths on stdin) and fails only on errors the branch adds. Errors are matched to the merge
  * base by rule + message count per file (line numbers shift), so debt already in a touched file does not block a
@@ -115,6 +125,7 @@ tests=$(
   } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
 )
 if [ -n "$tests" ]; then
+  ${TEST_POSTGRES_GUARD}
   echo "== targeted tests"
   # shellcheck disable=SC2086
   node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
@@ -123,6 +134,7 @@ else
 fi`;
 
 export const PLATFORM_REGRESSION_COMMAND = `${SELF_TEST_GUARD}
+${TEST_POSTGRES_GUARD}
 echo "== full regression (npm test)"
 npm test`;
 
@@ -165,6 +177,7 @@ elif [ -f package.json ]; then
       } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
     )
     if [ -n "$tests" ]; then
+      ${TEST_POSTGRES_GUARD}
       echo "== targeted tests"
       node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 $tests
     else
@@ -190,6 +203,7 @@ elif [ -f package.json ]; then
     echo "== install dependencies"
     if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund || { echo "npm ci refused (package-lock.json out of sync with package.json?): installing from package.json, lock file untouched"; npm install --no-package-lock --ignore-scripts --no-audit --no-fund; }; else npm install --ignore-scripts --no-audit --no-fund; fi
   fi
+  ${TEST_POSTGRES_GUARD}
   echo "== regression (npm test)"
   npm test --if-present
 else

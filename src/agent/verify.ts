@@ -9,6 +9,10 @@ import {
   type GoTestReport,
 } from "../workflow/executors/baseline.ts";
 import { languageReminder, type OutputLocale } from "./language.ts";
+import {
+  ENVIRONMENT_UNAVAILABLE_EXIT,
+  ENVIRONMENT_UNAVAILABLE_MARKER,
+} from "../workflow/templates.ts";
 
 /**
  * Verification-and-repair loop for coding steps (harness layer around the Claude executor).
@@ -60,8 +64,17 @@ export function verifyConfig(
  *   tests excluded (anything else still failing → failed). Explicitly listed, never reported as a clean pass.
  * failed: regressions, unclassified failures, timeouts or hard test weakening — sent back to the agent for repair.
  * error: verification itself could not complete (integrity check or tooling failure) — not repairable by the agent.
+ * skipped: the command reported that its environment cannot run the tests (e.g. no PostgreSQL) — nothing was tested,
+ *   never counted as passed, not repairable by the agent.
  */
-export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error";
+export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error" | "skipped";
+
+/** The reason a test command gave for not running at all (dedicated exit + marker line), or null. */
+export function environmentUnavailable(code: number | null, output: string): string | null {
+  if (code !== ENVIRONMENT_UNAVAILABLE_EXIT) return null;
+  const line = output.split("\n").find((l) => l.startsWith(ENVIRONMENT_UNAVAILABLE_MARKER));
+  return line ? line.slice(ENVIRONMENT_UNAVAILABLE_MARKER.length).trim() : null;
+}
 
 export interface RepoVerification {
   repo: string;
@@ -276,6 +289,14 @@ export async function verifyWorkspaces(
       needs_review: false,
       excerpt: "",
     };
+    const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
+    if (unavailable)
+      Object.assign(entry, {
+        status: "skipped",
+        needs_review: true,
+        note: `environment unavailable: ${unavailable}`,
+        excerpt: failureExcerpt(r.output),
+      });
     if (entry.status === "failed") {
       entry.excerpt = failureExcerpt(r.output);
       const report = parseGoTest(r.output);
@@ -393,7 +414,8 @@ export async function verifyWorkspaces(
   };
 }
 
-export type LoopOutcome = "passed" | "failed" | "no_progress" | "error" | "canceled" | "stopped";
+export type LoopOutcome =
+  "passed" | "failed" | "no_progress" | "error" | "skipped" | "canceled" | "stopped";
 export interface LoopResult<S> {
   outcome: LoopOutcome;
   rounds: VerificationRound[];
@@ -430,6 +452,12 @@ export async function verificationLoop<S>(opts: {
     if (r.passed) return { outcome: "passed", rounds, repairs };
     // The agent cannot repair the verification infrastructure: stop instead of spending repairs.
     if (r.error) return { outcome: "error", rounds, repairs };
+    // Nothing left that a code change could fix: the environment could not run the tests.
+    if (
+      r.repos.some((x) => x.status === "skipped") &&
+      r.repos.every((x) => x.passed || x.status === "skipped")
+    )
+      return { outcome: "skipped", rounds, repairs };
     if (repairs >= opts.cfg.maxRepairs) return { outcome: "failed", rounds, repairs };
     if (rounds.length >= 2 && rounds[rounds.length - 2].signature === r.signature)
       return { outcome: "no_progress", rounds, repairs };
@@ -489,14 +517,17 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
   const accepted = !!last?.repos.some((r) => r.status === "accepted_preexisting");
   const reviewReasons = (last?.repos ?? []).flatMap((r) => [
     ...r.suspected,
-    ...(r.needs_review && r.status === "accepted_preexisting" ? [`${r.repo}: ${r.note}`] : []),
+    ...(r.needs_review && ["accepted_preexisting", "skipped"].includes(r.status)
+      ? [`${r.repo}: ${r.note}`]
+      : []),
   ]);
   return {
     outcome: res.outcome,
     /** clean | accepted_with_preexisting | failed | error | … — what kind of pass/failure this was. */
     status:
       res.outcome === "passed" ? (accepted ? "accepted_with_preexisting" : "clean") : res.outcome,
-    passed: res.outcome === "passed",
+    /** null when the tests could not run at all (skipped): neither a pass nor a code failure. */
+    passed: res.outcome === "skipped" ? null : res.outcome === "passed",
     needs_review: reviewReasons.length > 0,
     review_reasons: reviewReasons,
     errors: (last?.repos ?? [])
