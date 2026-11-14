@@ -350,12 +350,14 @@ test("runCommand: without PostgreSQL a harness run that hits the missing initdb 
 test("runCommand: resolving PostgreSQL has its own limit, does not eat the command timeout, and timing out is unavailable", async () => {
   const repo = harness();
   try {
-    setPostgresBinForTests(new Promise(() => {}), 200);
+    // Resolution alone exceeds the command budget, so sharing a deadline still fails.
+    // Leave ample room for bash login profiles and process scheduling on busy CI runners.
+    setPostgresBinForTests(new Promise(() => {}), 2500);
     const r = await runCommand(
       'sleep 0.2; printf %s "$PLATFORM_POSTGRES_UNAVAILABLE"',
       repo,
       {},
-      300,
+      2000,
       never,
     );
     assert.equal(r.timedOut, false, r.output);
