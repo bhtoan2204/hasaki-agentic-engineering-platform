@@ -1,5 +1,6 @@
 import { useI18n } from "./i18n/index.tsx";
 import { useApi } from "./api.ts";
+import { ModelSelect, type CatalogModel } from "./ModelSelect.tsx";
 import { Field } from "./ui.tsx";
 
 /** Shared configuration form; the server validates inherited providers and CLI capabilities. */
@@ -14,7 +15,7 @@ export function StepAgentFields({
 }) {
   const { locale } = useI18n();
   const { data: providers } =
-    useApi<Array<{ id: string; models?: string[] }>>("/api/agent-providers");
+    useApi<Array<{ id: string; models?: CatalogModel[] }>>("/api/agent-providers");
   const en = locale === "en";
   const set = (key: string, val: unknown) => {
     const next = { ...value };
@@ -141,26 +142,27 @@ export function StepAgentFields({
           label={en ? "Provider model" : "Mô hình của nhà cung cấp"}
           hint={
             en
-              ? "Empty: provider routing/account default. Use a model identifier supported by the selected provider."
-              : "Để trống: định tuyến/mặc định tài khoản. Dùng mã mô hình được nhà cung cấp hỗ trợ."
+              ? "Empty uses the account default. The list is the models this provider can run on this machine."
+              : "Để trống dùng mặc định tài khoản. Danh sách là model provider này chạy được trên máy này."
           }
         >
-          <input
-            aria-label={en ? "Provider model" : "Mô hình của nhà cung cấp"}
-            list={`agent-models-${provider ?? "inherit"}`}
+          <ModelSelect
+            ariaLabel={en ? "Provider model" : "Mô hình của nhà cung cấp"}
             value={value.model ?? ""}
-            onChange={(e) => set("model", e.target.value || null)}
+            emptyLabel={en ? "Account default" : "Mặc định tài khoản"}
+            models={
+              provider === "claude"
+                ? [
+                    { slug: "sonnet", name: "Sonnet" },
+                    { slug: "opus", name: "Opus" },
+                    { slug: "haiku", name: "Haiku" },
+                  ]
+                : provider === "cursor"
+                  ? [{ slug: "auto", name: "Auto" }]
+                  : (providers?.find((p) => p.id === provider)?.models ?? [])
+            }
+            onChange={(model) => set("model", model || null)}
           />
-          <datalist id={`agent-models-${provider ?? "inherit"}`}>
-            {(provider === "claude"
-              ? ["sonnet", "opus", "haiku"]
-              : provider === "cursor"
-                ? ["auto"]
-                : (providers?.find((p) => p.id === provider)?.models ?? [])
-            ).map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
         </Field>
         <Field label={en ? "Execution profile" : "Hồ sơ thực thi"}>
           <select

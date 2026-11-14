@@ -1,6 +1,7 @@
 import { HandoffPreview } from "./HandoffPreview.tsx";
 import { useState, useEffect } from "react";
 import { useApi } from "./api.ts";
+import { ModelSelect, type CatalogModel } from "./ModelSelect.tsx";
 import { useI18n } from "./i18n/index.tsx";
 import { Field, time } from "./ui.tsx";
 
@@ -183,21 +184,16 @@ export function ProviderHandoff({
               </select>
             </Field>
             <Field label={en ? "Target model" : "Mô hình tiếp theo"}>
-              <input
-                aria-label={en ? "Target model" : "Mô hình tiếp theo"}
-                list="handoff-models"
+              <ModelSelect
+                ariaLabel={en ? "Target model" : "Mô hình tiếp theo"}
                 value={model}
-                onChange={(e) => {
-                  setModel(e.target.value);
+                models={(target?.models ?? []) as CatalogModel[]}
+                emptyLabel={en ? "Account default" : "Mặc định tài khoản"}
+                onChange={(next) => {
+                  setModel(next);
                   setConfirmed(false);
                 }}
-                placeholder={en ? "Provider default" : "Mặc định nhà cung cấp"}
               />
-              <datalist id="handoff-models">
-                {target?.models?.map((m: string) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
             </Field>
           </div>
           <p className="muted small">

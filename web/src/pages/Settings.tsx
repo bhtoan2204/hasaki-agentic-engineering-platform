@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Settings2 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { ModelSelect, type CatalogModel } from "../ModelSelect.tsx";
 import { ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
@@ -43,6 +44,8 @@ function fromEffective(e: Form): Form {
 export function SettingsPage() {
   const { t } = useI18n();
   const { data, error, loading, setData } = useApi<{ effective: Form }>("/api/settings/operator");
+  const providers = useApi<Array<{ id: string; models?: CatalogModel[] }>>("/api/agent-providers");
+  const catalog = (id: string) => providers.data?.find((p) => p.id === id)?.models;
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -146,10 +149,16 @@ export function SettingsPage() {
               </select>
             </Field>
             <Field label={t("set.claudeModel")} hint={t("set.claudeModelHint")}>
-              <input
+              <ModelSelect
+                ariaLabel={t("set.claudeModel")}
                 value={form.model}
-                onChange={(e) => set({ model: e.target.value })}
-                autoComplete="off"
+                models={[
+                  { slug: "sonnet", name: "Sonnet" },
+                  { slug: "opus", name: "Opus" },
+                  { slug: "haiku", name: "Haiku" },
+                ]}
+                emptyLabel={t("set.modelAccount")}
+                onChange={(model) => set({ model })}
               />
             </Field>
             <Field label={t("set.maxTurns")}>
@@ -164,11 +173,18 @@ export function SettingsPage() {
           </div>
           <h4>{t("set.codex")}</h4>
           <div className="grid2">
-            <Field label={t("set.model")}>
-              <input
+            <Field
+              label={t("set.model")}
+              hint={
+                providers.loading || catalog("codex")?.length ? undefined : t("set.modelMissing")
+              }
+            >
+              <ModelSelect
+                ariaLabel={`${t("set.codex")} ${t("set.model")}`}
                 value={form.codex.model}
-                onChange={(e) => set({ codex: { ...form.codex, model: e.target.value } })}
-                autoComplete="off"
+                models={catalog("codex")}
+                emptyLabel={t("set.modelAccount")}
+                onChange={(model) => set({ codex: { ...form.codex, model } })}
               />
             </Field>
             <Field label={t("set.effort")}>
@@ -186,13 +202,20 @@ export function SettingsPage() {
           </div>
           <h4>{t("set.agy")}</h4>
           <div className="grid2">
-            <Field label={t("set.model")}>
-              <input
+            <Field
+              label={t("set.model")}
+              hint={
+                providers.loading || catalog("antigravity")?.length
+                  ? undefined
+                  : t("set.modelMissing")
+              }
+            >
+              <ModelSelect
+                ariaLabel={`${t("set.agy")} ${t("set.model")}`}
                 value={form.antigravity.model}
-                onChange={(e) =>
-                  set({ antigravity: { ...form.antigravity, model: e.target.value } })
-                }
-                autoComplete="off"
+                models={catalog("antigravity")}
+                emptyLabel={t("set.modelAccount")}
+                onChange={(model) => set({ antigravity: { ...form.antigravity, model } })}
               />
             </Field>
             <Field label={t("set.effort")}>

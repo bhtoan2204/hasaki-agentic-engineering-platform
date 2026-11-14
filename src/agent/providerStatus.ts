@@ -62,7 +62,8 @@ export async function agentProviderStatus(refresh = false) {
       auth: "auth" in codex ? codex.auth : undefined,
       model: cfg.model || null,
       reasoning_effort: cfg.reasoningEffort || null,
-      models: "models" in codex ? codex.models?.map((m) => m.slug) : undefined,
+      models:
+        "models" in codex ? codex.models?.map((m) => ({ slug: m.slug, name: m.slug })) : undefined,
     },
     {
       id: "antigravity",
@@ -80,7 +81,10 @@ export async function agentProviderStatus(refresh = false) {
       auth: "auth" in antigravity ? antigravity.auth : undefined,
       model: agyCfg.model || null,
       reasoning_effort: agyCfg.effort || null,
-      models: "models" in antigravity ? antigravity.models?.map((m) => m.slug) : undefined,
+      models:
+        "models" in antigravity
+          ? antigravity.models?.map((m) => ({ slug: m.slug, name: m.name || m.slug }))
+          : undefined,
     },
   ];
 }
