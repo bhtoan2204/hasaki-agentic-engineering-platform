@@ -1,4 +1,5 @@
 import { codexConfig, antigravityConfig } from "../config.ts";
+import { providerEnabled } from "./provider.ts";
 import { probeAgentHealth, rememberedQuota } from "./health.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
@@ -27,12 +28,14 @@ export async function agentProviderStatus(refresh = false) {
   return [
     {
       id: "claude",
+      enabled: providerEnabled("claude"),
       ok: claudeHealth.connected && claudeHealth.quota !== "exhausted",
       error: claudeHealth.reason,
       quota: claudeHealth.quota,
     },
     {
       id: "cursor",
+      enabled: providerEnabled("cursor"),
       ok: cursor.ok && rememberedQuota("cursor") !== "exhausted",
       error:
         rememberedQuota("cursor") === "exhausted"
@@ -44,6 +47,7 @@ export async function agentProviderStatus(refresh = false) {
     },
     {
       id: "codex",
+      enabled: providerEnabled("codex"),
       ok: codex.ok && rememberedQuota("codex") !== "exhausted",
       error:
         rememberedQuota("codex") === "exhausted"
@@ -62,6 +66,7 @@ export async function agentProviderStatus(refresh = false) {
     },
     {
       id: "antigravity",
+      enabled: providerEnabled("antigravity"),
       ok: antigravity.ok && rememberedQuota("antigravity") !== "exhausted",
       error:
         rememberedQuota("antigravity") === "exhausted"

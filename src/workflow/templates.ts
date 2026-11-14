@@ -1081,7 +1081,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "human_approval",
           name: "Confirm Repositories",
           depends_on: ["discover"],
-          config: CONFIRM_REPOS,
+          config: { ...CONFIRM_REPOS, auto_approve_preselected: true },
         },
         {
           key: "plan",

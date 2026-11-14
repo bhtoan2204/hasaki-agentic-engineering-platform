@@ -959,7 +959,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.workerAvailable": "Worker",
     "rv.ownerOnly": "Tiếp tục trên máy được giao; khởi động lại nền tảng ở máy đó nếu mất kết nối.",
     "rv.reconcile": "Cần kiểm tra worktree và tác động bên ngoài trước khi tiếp tục.",
-    "rv.queueHint": "tăng scheduler.workers trong config.json để chạy song song.",
+    "rv.queueHint": "tăng số worker trong Cấu hình để chạy song song.",
     "rv.report": "Báo cáo kết quả",
     "rv.verified": "{n} đã xác minh",
     "rv.partial": "{n} một phần",
@@ -1221,6 +1221,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.workItemOpt": "Work item (tuỳ chọn)",
     "wfe.standalone": "(không gắn work item — chạy độc lập)",
     "wfe.repos": "Repository (để trống thì tự tìm)",
+    "wfe.selfRepo": "Ứng dụng platform: {repos}. Bước chọn repository dùng sẵn repo này.",
+    "wfe.selfRepoMissing":
+      "Chưa đăng ký repository của ứng dụng platform, hoặc bạn không có quyền truy cập.",
     "wfe.noRepos": "Không có repository nào đang bật.",
     "wfe.inputs": "Inputs (JSON)",
     "wfe.inputsHint": 'ví dụ {"project":"OMS","focus":"refund"}',
@@ -2212,6 +2215,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.health.label": "Sức khỏe agent",
     "run.health.checking": "Đang kiểm tra kết nối các agent…",
     "run.health.connected": "đã kết nối",
+    "run.health.off": "đang tắt",
     "run.health.quota": "hết hạn mức",
     "run.health.down": "chưa kết nối",
     "run.codex.account":
@@ -3279,7 +3283,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.workerAvailable": "Worker availability",
     "rv.ownerOnly": "Continue on the assigned instance; restart its platform if disconnected.",
     "rv.reconcile": "Inspect worktrees and external effects before continuing.",
-    "rv.queueHint": "raise scheduler.workers in config.json to run more in parallel.",
+    "rv.queueHint": "raise the worker count in Settings to run more in parallel.",
     "rv.report": "Task result report",
     "rv.verified": "{n} verified",
     "rv.partial": "{n} partial",
@@ -3540,6 +3544,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.workItemOpt": "Work item (optional)",
     "wfe.standalone": "(none — run on its own)",
     "wfe.repos": "Repositories (empty = discover them)",
+    "wfe.selfRepo": "Platform application: {repos}. The repository step uses this automatically.",
+    "wfe.selfRepoMissing":
+      "This platform's repository is not registered, or you cannot access it.",
     "wfe.noRepos": "No repository is enabled.",
     "wfe.inputs": "Inputs (JSON)",
     "wfe.inputsHint": 'e.g. {"project":"OMS","focus":"refund"}',
@@ -4530,6 +4537,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "run.health.label": "Agent health",
     "run.health.checking": "Checking agent connections…",
     "run.health.connected": "connected",
+    "run.health.off": "off",
     "run.health.quota": "out of quota",
     "run.health.down": "not connected",
     "run.codex.account":

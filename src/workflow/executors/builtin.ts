@@ -116,7 +116,11 @@ export const humanApprovalExecutor: StepExecutor = {
       ).filter((r) => ctx.run.allowed_repositories.includes(r));
       // After feedback-driven rediscovery the scope is the developer's call again: never auto-approve.
       const rediscovered = !!discovery?.rediscovered;
-      if (cfg.auto_approve_preselected && preselected.length && !rediscovered)
+      if (
+        (cfg.auto_approve_preselected || ctx.run.graph?.execution_mode === "self_development") &&
+        preselected.length &&
+        !rediscovered
+      )
         return {
           kind: "completed",
           output: {

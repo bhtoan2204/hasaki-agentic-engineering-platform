@@ -1,4 +1,5 @@
 import { execution } from "./auth/execution.ts";
+import { isOwned } from "./platform/operatorState.ts";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -214,19 +215,23 @@ export interface Config {
     upstreamTokens: number;
     /** Default agent provider. */
     defaultProvider?: "claude" | "codex" | "cursor" | "antigravity";
+    /** Settings page. A false entry is off; omitted entries stay on. */
+    enabledProviders?: Partial<Record<"claude" | "cursor" | "codex" | "antigravity", boolean>>;
     cursorBin?: string;
     claudeBin?: string;
     /**
      * OpenAI Codex CLI (provider "codex"). Runs as the Codex login of the WORKER machine (`codex login`, e.g. a ChatGPT
      * account); the platform never reads auth.json and never switches to an API key on its own. Claude model ids are
-     * never sent to it: Codex has its own model / effort / routing. Env overrides: CODEX_BIN, CODEX_TIMEOUT_MS,
-     * CODEX_MODEL, CODEX_REASONING_EFFORT.
+     * never sent to it: Codex has its own model / effort / routing. The Settings page wins for model and effort
+     * once saved; otherwise CODEX_MODEL / CODEX_REASONING_EFFORT, then config.json. CODEX_BIN and
+     * CODEX_TIMEOUT_MS stay process-local.
      */
     codex?: CodexConfig;
     /**
      * Google Antigravity CLI (provider "antigravity"). Runs as the authenticated account of the WORKER machine.
-     * Env overrides: AGY_BIN / ANTIGRAVITY_BIN, AGY_TIMEOUT_MS / ANTIGRAVITY_TIMEOUT_MS,
-     * AGY_MODEL / ANTIGRAVITY_MODEL, AGY_EFFORT / ANTIGRAVITY_EFFORT.
+     * The Settings page wins for model, effort, sandbox and concurrency once saved; otherwise the
+     * AGY_* / ANTIGRAVITY_* environment, then config.json. The binary path and turn timeout stay
+     * process-local.
      */
     antigravity?: AntigravityConfig;
     /**
@@ -681,8 +686,10 @@ export function codexConfig(): Required<
   return {
     bin: process.env.CODEX_BIN || c.bin || "codex",
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model: process.env.CODEX_MODEL ?? c.model ?? "",
-    reasoningEffort: process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
+    model: isOwned("codex.model") ? (c.model ?? "") : (process.env.CODEX_MODEL ?? c.model ?? ""),
+    reasoningEffort: isOwned("codex.reasoningEffort")
+      ? (c.reasoningEffort ?? "")
+      : (process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? ""),
     models: c.models ?? {},
   };
 }
@@ -731,25 +738,32 @@ export function antigravityConfig(): Required<
       c.timeoutMs ||
       45 * 60 * 1000,
   );
-  const maxConcurrent = Number(
-    process.env.AGY_MAX_CONCURRENT ||
-      process.env.ANTIGRAVITY_MAX_CONCURRENT ||
-      c.maxConcurrent ||
-      1,
-  );
+  const maxConcurrent = isOwned("antigravity.maxConcurrent")
+    ? Number(c.maxConcurrent)
+    : Number(
+        process.env.AGY_MAX_CONCURRENT ||
+          process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+          c.maxConcurrent ||
+          1,
+      );
   return {
     bin: process.env.AGY_BIN || process.env.ANTIGRAVITY_BIN || c.bin || "agy",
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model: process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? "",
-    effort: process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? c.effort ?? "",
+    model: isOwned("antigravity.model")
+      ? (c.model ?? "")
+      : (process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? ""),
+    effort: isOwned("antigravity.effort")
+      ? (c.effort ?? "")
+      : (process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? c.effort ?? ""),
     maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
     allowSubagents:
       (process.env.AGY_ALLOW_SUBAGENTS ?? process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
         ? process.env.AGY_ALLOW_SUBAGENTS === "true" ||
           process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
         : (c.allowSubagents ?? false),
-    sandbox:
-      (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
+    sandbox: isOwned("antigravity.sandbox")
+      ? c.sandbox !== false
+      : (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
         ? process.env.AGY_SANDBOX === "true" || process.env.ANTIGRAVITY_SANDBOX === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},

@@ -16,6 +16,7 @@ import { loadArgoToken } from "./integrations/argocd.ts";
 import { loadSplunkCookie } from "./integrations/splunk.ts";
 import { loadKafkaCookie } from "./integrations/kafka.ts";
 import { loadAccountSettings } from "./integrations/accounts.ts";
+import { loadOperatorSettings } from "./platform/operatorSettings.ts";
 import { loadVaultToken } from "./integrations/vault.ts";
 import { startProdErrorSchedule } from "./prodErrors/scan.ts";
 import { seedTemplates } from "./workflow/definitions.ts";
@@ -58,6 +59,7 @@ for (const warning of await validateLocalConfiguration())
   console.warn(`Startup warning: ${warning}`);
 await seedKnowledge();
 await loadAccountSettings();
+await loadOperatorSettings();
 await loadToken();
 await loadArgoToken();
 await loadSplunkCookie();

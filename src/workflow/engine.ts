@@ -50,9 +50,15 @@ import {
 } from "../git/provider.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
-import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
+import {
+  providerEnabled,
+  resolveAgentProvider,
+  substituteEnabledProvider,
+  type AgentProvider,
+} from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
+import { selfRepositoryNames } from "../platform/selfDevelopment.ts";
 import { isAmbiguous, rankRepositories, repositories } from "../repos/service.ts";
 import { allowedRepositoriesForRun, effectivePermissions } from "../repos/access.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
@@ -247,6 +253,25 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
       reusedRepositories = true;
     }
   }
+  // Self-development always targets this installation unless the caller named repositories.
+  // A previous run of the same work item must not reuse some other repository into this workflow.
+  const callerChoseRepositories =
+    (Array.isArray(input.repositories) && input.repositories.length > 0) ||
+    (Array.isArray(inputs.repositories) && (inputs.repositories as unknown[]).length > 0);
+  if (dv.spec.execution_mode === "self_development" && !callerChoseRepositories) {
+    const names = await selfRepositoryNames(
+      (await repositories.list(c)).filter((r) => allowed.includes(r.name)),
+    );
+    if (names.length !== 1)
+      throw new EngineError(
+        names.length
+          ? `self-development matches more than one platform repository (${names.join(", ")}); pass repositories to choose one`
+          : "self-development needs this platform's repository registered and accessible to the run owner",
+        400,
+      );
+    selected = names;
+    reusedRepositories = false;
+  }
   // Deterministic discovery signal for profile selection (no LLM).
   const text = [wi?.title, wi?.description, input.title, JSON.stringify(inputs)]
     .filter(Boolean)
@@ -346,7 +371,9 @@ export async function startRun(input: StartRunInput) {
   let agent_provider: AgentProvider;
   try {
     output_locale = resolveOutputLocale(input.outputLocale);
-    agent_provider = resolveAgentProvider(input.agentProvider ?? config.agent.defaultProvider);
+    agent_provider = substituteEnabledProvider(
+      resolveAgentProvider(input.agentProvider ?? config.agent.defaultProvider),
+    );
   } catch (e) {
     throw new EngineError((e as Error).message, 400);
   }
@@ -3196,6 +3223,15 @@ export async function providerHandoffOptions(runId: number, key: string) {
   const catalog = await agentProviderStatus();
   return Promise.all(
     fallbackPolicy(step).providers.map(async (provider) => {
+      if (!providerEnabled(provider))
+        return {
+          provider,
+          ok: false,
+          error: "disabled in Settings",
+          models: [],
+          quota: "unknown" as const,
+          cost: "unknown" as const,
+        };
       try {
         const candidate = resolveStepAgent(run, {
           ...step,

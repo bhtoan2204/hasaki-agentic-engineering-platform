@@ -1445,6 +1445,11 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
     navigate(`/runs/${r.id}`);
   };
   const enabledRepos = (repos ?? []).filter((r) => r.enabled);
+  const selfWorkflow = wfKey === "platform-self-development";
+  const selfNames = enabledRepos.filter((r) => r.self).map((r) => r.name);
+  useEffect(() => {
+    if (selfWorkflow) setSel(selfNames);
+  }, [selfWorkflow, selfNames.join("|")]);
   return (
     <div className="wfe-form">
       <div className="wfe-insp-head">
@@ -1473,7 +1478,15 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
           </Field>
           <div className="field">
             <span>{t("wfe.repos")}</span>
-            {enabledRepos.length === 0 ? (
+            {selfWorkflow ? (
+              <div className="muted small">
+                {!repos
+                  ? t("common.loading")
+                  : selfNames.length
+                    ? t("wfe.selfRepo", { repos: selfNames.join(", ") })
+                    : t("wfe.selfRepoMissing")}
+              </div>
+            ) : enabledRepos.length === 0 ? (
               <div className="muted small">{repos ? t("wfe.noRepos") : t("common.loading")}</div>
             ) : (
               <div className="wfe-repos">

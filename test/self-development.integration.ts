@@ -98,6 +98,19 @@ test("self-development registers GitHub, isolates the live tree and stays recove
       description: "Reduce unnecessary test execution.",
       ownerId: member.id,
     });
+    const implied = await startRun({
+      definitionKey: "platform-self-development",
+      workItemId: item.id,
+      ownerId: member.id,
+      start: false,
+      profile: "STANDARD",
+    });
+    assert.deepEqual(implied.selected_repositories, [repo.name]);
+    assert.equal(
+      implied.steps.find((step) => step.key === "confirm_repos")?.config.auto_approve_preselected,
+      true,
+    );
+
     const started = await startRun({
       definitionKey: "platform-self-development",
       workItemId: item.id,

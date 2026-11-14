@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { config, codexConfig, antigravityConfig } from "../config.ts";
-import { agentProvider, AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
+import {
+  agentProvider,
+  AGENT_PROVIDERS,
+  substituteEnabledProvider,
+  type AgentProvider,
+} from "./provider.ts";
 
 export const FallbackPolicy = z
   .object({
@@ -202,10 +207,16 @@ export function resolveStepAgent(
     ...(changedProvider ? { model: null, reasoning_effort: null } : {}),
     ...override,
   };
-  const provider =
+  let provider =
     merged.provider ??
     (run.agent_provider ? agentProvider(run) : (config.agent.defaultProvider ?? "claude"));
   validateAgentOptions(merged, provider);
+  const active = substituteEnabledProvider(provider);
+  if (active !== provider) {
+    merged.model = null;
+    merged.reasoning_effort = null;
+    provider = active;
+  }
   const profile = merged.execution_profile ?? run.profile ?? "STANDARD";
   const legacy = { ...step, config: { ...step.config } };
   if (Object.hasOwn(merged, "model")) {

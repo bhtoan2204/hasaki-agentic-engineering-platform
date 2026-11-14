@@ -1,5 +1,10 @@
 import { handoffReadiness } from "./handoff.ts";
-import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
+import {
+  AGENT_PROVIDERS,
+  parseAgentProvider,
+  providerEnabled,
+  type AgentProvider,
+} from "./provider.ts";
 import type { EffectiveAgent } from "./stepAgent.ts";
 
 const QUOTA_TTL_MS = 30 * 60_000;
@@ -46,6 +51,8 @@ export function nextHealthyProvider(
 ): AgentProvider | null {
   for (const provider of order) {
     if (avoid.has(provider)) continue;
+    const parsed = parseAgentProvider(provider);
+    if (!parsed || !providerEnabled(parsed)) continue;
     const row = health.find((h) => h.provider === provider);
     if (isUsableAgent(row)) return row!.provider;
   }

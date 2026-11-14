@@ -4,6 +4,7 @@ import { q, one, withTx, type Db } from "../db/pool.ts";
 import { pool } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { RECOMMENDATION_VERSION, recommendationDetail } from "./recommendations.ts";
+import { providerEnabled } from "../agent/provider.ts";
 import { resolveStepAgent } from "../agent/stepAgent.ts";
 import { handoffReadiness } from "../agent/handoff.ts";
 import type { WorkflowSpec } from "../workflow/types.ts";
@@ -104,6 +105,8 @@ export async function applyOptimizationDefaults(
       if (p.decision.cost_availability !== "Known" && !p.allow_unknown_cost)
         throw new Error("Unknown cost not authorized by optimization policy");
       const agent = p.decision.plan[0];
+      if (!providerEnabled(agent.provider))
+        throw new Error(`Provider ${agent.provider} is disabled in Settings`);
       // Sensitive (HIGH_RISK) work is only routed to providers with an approved security policy.
       if (complexity === "HIGH_RISK" && !config.routing.sensitiveProviders.includes(agent.provider))
         throw new Error(

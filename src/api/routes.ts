@@ -101,6 +101,11 @@ import {
 } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
 import {
+  clearOperatorSettings,
+  operatorView,
+  saveOperatorSettings,
+} from "../platform/operatorSettings.ts";
+import {
   assertQuestionsAccessible,
   audit,
   requireAdmin,
@@ -141,6 +146,7 @@ const metricsSwr = new StaleWhileRevalidate<Awaited<ReturnType<typeof metricsSum
 import { summarizeEval } from "../eval/summary.ts";
 import { importFromRepositories } from "../knowledge/importer.ts";
 import { CATEGORIES, SCOPES, resolveKnowledge } from "../knowledge/resolve.ts";
+import { isSelfRepository } from "../platform/selfDevelopment.ts";
 import { repositoryRemote } from "../repos/remote.ts";
 import {
   prepareRepository,
@@ -737,7 +743,8 @@ export const routes: Route[] = [
         return n;
       };
       for (const k of ["from", "to"])
-        if (sp.get(k) && Number.isNaN(Date.parse(sp.get(k)!))) throw new HttpError(400, `invalid ${k}`);
+        if (sp.get(k) && Number.isNaN(Date.parse(sp.get(k)!)))
+          throw new HttpError(400, `invalid ${k}`);
       return searchLogs(num(c.p[0]), {
         stepId: id("step"),
         attemptId: id("attempt"),
@@ -1549,13 +1556,19 @@ export const routes: Route[] = [
     async ({ actor, url }) => {
       if (url.searchParams.get("manage") === "1") {
         requireAdmin(actor);
-        return (await repositories.list())
-          .filter((r) => r.provider !== "benchmark")
-          .map(publicRepository);
+        const rows = (await repositories.list()).filter((r) => r.provider !== "benchmark");
+        return Promise.all(
+          rows.map(async (r) => ({ ...publicRepository(r), self: await isSelfRepository(r) })),
+        );
       }
       const mine = await listAccessibleRepositories(actor.id, { verify: true });
       const visible = new Set(mine.map((m) => m.repository.name));
-      return mine.map((m) => memberRepository(m.repository, m.access, visible));
+      return Promise.all(
+        mine.map(async (m) => ({
+          ...memberRepository(m.repository, m.access, visible),
+          self: await isSelfRepository(m.repository),
+        })),
+      );
     },
   ],
   [
@@ -2175,6 +2188,27 @@ export const routes: Route[] = [
       await setPassword(num(p[0]), String(body.password ?? "")),
       { ok: true }
     ),
+  ],
+  ["GET", /^\/api\/settings\/operator$/, ({ actor }) => (requireAdmin(actor), operatorView())],
+  [
+    "POST",
+    /^\/api\/settings\/operator$/,
+    async ({ body, actor }) => {
+      requireAdmin(actor);
+      const view = await saveOperatorSettings(body ?? {});
+      await audit(actor.id, "settings.operator.update", "settings", "operator", body ?? {});
+      return view;
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/settings\/operator\/clear$/,
+    async ({ actor }) => {
+      requireAdmin(actor);
+      const view = await clearOperatorSettings();
+      await audit(actor.id, "settings.operator.clear", "settings", "operator");
+      return view;
+    },
   ],
   [
     "POST",

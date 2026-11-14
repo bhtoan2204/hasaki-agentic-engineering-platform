@@ -18,6 +18,7 @@ import {
   Moon,
   PlayCircle,
   PlugZap,
+  Settings2,
   Siren,
   Sun,
   Workflow,
@@ -53,6 +54,7 @@ import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { InvestigationsPage } from "./pages/Investigations.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
+import { SettingsPage } from "./pages/Settings.tsx";
 import { ProductionErrorsPage } from "./pages/prodErrors/ProductionErrorsPage.tsx";
 import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
 import { useI18n } from "./i18n/index.tsx";
@@ -122,6 +124,7 @@ const NAV: Array<{
 const LABEL = {
   ...Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.key, i]))),
   users: { labelKey: "auth.users", icon: Users },
+  settings: { labelKey: "nav.settings", icon: Settings2 },
   account: { labelKey: "auth.account", icon: UserRound },
 } as Record<string, { labelKey: string; icon: LucideIcon }>;
 
@@ -296,6 +299,9 @@ export function App() {
     case "integrations":
       page = <IntegrationsPage me={me} />;
       break;
+    case "settings":
+      page = me?.role === "admin" ? <SettingsPage /> : <OverviewPage />;
+      break;
     case "insights":
       page = <InsightsPage tab={parts[1]} />;
       break;
@@ -406,6 +412,16 @@ export function App() {
               >
                 <Users size={18} />
                 <span>{t("auth.users")}</span>
+              </a>
+              <a
+                href="#/settings"
+                className={`sb-link${section === "settings" ? " on" : ""}`}
+                aria-current={section === "settings" ? "page" : undefined}
+                aria-label={t("nav.settings")}
+                data-tip={collapsed ? t("nav.settings") : undefined}
+              >
+                <Settings2 size={18} />
+                <span>{t("nav.settings")}</span>
               </a>
               <button
                 className={`sb-link sb-support${support ? " on" : ""}`}

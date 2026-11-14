@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { config } from "../config.ts";
+import { isSelfRepository } from "../platform/selfDevelopment.ts";
 import { repositories, repoPath, type RepositoryRow } from "../repos/service.ts";
 import { knowledge, type KnowledgeInput } from "./service.ts";
 import { hashOf } from "../workflow/definitions.ts";
@@ -503,6 +504,37 @@ export async function scanRepositories(): Promise<{
         },
         source: [src(file, text)],
       });
+    }
+
+    // This installation's own checkout: architecture and integration notes are not a wiki, so the wiki pass
+    // never sees them. Keep them on demand for the platform repository only.
+    if (await isSelfRepository(r)) {
+      for (const file of walk(join(root, "docs"), 3)) {
+        if (!file.endsWith(".md") || /convention/i.test(basename(file))) continue;
+        const rel = relative(root, file).replaceAll("\\", "/");
+        const platformDoc =
+          rel.startsWith("docs/architecture/") ||
+          rel.startsWith("docs/integrations/") ||
+          rel === "docs/frontend/ui-quality-standards.md";
+        if (!platformDoc) continue;
+        const text = read(r, file);
+        if (!text) continue;
+        const category = rel.startsWith("docs/architecture/")
+          ? "architecture_guideline"
+          : rel === "docs/frontend/ui-quality-standards.md"
+            ? "coding_standard"
+            : "domain_knowledge";
+        out.push({
+          key: slug(`${r.name}.${rel.replace(/\.md$/, "").replace(/\//g, ".")}`),
+          category,
+          scope_type: "REPOSITORY",
+          scope_ref: r.name,
+          title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
+          content: text,
+          metadata: { load: "on_demand", description: firstParagraph(text) },
+          source: [src(file, text)],
+        });
+      }
     }
 
     // 4. Wiki repositories: architecture + partner/domain docs for the whole project, on demand.

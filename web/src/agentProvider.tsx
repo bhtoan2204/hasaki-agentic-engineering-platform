@@ -17,6 +17,7 @@ export const agentKey = (p: unknown, short = false) =>
 
 interface ProviderStatus {
   id: AgentProvider;
+  enabled?: boolean;
   ok: boolean;
   error?: string;
   quota?: "ok" | "exhausted" | "unknown";
@@ -50,7 +51,14 @@ export function AgentHealthBar() {
     <div className="tb-health" role="status" aria-label={t("run.health.label")}>
       {AGENT_PROVIDERS.map((id) => {
         const row = data?.find((p) => p.id === id);
-        const state = error ? "down" : data ? agentHealthState(row) : "checking";
+        const state =
+          row?.enabled === false
+            ? "off"
+            : error
+              ? "down"
+              : data
+                ? agentHealthState(row)
+                : "checking";
         const detail =
           state === "checking"
             ? t("run.health.checking")
@@ -101,11 +109,19 @@ export function AgentProviderField({
   onChange: (p: AgentProvider) => void;
 }) {
   const { t } = useI18n();
+  const { data } = useAgentHealth();
+  const choices = AGENT_PROVIDERS.filter(
+    (p) => data?.find((row) => row.id === p)?.enabled !== false,
+  );
+  useEffect(() => {
+    if (!data || choices.includes(value)) return;
+    if (choices[0]) onChange(choices[0]);
+  }, [data, value, choices, onChange]);
   return (
     <>
       <Field label={t("run.agent")} hint={t("run.agentHint")}>
         <select value={value} onChange={(e) => onChange(asProvider(e.target.value))}>
-          {AGENT_PROVIDERS.map((p) => (
+          {choices.map((p) => (
             <option key={p} value={p}>
               {t(agentKey(p))}
             </option>

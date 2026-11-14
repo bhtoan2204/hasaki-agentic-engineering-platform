@@ -350,6 +350,7 @@ button.is-busy::after,
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   button.is-busy::after,
   [role="button"].is-busy::after {
     animation-duration: 2s;
@@ -448,9 +449,9 @@ button.link-button:hover {
   text-underline-offset: 3px;
 }
 
-.ui-button > svg,
-button > svg,
-.btn > svg {
+.ui-button>svg,
+button>svg,
+.btn>svg {
   flex-shrink: 0;
 }
 
@@ -511,7 +512,7 @@ input[type="radio"] {
   margin: 10px 0;
 }
 
-.field > span {
+.field>span {
   display: block;
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -562,7 +563,7 @@ input[type="radio"] {
   color: var(--ink-2);
 }
 
-.filter-field > span:first-child {
+.filter-field>span:first-child {
   line-height: 1.5;
 }
 
@@ -884,6 +885,7 @@ tr.click:hover td {
 }
 
 @keyframes livepulse {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent);
@@ -949,7 +951,7 @@ tr.click:hover td {
   display: flex;
 }
 
-.progress > span {
+.progress>span {
   height: 100%;
   display: block;
 }
@@ -1087,12 +1089,10 @@ tr.click:hover td {
 }
 
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--surface-3) 0%,
-    var(--surface-2) 50%,
-    var(--surface-3) 100%
-  );
+  background: linear-gradient(90deg,
+      var(--surface-3) 0%,
+      var(--surface-2) 50%,
+      var(--surface-3) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.3s linear infinite;
   border-radius: var(--r-sm);
@@ -1581,6 +1581,14 @@ tr.click:hover td {
   background: var(--st-err);
 }
 
+.tb-health-item.is-off {
+  opacity: 0.55;
+}
+
+.tb-health-item.is-off i {
+  background: var(--muted);
+}
+
 .lang-switch {
   display: inline-flex;
   gap: 2px;
@@ -1673,7 +1681,7 @@ tr.click:hover td {
 }
 
 /* ---------------------------------------------------------------- json / markdown (unchanged behaviour) */
-details > summary {
+details>summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12.5px;
@@ -1786,12 +1794,9 @@ details > summary {
   min-width: 0;
   position: relative;
   background:
-    radial-gradient(
-        circle at 1px 1px,
-        color-mix(in srgb, var(--line-strong) 70%, transparent) 1px,
-        transparent 0
-      )
-      0 0 / 22px 22px,
+    radial-gradient(circle at 1px 1px,
+      color-mix(in srgb, var(--line-strong) 70%, transparent) 1px,
+      transparent 0) 0 0 / 22px 22px,
     var(--bg);
 }
 
@@ -1852,6 +1857,7 @@ details > summary {
 }
 
 @keyframes pulse {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-wait) 55%, transparent);
@@ -1863,6 +1869,7 @@ details > summary {
 }
 
 @keyframes glow {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-run) 50%, transparent);
@@ -1909,6 +1916,7 @@ details > summary {
   overflow: hidden;
   box-shadow: var(--shadow-2);
 }
+
 .react-flow__controls-button.on {
   color: var(--accent);
 }
@@ -2056,7 +2064,7 @@ details > summary {
   font-size: 13px;
 }
 
-.kv > :nth-child(odd) {
+.kv> :nth-child(odd) {
   color: var(--muted);
 }
 
@@ -2140,6 +2148,7 @@ details > summary {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {
@@ -2308,20 +2317,24 @@ details > summary {
   line-height: 1.45;
   cursor: pointer;
 }
+
 .handoff-confirm.is-on {
   border-color: var(--st-ok);
 }
+
 .handoff-confirm input {
   flex: none;
   width: 16px;
   height: 16px;
   margin: 2px 0 0;
 }
+
 .handoff-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: 10px;
 }
+
 .handoff-history {
   margin-top: 12px;
 }

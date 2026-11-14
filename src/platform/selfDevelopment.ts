@@ -91,6 +91,18 @@ export async function isSelfRepository(repo: { repository_url?: string | null })
   return !!self && !!url && self === url;
 }
 
+/** Enabled repositories whose URL is this installation. Names only; callers decide what a tie means. */
+export async function selfRepositoryNames(
+  rows: Array<{ name: string; repository_url?: string | null; enabled?: boolean }>,
+): Promise<string[]> {
+  const names: string[] = [];
+  for (const row of rows) {
+    if (row.enabled === false) continue;
+    if (await isSelfRepository(row)) names.push(row.name);
+  }
+  return names;
+}
+
 /** True when `path` is the live checkout, is inside it, or contains it. Missing suffixes are planned paths. */
 export function overlapsLiveApplication(path: string): boolean {
   const live = liveApplicationRoot();
