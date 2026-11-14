@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ancestors, downstream, topoOrder } from "./graph.ts";
 import type { StepSpec, WorkflowSpec } from "./types.ts";
+import { FEATURE_MICRO_TARGETED_COMMAND, FEATURE_TARGETED_COMMAND } from "./templates.ts";
 
 /**
  * Adaptive execution profiles (pure, deterministic).
@@ -28,6 +29,7 @@ export interface ProfileSignals {
   /** Explicit risk declared on the work item / run inputs ("low" | "medium" | "high"). */
   declaredRisk?: string | null;
   implementationHint?: "small" | "standard" | "large";
+  provider?: string | null;
   /** Platform-collected index evidence. Never copied from run input or model output. */
   evidence?: {
     revision: string;
@@ -99,8 +101,10 @@ export function classifyProfile(
             ? "low"
             : "unknown",
   };
+  const cursor = s.provider === "cursor";
   const evidence = s.evidence;
   const eligible =
+    !cursor &&
     !highRisk &&
     !MULTI.test(text) &&
     !BIG.test(text) &&
@@ -132,7 +136,11 @@ export function classifyProfile(
           : "STANDARD",
       requested,
       confidence: "high",
-      reasons: ["MICRO declined: verified low-risk scope and dependency impact are required"],
+      reasons: [
+        cursor
+          ? "MICRO declined: Cursor cannot enforce pre-execution tool boundaries"
+          : "MICRO declined: verified low-risk scope and dependency impact are required",
+      ],
       warnings,
       signals,
     };
@@ -331,7 +339,7 @@ export function applyProfile(
   // Only steps that ARE reviews (by key/name or a verdict-style output contract) — other downstream agents still need the author's output.
   const looksLikeReview = (s: StepSpec) =>
     /review|verif|audit|\bqa\b/i.test(`${s.key} ${s.name ?? ""}`) ||
-    /\b(approved|verdict)\b/.test(String(s.config.output_contract ?? ""));
+    /\b(approved|verdict)\b/.test(String(s.config?.output_contract ?? ""));
   const verifierKeys = new Set(
     spec.steps
       .filter(
@@ -432,6 +440,17 @@ export function applyProfile(
     );
   if (micro) {
     if (
+      spec.steps.some(
+        (s) =>
+          s.config?.agent &&
+          typeof s.config.agent === "object" &&
+          (s.config.agent as { provider?: string }).provider === "cursor",
+      )
+    )
+      throw new ProfileNotApplicable(
+        "MICRO cannot run on Cursor: provider does not support pre-execution tool interception",
+      );
+    if (
       [...merged, ...reviews].some(
         (step) => step.config.independent === true || step.config.output_contract != null,
       )
@@ -493,6 +512,9 @@ export function applyProfile(
         config: {
           ...s.config,
           ...(micro ? { delegation: { enabled: false } } : {}),
+          ...(micro && (s.config.verify as { command?: string; [k: string]: unknown } | undefined)?.command === FEATURE_TARGETED_COMMAND
+            ? { verify: { ...(s.config.verify as object), command: FEATURE_MICRO_TARGETED_COMMAND } }
+            : {}),
           instructions,
           merged_from: [...merged, ...(micro ? reviews : [])].map((m) => m.key),
           knowledge_index_size: s.config.knowledge_index_size ?? 6,
@@ -609,6 +631,7 @@ export async function classifyWithFallback(
   const base = classifyProfile(s, requested);
   const e = s.evidence;
   if (
+    s.provider === "cursor" ||
     !["AUTO", "MICRO"].includes(requested) ||
     base.profile === "MICRO" ||
     base.signals.high_risk_term ||

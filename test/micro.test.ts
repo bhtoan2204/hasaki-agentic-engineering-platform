@@ -197,3 +197,55 @@ test("MICRO budget decisions deny further execution and stricter provider limits
   assert.equal(effective.context_tokens, 12000);
   assert.equal(effective.timeout_ms, 600000);
 });
+
+import { TEMPLATES, FEATURE_MICRO_TARGETED_COMMAND } from "../src/workflow/templates.ts";
+import { applyProfile, ProfileNotApplicable } from "../src/workflow/profiles.ts";
+import { validateAgentOptions } from "../src/agent/stepAgent.ts";
+import { claudeExecutor } from "../src/agent/claude.ts";
+
+test("micro-change template runs unit tests for ordinary Node repositories", () => {
+  const tmpl = TEMPLATES.find((t) => t.key === "micro-change")!;
+  assert.ok(tmpl);
+  const implementStep = (tmpl.spec.steps as any[]).find((s) => s.key === "implement")!;
+  assert.equal(implementStep.config.verify.command, FEATURE_MICRO_TARGETED_COMMAND);
+  assert.ok(FEATURE_MICRO_TARGETED_COMMAND.includes("npm test --if-present"));
+  assert.ok(!FEATURE_MICRO_TARGETED_COMMAND.includes("no platform test harness; the regression step runs npm test"));
+});
+
+test("MICRO declines Cursor and prevents execution without pre-execution tool interception", async () => {
+  const cursorDecision = classifyProfile({ ...signals, provider: "cursor" }, "AUTO");
+  assert.notEqual(cursorDecision.profile, "MICRO");
+
+  const cursorReqDecision = classifyProfile({ ...signals, provider: "cursor" }, "MICRO");
+  assert.notEqual(cursorReqDecision.profile, "MICRO");
+  assert.ok(cursorReqDecision.reasons.some((r) => r.includes("Cursor cannot enforce pre-execution tool boundaries")));
+
+  assert.throws(
+    () => validateAgentOptions({ execution_profile: "MICRO" }, "cursor"),
+    /Cursor cannot enforce pre-execution tool boundaries/
+  );
+
+  const microSpec = validateSpec({
+    name: "micro-test",
+    steps: [
+      { key: "analyze", type: "agent" },
+      { key: "implement", type: "coding_agent", depends_on: ["analyze"], config: { agent: { provider: "cursor" } } },
+      { key: "self_review", type: "agent", depends_on: ["implement"], config: { independent: false } },
+    ],
+  });
+  assert.throws(
+    () => applyProfile(microSpec, "MICRO"),
+    (err: any) => err instanceof ProfileNotApplicable && /MICRO cannot run on Cursor/.test(err.message)
+  );
+
+  const escalation = await claudeExecutor.execute({
+    run: { profile: "MICRO", agent_provider: "cursor", selected_repositories: [] },
+    step: { type: "coding_agent", config: {} },
+    input: {},
+    context: {},
+    attempt: { effective_agent: { provider: "cursor", execution_profile: "MICRO" } },
+  } as any);
+  assert.equal(escalation.kind, "profile_escalation");
+  assert.equal((escalation as any).request.target, "STANDARD");
+  assert.ok((escalation as any).request.reason.includes("Cursor cannot enforce pre-execution tool boundaries"));
+});

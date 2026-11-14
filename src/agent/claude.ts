@@ -572,6 +572,16 @@ const agentExecutor: StepExecutor = {
           error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`,
           retryable: false,
         };
+      if (ctx.run.profile === "MICRO" && provider === "cursor")
+        return {
+          kind: "profile_escalation",
+          request: {
+            target: "STANDARD",
+            risk: "unknown",
+            reason: "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
+            expectedRevision: (ctx.run.graph as (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }) | undefined)?.profile_revision ?? 0,
+          },
+        };
       const cap =
         provider === "codex"
           ? await codexCapabilities(false, {
@@ -650,8 +660,18 @@ const agentExecutor: StepExecutor = {
       }
     }
     if (ctx.run.profile === "MICRO") {
+      if (provider === "cursor")
+        return {
+          kind: "profile_escalation",
+          request: {
+            target: "STANDARD",
+            risk: "unknown",
+            reason: "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
+            expectedRevision: (ctx.run.graph as (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }) | undefined)?.profile_revision ?? 0,
+          },
+        };
       for (const workspace of ws) if (!(await validateMicroWorkspace(workspace.path, ctx.step.config.micro_source_revision, ctx.step.config.micro_hashes)))
-        return { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: "prepared workspace no longer matches verified admission evidence", expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+        return { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: "prepared workspace no longer matches verified admission evidence", expectedRevision: (ctx.run.graph as (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }) | undefined)?.profile_revision ?? 0 } };
     }
     const delegationCfg = ctx.step.config.delegation as
       { enabled?: boolean; agents?: string[] } | undefined;

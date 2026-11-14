@@ -280,6 +280,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
       knownRepository: positive.length && !isAmbiguous(positive) ? positive[0].repo : null,
       matchingRepositories: positive.length,
       declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
+      provider: input.agentProvider ?? config.agent.defaultProvider ?? null,
       evidence: selected.length === 1 ? await collectMicroEvidence(selected[0], inputs.files, priorFailureRuns) : undefined,
     },
     input.profile ?? "AUTO",

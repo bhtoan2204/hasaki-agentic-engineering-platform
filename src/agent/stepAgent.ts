@@ -110,6 +110,10 @@ export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) 
     throw new Error(
       "Cursor cannot enforce a custom native tool allowlist; use its existing platform policy",
     );
+  if (provider === "cursor" && a.execution_profile === "MICRO")
+    throw new Error(
+      "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
+    );
 }
 
 export function modelFor(

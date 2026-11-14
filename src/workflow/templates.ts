@@ -217,6 +217,62 @@ else
   echo "no regression runner detected"
 fi`;
 
+/**
+ * Verification command for MICRO profile. Unlike FEATURE_TARGETED_COMMAND, MICRO has no later
+ * regression step; if test/setup.ts is absent (an ordinary Node repository) or no targeted tests match,
+ * it falls back to running unit tests (npm test --if-present) so tests are never skipped before PR approval.
+ */
+export const FEATURE_MICRO_TARGETED_COMMAND = `set -euo pipefail
+${FEATURE_SELF_GUARD}
+if [ -f go.mod ]; then
+  pkgs=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" -- '*.go' | xargs -r -n1 dirname | sort -u | sed 's|^|./|')
+  echo "== go build ./..."
+  go build ./...
+  if [ -n "$pkgs" ]; then
+    echo "== go test -short -timeout 5m \${GO_TEST_SKIP:+-skip $GO_TEST_SKIP} $pkgs"
+    go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} $pkgs
+  else
+    echo "== go test -short -timeout 5m ./..."
+    go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} ./...
+  fi
+elif [ -f package.json ]; then
+  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '*' -print -quit 2>/dev/null)" ]; then
+    echo "== install dependencies"
+    if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund || { echo "npm ci refused (package-lock.json out of sync with package.json?): installing from package.json, lock file untouched"; npm install --no-package-lock --ignore-scripts --no-audit --no-fund; }; else npm install --ignore-scripts --no-audit --no-fund; fi
+  fi
+  echo "== typecheck"
+  if [ -x node_modules/.bin/tsc ]; then npx --no-install tsc -p . --pretty false --noEmit --incremental false; else echo "tsc not installed; typecheck skipped"; fi
+  changed=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" || true)
+  files=$(printf '%s\\n' "$changed" | grep -E '\\.(ts|tsx|js|jsx)$' || true)
+  if [ -n "$files" ] && [ -x node_modules/.bin/eslint ]; then
+    ${eslintNewErrors("origin/$BASE_BRANCH")}
+  else
+    echo "eslint skipped"
+  fi
+  if [ -f test/setup.ts ]; then
+    tests=$(
+      {
+        printf '%s\\n' "$changed" | grep -E '^test/.*\\.test\\.ts$' || true
+        printf '%s\\n' "$changed" | sed -n 's|^src/\\(.*\\)\\.ts$|test/\\1.test.ts|p'
+      } | sort -u | while IFS= read -r f; do if [ -n "$f" ] && [ -f "$f" ]; then printf '%s\\n' "$f"; fi; done
+    )
+    if [ -n "$tests" ]; then
+      echo "== targeted tests"
+      preload=./test/env.ts; [ -f test/env.ts ] || preload=./test/setup.ts
+      node --disable-warning=ExperimentalWarning --import "$preload" --test $tests
+    else
+      echo "== unit tests fallback (npm test)"
+      npm test --if-present
+    fi
+  else
+    echo "== unit tests (npm test)"
+    npm test --if-present
+  fi
+else
+  echo "no test runner detected"
+fi`;
+
+
 const ANALYZE = {
   instructions:
     "Analyse the engineering request. Restate the goal, list functional requirements, acceptance criteria, " +
@@ -1339,7 +1395,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       steps: [
         { key: "analyze", type: "agent", name: "Local Analysis", config: { instructions: "Inspect the hinted symbols, requirements, risk and direct dependencies. Stay within the confirmed repository and file scope." } },
         { key: "plan", type: "agent", name: "Local Plan", depends_on: ["analyze"], config: { instructions: "State the smallest correct change and its targeted verification. Escalate uncertain impact before editing." } },
-        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["plan"], config: { ...IMPLEMENT, verify: { command: FEATURE_TARGETED_COMMAND, broad_command: FEATURE_REGRESSION_COMMAND, timeout_seconds: 900 } } },
+        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["plan"], config: { ...IMPLEMENT, verify: { command: FEATURE_MICRO_TARGETED_COMMAND, broad_command: FEATURE_REGRESSION_COMMAND, timeout_seconds: 900 } } },
         { key: "self_review", type: "agent", name: "Self-review", depends_on: ["implement"], config: { independent: false, instructions: "Review the diff against the requirements, scope and risk; verify test evidence and report limitations." } },
         { key: "approve_diff", type: "human_approval", name: "Approve Diff", depends_on: ["self_review"], config: { message: "Review the diff and verification evidence before publishing.", show_outputs: ["implement"] } },
         { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["approve_diff"], config: { mode: "approval", content_from: "implement" } },
