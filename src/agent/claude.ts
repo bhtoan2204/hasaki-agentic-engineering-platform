@@ -1656,7 +1656,7 @@ const agentExecutor: StepExecutor = {
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
       );
-      if (ctx.run.profile === "MICRO") {
+      const assessMicroScope = async (): Promise<{ escalate: false } | { escalate: true; result: ExecResult }> => {
         const state = await collectScopeState(await Promise.all(trees.map(async w => ({ repo: w.repo, path: w.path, base: (await workspaceBase(ctx.run, w)).ref }))));
         const files = Object.values(state.files).flat();
         const approved = Array.isArray(ctx.step.config.micro_scope) ? ctx.step.config.micro_scope as string[] : [];
@@ -1667,8 +1667,13 @@ const agentExecutor: StepExecutor = {
         }
         const scope = selectVerificationScope({ files, approvedFiles: approved, impactKnown, risk: "low", mandatory: vcfg.command, targeted: vcfg.command, broad: vcfg.broadCommand });
         await ctx.recordMetrics({ verification_scope: scope });
-        if (scope.escalate) return { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: scope.reasons.join("; "), expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+        if (scope.escalate) return { escalate: true, result: { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: scope.reasons.join("; "), expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } } };
         vcfg.command = scope.commands.map(command => `{\n${command}\n}`).join("\n");
+        return { escalate: false };
+      };
+      if (ctx.run.profile === "MICRO") {
+        const check = await assessMicroScope();
+        if (check.escalate) return check.result;
       } else if (ctx.input.pending?.profile_transition && vcfg.broadCommand) {
         vcfg.command = `set -e\n{\n${vcfg.command}\n}\n{\n${vcfg.broadCommand}\n}`;
       }
@@ -1795,6 +1800,10 @@ const agentExecutor: StepExecutor = {
               retryable: !TERMINAL_FAILURES.has(r.failure ?? ""),
             };
           if (await openQuestions()) return pause(r.text);
+          if (ctx.run.profile === "MICRO") {
+            const check = await assessMicroScope();
+            if (check.escalate) return check.result;
+          }
           return undefined;
         },
       });
@@ -1843,6 +1852,10 @@ const agentExecutor: StepExecutor = {
           { verification: "needs_review" },
         );
       output = { ...accepted, verification: summary };
+      if (ctx.run.profile === "MICRO") {
+        const check = await assessMicroScope();
+        if (check.escalate) return check.result;
+      }
     }
     // Approved scope integrity, deterministic: what git says changed (committed, staged, unstaged, untracked — after the
     // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact

@@ -260,3 +260,31 @@ test("escalation tool fences later writes and an interrupted provider retains th
   assert.equal((await getRun(run.id)).profile, "DEEP");
   await cancelRun(run.id);
 });
+
+test("incoming module import of constant export marks impact unknown", async () => {
+  writeFileSync(join(root, "src/consumer.ts"), 'import { label } from "./label";\nexport const x = label;\n');
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "add consumer");
+  await indexRepository(repo);
+  const evidence = await collectMicroEvidence(repo, ["src/label.ts"], 0);
+  assert.equal(evidence?.impactKnown, false);
+  git(root, "rm", "src/consumer.ts");
+  git(root, "commit", "-qm", "remove consumer");
+  await indexRepository(repo);
+  const restored = await collectMicroEvidence(repo, ["src/label.ts"], 0);
+  assert.equal(restored?.impactKnown, true);
+});
+
+test("unindexed or broken file in repository marks impact unknown", async () => {
+  writeFileSync(join(root, "src/broken.ts"), 'export const broken = ;;\n');
+  git(root, "add", ".");
+  git(root, "commit", "-qm", "add broken file");
+  await indexRepository(repo);
+  const evidence = await collectMicroEvidence(repo, ["src/label.ts"], 0);
+  assert.equal(evidence?.impactKnown, false);
+  git(root, "rm", "src/broken.ts");
+  git(root, "commit", "-qm", "remove broken file");
+  await indexRepository(repo);
+  const restored = await collectMicroEvidence(repo, ["src/label.ts"], 0);
+  assert.equal(restored?.impactKnown, true);
+});
