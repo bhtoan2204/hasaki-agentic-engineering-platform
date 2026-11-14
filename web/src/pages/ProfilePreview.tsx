@@ -18,7 +18,7 @@ import { useI18n } from "../i18n/index.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
 
-export type ProfileChoice = "AUTO" | "FAST" | "STANDARD" | "DEEP";
+export type ProfileChoice = "AUTO" | "MICRO" | "FAST" | "STANDARD" | "DEEP";
 const COLOR: Record<string, string> = {
   FAST: "COMPLETED",
   STANDARD: "READY",

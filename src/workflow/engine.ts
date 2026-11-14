@@ -92,10 +92,9 @@ import type {
 } from "./types.ts";
 import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
 import {
-  applyProfile,
+  resolveProfile,
   classifyComplexity,
   classifyProfile,
-  ProfileNotApplicable,
   type ProfileChange,
   type ProfileChoice,
   type ProfileDecision,
@@ -298,18 +297,8 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
         "FAST refused: HIGH_RISK tasks keep the independent review and approvals (override the complexity class to change this)",
       ],
     };
-  let resolved: { spec: WorkflowSpec; changes: ProfileChange[] };
-  try {
-    resolved = applyProfile(dv.spec, decision.profile);
-  } catch (e) {
-    if (!(e instanceof ProfileNotApplicable)) throw e;
-    decision = {
-      ...decision,
-      profile: "STANDARD",
-      reasons: [...decision.reasons, `FAST not applicable: ${e.message} → STANDARD`],
-    };
-    resolved = { spec: dv.spec, changes: [] };
-  }
+  const resolved = resolveProfile(dv.spec, decision);
+  decision = resolved.decision;
   const reported = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
   const graph = withCleanupStep(reported);
   return {
