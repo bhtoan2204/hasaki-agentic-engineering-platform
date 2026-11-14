@@ -31,6 +31,7 @@ import {
 } from "../src/agent/copilot/policy.ts";
 import { buildCopilotArgs } from "../src/agent/copilot/run.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import { ResumeHandoff } from "../src/workflow/engine.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-copilot.mjs");
 let tempDir = "";
@@ -405,4 +406,24 @@ test("migration 057 updates check constraints for copilot", () => {
   assert.match(sql, /workflow_step_attempts_agent_provider_check/);
   assert.match(sql, /evaluation_provider_phases_provider_check/);
   assert.match(sql, /copilot/);
+});
+
+test("ResumeHandoff schema accepts copilot and rejects unknown providers", () => {
+  const valid = ResumeHandoff.safeParse({
+    handoff_id: 1,
+    expected_attempt_id: 2,
+    provider: "copilot",
+    confirm: true,
+    checkpoint_fingerprint: "a".repeat(64),
+  });
+  assert.equal(valid.success, true);
+
+  const invalid = ResumeHandoff.safeParse({
+    handoff_id: 1,
+    expected_attempt_id: 2,
+    provider: "unknown-provider",
+    confirm: true,
+    checkpoint_fingerprint: "a".repeat(64),
+  });
+  assert.equal(invalid.success, false);
 });
