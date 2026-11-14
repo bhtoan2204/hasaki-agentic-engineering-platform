@@ -8,9 +8,11 @@ const plans = [
   "codex",
   "cursor",
   "antigravity",
+  "copilot",
   "claude,codex",
   "codex,claude",
   "claude,antigravity",
+  "claude,copilot",
   "claude,codex,cursor",
 ];
 export function ProviderExperimentForm({

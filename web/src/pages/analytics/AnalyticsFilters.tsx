@@ -156,7 +156,7 @@ export function AnalyticsFilters({
           {dates}
           {select(
             "provider",
-            ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
+            ["claude", "codex", "cursor", "antigravity", "copilot"].map((v) => [v, v]),
           )}
           {select(
             "workflow",
@@ -284,7 +284,7 @@ export function AnalyticsFilters({
             </label>
             {select(
               "provider",
-              ["claude", "codex", "cursor", "antigravity"].map((v) => [v, v]),
+              ["claude", "codex", "cursor", "antigravity", "copilot"].map((v) => [v, v]),
             )}
             <label>
               {t("an.model")}

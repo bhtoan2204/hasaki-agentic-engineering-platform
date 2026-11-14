@@ -2841,7 +2841,7 @@ const ResumeHandoff = z
   .object({
     handoff_id: z.number().int().positive(),
     expected_attempt_id: z.number().int().positive(),
-    provider: z.enum(["claude", "codex", "cursor", "antigravity"]),
+    provider: z.enum(["claude", "codex", "cursor", "antigravity", "copilot"]),
     model: StepAgentOverrideConfig.shape.model.optional(),
     confirm: z.literal(true),
     checkpoint_fingerprint: z.string().regex(/^[a-f0-9]{64}$/),

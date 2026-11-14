@@ -1654,7 +1654,9 @@ function AttemptMetrics({ m }: { m: any }) {
                 ? t(
                     m.provider === "antigravity"
                       ? "run.antigravity.defaultModel"
-                      : "run.codex.defaultModel",
+                      : m.provider === "copilot"
+                        ? "run.copilot.defaultModel"
+                        : "run.codex.defaultModel",
                   )
                 : null),
             m.reasoning_effort,

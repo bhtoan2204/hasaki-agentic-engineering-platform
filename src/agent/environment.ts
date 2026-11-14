@@ -2,7 +2,7 @@ import { liveRuntime } from "../eval/liveRuntime.ts";
 /** Child processes receive their configured provider authentication, never platform/application credentials. */
 export function agentEnvironment(
   base: NodeJS.ProcessEnv,
-  provider: "claude" | "codex" | "cursor" | "antigravity",
+  provider: "claude" | "codex" | "cursor" | "antigravity" | "copilot",
 ): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   const platform =

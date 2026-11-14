@@ -41,6 +41,8 @@ import { cursorAgentTurn, cursorCapabilities } from "./cursor/run.ts";
 import { codexAgentTurn, codexCapabilities } from "./codex/run.ts";
 import { antigravityAgentTurn } from "./antigravity/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
+import { copilotAgentTurn } from "./copilot/run.ts";
+import { copilotCapabilities } from "./copilot/capabilities.ts";
 import { completeForRun } from "./complete.ts";
 import {
   addUsage,
@@ -561,7 +563,9 @@ const agentExecutor: StepExecutor = {
           ? "OpenAI Codex"
           : provider === "cursor"
             ? "This Cursor CLI"
-            : "Google Antigravity CLI";
+            : provider === "antigravity"
+              ? "Google Antigravity CLI"
+              : "GitHub Copilot CLI";
       // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
       if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
         return {
@@ -577,10 +581,15 @@ const agentExecutor: StepExecutor = {
             })
           : provider === "cursor"
             ? await cursorCapabilities()
-            : await antigravityCapabilities(false, {
-                model: effective.model ?? "",
-                effort: effective.reasoning_effort ?? "",
-              });
+            : provider === "antigravity"
+              ? await antigravityCapabilities(false, {
+                  model: effective.model ?? "",
+                  effort: effective.reasoning_effort ?? "",
+                })
+              : await copilotCapabilities(false, {
+                  model: effective.model ?? "",
+                  effort: effective.reasoning_effort ?? "",
+                });
       if (!cap.ok)
         return {
           kind: "failed",
@@ -1060,6 +1069,29 @@ const agentExecutor: StepExecutor = {
           failure: result.failure,
         };
       }
+      if (provider === "copilot") {
+        const full = resumeId ? prompt : `${systemAppend}\n\n${prompt}`;
+        const result = await copilotAgentTurn({
+          ctx,
+          mode,
+          policy,
+          cwd,
+          prompt: full,
+          metrics,
+          invocationId: sessionKey,
+          onTelemetry: persistSession,
+          model: routed.model || undefined,
+          effort: routed.effort || undefined,
+          resumeId,
+        });
+        if (result.submitted) submitted = result.submitted;
+        return {
+          isError: result.isError,
+          text: result.text,
+          assistantTurns: result.assistantTurns,
+          failure: result.failure,
+        };
+      }
       if (provider === "antigravity") {
         const full = resumeId ? prompt : `${systemAppend}\n\n${prompt}`;
         const result = await antigravityAgentTurn({
@@ -1468,20 +1500,20 @@ const agentExecutor: StepExecutor = {
         },
       };
     if (await openQuestions()) return pause(result.text);
-    if (provider === "codex" && !independent) {
-      // A Codex turn that exits 0 or says "done" is not a result: the step needs submit_result matching its contract.
+    if ((provider === "codex" || provider === "copilot") && !independent) {
+      const pName = provider === "codex" ? "Codex" : "Copilot";
       if (!submitted)
         return {
           kind: "failed",
           error:
-            "Codex finished the turn without calling submit_result; no step output was recorded.",
+            `${pName} finished the turn without calling submit_result; no step output was recorded.`,
           retryable: true,
         };
       const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
       if (missing.length)
         return {
           kind: "failed",
-          error: `Codex submitted an output that does not match the step's output contract (missing: ${missing.join(", ")}).`,
+          error: `${pName} submitted an output that does not match the step's output contract (missing: ${missing.join(", ")}).`,
           retryable: true,
           details: { submitted },
         };

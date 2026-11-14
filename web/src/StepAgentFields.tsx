@@ -41,7 +41,7 @@ export function StepAgentFields({
           <Field label={en ? "Fallback provider order" : "Thứ tự agent dự phòng"}>
             <input
               value={(
-                value.fallback?.providers ?? ["claude", "codex", "cursor", "antigravity"]
+                value.fallback?.providers ?? ["claude", "codex", "cursor", "antigravity", "copilot"]
               ).join(", ")}
               onChange={(e) =>
                 set("fallback", {
@@ -135,6 +135,7 @@ export function StepAgentFields({
             <option value="codex">Codex</option>
             <option value="cursor">Cursor</option>
             <option value="antigravity">Antigravity</option>
+            <option value="copilot">Copilot</option>
           </select>
         </Field>
         <Field
