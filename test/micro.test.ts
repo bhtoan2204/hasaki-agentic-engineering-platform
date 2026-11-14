@@ -206,7 +206,8 @@ import { claudeExecutor } from "../src/agent/claude.ts";
 test("micro-change template runs unit tests for ordinary Node repositories", () => {
   const tmpl = TEMPLATES.find((t) => t.key === "micro-change")!;
   assert.ok(tmpl);
-  const implementStep = (tmpl.spec.steps as any[]).find((s) => s.key === "implement")!;
+  const steps = tmpl.spec.steps as Array<{ key: string; config: { verify: { command: string } } }>;
+  const implementStep = steps.find((s) => s.key === "implement")!;
   assert.equal(implementStep.config.verify.command, FEATURE_MICRO_TARGETED_COMMAND);
   assert.ok(FEATURE_MICRO_TARGETED_COMMAND.includes("npm test --if-present"));
   assert.ok(!FEATURE_MICRO_TARGETED_COMMAND.includes("no platform test harness; the regression step runs npm test"));
@@ -235,7 +236,7 @@ test("MICRO declines Cursor and prevents execution without pre-execution tool in
   });
   assert.throws(
     () => applyProfile(microSpec, "MICRO"),
-    (err: any) => err instanceof ProfileNotApplicable && /MICRO cannot run on Cursor/.test(err.message)
+    (err: unknown) => err instanceof ProfileNotApplicable && /MICRO cannot run on Cursor/.test(err.message)
   );
 
   const escalation = await claudeExecutor.execute({
@@ -244,8 +245,10 @@ test("MICRO declines Cursor and prevents execution without pre-execution tool in
     input: {},
     context: {},
     attempt: { effective_agent: { provider: "cursor", execution_profile: "MICRO" } },
-  } as any);
+  } as unknown as Parameters<typeof claudeExecutor.execute>[0]);
   assert.equal(escalation.kind, "profile_escalation");
-  assert.equal((escalation as any).request.target, "STANDARD");
-  assert.ok((escalation as any).request.reason.includes("Cursor cannot enforce pre-execution tool boundaries"));
+  if (escalation.kind === "profile_escalation") {
+    assert.equal(escalation.request.target, "STANDARD");
+    assert.ok(escalation.request.reason.includes("Cursor cannot enforce pre-execution tool boundaries"));
+  }
 });
