@@ -27,6 +27,7 @@ import {
 const exec = promisify(execFile);
 
 export interface VerifyConfig {
+  broadCommand?: string;
   /** Shell command run in each worktree (trusted: comes from the workflow definition, never from the agent). */
   command: string;
   maxRepairs: number;
@@ -52,6 +53,7 @@ export function verifyConfig(
   const command = typeof o.command === "string" && o.command.trim() ? o.command : defaultCommand;
   return {
     command,
+    ...(typeof o.broad_command === "string" ? { broadCommand: o.broad_command } : {}),
     maxRepairs: Math.max(0, Math.min(5, Math.floor(Number(o.max_repairs ?? 2)) || 0)),
     timeoutMs: Math.max(30, Math.min(3600, Number(o.timeout_seconds ?? 600) || 600)) * 1000,
     baseline: o.baseline === null || o.baseline === false ? null : "go",

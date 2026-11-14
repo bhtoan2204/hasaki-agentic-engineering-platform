@@ -1,3 +1,6 @@
+import { selectVerificationScope } from "./verificationScope.ts";
+import { collectMicroEvidence, validateMicroWorkspace } from "../workflow/microEvidence.ts";
+import { indexRepository } from "../codeIntelligence/indexer.ts";
 import { liveRuntime, setLiveUsageOffset } from "../eval/liveRuntime.ts";
 import { liveClaudeSandbox } from "../eval/liveSandbox.ts";
 import {
@@ -563,7 +566,7 @@ const agentExecutor: StepExecutor = {
             ? "This Cursor CLI"
             : "Google Antigravity CLI";
       // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
-      if ((ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
+      if (ctx.run.profile !== "MICRO" && (ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
         return {
           kind: "failed",
           error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`,
@@ -646,10 +649,15 @@ const agentExecutor: StepExecutor = {
           await ctx.log("system", `installed Node dependencies in ${w.repo}`);
       }
     }
+    if (ctx.run.profile === "MICRO") {
+      for (const workspace of ws) if (!(await validateMicroWorkspace(workspace.path, ctx.step.config.micro_source_revision, ctx.step.config.micro_hashes)))
+        return { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: "prepared workspace no longer matches verified admission evidence", expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+    }
     const delegationCfg = ctx.step.config.delegation as
       { enabled?: boolean; agents?: string[] } | undefined;
-    const delegation = delegationCfg?.enabled === true;
+    const delegation = ctx.run.profile !== "MICRO" && delegationCfg?.enabled === true;
     const policy: PolicyContext = {
+      ...(ctx.run.profile === "MICRO" ? { micro: { files: Array.isArray(ctx.step.config.micro_scope) ? ctx.step.config.micro_scope as string[] : [], calls: 0, limit: 20, exhausted: false } } : {}),
       mode,
       workspaces: ws.map((w) => w.path),
       baseBranch: config.baseBranch,
@@ -1442,6 +1450,11 @@ const agentExecutor: StepExecutor = {
         },
       };
     };
+    if (ctx.run.profile === "MICRO" && (submitted?.profile_escalation || policy.micro?.exhausted)) {
+      const request = submitted?.profile_escalation as import("../workflow/profileRuntime.ts").EscalationRequest | undefined;
+      return { kind: "profile_escalation", request: request ?? { reason: policy.micro?.reason ?? "MICRO scope or tool budget exceeded", risk: "unknown", target: "STANDARD",
+        expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+    }
     if (result.isError)
       return {
         kind: "failed",
@@ -1643,6 +1656,22 @@ const agentExecutor: StepExecutor = {
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
       );
+      if (ctx.run.profile === "MICRO") {
+        const state = await collectScopeState(await Promise.all(trees.map(async w => ({ repo: w.repo, path: w.path, base: (await workspaceBase(ctx.run, w)).ref }))));
+        const files = Object.values(state.files).flat();
+        const approved = Array.isArray(ctx.step.config.micro_scope) ? ctx.step.config.micro_scope as string[] : [];
+        let impactKnown = false;
+        if (trees.length === 1 && files.every(file => approved.includes(file))) {
+          await indexRepository(trees[0].repo, ctx.run.id).catch(() => null);
+          impactKnown = (await collectMicroEvidence(trees[0].repo, files, 0, ctx.run.id))?.impactKnown === true;
+        }
+        const scope = selectVerificationScope({ files, approvedFiles: approved, impactKnown, risk: "low", mandatory: vcfg.command, targeted: vcfg.command, broad: vcfg.broadCommand });
+        await ctx.recordMetrics({ verification_scope: scope });
+        if (scope.escalate) return { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: scope.reasons.join("; "), expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+        vcfg.command = scope.commands.map(command => `{\n${command}\n}`).join("\n");
+      } else if (ctx.input.pending?.profile_transition && vcfg.broadCommand) {
+        vcfg.command = `set -e\n{\n${vcfg.command}\n}\n{\n${vcfg.broadCommand}\n}`;
+      }
       if (!trees.length) {
         await ctx.log(
           "system",

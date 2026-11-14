@@ -256,6 +256,7 @@ export interface QuestionInput {
 
 /** What a step executor reports back. The engine turns it into state transitions. */
 export type ExecResult =
+  | { kind: "profile_escalation"; request: import("./profileRuntime.ts").EscalationRequest }
   | { kind: "completed"; output: unknown }
   | { kind: "failed"; error: string; retryable?: boolean; details?: unknown }
   | {

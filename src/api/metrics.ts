@@ -1,3 +1,4 @@
+import { summarizeProfiles, type ProfileSample } from "../workflow/profileMetrics.ts";
 import { usageSummary } from "../agent/telemetry.ts";
 import { pool, q, one } from "../db/pool.ts";
 
@@ -181,7 +182,19 @@ export async function runMetrics(runId: number) {
     Object.entries(perStep).sort(
       (a, b) => b[1].exec_ms + b[1].queue_ms - (a[1].exec_ms + a[1].queue_ms),
     )[0]?.[0] ?? null;
+  const initialProfile = run?.profile_decision?.initial_profile ?? run?.profile_decision?.signals?.initial_profile ?? run?.profile;
+  const adaptiveSamples: ProfileSample[] = attempts.filter(a => ["agent", "coding_agent"].includes(a.step_type)).map(a => {
+    const t = telemetry.find(t => Number(t.attempt_id) === Number(a.id));
+    const sessions = Object.keys(t?.provider_sessions ?? {});
+    return { fixture: String(runId), repetition: Number(a.number), base: "run-evidence", provider: a.agent_provider ?? "unknown", model: a.agent_model ?? "unknown", cache: "unknown", checks: [],
+      initialProfile: a.effective_agent?.execution_profile ?? initialProfile ?? "STANDARD", finalProfile: run?.profile ?? "STANDARD",
+      wallMs: Number(a.exec_ms), activeMs: t?.provider_execution_ms == null ? null : Number(t.provider_execution_ms), queueMs: a.queue_ms == null ? null : Number(a.queue_ms),
+      invocations: sessions.length || null, tokens: t?.input_tokens == null || t?.output_tokens == null ? null : Number(t.input_tokens) + Number(t.output_tokens),
+      contextTokens: a.metrics?.context_pack?.estimated_tokens ?? null, verificationMs: a.metrics?.verification?.duration_ms ?? null, correct: null, expectedProfile: null };
+  });
   return {
+    adaptive: { initial_profile: initialProfile, final_profile: run?.profile, classification_invocation: run?.profile_decision?.signals?.classification_invocation ?? null,
+      segments: summarizeProfiles(adaptiveSamples), samples: adaptiveSamples, accuracy_note: "Accuracy requires independently adjudicated labels; escalation alone is not a classification error." },
     telemetry: { attempts: telemetry, ...telemetryGroups(telemetry) },
     run_id: runId,
     profile: run?.profile,
@@ -221,7 +234,8 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
   const evaluationPromise = harnessEvaluation(since, attemptOwn, own);
   const byProfilePromise = q(
     pool,
-    `SELECT r.profile, count(DISTINCT r.id)::int AS runs, count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
+    `SELECT r.profile, count(DISTINCT r.id) FILTER (WHERE jsonb_array_length(COALESCE(r.graph->'transitions','[]'::jsonb))>0)::int AS escalated_runs,
+            count(DISTINCT r.id)::int AS runs, count(DISTINCT r.id) FILTER (WHERE r.status = 'COMPLETED')::int AS completed,
             round(avg(extract(epoch FROM (r.finished_at - r.started_at))) FILTER (WHERE r.finished_at IS NOT NULL)::numeric / 60, 1) AS avg_wall_min,
             round(COALESCE(sum((a.metrics->>'turns')::numeric), 0) / NULLIF(count(DISTINCT r.id), 0), 1) AS turns_per_run,
             round(sum((a.metrics->>'cost_usd')::numeric) / NULLIF(count(DISTINCT r.id), 0), 3) AS cost_per_run,

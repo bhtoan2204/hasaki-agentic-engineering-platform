@@ -1331,6 +1331,23 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       ],
     },
   },
+  {
+    key: "micro-change",
+    spec: {
+      name: "Bounded Local Change",
+      description: "Verified single-repository leaf changes; MICRO combines local phases while retaining verification and PR approval.",
+      steps: [
+        { key: "analyze", type: "agent", name: "Local Analysis", config: { instructions: "Inspect the hinted symbols, requirements, risk and direct dependencies. Stay within the confirmed repository and file scope." } },
+        { key: "plan", type: "agent", name: "Local Plan", depends_on: ["analyze"], config: { instructions: "State the smallest correct change and its targeted verification. Escalate uncertain impact before editing." } },
+        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["plan"], config: { ...IMPLEMENT, verify: { command: FEATURE_TARGETED_COMMAND, broad_command: FEATURE_REGRESSION_COMMAND, timeout_seconds: 900 } } },
+        { key: "self_review", type: "agent", name: "Self-review", depends_on: ["implement"], config: { independent: false, instructions: "Review the diff against the requirements, scope and risk; verify test evidence and report limitations." } },
+        { key: "approve_diff", type: "human_approval", name: "Approve Diff", depends_on: ["self_review"], config: { message: "Review the diff and verification evidence before publishing.", show_outputs: ["implement"] } },
+        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["approve_diff"], config: { mode: "approval", content_from: "implement" } },
+        cleanup("pr"),
+      ],
+    },
+  },
+
 ];
 
 // Not seeded: an admin installs it as a private workflow (POST /api/workflows with this key and spec) so only they run it.

@@ -221,7 +221,7 @@ export interface TraceNode {
 }
 
 export interface TraceInput {
-  run: { id: number; status: string; created_at: string; finished_at?: string | null };
+  run: { id: number; status: string; created_at: string; finished_at?: string | null; profile?: string; graph?: { transitions?: unknown[] } };
   steps: Array<{
     id: number;
     key: string;
@@ -270,7 +270,7 @@ export function assembleTrace(input: TraceInput): TraceNode {
     startedAt: input.run.created_at,
     durationMs: ms(input.run.created_at, input.run.finished_at),
     ids: { runId: input.run.id },
-    attrs: {},
+    attrs: { profile: input.run.profile ?? null, transitions: redactTraceValue(input.run.graph?.transitions ?? []) },
     children: [],
   };
   const runId = input.run.id;
@@ -386,7 +386,7 @@ export function assembleTrace(input: TraceInput): TraceNode {
 /** Loads the rows of a run (reusing execution_attempt_telemetry for duration/tokens) and builds the tree. */
 export async function loadTraceInput(runId: number, db: Db = pool): Promise<TraceInput> {
   const [runs, steps, attempts, events, handoffs] = await Promise.all([
-    q(db, "SELECT id, status, created_at, finished_at FROM workflow_runs WHERE id = $1", [runId]),
+    q(db, "SELECT id, status, created_at, finished_at, profile, graph FROM workflow_runs WHERE id = $1", [runId]),
     q(
       db,
       `SELECT s.id, s.key, s.type, s.status, j.status AS live_job_status, j.available_at AS live_job_available_at,
