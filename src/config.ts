@@ -238,7 +238,9 @@ export interface Config {
     antigravity?: AntigravityConfig;
     /**
      * GitHub Copilot CLI (provider "copilot"). Runs as the authenticated account of the WORKER machine.
-     * Env overrides: COPILOT_BIN, COPILOT_TIMEOUT_MS, COPILOT_MODEL, COPILOT_EFFORT.
+     * The Settings page wins for model, effort, sandbox and concurrency once saved; otherwise
+     * COPILOT_MODEL / COPILOT_EFFORT / COPILOT_SANDBOX / COPILOT_MAX_CONCURRENT, then config.json.
+     * The binary path and turn timeout stay process-local.
      */
     copilot?: CopilotConfig;
     /**
@@ -817,21 +819,23 @@ export function copilotConfig(): Required<
     };
   const c = config.agent.copilot ?? {};
   const timeout = Number(process.env.COPILOT_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
-  const maxConcurrent = Number(
-    process.env.COPILOT_MAX_CONCURRENT || c.maxConcurrent || 1,
-  );
+  const maxConcurrent = isOwned("copilot.maxConcurrent")
+    ? Number(c.maxConcurrent)
+    : Number(process.env.COPILOT_MAX_CONCURRENT || c.maxConcurrent || 1);
   return {
     bin: process.env.COPILOT_BIN || c.bin || "copilot",
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model: process.env.COPILOT_MODEL ?? c.model ?? "",
-    effort: process.env.COPILOT_EFFORT ?? c.effort ?? "",
+    model: isOwned("copilot.model") ? (c.model ?? "") : (process.env.COPILOT_MODEL ?? c.model ?? ""),
+    effort: isOwned("copilot.effort")
+      ? (c.effort ?? "")
+      : (process.env.COPILOT_EFFORT ?? c.effort ?? ""),
     maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
-    allowSubagents:
-      process.env.COPILOT_ALLOW_SUBAGENTS
-        ? process.env.COPILOT_ALLOW_SUBAGENTS === "true"
-        : (c.allowSubagents ?? false),
-    sandbox:
-      process.env.COPILOT_SANDBOX
+    allowSubagents: process.env.COPILOT_ALLOW_SUBAGENTS
+      ? process.env.COPILOT_ALLOW_SUBAGENTS === "true"
+      : (c.allowSubagents ?? false),
+    sandbox: isOwned("copilot.sandbox")
+      ? c.sandbox !== false
+      : process.env.COPILOT_SANDBOX
         ? process.env.COPILOT_SANDBOX === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},

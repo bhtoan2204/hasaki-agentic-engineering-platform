@@ -395,11 +395,12 @@ test("copilotHeadlessSettings and excludeFromGit configure repository and tool p
   assert.equal(env.PATH, "/bin");
 });
 
-// ------------------------------------------------------------------ Database Migration 057
+// ------------------------------------------------------------------ Database Migration 058
+// 057 is the MICRO profile migration. Copilot constraints were renumbered so the two do not share a version.
 
-test("migration 057 updates check constraints for copilot", () => {
-  const migPath = join(import.meta.dirname, "..", "migrations", "057_agent_provider_copilot.sql");
-  assert.ok(existsSync(migPath), "057_agent_provider_copilot.sql must exist");
+test("migration 058 updates check constraints for copilot", () => {
+  const migPath = join(import.meta.dirname, "..", "migrations", "058_agent_provider_copilot.sql");
+  assert.ok(existsSync(migPath), "058_agent_provider_copilot.sql must exist");
   const sql = readFileSync(migPath, "utf8");
   assert.match(sql, /workflow_runs_agent_provider_check/);
   assert.match(sql, /agent_sessions_provider_check/);

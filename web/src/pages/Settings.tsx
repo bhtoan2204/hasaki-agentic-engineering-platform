@@ -16,6 +16,7 @@ type Form = {
   enabledProviders: Record<(typeof PROVIDERS)[number], boolean>;
   codex: { model: string; reasoningEffort: string };
   antigravity: { model: string; effort: string; sandbox: boolean; maxConcurrent: number };
+  copilot: { model: string; effort: string; sandbox: boolean; maxConcurrent: number };
   costBudget: {
     runUsd: number | null;
     workItemUsd: number | null;
@@ -33,6 +34,7 @@ function fromEffective(e: Form): Form {
     ...e,
     codex: { ...e.codex },
     antigravity: { ...e.antigravity },
+    copilot: { ...e.copilot },
     costBudget: { ...e.costBudget },
     scheduler: { ...e.scheduler },
     enabledProviders: { ...e.enabledProviders },
@@ -254,6 +256,59 @@ export function SettingsPage() {
                   onChange={(e) =>
                     set({ antigravity: { ...form.antigravity, sandbox: e.target.checked } })
                   }
+                />{" "}
+                {t("set.sandboxHint")}
+              </span>
+            </label>
+          </div>
+          <h4>{t("set.copilot")}</h4>
+          <div className="grid2">
+            <Field
+              label={t("set.model")}
+              hint={
+                providers.loading || catalog("copilot")?.length ? undefined : t("set.modelMissing")
+              }
+            >
+              <ModelSelect
+                ariaLabel={`${t("set.copilot")} ${t("set.model")}`}
+                value={form.copilot.model}
+                models={catalog("copilot")}
+                emptyLabel={t("set.modelAccount")}
+                onChange={(model) => set({ copilot: { ...form.copilot, model } })}
+              />
+            </Field>
+            <Field label={t("set.effort")}>
+              <select
+                value={form.copilot.effort}
+                onChange={(e) => set({ copilot: { ...form.copilot, effort: e.target.value } })}
+              >
+                {EFFORTS.map((effort) => (
+                  <option key={effort || "default"} value={effort}>
+                    {effort || t("set.effortDefault")}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t("set.copilotConcurrent")}>
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={form.copilot.maxConcurrent}
+                onChange={(e) =>
+                  set({
+                    copilot: { ...form.copilot, maxConcurrent: Number(e.target.value) },
+                  })
+                }
+              />
+            </Field>
+            <label className="field">
+              <span>{t("set.sandbox")}</span>
+              <span>
+                <input
+                  type="checkbox"
+                  checked={form.copilot.sandbox}
+                  onChange={(e) => set({ copilot: { ...form.copilot, sandbox: e.target.checked } })}
                 />{" "}
                 {t("set.sandboxHint")}
               </span>

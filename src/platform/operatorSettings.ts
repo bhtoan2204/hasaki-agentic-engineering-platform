@@ -49,6 +49,15 @@ const Patch = z
       })
       .strict()
       .optional(),
+    copilot: z
+      .object({
+        model: z.string().max(200).optional(),
+        effort: Effort.optional(),
+        sandbox: z.boolean().optional(),
+        maxConcurrent: z.number().int().min(1).max(8).optional(),
+      })
+      .strict()
+      .optional(),
     costBudget: z
       .object({
         runUsd: z.number().positive().max(1_000_000).nullable().optional(),
@@ -68,7 +77,7 @@ const Patch = z
       .optional(),
     routing: z
       .object({
-        sensitiveProviders: z.array(Provider).max(4).optional(),
+        sensitiveProviders: z.array(Provider).max(5).optional(),
       })
       .strict()
       .optional(),
@@ -106,12 +115,15 @@ export function captureOperatorFallback(): OperatorPatch {
   if (fallback) return fallback;
   const codex = config.agent.codex ?? {};
   const agy = config.agent.antigravity ?? {};
+  const copilot = config.agent.copilot ?? {};
   const maxConcurrent = Number(
     process.env.AGY_MAX_CONCURRENT ||
       process.env.ANTIGRAVITY_MAX_CONCURRENT ||
       agy.maxConcurrent ||
       1,
   );
+  const copilotConcurrent = Number(process.env.COPILOT_MAX_CONCURRENT || copilot.maxConcurrent || 1);
+  const copilotSandbox = process.env.COPILOT_SANDBOX;
   fallback = {
     model: config.model ?? "",
     maxTurns: config.maxTurns,
@@ -129,6 +141,21 @@ export function captureOperatorFallback(): OperatorPatch {
       sandbox: envFlag("AGY_SANDBOX", "ANTIGRAVITY_SANDBOX") ?? agy.sandbox ?? true,
       maxConcurrent:
         Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? Math.floor(maxConcurrent) : 1,
+    },
+    copilot: {
+      model: process.env.COPILOT_MODEL ?? copilot.model ?? "",
+      effort: (process.env.COPILOT_EFFORT ?? copilot.effort ?? "") as
+        | ""
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh",
+      sandbox:
+        copilotSandbox === "true" ? true : copilotSandbox === "false" ? false : (copilot.sandbox ?? true),
+      maxConcurrent:
+        Number.isFinite(copilotConcurrent) && copilotConcurrent > 0
+          ? Math.floor(copilotConcurrent)
+          : 1,
     },
     costBudget: {
       runUsd: config.costBudget.runUsd,
@@ -203,6 +230,20 @@ function write(next: OperatorPatch) {
     own(
       `antigravity.${key}`,
       !!next.antigravity && Object.prototype.hasOwnProperty.call(next.antigravity, key),
+    );
+
+  const copilotFb = fb.copilot ?? {};
+  config.agent.copilot = {
+    ...(config.agent.copilot ?? {}),
+    model: pick(next.copilot, "model", copilotFb.model ?? ""),
+    effort: pick(next.copilot, "effort", copilotFb.effort ?? ""),
+    sandbox: pick(next.copilot, "sandbox", copilotFb.sandbox ?? true),
+    maxConcurrent: pick(next.copilot, "maxConcurrent", copilotFb.maxConcurrent ?? 1),
+  };
+  for (const key of ["model", "effort", "sandbox", "maxConcurrent"] as const)
+    own(
+      `copilot.${key}`,
+      !!next.copilot && Object.prototype.hasOwnProperty.call(next.copilot, key),
     );
 
   const costFb = fb.costBudget ?? {};
@@ -284,6 +325,12 @@ export function operatorView() {
         effort: config.agent.antigravity?.effort ?? "",
         sandbox: config.agent.antigravity?.sandbox ?? true,
         maxConcurrent: config.agent.antigravity?.maxConcurrent ?? 1,
+      },
+      copilot: {
+        model: config.agent.copilot?.model ?? "",
+        effort: config.agent.copilot?.effort ?? "",
+        sandbox: config.agent.copilot?.sandbox ?? true,
+        maxConcurrent: config.agent.copilot?.maxConcurrent ?? 1,
       },
       costBudget: config.costBudget,
       scheduler: {
