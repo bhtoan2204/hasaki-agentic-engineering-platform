@@ -6,6 +6,7 @@ import { createServer, type Server } from "node:http";
 import { migrate } from "../src/db/migrate.ts";
 import { pool, q, one } from "../src/db/pool.ts";
 import { config } from "../src/config.ts";
+import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { createUser, type PublicUser } from "../src/auth/users.ts";
 import { definitions } from "../src/workflow/definitions.ts";
 import {
@@ -37,6 +38,8 @@ let seq = 0;
 const runs: number[] = [];
 const policy = { mode: "analysis" as const, workspaces: [], baseBranch: "main" };
 before(async () => {
+  // Routing assertions concern the pinned provider, not installed CLI credentials or capability caches.
+  setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   await migrate();
   owner = await createUser({
     username: "routing-owner",
@@ -64,6 +67,7 @@ afterEach(async () => {
   await settleBackground();
 });
 after(async () => {
+  setHandoffReadinessForTests(undefined);
   server.close();
   await settleBackground();
   await pool.end();

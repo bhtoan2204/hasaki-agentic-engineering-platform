@@ -1,3 +1,4 @@
+import { validateMicroWorkspace } from "../workflow/microEvidence.ts";
 import { toolAllowed } from "./toolPolicy.ts";
 import {
   contextTool,
@@ -88,7 +89,7 @@ export interface PlatformToolEnv {
   onSubmit?(output: Record<string, unknown>): void;
 }
 
-const MUTATING = new Set(["prepare_branch", "commit_changes", "submit_result"]);
+const MUTATING = new Set(["prepare_branch", "commit_changes", "submit_result", "escalate_profile"]);
 const execGit = promisify(execFile);
 
 export async function attemptIsLive(
@@ -96,6 +97,7 @@ export async function attemptIsLive(
   fencingToken: number | null,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const row = await one<{
+    profile_transition_pending: boolean;
     status: string;
     step_status: string;
     current_attempt_id: number | null;
@@ -107,7 +109,8 @@ export async function attemptIsLive(
     worker_instance: string | null;
   }>(
     pool,
-    `SELECT a.status, s.status AS step_status, s.current_attempt_id, s.generation, a.generation AS attempt_generation,
+    `SELECT EXISTS (SELECT 1 FROM workflow_checkpoints cp WHERE cp.attempt_id=a.id AND cp.reason='profile_escalation_requested') AS profile_transition_pending,
+            a.status, s.status AS step_status, s.current_attempt_id, s.generation, a.generation AS attempt_generation,
             j.status AS job_status, j.fencing_token, j.lease_expires_at > clock_timestamp() AS lease_live, r.worker_instance
        FROM workflow_step_attempts a
        JOIN workflow_steps s ON s.id = a.step_id
@@ -117,6 +120,7 @@ export async function attemptIsLive(
     [attemptId],
   );
   if (!row) return { ok: false, reason: "attempt not found" };
+  if (row.profile_transition_pending) return { ok: false, reason: "profile escalation checkpoint pending; end the turn" };
   if (row.worker_instance !== config.instanceId || !row.lease_live)
     return { ok: false, reason: "assigned worker mismatch or lease expired" };
   if (row.status !== "RUNNING") return { ok: false, reason: `attempt is ${row.status}` };
@@ -301,6 +305,16 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       return postUpdate(args, env);
     case "submit_result":
       return submitResult(args, env);
+    case "escalate_profile": {
+      const run = await one<{ profile: string; graph: { profile_revision?: number } }>(pool, "SELECT profile,graph FROM workflow_runs WHERE id=$1", [env.runId]);
+      if (env.mode !== "coding" || run?.profile !== "MICRO") return "ERROR: escalation is only available to a MICRO coding attempt";
+      const request = { ...args, expectedRevision: run.graph.profile_revision ?? 0 };
+      await q(pool, "INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data) VALUES($1,$2,$3,'profile_escalation_requested',$4)",
+        [env.runId, env.stepId, env.attemptId, JSON.stringify(request)]);
+      if (env.policy?.micro) { env.policy.micro.exhausted = true; env.policy.micro.limit = 0; }
+      env.onSubmit?.({ profile_escalation: request });
+      return "Escalation checkpoint recorded. End the turn now; the platform will reassess risk and reconcile the same run before further changes.";
+    }
     case "prepare_branch":
       return prepareBranch(args, env);
     case "commit_changes":
@@ -428,13 +442,17 @@ async function isolationFor(
 
 async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
+  if (env.policy?.micro && !env.selected.includes(repo)) {
+    env.policy.micro.exhausted = true; env.policy.micro.reason = "repository scope expansion requires reassessment";
+    return "ERROR: repository exceeds MICRO scope; escalate before preparing another worktree";
+  }
   const isolation = await isolationFor(env.stepId);
   if (isolation.isolated && !isolation.subtaskId)
     return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
   const run = await selectRepositoryForPreparation(env, repo);
-  const step = await one<{ holders: string[] | null }>(
+  const step = await one<{ holders: string[] | null; config: { micro_source_revision?: string; micro_hashes?: Record<string, string> } }>(
     pool,
-    "SELECT pending_input->'workspace_release'->'holders' AS holders FROM workflow_steps WHERE id = $1",
+    "SELECT config,pending_input->'workspace_release'->'holders' AS holders FROM workflow_steps WHERE id = $1",
     [env.stepId],
   );
   let w;
@@ -489,6 +507,8 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
     message: `prepare_branch ${repo}: ${w.branch}`,
     data: { repo, branch: w.branch, created_from: w.created_from, path: w.path },
   });
+  if (env.policy?.micro && !(await validateMicroWorkspace(w.path, step?.config.micro_source_revision, step?.config.micro_hashes)))
+    return dispatchOwned("escalate_profile", { target: "STANDARD", risk: "unknown", reason: "prepared workspace differs from verified admission revision; reassessment is required" }, env);
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;
@@ -858,6 +878,7 @@ const PLATFORM_TOOL_DOCS: Record<string, { summary: string; read_only: boolean }
     summary: "Submit this step's output object once, then stop.",
     read_only: false,
   },
+  escalate_profile: { summary: "Checkpoint and escalate MICRO before scope, risk or budgets increase. End the turn after calling.", read_only: false },
   prepare_branch: {
     summary:
       "Create the run branch worktree; automatically select an allowed repo with current write access. Coding steps only.",
@@ -937,6 +958,7 @@ const legacyInputs: Record<string, z.ZodType> = {
       .max(8),
   }),
   post_update: z.strictObject({ message: z.string().min(1).max(12000) }),
+  escalate_profile: z.strictObject({ target: z.enum(["FAST", "STANDARD", "DEEP"]), risk: z.enum(["low", "medium", "high", "unknown"]), reason: z.string().min(5).max(2000) }),
   submit_result: z.strictObject({
     output: z.record(z.string(), z.unknown()),
     skills_applied: z.array(z.string().max(300)).max(100).optional(),

@@ -40,6 +40,7 @@ export const SUBAGENT_PLATFORM_TOOLS = [
 ].map((t) => `mcp__platform__${t}`);
 
 export interface PolicyContext {
+  micro?: { files: string[]; calls: number; limit: number; exhausted: boolean; reason?: string };
   mode: ToolMode;
   allowedTools?: string[] | null;
   /** Absolute worktree paths the step may edit. */
@@ -886,6 +887,24 @@ export function decide(
   cwd?: string,
   agentId?: string,
 ): Decision {
+  if (ctx.micro) {
+    const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(tool);
+    if (!control && ++ctx.micro.calls > ctx.micro.limit) {
+      ctx.micro.exhausted = true; ctx.micro.reason = "MICRO tool budget exhausted";
+      return deny("MICRO tool budget exhausted; call escalate_profile before continuing");
+    }
+    if (agentId || tool === "Task" || tool === "Agent") return deny("MICRO does not permit subagents");
+    if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
+      const path = String(input.file_path ?? input.notebook_path ?? "");
+      if (!path || !ctx.workspaces.some(root => ctx.micro!.files.some(file => resolve(root, file) === resolve(cwd ?? root, path)))) {
+        ctx.micro.exhausted = true; ctx.micro.reason = "proposed edit exceeds MICRO scope";
+        return deny("edit exceeds verified MICRO file scope; call escalate_profile before expanding scope");
+      }
+    }
+    // Even a nominal test/read command can execute repository code in an unsandboxed coding process.
+    // Bounded platform reads and explicit edit tools suffice; the trusted harness performs verification.
+    if (tool === "Bash") return deny("MICRO shell execution has uncertain write scope; use bounded platform reads and explicit edits, or escalate. The platform runs mandatory verification.");
+  }
   if (!toolAllowed(tool, ctx.allowedTools))
     return deny(`tool ${tool} is excluded by this attempt's allowed_tools`);
   if (agentId) {

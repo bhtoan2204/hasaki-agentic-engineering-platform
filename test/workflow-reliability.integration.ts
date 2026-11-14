@@ -1,3 +1,4 @@
+import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { pool, one, q, retryTransient } from "../src/db/pool.ts";
@@ -21,6 +22,8 @@ import { claimJob } from "../src/workflow/scheduler.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 
 before(async () => {
+  // Recovery uses scripted executors; installed CLI authentication is outside this fixture's contract.
+  setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   await migrate();
   await definitions.create({
     key: "reliability-control",
@@ -48,6 +51,7 @@ before(async () => {
 });
 after(async () => {
   await settleBackground();
+  setHandoffReadinessForTests(undefined);
   await pool.end();
 });
 

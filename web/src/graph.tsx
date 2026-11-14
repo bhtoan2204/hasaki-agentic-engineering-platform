@@ -142,6 +142,7 @@ export function toEdges(
 }
 
 export type StepNodeData = {
+  transition?: { from: string; to: string; reason: string; revision: number };
   step: StepLike;
   status?: string;
   attempts?: number;
@@ -203,6 +204,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
         </span>
         <div className="gn-titles">
           <div className="t">{step.name || step.key}</div>
+          {data.transition && <div className="sub" title={data.transition.reason}>{data.transition.from} → {data.transition.to} · r{data.transition.revision}: {data.transition.reason}</div>}
           <div className="sub">
             {step.key} · {step.type}
           </div>

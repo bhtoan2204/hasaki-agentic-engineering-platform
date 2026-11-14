@@ -209,7 +209,8 @@ export async function ensureContextPack(
       if (!Number.isInteger(globalBudget) || globalBudget < 2000 || globalBudget > 64000)
         throw new ContextBudgetError("context_tokens must be an integer between 2000 and 64000");
       const role = ctx.step.config.context_tokens == null ? roleBudget(ctx.step) : null;
-      const budget = role != null && role < globalBudget ? role : globalBudget;
+      const roleLimited = role != null && role < globalBudget ? role : globalBudget;
+      const budget = ctx.run.profile === "MICRO" ? Math.min(12000, roleLimited) : roleLimited;
       const budgetSource: ContextPack["budget_source"] =
         ctx.step.config.context_tokens != null
           ? "step_config"

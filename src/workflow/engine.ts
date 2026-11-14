@@ -1,3 +1,4 @@
+import { completeForRun } from "../agent/complete.ts";
 export { releaseAttempt, reapExpiredLeases, safeRecovery } from "./recovery.ts";
 import { existsSync } from "node:fs";
 import { advance } from "./progression.ts";
@@ -14,6 +15,8 @@ import {
   type AfterCommit,
 } from "./mutations.ts";
 export { EngineError } from "./mutations.ts";
+import { applyProfileEscalation } from "./profileRuntime.ts";
+import { collectMicroEvidence } from "./microEvidence.ts";
 import { applyOptimizationDefaults } from "../eval/optimization.ts";
 import { z } from "zod";
 import { execution } from "../auth/execution.ts";
@@ -98,10 +101,9 @@ import type {
 } from "./types.ts";
 import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
 import {
-  applyProfile,
+  resolveProfile,
   classifyComplexity,
-  classifyProfile,
-  ProfileNotApplicable,
+  classifyWithFallback,
   type ProfileChange,
   type ProfileChoice,
   type ProfileDecision,
@@ -283,18 +285,6 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
   const positive = ranked.filter(
     (r) => r.score > 0 && !r.reasons.every((x) => x.startsWith("mapped to project")),
   );
-  const decision0 = classifyProfile(
-    {
-      title: wi?.title ?? input.title ?? "",
-      description: wi?.description ?? String(inputs.description ?? ""),
-      project,
-      repositories: selected,
-      knownRepository: positive.length && !isAmbiguous(positive) ? positive[0].repo : null,
-      matchingRepositories: positive.length,
-      declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
-    },
-    input.profile ?? "AUTO",
-  );
   const priorFailureRuns = wi
     ? Number(
         (
@@ -306,6 +296,21 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
         )?.n ?? 0,
       )
     : 0;
+  const decision0 = await classifyWithFallback(
+    {
+      title: wi?.title ?? input.title ?? "",
+      description: wi?.description ?? String(inputs.description ?? ""),
+      project,
+      repositories: selected,
+      knownRepository: positive.length && !isAmbiguous(positive) ? positive[0].repo : null,
+      matchingRepositories: positive.length,
+      declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
+      provider: input.agentProvider ?? config.agent.defaultProvider ?? null,
+      evidence: selected.length === 1 ? await collectMicroEvidence(selected[0], inputs.files, priorFailureRuns) : undefined,
+    },
+    input.profile ?? "AUTO",
+    prompt => completeForRun({ agent_provider: input.agentProvider }, prompt, AbortSignal.timeout(5000)),
+  );
   const complexity = classifyComplexity(decision0, { priorFailureRuns }, inputs.complexity);
   let decision: ProfileDecision & { complexity: typeof complexity } = {
     ...decision0,
@@ -314,7 +319,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
   };
   // High-risk verification stays mandatory: FAST would drop the independent review, so it is refused for HIGH_RISK
   // unless the user explicitly re-classified the task (recorded as an override).
-  if (complexity.class === "HIGH_RISK" && decision.profile === "FAST")
+  if (complexity.class === "HIGH_RISK" && (decision.profile === "FAST" || decision.profile === "MICRO"))
     decision = {
       ...decision,
       profile: "STANDARD",
@@ -323,17 +328,14 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
         "FAST refused: HIGH_RISK tasks keep the independent review and approvals (override the complexity class to change this)",
       ],
     };
-  let resolved: { spec: WorkflowSpec; changes: ProfileChange[] };
-  try {
-    resolved = applyProfile(dv.spec, decision.profile);
-  } catch (e) {
-    if (!(e instanceof ProfileNotApplicable)) throw e;
-    decision = {
-      ...decision,
-      profile: "STANDARD",
-      reasons: [...decision.reasons, `FAST not applicable: ${e.message} → STANDARD`],
-    };
-    resolved = { spec: dv.spec, changes: [] };
+  const resolved = resolveProfile(dv.spec, decision);
+  decision = resolved.decision;
+  if (decision.profile === "MICRO") {
+    const evidence = decision.signals.evidence as NonNullable<import("./profiles.ts").ProfileSignals["evidence"]>;
+    const files = evidence.files;
+    resolved.spec = { ...resolved.spec, steps: resolved.spec.steps.map(step => step.type === "coding_agent" ? {
+      ...step, config: { ...step.config, micro_scope: files, micro_revision: 0, micro_source_revision: evidence.revision, micro_hashes: evidence.hashes },
+    } : step) };
   }
   const reported = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
   const graph = withCleanupStep(reported);
@@ -423,7 +425,10 @@ export async function startRun(input: StartRunInput) {
     const resolvedGraph = {
       ...optimized.graph,
       profile: r.decision.profile,
+      initial_profile: r.decision.profile,
       profile_changes: r.changes,
+      profile_revision: 0,
+      original_spec: dv.spec,
     };
     await q(
       c,
@@ -442,7 +447,7 @@ export async function startRun(input: StartRunInput) {
         selected,
         branch,
         r.decision.profile,
-        json(r.decision),
+        json({ ...r.decision, initial_profile: r.decision.profile }),
         output_locale,
         agent_provider,
         r.ownerId,
@@ -1827,7 +1832,27 @@ async function applyResult(
       [attempt.id, status, json(output), json(error)],
     );
 
+  if (run.profile === "MICRO" && result.kind === "failed") {
+    const pending = await one<{ data: import("./profileRuntime.ts").EscalationRequest }>(c,
+      "SELECT data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' ORDER BY id DESC LIMIT 1", [attempt.id]);
+    result = { kind: "profile_escalation", request: pending?.data ?? { target: "STANDARD", risk: "unknown",
+      reason: result.error, expectedRevision: (run.graph as WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+  }
   switch (result.kind) {
+    case "profile_escalation": {
+      const previousGraph = run.graph;
+      const previousProfile = run.profile;
+      await q(c, "SAVEPOINT profile_transition");
+      try {
+        await applyProfileEscalation(c, run, step, attempt, result.request);
+        await q(c, "RELEASE SAVEPOINT profile_transition");
+      } catch (error) {
+        await q(c, "ROLLBACK TO SAVEPOINT profile_transition");
+        run.graph = previousGraph; run.profile = previousProfile;
+        return applyResult(c, run, step, attempt, jobId, { kind: "waiting_input", checkpoint: { profile_transition: result.request }, questions: [{ question: "The profile transition requires reconciliation before execution can continue.", context: (error as Error).message, options: ["Review the preserved checkpoint and resume"] }] }, afterCommit);
+      }
+      break;
+    }
     case "completed": {
       const out: any = result.output ?? {};
       if (Array.isArray(out?.selected_repositories))
@@ -2135,7 +2160,11 @@ export async function finishAttempt(
         blocked:
           "Switch request arrived after checkpoint preparation; reinspect the stopped executor's preserved state",
       };
-    if (handoff && attempt.executor_stopped_at && (request || handoff.failure)) {
+    const microEscalating = run.profile === "MICRO" && !request && (
+      result.kind === "profile_escalation" ||
+      (result.kind === "failed" && /execution timeout|context.*budget/i.test(result.error)) ||
+      !!(await one(c, "SELECT 1 FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' LIMIT 1", [attempt.id])));
+    if (!microEscalating && handoff && attempt.executor_stopped_at && (request || handoff.failure)) {
       await persistProviderPause(c, run, step, attempt, j!, result, handoff, request, afterCommit);
     } else {
       await applyResult(c, run, step, attempt, jobId, result, afterCommit);

@@ -39,7 +39,7 @@ import {
 } from "../src/workflow/scheduler.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 import { setPostgresBinForTests } from "../src/platform/postgresBinaries.ts";
-import { FEATURE_REGRESSION_COMMAND } from "../src/workflow/templates.ts";
+import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
 import {
   commandExecutor,
@@ -221,6 +221,8 @@ setGitProvider({
 });
 
 before(async () => {
+  // Executors are scripted here; worker CLI authentication must not reroute their provider snapshots.
+  setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   await migrate();
   await shareAllRepositoriesForTests();
   await seedTemplates();
@@ -263,6 +265,7 @@ before(async () => {
 });
 after(async () => {
   await settleBackground();
+  setHandoffReadinessForTests(undefined);
   await pool.end();
 });
 beforeEach(() => {
@@ -1231,7 +1234,9 @@ test("regression step without a test PostgreSQL is not passed: the reason reache
       type: "command",
       max_attempts: 2,
       retry_backoff_seconds: 0,
-      config: { cwd, command: FEATURE_REGRESSION_COMMAND, on_failure },
+      // Exercise command diagnosis with the local fake runner. A workflow's self-test shell guard
+      // also checks inherited parent verification flags, which are unrelated to this fixture.
+      config: { cwd, command: "npm test --if-present", on_failure },
     });
     const failRun = await startRun({ definitionKey: await customWorkflow([step("fail")]) });
     await drain();

@@ -23,6 +23,7 @@ import {
 import { buildSystemAppend } from "../src/agent/stepPrompt.ts";
 import { claudeExecutor } from "../src/agent/claude.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 
 const ROOT = resolve(import.meta.dirname, "../skills/external");
 const ext = (over: Record<string, unknown> = {}) => ({
@@ -170,6 +171,7 @@ test("prompt notice states provenance and that a third-party skill cannot widen 
 let owner: PublicUser;
 const runs: number[] = [];
 before(async () => {
+  setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   await migrate();
   await shareAllRepositoriesForTests();
   owner = await createUser({
@@ -219,6 +221,7 @@ afterEach(async () => {
 });
 after(async () => {
   await settleBackground();
+  setHandoffReadinessForTests(undefined);
   await pool.end();
 });
 

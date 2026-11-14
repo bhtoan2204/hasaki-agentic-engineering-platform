@@ -311,8 +311,8 @@ export async function resolveContext(
   const disclosure = planKnowledge(res.applied, {
     requestText: rankText,
     stepType: step.type,
-    inlineTokens: config.agent.inlineKnowledgeTokens,
-    indexSize: Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
+    inlineTokens: run.profile === "MICRO" ? Math.min(3000, config.agent.inlineKnowledgeTokens) : config.agent.inlineKnowledgeTokens,
+    indexSize: run.profile === "MICRO" ? Math.min(4, Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize)) : Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
   });
   const completed = Object.fromEntries(
     Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED"),
@@ -320,7 +320,7 @@ export async function resolveContext(
   const upstream = planUpstream(
     completed,
     step.depends_on,
-    Number(cfg.upstream_tokens ?? config.agent.upstreamTokens),
+    run.profile === "MICRO" ? Math.min(2000, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens)) : Number(cfg.upstream_tokens ?? config.agent.upstreamTokens),
   );
   const fileRefs =
     step.type === "agent" || step.type === "coding_agent"

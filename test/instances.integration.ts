@@ -1,3 +1,4 @@
+import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -117,6 +118,8 @@ async function run(type: string) {
   return startRun({ definitionKey: key, outputLocale: "en" });
 }
 before(async () => {
+  // Recovery uses scripted executors; installed CLI authentication is outside this fixture's contract.
+  setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   await migrate();
   registerExecutor("agent", {
     execute: async () => ({ kind: "completed", output: { recovered: true } }),
@@ -125,7 +128,7 @@ before(async () => {
     execute: async () => ({ kind: "completed", output: { result: true } }),
   });
 });
-after(() => pool.end());
+after(async () => { setHandoffReadinessForTests(undefined); await pool.end(); });
 
 test("identity survives process restarts, is unique per installation, refuses Git storage and invalid IDs", async () => {
   const a = mkdtempSync(join(process.env.TEST_ROOT!, "identity-"));

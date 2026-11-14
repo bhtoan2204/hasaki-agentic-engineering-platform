@@ -161,7 +161,7 @@ export interface RunRow {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
-  profile?: "FAST" | "STANDARD" | "DEEP";
+  profile?: "MICRO" | "FAST" | "STANDARD" | "DEEP";
   profile_decision?: unknown;
   /** User-facing prose language for this run. NULL on rows created before the column existed. */
   output_locale?: "vi" | "en" | null;
@@ -256,6 +256,7 @@ export interface QuestionInput {
 
 /** What a step executor reports back. The engine turns it into state transitions. */
 export type ExecResult =
+  | { kind: "profile_escalation"; request: import("./profileRuntime.ts").EscalationRequest }
   | { kind: "completed"; output: unknown }
   | { kind: "failed"; error: string; retryable?: boolean; details?: unknown }
   | {

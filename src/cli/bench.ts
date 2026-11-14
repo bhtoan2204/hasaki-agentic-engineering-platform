@@ -18,6 +18,14 @@ const args = Object.fromEntries(
     .map((a) => a.replace(/^--/, "").split("="))
     .map(([k, v]) => [k, v ?? "true"]),
 );
+if (args.suite === "adaptive-v1") {
+  if (args.fixture === "true") {
+    execFileSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", "./test/setup.ts", "test/adaptive.bench.ts"], { stdio: "inherit" });
+    process.exit(0);
+  }
+  await import("./benchAdaptive.ts");
+  process.exit(0);
+}
 if (args.suite === "platform-performance-v1") {
   await import("./benchPerformance.ts");
   process.exit(0);

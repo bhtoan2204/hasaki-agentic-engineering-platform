@@ -68,7 +68,7 @@ export async function applyOptimizationDefaults(
   spec: WorkflowSpec,
   inputs: Record<string, unknown>,
   explicitProvider: boolean,
-  profile: "FAST" | "STANDARD" | "DEEP" = "STANDARD",
+  profile: "MICRO" | "FAST" | "STANDARD" | "DEEP" = "STANDARD",
   complexity: string | null = null,
 ) {
   const category = typeof inputs.task_category === "string" ? inputs.task_category : null;

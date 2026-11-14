@@ -225,6 +225,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             name: row?.name ?? s.name,
             requires_approval: row?.requires_approval ?? s.requires_approval,
           },
+          transition: s.type === "coding_agent" ? run.graph?.transitions?.at(-1) : undefined,
           status: row?.status,
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],
@@ -941,6 +942,9 @@ function ProfileCard({ run }: { run: any }) {
         </h4>
         <ProfileBadge profile={run.profile} />
       </div>
+      {(run.graph?.transitions ?? []).map((transition: { from: string; to: string; reason: string; revision: number }) => (
+        <div className="small" key={transition.revision}>{transition.from} → {transition.to} · revision {transition.revision}: {transition.reason}</div>
+      ))}
       <div className="small muted">
         {d.requested === "AUTO"
           ? t("rv.autoPick", { confidence: d.confidence })

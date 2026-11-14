@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyProfile,
   classifyProfile,
+  resolveProfile,
   ProfileNotApplicable,
   type ProfileSignals,
 } from "../src/workflow/profiles.ts";
@@ -172,4 +173,147 @@ test("STANDARD is the identity; DEEP removes auto-approval and enables AI discov
   );
   assert.ok(deep.changes.length >= 1);
   assert.equal(deep.spec.steps.length, spec.steps.length);
+});
+
+test("MICRO cannot be forced without verified scope and impact evidence", () => {
+  const decision = classifyProfile(
+    sig({
+      title: "Fix label typo",
+      repositories: ["web"],
+      declaredRisk: "low",
+    }),
+    "MICRO",
+  );
+  assert.equal(decision.profile, "STANDARD");
+  assert.equal(decision.requested, "MICRO");
+  assert.ok(decision.reasons.some((reason) => /verified/i.test(reason)));
+});
+
+test("risk and implementation complexity remain separate and AUTO retains existing routing", () => {
+  const decision = classifyProfile(sig({ title: "Fix payment label", repositories: ["web"] }));
+  assert.equal(decision.signals.business_risk, "high");
+  assert.equal(decision.signals.implementation_complexity, "small");
+  assert.equal(decision.profile, "STANDARD");
+  const short = classifyProfile(sig({ title: "Fix", repositories: ["web"] }));
+  assert.equal(short.signals.business_risk, "unknown");
+  assert.notEqual(short.profile, "MICRO");
+});
+
+test("profile fallback applies STANDARD independent verification to configured boundaries", () => {
+  const spec = validateSpec({
+    name: "Boundary",
+    steps: [
+      { key: "analyze", type: "agent", config: { agent: { provider: "codex" } } },
+      { key: "implement", type: "coding_agent", depends_on: ["analyze"] },
+      { key: "review", type: "agent", depends_on: ["implement"] },
+      { key: "pr", type: "integration", depends_on: ["review"], config: { mode: "approval" } },
+    ],
+  });
+  const decision = classifyProfile(sig({ title: "Fix typo", repositories: ["web"] }), "FAST");
+  const result = resolveProfile(spec, decision);
+  assert.equal(result.decision.profile, "STANDARD");
+  assert.equal(result.decision.requested, "FAST");
+  assert.match(result.decision.reasons.join(" "), /explicit agent configuration/);
+  assert.equal(result.spec.steps.find((step) => step.key === "review")!.config.independent, true);
+  assert.equal(result.spec.steps.find((step) => step.key === "pr")!.config.mode, "approval");
+  assert.equal(spec.steps.find((step) => step.key === "review")!.config.independent, undefined);
+});
+
+test("MICRO declines graphs with plan approvals and mandatory independent review", () => {
+  assert.throws(() => applyProfile(tpl("feature-implementation"), "MICRO"), ProfileNotApplicable);
+});
+
+test("MICRO graph folds only explicit self-review and preserves deterministic checks and PR approval", () => {
+  const spec = validateSpec({
+    name: "Local change",
+    steps: [
+      { key: "analyze", type: "agent", config: { instructions: "Find the label" } },
+      { key: "plan", type: "agent", depends_on: ["analyze"] },
+      {
+        key: "implement",
+        type: "coding_agent",
+        depends_on: ["plan"],
+        config: { delegation: { enabled: true } },
+      },
+      {
+        key: "self_review",
+        type: "agent",
+        depends_on: ["implement"],
+        config: { independent: false, instructions: "Check the label" },
+      },
+      {
+        key: "test",
+        type: "integration",
+        depends_on: ["self_review"],
+        config: { action: "tests" },
+      },
+      { key: "pr", type: "integration", depends_on: ["test"], config: { mode: "approval" } },
+    ],
+  });
+  const result = applyProfile(spec, "MICRO");
+  assert.deepEqual(
+    result.spec.steps.map((step) => step.key),
+    ["implement", "test", "pr"],
+  );
+  assert.deepEqual(result.spec.steps.find((step) => step.key === "test")!.depends_on, [
+    "implement",
+  ]);
+  assert.equal(result.spec.steps.find((step) => step.key === "pr")!.config.mode, "approval");
+  const coding = result.spec.steps.find((step) => step.key === "implement")!;
+  assert.match(String(coding.config.instructions), /Check the label/);
+  assert.deepEqual(coding.config.delegation, { enabled: false });
+  assert.deepEqual(coding.config.merged_from, ["analyze", "plan", "self_review"]);
+  assert.doesNotThrow(() => validateSpec(result.spec));
+  assert.equal(spec.steps.length, 6);
+});
+
+test("MICRO refuses mandatory review, multiple coding sessions and approval boundaries", () => {
+  for (const steps of [
+    [
+      { key: "implement", type: "coding_agent" },
+      { key: "review", type: "agent", depends_on: ["implement"] },
+    ],
+    [
+      { key: "implement", type: "coding_agent" },
+      { key: "fix", type: "coding_agent", depends_on: ["implement"] },
+    ],
+    [
+      { key: "approve", type: "human_approval" },
+      { key: "implement", type: "coding_agent", depends_on: ["approve"] },
+    ],
+  ])
+    assert.throws(
+      () => applyProfile(validateSpec({ name: "Boundaries", steps }), "MICRO"),
+      ProfileNotApplicable,
+    );
+});
+
+test("MICRO cannot fold independent phases or discard structured output contracts", () => {
+  for (const config of [{ independent: true }, { output_contract: "{ findings: [] }" }]) {
+    const spec = validateSpec({
+      name: "Preserve phase contract",
+      steps: [
+        { key: "analyze", type: "agent", config },
+        { key: "implement", type: "coding_agent", depends_on: ["analyze"] },
+      ],
+    });
+    assert.throws(() => applyProfile(spec, "MICRO"), ProfileNotApplicable);
+  }
+});
+
+test("MICRO preserves consumers of a removed phase output by declining folding", () => {
+  const spec = validateSpec({
+    name: "Consumer",
+    steps: [
+      { key: "analyze", type: "agent" },
+      { key: "implement", type: "coding_agent", depends_on: ["analyze"] },
+      {
+        key: "test",
+        type: "integration",
+        depends_on: ["implement"],
+        config: { input: "upstream.analyze.output.command" },
+      },
+    ],
+  });
+  assert.throws(() => applyProfile(spec, "MICRO"), /reads a phase output/);
 });

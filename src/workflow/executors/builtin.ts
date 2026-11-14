@@ -93,6 +93,7 @@ export const humanApprovalExecutor: StepExecutor = {
         cfg.approve_scope_from,
         ctx.input.upstream[cfg.approve_scope_from]?.output,
       );
+      if (!scope && cfg.require_scope === true) return { kind: "failed", error: "A concrete revised scope is required before approval; reconcile the scope-plan output.", retryable: false };
       if (scope)
         Object.assign(request, {
           scope,

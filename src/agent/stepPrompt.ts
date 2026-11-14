@@ -34,6 +34,7 @@ export function buildSystemAppend(
 ): string {
   const cfg = step.config ?? {};
   const lines = [
+    ...(run.profile === "MICRO" ? ["MICRO: complete analysis, plan, implementation and self-review in this session. Do not delegate. Edit only verified micro_scope files using explicit edit tools. Shell execution is disabled; use bounded platform read tools. The trusted platform harness runs mandatory verification. If scope, business risk, dependency impact or budgets grow, call mcp__platform__escalate_profile and end the turn before further changes."] : []),
     `You are executing ONE step of an engineering workflow on the Hasaki workflow platform, UNATTENDED.`,
     `Workflow: ${run.definition_key} · run #${run.id} · step "${step.name}" (${step.key}, type ${step.type}).`,
     `The developer is not watching the terminal; reach them only through the platform tools (mcp__platform__*).`,
@@ -191,7 +192,7 @@ export function buildSystemAppend(
       "Domain integrations (Splunk, project QC databases, Kafka, Vault, Argo CD, Jira, Hasaki Work, Bitbucket, repository registry, this run's history/changes) are not loaded up front:",
       "mcp__platform__list_tools to discover them, mcp__platform__describe_tool for the full contract, mcp__platform__call_tool to use one.",
     );
-  if (step.config?.delegation?.enabled)
+  if (run.profile !== "MICRO" && step.config?.delegation?.enabled)
     lines.push(
       "",
       "## Delegation (optional)",

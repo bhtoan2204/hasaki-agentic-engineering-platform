@@ -18,8 +18,9 @@ import { useI18n } from "../i18n/index.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
 
-export type ProfileChoice = "AUTO" | "FAST" | "STANDARD" | "DEEP";
+export type ProfileChoice = "AUTO" | "MICRO" | "FAST" | "STANDARD" | "DEEP";
 const COLOR: Record<string, string> = {
+  MICRO: "COMPLETED",
   FAST: "COMPLETED",
   STANDARD: "READY",
   DEEP: "WAITING",
@@ -28,7 +29,7 @@ const COLOR: Record<string, string> = {
 export function ProfileBadge({ profile, title }: { profile?: string; title?: string }) {
   if (!profile) return null;
   const I =
-    profile === "FAST"
+    (profile === "FAST" || profile === "MICRO")
       ? Zap
       : profile === "DEEP"
         ? Microscope
@@ -113,6 +114,7 @@ export function ProfilePreview({
                 AUTO
               </span>,
             ],
+            ["MICRO", <span>MICRO</span>],
             [
               "FAST",
               <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>

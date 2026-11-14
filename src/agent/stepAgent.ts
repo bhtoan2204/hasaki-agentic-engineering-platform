@@ -45,7 +45,7 @@ export const StepAgentConfig = z
       .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
       .nullable()
       .optional(),
-    execution_profile: z.enum(["FAST", "STANDARD", "DEEP"]).optional(),
+    execution_profile: z.enum(["MICRO", "FAST", "STANDARD", "DEEP"]).optional(),
     timeout_ms: z.number().int().min(1000).max(86_400_000).optional(),
     retry: z
       .object({
@@ -85,7 +85,7 @@ export type StepAgentConfig = z.infer<typeof StepAgentConfig>;
 export interface EffectiveAgent extends StepAgentConfig {
   provider: AgentProvider;
   model: string | null;
-  execution_profile: "FAST" | "STANDARD" | "DEEP";
+  execution_profile: "MICRO" | "FAST" | "STANDARD" | "DEEP";
   source: string;
 }
 
@@ -114,6 +114,10 @@ export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) 
   if (provider === "cursor" && a.allowed_tools != null)
     throw new Error(
       "Cursor cannot enforce a custom native tool allowlist; use its existing platform policy",
+    );
+  if (provider === "cursor" && a.execution_profile === "MICRO")
+    throw new Error(
+      "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
     );
 }
 
@@ -217,7 +221,12 @@ export function resolveStepAgent(
     merged.reasoning_effort = null;
     provider = active;
   }
-  const profile = merged.execution_profile ?? run.profile ?? "STANDARD";
+  const profile =
+    run.profile === "MICRO" ? "MICRO" : (merged.execution_profile ?? run.profile ?? "STANDARD");
+  if (run.profile === "MICRO") {
+    merged.context_tokens = Math.min(12000, merged.context_tokens ?? 12000);
+    merged.timeout_ms = Math.min(600000, merged.timeout_ms ?? 600000);
+  }
   const legacy = { ...step, config: { ...step.config } };
   if (Object.hasOwn(merged, "model")) {
     delete legacy.config.model;
