@@ -776,6 +776,22 @@ test("eval:cleanup lists by default and with --yes removes only COMPLETED or CAN
     await rm(outside, { recursive: true, force: true });
   }
 });
+async function assertPostmasterStopped(pid: number) {
+  const { readFileSync } = await import("node:fs");
+  try {
+    process.kill(pid, 0);
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      if (state === "Z") return;
+    } catch {
+      return;
+    }
+    assert.fail(`process ${pid} is still running`);
+  } catch (err: unknown) {
+    assert.equal((err as NodeJS.ErrnoException).code, "ESRCH");
+  }
+}
 async function startPostmaster(root: string) {
   const { mkdtemp, readFile } = await import("node:fs/promises");
   const { join } = await import("node:path");
@@ -822,7 +838,7 @@ test("eval:cleanup --case removes one case regardless of status, stopping its po
     const report = await evalCleanup({ yes: true, caseRunId: failed.caseRunId });
     assert.equal(report.find((r) => r.case_run_id === failed.caseRunId)?.removed, true);
     assert.equal(report.find((r) => r.case_run_id === other.caseRunId)?.removed, false);
-    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assertPostmasterStopped(pid);
     await assert.rejects(stat(failed.root));
     await stat(join(other.root, "repo", "edited.txt"));
   } finally {
@@ -1097,7 +1113,7 @@ test("live cleanup stops an orphaned postmaster first and reports a missing pg_c
     await stat(data);
     process.env.PATH = path;
     await cleanupLiveWork(Number(orphan.e.workflow_run_id), orphan.root);
-    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assertPostmasterStopped(pid);
     await assert.rejects(stat(orphan.root));
   } finally {
     process.env.PATH = path;
