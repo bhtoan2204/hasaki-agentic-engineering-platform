@@ -804,6 +804,34 @@ async function startPostmaster(root: string) {
   const pid = Number((await readFile(join(data, "postmaster.pid"), "utf8")).split("\n")[0]);
   return { data, socket, pid };
 }
+async function assertPostmasterTerminated(pid: number) {
+  const { readFileSync } = await import("node:fs");
+  let running = true;
+  for (let i = 0; i < 50; i++) {
+    try {
+      process.kill(pid, 0);
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+        if (state === "Z") {
+          running = false;
+          break;
+        }
+      } catch {
+        running = false;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        running = false;
+        break;
+      }
+      throw error;
+    }
+  }
+  assert.equal(running, false, `postmaster process ${pid} still running`);
+}
 test("eval:cleanup --case removes one case regardless of status, stopping its postmaster first", async () => {
   const { evalCleanup } = await import("../src/cli/evalCleanup.ts");
   const { stat, rm } = await import("node:fs/promises");
@@ -822,7 +850,7 @@ test("eval:cleanup --case removes one case regardless of status, stopping its po
     const report = await evalCleanup({ yes: true, caseRunId: failed.caseRunId });
     assert.equal(report.find((r) => r.case_run_id === failed.caseRunId)?.removed, true);
     assert.equal(report.find((r) => r.case_run_id === other.caseRunId)?.removed, false);
-    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assertPostmasterTerminated(pid);
     await assert.rejects(stat(failed.root));
     await stat(join(other.root, "repo", "edited.txt"));
   } finally {
@@ -1097,7 +1125,7 @@ test("live cleanup stops an orphaned postmaster first and reports a missing pg_c
     await stat(data);
     process.env.PATH = path;
     await cleanupLiveWork(Number(orphan.e.workflow_run_id), orphan.root);
-    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    await assertPostmasterTerminated(pid);
     await assert.rejects(stat(orphan.root));
   } finally {
     process.env.PATH = path;

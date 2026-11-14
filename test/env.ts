@@ -55,6 +55,28 @@ const testGoPath = join(root, "gopath");
 mkdirSync(testGoPath, { recursive: true });
 process.env.GOPATH = testGoPath;
 
+// Mock claude CLI in PATH so probeAgentHealth confirms readiness in test runs without remote auth.
+const testBin = join(root, "bin");
+mkdirSync(testBin, { recursive: true });
+const claudeScript = join(testBin, "claude");
+writeFileSync(
+  claudeScript,
+  `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "auth" && args[1] === "status") {
+  console.log(JSON.stringify({ loggedIn: true }));
+  process.exit(0);
+}
+if (args[0] === "--version") {
+  console.log("2.0.0");
+  process.exit(0);
+}
+console.log(JSON.stringify({ ok: true }));
+`,
+  { mode: 0o755 },
+);
+process.env.PATH = `${testBin}:${process.env.PATH || ""}`;
+
 // Tests must never inherit a developer's live Telegram bot or receiver settings. Individual Telegram tests
 // explicitly point config at their local mocked Bot API after the isolated database is ready.
 for (const key of [
