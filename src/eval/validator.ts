@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile, writeFile, lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { extract } from "../codeIntelligence/parser.ts";
@@ -111,10 +112,11 @@ if (tsc.status !== 0) {
         source: join(import.meta.dirname, "..", "..", "node_modules", "typescript"),
         target: "/compiler/node_modules/typescript",
       },
-      {
+      // The scoped native compiler packages are optional; JS-only TypeScript installations omit this directory.
+      ...(existsSync(join(import.meta.dirname, "..", "..", "node_modules", "@typescript")) ? [{
         source: join(import.meta.dirname, "..", "..", "node_modules", "@typescript"),
         target: "/compiler/node_modules/@typescript",
-      },
+      }] : []),
     );
   }
   try {
