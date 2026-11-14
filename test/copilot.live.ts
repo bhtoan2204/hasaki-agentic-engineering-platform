@@ -117,7 +117,8 @@ test(
       inputs: { project: "OMS" },
     });
     await drain();
-    const qs = await q<any>(
+    const qs = await q<{ id: string }>(
+
       pool,
       "SELECT * FROM workflow_questions WHERE run_id = $1 AND status = 'open'",
       [run.id],
@@ -125,7 +126,12 @@ test(
     assert.equal(qs.length, 1, "analysis asked one question and paused");
     await answerQuestions({ [qs[0].id]: "refund" }, "smoke");
     await drain();
-    const steps = await q<any>(
+    const steps = await q<{
+        key: string;
+        status: string;
+        output?: { verdict?: unknown; verification?: { status?: unknown } };
+      }>(
+
       pool,
       "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 ORDER BY id",
       [run.id],
@@ -142,7 +148,12 @@ test(
         1,
       ),
     );
-    const sessions = await q<any>(
+    const sessions = await q<{
+        provider: string;
+        session_id: string;
+        key: string;
+      }>(
+
       pool,
       "SELECT s.provider, s.session_id, st.key FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id JOIN workflow_steps st ON st.id = a.step_id WHERE a.run_id = $1 ORDER BY s.id",
       [run.id],
@@ -158,12 +169,13 @@ test(
       verifyThread && verifyThread !== implThread,
       "independent verification used a fresh thread",
     );
-    const denied = await one<any>(
+    const denied = await one<{ n: number }>(
+
       pool,
       "SELECT count(*)::int AS n FROM workflow_events WHERE run_id = $1 AND kind = 'tool' AND content LIKE 'denied %'",
       [run.id],
     );
-    assert.ok(denied.n >= 1, "the git push attempt was denied before execution");
+    assert.ok(denied && denied.n >= 1, "the git push attempt was denied before execution");
     assert.equal(steps.find((s) => s.key === "implement")?.status, "COMPLETED");
     assert.equal((await getRun(run.id)).agent_provider, "copilot");
   },

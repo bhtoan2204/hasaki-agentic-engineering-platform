@@ -80,8 +80,9 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
   try {
     const v = await run(bin, ["--version"]);
     version = `${v.stdout}`.trim().split("\n")[0] ?? "";
-  } catch (e: any) {
-    if (e?.code === "ENOENT")
+  } catch (e: unknown) {
+    const err = e as { code?: string; stderr?: string; message?: string } | null;
+    if (err?.code === "ENOENT")
       return {
         ok: false,
         bin,
@@ -92,7 +93,7 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
       ok: false,
       bin,
       kind: "missing",
-      error: `GitHub Copilot CLI (${bin}) failed to start: ${String(e?.stderr || e?.message || e).slice(0, 300)}. ${NO_FALLBACK}`,
+      error: `GitHub Copilot CLI (${bin}) failed to start: ${String(err?.stderr || err?.message || e).slice(0, 300)}. ${NO_FALLBACK}`,
     };
   }
 
@@ -110,13 +111,14 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
         };
       }
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as { stderr?: string; message?: string } | null;
     return {
       ok: false,
       bin,
       version,
       kind: "unsupported",
-      error: `${version || bin}: could not read \`copilot --help\`: ${String(e?.stderr || e?.message || e).slice(0, 300)}. ${NO_FALLBACK}`,
+      error: `${version || bin}: could not read \`copilot --help\`: ${String(err?.stderr || err?.message || e).slice(0, 300)}. ${NO_FALLBACK}`,
     };
   }
 
@@ -125,7 +127,7 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
   let hasToken = false;
   try {
     hasToken = existsSync(tokenFile) && statSync(tokenFile).size > 0;
-  } catch {}
+  } catch { /* ignore */ }
 
   const models = await modelCatalog(bin);
   if (!models && !execution.getStore()?.evaluation?.fixtureAgent) {

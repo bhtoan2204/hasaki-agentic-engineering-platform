@@ -142,7 +142,9 @@ if (existsSync(hooksFile)) {
       hooksCfg["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command ||
       hooksCfg.PreToolUse?.command ||
       null;
-  } catch {}
+  } catch {
+    /* ignore */
+  }
 }
 
 const callHook = (payload) => {
@@ -184,7 +186,9 @@ function startMcp() {
           try {
             const msg = JSON.parse(line);
             waiting.get(msg.id)?.(msg);
-          } catch {}
+          } catch {
+            /* ignore */
+          }
         }
       }
     });

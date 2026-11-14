@@ -156,28 +156,30 @@ export function codexModelFor(
 
 
 export function copilotModelFor(
-  step: { type: string; config: Record<string, any> },
+  step: { type: string; config: Record<string, unknown> },
   profile?: string | null,
 ): { model: string; source: string; effort: string } {
   const c = copilotConfig();
+  const cfg = step.config;
+  const agent = cfg.agent as { model?: string; reasoning_effort?: string } | undefined;
   const effort =
-    step.config.agent?.reasoning_effort ||
-    step.config.copilot_effort ||
-    step.config.effort ||
+    agent?.reasoning_effort ||
+    (typeof cfg.copilot_effort === "string" ? cfg.copilot_effort : "") ||
+    (typeof cfg.effort === "string" ? cfg.effort : "") ||
     c.effort;
-  if (step.config.agent?.model)
+  if (agent?.model)
     return {
-      model: step.config.agent.model,
+      model: agent.model,
       source: "step config (agent.model)",
       effort,
     };
-  if (step.config.copilot_model)
+  if (typeof cfg.copilot_model === "string")
     return {
-      model: step.config.copilot_model,
+      model: cfg.copilot_model,
       source: "step config (copilot_model)",
       effort,
     };
-  const role = step.config.independent === true ? "verifier" : step.type;
+  const role = cfg.independent === true ? "verifier" : step.type;
   for (const scope of [profile ?? "", "*"]) {
     const model = c.models[scope]?.[role];
     if (model) return { model, source: `copilot routing ${scope}/${role}`, effort };

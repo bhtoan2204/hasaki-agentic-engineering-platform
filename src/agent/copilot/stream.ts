@@ -118,10 +118,12 @@ export class TextBatch {
   }
 }
 
+type RawRecord = Record<string, unknown>;
+
 function parseCopilotLine(
   line: string,
 ): { event: CopilotEvent } | { error: CopilotParseError } {
-  let raw: any;
+  let raw: unknown;
   try {
     raw = JSON.parse(line);
   } catch (e) {
@@ -133,57 +135,67 @@ function parseCopilotLine(
   if (!raw || typeof raw !== "object") {
     return { error: { line: line.slice(0, 500), error: "event has no type" } };
   }
+  const rawObj = raw as RawRecord;
 
-  const protocolEvent = typeof raw.event === "string" ? raw.event : "";
-  const payload =
+  const protocolEvent = typeof rawObj.event === "string" ? rawObj.event : "";
+  const payload = (
     protocolEvent === "step_update"
-      ? (raw.step_update ?? {})
+      ? (rawObj.step_update ?? {})
       : protocolEvent === "result"
-        ? (raw.result ?? {})
+        ? (rawObj.result ?? {})
         : protocolEvent === "init"
-          ? (raw.init ?? raw)
-          : raw;
+          ? (rawObj.init ?? rawObj)
+          : rawObj
+  ) as RawRecord;
   const type =
     protocolEvent === "step_update"
       ? `step_update.${String(payload.step_type ?? "unknown")}`
-      : protocolEvent || String(raw.type ?? raw.event_type ?? raw.kind ?? "message");
+      : protocolEvent || String(rawObj.type ?? rawObj.event_type ?? rawObj.kind ?? "message");
   let text: string | undefined = undefined;
   let thinking: string | undefined = undefined;
+
+  const rawDelta = rawObj.delta as RawRecord | undefined;
+  const rawMsg = rawObj.message as RawRecord | undefined;
 
   if (typeof payload.text_delta === "string") text = payload.text_delta;
   else if (typeof payload.response === "string") text = payload.response;
   else if (typeof payload.text === "string") text = payload.text;
-  else if (typeof raw.text === "string") text = raw.text;
-  else if (typeof raw.content === "string") text = raw.content;
-  else if (typeof raw.delta?.text === "string") text = raw.delta.text;
-  else if (typeof raw.message?.content === "string") text = raw.message.content;
-  else if (Array.isArray(raw.message?.content)) {
-    const parts = raw.message.content
-      .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
-      .map((c: any) => c.text);
+  else if (typeof rawObj.text === "string") text = rawObj.text;
+  else if (typeof rawObj.content === "string") text = rawObj.content;
+  else if (typeof rawDelta?.text === "string") text = rawDelta.text;
+  else if (typeof rawMsg?.content === "string") text = rawMsg.content;
+  else if (Array.isArray(rawMsg?.content)) {
+    const parts = (rawMsg.content as unknown[])
+      .filter((c): c is { type: string; text: string } => {
+        const item = c as { type?: unknown; text?: unknown } | null;
+        return Boolean(item && item.type === "text" && typeof item.text === "string");
+      })
+      .map((c) => c.text);
     if (parts.length) text = parts.join("");
   }
 
   if (typeof payload.thinking === "string") thinking = payload.thinking;
-  else if (typeof raw.thinking === "string") thinking = raw.thinking;
-  else if (typeof raw.delta?.thinking === "string") thinking = raw.delta.thinking;
+  else if (typeof rawObj.thinking === "string") thinking = rawObj.thinking;
+  else if (typeof rawDelta?.thinking === "string") thinking = rawDelta.thinking;
 
   const conversationId =
     payload.conversationId ??
     payload.conversation_id ??
-    raw.conversationId ??
-    raw.conversation_id ??
-    raw.sessionId ??
-    raw.session_id;
+    rawObj.conversationId ??
+    rawObj.conversation_id ??
+    rawObj.sessionId ??
+    rawObj.session_id;
 
   // Extract usage / tokens
   let tokens: CopilotTokens | undefined = undefined;
-  const usage =
+  const rawMetrics = rawObj.metrics as RawRecord | undefined;
+  const usage = (
     payload.usage ??
-    raw.usage ??
-    raw.metrics?.tokens ??
-    raw.tokens ??
-    (raw.type === "tokens" || raw.input != null ? raw : null);
+    rawObj.usage ??
+    rawMetrics?.tokens ??
+    rawObj.tokens ??
+    (rawObj.type === "tokens" || rawObj.input != null ? rawObj : null)
+  ) as RawRecord | undefined;
   if (usage && typeof usage === "object") {
     tokens = {
       input: num(usage.input_tokens ?? usage.input ?? usage.prompt_tokens),
@@ -199,19 +211,23 @@ function parseCopilotLine(
     };
   }
 
-  const rawError = payload.error ?? raw.error;
+  const rawError = (payload.error ?? rawObj.error) as RawRecord | string | undefined;
+  const rawErrorMsg = typeof rawError === "object" && rawError !== null && typeof rawError.message === "string" ? rawError.message : undefined;
   const error =
     protocolEvent === "result" && payload.status === "ERROR"
       ? typeof rawError === "string"
         ? rawError
-        : String(rawError?.message ?? "Copilot returned ERROR")
+        : String(rawErrorMsg ?? "Copilot returned ERROR")
       : rawError
         ? typeof rawError === "string"
           ? rawError
-          : rawError.message
-            ? String(rawError.message)
+          : rawErrorMsg
+            ? String(rawErrorMsg)
             : JSON.stringify(rawError)
         : undefined;
+
+  const payloadToolInfo = payload.tool_info as RawRecord | undefined;
+  const rawToolCall = (rawObj.toolCall ?? rawObj.tool_call) as RawRecord | undefined;
 
   return {
     event: {
@@ -227,22 +243,22 @@ function parseCopilotLine(
       cumulativeUsage: protocolEvent === "result",
       status: typeof payload.status === "string" ? payload.status : undefined,
       turns: num(payload.num_turns) ?? undefined,
-      tool:
-        payload.tool_info?.name ??
-        payload.tool_info?.tool_name ??
-        raw.toolCall?.name ??
-        raw.tool_call?.name ??
-        raw.tool ??
-        undefined,
-      toolArgs:
-        payload.tool_info?.parameters ??
-        raw.toolCall?.args ??
-        raw.tool_call?.args ??
-        raw.args ??
-        undefined,
-      toolResult: payload.tool_info ?? raw.result ?? raw.toolResult ?? undefined,
+      tool: (
+        payloadToolInfo?.name ??
+        payloadToolInfo?.tool_name ??
+        rawToolCall?.name ??
+        rawObj.tool ??
+        undefined
+      ) as string | undefined,
+      toolArgs: (
+        payloadToolInfo?.parameters ??
+        rawToolCall?.args ??
+        rawObj.args ??
+        undefined
+      ) as Record<string, unknown> | undefined,
+      toolResult: payload.tool_info ?? rawObj.result ?? rawObj.toolResult ?? undefined,
       error,
-      raw,
+      raw: rawObj,
     },
   };
 }
@@ -251,9 +267,13 @@ const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 
 export function classifyCopilotError(err: unknown): FailureCategory {
-  const text = String(
-    (err as any)?.message ?? (err as any)?.error?.message ?? (err as any)?.error ?? err ?? "",
-  ).toLowerCase();
+  const obj = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
+  const errObj =
+    typeof obj?.error === "object" && obj?.error !== null
+      ? (obj.error as Record<string, unknown>)
+      : null;
+  const errMsg = typeof errObj?.message === "string" ? errObj.message : undefined;
+  const text = String(obj?.message ?? errMsg ?? obj?.error ?? err ?? "").toLowerCase();
   if (/quota|resource has been exhausted|rate_limit|too many requests|429/.test(text)) {
     if (/quota|credit|billing|exhausted/.test(text)) return "QUOTA_EXHAUSTED";
     return "RATE_LIMIT";

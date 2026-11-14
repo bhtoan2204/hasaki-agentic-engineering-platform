@@ -5,7 +5,7 @@ import { decide, type Decision, type PolicyContext } from "../toolPolicy.ts";
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [
-    /github-copilot|\.config[\/\\]github-copilot/i,
+    /github-copilot|\.config[/\\]github-copilot/i,
     "GitHub Copilot credentials and configuration are not readable by workflow steps",
   ],
   [
@@ -27,11 +27,11 @@ function secretDenial(text: string): string | null {
 }
 
 export function copilotHookDecision(
-  payload: any,
+  payload: Record<string, unknown> | null | undefined,
   policy: PolicyContext,
   sessionCwd: string,
 ): Decision {
-  const toolCall = payload?.toolCall ?? payload?.tool_call;
+  const toolCall = (payload?.toolCall ?? payload?.tool_call) as Record<string, unknown> | undefined;
   const toolName = String(toolCall?.name ?? payload?.tool_name ?? payload?.name ?? "");
   const args = (toolCall?.args ?? payload?.tool_input ?? payload?.args ?? {}) as Record<
     string,
@@ -193,7 +193,9 @@ export function excludeFromGit(gitDir: string) {
   let cur = "";
   try {
     cur = readFileSync(exclude, "utf8");
-  } catch {}
+  } catch {
+    /* ignore */
+  }
   const lines = [".agents/hooks.json", ".agents/mcp_config.json"];
   let added = false;
   for (const line of lines) {

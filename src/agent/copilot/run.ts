@@ -70,7 +70,11 @@ function waitForDrain(child: ChildProcess, signal?: AbortSignal): Promise<void> 
     };
     const done = (error?: Error) => {
       cleanup();
-      error ? reject(error) : resolve();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
     };
     const drained = () => done();
     const failed = (error: Error) => done(error);
@@ -120,7 +124,11 @@ async function writeCopilotPrompt(child: ChildProcess, prompt: string, signal?: 
     };
     const done = (error?: Error) => {
       cleanup();
-      error ? reject(error) : resolve();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
     };
     const finished = () => done();
     const failed = (error: Error) => done(error);
@@ -145,7 +153,9 @@ function killCopilot(child: ChildProcess) {
   } catch {
     try {
       child.kill("SIGTERM");
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }
   const force = setTimeout(() => {
     if (child.exitCode !== null || child.signalCode !== null) return;
@@ -154,7 +164,9 @@ function killCopilot(child: ChildProcess) {
     } catch {
       try {
         child.kill("SIGKILL");
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     }
   }, 5000);
   force.unref();
@@ -311,7 +323,9 @@ export async function copilotAgentTurn(
     for (const w of workspaces) {
       try {
         excludeFromGit(join(w.path, ".git"));
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     }
 
     const additionalDirs = workspaces.map((w) => w.path).filter((p) => p !== input.cwd);
