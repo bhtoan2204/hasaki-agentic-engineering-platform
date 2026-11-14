@@ -4,8 +4,7 @@ import { config } from "../config.ts";
  * The run default remains fixed for historical compatibility. Agent steps resolve their own provider and model
  * into an immutable attempt snapshot. Historical rows without the run column default to Claude.
  */
-
-export const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity"] as const;
+export const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity", "copilot"] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
 export type ProviderFlags = Partial<Record<AgentProvider, boolean>>;

@@ -1,6 +1,6 @@
 import { access, constants } from "node:fs/promises";
 import { delimiter, join, isAbsolute } from "node:path";
-import { config, codexConfig, antigravityConfig } from "../config.ts";
+import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
 import { bwrapAvailable } from "../platform/selfDevelopment.ts";
 async function executable(bin: string) {
   const candidates = isAbsolute(bin)
@@ -34,6 +34,7 @@ export async function livePrerequisites(configuration: {
     codex: codexConfig().bin,
     cursor: process.env.CURSOR_AGENT_BIN || config.agent.cursorBin || "agent",
     antigravity: antigravityConfig().bin,
+    copilot: copilotConfig().bin,
   };
   for (const agent of configuration.provider_sequence) {
     const bin = bins[agent.provider ?? ""];

@@ -5,7 +5,7 @@ import { ModelSelect, type CatalogModel } from "../ModelSelect.tsx";
 import { ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
-const PROVIDERS = ["claude", "codex", "cursor", "antigravity"] as const;
+const PROVIDERS = ["claude", "codex", "cursor", "antigravity", "copilot"] as const;
 const EFFORTS = ["", "low", "medium", "high", "xhigh"] as const;
 const AGY_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"] as const;
 

@@ -13,6 +13,7 @@ import { config } from "../config.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
+import { copilotCapabilities } from "./copilot/capabilities.ts";
 import { agentEnvironment } from "./environment.ts";
 import type { EffectiveAgent } from "./stepAgent.ts";
 import type { RunRow, StepRow, AttemptRow, ExecResult } from "../workflow/types.ts";
@@ -354,6 +355,13 @@ export async function handoffReadiness(a: EffectiveAgent) {
         quota: "unknown",
         cost: "unknown",
       };
+    }
+    if (a.provider === "copilot") {
+      const c = await copilotCapabilities(false, {
+        model: a.model ?? "",
+        effort: a.reasoning_effort ?? "",
+      });
+      return { ok: c.ok, error: c.error, quota: "unknown", cost: "unknown" };
     }
     if (a.provider === "antigravity") {
       const c = await antigravityCapabilities(false, {

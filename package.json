@@ -16,6 +16,7 @@
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",
     "eval:cleanup": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalCleanup.ts",
     "smoke:codex": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/codex.live.ts",
+    "smoke:copilot": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/copilot.live.ts",
     "typecheck": "tsc -p . && tsc -p web",
     "build": "vite build --config web/vite.config.ts",
     "serve": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",

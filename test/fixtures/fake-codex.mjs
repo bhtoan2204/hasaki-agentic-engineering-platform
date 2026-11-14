@@ -41,6 +41,11 @@ if (argv[0] === "debug" && argv[1] === "models") {
           supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
           default_reasoning_level: "low",
         },
+        {
+          slug: "gpt-5-codex",
+          supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }],
+          default_reasoning_level: "medium",
+        },
       ],
     }),
   );

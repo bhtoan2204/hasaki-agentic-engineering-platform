@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { config, codexConfig, antigravityConfig } from "../config.ts";
+import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
 import {
   agentProvider,
   AGENT_PROVIDERS,
@@ -13,7 +13,7 @@ export const FallbackPolicy = z
     providers: z
       .array(z.enum(AGENT_PROVIDERS))
       .min(1)
-      .max(4)
+      .max(5)
       .refine((v) => new Set(v).size === v.length, "Duplicate fallback provider")
       .default(["claude", "codex", "cursor", "antigravity"]),
     max_switches: z.number().int().min(0).max(10).default(2),
@@ -110,6 +110,8 @@ export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) 
       throw new Error("Unsupported Codex reasoning_effort");
     if (provider === "antigravity" && ["none", "minimal"].includes(a.reasoning_effort))
       throw new Error("Unsupported Antigravity reasoning_effort");
+    if (provider === "copilot" && ["none", "minimal"].includes(a.reasoning_effort))
+      throw new Error("Unsupported Copilot reasoning_effort");
   }
   if (provider === "cursor" && a.allowed_tools != null)
     throw new Error(
@@ -157,6 +159,43 @@ export function codexModelFor(
   return {
     model: c.model,
     source: c.model ? "agent.codex.model" : "codex account default",
+    effort,
+  };
+}
+
+
+export function copilotModelFor(
+  step: { type: string; config: Record<string, unknown> },
+  profile?: string | null,
+): { model: string; source: string; effort: string } {
+  const c = copilotConfig();
+  const cfg = step.config;
+  const agent = cfg.agent as { model?: string; reasoning_effort?: string } | undefined;
+  const effort =
+    agent?.reasoning_effort ||
+    (typeof cfg.copilot_effort === "string" ? cfg.copilot_effort : "") ||
+    (typeof cfg.effort === "string" ? cfg.effort : "") ||
+    c.effort;
+  if (agent?.model)
+    return {
+      model: agent.model,
+      source: "step config (agent.model)",
+      effort,
+    };
+  if (typeof cfg.copilot_model === "string")
+    return {
+      model: cfg.copilot_model,
+      source: "step config (copilot_model)",
+      effort,
+    };
+  const role = cfg.independent === true ? "verifier" : step.type;
+  for (const scope of [profile ?? "", "*"]) {
+    const model = c.models[scope]?.[role];
+    if (model) return { model, source: `copilot routing ${scope}/${role}`, effort };
+  }
+  return {
+    model: c.model,
+    source: c.model ? "agent.copilot.model" : "copilot default",
     effort,
   };
 }
@@ -232,6 +271,7 @@ export function resolveStepAgent(
     delete legacy.config.model;
     delete legacy.config.codex_model;
     delete legacy.config.antigravity_model;
+    delete legacy.config.copilot_model;
   }
   const routed =
     provider === "claude"
@@ -240,13 +280,17 @@ export function resolveStepAgent(
         ? codexModelFor(legacy, profile)
         : provider === "antigravity"
           ? antigravityModelFor(legacy, profile)
-          : { model: "" };
+          : provider === "copilot"
+            ? copilotModelFor(legacy, profile)
+            : { model: "" };
   const model = merged.model ?? routed.model ?? null;
   const reasoning_effort =
-    merged.reasoning_effort === undefined && (provider === "codex" || provider === "antigravity")
+    merged.reasoning_effort === undefined && (provider === "codex" || provider === "antigravity" || provider === "copilot")
       ? (provider === "codex"
           ? codexModelFor(legacy, profile).effort
-          : antigravityModelFor(legacy, profile).effort) || null
+          : provider === "antigravity"
+            ? antigravityModelFor(legacy, profile).effort
+            : copilotModelFor(legacy, profile).effort) || null
       : merged.reasoning_effort;
   validateAgentOptions(
     {

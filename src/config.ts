@@ -214,9 +214,11 @@ export interface Config {
     /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
     upstreamTokens: number;
     /** Default agent provider. */
-    defaultProvider?: "claude" | "codex" | "cursor" | "antigravity";
+    defaultProvider?: "claude" | "codex" | "cursor" | "antigravity" | "copilot";
     /** Settings page. A false entry is off; omitted entries stay on. */
-    enabledProviders?: Partial<Record<"claude" | "cursor" | "codex" | "antigravity", boolean>>;
+    enabledProviders?: Partial<
+      Record<"claude" | "cursor" | "codex" | "antigravity" | "copilot", boolean>
+    >;
     cursorBin?: string;
     claudeBin?: string;
     /**
@@ -234,6 +236,11 @@ export interface Config {
      * process-local.
      */
     antigravity?: AntigravityConfig;
+    /**
+     * GitHub Copilot CLI (provider "copilot"). Runs as the authenticated account of the WORKER machine.
+     * Env overrides: COPILOT_BIN, COPILOT_TIMEOUT_MS, COPILOT_MODEL, COPILOT_EFFORT.
+     */
+    copilot?: CopilotConfig;
     /**
      * Optional model routing, e.g. { "FAST": { "agent": "<model>" }, "DEEP": { "verifier": "<model>" }, "*": { "coding_agent": "<model>" } }.
      * Keys: profile (or "*") → step type, or "verifier" for independent verification steps. Resolution order:
@@ -344,7 +351,7 @@ const defaults: Config = {
     maxCostUsd: 10,
     maxSuiteCostUsd: 300,
     liveEnabled: false,
-    liveUsageProviders: ["claude", "antigravity"],
+    liveUsageProviders: ["claude", "antigravity", "copilot"],
     estimatedUsdPerMillion: 30,
     sandboxImage: "docker.io/library/postgres:17-alpine",
     maxLiveAgents: 1,
@@ -765,6 +772,67 @@ export function antigravityConfig(): Required<
       ? c.sandbox !== false
       : (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
         ? process.env.AGY_SANDBOX === "true" || process.env.ANTIGRAVITY_SANDBOX === "true"
+        : (c.sandbox ?? true),
+    models: c.models ?? {},
+  };
+}
+
+
+export interface CopilotConfig {
+  /** Executable. Empty uses `copilot` on PATH. */
+  bin?: string;
+  /** Hard limit for one Copilot turn (process). Default 45 minutes. */
+  timeoutMs?: number;
+  /** Copilot model slug (e.g. gpt-4o, claude-3.5-sonnet). Empty = the copilot default. */
+  model?: string;
+  /** Reasoning effort, e.g. low | medium | high | xhigh. Empty = model default. */
+  effort?: string;
+  /** Max concurrent Copilot turns on this worker (default 1). */
+  maxConcurrent?: number;
+  /** Allow subagents (default false). */
+  allowSubagents?: boolean;
+  /** Run in sandbox with restrictions (default true). */
+  sandbox?: boolean;
+  /** Same shape as agent.models (profile or "*" → step type or "verifier"), with Copilot model slugs only. */
+  models?: Record<string, Record<string, string>>;
+}
+
+/** Copilot settings with env overrides applied. */
+export function copilotConfig(): Required<
+  Pick<
+    CopilotConfig,
+    "bin" | "timeoutMs" | "model" | "effort" | "maxConcurrent" | "allowSubagents" | "sandbox"
+  >
+> & { models: Record<string, Record<string, string>> } {
+  if (execution.getStore()?.evaluation?.fixtureAgent)
+    return {
+      bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-copilot.mjs"),
+      timeoutMs: 15000,
+      model: "gpt-test",
+      effort: "medium",
+      maxConcurrent: 1,
+      allowSubagents: false,
+      sandbox: true,
+      models: {},
+    };
+  const c = config.agent.copilot ?? {};
+  const timeout = Number(process.env.COPILOT_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
+  const maxConcurrent = Number(
+    process.env.COPILOT_MAX_CONCURRENT || c.maxConcurrent || 1,
+  );
+  return {
+    bin: process.env.COPILOT_BIN || c.bin || "copilot",
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model: process.env.COPILOT_MODEL ?? c.model ?? "",
+    effort: process.env.COPILOT_EFFORT ?? c.effort ?? "",
+    maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
+    allowSubagents:
+      process.env.COPILOT_ALLOW_SUBAGENTS
+        ? process.env.COPILOT_ALLOW_SUBAGENTS === "true"
+        : (c.allowSubagents ?? false),
+    sandbox:
+      process.env.COPILOT_SANDBOX
+        ? process.env.COPILOT_SANDBOX === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},
   };

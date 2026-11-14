@@ -166,7 +166,7 @@ export interface RunRow {
   /** User-facing prose language for this run. NULL on rows created before the column existed. */
   output_locale?: "vi" | "en" | null;
   /** claude (default, including rows from before the column), cursor, codex or antigravity. Run default; effective agent settings are pinned per attempt. */
-  agent_provider?: "claude" | "cursor" | "codex" | "antigravity";
+  agent_provider?: "claude" | "cursor" | "codex" | "antigravity" | "copilot";
   /** Null only for unassigned legacy rows, which are not runnable. */
   owner_id?: number | null;
   /** Platform instance (machine) whose workers execute this run; null = any instance (legacy rows). */
@@ -223,7 +223,7 @@ export interface AttemptRow {
   fencing_token: number | null;
   input: any;
   output: any;
-  agent_provider?: "claude" | "codex" | "cursor" | "antigravity" | null;
+  agent_provider?: "claude" | "codex" | "cursor" | "antigravity" | "copilot" | null;
   agent_model?: string | null;
   effective_agent?: EffectiveAgent | null;
   executor_stopped_at?: string | null;

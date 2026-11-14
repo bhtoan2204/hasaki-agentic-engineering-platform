@@ -97,7 +97,7 @@ export async function loadKnowledgeAuditData(
   const providerAvailability = Object.fromEntries(
     items.map((i) => [
       i.key,
-      ["claude", "codex", "cursor", "antigravity"].some(
+      ["claude", "codex", "cursor", "antigravity", "copilot"].some(
         (p) => skillAvailability(i.metadata, p).available,
       ),
     ]),

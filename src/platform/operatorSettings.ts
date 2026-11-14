@@ -13,7 +13,7 @@ import { clearOwned, own } from "./operatorState.ts";
  * Machine paths (dataDir, reposRoot, ports, CLI binaries) stay local because each workstation differs.
  */
 
-const PROVIDERS = ["claude", "codex", "cursor", "antigravity"] as const;
+const PROVIDERS = ["claude", "codex", "cursor", "antigravity", "copilot"] as const;
 const Provider = z.enum(PROVIDERS);
 const Effort = z.enum(["", "low", "medium", "high", "xhigh"]);
 const AgyEffort = z.enum(["", "low", "medium", "high", "xhigh", "max"]);
@@ -29,6 +29,7 @@ const Patch = z
         cursor: z.boolean().optional(),
         codex: z.boolean().optional(),
         antigravity: z.boolean().optional(),
+        copilot: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -272,6 +273,7 @@ export function operatorView() {
         cursor: config.agent.enabledProviders?.cursor !== false,
         codex: config.agent.enabledProviders?.codex !== false,
         antigravity: config.agent.enabledProviders?.antigravity !== false,
+        copilot: config.agent.enabledProviders?.copilot !== false,
       },
       codex: {
         model: config.agent.codex?.model ?? "",

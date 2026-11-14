@@ -82,7 +82,13 @@ test("an off provider is replaced by one that is on, and health fallback skips i
     "codex",
   );
   applyOperator({
-    enabledProviders: { claude: false, cursor: false, codex: false, antigravity: false },
+    enabledProviders: {
+      claude: false,
+      cursor: false,
+      codex: false,
+      antigravity: false,
+      copilot: false,
+    },
   });
   assert.throws(() => substituteEnabledProvider("claude"), /enabled in Settings/);
 });

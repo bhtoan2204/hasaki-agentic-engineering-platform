@@ -4,7 +4,7 @@ import { useI18n } from "./i18n/index.tsx";
 import { Field } from "./ui.tsx";
 
 /** Default agent providers a run can be created with. Agent steps can override this default. */
-export const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity"] as const;
+export const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity", "copilot"] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
 export function asProvider(v: unknown): AgentProvider {
@@ -131,6 +131,7 @@ export function AgentProviderField({
       <AgentHealthList />
       {value === "codex" && <CodexNotice />}
       {value === "antigravity" && <AntigravityNotice />}
+      {value === "copilot" && <CopilotNotice />}
     </>
   );
 }
@@ -199,6 +200,41 @@ function AntigravityNotice() {
       {agy && !agy.ok && (
         <p className="agent-notice-err">
           {t("run.antigravity.notReady")}: {agy.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CopilotNotice() {
+  const { t } = useI18n();
+  const { data, error } = useApi<ProviderStatus[]>("/api/agent-providers");
+  const copilot = data?.find((p) => p.id === "copilot");
+  return (
+    <div className="agent-notice" role="note">
+      <p>{t("run.copilot.account")}</p>
+      {error && (
+        <p className="agent-notice-err">
+          {t("run.copilot.statusUnknown")}: {error}
+        </p>
+      )}
+      {!data && !error && <p className="muted">{t("run.copilot.checking")}</p>}
+      {copilot && copilot.ok && (
+        <p className="muted">
+          {t("run.copilot.ready", {
+            version: copilot.version ?? "copilot",
+            auth: copilot.auth ?? "?",
+          })}
+          {" · "}
+          {t("run.copilot.model", {
+            model: copilot.model || t("run.copilot.defaultModel"),
+            effort: copilot.reasoning_effort || t("run.copilot.defaultEffort"),
+          })}
+        </p>
+      )}
+      {copilot && !copilot.ok && (
+        <p className="agent-notice-err">
+          {t("run.copilot.notReady")}: {copilot.error}
         </p>
       )}
     </div>

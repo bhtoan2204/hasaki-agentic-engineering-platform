@@ -1,16 +1,17 @@
-import { codexConfig, antigravityConfig } from "../config.ts";
+import { codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
 import { providerEnabled } from "./provider.ts";
 import { probeAgentHealth, rememberedQuota } from "./health.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
+import { copilotCapabilities } from "./copilot/capabilities.ts";
 
 /**
  * Readiness of each agent provider on this worker, for the run forms. Probes the installed CLIs only (version, flags,
  * login status, model catalog); no model is called, nothing is billed, and no credential is read or returned.
  */
 export async function agentProviderStatus(refresh = false) {
-  const [cursor, codex, antigravity, claudeHealth] = await Promise.all([
+  const [cursor, codex, antigravity, copilot, claudeHealth] = await Promise.all([
     cursorCapabilities(refresh).catch((e) => ({
       ok: false,
       error: String(e?.message ?? e),
@@ -21,10 +22,14 @@ export async function agentProviderStatus(refresh = false) {
     antigravityCapabilities(refresh).catch(
       (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
     ),
+    copilotCapabilities(refresh).catch(
+      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
+    ),
     probeAgentHealth(["claude"]).then((rows) => rows[0]),
   ]);
   const cfg = codexConfig();
   const agyCfg = antigravityConfig();
+  const copilotCfg = copilotConfig();
   return [
     {
       id: "claude",
@@ -64,6 +69,27 @@ export async function agentProviderStatus(refresh = false) {
       reasoning_effort: cfg.reasoningEffort || null,
       models:
         "models" in codex ? codex.models?.map((m) => ({ slug: m.slug, name: m.slug })) : undefined,
+    },
+    {
+      id: "copilot",
+      enabled: providerEnabled("copilot"),
+      ok: copilot.ok && rememberedQuota("copilot") !== "exhausted",
+      error:
+        rememberedQuota("copilot") === "exhausted"
+          ? "quota exhausted"
+          : copilot.ok
+            ? undefined
+            : copilot.error,
+      quota: rememberedQuota("copilot"),
+      kind: "kind" in copilot ? copilot.kind : undefined,
+      version: "version" in copilot ? copilot.version : undefined,
+      auth: "auth" in copilot ? copilot.auth : undefined,
+      model: copilotCfg.model || null,
+      reasoning_effort: copilotCfg.effort || null,
+      models:
+        "models" in copilot
+          ? copilot.models?.map((m) => ({ slug: m.slug, name: m.name || m.slug }))
+          : undefined,
     },
     {
       id: "antigravity",

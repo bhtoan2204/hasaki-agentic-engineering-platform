@@ -241,6 +241,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
                       codex: "Codex",
                       cursor: "Cursor",
                       antigravity: "Antigravity",
+                      copilot: "Copilot",
                     } as Record<string, string>
                   )[provider] ?? provider)
                 : t("agent.inherit")}

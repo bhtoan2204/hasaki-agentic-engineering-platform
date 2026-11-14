@@ -1236,7 +1236,12 @@ test("regression step without a test PostgreSQL is not passed: the reason reache
       retry_backoff_seconds: 0,
       // Exercise command diagnosis with the local fake runner. A workflow's self-test shell guard
       // also checks inherited parent verification flags, which are unrelated to this fixture.
-      config: { cwd, command: "npm test --if-present", on_failure },
+      config: {
+        cwd,
+        command: "npm test --if-present",
+        on_failure,
+        env: { PLATFORM_SELF_TEST: "", DATABASE_URL: "" },
+      },
     });
     const failRun = await startRun({ definitionKey: await customWorkflow([step("fail")]) });
     await drain();
@@ -3740,7 +3745,13 @@ test("telemetry snapshots are idempotent; recovery fences stale writers and reta
   const { makeContext } = await import("../src/workflow/executors/registry.ts");
   const { runMetrics } = await import("../src/api/metrics.ts");
   const key = await customWorkflow([
-    { key: "telemetry", type: "agent", max_attempts: 2, retry_backoff_seconds: 0 },
+    {
+      key: "telemetry",
+      type: "agent",
+      max_attempts: 2,
+      retry_backoff_seconds: 0,
+      config: { fallback: { auto_health: false } },
+    },
   ]);
   const run = await startRun({ definitionKey: key, agentProvider: "codex" });
   const job = (await claimJob("telemetry-worker", 30))!;

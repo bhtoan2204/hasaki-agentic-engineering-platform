@@ -55,6 +55,94 @@ const testGoPath = join(root, "gopath");
 mkdirSync(testGoPath, { recursive: true });
 process.env.GOPATH = testGoPath;
 
+// Mock claude, codex, and copilot CLIs in PATH so probeAgentHealth confirms readiness in test runs without remote auth.
+const testBin = join(root, "bin");
+mkdirSync(testBin, { recursive: true });
+const claudeScript = join(testBin, "claude");
+writeFileSync(
+  claudeScript,
+  `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "auth" && args[1] === "status") {
+  console.log(JSON.stringify({ loggedIn: true }));
+  process.exit(0);
+}
+if (args[0] === "--version") {
+  console.log("2.0.0");
+  process.exit(0);
+}
+console.log(JSON.stringify({ ok: true }));
+`,
+  { mode: 0o755 },
+);
+
+const fakeCodex = join(import.meta.dirname, "fixtures", "fake-codex.mjs");
+const codexScript = join(testBin, "codex");
+writeFileSync(
+  codexScript,
+  `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+const args = process.argv.slice(2);
+if (args[0] === "login" && args[1] === "status") {
+  console.log("Logged in using ChatGPT");
+  process.exit(0);
+}
+if (args[0] === "--version") {
+  console.log("codex-cli 0.164.0-fake");
+  process.exit(0);
+}
+if (args[0] === "exec" && args.includes("--help")) {
+  console.log("--json --strict-config --ignore-user-config --ignore-rules --dangerously-bypass-hook-trust --skip-git-repo-check --config --sandbox");
+  process.exit(0);
+}
+if (args[0] === "debug" && args[1] === "models") {
+  console.log(JSON.stringify({
+    models: [
+      { slug: "gpt-test", supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }], default_reasoning_level: "low" },
+      { slug: "gpt-5-codex", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }], default_reasoning_level: "medium" }
+    ]
+  }));
+  process.exit(0);
+}
+const res = spawnSync(process.execPath, [${JSON.stringify(fakeCodex)}, ...args], {
+  stdio: "inherit",
+  env: process.env,
+});
+process.exit(res.status ?? (res.error ? 1 : 0));
+`,
+  { mode: 0o755 },
+);
+
+const fakeCopilot = join(import.meta.dirname, "fixtures", "fake-copilot.mjs");
+const copilotScript = join(testBin, "copilot");
+writeFileSync(
+  copilotScript,
+  `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+const args = process.argv.slice(2);
+if (args.includes("--version")) {
+  console.log("GitHub Copilot CLI 0.1.0-fake");
+  process.exit(0);
+}
+if (args.includes("--help") && !args.includes("-p") && !args.includes("--print")) {
+  console.log("GitHub Copilot CLI 0.1.0-fake\\nOptions:\\n  -p, --print\\n  --output-format <format>\\n  --input-format <format>\\n  --model <model>\\n  --effort <effort>\\n  --sandbox\\n  --conversation <id>\\n  --print-timeout <duration>\\n  --add-dir <path>\\n");
+  process.exit(0);
+}
+if (args[0] === "models") {
+  console.log("gpt-4o\\no1-preview\\no1-mini\\nclaude-3.5-sonnet\\nclaude-3.5-haiku\\ngpt-4o-mini");
+  process.exit(0);
+}
+const res = spawnSync(process.execPath, [${JSON.stringify(fakeCopilot)}, ...args], {
+  stdio: "inherit",
+  env: process.env,
+});
+process.exit(res.status ?? (res.error ? 1 : 0));
+`,
+  { mode: 0o755 },
+);
+
+process.env.PATH = `${testBin}:${process.env.PATH || ""}`;
+
 // Tests must never inherit a developer's live Telegram bot or receiver settings. Individual Telegram tests
 // explicitly point config at their local mocked Bot API after the isolated database is ready.
 for (const key of [
