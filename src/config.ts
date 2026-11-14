@@ -715,7 +715,7 @@ export interface AntigravityConfig {
 export function antigravityConfig(): Required<
   Pick<
     AntigravityConfig,
-    "bin" | "timeoutMs" | "model" | "effort" | "maxConcurrent" | "allowSubagents" | "sandbox" | "sandbox"
+    "bin" | "timeoutMs" | "model" | "effort" | "maxConcurrent" | "allowSubagents" | "sandbox"
   >
 > & { models: Record<string, Record<string, string>> } {
   if (execution.getStore()?.evaluation?.fixtureAgent)
