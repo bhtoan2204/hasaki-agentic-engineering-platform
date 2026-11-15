@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { buildExecutionContract } from "../../agent/contract.ts";
 import { worktreeFingerprint } from "../../agent/scopeGuard.ts";
 import { requireRunRepositoryAccess } from "../../repos/access.ts";
@@ -219,6 +220,8 @@ export async function runCommand(
   const proc = await commandProcessEnv(cwd, env);
   const useBwrap = proc.isolation?.mode === "bwrap";
   const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
+  // Verification is a new test invocation, not a recursive child of the worker test harness.
+  delete childEnv.NODE_TEST_CONTEXT;
   const pg = await testPostgresEnv(cwd, signal, {
     build: command !== PLATFORM_TARGETED_COMMAND && command !== FEATURE_TARGETED_COMMAND,
   });
@@ -229,6 +232,7 @@ export async function runCommand(
       timedOut: false,
     };
   Object.assign(childEnv, pg);
+  childEnv.PLATFORM_NODE_DEPENDENCIES = fileURLToPath(new URL("../../git/nodeDependencies.ts", import.meta.url));
   // Login profiles may drop inherited toolchains (Nix keeps node and npm in separate prefixes).
   // Keep the profile's priority, then append missing inherited directories before adding PostgreSQL.
   childEnv.PLATFORM_COMMAND_PATH = childEnv.PATH ?? "";

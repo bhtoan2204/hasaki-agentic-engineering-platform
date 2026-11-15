@@ -1,3 +1,4 @@
+import { FEATURE_TARGETED_COMMAND } from "../src/workflow/templates.ts";
 /** Persisted upstream fixtures for provider tests, which exercise transport rather than plan generation. */
 import { mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { config } from "../src/config.ts";
@@ -40,7 +41,7 @@ export async function approvedCodingFixture(runId: number, key: string) {
       [runId, step.id, JSON.stringify(input), JSON.stringify(output)]))!;
     await q(pool, "UPDATE workflow_steps SET current_attempt_id=$2 WHERE id=$1", [step.id, attempt.id]);
   }
-  const command = "go test -json .";
+  const command = FEATURE_TARGETED_COMMAND;
   run.graph.steps.push(...validateSpec({ name: "fixture", steps: [{ key: planKey, type: "agent" }, { key: approvalKey, type: "human_approval", depends_on: [planKey] }] }).steps);
   const coding = run.graph.steps.find(s => s.key === key)!;
   coding.depends_on = [...(coding.depends_on ?? []), approvalKey];

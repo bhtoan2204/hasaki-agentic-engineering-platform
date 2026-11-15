@@ -253,7 +253,7 @@ test("MICRO declines Cursor and prevents execution without pre-execution tool in
   }
 });
 
-test("MICRO verification reuses nonempty dependencies instead of reinstalling them", async () => {
+test("MICRO verification reuses dependencies with a matching worker fingerprint", async () => {
   const { mkdtemp, mkdir, writeFile, rm, readFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -263,9 +263,12 @@ test("MICRO verification reuses nonempty dependencies instead of reinstalling th
     await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
     await mkdir(join(root, "bin"));
     await writeFile(join(root, "package.json"), "{}");
-    await writeFile(join(root, "bin", "npm"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n', { mode: 0o755 });
+    const { dependencyFingerprint } = await import("../src/git/provider.ts");
+    const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
+    await writeFile(join(root, "node_modules", ".platform-ready"), dependencyFingerprint(root)!);
+    await writeFile(join(root, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf "%s\\n" "$*" >> "$CALLS"\n`, { mode: 0o755 });
     execFileSync("bash", ["-c", FEATURE_MICRO_TARGETED_COMMAND], { cwd: root,
-      env: { ...process.env, PLATFORM_SELF_TEST: "0", BASE_BRANCH: "main", PATH: `${join(root, "bin")}:${process.env.PATH}`, CALLS: join(root, "calls") }, stdio: "pipe" });
+      env: { ...process.env, PLATFORM_NODE_DEPENDENCIES: join(import.meta.dirname, "..", "src", "git", "nodeDependencies.ts"), PLATFORM_SELF_TEST: "0", BASE_BRANCH: "main", PATH: `${join(root, "bin")}:${process.env.PATH}`, CALLS: join(root, "calls") }, stdio: "pipe" });
     assert.equal((await readFile(join(root, "calls"), "utf8")).trim(), "test --if-present");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

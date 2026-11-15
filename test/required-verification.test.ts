@@ -12,10 +12,12 @@ test("required verification rejects prose mentions, skipped tests and workspace 
   try {
     git("init", "-q");
     writeFileSync(join(path, "source.txt"), "original");
+    writeFileSync(join(path, "go.mod"), "module app\n\ngo 1.20\n");
     git("add", ".");
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture");
     for (const scenario of [
       { output: "app/TestBusiness passed", passed: false },
+      { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }) + "\n[output truncated]", passed: false },
       { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }), command: "node test.js", passed: false },
       { output: JSON.stringify({ Action: "skip", Package: "app", Test: "TestBusiness" }), passed: false },
       { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }), passed: true },
@@ -25,7 +27,8 @@ test("required verification rejects prose mentions, skipped tests and workspace 
         command: scenario.command ?? "go test -json ./...", requiredTests: ["app/TestBusiness"], maxRepairs: 0,
         timeoutMs: 30000, baseline: null, allowTestWeakening: false,
       }, 0, new AbortController().signal, {
-        run: async () => {
+        run: async command => {
+          if (command !== (scenario.command ?? "go test -json ./...")) return { code: 0, timedOut: false, output: "" };
           if (scenario.mutate) writeFileSync(join(path, "source.txt"), "changed during verification");
           return { code: 0, timedOut: false, output: scenario.output };
         }, diffTests: async () => "",
