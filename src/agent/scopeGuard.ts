@@ -165,12 +165,19 @@ async function uncommittedHash(path: string, prefix: string) {
   const h = createHash("sha256")
     .update(prefix)
     .update("\0")
-    .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]));
-  for (const f of z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"]))
-    .sort()
-    .slice(0, 500)) {
-    const blob = (await git(path, ["hash-object", "--", f]).catch(() => "?")).trim();
-    h.update(`\0${f}\0${blob}`);
+    .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]))
+    .update("\0index\0")
+    .update(await git(path, ["diff", "--cached", "--no-color", "--binary", "--no-renames", "HEAD"]));
+  const files = z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"])).sort();
+  if (files.length) {
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile("git", ["-C", path, "hash-object", "--stdin-paths"], { maxBuffer: 64 << 20 },
+        (error, stdout) => error ? reject(error) : resolve(stdout));
+      child.stdin?.end(files.map(file => JSON.stringify(file)).join("\n") + "\n");
+    });
+    const hashes = output.trim().split("\n");
+    if (hashes.length !== files.length) throw new Error("Incomplete untracked file observation");
+    files.forEach((file, i) => h.update(`\0${file}\0${hashes[i]}`));
   }
   return h.digest("hex");
 }

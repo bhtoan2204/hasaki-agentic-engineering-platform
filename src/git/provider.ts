@@ -1,5 +1,6 @@
-import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -35,13 +36,30 @@ export function npmCacheDir() {
   return join(config.dataDir, "npm-cache");
 }
 
-/** A failed `npm ci` leaves an empty node_modules. That is not an install. */
-// Package managers write these only when an install completes; an interrupted install leaves packages without one.
+let npmVersion: string | undefined;
+/** The worker owns this record; package-manager metadata is never manufactured. */
+export function dependencyFingerprint(workspace: string): string | null {
+  try {
+    if (!existsSync(join(workspace, "package.json"))) return null;
+    // These may contain credentials. Do not read them or guess their effect on installation.
+    if ([".npmrc", ".yarnrc.yml"].some(file => existsSync(join(workspace, file)))) return null;
+    npmVersion ??= execFileSync("npm", ["--version"], { encoding: "utf8", timeout: 5000 }).trim();
+    const hash = createHash("sha256").update(JSON.stringify({ node: process.version, npm: npmVersion,
+      platform: process.platform, arch: process.arch, ignoreScripts: true,
+      nodeEnv: process.env.NODE_ENV ?? "", omit: process.env.npm_config_omit ?? "",
+      include: process.env.npm_config_include ?? "", legacyPeerDeps: process.env.npm_config_legacy_peer_deps ?? "" }));
+    for (const file of ["package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", ".nvmrc", ".node-version"])
+      hash.update(file).update("\0").update(existsSync(join(workspace, file)) ? readFileSync(join(workspace, file)) : "absent").update("\0");
+    return hash.digest("hex");
+  } catch { return null; }
+}
+
+/** Only a successful worker installation for the current dependency/runtime state establishes readiness. */
 export function nodeModulesReady(workspace: string) {
-  const dir = join(workspace, "node_modules");
-  return [".package-lock.json", ".modules.yaml", ".yarn-integrity", ".platform-ready"].some((marker) =>
-    existsSync(join(dir, marker)),
-  );
+  const fingerprint = dependencyFingerprint(workspace);
+  if (!fingerprint) return false;
+  try { return readFileSync(join(workspace, "node_modules", ".platform-ready"), "utf8") === fingerprint; }
+  catch { return false; }
 }
 
 /**
@@ -69,10 +87,9 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
     if (!ci || !/EUSAGE|in sync/.test(String((e as any).stderr ?? (e as Error).message))) throw e;
     await exec("npm", ["install", "--no-package-lock", ...flags], opts);
   }
-  const dir = join(workspace, "node_modules");
-  if (existsSync(dir) && !nodeModulesReady(workspace)) {
-    await writeFile(join(dir, ".package-lock.json"), "{}").catch(() => {});
-  }
+  const fingerprint = dependencyFingerprint(workspace);
+  if (fingerprint && existsSync(join(workspace, "node_modules")))
+    await writeFile(join(workspace, "node_modules", ".platform-ready"), fingerprint);
   return true;
 }
 

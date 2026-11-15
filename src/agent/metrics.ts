@@ -81,7 +81,7 @@ const toolState = new WeakMap<
 >();
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
-function stableJson(v: unknown): string {
+export function stableJson(v: unknown): string {
   if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
   if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
   return `{${Object.keys(v as object)

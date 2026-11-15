@@ -667,3 +667,21 @@ test("pre-publish gate: a rebase or a base merge that keeps the change keeps tes
     /tests in "implement" ran on/,
   );
 });
+
+test("workspace fingerprints include untracked files beyond the old 500-file cap", async () => {
+  const path = repo();
+  for (let i = 0; i < 501; i++) write(path, `untracked/${String(i).padStart(4, "0")}.txt`, "before");
+  const before = await worktreeFingerprint(path);
+  write(path, "untracked/0500.txt", "after");
+  assert.notEqual((await worktreeFingerprint(path)).fingerprint, before.fingerprint);
+});
+
+test("workspace fingerprints distinguish staging changes even when working content is unchanged", async () => {
+  const path = repo();
+  write(path, "app/refund.go", "staged content");
+  g(path, "add", "app/refund.go");
+  write(path, "app/refund.go", "working content");
+  const before = await worktreeFingerprint(path);
+  g(path, "reset", "-q", "HEAD", "app/refund.go");
+  assert.notEqual((await worktreeFingerprint(path)).fingerprint, before.fingerprint);
+});

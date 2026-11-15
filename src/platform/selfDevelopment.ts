@@ -133,8 +133,8 @@ export function protectedRootsFor(paths: string[]): string[] {
 }
 
 /**
- * dataDir must sit outside the live checkout. Codex coding has no OS write sandbox; the tool-policy hook is its
- * write boundary. Other providers are enforced by tool policy only.
+ * dataDir must sit outside the live checkout. Codex coding uses its native workspace-write sandbox.
+ * Other providers still require an explicit trusted-operator policy; this is not credential read isolation.
  */
 export function assertSelfCodingIsolation(provider: string) {
   if (overlapsLiveApplication(config.dataDir))
@@ -144,7 +144,7 @@ export function assertSelfCodingIsolation(provider: string) {
   if (provider === "codex") return;
   if (config.platform.trustedOperatorIsolation) return;
   throw new Error(
-    "Self-development coding with this provider is refused. Codex coding is allowed on this workstation without an OS sandbox. " +
+    "Self-development coding with this provider is refused. Codex coding uses its native workspace-write sandbox. " +
       "Claude, Cursor and Antigravity are enforced by tool policy only. On a single-operator workstation set " +
       "platform.trustedOperatorIsolation (or PLATFORM_TRUSTED_OPERATOR_ISOLATION=1). Do not enable that for untrusted users.",
   );

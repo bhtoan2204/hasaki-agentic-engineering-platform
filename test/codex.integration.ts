@@ -1,6 +1,9 @@
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import { repositories } from "../src/repos/service.ts";
+import { approvedCodingFixture } from "./approved-coding-fixture.ts";
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, unlinkSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +17,7 @@ import {
   startPendingRun,
   startRun,
 } from "../src/workflow/engine.ts";
-import { recordWorkspace } from "../src/git/provider.ts";
+import { workspacesOf, recordWorkspace } from "../src/git/provider.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import {
@@ -50,6 +53,8 @@ let defSeq = 0;
 
 before(async () => {
   await migrate();
+  await shareAllRepositoriesForTests();
+  await repositories.upsert("oms-api", {});
   await seedTemplates();
   chmodSync(FAKE, 0o755);
   process.env.CODEX_BIN = FAKE;
@@ -448,8 +453,9 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
   }
   assert.ok(a.includes('sandbox_mode="read-only"'));
   assert.ok(!a.some((x) => x.includes("danger-full-access")));
-  assert.ok(c.includes('sandbox_mode="danger-full-access"'));
-  assert.ok(!c.some((x) => x.includes("sandbox_workspace_write")));
+  assert.ok(c.includes('sandbox_mode="workspace-write"'));
+  assert.ok(c.includes("sandbox_workspace_write.network_access=false"));
+  assert.ok(c.includes("sandbox_workspace_write.writable_roots=[]"));
   const cache = JSON.stringify(npmCacheDir());
   assert.ok(c.some((x) => x.includes(`npm_config_cache=${cache}`)));
   // The outer test environment may itself live under ctp-agent-tmp. Reject this invocation's
@@ -673,6 +679,9 @@ test("a Codex run completes through MCP submit_result, records codex session/met
   assert.equal(step.output.goal, "from codex");
   const [a] = await attemptsOf(run.id, "analyze");
   assert.equal(a.metrics.provider, "codex");
+  assert.ok(a.metrics.prompt_context.known_prompt_tokens > 0);
+  assert.equal(a.metrics.prompt_context.measurement, "character_estimate_not_provider_usage");
+  assert.equal(a.metrics.prompt_context.session_history_tokens, null);
   assert.equal(a.metrics.cost_usd, null);
   assert.equal(a.metrics.tokens.input, 120);
   const s = await one<any>(pool, "SELECT * FROM agent_sessions WHERE attempt_id = $1", [a.id]);
@@ -709,8 +718,9 @@ test("Codex ask_user pauses the step, blocks edits while waiting, then resumes t
   process.env.FAKE_CODEX_MODE = "ask";
   process.env.FAKE_CODEX_THREAD = "th-ask";
   const run = await startRun({ definitionKey: key, title: "codex ask", agentProvider: "codex" });
+  await approvedCodingFixture(run.id, "plan");
   await drain();
-  assert.equal((await stepOf(run.id, "plan")).status, "WAITING_INPUT");
+  assert.equal((await stepOf(run.id, "plan")).status, "WAITING_INPUT", JSON.stringify((await attemptsOf(run.id, "plan")).map(a => a.error)));
   assert.equal(
     fakeLog().find((l) => "editAfterAsk" in l).editAfterAsk,
     2,
@@ -732,7 +742,7 @@ test("Codex ask_user pauses the step, blocks edits while waiting, then resumes t
   const resumed = fakeLog().find((l) => l.argv && l.resumeId);
   assert.equal(resumed.resumeId, "th-ask");
   assert.ok(!resumed.argv.includes("--last"));
-  assert.ok(resumed.argv.includes('sandbox_mode="danger-full-access"'));
+  assert.ok(resumed.argv.includes('sandbox_mode="workspace-write"'));
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });
 
@@ -806,7 +816,8 @@ test("no submit_result or output missing contract keys fails the step; retry kee
   await retryStep(run.id, "analyze").catch(() => {});
   await drain();
   atts = await attemptsOf(run.id, "analyze");
-  assert.match(atts.at(-1).error?.message ?? "", /missing: goal, requirements/);
+  assert.match(atts.at(-1).error?.message ?? "", /without calling submit_result/);
+  assert.equal((await one(pool, "SELECT count(*)::int AS n FROM workflow_checkpoints WHERE run_id=$1 AND reason='submit_result'", [run.id])).n, 0, "invalid submissions are refused before they are recorded");
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });
 
@@ -850,12 +861,14 @@ test("commit_changes commits inside the run worktree only, with repository hooks
     path: ws,
     created_from: "test",
   });
+  await approvedCodingFixture(run.id, "implement");
   process.env.FAKE_CODEX_MODE = "commit";
   process.env.FAKE_CODEX_WS = ws;
   await startPendingRun(run.id);
   await drain();
   delete process.env.FAKE_CODEX_WS;
   const entry = fakeLog().find((l) => "commit" in l);
+  assert.ok(entry, JSON.stringify((await attemptsOf(run.id, "implement")).map(a => a.error)));
   assert.match(entry.outside, /outside the worktree/);
   assert.match(entry.commit, /Committed \w+ feat: add feature/);
   assert.equal(
@@ -986,4 +999,37 @@ test("output contract keys", () => {
   );
   assert.deepEqual(missingContractKeys("{ a, b }", { a: 1 }), ["b"]);
   assert.deepEqual(contractKeys("free text"), []);
+});
+
+test("coding launch refuses missing contracts and stale approval attempts before starting Codex", async () => {
+  for (const stale of [false, true]) {
+    const key = await workflow([{ key: "implement", type: "coding_agent", config: { verify: false } }]);
+    const run = await startRun({ definitionKey: key, title: "contract refusal", agentProvider: "codex" });
+    if (stale) {
+      await approvedCodingFixture(run.id, "implement");
+      await q(pool, `UPDATE workflow_step_attempts SET input='{}'::jsonb WHERE run_id=$1 AND step_id=(SELECT id FROM workflow_steps WHERE run_id=$1 AND key='approve_plan')`, [run.id]);
+    }
+    const before = fakeLog().filter(l => l.argv).length;
+    await drain();
+    assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
+    const attempts = await attemptsOf(run.id, "implement");
+    assert.match(JSON.stringify(attempts.at(-1).error), /Mandatory execution contract/);
+    assert.equal(fakeLog().filter(l => l.argv).length, before, "invalid approval must prevent provider launch");
+  }
+});
+
+test("coding completion refuses a passing verification with no implementation changes", async () => {
+  const key = await workflow([{ key: "implement", type: "coding_agent", config: { output_contract: "{ goal, requirements }" } }]);
+  const run = await startRun({ definitionKey: key, title: "empty implementation", agentProvider: "codex" });
+  await approvedCodingFixture(run.id, "implement");
+  const [workspace] = await workspacesOf(run.id);
+  unlinkSync(join(workspace.path, "implementation-evidence.txt"));
+  // The test harness is part of the approved fixture baseline, not an implementation change.
+  execFileSync("git", ["-C", workspace.path, "add", "go.mod", "transport_test.go"]);
+  execFileSync("git", ["-C", workspace.path, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "verification fixture"]);
+  execFileSync("git", ["-C", workspace.path, "update-ref", "refs/remotes/origin/release/prod", "HEAD"]);
+  execFileSync("git", ["-C", workspace.path, "update-ref", "refs/remotes/origin/main", "HEAD"]);
+  await drain();
+  assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
+  assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), /IMPLEMENTED requires worker-observed implementation/);
 });

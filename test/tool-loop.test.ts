@@ -85,3 +85,12 @@ test("decide integrates ToolLoopDetector to block looping calls", () => {
   assert.equal(decision.allow, false);
   assert.ok(decision.reason?.includes("Repeated tool call loop detected"));
 });
+
+test("loop detection normalizes platform aliases and argument ordering and permits changed observations", () => {
+  const detector = new ToolLoopDetector({ consecutiveThreshold: 2 });
+  detector.record("mcp__platform__search_code", { query: "refund", limit: 2 }, "ok", "old result");
+  detector.record("platform.search_code", { limit: 2, query: "refund" }, "ok", "old result");
+  assert.equal(detector.check("search_code", { query: "refund", limit: 2 }).isLoop, true);
+  detector.record("search_code", { query: "refund", limit: 2 }, "ok", "new result");
+  assert.equal(detector.check("search_code", { limit: 2, query: "refund" }).isLoop, false);
+});

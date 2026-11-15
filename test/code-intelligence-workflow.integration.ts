@@ -1,3 +1,4 @@
+import { approvedCodingFixture } from "./approved-coding-fixture.ts";
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
@@ -126,6 +127,7 @@ test("Actual analysis → discovery → ranking → shared executor → Codex pr
     discovery!.output.candidates[0].reasons.some((r: string) => r.includes("code evidence")),
   );
   assert.deepEqual((await getRun(run.id)).selected_repositories, [z]);
+  await approvedCodingFixture(run.id, "implement");
   process.env.FAKE_CODEX_MODE = "ask";
   assert.ok(await runOnce());
   const prompt = logs().at(-1).prompt;
@@ -167,7 +169,7 @@ test("Actual analysis → discovery → ranking → shared executor → Codex pr
   assert.match(block(resumed.prompt), /return 2/);
   assert.doesNotMatch(block(resumed.prompt), /return 1/);
   assert.ok(await runOnce());
-  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  assert.equal((await getRun(run.id)).status, "COMPLETED", JSON.stringify({ steps: await q(pool, "SELECT key,status,error FROM workflow_steps WHERE run_id=$1", [run.id]), questions: await q(pool, "SELECT question FROM workflow_questions WHERE run_id=$1", [run.id]) }));
 });
 test("Disabling P1 keeps actual agent workflow functional and removes the code context block", async () => {
   config.codeIntelligence.enabled = false;
@@ -177,8 +179,11 @@ test("Disabling P1 keeps actual agent workflow functional and removes the code c
     inputs: { project: "Proof" },
     agentProvider: "codex",
   });
+  assert.ok(await runOnce());
+  assert.ok(await runOnce());
+  await approvedCodingFixture(run.id, "implement");
   await drain();
-  assert.equal((await getRun(run.id)).status, "COMPLETED");
+  assert.equal((await getRun(run.id)).status, "COMPLETED", JSON.stringify({ steps: await q(pool, "SELECT key,status,error FROM workflow_steps WHERE run_id=$1", [run.id]), questions: await q(pool, "SELECT question FROM workflow_questions WHERE run_id=$1", [run.id]) }));
   assert.equal(block(logs().at(-1).prompt), "");
   config.codeIntelligence.enabled = true;
 });

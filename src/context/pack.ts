@@ -24,15 +24,26 @@ import type { PolicyContext } from "../agent/toolPolicy.ts";
 import { source } from "../agent/contextTools.ts";
 import { evidenceSummary } from "../agent/evidence.ts";
 import { workspacesOf } from "../git/provider.ts";
-import type { MandatoryExecutionContract } from "../agent/contract.ts";
-import { repositoryBaseBranch } from "../repos/service.ts";
+import { buildExecutionContract } from "../agent/contract.ts";
+import { baseCommit } from "../codeIntelligence/git.ts";
+import { localScope } from "../codeIntelligence/indexer.ts";
 import { worktreeFingerprint } from "../agent/scopeGuard.ts";
 import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const gitTip = async (path: string, ref: string) =>
-  (await promisify(execFile)("git", ["-C", path, "rev-parse", ref])).stdout.trim();
+/** Every selected repository must have a complete, observed source and index identity. */
+export async function observeRetrievalState(names: string[], read: (name: string) => Promise<{
+  workspace: string; head: string; fingerprint: string; snapshot: string;
+} | null>): Promise<Record<string, string> | null> {
+  if (!names.length) return null;
+  const state: Record<string, string> = {};
+  try {
+    for (const name of [...new Set(names)].sort()) {
+      const observed = await read(name);
+      if (!observed || Object.values(observed).some(v => !v)) return null;
+      state[name] = JSON.stringify(observed);
+    }
+    return state;
+  } catch { return null; }
+}
 
 export interface ContextEntry {
   id: string;
@@ -324,63 +335,11 @@ export async function ensureContextPack(
         ),
         "platform_constraint",
       );
-      const toObj = (v: unknown): Record<string, unknown> | null =>
-        typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-      const toArr = (v: unknown): string[] =>
-        Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-
-      const snapContent = toObj(snap?.content);
-      const promptPlan = toObj(snapContent?.prompt_plan);
-      const reqOutput = toObj(toObj(input.upstream?.requirements)?.output);
-      const analyzeOutput = toObj(toObj(input.upstream?.analyze)?.output);
-      const planOutput = toObj(toObj(input.upstream?.plan)?.output);
-      const approvePlanOutput = toObj(toObj(input.upstream?.approve_plan)?.output);
-      const workItemPayload = toObj(input.work_item?.payload);
-
-      const rawPlan =
-        approvePlanOutput ??
-        planOutput ??
-        promptPlan?.approved_plan ??
-        null;
-      const approvedPlan: string | Record<string, unknown> | null =
-        typeof rawPlan === "string"
-          ? rawPlan
-          : typeof rawPlan === "object" && rawPlan !== null && !Array.isArray(rawPlan)
-            ? (rawPlan as Record<string, unknown>)
-            : null;
-      const acceptanceCriteria: string[] = [
-        ...new Set([
-          ...toArr(reqOutput?.acceptance_criteria),
-          ...toArr(analyzeOutput?.acceptance_criteria),
-          ...toArr(planOutput?.acceptance_criteria),
-          ...toArr(workItemPayload?.acceptance_criteria),
-        ]),
-      ];
-      const businessConstraints: string[] = [
-        ...new Set([
-          ...toArr(reqOutput?.constraints),
-          ...toArr(analyzeOutput?.constraints),
-          ...toArr(planOutput?.constraints),
-          ...toArr(workItemPayload?.constraints),
-        ]),
-      ];
-      const promptPlanVerification = toObj(promptPlan?.verification);
-      const requiredTests: string[] = [
-        ...new Set([
-          ...toArr(promptPlanVerification?.required_tests),
-          ...toArr(planOutput?.tests),
-        ]),
-      ];
-
-      const mandatoryContract: MandatoryExecutionContract = {
-        approved_plan: approvedPlan,
-        acceptance_criteria: acceptanceCriteria,
-        business_constraints: businessConstraints,
-        selected_repositories: ctx.run.selected_repositories?.length
-          ? ctx.run.selected_repositories
-          : ctx.run.allowed_repositories,
-        required_tests: requiredTests,
-      };
+      const mandatoryContract = buildExecutionContract(
+        input.upstream,
+        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories,
+        input.work_item,
+      );
 
       add(
         "mandatory_execution_contract",
@@ -763,30 +722,28 @@ export async function ensureContextPack(
       let retrievalCache: ContextPack["retrieval_cache"] | undefined;
       if (!independent) {
         const query = ctx.context.requestText.slice(0, 512);
-        const repoState: Record<string, string> = {};
-        let keyable = true;
-        for (const w of await workspacesOf(ctx.run.id).catch(() => [])) {
-          try {
-            const fp = await worktreeFingerprint(w.path);
-            const base = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);
-            const tip = await gitTip(w.path, `origin/${base}`);
-            repoState[w.repo] = `${fp.fingerprint}:${tip}`;
-          } catch {
-            keyable = false; // unreadable state: never reuse
-          }
-        }
-        const key = keyable
-          ? codeRetrievalKey({
-              ownerId: ctx.run.owner_id!,
-              runId: ctx.run.id,
-              allowed: ctx.run.allowed_repositories,
-              selected: ctx.run.selected_repositories,
-              query,
-              repos: repoState,
-              indexVersion: INDEX_VERSION,
-              indexSnapshot: (snap?.content as Record<string, unknown> | undefined)?.code_intelligence ? String(((snap?.content as Record<string, unknown>).code_intelligence as Record<string, unknown>).snapshot_id ?? "") || null : null,
-            })
-          : null;
+        const observe = async () => {
+          const workspaces = await workspacesOf(ctx.run.id); // enumeration errors invalidate reuse
+          return observeRetrievalState(ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, async name => {
+            const workspace = workspaces.find(w => w.repo === name);
+            const scope = await localScope(name, workspace ? ctx.run.id : undefined, false, workspace?.path);
+            const fp = await worktreeFingerprint(scope.root);
+            const snapshots = await q<{ id: number; generation: string; commit_sha: string }>(pool,
+              `SELECT id,generation,commit_sha FROM code_intelligence.snapshots WHERE repository_id=$1 AND index_version=$2
+              AND (run_id IS NULL OR (run_id=$3 AND instance_id=$4)) ORDER BY id`,
+              [scope.repo.id, INDEX_VERSION, ctx.run.id, config.instanceId]);
+            if (!snapshots.length) return null;
+            return { workspace: `${workspace ? "worktree" : "primary"}:${scope.root}`, head: `${fp.head}:${await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch)}`,
+              fingerprint: fp.fingerprint, snapshot: JSON.stringify(snapshots) };
+          });
+        };
+        const makeKey = async () => {
+          const repoState = await observe().catch(() => null);
+          return repoState ? codeRetrievalKey({ ownerId: ctx.run.owner_id!, runId: ctx.run.id,
+            allowed: ctx.run.allowed_repositories, selected: ctx.run.selected_repositories,
+            query, repos: repoState, indexVersion: INDEX_VERSION, indexSnapshot: JSON.stringify(repoState) }) : null;
+        };
+        const key = await makeKey();
         const prior = key
           ? await one<{ id: number; cache: any }>(
               pool,
@@ -798,7 +755,7 @@ export async function ensureContextPack(
           prior?.cache?.entries && typeof prior.cache.entries === "object"
             ? (prior.cache.entries as Record<string, string>)
             : null;
-        if (cached && cached.search_code) {
+        if (cached && cached.search_code && key === await makeKey()) {
           for (const [id, body] of Object.entries(cached))
             entries.push({
               id,
@@ -881,7 +838,7 @@ export async function ensureContextPack(
               .filter((e) => e.id === "search_code" || e.id === "find_dependencies")
               .map((e) => [e.id, e.body]),
           );
-          if (key && ok.search_code) retrievalCache = { key, entries: ok, reused_from_pack: null };
+          if (key && ok.search_code && key === await makeKey()) retrievalCache = { key, entries: ok, reused_from_pack: null };
         }
       }
       const parents = await q(

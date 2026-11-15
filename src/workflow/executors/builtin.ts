@@ -1,3 +1,5 @@
+import { buildExecutionContract } from "../../agent/contract.ts";
+import { worktreeFingerprint } from "../../agent/scopeGuard.ts";
 import { requireRunRepositoryAccess } from "../../repos/access.ts";
 import { createHash } from "node:crypto";
 import {
@@ -1171,8 +1173,23 @@ export const pullRequestExecutor: StepExecutor = {
       )
       .map((x) => ({ step: x.key, heads: x.output.tested_heads }));
     const verifiers = steps.filter((x) => x.independent);
+    const staleEvidence: string[] = [];
+    const contract = buildExecutionContract(ctx.input.upstream,
+      ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, ctx.input.work_item);
+    for (const step of steps.filter(step => step.status === "COMPLETED" && step.output?.verification?.contract_revision)) {
+      const verification = step.output.verification;
+      if (verification.contract_revision !== contract.provenance?.revision)
+        staleEvidence.push(`${step.key}: approved execution contract changed after verification`);
+      for (const workspace of workspaces) {
+        const tested = verification.last?.find((repo: { repo: string }) => repo.repo === workspace.repo)?.tested_state;
+        const current = await worktreeFingerprint(workspace.path).catch(() => null);
+        if (!tested || !current || JSON.stringify(tested) !== JSON.stringify(current))
+          staleEvidence.push(`${step.key}: verification does not match the current workspace for ${workspace.repo}`);
+      }
+    }
     const problems = [
       ...new Set([
+        ...staleEvidence,
         ...prePublishProblems({ publish, scope, state, renewedRevision, tested }),
         ...(verifiers.length ? verificationGate(verifiers, publish) : []),
       ]),

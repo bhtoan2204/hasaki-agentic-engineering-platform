@@ -236,7 +236,7 @@ if [ -f go.mod ]; then
     go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} ./...
   fi
 elif [ -f package.json ]; then
-  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '*' -print -quit 2>/dev/null)" ]; then
+  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit 2>/dev/null)" ]; then
     echo "== install dependencies"
     if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund || { echo "npm ci refused (package-lock.json out of sync with package.json?): installing from package.json, lock file untouched"; npm install --no-package-lock --ignore-scripts --no-audit --no-fund; }; else npm install --ignore-scripts --no-audit --no-fund; fi
   fi
@@ -290,6 +290,22 @@ const CONFIRM_REPOS = {
 };
 
 const IMPLEMENT = {
+  output_schema: {
+    type: "object",
+    required: ["summary", "pull_requests", "verification"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      pull_requests: { type: "object", additionalProperties: {
+        type: "object", required: ["title", "summary", "decisions"], properties: {
+          title: { type: "string", minLength: 1 }, summary: { type: "string" },
+          decisions: { type: "array", items: { type: "object", required: ["title", "detail"],
+            properties: { title: { type: "string" }, detail: { type: "string" } } } },
+        },
+      } },
+      verification: { type: ["object", "string"] },
+      outcome: { enum: ["IMPLEMENTED", "NO_CHANGE_REQUIRED", "BLOCKED", "FAILED"] },
+    },
+  },
   // The repair loop runs the tests that match the diff. The full suite stays on the later regression step.
   verify: { command: FEATURE_TARGETED_COMMAND, timeout_seconds: 900 },
   instructions:

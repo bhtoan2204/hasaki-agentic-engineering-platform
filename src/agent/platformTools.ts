@@ -1,3 +1,4 @@
+import { validateOutputContract } from "./contract.ts";
 import { validateMicroWorkspace } from "../workflow/microEvidence.ts";
 import { toolAllowed } from "./toolPolicy.ts";
 import {
@@ -9,6 +10,7 @@ import {
 } from "./contextTools.ts";
 import { developerQuestionIssue } from "./contextToolSchemas.ts";
 import {
+  refreshToolProgress,
   validateToolBinding,
   journalToolCall,
   auditToolDenial,
@@ -62,6 +64,7 @@ export interface PlatformToolEnv {
   allowed: string[];
   selected: string[];
   prose: string;
+  outputContract?: unknown;
   knowledge: Array<{
     id?: number;
     owner_id?: number | null;
@@ -194,6 +197,11 @@ export async function dispatchPlatformTool(
             throw new Error("Platform tools are disabled by the frozen benchmark context variant");
           if (!toolAllowed(target, experiment.allowedTools))
             throw new Error("Tool excluded by frozen benchmark permissions");
+        }
+        if (!env.contextPreparation) {
+          await refreshToolProgress(env.policy);
+          const loop = env.policy?.loopDetector?.check(name, args);
+          if (loop?.isLoop) throw new Error(loop.reason);
         }
         if (!env.contextPreparation && !toolAllowed(target, env.attemptAllowedTools))
           throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
@@ -409,6 +417,8 @@ async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
   const output = (args?.output ?? {}) as Record<string, unknown>;
   if (!output || typeof output !== "object" || Array.isArray(output))
     return "ERROR: submit_result.output must be an object";
+  const validation = validateOutputContract(env.outputContract, output);
+  if (!validation.valid) return `ERROR: output contract validation failed: ${validation.errors.join("; ")}`;
   env.onSubmit?.(output);
   await q(
     pool,
@@ -770,6 +780,7 @@ export function envFromExecution(
     branch: ctx.run.branch,
     allowed: ctx.run.allowed_repositories,
     selected: ctx.run.selected_repositories,
+    outputContract: ctx.step.config.output_schema ?? ctx.step.config.output_contract,
     prose: outputLocale(ctx.run) === "vi" ? "Vietnamese" : "English",
     knowledge: (ctx.context?.knowledge ?? []) as PlatformToolEnv["knowledge"],
     disclosure: ctx.context?.disclosure ?? [],
@@ -829,6 +840,7 @@ export async function envFromDatabase(
     branch: run.branch,
     allowed: run.allowed_repositories,
     selected: run.selected_repositories,
+    outputContract: step.config?.output_schema ?? step.config?.output_contract,
     prose: outputLocale(run) === "vi" ? "Vietnamese" : "English",
     knowledge: content.knowledge ?? [],
     disclosure: content.prompt_plan?.knowledge ?? [],

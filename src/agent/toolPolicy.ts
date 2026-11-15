@@ -1,3 +1,5 @@
+import { stableJson } from "./metrics.ts";
+import { createHash } from "node:crypto";
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,10 +48,17 @@ export interface ToolCallRecord {
   timestamp: number;
   status?: "ok" | "error" | "denied";
   error?: string;
+  resultHash?: string;
 }
 
 export class ToolLoopDetector {
   private history: ToolCallRecord[] = [];
+  private workspaceState: string | undefined;
+
+  observeProgress(state: string) {
+    if (this.workspaceState !== undefined && this.workspaceState !== state) this.history = [];
+    this.workspaceState = state;
+  }
   readonly consecutiveThreshold: number;
   readonly cycleThreshold: number;
 
@@ -59,10 +68,15 @@ export class ToolLoopDetector {
   }
 
   record(tool: string, input: unknown, status: "ok" | "error" | "denied" = "ok", error?: string) {
-    const inputHash = JSON.stringify(input ?? {});
+    tool = tool.replace(/^mcp__platform__|^platform\./, "");
+    const inputHash = stableJson(input ?? {});
+    const resultHash = error === undefined ? undefined : createHash("sha256").update(error).digest("hex");
+    const previous = this.history.findLast(call => call.tool === tool && call.inputHash === inputHash);
+    if (previous?.resultHash && resultHash && previous.resultHash !== resultHash) this.history = [];
     this.history.push({
       tool,
       inputHash,
+      resultHash,
       timestamp: Date.now(),
       status,
       error,
@@ -71,7 +85,8 @@ export class ToolLoopDetector {
   }
 
   check(tool: string, input: unknown): { isLoop: boolean; reason?: string } {
-    const inputHash = JSON.stringify(input ?? {});
+    tool = tool.replace(/^mcp__platform__|^platform\./, "");
+    const inputHash = stableJson(input ?? {});
     let count = 0;
     for (let i = this.history.length - 1; i >= 0; i--) {
       if (this.history[i].tool === tool && this.history[i].inputHash === inputHash) {

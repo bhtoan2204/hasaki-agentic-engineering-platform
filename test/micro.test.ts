@@ -252,3 +252,20 @@ test("MICRO declines Cursor and prevents execution without pre-execution tool in
     assert.ok(escalation.request.reason.includes("Cursor cannot enforce pre-execution tool boundaries"));
   }
 });
+
+test("MICRO verification reuses nonempty dependencies instead of reinstalling them", async () => {
+  const { mkdtemp, mkdir, writeFile, rm, readFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFileSync } = await import("node:child_process");
+  const root = await mkdtemp(join(tmpdir(), "micro-dependencies-"));
+  try {
+    await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
+    await mkdir(join(root, "bin"));
+    await writeFile(join(root, "package.json"), "{}");
+    await writeFile(join(root, "bin", "npm"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n', { mode: 0o755 });
+    execFileSync("bash", ["-c", FEATURE_MICRO_TARGETED_COMMAND], { cwd: root,
+      env: { ...process.env, PLATFORM_SELF_TEST: "0", BASE_BRANCH: "main", PATH: `${join(root, "bin")}:${process.env.PATH}`, CALLS: join(root, "calls") }, stdio: "pipe" });
+    assert.equal((await readFile(join(root, "calls"), "utf8")).trim(), "test --if-present");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

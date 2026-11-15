@@ -1,3 +1,5 @@
+import { worktreeFingerprint } from "./scopeGuard.ts";
+import type { PolicyContext } from "./toolPolicy.ts";
 import { execution } from "../auth/execution.ts";
 import { assertRunScopeReadable, requireRunRepositoryAccess } from "../repos/access.ts";
 import { pool, q, one, withTx, type Db } from "../db/pool.ts";
@@ -218,4 +220,11 @@ export async function postClarification(
       );
     return questions.length;
   });
+}
+
+/** Unknown source state is never taken as proof of progress. */
+export async function refreshToolProgress(policy?: PolicyContext) {
+  if (!policy?.loopDetector || !policy.workspaces.length) return;
+  const state = await Promise.all(policy.workspaces.map(async path => ({ path, ...await worktreeFingerprint(path) }))).catch(() => null);
+  if (state) policy.loopDetector.observeProgress(hashOf(state));
 }

@@ -1,3 +1,4 @@
+import { worktreeFingerprint } from "./scopeGuard.ts";
 import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -37,6 +38,7 @@ export interface VerifyConfig {
   /** Hard test-weakening signals (removed/skipped/disabled tests) fail verification unless explicitly allowed. */
   allowTestWeakening: boolean;
   requiredTests?: string[];
+  contractRevision?: string;
 }
 
 /**
@@ -83,6 +85,9 @@ export function environmentUnavailable(code: number | null, output: string): str
 }
 
 export interface RepoVerification {
+  tested_state?: { head: string; fingerprint: string };
+  contract_revision?: string;
+  required_tests?: Record<string, "passed" | "failed" | "skipped" | "not_executed">;
   repo: string;
   status: RepoStatus;
   /** passed or accepted_preexisting. */
@@ -293,6 +298,7 @@ export async function verifyWorkspaces(
       `◆ verify ${w.repo} (round ${round})${known?.tests.length ? `, skipping ${known.tests.length} test(s) known to fail on base` : ""}`,
     );
     const started = Date.now();
+    const beforeState = await worktreeFingerprint(p).catch(() => null);
     const baseEnv = { ...env, REPO: w.repo, ...(w.branch ? { BRANCH: w.branch } : {}) };
     const runWith = (skip: string | null) =>
       deps.run(
@@ -324,13 +330,6 @@ export async function verifyWorkspaces(
       excerpt: "",
       commit_sha: headCommit,
     };
-    if (entry.status === "passed" && cfg.requiredTests?.length) {
-      const missing = cfg.requiredTests.filter((t) => !r.output.includes(t));
-      if (missing.length > 0) {
-        entry.status = "failed";
-        entry.note = `required tests were not executed: ${missing.join(", ")}`;
-      }
-    }
     const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
     if (unavailable)
       Object.assign(entry, {
@@ -429,6 +428,33 @@ export async function verifyWorkspaces(
           error: `could not inspect test changes: ${(e as Error).message.split("\n")[0]}`,
         });
       }
+    }
+    if (cfg.requiredTests?.length) {
+      const results: NonNullable<RepoVerification["required_tests"]> = {};
+      for (const id of cfg.requiredTests) results[id] = "not_executed";
+      // Only the trusted runner's machine stream can establish test status. A script may print arbitrary JSON.
+      const goJson = /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(cfg.command.trim());
+      for (const line of goJson ? r.output.split("\n") : []) {
+        try {
+          const event = JSON.parse(line);
+          if (typeof event.Package !== "string" || typeof event.Test !== "string") continue;
+          const id = `${event.Package}/${event.Test}`;
+          if (!(id in results)) continue;
+          const status = event.Action === "pass" ? "passed" : event.Action === "fail" ? "failed" : event.Action === "skip" ? "skipped" : null;
+          if (status && results[id] !== "failed" && results[id] !== "skipped") results[id] = status;
+        } catch { /* Non-JSON logs are never evidence of a required test pass. */ }
+      }
+      entry.required_tests = results;
+      if (Object.values(results).some(status => status !== "passed")) {
+        entry.status = "failed";
+        entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
+      }
+      const afterState = await worktreeFingerprint(p).catch(() => null);
+      if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
+        entry.status = "failed";
+        entry.note = "Workspace changed during verification or its state could not be established";
+      } else entry.tested_state = afterState;
+      entry.contract_revision = cfg.contractRevision;
     }
     entry.passed = entry.status === "passed" || entry.status === "accepted_preexisting";
     entry.duration_ms = Date.now() - started;
@@ -581,6 +607,7 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
       : []),
   ]);
   return {
+    contract_revision: cfg.contractRevision,
     outcome: res.outcome,
     /** clean | accepted_with_preexisting | failed | error | … — what kind of pass/failure this was. */
     status:
@@ -614,6 +641,9 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
           note,
           error,
           artifact_id,
+          tested_state,
+          contract_revision,
+          required_tests,
         }) => ({
           repo,
           status,
@@ -629,6 +659,9 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
           note,
           error,
           artifact_id,
+          tested_state,
+          contract_revision,
+          required_tests,
         }),
       ) ?? [],
   };

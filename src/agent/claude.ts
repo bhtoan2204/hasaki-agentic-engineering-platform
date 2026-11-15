@@ -1,3 +1,5 @@
+import { worktreeFingerprint } from "./scopeGuard.ts";
+import { refreshToolProgress } from "./toolRuntime.ts";
 import { selectVerificationScope } from "./verificationScope.ts";
 import { collectMicroEvidence, validateMicroWorkspace } from "../workflow/microEvidence.ts";
 import { indexRepository } from "../codeIntelligence/indexer.ts";
@@ -54,7 +56,7 @@ import {
   newMetrics,
   type AgentMetrics,
 } from "./metrics.ts";
-import { missingContractKeys, validateOutputContract } from "./contract.ts";
+import { buildExecutionContract, executionContractProblems, missingContractKeys, validateOutputContract } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   installNodeDependencies,
@@ -748,6 +750,23 @@ const agentExecutor: StepExecutor = {
         return { kind: "failed", error: error.message, retryable: false };
       throw error;
     }
+    if (mode === "coding" && !independent) {
+      const contract = buildExecutionContract(ctx.input.upstream,
+        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, ctx.input.work_item);
+      const problems = executionContractProblems(contract, ctx.run.allowed_repositories);
+      const provenance = contract.provenance!;
+      if (!problems.length) {
+        const approval = await one<{ input: { upstream?: Record<string, { attempt_id?: number }> } }>(pool,
+          "SELECT a.input FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id WHERE a.id=$1 AND a.run_id=$2 AND a.status='COMPLETED' AND s.type='human_approval' AND s.current_attempt_id=a.id AND s.status='COMPLETED'",
+          [provenance.approval_attempt_id, ctx.run.id]);
+        if (Object.entries(provenance.source_attempts).some(([key, attempt]) =>
+          approval?.input?.upstream?.[key]?.attempt_id !== attempt))
+          problems.push("Approval does not reference the current plan attempt; renewed approval is required");
+      }
+      if (problems.length) return { kind: "failed", retryable: false,
+        error: `Mandatory execution contract is incomplete: ${problems.join("; ")}` };
+      await ctx.artifact("execution_contract", "approved execution contract", JSON.stringify(contract), contract);
+    }
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
     const resume = independent ? null : await resumableSession(ctx, cwd, provider);
     let reviewKey: string | null = null;
@@ -973,6 +992,7 @@ const agentExecutor: StepExecutor = {
         "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'",
         [ctx.attempt.id],
       );
+      await refreshToolProgress(policy);
       const d = decide(
         input.tool_name,
         (input.tool_input ?? {}) as Record<string, unknown>,
@@ -981,7 +1001,7 @@ const agentExecutor: StepExecutor = {
         input.agent_id,
       );
       if (d.allow) {
-        policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
+        if (!input.tool_name.startsWith("mcp__platform__")) policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
         hookAllowed.add(callKey(input.tool_name, input.tool_input));
         if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
         return {};
@@ -1050,17 +1070,28 @@ const agentExecutor: StepExecutor = {
           assistantTurns: 0,
           failure: "canceled",
         };
-      if (live) {
+      {
         const promptTokens = Math.ceil(prompt.length / 4);
         const systemAppendTokens = Math.ceil(systemAppend.length / 4);
         const totalPromptTokens = Math.ceil((systemAppend.length + prompt.length) / 4);
         await ctx.recordMetrics({
-          evaluation_context: {
+          prompt_context: {
+            measurement: "character_estimate_not_provider_usage",
+            system_append_tokens: systemAppendTokens,
+            user_prompt_tokens: promptTokens,
+            known_prompt_tokens: totalPromptTokens,
+            full_input_tokens: null,
+            tool_schema_tokens: null,
+            session_history_tokens: null,
+            provider_system_tokens: null,
+            resumed: !!resumeId,
+          },
+          ...(live ? { evaluation_context: {
             system_append_tokens: systemAppendTokens,
             pack_tokens: ctx.context.contextPack?.estimated_tokens ?? 0,
             user_prompt_tokens: promptTokens,
             total_prompt_tokens: totalPromptTokens,
-          },
+          } } : {}),
         }).catch(() => {});
       }
       await ctx.log("prompt", prompt, {
@@ -1563,7 +1594,7 @@ const agentExecutor: StepExecutor = {
                 ? "Claude"
                 : String(provider);
     if (!independent) {
-      if (ctx.step.config?.output_contract) {
+      if (ctx.step.config?.output_schema || ctx.step.config?.output_contract) {
         if (!submitted)
           return {
             kind: "failed",
@@ -1579,7 +1610,7 @@ const agentExecutor: StepExecutor = {
             retryable: true,
             details: { submitted },
           };
-        const validation = validateOutputContract(ctx.step.config.output_contract, submitted);
+        const validation = validateOutputContract(ctx.step.config.output_schema ?? ctx.step.config.output_contract, submitted);
         if (!validation.valid)
           return {
             kind: "failed",
@@ -1590,6 +1621,10 @@ ${validation.errors.join("; ")}`,
           };
       }
     }
+    if (mode === "coding" && !independent &&
+      (submitted?.outcome === "BLOCKED" || submitted?.blocked === true || submitted?.outcome === "FAILED"))
+      return { kind: "failed", retryable: false,
+        error: `Coding outcome ${submitted?.outcome ?? "BLOCKED"} cannot complete successfully`, details: { submitted } };
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
     if (mode === "coding" && !independent) {
       if (submitted?.outcome === "NO_CHANGE_REQUIRED" || submitted?.no_change_required === true) {
@@ -1732,6 +1767,15 @@ ${validation.errors.join("; ")}`,
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
     const vcfg = mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
+    if (vcfg && !independent) {
+      const contract = buildExecutionContract(ctx.input.upstream,
+        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, ctx.input.work_item);
+      vcfg.requiredTests = [...new Set([...(vcfg.requiredTests ?? []), ...contract.required_tests])];
+      vcfg.contractRevision = contract.provenance?.revision;
+    }
+    if (mode === "coding" && !independent && !vcfg)
+      return { kind: "failed", retryable: false, error: "Mandatory implementation verification is disabled" };
+
     if (mode === "coding" && !vcfg) {
       // Only the versioned workflow definition can turn the gate off; record it so evaluation never counts it as passed.
       await ctx.log(
@@ -1975,6 +2019,19 @@ ${validation.errors.join("; ")}`,
           })),
         ),
       );
+      if (state.unreadable.length) return { kind: "failed", retryable: false, error: state.unreadable.join("; ") };
+      if (output.outcome === "NO_CHANGE_REQUIRED" || output.no_change_required === true)
+        return { kind: "failed", retryable: false, error: "NO_CHANGE_REQUIRED needs independent requirement-satisfaction evidence; this executor cannot establish it" };
+      if (!Object.values(state.files).some(files => files.length))
+        return { kind: "failed", retryable: false, error: "IMPLEMENTED requires worker-observed implementation changes" };
+      const verified = output.verification as { passed?: boolean; last?: Array<{ repo: string; tested_state?: { head: string; fingerprint: string } }> } | undefined;
+      for (const workspace of all) {
+        const tested = verified?.last?.find(repo => repo.repo === workspace.repo)?.tested_state;
+        const current = await worktreeFingerprint(workspace.path).catch(() => null);
+        if (!verified?.passed || !tested || !current || JSON.stringify(tested) !== JSON.stringify(current))
+          return { kind: "failed", retryable: false, error: `Verification is missing or stale for ${workspace.repo}` };
+      }
+      output.outcome = "IMPLEMENTED";
       // Time to the first useful code location: first read/edit of a file the step finally changed (measured events).
       const changed = Object.values(state.files).flat();
       if (changed.length) {
@@ -2035,6 +2092,13 @@ ${validation.errors.join("; ")}`,
           } as any;
       }
     }
+    if (!independent && (ctx.step.config.output_schema || ctx.step.config.output_contract)) {
+      const validation = validateOutputContract(ctx.step.config.output_schema ?? ctx.step.config.output_contract, output);
+      if (!validation.valid) return { kind: "failed", retryable: false,
+        error: `Final output contract validation failed: ${validation.errors.join("; ")}` };
+    }
+    if (mode === "coding" && !independent && (output.outcome === "BLOCKED" || output.outcome === "FAILED" || output.blocked === true))
+      return { kind: "failed", retryable: false, error: "Terminal coding outcome cannot complete successfully", details: { output } };
     return { kind: "completed", output };
   },
 };

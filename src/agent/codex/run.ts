@@ -1,4 +1,3 @@
-import { liveRuntime } from "../../eval/liveRuntime.ts";
 import { agentEnvironment } from "../environment.ts";
 import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
@@ -31,7 +30,7 @@ const exec = promisify(execFile);
  *
  * Execution policy, per invocation and never in the user's ~/.codex:
  *  - --ignore-user-config / --ignore-rules / --strict-config: only the platform's -c overrides apply; unknown keys fail.
- *  - OS sandbox: read-only for analysis. Coding runs danger-full-access (no OS sandbox, network allowed) so local
+ *  - OS sandbox: read-only for analysis. Coding runs workspace-write with network disabled so local
  *    PostgreSQL sockets and the test suite can run. .git stays read-only to the tool policy, so commits go through
  *    the platform's commit_changes tool.
  *  - approval_policy = never. PermissionRequest is denied by the platform hook as well.
@@ -306,15 +305,13 @@ export function codexArgs(inv: CodexInvocation): string[] {
   const cfg: Array<[string, unknown]> = [
     [
       "sandbox_mode",
-      coding ? (liveRuntime.getStore() ? "workspace-write" : "danger-full-access") : "read-only",
+      coding ? "workspace-write" : "read-only",
     ],
     ["approval_policy", "never"],
     ["web_search", "disabled"],
   ];
-  // Analysis stays inside the read-only sandbox. Coding does not: workspace-write blocks Unix socket binds
-  // (local PostgreSQL) and network, which made the agent ask a human to run the suite.
-  if (!coding || liveRuntime.getStore())
-    cfg.push(
+  // Coding stays inside the native write sandbox. The worker runs infrastructure verification after submission.
+  cfg.push(
       ["sandbox_workspace_write.network_access", false],
       ["sandbox_workspace_write.writable_roots", []],
     );
