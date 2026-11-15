@@ -433,6 +433,27 @@ test("automatic mode requires explicit cost permission, excludes auth/timeouts a
   assert.match((await checkpoint(r.id)).blocked_reason, /loop|budget/);
 });
 
+test("manual confirmation past the switch budget warns and continues", async () => {
+  const r = await run("claude", {
+    mode: "manual",
+    providers: ["claude", "codex"],
+    max_switches: 0,
+  });
+  await workspace(r);
+  await quota();
+  await once();
+  const h = await checkpoint(r.id);
+  const result = await resume(r.id, h, "codex");
+  assert.equal(result.handoff.status, "RESUMED");
+  assert.match(result.warning ?? "", /switch budget/);
+  const ev = await one(
+    pool,
+    "SELECT content FROM workflow_events WHERE run_id=$1 AND kind='provider_handoff' ORDER BY id DESC LIMIT 1",
+    [r.id],
+  );
+  assert.match(ev.content, /switch budget/);
+});
+
 test("authentication, context limits, timeouts and unknown structured provider failures pause for manual recovery", async () => {
   for (const code of [
     "authentication",

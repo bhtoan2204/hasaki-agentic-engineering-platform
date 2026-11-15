@@ -306,10 +306,14 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
       matchingRepositories: positive.length,
       declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
       provider: input.agentProvider ?? config.agent.defaultProvider ?? null,
-      evidence: selected.length === 1 ? await collectMicroEvidence(selected[0], inputs.files, priorFailureRuns) : undefined,
+      evidence:
+        selected.length === 1
+          ? await collectMicroEvidence(selected[0], inputs.files, priorFailureRuns)
+          : undefined,
     },
     input.profile ?? "AUTO",
-    prompt => completeForRun({ agent_provider: input.agentProvider }, prompt, AbortSignal.timeout(5000)),
+    (prompt) =>
+      completeForRun({ agent_provider: input.agentProvider }, prompt, AbortSignal.timeout(5000)),
   );
   const complexity = classifyComplexity(decision0, { priorFailureRuns }, inputs.complexity);
   let decision: ProfileDecision & { complexity: typeof complexity } = {
@@ -319,7 +323,10 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
   };
   // High-risk verification stays mandatory: FAST would drop the independent review, so it is refused for HIGH_RISK
   // unless the user explicitly re-classified the task (recorded as an override).
-  if (complexity.class === "HIGH_RISK" && (decision.profile === "FAST" || decision.profile === "MICRO"))
+  if (
+    complexity.class === "HIGH_RISK" &&
+    (decision.profile === "FAST" || decision.profile === "MICRO")
+  )
     decision = {
       ...decision,
       profile: "STANDARD",
@@ -331,11 +338,27 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
   const resolved = resolveProfile(dv.spec, decision);
   decision = resolved.decision;
   if (decision.profile === "MICRO") {
-    const evidence = decision.signals.evidence as NonNullable<import("./profiles.ts").ProfileSignals["evidence"]>;
+    const evidence = decision.signals.evidence as NonNullable<
+      import("./profiles.ts").ProfileSignals["evidence"]
+    >;
     const files = evidence.files;
-    resolved.spec = { ...resolved.spec, steps: resolved.spec.steps.map(step => step.type === "coding_agent" ? {
-      ...step, config: { ...step.config, micro_scope: files, micro_revision: 0, micro_source_revision: evidence.revision, micro_hashes: evidence.hashes },
-    } : step) };
+    resolved.spec = {
+      ...resolved.spec,
+      steps: resolved.spec.steps.map((step) =>
+        step.type === "coding_agent"
+          ? {
+              ...step,
+              config: {
+                ...step.config,
+                micro_scope: files,
+                micro_revision: 0,
+                micro_source_revision: evidence.revision,
+                micro_hashes: evidence.hashes,
+              },
+            }
+          : step,
+      ),
+    };
   }
   const reported = withReportStep(resolved.spec, wi ? parseAiSuggest(wi.payload) : null);
   const graph = withCleanupStep(reported);
@@ -1833,10 +1856,21 @@ async function applyResult(
     );
 
   if (run.profile === "MICRO" && result.kind === "failed") {
-    const pending = await one<{ data: import("./profileRuntime.ts").EscalationRequest }>(c,
-      "SELECT data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' ORDER BY id DESC LIMIT 1", [attempt.id]);
-    result = { kind: "profile_escalation", request: pending?.data ?? { target: "STANDARD", risk: "unknown",
-      reason: result.error, expectedRevision: (run.graph as WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+    const pending = await one<{ data: import("./profileRuntime.ts").EscalationRequest }>(
+      c,
+      "SELECT data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' ORDER BY id DESC LIMIT 1",
+      [attempt.id],
+    );
+    result = {
+      kind: "profile_escalation",
+      request: pending?.data ?? {
+        target: "STANDARD",
+        risk: "unknown",
+        reason: result.error,
+        expectedRevision:
+          (run.graph as WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0,
+      },
+    };
   }
   switch (result.kind) {
     case "profile_escalation": {
@@ -1848,8 +1882,28 @@ async function applyResult(
         await q(c, "RELEASE SAVEPOINT profile_transition");
       } catch (error) {
         await q(c, "ROLLBACK TO SAVEPOINT profile_transition");
-        run.graph = previousGraph; run.profile = previousProfile;
-        return applyResult(c, run, step, attempt, jobId, { kind: "waiting_input", checkpoint: { profile_transition: result.request }, questions: [{ question: "The profile transition requires reconciliation before execution can continue.", context: (error as Error).message, options: ["Review the preserved checkpoint and resume"] }] }, afterCommit);
+        run.graph = previousGraph;
+        run.profile = previousProfile;
+        return applyResult(
+          c,
+          run,
+          step,
+          attempt,
+          jobId,
+          {
+            kind: "waiting_input",
+            checkpoint: { profile_transition: result.request },
+            questions: [
+              {
+                question:
+                  "The profile transition requires reconciliation before execution can continue.",
+                context: (error as Error).message,
+                options: ["Review the preserved checkpoint and resume"],
+              },
+            ],
+          },
+          afterCommit,
+        );
       }
       break;
     }
@@ -2160,11 +2214,22 @@ export async function finishAttempt(
         blocked:
           "Switch request arrived after checkpoint preparation; reinspect the stopped executor's preserved state",
       };
-    const microEscalating = run.profile === "MICRO" && !request && (
-      result.kind === "profile_escalation" ||
-      (result.kind === "failed" && /execution timeout|context.*budget/i.test(result.error)) ||
-      !!(await one(c, "SELECT 1 FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' LIMIT 1", [attempt.id])));
-    if (!microEscalating && handoff && attempt.executor_stopped_at && (request || handoff.failure)) {
+    const microEscalating =
+      run.profile === "MICRO" &&
+      !request &&
+      (result.kind === "profile_escalation" ||
+        (result.kind === "failed" && /execution timeout|context.*budget/i.test(result.error)) ||
+        !!(await one(
+          c,
+          "SELECT 1 FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' LIMIT 1",
+          [attempt.id],
+        )));
+    if (
+      !microEscalating &&
+      handoff &&
+      attempt.executor_stopped_at &&
+      (request || handoff.failure)
+    ) {
       await persistProviderPause(c, run, step, attempt, j!, result, handoff, request, afterCommit);
     } else {
       await applyResult(c, run, step, attempt, jobId, result, afterCommit);
@@ -3021,10 +3086,13 @@ export async function resumeProviderHandoff(
     );
     if (policy.mode === "disabled" || !policy.providers.includes(input.provider))
       throw new EngineError("Fallback provider is disabled by workflow policy", 409);
-    if (
-      input.provider !== h.original_provider &&
-      history.filter((v) => v.target_provider !== v.original_provider).length >= policy.max_switches
-    )
+    // max_switches stops automatic failover. A person who confirms a switch is warned and allowed through.
+    const switches = history.filter((v) => v.target_provider !== v.original_provider).length;
+    const switchBudgetWarning =
+      input.provider !== h.original_provider && switches >= policy.max_switches
+        ? `Provider switch budget reached (${switches}/${policy.max_switches}); manual confirmation continues`
+        : null;
+    if (switchBudgetWarning && automatic)
       throw new EngineError("Provider switch budget exhausted", 409);
     const healthFailover =
       policy.auto_health && ["AUTHENTICATION", "QUOTA_EXHAUSTED"].includes(h.failure_category);
@@ -3131,6 +3199,7 @@ export async function resumeProviderHandoff(
             handoff_id: h.id,
             original_provider: h.original_provider,
             target_provider: input.provider,
+            warning: switchBudgetWarning,
           }),
         ],
       );
@@ -3138,15 +3207,18 @@ export async function resumeProviderHandoff(
       c,
       runId,
       "provider_handoff",
-      `${h.original_provider} → ${input.provider}`,
+      switchBudgetWarning
+        ? `${h.original_provider} → ${input.provider}; ${switchBudgetWarning}`
+        : `${h.original_provider} → ${input.provider}`,
       s.id,
       h.source_attempt_id,
-      { handoff_id: h.id, automatic },
+      { handoff_id: h.id, automatic, warning: switchBudgetWarning },
     );
     await advance(c, runId, afterCommit);
     return {
       handoff: { ...h, status: "RESUMED", target_provider: input.provider },
       duplicate: false,
+      warning: switchBudgetWarning,
     };
   });
 }
