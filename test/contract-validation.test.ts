@@ -177,6 +177,7 @@ test("validateOutputContract validates enums and optional fields", () => {
 });
 
 test("validateOutputContract checks outcome enum when outcome field is provided", () => {
+  assert.deepEqual(VALID_STEP_OUTCOMES, ["IMPLEMENTED", "NO_CHANGE_REQUIRED", "BLOCKED", "FAILED"]);
   assert.equal(isStepOutcome("IMPLEMENTED"), true);
   assert.equal(isStepOutcome("NO_CHANGE_REQUIRED"), true);
   assert.equal(isStepOutcome("BLOCKED"), true);

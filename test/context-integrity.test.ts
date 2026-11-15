@@ -84,11 +84,27 @@ test("budgetContextPack preserves mandatory required entries and throws ContextB
       relevance: "optional",
       state: "snapshot",
     },
-    trust: "approved_knowledge",
+    trust: "curated_rule",
+  };
+
+  const basePack = {
+    version: 1 as const,
+    run_id: 1,
+    step_id: 1,
+    attempt_id: 1,
+    owner_id: 1,
+    snapshot_id: 1,
+    created_at: new Date().toISOString(),
+    budget_tokens: 10000,
+    token_measurement: "character_estimate_not_provider_usage" as const,
+    parent_pack_ids: [],
+    retrieval_calls: 0,
+    retrieval_failures: 0,
+    preparation_ms: 0,
   };
 
   const pack = budgetContextPack(
-    { pack_id: 1, snapshot_id: 1, token_measurement: "character_estimate_not_provider_usage", budget_tokens: 10000 },
+    basePack,
     [mandatoryEntry, optionalEntry],
   );
   assert.equal(pack.entries.length, 2);
@@ -97,7 +113,7 @@ test("budgetContextPack preserves mandatory required entries and throws ContextB
   assert.throws(
     () =>
       budgetContextPack(
-        { pack_id: 1, snapshot_id: 1, token_measurement: "character_estimate_not_provider_usage", budget_tokens: 10 },
+        { ...basePack, budget_tokens: 10 },
         [mandatoryEntry],
       ),
     (err: unknown) => err instanceof ContextBudgetError,
