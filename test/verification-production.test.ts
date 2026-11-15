@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { verifyWorkspaces } from "../src/agent/verify.ts";
-import { runCommand } from "../src/workflow/executors/builtin.ts";
+import { runVerificationCommand as runCommand } from "../src/workflow/executors/builtin.ts";
 import { FEATURE_TARGETED_COMMAND, PLATFORM_TARGETED_COMMAND } from "../src/workflow/templates.ts";
 import { dependencyFingerprint } from "../src/git/provider.ts";
 

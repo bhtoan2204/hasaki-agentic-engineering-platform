@@ -335,11 +335,11 @@ export async function ensureContextPack(
         ),
         "platform_constraint",
       );
-      const mandatoryContract = buildExecutionContract(
-        input.upstream,
-        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories,
-        input.work_item,
-      );
+      const mandatoryContract = input.execution_contract ?? (ctx.step.type === "coding_agent" ? { blocked: "Missing pinned execution contract; renew authorization" } : buildExecutionContract(input.upstream,
+        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, input.work_item, {
+          graph: ctx.run.graph, step: ctx.step, definition_version_id: ctx.run.definition_version_id, profile: ctx.run.profile,
+          request: { title: ctx.run.title, description: input.work_item?.description, inputs: ctx.run.inputs },
+        }));
 
       add(
         "mandatory_execution_contract",

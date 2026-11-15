@@ -1,3 +1,5 @@
+import { validateExecutionAuthorization } from "./executionContract.ts";
+import { executionWorkspaces, implementationBaseline, implementationChanged, observeImplementation, loadImplementationBaseline } from "./implementationEvidence.ts";
 import { worktreeFingerprint } from "./scopeGuard.ts";
 import { refreshToolProgress } from "./toolRuntime.ts";
 import { selectVerificationScope } from "./verificationScope.ts";
@@ -56,7 +58,7 @@ import {
   newMetrics,
   type AgentMetrics,
 } from "./metrics.ts";
-import { buildExecutionContract, executionContractProblems, missingContractKeys, validateOutputContract } from "./contract.ts";
+import { missingContractKeys, validateOutputContract } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   installNodeDependencies,
@@ -102,7 +104,7 @@ import {
   dispatchPlatformTool,
   envFromExecution,
 } from "./platformTools.ts";
-import { runCommand } from "../workflow/executors/builtin.ts";
+import { runVerificationCommand as runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
 import { branchFor } from "../workflow/branches.ts";
@@ -661,7 +663,7 @@ const agentExecutor: StepExecutor = {
       const blocked = await restoreWorkspaces();
       if (blocked) return blocked;
     }
-    const ws = (await workspacesOf(ctx.run.id)).filter(
+    const ws = (await executionWorkspaces(ctx)).filter(
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
@@ -743,6 +745,7 @@ const agentExecutor: StepExecutor = {
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
+    let implementationStart: Awaited<ReturnType<typeof implementationBaseline>> | null = null;
     try {
       ctx.context.contextPack = await ensureContextPack(ctx, metrics, policy);
     } catch (error) {
@@ -751,21 +754,20 @@ const agentExecutor: StepExecutor = {
       throw error;
     }
     if (mode === "coding" && !independent) {
-      const contract = buildExecutionContract(ctx.input.upstream,
-        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, ctx.input.work_item);
-      const problems = executionContractProblems(contract, ctx.run.allowed_repositories);
-      const provenance = contract.provenance!;
-      if (!problems.length) {
-        const approval = await one<{ input: { upstream?: Record<string, { attempt_id?: number }> } }>(pool,
-          "SELECT a.input FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id WHERE a.id=$1 AND a.run_id=$2 AND a.status='COMPLETED' AND s.type='human_approval' AND s.current_attempt_id=a.id AND s.status='COMPLETED'",
-          [provenance.approval_attempt_id, ctx.run.id]);
-        if (Object.entries(provenance.source_attempts).some(([key, attempt]) =>
-          approval?.input?.upstream?.[key]?.attempt_id !== attempt))
-          problems.push("Approval does not reference the current plan attempt; renewed approval is required");
-      }
+      const contract = ctx.input.execution_contract;
+      const problems = await validateExecutionAuthorization(ctx);
       if (problems.length) return { kind: "failed", retryable: false,
         error: `Mandatory execution contract is incomplete: ${problems.join("; ")}` };
-      await ctx.artifact("execution_contract", "approved execution contract", JSON.stringify(contract), contract);
+      await ctx.artifact(
+        "execution_contract",
+        "approved execution contract",
+        JSON.stringify(contract),
+        contract,
+      );
+    }
+    if (mode === "coding" && !independent) {
+      implementationStart = await implementationBaseline(ctx);
+      policy.workspaces = (await executionWorkspaces(ctx)).map(w => w.path);
     }
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
     const resume = independent ? null : await resumableSession(ctx, cwd, provider);
@@ -1771,11 +1773,14 @@ ${validation.errors.join("; ")}`,
     }
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
-    const vcfg = mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
+    const vcfg = mode === "coding" ? (ctx.input.execution_contract?.verification
+      ? { ...(ctx.input.execution_contract.verification as import("./verify.ts").VerifyConfig) }
+      : verifyConfig(ctx.step.config, TEST_COMMAND)) : null;
     if (vcfg && !independent) {
-      const contract = buildExecutionContract(ctx.input.upstream,
-        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, ctx.input.work_item);
-      vcfg.requiredTests = [...new Set([...(vcfg.requiredTests ?? []), ...contract.required_tests])];
+      const contract = ctx.input.execution_contract!;
+      vcfg.requiredTests = [
+        ...new Set([...(vcfg.requiredTests ?? []), ...contract.required_tests]),
+      ];
       vcfg.contractRevision = contract.provenance?.revision;
     }
     if (mode === "coding" && !independent && !vcfg)
@@ -1803,7 +1808,7 @@ ${validation.errors.join("; ")}`,
     // The agent already submitted: a question now would re-run it from scratch on resume, so conflicted repos are skipped.
     const unrestored = restoreConflictSkips(restoreBlocked);
     if (vcfg) {
-      const trees = (await workspacesOf(ctx.run.id)).filter(
+      const trees = (await executionWorkspaces(ctx)).filter(
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
       );
@@ -2018,7 +2023,7 @@ ${validation.errors.join("; ")}`,
     // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact
     // revision; the PR step re-validates it. The agent's own deviation report is recorded but never relied on.
     if (mode === "coding" && !independent) {
-      const all = (await workspacesOf(ctx.run.id).catch(() => [])).filter(
+      const all = (await executionWorkspaces(ctx)).filter(
         (w) => !unrestored.has(w.repo),
       );
       const state = await collectScopeState(
@@ -2033,15 +2038,48 @@ ${validation.errors.join("; ")}`,
       if (state.unreadable.length) return { kind: "failed", retryable: false, error: state.unreadable.join("; ") };
       if (output.outcome === "NO_CHANGE_REQUIRED" || output.no_change_required === true)
         return { kind: "failed", retryable: false, error: "NO_CHANGE_REQUIRED needs independent requirement-satisfaction evidence; this executor cannot establish it" };
-      if (!Object.values(state.files).some(files => files.length))
-        return { kind: "failed", retryable: false, error: "IMPLEMENTED requires worker-observed implementation changes" };
-      const verified = output.verification as { passed?: boolean; last?: Array<{ repo: string; tested_state?: { head: string; fingerprint: string } }> } | undefined;
+      const authorizationProblems = await validateExecutionAuthorization(ctx);
+      if (authorizationProblems.length) return { kind: "failed", retryable: false, error: authorizationProblems.join("; ") };
+      const implementationEnd = await observeImplementation(ctx);
+      implementationStart = await loadImplementationBaseline(ctx.step.id, ctx.step.generation);
+      if (
+        !implementationStart ||
+        !implementationChanged(implementationStart, implementationEnd) ||
+        !Object.values(state.files).some((files) => files.length)
+      )
+        return {
+          kind: "failed",
+          retryable: false,
+          error: "IMPLEMENTED requires worker-observed implementation changes",
+        };
+      const verified = output.verification as
+        | {
+            passed?: boolean;
+            last?: Array<{ repo: string; tested_state?: { head: string; fingerprint: string } }>;
+          }
+        | undefined;
       for (const workspace of all) {
-        const tested = verified?.last?.find(repo => repo.repo === workspace.repo)?.tested_state;
+        const tested = verified?.last?.find((repo) => repo.repo === workspace.repo)?.tested_state;
         const current = await worktreeFingerprint(workspace.path).catch(() => null);
-        if (!verified?.passed || !tested || !current || JSON.stringify(tested) !== JSON.stringify(current))
-          return { kind: "failed", retryable: false, error: `Verification is missing or stale for ${workspace.repo}` };
+        if (
+          !verified?.passed ||
+          !tested ||
+          !current ||
+          JSON.stringify(tested) !== JSON.stringify(current)
+        )
+          return {
+            kind: "failed",
+            retryable: false,
+            error: `Verification is missing or stale for ${workspace.repo}`,
+          };
       }
+      output.implementation_evidence = {
+        baseline: implementationStart,
+        observed: implementationEnd,
+        generation: ctx.step.generation,
+        attempt_id: ctx.attempt.id,
+      };
+      output.execution_contract = ctx.input.execution_contract;
       output.outcome = "IMPLEMENTED";
       // Time to the first useful code location: first read/edit of a file the step finally changed (measured events).
       const changed = Object.values(state.files).flat();

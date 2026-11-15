@@ -19,6 +19,10 @@ export async function approvedCodingFixture(runId: number, key: string, maxRepai
     await repositories.upsert(repo, { shared_access: "write" });
     run.allowed_repositories = [repo];
   }
+  if (run.selected_repositories.length) {
+    run.selected_repositories = [repo];
+    await q(pool, "UPDATE workflow_runs SET selected_repositories=$2 WHERE id=$1", [runId, run.selected_repositories]);
+  }
   await shareAllRepositoriesForTests();
   if (!run.owner_id) {
     const owner = (await one<{ id: number }>(pool, "INSERT INTO users(username,password_hash,role) VALUES('transport-fixture','invalid-fixture-hash','member') ON CONFLICT(username) DO UPDATE SET active=true RETURNING id"))!;
@@ -26,7 +30,7 @@ export async function approvedCodingFixture(runId: number, key: string, maxRepai
   }
   const planKey = key === "plan" ? "fix_proposal" : "plan";
   const approvalKey = key === "plan" ? "approve_fix" : "approve_plan";
-  const plan = { summary: "Exercise the provider transport", acceptance_criteria: ["Preserve provider session and tool policy"], tests: ["fixture/TestTransport"] };
+  const plan = { summary: "Exercise the provider transport", acceptance_criteria: ["Preserve provider session and tool policy"], tests: ["fixture/TestTransport"], required_tests: ["fixture/TestTransport"] };
   for (const [position, stepKey, type, output] of [
     [-2, planKey, "agent", plan], [-1, approvalKey, "human_approval", { approved: true, by: "fixture" }],
   ] as const) {
@@ -35,15 +39,17 @@ export async function approvedCodingFixture(runId: number, key: string, maxRepai
       [runId, stepKey, type, position, JSON.stringify(output)]))!;
     const ancestors = await q<{ key: string; current_attempt_id: number; output: unknown }>(pool,
       "SELECT key,current_attempt_id,output FROM workflow_steps WHERE run_id=$1 AND status='COMPLETED' AND current_attempt_id IS NOT NULL", [runId]);
-    const input = stepKey === approvalKey ? { upstream: Object.fromEntries(ancestors.map(source => [source.key, { attempt_id: source.current_attempt_id, output: source.output, status: "COMPLETED" }])) } : {};
+    const input = stepKey === approvalKey ? { run: { selected_repositories: run.selected_repositories, allowed_repositories: run.allowed_repositories }, upstream: Object.fromEntries(ancestors.map(source => [source.key, { attempt_id: source.current_attempt_id, output: source.output, status: "COMPLETED" }])) } : {};
     const attempt = (await one<{ id: number }>(pool,
       "INSERT INTO workflow_step_attempts(run_id,step_id,number,generation,status,input,output) VALUES($1,$2,1,1,'COMPLETED',$3,$4) RETURNING id",
       [runId, step.id, JSON.stringify(input), JSON.stringify(output)]))!;
     await q(pool, "UPDATE workflow_steps SET current_attempt_id=$2 WHERE id=$1", [step.id, attempt.id]);
   }
+  await q(pool, "UPDATE workflow_steps SET depends_on=$3,config=$4 WHERE run_id=$1 AND key=$2", [runId, approvalKey, [planKey], JSON.stringify({ show_outputs: [planKey] })]);
   const command = FEATURE_TARGETED_COMMAND;
   run.graph.steps.push(...validateSpec({ name: "fixture", steps: [{ key: planKey, type: "agent" }, { key: approvalKey, type: "human_approval", depends_on: [planKey] }] }).steps);
   const coding = run.graph.steps.find(s => s.key === key)!;
+  await q(pool, "UPDATE workflow_steps SET depends_on=$3 WHERE run_id=$1 AND key=$2", [runId, planKey, coding.depends_on ?? []]);
   coding.depends_on = [...(coding.depends_on ?? []), approvalKey];
   coding.config = { ...coding.config, verify: { command, baseline: null, max_repairs: maxRepairs } };
   await q(pool, "UPDATE workflow_runs SET graph=$2,selected_repositories=$3,allowed_repositories=$4 WHERE id=$1", [runId, JSON.stringify(run.graph), run.selected_repositories.length ? [repo] : [], run.allowed_repositories]);
@@ -63,6 +69,7 @@ export async function approvedCodingFixture(runId: number, key: string, maxRepai
     git("update-ref", "refs/remotes/origin/main", "HEAD");
     await recordWorkspace(runId, { repo, path, branch: run.branch, created_from: "test" });
   }
+  process.env.FAKE_TRANSPORT_WORKSPACES = JSON.stringify((await workspacesOf(runId)).map(w => w.path));
   for (const workspace of await workspacesOf(runId)) {
     execFileSync("git", ["-C", workspace.path, "update-ref", `refs/remotes/origin/${await repositoryBaseBranch(workspace.repo)}`, "HEAD"], { stdio: "pipe" });
     writeFileSync(join(workspace.path, "implementation-evidence.txt"), "Prior implementation work for the transport fixture\n");

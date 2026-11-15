@@ -3,6 +3,7 @@
 // help, login status, debug models, and `exec --json` turns. During a turn it runs the platform hook command found in
 // `-c hooks.PreToolUse=...` and spawns the MCP server from `-c mcp_servers.platform.*` (forwarding env_vars), then
 // speaks newline-delimited JSON-RPC to it — the same path the real CLI takes. No model is called.
+import { implementTransportFixture } from "./transport-implementation.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 
@@ -209,10 +210,38 @@ const start = callHook({
   source: resumeId ? "resume" : "startup",
 });
 log({ sessionStart: start.status });
+implementTransportFixture();
 const mcp = startMcp();
 await mcp.rpc("initialize", { protocolVersion: "2025-06-18" });
 const list = await mcp.rpc("tools/list", {});
 log({ tools: list.result.tools.map((t) => t.name) });
+
+if (mode === "lifecycle") {
+  const repo = process.env.FAKE_LIFECYCLE_REPO;
+  const prepared = await tool(mcp, "prepare_branch", { repo });
+  const path = /Work ONLY in: ([^\n]+)/.exec(prepared?.content?.[0]?.text || "")?.[1];
+  if (!path) throw new Error(JSON.stringify(prepared));
+  if (process.env.FAKE_LIFECYCLE_ACTION !== "noop") {
+    const label = process.env.FAKE_LIFECYCLE_ACTION === "label";
+    const file = path + (label ? `/${process.env.FAKE_LIFECYCLE_SOURCE || "label.go"}` : "/value.go");
+    const decision = callHook({ hook_event_name: "PreToolUse", tool_name: "apply_patch",
+      tool_input: { patch: `*** Begin Patch\n*** Update File: ${file}\n@@\n-func Value() int { return 1 }\n+func Value() int { return 2 }\n*** End Patch` } });
+    if (decision.status === 2) throw new Error("Implementation edit denied");
+    writeFileSync(file, label ? (process.env.FAKE_LIFECYCLE_SOURCE ? 'export const label = "new";\n' : 'package business\nconst Label = "new"\n') : `package business\nfunc Value() int { return ${process.env.FAKE_LIFECYCLE_VALUE || 2} }\n`);
+    const committed = await tool(mcp, "commit_changes", { repo, message: "implement lifecycle value" });
+    if (/ERROR:/.test(committed?.content?.[0]?.text || "")) throw new Error(JSON.stringify(committed));
+  }
+  if (process.env.FAKE_LIFECYCLE_ACTION === "fail-after-edit") {
+    out({ type: "turn.failed", error: { message: "fixture interrupted after implementation" } });
+    mcp.close(); process.exit(1);
+  }
+  if (process.env.FAKE_LIFECYCLE_ACTION === "ask") {
+    await tool(mcp, "ask_user", { questions: [{ question: "Should the public label remain?", options: ["Yes", "No"] }] });
+    out({ type: "turn.completed", usage }); mcp.close(); process.exit(0);
+  }
+  await tool(mcp, "submit_result", { output: { outcome: "IMPLEMENTED", goal: "Implement Value", requirements: ["Value returns two"], summary: "Implemented", changes: [], tests: [], pull_requests: {}, verification: {} } });
+  out({ type: "turn.completed", usage }); mcp.close(); process.exit(0);
+}
 
 if (mode === "push") {
   const r = callHook({

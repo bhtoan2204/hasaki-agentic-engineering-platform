@@ -763,7 +763,7 @@ async function reexecuteTx(
       s === target ? why : `invalidated by ${stepKey}`,
     );
   };
-  for (const key of downstream(run.graph.steps, stepKey)) {
+  for (const key of downstream(steps, stepKey)) {
     await invalidate(byKey.get(key)!, "PENDING");
   }
   await invalidate(target, "READY");
@@ -787,6 +787,8 @@ export async function reexecuteStep(
     by?: string;
     /** Keep the instructions as a developer decision for every later step of the run (default true). */
     persist?: boolean;
+    /** Internal retry continuation; authorization and observed evidence remain bound to the source attempt. */
+    retry?: boolean;
   } = {},
 ) {
   return txThenRun(runId, async (c, afterCommit) => {
@@ -828,10 +830,15 @@ export async function reexecuteStep(
             at: new Date().toISOString(),
           }
         : null;
+    const retrySource = opts.retry ? await one<{ current_attempt_id: number | null; status: string }>(c,
+      "SELECT current_attempt_id,status FROM workflow_steps WHERE run_id=$1 AND key=$2", [runId, stepKey]) : null;
+    const retry = retrySource?.current_attempt_id && ["FAILED", "CANCELED", "RETRYING"].includes(retrySource.status)
+      ? { source_attempt_id: retrySource.current_attempt_id } : undefined;
     const pending =
-      feedback || opts.input || reexecute
+      feedback || opts.input || reexecute || retry
         ? {
             ...(opts.input ?? {}),
+            ...(retry ? { execution_retry: retry } : {}),
             ...(feedback ? { feedback } : {}),
             ...(reexecute ? { reexecute } : {}),
           }
@@ -861,7 +868,7 @@ export async function reexecuteStep(
 
 /** Retry = re-execute a FAILED/CANCELED step (same invalidation semantics). */
 export const retryStep = (runId: number, stepKey: string, input?: Record<string, unknown>) =>
-  reexecuteStep(runId, stepKey, { input });
+  reexecuteStep(runId, stepKey, { input, retry: true });
 
 /** One model call that judges feedback (injected: the agent layer provides it; null → fallback cues only). */
 let feedbackModel: ((run: RunRow, prompt: string) => Promise<string>) | null = null;

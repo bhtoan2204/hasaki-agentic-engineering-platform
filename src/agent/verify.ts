@@ -1,8 +1,9 @@
 import { fileURLToPath } from "node:url";
+import { normalizeScopePath } from "./scopeGuard.ts";
 import { worktreeFingerprint } from "./scopeGuard.ts";
 import { execFile } from "node:child_process";
 import { realpath, stat, readFile } from "node:fs/promises";
-import { resolve, relative, isAbsolute } from "node:path";
+import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
 import { promisify } from "node:util";
 import {
   classify,
@@ -257,19 +258,32 @@ type RequiredTestTarget = { id: string; selector: string; format: "go" | "node";
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 const directGoJson = (command: string) => /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
 
+async function plannedPath(path: string, allowMissing: boolean): Promise<string | null> {
+  try { return await realpath(path); }
+  catch {
+    if (!allowMissing || dirname(path) === path) return null;
+    const parent = await plannedPath(dirname(path), true);
+    return parent ? resolve(parent, basename(path)) : null;
+  }
+}
+
 /** Resolve ownership before execution. Ambiguous IDs need an explicit repository:: selector. */
-async function requiredTestTargets(workspaces: Array<{ repo: string; path: string }>, ids: string[]) {
+export async function requiredTestTargets(workspaces: Array<{ repo: string; path: string }>, ids: string[], beforeApproval = false) {
   const targets = new Map<string, RequiredTestTarget[]>();
   const problems: string[] = [];
   for (const id of ids) {
+    if (typeof id !== "string" || !id.trim() || id !== id.trim()) { problems.push("Invalid required test selector"); continue; }
     const separator = id.indexOf("::");
     const repository = separator < 0 ? null : id.slice(0, separator);
     const selector = separator < 0 ? id : id.slice(separator + 2);
+    if ("invalid" in normalizeScopePath(selector) || /[\s;$`|&<>]/.test(selector)) { problems.push(`${id}: invalid executable test selector`); continue; }
     const matches: Array<{ repo: string; target: RequiredTestTarget }> = [];
     for (const workspace of workspaces.filter(w => !repository || w.repo === repository)) {
-      if (/\.(?:[cm]?[jt]sx?)$/.test(selector) && !isAbsolute(selector)) {
+      if (/\.(?:[cm]?[jt]s)$/.test(selector) && !isAbsolute(selector)) {
         const root = await realpath(workspace.path).catch(() => null);
-        const file = await realpath(resolve(workspace.path, selector)).catch(() => null);
+        const file = await plannedPath(resolve(workspace.path, selector), beforeApproval);
+        const manifest = JSON.parse(await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"));
+        if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) { problems.push(`${id}: repository runner is incompatible with the Node structured test runner`); continue; }
         if (!root || !file || relative(root, file).startsWith("..") || isAbsolute(relative(root, file))) continue;
         const preload = /\.integration\./.test(selector) ? "test/setup.ts" : "test/env.ts";
         const hasPreload = await stat(resolve(root, preload)).then(s => s.isFile()).catch(() => false);
@@ -279,11 +293,14 @@ async function requiredTestTargets(workspaces: Array<{ repo: string; path: strin
       } else {
         const module = /^module\s+["']?([^\s"']+)/m.exec(await readFile(resolve(workspace.path, "go.mod"), "utf8").catch(() => ""))?.[1];
         const testAt = selector.search(/\/Test[A-Za-z0-9_]/);
-        if (!module || testAt < 0) continue;
+        if (!module || testAt < 0 || !/^Test[A-Za-z0-9_]+(?:\/[A-Za-z0-9_-]+)*$/.test(selector.slice(testAt + 1))) continue;
         const pkg = selector.slice(0, testAt), test = selector.slice(testAt + 1);
         if (pkg !== module && !pkg.startsWith(`${module}/`)) continue;
         const packagePath = pkg === module ? "." : `.${pkg.slice(module.length)}`;
         if (packagePath.split("/").includes("..")) continue;
+        const root = await realpath(workspace.path).catch(() => null);
+        const directory = await plannedPath(resolve(workspace.path, packagePath), beforeApproval);
+        if (!root || !directory || relative(root, directory).startsWith("..") || isAbsolute(relative(root, directory))) continue;
         const pattern = test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         matches.push({ repo: workspace.repo, target: { id, selector, format: "go",
           command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}` } });
@@ -521,10 +538,14 @@ export async function verifyWorkspaces(
         entry.status = "failed";
         entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
       }
+    }
+    {
       const afterState = await worktreeFingerprint(p).catch(() => null);
       if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
-        entry.status = "failed";
-        entry.note = "Workspace changed during verification or its state could not be established";
+        if (entry.status !== "error" && entry.status !== "skipped") {
+          entry.status = "failed";
+          entry.note = "Workspace changed during verification or its state could not be established";
+        }
       } else entry.tested_state = afterState;
       entry.contract_revision = cfg.contractRevision;
     }

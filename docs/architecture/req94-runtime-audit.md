@@ -1,5 +1,7 @@
 # REQ-94 runtime audit
 
+Historical audit of the initial PR revisions. See [PR #11 blocking review resolution](pr11-blocking-review.md) for the current contract, profile, lifecycle and publication fixes and their validation.
+
 Baseline: `5c56d2c39327403291f00f22bf1ad41e61cccb37` (the prepared branch includes the REQ-93 merge). The earlier planning checkout was older. No network fetch, deployment, server restart, application database migration or push was performed.
 
 **Overall verdict: BLOCKED. This patch does not establish full REQ-94 acceptance and is not a claim of provider-wide end-to-end hardening.** The supported paths below have regression evidence; unsupported paths and remaining gaps are explicit.

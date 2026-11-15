@@ -1,3 +1,5 @@
+import { requireRunRepositoryAccess } from "../repos/access.ts";
+import { recordPreparedBaseline } from "./implementationEvidence.ts";
 import { validateOutputContract } from "./contract.ts";
 import { validateMicroWorkspace } from "../workflow/microEvidence.ts";
 import { toolAllowed } from "./toolPolicy.ts";
@@ -456,6 +458,13 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
     env.policy.micro.exhausted = true; env.policy.micro.reason = "repository scope expansion requires reassessment";
     return "ERROR: repository exceeds MICRO scope; escalate before preparing another worktree";
   }
+  const pinned = await one<{ contract: { selected_repositories: string[]; authorization?: { mode: string; repository_scope?: string[] } } | null }>(pool,
+    "SELECT input->'execution_contract' AS contract FROM workflow_step_attempts WHERE id=$1", [env.attemptId]);
+  if (!env.allowed.includes(repo)) return "ERROR: repository outside run scope";
+  await requireRunRepositoryAccess(env.runId, repo, "write");
+  const repositoryScope = pinned?.contract?.authorization?.repository_scope ?? pinned?.contract?.selected_repositories;
+  if (repositoryScope && !repositoryScope.includes(repo))
+    return "ERROR: repository exceeds the immutable execution contract; renew authorization before preparing it";
   const isolation = await isolationFor(env.stepId);
   if (isolation.isolated && !isolation.subtaskId)
     return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
@@ -507,6 +516,7 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
     }
     throw e;
   }
+  await recordPreparedBaseline(env, w);
   void traceLog({
     runId: env.runId,
     stepId: env.stepId,

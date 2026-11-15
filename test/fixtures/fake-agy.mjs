@@ -2,6 +2,7 @@
 // Fake `agy` CLI for deterministic unit and integration tests.
 // Behaves like Google Antigravity CLI for capabilities discovery (--version, --help, models)
 // and headless execution through the documented stream-json stdin protocol.
+import { implementTransportFixture } from "./transport-implementation.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -258,6 +259,7 @@ if (mode === "denied_tool") {
   log({ write: r.status, stdout: r.stdout });
 }
 
+implementTransportFixture();
 const mcp = startMcp();
 if (mcp) {
   await mcp.rpc("initialize", { protocolVersion: "2024-11-05" });

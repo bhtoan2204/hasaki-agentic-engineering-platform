@@ -301,6 +301,7 @@ export interface CommandIsolation {
 export async function commandProcessEnv(
   cwd: string,
   extra: Record<string, string>,
+  verification = false,
 ): Promise<CommandIsolation> {
   if (overlapsLiveApplication(cwd))
     throw new Error("Refusing to run a command in the running application checkout");
@@ -314,8 +315,15 @@ export async function commandProcessEnv(
       isolation: { replaceEnv: true, mode: "bwrap", liveRoot: liveApplicationRoot() },
     };
   }
-  if (!(await directoryIsSelfRepository(cwd)))
-    return { env: { ...agentEnvironment(process.env, "codex"), ...extra } };
+  if (!(await directoryIsSelfRepository(cwd))) {
+    if (!verification) return { env: { ...agentEnvironment(process.env, "codex"), ...extra } };
+    const bwrap = await bwrapAvailable();
+    if (!bwrap && !config.platform.trustedOperatorIsolation)
+      throw new Error("Worker commands need bubblewrap or explicit platform.trustedOperatorIsolation");
+    const env = { ...agentEnvironment(process.env, "codex"), ...extra };
+    for (const key of ["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV"]) delete env[key];
+    return { env, isolation: { replaceEnv: true, mode: bwrap ? "bwrap" : "trusted", liveRoot: liveApplicationRoot() } };
+  }
   const bwrap = await bwrapAvailable();
   if (!bwrap && !config.platform.trustedOperatorIsolation)
     throw new Error(

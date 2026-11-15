@@ -1,4 +1,8 @@
-import { worktreeFingerprint } from "./scopeGuard.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { lstat } from "node:fs/promises";
+import { join } from "node:path";
+const progressExec = promisify(execFile);
 import type { PolicyContext } from "./toolPolicy.ts";
 import { execution } from "../auth/execution.ts";
 import { assertRunScopeReadable, requireRunRepositoryAccess } from "../repos/access.ts";
@@ -225,6 +229,17 @@ export async function postClarification(
 /** Unknown source state is never taken as proof of progress. */
 export async function refreshToolProgress(policy?: PolicyContext) {
   if (!policy?.loopDetector || !policy.workspaces.length) return;
-  const state = await Promise.all(policy.workspaces.map(async path => ({ path, ...await worktreeFingerprint(path) }))).catch(() => null);
+  // Progress is a loop-detector hint, never verification evidence. Observe git metadata and
+  // changed-file stat identities; do not read and hash every dirty file on each read-only call.
+  const state = await Promise.all(policy.workspaces.map(async path => {
+    const { stdout: status } = await progressExec("git", ["-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=normal"], { maxBuffer: 4 << 20 });
+    const files = status.split("\0").filter(Boolean).map(entry => entry.slice(3));
+    const metadata = await Promise.all(files.map(async file => {
+      const st = await lstat(join(path, file)).catch(() => null);
+      return [file, st?.size, st?.mtimeMs, st?.ctimeMs];
+    }));
+    const { stdout: head } = await progressExec("git", ["-C", path, "rev-parse", "HEAD"]);
+    return { path, head, status, metadata };
+  })).catch(() => null);
   if (state) policy.loopDetector.observeProgress(hashOf(state));
 }

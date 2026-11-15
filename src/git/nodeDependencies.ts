@@ -1,9 +1,9 @@
 import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { constants, existsSync, readFileSync } from "node:fs";
+import { constants, existsSync, readFileSync, readdirSync, lstatSync, realpathSync, readlinkSync } from "node:fs";
 import { access, mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 const exec = promisify(execFile);
@@ -26,11 +26,63 @@ export function dependencyFingerprint(workspace: string): string | null {
   } catch { return null; }
 }
 
+/** Installed contents must still match the successful install, including package code and links. */
+function installedFingerprint(workspace: string): string {
+  const hash = createHash("sha256");
+  const walk = (dir: string, prefix = "") => {
+    for (const name of readdirSync(dir).sort()) {
+      if (!prefix && name === ".platform-ready") continue;
+      const path = join(dir, name), key = `${prefix}/${name}`, st = lstatSync(path);
+      hash.update(key).update(String(st.mode));
+      if (st.isSymbolicLink()) {
+        const target = realpathSync(path);
+        if (relative(realpathSync(workspace), target).startsWith("..")) throw new Error("Dependency link leaves repository");
+        hash.update(readlinkSync(path));
+        if (lstatSync(target).isFile()) hash.update(readFileSync(target));
+      }
+      else if (st.isDirectory()) walk(path, key);
+      else if (st.isFile()) hash.update(readFileSync(path));
+      else throw new Error("Unsupported dependency entry");
+    }
+  };
+  walk(join(workspace, "node_modules"));
+  return hash.digest("hex");
+}
+function completeInstall(workspace: string) {
+  const manifest = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+  const lock = existsSync(join(workspace, "package-lock.json")) ? JSON.parse(readFileSync(join(workspace, "package-lock.json"), "utf8")) : null;
+  const omit = new Set((process.env.npm_config_omit ?? (process.env.NODE_ENV === "production" ? "dev" : "")).split(/[,\s]+/));
+  const required = { ...manifest.dependencies, ...(!omit.has("dev") ? manifest.devDependencies : {}) };
+  for (const name of Object.keys(required)) {
+    if (!/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(name)) return false;
+    const installed = JSON.parse(readFileSync(join(workspace, "node_modules", name, "package.json"), "utf8"));
+    const locked = lock?.packages?.[`node_modules/${name}`];
+    if (!installed.version || (locked?.version && installed.version !== locked.version)) return false;
+  }
+  for (const [path, raw] of Object.entries(lock?.packages ?? {})) {
+    const entry = raw as { optional?: boolean; dev?: boolean; link?: boolean; version?: string };
+    if (!path || entry.optional || (entry.dev && omit.has("dev")) || entry.link) continue;
+    if (!path.startsWith("node_modules/") || path.split("/").includes("..")) return false;
+    const installed = JSON.parse(readFileSync(join(workspace, path, "package.json"), "utf8"));
+    if (entry.version && installed.version !== entry.version) return false;
+  }
+  return true;
+}
+function hasDependencies(workspace: string) {
+  const manifest = JSON.parse(readFileSync(join(workspace, "package.json"), "utf8"));
+  return ["dependencies", "devDependencies", "optionalDependencies"].some(key => Object.keys(manifest[key] ?? {}).length);
+}
 /** Only a successful worker installation for the current dependency/runtime state establishes readiness. */
 export function nodeModulesReady(workspace: string) {
   const fingerprint = dependencyFingerprint(workspace);
   if (!fingerprint) return false;
-  try { return readFileSync(join(workspace, "node_modules", ".platform-ready"), "utf8") === fingerprint; }
+  try {
+    const record = readFileSync(join(workspace, "node_modules", ".platform-ready"), "utf8");
+    // Empty dependency manifests need no package evidence; retain compatibility with earlier empty installs.
+    if (!hasDependencies(workspace) && record === fingerprint) return true;
+    const evidence = JSON.parse(record);
+    return evidence.dependencies === fingerprint && completeInstall(workspace) && evidence.installed === installedFingerprint(workspace);
+  }
   catch { return false; }
 }
 
@@ -72,8 +124,9 @@ export async function installNodeDependencies(workspace: string, cache?: string)
       await exec("npm", ["install", "--no-package-lock", ...flags], opts);
     }
     const fingerprint = dependencyFingerprint(workspace);
-    if (fingerprint && fingerprint === expected && existsSync(join(workspace, "node_modules")))
-      await writeFile(join(workspace, "node_modules", ".platform-ready"), fingerprint);
+    if (fingerprint && fingerprint === expected && existsSync(join(workspace, "node_modules")) && (!hasDependencies(workspace) || completeInstall(workspace)))
+      await writeFile(join(workspace, "node_modules", ".platform-ready"), hasDependencies(workspace)
+        ? JSON.stringify({ dependencies: fingerprint, installed: installedFingerprint(workspace) }) : fingerprint);
     return true;
   } finally {
     if (temporaryCache) await rm(temporaryCache, { recursive: true, force: true });
