@@ -337,11 +337,17 @@ export async function ensureContextPack(
       const approvePlanOutput = toObj(toObj(input.upstream?.approve_plan)?.output);
       const workItemPayload = toObj(input.work_item?.payload);
 
-      const approvedPlan =
+      const rawPlan =
         approvePlanOutput ??
         planOutput ??
         promptPlan?.approved_plan ??
         null;
+      const approvedPlan: string | Record<string, unknown> | null =
+        typeof rawPlan === "string"
+          ? rawPlan
+          : typeof rawPlan === "object" && rawPlan !== null && !Array.isArray(rawPlan)
+            ? (rawPlan as Record<string, unknown>)
+            : null;
       const acceptanceCriteria: string[] = [
         ...new Set([
           ...toArr(reqOutput?.acceptance_criteria),
