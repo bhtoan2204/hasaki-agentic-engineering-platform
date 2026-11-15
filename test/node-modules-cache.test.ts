@@ -108,3 +108,34 @@ test("a failed dependency install cannot leave a reusable worker record", async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("dependency installation falls back when the inherited cache is not writable", async () => {
+  const { installNodeDependencies: install } = await import("../src/git/nodeDependencies.ts");
+  const { execFileSync } = await import("node:child_process");
+  const { readFile, access } = await import("node:fs/promises");
+  const dir = await mkdtemp(join(tmpdir(), "nm-cache-fallback-"));
+  const previousPath = process.env.PATH;
+  const previousCapture = process.env.CACHE_USED;
+  try {
+    await writeFile(join(dir, "package.json"), "{}");
+    await mkdir(join(dir, "node_modules"));
+    await mkdir(join(dir, "bin"));
+    const cache = join(dir, "unwritable-cache");
+    await writeFile(cache, "protected cache path");
+    const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
+    await writeFile(join(dir, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf '%s' "$npm_config_cache" > "$CACHE_USED"\n`, { mode: 0o755 });
+    process.env.PATH = `${join(dir, "bin")}:${previousPath}`;
+    process.env.CACHE_USED = join(dir, "cache-used");
+    assert.equal(await install(dir, cache), true);
+    assert.equal(nodeModulesReady(dir), true);
+    assert.equal(await readFile(cache, "utf8"), "protected cache path");
+    const used = await readFile(join(dir, "cache-used"), "utf8");
+    assert.notEqual(used, cache);
+    await assert.rejects(access(used), { code: "ENOENT" }, "temporary cache must be cleaned up");
+  } finally {
+    process.env.PATH = previousPath;
+    if (previousCapture === undefined) delete process.env.CACHE_USED;
+    else process.env.CACHE_USED = previousCapture;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
