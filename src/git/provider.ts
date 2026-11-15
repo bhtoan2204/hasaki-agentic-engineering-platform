@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
 import { repositories, repositoryBaseBranch } from "../repos/service.ts";
@@ -39,7 +39,7 @@ export function npmCacheDir() {
 // Package managers write these only when an install completes; an interrupted install leaves packages without one.
 export function nodeModulesReady(workspace: string) {
   const dir = join(workspace, "node_modules");
-  return [".package-lock.json", ".modules.yaml", ".yarn-integrity"].some((marker) =>
+  return [".package-lock.json", ".modules.yaml", ".yarn-integrity", ".platform-ready"].some((marker) =>
     existsSync(join(dir, marker)),
   );
 }
@@ -68,6 +68,10 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
     // without reading or rewriting the lock, so the worktree stays clean.
     if (!ci || !/EUSAGE|in sync/.test(String((e as any).stderr ?? (e as Error).message))) throw e;
     await exec("npm", ["install", "--no-package-lock", ...flags], opts);
+  }
+  const dir = join(workspace, "node_modules");
+  if (existsSync(dir) && !nodeModulesReady(workspace)) {
+    await writeFile(join(dir, ".package-lock.json"), "{}").catch(() => {});
   }
   return true;
 }

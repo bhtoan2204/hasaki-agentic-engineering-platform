@@ -130,6 +130,7 @@ export async function journalToolCall(
   args: unknown,
   result: string,
 ) {
+  env.policy?.loopDetector?.record(name, args, status === "ok" ? "ok" : status === "denied" ? "denied" : "error", result);
   // Evidence is redacted, bounded and owner-scoped. SQL aggregation, rather than increments, makes retrying writes safe.
   await withTx(async (c) => {
     await q(

@@ -36,6 +36,7 @@ export interface VerifyConfig {
   baseline: "go" | null;
   /** Hard test-weakening signals (removed/skipped/disabled tests) fail verification unless explicitly allowed. */
   allowTestWeakening: boolean;
+  requiredTests?: string[];
 }
 
 /**
@@ -58,6 +59,7 @@ export function verifyConfig(
     timeoutMs: Math.max(30, Math.min(3600, Number(o.timeout_seconds ?? 600) || 600)) * 1000,
     baseline: o.baseline === null || o.baseline === false ? null : "go",
     allowTestWeakening: o.allow_test_weakening === true,
+    ...(Array.isArray(o.required_tests) ? { requiredTests: o.required_tests } : {}),
   };
 }
 
@@ -102,6 +104,7 @@ export interface RepoVerification {
   note?: string;
   error?: string;
   artifact_id?: number;
+  commit_sha?: string;
 }
 export interface VerificationRound {
   round: number;
@@ -302,6 +305,9 @@ export async function verifyWorkspaces(
       );
     let r = await runWith(known?.skipRegex ?? null);
     if (signal.aborted) throw new Error("verification canceled");
+    const headCommit = await exec("git", ["-C", p, "rev-parse", "HEAD"])
+      .then(({ stdout }) => stdout.trim())
+      .catch(() => "");
     const entry: RepoVerification = {
       repo: w.repo,
       status: r.code === 0 && !r.timedOut ? "passed" : "failed",
@@ -316,7 +322,15 @@ export async function verifyWorkspaces(
       suspected: [],
       needs_review: false,
       excerpt: "",
+      commit_sha: headCommit,
     };
+    if (entry.status === "passed" && cfg.requiredTests?.length) {
+      const missing = cfg.requiredTests.filter((t) => !r.output.includes(t));
+      if (missing.length > 0) {
+        entry.status = "failed";
+        entry.note = `required tests were not executed: ${missing.join(", ")}`;
+      }
+    }
     const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
     if (unavailable)
       Object.assign(entry, {

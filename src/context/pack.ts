@@ -24,6 +24,7 @@ import type { PolicyContext } from "../agent/toolPolicy.ts";
 import { source } from "../agent/contextTools.ts";
 import { evidenceSummary } from "../agent/evidence.ts";
 import { workspacesOf } from "../git/provider.ts";
+import type { MandatoryExecutionContract } from "../agent/contract.ts";
 import { repositoryBaseBranch } from "../repos/service.ts";
 import { worktreeFingerprint } from "../agent/scopeGuard.ts";
 import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
@@ -109,18 +110,22 @@ export function codeRetrievalKey(input: {
   query: string;
   repos: Record<string, string>;
   indexVersion: string;
+  selected?: string[];
+  indexSnapshot?: string | null;
 }) {
   const repos = Object.keys(input.repos)
     .sort()
     .map((k) => [k, input.repos[k]]);
   return hashOf({
-    v: 2,
+    v: 3,
     owner: input.ownerId,
     run: input.runId,
     allowed: [...input.allowed].sort(),
     query: input.query,
     repos,
     index: input.indexVersion,
+    ...(input.selected ? { selected: [...input.selected].sort() } : {}),
+    ...(input.indexSnapshot ? { indexSnapshot: input.indexSnapshot } : {}),
   });
 }
 /** The estimate includes provenance and summaries. Required constraints are never silently shortened or dropped. */
@@ -318,6 +323,79 @@ export async function ensureContextPack(
           "workflow-defined verification gate, not an agent claim",
         ),
         "platform_constraint",
+      );
+      const toObj = (v: unknown): Record<string, unknown> | null =>
+        typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+      const toArr = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+      const snapContent = toObj(snap?.content);
+      const promptPlan = toObj(snapContent?.prompt_plan);
+      const reqOutput = toObj(toObj(input.upstream?.requirements)?.output);
+      const analyzeOutput = toObj(toObj(input.upstream?.analyze)?.output);
+      const planOutput = toObj(toObj(input.upstream?.plan)?.output);
+      const approvePlanOutput = toObj(toObj(input.upstream?.approve_plan)?.output);
+      const workItemPayload = toObj(input.work_item?.payload);
+
+      const rawPlan =
+        approvePlanOutput ??
+        planOutput ??
+        promptPlan?.approved_plan ??
+        null;
+      const approvedPlan: string | Record<string, unknown> | null =
+        typeof rawPlan === "string"
+          ? rawPlan
+          : typeof rawPlan === "object" && rawPlan !== null && !Array.isArray(rawPlan)
+            ? (rawPlan as Record<string, unknown>)
+            : null;
+      const acceptanceCriteria: string[] = [
+        ...new Set([
+          ...toArr(reqOutput?.acceptance_criteria),
+          ...toArr(analyzeOutput?.acceptance_criteria),
+          ...toArr(planOutput?.acceptance_criteria),
+          ...toArr(workItemPayload?.acceptance_criteria),
+        ]),
+      ];
+      const businessConstraints: string[] = [
+        ...new Set([
+          ...toArr(reqOutput?.constraints),
+          ...toArr(analyzeOutput?.constraints),
+          ...toArr(planOutput?.constraints),
+          ...toArr(workItemPayload?.constraints),
+        ]),
+      ];
+      const promptPlanVerification = toObj(promptPlan?.verification);
+      const requiredTests: string[] = [
+        ...new Set([
+          ...toArr(promptPlanVerification?.required_tests),
+          ...toArr(planOutput?.tests),
+        ]),
+      ];
+
+      const mandatoryContract: MandatoryExecutionContract = {
+        approved_plan: approvedPlan,
+        acceptance_criteria: acceptanceCriteria,
+        business_constraints: businessConstraints,
+        selected_repositories: ctx.run.selected_repositories?.length
+          ? ctx.run.selected_repositories
+          : ctx.run.allowed_repositories,
+        required_tests: requiredTests,
+      };
+
+      add(
+        "mandatory_execution_contract",
+        "requirements",
+        mandatoryContract,
+        1000,
+        true,
+        source(
+          `run:${ctx.run.id}:execution_contract`,
+          null,
+          at,
+          "owner",
+          "immutable approved execution contract: plan, acceptance criteria, constraints, repos and tests",
+          "snapshot",
+        ),
       );
       if (input.answers.length || input.pending?.reexecute?.instructions || input.pending?.feedback)
         add(
@@ -702,9 +780,11 @@ export async function ensureContextPack(
               ownerId: ctx.run.owner_id!,
               runId: ctx.run.id,
               allowed: ctx.run.allowed_repositories,
+              selected: ctx.run.selected_repositories,
               query,
               repos: repoState,
               indexVersion: INDEX_VERSION,
+              indexSnapshot: (snap?.content as Record<string, unknown> | undefined)?.code_intelligence ? String(((snap?.content as Record<string, unknown>).code_intelligence as Record<string, unknown>).snapshot_id ?? "") || null : null,
             })
           : null;
         const prior = key

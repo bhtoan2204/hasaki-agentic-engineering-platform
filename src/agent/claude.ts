@@ -54,7 +54,7 @@ import {
   newMetrics,
   type AgentMetrics,
 } from "./metrics.ts";
-import { missingContractKeys } from "./contract.ts";
+import { missingContractKeys, validateOutputContract } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import {
   installNodeDependencies,
@@ -88,6 +88,7 @@ import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "./stepPr
 import {
   decide,
   toolsFor,
+  ToolLoopDetector,
   SUBAGENT_PLATFORM_TOOLS,
   type PolicyContext,
   type ToolMode,
@@ -697,6 +698,7 @@ const agentExecutor: StepExecutor = {
       delegation,
       isReadOnlyIntegration: (name) =>
         integrationTools().find((t) => t.name === name)?.readOnly === true,
+      loopDetector: new ToolLoopDetector(),
     };
     const settingSources = live ? [] : config.agent.settingSources;
     policy.allowedTools = effective.allowed_tools;
@@ -979,10 +981,12 @@ const agentExecutor: StepExecutor = {
         input.agent_id,
       );
       if (d.allow) {
+        policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
         hookAllowed.add(callKey(input.tool_name, input.tool_input));
         if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
         return {};
       }
+      policy.loopDetector?.record(input.tool_name, input.tool_input, "denied", d.reason);
       metrics.denied.push({
         tool: input.tool_name,
         reason: d.reason,
@@ -1046,6 +1050,19 @@ const agentExecutor: StepExecutor = {
           assistantTurns: 0,
           failure: "canceled",
         };
+      if (live) {
+        const promptTokens = Math.ceil(prompt.length / 4);
+        const systemAppendTokens = Math.ceil(systemAppend.length / 4);
+        const totalPromptTokens = Math.ceil((systemAppend.length + prompt.length) / 4);
+        await ctx.recordMetrics({
+          evaluation_context: {
+            system_append_tokens: systemAppendTokens,
+            pack_tokens: ctx.context.contextPack?.estimated_tokens ?? 0,
+            user_prompt_tokens: promptTokens,
+            total_prompt_tokens: totalPromptTokens,
+          },
+        }).catch(() => {});
+      }
       await ctx.log("prompt", prompt, {
         resume_session: resumeId ?? null,
         provider,
@@ -1533,25 +1550,58 @@ const agentExecutor: StepExecutor = {
         },
       };
     if (await openQuestions()) return pause(result.text);
-    if ((provider === "codex" || provider === "copilot") && !independent) {
-      const pName = provider === "codex" ? "Codex" : "Copilot";
-      if (!submitted)
-        return {
-          kind: "failed",
-          error:
-            `${pName} finished the turn without calling submit_result; no step output was recorded.`,
-          retryable: true,
-        };
-      const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
-      if (missing.length)
-        return {
-          kind: "failed",
-          error: `${pName} submitted an output that does not match the step's output contract (missing: ${missing.join(", ")}).`,
-          retryable: true,
-          details: { submitted },
-        };
+    const pName =
+      provider === "codex"
+        ? "Codex"
+        : provider === "copilot"
+          ? "Copilot"
+          : provider === "cursor"
+            ? "Cursor"
+            : provider === "antigravity"
+              ? "Antigravity"
+              : provider === "claude"
+                ? "Claude"
+                : String(provider);
+    if (!independent) {
+      if (ctx.step.config?.output_contract) {
+        if (!submitted)
+          return {
+            kind: "failed",
+            error:
+              `${pName} finished the turn without calling submit_result; no step output was recorded.`,
+            retryable: true,
+          };
+        const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
+        if (missing.length)
+          return {
+            kind: "failed",
+            error: `${pName} submitted an output that does not match the step's output contract (missing: ${missing.join(", ")}).`,
+            retryable: true,
+            details: { submitted },
+          };
+        const validation = validateOutputContract(ctx.step.config.output_contract, submitted);
+        if (!validation.valid)
+          return {
+            kind: "failed",
+            error: `${pName} submitted an output that does not match the step's output contract:
+${validation.errors.join("; ")}`,
+            retryable: true,
+            details: { submitted, errors: validation.errors },
+          };
+      }
     }
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
+    if (mode === "coding" && !independent) {
+      if (submitted?.outcome === "NO_CHANGE_REQUIRED" || submitted?.no_change_required === true) {
+        output.outcome = "NO_CHANGE_REQUIRED";
+      } else if (submitted?.outcome === "BLOCKED" || submitted?.blocked === true) {
+        output.outcome = "BLOCKED";
+      } else if (submitted?.outcome === "FAILED") {
+        output.outcome = "FAILED";
+      } else {
+        output.outcome = "IMPLEMENTED";
+      }
+    }
     // A coding step that produced nothing — no submitted result AND no workspace — is blocked, not done (e.g. the
     // branch it must continue from does not exist). Completing it would send an empty diff to review and burn repair
     // rounds; a legitimate "no change needed" outcome is reported through submit_result.

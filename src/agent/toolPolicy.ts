@@ -39,6 +39,92 @@ export const SUBAGENT_PLATFORM_TOOLS = [
   ...CONTEXT_TOOLS.filter((t) => t.readOnly).map((t) => t.name),
 ].map((t) => `mcp__platform__${t}`);
 
+
+export interface ToolCallRecord {
+  tool: string;
+  inputHash: string;
+  timestamp: number;
+  status?: "ok" | "error" | "denied";
+  error?: string;
+}
+
+export class ToolLoopDetector {
+  private history: ToolCallRecord[] = [];
+  readonly consecutiveThreshold: number;
+  readonly cycleThreshold: number;
+
+  constructor(options?: { consecutiveThreshold?: number; cycleThreshold?: number }) {
+    this.consecutiveThreshold = options?.consecutiveThreshold ?? 3;
+    this.cycleThreshold = options?.cycleThreshold ?? 3;
+  }
+
+  record(tool: string, input: unknown, status: "ok" | "error" | "denied" = "ok", error?: string) {
+    const inputHash = JSON.stringify(input ?? {});
+    this.history.push({
+      tool,
+      inputHash,
+      timestamp: Date.now(),
+      status,
+      error,
+    });
+    if (this.history.length > 50) this.history.shift();
+  }
+
+  check(tool: string, input: unknown): { isLoop: boolean; reason?: string } {
+    const inputHash = JSON.stringify(input ?? {});
+    let count = 0;
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      if (this.history[i].tool === tool && this.history[i].inputHash === inputHash) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    if (count >= this.consecutiveThreshold) {
+      return {
+        isLoop: true,
+        reason: `Repeated tool call loop detected: ${tool} was executed ${count} times consecutively with identical arguments without progress`,
+      };
+    }
+
+    if (this.history.length >= 4) {
+      const last = this.history[this.history.length - 1];
+      const prev = this.history[this.history.length - 2];
+      if (last.tool !== prev.tool || last.inputHash !== prev.inputHash) {
+        let cycleMatches = 0;
+        for (let i = this.history.length - 1; i >= 1; i -= 2) {
+          if (
+            this.history[i].tool === last.tool &&
+            this.history[i].inputHash === last.inputHash &&
+            this.history[i - 1].tool === prev.tool &&
+            this.history[i - 1].inputHash === prev.inputHash
+          ) {
+            cycleMatches++;
+          } else {
+            break;
+          }
+        }
+        if (cycleMatches >= this.cycleThreshold && tool === prev.tool && inputHash === prev.inputHash) {
+          return {
+            isLoop: true,
+            reason: `Cyclic tool call loop detected: alternating pattern between ${prev.tool} and ${last.tool} repeated ${cycleMatches} times without progress`,
+          };
+        }
+      }
+    }
+
+    return { isLoop: false };
+  }
+
+  reset() {
+    this.history = [];
+  }
+
+  getHistory(): readonly ToolCallRecord[] {
+    return this.history;
+  }
+}
+
 export interface PolicyContext {
   micro?: { files: string[]; calls: number; limit: number; exhausted: boolean; reason?: string };
   mode: ToolMode;
@@ -52,6 +138,7 @@ export interface PolicyContext {
   delegation?: boolean;
   /** For call_tool from subagents: is the named integration tool read-only? */
   isReadOnlyIntegration?: (name: string) => boolean;
+  loopDetector?: ToolLoopDetector;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -887,6 +974,10 @@ export function decide(
   cwd?: string,
   agentId?: string,
 ): Decision {
+  if (ctx.loopDetector) {
+    const loop = ctx.loopDetector.check(tool, input);
+    if (loop.isLoop) return deny(loop.reason!);
+  }
   if (ctx.micro) {
     const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(tool);
     if (!control && ++ctx.micro.calls > ctx.micro.limit) {
