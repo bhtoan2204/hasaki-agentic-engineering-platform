@@ -12,7 +12,7 @@ import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 import { repositories, repositoryBaseBranch } from "../src/repos/service.ts";
 import type { RunRow } from "../src/workflow/types.ts";
 
-export async function approvedCodingFixture(runId: number, key: string) {
+export async function approvedCodingFixture(runId: number, key: string, maxRepairs = 0) {
   const run = (await one<RunRow>(pool, "SELECT * FROM workflow_runs WHERE id=$1", [runId]))!;
   const repo = run.selected_repositories[0] ?? run.allowed_repositories[0] ?? "oms-api";
   if (!run.allowed_repositories.length) {
@@ -45,7 +45,7 @@ export async function approvedCodingFixture(runId: number, key: string) {
   run.graph.steps.push(...validateSpec({ name: "fixture", steps: [{ key: planKey, type: "agent" }, { key: approvalKey, type: "human_approval", depends_on: [planKey] }] }).steps);
   const coding = run.graph.steps.find(s => s.key === key)!;
   coding.depends_on = [...(coding.depends_on ?? []), approvalKey];
-  coding.config = { ...coding.config, verify: { command, baseline: null, max_repairs: 0 } };
+  coding.config = { ...coding.config, verify: { command, baseline: null, max_repairs: maxRepairs } };
   await q(pool, "UPDATE workflow_runs SET graph=$2,selected_repositories=$3,allowed_repositories=$4 WHERE id=$1", [runId, JSON.stringify(run.graph), run.selected_repositories.length ? [repo] : [], run.allowed_repositories]);
   await q(pool, "UPDATE workflow_steps SET depends_on=$3,config=$4 WHERE run_id=$1 AND key=$2", [runId, key, coding.depends_on, JSON.stringify(coding.config)]);
   if (!(await workspacesOf(runId)).length) {

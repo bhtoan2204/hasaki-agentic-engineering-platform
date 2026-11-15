@@ -1033,3 +1033,46 @@ test("coding completion refuses a passing verification with no implementation ch
   assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
   assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), /IMPLEMENTED requires worker-observed implementation/);
 });
+
+test("approved coding submissions cannot complete without a registered worktree", async () => {
+  for (const outcome of ["IMPLEMENTED", "NO_CHANGE_REQUIRED"]) {
+    const key = await workflow([{ key: "implement", type: "coding_agent", config: { output_contract: "{ goal, requirements }" } }]);
+    const run = await startRun({ definitionKey: key, title: "no worktree", agentProvider: "codex" });
+    await approvedCodingFixture(run.id, "implement");
+    await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1", [run.id]);
+    process.env.FAKE_CODEX_MODE = `outcome-${outcome}`;
+    await drain();
+    const step = await stepOf(run.id, "implement");
+    assert.equal(step.status, "FAILED", `${outcome} must not bypass verification without a worktree`);
+    assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), /no worktree/i);
+    assert.ok(fakeLog().some(log => log.argv), "the valid contract must reach the provider submission path");
+  }
+});
+
+test("repair completion preserves terminal outcomes and verified implementation", async () => {
+  for (const outcome of ["FAILED", "BLOCKED", "IMPLEMENTED"]) {
+    const key = await workflow([{ key: "implement", type: "coding_agent", config: { output_contract: "{ goal, requirements }" } }]);
+    const run = await startRun({ definitionKey: key, title: "terminal repair", agentProvider: "codex" });
+    await approvedCodingFixture(run.id, "implement", 1);
+    const [workspace] = await workspacesOf(run.id);
+    writeFileSync(join(workspace.path, "transport.go"), 'package fixture\nfunc TransportValue() int { return 5 }\n');
+    writeFileSync(join(workspace.path, "transport_test.go"), 'package fixture\nimport "testing"\nfunc TestTransport(t *testing.T) { if TransportValue() != 4 { t.Fatal("initial business failure") } }\n');
+    process.env.FAKE_CODEX_MODE = `repair-${outcome}`;
+    process.env.FAKE_CODEX_WS = workspace.path;
+    try {
+      await drain();
+      const step = await stepOf(run.id, "implement");
+      if (outcome === "IMPLEMENTED") {
+        assert.equal(step.status, "COMPLETED");
+        assert.equal(step.output.outcome, "IMPLEMENTED");
+        assert.equal(step.output.verification.passed, true);
+        assert.equal(step.output.verification.repairs, 1);
+      } else {
+        assert.equal(step.status, "FAILED", `${outcome} from repair must remain terminal`);
+        assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), new RegExp(`Coding outcome ${outcome}`));
+      }
+      assert.ok(fakeLog().some(log => log.argv && log.resumeId), "the verification failure must actually invoke repair");
+      execFileSync("go", ["test", "."], { cwd: workspace.path, stdio: "pipe" });
+    } finally { delete process.env.FAKE_CODEX_WS; }
+  }
+});

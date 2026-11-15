@@ -1621,10 +1621,15 @@ ${validation.errors.join("; ")}`,
           };
       }
     }
-    if (mode === "coding" && !independent &&
-      (submitted?.outcome === "BLOCKED" || submitted?.blocked === true || submitted?.outcome === "FAILED"))
-      return { kind: "failed", retryable: false,
-        error: `Coding outcome ${submitted?.outcome ?? "BLOCKED"} cannot complete successfully`, details: { submitted } };
+    const terminalCodingFailure = (candidate: Record<string, unknown> | undefined): ExecResult | null => {
+      if (mode !== "coding" || independent) return null;
+      const outcome = candidate?.outcome === "FAILED" ? "FAILED" :
+        candidate?.outcome === "BLOCKED" || candidate?.blocked === true ? "BLOCKED" : null;
+      return outcome ? { kind: "failed", retryable: false,
+        error: `Coding outcome ${outcome} cannot complete successfully`, details: { submitted: candidate } } : null;
+    };
+    const terminalSubmission = terminalCodingFailure(submitted);
+    if (terminalSubmission) return terminalSubmission;
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
     if (mode === "coding" && !independent) {
       if (submitted?.outcome === "NO_CHANGE_REQUIRED" || submitted?.no_change_required === true) {
@@ -1835,9 +1840,11 @@ ${validation.errors.join("; ")}`,
         };
         await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
         return {
-          kind: "completed",
-          output: {
-            ...output,
+          kind: "failed",
+          retryable: false,
+          error: "Mandatory verification cannot run: no worktree was prepared",
+          details: {
+            submitted: output,
             verification: {
               outcome: "skipped",
               status: "skipped",
@@ -1938,7 +1945,6 @@ ${validation.errors.join("; ")}`,
               );
             r = await run(`${freshPrompt()}\n\n${msg}`);
           }
-          if (submitted) accepted = submitted;
           if (r.isError)
             return {
               kind: "failed",
@@ -1946,6 +1952,9 @@ ${validation.errors.join("; ")}`,
               retryable: !TERMINAL_FAILURES.has(r.failure ?? ""),
             };
           if (await openQuestions()) return pause(r.text);
+          const terminalRepair = terminalCodingFailure(submitted);
+          if (terminalRepair) return terminalRepair;
+          if (submitted) accepted = submitted;
           if (ctx.run.profile === "MICRO") {
             const check = await assessMicroScope();
             if (check.escalate) return check.result;
@@ -1998,6 +2007,8 @@ ${validation.errors.join("; ")}`,
           { verification: "needs_review" },
         );
       output = { ...accepted, verification: summary };
+      const terminalVerifiedSubmission = terminalCodingFailure(output);
+      if (terminalVerifiedSubmission) return terminalVerifiedSubmission;
       if (ctx.run.profile === "MICRO") {
         const check = await assessMicroScope();
         if (check.escalate) return check.result;
@@ -2097,8 +2108,8 @@ ${validation.errors.join("; ")}`,
       if (!validation.valid) return { kind: "failed", retryable: false,
         error: `Final output contract validation failed: ${validation.errors.join("; ")}` };
     }
-    if (mode === "coding" && !independent && (output.outcome === "BLOCKED" || output.outcome === "FAILED" || output.blocked === true))
-      return { kind: "failed", retryable: false, error: "Terminal coding outcome cannot complete successfully", details: { output } };
+    const terminalOutput = terminalCodingFailure(output);
+    if (terminalOutput) return terminalOutput;
     return { kind: "completed", output };
   },
 };

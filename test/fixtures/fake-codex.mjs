@@ -264,8 +264,13 @@ if (mode === "no-submit") {
   mcp.close();
   process.exit(0);
 }
+if (mode.startsWith("repair-") && resumeId) {
+  writeFileSync(process.env.FAKE_CODEX_WS + "/transport.go", 'package fixture\nfunc TransportValue() int { return 4 }\n');
+}
 const output =
-  mode === "bad-contract"
+  mode.startsWith("outcome-") || (mode.startsWith("repair-") && resumeId)
+    ? { goal: "declared outcome", requirements: [], outcome: mode.slice(mode.indexOf("-") + 1) }
+    : mode === "bad-contract"
     ? { summary: "missing keys" }
     : resumeId
       ? { goal: "resumed", requirements: [], answer_seen: prompt.includes("Không") }
