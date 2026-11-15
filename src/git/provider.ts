@@ -71,9 +71,7 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
   }
   const dir = join(workspace, "node_modules");
   if (existsSync(dir) && !nodeModulesReady(workspace)) {
-    try {
-      await writeFile(join(dir, ".package-lock.json"), "{}");
-    } catch {}
+    await writeFile(join(dir, ".package-lock.json"), "{}").catch(() => {});
   }
   return true;
 }

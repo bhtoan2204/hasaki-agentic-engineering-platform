@@ -324,51 +324,45 @@ export async function ensureContextPack(
         ),
         "platform_constraint",
       );
+      const toObj = (v: unknown): Record<string, unknown> | null =>
+        typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+      const toArr = (v: unknown): string[] =>
+        Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+
+      const snapContent = toObj(snap?.content);
+      const promptPlan = toObj(snapContent?.prompt_plan);
+      const reqOutput = toObj(toObj(input.upstream?.requirements)?.output);
+      const analyzeOutput = toObj(toObj(input.upstream?.analyze)?.output);
+      const planOutput = toObj(toObj(input.upstream?.plan)?.output);
+      const approvePlanOutput = toObj(toObj(input.upstream?.approve_plan)?.output);
+      const workItemPayload = toObj(input.work_item?.payload);
+
       const approvedPlan =
-        (input.upstream?.approve_plan?.output as any) ??
-        (input.upstream?.plan?.output as any) ??
-        (snap?.content?.prompt_plan as any)?.approved_plan ??
+        approvePlanOutput ??
+        planOutput ??
+        promptPlan?.approved_plan ??
         null;
       const acceptanceCriteria: string[] = [
         ...new Set([
-          ...(Array.isArray((input.upstream?.requirements?.output as any)?.acceptance_criteria)
-            ? (input.upstream.requirements.output as any).acceptance_criteria
-            : []),
-          ...(Array.isArray((input.upstream?.analyze?.output as any)?.acceptance_criteria)
-            ? (input.upstream.analyze.output as any).acceptance_criteria
-            : []),
-          ...(Array.isArray((input.upstream?.plan?.output as any)?.acceptance_criteria)
-            ? (input.upstream.plan.output as any).acceptance_criteria
-            : []),
-          ...(Array.isArray(input.work_item?.payload?.acceptance_criteria)
-            ? input.work_item.payload.acceptance_criteria
-            : []),
+          ...toArr(reqOutput?.acceptance_criteria),
+          ...toArr(analyzeOutput?.acceptance_criteria),
+          ...toArr(planOutput?.acceptance_criteria),
+          ...toArr(workItemPayload?.acceptance_criteria),
         ]),
       ];
       const businessConstraints: string[] = [
         ...new Set([
-          ...(Array.isArray((input.upstream?.requirements?.output as any)?.constraints)
-            ? (input.upstream.requirements.output as any).constraints
-            : []),
-          ...(Array.isArray((input.upstream?.analyze?.output as any)?.constraints)
-            ? (input.upstream.analyze.output as any).constraints
-            : []),
-          ...(Array.isArray((input.upstream?.plan?.output as any)?.constraints)
-            ? (input.upstream.plan.output as any).constraints
-            : []),
-          ...(Array.isArray(input.work_item?.payload?.constraints)
-            ? input.work_item.payload.constraints
-            : []),
+          ...toArr(reqOutput?.constraints),
+          ...toArr(analyzeOutput?.constraints),
+          ...toArr(planOutput?.constraints),
+          ...toArr(workItemPayload?.constraints),
         ]),
       ];
+      const promptPlanVerification = toObj(promptPlan?.verification);
       const requiredTests: string[] = [
         ...new Set([
-          ...(Array.isArray((snap?.content?.prompt_plan as any)?.verification?.required_tests)
-            ? (snap.content.prompt_plan as any).verification.required_tests
-            : []),
-          ...(Array.isArray((input.upstream?.plan?.output as any)?.tests)
-            ? (input.upstream.plan.output as any).tests
-            : []),
+          ...toArr(promptPlanVerification?.required_tests),
+          ...toArr(planOutput?.tests),
         ]),
       ];
 
@@ -784,7 +778,7 @@ export async function ensureContextPack(
               query,
               repos: repoState,
               indexVersion: INDEX_VERSION,
-              indexSnapshot: (snap as any)?.content?.code_intelligence?.snapshot_id ?? null,
+              indexSnapshot: (snap?.content as Record<string, unknown> | undefined)?.code_intelligence ? String(((snap?.content as Record<string, unknown>).code_intelligence as Record<string, unknown>).snapshot_id ?? "") || null : null,
             })
           : null;
         const prior = key

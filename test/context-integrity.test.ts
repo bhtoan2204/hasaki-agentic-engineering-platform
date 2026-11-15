@@ -6,7 +6,7 @@ import {
   ContextBudgetError,
   type ContextEntry,
 } from "../src/context/pack.ts";
-import { scoreKnowledge } from "../src/context/plan.ts";
+import { scoreKnowledge, type KnowledgeLike } from "../src/context/plan.ts";
 
 test("codeRetrievalKey v3 incorporates selected repos and index snapshot, ignoring ordering", () => {
   const base = {
@@ -148,8 +148,8 @@ test("scoreKnowledge discounts agent skills not applicable to current step type"
   };
 
   const request = "Run test driven development and architecture audit";
-  const scoreMatching = scoreKnowledge(matchingSkill as any, request, "coding_agent");
-  const scoreUnmatching = scoreKnowledge(unmatchingSkill as any, request, "coding_agent");
+  const scoreMatching = scoreKnowledge(matchingSkill as unknown as KnowledgeLike, request, "coding_agent");
+  const scoreUnmatching = scoreKnowledge(unmatchingSkill as unknown as KnowledgeLike, request, "coding_agent");
 
   assert.ok(scoreMatching.score > scoreUnmatching.score, "non-applicable step skill should be discounted");
 });

@@ -52,7 +52,7 @@ test("validateOutputContract validates required top-level fields and types", () 
   // Wrong element type in array
   const resWrongElem = validateOutputContract(contract, {
     goal: "Fix bug",
-    requirements: ["req1", 123 as any],
+    requirements: ["req1", 123 as unknown as string],
     risks: "None",
   });
   assert.equal(resWrongElem.valid, false);

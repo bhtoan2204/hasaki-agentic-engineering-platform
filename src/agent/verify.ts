@@ -305,11 +305,9 @@ export async function verifyWorkspaces(
       );
     let r = await runWith(known?.skipRegex ?? null);
     if (signal.aborted) throw new Error("verification canceled");
-    let headCommit = "";
-    try {
-      const { stdout } = await exec("git", ["-C", p, "rev-parse", "HEAD"]);
-      headCommit = stdout.trim();
-    } catch {}
+    const headCommit = await exec("git", ["-C", p, "rev-parse", "HEAD"])
+      .then(({ stdout }) => stdout.trim())
+      .catch(() => "");
     const entry: RepoVerification = {
       repo: w.repo,
       status: r.code === 0 && !r.timedOut ? "passed" : "failed",
