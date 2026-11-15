@@ -29,7 +29,7 @@ const COLOR: Record<string, string> = {
 export function ProfileBadge({ profile, title }: { profile?: string; title?: string }) {
   if (!profile) return null;
   const I =
-    (profile === "FAST" || profile === "MICRO")
+    profile === "FAST" || profile === "MICRO"
       ? Zap
       : profile === "DEEP"
         ? Microscope
@@ -98,7 +98,7 @@ export function ProfilePreview({
   }, [data]);
   return (
     <div>
-      <div className="row tight" style={{ gap: 10 }}>
+      <div className="pp-profiles">
         <b className="small" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
           <Gauge size={15} color="var(--brand)" /> {t("pp.profile")}
         </b>

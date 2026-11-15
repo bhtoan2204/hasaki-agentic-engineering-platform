@@ -1281,6 +1281,21 @@
 }
 
 /* profile preview */
+.pp-profiles {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pp-profiles .segmented {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
 .pp-graph {
   height: 300px;
   border: 1px solid var(--line);
