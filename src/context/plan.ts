@@ -59,6 +59,12 @@ export function scoreKnowledge(
   if (k.reason.startsWith("REPOSITORY") || k.scope_type === "REPOSITORY") score += 2;
   if (stepType === "coding_agent" && /coding_standard|repository_convention/.test(k.category))
     score += 1;
+  if (k.category === "agent_skill" && k.metadata?.applicable_steps) {
+    const steps = Array.isArray(k.metadata.applicable_steps) ? k.metadata.applicable_steps : [];
+    if (steps.length > 0 && !steps.includes(stepType)) {
+      score = Math.max(0, score - 5);
+    }
+  }
   return { score: Math.round(score * 100) / 100, why: hits.join("; ") || "no keyword overlap" };
 }
 

@@ -13,7 +13,7 @@ if [ -f go.mod ]; then
   # GO_TEST_SKIP (set by the platform): tests already known to fail on the same base commit — not re-run.
   if [ -n "$pkgs" ]; then echo "== go test -short -timeout 5m \${GO_TEST_SKIP:+-skip $GO_TEST_SKIP} $pkgs"; go test -short -timeout 5m \${GO_TEST_SKIP:+-skip "$GO_TEST_SKIP"} $pkgs; else echo "no Go packages changed"; fi
 elif [ -f package.json ]; then
-  if [ ! -d node_modules ] || [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit 2>/dev/null)" ]; then
+  if [ ! -d node_modules ] || (! [ -f node_modules/.package-lock.json ] && ! [ -f node_modules/.modules.yaml ] && ! [ -f node_modules/.yarn-integrity ] && ! [ -f node_modules/.platform-ready ] && [ -z "$(find node_modules -mindepth 1 -maxdepth 1 ! -name '.*' -print -quit 2>/dev/null)" ]); then
     echo "== install dependencies"
     if [ -f package-lock.json ]; then npm ci --ignore-scripts --no-audit --no-fund || { echo "npm ci refused (package-lock.json out of sync with package.json?): installing from package.json, lock file untouched"; npm install --no-package-lock --ignore-scripts --no-audit --no-fund; }; else npm install --ignore-scripts --no-audit --no-fund; fi
   fi
@@ -47,7 +47,7 @@ case "$admin" in
   */platform|*/platform\\?*) echo "refusing verification: admin URL names the application database" >&2; exit 2 ;;
 esac
 if [ ! -f package.json ]; then echo "package.json is required" >&2; exit 1; fi
-if [ ! -x node_modules/.bin/tsc ]; then npm ci --ignore-scripts --no-audit --no-fund; fi`;
+if [ ! -d node_modules ] || (! [ -f node_modules/.package-lock.json ] && ! [ -f node_modules/.modules.yaml ] && ! [ -f node_modules/.yarn-integrity ] && ! [ -f node_modules/.platform-ready ] && ! [ -x node_modules/.bin/tsc ]); then npm ci --ignore-scripts --no-audit --no-fund || npm install --no-package-lock --ignore-scripts --no-audit --no-fund; fi`;
 
 /**
  * Lints the changed files (paths on stdin) and fails only on errors the branch adds. Errors are matched to the merge

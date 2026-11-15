@@ -24,6 +24,7 @@ import type { PolicyContext } from "../agent/toolPolicy.ts";
 import { source } from "../agent/contextTools.ts";
 import { evidenceSummary } from "../agent/evidence.ts";
 import { workspacesOf } from "../git/provider.ts";
+import type { MandatoryExecutionContract } from "../agent/contract.ts";
 import { repositoryBaseBranch } from "../repos/service.ts";
 import { worktreeFingerprint } from "../agent/scopeGuard.ts";
 import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
@@ -109,18 +110,22 @@ export function codeRetrievalKey(input: {
   query: string;
   repos: Record<string, string>;
   indexVersion: string;
+  selected?: string[];
+  indexSnapshot?: string | null;
 }) {
   const repos = Object.keys(input.repos)
     .sort()
     .map((k) => [k, input.repos[k]]);
   return hashOf({
-    v: 2,
+    v: 3,
     owner: input.ownerId,
     run: input.runId,
     allowed: [...input.allowed].sort(),
     query: input.query,
     repos,
     index: input.indexVersion,
+    ...(input.selected ? { selected: [...input.selected].sort() } : {}),
+    ...(input.indexSnapshot ? { indexSnapshot: input.indexSnapshot } : {}),
   });
 }
 /** The estimate includes provenance and summaries. Required constraints are never silently shortened or dropped. */
@@ -318,6 +323,79 @@ export async function ensureContextPack(
           "workflow-defined verification gate, not an agent claim",
         ),
         "platform_constraint",
+      );
+      const approvedPlan =
+        (input.upstream?.approve_plan?.output as any) ??
+        (input.upstream?.plan?.output as any) ??
+        (snap?.content?.prompt_plan as any)?.approved_plan ??
+        null;
+      const acceptanceCriteria: string[] = [
+        ...new Set([
+          ...(Array.isArray((input.upstream?.requirements?.output as any)?.acceptance_criteria)
+            ? (input.upstream.requirements.output as any).acceptance_criteria
+            : []),
+          ...(Array.isArray((input.upstream?.analyze?.output as any)?.acceptance_criteria)
+            ? (input.upstream.analyze.output as any).acceptance_criteria
+            : []),
+          ...(Array.isArray((input.upstream?.plan?.output as any)?.acceptance_criteria)
+            ? (input.upstream.plan.output as any).acceptance_criteria
+            : []),
+          ...(Array.isArray(input.work_item?.payload?.acceptance_criteria)
+            ? input.work_item.payload.acceptance_criteria
+            : []),
+        ]),
+      ];
+      const businessConstraints: string[] = [
+        ...new Set([
+          ...(Array.isArray((input.upstream?.requirements?.output as any)?.constraints)
+            ? (input.upstream.requirements.output as any).constraints
+            : []),
+          ...(Array.isArray((input.upstream?.analyze?.output as any)?.constraints)
+            ? (input.upstream.analyze.output as any).constraints
+            : []),
+          ...(Array.isArray((input.upstream?.plan?.output as any)?.constraints)
+            ? (input.upstream.plan.output as any).constraints
+            : []),
+          ...(Array.isArray(input.work_item?.payload?.constraints)
+            ? input.work_item.payload.constraints
+            : []),
+        ]),
+      ];
+      const requiredTests: string[] = [
+        ...new Set([
+          ...(Array.isArray((snap?.content?.prompt_plan as any)?.verification?.required_tests)
+            ? (snap.content.prompt_plan as any).verification.required_tests
+            : []),
+          ...(Array.isArray((input.upstream?.plan?.output as any)?.tests)
+            ? (input.upstream.plan.output as any).tests
+            : []),
+        ]),
+      ];
+
+      const mandatoryContract: MandatoryExecutionContract = {
+        approved_plan: approvedPlan,
+        acceptance_criteria: acceptanceCriteria,
+        business_constraints: businessConstraints,
+        selected_repositories: ctx.run.selected_repositories?.length
+          ? ctx.run.selected_repositories
+          : ctx.run.allowed_repositories,
+        required_tests: requiredTests,
+      };
+
+      add(
+        "mandatory_execution_contract",
+        "requirements",
+        mandatoryContract,
+        1000,
+        true,
+        source(
+          `run:${ctx.run.id}:execution_contract`,
+          null,
+          at,
+          "owner",
+          "immutable approved execution contract: plan, acceptance criteria, constraints, repos and tests",
+          "snapshot",
+        ),
       );
       if (input.answers.length || input.pending?.reexecute?.instructions || input.pending?.feedback)
         add(
@@ -702,9 +780,11 @@ export async function ensureContextPack(
               ownerId: ctx.run.owner_id!,
               runId: ctx.run.id,
               allowed: ctx.run.allowed_repositories,
+              selected: ctx.run.selected_repositories,
               query,
               repos: repoState,
               indexVersion: INDEX_VERSION,
+              indexSnapshot: (snap as any)?.content?.code_intelligence?.snapshot_id ?? null,
             })
           : null;
         const prior = key
