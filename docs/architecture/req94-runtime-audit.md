@@ -19,10 +19,10 @@ Baseline: `5c56d2c39327403291f00f22bf1ad41e61cccb37` (the prepared branch includ
 
 ## Verification results
 
-- `npm test`: 423 tests passed, zero failures, zero skips after repair.
+- `npm test`: 424 tests passed, zero failures, zero skips with PLATFORM_SELF_TEST=1 after the subprocess-environment repair.
 - `npm run typecheck`: passed after the final test typing correction.
 - `npm run build`: passed.
-- Full integration: 623 tests passed with zero failures/skips after the three runtime repairs; final integration results are also recorded in the implementation step output.
+- Full integration: 623 tests passed with zero failures/skips with PLATFORM_SELF_TEST=1 after the subprocess-environment repair.
 - Focused repair suites cover production scripts, disjoint Go modules, repository-qualified Node files, ambiguous/missing owners, skipped/failed tests, spoofed stdout, truncated evidence and dependency lifecycle failures. Actual local Go and Node runners are exercised; no remote infrastructure is required.
 - Full lint still fails on existing debt: the baseline has 3,315 errors and 22 warnings, while the repaired candidate has 3,314 errors and 22 warnings after equivalent web builds. No diagnostics were added; one existing explicit-any diagnostic was removed during extraction. These are baseline findings, predominantly existing explicit `any` and generated web assets. They were not suppressed. The sole added lint exclusion covers the local baseline export, not application/test sources.
 - Red/green evidence was collected for nested schema rejection, missing contract exports/completeness, source fingerprint omissions, the MICRO reinstall, spoofed required-test output and false IMPLEMENTED completion. Temporarily removing the empty-implementation guard made its runtime regression complete incorrectly; restoring it rejects that completion.
@@ -41,3 +41,11 @@ Existing coding runs need a complete approval-bound contract and explicit suppor
 3. **PASS — dependencies:** extracted the existing worker readiness/install logic for actual reuse by every Node template. Lockfile and manifest mutations cause one installation each; unchanged fingerprints avoid another installation. A failed install cannot leave a reusable marker. No test, authorization rule or verification policy was weakened.
 
 No remote infrastructure-dependent test was deleted or rewritten. Existing command-selection fixtures still mock external executables; their readiness helper is explicitly stubbed because actual readiness is covered by the new executable profile tests. The earlier source-string marker assertion was replaced with a stronger subprocess behavior assertion. Broad security, legacy schema and live benchmark limitations remain as stated above.
+
+## Mandatory gate environment repair
+
+The gate's inherited `PLATFORM_SELF_TEST=1` flag and worker `DATABASE_URL` reached commands for unrelated fixture repositories. The unchanged feature verification guard therefore exited 2 before running tests. Running the code-intelligence integration suite with that flag reproduced all six reported failures.
+
+`commandProcessEnv` now scrubs inherited worker credentials and platform scope markers for non-self repositories through the existing `agentEnvironment` policy. `runCommand` uses that complete environment without merging the original worker values back into it. Explicit command environment inputs retain their existing behavior. Actual self-repository commands still use `selfTestEnvironment`, retain their own marker, remove application credentials and enforce their existing isolation and database guard.
+
+A new subprocess regression proves that a repository command cannot inherit the worker database URL or another invocation's self-test marker. The original code-intelligence assertions and existing self-development isolation assertions pass together under `PLATFORM_SELF_TEST=1`. No CI/verification script or existing test assertion was changed for this repair, and no infrastructure-dependent test was deleted, skipped or weakened.

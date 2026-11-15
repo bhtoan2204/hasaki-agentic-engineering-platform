@@ -219,7 +219,8 @@ export async function runCommand(
 ) {
   const proc = await commandProcessEnv(cwd, env);
   const useBwrap = proc.isolation?.mode === "bwrap";
-  const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
+  // commandProcessEnv owns the complete environment; never reintroduce scrubbed worker values.
+  const childEnv = { ...proc.env };
   // Verification is a new test invocation, not a recursive child of the worker test harness.
   delete childEnv.NODE_TEST_CONTEXT;
   const pg = await testPostgresEnv(cwd, signal, {

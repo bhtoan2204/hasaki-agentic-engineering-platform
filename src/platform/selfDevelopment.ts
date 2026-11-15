@@ -295,8 +295,8 @@ export interface CommandIsolation {
 }
 
 /**
- * Commands in any other repository keep the worker environment. Commands in this installation's repository get a
- * scrubbed environment and, when bubblewrap is installed, an OS mount that makes the live checkout read-only.
+ * Every command gets a scrubbed worker environment. This installation's own repository additionally gets
+ * its self-test scope and, when bubblewrap is installed, an OS mount that makes the live checkout read-only.
  */
 export async function commandProcessEnv(
   cwd: string,
@@ -314,7 +314,8 @@ export async function commandProcessEnv(
       isolation: { replaceEnv: true, mode: "bwrap", liveRoot: liveApplicationRoot() },
     };
   }
-  if (!(await directoryIsSelfRepository(cwd))) return { env: { ...process.env, ...extra } };
+  if (!(await directoryIsSelfRepository(cwd)))
+    return { env: { ...agentEnvironment(process.env, "codex"), ...extra } };
   const bwrap = await bwrapAvailable();
   if (!bwrap && !config.platform.trustedOperatorIsolation)
     throw new Error(

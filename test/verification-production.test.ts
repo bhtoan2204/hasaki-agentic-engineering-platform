@@ -87,3 +87,20 @@ test("required test ownership rejects unknown or ambiguous IDs and accepts expli
   assert.equal(result.passed, true, JSON.stringify(result.repos));
   assert.deepEqual(result.repos.map(r => Object.keys(r.required_tests!)), [[required[0]], [required[1]]]);
 });
+
+test("repository commands do not inherit worker database credentials or self-test scope markers", async t => {
+  const { path } = fixture(t, "environment");
+  const previous = { DATABASE_URL: process.env.DATABASE_URL, PLATFORM_SELF_TEST: process.env.PLATFORM_SELF_TEST };
+  try {
+    process.env.DATABASE_URL = "postgres://unused@worker.invalid/application";
+    process.env.PLATFORM_SELF_TEST = "1";
+    const command = `node -e 'const a=require("node:assert/strict");a.equal(process.env.DATABASE_URL,undefined);a.equal(process.env.PLATFORM_SELF_TEST,undefined)'`;
+    const result = await runCommand(command, path, {}, 30000, signal);
+    assert.equal(result.code, 0, result.output);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
