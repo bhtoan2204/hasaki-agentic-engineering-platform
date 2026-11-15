@@ -153,3 +153,15 @@ test("scoreKnowledge discounts agent skills not applicable to current step type"
 
   assert.ok(scoreMatching.score > scoreUnmatching.score, "non-applicable step skill should be discounted");
 });
+
+test("retrieval state fails closed on partial observations and identifies scope and index changes", async () => {
+  const { observeRetrievalState } = await import("../src/context/pack.ts");
+  const read = async (repo: string) => repo === "missing" ? null : { workspace: "primary", head: "sha1", fingerprint: "clean", snapshot: "144:generation" };
+  assert.equal(await observeRetrievalState(["repo-a", "missing"], read), null);
+  assert.equal(await observeRetrievalState([], read), null);
+  assert.equal(await observeRetrievalState(["repo-a"], async () => { throw new Error("unreadable"); }), null);
+  const first = await observeRetrievalState(["repo-a"], read);
+  assert.ok(first);
+  assert.notDeepEqual(await observeRetrievalState(["repo-a"], async () => ({ workspace: "worktree", head: "sha1", fingerprint: "clean", snapshot: "144:generation" })), first);
+  assert.notDeepEqual(await observeRetrievalState(["repo-a"], async () => ({ workspace: "primary", head: "sha1", fingerprint: "clean", snapshot: "145:new" })), first);
+});

@@ -199,3 +199,21 @@ test("validateOutputContract checks outcome enum when outcome field is provided"
   assert.equal(res.valid, false);
   assert.ok(res.errors.some((e) => e.includes("invalid outcome value")));
 });
+
+test("structured JSON schemas reject nested malformed output without prose parsing", () => {
+  const schema = { type: "object", required: ["summary", "changes"], properties: {
+    summary: { type: "string" }, changes: { type: "array", items: { type: "object", required: ["files"], properties: { files: { type: "array", items: { type: "string" } } } } },
+  }};
+  assert.equal(validateOutputContract(schema, { summary: "ok", changes: [{ files: ["src/app.ts"] }] }).valid, true);
+  assert.equal(validateOutputContract(schema, { summary: "ok", changes: [{ files: [42] }] }).valid, false);
+  assert.equal(validateOutputContract(schema, { summary: "ok" }).valid, false);
+});
+
+test("built-in implementation outputs use a structured schema for nested PR decisions", async () => {
+  const { TEMPLATES } = await import("../src/workflow/templates.ts");
+  const { validateSpec } = await import("../src/workflow/graph.ts");
+  const step = validateSpec(TEMPLATES.find(t => t.key === "platform-self-development")!.spec).steps.find(s => s.key === "implement")!;
+  const output = { summary: "Done", pull_requests: { platform: { title: "fix", summary: "details", decisions: [{ title: "Reuse", detail: 42 }] } }, verification: "passed" };
+  assert.equal(validateOutputContract(step.config!.output_schema, output).valid, false);
+  assert.equal(validateOutputContract(step.config!.output_schema, { ...output, pull_requests: { platform: { title: "fix", summary: "details", decisions: [{ title: "Reuse", detail: "Shared executor" }] } } }).valid, true);
+});

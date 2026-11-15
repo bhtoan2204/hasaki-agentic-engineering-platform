@@ -133,8 +133,8 @@ export function protectedRootsFor(paths: string[]): string[] {
 }
 
 /**
- * dataDir must sit outside the live checkout. Codex coding has no OS write sandbox; the tool-policy hook is its
- * write boundary. Other providers are enforced by tool policy only.
+ * dataDir must sit outside the live checkout. Codex coding uses its native workspace-write sandbox.
+ * Other providers still require an explicit trusted-operator policy; this is not credential read isolation.
  */
 export function assertSelfCodingIsolation(provider: string) {
   if (overlapsLiveApplication(config.dataDir))
@@ -144,7 +144,7 @@ export function assertSelfCodingIsolation(provider: string) {
   if (provider === "codex") return;
   if (config.platform.trustedOperatorIsolation) return;
   throw new Error(
-    "Self-development coding with this provider is refused. Codex coding is allowed on this workstation without an OS sandbox. " +
+    "Self-development coding with this provider is refused. Codex coding uses its native workspace-write sandbox. " +
       "Claude, Cursor and Antigravity are enforced by tool policy only. On a single-operator workstation set " +
       "platform.trustedOperatorIsolation (or PLATFORM_TRUSTED_OPERATOR_ISOLATION=1). Do not enable that for untrusted users.",
   );
@@ -295,12 +295,13 @@ export interface CommandIsolation {
 }
 
 /**
- * Commands in any other repository keep the worker environment. Commands in this installation's repository get a
- * scrubbed environment and, when bubblewrap is installed, an OS mount that makes the live checkout read-only.
+ * Every command gets a scrubbed worker environment. This installation's own repository additionally gets
+ * its self-test scope and, when bubblewrap is installed, an OS mount that makes the live checkout read-only.
  */
 export async function commandProcessEnv(
   cwd: string,
   extra: Record<string, string>,
+  verification = false,
 ): Promise<CommandIsolation> {
   if (overlapsLiveApplication(cwd))
     throw new Error("Refusing to run a command in the running application checkout");
@@ -314,7 +315,15 @@ export async function commandProcessEnv(
       isolation: { replaceEnv: true, mode: "bwrap", liveRoot: liveApplicationRoot() },
     };
   }
-  if (!(await directoryIsSelfRepository(cwd))) return { env: { ...process.env, ...extra } };
+  if (!(await directoryIsSelfRepository(cwd))) {
+    if (!verification) return { env: { ...agentEnvironment(process.env, "codex"), ...extra } };
+    const bwrap = await bwrapAvailable();
+    if (!bwrap && !config.platform.trustedOperatorIsolation)
+      throw new Error("Worker commands need bubblewrap or explicit platform.trustedOperatorIsolation");
+    const env = { ...agentEnvironment(process.env, "codex"), ...extra };
+    for (const key of ["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV"]) delete env[key];
+    return { env, isolation: { replaceEnv: true, mode: bwrap ? "bwrap" : "trusted", liveRoot: liveApplicationRoot() } };
+  }
   const bwrap = await bwrapAvailable();
   if (!bwrap && !config.platform.trustedOperatorIsolation)
     throw new Error(

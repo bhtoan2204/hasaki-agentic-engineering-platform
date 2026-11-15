@@ -70,7 +70,7 @@ jobs:
       - run: echo "$HOME/.local/ripgrep" >> "$GITHUB_PATH"
       - run: rg --version
       # test/pg-cluster.ts starts a private cluster with initdb/pg_ctl. Those binaries are not on the runner image.
-      - name: Install PostgreSQL 17
+      - name: Install PostgreSQL 17 and verification sandbox
         run: |
           sudo apt-get update
           sudo apt-get install -y curl ca-certificates
@@ -79,9 +79,10 @@ jobs:
           . /etc/os-release
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y postgresql-17
+          sudo apt-get install -y postgresql-17 bubblewrap
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
           /usr/lib/postgresql/17/bin/initdb --version
+          bwrap --die-with-parent --unshare-pid --ro-bind / / --dev /dev --proc /proc true
       - name: npm test (unit, shard ${{ matrix.shard }}/3)
         run: >-
           node --disable-warning=ExperimentalWarning --import ./test/env.ts --test

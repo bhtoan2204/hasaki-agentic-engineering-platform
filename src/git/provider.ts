@@ -1,7 +1,8 @@
+import { installNodeDependencies as ensureNodeDependencies } from "./nodeDependencies.ts";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 import { prepareRepository, repositoryLock, checkoutForRun } from "../repos/workspaces.ts";
 import { repositories, repositoryBaseBranch } from "../repos/service.ts";
@@ -35,45 +36,10 @@ export function npmCacheDir() {
   return join(config.dataDir, "npm-cache");
 }
 
-/** A failed `npm ci` leaves an empty node_modules. That is not an install. */
-// Package managers write these only when an install completes; an interrupted install leaves packages without one.
-export function nodeModulesReady(workspace: string) {
-  const dir = join(workspace, "node_modules");
-  return [".package-lock.json", ".modules.yaml", ".yarn-integrity", ".platform-ready"].some((marker) =>
-    existsSync(join(dir, marker)),
-  );
-}
-
-/**
- * A git worktree does not contain node_modules. The coding sandbox has no network, so the worker installs here.
- * Lifecycle scripts are not run: this executes for whatever repository the run was allowed to prepare.
- * Returns true when it actually installed.
- */
+export { dependencyFingerprint, nodeModulesReady } from "./nodeDependencies.ts";
+/** Worker preparation and verification shells share exactly the same readiness implementation. */
 export async function installNodeDependencies(workspace: string): Promise<boolean> {
-  if (!existsSync(join(workspace, "package.json")) || nodeModulesReady(workspace)) return false;
-  const cache = npmCacheDir();
-  await mkdir(cache, { recursive: true });
-  const ci = existsSync(join(workspace, "package-lock.json"));
-  const opts = {
-    cwd: workspace,
-    timeout: 10 * 60_000,
-    maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, npm_config_cache: cache },
-  };
-  const flags = ["--ignore-scripts", "--no-audit", "--no-fund"];
-  try {
-    await exec("npm", [ci ? "ci" : "install", ...flags], opts);
-  } catch (e) {
-    // The repository's own lock file is out of sync with package.json (npm ci EUSAGE): install from package.json
-    // without reading or rewriting the lock, so the worktree stays clean.
-    if (!ci || !/EUSAGE|in sync/.test(String((e as any).stderr ?? (e as Error).message))) throw e;
-    await exec("npm", ["install", "--no-package-lock", ...flags], opts);
-  }
-  const dir = join(workspace, "node_modules");
-  if (existsSync(dir) && !nodeModulesReady(workspace)) {
-    await writeFile(join(dir, ".package-lock.json"), "{}").catch(() => {});
-  }
-  return true;
+  return ensureNodeDependencies(workspace, npmCacheDir());
 }
 
 /**

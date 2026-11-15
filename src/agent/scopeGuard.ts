@@ -15,7 +15,8 @@
  */
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { posix } from "node:path";
+import { posix, join } from "node:path";
+import { lstat, readlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { ApprovedScope } from "./evidence.ts";
 
@@ -165,12 +166,26 @@ async function uncommittedHash(path: string, prefix: string) {
   const h = createHash("sha256")
     .update(prefix)
     .update("\0")
-    .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]));
-  for (const f of z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"]))
-    .sort()
-    .slice(0, 500)) {
-    const blob = (await git(path, ["hash-object", "--", f]).catch(() => "?")).trim();
-    h.update(`\0${f}\0${blob}`);
+    .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]))
+    .update("\0index\0")
+    .update(await git(path, ["diff", "--cached", "--no-color", "--binary", "--no-renames", "HEAD"]));
+  const untracked = z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"])).sort();
+  const files: string[] = [];
+  for (const file of untracked) {
+    const st = await lstat(join(path, file));
+    if (st.isSymbolicLink()) h.update(`\0symlink\0${file}\0${await readlink(join(path, file))}`);
+    else if (st.isFile()) files.push(file);
+    else throw new Error("Unsupported untracked entry");
+  }
+  if (files.length) {
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile("git", ["-C", path, "hash-object", "--stdin-paths"], { maxBuffer: 64 << 20 },
+        (error, stdout) => error ? reject(error) : resolve(stdout));
+      child.stdin?.end(files.map(file => JSON.stringify(file)).join("\n") + "\n");
+    });
+    const hashes = output.trim().split("\n");
+    if (hashes.length !== files.length) throw new Error("Incomplete untracked file observation");
+    files.forEach((file, i) => h.update(`\0${file}\0${hashes[i]}`));
   }
   return h.digest("hex");
 }

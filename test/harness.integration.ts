@@ -39,6 +39,10 @@ const CFG: VerifyConfig = {
   allowTestWeakening: false,
 };
 const WT = mkdtempSync(join(tmpdir(), "verify-wt-")); // a real directory: authorisation uses realpath
+execFileSync("git", ["-C", WT, "init", "-q"]);
+writeFileSync(join(WT, "source.txt"), "verification baseline");
+execFileSync("git", ["-C", WT, "add", "."]);
+execFileSync("git", ["-C", WT, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "baseline"]);
 const WS = [{ repo: "svc", path: WT }];
 const ROOTS = [WT];
 const never = new AbortController().signal;

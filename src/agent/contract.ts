@@ -1,3 +1,4 @@
+import { z } from "zod";
 /**
  * Top-level keys of a step's prose output contract, e.g. "{ goal, requirements: string[], risks }" → goal, requirements,
  * risks. Dynamic keys ("[repo]") and optional keys ("key?") are skipped. Used to refuse a step that ends without a result matching it.
@@ -16,13 +17,10 @@ export function isStepOutcome(val: unknown): val is StepOutcome {
   return typeof val === "string" && (VALID_STEP_OUTCOMES as readonly string[]).includes(val);
 }
 
-export interface MandatoryExecutionContract {
-  approved_plan: string | Record<string, unknown> | null;
-  acceptance_criteria: string[];
-  business_constraints: string[];
-  selected_repositories: string[];
-  required_tests: string[];
-}
+export { buildExecutionContract, executionContractProblems } from "./executionContract.ts";
+export type { MandatoryExecutionContract } from "./executionContract.ts";
+
+const objectValue = (v: unknown) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 export function contractKeys(contract: unknown): string[] {
   const s = typeof contract === "string" ? contract.trim() : "";
@@ -111,6 +109,14 @@ export function validateOutputContract(
   contract: unknown,
   output: unknown,
 ): ContractValidationResult {
+  if (objectValue(contract)) {
+    try {
+      const result = z.fromJSONSchema(contract as z.core.JSONSchema.JSONSchema).safeParse(output);
+      return result.success ? { valid: true, errors: [] } : { valid: false, errors: result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`) };
+    } catch (error) {
+      return { valid: false, errors: [`Unsupported output schema: ${String(error)}`] };
+    }
+  }
   const errors: string[] = [];
   const s = typeof contract === "string" ? contract.trim() : "";
   if (!s || !s.startsWith("{") || !s.endsWith("}")) {

@@ -1,3 +1,7 @@
+import { validateExecutionAuthorization } from "./executionContract.ts";
+import { executionWorkspaces, implementationBaseline, implementationChanged, observeImplementation, loadImplementationBaseline } from "./implementationEvidence.ts";
+import { worktreeFingerprint } from "./scopeGuard.ts";
+import { refreshToolProgress } from "./toolRuntime.ts";
 import { selectVerificationScope } from "./verificationScope.ts";
 import { collectMicroEvidence, validateMicroWorkspace } from "../workflow/microEvidence.ts";
 import { indexRepository } from "../codeIntelligence/indexer.ts";
@@ -100,7 +104,7 @@ import {
   dispatchPlatformTool,
   envFromExecution,
 } from "./platformTools.ts";
-import { runCommand } from "../workflow/executors/builtin.ts";
+import { runVerificationCommand as runCommand } from "../workflow/executors/builtin.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
 import { branchFor } from "../workflow/branches.ts";
@@ -659,7 +663,7 @@ const agentExecutor: StepExecutor = {
       const blocked = await restoreWorkspaces();
       if (blocked) return blocked;
     }
-    const ws = (await workspacesOf(ctx.run.id)).filter(
+    const ws = (await executionWorkspaces(ctx)).filter(
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
@@ -741,12 +745,29 @@ const agentExecutor: StepExecutor = {
     let submitted: Record<string, unknown> | undefined;
 
     const independent = isIndependent(ctx.step.config);
+    let implementationStart: Awaited<ReturnType<typeof implementationBaseline>> | null = null;
     try {
       ctx.context.contextPack = await ensureContextPack(ctx, metrics, policy);
     } catch (error) {
       if (error instanceof ContextBudgetError)
         return { kind: "failed", error: error.message, retryable: false };
       throw error;
+    }
+    if (mode === "coding" && !independent) {
+      const contract = ctx.input.execution_contract;
+      const problems = await validateExecutionAuthorization(ctx);
+      if (problems.length) return { kind: "failed", retryable: false,
+        error: `Mandatory execution contract is incomplete: ${problems.join("; ")}` };
+      await ctx.artifact(
+        "execution_contract",
+        "approved execution contract",
+        JSON.stringify(contract),
+        contract,
+      );
+    }
+    if (mode === "coding" && !independent) {
+      implementationStart = await implementationBaseline(ctx);
+      policy.workspaces = (await executionWorkspaces(ctx)).map(w => w.path);
     }
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
     const resume = independent ? null : await resumableSession(ctx, cwd, provider);
@@ -973,6 +994,7 @@ const agentExecutor: StepExecutor = {
         "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'",
         [ctx.attempt.id],
       );
+      await refreshToolProgress(policy);
       const d = decide(
         input.tool_name,
         (input.tool_input ?? {}) as Record<string, unknown>,
@@ -981,7 +1003,7 @@ const agentExecutor: StepExecutor = {
         input.agent_id,
       );
       if (d.allow) {
-        policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
+        if (!input.tool_name.startsWith("mcp__platform__")) policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
         hookAllowed.add(callKey(input.tool_name, input.tool_input));
         if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
         return {};
@@ -1050,17 +1072,28 @@ const agentExecutor: StepExecutor = {
           assistantTurns: 0,
           failure: "canceled",
         };
-      if (live) {
+      {
         const promptTokens = Math.ceil(prompt.length / 4);
         const systemAppendTokens = Math.ceil(systemAppend.length / 4);
         const totalPromptTokens = Math.ceil((systemAppend.length + prompt.length) / 4);
         await ctx.recordMetrics({
-          evaluation_context: {
+          prompt_context: {
+            measurement: "character_estimate_not_provider_usage",
+            system_append_tokens: systemAppendTokens,
+            user_prompt_tokens: promptTokens,
+            known_prompt_tokens: totalPromptTokens,
+            full_input_tokens: null,
+            tool_schema_tokens: null,
+            session_history_tokens: null,
+            provider_system_tokens: null,
+            resumed: !!resumeId,
+          },
+          ...(live ? { evaluation_context: {
             system_append_tokens: systemAppendTokens,
             pack_tokens: ctx.context.contextPack?.estimated_tokens ?? 0,
             user_prompt_tokens: promptTokens,
             total_prompt_tokens: totalPromptTokens,
-          },
+          } } : {}),
         }).catch(() => {});
       }
       await ctx.log("prompt", prompt, {
@@ -1563,7 +1596,7 @@ const agentExecutor: StepExecutor = {
                 ? "Claude"
                 : String(provider);
     if (!independent) {
-      if (ctx.step.config?.output_contract) {
+      if (ctx.step.config?.output_schema || ctx.step.config?.output_contract) {
         if (!submitted)
           return {
             kind: "failed",
@@ -1579,7 +1612,7 @@ const agentExecutor: StepExecutor = {
             retryable: true,
             details: { submitted },
           };
-        const validation = validateOutputContract(ctx.step.config.output_contract, submitted);
+        const validation = validateOutputContract(ctx.step.config.output_schema ?? ctx.step.config.output_contract, submitted);
         if (!validation.valid)
           return {
             kind: "failed",
@@ -1590,6 +1623,15 @@ ${validation.errors.join("; ")}`,
           };
       }
     }
+    const terminalCodingFailure = (candidate: Record<string, unknown> | undefined): ExecResult | null => {
+      if (mode !== "coding" || independent) return null;
+      const outcome = candidate?.outcome === "FAILED" ? "FAILED" :
+        candidate?.outcome === "BLOCKED" || candidate?.blocked === true ? "BLOCKED" : null;
+      return outcome ? { kind: "failed", retryable: false,
+        error: `Coding outcome ${outcome} cannot complete successfully`, details: { submitted: candidate } } : null;
+    };
+    const terminalSubmission = terminalCodingFailure(submitted);
+    if (terminalSubmission) return terminalSubmission;
     let output: Record<string, unknown> = submitted ?? { summary: result.text };
     if (mode === "coding" && !independent) {
       if (submitted?.outcome === "NO_CHANGE_REQUIRED" || submitted?.no_change_required === true) {
@@ -1731,7 +1773,19 @@ ${validation.errors.join("; ")}`,
     }
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
-    const vcfg = mode === "coding" ? verifyConfig(ctx.step.config, TEST_COMMAND) : null;
+    const vcfg = mode === "coding" ? (ctx.input.execution_contract?.verification
+      ? { ...(ctx.input.execution_contract.verification as import("./verify.ts").VerifyConfig) }
+      : verifyConfig(ctx.step.config, TEST_COMMAND)) : null;
+    if (vcfg && !independent) {
+      const contract = ctx.input.execution_contract!;
+      vcfg.requiredTests = [
+        ...new Set([...(vcfg.requiredTests ?? []), ...contract.required_tests]),
+      ];
+      vcfg.contractRevision = contract.provenance?.revision;
+    }
+    if (mode === "coding" && !independent && !vcfg)
+      return { kind: "failed", retryable: false, error: "Mandatory implementation verification is disabled" };
+
     if (mode === "coding" && !vcfg) {
       // Only the versioned workflow definition can turn the gate off; record it so evaluation never counts it as passed.
       await ctx.log(
@@ -1754,7 +1808,7 @@ ${validation.errors.join("; ")}`,
     // The agent already submitted: a question now would re-run it from scratch on resume, so conflicted repos are skipped.
     const unrestored = restoreConflictSkips(restoreBlocked);
     if (vcfg) {
-      const trees = (await workspacesOf(ctx.run.id)).filter(
+      const trees = (await executionWorkspaces(ctx)).filter(
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
       );
@@ -1791,9 +1845,11 @@ ${validation.errors.join("; ")}`,
         };
         await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
         return {
-          kind: "completed",
-          output: {
-            ...output,
+          kind: "failed",
+          retryable: false,
+          error: "Mandatory verification cannot run: no worktree was prepared",
+          details: {
+            submitted: output,
             verification: {
               outcome: "skipped",
               status: "skipped",
@@ -1894,7 +1950,6 @@ ${validation.errors.join("; ")}`,
               );
             r = await run(`${freshPrompt()}\n\n${msg}`);
           }
-          if (submitted) accepted = submitted;
           if (r.isError)
             return {
               kind: "failed",
@@ -1902,6 +1957,9 @@ ${validation.errors.join("; ")}`,
               retryable: !TERMINAL_FAILURES.has(r.failure ?? ""),
             };
           if (await openQuestions()) return pause(r.text);
+          const terminalRepair = terminalCodingFailure(submitted);
+          if (terminalRepair) return terminalRepair;
+          if (submitted) accepted = submitted;
           if (ctx.run.profile === "MICRO") {
             const check = await assessMicroScope();
             if (check.escalate) return check.result;
@@ -1954,6 +2012,8 @@ ${validation.errors.join("; ")}`,
           { verification: "needs_review" },
         );
       output = { ...accepted, verification: summary };
+      const terminalVerifiedSubmission = terminalCodingFailure(output);
+      if (terminalVerifiedSubmission) return terminalVerifiedSubmission;
       if (ctx.run.profile === "MICRO") {
         const check = await assessMicroScope();
         if (check.escalate) return check.result;
@@ -1963,7 +2023,7 @@ ${validation.errors.join("; ")}`,
     // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact
     // revision; the PR step re-validates it. The agent's own deviation report is recorded but never relied on.
     if (mode === "coding" && !independent) {
-      const all = (await workspacesOf(ctx.run.id).catch(() => [])).filter(
+      const all = (await executionWorkspaces(ctx)).filter(
         (w) => !unrestored.has(w.repo),
       );
       const state = await collectScopeState(
@@ -1975,6 +2035,52 @@ ${validation.errors.join("; ")}`,
           })),
         ),
       );
+      if (state.unreadable.length) return { kind: "failed", retryable: false, error: state.unreadable.join("; ") };
+      if (output.outcome === "NO_CHANGE_REQUIRED" || output.no_change_required === true)
+        return { kind: "failed", retryable: false, error: "NO_CHANGE_REQUIRED needs independent requirement-satisfaction evidence; this executor cannot establish it" };
+      const authorizationProblems = await validateExecutionAuthorization(ctx);
+      if (authorizationProblems.length) return { kind: "failed", retryable: false, error: authorizationProblems.join("; ") };
+      const implementationEnd = await observeImplementation(ctx);
+      implementationStart = await loadImplementationBaseline(ctx.step.id, ctx.step.generation);
+      if (
+        !implementationStart ||
+        !implementationChanged(implementationStart, implementationEnd) ||
+        !Object.values(state.files).some((files) => files.length)
+      )
+        return {
+          kind: "failed",
+          retryable: false,
+          error: "IMPLEMENTED requires worker-observed implementation changes",
+        };
+      const verified = output.verification as
+        | {
+            passed?: boolean;
+            last?: Array<{ repo: string; tested_state?: { head: string; fingerprint: string } }>;
+          }
+        | undefined;
+      for (const workspace of all) {
+        const tested = verified?.last?.find((repo) => repo.repo === workspace.repo)?.tested_state;
+        const current = await worktreeFingerprint(workspace.path).catch(() => null);
+        if (
+          !verified?.passed ||
+          !tested ||
+          !current ||
+          JSON.stringify(tested) !== JSON.stringify(current)
+        )
+          return {
+            kind: "failed",
+            retryable: false,
+            error: `Verification is missing or stale for ${workspace.repo}`,
+          };
+      }
+      output.implementation_evidence = {
+        baseline: implementationStart,
+        observed: implementationEnd,
+        generation: ctx.step.generation,
+        attempt_id: ctx.attempt.id,
+      };
+      output.execution_contract = ctx.input.execution_contract;
+      output.outcome = "IMPLEMENTED";
       // Time to the first useful code location: first read/edit of a file the step finally changed (measured events).
       const changed = Object.values(state.files).flat();
       if (changed.length) {
@@ -2035,6 +2141,13 @@ ${validation.errors.join("; ")}`,
           } as any;
       }
     }
+    if (!independent && (ctx.step.config.output_schema || ctx.step.config.output_contract)) {
+      const validation = validateOutputContract(ctx.step.config.output_schema ?? ctx.step.config.output_contract, output);
+      if (!validation.valid) return { kind: "failed", retryable: false,
+        error: `Final output contract validation failed: ${validation.errors.join("; ")}` };
+    }
+    const terminalOutput = terminalCodingFailure(output);
+    if (terminalOutput) return terminalOutput;
     return { kind: "completed", output };
   },
 };

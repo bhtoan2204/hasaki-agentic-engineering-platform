@@ -1,3 +1,4 @@
+import { buildExecutionContract, type MandatoryExecutionContract } from "../agent/executionContract.ts";
 import { detectNativeKnowledgeSources } from "../knowledge/nativeSources.ts";
 import { visibleKnowledge } from "../knowledge/visibility.ts";
 import type { ContextPack } from "../context/pack.ts";
@@ -25,6 +26,8 @@ import type { RunRow, StepRow } from "./types.ts";
 
 /** Everything a step attempt receives. Persisted as the attempt's input snapshot. */
 export interface StepInput {
+  execution_contract?: MandatoryExecutionContract;
+  execution_evidence_source?: { attempt_id: number; generation: number };
   run: {
     id: number;
     title: string;
@@ -132,7 +135,8 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
         [run.work_item_id],
       )
     : null;
-  const anc = ancestors(run.graph.steps, step.key);
+  const liveSteps = await q<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position", [run.id]);
+  const anc = ancestors(liveSteps, step.key);
   let upstream: StepInput["upstream"] = {};
   if (anc.size) {
     for (const s of await q<StepRow>(
@@ -143,7 +147,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
       upstream[s.key] = { status: s.status, attempt_id: s.current_attempt_id, output: s.output };
   }
   // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
-  if (isIndependent(step.config)) upstream = independentUpstream(run.graph.steps, upstream);
+  if (isIndependent(step.config)) upstream = independentUpstream(liveSteps, upstream);
   const answers = await q(
     c,
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",
@@ -158,7 +162,25 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
         [step.id, step.generation],
       )) ?? null)
     : null;
+  let execution_contract: MandatoryExecutionContract | undefined;
+  let execution_evidence_source: StepInput["execution_evidence_source"];
+  if (step.type === "coding_agent" && !isIndependent(step.config)) {
+    const previous = await one<{ input: StepInput }>(c,
+      "SELECT input FROM workflow_step_attempts WHERE step_id=$1 AND generation=$2 ORDER BY id LIMIT 1", [step.id, step.generation]);
+    const retry = step.pending_input?.execution_retry?.source_attempt_id
+      ? await one<{ id: number; generation: number; input: StepInput }>(c,
+          "SELECT id,generation,input FROM workflow_step_attempts WHERE id=$1 AND step_id=$2 AND generation<$3 AND status IN ('FAILED','CANCELED')",
+          [step.pending_input.execution_retry.source_attempt_id, step.id, step.generation]) : null;
+    execution_evidence_source = previous?.input.execution_evidence_source ?? (retry?.input.execution_contract ? { attempt_id: retry.id, generation: retry.generation } : undefined);
+    execution_contract = previous ? previous.input.execution_contract : retry ? retry.input.execution_contract : buildExecutionContract(upstream,
+      run.selected_repositories.length ? run.selected_repositories : run.allowed_repositories, wi, {
+        graph: { ...run.graph, steps: liveSteps.map(s => ({ ...s, retry_backoff_seconds: s.retry_backoff_s, run_if: s.run_if ?? undefined })) }, step, definition_version_id: run.definition_version_id, profile: run.profile, allowed_repositories: run.allowed_repositories,
+        request: { title: run.title, description: wi?.description, inputs: run.inputs },
+      });
+  }
   return {
+    execution_contract,
+    execution_evidence_source,
     previous_attempt,
     run: {
       id: run.id,

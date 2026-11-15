@@ -1,3 +1,6 @@
+import { fileURLToPath } from "node:url";
+import { verifyPublication } from "../../agent/publicationVerification.ts";
+import type { StepRow } from "../types.ts";
 import { requireRunRepositoryAccess } from "../../repos/access.ts";
 import { createHash } from "node:crypto";
 import {
@@ -7,11 +10,15 @@ import {
   investigationReport,
 } from "../../investigation/steps.ts";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
+import { requiredTestTargets } from "../../agent/verify.ts";
+import { repoPath } from "../../repos/service.ts";
 import { environmentUnavailable } from "../../agent/verify.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdtemp, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import {
@@ -37,7 +44,7 @@ import {
   type RankedRepository,
   type RepositoryRow,
 } from "../../repos/service.ts";
-import { getPath } from "../graph.ts";
+import { getPath, ancestors } from "../graph.ts";
 import { FEATURE_TARGETED_COMMAND, PLATFORM_TARGETED_COMMAND } from "../templates.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
@@ -80,7 +87,7 @@ export const humanApprovalExecutor: StepExecutor = {
   async execute(ctx) {
     const cfg = ctx.step.config;
     const shown = Object.fromEntries(
-      ((cfg.show_outputs as string[]) ?? []).map((k) => [k, ctx.input.upstream[k]?.output ?? null]),
+      [...new Set([...(cfg.show_outputs as string[] ?? ctx.step.depends_on), ...(typeof cfg.approve_scope_from === "string" ? [cfg.approve_scope_from] : [])])].map((k) => [k, ctx.input.upstream[k]?.output ?? null]),
     );
     const request: Record<string, unknown> = {
       message: cfg.message ?? `Approve "${ctx.step.name}"?`,
@@ -99,6 +106,22 @@ export const humanApprovalExecutor: StepExecutor = {
           scope,
           requires_risk_acknowledgement: scope.gate ? !scope.gate.satisfied : scope.risk === "HIGH",
         });
+    }
+    const executableTests = [...new Set(Object.values(shown).flatMap(output => {
+      const o = output as { required_tests?: unknown; subtasks?: Array<{ required_tests?: unknown }> } | null;
+      return [...(Array.isArray(o?.required_tests) ? o.required_tests : []), ...(o?.subtasks ?? []).flatMap(t => Array.isArray(t.required_tests) ? t.required_tests : [])];
+    }))];
+    for (const coding of ctx.run.graph.steps.filter(s => s.type === "coding_agent" && ancestors(ctx.run.graph.steps, s.key).has(ctx.step.key))) {
+      const tests = (coding.config.verify as { required_tests?: unknown } | undefined)?.required_tests;
+      if (Array.isArray(tests)) for (const id of tests) if (!executableTests.includes(id)) executableTests.push(id);
+    }
+    if (executableTests.length) {
+      const repos = ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories;
+      const prepared = await workspacesOf(ctx.run.id);
+      const targets = await Promise.all(repos.map(async repo => ({ repo, path: prepared.find(w => w.repo === repo)?.path ?? repoPath((await repositories.get(repo))!) })));
+      const checked = await requiredTestTargets(targets, executableTests, true);
+      if (checked.problems.length) return { kind: "failed", retryable: false, error: `Invalid required tests before approval: ${checked.problems.join("; ")}` };
+      request.required_tests = executableTests;
     }
     if (cfg.select_repositories) {
       const discovery = Object.values(ctx.input.upstream).find((u) =>
@@ -204,7 +227,13 @@ export const conditionExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- command
 
+let verificationGoCache: string | undefined;
+
 type CommandResult = { code: number | null; output: string; timedOut: boolean };
+
+/** Worker verification always uses the existing isolation policy, including non-self repositories. */
+export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps["run"] =
+  (command, cwd, env, timeoutMs, signal, onChunk) => runCommand(command, cwd, env, timeoutMs, signal, onChunk, true);
 
 export async function runCommand(
   command: string,
@@ -213,10 +242,22 @@ export async function runCommand(
   timeoutMs: number,
   signal: AbortSignal,
   onChunk?: (text: string) => void,
+  verification = false,
 ) {
-  const proc = await commandProcessEnv(cwd, env);
+  const proc = await commandProcessEnv(cwd, env, verification);
   const useBwrap = proc.isolation?.mode === "bwrap";
-  const childEnv = proc.isolation?.replaceEnv ? proc.env : { ...process.env, ...proc.env };
+  // commandProcessEnv owns the complete environment; never reintroduce scrubbed worker values.
+  const childEnv = { ...proc.env };
+  // Verification is a new test invocation, not a recursive child of the worker test harness.
+  delete childEnv.NODE_TEST_CONTEXT;
+  if (useBwrap) {
+    childEnv.TMPDIR = "/tmp";
+    if (!childEnv.GOCACHE?.startsWith("/tmp/")) {
+      verificationGoCache ??= await mkdtemp("/tmp/ctp-verification-cache-");
+      childEnv.GOCACHE = join(verificationGoCache, "go-build");
+      await mkdir(childEnv.GOCACHE, { recursive: true });
+    }
+  }
   const pg = await testPostgresEnv(cwd, signal, {
     build: command !== PLATFORM_TARGETED_COMMAND && command !== FEATURE_TARGETED_COMMAND,
   });
@@ -227,6 +268,7 @@ export async function runCommand(
       timedOut: false,
     };
   Object.assign(childEnv, pg);
+  childEnv.PLATFORM_NODE_DEPENDENCIES = fileURLToPath(new URL("../../git/nodeDependencies.ts", import.meta.url));
   // Login profiles may drop inherited toolchains (Nix keeps node and npm in separate prefixes).
   // Keep the profile's priority, then append missing inherited directories before adding PostgreSQL.
   childEnv.PLATFORM_COMMAND_PATH = childEnv.PATH ?? "";
@@ -1115,9 +1157,9 @@ export const pullRequestExecutor: StepExecutor = {
         workspaces.map(async (w) => [w.repo, await workspaceBase(ctx.run, w)] as const),
       ),
     );
-    const steps = await q<{ key: string; status: string; output: any; independent: boolean }>(
+    const steps = await q<StepRow & { independent: boolean }>(
       pool,
-      "SELECT key, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
+      "SELECT *, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
       [ctx.run.id],
     );
     const publish: Record<string, PublishState> = {};
@@ -1169,11 +1211,16 @@ export const pullRequestExecutor: StepExecutor = {
           x.output?.tested_heads &&
           typeof x.output.tested_heads === "object",
       )
-      .map((x) => ({ step: x.key, heads: x.output.tested_heads }));
+      .map((x) => ({ step: x.key, heads: x.output.tested_heads as Record<string, string> }));
     const verifiers = steps.filter((x) => x.independent);
+    const finalVerification = await verifyPublication(ctx, steps, workspaces,
+      runVerificationCommand);
+    const finalRepos = new Set(finalVerification.tested.flatMap(t => Object.keys(t.heads)));
+    const publicationTested = [...tested.map(t => ({ ...t, heads: Object.fromEntries(Object.entries(t.heads).filter(([repo]) => !finalRepos.has(repo))) })), ...finalVerification.tested];
     const problems = [
       ...new Set([
-        ...prePublishProblems({ publish, scope, state, renewedRevision, tested }),
+        ...finalVerification.problems,
+        ...prePublishProblems({ publish, scope, state, renewedRevision, tested: publicationTested }),
         ...(verifiers.length ? verificationGate(verifiers, publish) : []),
       ]),
     ];

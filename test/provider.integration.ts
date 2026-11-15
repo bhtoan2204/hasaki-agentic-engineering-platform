@@ -13,7 +13,7 @@ import { cursorToolDecision } from "../src/agent/cursor/policyWatch.ts";
 import { cursorAgentTurn, cursorCapabilities } from "../src/agent/cursor/run.ts";
 import { attemptIsLive, dispatchPlatformTool } from "../src/agent/platformTools.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
-import { nodeModulesReady } from "../src/git/provider.ts";
+import { dependencyFingerprint, nodeModulesReady } from "../src/git/provider.ts";
 
 before(async () => {
   await migrate();
@@ -305,9 +305,14 @@ test("node_modules counts as installed only after a package manager finished", (
     "a partial install has packages but no completion marker",
   );
   writeFileSync(join(ws, "node_modules", ".package-lock.json"), "{}");
+  assert.equal(nodeModulesReady(ws), false, "package-manager marker alone cannot prove current dependency state");
+  writeFileSync(join(ws, "package.json"), "{}");
+  writeFileSync(join(ws, "node_modules", ".platform-ready"), dependencyFingerprint(ws)!);
   assert.equal(nodeModulesReady(ws), true);
+  writeFileSync(join(ws, "package-lock.json"), "changed");
+  assert.equal(nodeModulesReady(ws), false, "lockfile changes invalidate the install");
   const pnpm = mkdtempSync(join(tmpdir(), "node-modules-ready-"));
   mkdirSync(join(pnpm, "node_modules"));
   writeFileSync(join(pnpm, "node_modules", ".modules.yaml"), "");
-  assert.equal(nodeModulesReady(pnpm), true);
+  assert.equal(nodeModulesReady(pnpm), false);
 });

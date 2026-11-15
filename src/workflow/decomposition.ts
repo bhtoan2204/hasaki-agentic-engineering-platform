@@ -23,6 +23,7 @@ export const SubtaskSpec = z.object({
   execution_strategy: z.enum(["sequential", "parallel"]).default("sequential"),
   agent_role: z.string().default("coder"),
   testing: z.array(z.string()).default([]),
+  required_tests: z.array(z.string()).optional(),
   /** Files this subtask will write; overlap with a sibling forces sequential order. */
   owned_files: z.array(z.string()).default([]),
 });
@@ -293,7 +294,7 @@ export async function materializeSubtasks(
   const created: string[] = [];
   let position = Math.max(...steps.map((s) => s.position)) + 1;
   for (const s of subtasks) {
-    const deps = s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey];
+    const deps = [...new Set([...(s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey]), gate.key])];
     await q(
       c,
       `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, requires_approval, max_attempts, retry_backoff_s, status, parent_step_key, subtask_id, graph_revision)
@@ -340,6 +341,7 @@ export async function materializeSubtasks(
         depends_on: s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey],
       })),
     ]);
+    cleanup.depends_on = [...new Set([...cleanup.depends_on, gate.key])];
     await q(
       c,
       `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, requires_approval, max_attempts, retry_backoff_s, status, graph_revision)

@@ -1,6 +1,9 @@
+import { fileURLToPath } from "node:url";
+import { normalizeScopePath } from "./scopeGuard.ts";
+import { worktreeFingerprint } from "./scopeGuard.ts";
 import { execFile } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { realpath, stat, readFile } from "node:fs/promises";
+import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
 import { promisify } from "node:util";
 import {
   classify,
@@ -37,6 +40,7 @@ export interface VerifyConfig {
   /** Hard test-weakening signals (removed/skipped/disabled tests) fail verification unless explicitly allowed. */
   allowTestWeakening: boolean;
   requiredTests?: string[];
+  contractRevision?: string;
 }
 
 /**
@@ -83,6 +87,9 @@ export function environmentUnavailable(code: number | null, output: string): str
 }
 
 export interface RepoVerification {
+  tested_state?: { head: string; fingerprint: string };
+  contract_revision?: string;
+  required_tests?: Record<string, "passed" | "failed" | "skipped" | "not_executed">;
   repo: string;
   status: RepoStatus;
   /** passed or accepted_preexisting. */
@@ -247,6 +254,85 @@ export async function authorizeWorkspace(path: string, allowedRoots: string[]): 
 
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+type RequiredTestTarget = { id: string; selector: string; format: "go" | "node"; command: string };
+const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+const directGoJson = (command: string) => /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
+
+async function plannedPath(path: string, allowMissing: boolean): Promise<string | null> {
+  try { return await realpath(path); }
+  catch {
+    if (!allowMissing || dirname(path) === path) return null;
+    const parent = await plannedPath(dirname(path), true);
+    return parent ? resolve(parent, basename(path)) : null;
+  }
+}
+
+/** Resolve ownership before execution. Ambiguous IDs need an explicit repository:: selector. */
+export async function requiredTestTargets(workspaces: Array<{ repo: string; path: string }>, ids: string[], beforeApproval = false) {
+  const targets = new Map<string, RequiredTestTarget[]>();
+  const problems: string[] = [];
+  for (const id of ids) {
+    if (typeof id !== "string" || !id.trim() || id !== id.trim()) { problems.push("Invalid required test selector"); continue; }
+    const separator = id.indexOf("::");
+    const repository = separator < 0 ? null : id.slice(0, separator);
+    const selector = separator < 0 ? id : id.slice(separator + 2);
+    if ("invalid" in normalizeScopePath(selector) || /[\s;$`|&<>]/.test(selector)) { problems.push(`${id}: invalid executable test selector`); continue; }
+    const matches: Array<{ repo: string; target: RequiredTestTarget }> = [];
+    for (const workspace of workspaces.filter(w => !repository || w.repo === repository)) {
+      if (/\.(?:[cm]?[jt]s)$/.test(selector) && !isAbsolute(selector)) {
+        const root = await realpath(workspace.path).catch(() => null);
+        const file = await plannedPath(resolve(workspace.path, selector), beforeApproval);
+        const manifest = JSON.parse(await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"));
+        if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) { problems.push(`${id}: repository runner is incompatible with the Node structured test runner`); continue; }
+        if (!root || !file || relative(root, file).startsWith("..") || isAbsolute(relative(root, file))) continue;
+        const preload = /\.integration\./.test(selector) ? "test/setup.ts" : "test/env.ts";
+        const hasPreload = await stat(resolve(root, preload)).then(s => s.isFile()).catch(() => false);
+        const args = [process.execPath, ...(hasPreload ? ["--import", `./${preload}`] : []), "--test",
+          `--test-reporter=${fileURLToPath(new URL("./testReporter.mjs", import.meta.url))}`, file];
+        matches.push({ repo: workspace.repo, target: { id, selector: file, format: "node", command: args.map(shellQuote).join(" ") } });
+      } else {
+        const module = /^module\s+["']?([^\s"']+)/m.exec(await readFile(resolve(workspace.path, "go.mod"), "utf8").catch(() => ""))?.[1];
+        const testAt = selector.search(/\/Test[A-Za-z0-9_]/);
+        if (!module || testAt < 0 || !/^Test[A-Za-z0-9_]+(?:\/[A-Za-z0-9_-]+)*$/.test(selector.slice(testAt + 1))) continue;
+        const pkg = selector.slice(0, testAt), test = selector.slice(testAt + 1);
+        if (pkg !== module && !pkg.startsWith(`${module}/`)) continue;
+        const packagePath = pkg === module ? "." : `.${pkg.slice(module.length)}`;
+        if (packagePath.split("/").includes("..")) continue;
+        const root = await realpath(workspace.path).catch(() => null);
+        const directory = await plannedPath(resolve(workspace.path, packagePath), beforeApproval);
+        if (!root || !directory || relative(root, directory).startsWith("..") || isAbsolute(relative(root, directory))) continue;
+        const pattern = test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        matches.push({ repo: workspace.repo, target: { id, selector, format: "go",
+          command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}` } });
+      }
+    }
+    if (matches.length !== 1) problems.push(`${id}: ${matches.length ? "ambiguous repository; use repository::test ID" : "test has no authorized repository owner"}`);
+    else {
+      const match = matches[0];
+      targets.set(match.repo, [...(targets.get(match.repo) ?? []), match.target]);
+    }
+  }
+  return { targets, problems };
+}
+
+function requiredTestStatus(output: string, target: RequiredTestTarget): NonNullable<RepoVerification["required_tests"]>[string] {
+  if (output.endsWith("\n[output truncated]")) return "not_executed";
+  let status: NonNullable<RepoVerification["required_tests"]>[string] = "not_executed";
+  for (const line of output.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      let next: NonNullable<RepoVerification["required_tests"]>[string] | null = null;
+      if (target.format === "go" && `${event.Package}/${event.Test}` === target.selector)
+        next = event.Action === "pass" ? "passed" : event.Action === "fail" ? "failed" : event.Action === "skip" ? "skipped" : null;
+      if (target.format === "node" && event.type === "platform:test-summary" && event.complete === true && event.file === target.selector &&
+        [event.passed, event.failed, event.skipped].every(count => Number.isInteger(count) && count >= 0))
+        next = event.failed > 0 ? "failed" : event.skipped > 0 ? "skipped" : event.passed > 0 ? "passed" : null;
+      if (next && status !== "failed" && status !== "skipped") status = next;
+    } catch { /* Logs, including test stdout, are never passing evidence. */ }
+  }
+  return status;
+}
+
 /** Run verification once in every worktree. Refuses to run anywhere else. */
 export async function verifyWorkspaces(
   workspaces: Array<{ repo: string; path: string; branch?: string; skip?: string }>,
@@ -259,6 +345,7 @@ export async function verifyWorkspaces(
 ): Promise<VerificationRound> {
   const t0 = Date.now();
   const repos: RepoVerification[] = [];
+  const required = await requiredTestTargets(workspaces, cfg.requiredTests ?? []);
   for (const w of workspaces) {
     if (w.skip) {
       await deps.log?.(`■ verify ${w.repo}: SKIPPED (${w.skip})`, {
@@ -293,6 +380,7 @@ export async function verifyWorkspaces(
       `◆ verify ${w.repo} (round ${round})${known?.tests.length ? `, skipping ${known.tests.length} test(s) known to fail on base` : ""}`,
     );
     const started = Date.now();
+    const beforeState = await worktreeFingerprint(p).catch(() => null);
     const baseEnv = { ...env, REPO: w.repo, ...(w.branch ? { BRANCH: w.branch } : {}) };
     const runWith = (skip: string | null) =>
       deps.run(
@@ -324,13 +412,6 @@ export async function verifyWorkspaces(
       excerpt: "",
       commit_sha: headCommit,
     };
-    if (entry.status === "passed" && cfg.requiredTests?.length) {
-      const missing = cfg.requiredTests.filter((t) => !r.output.includes(t));
-      if (missing.length > 0) {
-        entry.status = "failed";
-        entry.note = `required tests were not executed: ${missing.join(", ")}`;
-      }
-    }
     const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
     if (unavailable)
       Object.assign(entry, {
@@ -430,6 +511,44 @@ export async function verifyWorkspaces(
         });
       }
     }
+    if (cfg.requiredTests?.length) {
+      const results: NonNullable<RepoVerification["required_tests"]> = {};
+      for (const target of required.targets.get(w.repo) ?? []) {
+        let status = target.format === "go" && directGoJson(cfg.command) ? requiredTestStatus(r.output, target) : "not_executed";
+        if (status === "not_executed" && ["passed", "accepted_preexisting"].includes(entry.status)) {
+          const remaining = cfg.timeoutMs - (Date.now() - started);
+          if (remaining > 0) {
+            await deps.log?.(`◆ required test ${target.id} (${w.repo})`);
+            const evidence = await deps.run(target.command, p, baseEnv, remaining, signal);
+            if (signal.aborted) throw new Error("verification canceled");
+            status = requiredTestStatus(evidence.output, target);
+            r = { ...r, output: `${r.output}\n== required ${target.id}\n${evidence.output}` };
+            if (evidence.code !== 0 || evidence.timedOut) {
+              entry.status = "failed";
+              entry.exit_code = evidence.code;
+              entry.timed_out = evidence.timedOut;
+              status = "failed";
+            }
+          }
+        }
+        results[target.id] = status;
+      }
+      entry.required_tests = results;
+      if (Object.values(results).some(status => status !== "passed")) {
+        entry.status = "failed";
+        entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
+      }
+    }
+    {
+      const afterState = await worktreeFingerprint(p).catch(() => null);
+      if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
+        if (entry.status !== "error" && entry.status !== "skipped") {
+          entry.status = "failed";
+          entry.note = "Workspace changed during verification or its state could not be established";
+        }
+      } else entry.tested_state = afterState;
+      entry.contract_revision = cfg.contractRevision;
+    }
     entry.passed = entry.status === "passed" || entry.status === "accepted_preexisting";
     entry.duration_ms = Date.now() - started;
     if (deps.artifact)
@@ -444,6 +563,11 @@ export async function verifyWorkspaces(
       { repo: w.repo, verification: round, status: entry.status },
     );
     repos.push(entry);
+  }
+  if (required.problems.length && repos.length) {
+    repos[0].status = "failed";
+    repos[0].passed = false;
+    repos[0].note = `Required test ownership could not be established: ${required.problems.join("; ")}`;
   }
   return {
     round,
@@ -581,6 +705,7 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
       : []),
   ]);
   return {
+    contract_revision: cfg.contractRevision,
     outcome: res.outcome,
     /** clean | accepted_with_preexisting | failed | error | … — what kind of pass/failure this was. */
     status:
@@ -614,6 +739,9 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
           note,
           error,
           artifact_id,
+          tested_state,
+          contract_revision,
+          required_tests,
         }) => ({
           repo,
           status,
@@ -629,6 +757,9 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
           note,
           error,
           artifact_id,
+          tested_state,
+          contract_revision,
+          required_tests,
         }),
       ) ?? [],
   };
