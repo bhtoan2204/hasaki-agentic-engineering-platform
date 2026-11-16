@@ -127,3 +127,12 @@ test("testEvidence parses node:test, Go and markers", () => {
   assert.equal(testEvidence("hello").executed, null);
   assert.equal(testEvidence("no matching test files; targeted suite skipped").marker, true);
 });
+
+test("testEvidence reads go test -json events and ignores package-level events", () => {
+  const pass = '{"Time":"t","Action":"pass","Package":"p","Test":"TestA","Elapsed":0}\n{"Time":"t","Action":"pass","Package":"p","Elapsed":0.1}\n';
+  assert.deepEqual(testEvidence(pass), { executed: 1, skipped: 0, marker: false });
+  const none = '{"Time":"t","Action":"skip","Package":"p","Elapsed":0}\n';
+  assert.equal(testEvidence(none).executed, null);
+  const skipped = '{"Action":"skip","Package":"p","Test":"TestB","Elapsed":0}\n';
+  assert.deepEqual(testEvidence(skipped), { executed: 0, skipped: 1, marker: false });
+});

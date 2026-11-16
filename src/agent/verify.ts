@@ -138,6 +138,14 @@ export function testEvidence(output: string): { executed: number | null; skipped
     recognised = true;
     executed += Math.max(goOk, goPass);
   }
+  // `go test -json`: one event per line; only test-level pass/skip events count (package events prove nothing).
+  const jsonPass = (output.match(/"Action":"pass"[^\n]*"Test":"/g) ?? []).length;
+  const jsonSkip = (output.match(/"Action":"skip"[^\n]*"Test":"/g) ?? []).length;
+  if (jsonPass || jsonSkip) {
+    recognised = true;
+    executed += jsonPass;
+    skipped += jsonSkip;
+  }
   return { executed: recognised ? executed : null, skipped, marker };
 }
 
