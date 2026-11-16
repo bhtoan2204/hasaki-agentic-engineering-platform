@@ -83,7 +83,9 @@ const FRAMES: Frame[] = [
     caption: "office.cap.grep",
     status: { ...all(P), analyze: RUN },
     events: {
-      analyze: [{ kind: "tool", name: "Grep", input: { pattern: "RefundShipment" } }],
+      analyze: [
+        { kind: "tool", name: "Grep", input: { pattern: "RefundShipment" } },
+      ],
     },
   },
   {
@@ -148,7 +150,9 @@ const FRAMES: Frame[] = [
     caption: "office.cap.bash",
     status: { ...all(OK), implement: RUN, test: P, review: P, pr: P },
     events: {
-      implement: [{ kind: "tool", name: "Bash", input: { command: "go build ./..." } }],
+      implement: [
+        { kind: "tool", name: "Bash", input: { command: "go build ./..." } },
+      ],
     },
   },
   {
@@ -180,7 +184,9 @@ const FRAMES: Frame[] = [
     caption: "office.cap.retry",
     status: { ...all(OK), implement: OK, test: "RETRYING", review: P, pr: P },
     events: {
-      test: [{ kind: "output", content: "== go test -short ./app/usecases (retry)" }],
+      test: [
+        { kind: "output", content: "== go test -short ./app/usecases (retry)" },
+      ],
     },
   },
   {
@@ -244,12 +250,19 @@ export function usePreviewOffice(enabled: boolean) {
     position: idx,
   }));
   for (const s of steps) {
-    const active = ["RUNNING", "RETRYING", "WAITING_INPUT", "WAITING_APPROVAL", "READY"].includes(
-      s.status,
-    );
+    const active = [
+      "RUNNING",
+      "RETRYING",
+      "WAITING_INPUT",
+      "WAITING_APPROVAL",
+      "READY",
+    ].includes(s.status);
     if (active && !tm.started[s.key]) tm.started[s.key] = now;
     if (s.status === P) (delete tm.started[s.key], delete tm.finished[s.key]);
-    if (["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status) && !tm.finished[s.key])
+    if (
+      ["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status) &&
+      !tm.finished[s.key]
+    )
       tm.finished[s.key] = now;
     if (!["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status))
       delete tm.finished[s.key];
@@ -275,7 +288,9 @@ export function usePreviewOffice(enabled: boolean) {
       started_at: tm.started[s.key]
         ? new Date(tm.started[s.key]).toISOString()
         : new Date(now - 60000).toISOString(),
-      finished_at: tm.finished[s.key] ? new Date(tm.finished[s.key]).toISOString() : null,
+      finished_at: tm.finished[s.key]
+        ? new Date(tm.finished[s.key]).toISOString()
+        : null,
       error: frame.errors?.[s.key] ?? null,
     }));
   const questions: QuestionLite[] = (frame.questions ?? []).map((k) => ({

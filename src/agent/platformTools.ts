@@ -1,7 +1,3 @@
-import { requireRunRepositoryAccess } from "../repos/access.ts";
-import { recordPreparedBaseline } from "./implementationEvidence.ts";
-import { validateOutputContract } from "./contract.ts";
-import { validateMicroWorkspace } from "../workflow/microEvidence.ts";
 import { toolAllowed } from "./toolPolicy.ts";
 import {
   contextTool,
@@ -10,15 +6,7 @@ import {
   boundedContextJson,
   visibleSnapshotKnowledge,
 } from "./contextTools.ts";
-import { developerQuestionIssue } from "./contextToolSchemas.ts";
-import {
-  refreshToolProgress,
-  validateToolBinding,
-  journalToolCall,
-  auditToolDenial,
-  postClarification,
-  selectRepositoryForPreparation,
-} from "./toolRuntime.ts";
+import { validateToolBinding, journalToolCall, auditToolDenial, postClarification } from "./toolRuntime.ts";
 import { redactContextText } from "../context/redact.ts";
 import { safeDiagnostics } from "./telemetry.ts";
 import { z } from "zod";
@@ -26,16 +14,13 @@ import { execFile } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { config, codeIntelligenceEnabled } from "../config.ts";
-import { protectedRootsFor } from "../platform/selfDevelopment.ts";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { repositories, repoPath } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
-import { citedArtifactIds, evidenceExcerpt } from "./independentReview.ts";
-import { prepareWorkspace, WorkspaceConflictError, workspacesOf } from "../git/provider.ts";
+import { prepareWorkspace, workspacesOf } from "../git/provider.ts";
 import { scoreKnowledge } from "../context/plan.ts";
-import { externalNotice, isExternal } from "../knowledge/external.ts";
 import { callTool, capResult, describeTool, listTools } from "./toolRegistry.ts";
 import { isInside, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
@@ -45,8 +30,6 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
  * Every call is bound to one attempt. A fenced, stale, or canceled attempt cannot mutate.
  * After ask_user has open questions, further mutations are refused until the engine resumes.
  */
-import { traceLog } from "../workflow/trace.ts";
-
 export interface PlatformToolEnv {
   contextPreparation?: boolean;
   attemptAllowedTools?: string[] | null;
@@ -57,8 +40,6 @@ export interface PlatformToolEnv {
   /** Run owner. Tool calls that touch credentials use this, not a process-global user. */
   ownerId?: number | null;
   stepId: number;
-  /** Step key, for audit records of integration calls. */
-  stepKey?: string;
   attemptId: number;
   fencingToken: number | null;
   mode: ToolMode;
@@ -66,7 +47,6 @@ export interface PlatformToolEnv {
   allowed: string[];
   selected: string[];
   prose: string;
-  outputContract?: unknown;
   knowledge: Array<{
     id?: number;
     owner_id?: number | null;
@@ -88,13 +68,11 @@ export interface PlatformToolEnv {
     integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }>;
   };
   log(kind: "agent" | "system", content: string, data?: unknown): Promise<void>;
-  ask(
-    questions: Array<{ question: string; context?: string; options?: string[] }>,
-  ): Promise<number>;
+  ask(questions: Array<{ question: string; context?: string; options?: string[] }>): Promise<number>;
   onSubmit?(output: Record<string, unknown>): void;
 }
 
-const MUTATING = new Set(["prepare_branch", "commit_changes", "submit_result", "escalate_profile"]);
+const MUTATING = new Set(["prepare_branch", "commit_changes", "submit_result"]);
 const execGit = promisify(execFile);
 
 export async function attemptIsLive(
@@ -102,7 +80,6 @@ export async function attemptIsLive(
   fencingToken: number | null,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const row = await one<{
-    profile_transition_pending: boolean;
     status: string;
     step_status: string;
     current_attempt_id: number | null;
@@ -114,8 +91,7 @@ export async function attemptIsLive(
     worker_instance: string | null;
   }>(
     pool,
-    `SELECT EXISTS (SELECT 1 FROM workflow_checkpoints cp WHERE cp.attempt_id=a.id AND cp.reason='profile_escalation_requested') AS profile_transition_pending,
-            a.status, s.status AS step_status, s.current_attempt_id, s.generation, a.generation AS attempt_generation,
+    `SELECT a.status, s.status AS step_status, s.current_attempt_id, s.generation, a.generation AS attempt_generation,
             j.status AS job_status, j.fencing_token, j.lease_expires_at > clock_timestamp() AS lease_live, r.worker_instance
        FROM workflow_step_attempts a
        JOIN workflow_steps s ON s.id = a.step_id
@@ -125,7 +101,6 @@ export async function attemptIsLive(
     [attemptId],
   );
   if (!row) return { ok: false, reason: "attempt not found" };
-  if (row.profile_transition_pending) return { ok: false, reason: "profile escalation checkpoint pending; end the turn" };
   if (row.worker_instance !== config.instanceId || !row.lease_live)
     return { ok: false, reason: "assigned worker mismatch or lease expired" };
   if (row.status !== "RUNNING") return { ok: false, reason: `attempt is ${row.status}` };
@@ -152,11 +127,7 @@ async function openQuestions(attemptId: number): Promise<number> {
 
 const activeContextReads = new Map<number, number>();
 
-export async function dispatchPlatformTool(
-  name: string,
-  args: any,
-  env: PlatformToolEnv,
-): Promise<string> {
+export async function dispatchPlatformTool(name: string, args: any, env: PlatformToolEnv): Promise<string> {
   const started = performance.now();
   try {
     await validateToolBinding(env);
@@ -168,9 +139,7 @@ export async function dispatchPlatformTool(
     { ...execution.getStore(), userId: Number(env.ownerId), runId: env.runId, kind: "run" },
     async () => {
       const nativeName =
-        name === "call_tool" && String(args?.name ?? "").startsWith("platform.")
-          ? String(args.name)
-          : name;
+        name === "call_tool" && String(args?.name ?? "").startsWith("platform.") ? String(args.name) : name;
       const nativeArgs = nativeName !== name ? (args.arguments ?? {}) : args;
       const native =
         nativeName.startsWith("platform.") || !["search_knowledge"].includes(nativeName)
@@ -184,9 +153,7 @@ export async function dispatchPlatformTool(
           ? describeToolSafe(String(args?.name ?? ""))?.read_only === true
           : !MUTATING.has(name) && name !== "ask_user" && name !== "post_update");
       try {
-        const target =
-          native?.logicalName ??
-          (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
+        const target = native?.logicalName ?? (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
         const experiment = execution.getStore()?.evaluation;
         if (!env.contextPreparation && experiment?.contextMode) {
           const control = [
@@ -196,50 +163,31 @@ export async function dispatchPlatformTool(
             "platform.post_update",
           ].includes(target);
           if (!control && experiment.contextMode !== "tools")
-            throw new Error("Platform tools are disabled by the frozen benchmark context variant");
+            throw new Error(
+              "Platform tools are disabled by the frozen benchmark context variant",
+            );
           if (!toolAllowed(target, experiment.allowedTools))
             throw new Error("Tool excluded by frozen benchmark permissions");
         }
-        if (!env.contextPreparation) {
-          await refreshToolProgress(env.policy);
-          const loop = env.policy?.loopDetector?.check(name, args);
-          if (loop?.isLoop) throw new Error(loop.reason);
-        }
-        if (!env.contextPreparation && !toolAllowed(target, env.attemptAllowedTools))
-          throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
+        if (!env.contextPreparation && !toolAllowed(target, env.attemptAllowedTools)) throw new Error(`Tool ${target} is excluded by this attempt's allowed_tools`);
         if (["read_knowledge", "search_knowledge"].includes(name) && !native)
           env = { ...env, knowledge: await visibleSnapshotKnowledge(env) };
-        if (JSON.stringify(args ?? {}).length > 128000)
-          throw new Error("Tool arguments exceed 128000 characters");
+        if (JSON.stringify(args ?? {}).length > 128000) throw new Error("Tool arguments exceed 128000 characters");
         if (!native) {
           const legacy = legacyInputs[name];
-          if (!legacy)
-            throw new Error(
-              "Unknown tool; starting arbitrary workflows is not a supported capability",
-            );
+          if (!legacy) throw new Error("Unknown tool; starting arbitrary workflows is not a supported capability");
           args = legacy.parse(args ?? {});
         }
         if (native) {
           const parsed = native.input.safeParse(nativeArgs ?? {});
           if (!parsed.success)
-            throw new Error(
-              `Invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ")}`,
-            );
-          const timeout = Math.min(
-            60000,
-            Math.max(1000, Number(config.agent.contextToolTimeoutMs) || 10000),
-          );
+            throw new Error(`Invalid arguments: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+          const timeout = Math.min(60000, Math.max(1000, Number(config.agent.contextToolTimeoutMs) || 10000));
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             if (readOnly && (activeContextReads.get(env.attemptId) ?? 0) >= 4)
-              throw new Error(
-                "Context retrieval concurrency limit reached; wait for existing reads",
-              );
-            if (readOnly)
-              activeContextReads.set(
-                env.attemptId,
-                (activeContextReads.get(env.attemptId) ?? 0) + 1,
-              );
+              throw new Error("Context retrieval concurrency limit reached; wait for existing reads");
+            if (readOnly) activeContextReads.set(env.attemptId, (activeContextReads.get(env.attemptId) ?? 0) + 1);
             const operation = executeContextTool(native.name, parsed.data, env);
             if (readOnly) {
               const release = () => {
@@ -251,14 +199,11 @@ export async function dispatchPlatformTool(
             }
             const value = readOnly
               ? await Promise.race([
-                  operation,
-                  new Promise((_, reject) => {
-                    timer = setTimeout(
-                      () => reject(new Error("Context tool deadline exceeded")),
-                      timeout,
-                    );
-                  }),
-                ])
+                operation,
+                new Promise((_, reject) => {
+                  timer = setTimeout(() => reject(new Error("Context tool deadline exceeded")), timeout);
+                }),
+              ])
               : await operation;
             if (readOnly) await validateToolBinding(env);
             result = boundedContextJson(value);
@@ -266,8 +211,7 @@ export async function dispatchPlatformTool(
             if (timer) clearTimeout(timer);
           }
         } else {
-          if (nativeName.startsWith("platform."))
-            throw new Error("Unsupported platform capability");
+          if (nativeName.startsWith("platform.")) throw new Error("Unsupported platform capability");
           if (["call_tool", "list_tools"].includes(name)) await loadPersonalIntegrations();
           result = await dispatchOwned(name, args, env);
         }
@@ -284,15 +228,9 @@ export async function dispatchPlatformTool(
           summary: result.slice(0, 20000),
           next: "Narrow the request or paginate the source tool",
         });
-      await journalToolCall(
-        env,
-        native?.logicalName ?? name,
-        readOnly,
-        status,
-        started,
-        nativeArgs,
-        result,
-      ).catch((error) => console.error(`tool audit persistence failed: ${safeDiagnostics(error)}`));
+      await journalToolCall(env, native?.logicalName ?? name, readOnly, status, started, nativeArgs, result).catch(
+        (error) => console.error(`tool audit persistence failed: ${safeDiagnostics(error)}`),
+      );
       return result;
     },
   );
@@ -315,16 +253,6 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       return postUpdate(args, env);
     case "submit_result":
       return submitResult(args, env);
-    case "escalate_profile": {
-      const run = await one<{ profile: string; graph: { profile_revision?: number } }>(pool, "SELECT profile,graph FROM workflow_runs WHERE id=$1", [env.runId]);
-      if (env.mode !== "coding" || run?.profile !== "MICRO") return "ERROR: escalation is only available to a MICRO coding attempt";
-      const request = { ...args, expectedRevision: run.graph.profile_revision ?? 0 };
-      await q(pool, "INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data) VALUES($1,$2,$3,'profile_escalation_requested',$4)",
-        [env.runId, env.stepId, env.attemptId, JSON.stringify(request)]);
-      if (env.policy?.micro) { env.policy.micro.exhausted = true; env.policy.micro.limit = 0; }
-      env.onSubmit?.({ profile_escalation: request });
-      return "Escalation checkpoint recorded. End the turn now; the platform will reassess risk and reconcile the same run before further changes.";
-    }
     case "prepare_branch":
       return prepareBranch(args, env);
     case "commit_changes":
@@ -335,20 +263,16 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       return searchKnowledge(args, env);
     case "read_step_output":
       return readStepOutput(args, env);
-    case "read_artifact":
-      return readArtifact(args, env);
     case "list_tools":
       return JSON.stringify(
         [
-          ...listOwnedTools(args?.query),
           ...listTools(args?.query, { mode: env.mode }),
           ...CONTEXT_TOOLS.map((t) => ({
             name: t.logicalName,
             summary: t.description,
             read_only: t.readOnly,
             available:
-              !["search_code", "get_symbol", "find_dependencies"].includes(t.name) ||
-              codeIntelligenceEnabled(),
+              !["search_code", "get_symbol", "find_dependencies"].includes(t.name) || codeIntelligenceEnabled(),
           })),
         ],
         null,
@@ -356,20 +280,18 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
       );
     case "describe_tool":
       try {
-        const owned = describeOwnedTool(String(args?.name ?? ""));
-        if (owned) return JSON.stringify(owned, null, 2);
         const native = contextTool(String(args?.name ?? ""));
         return JSON.stringify(
           native
             ? {
-                name: native.logicalName,
-                description: native.description,
-                read_only: native.readOnly,
-                available:
-                  !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
-                  codeIntelligenceEnabled(),
-                input_schema: z.toJSONSchema(native.input),
-              }
+              name: native.logicalName,
+              description: native.description,
+              read_only: native.readOnly,
+              available:
+                !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
+                codeIntelligenceEnabled(),
+              input_schema: z.toJSONSchema(native.input),
+            }
             : describeTool(String(args?.name ?? "")),
           null,
           2,
@@ -386,19 +308,9 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
 
 async function askUser(args: any, env: PlatformToolEnv): Promise<string> {
   const questions = z
-    .array(
-      z.object({
-        question: z.string(),
-        context: z.string().optional(),
-        options: z.array(z.string()).optional(),
-      }),
-    )
+    .array(z.object({ question: z.string(), context: z.string().optional(), options: z.array(z.string()).optional() }))
     .min(1)
     .parse(args?.questions ?? args);
-  for (const item of questions) {
-    const issue = developerQuestionIssue(item.question);
-    if (issue) return `ERROR: ${issue}`;
-  }
   const n = await postClarification(env, questions);
   await env.log("system", `${n} question(s) posted`);
   return "Questions posted. Stop now and end your turn without further tool calls.";
@@ -419,116 +331,24 @@ async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
   const output = (args?.output ?? {}) as Record<string, unknown>;
   if (!output || typeof output !== "object" || Array.isArray(output))
     return "ERROR: submit_result.output must be an object";
-  const validation = validateOutputContract(env.outputContract, output);
-  if (!validation.valid) return `ERROR: output contract validation failed: ${validation.errors.join("; ")}`;
   env.onSubmit?.(output);
   await q(
     pool,
     "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'submit_result', $4)",
-    [
-      env.runId,
-      env.stepId,
-      env.attemptId,
-      JSON.stringify({
-        output,
-        skills_applied: args.skills_applied ?? output.skills_applied ?? [],
-      }),
-    ],
+    [env.runId, env.stepId, env.attemptId, JSON.stringify({ output })],
   );
   return "Result recorded. End your turn now.";
 }
 
-async function isolationFor(
-  stepId: number,
-): Promise<{ isolated: boolean; subtaskId: string | null }> {
-  const step = await one<{ subtask_id: string | null; config: { isolated_workspace?: boolean } }>(
-    pool,
-    "SELECT subtask_id, config FROM workflow_steps WHERE id = $1",
-    [stepId],
-  );
-  const isolated = step?.config?.isolated_workspace === true;
-  const subtaskId =
-    isolated && typeof step?.subtask_id === "string" && step.subtask_id ? step.subtask_id : null;
-  return { isolated, subtaskId };
-}
-
 async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
-  if (env.policy?.micro && !env.selected.includes(repo)) {
-    env.policy.micro.exhausted = true; env.policy.micro.reason = "repository scope expansion requires reassessment";
-    return "ERROR: repository exceeds MICRO scope; escalate before preparing another worktree";
-  }
-  const pinned = await one<{ contract: { selected_repositories: string[]; authorization?: { mode: string; repository_scope?: string[] } } | null }>(pool,
-    "SELECT input->'execution_contract' AS contract FROM workflow_step_attempts WHERE id=$1", [env.attemptId]);
-  if (!env.allowed.includes(repo)) return "ERROR: repository outside run scope";
-  await requireRunRepositoryAccess(env.runId, repo, "write");
-  const repositoryScope = pinned?.contract?.authorization?.repository_scope ?? pinned?.contract?.selected_repositories;
-  if (repositoryScope && !repositoryScope.includes(repo))
-    return "ERROR: repository exceeds the immutable execution contract; renew authorization before preparing it";
-  const isolation = await isolationFor(env.stepId);
-  if (isolation.isolated && !isolation.subtaskId)
-    return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
-  const run = await selectRepositoryForPreparation(env, repo);
-  const step = await one<{ holders: string[] | null; config: { micro_source_revision?: string; micro_hashes?: Record<string, string> } }>(
-    pool,
-    "SELECT config,pending_input->'workspace_release'->'holders' AS holders FROM workflow_steps WHERE id = $1",
-    [env.stepId],
-  );
-  let w;
-  try {
-    w = await prepareWorkspace(
-      run,
-      repo,
-      async () => {
-        const live = await attemptIsLive(env.attemptId, env.fencingToken);
-        if (!live.ok) throw new Error(live.reason);
-      },
-      {
-        subtaskId: isolation.subtaskId,
-        approvedReleases: Array.isArray(step?.holders) ? step.holders.map(String) : [],
-        log: (message) => env.log("system", message),
-      },
-    );
-  } catch (e) {
-    void traceLog({
-      runId: env.runId,
-      stepId: env.stepId,
-      attemptId: env.attemptId,
-      level: "ERROR",
-      event: "tool.prepare_branch",
-      status: "FAILED",
-      message: `prepare_branch failed for ${repo}: ${(e as Error).message}`,
-      data: {
-        repo,
-        conflict: e instanceof WorkspaceConflictError,
-        isolated_subtask: isolation.subtaskId,
-        stack: (e as Error).stack,
-      },
-    });
-    if (e instanceof WorkspaceConflictError) {
-      await q(
-        pool,
-        `UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || '{"workspace_conflict": true}'::jsonb
-          WHERE id = $1 AND status = 'RUNNING'`,
-        [env.attemptId],
-      ).catch(() => {});
-      return `ERROR: ${e.message}`;
-    }
-    throw e;
-  }
-  await recordPreparedBaseline(env, w);
-  void traceLog({
-    runId: env.runId,
-    stepId: env.stepId,
-    attemptId: env.attemptId,
-    level: "INFO",
-    event: "tool.prepare_branch",
-    status: "COMPLETED",
-    message: `prepare_branch ${repo}: ${w.branch}`,
-    data: { repo, branch: w.branch, created_from: w.created_from, path: w.path },
+  const editable = env.selected.length ? env.selected : env.allowed;
+  if (!editable.includes(repo)) return `Repo "${repo}" is not selected for this run. Allowed: ${editable.join(", ")}`;
+  const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [env.runId]);
+  const w = await prepareWorkspace(run, repo, async () => {
+    const live = await attemptIsLive(env.attemptId, env.fencingToken);
+    if (!live.ok) throw new Error(live.reason);
   });
-  if (env.policy?.micro && !(await validateMicroWorkspace(w.path, step?.config.micro_source_revision, step?.config.micro_hashes)))
-    return dispatchOwned("escalate_profile", { target: "STANDARD", risk: "unknown", reason: "prepared workspace differs from verified admission revision; reassessment is required" }, env);
   if (env.policy && !env.policy.workspaces.includes(w.path)) env.policy.workspaces.push(w.path);
   await env.log("system", `branch ${w.branch} in ${repo} (${w.created_from}) -> ${w.path}`);
   return `Ready. Work ONLY in: ${w.path}\nBranch: ${w.branch} (from ${w.created_from})`;
@@ -545,19 +365,7 @@ async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
   const message = String(args?.message ?? "").trim();
   if (!message) return "ERROR: commit_changes needs a commit message";
-  const isolation = await isolationFor(env.stepId);
-  if (isolation.isolated && !isolation.subtaskId)
-    return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
-  const w = isolation.subtaskId
-    ? (
-        await q<{ repo: string; branch: string; path: string }>(
-          pool,
-          `SELECT repo, branch, path FROM execution_workspaces
-           WHERE run_id = $1 AND repo = $2 AND subtask_id = $3`,
-          [env.runId, repo, isolation.subtaskId],
-        )
-      )[0]
-    : (await workspacesOf(env.runId)).find((x) => x.repo === repo);
+  const w = (await workspacesOf(env.runId)).find((x) => x.repo === repo);
   if (!w) return `ERROR: no worktree for "${repo}" in this run. Call prepare_branch first.`;
   const registered = await repositories.get(repo);
   if (registered && (!registered.enabled || !registered.allowed_actions.includes("write")))
@@ -594,29 +402,13 @@ async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
 async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
   const key = String(args?.key ?? "");
   const k = env.knowledge.find((x) => x.key === key);
-  if (!k)
-    return `"${key}" is not available to this step. Use search_knowledge to find applicable items.`;
-  await env.log("system", `loaded knowledge ${key} v${k.version}`, {
-    knowledge: key,
-    version: k.version,
-  });
+  if (!k) return `"${key}" is not available to this step. Use search_knowledge to find applicable items.`;
+  await env.log("system", `loaded knowledge ${key} v${k.version}`, { knowledge: key, version: k.version });
   if (env.metrics && !env.metrics.skills_loaded.includes(key)) env.metrics.skills_loaded.push(key);
   const offset = Number(args.offset ?? 0),
     limit = Number(args.limit ?? 18000);
   const body = k.content.slice(offset, offset + limit);
-  if (k.category === "agent_skill")
-    await q(
-      pool,
-      "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'skill_read', $4)",
-      [
-        env.runId,
-        env.stepId,
-        env.attemptId,
-        JSON.stringify({ key, version: k.version, offset, end: offset + body.length }),
-      ],
-    ).catch((error) => console.error(`skill read trace failed: ${safeDiagnostics(error)}`));
-  const notice = isExternal(k.metadata) && offset === 0 ? `${externalNotice(k.metadata)}\n\n` : "";
-  return `# ${k.title} (${k.key} v${k.version})\n\n${notice}${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
+  return `# ${k.title} (${k.key} v${k.version})\n\n${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
 }
 
 async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
@@ -638,79 +430,18 @@ async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string>
       score: x.score,
       already_in_prompt: tier.get(x.k.key) === "inline",
     }));
-  await env.log(
-    "system",
-    `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`,
-    {
-      query,
-      hits: hits.map((h) => h.key),
-    },
-  );
-  return hits.length
-    ? JSON.stringify(hits, null, 2)
-    : "No applicable knowledge matches. Try other words.";
-}
-
-async function readArtifact(
-  args: { artifact_id: number; offset?: number; limit?: number },
-  env: PlatformToolEnv,
-): Promise<string> {
-  const id = args.artifact_id;
-  if (env.independent && !citedArtifactIds(env.upstream).includes(id))
-    return "ERROR: independent review can only read artifacts cited by its ancestor outputs";
-  const row = await one(
-    pool,
-    "SELECT id, kind, name, content, data FROM workflow_artifacts WHERE id = $1 AND run_id = $2",
-    [id, env.runId],
-  );
-  if (!row) return "ERROR: artifact is not part of this run";
-  if (row.kind !== "log" && row.kind !== "report")
-    return "ERROR: only log and report artifacts are readable as verification evidence";
-  const content = redactContextText(String(row.content ?? ""));
-  const offset = args.offset ?? 0;
-  const limit = args.limit ?? 16000;
-  return JSON.stringify({
-    id: Number(row.id),
-    kind: row.kind,
-    name: row.name,
-    bytes: content.length,
-    exit_code: row.data?.exit_code ?? null,
-    offset,
-    truncated: offset + limit < content.length,
-    content: content.slice(offset, offset + limit),
+  await env.log("system", `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`, {
+    query,
+    hits: hits.map((h) => h.key),
   });
-}
-
-/** Command output for artifact ids already cited by this step's ancestor outputs. */
-export async function citedEvidenceLogs(runId: number, upstream: unknown): Promise<string> {
-  const ids = citedArtifactIds(upstream);
-  if (!ids.length) return "";
-  const rows = await q(
-    pool,
-    `SELECT id, kind, name, content, data FROM workflow_artifacts
-      WHERE run_id = $1 AND id = ANY($2::bigint[]) AND kind IN ('log', 'report')
-      ORDER BY id`,
-    [runId, ids],
-  );
-  return rows
-    .map((row) => {
-      const content = redactContextText(String(row.content ?? ""));
-      const excerpt = evidenceExcerpt(content);
-      return [
-        `# artifact ${row.id} ${row.kind} ${row.name} exit_code=${row.data?.exit_code ?? "unknown"} bytes=${content.length}${excerpt.truncated ? " truncated=true" : ""}`,
-        excerpt.text,
-      ].join("\n");
-    })
-    .join("\n\n");
+  return hits.length ? JSON.stringify(hits, null, 2) : "No applicable knowledge matches. Try other words.";
 }
 
 async function readStepOutput(args: any, env: PlatformToolEnv): Promise<string> {
   const stepKey = String(args?.step_key ?? "");
   if (env.independent) {
     const u = env.upstream[stepKey];
-    return u
-      ? capResult(u.output)
-      : "ERROR: independent review only exposes sanitized pinned ancestors";
+    return u ? capResult(u.output) : "ERROR: independent review only exposes sanitized pinned ancestors";
   }
   const attempt = args?.attempt != null ? Number(args.attempt) : undefined;
   if (attempt) {
@@ -740,7 +471,6 @@ async function callIntegration(args: any, env: PlatformToolEnv): Promise<string>
     runId: env.runId,
     allowedRepositories: env.allowed,
     mode: env.mode,
-    stepKey: env.stepKey,
   });
   env.metrics?.integration_calls.push({
     name: toolName,
@@ -783,14 +513,12 @@ export function envFromExecution(
     independent: ctx.step.config.independent === true,
     ownerId: ctx.run.owner_id ?? null,
     stepId: ctx.step.id,
-    stepKey: ctx.step.key,
     attemptId: ctx.attempt.id,
     fencingToken: ctx.attempt.fencing_token,
     mode,
     branch: ctx.run.branch,
     allowed: ctx.run.allowed_repositories,
     selected: ctx.run.selected_repositories,
-    outputContract: ctx.step.config.output_schema ?? ctx.step.config.output_contract,
     prose: outputLocale(ctx.run) === "vi" ? "Vietnamese" : "English",
     knowledge: (ctx.context?.knowledge ?? []) as PlatformToolEnv["knowledge"],
     disclosure: ctx.context?.disclosure ?? [],
@@ -809,9 +537,7 @@ export async function envFromDatabase(
   ids: { runId: number; stepId: number; attemptId: number },
   onSubmit?: (o: Record<string, unknown>) => void,
 ): Promise<PlatformToolEnv> {
-  const attempt = await one<any>(pool, "SELECT * FROM workflow_step_attempts WHERE id = $1", [
-    ids.attemptId,
-  ]);
+  const attempt = await one<any>(pool, "SELECT * FROM workflow_step_attempts WHERE id = $1", [ids.attemptId]);
   const step = await one<any>(pool, "SELECT * FROM workflow_steps WHERE id = $1", [ids.stepId]);
   const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [ids.runId]);
   if (
@@ -825,9 +551,7 @@ export async function envFromDatabase(
   )
     throw new Error("bridge attempt not found or assigned to another instance");
   const snap = attempt.context_snapshot_id
-    ? await one<any>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [
-        attempt.context_snapshot_id,
-      ])
+    ? await one<any>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [attempt.context_snapshot_id])
     : null;
   const content = snap?.content ?? {};
   const input = attempt.input ?? {};
@@ -843,14 +567,12 @@ export async function envFromDatabase(
     independent: step.config?.independent === true,
     ownerId: run.owner_id ?? null,
     stepId: step.id,
-    stepKey: step.key,
     attemptId: attempt.id,
     fencingToken: attempt.fencing_token,
     mode,
     branch: run.branch,
     allowed: run.allowed_repositories,
     selected: run.selected_repositories,
-    outputContract: step.config?.output_schema ?? step.config?.output_contract,
     prose: outputLocale(run) === "vi" ? "Vietnamese" : "English",
     knowledge: content.knowledge ?? [],
     disclosure: content.prompt_plan?.knowledge ?? [],
@@ -861,10 +583,9 @@ export async function envFromDatabase(
       mode,
       workspaces: ws.map((w: { path: string }) => w.path),
       baseBranch: config.baseBranch,
-      protectedRoots: protectedRootsFor([config.reposRoot, ...localPaths]),
+      protectedRoots: [config.reposRoot, ...localPaths],
     },
-    log: (kind, text, data) =>
-      runEvents.add(pool, run.id, kind, text, step.id, attempt.id, data ?? null),
+    log: (kind, text, data) => runEvents.add(pool, run.id, kind, text, step.id, attempt.id, data ?? null),
     ask: async (questions) => {
       for (const x of questions)
         await q(
@@ -886,93 +607,13 @@ export async function envFromDatabase(
   };
 }
 
-const PLATFORM_TOOL_DOCS: Record<string, { summary: string; read_only: boolean }> = {
-  ask_user: {
-    summary:
-      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step until they answer. Each question needs at least two words plus context (the SPL, the window, the error). Never send a schema probe such as "test".',
-    read_only: false,
-  },
-  post_update: {
-    summary: "Post a short progress note on the run timeline.",
-    read_only: false,
-  },
-  submit_result: {
-    summary: "Submit this step's output object once, then stop.",
-    read_only: false,
-  },
-  escalate_profile: { summary: "Checkpoint and escalate MICRO before scope, risk or budgets increase. End the turn after calling.", read_only: false },
-  prepare_branch: {
-    summary:
-      "Create the run branch worktree; automatically select an allowed repo with current write access. Coding steps only.",
-    read_only: false,
-  },
-  commit_changes: {
-    summary: "Commit selected paths on the run branch. Coding steps only.",
-    read_only: false,
-  },
-  read_knowledge: { summary: "Read one knowledge document by key.", read_only: true },
-  search_knowledge: { summary: "Search knowledge titles and bodies.", read_only: true },
-  read_step_output: { summary: "Read the output of an earlier step in this run.", read_only: true },
-  read_artifact: { summary: "Read one artifact stored on this run.", read_only: true },
-  list_tools: { summary: "List integration tools and platform tools.", read_only: true },
-  describe_tool: {
-    summary: "Return the input schema of one integration or platform tool, including ask_user.",
-    read_only: true,
-  },
-  call_tool: { summary: "Call one integration tool by name.", read_only: false },
-};
-
-/** Platform control tools. describe_tool used to know only integrations, so agents probed ask_user with "test". */
-export function describeOwnedTool(name: string) {
-  const key = name
-    .trim()
-    .replace(/^mcp__platform__/, "")
-    .replace(/^platform\./, "");
-  const schema = legacyInputs[key];
-  const doc = PLATFORM_TOOL_DOCS[key];
-  if (!schema || !doc) return null;
-  return {
-    name: key,
-    description: doc.summary,
-    read_only: doc.read_only,
-    available: true,
-    input_schema: z.toJSONSchema(schema),
-  };
-}
-
-function listOwnedTools(query: unknown) {
-  const want = String(query ?? "")
-    .trim()
-    .toLowerCase();
-  return Object.entries(PLATFORM_TOOL_DOCS)
-    .filter(([name, doc]) => !want || `${name} ${doc.summary}`.toLowerCase().includes(want))
-    .map(([name, doc]) => ({
-      name,
-      summary: doc.summary,
-      read_only: doc.read_only,
-      available: true,
-      kind: "platform",
-      score: want ? 1 : 0,
-    }));
-}
-
 const legacyInputs: Record<string, z.ZodType> = {
   ask_user: z.strictObject({
     questions: z
       .array(
         z.strictObject({
-          question: z
-            .string()
-            .min(1)
-            .max(2000)
-            .describe(
-              'Exact text shown to the developer. A real question of at least two words, plus context. Not a schema probe such as "test".',
-            ),
-          context: z
-            .string()
-            .max(4000)
-            .optional()
-            .describe("What you already found: the error, the SPL, the time window, the link"),
+          question: z.string().min(1).max(2000),
+          context: z.string().max(4000).optional(),
           options: z.array(z.string().max(500)).max(8).optional(),
         }),
       )
@@ -980,11 +621,7 @@ const legacyInputs: Record<string, z.ZodType> = {
       .max(8),
   }),
   post_update: z.strictObject({ message: z.string().min(1).max(12000) }),
-  escalate_profile: z.strictObject({ target: z.enum(["FAST", "STANDARD", "DEEP"]), risk: z.enum(["low", "medium", "high", "unknown"]), reason: z.string().min(5).max(2000) }),
-  submit_result: z.strictObject({
-    output: z.record(z.string(), z.unknown()),
-    skills_applied: z.array(z.string().max(300)).max(100).optional(),
-  }),
+  submit_result: z.strictObject({ output: z.record(z.string(), z.unknown()) }),
   prepare_branch: z.strictObject({ repo: z.string().min(1).max(160) }),
   commit_changes: z.strictObject({
     repo: z.string().min(1).max(160),
@@ -1003,11 +640,6 @@ const legacyInputs: Record<string, z.ZodType> = {
   read_step_output: z.strictObject({
     step_key: z.string().min(1).max(160),
     attempt: z.number().int().positive().optional(),
-  }),
-  read_artifact: z.strictObject({
-    artifact_id: z.number().int().positive(),
-    offset: z.number().int().min(0).max(1000000).optional(),
-    limit: z.number().int().min(1).max(24000).optional(),
   }),
   list_tools: z.strictObject({ query: z.string().max(512).optional() }),
   describe_tool: z.strictObject({ name: z.string().min(1).max(200) }),

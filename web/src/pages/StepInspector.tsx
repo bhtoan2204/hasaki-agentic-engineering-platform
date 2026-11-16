@@ -60,7 +60,6 @@ import { stepTypeIcon } from "../graph.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { ReportPanel } from "./Report.tsx";
-import { InvestigationOutput } from "./Investigations.tsx";
 import "./RunView.css";
 
 const AGENT_TYPES = ["agent", "coding_agent"];
@@ -75,7 +74,13 @@ type Tab =
   | "artifacts"
   | "history";
 
-const TabLabel = ({ icon: I, children }: { icon: typeof Info; children: ReactNode }) => (
+const TabLabel = ({
+  icon: I,
+  children,
+}: {
+  icon: typeof Info;
+  children: ReactNode;
+}) => (
   <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
     <I size={13} strokeWidth={2} />
     {children}
@@ -83,14 +88,14 @@ const TabLabel = ({ icon: I, children }: { icon: typeof Info; children: ReactNod
 );
 
 /** Render a step output: Markdown for summary-like strings, then the full structure. */
-export function OutputView({ value, locale }: { value: any; locale?: string | null }) {
+export function OutputView({ value }: { value: any }) {
   const { t } = useI18n();
   if (value == null) return <Empty>{t("si.noOutput")}</Empty>;
-  const text = typeof value === "string" ? value : (value.summary ?? value.report ?? null);
+  const text =
+    typeof value === "string" ? value : (value.summary ?? value.report ?? null);
   return (
     <div>
       {hasEvidence(value) && <EvidenceSummary output={value} />}
-      <InvestigationOutput value={value} locale={locale} />
       {typeof text === "string" && (
         <div className="rv-card">
           <div className="rv-card-head">
@@ -113,7 +118,7 @@ export function QuestionsForm({
   provider = "claude",
 }: {
   questions: any[];
-  onDone: () => void | Promise<unknown>;
+  onDone: () => void;
   provider?: AgentProvider;
 }) {
   const { t } = useI18n();
@@ -122,13 +127,12 @@ export function QuestionsForm({
   if (!questions.length) return null;
   const submit = async () => {
     setBusy(true);
-    const r = await act(async () => {
-      const result = await api("/api/questions/answers", { answers });
-      if (result) await onDone();
-      return result;
-    });
+    const r = await act(() => api("/api/questions/answers", { answers }));
     setBusy(false);
-    if (r) setAnswers({});
+    if (r) {
+      setAnswers({});
+      onDone();
+    }
   };
   return (
     <section className="rv-attn" aria-label={t("si.questionsWaiting")}>
@@ -153,7 +157,10 @@ export function QuestionsForm({
             <Copy text={q.question} />
           </div>
           {q.context && (
-            <div className="muted small" style={{ whiteSpace: "pre-wrap", margin: "6px 0" }}>
+            <div
+              className="muted small"
+              style={{ whiteSpace: "pre-wrap", margin: "6px 0" }}
+            >
               {q.context}
             </div>
           )}
@@ -214,30 +221,38 @@ export function ApprovalPanel({
 }: {
   run: any;
   step: any;
-  onDone: () => void | Promise<unknown>;
+  onDone: () => void;
 }) {
   const { t } = useI18n();
   const req = step.approval?.request;
   const gate = step.approval?.gate && !step.approval?.granted;
   const [comment, setComment] = useState("");
   const [ackRisk, setAckRisk] = useState(false);
-  const [repos, setRepos] = useState<string[]>(req?.recommended ?? run.selected_repositories ?? []);
+  const [repos, setRepos] = useState<string[]>(
+    req?.recommended ?? run.selected_repositories ?? [],
+  );
   const [branch, setBranch] = useState<string>(req?.branch ?? "");
   const [branches, setBranches] = useState<Record<string, string>>(() => ({
     ...(req?.branches ?? {}),
   }));
   const [repoFilter, setRepoFilter] = useState("");
   const allowed: string[] = req?.allowed ?? run.allowed_repositories ?? [];
-  const candidateNames = new Set<string>((req?.candidates ?? []).map((c: any) => c.repo));
+  const candidateNames = new Set<string>(
+    (req?.candidates ?? []).map((c: any) => c.repo),
+  );
   // Every allowed repository the discovery did not suggest, plus anything already selected that is not a candidate
   // (e.g. reused from an earlier run), so the reviewer can add or remove any repo, not only the suggested ones.
-  const others = [...new Set([...allowed, ...repos])].filter((r) => !candidateNames.has(r)).sort();
+  const others = [...new Set([...allowed, ...repos])]
+    .filter((r) => !candidateNames.has(r))
+    .sort();
   const f = repoFilter.trim().toLowerCase();
   const shownOthers = f
     ? others.filter((r) => r.toLowerCase().includes(f) || repos.includes(r))
     : others;
   const toggleRepo = (r: string, on: boolean) =>
-    setRepos((cur) => (on ? [...new Set([...cur, r])] : cur.filter((x) => x !== r)));
+    setRepos((cur) =>
+      on ? [...new Set([...cur, r])] : cur.filter((x) => x !== r),
+    );
   // "payment-fiserv: Nhánh split/8-channel-splitting  payment_gateway_global: Nhánh split/6-channel-splitting" pasted
   // into the common field fills the per-repository fields instead.
   const onCommon = (v: string) => {
@@ -264,21 +279,21 @@ export function ApprovalPanel({
     if (approve && req?.ask_branch)
       body.data = {
         branch: branch.trim(),
-        branches: Object.fromEntries(repos.map((r) => [r, (branches[r] ?? "").trim()])),
+        branches: Object.fromEntries(
+          repos.map((r) => [r, (branches[r] ?? "").trim()]),
+        ),
       };
     if (approve && req?.requires_risk_acknowledgement)
       body.data = { ...(body.data ?? {}), acknowledge_risk: ackRisk };
-    await act(
-      async () => {
-        const result = await api(
+    const r = await act(
+      () =>
+        api(
           `/api/runs/${run.id}/steps/${step.key}/${approve ? "approve" : "reject"}`,
           body,
-        );
-        await onDone();
-        return result;
-      },
+        ),
       approve ? t("si.approved") : t("si.rejected"),
     );
+    if (r) onDone();
   };
   const reexec = step.config?.on_reject?.reexecute;
   return (
@@ -288,13 +303,22 @@ export function ApprovalPanel({
           <Hand size={20} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h4>{gate ? t("si.approveBefore") : (req?.message ?? t("si.needsApproval"))}</h4>
-          <div className="rv-attn-sub">{t("si.stoppedAt", { step: step.name })}</div>
+          <h4>
+            {gate
+              ? t("si.approveBefore")
+              : (req?.message ?? t("si.needsApproval"))}
+          </h4>
+          <div className="rv-attn-sub">
+            {t("si.stoppedAt", { step: step.name })}
+          </div>
         </div>
       </div>
       {step.type === "git_pull_request" && (
         <div className="row">
-          <button className="ghost sm" onClick={() => navigate(`/runs/${run.id}/~changes`)}>
+          <button
+            className="ghost sm"
+            onClick={() => navigate(`/runs/${run.id}/~changes`)}
+          >
             <FileDiff size={14} /> {t("si.seeChanges")}
           </button>
         </div>
@@ -322,16 +346,24 @@ export function ApprovalPanel({
                 onChange={(e) => toggleRepo(c.repo, e.target.checked)}
               />
               <span style={{ minWidth: 0 }}>
-                <b>{c.repo}</b> <span className="muted small">{t("si.score", { n: c.score })}</span>
+                <b>{c.repo}</b>{" "}
+                <span className="muted small">
+                  {t("si.score", { n: c.score })}
+                </span>
                 <br />
-                <span className="muted small">{(c.reasons ?? []).join(" · ")}</span>
+                <span className="muted small">
+                  {(c.reasons ?? []).join(" · ")}
+                </span>
               </span>
             </label>
           ))}
           {others.length > 0 && (
             <div className="rv-repo-more">
               <div className="rv-repo-more-head">
-                <span className="small" style={{ fontWeight: 600, color: "var(--ink-2)" }}>
+                <span
+                  className="small"
+                  style={{ fontWeight: 600, color: "var(--ink-2)" }}
+                >
                   {t("si.otherRepos", { n: others.length })}
                 </span>
                 {others.length > 8 && (
@@ -347,7 +379,10 @@ export function ApprovalPanel({
               </div>
               <div className="rv-repo-chips">
                 {shownOthers.map((r) => (
-                  <label key={r} className={`rv-repo-chip${repos.includes(r) ? " on" : ""}`}>
+                  <label
+                    key={r}
+                    className={`rv-repo-chip${repos.includes(r) ? " on" : ""}`}
+                  >
                     <input
                       type="checkbox"
                       checked={repos.includes(r)}
@@ -364,7 +399,10 @@ export function ApprovalPanel({
           )}
           {req.ask_branch && (
             <div className="si-branch">
-              <span className="small" style={{ fontWeight: 600, color: "var(--ink-2)" }}>
+              <span
+                className="small"
+                style={{ fontWeight: 600, color: "var(--ink-2)" }}
+              >
                 {t("si.branch")}
               </span>
               <input
@@ -382,7 +420,9 @@ export function ApprovalPanel({
                         className="mono"
                         value={branches[r] ?? ""}
                         placeholder={branch.trim() || t("si.branchBase")}
-                        onChange={(e) => setBranches((b) => ({ ...b, [r]: e.target.value }))}
+                        onChange={(e) =>
+                          setBranches((b) => ({ ...b, [r]: e.target.value }))
+                        }
                       />
                     </label>
                   ))}
@@ -397,7 +437,7 @@ export function ApprovalPanel({
       {Object.entries(req?.outputs ?? {}).map(([k, v]) => (
         <details key={k} open style={{ marginTop: 8 }}>
           <summary>{t("si.stepOutput", { step: k })}</summary>
-          <OutputView value={v} locale={run.output_locale} />
+          <OutputView value={v} />
         </details>
       ))}
       <textarea
@@ -415,14 +455,17 @@ export function ApprovalPanel({
             : t("si.approveDoes")}
         </span>
         <XCircle size={14} color="var(--st-err)" />
-        <span>{reexec ? t("si.rejectRedo", { step: reexec }) : t("si.rejectDoes")}</span>
+        <span>
+          {reexec ? t("si.rejectRedo", { step: reexec }) : t("si.rejectDoes")}
+        </span>
       </div>
       {req?.requires_risk_acknowledgement && (
-        <label
-          className="small"
-          style={{ display: "flex", gap: 6, marginTop: 8, color: "var(--st-err)" }}
-        >
-          <input type="checkbox" checked={ackRisk} onChange={(e) => setAckRisk(e.target.checked)} />
+        <label className="small" style={{ display: "flex", gap: 6, marginTop: 8, color: "var(--st-err)" }}>
+          <input
+            type="checkbox"
+            checked={ackRisk}
+            onChange={(e) => setAckRisk(e.target.checked)}
+          />
           <span>{t("ev.ack")}</span>
         </label>
       )}
@@ -430,11 +473,7 @@ export function ApprovalPanel({
         <button
           className="ok big"
           disabled={req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim())}
-          title={
-            req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim())
-              ? t("ev.ackHint")
-              : undefined
-          }
+          title={req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim()) ? t("ev.ackHint") : undefined}
           onClick={() => send(true)}
         >
           <ShieldCheck size={16} /> {t("si.approve")}
@@ -457,7 +496,8 @@ export function ApprovalPanel({
           </button>
         )}
         <button className="danger" onClick={() => send(false)}>
-          <X size={15} /> {reexec ? t("si.rejectRedoBtn", { step: reexec }) : t("si.reject")}
+          <X size={15} />{" "}
+          {reexec ? t("si.rejectRedoBtn", { step: reexec }) : t("si.reject")}
         </button>
       </div>
     </section>
@@ -468,22 +508,20 @@ export function StepInspector({
   run,
   stepKey,
   tick,
-  activity = tick,
   onChanged,
 }: {
   run: any;
   stepKey: string;
-  /** Bumped when step state may have changed (reloads the step). */
   tick: number;
-  /** Bumped on every event of the run (incremental transcript fetches). */
-  activity?: number;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
-  const { data, error, loading, reload, reloadFresh } = useApi<any>(
+  const { data, error, loading, reload } = useApi<any>(
     `/api/runs/${run.id}/steps/${stepKey}`,
   );
-  const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
+  const [tab, setTab] = useState<Tab>(
+    stepKey === "task_result_report" ? "report" : "overview",
+  );
   const [attemptId, setAttemptId] = useState<number | null>(null);
   useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => setAttemptId(null), [stepKey]);
@@ -499,53 +537,98 @@ export function StepInspector({
         <ErrorBox error={error} onRetry={reload} />
       </div>
     );
-  const { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs } = data;
+  const {
+    step,
+    attempts,
+    questions,
+    checkpoints,
+    artifacts,
+    sessions,
+    snapshots,
+    jobs,
+  } = data;
   const isAgent = AGENT_TYPES.includes(step.type);
   const attempt =
     attempts.find((a: any) => a.id === attemptId) ??
     attempts.find((a: any) => a.id === step.current_attempt_id) ??
     attempts[attempts.length - 1];
   const effectiveProvider = attempt
-    ? (attempt.agent_provider ?? attempt.metrics?.provider ?? run.agent_provider)
-    : (step.agent_override?.provider ?? step.config?.agent?.provider ?? run.agent_provider);
+    ? (attempt.agent_provider ??
+      attempt.metrics?.provider ??
+      run.agent_provider)
+    : (step.agent_override?.provider ??
+      step.config?.agent?.provider ??
+      run.agent_provider);
   const effectiveModel =
     attempt?.metrics?.model ||
     attempt?.agent_model ||
-    (attempt ? null : (step.agent_override?.model ?? step.config?.agent?.model));
-  const snapshot = snapshots.find((s: any) => s.id === attempt?.context_snapshot_id);
+    (attempt
+      ? null
+      : (step.agent_override?.model ?? step.config?.agent?.model));
+  const snapshot = snapshots.find(
+    (s: any) => s.id === attempt?.context_snapshot_id,
+  );
   const open = questions.filter((q: any) => q.status === "open");
-  const live = step.status === "RUNNING" && attempt?.id === step.current_attempt_id;
+  const live =
+    step.status === "RUNNING" && attempt?.id === step.current_attempt_id;
   const runActive = run.status !== "CANCELED";
-  const refresh = () => Promise.all([reloadFresh(), Promise.resolve(onChanged())]);
-  const action = async (path: string, body: any = {}, ok?: string) =>
-    act(async () => {
-      const result = await api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body);
-      await refresh();
-      return result;
-    }, ok);
+  const refresh = () => {
+    reload();
+    onChanged();
+  };
+  const action = async (path: string, body: any = {}, ok?: string) => {
+    const r = await act(
+      () => api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body),
+      ok,
+    );
+    if (r) refresh();
+    return r;
+  };
   const canRun =
-    run.worker?.local && run.status === "PAUSED" && ["READY", "RETRYING"].includes(step.status);
-  const canRetry = run.worker?.local && runActive && ["FAILED", "CANCELED"].includes(step.status);
+    run.worker?.local &&
+    run.status === "PAUSED" &&
+    ["READY", "RETRYING"].includes(step.status);
+  const canRetry =
+    run.worker?.local &&
+    runActive &&
+    ["FAILED", "CANCELED"].includes(step.status);
   const canReexec =
     run.worker?.local &&
     runActive &&
-    ["COMPLETED", "SKIPPED", "WAITING_INPUT", "WAITING_APPROVAL", "FAILED"].includes(step.status);
+    [
+      "COMPLETED",
+      "SKIPPED",
+      "WAITING_INPUT",
+      "WAITING_APPROVAL",
+      "FAILED",
+    ].includes(step.status);
   const canSkip =
     runActive &&
-    ["PENDING", "READY", "FAILED", "WAITING_INPUT", "WAITING_APPROVAL"].includes(step.status);
+    [
+      "PENDING",
+      "READY",
+      "FAILED",
+      "WAITING_INPUT",
+      "WAITING_APPROVAL",
+    ].includes(step.status);
   const verification = attempt
     ? (attempt.output?.verification ??
       attempt.metrics?.verification ??
       attempt.error?.details?.verification ??
-      (attempt.id === step.current_attempt_id ? step.output?.verification : undefined))
+      (attempt.id === step.current_attempt_id
+        ? step.output?.verification
+        : undefined))
     : step.output?.verification;
   const TypeIcon = stepTypeIcon(step.type);
 
   const tabs: Array<[Tab, React.ReactNode]> = [
     ...(step.type === "task_result_report"
-      ? ([["report", <TabLabel icon={ClipboardList}>{t("si.tab.report")}</TabLabel>]] as Array<
-          [Tab, React.ReactNode]
-        >)
+      ? ([
+          [
+            "report",
+            <TabLabel icon={ClipboardList}>{t("si.tab.report")}</TabLabel>,
+          ],
+        ] as Array<[Tab, React.ReactNode]>)
       : []),
     ["overview", <TabLabel icon={Info}>{t("si.tab.overview")}</TabLabel>],
     ...(isAgent
@@ -553,7 +636,8 @@ export function StepInspector({
           [
             "execution",
             <TabLabel icon={Bot}>
-              {t(agentKey(effectiveProvider, true))} {live && <span className="spinner" />}
+              {t(agentKey(effectiveProvider, true))}{" "}
+              {live && <span className="spinner" />}
             </TabLabel>,
           ],
         ] as Array<[Tab, React.ReactNode]>)
@@ -590,7 +674,9 @@ export function StepInspector({
     ],
     [
       "history",
-      <TabLabel icon={History}>{`${t("si.tab.history")} (${attempts.length})`}</TabLabel>,
+      <TabLabel
+        icon={History}
+      >{`${t("si.tab.history")} (${attempts.length})`}</TabLabel>,
     ],
   ];
 
@@ -616,7 +702,9 @@ export function StepInspector({
                 {t("cl.gen")} {step.generation}
               </span>
               <span>
-                {attempt ? t("si.attemptN", { n: attempt.number }) : t("si.notRun")}
+                {attempt
+                  ? t("si.attemptN", { n: attempt.number })
+                  : t("si.notRun")}
                 {attempts.length > 1 ? ` / ${attempts.length}` : ""}
               </span>
             </div>
@@ -637,32 +725,40 @@ export function StepInspector({
           attempts.length > 1) && (
           <div className="si-actions">
             {canRun && (
-              <button className="sm" onClick={() => action("run", {}, t("si.queued"))}>
+              <button
+                className="sm"
+                onClick={() => action("run", {}, t("si.queued"))}
+              >
                 <Play size={13} /> {t("si.runStep")}
               </button>
             )}
             {canRetry && (
-              <button className="sm warn" onClick={() => action("retry", {}, t("si.retrying"))}>
+              <button
+                className="sm warn"
+                onClick={() => action("retry", {}, t("si.retrying"))}
+              >
                 <RotateCcw size={13} /> {t("si.retry")}
               </button>
             )}
-            {canRetry && step.type === "command" && step.config?.baseline_compare !== "go" && (
-              <button
-                className="sm ghost"
-                title={t("si.retryBaselineTip")}
-                onClick={() =>
-                  action(
-                    "retry",
-                    {
-                      input: { config_overrides: { baseline_compare: "go" } },
-                    },
-                    t("si.retryingBaseline"),
-                  )
-                }
-              >
-                <Layers size={13} /> {t("si.retryBaseline")}
-              </button>
-            )}
+            {canRetry &&
+              step.type === "command" &&
+              step.config?.baseline_compare !== "go" && (
+                <button
+                  className="sm ghost"
+                  title={t("si.retryBaselineTip")}
+                  onClick={() =>
+                    action(
+                      "retry",
+                      {
+                        input: { config_overrides: { baseline_compare: "go" } },
+                      },
+                      t("si.retryingBaseline"),
+                    )
+                  }
+                >
+                  <Layers size={13} /> {t("si.retryBaseline")}
+                </button>
+              )}
             {canSkip && (
               <button
                 className="sm ghost"
@@ -674,7 +770,10 @@ export function StepInspector({
             {["RUNNING", "RETRYING"].includes(step.status) && (
               <button
                 className="sm danger"
-                onClick={() => confirm(t("si.stopAsk")) && action("stop", {}, t("si.stopped"))}
+                onClick={() =>
+                  confirm(t("si.stopAsk")) &&
+                  action("stop", {}, t("si.stopped"))
+                }
               >
                 <Square size={12} /> {t("si.stop")}
               </button>
@@ -687,8 +786,8 @@ export function StepInspector({
               >
                 {attempts.map((a: any) => (
                   <option key={a.id} value={a.id}>
-                    {t("si.attemptN", { n: a.number })} · {t("cl.gen")} {a.generation} ·{" "}
-                    {t("status." + a.status)}
+                    {t("si.attemptN", { n: a.number })} · {t("cl.gen")}{" "}
+                    {a.generation} · {t("status." + a.status)}
                     {a.invalidated_at ? ` (${t("si.invalidated")})` : ""}
                   </option>
                 ))}
@@ -732,9 +831,14 @@ export function StepInspector({
         {isAgent &&
           !step.pending_input?.provider_handoff &&
           runActive &&
-          ["PENDING", "READY", "RETRYING", "FAILED", "CANCELED", "WAITING_INPUT"].includes(
-            step.status,
-          ) && (
+          [
+            "PENDING",
+            "READY",
+            "RETRYING",
+            "FAILED",
+            "CANCELED",
+            "WAITING_INPUT",
+          ].includes(step.status) && (
             <StepAgentOverride
               key={`${step.id}:${JSON.stringify(step.agent_override)}`}
               value={step.agent_override}
@@ -749,9 +853,10 @@ export function StepInspector({
             provider={asProvider(effectiveProvider)}
           />
         )}
-        {step.status === "WAITING_APPROVAL" && step.type !== "task_result_report" && (
-          <ApprovalPanel run={run} step={step} onDone={refresh} />
-        )}
+        {step.status === "WAITING_APPROVAL" &&
+          step.type !== "task_result_report" && (
+            <ApprovalPanel run={run} step={step} onDone={refresh} />
+          )}
         {step.type === "task_result_report" &&
           step.status === "WAITING_APPROVAL" &&
           tab !== "report" && (
@@ -776,7 +881,10 @@ export function StepInspector({
               <b className="grow">{t("common.error")}</b>
               <Copy text={step.error} />
             </div>
-            <div className="mono" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
+            <div
+              className="mono"
+              style={{ whiteSpace: "pre-wrap", marginTop: 6 }}
+            >
               {step.error}
             </div>
           </div>
@@ -796,9 +904,17 @@ export function StepInspector({
           <div>
             {verification && <VerificationCard v={verification} />}
             {(attempt?.output?.verdict || attempt?.error?.details?.verdict) && (
-              <VerdictCard v={attempt.output?.verdict ? attempt.output : attempt.error.details} />
+              <VerdictCard
+                v={
+                  attempt.output?.verdict
+                    ? attempt.output
+                    : attempt.error.details
+                }
+              />
             )}
-            {attempt?.error?.failure && <FailureCard f={attempt.error.failure} />}
+            {attempt?.error?.failure && (
+              <FailureCard f={attempt.error.failure} />
+            )}
             {step.type === "command" && (
               <TestFailurePanel
                 attempts={attempts}
@@ -808,7 +924,9 @@ export function StepInspector({
               />
             )}
             {step.type === "command" && (
-              <BaselineSummary results={(attempt?.output ?? attempt?.error?.details)?.results} />
+              <BaselineSummary
+                results={(attempt?.output ?? attempt?.error?.details)?.results}
+              />
             )}
             {attempt?.metrics && <AttemptMetrics m={attempt.metrics} />}
             <div className="rv-card">
@@ -823,10 +941,13 @@ export function StepInspector({
                   <Badge s={step.status} />
                 </span>
                 <span>{t("si.depends")}</span>
-                <span className="mono">{step.depends_on.join(", ") || "—"}</span>
+                <span className="mono">
+                  {step.depends_on.join(", ") || "—"}
+                </span>
                 <span>{t("si.maxAttempts")}</span>
                 <span>
-                  {step.max_attempts} ({t("si.backoff", { n: step.retry_backoff_s })})
+                  {step.max_attempts} (
+                  {t("si.backoff", { n: step.retry_backoff_s })})
                 </span>
                 <span>{t("si.gate")}</span>
                 <span>{step.requires_approval ? t("si.yes") : t("si.no")}</span>
@@ -879,7 +1000,9 @@ export function StepInspector({
             )}
             {checkpoints.length > 0 && (
               <details style={{ marginTop: 8 }}>
-                <summary>{t("si.checkpoints", { n: checkpoints.length })}</summary>
+                <summary>
+                  {t("si.checkpoints", { n: checkpoints.length })}
+                </summary>
                 {checkpoints.map((c: any) => (
                   <div
                     key={c.id}
@@ -889,8 +1012,11 @@ export function StepInspector({
                       borderBottom: "1px dashed var(--line)",
                     }}
                   >
-                    <span className="muted">{time(c.created_at)}</span> <b>{c.reason}</b>{" "}
-                    <span className="mono">{JSON.stringify(c.data).slice(0, 300)}</span>
+                    <span className="muted">{time(c.created_at)}</span>{" "}
+                    <b>{c.reason}</b>{" "}
+                    <span className="mono">
+                      {JSON.stringify(c.data).slice(0, 300)}
+                    </span>
                   </div>
                 ))}
               </details>
@@ -904,32 +1030,38 @@ export function StepInspector({
             <Transcript
               attemptId={attempt.id}
               live={live}
-              tick={activity}
+              tick={tick}
               provider={asProvider(effectiveProvider)}
             />
           ) : (
             <CommandLog
               attemptId={attempt.id}
               live={live}
-              tick={activity}
+              tick={tick}
               startedAt={attempt.started_at}
             />
           ))}
         {tab === "input" &&
           (attempt ? (
-            <JsonBlock value={attempt.input} title={t("si.resolvedInput", { n: attempt.number })} />
+            <JsonBlock
+              value={attempt.input}
+              title={t("si.resolvedInput", { n: attempt.number })}
+            />
           ) : (
             <Empty>{t("si.inputLater")}</Empty>
           ))}
         {tab === "output" && (
           <div>
             <OutputView
-              locale={run.output_locale}
               value={
-                attempt && attempt.id !== step.current_attempt_id ? attempt.output : step.output
+                attempt && attempt.id !== step.current_attempt_id
+                  ? attempt.output
+                  : step.output
               }
             />
-            {attempt?.error && <JsonBlock value={attempt.error} title={t("si.attemptError")} />}
+            {attempt?.error && (
+              <JsonBlock value={attempt.error} title={t("si.attemptError")} />
+            )}
           </div>
         )}
         {tab === "knowledge" && <KnowledgeApplied snapshot={snapshot} />}
@@ -963,7 +1095,10 @@ export function StepInspector({
                   </Badge>
                 </div>
                 {q.context && (
-                  <div className="muted small" style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>
+                  <div
+                    className="muted small"
+                    style={{ whiteSpace: "pre-wrap", marginTop: 4 }}
+                  >
                     {q.context}
                   </div>
                 )}
@@ -976,7 +1111,8 @@ export function StepInspector({
                       borderRadius: "var(--r-sm)",
                     }}
                   >
-                    <ArrowRight size={13} style={{ verticalAlign: -2 }} /> {q.answer}{" "}
+                    <ArrowRight size={13} style={{ verticalAlign: -2 }} />{" "}
+                    {q.answer}{" "}
                     <span className="muted small">
                       {q.answered_by} {time(q.answered_at)}
                     </span>
@@ -984,7 +1120,9 @@ export function StepInspector({
                 )}
                 <div className="muted small" style={{ marginTop: 6 }}>
                   {t("si.attemptOf", {
-                    n: attempts.find((a: any) => a.id === q.attempt_id)?.number ?? "?",
+                    n:
+                      attempts.find((a: any) => a.id === q.attempt_id)
+                        ?.number ?? "?",
                   })}{" "}
                   · {time(q.created_at)}
                 </div>
@@ -1016,9 +1154,13 @@ export function StepInspector({
                       className="click"
                       style={{
                         opacity: a.invalidated_at ? 0.6 : 1,
-                        background: a.id === attempt?.id ? "var(--sel)" : undefined,
+                        background:
+                          a.id === attempt?.id ? "var(--sel)" : undefined,
                       }}
-                      onClick={() => (setAttemptId(a.id), setTab(isAgent ? "execution" : "output"))}
+                      onClick={() => (
+                        setAttemptId(a.id),
+                        setTab(isAgent ? "execution" : "output")
+                      )}
                     >
                       <td>
                         <b>{a.number}</b>
@@ -1027,11 +1169,16 @@ export function StepInspector({
                       <td>
                         <Badge s={a.status} />
                         {a.invalidated_at && (
-                          <div className="muted small">{t("si.invalidated")}</div>
+                          <div className="muted small">
+                            {t("si.invalidated")}
+                          </div>
                         )}
                         {a.input?.pending?.reexecute && (
                           <div className="small" style={{ marginTop: 2 }}>
-                            <RotateCcw size={11} style={{ verticalAlign: -1 }} />{" "}
+                            <RotateCcw
+                              size={11}
+                              style={{ verticalAlign: -1 }}
+                            />{" "}
                             {a.input.pending.reexecute.instructions
                               ? `“${String(a.input.pending.reexecute.instructions).slice(0, 80)}”`
                               : t("si.reexecuteWord")}
@@ -1049,7 +1196,9 @@ export function StepInspector({
                       </td>
                       <td className="small">{time(a.started_at)}</td>
                       <td className="small">{time(a.finished_at)}</td>
-                      <td className="mono small">{(a.worker ?? "").split(":").slice(-1)[0]}</td>
+                      <td className="mono small">
+                        {(a.worker ?? "").split(":").slice(-1)[0]}
+                      </td>
                       <td className="err small">
                         {a.error?.failure && (
                           <span className="pill" title={a.error.failure.reason}>
@@ -1078,7 +1227,8 @@ export function StepInspector({
                     }}
                   >
                     #{j.id} {j.status} gen{j.generation} claims={j.claims}
-                    {j.force ? " force" : ""} {j.lease_owner ?? ""} {j.last_error ?? ""}
+                    {j.force ? " force" : ""} {j.lease_owner ?? ""}{" "}
+                    {j.last_error ?? ""}
                   </div>
                 ))
               ) : (
@@ -1111,7 +1261,8 @@ const TONE_STATUS = {
   idle: "SKIPPED",
 } as const;
 const arr = (x: unknown): any[] => (Array.isArray(x) ? x : []);
-const num = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+const num = (x: unknown): number | null =>
+  typeof x === "number" && Number.isFinite(x) ? x : null;
 
 /** Harness verification-and-repair result (attempt metrics / output `verification`). Renders only the fields present. */
 function VerificationCard({ v }: { v: any }) {
@@ -1125,8 +1276,12 @@ function VerificationCard({ v }: { v: any }) {
         : v.passed === false
           ? "failed"
           : "";
-  const tone = VF_TONE[outcome] ?? (v.passed === true ? "ok" : v.passed === false ? "err" : "idle");
-  const label = VF_TONE[outcome] ? t(`si.vf.${outcome}`) : outcome || t("si.unknown");
+  const tone =
+    VF_TONE[outcome] ??
+    (v.passed === true ? "ok" : v.passed === false ? "err" : "idle");
+  const label = VF_TONE[outcome]
+    ? t(`si.vf.${outcome}`)
+    : outcome || t("si.unknown");
   const rounds = num(v.rounds);
   const repairs = num(v.repairs);
   const maxRepairs = num(v.max_repairs);
@@ -1154,7 +1309,11 @@ function VerificationCard({ v }: { v: any }) {
         <div className="vf-steps" role="list" aria-label={t("si.rounds")}>
           {Array.from({ length: rounds }, (_, i) => {
             const state =
-              i < sigs.length ? "fail" : v.passed === true && i === rounds - 1 ? "pass" : "unknown";
+              i < sigs.length
+                ? "fail"
+                : v.passed === true && i === rounds - 1
+                  ? "pass"
+                  : "unknown";
             return (
               <div key={i} style={{ display: "contents" }}>
                 {i > 0 && <span className="vf-link" aria-hidden />}
@@ -1172,7 +1331,9 @@ function VerificationCard({ v }: { v: any }) {
                       <CircleDashed size={13} />
                     )}
                   </span>
-                  <span>{i === 0 ? t("si.check") : t("si.repairN", { n: i })}</span>
+                  <span>
+                    {i === 0 ? t("si.check") : t("si.repairN", { n: i })}
+                  </span>
                 </div>
               </div>
             );
@@ -1193,7 +1354,10 @@ function VerificationCard({ v }: { v: any }) {
                   <span
                     style={{
                       width: `${Math.min(100, (repairs / maxRepairs) * 100)}%`,
-                      background: repairs >= maxRepairs ? "var(--st-err)" : "var(--brand)",
+                      background:
+                        repairs >= maxRepairs
+                          ? "var(--st-err)"
+                          : "var(--brand)",
                     }}
                   />
                 </span>
@@ -1241,7 +1405,10 @@ function VerificationCard({ v }: { v: any }) {
               <ul className="vf-list">
                 {regs.map((g: any, j: number) => (
                   <li key={j} style={{ flexDirection: "column", gap: 1 }}>
-                    <span className="mono" style={{ color: "var(--st-err)", fontWeight: 600 }}>
+                    <span
+                      className="mono"
+                      style={{ color: "var(--st-err)", fontWeight: 600 }}
+                    >
                       {g?.package}
                     </span>
                     {arr(g?.tests).map((t: string) => (
@@ -1333,19 +1500,23 @@ function TestFailurePanel({
     .map((a) => ({ n: a.number, ...payload(a).decision }));
   const exception = step.output?.accepted_exception;
   if (!d && !decisions.length) return null;
-  const groups = (["new", "pre_existing", "environment", "insufficient"] as const).filter((k) =>
-    d?.failures.some((f: any) => f.category === k),
-  );
+  const groups = (
+    ["new", "pre_existing", "environment", "insufficient"] as const
+  ).filter((k) => d?.failures.some((f: any) => f.category === k));
   return (
     <div
       className={step.status === "WAITING_INPUT" ? "rv-attn" : "rv-card"}
-      style={step.status === "WAITING_INPUT" ? { boxShadow: "none" } : undefined}
+      style={
+        step.status === "WAITING_INPUT" ? { boxShadow: "none" } : undefined
+      }
     >
       <div className="rv-card-head">
         <h4>
           <FlaskConical size={16} /> {t("si.diagnosis")}
         </h4>
-        {step.output?.test_status === "FAILED" && <Badge s="FAILED">{t("si.testFailed")}</Badge>}
+        {step.output?.test_status === "FAILED" && (
+          <Badge s="FAILED">{t("si.testFailed")}</Badge>
+        )}
       </div>
       {d && (
         <>
@@ -1380,7 +1551,9 @@ function TestFailurePanel({
           {d.explanation && (
             <div className="rv-card soft" style={{ padding: "10px 12px" }}>
               <div className="small">
-                <b>{d.explanation.by === "claude" ? t("si.ai") : t("si.brief")}:</b>{" "}
+                <b>
+                  {d.explanation.by === "claude" ? t("si.ai") : t("si.brief")}:
+                </b>{" "}
                 {d.explanation.text}
               </div>
               <div className="small" style={{ marginTop: 4 }}>
@@ -1391,7 +1564,8 @@ function TestFailurePanel({
           {groups.map((g) => (
             <div key={g} style={{ marginTop: 8 }}>
               <Badge s={CAT_STATUS[g]}>
-                {t(`si.cat.${g}`)} · {d.failures.filter((f: any) => f.category === g).length}
+                {t(`si.cat.${g}`)} ·{" "}
+                {d.failures.filter((f: any) => f.category === g).length}
               </Badge>
               {d.failures
                 .filter((f: any) => f.category === g)
@@ -1404,7 +1578,9 @@ function TestFailurePanel({
                       </span>{" "}
                       <span className="muted small">
                         — {f.reason}
-                        {f.env_signal && g !== "environment" ? ` ${t("si.envHint")}` : ""}
+                        {f.env_signal && g !== "environment"
+                          ? ` ${t("si.envHint")}`
+                          : ""}
                       </span>
                     </summary>
                     <pre>{f.log}</pre>
@@ -1531,10 +1707,15 @@ function BaselineSummary({ results }: { results?: any[] }) {
           {r.baseline.note ? (
             <div className="muted small">{r.baseline.note}</div>
           ) : (
-            <div className="muted small mono">base {String(r.baseline.base_sha).slice(0, 9)}</div>
+            <div className="muted small mono">
+              base {String(r.baseline.base_sha).slice(0, 9)}
+            </div>
           )}
           {r.baseline.regressions?.length > 0 && (
-            <div className="err small" style={{ marginTop: 6, fontWeight: 600 }}>
+            <div
+              className="err small"
+              style={{ marginTop: 6, fontWeight: 600 }}
+            >
               {t("si.newFaults")}
             </div>
           )}
@@ -1578,7 +1759,9 @@ function CommandLog({
     last.current = 0;
   }, [attemptId]);
   useEffect(() => {
-    api<any[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
+    api<any[]>(
+      `/api/attempts/${attemptId}/transcript?after=${last.current}`,
+    ).then((rows) => {
       if (!rows.length) return;
       last.current = rows[rows.length - 1].id;
       setEvents((p) => [...p, ...rows]);
@@ -1592,9 +1775,15 @@ function CommandLog({
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [events, follow]);
-  const text = events.map((e) => (e.kind === "log" ? e.content : `\n${e.content}\n`)).join("");
-  const lastAt = events.length ? events[events.length - 1].created_at : startedAt;
-  const quiet = live ? Math.round((Date.now() - new Date(lastAt).getTime()) / 1000) : 0;
+  const text = events
+    .map((e) => (e.kind === "log" ? e.content : `\n${e.content}\n`))
+    .join("");
+  const lastAt = events.length
+    ? events[events.length - 1].created_at
+    : startedAt;
+  const quiet = live
+    ? Math.round((Date.now() - new Date(lastAt).getTime()) / 1000)
+    : 0;
   return (
     <div>
       <div className="rv-toolrow">
@@ -1611,7 +1800,9 @@ function CommandLog({
             <>
               <span className="spinner" />{" "}
               {t("si.runningFor", {
-                secs: Math.round((Date.now() - new Date(startedAt).getTime()) / 1000),
+                secs: Math.round(
+                  (Date.now() - new Date(startedAt).getTime()) / 1000,
+                ),
                 quiet,
               })}
             </>
@@ -1625,7 +1816,11 @@ function CommandLog({
           )}
         </span>
         <label>
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />{" "}
+          <input
+            type="checkbox"
+            checked={follow}
+            onChange={(e) => setFollow(e.target.checked)}
+          />{" "}
           {t("si.follow")}
         </label>
         <Copy text={text} />
@@ -1639,7 +1834,9 @@ function CommandLog({
 
 function AttemptMetrics({ m }: { m: any }) {
   const { t } = useI18n();
-  const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
+  const tools = Object.entries<number>(m.tool_calls ?? {}).sort(
+    (a, b) => b[1] - a[1],
+  );
   return (
     <div className="rv-card">
       <div className="rv-card-head">
@@ -1654,9 +1851,7 @@ function AttemptMetrics({ m }: { m: any }) {
                 ? t(
                     m.provider === "antigravity"
                       ? "run.antigravity.defaultModel"
-                      : m.provider === "copilot"
-                        ? "run.copilot.defaultModel"
-                        : "run.codex.defaultModel",
+                      : "run.codex.defaultModel",
                   )
                 : null),
             m.reasoning_effort,
@@ -1668,7 +1863,9 @@ function AttemptMetrics({ m }: { m: any }) {
       <div className="rv-minis" style={{ marginBottom: 10 }}>
         <div className="rv-mini">
           <span>{t("si.cost")}</span>
-          <b>{m.cost_usd == null ? "—" : `$${Number(m.cost_usd).toFixed(4)}`}</b>
+          <b>
+            {m.cost_usd == null ? "—" : `$${Number(m.cost_usd).toFixed(4)}`}
+          </b>
         </div>
         <div className="rv-mini">
           <span>{t("si.turns")}</span>
@@ -1710,9 +1907,14 @@ function AttemptMetrics({ m }: { m: any }) {
         </span>
         <span>{t("common.tools")}</span>
         <span className="small">
-          {tools.map(([k, v]) => `${k.replace("mcp__platform__", "platform·")}×${v}`).join(", ") ||
-            "—"}
-          {m.tool_errors ? ` · ${t("si.toolErrors", { n: m.tool_errors })}` : ""}
+          {tools
+            .map(
+              ([k, v]) => `${k.replace("mcp__platform__", "platform·")}×${v}`,
+            )
+            .join(", ") || "—"}
+          {m.tool_errors
+            ? ` · ${t("si.toolErrors", { n: m.tool_errors })}`
+            : ""}
         </span>
         <span>{t("si.skillsLoaded")}</span>
         <span className="small">
@@ -1721,31 +1923,6 @@ function AttemptMetrics({ m }: { m: any }) {
             ? ` · ${t("si.searched", { q: m.knowledge_searches.map((q: string) => `"${q}"`).join(", ") })}`
             : ""}
         </span>
-        {m.skills?.length > 0 && (
-          <>
-            <span>Skill activation</span>
-            <span className="small">
-              {m.skills.map(
-                (s: {
-                  key: string;
-                  version: number;
-                  tier: string;
-                  tokens: number;
-                  states: string[];
-                  evidence: string[];
-                  loaded_unused: boolean;
-                  provider_limited: boolean;
-                }) => (
-                  <div key={s.key} title={s.evidence.join(", ")}>
-                    {s.key}@v{s.version} · {s.tier} · {s.tokens} tokens · {s.states.join(" → ")}
-                    {s.loaded_unused ? " · loaded_unused" : ""}
-                    {s.provider_limited ? " · provider_limited" : ""}
-                  </div>
-                ),
-              )}
-            </span>
-          </>
-        )}
         <span>{t("si.integration")}</span>
         <span className="small">
           {(m.integration_calls ?? [])
@@ -1761,7 +1938,10 @@ function AttemptMetrics({ m }: { m: any }) {
             <span>{t("si.blocked")}</span>
             <span className="small err">
               {m.denied
-                .map((d: any) => `${d.tool}${d.subagent ? ` (${d.subagent})` : ""}: ${d.reason}`)
+                .map(
+                  (d: any) =>
+                    `${d.tool}${d.subagent ? ` (${d.subagent})` : ""}: ${d.reason}`,
+                )
                 .join(" · ")}
             </span>
           </>
@@ -1796,7 +1976,8 @@ function ReexecuteInfo({ rx, prev }: { rx: any; prev?: number }) {
           {t("kn.cat.agent_skill")}:{" "}
           {rx.skills.map((s: any) => (
             <span key={s.key} className="pill">
-              {s.title ?? s.key} <span className="muted mono">v{s.version}</span>
+              {s.title ?? s.key}{" "}
+              <span className="muted mono">v{s.version}</span>
             </span>
           ))}
         </div>
@@ -1819,11 +2000,11 @@ function ReexecuteDialog({
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [skills, setSkills] = useState<string[]>([]);
-  const [persist, setPersist] = useState(true);
   const [busy, setBusy] = useState(false);
-  const { data: catalog } = useApi<any[]>(open ? "/api/knowledge?category=agent_skill" : null, [
-    open,
-  ]);
+  const { data: catalog } = useApi<any[]>(
+    open ? "/api/knowledge?category=agent_skill" : null,
+    [open],
+  );
   const graph: any[] = run.graph?.steps ?? [];
   const affected: string[] = [];
   const stack = [step.key];
@@ -1882,23 +2063,6 @@ function ReexecuteDialog({
           onChange={(e) => setText(e.target.value)}
         />
       </label>
-      {text.trim() && (
-        <label
-          className="small"
-          style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 6 }}
-        >
-          <input
-            type="checkbox"
-            checked={persist}
-            onChange={(e) => setPersist(e.target.checked)}
-            style={{ marginTop: 2, flex: "none" }}
-          />
-          <span>
-            <b>{t("si.persistDecision")}</b>
-            <span className="muted"> — {t("si.persistDecisionHint")}</span>
-          </span>
-        </label>
-      )}
       <div className="field">
         <span>
           {t("si.skillsThis")}{" "}
@@ -1921,18 +2085,27 @@ function ReexecuteDialog({
             ))}
           </div>
         )}
-        <select value="" onChange={(e) => e.target.value && setSkills([...skills, e.target.value])}>
+        <select
+          value=""
+          onChange={(e) =>
+            e.target.value && setSkills([...skills, e.target.value])
+          }
+        >
           <option value="">{t("si.addSkill")}</option>
           {(catalog ?? [])
             .filter((c) => !skills.includes(c.key))
             .map((c) => (
               <option key={c.key} value={c.key}>
-                {c.title} ({c.key} v{c.current_version}){c.enabled ? "" : " [off]"}
+                {c.title} ({c.key} v{c.current_version})
+                {c.enabled ? "" : " [off]"}
               </option>
             ))}
         </select>
       </div>
-      <div className="rv-card soft" style={{ margin: "10px 0 0", padding: "10px 12px" }}>
+      <div
+        className="rv-card soft"
+        style={{ margin: "10px 0 0", padding: "10px 12px" }}
+      >
         <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>
           {t("si.willRerun")}
         </div>
@@ -1945,7 +2118,8 @@ function ReexecuteDialog({
                 s?.requires_approval ||
                 s?.type === "human_approval" ||
                 s?.type === "task_result_report" ||
-                (s?.type === "git_pull_request" && s?.config?.mode === "approval");
+                (s?.type === "git_pull_request" &&
+                  s?.config?.mode === "approval");
               return (
                 <span
                   key={k}
@@ -1960,7 +2134,8 @@ function ReexecuteDialog({
                     {s?.name ?? k}
                     {gate && (
                       <>
-                        <Hand size={11} color="var(--st-wait)" /> {t("si.reapprove")}
+                        <Hand size={11} color="var(--st-wait)" />{" "}
+                        {t("si.reapprove")}
                       </>
                     )}
                   </span>
@@ -1981,7 +2156,7 @@ function ReexecuteDialog({
           onClick={async () => {
             setBusy(true);
             const r = await onSubmit({
-              ...(text.trim() ? { feedback: text.trim(), persist } : {}),
+              ...(text.trim() ? { feedback: text.trim() } : {}),
               ...(skills.length ? { skills } : {}),
             });
             setBusy(false);
@@ -2003,7 +2178,9 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
   const { t } = useI18n();
   if (!snapshot) return <Empty>{t("si.noSnapshot")}</Empty>;
   const c = snapshot.content;
-  const plan = new Map<string, any>((c.prompt_plan?.knowledge ?? []).map((d: any) => [d.key, d]));
+  const plan = new Map<string, any>(
+    (c.prompt_plan?.knowledge ?? []).map((d: any) => [d.key, d]),
+  );
   const TIER: Record<string, string> = {
     inline: "COMPLETED",
     index: "READY",
@@ -2014,14 +2191,17 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
   return (
     <div>
       <div className="rv-card soft small" style={{ padding: "9px 12px" }}>
-        Snapshot #{snapshot.id} · <span className="mono">{snapshot.hash.slice(0, 16)}</span> ·
-        project {c.project || "—"} · repos {c.repositories.join(", ") || "—"} ·{" "}
+        Snapshot #{snapshot.id} ·{" "}
+        <span className="mono">{snapshot.hash.slice(0, 16)}</span> · project{" "}
+        {c.project || "—"} · repos {c.repositories.join(", ") || "—"} ·{" "}
         {time(snapshot.created_at)}
       </div>
       {!c.knowledge.length && <Empty>{t("si.noKnowledge")}</Empty>}
       {Object.entries(groups).map(([cat, items]) => (
         <div key={cat}>
-          <h3>{t(`kn.cat.${cat}`) === `kn.cat.${cat}` ? cat : t(`kn.cat.${cat}`)}</h3>
+          <h3>
+            {t(`kn.cat.${cat}`) === `kn.cat.${cat}` ? cat : t(`kn.cat.${cat}`)}
+          </h3>
           {items.map((k) => (
             <details
               key={k.key}
@@ -2055,22 +2235,27 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
           ))}
         </div>
       ))}
-      {c.prompt_plan?.upstream && Object.keys(c.prompt_plan.upstream).length > 0 && (
-        <>
-          <h3>{t("si.upstream")}</h3>
-          {Object.entries<any>(c.prompt_plan.upstream).map(([k, u]) => (
-            <div key={k} className="small" style={{ padding: "2px 0" }}>
-              <b>{k}</b> {u.direct && <span className="muted">({t("si.direct")})</span>} —{" "}
-              {u.mode === "full" ? (
-                t("si.full")
-              ) : (
-                <span style={{ color: "var(--st-wait)" }}>{t("si.summarised")}</span>
-              )}{" "}
-              ~{u.tokens} / {u.full_tokens} tokens
-            </div>
-          ))}
-        </>
-      )}
+      {c.prompt_plan?.upstream &&
+        Object.keys(c.prompt_plan.upstream).length > 0 && (
+          <>
+            <h3>{t("si.upstream")}</h3>
+            {Object.entries<any>(c.prompt_plan.upstream).map(([k, u]) => (
+              <div key={k} className="small" style={{ padding: "2px 0" }}>
+                <b>{k}</b>{" "}
+                {u.direct && <span className="muted">({t("si.direct")})</span>}{" "}
+                —{" "}
+                {u.mode === "full" ? (
+                  t("si.full")
+                ) : (
+                  <span style={{ color: "var(--st-wait)" }}>
+                    {t("si.summarised")}
+                  </span>
+                )}{" "}
+                ~{u.tokens} / {u.full_tokens} tokens
+              </div>
+            ))}
+          </>
+        )}
       {c.overridden?.length > 0 && (
         <>
           <h3>{t("si.overridden")}</h3>
@@ -2107,7 +2292,9 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
 export function Artifacts({ artifacts }: { artifacts: any[] }) {
   const { t } = useI18n();
   const [openId, setOpenId] = useState<number | null>(null);
-  const { data } = useApi<any>(openId ? `/api/artifacts/${openId}` : null, [openId]);
+  const { data } = useApi<any>(openId ? `/api/artifacts/${openId}` : null, [
+    openId,
+  ]);
   if (!artifacts.length) return <Empty>{t("si.noArtifacts")}</Empty>;
   return (
     <div>
@@ -2135,7 +2322,8 @@ export function Artifacts({ artifacts }: { artifacts: any[] }) {
           </b>
           <span className="muted small">
             {a.kind} · {t("si.chars", { n: a.size })}
-            {a.data?.exit_code != null && ` · ${t("si.exit", { code: a.data.exit_code })}`}
+            {a.data?.exit_code != null &&
+              ` · ${t("si.exit", { code: a.data.exit_code })}`}
           </span>
         </button>
       ))}
@@ -2147,7 +2335,11 @@ export function Artifacts({ artifacts }: { artifacts: any[] }) {
             </h4>
             <Copy text={data.content} />
           </div>
-          {data.name.endsWith(".md") ? <Markdown text={data.content} /> : <pre>{data.content}</pre>}
+          {data.name.endsWith(".md") ? (
+            <Markdown text={data.content} />
+          ) : (
+            <pre>{data.content}</pre>
+          )}
           {data.data && <JsonBlock value={data.data} title={t("si.data")} />}
         </div>
       )}
@@ -2159,7 +2351,11 @@ export function Artifacts({ artifacts }: { artifacts: any[] }) {
 function VerdictCard({ v }: { v: any }) {
   const { t } = useI18n();
   const tone =
-    v.verdict === "PASS" ? "COMPLETED" : v.verdict === "FAIL" ? "FAILED" : "WAITING_INPUT";
+    v.verdict === "PASS"
+      ? "COMPLETED"
+      : v.verdict === "FAIL"
+        ? "FAILED"
+        : "WAITING_INPUT";
   const findings = (v.findings ?? []) as any[];
   return (
     <div
@@ -2233,7 +2429,10 @@ function VerdictCard({ v }: { v: any }) {
 function FailureCard({ f }: { f: any }) {
   const { t } = useI18n();
   return (
-    <div className="card tight" style={{ borderLeft: "4px solid var(--st-err)" }}>
+    <div
+      className="card tight"
+      style={{ borderLeft: "4px solid var(--st-err)" }}
+    >
       <div className="row tight">
         <b className="small">{t("si.failure", { class: f.class })}</b>
         <span className="pill">

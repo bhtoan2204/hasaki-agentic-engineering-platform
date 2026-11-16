@@ -46,7 +46,8 @@ export function Dialog({
           e.currentTarget.focus();
         } else if (
           e.shiftKey &&
-          (document.activeElement === first || document.activeElement === e.currentTarget)
+          (document.activeElement === first ||
+            document.activeElement === e.currentTarget)
         ) {
           e.preventDefault();
           last.focus();

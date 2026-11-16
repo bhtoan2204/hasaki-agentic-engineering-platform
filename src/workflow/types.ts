@@ -60,7 +60,9 @@ const RunIf = z
 
 export const StepSpec = z
   .object({
-    key: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "step key must be lowercase [a-z0-9_-]"),
+    key: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9_-]*$/, "step key must be lowercase [a-z0-9_-]"),
     type: z.enum(STEP_TYPES),
     name: z.string().optional(),
     depends_on: z.array(z.string()).default([]),
@@ -109,8 +111,6 @@ export const WorkflowSpec = z.object({
   description: z.string().default(""),
   /** Step that receives review feedback ("Nhắn cho agent"); default: first coding_agent step. */
   feedback_step: z.string().optional(),
-  /** Step a "re-plan" feedback re-executes (analysis/planning after repository selection); default: derived from the graph. */
-  replan_step: z.string().optional(),
   /** Inputs the run form asks for (purely descriptive; values land in run.inputs). */
   inputs: z
     .record(
@@ -121,23 +121,6 @@ export const WorkflowSpec = z.object({
       }),
     )
     .default({}),
-  /** UI grouping, e.g. "Operations / Debugging". */
-  category: z.string().max(80).optional(),
-  /**
-   * read_only: the workflow may not contain steps that change code or external state (coding_agent, command,
-   * git_pull_request); its agent steps run with read-only tools only. Enforced by validateSpec.
-   * self_development: same steps as standard, but FAST keeps the independent review.
-   */
-  execution_mode: z.enum(["standard", "read_only", "self_development"]).optional(),
-  /** Intent routing: suggest this workflow when a request matches (see investigation/request.ts scoreTriggers). */
-  triggers: z
-    .object({
-      phrases: z.array(z.string().min(2)).min(1),
-      requires_any: z.array(z.string()).optional(),
-      excludes: z.array(z.string()).optional(),
-      explicit: z.array(z.string()).optional(),
-    })
-    .optional(),
   /** Knowledge item / skill keys applied to every step of this workflow. */
   knowledge: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),
@@ -161,12 +144,12 @@ export interface RunRow {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
-  profile?: "MICRO" | "FAST" | "STANDARD" | "DEEP";
+  profile?: "FAST" | "STANDARD" | "DEEP";
   profile_decision?: unknown;
   /** User-facing prose language for this run. NULL on rows created before the column existed. */
   output_locale?: "vi" | "en" | null;
   /** claude (default, including rows from before the column), cursor, codex or antigravity. Run default; effective agent settings are pinned per attempt. */
-  agent_provider?: "claude" | "cursor" | "codex" | "antigravity" | "copilot";
+  agent_provider?: "claude" | "cursor" | "codex" | "antigravity";
   /** Null only for unassigned legacy rows, which are not runnable. */
   owner_id?: number | null;
   /** Platform instance (machine) whose workers execute this run; null = any instance (legacy rows). */
@@ -196,9 +179,6 @@ export interface StepRow {
   attempt_count: number;
   current_attempt_id: number | null;
   agent_override?: unknown;
-  parent_step_key?: string | null;
-  subtask_id?: string | null;
-  graph_revision?: number | null;
   output: any;
   pending_input: any;
   approval: any;
@@ -212,18 +192,18 @@ export interface AttemptRow {
   number: number;
   generation: number;
   status:
-    | "RUNNING"
-    | "COMPLETED"
-    | "FAILED"
-    | "WAITING_INPUT"
-    | "WAITING_APPROVAL"
-    | "CANCELED"
-    | "STALE";
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED"
+  | "WAITING_INPUT"
+  | "WAITING_APPROVAL"
+  | "CANCELED"
+  | "STALE";
   job_id: number | null;
   fencing_token: number | null;
   input: any;
   output: any;
-  agent_provider?: "claude" | "codex" | "cursor" | "antigravity" | "copilot" | null;
+  agent_provider?: "claude" | "codex" | "cursor" | "antigravity" | null;
   agent_model?: string | null;
   effective_agent?: EffectiveAgent | null;
   executor_stopped_at?: string | null;
@@ -256,19 +236,18 @@ export interface QuestionInput {
 
 /** What a step executor reports back. The engine turns it into state transitions. */
 export type ExecResult =
-  | { kind: "profile_escalation"; request: import("./profileRuntime.ts").EscalationRequest }
   | { kind: "completed"; output: unknown }
   | { kind: "failed"; error: string; retryable?: boolean; details?: unknown }
   | {
-      kind: "waiting_input";
-      checkpoint?: Record<string, unknown>;
-      questions?: QuestionInput[];
-      output?: unknown;
-    }
+    kind: "waiting_input";
+    checkpoint?: Record<string, unknown>;
+    questions?: QuestionInput[];
+    output?: unknown;
+  }
   /** Re-execute an upstream step with feedback (its dependants, including this step, are invalidated and rerun). */
   | { kind: "reexecute"; target: string; feedback: string; output?: unknown }
   | {
-      kind: "waiting_approval";
-      request: Record<string, unknown>;
-      checkpoint?: Record<string, unknown>;
-    };
+    kind: "waiting_approval";
+    request: Record<string, unknown>;
+    checkpoint?: Record<string, unknown>;
+  };

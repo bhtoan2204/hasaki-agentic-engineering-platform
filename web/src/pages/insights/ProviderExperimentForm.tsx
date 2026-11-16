@@ -8,11 +8,9 @@ const plans = [
   "codex",
   "cursor",
   "antigravity",
-  "copilot",
   "claude,codex",
   "codex,claude",
   "claude,antigravity",
-  "claude,copilot",
   "claude,codex,cursor",
 ];
 export function ProviderExperimentForm({
@@ -40,7 +38,9 @@ export function ProviderExperimentForm({
     try {
       await act(
         async () => {
-          for (const context_variant of ab ? ["minimal", "pack", "tools"] : [variant]) {
+          for (const context_variant of ab
+            ? ["minimal", "pack", "tools"]
+            : [variant]) {
             const provider_sequence = plan
               .split(",")
               .map((provider, i) => ({ provider, model: models[i] || null }));
@@ -51,7 +51,8 @@ export function ProviderExperimentForm({
               configuration: {
                 mode,
                 adapter: "provider_fixture",
-                provider: mode === "live" ? provider_sequence[0].provider : "fixture",
+                provider:
+                  mode === "live" ? provider_sequence[0].provider : "fixture",
                 provider_sequence,
                 context_variant,
                 repetitions: reps,
@@ -69,7 +70,11 @@ export function ProviderExperimentForm({
     }
   };
   return (
-    <Panel title={en ? "Controlled provider experiments" : "Thử nghiệm agent có kiểm soát"}>
+    <Panel
+      title={
+        en ? "Controlled provider experiments" : "Thử nghiệm agent có kiểm soát"
+      }
+    >
       <Notice>
         {en
           ? "Fixture controls exercise the workflow and validators, not model quality. Live calls remain blocked on workers without verified budget/isolation support."
@@ -118,9 +123,15 @@ export function ProviderExperimentForm({
             value={variant}
             onChange={(e) => setVariant(e.target.value)}
           >
-            <option value="minimal">A · {en ? "Minimal task" : "Nhiệm vụ tối thiểu"}</option>
-            <option value="pack">B · {en ? "Context pack" : "Gói ngữ cảnh"}</option>
-            <option value="tools">C · {en ? "Pack + tools" : "Gói + công cụ"}</option>
+            <option value="minimal">
+              A · {en ? "Minimal task" : "Nhiệm vụ tối thiểu"}
+            </option>
+            <option value="pack">
+              B · {en ? "Context pack" : "Gói ngữ cảnh"}
+            </option>
+            <option value="tools">
+              C · {en ? "Pack + tools" : "Gói + công cụ"}
+            </option>
           </select>
         </Field>
         <Field label={en ? "Repetitions" : "Số lần lặp"}>
@@ -144,7 +155,10 @@ export function ProviderExperimentForm({
           />
         </Field>
         {plan.split(",").map((provider, i) => (
-          <Field key={i} label={`${provider} · ${en ? "configured model" : "mô hình cấu hình"}`}>
+          <Field
+            key={i}
+            label={`${provider} · ${en ? "configured model" : "mô hình cấu hình"}`}
+          >
             <input
               value={models[i] ?? ""}
               placeholder={en ? "Default/unreported" : "Mặc định/chưa báo cáo"}
@@ -166,8 +180,12 @@ export function ProviderExperimentForm({
               setPaid(false);
             }}
           >
-            <option value="fixture">{en ? "Fixture controls" : "Điều khiển fixture"}</option>
-            <option value="dry_run">{en ? "Dry run" : "Chạy thử cấu hình"}</option>
+            <option value="fixture">
+              {en ? "Fixture controls" : "Điều khiển fixture"}
+            </option>
+            <option value="dry_run">
+              {en ? "Dry run" : "Chạy thử cấu hình"}
+            </option>
             {admin && (
               <option value="live">
                 {en
@@ -180,7 +198,11 @@ export function ProviderExperimentForm({
       </div>
       {mode === "live" && (
         <label>
-          <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={paid}
+            onChange={(e) => setPaid(e.target.checked)}
+          />
           {en
             ? "Record administrator approval; this does not bypass sandbox or budget requirements."
             : "Ghi nhận phê duyệt quản trị; không bỏ qua yêu cầu sandbox hoặc ngân sách."}
@@ -201,7 +223,10 @@ export function ProviderExperimentForm({
         >
           {en ? "Queue A/B/C context study" : "Xếp hàng nghiên cứu A/B/C"}
         </button>
-        <button className="quiet sm" onClick={() => navigate("/insights/quality")}>
+        <button
+          className="quiet sm"
+          onClick={() => navigate("/insights/quality")}
+        >
           {en
             ? "Existing benchmark runner & paired comparisons"
             : "Benchmark và so sánh cặp hiện có"}

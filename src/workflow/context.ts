@@ -1,21 +1,12 @@
-import { buildExecutionContract, type MandatoryExecutionContract } from "../agent/executionContract.ts";
-import { detectNativeKnowledgeSources } from "../knowledge/nativeSources.ts";
-import { visibleKnowledge } from "../knowledge/visibility.ts";
 import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
 import { q, one, json, type Db } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
-import {
-  planKnowledge,
-  planUpstream,
-  type DisclosureEntry,
-  type UpstreamPlanEntry,
-} from "../context/plan.ts";
-import { projectsOfRepositories, repoPath } from "../repos/service.ts";
+import { planKnowledge, planUpstream, type DisclosureEntry, type UpstreamPlanEntry } from "../context/plan.ts";
+import { repoPath } from "../repos/service.ts";
 import { independentUpstream, isIndependent } from "../agent/independentReview.ts";
 import { memoryFreshness } from "../knowledge/memory.ts";
-import { skillAvailability } from "../knowledge/external.ts";
 import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
 import { createHash } from "node:crypto";
@@ -26,27 +17,8 @@ import type { RunRow, StepRow } from "./types.ts";
 
 /** Everything a step attempt receives. Persisted as the attempt's input snapshot. */
 export interface StepInput {
-  execution_contract?: MandatoryExecutionContract;
-  execution_evidence_source?: { attempt_id: number; generation: number };
-  run: {
-    id: number;
-    title: string;
-    inputs: Record<string, any>;
-    branch: string;
-    definition_key: string;
-    selected_repositories: string[];
-    allowed_repositories: string[];
-    output_locale?: "vi" | "en" | null;
-  };
-  work_item: {
-    id: number;
-    code: string;
-    title: string;
-    description: string;
-    project: string;
-    source: string;
-    payload: any;
-  } | null;
+  run: { id: number; title: string; inputs: Record<string, any>; branch: string; definition_key: string; selected_repositories: string[]; allowed_repositories: string[]; output_locale?: "vi" | "en" | null };
+  work_item: { id: number; code: string; title: string; description: string; project: string; source: string; payload: any } | null;
   /** Outputs of every ancestor step, keyed by step key, with the attempt that produced them. */
   upstream: Record<string, { status: string; attempt_id: number | null; output: any }>;
   /** All answered questions of this step (every attempt), oldest first. */
@@ -55,13 +27,7 @@ export interface StepInput {
   pending: any;
   approval: any;
   /** When re-executed with instructions: the latest earlier attempt of this step (what to revise). */
-  previous_attempt?: {
-    number: number;
-    generation: number;
-    status: string;
-    output: any;
-    error: any;
-  } | null;
+  previous_attempt?: { number: number; generation: number; status: string; output: any; error: any } | null;
 }
 
 export interface ResolvedContext {
@@ -82,12 +48,9 @@ export interface ResolvedContext {
   fileRefs: Array<{ path: string; refs: number; from: string[] }>;
   /** Primary checkout path of each repository the run may use (selected, else allowed). */
   repoPaths?: Array<{ name: string; path: string }>;
-  /** Explicitly assigned skills that cannot run here (blocked, missing runtime, unsupported provider): the attempt fails. */
-  unavailableSkills?: Array<{ key: string; reason: string }>;
 }
 
-const CODE_REF =
-  /(?:^|[\s`'"(\[])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
+const CODE_REF = /(?:^|[\s`'"(\[])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
 
 /**
  * Deterministic handoff of source locations: files read/edited/grepped by the CURRENT attempt of each ancestor step
@@ -103,9 +66,7 @@ export async function collectFileRefs(c: Db, upstream: StepInput["upstream"]) {
     e.refs++;
     e.from.add(from);
   };
-  const attemptIds = Object.values(upstream)
-    .map((u) => u.attempt_id)
-    .filter((x): x is number => !!x);
+  const attemptIds = Object.values(upstream).map((u) => u.attempt_id).filter((x): x is number => !!x);
   if (attemptIds.length) {
     const rows = await q<{ key: string; name: string; path: string }>(
       c,
@@ -118,8 +79,7 @@ export async function collectFileRefs(c: Db, upstream: StepInput["upstream"]) {
   }
   for (const [key, u] of Object.entries(upstream)) {
     if (u.status !== "COMPLETED" || !u.output) continue;
-    for (const m of JSON.stringify(u.output).replace(/\\n/g, " ").matchAll(CODE_REF))
-      add(m[2] ? `${m[1]}:${m[2]}` : m[1], key);
+    for (const m of JSON.stringify(u.output).replace(/\\n/g, " ").matchAll(CODE_REF)) add(m[2] ? `${m[1]}:${m[2]}` : m[1], key);
   }
   return [...byPath.entries()]
     .map(([path, v]) => ({ path, refs: v.refs, from: [...v.from] }))
@@ -129,25 +89,19 @@ export async function collectFileRefs(c: Db, upstream: StepInput["upstream"]) {
 
 export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise<StepInput> {
   const wi = run.work_item_id
-    ? await one(
-        c,
-        "SELECT id, code, title, description, project, source, payload FROM work_items WHERE id = $1",
-        [run.work_item_id],
-      )
+    ? await one(c, "SELECT id, code, title, description, project, source, payload FROM work_items WHERE id = $1", [run.work_item_id])
     : null;
-  const liveSteps = await q<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position", [run.id]);
-  const anc = ancestors(liveSteps, step.key);
+  const anc = ancestors(run.graph.steps, step.key);
   let upstream: StepInput["upstream"] = {};
   if (anc.size) {
-    for (const s of await q<StepRow>(
-      c,
-      "SELECT key, status, current_attempt_id, output FROM workflow_steps WHERE run_id = $1 AND key = ANY($2)",
-      [run.id, [...anc]],
-    ))
+    for (const s of await q<StepRow>(c, "SELECT key, status, current_attempt_id, output FROM workflow_steps WHERE run_id = $1 AND key = ANY($2)", [
+      run.id,
+      [...anc],
+    ]))
       upstream[s.key] = { status: s.status, attempt_id: s.current_attempt_id, output: s.output };
   }
   // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
-  if (isIndependent(step.config)) upstream = independentUpstream(liveSteps, upstream);
+  if (isIndependent(step.config)) upstream = independentUpstream(run.graph.steps, upstream);
   const answers = await q(
     c,
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",
@@ -156,31 +110,13 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
   const reexec = step.pending_input?.reexecute || step.pending_input?.feedback;
   const previous_attempt = reexec
     ? ((await one(
-        c,
-        `SELECT number, generation, status, output, error FROM workflow_step_attempts
+      c,
+      `SELECT number, generation, status, output, error FROM workflow_step_attempts
           WHERE step_id = $1 AND generation < $2 AND (output IS NOT NULL OR error IS NOT NULL) ORDER BY number DESC LIMIT 1`,
-        [step.id, step.generation],
-      )) ?? null)
+      [step.id, step.generation],
+    )) ?? null)
     : null;
-  let execution_contract: MandatoryExecutionContract | undefined;
-  let execution_evidence_source: StepInput["execution_evidence_source"];
-  if (step.type === "coding_agent" && !isIndependent(step.config)) {
-    const previous = await one<{ input: StepInput }>(c,
-      "SELECT input FROM workflow_step_attempts WHERE step_id=$1 AND generation=$2 ORDER BY id LIMIT 1", [step.id, step.generation]);
-    const retry = step.pending_input?.execution_retry?.source_attempt_id
-      ? await one<{ id: number; generation: number; input: StepInput }>(c,
-          "SELECT id,generation,input FROM workflow_step_attempts WHERE id=$1 AND step_id=$2 AND generation<$3 AND status IN ('FAILED','CANCELED')",
-          [step.pending_input.execution_retry.source_attempt_id, step.id, step.generation]) : null;
-    execution_evidence_source = previous?.input.execution_evidence_source ?? (retry?.input.execution_contract ? { attempt_id: retry.id, generation: retry.generation } : undefined);
-    execution_contract = previous ? previous.input.execution_contract : retry ? retry.input.execution_contract : buildExecutionContract(upstream,
-      run.selected_repositories.length ? run.selected_repositories : run.allowed_repositories, wi, {
-        graph: { ...run.graph, steps: liveSteps.map(s => ({ ...s, retry_backoff_seconds: s.retry_backoff_s, run_if: s.run_if ?? undefined })) }, step, definition_version_id: run.definition_version_id, profile: run.profile, allowed_repositories: run.allowed_repositories,
-        request: { title: run.title, description: wi?.description, inputs: run.inputs },
-      });
-  }
   return {
-    execution_contract,
-    execution_evidence_source,
     previous_attempt,
     run: {
       id: run.id,
@@ -202,12 +138,7 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
 
 /** Text used for keyword applicability: the request plus upstream analysis keywords. */
 function requestText(input: StepInput) {
-  const parts = [
-    input.run.title,
-    input.work_item?.title,
-    input.work_item?.description,
-    JSON.stringify(input.run.inputs ?? {}),
-  ];
+  const parts = [input.run.title, input.work_item?.title, input.work_item?.description, JSON.stringify(input.run.inputs ?? {})];
   for (const u of Object.values(input.upstream)) {
     const kw = u.output?.keywords;
     if (Array.isArray(kw)) parts.push(kw.join(" "));
@@ -219,13 +150,7 @@ function requestText(input: StepInput) {
  * ContextResolver: resolve applicable knowledge for this step and persist an immutable, content-hashed
  * snapshot of what the attempt is given (knowledge item versions + upstream attempt ids + repositories).
  */
-export async function resolveContext(
-  c: Db,
-  run: RunRow,
-  step: StepRow,
-  input: StepInput,
-  provider?: string | null,
-): Promise<ResolvedContext> {
+export async function resolveContext(c: Db, run: RunRow, step: StepRow, input: StepInput): Promise<ResolvedContext> {
   const project = input.work_item?.project || String(input.run.inputs?.project ?? "");
   const repositories = run.selected_repositories;
   const cfg = step.config ?? {};
@@ -238,27 +163,17 @@ export async function resolveContext(
   const pinned: Array<{ key: string; version: number }> = input.pending?.reexecute?.skills ?? [];
   // One instant for version selection (effective dates) and expiry, recorded in the snapshot for reproducibility.
   const at = new Date();
-  // Knowledge derived from repositories the owner cannot read never reaches the agent.
-  const res = resolveKnowledge(
-    await visibleKnowledge(run.owner_id, await knowledge.candidates(c, run.owner_id, at)),
-    {
-      organization: config.organization,
-      project,
-      repositories,
-      repositoryProjects: await projectsOfRepositories(repositories ?? [], c),
-      workflowKey: run.definition_key,
-      stepKey: cfg.evaluation_phase?.semantic_role ?? step.key,
-      stepType: step.type,
-      text: requestText(input),
-      explicit,
-      now: at,
-      ponytailEnabled:
-        (!cfg.evaluation_phase ||
-          (cfg.evaluation_phase.ponytail ??
-            ((cfg.skills as string[]) ?? []).some((k) => k.startsWith("skill.ext.ponytail")))) &&
-        config.knowledge.ponytail.enabled,
-    },
-  );
+  const res = resolveKnowledge(await knowledge.candidates(c, run.owner_id, at), {
+    organization: config.organization,
+    project,
+    repositories,
+    workflowKey: run.definition_key,
+    stepKey: step.key,
+    stepType: step.type,
+    text: requestText(input),
+    explicit,
+    now: at,
+  });
   // Skills selected for this re-execution, at the exact version pinned when it was requested.
   for (const p of pinned) {
     const v = await one(
@@ -273,119 +188,47 @@ export async function resolveContext(
   // Cross-task memory: never untrusted conclusions (they are disabled until approved); only provably FRESH items load
   // (STALE and UNKNOWN — missing provenance, unavailable repo or history — are excluded and recorded with the reason).
   const memoryStale: string[] = [];
-  const memoryStates: Array<{ key: string; trust: string | null; state: string; reason: string }> =
-    [];
+  const memoryStates: Array<{ key: string; trust: string | null; state: string; reason: string }> = [];
   const memoryItems = res.applied.filter((k) => k.category === "task_memory");
   if (memoryItems.length) {
-    const repoRows = await q<import("../repos/service.ts").RepositoryRow>(
-      c,
-      "SELECT * FROM repositories WHERE name = ANY($1)",
-      [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]],
-    );
+    const repoRows = await q<import("../repos/service.ts").RepositoryRow>(c, "SELECT * FROM repositories WHERE name = ANY($1)", [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]]);
     for (const k of memoryItems) {
       const m = (k.metadata as any)?.memory;
       const trusted = m && (m.trust === "verified" || m.trust === "approved");
       const row = repoRows.find((r) => r.name === m?.repo);
-      const fresh = trusted
-        ? await memoryFreshness(m, row ? repoPath(row) : null)
-        : { state: "UNKNOWN", reason: "not verified or approved" };
-      memoryStates.push({
-        key: k.key,
-        trust: m?.trust ?? null,
-        state: fresh.state,
-        reason: fresh.reason,
-      });
+      const fresh = trusted ? await memoryFreshness(m, row ? repoPath(row) : null) : { state: "UNKNOWN", reason: "not verified or approved" };
+      memoryStates.push({ key: k.key, trust: m?.trust ?? null, state: fresh.state, reason: fresh.reason });
       if (!trusted || fresh.state !== "FRESH") memoryStale.push(k.key);
     }
     res.applied = res.applied.filter((k) => !memoryStale.includes(k.key));
   }
-  // Third-party skills the agent cannot use here never reach it; an explicitly assigned one fails the attempt.
-  const unavailable = new Map<string, string>();
-  for (const k of res.applied) {
-    const a = skillAvailability(k.metadata, provider);
-    if (!a.available) unavailable.set(k.key, a.reason);
-  }
-  for (const k of res.applied) {
-    const parent = (k.metadata as any)?.parent_skill;
-    if (parent && unavailable.has(parent) && !unavailable.has(k.key))
-      unavailable.set(k.key, `supporting file of unavailable ${parent}`);
-  }
-  const unavailableSkills: Array<{ key: string; reason: string }> = [];
-  for (const k of res.applied.filter((x) => unavailable.has(x.key))) {
-    res.overridden.push({
-      key: k.key,
-      version: k.version,
-      by: "",
-      conflict_key: k.conflict_key ?? "",
-      reason: "unavailable",
-      detail: unavailable.get(k.key),
-    });
-    if (k.reason === "assigned to step" || k.reason.startsWith("selected for this re-execution"))
-      unavailableSkills.push({ key: k.key, reason: unavailable.get(k.key)! });
-  }
-  res.applied = res.applied.filter((k) => !unavailable.has(k.key));
-  const rankText = [
-    requestText(input),
-    step.name,
-    String(cfg.instructions ?? ""),
-    String(input.pending?.reexecute?.instructions ?? ""),
-  ].join("\n");
+  const rankText = [requestText(input), step.name, String(cfg.instructions ?? ""), String(input.pending?.reexecute?.instructions ?? "")].join("\n");
   const disclosure = planKnowledge(res.applied, {
     requestText: rankText,
     stepType: step.type,
-    inlineTokens: run.profile === "MICRO" ? Math.min(3000, config.agent.inlineKnowledgeTokens) : config.agent.inlineKnowledgeTokens,
-    indexSize: run.profile === "MICRO" ? Math.min(4, Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize)) : Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
+    inlineTokens: config.agent.inlineKnowledgeTokens,
+    indexSize: Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
   });
-  const completed = Object.fromEntries(
-    Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED"),
-  );
-  const upstream = planUpstream(
-    completed,
-    step.depends_on,
-    run.profile === "MICRO" ? Math.min(2000, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens)) : Number(cfg.upstream_tokens ?? config.agent.upstreamTokens),
-  );
-  const fileRefs =
-    step.type === "agent" || step.type === "coding_agent"
-      ? await collectFileRefs(c, input.upstream)
-      : [];
-  const nativeSources =
-    step.type === "agent" || step.type === "coding_agent"
-      ? await detectNativeKnowledgeSources(
-          await q<{ repo: string; path: string }>(
-            c,
-            "SELECT repo, path FROM execution_workspaces WHERE run_id=$1 AND (subtask_id IS NULL OR subtask_id=$2) ORDER BY repo",
-            [run.id, step.subtask_id ?? null],
-          ),
-        )
-      : [];
+  const completed = Object.fromEntries(Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED"));
+  const upstream = planUpstream(completed, step.depends_on, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens));
+  const fileRefs = step.type === "agent" || step.type === "coding_agent" ? await collectFileRefs(c, input.upstream) : [];
   const content = {
-    native_sources: nativeSources,
     step: { key: step.key, type: step.type, generation: step.generation },
     // How the prompt was shaped — enough to reproduce/audit what the agent was shown.
     prompt_plan: {
       knowledge: disclosure,
       upstream: upstream.plan,
       file_refs: fileRefs,
-      budgets: {
-        inline_knowledge_tokens: config.agent.inlineKnowledgeTokens,
-        index_size: config.agent.knowledgeIndexSize,
-        upstream_tokens: config.agent.upstreamTokens,
-      },
+      budgets: { inline_knowledge_tokens: config.agent.inlineKnowledgeTokens, index_size: config.agent.knowledgeIndexSize, upstream_tokens: config.agent.upstreamTokens },
       setting_sources: config.agent.settingSources,
       reexecute: input.pending?.reexecute
-        ? {
-            instructions: input.pending.reexecute.instructions,
-            skills: pinned.map((p) => `${p.key}@v${p.version}`),
-            previous_attempt: input.previous_attempt?.number ?? null,
-          }
+        ? { instructions: input.pending.reexecute.instructions, skills: pinned.map((p) => `${p.key}@v${p.version}`), previous_attempt: input.previous_attempt?.number ?? null }
         : null,
       delegation: cfg.delegation?.enabled === true,
       // The checks this attempt is held to (coding steps): audit trail for "why did it (not) complete".
       verification: step.type === "coding_agent" ? verificationPlan(cfg) : null,
       memory_excluded: memoryStale,
       memory_freshness: memoryStates,
-      ...(provider ? { provider } : {}),
-      ...(unavailableSkills.length ? { unavailable_skills: unavailableSkills } : {}),
     },
     project,
     repositories,
@@ -393,9 +236,7 @@ export async function resolveContext(
     answers: input.answers.length,
     input_hash: hashOf(input),
     knowledge: res.applied.map((k) => ({
-      id: k.id,
-      owner_id: k.owner_id ?? null,
-      updated_at: k.updated_at,
+      id: k.id, owner_id: k.owner_id ?? null, updated_at: k.updated_at,
       key: k.key,
       version: k.version,
       category: k.category,
@@ -413,46 +254,21 @@ export async function resolveContext(
   const hash = hashOf(content);
   // The resolution instant decides which versions were in effect; it is recorded but not part of the content hash.
   Object.assign(content, { resolved_at: at.toISOString() });
-  const row = await one(
-    c,
-    "INSERT INTO context_snapshots (run_id, step_id, hash, content) VALUES ($1, $2, $3, $4) RETURNING id",
-    [run.id, step.id, hash, json(content)],
-  );
+  const row = await one(c, "INSERT INTO context_snapshots (run_id, step_id, hash, content) VALUES ($1, $2, $3, $4) RETURNING id", [
+    run.id,
+    step.id,
+    hash,
+    json(content),
+  ]);
   const names = repositories.length ? repositories : run.allowed_repositories;
   const repoPaths = names.length
-    ? (
-        await q<import("../repos/service.ts").RepositoryRow>(
-          c,
-          "SELECT * FROM repositories WHERE name = ANY($1) ORDER BY name",
-          [names],
-        )
-      ).map((r) => ({ name: r.name, path: repoPath(r) }))
+    ? (await q<import("../repos/service.ts").RepositoryRow>(c, "SELECT * FROM repositories WHERE name = ANY($1) ORDER BY name", [names])).map((r) => ({ name: r.name, path: repoPath(r) }))
     : [];
-  return {
-    snapshot_id: row.id,
-    hash,
-    project,
-    repositories,
-    knowledge: res.applied,
-    overridden: res.overridden,
-    disclosure,
-    upstream,
-    requestText: rankText,
-    fileRefs,
-    repoPaths,
-    unavailableSkills,
-  };
+  return { snapshot_id: row.id, hash, project, repositories, knowledge: res.applied, overridden: res.overridden, disclosure, upstream, requestText: rankText, fileRefs, repoPaths };
 }
 
 function verificationPlan(cfg: Record<string, any>) {
   const v = verifyConfig(cfg, TEST_COMMAND);
   if (!v) return { enabled: false };
-  return {
-    enabled: true,
-    command_sha256: createHash("sha256").update(v.command).digest("hex").slice(0, 16),
-    default_command: v.command === TEST_COMMAND,
-    max_repairs: v.maxRepairs,
-    baseline: v.baseline,
-    allow_test_weakening: v.allowTestWeakening,
-  };
+  return { enabled: true, command_sha256: createHash("sha256").update(v.command).digest("hex").slice(0, 16), default_command: v.command === TEST_COMMAND, max_repairs: v.maxRepairs, baseline: v.baseline, allow_test_weakening: v.allowTestWeakening };
 }

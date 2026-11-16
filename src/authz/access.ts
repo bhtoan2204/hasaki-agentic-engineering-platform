@@ -8,28 +8,18 @@ export function wantsSupport(actor: Actor, scope: string | null) {
   return actor.role === "admin" && scope === "all";
 }
 
-export async function audit(
-  actorId: number,
-  action: string,
-  resourceType: string,
-  resourceId: string,
-  detail: unknown = {},
-) {
-  await q(
-    pool,
-    "INSERT INTO audit_log (actor_id, action, resource_type, resource_id, detail) VALUES ($1, $2, $3, $4, $5)",
-    [actorId, action, resourceType, resourceId, JSON.stringify(detail ?? {})],
-  );
+export async function audit(actorId: number, action: string, resourceType: string, resourceId: string, detail: unknown = {}) {
+  await q(pool, "INSERT INTO audit_log (actor_id, action, resource_type, resource_id, detail) VALUES ($1, $2, $3, $4, $5)", [
+    actorId,
+    action,
+    resourceType,
+    resourceId,
+    JSON.stringify(detail ?? {}),
+  ]);
 }
 
 /** Private rows with a null owner stay hidden, including from admins, until claim-legacy. */
-export async function requireOwner(
-  actor: Actor,
-  ownerId: number | null,
-  support: boolean,
-  resourceType: string,
-  resourceId: string,
-) {
+export async function requireOwner(actor: Actor, ownerId: number | null, support: boolean, resourceType: string, resourceId: string) {
   if (ownerId == null) throw new HttpError(404, "not found");
   if (Number(ownerId) === actor.id) return;
   if (!(support && actor.role === "admin")) throw new HttpError(404, "not found");
@@ -44,11 +34,7 @@ const runOwners = new Map<number, number>();
 export async function requireRun(actor: Actor, runId: number, support: boolean) {
   let owner = runOwners.get(runId) ?? null;
   if (owner == null) {
-    const row = await one<{ owner_id: number | null }>(
-      pool,
-      "SELECT owner_id FROM workflow_runs WHERE id = $1",
-      [runId],
-    );
+    const row = await one<{ owner_id: number | null }>(pool, "SELECT owner_id FROM workflow_runs WHERE id = $1", [runId]);
     if (!row) throw new HttpError(404, "not found");
     owner = row.owner_id == null ? null : Number(row.owner_id);
     if (owner != null) {
@@ -60,11 +46,7 @@ export async function requireRun(actor: Actor, runId: number, support: boolean) 
 }
 
 export async function requireWorkItem(actor: Actor, id: number, support: boolean) {
-  const row = await one<{ owner_id: number | null }>(
-    pool,
-    "SELECT owner_id FROM work_items WHERE id = $1",
-    [id],
-  );
+  const row = await one<{ owner_id: number | null }>(pool, "SELECT owner_id FROM work_items WHERE id = $1", [id]);
   if (!row) throw new HttpError(404, "not found");
   await requireOwner(actor, row.owner_id, support, "work_item", String(id));
 }
@@ -101,11 +83,7 @@ export async function requireSnapshot(actor: Actor, snapshotId: number, support:
 }
 
 /** Every id must be visible before the caller writes. A mix of owned and foreign ids fails as a whole. */
-export async function assertQuestionsAccessible(
-  actor: Actor,
-  support: boolean,
-  answers: Record<string, string>,
-) {
+export async function assertQuestionsAccessible(actor: Actor, support: boolean, answers: Record<string, string>) {
   const ids = Object.entries(answers ?? {})
     .filter(([, value]) => String(value ?? "").trim())
     .map(([id]) => Number(id));
@@ -117,8 +95,7 @@ export async function assertQuestionsAccessible(
     [ids],
   );
   if (rows.length !== ids.length) throw new HttpError(404, "not found");
-  for (const row of rows)
-    await requireOwner(actor, row.owner_id, support, "question", String(row.id));
+  for (const row of rows) await requireOwner(actor, row.owner_id, support, "question", String(row.id));
 }
 
 export function requireAdmin(actor: Actor) {

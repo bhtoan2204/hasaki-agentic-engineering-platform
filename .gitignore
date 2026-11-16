@@ -2,7 +2,3 @@ node_modules/
 config.json
 web/dist/
 .env
-
-# Local REQ-94 baseline export and verification reports.
-.req94-baseline/
-req94-*.log

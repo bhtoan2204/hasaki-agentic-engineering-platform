@@ -16,10 +16,6 @@ function readStdin(): Promise<string> {
 }
 
 function respond(allow: boolean, reason: string) {
-  if (process.argv.includes("--telemetry") && allow) {
-    process.stdout.write("{}");
-    process.exit(0);
-  }
   const out = allow
     ? { decision: "allow" }
     : { decision: "deny", reason: `platform policy: ${reason}` };
@@ -34,23 +30,25 @@ function respond(allow: boolean, reason: string) {
 async function main() {
   try {
     const raw = await readStdin();
-    const input = JSON.parse(raw || "{}");
-    const payload = {
-      ...input,
-      hook_event_name: process.argv.includes("--telemetry") ? "PreInvocation" : "PreToolUse",
-      model:
-        typeof input.modelName === "string" && input.modelName.trim()
-          ? input.modelName.trim()
-          : input.model,
-    };
+    const payload = JSON.parse(raw || "{}");
     const socket = process.env.PLATFORM_BROKER_SOCKET;
     const token = process.env.PLATFORM_BROKER_TOKEN;
     if (!socket || !token)
-      throw new Error("platform broker credentials are missing from the hook environment");
+      throw new Error(
+        "platform broker credentials are missing from the hook environment",
+      );
 
-    const r = await brokerRequest(socket, { token, kind: "hook", payload }, 60_000);
-    if (!r?.ok) throw new Error(String(r?.error ?? "broker refused the request"));
-    respond(r.decision?.allow === true, String(r.decision?.reason ?? "denied by platform policy"));
+    const r = await brokerRequest(
+      socket,
+      { token, kind: "hook", payload },
+      60_000,
+    );
+    if (!r?.ok)
+      throw new Error(String(r?.error ?? "broker refused the request"));
+    respond(
+      r.decision?.allow === true,
+      String(r.decision?.reason ?? "denied by platform policy"),
+    );
   } catch (e) {
     respond(
       false,

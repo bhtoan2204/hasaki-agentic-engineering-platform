@@ -1,18 +1,25 @@
 import { LineChart, RefreshCw, Siren } from "lucide-react";
 import { useApi, useLive } from "../../api.ts";
-import { EmptyState, ErrorBox, PageHeader, Button, Tabs, navigate } from "../../ui.tsx";
+import {
+  EmptyState,
+  ErrorBox,
+  PageHeader,
+  Button,
+  Tabs,
+  navigate,
+} from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.tsx";
+import {
+  AnalyticsFilters,
+  defaultFilters,
+} from "../analytics/AnalyticsFilters.tsx";
 import { AnalyticsSkeleton, type Row } from "../analytics/shared.tsx";
 import { UsageDashboard } from "./UsageDashboard.tsx";
 import { PerformanceDashboard } from "./PerformanceDashboard.tsx";
-import { WorkflowDashboard, type WorkflowView } from "./WorkflowDashboard.tsx";
+import { WorkflowDashboard } from "./WorkflowDashboard.tsx";
 import "../analytics/analytics.css";
 export const ANALYTICS_TABS = ["usage", "performance", "workflows"] as const;
 type Tab = (typeof ANALYTICS_TABS)[number];
-function workflowSection(value: string | null): WorkflowView {
-  return value === "workflows" || value === "bottlenecks" || value === "details" ? value : "overview";
-}
 function DashboardBody({
   tab,
   query,
@@ -25,10 +32,9 @@ function DashboardBody({
   const { t } = useI18n();
   const params = new URLSearchParams(query);
   const page = Number(params.get("page") || 1);
-  const workflowView = workflowSection(params.get("view"));
-  const request = new URLSearchParams(query);
-  if (tab === "workflows" && workflowView === "overview") request.delete("page");
-  const { data, error, loading, reload } = useApi<Row>(`/api/analytics/${tab}?${request}`);
+  const { data, error, loading, reload } = useApi<Row>(
+    `/api/analytics/${tab}?${query}`,
+  );
   useLive(null, (p) => {
     if (p?.kind === "status" || p?.kind === "refresh") reload();
   });
@@ -46,7 +52,12 @@ function DashboardBody({
         <span className="muted small">
           {data.filters.timezone} · {t(`an.${data.filters.bucket}`)}
         </span>
-        <Button variant="secondary" size="sm" onClick={reload} icon={<RefreshCw size={14} />}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={reload}
+          icon={<RefreshCw size={14} />}
+        >
           {t("an.refresh")}
         </Button>
       </div>
@@ -64,28 +75,11 @@ function DashboardBody({
           }}
         />
       )}
-      {tab === "performance" && <PerformanceDashboard data={data} page={page} onPage={onPage} />}
+      {tab === "performance" && (
+        <PerformanceDashboard data={data} page={page} onPage={onPage} />
+      )}
       {tab === "workflows" && (
-        <WorkflowDashboard
-          data={data}
-          page={page}
-          onPage={onPage}
-          view={workflowView}
-          onView={(view) => {
-            const p = new URLSearchParams(query);
-            if (view === "overview") p.delete("view");
-            else p.set("view", view);
-            p.delete("page");
-            onChange(p);
-          }}
-          onSelectWorkflow={(key) => {
-            const p = new URLSearchParams(query);
-            p.set("workflow", key);
-            p.set("view", "details");
-            p.delete("page");
-            onChange(p);
-          }}
-        />
+        <WorkflowDashboard data={data} page={page} onPage={onPage} />
       )}
     </>
   );
@@ -93,13 +87,16 @@ function DashboardBody({
 export function AnalyticsInsights({ tabParam }: { tabParam?: string }) {
   const { t } = useI18n();
   const tab = (
-    ANALYTICS_TABS.includes(tabParam?.split("?")[0] as Tab) ? tabParam!.split("?")[0] : "usage"
+    ANALYTICS_TABS.includes(tabParam?.split("?")[0] as Tab)
+      ? tabParam!.split("?")[0]
+      : "usage"
   ) as Tab;
   const raw = location.hash.includes("?")
     ? location.hash.slice(location.hash.indexOf("?") + 1)
     : "";
   const params = new URLSearchParams(raw);
-  for (const [k, v] of Object.entries(defaultFilters())) if (v && !params.has(k)) params.set(k, v);
+  for (const [k, v] of Object.entries(defaultFilters()))
+    if (v && !params.has(k)) params.set(k, v);
   const query = params.toString();
   const {
     data: options,
@@ -139,13 +136,10 @@ export function AnalyticsInsights({ tabParam }: { tabParam?: string }) {
           navigate(`/insights/${k}?${p}`);
         }}
       />
-      {optionsError && <ErrorBox error={optionsError} onRetry={reloadOptions} />}
-      <AnalyticsFilters
-        query={query}
-        options={options}
-        onApply={change}
-        compact={tab === "workflows"}
-      />
+      {optionsError && (
+        <ErrorBox error={optionsError} onRetry={reloadOptions} />
+      )}
+      <AnalyticsFilters query={query} options={options} onApply={change} />
       <DashboardBody key={tab} tab={tab} query={query} onChange={change} />
     </div>
   );

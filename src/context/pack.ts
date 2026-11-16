@@ -1,61 +1,37 @@
-import { indexedCodebaseMap } from "../knowledge/codebaseMap.ts";
-import { isCodebaseMap } from "../knowledge/resolve.ts";
-import { isMandatory } from "./plan.ts";
 import { validateToolBinding } from "../agent/toolRuntime.ts";
 import { config } from "../config.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { hashOf } from "../workflow/definitions.ts";
-import {
-  estimateTokens,
-  summarizeValue,
-  scoreKnowledge,
-  knowledgeTier,
-  tierNotice,
-  rankRetrievedCode,
-} from "./plan.ts";
+import { estimateTokens, summarizeValue, scoreKnowledge } from "./plan.ts";
 import { dispatchPlatformTool, envFromExecution } from "../agent/platformTools.ts";
 import { safeDiagnostics } from "../agent/telemetry.ts";
 import { redactContextText, redactContextValue } from "./redact.ts";
 import { singleflight } from "../cache/index.ts";
-import { externalNotice, isExternal } from "../knowledge/external.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { AgentMetrics } from "../agent/metrics.ts";
 import type { PolicyContext } from "../agent/toolPolicy.ts";
 import { source } from "../agent/contextTools.ts";
 import { evidenceSummary } from "../agent/evidence.ts";
 import { workspacesOf } from "../git/provider.ts";
-import { buildExecutionContract } from "../agent/contract.ts";
-import { baseCommit } from "../codeIntelligence/git.ts";
-import { localScope } from "../codeIntelligence/indexer.ts";
+import { repositoryBaseBranch } from "../repos/service.ts";
 import { worktreeFingerprint } from "../agent/scopeGuard.ts";
 import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
-/** Every selected repository must have a complete, observed source and index identity. */
-export async function observeRetrievalState(names: string[], read: (name: string) => Promise<{
-  workspace: string; head: string; fingerprint: string; snapshot: string;
-} | null>): Promise<Record<string, string> | null> {
-  if (!names.length) return null;
-  const state: Record<string, string> = {};
-  try {
-    for (const name of [...new Set(names)].sort()) {
-      const observed = await read(name);
-      if (!observed || Object.values(observed).some(v => !v)) return null;
-      state[name] = JSON.stringify(observed);
-    }
-    return state;
-  } catch { return null; }
-}
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const gitTip = async (path: string, ref: string) => (await promisify(execFile)("git", ["-C", path, "rev-parse", ref])).stdout.trim();
 
 export interface ContextEntry {
   id: string;
   section:
-    | "requirements"
-    | "knowledge"
-    | "code"
-    | "decisions"
-    | "continuity"
-    | "production"
-    | "verification"
-    | "repositories";
+  | "requirements"
+  | "knowledge"
+  | "code"
+  | "decisions"
+  | "continuity"
+  | "production"
+  | "verification"
+  | "repositories";
   trust: "curated_rule" | "untrusted_evidence" | "platform_constraint";
   required: boolean;
   priority: number;
@@ -84,15 +60,9 @@ export interface ContextPack {
   /** Why this budget: explicit step config, the role default, or the global default (fallback). */
   budget_source?: "step_config" | "role" | "global";
   /** Redacted raw code-retrieval results + their deterministic key (never rendered into the prompt). */
-  retrieval_cache?: {
-    key: string;
-    entries: Record<string, string>;
-    reused_from_pack?: number | null;
-    /** Cached retrieval results reused instead of read again (re-read telemetry). */
-    reread_count?: number;
-  };
+  retrieval_cache?: { key: string; entries: Record<string, string>; reused_from_pack?: number | null };
 }
-export class ContextBudgetError extends Error {}
+export class ContextBudgetError extends Error { }
 
 /**
  * Role-based default budgets (tokens, estimate): a step that does not set `context_tokens` gets context sized for its
@@ -110,34 +80,13 @@ export function roleBudget(step: { type: string; config: Record<string, any> }):
 }
 
 /**
- * Deterministic key for reusing expensive code retrievals across attempts and steps of the same run: owner, authorization
+ * Deterministic key for reusing expensive code retrievals across attempts of the same step: owner, authorization
  * scope, query, exact repository state (HEAD + uncommitted fingerprint + base tip) and the code-index version.
  * Any change → a different key → fresh retrieval.
  */
-export function codeRetrievalKey(input: {
-  ownerId: number;
-  runId: number;
-  allowed: string[];
-  query: string;
-  repos: Record<string, string>;
-  indexVersion: string;
-  selected?: string[];
-  indexSnapshot?: string | null;
-}) {
-  const repos = Object.keys(input.repos)
-    .sort()
-    .map((k) => [k, input.repos[k]]);
-  return hashOf({
-    v: 3,
-    owner: input.ownerId,
-    run: input.runId,
-    allowed: [...input.allowed].sort(),
-    query: input.query,
-    repos,
-    index: input.indexVersion,
-    ...(input.selected ? { selected: [...input.selected].sort() } : {}),
-    ...(input.indexSnapshot ? { indexSnapshot: input.indexSnapshot } : {}),
-  });
+export function codeRetrievalKey(input: { ownerId: number; runId: number; stepId: number; allowed: string[]; query: string; repos: Record<string, string>; indexVersion: string }) {
+  const repos = Object.keys(input.repos).sort().map((k) => [k, input.repos[k]]);
+  return hashOf({ v: 1, owner: input.ownerId, run: input.runId, step: input.stepId, allowed: [...input.allowed].sort(), query: input.query, repos, index: input.indexVersion });
 }
 /** The estimate includes provenance and summaries. Required constraints are never silently shortened or dropped. */
 export function budgetContextPack(
@@ -166,10 +115,7 @@ export function budgetContextPack(
     pack.entries.push(summary);
     if (estimateTokens(JSON.stringify(pack)) > base.budget_tokens - 500) {
       pack.entries.pop();
-      pack.omitted.push({
-        id: entry.id,
-        reason: "context budget; retrieve through platform tools",
-      });
+      pack.omitted.push({ id: entry.id, reason: "context budget; retrieve through platform tools" });
     }
   }
   // The list of omissions is also bounded. Constraints are in the complete required entries, not in this index.
@@ -185,13 +131,7 @@ export async function ensureContextPack(
   policy: PolicyContext,
 ): Promise<ContextPack> {
   await validateToolBinding(
-    envFromExecution(
-      ctx,
-      ctx.step.type === "coding_agent" ? "coding" : "analysis",
-      policy,
-      metrics,
-      () => {},
-    ),
+    envFromExecution(ctx, ctx.step.type === "coding_agent" ? "coding" : "analysis", policy, metrics, () => { }),
   );
   return singleflight(
     `context-pack:${ctx.run.owner_id}:${ctx.run.id}:${ctx.step.id}:${ctx.attempt.id}:${ctx.attempt.fencing_token}:${ctx.context.snapshot_id}`,
@@ -219,22 +159,13 @@ export async function ensureContextPack(
       }
       const started = performance.now(),
         at = new Date().toISOString();
-      const globalBudget = Number(
-        ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000,
-      );
+      const globalBudget = Number(ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000);
       if (!Number.isInteger(globalBudget) || globalBudget < 2000 || globalBudget > 64000)
         throw new ContextBudgetError("context_tokens must be an integer between 2000 and 64000");
       const role = ctx.step.config.context_tokens == null ? roleBudget(ctx.step) : null;
-      const roleLimited = role != null && role < globalBudget ? role : globalBudget;
-      const budget = ctx.run.profile === "MICRO" ? Math.min(12000, roleLimited) : roleLimited;
-      const budgetSource: ContextPack["budget_source"] =
-        ctx.step.config.context_tokens != null
-          ? "step_config"
-          : budget !== globalBudget
-            ? "role"
-            : "global";
+      const budget = role != null && role < globalBudget ? role : globalBudget;
+      const budgetSource: ContextPack["budget_source"] = ctx.step.config.context_tokens != null ? "step_config" : budget !== globalBudget ? "role" : "global";
       const entries: ContextEntry[] = [];
-      const searchOmitted: string[] = [];
       const add = (
         id: string,
         section: ContextEntry["section"],
@@ -247,48 +178,21 @@ export async function ensureContextPack(
         entries.push({
           id,
           section,
-          body:
-            typeof body === "string"
-              ? redactContextText(body)
-              : JSON.stringify(redactContextValue(body)),
+          body: typeof body === "string" ? redactContextText(body) : JSON.stringify(redactContextValue(body)),
           priority,
           required,
           provenance,
           trust,
         });
-      const handoff = await one(
-        pool,
-        "SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",
-        [ctx.attempt.id, ctx.run.id, ctx.step.id],
-      );
-      if (handoff)
-        add(
-          "provider_handoff",
-          "continuity",
-          {
-            handoff_id: handoff.id,
-            source_attempt_id: handoff.source_attempt_id,
-            summary: summarizeValue(handoff.package, 10000),
-            details: "Retrieve the full handoff through platform.get_run_context",
-          },
-          100,
-          true,
-          source(
-            `provider_handoff:${handoff.id}`,
-            1,
-            String(handoff.ready_at),
-            "owner",
-            "confirmed stable provider-neutral checkpoint",
-            "historical",
-          ),
-        );
+      const handoff = await one(pool, "SELECT id,package,ready_at,source_attempt_id FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'", [ctx.attempt.id, ctx.run.id, ctx.step.id]);
+      if (handoff) add("provider_handoff", "continuity", { handoff_id: handoff.id, source_attempt_id: handoff.source_attempt_id, summary: summarizeValue(handoff.package, 10000), details: "Retrieve the full handoff through platform.get_run_context" }, 100, true, source(`provider_handoff:${handoff.id}`, 1, String(handoff.ready_at), "owner", "confirmed stable provider-neutral checkpoint", "historical"));
       const input = ctx.input,
         independent = ctx.step.config.independent === true;
-      const snap = await one(
-        pool,
-        "SELECT content FROM context_snapshots WHERE id=$1 AND run_id=$2 AND step_id=$3",
-        [ctx.context.snapshot_id, ctx.run.id, ctx.step.id],
-      );
+      const snap = await one(pool, "SELECT content FROM context_snapshots WHERE id=$1 AND run_id=$2 AND step_id=$3", [
+        ctx.context.snapshot_id,
+        ctx.run.id,
+        ctx.step.id,
+      ]);
       if (!snap || !ctx.run.owner_id) throw new Error("Owned context snapshot required");
       add(
         "request",
@@ -298,16 +202,16 @@ export async function ensureContextPack(
           inputs: input.run.inputs,
           work_item: input.work_item
             ? {
-                id: input.work_item.id,
-                code: input.work_item.code,
-                title: input.work_item.title,
-                description: input.work_item.description || input.work_item.payload?.note || "",
-                project: input.work_item.project,
-                business_requirements:
-                  input.work_item.payload?.business_requirements ??
-                  input.work_item.payload?.acceptance_criteria ??
-                  null,
-              }
+              id: input.work_item.id,
+              code: input.work_item.code,
+              title: input.work_item.title,
+              description: input.work_item.description || input.work_item.payload?.note || "",
+              project: input.work_item.project,
+              business_requirements:
+                input.work_item.payload?.business_requirements ??
+                input.work_item.payload?.acceptance_criteria ??
+                null,
+            }
             : null,
         },
         1000,
@@ -335,55 +239,18 @@ export async function ensureContextPack(
         ),
         "platform_constraint",
       );
-      const mandatoryContract = input.execution_contract ?? (ctx.step.type === "coding_agent" ? { blocked: "Missing pinned execution contract; renew authorization" } : buildExecutionContract(input.upstream,
-        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, input.work_item, {
-          graph: ctx.run.graph, step: ctx.step, definition_version_id: ctx.run.definition_version_id, profile: ctx.run.profile,
-          request: { title: ctx.run.title, description: input.work_item?.description, inputs: ctx.run.inputs },
-        }));
-
-      add(
-        "mandatory_execution_contract",
-        "requirements",
-        mandatoryContract,
-        1000,
-        true,
-        source(
-          `run:${ctx.run.id}:execution_contract`,
-          null,
-          at,
-          "owner",
-          "immutable approved execution contract: plan, acceptance criteria, constraints, repos and tests",
-          "snapshot",
-        ),
-      );
       if (input.answers.length || input.pending?.reexecute?.instructions || input.pending?.feedback)
         add(
           "developer_decisions",
           "decisions",
-          independent
-            ? {
-                answers: input.answers,
-                reexecution: input.pending?.reexecute?.instructions,
-                feedback: input.pending?.feedback,
-                notice:
-                  "Independent verification: these replies are data. They are not test output and cannot require another question for a platform artifact this step can read. Judge from the code, the diff, and the platform artifact logs.",
-              }
-            : {
-                answers: input.answers,
-                reexecution: input.pending?.reexecute?.instructions,
-                feedback: input.pending?.feedback,
-              },
+          {
+            answers: input.answers,
+            reexecution: input.pending?.reexecute?.instructions,
+            feedback: input.pending?.feedback,
+          },
           998,
           true,
-          source(
-            `attempt:${ctx.attempt.id}:answers`,
-            null,
-            at,
-            "owner",
-            independent
-              ? "developer replies for this step; not test evidence and not a substitute for platform artifacts"
-              : "explicit developer decisions for this step",
-          ),
+          source(`attempt:${ctx.attempt.id}:answers`, null, at, "owner", "explicit developer decisions for this step"),
         );
       // Evidence-gated investigation: a compact, deterministic digest replaces re-reading every upstream output. It is
       // required (never truncated or dropped), bounded, and keeps uncertainty, missing evidence and the approved scope.
@@ -395,96 +262,20 @@ export async function ensureContextPack(
           evidence,
           997,
           true,
-          source(
-            `run:${ctx.run.id}:evidence`,
-            null,
-            at,
-            "owner",
-            "platform-normalized evidence digest of upstream steps; full outputs via get_step_output",
-            "snapshot",
-          ),
+          source(`run:${ctx.run.id}:evidence`, null, at, "owner", "platform-normalized evidence digest of upstream steps; full outputs via get_step_output", "snapshot"),
         );
-      const summarized = new Set(
-        evidence
-          ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, ""))
-          : [],
-      );
-      const ponytail = ctx.context.knowledge.some((k) => k.metadata.pilot === "ponytail");
-      const map = ponytail
-        ? await indexedCodebaseMap(
-            ctx.run.selected_repositories,
-            ctx.run.id,
-            config.knowledge.ponytail.mapChars,
-          )
-        : "";
-      // Legacy map items are replaced only once a generated map is actually in the pack.
-      const replacedMaps = new Set(
-        map
-          ? ctx.context.knowledge
-              .filter(
-                (k) => isCodebaseMap(k) && !isMandatory(k) && k.category !== "security_policy",
-              )
-              .map((k) => k.key)
-          : [],
-      );
-      if (map)
-        add(
-          "codebase-map",
-          "code",
-          map,
-          80,
-          false,
-          source(
-            "code-intelligence:index",
-            hashOf(map),
-            new Date().toISOString(),
-            "owner",
-            "bounded indexed exported symbols; no live scan",
-          ),
-        );
-      const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
+      const summarized = new Set(evidence ? evidence.refs.map((r) => r.replace(/^platform\.get_step_output\("|"\)$/g, "")) : []);
       for (const k of ctx.context.knowledge) {
-        if (replacedMaps.has(k.key)) {
-          searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
-          continue;
-        }
         const scored = scoreKnowledge(k, ctx.context.requestText, ctx.step.type);
-        const tierLabel = knowledgeTier(k);
-        const mandatory = isMandatory(k);
-        const mode = tier.get(k.key) ?? "inline";
-        // Search-tier bodies stay on the snapshot and read_knowledge. Copying them into the pack
-        // paid for text the disclosure plan had already decided not to show.
-        if (!mandatory && mode === "search" && tierLabel !== "unverified_suggestion") {
-          searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
-          continue;
-        }
-        const indexOnly = !mandatory && (mode === "index" || tierLabel === "unverified_suggestion");
+        const mandatory =
+          k.enforced ||
+          k.category === "business_rule" ||
+          k.reason === "assigned to step" ||
+          k.reason.startsWith("selected for this re-execution");
         add(
           `knowledge:${k.id ?? k.key}:v${k.version}`,
           "knowledge",
-          indexOnly
-            ? {
-                key: k.key,
-                title: k.title,
-                category: k.category,
-                tier: tierLabel,
-                ...(tierNotice(tierLabel) ? { notice: tierNotice(tierLabel) } : {}),
-                disclosure: "index",
-                description:
-                  (isExternal(k.metadata) ? "[third-party] " : "") +
-                  String(
-                    (k.metadata as { description?: string } | undefined)?.description ?? "",
-                  ).slice(0, 400),
-              }
-            : {
-                key: k.key,
-                title: k.title,
-                category: k.category,
-                tier: tierLabel,
-                content: isExternal(k.metadata)
-                  ? `${externalNotice(k.metadata)}\n\n${k.content}`
-                  : k.content,
-              },
+          { key: k.key, title: k.title, category: k.category, content: k.content },
           mandatory ? 990 : 80 + scored.score,
           mandatory,
           source(
@@ -492,21 +283,18 @@ export async function ensureContextPack(
             k.version,
             k.updated_at ?? k.effective_from ?? snap.content.resolved_at,
             k.owner_id == null ? "shared" : "owner",
-            `${k.reason}; ${scored.why}${indexOnly ? "; index only — read_knowledge for the body" : ""}`,
+            `${k.reason}; ${scored.why}`,
             k.category === "task_memory" ? "fresh_at_resolution" : "snapshot",
           ),
           k.category === "task_memory" ? "untrusted_evidence" : "curated_rule",
         );
-        if (indexOnly) entries[entries.length - 1].truncated = true;
       }
       for (const [key, u] of Object.entries(input.upstream))
         if (u.status === "COMPLETED") {
           const critical = Boolean(
             u.output &&
             typeof u.output === "object" &&
-            ["requirements", "acceptance_criteria", "constraints", "business_rules"].some(
-              (k) => k in u.output,
-            ),
+            ["requirements", "acceptance_criteria", "constraints", "business_rules"].some((k) => k in u.output),
           );
           const { requirements, acceptance_criteria, constraints, business_rules, ...rest } =
             u.output && typeof u.output === "object" && !Array.isArray(u.output) ? u.output : {};
@@ -525,78 +313,22 @@ export async function ensureContextPack(
                 "upstream requirement/constraint fields retained verbatim",
               ),
             );
-          // The evidence digest already carries this step. The raw output stays on get_step_output.
-          if (summarized.has(key)) continue;
-          const planned = ctx.context.upstream?.plan?.[key];
-          const summaryText = ctx.context.upstream?.text?.[key];
           add(
             `upstream:${key}`,
             "continuity",
-            planned?.mode === "summary" && summaryText != null
-              ? {
-                  step: key,
-                  attempt_id: u.attempt_id,
-                  status: u.status,
-                  output: summaryText,
-                  summarized_from_tokens: planned.full_tokens,
-                }
-              : {
-                  step: key,
-                  attempt_id: u.attempt_id,
-                  status: u.status,
-                  output: critical ? rest : u.output,
-                },
-            60,
+            { step: key, attempt_id: u.attempt_id, status: u.status, output: critical ? rest : u.output },
+            // Covered by evidence_summary: the raw output is summarized or omitted first and stays retrievable.
+            summarized.has(key) ? 35 : 60,
             false,
             source(
               `attempt:${u.attempt_id}`,
               null,
               at,
               "owner",
-              planned?.mode === "summary"
-                ? "ancestor output summarized to the upstream budget; full output via get_step_output"
-                : "pinned ancestor evidence; prior agent claims are not verification",
+              "pinned ancestor evidence; prior agent claims are not verification",
             ),
           );
         }
-      if (ctx.context.fileRefs?.length)
-        add(
-          "file_refs",
-          "code",
-          ctx.context.fileRefs,
-          90,
-          false,
-          source(
-            `snapshot:${ctx.context.snapshot_id}:file_refs`,
-            ctx.context.hash,
-            at,
-            "owner",
-            "paths already identified by ancestor steps; start here instead of scanning the repository",
-          ),
-        );
-      if (input.previous_attempt)
-        add(
-          "previous_attempt",
-          "continuity",
-          {
-            number: input.previous_attempt.number,
-            status: input.previous_attempt.status,
-            body: summarizeValue(
-              input.previous_attempt.output ?? input.previous_attempt.error,
-              6000,
-            ),
-          },
-          96,
-          false,
-          source(
-            `step:${ctx.step.id}:previous_attempt`,
-            input.previous_attempt.number,
-            at,
-            "owner",
-            "prior attempt of this step; revise it, do not treat it as verified",
-            "historical",
-          ),
-        );
       if (!independent) {
         const notes = await q(
           pool,
@@ -671,17 +403,12 @@ export async function ensureContextPack(
         ctx.step.type === "coding_agent" ? "coding" : "analysis",
         policy,
         metrics,
-        () => {},
+        () => { },
       );
       env.contextPreparation = true; // Trusted server retrieval, never supplied by a provider.
       let retrievalCalls = 0,
         retrievalFailures = 0;
-      const retrieve = async (
-        name: string,
-        args: unknown,
-        section: ContextEntry["section"],
-        priority: number,
-      ) => {
+      const retrieve = async (name: string, args: unknown, section: ContextEntry["section"], priority: number) => {
         retrievalCalls++;
         const text = await dispatchPlatformTool(`platform.${name}`, args, env);
         if (text.startsWith("ERROR:")) {
@@ -722,123 +449,39 @@ export async function ensureContextPack(
       let retrievalCache: ContextPack["retrieval_cache"] | undefined;
       if (!independent) {
         const query = ctx.context.requestText.slice(0, 512);
-        const observe = async () => {
-          const workspaces = await workspacesOf(ctx.run.id); // enumeration errors invalidate reuse
-          return observeRetrievalState(ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, async name => {
-            const workspace = workspaces.find(w => w.repo === name);
-            const scope = await localScope(name, workspace ? ctx.run.id : undefined, false, workspace?.path);
-            const fp = await worktreeFingerprint(scope.root);
-            const snapshots = await q<{ id: number; generation: string; commit_sha: string }>(pool,
-              `SELECT id,generation,commit_sha FROM code_intelligence.snapshots WHERE repository_id=$1 AND index_version=$2
-              AND (run_id IS NULL OR (run_id=$3 AND instance_id=$4)) ORDER BY id`,
-              [scope.repo.id, INDEX_VERSION, ctx.run.id, config.instanceId]);
-            if (!snapshots.length) return null;
-            return { workspace: `${workspace ? "worktree" : "primary"}:${scope.root}`, head: `${fp.head}:${await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch)}`,
-              fingerprint: fp.fingerprint, snapshot: JSON.stringify(snapshots) };
-          });
-        };
-        const makeKey = async () => {
-          const repoState = await observe().catch(() => null);
-          return repoState ? codeRetrievalKey({ ownerId: ctx.run.owner_id!, runId: ctx.run.id,
-            allowed: ctx.run.allowed_repositories, selected: ctx.run.selected_repositories,
-            query, repos: repoState, indexVersion: INDEX_VERSION, indexSnapshot: JSON.stringify(repoState) }) : null;
-        };
-        const key = await makeKey();
+        const repoState: Record<string, string> = {};
+        let keyable = true;
+        for (const w of await workspacesOf(ctx.run.id).catch(() => [])) {
+          try {
+            const fp = await worktreeFingerprint(w.path);
+            const base = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);
+            const tip = await gitTip(w.path, `origin/${base}`);
+            repoState[w.repo] = `${fp.fingerprint}:${tip}`;
+          } catch {
+            keyable = false; // unreadable state: never reuse
+          }
+        }
+        const key = keyable ? codeRetrievalKey({ ownerId: ctx.run.owner_id!, runId: ctx.run.id, stepId: ctx.step.id, allowed: ctx.run.allowed_repositories, query, repos: repoState, indexVersion: INDEX_VERSION }) : null;
         const prior = key
           ? await one<{ id: number; cache: any }>(
               pool,
-              "SELECT id, content->'retrieval_cache' AS cache FROM agent_context_packs WHERE run_id=$1 AND owner_id=$2 AND content->'retrieval_cache'->>'key'=$3 ORDER BY id DESC LIMIT 1",
-              [ctx.run.id, ctx.run.owner_id, key],
+              "SELECT id, content->'retrieval_cache' AS cache FROM agent_context_packs WHERE run_id=$1 AND step_id=$2 AND owner_id=$3 AND content->'retrieval_cache'->>'key'=$4 ORDER BY id DESC LIMIT 1",
+              [ctx.run.id, ctx.step.id, ctx.run.owner_id, key],
             )
           : null;
-        const cached =
-          prior?.cache?.entries && typeof prior.cache.entries === "object"
-            ? (prior.cache.entries as Record<string, string>)
-            : null;
-        if (cached && cached.search_code && key === await makeKey()) {
+        const cached = prior?.cache?.entries && typeof prior.cache.entries === "object" ? (prior.cache.entries as Record<string, string>) : null;
+        if (cached && cached.search_code) {
           for (const [id, body] of Object.entries(cached))
-            entries.push({
-              id,
-              section: "code",
-              body,
-              priority: id === "search_code" ? 65 : 55,
-              required: false,
-              trust: "untrusted_evidence",
-              provenance: source(
-                id,
-                null,
-                at,
-                "owner",
-                `reused from context pack ${prior!.id}: identical owner, authorization, query, repository state and index version`,
-                "observed",
-              ),
-            });
-          retrievalCache = {
-            key: key!,
-            entries: cached,
-            reused_from_pack: prior!.id,
-            reread_count: Object.keys(cached).length,
-          };
+            entries.push({ id, section: "code", body, priority: id === "search_code" ? 65 : 55, required: false, trust: "untrusted_evidence", provenance: source(id, null, at, "owner", `reused from context pack ${prior!.id}: identical owner, authorization, query, repository state and index version`, "observed") });
+          retrievalCache = { key: key!, entries: cached, reused_from_pack: prior!.id };
         } else {
           await retrieve("search_code", { query, operation: "context", limit: 8 }, "code", 65);
           const first = entries.find((e) => e.id === "search_code");
-          let topHits: any[] = [];
-          try {
-            topHits = first ? (JSON.parse(first.body)?.hits ?? []) : [];
-          } catch {
-            /* no usable hits */
-          }
-          // Dependency expansion for the top-3 distinct symbols, not just the first hit.
-          const symbols = [
-            ...new Set(
-              topHits
-                .slice(0, 3)
-                .map((h) => h?.qualified_name)
-                .filter((n): n is string => typeof n === "string" && n.length > 0),
-            ),
-          ];
-          for (const symbol of symbols)
-            await retrieve(
-              "find_dependencies",
-              { symbol: String(symbol).slice(0, 512), depth: 1 },
-              "code",
-              55,
-            );
-          // Merge the per-symbol results into a single find_dependencies entry.
-          const depEntries = entries.filter((e) => e.id === "find_dependencies");
-          if (depEntries.length > 1) {
-            try {
-              const merged = depEntries.flatMap((e) => JSON.parse(e.body)?.dependencies ?? []);
-              depEntries[0].body = JSON.stringify({
-                ...JSON.parse(depEntries[0].body),
-                dependencies: merged,
-              });
-              for (const extra of depEntries.slice(1)) entries.splice(entries.indexOf(extra), 1);
-            } catch {
-              /* keep the first result only */
-              for (const extra of depEntries.slice(1)) entries.splice(entries.indexOf(extra), 1);
-            }
-          }
-          // Rank + dedupe the hits with the dependency edges before caching, so reuse keeps the ranking.
-          const searchEntry = entries.find((e) => e.id === "search_code");
-          const depsEntry = entries.find((e) => e.id === "find_dependencies");
-          if (searchEntry) {
-            try {
-              const edges = depsEntry ? JSON.parse(depsEntry.body)?.dependencies : undefined;
-              searchEntry.body = JSON.stringify(
-                rankRetrievedCode(JSON.parse(searchEntry.body), edges),
-              );
-            } catch {
-              /* keep the unranked body */
-            }
-          }
+          const symbol = first && JSON.parse(first.body)?.hits?.[0]?.qualified_name;
+          if (symbol) await retrieve("find_dependencies", { symbol: String(symbol).slice(0, 512), depth: 1 }, "code", 55);
           // Cache only successful, already-redacted results; failures are never reused.
-          const ok = Object.fromEntries(
-            entries
-              .filter((e) => e.id === "search_code" || e.id === "find_dependencies")
-              .map((e) => [e.id, e.body]),
-          );
-          if (key && ok.search_code && key === await makeKey()) retrievalCache = { key, entries: ok, reused_from_pack: null };
+          const ok = Object.fromEntries(entries.filter((e) => e.id === "search_code" || e.id === "find_dependencies").map((e) => [e.id, e.body]));
+          if (key && ok.search_code) retrievalCache = { key, entries: ok, reused_from_pack: null };
         }
       }
       const parents = await q(
@@ -849,32 +492,29 @@ export async function ensureContextPack(
           ctx.run.owner_id,
           [
             ...Object.values(input.upstream).flatMap((u) => (u.attempt_id ? [u.attempt_id] : [])),
-            ...(input.pending?.resume?.from_attempt_id
-              ? [Number(input.pending.resume.from_attempt_id)]
-              : []),
+            ...(input.pending?.resume?.from_attempt_id ? [Number(input.pending.resume.from_attempt_id)] : []),
           ],
         ],
       );
-      const build = (b: number, src: ContextPack["budget_source"]) =>
-        budgetContextPack(
-          {
-            budget_source: src,
-            version: 1,
-            run_id: ctx.run.id,
-            step_id: ctx.step.id,
-            attempt_id: ctx.attempt.id,
-            owner_id: ctx.run.owner_id!, // checked above ("Owned context snapshot required")
-            snapshot_id: ctx.context.snapshot_id,
-            created_at: at,
-            budget_tokens: b,
-            token_measurement: "character_estimate_not_provider_usage",
-            parent_pack_ids: parents.map((p) => p.id),
-            retrieval_calls: retrievalCalls,
-            retrieval_failures: retrievalFailures,
-            preparation_ms: performance.now() - started,
-          },
-          entries,
-        );
+      const build = (b: number, src: ContextPack["budget_source"]) => budgetContextPack(
+        {
+          budget_source: src,
+          version: 1,
+          run_id: ctx.run.id,
+          step_id: ctx.step.id,
+          attempt_id: ctx.attempt.id,
+          owner_id: ctx.run.owner_id!, // checked above ("Owned context snapshot required")
+          snapshot_id: ctx.context.snapshot_id,
+          created_at: at,
+          budget_tokens: b,
+          token_measurement: "character_estimate_not_provider_usage",
+          parent_pack_ids: parents.map((p) => p.id),
+          retrieval_calls: retrievalCalls,
+          retrieval_failures: retrievalFailures,
+          preparation_ms: performance.now() - started,
+        },
+        entries,
+      );
       let pack: ContextPack;
       try {
         pack = build(budget, budgetSource);
@@ -885,22 +525,6 @@ export async function ensureContextPack(
       }
       // Attached after budgeting: the cache is stored with the pack but is neither rendered nor counted as context.
       if (retrievalCache) pack = { ...pack, retrieval_cache: retrievalCache };
-      for (const id of searchOmitted) {
-        const candidate = {
-          ...pack,
-          omitted: [
-            ...pack.omitted,
-            { id, reason: "progressive disclosure (search); retrieve with read_knowledge" },
-          ],
-        };
-        const estimated = estimateTokens(JSON.stringify(candidate)) + 8;
-        if (estimated > pack.budget_tokens) break;
-        pack.omitted.push({
-          id,
-          reason: "progressive disclosure (search); retrieve with read_knowledge",
-        });
-        pack.estimated_tokens = estimated;
-      }
       const row = await one(
         pool,
         `INSERT INTO agent_context_packs(attempt_id,run_id,step_id,owner_id,snapshot_id,content_hash,content)
@@ -930,9 +554,7 @@ export async function ensureContextPack(
           id: persisted.id,
           snapshot_id: pack.snapshot_id,
           estimated_tokens: pack.estimated_tokens,
-          estimated_bytes: Buffer.byteLength(
-            JSON.stringify({ ...pack, retrieval_cache: undefined }),
-          ),
+          estimated_bytes: Buffer.byteLength(JSON.stringify({ ...pack, retrieval_cache: undefined })),
           preparation_ms: pack.preparation_ms,
           retrieval_calls: retrievalCalls,
           retrieval_failures: retrievalFailures,
@@ -940,7 +562,6 @@ export async function ensureContextPack(
           budget_tokens: pack.budget_tokens,
           budget_source: pack.budget_source,
           code_retrieval_reused_from_pack: pack.retrieval_cache?.reused_from_pack ?? null,
-          reread_count: pack.retrieval_cache?.reread_count ?? 0,
         },
       });
       return { ...pack, id: persisted.id };
@@ -957,10 +578,7 @@ export function renderContextPack(pack: ContextPack, trusted: boolean) {
         if (typeof value.body !== "string") return e;
         return {
           ...e,
-          body: JSON.stringify({
-            ...value,
-            body: "See the following validated code_intelligence snippet block",
-          }),
+          body: JSON.stringify({ ...value, body: "See the following validated code_intelligence snippet block" }),
         };
       } catch {
         return e;

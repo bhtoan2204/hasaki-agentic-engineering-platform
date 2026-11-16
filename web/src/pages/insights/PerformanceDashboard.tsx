@@ -26,7 +26,11 @@ export function PerformanceDashboard({
       <div className="ins-stats">
         <Metric label="runs" value={s.runs} />
         <Metric label="attempts" value={s.attempts} />
-        <Metric label="completion" value={ratio(s.completed_runs, s.runs)} style="pct" />
+        <Metric
+          label="completion"
+          value={ratio(s.completed_runs, s.runs)}
+          style="pct"
+        />
         <Metric
           label="verified"
           value={ratio(s.verified_runs, s.evaluated_runs)}
@@ -34,18 +38,30 @@ export function PerformanceDashboard({
           hint={t("an.verifiedHint")}
         />
         <Metric label="verifiedTasks" value={s.verified_tasks} />
-        <Metric label="retry" value={ratio(s.retried_attempts, s.attempts)} style="pct" />
+        <Metric
+          label="retry"
+          value={ratio(s.retried_attempts, s.attempts)}
+          style="pct"
+        />
         <Metric label="executionP50" value={s.execution_p50_ms} style="ms" />
         <Metric label="executionP95" value={s.execution_p95_ms} style="ms" />
         <Metric label="workflowP95" value={s.workflow_p95_ms} style="ms" />
         <Metric label="queue" value={s.queue_ms} style="ms" />
         <Metric label="human" value={s.human_wait_ms} style="ms" />
         <Metric label="tools" value={s.tool_ms} style="ms" />
-        <Metric label="toolError" value={ratio(s.tool_failures, s.tool_calls)} style="pct" />
+        <Metric
+          label="toolError"
+          value={ratio(s.tool_failures, s.tool_calls)}
+          style="pct"
+        />
       </div>
       <div className="ins-grid">
         <Panel title={t("an.failures")}>
-          <BreakdownBars rows={data.failures ?? []} field="attempts" labelKey="category" />
+          <BreakdownBars
+            rows={data.failures ?? []}
+            field="attempts"
+            labelKey="category"
+          />
         </Panel>
         <Panel title={t("an.coverage")}>
           <DataTable
@@ -62,39 +78,21 @@ export function PerformanceDashboard({
           />
         </Panel>
       </div>
-      <Panel title={t("an.compare")} hint={t("an.compareHint")}>
+      <Panel title={t("an.compare")}>
         <DataTable
           rows={data.comparison ?? []}
+          total={s.comparison_total}
+          page={page}
+          onPage={onPage}
           columns={[
             { key: "provider", label: "provider" },
             { key: "model", label: "model" },
             { key: "invocations", label: "invocations", style: "number" },
             { key: "runs", label: "runs", style: "number" },
-            { key: "failures", label: "failureCount", style: "number" },
-            {
-              key: "completed_runs",
-              label: "completed",
-              style: "number",
-              responsivePriority: "secondary",
-            },
-            {
-              key: "verified_runs",
-              label: "verifiedRuns",
-              style: "number",
-              responsivePriority: "secondary",
-            },
-            {
-              key: "execution_p50_ms",
-              label: "executionP50",
-              style: "ms",
-              responsivePriority: "secondary",
-            },
-            {
-              key: "execution_p95_ms",
-              label: "executionP95",
-              style: "ms",
-              responsivePriority: "secondary",
-            },
+            { key: "completed_runs", label: "completed", style: "number" },
+            { key: "verified_runs", label: "verifiedRuns", style: "number" },
+            { key: "execution_p50_ms", label: "executionP50", style: "ms" },
+            { key: "execution_p95_ms", label: "executionP95", style: "ms" },
           ]}
         />
       </Panel>
@@ -106,35 +104,15 @@ export function PerformanceDashboard({
           onPage={onPage}
           columns={[
             { key: "run_id", label: "run", render: runLink },
-            { key: "step_type", label: "step" },
             { key: "provider", label: "provider" },
             { key: "model", label: "model" },
             { key: "status", label: "status", render: (r) => status(r.status) },
             { key: "provider_execution_ms", label: "execution", style: "ms" },
-            {
-              key: "wall_duration_ms",
-              label: "wall",
-              style: "ms",
-              responsivePriority: "secondary",
-            },
-            {
-              key: "queue_duration_ms",
-              label: "queue",
-              style: "ms",
-              responsivePriority: "secondary",
-            },
-            { key: "human_wait_ms", label: "human", style: "ms", responsivePriority: "secondary" },
-            {
-              key: "tool_execution_ms",
-              label: "tools",
-              style: "ms",
-              responsivePriority: "secondary",
-            },
-            {
-              key: "normalized_failure_category",
-              label: "failures",
-              responsivePriority: "secondary",
-            },
+            { key: "wall_duration_ms", label: "wall", style: "ms" },
+            { key: "queue_duration_ms", label: "queue", style: "ms" },
+            { key: "human_wait_ms", label: "human", style: "ms" },
+            { key: "tool_execution_ms", label: "tools", style: "ms" },
+            { key: "normalized_failure_category", label: "failures" },
           ]}
         />
       </Panel>

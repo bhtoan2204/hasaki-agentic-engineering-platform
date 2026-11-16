@@ -3,9 +3,21 @@ import { ArrowLeft, ExternalLink, RefreshCw } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { EmptyState, ErrorBox } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import { DataTable, dateCell, fmt, Panel, type Row } from "../analytics/shared.tsx";
+import {
+  DataTable,
+  dateCell,
+  fmt,
+  Panel,
+  type Row,
+} from "../analytics/shared.tsx";
 
-export function ProductionIncident({ fingerprint, query }: { fingerprint: string; query: string }) {
+export function ProductionIncident({
+  fingerprint,
+  query,
+}: {
+  fingerprint: string;
+  query: string;
+}) {
   const { t } = useI18n();
   const params = new URLSearchParams(query);
   const returnTo = trustedProductionReturn(params.get("return_to"));
@@ -47,14 +59,22 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
           <code>{fingerprint}</code>
         </div>
         <div className="an-incident-status">
-          <span className={`pill sev-${g.severity}`}>{g.severity ?? t("an.unknown")}</span>
-          <span className="pill">{t(`an.${g.lifecycle_status ?? "open"}`)}</span>
+          <span className={`pill sev-${g.severity}`}>
+            {g.severity ?? t("an.unknown")}
+          </span>
+          <span className="pill">
+            {t(`an.${g.lifecycle_status ?? "open"}`)}
+          </span>
         </div>
       </header>
       <div className="an-health-service-kpis">
         <div>
           <span>{t("an.errorEvents")}</span>
-          <b>{rows.length ? fmt(rows.reduce((n, r) => n + Number(r.event_count ?? 0), 0)) : "—"}</b>
+          <b>
+            {rows.length
+              ? fmt(rows.reduce((n, r) => n + Number(r.event_count ?? 0), 0))
+              : "—"}
+          </b>
         </div>
         <div>
           <span>{t("an.firstSeen")}</span>
@@ -66,7 +86,13 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
         </div>
         <div>
           <span>{t("an.recurringIncidents")}</span>
-          <b>{rows.length ? (g.observed_recurring ? t("an.yes") : t("an.no")) : "—"}</b>
+          <b>
+            {rows.length
+              ? g.observed_recurring
+                ? t("an.yes")
+                : t("an.no")
+              : "—"}
+          </b>
         </div>
       </div>
       <a
@@ -105,7 +131,9 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
             { key: "trigger", label: "source" },
           ]}
         />
-        {!rows.length && <div className="an-chart-empty">{t("an.insufficientHistory")}</div>}
+        {!rows.length && (
+          <div className="an-chart-empty">{t("an.insufficientHistory")}</div>
+        )}
       </Panel>
       <Panel title={t("an.incidentLifecycleHistory")}>
         <DataTable
@@ -126,7 +154,8 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
         <div className="an-incident-links an-incident-related">
           {g.work_item_id && (
             <a href={`#/work-items/${g.work_item_id}`}>
-              {g.work_item_code ?? `#${g.work_item_id}`} · {g.work_item_title ?? ""}
+              {g.work_item_code ?? `#${g.work_item_id}`} ·{" "}
+              {g.work_item_title ?? ""}
               <ExternalLink size={13} />
             </a>
           )}

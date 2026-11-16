@@ -1,12 +1,21 @@
 import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, Info } from "lucide-react";
-import { EmptyState, Skeleton, SkeletonRows, StatCard, time } from "../../ui.tsx";
+import {
+  EmptyState,
+  Skeleton,
+  SkeletonRows,
+  StatCard,
+  time,
+} from "../../ui.tsx";
 import { uiLocale, useI18n } from "../../i18n/index.tsx";
 
 export type Row = Record<string, any>;
 export const number = (v: unknown) =>
   v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
-export const fmt = (v: unknown, style: "number" | "usd" | "ms" | "pct" = "number") => {
+export const fmt = (
+  v: unknown,
+  style: "number" | "usd" | "ms" | "pct" = "number",
+) => {
   const n = number(v);
   if (n == null) return "—";
   const locale = uiLocale() === "vi" ? "vi-VN" : "en-GB";
@@ -14,7 +23,8 @@ export const fmt = (v: unknown, style: "number" | "usd" | "ms" | "pct" = "number
     return n >= 60000
       ? `${(n / 60000).toLocaleString(locale, { maximumFractionDigits: 1 })} min`
       : `${(n / 1000).toLocaleString(locale, { maximumFractionDigits: 2 })} s`;
-  if (style === "pct") return `${(n * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
+  if (style === "pct")
+    return `${(n * 100).toLocaleString(locale, { maximumFractionDigits: 1 })}%`;
   return n.toLocaleString(locale, {
     maximumFractionDigits: style === "usd" ? 4 : 1,
     ...(style === "usd" ? { style: "currency", currency: "USD" } : {}),
@@ -141,8 +151,16 @@ export function DataTable({
               {t(expanded ? "an.summaryColumns" : "an.allColumns")}
             </button>
           )}
-          <div className="table-wrap" tabIndex={0} role="region" aria-label={t("an.tableScroll")}>
-            <table id={tableId} className={`ins-table${prioritised ? " prioritised-table" : ""}`}>
+          <div
+            className="table-wrap"
+            tabIndex={0}
+            role="region"
+            aria-label={t("an.tableScroll")}
+          >
+            <table
+              id={tableId}
+              className={`ins-table${prioritised ? " prioritised-table" : ""}`}
+            >
               <colgroup>
                 {columns.map((c) => (
                   <col
@@ -173,7 +191,11 @@ export function DataTable({
                       <td
                         key={c.key}
                         style={cellStyle(c)}
-                        className={c.style || c.align === "right" ? "numeric-cell" : undefined}
+                        className={
+                          c.style || c.align === "right"
+                            ? "numeric-cell"
+                            : undefined
+                        }
                         data-priority={c.responsivePriority}
                       >
                         {c.render ? (
@@ -271,7 +293,10 @@ export function Trend({
               <div
                 className={n == null ? "an-trend-missing" : "an-trend-bar"}
                 style={{
-                  height: n == null ? "8px" : `${max > 0 ? Math.max(1, (n / max) * 100) : 1}%`,
+                  height:
+                    n == null
+                      ? "8px"
+                      : `${max > 0 ? Math.max(1, (n / max) * 100) : 1}%`,
                 }}
               />
             </div>
@@ -313,19 +338,18 @@ export function BreakdownBars({
   const max = Math.max(...rows.map((r) => Number(r[field] ?? 0)), 1);
   return (
     <ul className="ins-bars">
-      {rows.map((r, i) => {
-        const n = Number(r[field] ?? 0);
-        const width = n > 0 ? Math.max(2, (100 * n) / max) : 0;
-        return (
-          <li className="ins-bar" key={i}>
-            <span className="mono">{r[labelKey] ?? t("an.unknown")}</span>
-            <div className="ins-bar-track" aria-hidden>
-              <span className="ins-bar-fill" style={{ width: `${width}%` }} />
-            </div>
-            <span className="ins-bar-value">{fmt(r[field])}</span>
-          </li>
-        );
-      })}
+      {rows.map((r, i) => (
+        <li className="ins-bar" key={i}>
+          <span className="mono">{r[labelKey] ?? t("an.unknown")}</span>
+          <div className="ins-bar-track" aria-hidden>
+            <span
+              className="ins-bar-fill"
+              style={{ width: `${(100 * Number(r[field] ?? 0)) / max}%` }}
+            />
+          </div>
+          <span>{fmt(r[field])}</span>
+        </li>
+      ))}
     </ul>
   );
 }

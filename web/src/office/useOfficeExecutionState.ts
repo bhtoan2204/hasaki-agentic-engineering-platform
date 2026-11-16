@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, isStateChange, useApi, useLive, type LiveState } from "../api.ts";
+import { api, useApi, useLive, type LiveState } from "../api.ts";
 import type { EventLite, OfficeSnapshot } from "./types.ts";
 
 const KEEP_EVENTS = 40;
-const WATCH = ["RUNNING", "RETRYING", "WAITING_INPUT", "WAITING_APPROVAL", "FAILED"];
+const WATCH = [
+  "RUNNING",
+  "RETRYING",
+  "WAITING_INPUT",
+  "WAITING_APPROVAL",
+  "FAILED",
+];
 
 /**
  * Real execution state for the office: the run detail (`GET /api/runs/:id`), refreshed by the shared SSE stream
  * (`useLive`), plus the recent transcript of attempts worth showing (active/failed steps and the selected step),
  * fetched incrementally with `?after=<last id>` from the existing transcript endpoint. No new backend endpoints.
  */
-export function useOfficeExecutionState(runId: number | null, focusStepKey: string | null) {
+export function useOfficeExecutionState(
+  runId: number | null,
+  focusStepKey: string | null,
+) {
   const {
     data: run,
     error,
@@ -31,7 +40,9 @@ export function useOfficeExecutionState(runId: number | null, focusStepKey: stri
       if (!r?.steps) return;
       const ids: number[] = r.steps
         .filter(
-          (s: any) => s.current_attempt_id && (WATCH.includes(s.status) || s.key === focusStepKey),
+          (s: any) =>
+            s.current_attempt_id &&
+            (WATCH.includes(s.status) || s.key === focusStepKey),
         )
         .map((s: any) => Number(s.current_attempt_id));
       await Promise.all(
@@ -68,14 +79,7 @@ export function useOfficeExecutionState(runId: number | null, focusStepKey: stri
   );
 
   useEffect(() => void pullTranscripts(run), [run, pullTranscripts]);
-  // A transcript line only extends the speech bubbles (incremental); the run itself is reloaded on state changes.
-  const latestRun = useRef(run);
-  latestRun.current = run;
-  const live: LiveState = useLive(
-    runId,
-    (p) => (isStateChange(p) ? void reload() : void pullTranscripts(latestRun.current)),
-    !!runId,
-  );
+  const live: LiveState = useLive(runId, () => void reload(), !!runId);
 
   const snapshot: OfficeSnapshot | null = run
     ? {
@@ -108,7 +112,8 @@ export function useOfficeRuns() {
     if (!p || p.kind === "status") void reload();
   });
   const runs = data ?? [];
-  const isActive = (r: any) => ["RUNNING", "WAITING", "PAUSED"].includes(r.status);
+  const isActive = (r: any) =>
+    ["RUNNING", "WAITING", "PAUSED"].includes(r.status);
   return { runs, active: runs.filter(isActive), isActive };
 }
 

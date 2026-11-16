@@ -2,15 +2,13 @@
 // Fake `agy` CLI for deterministic unit and integration tests.
 // Behaves like Google Antigravity CLI for capabilities discovery (--version, --help, models)
 // and headless execution through the documented stream-json stdin protocol.
-import { implementTransportFixture } from "./transport-implementation.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const mode = process.env.FAKE_AGY_MODE || "ok";
-const log = (o) =>
-  process.env.FAKE_AGY_LOG && appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(o) + "\n");
+const log = (o) => process.env.FAKE_AGY_LOG && appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(o) + "\n");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,7 +30,7 @@ Options:
   --effort <effort>              Reasoning effort: low, medium, high, xhigh, max
   --sandbox                      Run inside sandbox isolation
   --conversation <id>            Resume existing conversation session
-  --print-timeout <duration>     Maximum print execution timeout, for example 2700s
+  --print-timeout <ms>           Maximum print execution timeout in milliseconds
   --add-dir <path>               Add workspace directory
 `);
   }
@@ -53,12 +51,8 @@ gpt-oss-120b-medium`);
   process.exit(0);
 }
 
-if (
-  !argv.includes("--input-format") ||
-  argv[argv.indexOf("--input-format") + 1] !== "stream-json" ||
-  !argv.includes("--output-format") ||
-  argv[argv.indexOf("--output-format") + 1] !== "stream-json"
-) {
+if (!argv.includes("--input-format") || argv[argv.indexOf("--input-format") + 1] !== "stream-json" ||
+    !argv.includes("--output-format") || argv[argv.indexOf("--output-format") + 1] !== "stream-json") {
   console.error("Expected --input-format stream-json and --output-format stream-json");
   process.exit(2);
 }
@@ -70,8 +64,7 @@ try {
   const rows = stdinText.trimEnd().split("\n");
   if (rows.length !== 1) throw new Error("expected exactly one NDJSON input event");
   const input = JSON.parse(rows[0]);
-  if (input.event !== "user" || typeof input.message?.content !== "string")
-    throw new Error("invalid user event");
+  if (input.event !== "user" || typeof input.message?.content !== "string") throw new Error("invalid user event");
   prompt = input.message.content;
 } catch (e) {
   console.error(`invalid stream-json stdin: ${e.message}`);
@@ -95,9 +88,7 @@ log({
     DATABASE_URL: !!process.env.DATABASE_URL,
     AUTH_SECRET: !!process.env.AUTH_SECRET,
     BROKER: !!process.env.PLATFORM_BROKER_TOKEN,
-    containsPrompt: Object.values(process.env).some(
-      (v) => v === prompt || (prompt.length > 1000 && v?.includes(prompt.slice(0, 1000))),
-    ),
+    containsPrompt: Object.values(process.env).some((v) => v === prompt || (prompt.length > 1000 && v?.includes(prompt.slice(0, 1000)))),
   },
 });
 
@@ -119,11 +110,7 @@ if (mode === "quota") {
 
 if (mode === "aux_complete") {
   out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
-  out({
-    type: "message",
-    role: "assistant",
-    content: process.env.FAKE_AGY_TEXT || "Auxiliary response",
-  });
+  out({ type: "message", role: "assistant", content: process.env.FAKE_AGY_TEXT || "Auxiliary response" });
   out({ type: "tokens", input: 25, output: 10, reasoning: 0, cache_read: 0 });
   process.exit(0);
 }
@@ -133,11 +120,9 @@ const hooksFile = join(process.cwd(), ".agents", "hooks.json");
 const mcpFile = join(process.cwd(), ".agents", "mcp_config.json");
 
 let hookCommand = null;
-let telemetryCommand = null;
 if (existsSync(hooksFile)) {
   try {
     const hooksCfg = JSON.parse(readFileSync(hooksFile, "utf8"));
-    telemetryCommand = hooksCfg["platform-model"]?.PreInvocation?.[0]?.command ?? null;
     hookCommand =
       hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ||
       hooksCfg["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command ||
@@ -152,7 +137,7 @@ const callHook = (payload) => {
     input: JSON.stringify({
       session_id: sessionId,
       cwd: process.cwd(),
-      modelName: "gemini-3.8-flash-high",
+      model: "gemini-3.8-flash-high",
       ...payload,
     }),
     env: process.env,
@@ -218,26 +203,6 @@ async function tool(mcp, name, args) {
   return r.result;
 }
 
-if (mode === "native-model") {
-  out({ event: "init", conversation_id: sessionId, init: { cwd: process.cwd() } });
-  if (telemetryCommand) {
-    const r = spawnSync("sh", ["-c", telemetryCommand], {
-      input: JSON.stringify({
-        conversationId: sessionId,
-        modelName: "gemini-native-reported",
-        invocationNum: 0,
-      }),
-      env: process.env,
-      encoding: "utf8",
-    });
-    log({ modelHook: r.status, response: r.stdout });
-  }
-  out({
-    event: "result",
-    result: { status: "SUCCESS", response: "no tools needed", num_turns: 1 },
-  });
-  process.exit(0);
-}
 out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
 out({ type: "thinking", thought: "Initializing Antigravity session..." });
 
@@ -259,7 +224,6 @@ if (mode === "denied_tool") {
   log({ write: r.status, stdout: r.stdout });
 }
 
-implementTransportFixture();
 const mcp = startMcp();
 if (mcp) {
   await mcp.rpc("initialize", { protocolVersion: "2024-11-05" });
@@ -312,11 +276,7 @@ const output =
   mode === "bad-contract"
     ? { summary: "missing required keys" }
     : resumeId
-      ? {
-          goal: "resumed from antigravity",
-          requirements: [],
-          answer_seen: prompt.includes("Yes") || prompt.includes("Có"),
-        }
+      ? { goal: "resumed from antigravity", requirements: [], answer_seen: prompt.includes("Yes") || prompt.includes("Có") }
       : { goal: "from antigravity", requirements: ["r1", "r2"] };
 
 await tool(mcp, "submit_result", { output });

@@ -1,22 +1,9 @@
-import { fileURLToPath } from "node:url";
-import { normalizeScopePath } from "./scopeGuard.ts";
-import { worktreeFingerprint } from "./scopeGuard.ts";
 import { execFile } from "node:child_process";
-import { realpath, stat, readFile } from "node:fs/promises";
-import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
-import {
-  classify,
-  parseGoTest,
-  type Classification,
-  type GoTestReport,
-} from "../workflow/executors/baseline.ts";
+import { classify, parseGoTest, type Classification, type GoTestReport } from "../workflow/executors/baseline.ts";
 import { languageReminder, type OutputLocale } from "./language.ts";
-import type { WorkspaceConflict } from "../git/provider.ts";
-import {
-  ENVIRONMENT_UNAVAILABLE_EXIT,
-  ENVIRONMENT_UNAVAILABLE_MARKER,
-} from "../platform/postgresBinaries.ts";
 
 /**
  * Verification-and-repair loop for coding steps (harness layer around the Claude executor).
@@ -30,7 +17,6 @@ import {
 const exec = promisify(execFile);
 
 export interface VerifyConfig {
-  broadCommand?: string;
   /** Shell command run in each worktree (trusted: comes from the workflow definition, never from the agent). */
   command: string;
   maxRepairs: number;
@@ -39,8 +25,6 @@ export interface VerifyConfig {
   baseline: "go" | null;
   /** Hard test-weakening signals (removed/skipped/disabled tests) fail verification unless explicitly allowed. */
   allowTestWeakening: boolean;
-  requiredTests?: string[];
-  contractRevision?: string;
 }
 
 /**
@@ -48,22 +32,17 @@ export interface VerifyConfig {
  * per-attempt pending input, agent output or anything inside the worktree is never consulted). `false` disables it —
  * the executor records that as outcome "disabled" so it shows up in evaluation.
  */
-export function verifyConfig(
-  stepConfig: Record<string, any>,
-  defaultCommand: string,
-): VerifyConfig | null {
+export function verifyConfig(stepConfig: Record<string, any>, defaultCommand: string): VerifyConfig | null {
   const v = stepConfig.verify;
   if (v === false) return null;
   const o = typeof v === "object" && v ? v : {};
   const command = typeof o.command === "string" && o.command.trim() ? o.command : defaultCommand;
   return {
     command,
-    ...(typeof o.broad_command === "string" ? { broadCommand: o.broad_command } : {}),
     maxRepairs: Math.max(0, Math.min(5, Math.floor(Number(o.max_repairs ?? 2)) || 0)),
     timeoutMs: Math.max(30, Math.min(3600, Number(o.timeout_seconds ?? 600) || 600)) * 1000,
     baseline: o.baseline === null || o.baseline === false ? null : "go",
     allowTestWeakening: o.allow_test_weakening === true,
-    ...(Array.isArray(o.required_tests) ? { requiredTests: o.required_tests } : {}),
   };
 }
 
@@ -73,23 +52,10 @@ export function verifyConfig(
  *   tests excluded (anything else still failing → failed). Explicitly listed, never reported as a clean pass.
  * failed: regressions, unclassified failures, timeouts or hard test weakening — sent back to the agent for repair.
  * error: verification itself could not complete (integrity check or tooling failure) — not repairable by the agent.
- * skipped: the command reported that its environment cannot run the tests (e.g. no PostgreSQL), or the worktree could
- *   not be restored — nothing was tested,
- *   never counted as passed, not repairable by the agent.
  */
-export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error" | "skipped";
-
-/** The reason a test command gave for not running at all (dedicated exit + marker line), or null. */
-export function environmentUnavailable(code: number | null, output: string): string | null {
-  if (code !== ENVIRONMENT_UNAVAILABLE_EXIT) return null;
-  const line = output.split("\n").find((l) => l.startsWith(ENVIRONMENT_UNAVAILABLE_MARKER));
-  return line ? line.slice(ENVIRONMENT_UNAVAILABLE_MARKER.length).trim() : null;
-}
+export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error";
 
 export interface RepoVerification {
-  tested_state?: { head: string; fingerprint: string };
-  contract_revision?: string;
-  required_tests?: Record<string, "passed" | "failed" | "skipped" | "not_executed">;
   repo: string;
   status: RepoStatus;
   /** passed or accepted_preexisting. */
@@ -111,7 +77,6 @@ export interface RepoVerification {
   note?: string;
   error?: string;
   artifact_id?: number;
-  commit_sha?: string;
 }
 export interface VerificationRound {
   round: number;
@@ -130,11 +95,7 @@ export function failureExcerpt(output: string, maxLines = 60, maxChars = 4000): 
   const lines = output.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
   const keep = new Set<number>();
   lines.forEach((l, i) => {
-    if (
-      /(--- FAIL|^FAIL\s|panic:|\berror\b|\.go:\d+:|\bexpected\b|\bwant\b|\bgot\b|Error Trace|cannot|undefined:|\[build failed\])/i.test(
-        l,
-      )
-    )
+    if (/(--- FAIL|^FAIL\s|panic:|\berror\b|\.go:\d+:|\bexpected\b|\bwant\b|\bgot\b|Error Trace|cannot|undefined:|\[build failed\])/i.test(l))
       for (let k = i; k <= Math.min(i + 2, lines.length - 1); k++) keep.add(k);
   });
   let picked = [...keep].sort((a, b) => a - b).map((i) => lines[i]);
@@ -148,28 +109,15 @@ export function failureSignature(repos: RepoVerification[]): string {
   const parts = repos
     .filter((r) => !r.passed)
     .map((r) => {
-      const reg = r.regressions
-        .map(
-          (x) =>
-            `${x.package}:${[...x.tests].sort().join(",")}|${[...x.build_errors].sort().join(",")}`,
-        )
-        .sort();
-      const opaque = reg.length
-        ? ""
-        : r.excerpt
-            .replace(/\d+(\.\d+)?s\b/g, "")
-            .replace(/0x[0-9a-f]+/gi, "")
-            .replace(/:\d+(:\d+)?/g, "")
-            .replace(/\s+/g, " ")
-            .slice(0, 400);
+      const reg = r.regressions.map((x) => `${x.package}:${[...x.tests].sort().join(",")}|${[...x.build_errors].sort().join(",")}`).sort();
+      const opaque = reg.length ? "" : r.excerpt.replace(/\d+(\.\d+)?s\b/g, "").replace(/0x[0-9a-f]+/gi, "").replace(/:\d+(:\d+)?/g, "").replace(/\s+/g, " ").slice(0, 400);
       return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}}`;
     })
     .sort();
   return parts.join(" ");
 }
 
-const ASSERTION =
-  /\bt\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\(|\b(assert|require)\.\w+\(|\.Expect\(|\bgomock\.|\bt\.Run\(/;
+const ASSERTION = /\bt\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\(|\b(assert|require)\.\w+\(|\.Expect\(|\bgomock\.|\bt\.Run\(/;
 
 /**
  * Obvious test-weakening signals in a unified diff of *_test.go files (branch vs base). Regex heuristics: they catch
@@ -185,11 +133,10 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
   let oldFile = "";
   for (const line of diff.split("\n")) {
     const g = line.match(/^diff --git a\/(\S+) b\/(\S+)/);
-    if (g) ((oldFile = g[1]), (file = g[2]));
+    if (g) (oldFile = g[1]), (file = g[2]);
     const minus = line.match(/^--- a\/(.+)$/);
     if (minus) oldFile = minus[1];
-    if (line === "+++ /dev/null" && /_test\.go$/.test(oldFile))
-      hard.push(`${oldFile}: test file deleted`);
+    if (line === "+++ /dev/null" && /_test\.go$/.test(oldFile)) hard.push(`${oldFile}: test file deleted`);
     const plus = line.match(/^\+\+\+ b\/(.+)$/);
     if (plus) file = plus[1];
     const r = line.match(/^-func (Test\w+)\(/);
@@ -198,8 +145,7 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     if (a) added.add(a[1]);
     if (/^\+.*\bt\.(Skip|SkipNow|Skipf)\(/.test(line)) hard.push(`${file}: t.Skip added`);
     if (/^\+\s*\/\/\s*func Test\w+\(/.test(line)) hard.push(`${file}: test commented out`);
-    if (/^\+\s*\/\/(go:build| \+build)\s.*\bignore\b/.test(line))
-      hard.push(`${file}: build tag disables the file`);
+    if (/^\+\s*\/\/(go:build| \+build)\s.*\bignore\b/.test(line)) hard.push(`${file}: build tag disables the file`);
     if (/^\+\s*if\s+false\s*\{/.test(line)) soft.push(`${file}: "if false" block added`);
     if (/^[-+]/.test(line) && !/^(\+\+\+|---)/.test(line) && ASSERTION.test(line))
       assertDelta.set(file, (assertDelta.get(file) ?? 0) + (line.startsWith("+") ? 1 : -1));
@@ -212,14 +158,7 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
 export const testWeakening = (diff: string) => testWeakeningSignals(diff).hard;
 
 export interface VerifyDeps {
-  run(
-    command: string,
-    cwd: string,
-    env: Record<string, string>,
-    timeoutMs: number,
-    signal: AbortSignal,
-    onChunk?: (s: string) => void,
-  ): Promise<{ code: number | null; output: string; timedOut: boolean }>;
+  run(command: string, cwd: string, env: Record<string, string>, timeoutMs: number, signal: AbortSignal, onChunk?: (s: string) => void): Promise<{ code: number | null; output: string; timedOut: boolean }>;
   /** Base-branch report for failing packages (null when unavailable). */
   baseline?(repo: { repo: string; path: string }, failing: string[]): Promise<GoTestReport | null>;
   /** Tests skipped up front because they are known to fail on the same base commit. */
@@ -239,103 +178,20 @@ export async function authorizeWorkspace(path: string, allowedRoots: string[]): 
     real = await realpath(resolve(path));
     if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
   } catch (e) {
-    throw new Error(
-      `verification refused: ${path} is not an accessible worktree (${(e as Error).message})`,
-    );
+    throw new Error(`verification refused: ${path} is not an accessible worktree (${(e as Error).message})`);
   }
   for (const root of allowedRoots) {
     const r = await realpath(resolve(root)).catch(() => null);
     if (r && r === real) return real;
   }
-  throw new Error(
-    `verification refused: ${path} is not a worktree of this run (resolves to ${real})`,
-  );
+  throw new Error(`verification refused: ${path} is not a worktree of this run (resolves to ${real})`);
 }
 
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-type RequiredTestTarget = { id: string; selector: string; format: "go" | "node"; command: string };
-const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-const directGoJson = (command: string) => /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
-
-async function plannedPath(path: string, allowMissing: boolean): Promise<string | null> {
-  try { return await realpath(path); }
-  catch {
-    if (!allowMissing || dirname(path) === path) return null;
-    const parent = await plannedPath(dirname(path), true);
-    return parent ? resolve(parent, basename(path)) : null;
-  }
-}
-
-/** Resolve ownership before execution. Ambiguous IDs need an explicit repository:: selector. */
-export async function requiredTestTargets(workspaces: Array<{ repo: string; path: string }>, ids: string[], beforeApproval = false) {
-  const targets = new Map<string, RequiredTestTarget[]>();
-  const problems: string[] = [];
-  for (const id of ids) {
-    if (typeof id !== "string" || !id.trim() || id !== id.trim()) { problems.push("Invalid required test selector"); continue; }
-    const separator = id.indexOf("::");
-    const repository = separator < 0 ? null : id.slice(0, separator);
-    const selector = separator < 0 ? id : id.slice(separator + 2);
-    if ("invalid" in normalizeScopePath(selector) || /[\s;$`|&<>]/.test(selector)) { problems.push(`${id}: invalid executable test selector`); continue; }
-    const matches: Array<{ repo: string; target: RequiredTestTarget }> = [];
-    for (const workspace of workspaces.filter(w => !repository || w.repo === repository)) {
-      if (/\.(?:[cm]?[jt]s)$/.test(selector) && !isAbsolute(selector)) {
-        const root = await realpath(workspace.path).catch(() => null);
-        const file = await plannedPath(resolve(workspace.path, selector), beforeApproval);
-        const manifest = JSON.parse(await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"));
-        if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) { problems.push(`${id}: repository runner is incompatible with the Node structured test runner`); continue; }
-        if (!root || !file || relative(root, file).startsWith("..") || isAbsolute(relative(root, file))) continue;
-        const preload = /\.integration\./.test(selector) ? "test/setup.ts" : "test/env.ts";
-        const hasPreload = await stat(resolve(root, preload)).then(s => s.isFile()).catch(() => false);
-        const args = [process.execPath, ...(hasPreload ? ["--import", `./${preload}`] : []), "--test",
-          `--test-reporter=${fileURLToPath(new URL("./testReporter.mjs", import.meta.url))}`, file];
-        matches.push({ repo: workspace.repo, target: { id, selector: file, format: "node", command: args.map(shellQuote).join(" ") } });
-      } else {
-        const module = /^module\s+["']?([^\s"']+)/m.exec(await readFile(resolve(workspace.path, "go.mod"), "utf8").catch(() => ""))?.[1];
-        const testAt = selector.search(/\/Test[A-Za-z0-9_]/);
-        if (!module || testAt < 0 || !/^Test[A-Za-z0-9_]+(?:\/[A-Za-z0-9_-]+)*$/.test(selector.slice(testAt + 1))) continue;
-        const pkg = selector.slice(0, testAt), test = selector.slice(testAt + 1);
-        if (pkg !== module && !pkg.startsWith(`${module}/`)) continue;
-        const packagePath = pkg === module ? "." : `.${pkg.slice(module.length)}`;
-        if (packagePath.split("/").includes("..")) continue;
-        const root = await realpath(workspace.path).catch(() => null);
-        const directory = await plannedPath(resolve(workspace.path, packagePath), beforeApproval);
-        if (!root || !directory || relative(root, directory).startsWith("..") || isAbsolute(relative(root, directory))) continue;
-        const pattern = test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        matches.push({ repo: workspace.repo, target: { id, selector, format: "go",
-          command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}` } });
-      }
-    }
-    if (matches.length !== 1) problems.push(`${id}: ${matches.length ? "ambiguous repository; use repository::test ID" : "test has no authorized repository owner"}`);
-    else {
-      const match = matches[0];
-      targets.set(match.repo, [...(targets.get(match.repo) ?? []), match.target]);
-    }
-  }
-  return { targets, problems };
-}
-
-function requiredTestStatus(output: string, target: RequiredTestTarget): NonNullable<RepoVerification["required_tests"]>[string] {
-  if (output.endsWith("\n[output truncated]")) return "not_executed";
-  let status: NonNullable<RepoVerification["required_tests"]>[string] = "not_executed";
-  for (const line of output.split("\n")) {
-    try {
-      const event = JSON.parse(line);
-      let next: NonNullable<RepoVerification["required_tests"]>[string] | null = null;
-      if (target.format === "go" && `${event.Package}/${event.Test}` === target.selector)
-        next = event.Action === "pass" ? "passed" : event.Action === "fail" ? "failed" : event.Action === "skip" ? "skipped" : null;
-      if (target.format === "node" && event.type === "platform:test-summary" && event.complete === true && event.file === target.selector &&
-        [event.passed, event.failed, event.skipped].every(count => Number.isInteger(count) && count >= 0))
-        next = event.failed > 0 ? "failed" : event.skipped > 0 ? "skipped" : event.passed > 0 ? "passed" : null;
-      if (next && status !== "failed" && status !== "skipped") status = next;
-    } catch { /* Logs, including test stdout, are never passing evidence. */ }
-  }
-  return status;
-}
-
 /** Run verification once in every worktree. Refuses to run anywhere else. */
 export async function verifyWorkspaces(
-  workspaces: Array<{ repo: string; path: string; branch?: string; skip?: string }>,
+  workspaces: Array<{ repo: string; path: string; branch?: string }>,
   allowedRoots: string[],
   cfg: VerifyConfig,
   round: number,
@@ -345,156 +201,52 @@ export async function verifyWorkspaces(
 ): Promise<VerificationRound> {
   const t0 = Date.now();
   const repos: RepoVerification[] = [];
-  const required = await requiredTestTargets(workspaces, cfg.requiredTests ?? []);
   for (const w of workspaces) {
-    if (w.skip) {
-      await deps.log?.(`■ verify ${w.repo}: SKIPPED (${w.skip})`, {
-        repo: w.repo,
-        verification: round,
-        status: "skipped",
-      });
-      repos.push({
-        repo: w.repo,
-        status: "skipped",
-        passed: false,
-        exit_code: null,
-        timed_out: false,
-        duration_ms: 0,
-        regressions: [],
-        pre_existing: 0,
-        pre_existing_tests: [],
-        weakened: [],
-        suspected: [],
-        needs_review: true,
-        excerpt: "",
-        note: w.skip,
-      });
-      continue;
-    }
     const p = await authorizeWorkspace(w.path, allowedRoots);
-    const known =
-      cfg.baseline === "go" && deps.knownFailures
-        ? await deps.knownFailures(p).catch(() => null)
-        : null;
-    await deps.log?.(
-      `◆ verify ${w.repo} (round ${round})${known?.tests.length ? `, skipping ${known.tests.length} test(s) known to fail on base` : ""}`,
-    );
+    const known = cfg.baseline === "go" && deps.knownFailures ? await deps.knownFailures(p).catch(() => null) : null;
+    await deps.log?.(`◆ verify ${w.repo} (round ${round})${known?.tests.length ? `, skipping ${known.tests.length} test(s) known to fail on base` : ""}`);
     const started = Date.now();
-    const beforeState = await worktreeFingerprint(p).catch(() => null);
     const baseEnv = { ...env, REPO: w.repo, ...(w.branch ? { BRANCH: w.branch } : {}) };
-    const runWith = (skip: string | null) =>
-      deps.run(
-        cfg.command,
-        p,
-        { ...baseEnv, ...(skip ? { GO_TEST_SKIP: skip } : {}) },
-        cfg.timeoutMs,
-        signal,
-        (s) => void deps.log?.(s, { repo: w.repo, verification: round, stream: true }),
-      );
+    const runWith = (skip: string | null) => deps.run(cfg.command, p, { ...baseEnv, ...(skip ? { GO_TEST_SKIP: skip } : {}) }, cfg.timeoutMs, signal, (s) => void deps.log?.(s, { repo: w.repo, verification: round, stream: true }));
     let r = await runWith(known?.skipRegex ?? null);
     if (signal.aborted) throw new Error("verification canceled");
-    const headCommit = await exec("git", ["-C", p, "rev-parse", "HEAD"])
-      .then(({ stdout }) => stdout.trim())
-      .catch(() => "");
     const entry: RepoVerification = {
-      repo: w.repo,
-      status: r.code === 0 && !r.timedOut ? "passed" : "failed",
-      passed: false,
-      exit_code: r.code,
-      timed_out: r.timedOut,
-      duration_ms: 0,
-      regressions: [],
-      pre_existing: 0,
-      pre_existing_tests: [],
-      weakened: [],
-      suspected: [],
-      needs_review: false,
-      excerpt: "",
-      commit_sha: headCommit,
+      repo: w.repo, status: r.code === 0 && !r.timedOut ? "passed" : "failed", passed: false, exit_code: r.code, timed_out: r.timedOut, duration_ms: 0,
+      regressions: [], pre_existing: 0, pre_existing_tests: [], weakened: [], suspected: [], needs_review: false, excerpt: "",
     };
-    const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
-    if (unavailable)
-      Object.assign(entry, {
-        status: "skipped",
-        needs_review: true,
-        note: `environment unavailable: ${unavailable}`,
-        excerpt: failureExcerpt(r.output),
-      });
     if (entry.status === "failed") {
       entry.excerpt = failureExcerpt(r.output);
       const report = parseGoTest(r.output);
-      const failing = Object.entries(report)
-        .filter(([, x]) => x.status === "fail")
-        .map(([k]) => k);
+      const failing = Object.entries(report).filter(([, x]) => x.status === "fail").map(([k]) => k);
       let c: Classification | null = null;
       if (failing.length && cfg.baseline === "go" && deps.baseline) {
-        const base = await deps
-          .baseline({ repo: w.repo, path: p }, failing)
-          .catch(
-            (e) => (
-              (entry.note = `baseline unavailable: ${(e as Error).message.split("\n")[0]}`),
-              null
-            ),
-          );
+        const base = await deps.baseline({ repo: w.repo, path: p }, failing).catch((e) => ((entry.note = `baseline unavailable: ${(e as Error).message.split("\n")[0]}`), null));
         if (base) c = classify(report, base);
       }
-      if (!failing.length)
-        entry.note = `exit ${r.timedOut ? "timeout" : r.code} without a parseable test failure (build/script error) — counted as a failure`;
+      if (!failing.length) entry.note = `exit ${r.timedOut ? "timeout" : r.code} without a parseable test failure (build/script error) — counted as a failure`;
       if (c) {
-        entry.regressions = c.regressions.map(({ package: pkg, tests, build_errors }) => ({
-          package: pkg,
-          tests,
-          build_errors,
-        }));
+        entry.regressions = c.regressions.map(({ package: pkg, tests, build_errors }) => ({ package: pkg, tests, build_errors }));
         entry.pre_existing = c.pre_existing.length;
-        entry.pre_existing_tests = [
-          ...new Set(c.pre_existing.flatMap((x) => x.tests.map((t) => t.split("/")[0]))),
-        ];
+        entry.pre_existing_tests = [...new Set(c.pre_existing.flatMap((x) => x.tests.map((t) => t.split("/")[0])))];
         const preBuild = c.pre_existing.some((x) => x.build_errors.length || !x.tests.length);
         if (!r.timedOut && !entry.regressions.length) {
           if (preBuild) {
             // Base packages that do not even compile cannot be isolated with -skip: accept explicitly, flag for a human.
-            Object.assign(entry, {
-              status: "accepted_preexisting",
-              needs_review: true,
-              note: `${entry.pre_existing} package(s) fail on the base branch too, incl. build errors that cannot be isolated — needs human review`,
-            });
+            Object.assign(entry, { status: "accepted_preexisting", needs_review: true, note: `${entry.pre_existing} package(s) fail on the base branch too, incl. build errors that cannot be isolated — needs human review` });
           } else {
             // Confirm: re-run with the pre-existing tests excluded; anything still failing is not explained by the base.
-            const skip = [
-              known?.skipRegex,
-              `^(${entry.pre_existing_tests.map(escapeRe).join("|")})$`,
-            ]
-              .filter(Boolean)
-              .join("|");
-            await deps.log?.(
-              `◆ verify ${w.repo}: confirming that only pre-existing failures remain (re-run excluding ${entry.pre_existing_tests.length} test(s))`,
-            );
+            const skip = [known?.skipRegex, `^(${entry.pre_existing_tests.map(escapeRe).join("|")})$`].filter(Boolean).join("|");
+            await deps.log?.(`◆ verify ${w.repo}: confirming that only pre-existing failures remain (re-run excluding ${entry.pre_existing_tests.length} test(s))`);
             const again = await runWith(skip);
             if (signal.aborted) throw new Error("verification canceled");
-            if (again.code === 0 && !again.timedOut)
-              Object.assign(entry, {
-                status: "accepted_preexisting",
-                note: `only failures that also fail on the base branch (${entry.pre_existing_tests.join(", ")}); re-run without them passed`,
-              });
+            if (again.code === 0 && !again.timedOut) Object.assign(entry, { status: "accepted_preexisting", note: `only failures that also fail on the base branch (${entry.pre_existing_tests.join(", ")}); re-run without them passed` });
             else {
               r = again;
-              Object.assign(entry, {
-                status: "failed",
-                exit_code: again.code,
-                timed_out: again.timedOut,
-                excerpt: failureExcerpt(again.output),
-                note: "failures remain after excluding the pre-existing tests (unclassified) — counted as a failure",
-              });
+              Object.assign(entry, { status: "failed", exit_code: again.code, timed_out: again.timedOut, excerpt: failureExcerpt(again.output), note: "failures remain after excluding the pre-existing tests (unclassified) — counted as a failure" });
             }
           }
         }
-      } else if (failing.length)
-        entry.regressions = failing.map((pkg) => ({
-          package: pkg,
-          tests: report[pkg].tests,
-          build_errors: report[pkg].buildErrors,
-        }));
+      } else if (failing.length) entry.regressions = failing.map((pkg) => ({ package: pkg, tests: report[pkg].tests, build_errors: report[pkg].buildErrors }));
     }
     if (!cfg.allowTestWeakening && deps.diffTests) {
       try {
@@ -505,69 +257,17 @@ export async function verifyWorkspaces(
         if (sig.soft.length) entry.needs_review = true;
       } catch (e) {
         // An integrity check that cannot run must never look like a clean result.
-        Object.assign(entry, {
-          status: "error",
-          error: `could not inspect test changes: ${(e as Error).message.split("\n")[0]}`,
-        });
+        Object.assign(entry, { status: "error", error: `could not inspect test changes: ${(e as Error).message.split("\n")[0]}` });
       }
-    }
-    if (cfg.requiredTests?.length) {
-      const results: NonNullable<RepoVerification["required_tests"]> = {};
-      for (const target of required.targets.get(w.repo) ?? []) {
-        let status = target.format === "go" && directGoJson(cfg.command) ? requiredTestStatus(r.output, target) : "not_executed";
-        if (status === "not_executed" && ["passed", "accepted_preexisting"].includes(entry.status)) {
-          const remaining = cfg.timeoutMs - (Date.now() - started);
-          if (remaining > 0) {
-            await deps.log?.(`◆ required test ${target.id} (${w.repo})`);
-            const evidence = await deps.run(target.command, p, baseEnv, remaining, signal);
-            if (signal.aborted) throw new Error("verification canceled");
-            status = requiredTestStatus(evidence.output, target);
-            r = { ...r, output: `${r.output}\n== required ${target.id}\n${evidence.output}` };
-            if (evidence.code !== 0 || evidence.timedOut) {
-              entry.status = "failed";
-              entry.exit_code = evidence.code;
-              entry.timed_out = evidence.timedOut;
-              status = "failed";
-            }
-          }
-        }
-        results[target.id] = status;
-      }
-      entry.required_tests = results;
-      if (Object.values(results).some(status => status !== "passed")) {
-        entry.status = "failed";
-        entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
-      }
-    }
-    {
-      const afterState = await worktreeFingerprint(p).catch(() => null);
-      if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
-        if (entry.status !== "error" && entry.status !== "skipped") {
-          entry.status = "failed";
-          entry.note = "Workspace changed during verification or its state could not be established";
-        }
-      } else entry.tested_state = afterState;
-      entry.contract_revision = cfg.contractRevision;
     }
     entry.passed = entry.status === "passed" || entry.status === "accepted_preexisting";
     entry.duration_ms = Date.now() - started;
-    if (deps.artifact)
-      entry.artifact_id = await deps.artifact(`verify-${round}-${w.repo}.log`, r.output, {
-        exit_code: entry.exit_code,
-        timed_out: entry.timed_out,
-        round,
-        status: entry.status,
-      });
+    if (deps.artifact) entry.artifact_id = await deps.artifact(`verify-${round}-${w.repo}.log`, r.output, { exit_code: entry.exit_code, timed_out: entry.timed_out, round, status: entry.status });
     await deps.log?.(
       `■ verify ${w.repo}: ${entry.status.toUpperCase()}${entry.note ? ` (${entry.note})` : ""}${entry.error ? ` — ${entry.error}` : ""}${entry.weakened.length ? ` — tests weakened: ${entry.weakened.join(", ")}` : ""}${entry.suspected.length ? ` — review: ${entry.suspected.join(", ")}` : ""}`,
       { repo: w.repo, verification: round, status: entry.status },
     );
     repos.push(entry);
-  }
-  if (required.problems.length && repos.length) {
-    repos[0].status = "failed";
-    repos[0].passed = false;
-    repos[0].note = `Required test ownership could not be established: ${required.problems.join("; ")}`;
   }
   return {
     round,
@@ -580,8 +280,7 @@ export async function verifyWorkspaces(
   };
 }
 
-export type LoopOutcome =
-  "passed" | "failed" | "no_progress" | "error" | "skipped" | "canceled" | "stopped";
+export type LoopOutcome = "passed" | "failed" | "no_progress" | "error" | "canceled" | "stopped";
 export interface LoopResult<S> {
   outcome: LoopOutcome;
   rounds: VerificationRound[];
@@ -602,15 +301,13 @@ export async function verificationLoop<S>(opts: {
   repair: (failed: VerificationRound, repairNo: number) => Promise<S | undefined>;
 }): Promise<LoopResult<S>> {
   const rounds = [...(opts.prior ?? [])];
-  for (;;) {
-    if (opts.signal.aborted)
-      return { outcome: "canceled", rounds, repairs: Math.max(0, rounds.length - 1) };
+  for (; ;) {
+    if (opts.signal.aborted) return { outcome: "canceled", rounds, repairs: Math.max(0, rounds.length - 1) };
     let r: VerificationRound;
     try {
       r = await opts.verify(rounds.length + 1);
     } catch (e) {
-      if (opts.signal.aborted)
-        return { outcome: "canceled", rounds, repairs: Math.max(0, rounds.length - 1) };
+      if (opts.signal.aborted) return { outcome: "canceled", rounds, repairs: Math.max(0, rounds.length - 1) };
       throw e;
     }
     rounds.push(r);
@@ -618,54 +315,28 @@ export async function verificationLoop<S>(opts: {
     if (r.passed) return { outcome: "passed", rounds, repairs };
     // The agent cannot repair the verification infrastructure: stop instead of spending repairs.
     if (r.error) return { outcome: "error", rounds, repairs };
-    // Nothing left that a code change could fix: the environment could not run the tests.
-    if (
-      r.repos.some((x) => x.status === "skipped") &&
-      r.repos.every((x) => x.passed || x.status === "skipped")
-    )
-      return { outcome: "skipped", rounds, repairs };
     if (repairs >= opts.cfg.maxRepairs) return { outcome: "failed", rounds, repairs };
-    if (rounds.length >= 2 && rounds[rounds.length - 2].signature === r.signature)
-      return { outcome: "no_progress", rounds, repairs };
+    if (rounds.length >= 2 && rounds[rounds.length - 2].signature === r.signature) return { outcome: "no_progress", rounds, repairs };
     const stop = await opts.repair(r, repairs + 1);
     if (opts.signal.aborted) return { outcome: "canceled", rounds, repairs: repairs + 1 };
     if (stop !== undefined) return { outcome: "stopped", rounds, repairs: repairs + 1, stop };
   }
 }
 
-const untrusted = (label: string, body: string) =>
-  `<untrusted_input source="${label}">\n${body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`;
+const untrusted = (label: string, body: string) => `<untrusted_input source="${label}">\n${body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`;
 
 /** Repair instructions for the agent: actionable diagnostics, tool output marked untrusted, firm rules. */
-export function repairPrompt(
-  r: VerificationRound,
-  repairNo: number,
-  cfg: VerifyConfig,
-  locale: OutputLocale = "vi",
-): string {
+export function repairPrompt(r: VerificationRound, repairNo: number, cfg: VerifyConfig, locale: OutputLocale = "vi"): string {
   const parts = [
     `## Verification failed — repair ${repairNo} of ${cfg.maxRepairs}`,
     "The platform ran the mandatory verification on your worktree(s). Your result is NOT accepted until it passes.",
     `Command (fixed by the workflow; do not change it): \`${cfg.command.split("\n")[0]}${cfg.command.includes("\n") ? " …" : ""}\``,
   ];
   for (const x of r.repos.filter((y) => y.status === "failed")) {
-    parts.push(
-      `### ${x.repo}: ${x.timed_out ? "timed out" : `exit ${x.exit_code}`}${x.pre_existing ? ` (${x.pre_existing} package(s) also fail on the base branch — ignore those)` : ""}`,
-    );
+    parts.push(`### ${x.repo}: ${x.timed_out ? "timed out" : `exit ${x.exit_code}`}${x.pre_existing ? ` (${x.pre_existing} package(s) also fail on the base branch — ignore those)` : ""}`);
     if (x.regressions.length)
-      parts.push(
-        "New failures caused by this branch:\n" +
-          x.regressions
-            .map(
-              (g) =>
-                `- ${g.package}: ${[...g.tests, ...g.build_errors].slice(0, 12).join("; ") || "(package fails)"}`,
-            )
-            .join("\n"),
-      );
-    if (x.weakened.length)
-      parts.push(
-        `Tests were removed or skipped (not allowed): ${x.weakened.join(", ")}. Restore them; fix the code or correct the assertion instead.`,
-      );
+      parts.push("New failures caused by this branch:\n" + x.regressions.map((g) => `- ${g.package}: ${[...g.tests, ...g.build_errors].slice(0, 12).join("; ") || "(package fails)"}`).join("\n"));
+    if (x.weakened.length) parts.push(`Tests were removed or skipped (not allowed): ${x.weakened.join(", ")}. Restore them; fix the code or correct the assertion instead.`);
     if (x.excerpt) parts.push(untrusted(`verification:${x.repo}`, x.excerpt));
   }
   parts.push(
@@ -677,100 +348,30 @@ export function repairPrompt(
   return parts.join("\n\n");
 }
 
-/** Repos whose worktree could not be restored (branch held elsewhere) → why they are not verified; a human decides. */
-export function restoreConflictSkips(
-  blocked: { kind: string; checkpoint?: unknown } | null,
-): Map<string, string> {
-  const conflicts =
-    blocked?.kind === "waiting_input"
-      ? ((blocked.checkpoint as { workspace_conflict?: WorkspaceConflict[] } | undefined)
-          ?.workspace_conflict ?? [])
-      : [];
-  return new Map(
-    conflicts.map((c) => [
-      c.repo,
-      `workspace conflict while restoring the worktree, tests not run: ${c.branch} is checked out at ${c.holder_path} (${c.reason})`,
-    ]),
-  );
-}
-
 /** Compact record for outputs, metrics and the checkpoint. */
 export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>) {
   const last = res.rounds.at(-1);
   const accepted = !!last?.repos.some((r) => r.status === "accepted_preexisting");
-  const reviewReasons = (last?.repos ?? []).flatMap((r) => [
-    ...r.suspected,
-    ...(r.needs_review && ["accepted_preexisting", "skipped"].includes(r.status)
-      ? [`${r.repo}: ${r.note}`]
-      : []),
-  ]);
+  const reviewReasons = (last?.repos ?? []).flatMap((r) => [...r.suspected, ...(r.needs_review && r.status === "accepted_preexisting" ? [`${r.repo}: ${r.note}`] : [])]);
   return {
-    contract_revision: cfg.contractRevision,
     outcome: res.outcome,
     /** clean | accepted_with_preexisting | failed | error | … — what kind of pass/failure this was. */
-    status:
-      res.outcome === "passed" ? (accepted ? "accepted_with_preexisting" : "clean") : res.outcome,
-    /** null when the tests could not run at all (skipped): neither a pass nor a code failure. */
-    passed: res.outcome === "skipped" ? null : res.outcome === "passed",
+    status: res.outcome === "passed" ? (accepted ? "accepted_with_preexisting" : "clean") : res.outcome,
+    passed: res.outcome === "passed",
     needs_review: reviewReasons.length > 0,
     review_reasons: reviewReasons,
-    errors: (last?.repos ?? [])
-      .filter((r) => r.status === "error")
-      .map((r) => `${r.repo}: ${r.error}`),
+    errors: (last?.repos ?? []).filter((r) => r.status === "error").map((r) => `${r.repo}: ${r.error}`),
     rounds: res.rounds.length,
     repairs: res.repairs,
     max_repairs: cfg.maxRepairs,
     duration_ms: res.rounds.reduce((s, r) => s + r.duration_ms, 0),
     failure_signatures: res.rounds.filter((r) => !r.passed).map((r) => r.signature),
-    last:
-      last?.repos.map(
-        ({
-          repo,
-          status,
-          passed,
-          exit_code,
-          timed_out,
-          regressions,
-          pre_existing,
-          pre_existing_tests,
-          weakened,
-          suspected,
-          needs_review,
-          note,
-          error,
-          artifact_id,
-          tested_state,
-          contract_revision,
-          required_tests,
-        }) => ({
-          repo,
-          status,
-          passed,
-          exit_code,
-          timed_out,
-          regressions,
-          pre_existing,
-          pre_existing_tests,
-          weakened,
-          suspected,
-          needs_review,
-          note,
-          error,
-          artifact_id,
-          tested_state,
-          contract_revision,
-          required_tests,
-        }),
-      ) ?? [],
+    last: last?.repos.map(({ repo, status, passed, exit_code, timed_out, regressions, pre_existing, pre_existing_tests, weakened, suspected, needs_review, note, error, artifact_id }) => ({ repo, status, passed, exit_code, timed_out, regressions, pre_existing, pre_existing_tests, weakened, suspected, needs_review, note, error, artifact_id })) ?? [],
   };
 }
 
 /** `git diff origin/<base> -- *_test.go` of the worktree (committed + uncommitted changes). */
 export async function diffTestsAgainstBase(path: string, baseBranch: string) {
-  const { stdout } = await exec(
-    "git",
-    ["-C", path, "diff", "--no-color", `origin/${baseBranch}`, "--", "*_test.go"],
-    { maxBuffer: 16 * 1024 * 1024 },
-  );
+  const { stdout } = await exec("git", ["-C", path, "diff", "--no-color", `origin/${baseBranch}`, "--", "*_test.go"], { maxBuffer: 16 * 1024 * 1024 });
   return stdout;
 }

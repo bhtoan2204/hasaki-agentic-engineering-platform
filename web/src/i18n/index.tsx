@@ -1,5 +1,18 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { readUiLocale, statusLabel, translate, writeUiLocale, type UiLocale } from "./messages.ts";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  readUiLocale,
+  statusLabel,
+  translate,
+  writeUiLocale,
+  type UiLocale,
+} from "./messages.ts";
 
 let active: UiLocale = "vi";
 /** Read by non-hook helpers (date formatting) during render. The provider updates this before children render. */

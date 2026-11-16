@@ -91,10 +91,20 @@ interface Data {
 }
 
 type Preset = "1h" | "4h" | "12h" | "24h" | "today" | "yesterday" | "custom";
-const PRESETS: Preset[] = ["1h", "4h", "12h", "24h", "today", "yesterday", "custom"];
+const PRESETS: Preset[] = [
+  "1h",
+  "4h",
+  "12h",
+  "24h",
+  "today",
+  "yesterday",
+  "custom",
+];
 /** datetime-local value (local time, minutes) for a Date. */
 const localInput = (d: Date) =>
-  new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
 const PREF_KEY = "pe.scanPrefs";
 function loadPrefs(): { preset: Preset; namespaces: string[] | null } {
   try {
@@ -135,12 +145,15 @@ export function ScanPanel({
       : all,
   );
   const [preset, setPreset] = useState<Preset>(prefs.preset);
-  const [from, setFrom] = useState(() => localInput(new Date(Date.now() - 6 * 3600_000)));
+  const [from, setFrom] = useState(() =>
+    localInput(new Date(Date.now() - 6 * 3600_000)),
+  );
   const [to, setTo] = useState(() => localInput(new Date()));
   const [busy, setBusy] = useState(false);
   const toggle = (n: string) =>
     setChosen((c) => (c.includes(n) ? c.filter((x) => x !== n) : [...c, n]));
-  const customHours = (new Date(to).getTime() - new Date(from).getTime()) / 3600_000;
+  const customHours =
+    (new Date(to).getTime() - new Date(from).getTime()) / 3600_000;
   const customError =
     preset !== "custom"
       ? ""
@@ -153,7 +166,10 @@ export function ScanPanel({
   const start = async () => {
     setBusy(true);
     try {
-      localStorage.setItem(PREF_KEY, JSON.stringify({ preset, namespaces: chosen }));
+      localStorage.setItem(
+        PREF_KEY,
+        JSON.stringify({ preset, namespaces: chosen }),
+      );
     } catch {}
     const body: Record<string, unknown> = {
       preset,
@@ -194,7 +210,9 @@ export function ScanPanel({
           label={t("pe.opt.window")}
           value={preset}
           onChange={setPreset}
-          options={PRESETS.map((p) => [p, t(`pe.preset.${p}`)] as [Preset, string])}
+          options={PRESETS.map(
+            (p) => [p, t(`pe.preset.${p}`)] as [Preset, string],
+          )}
         />
       </div>
       {preset === "custom" && (
@@ -226,13 +244,18 @@ export function ScanPanel({
         <div className="pe-opt-label" />
         <div className="pe-opt-foot">
           <span className={customError ? "pe-warn small" : "muted small"}>
-            {customError || (long ? t("pe.opt.comparePrev") : t("pe.opt.compareYesterday"))}
+            {customError ||
+              (long ? t("pe.opt.comparePrev") : t("pe.opt.compareYesterday"))}
           </span>
           <span className="grow" />
           <button className="ghost sm" onClick={onClose}>
             {t("common.cancel")}
           </button>
-          <button className="sm" disabled={busy || !chosen.length || !!customError} onClick={start}>
+          <button
+            className="sm"
+            disabled={busy || !chosen.length || !!customError}
+            onClick={start}
+          >
             <RefreshCw size={14} strokeWidth={2} />
             {t("pe.opt.scan")}
           </button>
@@ -272,7 +295,9 @@ function reasonText(
   return reason;
 }
 const secs = (a?: string, b?: string) =>
-  a && b ? Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000) : null;
+  a && b
+    ? Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000)
+    : null;
 
 function Trend({ count, yesterday }: { count: number; yesterday: number }) {
   const { t } = useI18n();
@@ -324,7 +349,10 @@ function FixRef({
       <div className="pe-fix is-linked">
         <div className="pe-fix-label small muted">{t("pe.fixing")}</div>
         <div className="pe-fix-main">
-          <a className="pe-fix-code mono" href={`#/work-items/${g.work_item_id}`}>
+          <a
+            className="pe-fix-code mono"
+            href={`#/work-items/${g.work_item_id}`}
+          >
             <Bug size={14} strokeWidth={2} />
             {g.work_item_code}
           </a>
@@ -354,7 +382,11 @@ function FixRef({
               {p.repo}: {p.title}
             </a>
           ))}
-          <button className="xs ghost" onClick={() => link("")} title={t("pe.unlinkTip")}>
+          <button
+            className="xs ghost"
+            onClick={() => link("")}
+            title={t("pe.unlinkTip")}
+          >
             <Unlink size={12} />
             {t("pe.unlink")}
           </button>
@@ -382,7 +414,11 @@ function FixRef({
           placeholder={t("pe.codePh")}
           onKeyDown={(e) => e.key === "Enter" && ref.trim() && link(ref.trim())}
         />
-        <button className="sm ghost" disabled={!ref.trim()} onClick={() => link(ref.trim())}>
+        <button
+          className="sm ghost"
+          disabled={!ref.trim()}
+          onClick={() => link(ref.trim())}
+        >
           <Link2 size={14} strokeWidth={2} />
           {t("pe.attach")}
         </button>
@@ -407,10 +443,17 @@ function GroupRow({
   const spl = `index=k8s_prod kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
   const investigate = async () => {
     setBusy(true);
-    const r = await act(() => api<any>(`/api/prod-errors/${g.fingerprint}/investigate`, {}));
+    const r = await act(() =>
+      api<any>(`/api/prod-errors/${g.fingerprint}/investigate`, {}),
+    );
     setBusy(false);
     if (r) {
-      toast(r.created ? t("pe.created", { code: r.code }) : t("pe.exists", { code: r.code }), "ok");
+      toast(
+        r.created
+          ? t("pe.created", { code: r.code })
+          : t("pe.exists", { code: r.code }),
+        "ok",
+      );
       reload();
     }
   };
@@ -428,7 +471,9 @@ function GroupRow({
     >
       <button className="pe-head" aria-expanded={open} onClick={onToggle}>
         <ChevronRight size={16} strokeWidth={2} className="pe-chev" />
-        <span className={`pe-sev pe-${g.severity}`}>{t(`pe.sev.${g.severity}`)}</span>
+        <span className={`pe-sev pe-${g.severity}`}>
+          {t(`pe.sev.${g.severity}`)}
+        </span>
         <span className="pe-svc" title={`${g.namespace} / ${g.service}`}>
           {g.service}
         </span>
@@ -436,7 +481,9 @@ function GroupRow({
           {g.signature}
         </span>
         <span className="pe-num" title={t("pe.todayCount")}>
-          {g.today_count.toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB")}
+          {g.today_count.toLocaleString(
+            uiLocale() === "vi" ? "vi-VN" : "en-GB",
+          )}
         </span>
         <span className="pe-trend">
           <Trend count={g.today_count} yesterday={g.yesterday_count} />
@@ -454,7 +501,10 @@ function GroupRow({
                 code: g.work_item_code,
                 title: g.work_item_title ?? "",
               })}
-              onClick={(e) => (e.stopPropagation(), navigate(`/work-items/${g.work_item_id}`))}
+              onClick={(e) => (
+                e.stopPropagation(),
+                navigate(`/work-items/${g.work_item_id}`)
+              )}
               onKeyDown={(e) =>
                 e.key === "Enter" &&
                 (e.stopPropagation(), navigate(`/work-items/${g.work_item_id}`))
@@ -486,7 +536,12 @@ function GroupRow({
           >
             {t("an.openIncident")}
           </a>
-          <FixRef g={g} busy={busy} onInvestigate={investigate} reload={reload} />
+          <FixRef
+            g={g}
+            busy={busy}
+            onInvestigate={investigate}
+            reload={reload}
+          />
           <dl className="pe-meta small">
             <dt>Service</dt>
             <dd className="mono">
@@ -546,7 +601,11 @@ function GroupRow({
                 {t("pe.watchAgain")}
               </button>
             ) : (
-              <button className="sm ghost" onClick={() => ignore(true)} title={t("pe.ignoreTip")}>
+              <button
+                className="sm ghost"
+                onClick={() => ignore(true)}
+                title={t("pe.ignoreTip")}
+              >
                 <EyeOff size={14} strokeWidth={2} />
                 {t("pe.ignore")}
               </button>
@@ -572,7 +631,9 @@ function Schedule({ s, reload }: { s: Data["settings"]; reload: () => void }) {
       <summary className="small">
         <CalendarClock size={14} />{" "}
         {t("pe.schedule", {
-          times: s.schedule.length ? s.schedule.join(", ") : t("pe.scheduleOff"),
+          times: s.schedule.length
+            ? s.schedule.join(", ")
+            : t("pe.scheduleOff"),
         })}
         {s.notify ? ` · ${t("pe.telegram")}` : ""}
       </summary>
@@ -585,7 +646,11 @@ function Schedule({ s, reload }: { s: Data["settings"]; reload: () => void }) {
           />
         </Field>
         <label className="row tight small">
-          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />{" "}
+          <input
+            type="checkbox"
+            checked={notify}
+            onChange={(e) => setNotify(e.target.checked)}
+          />{" "}
           {t("pe.notify")}
         </label>
         <div className="row tight">
@@ -593,7 +658,8 @@ function Schedule({ s, reload }: { s: Data["settings"]; reload: () => void }) {
             className="sm"
             onClick={async () =>
               (await act(
-                () => api("/api/prod-errors/settings", { schedule: times, notify }),
+                () =>
+                  api("/api/prod-errors/settings", { schedule: times, notify }),
                 t("pe.saved"),
               )) && reload()
             }
@@ -627,7 +693,9 @@ export function ProdErrorsPage({
   };
   const all = url.get("list_ignored") === "1";
   const setAll = (v: boolean) => setFilter("list_ignored", v ? "1" : "");
-  const { data, error, loading, reload } = useApi<Data>(`/api/prod-errors${all ? "?all=1" : ""}`);
+  const { data, error, loading, reload } = useApi<Data>(
+    `/api/prod-errors${all ? "?all=1" : ""}`,
+  );
   const ns = url.get("list_namespace") || "all";
   const setNs = (v: string) => setFilter("list_namespace", v);
   const sev = url.get("list_severity") || "attention";
@@ -644,7 +712,11 @@ export function ProdErrorsPage({
     const g = data.groups.find((x) => x.fingerprint === focus);
     if (!g && !all) return setAll(true);
     focused.current = true;
-    if (g && !(g.severity === "critical" || g.severity === "high" || g.work_item_id)) setSev("all");
+    if (
+      g &&
+      !(g.severity === "critical" || g.severity === "high" || g.work_item_id)
+    )
+      setSev("all");
     setOpen(focus);
     setTimeout(
       () =>
@@ -657,8 +729,7 @@ export function ProdErrorsPage({
 
   useEffect(() => {
     if (!data?.scanning) return;
-    // Scan progress is in-memory server state, not a workflow event: poll only while a scan runs and the tab is seen.
-    const t = setInterval(() => document.visibilityState === "visible" && reload(), 1500);
+    const t = setInterval(reload, 1500);
     return () => clearInterval(t);
   }, [data?.scanning, reload]);
 
@@ -672,8 +743,9 @@ export function ProdErrorsPage({
         toast(
           t("pe.scanDone", {
             groups: l.groups,
-            attention: data.groups.filter((g) => g.severity === "critical" || g.severity === "high")
-              .length,
+            attention: data.groups.filter(
+              (g) => g.severity === "critical" || g.severity === "high",
+            ).length,
           }),
           "ok",
         );
@@ -689,11 +761,16 @@ export function ProdErrorsPage({
         (ns === "all" || g.namespace === ns) &&
         (sev === "all" ||
           (sev === "attention"
-            ? g.severity === "critical" || g.severity === "high" || g.work_item_id
+            ? g.severity === "critical" ||
+              g.severity === "high" ||
+              g.work_item_id
             : g.severity === sev)) &&
         (!service || g.service === service) &&
         (!incidentStatus || g.lifecycle_status === incidentStatus) &&
-        (!qq || `${g.service} ${g.signature} ${g.caller} ${g.sample}`.toLowerCase().includes(qq)),
+        (!qq ||
+          `${g.service} ${g.signature} ${g.caller} ${g.sample}`
+            .toLowerCase()
+            .includes(qq)),
     );
   }, [data, ns, sev, query, service, incidentStatus]);
 
@@ -704,7 +781,8 @@ export function ProdErrorsPage({
       medium: 0,
       low: 0,
     };
-    for (const g of data?.groups ?? []) if (ns === "all" || g.namespace === ns) c[g.severity]++;
+    for (const g of data?.groups ?? [])
+      if (ns === "all" || g.namespace === ns) c[g.severity]++;
     return c;
   }, [data, ns]);
 
@@ -731,7 +809,11 @@ export function ProdErrorsPage({
       {data && (
         <>
           {settings && panel && !data.scanning && (
-            <ScanPanel data={data} onStarted={reload} onClose={() => setPanel(false)} />
+            <ScanPanel
+              data={data}
+              onStarted={reload}
+              onClose={() => setPanel(false)}
+            />
           )}
           {data.scanning && (
             <ScanProgressCard
@@ -743,8 +825,10 @@ export function ProdErrorsPage({
           <div className="pe-status small">
             {!data.splunk.connected && (
               <span className="pe-warn">
-                {data.splunk.expired ? t("pe.sessionExpired") : t("pe.notConnected")} —{" "}
-                <a href="#/integrations">{t("pe.pasteCookie")}</a>
+                {data.splunk.expired
+                  ? t("pe.sessionExpired")
+                  : t("pe.notConnected")}{" "}
+                — <a href="#/integrations">{t("pe.pasteCookie")}</a>
               </span>
             )}
             {data.scanning ? null : last ? (
@@ -756,7 +840,9 @@ export function ProdErrorsPage({
                     groups: last.groups,
                     extra: last.trigger === "schedule" ? t("pe.scheduled") : "",
                   })}
-                  {last.error && <span className="pe-warn"> · {last.error}</span>}
+                  {last.error && (
+                    <span className="pe-warn"> · {last.error}</span>
+                  )}
                 </span>
               ) : (
                 <span className="pe-warn">
@@ -782,14 +868,20 @@ export function ProdErrorsPage({
                   range: `${dt(data.shown.window_start)} – ${dt(data.shown.window_end)}`,
                   projects:
                     data.namespaces
-                      .filter((n) => (data.shown!.namespaces ?? []).includes(n.namespace))
+                      .filter((n) =>
+                        (data.shown!.namespaces ?? []).includes(n.namespace),
+                      )
                       .map((n) => n.project)
                       .join(", ") || "—",
                 })}
               </span>
             ) : (
               data.day !== data.today &&
-              last && <span className="pe-warn">{t("pe.oldDay", { day: data.day })}</span>
+              last && (
+                <span className="pe-warn">
+                  {t("pe.oldDay", { day: data.day })}
+                </span>
+              )
             )}
           </div>
           {settings && <Schedule s={data.settings} reload={reload} />}
@@ -841,11 +933,13 @@ export function ProdErrorsPage({
                       {t("pe.attention", { n: counts.critical + counts.high })}
                     </option>
                     <option value="all">{t("an.all")}</option>
-                    {(["critical", "high", "medium", "low"] as const).map((k) => (
-                      <option key={k} value={k}>
-                        {t(`pe.sev.${k}`)}
-                      </option>
-                    ))}
+                    {(["critical", "high", "medium", "low"] as const).map(
+                      (k) => (
+                        <option key={k} value={k}>
+                          {t(`pe.sev.${k}`)}
+                        </option>
+                      ),
+                    )}
                   </select>
                 </FilterField>
                 <FilterField label={t("an.service")}>
@@ -886,10 +980,16 @@ export function ProdErrorsPage({
                 <EmptyState
                   icon={Siren}
                   title={
-                    data.groups.length ? t("pe.noMatch") : last ? t("pe.none") : t("pe.noData")
+                    data.groups.length
+                      ? t("pe.noMatch")
+                      : last
+                        ? t("pe.none")
+                        : t("pe.noData")
                   }
                 >
-                  {sev === "attention" && data.groups.length ? t("pe.widen") : null}
+                  {sev === "attention" && data.groups.length
+                    ? t("pe.widen")
+                    : null}
                 </EmptyState>
               ) : (
                 <div className="pe-list">
@@ -916,7 +1016,9 @@ export function ProdErrorsPage({
                       key={g.fingerprint}
                       g={g}
                       open={open === g.fingerprint}
-                      onToggle={() => setOpen(open === g.fingerprint ? null : g.fingerprint)}
+                      onToggle={() =>
+                        setOpen(open === g.fingerprint ? null : g.fingerprint)
+                      }
                       reload={reload}
                     />
                   ))}

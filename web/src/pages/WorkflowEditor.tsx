@@ -1,5 +1,12 @@
 import { StepAgentFields } from "../StepAgentFields.tsx";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Background,
   Controls,
@@ -43,8 +50,22 @@ import {
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
-import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
-import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
+import {
+  act,
+  Badge,
+  ErrorBox,
+  Field,
+  Loading,
+  navigate,
+  time,
+  toast,
+} from "../ui.tsx";
+import {
+  autoLayout,
+  nodeTypes,
+  toEdges,
+  type StepNodeData,
+} from "../graph.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import { WF_TYPE_ICON, WF_TYPE_TONE } from "./Workflows.tsx";
 import { useI18n } from "../i18n/index.tsx";
@@ -108,7 +129,8 @@ const DEFAULT_CONFIG: Record<string, Record<string, any>> = {
   coding_agent: {
     instructions:
       "Implement the approved plan. Call prepare_branch per repository, edit only in the worktree, commit, then submit_result.",
-    output_contract: "{ summary, pull_requests: { [repo]: { title, summary, decisions } } }",
+    output_contract:
+      "{ summary, pull_requests: { [repo]: { title, summary, decisions } } }",
   },
   human_input: { questions: [{ question: "", options: [] }] },
   human_approval: { message: "", show_outputs: [] },
@@ -146,10 +168,17 @@ export function WorkflowEditor({ wfKey }: { wfKey: string }) {
 
 function Editor({ wfKey }: { wfKey: string }) {
   const { t } = useI18n();
-  const { data: def, error, loading, reload } = useApi<any>(`/api/workflows/${wfKey}`);
+  const {
+    data: def,
+    error,
+    loading,
+    reload,
+  } = useApi<any>(`/api/workflows/${wfKey}`);
   const { data: knowledge } = useApi<any[]>("/api/knowledge");
   const [spec, setSpec] = useState<Spec | null>(null);
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [positions, setPositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
   const [selected, setSelected] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -167,7 +196,10 @@ function Editor({ wfKey }: { wfKey: string }) {
         config: x.config ?? {},
       })),
     };
-    setPositions(placeSteps(clean.steps));
+    const auto = autoLayout(clean.steps);
+    setPositions(
+      Object.fromEntries(clean.steps.map((x) => [x.key, x.ui ?? auto[x.key]])),
+    );
     setSpec(clean);
     setDirty(false);
     setErrors([]);
@@ -175,7 +207,9 @@ function Editor({ wfKey }: { wfKey: string }) {
   useEffect(() => {
     if (!def || spec) return;
     load(def.draft_spec ?? def.versions[0]?.spec);
-    setBaseVersion(def.draft_spec ? "draft" : (def.versions[0]?.version ?? null));
+    setBaseVersion(
+      def.draft_spec ? "draft" : (def.versions[0]?.version ?? null),
+    );
   }, [def, spec, load]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => dirty && e.preventDefault();
@@ -195,14 +229,14 @@ function Editor({ wfKey }: { wfKey: string }) {
     });
 
   const invalidKeys = useMemo(
-    () => new Set(errors.flatMap((e) => [...e.matchAll(/"([a-z0-9_-]+)"/g)].map((m) => m[1]))),
+    () =>
+      new Set(
+        errors.flatMap((e) =>
+          [...e.matchAll(/"([a-z0-9_-]+)"/g)].map((m) => m[1]),
+        ),
+      ),
     [errors],
   );
-  const pickedAt = useRef(0);
-  const pickStep = useCallback((key: string) => {
-    pickedAt.current = performance.now();
-    setSelected(key);
-  }, []);
   const nodes: Node<StepNodeData>[] = useMemo(
     () =>
       (spec?.steps ?? []).map((s) => ({
@@ -214,39 +248,19 @@ function Editor({ wfKey }: { wfKey: string }) {
           step: s,
           selected: s.key === selected,
           invalid: invalidKeys.has(s.key),
-          onPick: pickStep,
         },
       })),
-    [spec, positions, selected, invalidKeys, pickStep],
+    [spec, positions, selected, invalidKeys],
   );
   const edges: Edge[] = useMemo(
     () =>
-      toEdges(spec?.steps ?? [], undefined, positions).map((e) => ({
+      toEdges(spec?.steps ?? []).map((e) => ({
         ...e,
         deletable: true,
         selectable: true,
       })),
-    [spec, positions],
+    [spec],
   );
-
-  // Ctrl+S / ⌘S publishes the workflow (same as the Publish button: validate, save, publish a new version) instead of
-  // the browser's "Save page". Declared before the early returns; `publish` is defined below and kept in a ref.
-  const publishRef = useRef<() => Promise<void>>(async () => {});
-  const publishing = useRef(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s")
-        return;
-      e.preventDefault();
-      if (publishing.current || e.repeat) return;
-      publishing.current = true;
-      void publishRef.current().finally(() => {
-        publishing.current = false;
-      });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   if (loading && !def) return <Loading />;
   if (error)
@@ -264,7 +278,8 @@ function Editor({ wfKey }: { wfKey: string }) {
     );
     if (changes.some((c) => c.type === "position")) {
       setPositions(Object.fromEntries(moved.map((n) => [n.id, n.position])));
-      if (changes.some((c) => c.type === "position" && !c.dragging)) setDirty(true);
+      if (changes.some((c) => c.type === "position" && !c.dragging))
+        setDirty(true);
     }
   };
   const onConnect = (c: Connection) => {
@@ -293,7 +308,8 @@ function Editor({ wfKey }: { wfKey: string }) {
         st.depends_on = st.depends_on.filter((d) => !keys.includes(d));
         if (st.run_if && keys.includes(st.run_if.step)) delete st.run_if;
       }
-      if (s.feedback_step && keys.includes(s.feedback_step)) delete s.feedback_step;
+      if (s.feedback_step && keys.includes(s.feedback_step))
+        delete s.feedback_step;
       return s;
     });
     if (selected && keys.includes(selected)) setSelected(null);
@@ -326,7 +342,8 @@ function Editor({ wfKey }: { wfKey: string }) {
   };
   const renameStep = (from: string, to: string) => {
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(to)) return toast(t("wfe.keyChars"));
-    if (spec.steps.some((s) => s.key === to)) return toast(t("wfe.keyExists", { key: to }));
+    if (spec.steps.some((s) => s.key === to))
+      return toast(t("wfe.keyExists", { key: to }));
     update((s) => {
       for (const st of s.steps) {
         if (st.key === from) st.key = to;
@@ -334,8 +351,11 @@ function Editor({ wfKey }: { wfKey: string }) {
         if (st.run_if?.step === from) st.run_if.step = to;
         if (st.config.content_from === from) st.config.content_from = to;
         if (Array.isArray(st.config.show_outputs))
-          st.config.show_outputs = st.config.show_outputs.map((d: string) => (d === from ? to : d));
-        if (st.config.on_reject?.reexecute === from) st.config.on_reject.reexecute = to;
+          st.config.show_outputs = st.config.show_outputs.map((d: string) =>
+            d === from ? to : d,
+          );
+        if (st.config.on_reject?.reexecute === from)
+          st.config.on_reject.reexecute = to;
       }
       if (s.feedback_step === from) s.feedback_step = to;
       return s;
@@ -356,7 +376,9 @@ function Editor({ wfKey }: { wfKey: string }) {
     })),
   });
   const validate = async () => {
-    const r = await act(() => api<any>("/api/workflows/validate", { spec: toSave() }));
+    const r = await act(() =>
+      api<any>("/api/workflows/validate", { spec: toSave() }),
+    );
     if (!r) return false;
     setErrors(r.valid ? [] : r.errors);
     if (r.valid) toast(t("wfe.valid"), "ok");
@@ -365,7 +387,10 @@ function Editor({ wfKey }: { wfKey: string }) {
   const saveDraft = async () => {
     if (!(await validate())) return;
     if (
-      await act(() => api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }), t("wfe.draftSaved"))
+      await act(
+        () => api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }),
+        t("wfe.draftSaved"),
+      )
     ) {
       setDirty(false);
       setBaseVersion("draft");
@@ -374,17 +399,25 @@ function Editor({ wfKey }: { wfKey: string }) {
   };
   const publish = async () => {
     if (!(await validate())) return;
-    await api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }).catch((e) => toast(e.message));
-    const r = await act(() => api<any>(`/api/workflows/${wfKey}/publish`, { change_note: note }));
+    await api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }).catch((e) =>
+      toast(e.message),
+    );
+    const r = await act(() =>
+      api<any>(`/api/workflows/${wfKey}/publish`, { change_note: note }),
+    );
     if (r) {
-      toast(r.unchanged ? t("wfe.noChange") : t("wfe.published", { version: r.version }), "ok");
+      toast(
+        r.unchanged
+          ? t("wfe.noChange")
+          : t("wfe.published", { version: r.version }),
+        "ok",
+      );
       setDirty(false);
       setNote("");
       setBaseVersion(r.version);
       reload();
     }
   };
-  publishRef.current = publish;
   const loadVersion = (v: string) => {
     if (dirty && !confirm(t("wfe.discard"))) return;
     if (v === "draft") load(def.draft_spec);
@@ -448,13 +481,16 @@ function Editor({ wfKey }: { wfKey: string }) {
                 setTimeout(() => flow.fitView({ padding: 0.2 }), 50);
               }}
             >
-              <LayoutGrid size={15} /> <span className="wfe-lbl">{t("wfe.autoLayout")}</span>
+              <LayoutGrid size={15} />{" "}
+              <span className="wfe-lbl">{t("wfe.autoLayout")}</span>
             </button>
             <button className="sm ghost" onClick={validate}>
-              <ShieldCheck size={15} /> <span className="wfe-lbl">{t("wfe.validate")}</span>
+              <ShieldCheck size={15} />{" "}
+              <span className="wfe-lbl">{t("wfe.validate")}</span>
             </button>
             <button className="sm ghost" onClick={saveDraft}>
-              <Save size={15} /> <span className="wfe-lbl">{t("wfe.saveDraft")}</span>
+              <Save size={15} />{" "}
+              <span className="wfe-lbl">{t("wfe.saveDraft")}</span>
             </button>
           </div>
           <div className="wfe-publish">
@@ -464,12 +500,7 @@ function Editor({ wfKey }: { wfKey: string }) {
               onChange={(e) => setNote(e.target.value)}
               aria-label={t("wfe.changeNoteAria")}
             />
-            <button
-              className="sm"
-              onClick={publish}
-              title={t("wfe.publishShortcut")}
-              aria-keyshortcuts="Control+S Meta+S"
-            >
+            <button className="sm" onClick={publish}>
               <Rocket size={15} /> {t("wfe.publish")}
             </button>
           </div>
@@ -490,7 +521,9 @@ function Editor({ wfKey }: { wfKey: string }) {
           <div className="wfe-pal-head">
             <b>{t("wfe.addStep")}</b>
             <span className="muted small">
-              {selected ? t("wfe.after", { step: selected }) : t("wfe.clickAdd")}
+              {selected
+                ? t("wfe.after", { step: selected })
+                : t("wfe.clickAdd")}
             </span>
           </div>
           {PALETTE_GROUPS.map(([group, types]) => (
@@ -522,7 +555,11 @@ function Editor({ wfKey }: { wfKey: string }) {
 
         <div className="canvas wfe-canvas">
           {errors.length > 0 && (
-            <ErrorsCard errors={errors} stepKeys={stepKeys} onPick={setSelected} />
+            <ErrorsCard
+              errors={errors}
+              stepKeys={stepKeys}
+              onPick={setSelected}
+            />
           )}
           <ReactFlow
             nodes={nodes}
@@ -532,20 +569,17 @@ function Editor({ wfKey }: { wfKey: string }) {
             onConnect={onConnect}
             onEdgesDelete={removeEdges}
             onNodesDelete={(ns) => removeSteps(ns.map((n) => n.id))}
-            onNodeClick={(_, n) => pickStep(n.id)}
-            onPaneClick={() => {
-              if (performance.now() - pickedAt.current < 500) return;
-              setSelected(null);
-            }}
+            onNodeClick={(_, n) => setSelected(n.id)}
+            onPaneClick={() => setSelected(null)}
             deleteKeyCode={["Delete", "Backspace"]}
-            nodeClickDistance={8}
-            nodeDragThreshold={8}
             fitView
             fitViewOptions={{
               padding: 0.25,
               maxZoom: 1,
               minZoom: 0.7,
-              nodes: nodes.slice(0, 5).map((n: { id: string }) => ({ id: n.id })),
+              nodes: nodes
+                .slice(0, 5)
+                .map((n: { id: string }) => ({ id: n.id })),
             }}
             minZoom={0.2}
             ariaLabelConfig={{
@@ -563,7 +597,11 @@ function Editor({ wfKey }: { wfKey: string }) {
             <div className="wfe-empty">
               <div className="wfe-empty-card">
                 <div className="empty-art">
-                  <MousePointerClick size={32} strokeWidth={1.6} color="var(--brand)" />
+                  <MousePointerClick
+                    size={32}
+                    strokeWidth={1.6}
+                    color="var(--brand)"
+                  />
                 </div>
                 <b>{t("wfe.emptyCanvas")}</b>
                 <p className="muted small">{t("wfe.emptyHint")}</p>
@@ -571,7 +609,10 @@ function Editor({ wfKey }: { wfKey: string }) {
                   <button className="sm" onClick={() => addStep("agent")}>
                     <Plus size={14} /> {t("wfe.type.agent")}
                   </button>
-                  <button className="sm ghost" onClick={() => addStep("coding_agent")}>
+                  <button
+                    className="sm ghost"
+                    onClick={() => addStep("coding_agent")}
+                  >
                     <Plus size={14} /> {t("wfe.type.coding_agent")}
                   </button>
                 </div>
@@ -598,7 +639,12 @@ function Editor({ wfKey }: { wfKey: string }) {
               onBack={() => setSelected(null)}
             />
           ) : (
-            <WorkflowForm spec={spec} def={def} knowledge={knowledge ?? []} update={update} />
+            <WorkflowForm
+              spec={spec}
+              def={def}
+              knowledge={knowledge ?? []}
+              update={update}
+            />
           )}
         </aside>
       </div>
@@ -619,7 +665,11 @@ function ErrorsCard({
   const [open, setOpen] = useState(true);
   return (
     <div className="wfe-errors" role="alert">
-      <button className="wfe-errors-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+      <button
+        className="wfe-errors-head"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
         <CircleAlert size={16} />
         <b>{t("wfe.invalid")}</b>
         <span className="count">{errors.length}</span>
@@ -631,14 +681,20 @@ function ErrorsCard({
           {errors.map((e) => {
             const keys = [
               ...new Set(
-                [...e.matchAll(/"([a-z0-9_-]+)"/g)].map((m) => m[1]).filter((k) => stepKeys.has(k)),
+                [...e.matchAll(/"([a-z0-9_-]+)"/g)]
+                  .map((m) => m[1])
+                  .filter((k) => stepKeys.has(k)),
               ),
             ];
             return (
               <li key={e}>
                 <span>{e}</span>
                 {keys.map((k) => (
-                  <button key={k} className="xs ghost" onClick={() => onPick(k)}>
+                  <button
+                    key={k}
+                    className="xs ghost"
+                    onClick={() => onPick(k)}
+                  >
                     {t("wfe.pick", { key: k })}
                   </button>
                 ))}
@@ -688,7 +744,11 @@ function Check({
 }) {
   return (
     <label className="wfe-check" title={title}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
       <span>{children}</span>
     </label>
   );
@@ -726,7 +786,10 @@ function MultiPick({
           ))}
         </div>
       )}
-      <select value="" onChange={(e) => e.target.value && onChange([...value, e.target.value])}>
+      <select
+        value=""
+        onChange={(e) => e.target.value && onChange([...value, e.target.value])}
+      >
         <option value="">{placeholder}</option>
         {options
           .filter((o) => !value.includes(o[0]))
@@ -740,7 +803,10 @@ function MultiPick({
   );
 }
 
-function knowledgeOptions(knowledge: any[], skills: boolean): Array<[string, string]> {
+function knowledgeOptions(
+  knowledge: any[],
+  skills: boolean,
+): Array<[string, string]> {
   return knowledge
     .filter((k) => (k.category === "agent_skill") === skills)
     .map((k) => [
@@ -761,7 +827,9 @@ function WorkflowForm({
   update: (fn: (s: Spec) => Spec) => void;
 }) {
   const { t } = useI18n();
-  const scoped = knowledge.filter((k) => k.scope_type === "WORKFLOW" && k.scope_ref === def.key);
+  const scoped = knowledge.filter(
+    (k) => k.scope_type === "WORKFLOW" && k.scope_ref === def.key,
+  );
   return (
     <div className="wfe-form">
       <div className="wfe-insp-head">
@@ -770,7 +838,9 @@ function WorkflowForm({
         </span>
         <div className="wfe-insp-title">
           <b>{t("wfe.config")}</b>
-          <span className="muted small">{t("wfe.stepCount", { n: spec.steps.length })}</span>
+          <span className="muted small">
+            {t("wfe.stepCount", { n: spec.steps.length })}
+          </span>
         </div>
       </div>
       <div className="wfe-insp-body">
@@ -785,7 +855,9 @@ function WorkflowForm({
             <textarea
               rows={2}
               value={spec.description ?? ""}
-              onChange={(e) => update((s) => ({ ...s, description: e.target.value }))}
+              onChange={(e) =>
+                update((s) => ({ ...s, description: e.target.value }))
+              }
             />
           </Field>
           <Field label={t("wfe.feedbackStep")} hint={t("wfe.feedbackHint")}>
@@ -829,7 +901,8 @@ function WorkflowForm({
               <div className="muted">{t("wfe.scoped", { key: def.key })}</div>
               {scoped.map((k) => (
                 <div key={k.key}>
-                  <BookOpen size={12} /> <a href={`#/knowledge/${k.key}`}>{k.title}</a>
+                  <BookOpen size={12} />{" "}
+                  <a href={`#/knowledge/${k.key}`}>{k.title}</a>
                 </div>
               ))}
             </div>
@@ -846,7 +919,9 @@ function WorkflowForm({
         <Section
           icon={History}
           title={t("wfe.versions")}
-          aside={<span className="count wfe-sec-count">{def.versions.length}</span>}
+          aside={
+            <span className="count wfe-sec-count">{def.versions.length}</span>
+          }
         >
           {def.versions.length === 0 ? (
             <p className="muted small" style={{ margin: 0 }}>
@@ -859,7 +934,9 @@ function WorkflowForm({
                   <span className="wfe-v">v{v.version}</span>
                   <div>
                     <div className="small">
-                      {v.change_note || <span className="muted">{t("wfe.noNote")}</span>}
+                      {v.change_note || (
+                        <span className="muted">{t("wfe.noNote")}</span>
+                      )}
                     </div>
                     <div className="muted wfe-v-time">
                       <Clock size={11} /> {time(v.published_at)}
@@ -893,7 +970,8 @@ function JsonField({
   const ref = useRef<HTMLTextAreaElement>(null);
   // Reflect edits made through the form fields, but never while the user is typing here.
   useEffect(() => {
-    if (document.activeElement !== ref.current) setText(JSON.stringify(value, null, 2));
+    if (document.activeElement !== ref.current)
+      setText(JSON.stringify(value, null, 2));
   }, [value]);
   return (
     <>
@@ -951,7 +1029,9 @@ function StepForm({
   const set = (fn: (s: Step) => void) => updateStep(step.key, fn);
   const cfg = step.config;
   const setCfg = (k: string, v: unknown) =>
-    set((s) => (v === undefined || v === "" ? delete s.config[k] : (s.config[k] = v)));
+    set((s) =>
+      v === undefined || v === "" ? delete s.config[k] : (s.config[k] = v),
+    );
   const anc = [...ancestors(spec.steps, step.key)];
   const others = spec.steps.filter((s) => s.key !== step.key).map((s) => s.key);
   const isAgent = step.type === "agent" || step.type === "coding_agent";
@@ -973,7 +1053,8 @@ function StepForm({
         <div className="wfe-insp-title">
           <b>{step.name || step.key}</b>
           <span className="muted small">
-            {t(`wfe.type.${step.type}`)} · <span className="mono">{step.key}</span>
+            {t(`wfe.type.${step.type}`)} ·{" "}
+            <span className="mono">{step.key}</span>
           </span>
         </div>
         <button className="xs danger" onClick={removeStep}>
@@ -987,7 +1068,9 @@ function StepForm({
               <input
                 value={keyDraft}
                 onChange={(e) => setKeyDraft(e.target.value)}
-                onBlur={() => keyDraft !== step.key && renameStep(step.key, keyDraft)}
+                onBlur={() =>
+                  keyDraft !== step.key && renameStep(step.key, keyDraft)
+                }
               />
             </Field>
             <Field label={t("wfe.name")}>
@@ -1020,7 +1103,10 @@ function StepForm({
               options={others
                 .filter(
                   (k) =>
-                    !spec.steps.find((s) => s.key === k && ancestors(spec.steps, k).has(step.key)),
+                    !spec.steps.find(
+                      (s) =>
+                        s.key === k && ancestors(spec.steps, k).has(step.key),
+                    ),
                 )
                 .map((k) => [k, k])}
               placeholder={t("wfe.dependsPh")}
@@ -1033,7 +1119,10 @@ function StepForm({
           <Section icon={I} title={t(`wfe.cfg.${step.type}`)}>
             {isAgent && (
               <>
-                <Field label={t("wfe.instructions")} hint={t("wfe.instructionsHint")}>
+                <Field
+                  label={t("wfe.instructions")}
+                  hint={t("wfe.instructionsHint")}
+                >
                   <textarea
                     rows={8}
                     value={cfg.instructions ?? ""}
@@ -1061,7 +1150,9 @@ function StepForm({
                     value={cfg.knowledge ?? []}
                     options={knowledgeOptions(knowledge, false)}
                     placeholder={t("wfe.assignKnowledge")}
-                    onChange={(v) => setCfg("knowledge", v.length ? v : undefined)}
+                    onChange={(v) =>
+                      setCfg("knowledge", v.length ? v : undefined)
+                    }
                   />
                 </Field>
                 <Check
@@ -1070,20 +1161,28 @@ function StepForm({
                   onChange={(c) =>
                     setCfg(
                       "delegation",
-                      c ? { enabled: true, agents: ["explorer", "reviewer"] } : undefined,
+                      c
+                        ? { enabled: true, agents: ["explorer", "reviewer"] }
+                        : undefined,
                     )
                   }
                 >
                   {t("wfe.delegate")}
                 </Check>
-                <StepAgentFields value={cfg.agent ?? {}} onChange={(v) => setCfg("agent", v)} />
+                <StepAgentFields
+                  value={cfg.agent ?? {}}
+                  onChange={(v) => setCfg("agent", v)}
+                />
                 <div className="grid2">
                   <Field label={t("wfe.maxTurns")}>
                     <input
                       type="number"
                       value={cfg.max_turns ?? ""}
                       onChange={(e) =>
-                        setCfg("max_turns", e.target.value ? Number(e.target.value) : undefined)
+                        setCfg(
+                          "max_turns",
+                          e.target.value ? Number(e.target.value) : undefined,
+                        )
                       }
                     />
                   </Field>
@@ -1096,10 +1195,14 @@ function StepForm({
                   <div key={i} className="wfe-question">
                     <div className="wfe-question-head">
                       <span className="wfe-qn">{i + 1}</span>
-                      <span className="grow muted small">{t("wfe.question")}</span>
+                      <span className="grow muted small">
+                        {t("wfe.question")}
+                      </span>
                       <button
                         className="quiet xs"
-                        onClick={() => set((s) => s.config.questions.splice(i, 1))}
+                        onClick={() =>
+                          set((s) => s.config.questions.splice(i, 1))
+                        }
                       >
                         <Trash2 size={12} /> {t("wfe.deleteQuestion")}
                       </button>
@@ -1108,7 +1211,10 @@ function StepForm({
                       placeholder={t("wfe.questionPh")}
                       value={q.question}
                       onChange={(e) =>
-                        set((s) => (s.config.questions[i].question = e.target.value))
+                        set(
+                          (s) =>
+                            (s.config.questions[i].question = e.target.value),
+                        )
                       }
                     />
                     <input
@@ -1160,14 +1266,18 @@ function StepForm({
                 </Field>
                 <Check
                   checked={!!cfg.select_repositories}
-                  onChange={(c) => setCfg("select_repositories", c || undefined)}
+                  onChange={(c) =>
+                    setCfg("select_repositories", c || undefined)
+                  }
                 >
                   {t("wfe.selectRepos")}
                 </Check>
                 {cfg.select_repositories && (
                   <Check
                     checked={!!cfg.auto_approve_unambiguous}
-                    onChange={(c) => setCfg("auto_approve_unambiguous", c || undefined)}
+                    onChange={(c) =>
+                      setCfg("auto_approve_unambiguous", c || undefined)
+                    }
                   >
                     {t("wfe.autoApprove")}
                   </Check>
@@ -1178,7 +1288,9 @@ function StepForm({
                     onChange={(e) =>
                       setCfg(
                         "on_reject",
-                        e.target.value ? { reexecute: e.target.value } : undefined,
+                        e.target.value
+                          ? { reexecute: e.target.value }
+                          : undefined,
                       )
                     }
                   >
@@ -1197,24 +1309,37 @@ function StepForm({
                 <Field label={t("wfe.action")}>
                   <select
                     value={cfg.action ?? ""}
-                    onChange={(e) => set((s) => (s.config = { action: e.target.value }))}
+                    onChange={(e) =>
+                      set((s) => (s.config = { action: e.target.value }))
+                    }
                   >
-                    <option value="repository_discovery">{t("wfe.act.discovery")}</option>
-                    <option value="select_repositories">{t("wfe.act.select")}</option>
-                    <option value="publish_report">{t("wfe.act.report")}</option>
+                    <option value="repository_discovery">
+                      {t("wfe.act.discovery")}
+                    </option>
+                    <option value="select_repositories">
+                      {t("wfe.act.select")}
+                    </option>
+                    <option value="publish_report">
+                      {t("wfe.act.report")}
+                    </option>
                     <option value="noop">{t("wfe.act.noop")}</option>
                   </select>
                 </Field>
                 {cfg.action === "repository_discovery" && (
                   <div className="grid2 wfe-align-end">
-                    <Check checked={!!cfg.use_ai} onChange={(c) => setCfg("use_ai", c)}>
+                    <Check
+                      checked={!!cfg.use_ai}
+                      onChange={(c) => setCfg("use_ai", c)}
+                    >
                       {t("wfe.aiRank")}
                     </Check>
                     <Field label={t("wfe.maxCandidates")}>
                       <input
                         type="number"
                         value={cfg.max_candidates ?? 5}
-                        onChange={(e) => setCfg("max_candidates", Number(e.target.value))}
+                        onChange={(e) =>
+                          setCfg("max_candidates", Number(e.target.value))
+                        }
                       />
                     </Field>
                   </div>
@@ -1254,7 +1379,9 @@ function StepForm({
                     <input
                       type="number"
                       value={cfg.timeout_seconds ?? 600}
-                      onChange={(e) => setCfg("timeout_seconds", Number(e.target.value))}
+                      onChange={(e) =>
+                        setCfg("timeout_seconds", Number(e.target.value))
+                      }
                     />
                   </Field>
                   <Check
@@ -1269,11 +1396,25 @@ function StepForm({
             {step.type === "condition" && (
               <div className="grid3">
                 <Field label={t("wfe.path")}>
-                  <input value={cfg.path ?? ""} onChange={(e) => setCfg("path", e.target.value)} />
+                  <input
+                    value={cfg.path ?? ""}
+                    onChange={(e) => setCfg("path", e.target.value)}
+                  />
                 </Field>
                 <Field label={t("wfe.op")}>
-                  <select value={cfg.op ?? "truthy"} onChange={(e) => setCfg("op", e.target.value)}>
-                    {["eq", "ne", "gt", "lt", "exists", "truthy", "contains"].map((o) => (
+                  <select
+                    value={cfg.op ?? "truthy"}
+                    onChange={(e) => setCfg("op", e.target.value)}
+                  >
+                    {[
+                      "eq",
+                      "ne",
+                      "gt",
+                      "lt",
+                      "exists",
+                      "truthy",
+                      "contains",
+                    ].map((o) => (
                       <option key={o}>{o}</option>
                     ))}
                   </select>
@@ -1335,7 +1476,9 @@ function StepForm({
                 min={1}
                 max={10}
                 value={step.max_attempts ?? 1}
-                onChange={(e) => set((s) => (s.max_attempts = Number(e.target.value)))}
+                onChange={(e) =>
+                  set((s) => (s.max_attempts = Number(e.target.value)))
+                }
               />
             </Field>
             <Field label={t("wfe.backoff")}>
@@ -1343,7 +1486,9 @@ function StepForm({
                 type="number"
                 min={0}
                 value={step.retry_backoff_seconds ?? 5}
-                onChange={(e) => set((s) => (s.retry_backoff_seconds = Number(e.target.value)))}
+                onChange={(e) =>
+                  set((s) => (s.retry_backoff_seconds = Number(e.target.value)))
+                }
               />
             </Field>
           </div>
@@ -1374,7 +1519,9 @@ function StepForm({
                 <input
                   placeholder={t("wfe.pathPh")}
                   value={step.run_if.path ?? ""}
-                  onChange={(e) => set((s) => (s.run_if!.path = e.target.value || undefined))}
+                  onChange={(e) =>
+                    set((s) => (s.run_if!.path = e.target.value || undefined))
+                  }
                 />
               )}
               {step.run_if && (
@@ -1397,13 +1544,16 @@ function StepForm({
 
         <details className="wfe-sec wfe-adv">
           <summary className="wfe-sec-head">
-            <SlidersHorizontal size={14} strokeWidth={2} /> <span>{t("wfe.advanced")}</span>
+            <SlidersHorizontal size={14} strokeWidth={2} />{" "}
+            <span>{t("wfe.advanced")}</span>
             <ChevronDown size={14} className="wfe-adv-chev" />
           </summary>
           <JsonField
             value={cfg}
             rows={10}
-            onChange={(v) => v && typeof v === "object" && set((s) => (s.config = v))}
+            onChange={(v) =>
+              v && typeof v === "object" && set((s) => (s.config = v))
+            }
           />
         </details>
       </div>
@@ -1441,15 +1591,11 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
       }),
     );
     if (!r) return;
-    if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
+    if (mode === "step")
+      await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
   };
   const enabledRepos = (repos ?? []).filter((r) => r.enabled);
-  const selfWorkflow = wfKey === "platform-self-development";
-  const selfNames = enabledRepos.filter((r) => r.self).map((r) => r.name);
-  useEffect(() => {
-    if (selfWorkflow) setSel(selfNames);
-  }, [selfWorkflow, selfNames.join("|")]);
   return (
     <div className="wfe-form">
       <div className="wfe-insp-head">
@@ -1460,7 +1606,11 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
           <b>{t("wfe.runTitle", { key: wfKey })}</b>
           <span className="muted small">{t("wfe.latest")}</span>
         </div>
-        <button className="quiet icon" onClick={onClose} aria-label={t("common.close")}>
+        <button
+          className="quiet icon"
+          onClick={onClose}
+          aria-label={t("common.close")}
+        >
           <X size={17} />
         </button>
       </div>
@@ -1478,26 +1628,25 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
           </Field>
           <div className="field">
             <span>{t("wfe.repos")}</span>
-            {selfWorkflow ? (
+            {enabledRepos.length === 0 ? (
               <div className="muted small">
-                {!repos
-                  ? t("common.loading")
-                  : selfNames.length
-                    ? t("wfe.selfRepo", { repos: selfNames.join(", ") })
-                    : t("wfe.selfRepoMissing")}
+                {repos ? t("wfe.noRepos") : t("common.loading")}
               </div>
-            ) : enabledRepos.length === 0 ? (
-              <div className="muted small">{repos ? t("wfe.noRepos") : t("common.loading")}</div>
             ) : (
               <div className="wfe-repos">
                 {enabledRepos.map((r) => (
-                  <label key={r.name} className={`wfe-repo${sel.includes(r.name) ? " on" : ""}`}>
+                  <label
+                    key={r.name}
+                    className={`wfe-repo${sel.includes(r.name) ? " on" : ""}`}
+                  >
                     <input
                       type="checkbox"
                       checked={sel.includes(r.name)}
                       onChange={(e) =>
                         setSel(
-                          e.target.checked ? [...sel, r.name] : sel.filter((x) => x !== r.name),
+                          e.target.checked
+                            ? [...sel, r.name]
+                            : sel.filter((x) => x !== r.name),
                         )
                       }
                     />{" "}
@@ -1524,7 +1673,10 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
               <option value="en">{t("lang.en")}</option>
             </select>
           </Field>
-          <AgentProviderField value={agentProvider} onChange={setAgentProvider} />
+          <AgentProviderField
+            value={agentProvider}
+            onChange={setAgentProvider}
+          />
         </Section>
         <Section icon={Workflow} title={t("wfe.profile")}>
           <ProfilePreview

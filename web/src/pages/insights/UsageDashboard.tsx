@@ -73,7 +73,8 @@ export function UsageDashboard({
           <DataTable
             rows={fields.map(([k, label]) => ({
               label: t(`an.${label}`),
-              reported: Number(s.invocations ?? 0) - Number(s[`missing_${k}`] ?? 0),
+              reported:
+                Number(s.invocations ?? 0) - Number(s[`missing_${k}`] ?? 0),
               missing: s[`missing_${k}`],
             }))}
             columns={[
@@ -92,7 +93,14 @@ export function UsageDashboard({
             value={group}
             onChange={(e) => onGroup(e.target.value)}
           >
-            {["provider", "model", "user", "workflow", "repository", "project"].map((k) => (
+            {[
+              "provider",
+              "model",
+              "user",
+              "workflow",
+              "repository",
+              "project",
+            ].map((k) => (
               <option key={k} value={k}>
                 {t(`an.${k}`)}
               </option>
@@ -110,7 +118,9 @@ export function UsageDashboard({
             ...fields.map(([key, label]) => ({
               key,
               label,
-              style: (key === "reported_cost_usd" ? "usd" : "number") as "usd" | "number",
+              style: (key === "reported_cost_usd" ? "usd" : "number") as
+                | "usd"
+                | "number",
             })),
             {
               key: "missing_reported_cost_usd",
@@ -137,7 +147,11 @@ export function UsageDashboard({
               key: "token_anomaly",
               label: "anomaly",
               render: (r) =>
-                r.token_anomaly ? <span className="pill an-warning">{t("an.anomaly")}</span> : "—",
+                r.token_anomaly ? (
+                  <span className="pill an-warning">{t("an.anomaly")}</span>
+                ) : (
+                  "—"
+                ),
             },
           ]}
         />

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { readFile, writeFile, lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { extract } from "../codeIntelligence/parser.ts";
@@ -52,7 +51,9 @@ export async function validateSource(
       if (
         path.endsWith(".ts") &&
         (path === c.validation.path ||
-          c.allowed_changes.some((a) => a.repository === logical && a.path === path))
+          c.allowed_changes.some(
+            (a) => a.repository === logical && a.path === path,
+          ))
       )
         sources.push(`/workspace/${logical}/${path}`);
     }
@@ -65,11 +66,8 @@ export async function validateSource(
       checks,
       diagnostic: "Source syntax or forbidden capability check failed",
     };
-  // Typecheck and behavior checks share one container. Two boots were most of the benchmark wall time,
-  // and a typecheck failure still stops before the behavior script runs.
-  const script = join(validatorRoot, "validate.mjs");
-  await writeFile(script, validationProgram(c));
-  if (sources.length)
+  // Build/typecheck precedes required and hidden behavior checks. No project plugins/configuration are loaded.
+  if (sources.length) {
     await writeFile(
       join(validatorRoot, "tsconfig.json"),
       JSON.stringify({
@@ -86,50 +84,69 @@ export async function validateSource(
         files: sources,
       }),
     );
-  await writeFile(
-    join(validatorRoot, "run.mjs"),
-    `import { spawnSync } from "node:child_process";
-${
-  sources.length
-    ? `const tsc = spawnSync(process.execPath, ["/compiler/node_modules/typescript/lib/tsc.js", "--project", "/validator/tsconfig.json"], { encoding: "utf8" });
-if (tsc.status !== 0) {
-  process.stderr.write("EVAL_TSC_FAILED\\n");
-  process.stderr.write((tsc.stdout || "") + (tsc.stderr || ""));
-  process.exit(tsc.status || 1);
-}
-`
-    : ""
-}await import("/validator/validate.mjs");
-`,
-  );
-  const mounts = [
-    { source: workspace, target: "/workspace" },
-    { source: validatorRoot, target: "/validator" },
-  ];
-  if (sources.length) {
-    mounts.push(
-      {
-        source: join(import.meta.dirname, "..", "..", "node_modules", "typescript"),
-        target: "/compiler/node_modules/typescript",
-      },
-      // The scoped native compiler packages are optional; JS-only TypeScript installations omit this directory.
-      ...(existsSync(join(import.meta.dirname, "..", "..", "node_modules", "@typescript")) ? [{
-        source: join(import.meta.dirname, "..", "..", "node_modules", "@typescript"),
-        target: "/compiler/node_modules/@typescript",
-      }] : []),
-    );
+    try {
+      await containerRun(
+        image,
+        [
+          { source: workspace, target: "/workspace" },
+          { source: validatorRoot, target: "/validator" },
+          {
+            source: join(
+              import.meta.dirname,
+              "..",
+              "..",
+              "node_modules",
+              "typescript",
+            ),
+            target: "/compiler/node_modules/typescript",
+          },
+          {
+            source: join(
+              import.meta.dirname,
+              "..",
+              "..",
+              "node_modules",
+              "@typescript",
+            ),
+            target: "/compiler/node_modules/@typescript",
+          },
+        ],
+        [
+          "/compiler/node_modules/typescript/lib/tsc.js",
+          "--project",
+          "/validator/tsconfig.json",
+        ],
+        c.validation.timeout_seconds * 1000,
+        signal,
+      );
+      buildPassed = true;
+    } catch (error) {
+      if (error instanceof IsolationUnavailable || signal?.aborted) throw error;
+      return {
+        syntax: false,
+        build_passed: false,
+        security,
+        checks,
+        diagnostic: "Isolated TypeScript build/typecheck failed",
+      };
+    }
   }
+  const script = join(validatorRoot, "validate.mjs");
+  await writeFile(script, validationProgram(c));
   try {
     const result = await containerRun(
       image,
-      mounts,
-      ["/validator/run.mjs"],
-      c.validation.timeout_seconds * 1000 * (sources.length ? 2 : 1),
+      [
+        { source: workspace, target: "/workspace" },
+        { source: validatorRoot, target: "/validator" },
+      ],
+      ["/validator/validate.mjs"],
+      c.validation.timeout_seconds * 1000,
       signal,
     );
-    buildPassed = sources.length ? true : null;
     const parsed = JSON.parse(result.stdout.trim());
-    if (!Array.isArray(parsed.checks)) throw new Error("Invalid validation result");
+    if (!Array.isArray(parsed.checks))
+      throw new Error("Invalid validation result");
     return {
       syntax,
       security,
@@ -139,14 +156,6 @@ if (tsc.status !== 0) {
     };
   } catch (e) {
     if (e instanceof IsolationUnavailable || signal?.aborted) throw e;
-    if (String((e as { stderr?: string }).stderr ?? "").includes("EVAL_TSC_FAILED"))
-      return {
-        syntax: false,
-        build_passed: false,
-        security,
-        checks,
-        diagnostic: "Isolated TypeScript build/typecheck failed",
-      };
     if ((e as any).killed)
       throw Object.assign(new Error("Validation timeout"), {
         name: "EvaluationTimeout",
@@ -162,12 +171,14 @@ if (tsc.status !== 0) {
           checks: parsed.checks as typeof checks,
           diagnostic: "Required or hidden assertions failed",
         };
-    } catch {}
+    } catch { }
     return {
       syntax,
       security,
       checks: [{ name: "hidden:validator", passed: false }],
-      diagnostic: (e as any).killed ? "Validation timeout" : "Validation process failed",
+      diagnostic: (e as any).killed
+        ? "Validation timeout"
+        : "Validation process failed",
     };
   }
 }

@@ -14,7 +14,13 @@ export type StepStatus =
   | "SKIPPED";
 
 /** Logical workflow responsibilities (one character each). Not independent AI workers. */
-export type Role = "analyst" | "architect" | "developer" | "tester" | "reviewer" | "pr";
+export type Role =
+  | "analyst"
+  | "architect"
+  | "developer"
+  | "tester"
+  | "reviewer"
+  | "pr";
 
 /** What the character's body does — derived from step status only. */
 /** "greet" is decorative only (Overview mascot) — the mapper never produces it. */

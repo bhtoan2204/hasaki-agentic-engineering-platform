@@ -5,26 +5,12 @@ import { startRun } from "../src/workflow/engine.ts";
 import { workItems } from "../src/workitems/service.ts";
 import { repositories } from "../src/repos/service.ts";
 import { createUser } from "../src/auth/users.ts";
-import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
 export async function analyticsFixtures() {
   await migrate();
-  await shareAllRepositoriesForTests();
-  const owner = await createUser({
-    username: "analytics-a",
-    password: "analytics-password",
-    role: "member",
-  });
-  const other = await createUser({
-    username: "analytics-b",
-    password: "analytics-password",
-    role: "member",
-  });
-  const admin = await createUser({
-    username: "analytics-admin",
-    password: "analytics-password",
-    role: "admin",
-  });
+  const owner = await createUser({ username: "analytics-a", password: "analytics-password", role: "member" });
+  const other = await createUser({ username: "analytics-b", password: "analytics-password", role: "member" });
+  const admin = await createUser({ username: "analytics-admin", password: "analytics-password", role: "admin" });
   await repositories.upsert("oms-api", { projects: ["OMS"] });
   await repositories.upsert("oms-background", { projects: ["OMS"] });
   await definitions.create({
@@ -35,17 +21,13 @@ export async function analyticsFixtures() {
     },
   });
   const make = async (
-    provider: "claude" | "codex" | "cursor" | "antigravity",
+    provider: "claude" | "codex" | "cursor",
     user = owner,
     at = "2026-11-01T00:00:00Z",
     verified: boolean | null = true,
     privateCost?: number,
   ) => {
-    const item = await workItems.createManual({
-      title: `${provider} analytics`,
-      project: "OMS",
-      ownerId: user.id,
-    });
+    const item = await workItems.createManual({ title: `${provider} analytics`, project: "OMS", ownerId: user.id });
     const run = await startRun({
       definitionKey: "analytics-fixture",
       workItemId: item.id,
@@ -157,16 +139,5 @@ export async function analyticsFixtures() {
       );
     }
   }
-  return {
-    owner,
-    other,
-    admin,
-    claude,
-    codex,
-    cursor,
-    hidden,
-    before,
-    fingerprint,
-    foreignFingerprint,
-  };
+  return { owner, other, admin, claude, codex, cursor, hidden, before, fingerprint, foreignFingerprint };
 }

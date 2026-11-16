@@ -1,14 +1,22 @@
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
 import { EvaluationTable } from "./EvaluationTable.tsx";
-export function EvaluationDimensions({ data, common }: { data: any; common: any[] }) {
+export function EvaluationDimensions({
+  data,
+  common,
+}: {
+  data: any;
+  common: any[];
+}) {
   const { locale } = useI18n();
   const en = locale === "en";
   return (
     <>
       {" "}
       <Panel
-        title={en ? "Context effectiveness (A/B/C)" : "Hiệu quả ngữ cảnh (A/B/C)"}
+        title={
+          en ? "Context effectiveness (A/B/C)" : "Hiệu quả ngữ cảnh (A/B/C)"
+        }
         hint={
           en
             ? "Descriptive measured cohorts only. Use the paired comparison runner before concluding measurable benefit. Retrieval accuracy is unknown without labeled retrieved evidence."
@@ -36,7 +44,9 @@ export function EvaluationDimensions({ data, common }: { data: any; common: any[
       </Panel>
       <Panel
         title={
-          en ? "Task difficulty and objective quality" : "Độ khó nhiệm vụ và chất lượng khách quan"
+          en
+            ? "Task difficulty and objective quality"
+            : "Độ khó nhiệm vụ và chất lượng khách quan"
         }
       >
         <EvaluationTable
@@ -60,8 +70,11 @@ export function EvaluationDimensions({ data, common }: { data: any; common: any[
               value: (r) => fmt(r.regression_failures),
             },
             {
-              label: en ? "Invalid changes / security" : "Thay đổi sai / bảo mật",
-              value: (r) => `${fmt(r.invalid_modifications)} / ${fmt(r.security_violations)}`,
+              label: en
+                ? "Invalid changes / security"
+                : "Thay đổi sai / bảo mật",
+              value: (r) =>
+                `${fmt(r.invalid_modifications)} / ${fmt(r.security_violations)}`,
             },
             {
               label: en ? "Human interventions" : "Can thiệp con người",
@@ -76,7 +89,11 @@ export function EvaluationDimensions({ data, common }: { data: any; common: any[
         </p>
       </Panel>
       <Panel
-        title={en ? "Handoff and runtime effectiveness" : "Hiệu quả bàn giao và thời gian thực thi"}
+        title={
+          en
+            ? "Handoff and runtime effectiveness"
+            : "Hiệu quả bàn giao và thời gian thực thi"
+        }
       >
         <EvaluationTable
           rows={data.comparisons}
@@ -96,12 +113,16 @@ export function EvaluationDimensions({ data, common }: { data: any; common: any[
               value: (r) => fmt(r.active_execution_ms, "ms"),
             },
             {
-              label: en ? "Queue / human / tool" : "Hàng đợi / con người / công cụ",
+              label: en
+                ? "Queue / human / tool"
+                : "Hàng đợi / con người / công cụ",
               value: (r) =>
                 `${fmt(r.queue_ms, "ms")} / ${fmt(r.human_ms, "ms")} / ${fmt(r.tool_ms, "ms")}`,
             },
             {
-              label: en ? "Cache read / write / reasoning" : "Cache đọc / ghi / suy luận",
+              label: en
+                ? "Cache read / write / reasoning"
+                : "Cache đọc / ghi / suy luận",
               value: (r) =>
                 `${fmt(r.cache_read_tokens)} / ${fmt(r.cache_creation_tokens)} / ${fmt(r.reasoning_tokens)}`,
             },

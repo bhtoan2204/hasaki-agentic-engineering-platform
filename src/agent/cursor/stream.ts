@@ -54,29 +54,19 @@ export class NdjsonStream {
     this.buf = "";
     if (!rest.trim()) return { events: [], errors: [] };
     const parsed = parseLine(rest.trim());
-    return parsed.ok
-      ? { events: [parsed.event], errors: [] }
-      : { events: [], errors: [parsed.error] };
+    return parsed.ok ? { events: [parsed.event], errors: [] } : { events: [], errors: [parsed.error] };
   }
 }
 
-function parseLine(
-  line: string,
-): { ok: true; event: CursorEvent } | { ok: false; error: ParseError } {
+function parseLine(line: string): { ok: true; event: CursorEvent } | { ok: false; error: ParseError } {
   let raw: any;
   try {
     raw = JSON.parse(line);
   } catch (e) {
-    return {
-      ok: false,
-      error: { type: "malformed", line: line.slice(0, 500), error: (e as Error).message },
-    };
+    return { ok: false, error: { type: "malformed", line: line.slice(0, 500), error: (e as Error).message } };
   }
   if (!raw || typeof raw !== "object" || typeof raw.type !== "string")
-    return {
-      ok: false,
-      error: { type: "malformed", line: line.slice(0, 500), error: "event has no type" },
-    };
+    return { ok: false, error: { type: "malformed", line: line.slice(0, 500), error: "event has no type" } };
   const text = assistantText(raw);
   return {
     ok: true,
@@ -102,38 +92,8 @@ function parseLine(
 function assistantText(raw: any): string | undefined {
   const content = raw.message?.content;
   if (!Array.isArray(content)) return undefined;
-  const parts = content
-    .filter((c) => c && c.type === "text" && typeof c.text === "string")
-    .map((c) => c.text);
+  const parts = content.filter((c) => c && c.type === "text" && typeof c.text === "string").map((c) => c.text);
   return parts.length ? parts.join("") : undefined;
-}
-
-/**
- * Joins the per-token deltas of `--stream-partial-output` into whole messages. Consecutive deltas of the same kind
- * (assistant text or thinking) accumulate; anything else — a tool call, the other kind, the result, the CLI's own
- * duplicate full-message flush, or the end of the stream — closes the open message and `emit`s it once.
- */
-export class TextCoalescer {
-  private kind: "agent" | "thinking" | null = null;
-  private text = "";
-  private emit: (kind: "agent" | "thinking", text: string) => Promise<void>;
-  constructor(emit: (kind: "agent" | "thinking", text: string) => Promise<void>) {
-    this.emit = emit;
-  }
-  /** Feed one delta. */
-  async push(kind: "agent" | "thinking", delta: string) {
-    if (this.kind && this.kind !== kind) await this.flush();
-    this.kind = kind;
-    this.text += delta;
-  }
-  /** Close the open message (no-op when nothing or only whitespace is buffered). */
-  async flush() {
-    const kind = this.kind,
-      text = this.text;
-    this.kind = null;
-    this.text = "";
-    if (kind && text.trim()) await this.emit(kind, text.trim());
-  }
 }
 
 /**
@@ -149,9 +109,7 @@ export function isDuplicateAssistant(ev: CursorEvent, partial: boolean): boolean
 }
 
 /** First key of a tool_call object, e.g. readToolCall → { name: "read", body }. */
-export function toolCallShape(
-  toolCall: Record<string, unknown> | undefined,
-): { name: string; body: any } | null {
+export function toolCallShape(toolCall: Record<string, unknown> | undefined): { name: string; body: any } | null {
   if (!toolCall) return null;
   if (toolCall.function && typeof toolCall.function === "object") {
     const fn = toolCall.function as { name?: string; arguments?: unknown };
@@ -162,33 +120,4 @@ export function toolCallShape(
   const base = key.replace(/ToolCall$/, "");
   const name = base.charAt(0).toLowerCase() + base.slice(1);
   return { name, body: toolCall[key] };
-}
-
-export function cursorUsage(raw: unknown): {
-  tokens: {
-    input: number | null;
-    output: number | null;
-    cache_read: number | null;
-    cache_creation: number | null;
-  };
-  cost: number | null;
-} | null {
-  if (!raw || typeof raw !== "object") return null;
-  const event = raw as Record<string, unknown>;
-  const message =
-    event.message && typeof event.message === "object"
-      ? (event.message as Record<string, unknown>)
-      : {};
-  const usage = event.usage ?? message.usage;
-  if (!usage || typeof usage !== "object") return null;
-  const u = usage as Record<string, unknown>;
-  const number = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
-  const tokens = {
-    input: number(u.input_tokens ?? u.inputTokens),
-    output: number(u.output_tokens ?? u.outputTokens),
-    cache_read: number(u.cache_read_input_tokens ?? u.cached_input_tokens),
-    cache_creation: number(u.cache_creation_input_tokens),
-  };
-  if (Object.values(tokens).every((v) => v === null)) return null;
-  return { tokens, cost: number(event.total_cost_usd ?? event.cost_usd) };
 }

@@ -33,7 +33,10 @@ export function loadMigrations(dir = MIGRATIONS_DIR): Migration[] {
  * Apply pending migrations in order, each in its own transaction. Refuses to start if an applied
  * migration file was edited afterwards (checksum mismatch): schema history must be append-only.
  */
-export async function migrate(db: pg.Pool = pool, migrations = loadMigrations()) {
+export async function migrate(
+  db: pg.Pool = pool,
+  migrations = loadMigrations(),
+) {
   const c = await db.connect();
   try {
     await c.query("SELECT pg_advisory_lock($1)", [LOCK_ID]);
@@ -43,10 +46,9 @@ export async function migrate(db: pg.Pool = pool, migrations = loadMigrations())
       checksum   TEXT NOT NULL,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const applied = new Map(
-      (await c.query("SELECT version, checksum FROM schema_migrations")).rows.map((r) => [
-        r.version as number,
-        r.checksum as string,
-      ]),
+      (
+        await c.query("SELECT version, checksum FROM schema_migrations")
+      ).rows.map((r) => [r.version as number, r.checksum as string]),
     );
     const done: string[] = [];
     for (const m of migrations) {
@@ -74,7 +76,7 @@ export async function migrate(db: pg.Pool = pool, migrations = loadMigrations())
     }
     return done;
   } finally {
-    await c.query("SELECT pg_advisory_unlock($1)", [LOCK_ID]).catch(() => {});
+    await c.query("SELECT pg_advisory_unlock($1)", [LOCK_ID]).catch(() => { });
     c.release();
   }
 }

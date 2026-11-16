@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RunSummaryCard } from "./WorkItems.tsx";
-import { InvestigationRunCard } from "./Investigations.tsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { agentKey } from "../agentProvider.tsx";
-import { Background, ControlButton, Controls, ReactFlow, type Node } from "@xyflow/react";
+import { Background, Controls, ReactFlow, type Node } from "@xyflow/react";
 import {
   Activity,
   AlertTriangle,
@@ -15,7 +13,6 @@ import {
   GitPullRequest,
   Hand,
   Hourglass,
-  LayoutGrid,
   Info,
   ListTree,
   MessageCircleQuestion,
@@ -35,15 +32,19 @@ import {
   Ban,
   PenLine,
 } from "lucide-react";
-import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
+import { api, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
-import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
+import {
+  autoLayout,
+  nodeTypes,
+  toEdges,
+  type StepNodeData,
+} from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
 import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
-import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
 
 /** Display order of statuses in the run summary strip. */
@@ -68,7 +69,6 @@ const byOrder = (a: string, b: string) =>
 /** Live execution graph of one run + inspector. Route: #/runs/:id[/:stepKey | /~changes]. */
 const PANE_KEY = "rv.inspectorWidth";
 const PANE_MIN = 360;
-const ARRANGE_KEY = "rv.autoLayout";
 const paneMax = () => Math.round(window.innerWidth * 0.85);
 
 /** Width of the step inspector, set by dragging its left edge (or the arrow keys); remembered per browser. */
@@ -97,7 +97,8 @@ function useInspectorWidth() {
     const startX = e.clientX,
       startW = pane.getBoundingClientRect().width;
     document.body.classList.add("rv-resizing");
-    const move = (ev: PointerEvent) => setWidth(clamp(startW + (startX - ev.clientX)));
+    const move = (ev: PointerEvent) =>
+      setWidth(clamp(startW + (startX - ev.clientX)));
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -125,151 +126,85 @@ function useInspectorWidth() {
 export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const pane = useInspectorWidth();
   const { t, status } = useI18n();
-  const {
-    data: run,
-    error,
-    loading,
-    refreshing,
-    reload,
-    reloadFresh,
-  } = useApi<any>(`/api/runs/${id}`);
-  const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
-  // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
-  const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
+  const { data: run, error, loading, reload } = useApi<any>(`/api/runs/${id}`);
+  const { data: health, reload: reloadHealth } = useApi<any>(
+    `/api/runs/${id}/worker`,
+  );
   useEffect(() => {
-    if (finished) return;
-    const timer = setInterval(
-      () => document.visibilityState === "visible" && reloadHealth(),
-      15000,
-    );
+    const timer = setInterval(reloadHealth, 15000);
     return () => clearInterval(timer);
-  }, [id, reloadHealth, finished]);
-  // tick: state changed (run, steps, cost, totals, changes); activity: any event (incremental transcript/timeline).
+  }, [id, reloadHealth]);
   const [tick, setTick] = useState(0);
-  const [activity, setActivity] = useState(0);
-  const live = useLive(id, (p) => {
-    if (isStateChange(p)) {
-      reload();
-      setTick((t) => t + 1);
-    }
-    setActivity((a) => a + 1);
+  const live = useLive(id, () => {
+    reload();
+    setTick((t) => t + 1);
   });
   const [feedback, setFeedback] = useState("");
-  const [feedbackMode, setFeedbackMode] = useState<"auto" | "reimplement" | "replan" | "restart">(
-    "auto",
-  );
-  // Node drag (and a pane pan that starts on a block) cancels the click when the pointer moves at all.
-  // Record the press so the mouseup that lands on the pane does not immediately close the step.
-  const pickedAt = useRef(0);
-  const pickStep = useCallback(
-    (key: string) => {
-      pickedAt.current = performance.now();
-      navigate(`/runs/${id}/${key}`);
-    },
-    [id],
-  );
 
-  const [arranged, setArranged] = useState(() => {
-    try {
-      return localStorage.getItem(ARRANGE_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleArranged = () => {
-    const next = !arranged;
-    setArranged(next);
-    try {
-      localStorage.setItem(ARRANGE_KEY, next ? "1" : "0");
-    } catch {}
-  };
-  const hasSavedLayout = !!(run?.graph.steps as any[] | undefined)?.some((s) => s.ui);
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
     const specSteps = run.graph.steps as any[];
-    const placed = arranged && hasSavedLayout ? autoLayout(specSteps) : placeSteps(specSteps);
+    const pos = autoLayout(specSteps);
     const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
       if (q.status === "open") openQ[q.step_key] = (openQ[q.step_key] ?? 0) + 1;
     const attempts: Record<string, number> = {};
-    for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
-    const lastReplan = (run.inputs?.replans as any[] | undefined)?.at(-1);
-    const rerun = new Set<string>(lastReplan?.invalidated ?? []);
+    for (const a of run.attempts)
+      attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
-      const latestAttempt = [...run.attempts].reverse().find((a: any) => a.step_key === s.key);
+      const latestAttempt = [...run.attempts]
+        .reverse()
+        .find((a: any) => a.step_key === s.key);
       const effectiveAgent = latestAttempt
         ? {
             provider:
-              latestAttempt.agent_provider ?? latestAttempt.metrics?.provider ?? run.agent_provider,
+              latestAttempt.agent_provider ??
+              latestAttempt.metrics?.provider ??
+              run.agent_provider,
             model: latestAttempt.agent_model ?? null,
           }
         : {
             provider:
-              row?.agent_override?.provider ?? s.config?.agent?.provider ?? run.agent_provider,
+              row?.agent_override?.provider ??
+              s.config?.agent?.provider ??
+              run.agent_provider,
             model: row?.agent_override?.model ?? s.config?.agent?.model,
           };
       return {
         id: s.key,
         type: "step",
-        className: "nopan",
-        position: placed[s.key],
-        selected: s.key === stepKey,
+        position: s.ui ?? pos[s.key],
         data: {
           step: {
             ...s,
             handoff:
-              row?.status === "WAITING_INPUT" ? row?.pending_input?.provider_handoff : undefined,
+              row?.status === "WAITING_INPUT"
+                ? row?.pending_input?.provider_handoff
+                : undefined,
             effective_agent: effectiveAgent,
             name: row?.name ?? s.name,
             requires_approval: row?.requires_approval ?? s.requires_approval,
           },
-          transition: s.type === "coding_agent" ? run.graph?.transitions?.at(-1) : undefined,
           status: row?.status,
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],
           selected: s.key === stepKey,
-          generation: row?.generation,
-          replan: lastReplan
-            ? rerun.has(s.key)
-              ? "rerun"
-              : row?.status === "COMPLETED" || row?.status === "SKIPPED"
-                ? "reused"
-                : undefined
-            : undefined,
-          onPick: pickStep,
         },
       };
     });
-    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
-  }, [run, stepKey, pickStep, arranged, hasSavedLayout]);
-  const fitViewOptions = useMemo(
-    () => ({
-      padding: 0.25,
-      maxZoom: 1,
-      minZoom: 0.7,
-      nodes: focusNodes(
-        nodes.map((n) => n.id),
-        stepKey,
-      ),
-    }),
-    [nodes, stepKey],
-  );
-  const flowLabels = useMemo(
-    () => ({
-      "controls.ariaLabel": t("flow.controls"),
-      "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
-      "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
-      "controls.fitView.ariaLabel": t("flow.fit"),
-      "controls.interactive.ariaLabel": t("flow.interactive"),
-    }),
-    [t],
-  );
+    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status) };
+  }, [run, stepKey]);
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
-    if (run && stepKey && stepKey !== "~changes" && stepKey !== "~trace" && !run.steps.some((s: any) => s.key === stepKey))
+    if (
+      run &&
+      stepKey &&
+      stepKey !== "~changes" &&
+      !run.steps.some((s: any) => s.key === stepKey)
+    )
       navigate(`/runs/${id}`);
   }, [run, stepKey, id]);
   if (loading && !run) return <Loading />;
@@ -282,10 +217,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   const runAction = async (a: string, body: any = {}) => {
     if (a === "cancel" && !confirm(t("rv.cancelConfirm"))) return;
-    await act(async () => {
-      await api(`/api/runs/${id}/${a}`, body);
-      await reloadFresh();
-    });
+    if (await act(() => api(`/api/runs/${id}/${a}`, body))) reload();
   };
   const blocked = run.steps.filter(
     (s: any) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL",
@@ -298,7 +230,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const hasWorkspaces = run.workspaces.length > 0;
   const canFeedback =
     run.status !== "CANCELED" &&
-    (run.graph.feedback_step || run.steps.some((s: any) => s.type === "coding_agent"));
+    (run.graph.feedback_step ||
+      run.steps.some((s: any) => s.type === "coding_agent"));
   const openFeedback = () => {
     if (stepKey) navigate(`/runs/${id}`);
     setTimeout(() => {
@@ -318,7 +251,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             </a>
             <ChevronRight size={13} aria-hidden />
             <span className={stepKey ? undefined : "rv-cur"}>
-              {stepKey ? <a href={`#/runs/${id}`}>Run #{run.id}</a> : `Run #${run.id}`}
+              {stepKey ? (
+                <a href={`#/runs/${id}`}>Run #{run.id}</a>
+              ) : (
+                `Run #${run.id}`
+              )}
             </span>
             {stepKey && (
               <>
@@ -326,26 +263,19 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 <span className="rv-cur">
                   {stepKey === "~changes"
                     ? t("ch.title")
-                    : stepKey === "~trace"
-                      ? t("trace.title")
-                    : (run.steps.find((s: any) => s.key === stepKey)?.name ?? stepKey)}
+                    : (run.steps.find((s: any) => s.key === stepKey)?.name ??
+                      stepKey)}
                 </span>
               </>
             )}
           </nav>
-          <span
-            className={`rv-live is-${live}${refreshing ? " is-refreshing" : ""}`}
-            title={t("rv.channel")}
-            role="status"
-          >
+          <span className={`rv-live is-${live}`} title={t("rv.channel")}>
             <i />
-            {refreshing
-              ? t("rv.updating")
-              : live === "sse"
-                ? t("rv.live")
-                : live === "polling"
-                  ? t("rv.polling")
-                  : t("rv.connecting")}
+            {live === "sse"
+              ? t("rv.live")
+              : live === "polling"
+                ? t("rv.polling")
+                : t("rv.connecting")}
           </span>
         </div>
 
@@ -357,7 +287,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             <div style={{ minWidth: 0 }}>
               <h1 className="rv-title">
                 <span className="rv-id">#{run.id}</span>
-                <span className="rv-name">{run.title || run.definition_key}</span>
+                <span className="rv-name">
+                  {run.title || run.definition_key}
+                </span>
                 <Badge s={run.status} label />
                 <ProfileBadge
                   profile={run.profile}
@@ -368,7 +300,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 </span>
                 <span
                   className="pill"
-                  title={run.output_locale ? t("run.outputCurrent") : t("run.outputLegacyHint")}
+                  title={
+                    run.output_locale
+                      ? t("run.outputCurrent")
+                      : t("run.outputLegacyHint")
+                  }
                 >
                   {t("run.outputCurrent")}:{" "}
                   {run.output_locale === "en"
@@ -381,54 +317,51 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <div className="rv-meta">
                 <span title={t("common.workflow")}>
                   <Workflow size={13} />
-                  <a href={`#/workflows/${run.definition_key}`}>{run.definition_key}</a>{" "}
+                  <a href={`#/workflows/${run.definition_key}`}>
+                    {run.definition_key}
+                  </a>{" "}
                   <span className="muted">v{run.definition_version}</span>
                 </span>
                 <span title={t("common.branch")}>
                   <GitBranch size={13} />
                   <span className="mono">{run.branch}</span>
                 </span>
-                {Object.entries((run.inputs?.branches ?? {}) as Record<string, string>).map(
-                  ([repo, b]) => (
-                    <span
-                      key={repo}
-                      className="pill chip-brand"
-                      title={t("rv.continueTip", {
-                        source: run.inputs?.branches_source
-                          ? t("rv.from", { source: run.inputs.branches_source })
-                          : "",
-                      })}
-                    >
-                      <GitBranch size={12} /> {repo === "*" ? t("rv.allRepos") : repo} →{" "}
-                      <span className="mono">{b}</span> ({t("rv.continueOn")})
-                      {run.status !== "COMPLETED" && run.status !== "CANCELED" && (
-                        <button
-                          type="button"
-                          className="quiet"
-                          title={t("rv.editBranch")}
-                          onClick={() => {
-                            const next = prompt(
-                              t("rv.editBranchPrompt", {
-                                repo: repo === "*" ? t("rv.allRepos") : repo,
-                              }),
-                              b,
-                            );
-                            if (next !== null && next.trim() !== b)
-                              void runAction("branches", {
-                                branches: { ...(run.inputs?.branches ?? {}), [repo]: next.trim() },
-                              });
-                          }}
-                        >
-                          ✎
-                        </button>
-                      )}
-                    </span>
-                  ),
-                )}
+                {Object.entries(
+                  (run.inputs?.branches ?? {}) as Record<string, string>,
+                ).map(([repo, b]) => (
+                  <span
+                    key={repo}
+                    className="pill chip-brand"
+                    title={t("rv.continueTip", {
+                      source: run.inputs?.branches_source
+                        ? t("rv.from", { source: run.inputs.branches_source })
+                        : "",
+                    })}
+                  >
+                    <GitBranch size={12} />{" "}
+                    {repo === "*" ? t("rv.allRepos") : repo} →{" "}
+                    <span className="mono">{b}</span> ({t("rv.continueOn")})
+                    {run.status !== "COMPLETED" && run.status !== "CANCELED" && (
+                      <button
+                        type="button"
+                        className="quiet"
+                        title={t("rv.editBranch")}
+                        onClick={() => {
+                          const next = prompt(t("rv.editBranchPrompt", { repo: repo === "*" ? t("rv.allRepos") : repo }), b);
+                          if (next !== null && next.trim() !== b) void runAction("branches", { branches: { ...(run.inputs?.branches ?? {}), [repo]: next.trim() } });
+                        }}
+                      >
+                        ✎
+                      </button>
+                    )}
+                  </span>
+                ))}
                 {run.work_item && (
                   <span title={t("common.workItem")}>
                     <Ticket size={13} />
-                    <a href={`#/work-items/${run.work_item.id}`}>{run.work_item.code}</a>
+                    <a href={`#/work-items/${run.work_item.id}`}>
+                      {run.work_item.code}
+                    </a>
                   </span>
                 )}
                 {run.created_at && (
@@ -466,7 +399,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               </button>
             )}
             {canFeedback && (
-              <button className="sm ghost" onClick={openFeedback} title={t("rv.feedbackTip")}>
+              <button
+                className="sm ghost"
+                onClick={openFeedback}
+                title={t("rv.feedbackTip")}
+              >
                 <MessageSquareText size={14} /> {t("rv.feedback")}
               </button>
             )}
@@ -477,12 +414,6 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               onClick={() => navigate(`/runs/${id}/~changes`)}
             >
               <FileDiff size={14} /> {t("ch.title")}
-            </button>
-            <button
-              className={stepKey === "~trace" ? "sm" : "sm ghost"}
-              onClick={() => navigate(`/runs/${id}/~trace`)}
-            >
-              <Activity size={14} /> {t("trace.title")}
             </button>
             {!["CANCELED", "COMPLETED"].includes(run.status) && (
               <button className="sm danger" onClick={() => runAction("cancel")}>
@@ -523,24 +454,20 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       </header>
 
       {run.steps
-        .filter((s: any) => s.status === "WAITING_INPUT" && s.pending_input?.provider_handoff)
+        .filter(
+          (s: any) =>
+            s.status === "WAITING_INPUT" && s.pending_input?.provider_handoff,
+        )
         .map((s: any) => (
           <div key={s.id} className="rv-banner wait">
             <b>
-              {s.pending_input.provider_handoff.status === "BLOCKED"
-                ? t("handoff.blocked")
-                : t("handoff.paused")}
-              : {s.name}
-              {s.pending_input.provider_handoff.status === "BLOCKED"
-                ? ""
-                : ` · ${s.pending_input.provider_handoff.failure_category ?? ""}`}
+              {t("handoff.paused")}: {s.name} ·{" "}
+              {s.pending_input.provider_handoff.failure_category ?? ""}
             </b>{" "}
-            {s.pending_input.provider_handoff.status === "BLOCKED" && (
-              <span>
-                {s.pending_input.provider_handoff.blocked_reason || t("handoff.blockedHint")}{" "}
-              </span>
-            )}
-            <button className="ghost xs" onClick={() => navigate(`/runs/${id}/${s.key}`)}>
+            <button
+              className="ghost xs"
+              onClick={() => navigate(`/runs/${id}/${s.key}`)}
+            >
               {t("handoff.review")}
             </button>
           </div>
@@ -569,8 +496,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         <div className="rv-banner idle" role="status">
           <Info size={15} />
           <span>
-            {t("rv.assignedInstance")}: {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"}{" "}
-            · {health?.health ?? run.worker.health}
+            {t("rv.assignedInstance")}:{" "}
+            {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"} ·{" "}
+            {health?.health ?? run.worker.health}
             {" · "}
             {t("rv.lastSeen")}:{" "}
             {(health?.last_seen_at ?? run.worker.last_seen_at)
@@ -578,12 +506,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               : "UNKNOWN"}
             {" · "}
             {t("rv.workerAvailable")}:{" "}
-            {(health?.available ?? run.worker.available) ? "ONLINE" : "WAITING_FOR_WORKER"}
+            {(health?.available ?? run.worker.available)
+              ? "ONLINE"
+              : "WAITING_FOR_WORKER"}
             {run.worker.recovery && <> · {run.worker.recovery}</>}
-            {(!run.worker.local || !(health?.available ?? run.worker.available)) && (
+            {(!run.worker.local ||
+              !(health?.available ?? run.worker.available)) && (
               <> — {t("rv.ownerOnly")}</>
             )}
-            {run.worker.recovery === "NEEDS_ATTENTION" && <> — {t("rv.reconcile")}</>}
+            {run.worker.recovery === "NEEDS_ATTENTION" && (
+              <> — {t("rv.reconcile")}</>
+            )}
           </span>
         </div>
       )}
@@ -597,42 +530,34 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       <div className="split">
         <div className="canvas">
           <ReactFlow
-            key={arranged && hasSavedLayout ? "arranged" : "saved"}
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, n) => pickStep(n.id)}
-            onPaneClick={() => {
-              if (performance.now() - pickedAt.current < 500) return;
-              if (stepKey) navigate(`/runs/${id}`);
-            }}
-            nodesDraggable={false}
+            onNodeClick={(_, n) => navigate(`/runs/${id}/${n.id}`)}
+            onPaneClick={() => stepKey && navigate(`/runs/${id}`)}
             nodesConnectable={false}
-            elementsSelectable={false}
-            elevateEdgesOnSelect={false}
-            autoPanOnNodeFocus={false}
-            nodeClickDistance={8}
-            nodeDragThreshold={8}
             fitView
             // Long workflows: fit around the selected step (or the start) at a readable zoom instead of shrinking everything.
-            fitViewOptions={fitViewOptions}
+            fitViewOptions={{
+              padding: 0.25,
+              maxZoom: 1,
+              minZoom: 0.7,
+              nodes: focusNodes(
+                nodes.map((n) => n.id),
+                stepKey,
+              ),
+            }}
             minZoom={0.2}
-            ariaLabelConfig={flowLabels}
+            ariaLabelConfig={{
+              "controls.ariaLabel": t("flow.controls"),
+              "controls.zoomIn.ariaLabel": t("flow.zoomIn"),
+              "controls.zoomOut.ariaLabel": t("flow.zoomOut"),
+              "controls.fitView.ariaLabel": t("flow.fit"),
+              "controls.interactive.ariaLabel": t("flow.interactive"),
+            }}
           >
             <Background gap={18} />
-            <Controls showInteractive={false}>
-              {hasSavedLayout && (
-                <ControlButton
-                  onClick={toggleArranged}
-                  title={t("rv.autoLayout")}
-                  aria-label={t("rv.autoLayout")}
-                  aria-pressed={arranged}
-                  className={arranged ? "on" : undefined}
-                >
-                  <LayoutGrid size={14} />
-                </ControlButton>
-              )}
-            </Controls>
+            <Controls showInteractive={false} />
           </ReactFlow>
         </div>
         <div
@@ -656,11 +581,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               : undefined
           }
         >
-          {stepKey === "~trace" ? (
-            <TraceExplorer runId={id} activity={activity} />
-          ) : stepKey === "~changes" ? (
+          {stepKey === "~changes" ? (
             <div className="rv-pane">
-              <Changes run={run} tick={tick} activity={activity} onChanged={reloadFresh} />
+              <Changes run={run} tick={tick} onChanged={reload} />
             </div>
           ) : stepKey ? (
             <StepInspector
@@ -668,8 +591,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               run={run}
               stepKey={stepKey}
               tick={tick}
-              activity={activity}
-              onChanged={reloadFresh}
+              onChanged={reload}
             />
           ) : (
             <div className="rv-pane">
@@ -709,7 +631,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     )}
                   </span>
                   <span>{t("rv.allowedRepos")}</span>
-                  <span className="small">{run.allowed_repositories.join(", ")}</span>
+                  <span className="small">
+                    {run.allowed_repositories.join(", ")}
+                  </span>
                   <span>{t("rv.created")}</span>
                   <span>{time(run.created_at)}</span>
                   <span>{t("rv.finishedAt")}</span>
@@ -723,11 +647,12 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 </div>
               </div>
               <ReportCard run={run} />
-              <InvestigationRunCard run={run} />
               <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
               <CostPanel kind="run" id={id} tick={tick} />
-              {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
+              {run.status === "PENDING" && (
+                <RepoPicker run={run} onDone={reload} />
+              )}
               <div className="rv-note">
                 <Info size={14} />
                 {t("rv.clickNode")}
@@ -759,47 +684,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     <MessageSquareText size={14} /> {t("rv.feedbackTitle")}
                   </div>
                   <div className="rv-card">
-                    <div className="muted small">{t("rv.feedbackBody")}</div>
-                    <div className="rv-fb-modes" role="radiogroup" style={{ marginTop: 8 }}>
-                      {(["auto", "reimplement", "replan", "restart"] as const).map((m) => (
-                        <label key={m} className="rv-fb-mode" style={{ display: "block" }}>
-                          <input
-                            type="radio"
-                            name="rv-feedback-mode"
-                            value={m}
-                            checked={feedbackMode === m}
-                            onChange={() => setFeedbackMode(m)}
-                          />{" "}
-                          <b>{t(`rv.fbMode.${m}`)}</b>
-                          <span className="muted small">
-                            {" "}
-                            —{" "}
-                            {t(`rv.fbMode.${m}.d`, {
-                              step:
-                                m === "replan"
-                                  ? (run.graph.replan_step ?? "plan")
-                                  : (run.graph.feedback_step ?? t("rv.codingStep")),
-                            })}
-                          </span>
-                        </label>
-                      ))}
+                    <div className="muted small">
+                      {t("rv.feedbackBody", {
+                        step: run.graph.feedback_step ?? t("rv.codingStep"),
+                      })}
                     </div>
-                    {(() => {
-                      const last = (run.inputs?.replans as any[] | undefined)?.at(-1);
-                      return last ? (
-                        <div
-                          className="muted small"
-                          style={{ marginTop: 6 }}
-                          title={(last.reasons ?? []).join("\n")}
-                        >
-                          {t("rv.lastReplan", {
-                            route: t(`rv.fbMode.${last.route}`),
-                            source: t(`rv.replanSource.${last.source}`),
-                            targets: (last.targets ?? []).join(", "),
-                          })}
-                        </div>
-                      ) : null;
-                    })()}
                     <textarea
                       id="rv-feedback"
                       rows={3}
@@ -812,17 +701,15 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                       <button
                         className="sm"
                         disabled={!feedback.trim()}
-                        onClick={async () => {
-                          const r = await act(async () => {
-                            const result = await api(`/api/runs/${id}/feedback`, {
-                              message: feedback,
-                              mode: feedbackMode,
-                            });
-                            await reloadFresh();
-                            return result;
-                          }, t("rv.feedbackSent"));
-                          if (r) setFeedback("");
-                        }}
+                        onClick={async () =>
+                          (await act(
+                            () =>
+                              api(`/api/runs/${id}/feedback`, {
+                                message: feedback,
+                              }),
+                            t("rv.feedbackSent"),
+                          )) && (setFeedback(""), reload())
+                        }
                       >
                         <Send size={13} /> {t("rv.sendFeedback")}
                       </button>
@@ -830,9 +717,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                   </div>
                 </div>
               )}
-              {/* Result summary + copyable markdown for every finished run (runs without a work item had none). */}
-              <RunSummaryCard runs={[run]} />
-              <RunTimeline runId={id} activity={activity} />
+              <RunTimeline runId={id} tick={tick} />
             </div>
           )}
         </aside>
@@ -844,9 +729,13 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 /** READY steps that no worker has picked up yet: say who is holding the workers and for how long. */
 function QueueBanner({ run, tick }: { run: any; tick: number }) {
   const { t } = useI18n();
-  const waiting = run.steps.filter((s: any) => s.status === "READY" || s.status === "RETRYING");
+  const waiting = run.steps.filter(
+    (s: any) => s.status === "READY" || s.status === "RETRYING",
+  );
   const { data, reload } = useApi<any>(
-    waiting.length && !["PAUSED", "CANCELED"].includes(run.status) ? "/api/scheduler" : null,
+    waiting.length && !["PAUSED", "CANCELED"].includes(run.status)
+      ? "/api/scheduler"
+      : null,
   );
   useEffect(() => void reload(), [tick, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const [, force] = useState(0);
@@ -869,7 +758,11 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
           light: data.light_workers,
         })}{" "}
         {others.map((j: any) => (
-          <a key={j.job_id} href={`#/runs/${j.run_id}/${j.step_key}`} style={{ marginRight: 10 }}>
+          <a
+            key={j.job_id}
+            href={`#/runs/${j.run_id}/${j.step_key}`}
+            style={{ marginRight: 10 }}
+          >
             run #{j.run_id} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
           </a>
         ))}
@@ -901,16 +794,23 @@ function ReportCard({ run }: { run: any }) {
       {report ? (
         <div className="rv-chipline small">
           <Badge s="COMPLETED">
-            <CheckCircle2 size={11} /> {t("rv.verified", { n: report.counts.VERIFIED })}
+            <CheckCircle2 size={11} />{" "}
+            {t("rv.verified", { n: report.counts.VERIFIED })}
           </Badge>
           <Badge s="WAITING">
-            <AlertTriangle size={11} /> {t("rv.partial", { n: report.counts.PARTIAL })}
+            <AlertTriangle size={11} />{" "}
+            {t("rv.partial", { n: report.counts.PARTIAL })}
           </Badge>
           <Badge s="FAILED">
-            <XCircle size={11} /> {t("rv.missing", { n: report.counts.MISSING })}
+            <XCircle size={11} />{" "}
+            {t("rv.missing", { n: report.counts.MISSING })}
           </Badge>
           <span className="muted">
-            {s.status === "COMPLETED" ? t("rv.approved") : waiting ? t("rv.reviewWait") : ""}
+            {s.status === "COMPLETED"
+              ? t("rv.approved")
+              : waiting
+                ? t("rv.reviewWait")
+                : ""}
           </span>
         </div>
       ) : (
@@ -942,9 +842,6 @@ function ProfileCard({ run }: { run: any }) {
         </h4>
         <ProfileBadge profile={run.profile} />
       </div>
-      {(run.graph?.transitions ?? []).map((transition: { from: string; to: string; reason: string; revision: number }) => (
-        <div className="small" key={transition.revision}>{transition.from} → {transition.to} · revision {transition.revision}: {transition.reason}</div>
-      ))}
       <div className="small muted">
         {d.requested === "AUTO"
           ? t("rv.autoPick", { confidence: d.confidence })
@@ -956,7 +853,11 @@ function ProfileCard({ run }: { run: any }) {
         ))}
       </ul>
       {(d.warnings ?? []).map((w: string) => (
-        <div key={w} className="rv-note" style={{ color: "var(--st-wait)", margin: "4px 0" }}>
+        <div
+          key={w}
+          className="rv-note"
+          style={{ color: "var(--st-wait)", margin: "4px 0" }}
+        >
           <AlertTriangle size={13} />
           {w}
         </div>
@@ -1001,7 +902,10 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const num = (n: number | null | undefined) =>
     n == null ? "—" : n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
   const steps = Object.entries<any>(data.per_step);
-  const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
+  const max = Math.max(
+    1,
+    ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms),
+  );
   const C = {
     queue: "var(--st-idle)",
     claude: "var(--brand)",
@@ -1121,7 +1025,12 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
               <span
                 style={{
                   width: `${(s.exec_ms / max) * 100}%`,
-                  background: s.type === "command" ? C.command : s.claude_ms ? C.claude : C.other,
+                  background:
+                    s.type === "command"
+                      ? C.command
+                      : s.claude_ms
+                        ? C.claude
+                        : C.other,
                 }}
               />
               <span
@@ -1136,21 +1045,29 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
             </span>
           </div>
         ))}
-        <div className="rv-chipline muted small" style={{ marginTop: 8, gap: 12 }}>
-          {(["queue", "claude", "command", "other", "human"] as const).map((k) => (
-            <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-              <i
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 3,
-                  background: C[k],
-                  display: "inline-block",
-                }}
-              />
-              {k === "claude" ? "Claude" : t(`rv.legend.${k}`)}
-            </span>
-          ))}
+        <div
+          className="rv-chipline muted small"
+          style={{ marginTop: 8, gap: 12 }}
+        >
+          {(["queue", "claude", "command", "other", "human"] as const).map(
+            (k) => (
+              <span
+                key={k}
+                style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+              >
+                <i
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 3,
+                    background: C[k],
+                    display: "inline-block",
+                  }}
+                />
+                {k === "claude" ? "Claude" : t(`rv.legend.${k}`)}
+              </span>
+            ),
+          )}
         </div>
       </div>
     </div>
@@ -1182,7 +1099,11 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
             <input
               type="checkbox"
               checked={sel.includes(r)}
-              onChange={(e) => setSel(e.target.checked ? [...sel, r] : sel.filter((x) => x !== r))}
+              onChange={(e) =>
+                setSel(
+                  e.target.checked ? [...sel, r] : sel.filter((x) => x !== r),
+                )
+              }
               style={{ marginTop: 0 }}
             />{" "}
             {r}
@@ -1194,7 +1115,8 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
           className="sm ghost"
           onClick={async () =>
             (await act(
-              () => api(`/api/runs/${run.id}/repositories`, { repositories: sel }),
+              () =>
+                api(`/api/runs/${run.id}/repositories`, { repositories: sel }),
               t("wi.saved"),
             )) && onDone()
           }
@@ -1206,28 +1128,10 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
   );
 }
 
-/** Run timeline, fetched once and then incrementally (`?after=`) whenever an event arrives. */
-function RunTimeline({ runId, activity }: { runId: number; activity: number }) {
+function RunTimeline({ runId, tick }: { runId: number; tick: number }) {
   const { t } = useI18n();
-  const [data, setData] = useState<any[] | null>(null);
-  const last = useRef(0);
-  useEffect(() => {
-    setData(null);
-    last.current = 0;
-  }, [runId]);
-  useEffect(() => {
-    let stop = false;
-    api<any[]>(`/api/runs/${runId}/events?after=${last.current}`)
-      .then((rows) => {
-        if (stop) return;
-        if (rows.length) last.current = rows[rows.length - 1].id;
-        setData((prev) => [...(prev ?? []), ...rows]);
-      })
-      .catch(() => !stop && setData((prev) => prev ?? []));
-    return () => {
-      stop = true;
-    };
-  }, [runId, activity]);
+  const { data, reload } = useApi<any[]>(`/api/runs/${runId}/events`);
+  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!data) return null;
   return (
     <div className="rv-sec">

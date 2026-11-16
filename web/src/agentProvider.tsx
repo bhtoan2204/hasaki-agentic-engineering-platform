@@ -1,14 +1,20 @@
-import { useEffect } from "react";
 import { useApi } from "./api.ts";
 import { useI18n } from "./i18n/index.tsx";
 import { Field } from "./ui.tsx";
 
 /** Default agent providers a run can be created with. Agent steps can override this default. */
-export const AGENT_PROVIDERS = ["claude", "cursor", "codex", "antigravity", "copilot"] as const;
+export const AGENT_PROVIDERS = [
+  "claude",
+  "cursor",
+  "codex",
+  "antigravity",
+] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 
 export function asProvider(v: unknown): AgentProvider {
-  return (AGENT_PROVIDERS as readonly unknown[]).includes(v) ? (v as AgentProvider) : "claude";
+  return (AGENT_PROVIDERS as readonly unknown[]).includes(v)
+    ? (v as AgentProvider)
+    : "claude";
 }
 
 /** i18n key of a provider's name: full ("Claude Code", "OpenAI Codex", "Google Antigravity") or short ("Claude", "Codex", "Antigravity"). */
@@ -17,87 +23,12 @@ export const agentKey = (p: unknown, short = false) =>
 
 interface ProviderStatus {
   id: AgentProvider;
-  enabled?: boolean;
   ok: boolean;
   error?: string;
-  quota?: "ok" | "exhausted" | "unknown";
   version?: string;
   auth?: string;
   model?: string | null;
   reasoning_effort?: string | null;
-}
-
-function agentHealthState(row: ProviderStatus | undefined) {
-  if (row?.quota === "exhausted") return "quota" as const;
-  if (row?.ok) return "connected" as const;
-  return "down" as const;
-}
-
-function useAgentHealth() {
-  const health = useApi<ProviderStatus[]>("/api/agent-providers");
-  const { reloadFresh } = health;
-  useEffect(() => {
-    const id = setInterval(() => void reloadFresh(), 60_000);
-    return () => clearInterval(id);
-  }, [reloadFresh]);
-  return health;
-}
-
-/** Compact provider health for the top bar. Refreshes once a minute. */
-export function AgentHealthBar() {
-  const { t } = useI18n();
-  const { data, error } = useAgentHealth();
-  return (
-    <div className="tb-health" role="status" aria-label={t("run.health.label")}>
-      {AGENT_PROVIDERS.map((id) => {
-        const row = data?.find((p) => p.id === id);
-        const state =
-          row?.enabled === false
-            ? "off"
-            : error
-              ? "down"
-              : data
-                ? agentHealthState(row)
-                : "checking";
-        const detail =
-          state === "checking"
-            ? t("run.health.checking")
-            : `${t(agentKey(id, true))}: ${t(`run.health.${state}`)}${state !== "connected" && row?.error ? ` — ${row.error}` : ""}`;
-        return (
-          <span key={id} className={`tb-health-item is-${state}`} title={detail}>
-            <i />
-            {t(agentKey(id, true))}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function AgentHealthList() {
-  const { t } = useI18n();
-  const { data, error } = useAgentHealth();
-  if (error)
-    return (
-      <p className="agent-notice-err">
-        {t("run.codex.statusUnknown")}: {error}
-      </p>
-    );
-  if (!data) return <p className="muted">{t("run.health.checking")}</p>;
-  return (
-    <ul className="agent-health">
-      {AGENT_PROVIDERS.map((id) => {
-        const row = data.find((p) => p.id === id);
-        const state = agentHealthState(row);
-        return (
-          <li key={id}>
-            <b>{t(agentKey(id, true))}</b> · {t(`run.health.${state}`)}
-            {state !== "connected" && row?.error ? ` — ${row.error}` : ""}
-          </li>
-        );
-      })}
-    </ul>
-  );
 }
 
 /** Provider select for run forms. For Codex and Antigravity it states readiness and account context. */
@@ -109,29 +40,22 @@ export function AgentProviderField({
   onChange: (p: AgentProvider) => void;
 }) {
   const { t } = useI18n();
-  const { data } = useAgentHealth();
-  const choices = AGENT_PROVIDERS.filter(
-    (p) => data?.find((row) => row.id === p)?.enabled !== false,
-  );
-  useEffect(() => {
-    if (!data || choices.includes(value)) return;
-    if (choices[0]) onChange(choices[0]);
-  }, [data, value, choices, onChange]);
   return (
     <>
       <Field label={t("run.agent")} hint={t("run.agentHint")}>
-        <select value={value} onChange={(e) => onChange(asProvider(e.target.value))}>
-          {choices.map((p) => (
+        <select
+          value={value}
+          onChange={(e) => onChange(asProvider(e.target.value))}
+        >
+          {AGENT_PROVIDERS.map((p) => (
             <option key={p} value={p}>
               {t(agentKey(p))}
             </option>
           ))}
         </select>
       </Field>
-      <AgentHealthList />
       {value === "codex" && <CodexNotice />}
       {value === "antigravity" && <AntigravityNotice />}
-      {value === "copilot" && <CopilotNotice />}
     </>
   );
 }
@@ -183,7 +107,9 @@ function AntigravityNotice() {
           {t("run.antigravity.statusUnknown")}: {error}
         </p>
       )}
-      {!data && !error && <p className="muted">{t("run.antigravity.checking")}</p>}
+      {!data && !error && (
+        <p className="muted">{t("run.antigravity.checking")}</p>
+      )}
       {agy && agy.ok && (
         <p className="muted">
           {t("run.antigravity.ready", {
@@ -200,41 +126,6 @@ function AntigravityNotice() {
       {agy && !agy.ok && (
         <p className="agent-notice-err">
           {t("run.antigravity.notReady")}: {agy.error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function CopilotNotice() {
-  const { t } = useI18n();
-  const { data, error } = useApi<ProviderStatus[]>("/api/agent-providers");
-  const copilot = data?.find((p) => p.id === "copilot");
-  return (
-    <div className="agent-notice" role="note">
-      <p>{t("run.copilot.account")}</p>
-      {error && (
-        <p className="agent-notice-err">
-          {t("run.copilot.statusUnknown")}: {error}
-        </p>
-      )}
-      {!data && !error && <p className="muted">{t("run.copilot.checking")}</p>}
-      {copilot && copilot.ok && (
-        <p className="muted">
-          {t("run.copilot.ready", {
-            version: copilot.version ?? "copilot",
-            auth: copilot.auth ?? "?",
-          })}
-          {" · "}
-          {t("run.copilot.model", {
-            model: copilot.model || t("run.copilot.defaultModel"),
-            effort: copilot.reasoning_effort || t("run.copilot.defaultEffort"),
-          })}
-        </p>
-      )}
-      {copilot && !copilot.ok && (
-        <p className="agent-notice-err">
-          {t("run.copilot.notReady")}: {copilot.error}
         </p>
       )}
     </div>
