@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { EvidenceCache, memoryEvidenceStore, evidenceKey, notReusableReason } from "../src/agent/verifyEvidence.ts";
-import { verifyConfig, verifyWorkspaces, type VerifyDeps } from "../src/agent/verify.ts";
+import { verifyConfig, verifyWorkspaces, type RepoVerification, type VerifyDeps } from "../src/agent/verify.ts";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-C", cwd, ...a], { stdio: "pipe" }).toString();
 
@@ -24,7 +24,7 @@ function setup(dir: string, store = memoryEvidenceStore(), opts: { code?: number
   let calls = 0;
   const logs: string[] = [];
   const mk = (scope = { runId: 1, stepKey: "implement", attemptId: 7 }) => new EvidenceCache(store, scope);
-  let cfg = { ...verifyConfig({ verify: { command: opts.command ?? "true" } }, "true")!, baseline: null as any, contractRevision: opts.contract ?? "c1" };
+  let cfg = { ...verifyConfig({ verify: { command: opts.command ?? "true" } }, "true")!, baseline: null as null, contractRevision: opts.contract ?? "c1" };
   const deps = (cache?: EvidenceCache): VerifyDeps => ({
     run: async () => {
       calls++;
@@ -126,10 +126,11 @@ test("failed results are never stored or reused", async () => {
 });
 
 test("notReusableReason rejects every non-clean state", () => {
-  const base: any = { status: "passed", passed: true, exit_code: 0, timed_out: false, weakened: [], needs_review: false, tested_state: { head: "h", fingerprint: "f" } };
+  const base = { status: "passed" as const, passed: true, exit_code: 0, timed_out: false, weakened: [], needs_review: false, tested_state: { head: "h", fingerprint: "f" } } as unknown as RepoVerification;
   assert.equal(notReusableReason(base), null);
-  for (const bad of [{ status: "failed" }, { status: "error" }, { status: "skipped" }, { timed_out: true }, { exit_code: 1 },
-    { needs_review: true }, { status: "accepted_preexisting", needs_review: true }, { weakened: ["x"] }, { error: "e" }, { tested_state: undefined }])
+  const bads: Array<Partial<RepoVerification>> = [{ status: "failed" }, { status: "error" }, { status: "skipped" }, { timed_out: true }, { exit_code: 1 },
+    { needs_review: true }, { status: "accepted_preexisting", needs_review: true }, { weakened: ["x"] }, { error: "e" }, { tested_state: undefined }];
+  for (const bad of bads)
     assert.ok(notReusableReason({ ...base, ...bad }), JSON.stringify(bad));
 });
 
@@ -150,7 +151,7 @@ test("leader failure is not cached; next request reruns", async () => {
   const store = memoryEvidenceStore();
   const cache = new EvidenceCache(store, { runId: 1, stepKey: "s" });
   let n = 0;
-  const cfg = { ...verifyConfig({ verify: { command: "true" } }, "true")!, baseline: null as any };
+  const cfg = { ...verifyConfig({ verify: { command: "true" } }, "true")!, baseline: null as null };
   const deps = (fail: boolean): VerifyDeps => ({
     run: async () => { n++; await new Promise((r) => setTimeout(r, 20)); if (fail) throw new Error("boom"); return { code: 0, output: "", timedOut: false }; },
     evidence: cache,

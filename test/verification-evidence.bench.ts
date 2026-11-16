@@ -19,7 +19,7 @@ async function scenario(calls: number, cached: boolean) {
   git(dir, "init", "-q", "-b", "main"); git(dir, "config", "user.email", "b@b"); git(dir, "config", "user.name", "b");
   writeFileSync(join(dir, "a"), "1"); git(dir, "add", "-A"); git(dir, "commit", "-qm", "i");
   let executed = 0;
-  const cfg = { ...verifyConfig({ verify: { command: "sim" } }, "sim")!, baseline: null as any, contractRevision: "c" };
+  const cfg = { ...verifyConfig({ verify: { command: "sim" } }, "sim")!, baseline: null as null, contractRevision: "c" };
   const mk = (): VerifyDeps => ({
     run: async () => { executed++; await new Promise((r) => setTimeout(r, RUN_MS)); return { code: 0, output: "", timedOut: false }; },
     ...(cached ? { evidence: cache } : {}),

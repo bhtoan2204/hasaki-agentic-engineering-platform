@@ -179,9 +179,11 @@ export class EvidenceCache {
   }
 }
 
+type EvidenceRow = { key: string; parts: EvidenceParts; result: RepoVerification; attempt_id?: number | null; duration_ms?: number };
+
 /** PostgreSQL-backed store (migration 059). Rows are scoped by run_id. */
 export function pgEvidenceStore(db: Db): EvidenceStore {
-  const toRec = (r: any): EvidenceRecord => ({
+  const toRec = (r: EvidenceRow): EvidenceRecord => ({
     key: r.key, parts: r.parts, result: r.result, attempt_id: r.attempt_id ?? null, duration_ms: r.duration_ms ?? 0,
   });
   return {
