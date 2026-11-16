@@ -152,26 +152,24 @@ async function walkTree(root: string): Promise<Entry[]> {
   const out: Entry[] = [];
   const pending: [string, string][] = [[root, ""]];
   let sliceStart = performance.now();
-  try {
-    while (pending.length) {
-      const [dir, prefix] = pending.pop()!;
-      let names: string[];
-      try { names = readdirSync(dir); } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ENOENT" && dir === root) return out;
-        throw e;
-      }
-      for (const name of names) {
-        const path = join(dir, name), rel = `${prefix}/${name}`;
-        const st = lstatSync(path, { bigint: true });
-        dependencyStats.filesStatted++;
-        const kind = st.isSymbolicLink() ? "l" : st.isDirectory() ? "d" : st.isFile() ? "f" : null;
-        if (!kind) throw new Error("Unsupported dependency entry");
-        out.push({ rel, path, kind, mode: st.mode, size: st.size, mtime: st.mtimeNs, ctime: st.ctimeNs, ino: st.ino });
-        if (kind === "d") pending.push([path, rel]);
-      }
-      if (performance.now() - sliceStart > SLICE_MS) { await yieldLoop(); sliceStart = performance.now(); }
+  while (pending.length) {
+    const [dir, prefix] = pending.pop()!;
+    let names: string[];
+    try { names = readdirSync(dir); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT" && dir === root) return out;
+      throw e;
     }
-  } finally { /* nothing to release */ }
+    for (const name of names) {
+      const path = join(dir, name), rel = `${prefix}/${name}`;
+      const st = lstatSync(path, { bigint: true });
+      dependencyStats.filesStatted++;
+      const kind = st.isSymbolicLink() ? "l" : st.isDirectory() ? "d" : st.isFile() ? "f" : null;
+      if (!kind) throw new Error("Unsupported dependency entry");
+      out.push({ rel, path, kind, mode: st.mode, size: st.size, mtime: st.mtimeNs, ctime: st.ctimeNs, ino: st.ino });
+      if (kind === "d") pending.push([path, rel]);
+    }
+    if (performance.now() - sliceStart > SLICE_MS) { await yieldLoop(); sliceStart = performance.now(); }
+  }
   return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 }
 
@@ -364,26 +362,61 @@ export async function recordDependencies(workspace: string, opts: DependencyOpti
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } };
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-/** Cross-process mutual exclusion per workspace: mkdir is atomic. A dead owner or an old lock is taken over. */
-async function withInstallLock<T>(dir: string, real: string, fn: () => Promise<T>): Promise<T> {
-  const lock = join(dir, "locks", createHash("sha256").update(real).digest("hex"));
-  await mkdir(join(dir, "locks"), { recursive: true, mode: 0o700 });
+interface LockOwner { pid: number; token: string; at: number }
+const readOwner = (lock: string) => readFile(join(lock, "owner"), "utf8").then((text) => JSON.parse(text) as LockOwner, () => null);
+const sameOwner = (a: LockOwner | null, b: LockOwner | null) => a?.pid === b?.pid && a?.token === b?.token;
+
+/**
+ * A lock directory that was judged stale is moved aside with one atomic rename (only one waiter can win it), the moved
+ * directory's owner is compared with the owner that was judged stale, and only then deleted. Someone else's live lock that
+ * was moved by mistake is put back.
+ */
+async function takeOver(lock: string, judged: LockOwner | null, token: string) {
+  const grave = `${lock}.${token}.stale`;
+  try { await rename(lock, grave); } catch { return false; }
+  if (!sameOwner(await readOwner(grave), judged)) {
+    await rename(grave, lock).catch(() => rm(grave, { recursive: true, force: true }));
+    return false;
+  }
+  await rm(grave, { recursive: true, force: true });
+  return true;
+}
+
+/**
+ * Cross-process mutual exclusion per workspace. The lock directory is created complete (with its owner record) in a private
+ * name and published by rename, which fails while another lock exists, so a lock is never visible without an owner.
+ * A dead owner or an old lock is taken over by takeOver().
+ */
+export async function withInstallLock<T>(dir: string, real: string, fn: () => Promise<T>): Promise<T> {
+  const locks = join(dir, "locks");
+  const lock = join(locks, createHash("sha256").update(real).digest("hex"));
+  await mkdir(locks, { recursive: true, mode: 0o700 });
+  const token = randomBytes(8).toString("hex");
   const deadline = Date.now() + LOCK_STALE_MS;
   for (;;) {
+    const candidate = `${lock}.${token}.tmp`;
+    await rm(candidate, { recursive: true, force: true });
+    await mkdir(candidate);
+    await writeFile(join(candidate, "owner"), JSON.stringify({ pid: process.pid, token, at: Date.now() } satisfies LockOwner));
     try {
-      await mkdir(lock);
-      await writeFile(join(lock, "owner"), JSON.stringify({ pid: process.pid, at: Date.now() }));
+      await rename(candidate, lock);
       break;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      const owner = await readFile(join(lock, "owner"), "utf8").then((text) => JSON.parse(text) as { pid: number; at: number }, () => null);
-      const born = owner ? owner.at : ((await stat(lock).catch(() => null))?.mtimeMs ?? 0);
-      if (Date.now() - born > (owner ? LOCK_STALE_MS : 30_000) || (owner && !alive(owner.pid))) { await rm(lock, { recursive: true, force: true }); continue; }
-      if (Date.now() > deadline) throw new Error("Timed out waiting for another dependency installation");
-      await sleep(50);
+      await rm(candidate, { recursive: true, force: true });
+      if (!["ENOTEMPTY", "EEXIST"].includes((e as NodeJS.ErrnoException).code ?? "")) throw e;
     }
+    const owner = await readOwner(lock);
+    const born = owner ? owner.at : ((await stat(lock).catch(() => null))?.mtimeMs ?? null);
+    if (born === null) continue; // released while we looked
+    const stale = Date.now() - born > (owner ? LOCK_STALE_MS : 30_000) || (owner !== null && !alive(owner.pid));
+    if (stale && (await takeOver(lock, owner, token))) continue;
+    if (Date.now() > deadline) throw new Error("Timed out waiting for another dependency installation");
+    await sleep(50);
   }
-  try { return await fn(); } finally { await rm(lock, { recursive: true, force: true }); }
+  try { return await fn(); } finally {
+    // Release only a lock that is still ours (it may have been taken over after a very long install).
+    if ((await readOwner(lock))?.token === token) await takeOver(lock, { pid: process.pid, token, at: 0 } as LockOwner, token).catch(() => {});
+  }
 }
 
 const flights = new Map<string, Promise<boolean>>();
@@ -408,8 +441,27 @@ export async function installNodeDependencies(workspace: string, cache?: string,
   try { return await flight; } finally { flights.delete(key); }
 }
 
+/** Thrown instead of installing when the worker-owned evidence directory cannot be written (a sandboxed caller). */
+export class DependenciesNotPreparedError extends Error {
+  constructor(workspace: string) {
+    super(`Dependencies in ${workspace} are not installed and signed by the worker, and this process cannot write worker-owned evidence `
+      + "(read-only sandbox). The worker prepare step must install dependencies before verification runs.");
+    this.name = "DependenciesNotPreparedError";
+  }
+}
+
+/** Only the worker may write evidence. A caller that cannot (read-only mount, sandbox) must never try to install. */
+async function evidenceWritable(dir: string) {
+  try {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await access(dir, constants.W_OK | constants.X_OK);
+    return true;
+  } catch { return false; }
+}
+
 async function ensure(workspace: string, real: string, cache: string | undefined, opts: DependencyOptions) {
   if ((await validateDependencies(workspace, opts)).ready) return false;
+  if (!(await evidenceWritable(evidenceDirectory(opts)))) throw new DependenciesNotPreparedError(workspace);
   return withInstallLock(evidenceDirectory(opts), real, async () => {
     // Another caller or process may have finished while we waited for the lock.
     if ((await validateDependencies(workspace, opts)).ready) return false;
@@ -465,6 +517,12 @@ async function install(workspace: string, real: string, cache: string | undefine
 /** Verification entry point: `node nodeDependencies.ts <workspace>` re-verifies strictly, installing when needed. */
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const workspace = process.argv[2] ?? process.cwd();
-  await installNodeDependencies(workspace, process.env.npm_config_cache, { strict: true });
+  try {
+    await installNodeDependencies(workspace, process.env.npm_config_cache, { strict: true });
+  } catch (e) {
+    if (!(e instanceof DependenciesNotPreparedError)) throw e;
+    console.error(e.message);
+    process.exit(1);
+  }
   if (process.env.PLATFORM_DEPENDENCY_METRICS === "1") console.log(`dependencies: ${JSON.stringify(dependencyMetrics())}`);
 }

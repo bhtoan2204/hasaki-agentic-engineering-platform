@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dependencyStats, installNodeDependencies, nodeModulesReady, resetDependencyMetrics } from "../src/git/nodeDependencies.ts";
+import { dependencyStats, installNodeDependencies, nodeModulesReady, resetDependencyMetrics, withInstallLock } from "../src/git/nodeDependencies.ts";
 
 /** Fake npm that records start/end so overlap between two installs in one directory is observable. */
 async function fixture(t: { after(fn: () => unknown): void }) {
@@ -62,4 +62,25 @@ test("a lock left by a dead process is taken over", async (t) => {
   await mkdir(lock, { recursive: true });
   await writeFile(join(lock, "owner"), JSON.stringify({ pid: 2 ** 22 + 12345, at: Date.now() }));
   assert.equal(await installNodeDependencies(dir, join(dir, "cache"), { evidenceDir }), true);
+});
+
+test("two waiters racing to take over one stale lock never hold it together", async (t) => {
+  const { dir, evidenceDir } = await fixture(t);
+  const { realpath } = await import("node:fs/promises");
+  const { createHash } = await import("node:crypto");
+  const { spawnSync } = await import("node:child_process");
+  const real = await realpath(dir);
+  const lock = join(evidenceDir, "locks", createHash("sha256").update(real).digest("hex"));
+  const deadPid = spawnSync("true").pid!;
+  await mkdir(lock, { recursive: true });
+  await writeFile(join(lock, "owner"), JSON.stringify({ pid: deadPid, token: "dead", at: Date.now() }));
+  let holders = 0, maxHolders = 0, entered = 0;
+  const critical = async () => {
+    holders++; entered++; maxHolders = Math.max(maxHolders, holders);
+    await new Promise((done) => setTimeout(done, 40));
+    holders--;
+  };
+  await Promise.all([withInstallLock(evidenceDir, real, critical), withInstallLock(evidenceDir, real, critical), withInstallLock(evidenceDir, real, critical)]);
+  assert.equal(entered, 3, "every taker eventually ran");
+  assert.equal(maxHolders, 1, "never two holders at once");
 });

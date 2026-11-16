@@ -215,3 +215,23 @@ test("validating a large tree does not block the event loop", async (t) => {
   assert.ok(worst < 250, `event loop stalled for ${Math.round(worst)} ms`);
   assert.ok(dependencyMetrics().eventLoopLagMs !== null);
 });
+
+test("the verification helper fails fast, without EROFS noise, when it cannot write worker-owned evidence", async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { chmod, mkdtemp: mk } = await import("node:fs/promises");
+  const { dir } = await fixture(t);
+  // Un-installed workspace; the evidence location is not writable (read-only directory, or a path below a regular file as root).
+  const holder = await mk(join(tmpdir(), "ro-evidence-"));
+  t.after(async () => { await chmod(holder, 0o755).catch(() => {}); await rm(holder, { recursive: true, force: true }); });
+  let evidence = join(holder, "evidence");
+  if (process.getuid?.() === 0) { await writeFile(join(holder, "file"), "x"); evidence = join(holder, "file", "evidence"); }
+  else { await mkdir(evidence); await chmod(evidence, 0o555); }
+  const helper = join(import.meta.dirname, "..", "src", "git", "nodeDependencies.ts");
+  const run = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", helper, dir], {
+    encoding: "utf8", env: { ...process.env, PLATFORM_DEPENDENCY_EVIDENCE_DIR: evidence, CALLS: join(dir, "calls") },
+  });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /worker prepare step must install dependencies/);
+  assert.doesNotMatch(run.stderr, /EROFS|EACCES|ENOTDIR|\n\s+at /);
+  assert.equal(await readFile(join(dir, "calls"), "utf8").catch(() => ""), "", "no install was attempted");
+});
