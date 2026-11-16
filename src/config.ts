@@ -463,7 +463,7 @@ const defaults: Config = {
     ],
     timezone: "Asia/Ho_Chi_Minh",
     schedule: ["09:00", "14:00", "17:00"],
-    timeoutSeconds: 300,
+    timeoutSeconds: 1800,
   },
   learning: {
     detectChanges: true,
@@ -779,7 +779,6 @@ export function antigravityConfig(): Required<
   };
 }
 
-
 export interface CopilotConfig {
   /** Executable. Empty uses `copilot` on PATH. */
   bin?: string;
@@ -825,7 +824,9 @@ export function copilotConfig(): Required<
   return {
     bin: process.env.COPILOT_BIN || c.bin || "copilot",
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model: isOwned("copilot.model") ? (c.model ?? "") : (process.env.COPILOT_MODEL ?? c.model ?? ""),
+    model: isOwned("copilot.model")
+      ? (c.model ?? "")
+      : (process.env.COPILOT_MODEL ?? c.model ?? ""),
     effort: isOwned("copilot.effort")
       ? (c.effort ?? "")
       : (process.env.COPILOT_EFFORT ?? c.effort ?? ""),

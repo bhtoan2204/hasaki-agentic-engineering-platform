@@ -8,7 +8,9 @@
     "node": ">=22.18"
   },
   "scripts": {
+    "prestart": "sh scripts/ensure-bwrap.sh",
     "start": "npm run build && node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
+    "predev": "sh scripts/ensure-bwrap.sh",
     "dev": "node --watch --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "test": "node --disable-warning=ExperimentalWarning --import ./test/env.ts --test test/*.test.ts",
     "test:integration": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=8 test/*.integration.ts",

@@ -4,7 +4,8 @@
  */
 
 // Resolve the trusted helper on the current worker, not from a persisted machine-specific path.
-const NODE_DEPENDENCIES = 'node "${PLATFORM_NODE_DEPENDENCIES:?Verification worker dependency helper is unavailable}" "$PWD"';
+const NODE_DEPENDENCIES =
+  'node "${PLATFORM_NODE_DEPENDENCIES:?Verification worker dependency helper is unavailable}" "$PWD"';
 
 // Tests only the Go packages touched on the branch (oms-api has a known red baseline elsewhere), npm otherwise.
 export const TEST_COMMAND = `set -e
@@ -263,7 +264,6 @@ else
   echo "no test runner detected"
 fi`;
 
-
 const ANALYZE = {
   instructions:
     "Analyse the engineering request. Restate the goal, list functional requirements, acceptance criteria, " +
@@ -286,13 +286,25 @@ const IMPLEMENT = {
     required: ["summary", "pull_requests", "verification"],
     properties: {
       summary: { type: "string", minLength: 1 },
-      pull_requests: { type: "object", additionalProperties: {
-        type: "object", required: ["title", "summary", "decisions"], properties: {
-          title: { type: "string", minLength: 1 }, summary: { type: "string" },
-          decisions: { type: "array", items: { type: "object", required: ["title", "detail"],
-            properties: { title: { type: "string" }, detail: { type: "string" } } } },
+      pull_requests: {
+        type: "object",
+        additionalProperties: {
+          type: "object",
+          required: ["title", "summary", "decisions"],
+          properties: {
+            title: { type: "string", minLength: 1 },
+            summary: { type: "string" },
+            decisions: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["title", "detail"],
+                properties: { title: { type: "string" }, detail: { type: "string" } },
+              },
+            },
+          },
         },
-      } },
+      },
       verification: { type: ["object", "string"] },
       outcome: { enum: ["IMPLEMENTED", "NO_CHANGE_REQUIRED", "BLOCKED", "FAILED"] },
     },
@@ -356,7 +368,7 @@ const REVIEW = {
  * steps without new evidence, and fix risk has a detected floor. Steps opt in with config.evidence.
  */
 const CLAIMS_CONTRACT =
-  "claims: [{ id, claim, classification: 'OBSERVED_FACT'|'CODE_FACT'|'HYPOTHESIS'|'ASSUMPTION'|'CONFIRMED_ROOT_CAUSE', source_type, source_ref, repository, commit, file_path, line_range, confidence: 'low'|'medium'|'high', verification_status: 'verified'|'unverified'|'missing'|'contradicted', supports?: string[], contradicts?: string[] }]";
+  "claims: [{ id, claim, classification: 'OBSERVED_FACT'|'CODE_FACT'|'HYPOTHESIS'|'ASSUMPTION'|'CONFIRMED_ROOT_CAUSE', source_type?, source_ref?, repository?, commit?, file_path?, line_range?, confidence: 'low'|'medium'|'high', verification_status: 'verified'|'unverified'|'missing'|'contradicted', supports?: string[], contradicts?: string[] }]";
 const EVIDENCE_RULES =
   "Evidence rules: classify every critical claim. OBSERVED_FACT needs an observable source (production_log, api_response, database, test_output, screenshot, user_report…) and a source_ref you actually saw; " +
   "CODE_FACT needs repository, file_path, line_range and the commit you read. Earlier agent outputs are opinions, not evidence: repeating a hypothesis never makes it a fact. " +
@@ -1398,19 +1410,74 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     key: "micro-change",
     spec: {
       name: "Bounded Local Change",
-      description: "Verified single-repository leaf changes; MICRO combines local phases while retaining verification and PR approval.",
+      description:
+        "Verified single-repository leaf changes; MICRO combines local phases while retaining verification and PR approval.",
       steps: [
-        { key: "analyze", type: "agent", name: "Local Analysis", config: { instructions: "Inspect the hinted symbols, requirements, risk and direct dependencies. Stay within the confirmed repository and file scope." } },
-        { key: "plan", type: "agent", name: "Local Plan", depends_on: ["analyze"], config: { instructions: "State the smallest correct change and its targeted verification. Escalate uncertain impact before editing." } },
-        { key: "implement", type: "coding_agent", name: "Implementation", depends_on: ["plan"], config: { ...IMPLEMENT, verify: { command: FEATURE_MICRO_TARGETED_COMMAND, broad_command: FEATURE_REGRESSION_COMMAND, timeout_seconds: 900 } } },
-        { key: "self_review", type: "agent", name: "Self-review", depends_on: ["implement"], config: { independent: false, instructions: "Review the diff against the requirements, scope and risk; verify test evidence and report limitations." } },
-        { key: "approve_diff", type: "human_approval", name: "Approve Diff", depends_on: ["self_review"], config: { message: "Review the diff and verification evidence before publishing.", show_outputs: ["implement"] } },
-        { key: "pr", type: "git_pull_request", name: "Pull Request", depends_on: ["approve_diff"], config: { mode: "approval", content_from: "implement" } },
+        {
+          key: "analyze",
+          type: "agent",
+          name: "Local Analysis",
+          config: {
+            instructions:
+              "Inspect the hinted symbols, requirements, risk and direct dependencies. Stay within the confirmed repository and file scope.",
+          },
+        },
+        {
+          key: "plan",
+          type: "agent",
+          name: "Local Plan",
+          depends_on: ["analyze"],
+          config: {
+            instructions:
+              "State the smallest correct change and its targeted verification. Escalate uncertain impact before editing.",
+          },
+        },
+        {
+          key: "implement",
+          type: "coding_agent",
+          name: "Implementation",
+          depends_on: ["plan"],
+          config: {
+            ...IMPLEMENT,
+            verify: {
+              command: FEATURE_MICRO_TARGETED_COMMAND,
+              broad_command: FEATURE_REGRESSION_COMMAND,
+              timeout_seconds: 900,
+            },
+          },
+        },
+        {
+          key: "self_review",
+          type: "agent",
+          name: "Self-review",
+          depends_on: ["implement"],
+          config: {
+            independent: false,
+            instructions:
+              "Review the diff against the requirements, scope and risk; verify test evidence and report limitations.",
+          },
+        },
+        {
+          key: "approve_diff",
+          type: "human_approval",
+          name: "Approve Diff",
+          depends_on: ["self_review"],
+          config: {
+            message: "Review the diff and verification evidence before publishing.",
+            show_outputs: ["implement"],
+          },
+        },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["approve_diff"],
+          config: { mode: "approval", content_from: "implement" },
+        },
         cleanup("pr"),
       ],
     },
   },
-
 ];
 
 // Not seeded: an admin installs it as a private workflow (POST /api/workflows with this key and spec) so only they run it.

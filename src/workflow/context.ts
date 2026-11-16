@@ -1,4 +1,7 @@
-import { buildExecutionContract, type MandatoryExecutionContract } from "../agent/executionContract.ts";
+import {
+  buildExecutionContract,
+  type MandatoryExecutionContract,
+} from "../agent/executionContract.ts";
 import { detectNativeKnowledgeSources } from "../knowledge/nativeSources.ts";
 import { visibleKnowledge } from "../knowledge/visibility.ts";
 import type { ContextPack } from "../context/pack.ts";
@@ -135,7 +138,11 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
         [run.work_item_id],
       )
     : null;
-  const liveSteps = await q<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position", [run.id]);
+  const liveSteps = await q<StepRow>(
+    c,
+    "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position",
+    [run.id],
+  );
   const anc = ancestors(liveSteps, step.key);
   let upstream: StepInput["upstream"] = {};
   if (anc.size) {
@@ -165,18 +172,60 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
   let execution_contract: MandatoryExecutionContract | undefined;
   let execution_evidence_source: StepInput["execution_evidence_source"];
   if (step.type === "coding_agent" && !isIndependent(step.config)) {
-    const previous = await one<{ input: StepInput }>(c,
-      "SELECT input FROM workflow_step_attempts WHERE step_id=$1 AND generation=$2 ORDER BY id LIMIT 1", [step.id, step.generation]);
+    const previous = await one<{ input: StepInput }>(
+      c,
+      "SELECT input FROM workflow_step_attempts WHERE step_id=$1 AND generation=$2 ORDER BY id LIMIT 1",
+      [step.id, step.generation],
+    );
     const retry = step.pending_input?.execution_retry?.source_attempt_id
-      ? await one<{ id: number; generation: number; input: StepInput }>(c,
+      ? await one<{ id: number; generation: number; input: StepInput }>(
+          c,
           "SELECT id,generation,input FROM workflow_step_attempts WHERE id=$1 AND step_id=$2 AND generation<$3 AND status IN ('FAILED','CANCELED')",
-          [step.pending_input.execution_retry.source_attempt_id, step.id, step.generation]) : null;
-    execution_evidence_source = previous?.input.execution_evidence_source ?? (retry?.input.execution_contract ? { attempt_id: retry.id, generation: retry.generation } : undefined);
-    execution_contract = previous ? previous.input.execution_contract : retry ? retry.input.execution_contract : buildExecutionContract(upstream,
-      run.selected_repositories.length ? run.selected_repositories : run.allowed_repositories, wi, {
-        graph: { ...run.graph, steps: liveSteps.map(s => ({ ...s, retry_backoff_seconds: s.retry_backoff_s, run_if: s.run_if ?? undefined })) }, step, definition_version_id: run.definition_version_id, profile: run.profile, allowed_repositories: run.allowed_repositories,
-        request: { title: run.title, description: wi?.description, inputs: run.inputs },
-      });
+          [step.pending_input.execution_retry.source_attempt_id, step.id, step.generation],
+        )
+      : null;
+    // Work a worker observed in a generation that never completed was never accepted, so a later generation keeps that baseline.
+    const unaccepted = previous
+      ? null
+      : await one<{ id: number; generation: number }>(
+          c,
+          `SELECT a.id, a.generation FROM workflow_step_attempts a
+        WHERE a.step_id=$1 AND a.generation<$2
+          AND a.generation > coalesce((SELECT max(generation) FROM workflow_step_attempts WHERE step_id=$1 AND generation<$2 AND status='COMPLETED'), 0)
+          AND EXISTS (SELECT 1 FROM workflow_artifacts r WHERE r.attempt_id=a.id AND r.kind='implementation_baseline')
+        ORDER BY a.id LIMIT 1`,
+          [step.id, step.generation],
+        );
+    execution_evidence_source =
+      previous?.input.execution_evidence_source ??
+      (unaccepted ? { attempt_id: unaccepted.id, generation: unaccepted.generation } : undefined) ??
+      (retry?.input.execution_contract
+        ? { attempt_id: retry.id, generation: retry.generation }
+        : undefined);
+    execution_contract = previous
+      ? previous.input.execution_contract
+      : retry
+        ? retry.input.execution_contract
+        : buildExecutionContract(
+            upstream,
+            run.selected_repositories.length ? run.selected_repositories : run.allowed_repositories,
+            wi,
+            {
+              graph: {
+                ...run.graph,
+                steps: liveSteps.map((s) => ({
+                  ...s,
+                  retry_backoff_seconds: s.retry_backoff_s,
+                  run_if: s.run_if ?? undefined,
+                })),
+              },
+              step,
+              definition_version_id: run.definition_version_id,
+              profile: run.profile,
+              allowed_repositories: run.allowed_repositories,
+              request: { title: run.title, description: wi?.description, inputs: run.inputs },
+            },
+          );
   }
   return {
     execution_contract,
@@ -333,8 +382,14 @@ export async function resolveContext(
   const disclosure = planKnowledge(res.applied, {
     requestText: rankText,
     stepType: step.type,
-    inlineTokens: run.profile === "MICRO" ? Math.min(3000, config.agent.inlineKnowledgeTokens) : config.agent.inlineKnowledgeTokens,
-    indexSize: run.profile === "MICRO" ? Math.min(4, Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize)) : Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
+    inlineTokens:
+      run.profile === "MICRO"
+        ? Math.min(3000, config.agent.inlineKnowledgeTokens)
+        : config.agent.inlineKnowledgeTokens,
+    indexSize:
+      run.profile === "MICRO"
+        ? Math.min(4, Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize))
+        : Number(cfg.knowledge_index_size ?? config.agent.knowledgeIndexSize),
   });
   const completed = Object.fromEntries(
     Object.entries(input.upstream).filter(([, u]) => u.status === "COMPLETED"),
@@ -342,7 +397,9 @@ export async function resolveContext(
   const upstream = planUpstream(
     completed,
     step.depends_on,
-    run.profile === "MICRO" ? Math.min(2000, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens)) : Number(cfg.upstream_tokens ?? config.agent.upstreamTokens),
+    run.profile === "MICRO"
+      ? Math.min(2000, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens))
+      : Number(cfg.upstream_tokens ?? config.agent.upstreamTokens),
   );
   const fileRefs =
     step.type === "agent" || step.type === "coding_agent"

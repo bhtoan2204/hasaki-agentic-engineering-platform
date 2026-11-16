@@ -89,7 +89,8 @@ test("validateOutputContract handles nested objects and arrays of objects", () =
 });
 
 test("validateOutputContract handles dynamic map objects [repo]", () => {
-  const contract = "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }";
+  const contract =
+    "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification }";
 
   const validOutput = {
     summary: "Complete implementation",
@@ -117,7 +118,9 @@ test("validateOutputContract handles dynamic map objects [repo]", () => {
   };
   const res = validateOutputContract(contract, invalidOutput);
   assert.equal(res.valid, false);
-  assert.ok(res.errors.some((e) => e.includes('pull_requests["repo-a"]: missing required field "summary"')));
+  assert.ok(
+    res.errors.some((e) => e.includes('pull_requests["repo-a"]: missing required field "summary"')),
+  );
 });
 
 test("validateOutputContract validates enums and optional fields", () => {
@@ -155,7 +158,11 @@ test("validateOutputContract validates enums and optional fields", () => {
   };
   const resVerdict = validateOutputContract(contract, invalidVerdict);
   assert.equal(resVerdict.valid, false);
-  assert.ok(resVerdict.errors.some((e) => e.includes('verdict: expected one of ["PASS", "FAIL", "BLOCKED"]')));
+  assert.ok(
+    resVerdict.errors.some((e) =>
+      e.includes('verdict: expected one of ["PASS", "FAIL", "BLOCKED"]'),
+    ),
+  );
 
   // Invalid enum value for severity in findings[0]
   const invalidSeverity = {
@@ -173,7 +180,11 @@ test("validateOutputContract validates enums and optional fields", () => {
   };
   const resSeverity = validateOutputContract(contract, invalidSeverity);
   assert.equal(resSeverity.valid, false);
-  assert.ok(resSeverity.errors.some((e) => e.includes('findings[0].severity: expected one of ["high", "medium", "low"]')));
+  assert.ok(
+    resSeverity.errors.some((e) =>
+      e.includes('findings[0].severity: expected one of ["high", "medium", "low"]'),
+    ),
+  );
 });
 
 test("validateOutputContract checks outcome enum when outcome field is provided", () => {
@@ -201,19 +212,99 @@ test("validateOutputContract checks outcome enum when outcome field is provided"
 });
 
 test("structured JSON schemas reject nested malformed output without prose parsing", () => {
-  const schema = { type: "object", required: ["summary", "changes"], properties: {
-    summary: { type: "string" }, changes: { type: "array", items: { type: "object", required: ["files"], properties: { files: { type: "array", items: { type: "string" } } } } },
-  }};
-  assert.equal(validateOutputContract(schema, { summary: "ok", changes: [{ files: ["src/app.ts"] }] }).valid, true);
-  assert.equal(validateOutputContract(schema, { summary: "ok", changes: [{ files: [42] }] }).valid, false);
+  const schema = {
+    type: "object",
+    required: ["summary", "changes"],
+    properties: {
+      summary: { type: "string" },
+      changes: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["files"],
+          properties: { files: { type: "array", items: { type: "string" } } },
+        },
+      },
+    },
+  };
+  assert.equal(
+    validateOutputContract(schema, { summary: "ok", changes: [{ files: ["src/app.ts"] }] }).valid,
+    true,
+  );
+  assert.equal(
+    validateOutputContract(schema, { summary: "ok", changes: [{ files: [42] }] }).valid,
+    false,
+  );
   assert.equal(validateOutputContract(schema, { summary: "ok" }).valid, false);
 });
 
 test("built-in implementation outputs use a structured schema for nested PR decisions", async () => {
   const { TEMPLATES } = await import("../src/workflow/templates.ts");
   const { validateSpec } = await import("../src/workflow/graph.ts");
-  const step = validateSpec(TEMPLATES.find(t => t.key === "platform-self-development")!.spec).steps.find(s => s.key === "implement")!;
-  const output = { summary: "Done", pull_requests: { platform: { title: "fix", summary: "details", decisions: [{ title: "Reuse", detail: 42 }] } }, verification: "passed" };
+  const step = validateSpec(
+    TEMPLATES.find((t) => t.key === "platform-self-development")!.spec,
+  ).steps.find((s) => s.key === "implement")!;
+  const output = {
+    summary: "Done",
+    pull_requests: {
+      platform: { title: "fix", summary: "details", decisions: [{ title: "Reuse", detail: 42 }] },
+    },
+    verification: "passed",
+  };
   assert.equal(validateOutputContract(step.config!.output_schema, output).valid, false);
-  assert.equal(validateOutputContract(step.config!.output_schema, { ...output, pull_requests: { platform: { title: "fix", summary: "details", decisions: [{ title: "Reuse", detail: "Shared executor" }] } } }).valid, true);
+  assert.equal(
+    validateOutputContract(step.config!.output_schema, {
+      ...output,
+      pull_requests: {
+        platform: {
+          title: "fix",
+          summary: "details",
+          decisions: [{ title: "Reuse", detail: "Shared executor" }],
+        },
+      },
+    }).valid,
+    true,
+  );
+});
+
+test("normalized claims without code provenance still satisfy every evidence step contract", async () => {
+  const { TEMPLATES } = await import("../src/workflow/templates.ts");
+  const { normalizeClaims } = await import("../src/agent/evidence.ts");
+  const claims = normalizeClaims(
+    [
+      {
+        id: "C1",
+        claim: "Partner returned sub_return_code=-101",
+        classification: "OBSERVED_FACT",
+        source_type: "production_log",
+        source_ref: "S85:1",
+        repository: "",
+        commit: "",
+        file_path: "",
+        line_range: "",
+        confidence: "high",
+        verification_status: "verified",
+      },
+      {
+        id: "C2",
+        claim: "No money mismatch",
+        classification: "ASSUMPTION",
+        confidence: "low",
+        verification_status: "unverified",
+      },
+    ],
+    [],
+  );
+  const contracts = TEMPLATES.flatMap(
+    (t) => (t.spec.steps as Array<{ config?: { output_contract?: string } }>) ?? [],
+  )
+    .map((s) => s.config?.output_contract)
+    .filter((c): c is string => !!c && c.includes("claims"));
+  assert.ok(contracts.length);
+  for (const contract of contracts) {
+    const errors = validateOutputContract(contract, { claims }).errors.filter((e) =>
+      e.startsWith("claims"),
+    );
+    assert.deepEqual(errors, []);
+  }
 });
