@@ -1,7 +1,8 @@
+import { liveRuntime } from "../eval/liveRuntime.ts";
 /** Child processes receive their configured provider authentication, never platform/application credentials. */
 export function agentEnvironment(
   base: NodeJS.ProcessEnv,
-  provider: "claude" | "codex" | "cursor" | "antigravity",
+  provider: "claude" | "codex" | "cursor" | "antigravity" | "copilot",
 ): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   const platform =
@@ -13,11 +14,17 @@ export function agentEnvironment(
   for (const [key, value] of Object.entries(base)) {
     if (value === undefined || platform.test(key)) continue;
     const ownAuth =
-      (provider === "claude" &&
-        (/^(ANTHROPIC_)/.test(key) || key === "CLAUDE_CODE_OAUTH_TOKEN")) ||
+      (provider === "claude" && (/^(ANTHROPIC_)/.test(key) || key === "CLAUDE_CODE_OAUTH_TOKEN")) ||
       (provider === "cursor" && key === "CURSOR_API_KEY");
-    if (ownAuth || (!providerKey.test(key) && !secret.test(key)))
-      out[key] = value;
+    if (ownAuth || (!providerKey.test(key) && !secret.test(key))) out[key] = value;
+  }
+  const runtime = liveRuntime.getStore();
+  if (runtime) {
+    out.TEST_DATABASE_URL = runtime.databaseUrl;
+    delete out.NODE_OPTIONS;
+    delete out.NODE_PATH;
+    delete out.BASH_ENV;
+    delete out.ENV;
   }
   return out;
 }

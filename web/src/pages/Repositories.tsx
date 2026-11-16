@@ -13,10 +13,12 @@ import {
   Network,
   PenLine,
   Plus,
+  RefreshCw,
   Power,
   Save,
   ShieldCheck,
   Tag,
+  Trash2,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -38,6 +40,7 @@ import {
 } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Repositories.css";
+import { BitbucketState, RepositoryAccessAdmin } from "./RepositoryAccess.tsx";
 
 const LISTS = [
   "projects",
@@ -91,17 +94,84 @@ function Actions({ items }: { items?: string[] }) {
 }
 const repoDir = (r: any) => r.repository_url || r.path || r.name;
 
+/** The caller's effective access to one repository (platform grant ∩ Bitbucket ∩ repository policy). */
+function AccessCard({ access, provider }: { access: any; provider?: string }) {
+  const { t } = useI18n();
+  if (!access) return null;
+  return (
+    <section className="card">
+      <div className="card-head">
+        <ShieldCheck size={16} color="var(--brand)" />
+        <h4>{t("repo.yourAccess")}</h4>
+        <span className="grow" />
+        <span className={`repo-level is-${access.level}`}>{t(`repo.level.${access.level}`)}</span>
+      </div>
+      <dl className="repo-kv">
+        <div>
+          <dt>{t("repo.access.source")}</dt>
+          <dd>{access.source ? t(`repo.source.${access.source}`) : "—"}</dd>
+        </div>
+        <div>
+          <dt>{provider === "github" ? "GitHub" : "Bitbucket"}</dt>
+          <dd>
+            <BitbucketState
+              host={provider}
+              state={access.bitbucket.state}
+              reason={access.bitbucket.reason}
+              stale={access.bitbucket.stale}
+            />
+          </dd>
+        </div>
+      </dl>
+      <p className="muted small">{t("repo.access.effectiveHint")}</p>
+    </section>
+  );
+}
+
 export function RepositoriesPage({
   name,
   query,
-}: { name?: string; query?: string } = {}) {
+  me,
+}: { name?: string; query?: string; me?: { role?: string } | null } = {}) {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any[]>("/api/repositories");
-  const index = useApi<{ enabled: boolean; repositories: any[] }>(
-    name ? "/api/repositories/index-status" : null,
+  const isAdmin = me?.role === "admin";
+  const view = new URLSearchParams(
+    query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
+  ).get("view");
+  // Members only ever see "My repositories". Admins also manage the registry and grants (view=manage); managing
+  // access is not reading: the workspace and index panels need the admin's own grant like anyone else's.
+  const manage = isAdmin && view === "manage";
+  const { data, error, loading, reload } = useApi<any[]>(
+    manage ? "/api/repositories?manage=1" : "/api/repositories",
+    [manage],
   );
+
+  // Only for a repository the caller can read (otherwise the page shows "not found", like an unknown name).
+  const readable = !!name && !manage && !!data?.some((x) => x.name === name);
   const workspace = useApi<any>(
-    name ? `/api/repositories/${encodeURIComponent(name)}/workspace` : null,
+    readable ? `/api/repositories/${encodeURIComponent(name!)}/workspace` : null,
+    [manage, readable],
+  );
+  const index = useApi<{ enabled: boolean; repositories: any[] }>(
+    readable ? "/api/repositories/index-status" : null,
+    [manage, readable],
+  );
+  const manageHref = (repo?: string) =>
+    repo ? `/repositories/${repo}?view=manage` : "/repositories?view=manage";
+  const tabs = isAdmin && (
+    <Segmented
+      label={t("repo.title")}
+      options={[
+        ["mine", t("repo.mine")],
+        ["manage", t("repo.manage")],
+      ]}
+      value={manage ? "manage" : "mine"}
+      onChange={(v) =>
+        navigate(
+          v === "manage" ? manageHref(name) : name ? `/repositories/${name}` : "/repositories",
+        )
+      }
+    />
   );
   const [form, setForm] = useState<any>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
@@ -110,8 +180,7 @@ export function RepositoriesPage({
   const initParams = useMemo(
     () =>
       new URLSearchParams(
-        query ||
-          (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
+        query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
       ),
     [query],
   );
@@ -123,6 +192,7 @@ export function RepositoriesPage({
   const syncUrl = (newFilter: string, newQ: string) => {
     if (name) return;
     const p = new URLSearchParams();
+    if (manage) p.set("view", "manage");
     if (newFilter && newFilter !== "all") p.set("filter", newFilter);
     if (newQ.trim()) p.set("q", newQ.trim());
     const qs = p.toString();
@@ -154,14 +224,12 @@ export function RepositoriesPage({
             provider: "bitbucket",
             repository_url: "",
             default_branch: "",
+            category: "",
             description: "",
             architecture: "",
             enabled: true,
             ...Object.fromEntries(
-              LISTS.map((k) => [
-                k,
-                k === "allowed_actions" ? "read, write, pull_request" : "",
-              ]),
+              LISTS.map((k) => [k, k === "allowed_actions" ? "read, write, pull_request" : ""]),
             ),
           },
     );
@@ -210,14 +278,24 @@ export function RepositoriesPage({
         t("repo.saved"),
       )
     )
-      (reload(), setCreating(false), navigate(`/repositories/${form.name}`));
+      (reload(), setCreating(false), navigate(manageHref(form.name)));
   };
   const startNew = () => {
-    if (name) navigate("/repositories");
+    if (name) navigate(manageHref());
     setCreating(true);
   };
+  const remove = async (repo: string) => {
+    if (!confirm(t("repo.deleteConfirm", { name: repo }))) return;
+    if (
+      await act(
+        () => api(`/api/repositories/${encodeURIComponent(repo)}/delete`, {}),
+        t("repo.deleted", { name: repo }),
+      )
+    )
+      (reload(), navigate(manageHref()));
+  };
 
-  const editor = form && (
+  const editor = manage && form && (
     <RepoForm form={form} setForm={setForm} isNew={!name} onSave={save} />
   );
 
@@ -233,17 +311,26 @@ export function RepositoriesPage({
           subtitle={r?.description || undefined}
           actions={
             <>
+              {tabs}
               <button
                 className="ghost"
-                onClick={() => navigate("/repositories")}
+                onClick={() => navigate(manage ? manageHref() : "/repositories")}
               >
                 <ArrowLeft size={15} />
                 {t("repo.list")}
               </button>
-              <button className="ghost" onClick={startNew}>
-                <Plus size={15} />
-                {t("repo.add")}
-              </button>
+              {manage && (
+                <button className="ghost" onClick={startNew}>
+                  <Plus size={15} />
+                  {t("repo.add")}
+                </button>
+              )}
+              {manage && r && (
+                <button className="danger" onClick={() => remove(r.name)}>
+                  <Trash2 size={15} />
+                  {t("repo.delete")}
+                </button>
+              )}
             </>
           }
         />
@@ -254,7 +341,7 @@ export function RepositoriesPage({
             action={
               <button
                 className="ghost sm"
-                onClick={() => navigate("/repositories")}
+                onClick={() => navigate(manage ? manageHref() : "/repositories")}
               >
                 {t("repo.back")}
               </button>
@@ -264,6 +351,11 @@ export function RepositoriesPage({
           </EmptyState>
         ) : null}
         <div className="repo-detail">
+          {r && manage && (
+            <div className="repo-access-span">
+              <RepositoryAccessAdmin only={r.name} />
+            </div>
+          )}
           {r && (
             <div className="repo-detail-main">
               <div className="card repo-hero">
@@ -275,9 +367,7 @@ export function RepositoriesPage({
                     <div className="repo-hero-name mono">{r.name}</div>
                     <div className="repo-hero-path">
                       <span className="mono">{repoDir(r)}</span>
-                      {r.provider && (
-                        <span className="repo-chip">{r.provider}</span>
-                      )}
+                      {r.provider && <span className="repo-chip">{r.provider}</span>}
                     </div>
                   </div>
                   {r.enabled ? (
@@ -288,16 +378,11 @@ export function RepositoriesPage({
                 </div>
                 <dl className="repo-kv">
                   <div>
-                    <dt>
-                      {t(r.repository_url ? "repo.url" : "repo.legacyLayout")}
-                    </dt>
+                    <dt>{t(r.repository_url ? "repo.url" : "repo.legacyLayout")}</dt>
                     <dd className="mono">
                       {repoDir(r)}
                       {!r.repository_url && !r.path && (
-                        <span className="muted small">
-                          {" "}
-                          {t("repo.equalsName")}
-                        </span>
+                        <span className="muted small"> {t("repo.equalsName")}</span>
                       )}
                     </dd>
                   </div>
@@ -306,164 +391,169 @@ export function RepositoriesPage({
                     <dd>{r.provider || <span className="muted">—</span>}</dd>
                   </div>
                   <div>
+                    <dt>{t("repo.category")}</dt>
+                    <dd>{r.category || <span className="muted">—</span>}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("repo.project")}</dt>
+                    <dd>
+                      {r.projects?.length ? (
+                        r.projects.join(", ")
+                      ) : (
+                        <span className="muted">{t("repo.noProject")}</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
                     <dt>{t("repo.defaultBranch")}</dt>
                     <dd className="mono">
                       {r.default_branch || (
-                        <span className="muted">
-                          {t("repo.instanceDefault")}
-                        </span>
+                        <span className="muted">{t("repo.instanceDefault")}</span>
                       )}
                     </dd>
                   </div>
                 </dl>
               </div>
 
-              <section className="card">
-                <div className="card-head">
-                  <FolderGit2 size={16} />
-                  <h4>{t("repo.workspace")}</h4>
-                </div>
-                <p>
-                  {t(
-                    `repo.workspace.${workspace.data?.status ?? "remote_configured"}`,
-                  )}
-                </p>
-                <p className="muted small">{workspace.data?.instance_id}</p>
-                <div className="row" style={{ flexWrap: "wrap" }}>
-                  {(["test-connection", "prepare", "refresh"] as const).map(
-                    (action) => (
-                      <button
-                        key={action}
-                        className="ghost sm"
-                        onClick={async () => {
-                          if (
-                            await act(
-                              () =>
-                                api(
-                                  `/api/repositories/${encodeURIComponent(r.name)}/${action}`,
-                                  {},
-                                ),
-                              t("repo.saved"),
-                            )
-                          )
-                            workspace.reload();
-                        }}
-                      >
-                        {t(`repo.${action}`)}
-                      </button>
-                    ),
-                  )}
-                  <button className="ghost sm" onClick={workspace.reload}>
-                    {t("repo.workspaceStatus")}
-                  </button>
-                </div>
-              </section>
-              <section className="card">
-                <div className="card-head">
-                  <Network size={16} color="var(--brand)" />
-                  <h4>Code intelligence</h4>
-                </div>
-                {index.error ? (
-                  <ErrorBox error={index.error} onRetry={index.reload} />
-                ) : !index.data?.enabled ? (
-                  <span className="muted small">Disabled on this instance</span>
-                ) : (
-                  (() => {
-                    const state = index.data.repositories.find(
-                      (x: any) => x.name === r.name,
-                    );
-                    return (
-                      <>
-                        <dl className="repo-kv">
-                          <div>
-                            <dt>Status</dt>
-                            <dd>{state?.status ?? "Not indexed"}</dd>
-                          </div>
-                          <div>
-                            <dt>Progress</dt>
-                            <dd>
-                              {state?.status === "running"
-                                ? `${state?.metrics?.processed_files ?? 0} / ${state?.metrics?.total_files ?? "…"}`
-                                : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Commit</dt>
-                            <dd className="mono">
-                              {state?.commit_sha?.slice(0, 12) ?? "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Files / symbols / relations</dt>
-                            <dd>
-                              {state?.indexed_files ?? 0} /{" "}
-                              {state?.symbol_count ?? 0} /{" "}
-                              {state?.relation_count ?? 0}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Last indexed</dt>
-                            <dd>
-                              {state?.last_indexed_at
-                                ? new Date(
-                                    state.last_indexed_at,
-                                  ).toLocaleString()
-                                : "—"}
-                            </dd>
-                          </div>
-                        </dl>
-                        {state?.last_indexing_error && (
-                          <p className="muted small">
-                            {state.last_indexing_error}
-                          </p>
-                        )}
+              {!manage && <AccessCard access={r.access} provider={r.provider} />}
+              {!manage && (
+                <>
+                  <section className="card">
+                    <div className="card-head">
+                      <FolderGit2 size={16} />
+                      <h4>{t("repo.workspace")}</h4>
+                    </div>
+                    <p>{t(`repo.workspace.${workspace.data?.status ?? "remote_configured"}`)}</p>
+                    <p className="muted small">{workspace.data?.instance_id}</p>
+                    <div className="row" style={{ flexWrap: "wrap" }}>
+                      {(["test-connection", "prepare", "refresh"] as const).map((action) => (
                         <button
+                          key={action}
                           className="ghost sm"
                           onClick={async () => {
                             if (
                               await act(
                                 () =>
                                   api(
-                                    `/api/repositories/${encodeURIComponent(r.name)}/reindex`,
+                                    `/api/repositories/${encodeURIComponent(r.name)}/${action}`,
                                     {},
                                   ),
-                                "Indexing queued",
+                                t("repo.saved"),
                               )
                             )
-                              index.reload();
+                              workspace.reload();
                           }}
                         >
-                          Reindex (admin)
+                          {t(`repo.${action}`)}
                         </button>
-                        <button className="ghost sm" onClick={index.reload}>
-                          Refresh
-                        </button>
-                        {state?.indexing_run_id &&
-                          ["queued", "running"].includes(state.status) && (
-                            <button
-                              className="ghost sm"
-                              onClick={async () => {
-                                if (
-                                  await act(
-                                    () =>
-                                      api(
-                                        `/api/repositories/index-runs/${state.indexing_run_id}/cancel`,
-                                        {},
-                                      ),
-                                    "Indexing canceled",
+                      ))}
+                      <button className="ghost sm" onClick={workspace.reload}>
+                        {t("repo.workspaceStatus")}
+                      </button>
+                    </div>
+                  </section>
+                  <section className="card">
+                    <div className="card-head">
+                      <Network size={16} color="var(--brand)" />
+                      <h4>Code intelligence</h4>
+                    </div>
+                    {index.error ? (
+                      <ErrorBox error={index.error} onRetry={index.reload} />
+                    ) : !index.data?.enabled ? (
+                      <span className="muted small">Disabled on this instance</span>
+                    ) : (
+                      (() => {
+                        const state = index.data.repositories.find((x: any) => x.name === r.name);
+                        return (
+                          <>
+                            <dl className="repo-kv">
+                              <div>
+                                <dt>Status</dt>
+                                <dd>{state?.status ?? "Not indexed"}</dd>
+                              </div>
+                              <div>
+                                <dt>Progress</dt>
+                                <dd>
+                                  {state?.status === "running"
+                                    ? `${state?.metrics?.processed_files ?? 0} / ${state?.metrics?.total_files ?? "…"}`
+                                    : "—"}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Commit</dt>
+                                <dd className="mono">{state?.commit_sha?.slice(0, 12) ?? "—"}</dd>
+                              </div>
+                              <div>
+                                <dt>Files / symbols / relations</dt>
+                                <dd>
+                                  {state?.indexed_files ?? 0} / {state?.symbol_count ?? 0} /{" "}
+                                  {state?.relation_count ?? 0}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Last indexed</dt>
+                                <dd>
+                                  {state?.last_indexed_at
+                                    ? new Date(state.last_indexed_at).toLocaleString()
+                                    : "—"}
+                                </dd>
+                              </div>
+                            </dl>
+                            {state?.last_indexing_error && (
+                              <p className="muted small">{state.last_indexing_error}</p>
+                            )}
+                            {isAdmin && (
+                              <button
+                                className="ghost sm"
+                                onClick={async () => {
+                                  if (
+                                    await act(
+                                      () =>
+                                        api(
+                                          `/api/repositories/${encodeURIComponent(r.name)}/reindex`,
+                                          {},
+                                        ),
+                                      "Indexing queued",
+                                    )
                                   )
-                                )
-                                  index.reload();
-                              }}
-                            >
-                              Cancel (admin)
+                                    index.reload();
+                                }}
+                              >
+                                Reindex (admin)
+                              </button>
+                            )}
+                            <button className="ghost sm" onClick={index.reload}>
+                              Refresh
                             </button>
-                          )}
-                      </>
-                    );
-                  })()
-                )}
-              </section>
+                            {isAdmin &&
+                              state?.indexing_run_id &&
+                              ["queued", "running"].includes(state.status) && (
+                                <button
+                                  className="ghost sm"
+                                  onClick={async () => {
+                                    if (
+                                      await act(
+                                        () =>
+                                          api(
+                                            `/api/repositories/index-runs/${state.indexing_run_id}/cancel`,
+                                            {},
+                                          ),
+                                        "Indexing canceled",
+                                      )
+                                    )
+                                      index.reload();
+                                  }}
+                                >
+                                  Cancel (admin)
+                                </button>
+                              )}
+                          </>
+                        );
+                      })()
+                    )}
+                  </section>
+                </>
+              )}
 
               <section className="card">
                 <div className="card-head">
@@ -476,14 +566,8 @@ export function RepositoriesPage({
                     <Actions items={r.allowed_actions} />
                   </div>
                   <div>
-                    <div className="repo-label">
-                      {t("repo.projectsAllowed")}
-                    </div>
-                    <Chips
-                      items={r.projects}
-                      kind="is-project"
-                      empty={t("repo.noProject")}
-                    />
+                    <div className="repo-label">{t("repo.project")}</div>
+                    <Chips items={r.projects} kind="is-project" empty={t("repo.noProject")} />
                   </div>
                 </div>
               </section>
@@ -513,7 +597,7 @@ export function RepositoriesPage({
                           <a
                             key={d}
                             className="repo-chip is-link"
-                            href={`#/repositories/${d}`}
+                            href={`#${manage ? manageHref(d) : `/repositories/${d}`}`}
                           >
                             <Link2 size={11} />
                             {d}
@@ -569,29 +653,47 @@ export function RepositoriesPage({
   const all = data!;
   const enabled = all.filter((r) => r.enabled).length;
   const projects = new Set(all.flatMap((r) => r.projects));
-  const writable = all.filter(
-    (r) => r.enabled && r.allowed_actions.includes("write"),
+  // My repositories: what the caller may actually do. Management: what the registry allows.
+  const writable = all.filter((r) =>
+    manage ? r.enabled && r.allowed_actions.includes("write") : r.access?.effective?.write,
   ).length;
   return (
     <div className="repo">
       <PageHeader
         icon={FolderGit2}
-        title={t("repo.title")}
-        subtitle={t("repo.subtitle")}
+        title={manage ? t("repo.manage") : t("repo.mine")}
+        subtitle={manage ? t("repo.subtitle") : t("repo.mineSubtitle")}
         actions={
-          <button onClick={startNew}>
-            <Plus size={15} strokeWidth={2.2} />
-            {t("repo.add")}
-          </button>
+          <>
+            {tabs}
+            {manage ? (
+              <button onClick={startNew}>
+                <Plus size={15} strokeWidth={2.2} />
+                {t("repo.add")}
+              </button>
+            ) : (
+              <button
+                className="ghost"
+                onClick={async () => {
+                  if (
+                    await act(
+                      () => api("/api/repository-access/revalidate", {}),
+                      t("repo.access.revalidated"),
+                    )
+                  )
+                    reload();
+                }}
+              >
+                <RefreshCw size={15} />
+                {t("repo.revalidateMine")}
+              </button>
+            )}
+          </>
         }
       />
+      {manage && <RepositoryAccessAdmin />}
       <div className="repo-stats">
-        <StatCard
-          icon={FolderGit2}
-          label={t("repo.title")}
-          value={all.length}
-          tone="brand"
-        />
+        <StatCard icon={FolderGit2} label={t("repo.title")} value={all.length} tone="brand" />
         <StatCard
           icon={Power}
           label={t("repo.on")}
@@ -639,7 +741,11 @@ export function RepositoriesPage({
               {t("repo.count", { shown: shown.length, all: all.length })}
             </span>
           </div>
-          {!all.length ? (
+          {!all.length && !manage ? (
+            <EmptyState icon={FolderGit2} title={t("repo.mineEmpty")}>
+              {t(isAdmin ? "repo.mineEmptyAdmin" : "repo.mineEmptyBody")}
+            </EmptyState>
+          ) : !all.length ? (
             <EmptyState
               icon={FolderGit2}
               title={t("repo.empty")}
@@ -661,7 +767,7 @@ export function RepositoriesPage({
                   key={r.name}
                   type="button"
                   className={`repo-card${r.enabled ? "" : " is-off"}`}
-                  onClick={() => navigate(`/repositories/${r.name}`)}
+                  onClick={() => navigate(manage ? manageHref(r.name) : `/repositories/${r.name}`)}
                 >
                   <div className="repo-card-head">
                     <span className="repo-card-icon">
@@ -673,14 +779,15 @@ export function RepositoriesPage({
                         {r.repository_url || r.remote_slug || repoDir(r)}
                       </span>
                     </div>
-                    {!r.enabled && (
-                      <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>
+                    {!r.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
+                    {r.access && (
+                      <span className={`repo-level is-${r.access.level}`}>
+                        {t(`repo.level.${r.access.level}`)}
+                      </span>
                     )}
                   </div>
                   <div className="repo-card-desc">
-                    {r.description || (
-                      <span className="muted">{t("repo.noDesc")}</span>
-                    )}
+                    {r.description || <span className="muted">{t("repo.noDesc")}</span>}
                   </div>
                   <div className="repo-card-rows">
                     <div>
@@ -704,6 +811,20 @@ export function RepositoriesPage({
                       </span>
                       <Actions items={r.allowed_actions} />
                     </div>
+                    {r.access?.bitbucket?.state &&
+                      r.access.bitbucket.state !== "not_applicable" && (
+                        <div>
+                          <span className="repo-label-inline">
+                            {r.provider === "github" ? "GitHub" : "Bitbucket"}
+                          </span>
+                          <BitbucketState
+                            host={r.provider}
+                            state={r.access.bitbucket.state}
+                            reason={r.access.bitbucket.reason}
+                            stale={r.access.bitbucket.stale}
+                          />
+                        </div>
+                      )}
                   </div>
                 </button>
               ))}
@@ -738,9 +859,7 @@ export function RepositoriesPage({
               <button
                 className="sm ghost"
                 onClick={async () =>
-                  setRanked(
-                    await act(() => api("/api/repositories/rank", rank)),
-                  )
+                  setRanked(await act(() => api("/api/repositories/rank", rank)))
                 }
               >
                 {t("repo.rank")}
@@ -754,14 +873,9 @@ export function RepositoriesPage({
                     {t("repo.ambiguous")}
                   </div>
                 )}
-                {!ranked.ranked.length && (
-                  <div className="muted small">{t("repo.noneFit")}</div>
-                )}
+                {!ranked.ranked.length && <div className="muted small">{t("repo.noneFit")}</div>}
                 {(() => {
-                  const max = Math.max(
-                    ...ranked.ranked.map((x: any) => Number(x.score) || 0),
-                    1,
-                  );
+                  const max = Math.max(...ranked.ranked.map((x: any) => Number(x.score) || 0), 1);
                   return ranked.ranked.map((x: any, i: number) => (
                     <div key={x.repo} className="repo-ranked-row">
                       <div className="repo-ranked-top">
@@ -782,9 +896,7 @@ export function RepositoriesPage({
                         />
                       </div>
                       {x.reasons?.length > 0 && (
-                        <div className="muted small">
-                          {x.reasons.join(" · ")}
-                        </div>
+                        <div className="muted small">{x.reasons.join(" · ")}</div>
                       )}
                     </div>
                   ));
@@ -794,7 +906,7 @@ export function RepositoriesPage({
           </section>
         </aside>
       </div>
-      {creating && (
+      {creating && manage && (
         <NewRepoDrawer
           form={form}
           setForm={setForm}
@@ -820,11 +932,7 @@ function NewRepoDrawer({
   const { t } = useI18n();
   return (
     <Drawer title={t("repo.add")} onClose={onClose} width={560}>
-      {form ? (
-        <RepoForm form={form} setForm={setForm} isNew onSave={onSave} bare />
-      ) : (
-        <Loading />
-      )}
+      {form ? <RepoForm form={form} setForm={setForm} isNew onSave={onSave} bare /> : <Loading />}
     </Drawer>
   );
 }
@@ -858,12 +966,17 @@ function RepoForm({
           onChange={(e) => setForm({ ...form, provider: e.target.value })}
         >
           <option value="bitbucket">Bitbucket</option>
+          <option value="github">GitHub</option>
         </select>
       </Field>
       <Field label={t("repo.url")}>
         <input
           value={form.repository_url ?? ""}
-          placeholder="https://bitbucket.org/workspace/repository.git"
+          placeholder={
+            form.provider === "github"
+              ? "https://github.com/owner/repository.git"
+              : "https://bitbucket.org/workspace/repository.git"
+          }
           onChange={(e) => setForm({ ...form, repository_url: e.target.value })}
         />
       </Field>
@@ -888,6 +1001,20 @@ function RepoForm({
           onChange={(e) => setForm({ ...form, default_branch: e.target.value })}
         />
       </Field>
+      <Field label={t("repo.category")}>
+        <input
+          value={form.category ?? ""}
+          placeholder={t("repo.categoryPh")}
+          onChange={(e) => setForm({ ...form, category: e.target.value })}
+        />
+      </Field>
+      <Field label={t("repo.project")} hint={t("repo.projectHint")}>
+        <input
+          value={form.projects ?? ""}
+          placeholder={t("repo.projectPh")}
+          onChange={(e) => setForm({ ...form, projects: e.target.value })}
+        />
+      </Field>
       <Field label={t("repo.desc")}>
         <textarea
           rows={2}
@@ -896,12 +1023,9 @@ function RepoForm({
         />
       </Field>
       <div className="repo-form-grid">
-        {LISTS.map((k) => (
+        {LISTS.filter((k) => k !== "projects").map((k) => (
           <Field key={k} label={t(`repo.list.${k}`)} hint={t("repo.comma")}>
-            <input
-              value={form[k]}
-              onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-            />
+            <input value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
           </Field>
         ))}
       </div>

@@ -60,10 +60,7 @@ function targets(agents: AgentView[]) {
 }
 
 /** Characters walk (legs animate) only while their position actually changes. */
-function useWalking(
-  pos: Record<Role, { x: number; y: number }>,
-  still: boolean,
-) {
+function useWalking(pos: Record<Role, { x: number; y: number }>, still: boolean) {
   const prev = useRef<Record<string, string>>({});
   const [walking, setWalking] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -112,13 +109,8 @@ export function OfficeScene({
   const stablePos = useStable(t, key);
   const walking = useWalking(stablePos, still);
   const [hover, setHover] = useState<Role | null>(null);
-  const by = Object.fromEntries(agents.map((a) => [a.role, a])) as Record<
-    Role,
-    AgentView
-  >;
-  const waiting = agents.filter(
-    (a) => a.pose === "ask" || a.pose === "approval",
-  ).length;
+  const by = Object.fromEntries(agents.map((a) => [a.role, a])) as Record<Role, AgentView>;
+  const waiting = agents.filter((a) => a.pose === "ask" || a.pose === "approval").length;
 
   const agent = (role: Role) => {
     const a = by[role];
@@ -143,8 +135,7 @@ export function OfficeScene({
             className: `chibi-hit${selected === role ? " is-selected" : ""}`,
             onClick: () => onSelect(role),
             onKeyDown: (e: KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ")
-                (e.preventDefault(), onSelect(role));
+              if (e.key === "Enter" || e.key === " ") (e.preventDefault(), onSelect(role));
             },
             onMouseEnter: () => setHover(role),
             onMouseLeave: () => setHover((h) => (h === role ? null : h)),
@@ -168,29 +159,12 @@ export function OfficeScene({
         aria-label={tr("office.aria")}
       >
         <defs>
-          <pattern
-            id="o-planks"
-            width="32"
-            height="8"
-            patternUnits="userSpaceOnUse"
-          >
+          <pattern id="o-planks" width="32" height="8" patternUnits="userSpaceOnUse">
             <rect width="32" height="8" fill="var(--o-floor)" />
             <rect y="7" width="32" height="1" fill="var(--o-floor-line)" />
             <rect x="12" width="1" height="8" fill="var(--o-floor-line)" />
-            <rect
-              x="2"
-              y="2"
-              width="6"
-              height="1"
-              fill="var(--o-floor-grain)"
-            />
-            <rect
-              x="20"
-              y="4"
-              width="8"
-              height="1"
-              fill="var(--o-floor-grain)"
-            />
+            <rect x="2" y="2" width="6" height="1" fill="var(--o-floor-grain)" />
+            <rect x="20" y="4" width="8" height="1" fill="var(--o-floor-grain)" />
           </pattern>
         </defs>
         <Room now={now} />
@@ -204,11 +178,7 @@ export function OfficeScene({
         {agent("analyst")}
         <Desk x={16} y={73} w={58} />
         <PaperStack x={56} y={72} />
-        <Lamp
-          x={18}
-          y={60}
-          on={home("analyst") && by.analyst.pose === "work"}
-        />
+        <Lamp x={18} y={60} on={home("analyst") && by.analyst.pose === "work"} />
         <Mug x={48} y={69} steam={by.analyst.pose === "idle"} />
 
         {agent("architect")}
@@ -287,15 +257,8 @@ export function OfficeScene({
               key={a.role}
               agent={a}
               x={(p.x + 15) / STAGE_W}
-              y={
-                (p.y - (a.pose === "ask" || a.pose === "approval" ? 9 : 3)) /
-                STAGE_H
-              }
-              emphasis={
-                a.pose === "ask" ||
-                a.pose === "approval" ||
-                a.pose === "frustrated"
-              }
+              y={(p.y - (a.pose === "ask" || a.pose === "approval" ? 9 : 3)) / STAGE_H}
+              emphasis={a.pose === "ask" || a.pose === "approval" || a.pose === "frustrated"}
             />
           );
         })}

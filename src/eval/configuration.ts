@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { StepAgentConfig, validateAgentOptions } from "../agent/stepAgent.ts";
-export const ConfigurationSchema = z
+const LEGACY_LIMITS = { max_case_seconds: 20, max_tokens: 10000, max_cost_usd: 0 };
+const LIVE_LIMITS = { max_case_seconds: 1800, max_tokens: 3_000_000, max_cost_usd: 10 };
+const ConfigurationObject = z
   .object({
     provider_sequence: z
       .array(
@@ -20,9 +22,7 @@ export const ConfigurationSchema = z
     adapter: z
       .enum(["baseline", "reference", "agent_fixture", "provider_fixture"])
       .default("baseline"),
-    provider: z
-      .enum(["fixture", "claude", "codex", "cursor", "antigravity"])
-      .default("fixture"),
+    provider: z.enum(["fixture", "claude", "codex", "cursor", "antigravity", "copilot"]).default("fixture"),
     model: z.string().max(100).nullable().default(null),
     prompt_version: z.enum(["p2-task-v1", "p2-task-v2"]).default("p2-task-v1"),
     workflow_version: z.literal("p2-workflow-v1").default("p2-workflow-v1"),
@@ -30,9 +30,12 @@ export const ConfigurationSchema = z
     context_strategy: z.enum(["none", "symbols"]).default("none"),
     repetitions: z.number().int().min(1).max(3).default(1),
     case_limit: z.number().int().min(1).max(20).default(15),
-    max_case_seconds: z.number().int().min(1).max(30).default(20),
-    max_tokens: z.number().int().min(1).max(20000).default(10000),
-    max_cost_usd: z.number().min(0).max(2).default(0),
+    max_case_seconds: z.number().int().min(1).max(7200),
+    max_tokens: z.number().int().min(1).max(10000000),
+    ponytail: z.boolean().default(false),
+    budget_group: z.string().min(1).max(160).optional(),
+    max_suite_cost_usd: z.number().positive().max(1000).default(300),
+    max_cost_usd: z.number().min(0).max(100),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -40,14 +43,12 @@ export const ConfigurationSchema = z
       if (c.adapter !== "provider_fixture" && c.mode !== "live")
         ctx.addIssue({
           code: "custom",
-          message:
-            "Provider sequences require the provider_fixture adapter or live mode",
+          message: "Provider sequences require the provider_fixture adapter or live mode",
         });
       if (!c.context_variant)
         ctx.addIssue({
           code: "custom",
-          message:
-            "Provider sequences require an explicit minimal, pack, or tools context variant",
+          message: "Provider sequences require an explicit minimal, pack, or tools context variant",
         });
       for (const agent of c.provider_sequence) {
         try {
@@ -73,3 +74,11 @@ export const ConfigurationSchema = z
         message: "Symbol context requires code intelligence",
       });
   });
+// Live runs need realistic ceilings; fixture/dry-run requests keep the legacy defaults so replayed request keys still hash identically.
+export const ConfigurationSchema = z.preprocess(
+  (v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? { ...((v as { mode?: unknown }).mode === "live" ? LIVE_LIMITS : LEGACY_LIMITS), ...v }
+      : v,
+  ConfigurationObject,
+);

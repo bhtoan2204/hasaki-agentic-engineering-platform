@@ -4,14 +4,12 @@ import { existsSync, realpathSync } from "node:fs";
 import { config } from "../config.ts";
 import { randomUUID, createHash } from "node:crypto";
 const exec = promisify(execFile);
-export class IsolationUnavailable extends Error { }
+export class IsolationUnavailable extends Error {}
 let closure: Promise<string[]> | undefined;
 async function nodeClosure() {
   if (!closure)
     closure = (async () => {
-      const root = realpathSync(process.execPath).match(
-        /^(\/nix\/store\/[^/]+)\//,
-      )?.[1];
+      const root = realpathSync(process.execPath).match(/^(\/nix\/store\/[^/]+)\//)?.[1];
       if (!root)
         throw new IsolationUnavailable(
           "A pinned Nix Node runtime is required by this sandbox adapter",
@@ -25,10 +23,7 @@ async function nodeClosure() {
         .trim()
         .split("\n")
         .sort();
-      if (
-        !paths.length ||
-        paths.some((p) => !/^\/nix\/store\/[a-z0-9]{32}-[^/,]+$/.test(p))
-      )
+      if (!paths.length || paths.some((p) => !/^\/nix\/store\/[a-z0-9]{32}-[^/,]+$/.test(p)))
         throw new IsolationUnavailable("Invalid Node runtime closure");
       return paths;
     })().catch((e) => {
@@ -37,27 +32,41 @@ async function nodeClosure() {
     });
   return closure;
 }
-export async function sandboxIdentity() {
+let sandboxIdentityCache:
+  | Promise<{
+      image: string;
+      runtime_hash: string;
+      node: string;
+      network: string;
+      memory_bytes: number;
+      pids: number;
+      cpu: number;
+      version: string;
+    }>
+  | undefined;
+export function sandboxIdentity() {
+  // The image id is pinned. One successful probe per process; a failure is not cached.
+  if (!sandboxIdentityCache)
+    sandboxIdentityCache = readSandboxIdentity().catch((error) => {
+      sandboxIdentityCache = undefined;
+      throw error;
+    });
+  return sandboxIdentityCache;
+}
+async function readSandboxIdentity() {
   try {
     const image =
       "sha256:" +
       (
         await exec(
           "docker",
-          [
-            "image",
-            "inspect",
-            config.evaluation.sandboxImage,
-            "--format",
-            "{{.Id}}",
-          ],
+          ["image", "inspect", config.evaluation.sandboxImage, "--format", "{{.Id}}"],
           { timeout: 5000, maxBuffer: 8192 },
         )
       ).stdout
         .trim()
         .replace(/^sha256:/, "");
-    if (!/^sha256:[a-f0-9]{64}$/.test(image))
-      throw new Error("Missing immutable image identity");
+    if (!/^sha256:[a-f0-9]{64}$/.test(image)) throw new Error("Missing immutable image identity");
     const probe = await containerRun(
       image,
       [],
@@ -111,11 +120,7 @@ export async function containerRun(
     "run",
     "--rm",
     "--timeout",
-    String(
-      Math.ceil(
-        Math.min(timeoutMs, config.evaluation.maxCaseSeconds * 1000) / 1000,
-      ),
-    ),
+    String(Math.ceil(Math.min(timeoutMs, config.evaluation.maxCaseSeconds * 1000) / 1000)),
     "--name",
     name,
     "--pull=never",
@@ -150,13 +155,11 @@ export async function containerRun(
   for (const m of mounts) {
     if (!m.target.startsWith("/") || m.source.includes(","))
       throw new Error("Invalid sandbox mount");
-    flags.push(
-      "--mount",
-      `type=bind,src=${realpathSync(m.source)},dst=${m.target},readonly`,
-    );
+    flags.push("--mount", `type=bind,src=${realpathSync(m.source)},dst=${m.target},readonly`);
   }
+  let finished = false;
   try {
-    return await exec(
+    const result = await exec(
       "docker",
       [
         ...flags,
@@ -178,6 +181,8 @@ export async function containerRun(
         },
       },
     );
+    finished = true;
+    return result;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || Number(code) === 125)
@@ -186,9 +191,11 @@ export async function containerRun(
       );
     throw error;
   } finally {
-    await exec("docker", ["rm", "--force", name], {
-      timeout: 5000,
-      maxBuffer: 8192,
-    }).catch(() => { });
+    // --rm removes a container that exited. A timed-out or killed run can leave the name behind.
+    if (!finished)
+      await exec("docker", ["rm", "--force", name], {
+        timeout: 5000,
+        maxBuffer: 8192,
+      }).catch(() => {});
   }
 }

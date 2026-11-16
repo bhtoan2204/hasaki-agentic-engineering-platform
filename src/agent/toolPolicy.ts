@@ -1,3 +1,5 @@
+import { stableJson } from "./metrics.ts";
+import { createHash } from "node:crypto";
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +19,10 @@ const BASE_TOOLS = ["Read", "Grep", "Glob", "Bash", "TodoWrite", "WebFetch", "We
  * Native tools per step. `Task`/`Agent` (subagents) only when the step opts into delegation; `Skill` only when Claude
  * Code settings layers are loaded (otherwise skills come exclusively from the platform registry via read_knowledge).
  */
-export const toolsFor = (mode: ToolMode, opts: { delegation?: boolean; claudeSkills?: boolean } = {}) => [
+export const toolsFor = (
+  mode: ToolMode,
+  opts: { delegation?: boolean; claudeSkills?: boolean } = {},
+) => [
   ...BASE_TOOLS,
   ...(opts.claudeSkills ? ["Skill"] : []),
   ...(opts.delegation ? ["Task", "Agent"] : []),
@@ -25,9 +30,118 @@ export const toolsFor = (mode: ToolMode, opts: { delegation?: boolean; claudeSki
 ];
 
 /** Platform tools a subagent may use: read-only ones. */
-export const SUBAGENT_PLATFORM_TOOLS = ["read_knowledge", "search_knowledge", "read_step_output", "list_tools", "describe_tool", "call_tool", ...CONTEXT_TOOLS.filter(t => t.readOnly).map(t => t.name)].map((t) => `mcp__platform__${t}`);
+export const SUBAGENT_PLATFORM_TOOLS = [
+  "read_knowledge",
+  "search_knowledge",
+  "read_step_output",
+  "read_artifact",
+  "list_tools",
+  "describe_tool",
+  "call_tool",
+  ...CONTEXT_TOOLS.filter((t) => t.readOnly).map((t) => t.name),
+].map((t) => `mcp__platform__${t}`);
+
+
+export interface ToolCallRecord {
+  tool: string;
+  inputHash: string;
+  timestamp: number;
+  status?: "ok" | "error" | "denied";
+  error?: string;
+  resultHash?: string;
+}
+
+export class ToolLoopDetector {
+  private history: ToolCallRecord[] = [];
+  private workspaceState: string | undefined;
+
+  observeProgress(state: string) {
+    if (this.workspaceState !== undefined && this.workspaceState !== state) this.history = [];
+    this.workspaceState = state;
+  }
+  readonly consecutiveThreshold: number;
+  readonly cycleThreshold: number;
+
+  constructor(options?: { consecutiveThreshold?: number; cycleThreshold?: number }) {
+    this.consecutiveThreshold = options?.consecutiveThreshold ?? 3;
+    this.cycleThreshold = options?.cycleThreshold ?? 3;
+  }
+
+  record(tool: string, input: unknown, status: "ok" | "error" | "denied" = "ok", error?: string) {
+    tool = tool.replace(/^mcp__platform__|^platform\./, "");
+    const inputHash = stableJson(input ?? {});
+    const resultHash = error === undefined ? undefined : createHash("sha256").update(error).digest("hex");
+    const previous = this.history.findLast(call => call.tool === tool && call.inputHash === inputHash);
+    if (previous?.resultHash && resultHash && previous.resultHash !== resultHash) this.history = [];
+    this.history.push({
+      tool,
+      inputHash,
+      resultHash,
+      timestamp: Date.now(),
+      status,
+      error,
+    });
+    if (this.history.length > 50) this.history.shift();
+  }
+
+  check(tool: string, input: unknown): { isLoop: boolean; reason?: string } {
+    tool = tool.replace(/^mcp__platform__|^platform\./, "");
+    const inputHash = stableJson(input ?? {});
+    let count = 0;
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      if (this.history[i].tool === tool && this.history[i].inputHash === inputHash) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    if (count >= this.consecutiveThreshold) {
+      return {
+        isLoop: true,
+        reason: `Repeated tool call loop detected: ${tool} was executed ${count} times consecutively with identical arguments without progress`,
+      };
+    }
+
+    if (this.history.length >= 4) {
+      const last = this.history[this.history.length - 1];
+      const prev = this.history[this.history.length - 2];
+      if (last.tool !== prev.tool || last.inputHash !== prev.inputHash) {
+        let cycleMatches = 0;
+        for (let i = this.history.length - 1; i >= 1; i -= 2) {
+          if (
+            this.history[i].tool === last.tool &&
+            this.history[i].inputHash === last.inputHash &&
+            this.history[i - 1].tool === prev.tool &&
+            this.history[i - 1].inputHash === prev.inputHash
+          ) {
+            cycleMatches++;
+          } else {
+            break;
+          }
+        }
+        if (cycleMatches >= this.cycleThreshold && tool === prev.tool && inputHash === prev.inputHash) {
+          return {
+            isLoop: true,
+            reason: `Cyclic tool call loop detected: alternating pattern between ${prev.tool} and ${last.tool} repeated ${cycleMatches} times without progress`,
+          };
+        }
+      }
+    }
+
+    return { isLoop: false };
+  }
+
+  reset() {
+    this.history = [];
+  }
+
+  getHistory(): readonly ToolCallRecord[] {
+    return this.history;
+  }
+}
 
 export interface PolicyContext {
+  micro?: { files: string[]; calls: number; limit: number; exhausted: boolean; reason?: string };
   mode: ToolMode;
   allowedTools?: string[] | null;
   /** Absolute worktree paths the step may edit. */
@@ -39,11 +153,35 @@ export interface PolicyContext {
   delegation?: boolean;
   /** For call_tool from subagents: is the named integration tool read-only? */
   isReadOnlyIntegration?: (name: string) => boolean;
+  loopDetector?: ToolLoopDetector;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
 const allow: Decision = { allow: true };
 const deny = (reason: string): Decision => ({ allow: false, reason });
+
+/** Secret files in a protected checkout stay unreadable. `.env.example` is source, not a secret. */
+export function isSecretPath(path: string): boolean {
+  const base = path.split(/[/\\]/).pop() ?? "";
+  if (base === ".env.example" || base === ".env.sample") return false;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  return (
+    /^(config\.json|credentials\.json|auth\.json|id_rsa|id_ed25519)$/i.test(base) ||
+    /\.(pem|key)$/i.test(base)
+  );
+}
+
+function secretPathViolation(paths: string[], ctx: PolicyContext): string | null {
+  const roots = ctx.protectedRoots ?? [];
+  for (const raw of paths) {
+    if (!raw) continue;
+    const abs = raw.startsWith("~") ? expandHome(raw) : resolve(raw);
+    if (!isSecretPath(abs)) continue;
+    if (isInside(abs, roots) && !isInside(abs, ctx.workspaces))
+      return `refusing to read secret file ${abs}`;
+  }
+  return null;
+}
 
 export function isInside(path: string, roots: string[]) {
   const p = resolve(path);
@@ -54,25 +192,56 @@ export function isInside(path: string, roots: string[]) {
 }
 
 const ALWAYS_DENIED: Array<[RegExp, string]> = [
-  [/\bgit\s+(-C\s+\S+\s+)?push\b/, "pushing is done by the platform's pull request step — commit locally and finish with mcp__platform__submit_result"],
-  [/\bgit\s+(-C\s+\S+\s+)?reset\s+--hard\b/, "git reset --hard is not allowed — to undo a change, edit the files back or add a new commit (git revert)"],
-  [/\bgit\s+(-C\s+\S+\s+)?clean\b/, "git clean is not allowed — remove only files you created, by name (rm <file>)"],
-  [/\bgit\s+(-C\s+\S+\s+)?worktree\s+prune\b/, "worktrees are managed by the platform — keep working in the worktree returned by mcp__platform__prepare_branch"],
-  [/\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/, "deleting branches is not allowed — branches belong to the platform; just keep committing on the run branch"],
-  [/\bsudo\b/, "sudo is not allowed — the step runs unprivileged; if a tool is missing, say so in submit_result"],
-  [/\bgit\s+(-C\s+\S+\s+)?(restore\b|stash\b(?!\s+(list|show)\b))/, "do not discard or stash existing changes; edit them deliberately"],
-  [/\bgit\s+(-C\s+\S+\s+)?checkout\s+(--\s|\.(\s|$))/, "do not discard existing changes with git checkout -- — edit the file back deliberately instead"],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?push\b/,
+    "pushing is done by the platform's pull request step — commit locally and finish with mcp__platform__submit_result",
+  ],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?reset\s+--hard\b/,
+    "git reset --hard is not allowed — to undo a change, edit the files back or add a new commit (git revert)",
+  ],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?clean\b/,
+    "git clean is not allowed — remove only files you created, by name (rm <file>)",
+  ],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?worktree\s+prune\b/,
+    "worktrees are managed by the platform — keep working in the worktree returned by mcp__platform__prepare_branch",
+  ],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/,
+    "deleting branches is not allowed — branches belong to the platform; just keep committing on the run branch",
+  ],
+  [
+    /\bsudo\b/,
+    "sudo is not allowed — the step runs unprivileged; if a tool is missing, say so in submit_result",
+  ],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?(restore\b|stash\b(?!\s+(list|show)\b))/,
+    "do not discard or stash existing changes; edit them deliberately",
+  ],
+  [
+    /\bgit\s+(-C\s+\S+\s+)?checkout\s+(--\s|\.(\s|$))/,
+    "do not discard existing changes with git checkout -- — edit the file back deliberately instead",
+  ],
 ];
 
 // First word(s) of each pipeline segment allowed in analysis steps.
 const READ_ONLY = [
-  /^(ls|cat|head|tail|wc|grep|rg|find|tree|file|stat|pwd|echo|sort|uniq|cut|tr|jq|diff|basename|dirname|realpath|which|date)\b/,
+  /^(ls|cat|head|tail|wc|grep|rg|tree|file|stat|pwd|echo|sort|uniq|cut|tr|jq|diff|basename|dirname|realpath|which|date)\b/,
+  /^(true|false)(\s|$)|^:$/, // no-ops: `grep x f || true`; a bare `:` only (`: ${X:=y}` assigns)
+  // find reads, unless it deletes, runs commands or writes files through its own actions.
+  /^find\b(?!.*\s-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)\b)/,
   /^sed\b(?!.*(\s-[a-zA-Z]*i|--in-place|\/w\s|;\s*w\s|^sed\s+(-\S+\s+)*['"]?w\s))/, // no in-place edit, no `w file`
   /^awk\b(?!.*system\()/,
   /^git\s+(-C\s+\S+\s+)?(log|show|diff|status|blame|branch|rev-parse|ls-files|ls-tree|grep|cat-file|merge-base|describe|remote\s+-v|fetch|stash\s+(list|show))\b/,
   /^git\s+(-C\s+\S+\s+)?symbolic-ref(\s+(-q|--quiet|--short))*\s+\S+\s*$/, // one argument = read; two = write
   /^(\[|test)\s/, // [ -d dir ], test -f file
   /^go\s+(list|doc|version|env|vet)\b/,
+  // `go test` verifies (review, analysis) and only writes Go's own build/test cache — unless a flag writes a file:
+  // -c / -o (test binary), -coverprofile / -cpuprofile / -memprofile / -blockprofile / -mutexprofile / -trace /
+  // -outputdir. Those stay refused unless they point at /tmp or /dev/null.
+  /^go\s+test\b(?!.*\s-c(\s|$))(?!.*\s-(o|coverprofile|cpuprofile|memprofile|blockprofile|mutexprofile|trace|outputdir)(=|\s+)(?!\/tmp\/|\/dev\/null))/,
   /^(node|npm)\s+(-v|--version|ls)\b/,
 ];
 
@@ -81,7 +250,13 @@ export interface ShellParse {
   segments: string[];
   /** Unquoted output redirections, with the index of the simple command they belong to. */
   redirects: Array<{ target: string; seg: number }>;
-  heredocs: Array<{ seg: number; delim: string; quoted: boolean; body: string; /** body is stdin data, not a script */ data: boolean }>;
+  heredocs: Array<{
+    seg: number;
+    delim: string;
+    quoted: boolean;
+    body: string;
+    /** body is stdin data, not a script */ data: boolean;
+  }>;
   /** The command text with heredoc bodies removed (what the shell itself parses). */
   code: string;
   /** Set when the command cannot be parsed safely (unterminated quote/heredoc, ...): callers must deny. */
@@ -92,7 +267,8 @@ export interface ShellParse {
  * Commands whose stdin is plain data, so a heredoc fed to them is text (a commit message, a pattern list), never shell.
  * Anything else (python3 -, bash, node, psql, ...) treats the body as a script: it is kept for path/deny scanning.
  */
-const DATA_STDIN = /^(git\s+(-C\s+\S+\s+)?(commit|tag)\b.*\s(-F|--file)(\s+|=)-(\s|$)|(cat|grep|rg|wc|head|tail|jq|sort|uniq|cut|tr)\b)/;
+const DATA_STDIN =
+  /^(git\s+(-C\s+\S+\s+)?(commit|tag)\b.*\s(-F|--file)(\s+|=)-(\s|$)|(cat|grep|rg|wc|head|tail|jq|sort|uniq|cut|tr)\b)/;
 
 /**
  * Quote- and heredoc-aware tokenizer for policy checks. `grep -E 'a|b'` stays one command, `echo 'a > b'` has no
@@ -148,6 +324,12 @@ export function parseShell(command: string): ShellParse {
       add(c);
       continue;
     }
+    // An unquoted word starting with # comments out the rest of the line: it runs nothing (`${#x}` / `$#` are not words).
+    if (c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+      const nl = command.indexOf("\n", i);
+      i = (nl < 0 ? command.length : nl) - 1;
+      continue;
+    }
     if (c === "\\") {
       if (command[i + 1] === "\n") return fail("line continuation");
       add(c + (command[i + 1] ?? ""));
@@ -174,7 +356,7 @@ export function parseShell(command: string): ShellParse {
         quoted = true;
         j = close + 1;
       } else {
-        if (command[j] === "\\") (quoted = true), j++;
+        if (command[j] === "\\") ((quoted = true), j++);
         const m = command.slice(j).match(/^[A-Za-z0-9_]+/);
         if (!m) return fail("heredoc without a delimiter");
         delim = m[0];
@@ -206,7 +388,13 @@ export function parseShell(command: string): ShellParse {
           if (nl < 0) break;
         }
         if (!found) return fail(`unterminated heredoc <<${h.delim}`);
-        heredocs.push({ seg: h.seg, delim: h.delim, quoted: h.quoted, body: lines.join("\n"), data: false });
+        heredocs.push({
+          seg: h.seg,
+          delim: h.delim,
+          quoted: h.quoted,
+          body: lines.join("\n"),
+          data: false,
+        });
       }
       pending.length = 0;
       i = pos - 1;
@@ -254,18 +442,26 @@ export function parseShell(command: string): ShellParse {
   for (const h of heredocs) {
     h.data = DATA_STDIN.test(segments[h.seg] ?? "");
     // An unquoted heredoc expands $(...) and `...` in its body: that runs commands, so it is not plain data.
-    if (h.data && !h.quoted && /\$\(|`/.test(h.body)) return fail(`unquoted heredoc <<${h.delim} contains command substitution; quote the delimiter (<<'${h.delim}')`);
+    if (h.data && !h.quoted && /\$\(|`/.test(h.body))
+      return fail(
+        `unquoted heredoc <<${h.delim} contains command substitution; quote the delimiter (<<'${h.delim}')`,
+      );
   }
   return { segments, redirects, heredocs, code };
 }
 
 /** Text the policy scans for paths and forbidden commands: shell code plus script bodies (never data bodies). */
-const scanText = (p: ShellParse) => [p.code, ...p.heredocs.filter((h) => !h.data).map((h) => h.body)].join("\n");
+const scanText = (p: ShellParse) =>
+  [p.code, ...p.heredocs.filter((h) => !h.data).map((h) => h.body)].join("\n");
 
-const harmlessRedirect = (t: string) => t === "/dev/null" || t === "&/dev/null" || /^&[0-9-]$/.test(t);
+const harmlessRedirect = (t: string) =>
+  t === "/dev/null" || t === "&/dev/null" || /^&[0-9-]$/.test(t);
 
 /** null = read-only; otherwise the first offending segment / reason. */
-function readOnlyViolation(command: string, allow: (seg: string) => boolean = () => false): string | null {
+function readOnlyViolation(
+  command: string,
+  allow: (seg: string) => boolean = () => false,
+): string | null {
   const p = parseShell(command);
   if (p.error) return `cannot parse safely: ${p.error}`;
   const bad = p.redirects.find((r) => !harmlessRedirect(r.target));
@@ -292,8 +488,13 @@ function readOnlyViolation(command: string, allow: (seg: string) => boolean = ()
     if (allow(cmd)) continue;
     // VAR=value only sets a shell variable (also inside loop bodies: `do b=$(…)`); VAR=value cmd … runs cmd
     if (/^([A-Za-z_]\w*=\S*\s*)+$/.test(cmd)) continue;
-    const s = cmd.replace(/^([A-Za-z_]\w*=\S*\s+)+/, "").replace(/^cd\s+\S+\s*$/, "pwd");
-    if (!READ_ONLY.some((re) => re.test(s))) return `"${cmd.slice(0, 80)}" is not a read-only command`;
+    // `timeout 30 <cmd>` only bounds how long a read-only command may run: judge the wrapped command.
+    const s = cmd
+      .replace(/^([A-Za-z_]\w*=\S*\s+)+/, "")
+      .replace(/^timeout\s+(-[ks]\s+\S+\s+|--?[a-z-]+(=\S+)?\s+)*\d+(\.\d+)?[smhd]?\s+/, "")
+      .replace(/^cd\s+\S+\s*$/, "pwd");
+    if (!READ_ONLY.some((re) => re.test(s)))
+      return `"${cmd.slice(0, 80)}" is not a read-only command`;
   }
   return null;
 }
@@ -335,54 +536,97 @@ export function extractSubstitutions(seg: string): { text: string; inner: string
 
 export const loopUnsupported = (detail: string) =>
   `cú pháp vòng lặp chưa được hỗ trợ (${detail}). Tách vòng lặp thành các lệnh đơn rồi chạy lại: mỗi lệnh một lần gọi Bash, ` +
-  `hoặc nối các lệnh chỉ đọc bằng && / ; (chỉ hỗ trợ "for NAME in WORDS; do CMD; done" và "... | while read VAR; do CMD; done")`;
+  `hoặc nối các lệnh chỉ đọc bằng && / ; (chỉ hỗ trợ "for NAME in WORDS; do CMD; done", "... | while read VAR; do CMD; done" và "if CMD; then CMD; [elif CMD; then CMD;] [else CMD;] fi")`;
 
 /**
  * Validates loop structure over simple commands and returns the indexes of the commands that actually run (loop
- * bodies, plain commands). Supported: `for NAME in WORDS; do ...; done` and `while [IFS=..] read [-r] VAR...; do ...;
- * done`, nested when balanced. Anything else that looks like control flow is reported as unsupported, never guessed.
+ * bodies, plain commands). Supported: `for NAME in WORDS; do ...; done`, `while [IFS=..] read [-r] VAR...; do ...;
+ * done` and `if CMD; then ...; [elif CMD; then ...;] [else ...;] fi` (conditions are commands too), nested when
+ * balanced. Anything else that looks like control flow is reported as unsupported, never guessed.
  */
 function loopStructure(input: string[]): { commands: string[] } | { error: string } {
   const commands: string[] = [];
   // "do CMD" on one line is "do" followed by CMD (which may itself open a nested loop)
-  const segs = input.flatMap((s) => (/^do\s+\S/.test(s) ? ["do", s.slice(2).trim()] : [s]));
+  const segs = input.flatMap((s) => {
+    const m = s.match(/^(do|then|else)\s+(\S[\s\S]*)$/);
+    return m ? [m[1], m[2].trim()] : [s];
+  });
   const stack: Array<{ kind: string; open: boolean }> = []; // open = `do` seen
   for (const s of segs) {
     const top = stack.at(-1);
     if (/^for\b/.test(s)) {
       const m = s.match(/^for\s+([A-Za-z_]\w*)\s+in(?:\s+(.*))?$/);
       if (!m) return { error: `"${s.slice(0, 60)}" — chỉ hỗ trợ dạng "for NAME in WORDS"` };
-      if (/(^|\s)(do|done)(\s|$)/.test(m[2] ?? "")) return { error: `thiếu ";" trước do trong "${s.slice(0, 60)}"` };
+      if (/(^|\s)(do|done)(\s|$)/.test(m[2] ?? ""))
+        return { error: `thiếu ";" trước do trong "${s.slice(0, 60)}"` };
       if (top && !top.open) return { error: "vòng lặp lồng trước do" };
       stack.push({ kind: "for", open: false });
       // the word list may hold $(...) — already checked above; the `for` line itself runs nothing
       continue;
     }
     if (/^while\b/.test(s)) {
-      if (!/^while\s+(IFS=\S*\s+)?read(\s+-r)?(\s+[A-Za-z_]\w*)+$/.test(s)) return { error: `"${s.slice(0, 60)}" — chỉ hỗ trợ "while read VAR"` };
+      if (!/^while\s+(IFS=\S*\s+)?read(\s+-r)?(\s+[A-Za-z_]\w*)+$/.test(s))
+        return { error: `"${s.slice(0, 60)}" — chỉ hỗ trợ "while read VAR"` };
       if (top && !top.open) return { error: "vòng lặp lồng trước do" };
       stack.push({ kind: "while", open: false });
       continue;
     }
+    const cond = s.match(/^(if|elif)\s+(?:!\s+)?(\S[\s\S]*)$/);
+    if (cond) {
+      if (cond[1] === "if") {
+        if (top && !top.open && top.kind !== "if") return { error: "if lồng trước do" };
+        stack.push({ kind: "if", open: false });
+      } else {
+        if (top?.kind !== "if" || !top.open) return { error: '"elif" không thuộc if nào' };
+        top.open = false;
+      }
+      commands.push(cond[2]); // the condition runs: checked like any command
+      continue;
+    }
+    if (/^then$/.test(s)) {
+      if (top?.kind !== "if" || top.open) return { error: '"then" không khớp với if' };
+      top.open = true;
+      continue;
+    }
+    if (/^else$/.test(s)) {
+      if (top?.kind !== "if" || !top.open) return { error: '"else" không thuộc if nào' };
+      continue;
+    }
+    if (/^fi$/.test(s)) {
+      if (top?.kind !== "if" || !top.open) return { error: '"fi" không khớp với if' };
+      stack.pop();
+      continue;
+    }
     if (/^do(\s|$)/.test(s)) {
-      if (!top || top.open) return { error: '"do" không thuộc vòng lặp nào' };
+      if (!top || top.open || top.kind === "if") return { error: '"do" không thuộc vòng lặp nào' };
       top.open = true;
       continue;
     }
     if (/^done(\s+<\s*\S+)?$/.test(s)) {
-      if (!top || !top.open) return { error: '"done" không khớp với do' };
+      if (!top || !top.open || top.kind === "if") return { error: '"done" không khớp với do' };
       stack.pop();
       continue;
     }
-    if (/^(until|select|if|then|elif|else|fi|case|esac|function)\b|^[{}()]|^\(\(/.test(s)) return { error: `"${s.slice(0, 40)}" không được hỗ trợ` };
-    if (top && !top.open) return { error: `có lệnh giữa "${top.kind}" và "do"` };
+    if (/^(until|select|if|then|elif|else|fi|case|esac|function)\b|^[{}()]|^\(\(/.test(s))
+      return { error: `"${s.slice(0, 40)}" không được hỗ trợ` };
+    // `if a && b; then`: every part of the condition list is a command; loops take nothing before `do`.
+    if (top && !top.open && top.kind !== "if") return { error: `có lệnh giữa "${top.kind}" và "do"` };
     commands.push(s);
   }
-  if (stack.length) return { error: `vòng lặp "${stack.at(-1)!.kind}" chưa được đóng bằng done` };
+  if (stack.length)
+    return {
+      error:
+        stack.at(-1)!.kind === "if"
+          ? '"if" chưa được đóng bằng fi'
+          : `vòng lặp "${stack.at(-1)!.kind}" chưa được đóng bằng done`,
+    };
   return { commands };
 }
 
-const TEMP_ROOTS = () => [...new Set(["/tmp", tmpdir(), process.env.TMPDIR].filter(Boolean) as string[])].map((r) => resolve(r));
+const TEMP_ROOTS = () =>
+  [...new Set(["/tmp", tmpdir(), process.env.TMPDIR].filter(Boolean) as string[])].map((r) =>
+    resolve(r),
+  );
 const strictlyInside = (p: string, root: string) => p !== root && isInside(p, [root]);
 const expandHome = (t: string) => t.replace(/^~(?=\/|$)/, process.env.HOME ?? "~");
 
@@ -397,7 +641,14 @@ function segmentDirs(p: ShellParse, cwd?: string): Array<string | undefined> {
     const cd = seg.match(/^cd(?:\s+(\S+))?\s*$/);
     if (cd) {
       const to = expandHome((cd[1] ?? "~").replace(/^(['"])(.*)\1$/, "$2"));
-      dir = /[$`*?]/.test(to) || to === "-" ? undefined : to.startsWith("/") ? resolve(to) : dir ? resolve(dir, to) : undefined;
+      dir =
+        /[$`*?]/.test(to) || to === "-"
+          ? undefined
+          : to.startsWith("/")
+            ? resolve(to)
+            : dir
+              ? resolve(dir, to)
+              : undefined;
     }
     return here;
   });
@@ -408,11 +659,16 @@ function segmentDirs(p: ShellParse, cwd?: string): Array<string | undefined> {
  * tmp* / .tmp* folder (or something below one) inside one of the run's worktrees. `cd` earlier in the same command is
  * followed. Returns a deny reason, or null when the command has no rm -rf or only temp targets.
  */
-export function rmRfViolation(command: string | ShellParse, ctx: PolicyContext, cwd?: string): string | null {
+export function rmRfViolation(
+  command: string | ShellParse,
+  ctx: PolicyContext,
+  cwd?: string,
+): string | null {
   const p = typeof command === "string" ? parseShell(command) : command;
   if (p.error) return `cannot parse safely: ${p.error}`;
   for (const h of p.heredocs)
-    if (!h.data && /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b/.test(h.body)) return "rm -rf inside an inline script cannot be checked; run it as a separate command";
+    if (!h.data && /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b/.test(h.body))
+      return "rm -rf inside an inline script cannot be checked; run it as a separate command";
   const dirs = segmentDirs(p, cwd);
   for (const [n, seg] of p.segments.entries()) {
     const words = seg.split(/\s+/);
@@ -421,18 +677,70 @@ export function rmRfViolation(command: string | ShellParse, ctx: PolicyContext, 
     const args = words.slice(i + 1);
     const flags = args.filter((a) => /^-[a-zA-Z]+$/.test(a)).join("");
     if (!(/r|R/.test(flags) && /f/.test(flags)) && !args.includes("--recursive")) continue;
-    const targets = args.filter((a) => !a.startsWith("-")).map((a) => a.replace(/^['"]|['"]$/g, ""));
+    const targets = args
+      .filter((a) => !a.startsWith("-"))
+      .map((a) => a.replace(/^['"]|['"]$/g, ""));
     if (!targets.length) return "rm -rf without a target";
     const dir = dirs[n];
     for (const t of targets) {
       if (/[$`]/.test(t) || t.startsWith("~")) return `rm -rf target "${t}" must be a literal path`;
-      if (!t.startsWith("/") && !dir) return `rm -rf with a relative path needs a known directory ("${t}")`;
+      if (!t.startsWith("/") && !dir)
+        return `rm -rf with a relative path needs a known directory ("${t}")`;
       const abs = t.startsWith("/") ? resolve(t) : resolve(dir!, t);
       const temp = TEMP_ROOTS().some((r) => strictlyInside(abs, r));
       const ws = ctx.workspaces.find((w) => strictlyInside(abs, resolve(w)));
-      const tmpInWorktree = ws && relative(resolve(ws), abs).split(sep).some((c) => /^\.?tmp/i.test(c));
-      if (!temp && !tmpInWorktree) return `rm -rf is only allowed for temp paths (/tmp, $TMPDIR, or a tmp*/.tmp* folder inside the worktree), not "${t}"`;
+      const tmpInWorktree =
+        ws &&
+        relative(resolve(ws), abs)
+          .split(sep)
+          .some((c) => /^\.?tmp/i.test(c));
+      if (!temp && !tmpInWorktree)
+        return `rm -rf is only allowed for temp paths (/tmp, $TMPDIR, or a tmp*/.tmp* folder inside the worktree), not "${t}"`;
     }
+  }
+  return null;
+}
+
+/** Roots a recursive search must never start from: the whole machine, Windows drives under WSL, kernel trees. */
+const SCAN_ROOT = /^\/(mnt(\/[^/]+)?|proc|sys|dev)?\/?$/;
+const RECURSIVE_SCAN = /^(find|tree|du|rg|grep|ls)\b/;
+
+/**
+ * A recursive search started at `/`, `/mnt`, `/mnt/c`, `/proc`, `/sys` or `/dev` (e.g. `find / -iname x`). It never
+ * belongs to a step — the repositories and worktrees are known — and on WSL it crawls every Windows drive for minutes,
+ * long enough for the CLI to move it to the background and keep the step "running" after its result was submitted.
+ */
+export function filesystemScanViolation(p: ShellParse): string | null {
+  for (const raw of p.segments) {
+    const seg = raw.replace(/^timeout\s+(-\S+\s+)*\d+(\.\d+)?[smhd]?\s+/, "");
+    const m = seg.match(RECURSIVE_SCAN);
+    if (!m) continue;
+    const words = seg.split(/\s+/).slice(1);
+    const flags = words.filter((w) => w.startsWith("-")).join(" ");
+    const recursive =
+      m[1] === "find" ||
+      m[1] === "tree" ||
+      m[1] === "du" ||
+      m[1] === "rg" ||
+      (m[1] === "grep" &&
+        /(^|\s)(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive)(\s|$)/.test(flags)) ||
+      (m[1] === "ls" && /(^|\s)(-[a-zA-Z]*R[a-zA-Z]*|--recursive)(\s|$)/.test(flags));
+    if (!recursive) continue;
+    // find: paths come before the first expression. grep/rg: the first non-flag word is the pattern (unless given with
+    // -e/-f). Others: any non-flag word may be a path.
+    const end = m[1] === "find" ? words.findIndex((w) => /^[-(!]/.test(w)) : -1;
+    let operands =
+      end >= 0
+        ? words.slice(0, end)
+        : m[1] === "find"
+          ? words
+          : words.filter((w) => !w.startsWith("-"));
+    if ((m[1] === "grep" || m[1] === "rg") && !/(^|\s)(-[a-zA-Z]*[ef]|--regexp|--file)/.test(flags))
+      operands = operands.slice(1);
+    const paths = operands.map((w) => w.replace(/^['"]|['"]$/g, ""));
+    const hit = paths.find((w) => SCAN_ROOT.test(w));
+    if (hit)
+      return `"${m[1]} ${hit}" searches the whole machine (on WSL also every Windows drive) and can run for many minutes: search the repositories or worktrees you were given instead (e.g. ${m[1]} <repo path> …), bounded with "timeout 30 …" if unsure`;
   }
   return null;
 }
@@ -441,16 +749,29 @@ export function rmRfViolation(command: string | ShellParse, ctx: PolicyContext, 
  * A worktree may borrow the primary checkout's node_modules through a symlink (to run eslint/tsc/prettier), but then a
  * package install would write THROUGH the link into the primary checkout: refuse it while node_modules is a symlink.
  */
-export function packageInstallViolation(p: ShellParse, dirs: Array<string | undefined>, workspaces: string[]): string | null {
-  const linkedHere = p.segments.some((seg) => /^ln\s+-[a-zA-Z]*s[a-zA-Z]*\s+\S*node_modules\/?\s+\S*node_modules\/?$/.test(seg));
+export function packageInstallViolation(
+  p: ShellParse,
+  dirs: Array<string | undefined>,
+  workspaces: string[],
+): string | null {
+  const linkedHere = p.segments.some((seg) =>
+    /^ln\s+-[a-zA-Z]*s[a-zA-Z]*\s+\S*node_modules\/?\s+\S*node_modules\/?$/.test(seg),
+  );
   for (const [i, seg] of p.segments.entries()) {
-    if (!/^(npm|yarn|pnpm)\s+(install|i|ci|add|remove|rm|uninstall|update|up|upgrade|link)\b/.test(seg)) continue;
+    if (
+      !/^(npm|yarn|pnpm)\s+(install|i|ci|add|remove|rm|uninstall|update|up|upgrade|link)\b/.test(
+        seg,
+      )
+    )
+      continue;
     const dir = dirs[i];
     let symlinked = linkedHere;
     try {
-      if (dir && isInside(dir, workspaces)) symlinked ||= lstatSync(resolve(dir, "node_modules")).isSymbolicLink();
-    } catch { }
-    if (symlinked) return "node_modules in this worktree is a symlink to the primary checkout: installing/changing packages would modify the primary checkout. Remove the symlink first (rm node_modules) and install into the worktree, or report the needed dependency in submit_result";
+      if (dir && isInside(dir, workspaces))
+        symlinked ||= lstatSync(resolve(dir, "node_modules")).isSymbolicLink();
+    } catch {}
+    if (symlinked)
+      return "node_modules in this worktree is a symlink to the primary checkout: installing/changing packages would modify the primary checkout. Remove the symlink first (rm node_modules) and install into the worktree, or report the needed dependency in submit_result";
   }
   return null;
 }
@@ -478,10 +799,18 @@ export function worktreeRemoveViolation(p: ShellParse): string | null {
   for (const seg of p.segments) {
     const m = seg.match(/\bgit\s+(?:-C\s+\S+\s+)?worktree\s+remove\b(.*)$/);
     if (!m) continue;
-    const targets = m[1].trim().split(/\s+/).filter((a) => a && !a.startsWith("-")).map((a) => a.replace(/^['"]|['"]$/g, ""));
+    const targets = m[1]
+      .trim()
+      .split(/\s+/)
+      .filter((a) => a && !a.startsWith("-"))
+      .map((a) => a.replace(/^['"]|['"]$/g, ""));
     if (!targets.length) return "git worktree remove without a target";
     for (const t of targets) {
-      if (/[$`~]/.test(t) || !t.startsWith("/") || !TEMP_ROOTS().some((r) => strictlyInside(resolve(t), r)))
+      if (
+        /[$`~]/.test(t) ||
+        !t.startsWith("/") ||
+        !TEMP_ROOTS().some((r) => strictlyInside(resolve(t), r))
+      )
         return `worktrees are managed by the platform — you may only remove scratch worktrees you created under /tmp (absolute path), not "${t}"; keep working in the worktree returned by mcp__platform__prepare_branch`;
     }
   }
@@ -495,7 +824,9 @@ export function worktreeRemoveViolation(p: ShellParse): string | null {
 export function pathsIn(command: string): string[] {
   const p = parseShell(command);
   const text = p.error ? command : scanText(p);
-  return [...text.matchAll(/(?:^|[\s'"=:(])((?:~|\/)[^\s'"`;|&<>()]*)/g)].map((m) => expandHome(m[1])).filter((x) => x.startsWith("/") && x.length > 1);
+  return [...text.matchAll(/(?:^|[\s'"=:(])((?:~|\/)[^\s'"`;|&<>()]*)/g)]
+    .map((m) => expandHome(m[1]))
+    .filter((x) => x.startsWith("/") && x.length > 1);
 }
 
 /**
@@ -505,7 +836,9 @@ export function pathsIn(command: string): string[] {
 export function explicitDir(seg: string): string | undefined {
   const m = seg
     .replace(/^([A-Za-z_]\w*=\S*\s+)+/, "")
-    .match(/^(?:(?:go|git|make|pnpm)\s+-C(?:\s+|=)|npm\s+(?:\S+\s+)*?--prefix(?:\s+|=)|pnpm\s+--dir(?:\s+|=)|yarn\s+--cwd(?:\s+|=))(\S+)/);
+    .match(
+      /^(?:(?:go|git|make|pnpm)\s+-C(?:\s+|=)|npm\s+(?:\S+\s+)*?--prefix(?:\s+|=)|pnpm\s+--dir(?:\s+|=)|yarn\s+--cwd(?:\s+|=))(\S+)/,
+    );
   if (!m) return undefined;
   const d = expandHome(m[1].replace(/^(['"])(.*)\1$/, "$2"));
   return d.startsWith("/") && !/[$`*?]/.test(d) ? resolve(d) : undefined;
@@ -517,18 +850,38 @@ export function explicitDir(seg: string): string | undefined {
  */
 export function decideBash(command: string, ctx: PolicyContext, cwd?: string): Decision {
   const p = parseShell(command);
-  if (p.error) return deny(`cannot parse this command safely (${p.error}); split it into simpler commands`);
+  if (p.error)
+    return deny(`cannot parse this command safely (${p.error}); split it into simpler commands`);
+  const leaked = secretPathViolation(pathsIn(command), ctx);
+  if (leaked) return deny(leaked);
+  if (
+    cwd &&
+    isInside(cwd, ctx.protectedRoots ?? []) &&
+    !isInside(cwd, ctx.workspaces) &&
+    /(^|[\s'"=])\.env(\.[A-Za-z0-9_-]+)?\b/.test(command) &&
+    !/\.env\.(example|sample)\b/.test(command)
+  )
+    return deny("refusing to read secret files in a protected checkout");
   const scan = scanText(p);
   for (const [re, why] of ALWAYS_DENIED) if (re.test(scan)) return deny(why);
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
+  const fsScan = filesystemScanViolation(p);
+  if (fsScan) return deny(fsScan);
   const wt = worktreeRemoveViolation(p);
   if (wt) return deny(wt);
   const base = ctx.baseBranch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (new RegExp(`\\bgit\\s+(-C\\s+\\S+\\s+)?(checkout|switch)\\s+${base}\\b`).test(scan)) return deny(`do not check out ${ctx.baseBranch} — compare with git diff origin/${ctx.baseBranch}...HEAD or read a file with git show origin/${ctx.baseBranch}:<path>`);
+  if (new RegExp(`\\bgit\\s+(-C\\s+\\S+\\s+)?(checkout|switch)\\s+${base}\\b`).test(scan))
+    return deny(
+      `do not check out ${ctx.baseBranch} — compare with git diff origin/${ctx.baseBranch}...HEAD or read a file with git show origin/${ctx.baseBranch}:<path>`,
+    );
   if (ctx.mode === "coding") {
-    if (/\bgit\s+(-C\s+\S+\s+)?(checkout\s+-[bB]|switch\s+-[cC]|branch\s+(?!-)[^\s|;&]+)/.test(scan))
-      return deny("branches are managed by the platform: use mcp__platform__prepare_branch and work in the returned worktree");
+    if (
+      /\bgit\s+(-C\s+\S+\s+)?(checkout\s+-[bB]|switch\s+-[cC]|branch\s+(?!-)[^\s|;&]+)/.test(scan)
+    )
+      return deny(
+        "branches are managed by the platform: use mcp__platform__prepare_branch and work in the returned worktree",
+      );
     const roots = ctx.protectedRoots ?? [];
     const primary = (x: string) => isInside(x, roots) && !isInside(x, ctx.workspaces);
     const dirs = segmentDirs(p, cwd);
@@ -538,9 +891,11 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     p.segments.forEach((seg, i) => {
       const m = seg.match(/^(ln|cp)\s+((?:-[a-zA-Z]+\s+)*)(\S+)\s+(\S+)$/);
       if (!m || (m[1] === "ln" && !/s/.test(m[2])) || (m[1] === "cp" && /l/.test(m[2]))) return;
-      const src = expandHome(m[3]), dst = expandHome(m[4]);
+      const src = expandHome(m[3]),
+        dst = expandHome(m[4]);
       const dstAbs = dst.startsWith("/") ? resolve(dst) : dirs[i] ? resolve(dirs[i]!, dst) : null;
-      if (src.startsWith("/") && dstAbs && isInside(dstAbs, ctx.workspaces)) readSources.add(resolve(src));
+      if (src.startsWith("/") && dstAbs && isInside(dstAbs, ctx.workspaces))
+        readSources.add(resolve(src));
     });
     const pkgWrite = packageInstallViolation(p, dirs, ctx.workspaces);
     if (pkgWrite) return deny(pkgWrite);
@@ -557,11 +912,13 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       return !!d && !primary(d) && !pathsIn(seg).some(primary);
     };
     const away = (i: number) => elsewhere(p.segments[i] ?? "");
-    // A segment is charged to the directory it runs in (following `cd` earlier in the same command) only when it writes:
-    // `cd <worktree> && mkdir x` from a primary cwd writes in the worktree, not in the primary checkout. After a `cd` that
-    // cannot be resolved (`cd $X`) the directory is unknown: it is still charged to the cwd.
     const touched = [
-      ...dirs.map((d) => d ?? cwd).filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i) && !away(i) && readOnlyViolation(p.segments[i] ?? "") !== null),
+      ...(cwd &&
+      primary(cwd) &&
+      !p.segments.every((seg, i) => scratchOnly(i) || away(i) || readOnlyViolation(seg) === null)
+        ? [cwd]
+        : []),
+      ...dirs.filter((d, i): d is string => !!d && primary(d) && !scratchOnly(i) && !away(i)),
       ...pathsIn(command).filter((x) => primary(x) && !readSources.has(resolve(x))),
     ];
     // Literal variables assigned in the same command (`L=/abs/dir; … > $L-lint.log`) are expanded for redirect checks.
@@ -570,14 +927,21 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       const a = seg.match(/^([A-Za-z_]\w*)=(?:'([^']*)'|"([^"$`]*)"|([^\s$`'"]+))$/);
       if (a) vars.set(a[1], a[2] ?? a[3] ?? a[4] ?? "");
     }
-    const expandVars = (t: string) => t.replace(/\$\{(\w+)\}|\$(\w+)/g, (all, b, c) => vars.get(b ?? c) ?? all);
+    const expandVars = (t: string) =>
+      t.replace(/\$\{(\w+)\}|\$(\w+)/g, (all, b, c) => vars.get(b ?? c) ?? all);
     // Real output redirections: resolve each target where its command runs, so `> ../../src/repo/f` is caught too.
     for (const r of p.redirects) {
       if (harmlessRedirect(r.target) || r.target.startsWith("&")) continue;
       const target = expandVars(r.target);
-      if (/[$`*?{]/.test(target)) return deny(`cannot resolve redirection target "${r.target}" safely; use a literal path (or assign the variable a literal value earlier in the same command)`);
+      if (/[$`*?{]/.test(target))
+        return deny(
+          `cannot resolve redirection target "${r.target}" safely; use a literal path (or assign the variable a literal value earlier in the same command)`,
+        );
       const t = expandHome(target);
-      if (!t.startsWith("/") && !dirs[r.seg]) return deny(`cannot resolve relative redirection target "${r.target}": the working directory is unknown`);
+      if (!t.startsWith("/") && !dirs[r.seg])
+        return deny(
+          `cannot resolve relative redirection target "${r.target}": the working directory is unknown`,
+        );
       const abs = t.startsWith("/") ? resolve(t) : resolve(dirs[r.seg]!, t);
       if (primary(abs)) touched.push(abs);
     }
@@ -586,7 +950,8 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
       if (v)
         return deny(
           `${touched[0]} is a primary checkout and is read-only (${v}). Call mcp__platform__prepare_branch and run modifying commands inside the returned worktree` +
-          (ctx.workspaces.length ? ` (${ctx.workspaces.join(", ")})` : "") + ".",
+            (ctx.workspaces.length ? ` (${ctx.workspaces.join(", ")})` : "") +
+            ".",
         );
     }
     return allow;
@@ -602,18 +967,62 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
 /** Workflow control remains available so a restricted step can finish or ask for help. */
 export function toolAllowed(tool: string, allowed?: string[] | null): boolean {
   const logical = tool.startsWith("mcp__platform__") ? `platform.${tool.slice(15)}` : tool;
-  if (["platform.submit_result", "platform.ask_user", "platform.request_clarification", "platform.post_update"].includes(logical)) return true;
+  if (
+    [
+      "platform.submit_result",
+      "platform.ask_user",
+      "platform.request_clarification",
+      "platform.post_update",
+    ].includes(logical)
+  )
+    return true;
   // Dispatchers enforce the actual target, including call_tool aliases, after validating the attempt binding.
-  if (["platform.call_tool", "platform.list_tools", "platform.describe_tool"].includes(logical)) return true;
+  if (["platform.call_tool", "platform.list_tools", "platform.describe_tool"].includes(logical))
+    return true;
   return allowed == null || allowed.includes(logical);
 }
 
-export function decide(tool: string, input: Record<string, unknown>, ctx: PolicyContext, cwd?: string, agentId?: string): Decision {
-  if (!toolAllowed(tool, ctx.allowedTools)) return deny(`tool ${tool} is excluded by this attempt's allowed_tools`);
+export function decide(
+  tool: string,
+  input: Record<string, unknown>,
+  ctx: PolicyContext,
+  cwd?: string,
+  agentId?: string,
+): Decision {
+  if (ctx.loopDetector) {
+    const loop = ctx.loopDetector.check(tool, input);
+    if (loop.isLoop) return deny(loop.reason!);
+  }
+  if (ctx.micro) {
+    const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(tool);
+    if (!control && ++ctx.micro.calls > ctx.micro.limit) {
+      ctx.micro.exhausted = true; ctx.micro.reason = "MICRO tool budget exhausted";
+      return deny("MICRO tool budget exhausted; call escalate_profile before continuing");
+    }
+    if (agentId || tool === "Task" || tool === "Agent") return deny("MICRO does not permit subagents");
+    if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
+      const path = String(input.file_path ?? input.notebook_path ?? "");
+      if (!path || !ctx.workspaces.some(root => ctx.micro!.files.some(file => resolve(root, file) === resolve(cwd ?? root, path)))) {
+        ctx.micro.exhausted = true; ctx.micro.reason = "proposed edit exceeds MICRO scope";
+        return deny("edit exceeds verified MICRO file scope; call escalate_profile before expanding scope");
+      }
+    }
+    // Even a nominal test/read command can execute repository code in an unsandboxed coding process.
+    // Bounded platform reads and explicit edit tools suffice; the trusted harness performs verification.
+    if (tool === "Bash") return deny("MICRO shell execution has uncertain write scope; use bounded platform reads and explicit edits, or escalate. The platform runs mandatory verification.");
+  }
+  if (!toolAllowed(tool, ctx.allowedTools))
+    return deny(`tool ${tool} is excluded by this attempt's allowed_tools`);
   if (agentId) {
     if (tool.startsWith("mcp__platform__")) {
-      if (!SUBAGENT_PLATFORM_TOOLS.includes(tool)) return deny(`subagents are read-only: ${tool.replace("mcp__platform__", "")} is reserved for the main agent`);
-      if (tool === "mcp__platform__call_tool" && !(ctx.isReadOnlyIntegration?.(String(input.name ?? "")) ?? false))
+      if (!SUBAGENT_PLATFORM_TOOLS.includes(tool))
+        return deny(
+          `subagents are read-only: ${tool.replace("mcp__platform__", "")} is reserved for the main agent`,
+        );
+      if (
+        tool === "mcp__platform__call_tool" &&
+        !(ctx.isReadOnlyIntegration?.(String(input.name ?? "")) ?? false)
+      )
         return deny("subagents may only call read-only integration tools");
       return allow;
     }
@@ -624,11 +1033,26 @@ export function decide(tool: string, input: Record<string, unknown>, ctx: Policy
   switch (tool) {
     case "Task":
     case "Agent":
-      return ctx.delegation ? allow : deny("delegation is not enabled for this step (step config delegation.enabled)");
+      return ctx.delegation
+        ? allow
+        : deny("delegation is not enabled for this step (step config delegation.enabled)");
     case "Read":
     case "Grep":
     case "Glob":
-    case "LS":
+    case "LS": {
+      const paths = ["file_path", "path", "notebook_path"].flatMap((key) => {
+        const value = input[key];
+        return typeof value === "string" ? [value] : [];
+      });
+      const leaked = secretPathViolation(
+        paths.map((raw) =>
+          raw.startsWith("/") || raw.startsWith("~") ? raw : cwd ? resolve(cwd, raw) : raw,
+        ),
+        ctx,
+      );
+      if (leaked) return deny(leaked);
+      return allow;
+    }
     case "TodoWrite":
     case "WebFetch":
     case "WebSearch":
@@ -638,11 +1062,18 @@ export function decide(tool: string, input: Record<string, unknown>, ctx: Policy
     case "Write":
     case "MultiEdit":
     case "NotebookEdit": {
-      if (ctx.mode !== "coding") return deny("this step is read-only; file edits happen in a coding step");
+      if (ctx.mode !== "coding")
+        return deny("this step is read-only; file edits happen in a coding step");
       const path = String(input.file_path ?? input.notebook_path ?? "");
       if (!path) return deny("missing file path");
-      if (!ctx.workspaces.length) return deny("call mcp__platform__prepare_branch first; edits are only allowed inside its worktree");
-      if (!isInside(path, ctx.workspaces)) return deny(`edits are only allowed inside the run's worktrees: ${ctx.workspaces.join(", ")}`);
+      if (!ctx.workspaces.length)
+        return deny(
+          "call mcp__platform__prepare_branch first; edits are only allowed inside its worktree",
+        );
+      if (!isInside(path, ctx.workspaces))
+        return deny(
+          `edits are only allowed inside the run's worktrees: ${ctx.workspaces.join(", ")}`,
+        );
       return allow;
     }
     case "Bash":

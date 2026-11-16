@@ -8,25 +8,19 @@ test("A failed grammar load is visible, source-safe and retryable after assets a
   const loader = mock.method(Language, "load", async () => {
     throw new Error("private source or path must not be logged");
   });
-  await assert.rejects(
-    extract("retry.go", "package retry\nfunc Recovered() {}"),
-    ParserLoadError,
-  );
+  await assert.rejects(extract("retry.go", "package retry\nfunc Recovered() {}"), ParserLoadError);
   assert.equal(
     diagnostic(new ParserLoadError("go", new Error("secret"))),
     "Parser unavailable (go); check installed WASM assets",
   );
   loader.mock.restore();
   assert.ok(
-    (await extract(
-      "retry.go",
-      "package retry\nfunc Recovered() {}",
-    ))!.symbols.some((s) => s.symbol_name === "Recovered"),
+    (await extract("retry.go", "package retry\nfunc Recovered() {}"))!.symbols.some(
+      (s) => s.symbol_name === "Recovered",
+    ),
   );
   assert.equal(
-    diagnostic(
-      Object.assign(new Error("private filename"), { code: "EACCES" }),
-    ),
+    diagnostic(Object.assign(new Error("private filename"), { code: "EACCES" })),
     "Indexing source permission denied",
   );
 });

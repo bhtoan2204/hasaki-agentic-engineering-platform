@@ -12,7 +12,7 @@
 }
 
 .global-companion * {
-  pointer-events: auto
+  pointer-events: auto;
 }
 
 .companion-stage {
@@ -41,12 +41,12 @@
 .companion-avatar:focus-visible {
   background: transparent;
   box-shadow: none;
-  transform: none
+  transform: none;
 }
 
 .companion-avatar:active {
   cursor: grabbing;
-  transform: none
+  transform: none;
 }
 
 .companion-art {
@@ -55,11 +55,11 @@
   overflow: visible;
   position: relative;
   z-index: 1;
-  filter: drop-shadow(0 5px 4px rgba(25, 42, 31, .19));
+  filter: drop-shadow(0 5px 4px rgba(25, 42, 31, 0.19));
 }
 
 .hc-shadow {
-  fill: rgba(20, 35, 27, .16)
+  fill: rgba(20, 35, 27, 0.16);
 }
 
 .hc-character {
@@ -94,33 +94,33 @@
 .hc-confetti,
 .hc-zzz {
   opacity: 0;
-  transition: opacity .25s ease;
+  transition: opacity 0.25s ease;
 }
 
 .hc-raised-hand {
   opacity: 0;
   transform-box: fill-box;
   transform-origin: 0% 100%;
-  transition: opacity .2s ease;
+  transition: opacity 0.2s ease;
 }
 
 .hc-work-prop {
-  opacity: 1
+  opacity: 1;
 }
 
 .companion-art[data-companion-state="SLEEPING"] .hc-eyes,
 .companion-art[data-companion-state="WAITING"] .hc-eyes {
   animation: none;
-  transform: scaleY(.16);
+  transform: scaleY(0.16);
 }
 
 .companion-art[data-companion-state="SLEEPING"] .hc-zzz,
 .companion-art[data-companion-state="WAITING"] .hc-clock {
-  opacity: 1
+  opacity: 1;
 }
 
 .companion-art[data-companion-state="THINKING"] .hc-thought {
-  opacity: 1
+  opacity: 1;
 }
 
 .companion-art[data-companion-state="THINKING"] .hc-head-group,
@@ -130,16 +130,16 @@
 }
 
 .companion-art[data-companion-state="TESTING"] .hc-work-prop {
-  opacity: 0
+  opacity: 0;
 }
 
 .companion-art[data-companion-state="TESTING"] .hc-checklist {
-  opacity: 1
+  opacity: 1;
 }
 
 .companion-art[data-companion-state="REVIEWING"] .hc-thought,
 .companion-art[data-companion-state="RESEARCHING"] .hc-thought {
-  opacity: 1
+  opacity: 1;
 }
 
 .companion-art[data-companion-state="APPROVAL_REQUIRED"] .hc-raised-hand,
@@ -149,11 +149,11 @@
 }
 
 .companion-art[data-companion-state="APPROVAL_REQUIRED"] .hc-body {
-  transform: translateY(-2px) rotate(-2deg)
+  transform: translateY(-2px) rotate(-2deg);
 }
 
 .companion-art[data-companion-state="HANDOFF"] .hc-handoff {
-  opacity: 1
+  opacity: 1;
 }
 
 .companion-art[data-companion-state="FAILED"] .hc-mouth {
@@ -162,7 +162,7 @@
 }
 
 .companion-art[data-companion-state="FAILED"] .hc-brows {
-  transform: translateY(2px)
+  transform: translateY(2px);
 }
 
 .companion-art[data-companion-state="CELEBRATING"] .hc-confetti,
@@ -172,13 +172,13 @@
 }
 
 .companion-art[data-companion-state="CELEBRATING"] .hc-character {
-  animation: hc-celebrate .3s ease-in-out 4;
+  animation: hc-celebrate 0.3s ease-in-out 4;
 }
 
 .companion-art[data-companion-state="CODING"] .hc-body,
 .companion-art[data-companion-state="WORKING"] .hc-body,
 .companion-art[data-companion-state="RETRYING"] .hc-body {
-  animation: hc-type .38s ease-in-out infinite alternate;
+  animation: hc-type 0.38s ease-in-out infinite alternate;
 }
 
 .companion-orbit {
@@ -193,11 +193,11 @@
 }
 
 .intensity-subtle .hc-character {
-  animation-duration: 7s
+  animation-duration: 7s;
 }
 
 .intensity-playful .hc-character {
-  animation-duration: 2.6s
+  animation-duration: 2.6s;
 }
 
 .intensity-off .hc-character,
@@ -206,7 +206,7 @@
 .intensity-off .hc-confetti,
 .intensity-off .hc-body,
 .intensity-off .hc-raised-hand {
-  animation: none !important
+  animation: none !important;
 }
 
 .companion-collapse {
@@ -230,7 +230,7 @@
 
 .companion-collapse:hover {
   background: var(--surface-2);
-  color: var(--ink)
+  color: var(--ink);
 }
 
 .companion-panel {
@@ -243,14 +243,14 @@
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow-3);
-  animation: companion-in .16s ease-out both;
+  animation: companion-in 0.16s ease-out both;
 }
 
 .companion-panel-head {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-width: 0
+  min-width: 0;
 }
 
 .companion-heading {
@@ -258,12 +258,12 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  line-height: 1.35
+  line-height: 1.35;
 }
 
 .companion-heading strong {
   color: var(--ink);
-  font-size: var(--fs-md)
+  font-size: var(--fs-md);
 }
 
 .companion-heading span {
@@ -271,7 +271,7 @@
   font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .companion-status-dot {
@@ -280,7 +280,7 @@
   border-radius: 50%;
   background: var(--st-idle);
   box-shadow: 0 0 0 3px var(--st-idle-bg);
-  flex: 0 0 auto
+  flex: 0 0 auto;
 }
 
 .companion-status-dot[data-state="CODING"],
@@ -289,7 +289,7 @@
 .companion-status-dot[data-state="RESEARCHING"],
 .companion-status-dot[data-state="REVIEWING"] {
   background: var(--st-run);
-  box-shadow: 0 0 0 3px var(--st-run-bg)
+  box-shadow: 0 0 0 3px var(--st-run-bg);
 }
 
 .companion-status-dot[data-state="ASKING"],
@@ -297,24 +297,24 @@
 .companion-status-dot[data-state="APPROVAL_REQUIRED"],
 .companion-status-dot[data-state="HANDOFF"] {
   background: var(--st-wait);
-  box-shadow: 0 0 0 3px var(--st-wait-bg)
+  box-shadow: 0 0 0 3px var(--st-wait-bg);
 }
 
 .companion-status-dot[data-state="SUCCESS"],
 .companion-status-dot[data-state="CELEBRATING"] {
   background: var(--st-ok);
-  box-shadow: 0 0 0 3px var(--st-ok-bg)
+  box-shadow: 0 0 0 3px var(--st-ok-bg);
 }
 
 .companion-status-dot[data-state="FAILED"] {
   background: var(--st-err);
-  box-shadow: 0 0 0 3px var(--st-err-bg)
+  box-shadow: 0 0 0 3px var(--st-err-bg);
 }
 
 .companion-message {
   margin: 11px 0;
   color: var(--ink-2);
-  line-height: 1.5
+  line-height: 1.5;
 }
 
 .companion-run-card {
@@ -322,7 +322,7 @@
   border: 1px solid var(--line);
   border-radius: 11px;
   background: var(--surface-2);
-  min-width: 0
+  min-width: 0;
 }
 
 .companion-run-title,
@@ -330,79 +330,79 @@
   display: flex;
   gap: 7px;
   align-items: center;
-  min-width: 0
+  min-width: 0;
 }
 
 .companion-run-title b {
   color: var(--brand);
-  flex: 0 0 auto
+  flex: 0 0 auto;
 }
 
 .companion-run-title span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600
+  font-weight: 600;
 }
 
 .companion-meta {
   justify-content: space-between;
   margin-top: 5px;
   color: var(--muted);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .companion-meta span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .companion-run-status {
   flex: 0 0 auto;
   color: var(--ink-2);
-  font-weight: 600
+  font-weight: 600;
 }
 
 .companion-provider {
   margin-top: 5px;
   color: var(--brand);
   font: 500 var(--fs-xs)/1.4 var(--mono);
-  overflow-wrap: anywhere
+  overflow-wrap: anywhere;
 }
 
 .companion-panel-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  margin-top: 10px
+  margin-top: 10px;
 }
 
 .companion-panel-actions .btn {
   min-height: 34px;
   justify-content: center;
   font-size: var(--fs-xs);
-  padding: 7px 9px
+  padding: 7px 9px;
 }
 
 .companion-settings {
   display: grid;
   gap: 9px;
-  padding: 10px 0 0
+  padding: 10px 0 0;
 }
 
 .companion-settings label {
   display: grid;
   gap: 4px;
   font-size: var(--fs-xs);
-  color: var(--muted)
+  color: var(--muted);
 }
 
 .companion-settings input,
 .companion-settings select {
   min-height: 34px;
   padding: 5px 8px;
-  font-size: var(--fs-sm)
+  font-size: var(--fs-sm);
 }
 
 .companion-panel-foot {
@@ -412,7 +412,7 @@
   gap: 6px;
   border-top: 1px solid var(--line);
   margin-top: 11px;
-  padding-top: 9px
+  padding-top: 9px;
 }
 
 .companion-panel-foot .linkish {
@@ -421,7 +421,7 @@
   gap: 4px;
   padding: 3px 4px;
   font-size: var(--fs-xs);
-  min-height: 28px
+  min-height: 28px;
 }
 
 .companion-restore {
@@ -450,113 +450,108 @@
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
-  border: 0
+  border: 0;
 }
 
 @keyframes hc-breathe {
-
   0%,
   100% {
-    transform: translateY(0) scale(1)
+    transform: translateY(0) scale(1);
   }
 
   50% {
-    transform: translateY(-1px) scale(1.012)
+    transform: translateY(-1px) scale(1.012);
   }
 }
 
 @keyframes hc-head-idle {
-
   0%,
   42%,
   46%,
   100% {
-    transform: rotate(0)
+    transform: rotate(0);
   }
 
   44% {
-    transform: rotate(2deg)
+    transform: rotate(2deg);
   }
 }
 
 @keyframes hc-think {
   from {
-    transform: rotate(-2deg)
+    transform: rotate(-2deg);
   }
 
   to {
-    transform: rotate(2deg)
+    transform: rotate(2deg);
   }
 }
 
 @keyframes hc-raise {
   from {
-    transform: rotate(-2deg)
+    transform: rotate(-2deg);
   }
 
   to {
-    transform: rotate(5deg)
+    transform: rotate(5deg);
   }
 }
 
 @keyframes hc-celebrate {
-
   0%,
   100% {
-    transform: translateY(0) rotate(0)
+    transform: translateY(0) rotate(0);
   }
 
   50% {
-    transform: translateY(-5px) rotate(2deg)
+    transform: translateY(-5px) rotate(2deg);
   }
 }
 
 @keyframes hc-blink {
-
   0%,
   5%,
   100% {
-    transform: scaleY(1)
+    transform: scaleY(1);
   }
 
   2.5% {
-    transform: scaleY(.08)
+    transform: scaleY(0.08);
   }
 }
 
 @keyframes hc-type {
   from {
-    transform: translateY(0)
+    transform: translateY(0);
   }
 
   to {
-    transform: translateY(1px)
+    transform: translateY(1px);
   }
 }
 
 @keyframes hc-sparkle {
-
   0%,
   100% {
-    transform: scale(.96);
-    opacity: .65
+    transform: scale(0.96);
+    opacity: 0.65;
   }
 
   50% {
     transform: scale(1.08);
-    opacity: 1
+    opacity: 1;
   }
 }
 
 @keyframes companion-in {
   from {
     opacity: 0;
-    transform: translateY(7px) scale(.985)
+    transform: translateY(7px) scale(0.985);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scale(1)
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -567,46 +562,45 @@
 
   .companion-stage {
     width: 62px;
-    height: 70px
+    height: 70px;
   }
 
   .companion-avatar {
     width: 62px;
-    height: 70px
+    height: 70px;
   }
 
   .companion-art {
     width: 62px;
-    height: 70px
+    height: 70px;
   }
 
   .companion-collapse {
     right: -3px;
-    bottom: -1px
+    bottom: -1px;
   }
 
   .companion-panel {
     padding: 11px;
-    max-height: min(68vh, 480px)
+    max-height: min(68vh, 480px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .hc-character,
   .hc-head-group,
   .hc-eyes,
   .hc-confetti,
   .hc-body,
   .hc-raised-hand {
-    animation: none !important
+    animation: none !important;
   }
 
   .companion-panel {
-    animation: none
+    animation: none;
   }
 
   .companion-art * {
-    transition: none !important
+    transition: none !important;
   }
 }

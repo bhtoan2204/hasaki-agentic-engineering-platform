@@ -97,9 +97,7 @@ export async function evaluationAnalytics(actor: Actor, url: URL) {
     await audit(actor.id, "support.list", "agent-evaluation", "*", {
       filters: f,
     });
-  const data = await cache.get(JSON.stringify(f), () =>
-    loadEvaluationAnalytics(f),
-  );
+  const data = await cache.get(JSON.stringify(f), () => loadEvaluationAnalytics(f));
   return {
     ...data,
     filters: f,
@@ -114,35 +112,34 @@ export async function evaluationAnalytics(actor: Actor, url: URL) {
 }
 export async function loadEvaluationAnalytics(f: EvaluationFilters) {
   const args = params(f);
-  const [comparisons, context, difficulty, failures, details, production] =
-    await Promise.all([
-      q(
-        pool,
-        `${base} SELECT provider_path,model_path,category,context_variant,constraints_hash,evidence_kind,configuration->'provider_sequence' AS agent_plan,observed_models AS observed_model_group,${aggregates} FROM samples GROUP BY 1,2,3,4,5,6,7,8 ORDER BY category,provider_path LIMIT 500`,
-        args,
-      ),
-      q(
-        pool,
-        `${base} SELECT provider_path,model_path,category,constraints_hash,context_variant,evidence_kind,configuration->'provider_sequence' AS agent_plan,observed_models AS observed_model_group,${aggregates} FROM samples GROUP BY 1,2,3,4,5,6,7,8 ORDER BY 1,5 LIMIT 500`,
-        args,
-      ),
-      q(
-        pool,
-        `${base} SELECT difficulty,evidence_kind,${aggregates} FROM samples GROUP BY 1,2 ORDER BY 1`,
-        args,
-      ),
-      q(
-        pool,
-        `${base} SELECT COALESCE(failure_class,'unreported') AS category,evidence_kind,count(*)::int AS samples FROM samples WHERE result_status IN ('FAIL','BLOCKED') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 30`,
-        args,
-      ),
-      q(
-        pool,
-        `${base} SELECT case_run_id,evaluation_id,workflow_run_id,task_id,category,difficulty,repetition,provider_path,model_path,context_variant,evidence_kind,result_status,correct,hard_gates_passed,quality_score,artifact_id,base_commit,count(*) OVER()::int AS total_rows FROM samples ORDER BY evaluation_id DESC,case_run_id LIMIT $17 OFFSET $18`,
-        [...args, f.pageSize, (f.page - 1) * f.pageSize],
-      ),
-      observational(f),
-    ]);
+  const [comparisons, context, difficulty, failures, details, production] = await Promise.all([
+    q(
+      pool,
+      `${base} SELECT provider_path,model_path,category,context_variant,constraints_hash,evidence_kind,configuration->'provider_sequence' AS agent_plan,observed_models AS observed_model_group,${aggregates} FROM samples GROUP BY 1,2,3,4,5,6,7,8 ORDER BY category,provider_path LIMIT 500`,
+      args,
+    ),
+    q(
+      pool,
+      `${base} SELECT provider_path,model_path,category,constraints_hash,context_variant,evidence_kind,configuration->'provider_sequence' AS agent_plan,observed_models AS observed_model_group,${aggregates} FROM samples GROUP BY 1,2,3,4,5,6,7,8 ORDER BY 1,5 LIMIT 500`,
+      args,
+    ),
+    q(
+      pool,
+      `${base} SELECT difficulty,evidence_kind,${aggregates} FROM samples GROUP BY 1,2 ORDER BY 1`,
+      args,
+    ),
+    q(
+      pool,
+      `${base} SELECT COALESCE(failure_class,'unreported') AS category,evidence_kind,count(*)::int AS samples FROM samples WHERE result_status IN ('FAIL','BLOCKED') GROUP BY 1,2 ORDER BY 3 DESC LIMIT 30`,
+      args,
+    ),
+    q(
+      pool,
+      `${base} SELECT case_run_id,evaluation_id,workflow_run_id,task_id,category,difficulty,repetition,provider_path,model_path,context_variant,evidence_kind,result_status,correct,hard_gates_passed,quality_score,artifact_id,base_commit,count(*) OVER()::int AS total_rows FROM samples ORDER BY evaluation_id DESC,case_run_id LIMIT $17 OFFSET $18`,
+      [...args, f.pageSize, (f.page - 1) * f.pageSize],
+    ),
+    observational(f),
+  ]);
   return {
     comparisons,
     context,

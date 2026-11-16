@@ -6,7 +6,10 @@
  */
 import { pool, q, type Db } from "../db/pool.ts";
 
-export async function providerPerformance(o: { days?: number; ownerId?: number | null; minSamples?: number } = {}, db: Db = pool) {
+export async function providerPerformance(
+  o: { days?: number; ownerId?: number | null; minSamples?: number } = {},
+  db: Db = pool,
+) {
   const days = Math.min(365, Math.max(1, Math.round(o.days ?? 30)));
   const minSamples = Math.max(10, o.minSamples ?? 20);
   const rows = await q<any>(
@@ -50,7 +53,9 @@ export async function providerPerformance(o: { days?: number; ownerId?: number |
     verification_pass_rate: pct(r.verified_pass, r.verified),
     review_pass_rate: pct(r.review_pass, r.reviews),
     unknown_cost_rate: pct(r.cost_unknown, r.attempts),
-    cost_per_successful_completion: r.completed_with_cost ? Math.round((Number(r.completed_cost) / r.completed_with_cost) * 1e4) / 1e4 : null,
+    cost_per_successful_completion: r.completed_with_cost
+      ? Math.round((Number(r.completed_cost) / r.completed_with_cost) * 1e4) / 1e4
+      : null,
     p50_ms: r.p50_ms != null ? Math.round(Number(r.p50_ms)) : null,
     p95_ms: r.p95_ms != null ? Math.round(Number(r.p95_ms)) : null,
   }));
@@ -58,9 +63,30 @@ export async function providerPerformance(o: { days?: number; ownerId?: number |
   const leaders = [...new Set(groups.map((g) => g.step_type))].map((type) => {
     const g = groups.filter((x) => x.step_type === type);
     const eligible = g.filter((x) => x.sample_ok && x.success_rate != null);
-    if (eligible.length < 2 || eligible.length !== g.length) return { step_type: type, leader: null, reason: `needs ≥${minSamples} attempts for every provider of this step type` };
-    const best = [...eligible].sort((a, b) => (b.success_rate! - a.success_rate!) || ((a.cost_per_successful_completion ?? Infinity) - (b.cost_per_successful_completion ?? Infinity)))[0];
-    return { step_type: type, leader: best.provider, reason: "highest attempt success rate, then lower cost per success (observational: tasks differ)" };
+    if (eligible.length < 2 || eligible.length !== g.length)
+      return {
+        step_type: type,
+        leader: null,
+        reason: `needs ≥${minSamples} attempts for every provider of this step type`,
+      };
+    const best = [...eligible].sort(
+      (a, b) =>
+        b.success_rate! - a.success_rate! ||
+        (a.cost_per_successful_completion ?? Infinity) -
+          (b.cost_per_successful_completion ?? Infinity),
+    )[0];
+    return {
+      step_type: type,
+      leader: best.provider,
+      reason:
+        "highest attempt success rate, then lower cost per success (observational: tasks differ)",
+    };
   });
-  return { window_days: days, min_samples: minSamples, groups, leaders, note: "Attempt-level, observational. Route only through controlled recommendations; cost_per_successful_completion excludes unknown-cost attempts (see unknown_cost_rate)." };
+  return {
+    window_days: days,
+    min_samples: minSamples,
+    groups,
+    leaders,
+    note: "Attempt-level, observational. Route only through controlled recommendations; cost_per_successful_completion excludes unknown-cost attempts (see unknown_cost_rate).",
+  };
 }

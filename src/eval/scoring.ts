@@ -73,9 +73,7 @@ export function scoreEvidence(e: Evidence, scoring = defaultScoring) {
     const value = e[key];
     if (
       value !== null &&
-      (!Number.isFinite(value) ||
-        value < 0 ||
-        (key.includes("tokens") && !Number.isInteger(value)))
+      (!Number.isFinite(value) || value < 0 || (key.includes("tokens") && !Number.isInteger(value)))
     )
       throw new Error(`Invalid observed metric: ${key}`);
   }
@@ -98,18 +96,12 @@ export function scoreEvidence(e: Evidence, scoring = defaultScoring) {
     regression: e.regression_failed === 0 ? 1 : 0,
     requirements: e.expected_total ? e.expected_passed / e.expected_total : 0,
     code_quality: e.syntax && e.security && e.authorized_changes ? 1 : 0,
-    reliability:
-      (!e.clarification_required || e.clarification_passed) && !e.failure_class
-        ? 1
-        : 0,
+    reliability: (!e.clarification_required || e.clarification_passed) && !e.failure_class ? 1 : 0,
     efficiency: e.duration_ms <= e.runtime_budget_ms ? 1 : 0,
   };
   const score =
     Math.round(
-      dimensions.reduce(
-        (sum, key) => sum + values[key] * scoring.weights[key] * 100,
-        0,
-      ) * 100,
+      dimensions.reduce((sum, key) => sum + values[key] * scoring.weights[key] * 100, 0) * 100,
     ) / 100;
   const gates = Object.values(hard_gates).every(Boolean);
   return {
@@ -130,19 +122,12 @@ export function scoreEvidence(e: Evidence, scoring = defaultScoring) {
       ]),
     ),
     verdict:
-      e.failure_class === "infrastructure" || !e.environment
-        ? "BLOCKED"
-        : gates
-          ? "PASS"
-          : "FAIL",
+      e.failure_class === "infrastructure" || !e.environment ? "BLOCKED" : gates ? "PASS" : "FAIL",
   };
 }
-const mean = (xs: number[]) =>
-  xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const quantile = (xs: number[], p: number) =>
-  xs.length
-    ? [...xs].sort((a, b) => a - b)[Math.max(0, Math.ceil(xs.length * p) - 1)]
-    : null;
+  xs.length ? [...xs].sort((a, b) => a - b)[Math.max(0, Math.ceil(xs.length * p) - 1)] : null;
 export function wilson(success: number, n: number) {
   if (!n) return null;
   const z = 1.96,
@@ -173,31 +158,19 @@ export interface ResultLike {
 }
 const sd = (xs: number[]) =>
   xs.length > 1
-    ? Math.sqrt(
-      xs.reduce((s, x) => s + (x - (mean(xs) ?? 0)) ** 2, 0) /
-      (xs.length - 1),
-    )
+    ? Math.sqrt(xs.reduce((s, x) => s + (x - (mean(xs) ?? 0)) ** 2, 0) / (xs.length - 1))
     : null;
 export function aggregateResults(rows: ResultLike[], expected: number) {
-  const completed = rows.filter(
-    (r) => r.correct !== null && r.status !== "BLOCKED",
-  );
+  const completed = rows.filter((r) => r.correct !== null && r.status !== "BLOCKED");
   const successes = completed.filter((r) => r.correct === true).length;
-  const evidence = completed
-    .map((r) => r.data?.evidence)
-    .filter(Boolean) as Evidence[];
+  const evidence = completed.map((r) => r.data?.evidence).filter(Boolean) as Evidence[];
   const nums = (key: keyof Evidence) =>
     evidence
       .map((e) => e[key])
-      .filter(
-        (x): x is number =>
-          typeof x === "number" && Number.isFinite(x) && x >= 0,
-      );
+      .filter((x): x is number => typeof x === "number" && Number.isFinite(x) && x >= 0);
   const scores = completed
     .map((r) => Number(r.quality_score))
-    .filter(
-      (v, i) => completed[i].quality_score !== null && Number.isFinite(v),
-    );
+    .filter((v, i) => completed[i].quality_score !== null && Number.isFinite(v));
   const costs = nums("cost_usd");
   return {
     expected,
@@ -213,9 +186,7 @@ export function aggregateResults(rows: ResultLike[], expected: number) {
     score_sample_sd: sd(scores),
     duration_sample_sd_ms: sd(nums("duration_ms")),
     average_context_chars: mean(
-      evidence
-        .map((e) => Number(e.details.context_size))
-        .filter(Number.isFinite),
+      evidence.map((e) => Number(e.details.context_size)).filter(Number.isFinite),
     ),
     first_correct_file_median_ms: quantile(
       evidence
@@ -246,11 +217,9 @@ export function aggregateResults(rows: ResultLike[], expected: number) {
       ? completed.filter((r) => r.regression === true).length / completed.length
       : null,
     repository_accuracy:
-      nums("duration_ms").length &&
-        evidence.some((e) => typeof e.repository_correct === "boolean")
+      nums("duration_ms").length && evidence.some((e) => typeof e.repository_correct === "boolean")
         ? evidence.filter((e) => e.repository_correct === true).length /
-        evidence.filter((e) => typeof e.repository_correct === "boolean")
-          .length
+          evidence.filter((e) => typeof e.repository_correct === "boolean").length
         : null,
     blocked: rows.filter((r) => r.status === "BLOCKED").length,
   };
@@ -271,9 +240,7 @@ export function compareResults(
 ) {
   const a = aggregateResults(baseline, expected),
     b = aggregateResults(candidate, expected);
-  const byKey = new Map(
-    baseline.map((r) => [`${r.scenario}:${r.data?.repetition}`, r]),
-  );
+  const byKey = new Map(baseline.map((r) => [`${r.scenario}:${r.data?.repetition}`, r]));
   const pairs = candidate.map((c) => ({
     task: c.scenario,
     repetition: c.data?.repetition,
@@ -320,9 +287,7 @@ export function compareResults(
   )
     warnings.push("Cost increase exceeds configured ratio");
   if (a.cost_known < a.graded || b.cost_known < b.graded)
-    warnings.push(
-      "Cost comparison is unknown for runs without actual provider usage",
-    );
+    warnings.push("Cost comparison is unknown for runs without actual provider usage");
   const reps = new Map<string, Set<number>>();
   for (const p of pairs) {
     if (p.baseline && p.candidate.correct !== null) {
@@ -339,13 +304,7 @@ export function compareResults(
     pairs.length < policy.minimum_pairs;
   const blocked = a.blocked > 0 || b.blocked > 0;
   return {
-    verdict: fail
-      ? "FAIL"
-      : blocked
-        ? "BLOCKED"
-        : incomplete
-          ? "INCONCLUSIVE"
-          : "PASS",
+    verdict: fail ? "FAIL" : blocked ? "BLOCKED" : incomplete ? "INCONCLUSIVE" : "PASS",
     baseline: a,
     candidate: b,
     pairs,

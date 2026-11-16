@@ -1,4 +1,5 @@
 import { execution } from "./auth/execution.ts";
+import { isOwned } from "./platform/operatorState.ts";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -31,6 +32,7 @@ export interface CodeIntelligenceConfig {
 }
 
 export interface Config {
+  knowledge: { ponytail: { enabled: boolean; mapChars: number } };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
   evaluation: {
@@ -40,6 +42,10 @@ export interface Config {
     maxCaseSeconds: number;
     maxTokens: number;
     maxCostUsd: number;
+    maxSuiteCostUsd: number;
+    liveEnabled: boolean;
+    liveUsageProviders: string[];
+    estimatedUsdPerMillion: number;
     sandboxImage: string;
     maxLiveAgents: number;
   };
@@ -71,11 +77,44 @@ export interface Config {
   bitbucket: {
     /** Explicit process service account may be used when no personal credential exists. */
     allowSharedCredentials?: boolean;
+    /**
+     * How a user's own Bitbucket permission limits their repository access (src/repos/access.ts):
+     *  - "strict" (default): read must be verified with the user's personal credentials; write and pull requests
+     *    must be verified too. Unknown (no personal token, API unavailable) is never allowed.
+     *  - "personal": read must be verified; write/PR that Bitbucket does not report (its permission API is
+     *    workspace-admin only) are allowed because pushes and PRs then run with that same personal token, so
+     *    Bitbucket itself enforces them. A shared service account never qualifies.
+     *  - "trusted": an admin vouches that platform grants mirror Bitbucket for this team (e.g. everyone works through
+     *    the shared service account). Bitbucket is not consulted; effective access = platform grant ∩ repository.
+     */
+    accessVerification?: "strict" | "personal" | "trusted";
+    /** How long a Bitbucket permission check is reused before it is checked again (seconds, default 900). */
+    permissionTtlSeconds?: number;
     workspace: string;
     /** Atlassian account email (API token) or Bitbucket username (app password). Empty = no API, return a "create PR" link instead. */
     user: string;
     token: string;
     reviewers: string[]; // Bitbucket account UUIDs, e.g. "{xxxxxxxx-...}"
+  };
+  /**
+   * GitHub operations for repositories registered with a github.com URL. Personal tokens live in user secrets.
+   * The process token is used for clone/push/PR only when allowSharedCredentials is true, and never as a permission grant.
+   */
+  github: {
+    allowSharedCredentials?: boolean;
+    /** Same meanings as bitbucket.accessVerification, checked with the user's GitHub token. */
+    accessVerification?: "strict" | "personal" | "trusted";
+    token: string;
+  };
+  /**
+   * This installation's own source repository. Empty repositoryUrl is detected from the live checkout's origin.
+   * trustedOperatorIsolation allows Claude/Cursor coding and unsandboxed test commands on a single-operator machine.
+   */
+  platform: {
+    repositoryUrl: string;
+    trustedOperatorIsolation: boolean;
+    /** Local PostgreSQL URL used only to CREATE DATABASE for self-development tests. Empty derives database `postgres`. */
+    testDatabaseAdminUrl: string;
   };
   /** Optional: POST {text} here on question / PR / failure (Google Chat, Slack incoming webhook...). */
   notifyWebhook: string;
@@ -105,7 +144,13 @@ export interface Config {
    * override these. Checked after every attempt: `warnPct` logs a warning, 100% pauses the run when action = "pause".
    * Env: COST_BUDGET_RUN_USD / COST_BUDGET_WORK_ITEM_USD / COST_BUDGET_WARN_PCT / COST_BUDGET_ACTION.
    */
-  costBudget: { runUsd: number | null; workItemUsd: number | null; warnPct: number; action: "pause" | "warn"; unknownEstimate: "warn" | "pause" };
+  costBudget: {
+    runUsd: number | null;
+    workItemUsd: number | null;
+    warnPct: number;
+    action: "pause" | "warn";
+    unknownEstimate: "warn" | "pause";
+  };
   /**
    * Routing guard rails. `sensitiveProviders`: providers with an approved security policy for HIGH_RISK work
    * (ROUTING_SENSITIVE_PROVIDERS, comma-separated; default: the platform's default provider only).
@@ -152,6 +197,12 @@ export interface Config {
     contextTokens?: number;
     contextToolTimeoutMs?: number;
     /**
+     * After the agent submitted its result and its turn ended, how long the platform waits for the CLI to exit before
+     * stopping the session. Background shell tasks keep the CLI alive (it re-invokes the agent when they finish), which
+     * otherwise holds the step RUNNING and a worker slot for as long as that task runs.
+     */
+    postSubmitGraceSeconds?: number;
+    /**
      * Claude Code settings layers loaded by agent steps. Default [] so skills come from ONE place, the platform
      * knowledge registry (imported from repos and ~/.claude/skills), instead of also being auto-loaded by Claude Code.
      */
@@ -163,22 +214,35 @@ export interface Config {
     /** Token budget for upstream step outputs in the user prompt; larger outputs are summarized. */
     upstreamTokens: number;
     /** Default agent provider. */
-    defaultProvider?: "claude" | "codex" | "cursor" | "antigravity";
+    defaultProvider?: "claude" | "codex" | "cursor" | "antigravity" | "copilot";
+    /** Settings page. A false entry is off; omitted entries stay on. */
+    enabledProviders?: Partial<
+      Record<"claude" | "cursor" | "codex" | "antigravity" | "copilot", boolean>
+    >;
     cursorBin?: string;
     claudeBin?: string;
     /**
      * OpenAI Codex CLI (provider "codex"). Runs as the Codex login of the WORKER machine (`codex login`, e.g. a ChatGPT
      * account); the platform never reads auth.json and never switches to an API key on its own. Claude model ids are
-     * never sent to it: Codex has its own model / effort / routing. Env overrides: CODEX_BIN, CODEX_TIMEOUT_MS,
-     * CODEX_MODEL, CODEX_REASONING_EFFORT.
+     * never sent to it: Codex has its own model / effort / routing. The Settings page wins for model and effort
+     * once saved; otherwise CODEX_MODEL / CODEX_REASONING_EFFORT, then config.json. CODEX_BIN and
+     * CODEX_TIMEOUT_MS stay process-local.
      */
     codex?: CodexConfig;
     /**
      * Google Antigravity CLI (provider "antigravity"). Runs as the authenticated account of the WORKER machine.
-     * Env overrides: AGY_BIN / ANTIGRAVITY_BIN, AGY_TIMEOUT_MS / ANTIGRAVITY_TIMEOUT_MS,
-     * AGY_MODEL / ANTIGRAVITY_MODEL, AGY_EFFORT / ANTIGRAVITY_EFFORT.
+     * The Settings page wins for model, effort, sandbox and concurrency once saved; otherwise the
+     * AGY_* / ANTIGRAVITY_* environment, then config.json. The binary path and turn timeout stay
+     * process-local.
      */
     antigravity?: AntigravityConfig;
+    /**
+     * GitHub Copilot CLI (provider "copilot"). Runs as the authenticated account of the WORKER machine.
+     * The Settings page wins for model, effort, sandbox and concurrency once saved; otherwise
+     * COPILOT_MODEL / COPILOT_EFFORT / COPILOT_SANDBOX / COPILOT_MAX_CONCURRENT, then config.json.
+     * The binary path and turn timeout stay process-local.
+     */
+    copilot?: CopilotConfig;
     /**
      * Optional model routing, e.g. { "FAST": { "agent": "<model>" }, "DEEP": { "verifier": "<model>" }, "*": { "coding_agent": "<model>" } }.
      * Keys: profile (or "*") → step type, or "verifier" for independent verification steps. Resolution order:
@@ -212,11 +276,28 @@ export interface Config {
   };
   splunk: {
     baseUrl: string;
+    /**
+     * Optional splunkd management endpoint (e.g. https://splunk.example:8089) for token authentication. Empty = token
+     * searches go through Splunk Web's proxy (`<baseUrl>/<locale>/splunkd/__raw`), which accepts `Authorization: Bearer`.
+     */
+    managementUrl: string;
     locale: string;
     allowedIndexes: string[];
     maxMinutes: number;
     maxResults: number;
     timeoutSeconds: number;
+    /** Label shown to users and recorded with every search; investigations default to it. */
+    environment: string;
+    /** Timezone used to read and display investigation times (Splunk `_time` keeps its own offset). */
+    timezone: string;
+    /** Indexes an investigation searches when the request names none (must be within allowedIndexes when that is set). */
+    defaultIndexes: string[];
+    /** Concurrent Splunk searches per platform process. */
+    concurrency: number;
+    /** Searches one investigation run may execute against Splunk (cache hits and manual results do not count). */
+    queryBudget: number;
+    /** Let members use the administrator-managed shared service token when they have no personal session. */
+    allowSharedToken: boolean;
   };
   /** Daily production error scan over Splunk (page "Lỗi production"). */
   prodErrors: {
@@ -239,6 +320,7 @@ export interface Config {
 }
 
 const defaults: Config = {
+  knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   codeIntelligence: {
     enabled: false,
     includeGenerated: false,
@@ -266,9 +348,13 @@ const defaults: Config = {
     enabled: false,
     maxCases: 20,
     maxRepetitions: 3,
-    maxCaseSeconds: 30,
-    maxTokens: 20000,
-    maxCostUsd: 2,
+    maxCaseSeconds: 1800,
+    maxTokens: 3000000,
+    maxCostUsd: 10,
+    maxSuiteCostUsd: 300,
+    liveEnabled: false,
+    liveUsageProviders: ["claude", "antigravity", "copilot"],
+    estimatedUsdPerMillion: 30,
     sandboxImage: "docker.io/library/postgres:17-alpine",
     maxLiveAgents: 1,
   },
@@ -293,6 +379,8 @@ const defaults: Config = {
   relatedProjects: {},
   fileBaseUrl: "",
   bitbucket: { workspace: "hasaki-tech", user: "", token: "", reviewers: [] },
+  github: { allowSharedCredentials: false, accessVerification: "strict", token: "" },
+  platform: { repositoryUrl: "", trustedOperatorIsolation: false, testDatabaseAdminUrl: "" },
   notifyWebhook: "",
   publicUrl: "",
   model: "",
@@ -313,7 +401,13 @@ const defaults: Config = {
     autoWorkflow: "",
   },
   databaseUrl: "postgres://platform:platform@localhost:55432/platform",
-  costBudget: { runUsd: null, workItemUsd: null, warnPct: 0.8, action: "pause", unknownEstimate: "warn" },
+  costBudget: {
+    runUsd: null,
+    workItemUsd: null,
+    warnPct: 0.8,
+    action: "pause",
+    unknownEstimate: "warn",
+  },
   routing: { sensitiveProviders: [] },
   database: {
     poolMax: 10,
@@ -340,11 +434,18 @@ const defaults: Config = {
   },
   splunk: {
     baseUrl: "https://siem.hasaki.work",
+    managementUrl: "",
     locale: "en-US",
     allowedIndexes: [],
     maxMinutes: 7 * 24 * 60,
     maxResults: 500,
     timeoutSeconds: 60,
+    environment: "production",
+    timezone: "Asia/Ho_Chi_Minh",
+    defaultIndexes: ["k8s_prod"],
+    concurrency: 3,
+    queryBudget: 25,
+    allowSharedToken: false,
   },
   telegram: {
     botToken: "",
@@ -373,6 +474,7 @@ const defaults: Config = {
   agent: {
     contextTokens: 24000,
     contextToolTimeoutMs: 10000,
+    postSubmitGraceSeconds: 30,
     settingSources: [],
     inlineKnowledgeTokens: 8000,
     knowledgeIndexSize: 12,
@@ -384,12 +486,13 @@ export let instanceIdentityExplicit = false;
 
 function load(): Config {
   const file = resolve(process.env.PLATFORM_CONFIG ?? "config.json");
-  const fromFile = existsSync(file)
-    ? JSON.parse(readFileSync(file, "utf8"))
-    : {};
+  const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   const cfg: Config = {
     ...defaults,
     ...fromFile,
+    knowledge: {
+      ponytail: { ...defaults.knowledge.ponytail, ...(fromFile.knowledge?.ponytail ?? {}) },
+    },
     evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
     codeIntelligence: {
       ...defaults.codeIntelligence,
@@ -400,6 +503,8 @@ function load(): Config {
       },
     },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
+    github: { ...defaults.github, ...(fromFile.github ?? {}) },
+    platform: { ...defaults.platform, ...(fromFile.platform ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
     instance: { ...defaults.instance, ...(fromFile.instance ?? {}) },
@@ -422,9 +527,18 @@ function load(): Config {
   ] as const)
     cfg.evaluation[k] = positiveInt(`evaluation.${k}`, cfg.evaluation[k]);
   if (
-    !Number.isFinite(cfg.evaluation.maxCostUsd) ||
-    cfg.evaluation.maxCostUsd < 0
+    !Number.isFinite(cfg.evaluation.estimatedUsdPerMillion) ||
+    cfg.evaluation.estimatedUsdPerMillion <= 0 ||
+    cfg.evaluation.estimatedUsdPerMillion > 1000
   )
+    throw new Error("evaluation.estimatedUsdPerMillion must be positive and at most 1000");
+  if (
+    !Number.isFinite(cfg.evaluation.maxSuiteCostUsd) ||
+    cfg.evaluation.maxSuiteCostUsd <= 0 ||
+    cfg.evaluation.maxSuiteCostUsd > 1000
+  )
+    throw new Error("evaluation.maxSuiteCostUsd must be positive and at most 1000");
+  if (!Number.isFinite(cfg.evaluation.maxCostUsd) || cfg.evaluation.maxCostUsd < 0)
     throw new Error("evaluation.maxCostUsd must be nonnegative");
   for (const k of [
     "maxFileBytes",
@@ -436,13 +550,9 @@ function load(): Config {
     "contextTokens",
     "retentionDays",
   ] as const)
-    cfg.codeIntelligence[k] = positiveInt(
-      `codeIntelligence.${k}`,
-      cfg.codeIntelligence[k],
-    );
+    cfg.codeIntelligence[k] = positiveInt(`codeIntelligence.${k}`, cfg.codeIntelligence[k]);
   for (const v of Object.values(cfg.codeIntelligence.weights))
-    if (!Number.isFinite(v) || v < 0)
-      throw new Error("Invalid code intelligence weight");
+    if (!Number.isFinite(v) || v < 0) throw new Error("Invalid code intelligence weight");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
@@ -468,9 +578,7 @@ function load(): Config {
   cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
   cfg.dataDir = resolve(cfg.dataDir);
   cfg.reposRoot = resolve(cfg.reposRoot);
-  instanceIdentityExplicit = !!(
-    process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId
-  );
+  instanceIdentityExplicit = !!(process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
   cfg.instanceId = persistentInstanceId(
     cfg.dataDir,
     process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId,
@@ -479,45 +587,25 @@ function load(): Config {
     "instance.heartbeatSeconds",
     cfg.instance.heartbeatSeconds,
   );
-  cfg.instance.offlineSeconds = positiveInt(
-    "instance.offlineSeconds",
-    cfg.instance.offlineSeconds,
-  );
+  cfg.instance.offlineSeconds = positiveInt("instance.offlineSeconds", cfg.instance.offlineSeconds);
   if (cfg.instance.offlineSeconds <= cfg.instance.heartbeatSeconds * 2)
-    throw new Error(
-      "instance.offlineSeconds must exceed twice heartbeatSeconds",
-    );
-  for (const key of [
-    "workers",
-    "leaseSeconds",
-    "heartbeatSeconds",
-    "pollMs",
-  ] as const)
+    throw new Error("instance.offlineSeconds must exceed twice heartbeatSeconds");
+  for (const key of ["workers", "leaseSeconds", "heartbeatSeconds", "pollMs"] as const)
     cfg.scheduler[key] = positiveInt(`scheduler.${key}`, cfg.scheduler[key]);
   if (cfg.scheduler.heartbeatSeconds >= cfg.scheduler.leaseSeconds)
     throw new Error("scheduler heartbeat must be shorter than lease");
-  if (
-    !Number.isInteger(cfg.scheduler.lightWorkers) ||
-    cfg.scheduler.lightWorkers < 0
-  )
+  if (!Number.isInteger(cfg.scheduler.lightWorkers) || cfg.scheduler.lightWorkers < 0)
     throw new Error("scheduler.lightWorkers must be nonnegative");
   const dbUrl = new URL(process.env.DATABASE_URL ?? cfg.databaseUrl);
   if (!["postgres:", "postgresql:"].includes(dbUrl.protocol))
     throw new Error("databaseUrl must use PostgreSQL");
   cfg.databaseUrl = process.env.DATABASE_URL ?? cfg.databaseUrl;
   cfg.database = {
-    poolMax: positiveInt(
-      "database.poolMax",
-      process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax,
-    ),
-    poolMin: Math.max(
-      0,
-      Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0,
-    ),
+    poolMax: positiveInt("database.poolMax", process.env.DATABASE_POOL_MAX ?? cfg.database.poolMax),
+    poolMin: Math.max(0, Number(process.env.DATABASE_POOL_MIN ?? cfg.database.poolMin) || 0),
     connectionTimeoutMillis: positiveInt(
       "database.connectionTimeoutMillis",
-      process.env.DATABASE_CONNECTION_TIMEOUT_MS ??
-      cfg.database.connectionTimeoutMillis,
+      process.env.DATABASE_CONNECTION_TIMEOUT_MS ?? cfg.database.connectionTimeoutMillis,
     ),
     idleTimeoutMillis: positiveInt(
       "database.idleTimeoutMillis",
@@ -525,20 +613,42 @@ function load(): Config {
     ),
   };
   cfg.database.poolMin = Math.min(cfg.database.poolMin, cfg.database.poolMax);
-  const sensitive = (process.env.ROUTING_SENSITIVE_PROVIDERS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  cfg.routing = { sensitiveProviders: sensitive.length ? sensitive : cfg.routing?.sensitiveProviders?.length ? cfg.routing.sensitiveProviders : [cfg.agent?.defaultProvider ?? "claude"] };
+  const sensitive = (process.env.ROUTING_SENSITIVE_PROVIDERS ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  cfg.routing = {
+    sensitiveProviders: sensitive.length
+      ? sensitive
+      : cfg.routing?.sensitiveProviders?.length
+        ? cfg.routing.sensitiveProviders
+        : [cfg.agent?.defaultProvider ?? "claude"],
+  };
   const usd = (v: unknown) => (v == null || v === "" ? null : Number(v) > 0 ? Number(v) : null);
   const cb = { ...defaults.costBudget, ...(cfg.costBudget ?? {}) };
   cfg.costBudget = {
     runUsd: usd(process.env.COST_BUDGET_RUN_USD ?? cb.runUsd),
     workItemUsd: usd(process.env.COST_BUDGET_WORK_ITEM_USD ?? cb.workItemUsd),
-    warnPct: Math.min(1, Math.max(0.1, Number(process.env.COST_BUDGET_WARN_PCT ?? cb.warnPct) || 0.8)),
+    warnPct: Math.min(
+      1,
+      Math.max(0.1, Number(process.env.COST_BUDGET_WARN_PCT ?? cb.warnPct) || 0.8),
+    ),
     action: (process.env.COST_BUDGET_ACTION ?? cb.action) === "warn" ? "warn" : "pause",
-    unknownEstimate: (process.env.COST_BUDGET_UNKNOWN ?? cb.unknownEstimate) === "pause" ? "pause" : "warn",
+    unknownEstimate:
+      (process.env.COST_BUDGET_UNKNOWN ?? cb.unknownEstimate) === "pause" ? "pause" : "warn",
   };
   // Secrets may come from env so config.json can be committed.
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
   cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;
+  cfg.github.token = process.env.GITHUB_TOKEN ?? cfg.github.token;
+  if (process.env.PLATFORM_REPOSITORY_URL)
+    cfg.platform.repositoryUrl = process.env.PLATFORM_REPOSITORY_URL;
+  if (process.env.PLATFORM_TRUSTED_OPERATOR_ISOLATION === "1")
+    cfg.platform.trustedOperatorIsolation = true;
+  if (process.env.PLATFORM_TRUSTED_OPERATOR_ISOLATION === "0")
+    cfg.platform.trustedOperatorIsolation = false;
+  if (process.env.PLATFORM_TEST_DATABASE_ADMIN_URL)
+    cfg.platform.testDatabaseAdminUrl = process.env.PLATFORM_TEST_DATABASE_ADMIN_URL;
   cfg.notifyWebhook = process.env.NOTIFY_WEBHOOK ?? cfg.notifyWebhook;
   if (process.env.PORT) cfg.port = Number(process.env.PORT);
   if (!cfg.publicUrl) cfg.publicUrl = `http://localhost:${cfg.port}`;
@@ -551,8 +661,7 @@ export function positiveInt(name: string, raw: unknown): number {
   if (typeof raw !== "number" && typeof raw !== "string")
     throw new Error(`${name} must be a positive integer`);
   const n = typeof raw === "number" ? raw : Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1)
-    throw new Error(`${name} must be a positive integer`);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
   return n;
 }
 
@@ -575,29 +684,21 @@ export function codexConfig(): Required<
 > & { models: Record<string, Record<string, string>> } {
   if (execution.getStore()?.evaluation?.fixtureAgent)
     return {
-      bin: join(
-        import.meta.dirname,
-        "..",
-        "test",
-        "fixtures",
-        "fake-codex.mjs",
-      ),
+      bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-codex.mjs"),
       timeoutMs: 15000,
       model: "gpt-test",
       reasoningEffort: "low",
       models: {},
     };
   const c = config.agent.codex ?? {};
-  const timeout = Number(
-    process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000,
-  );
+  const timeout = Number(process.env.CODEX_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
   return {
     bin: process.env.CODEX_BIN || c.bin || "codex",
-    timeoutMs:
-      Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model: process.env.CODEX_MODEL ?? c.model ?? "",
-    reasoningEffort:
-      process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? "",
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model: isOwned("codex.model") ? (c.model ?? "") : (process.env.CODEX_MODEL ?? c.model ?? ""),
+    reasoningEffort: isOwned("codex.reasoningEffort")
+      ? (c.reasoningEffort ?? "")
+      : (process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? ""),
     models: c.models ?? {},
   };
 }
@@ -625,13 +726,7 @@ export interface AntigravityConfig {
 export function antigravityConfig(): Required<
   Pick<
     AntigravityConfig,
-    | "bin"
-    | "timeoutMs"
-    | "model"
-    | "effort"
-    | "maxConcurrent"
-    | "allowSubagents"
-    | "sandbox"
+    "bin" | "timeoutMs" | "model" | "effort" | "maxConcurrent" | "allowSubagents" | "sandbox"
   >
 > & { models: Record<string, Record<string, string>> } {
   if (execution.getStore()?.evaluation?.fixtureAgent)
@@ -648,39 +743,100 @@ export function antigravityConfig(): Required<
   const c = config.agent.antigravity ?? {};
   const timeout = Number(
     process.env.AGY_TIMEOUT_MS ||
-    process.env.ANTIGRAVITY_TIMEOUT_MS ||
-    c.timeoutMs ||
-    45 * 60 * 1000,
+      process.env.ANTIGRAVITY_TIMEOUT_MS ||
+      c.timeoutMs ||
+      45 * 60 * 1000,
   );
-  const maxConcurrent = Number(
-    process.env.AGY_MAX_CONCURRENT ||
-    process.env.ANTIGRAVITY_MAX_CONCURRENT ||
-    c.maxConcurrent ||
-    1,
-  );
+  const maxConcurrent = isOwned("antigravity.maxConcurrent")
+    ? Number(c.maxConcurrent)
+    : Number(
+        process.env.AGY_MAX_CONCURRENT ||
+          process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+          c.maxConcurrent ||
+          1,
+      );
   return {
     bin: process.env.AGY_BIN || process.env.ANTIGRAVITY_BIN || c.bin || "agy",
-    timeoutMs:
-      Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model:
-      process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? "",
-    effort:
-      process.env.AGY_EFFORT ??
-      process.env.ANTIGRAVITY_EFFORT ??
-      c.effort ??
-      "",
-    maxConcurrent:
-      Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model: isOwned("antigravity.model")
+      ? (c.model ?? "")
+      : (process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? ""),
+    effort: isOwned("antigravity.effort")
+      ? (c.effort ?? "")
+      : (process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? c.effort ?? ""),
+    maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
     allowSubagents:
-      (process.env.AGY_ALLOW_SUBAGENTS ??
-        process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
+      (process.env.AGY_ALLOW_SUBAGENTS ?? process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
         ? process.env.AGY_ALLOW_SUBAGENTS === "true" ||
-        process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
+          process.env.ANTIGRAVITY_ALLOW_SUBAGENTS === "true"
         : (c.allowSubagents ?? false),
-    sandbox:
-      (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
-        ? process.env.AGY_SANDBOX === "true" ||
-        process.env.ANTIGRAVITY_SANDBOX === "true"
+    sandbox: isOwned("antigravity.sandbox")
+      ? c.sandbox !== false
+      : (process.env.AGY_SANDBOX ?? process.env.ANTIGRAVITY_SANDBOX)
+        ? process.env.AGY_SANDBOX === "true" || process.env.ANTIGRAVITY_SANDBOX === "true"
+        : (c.sandbox ?? true),
+    models: c.models ?? {},
+  };
+}
+
+
+export interface CopilotConfig {
+  /** Executable. Empty uses `copilot` on PATH. */
+  bin?: string;
+  /** Hard limit for one Copilot turn (process). Default 45 minutes. */
+  timeoutMs?: number;
+  /** Copilot model slug (e.g. gpt-4o, claude-3.5-sonnet). Empty = the copilot default. */
+  model?: string;
+  /** Reasoning effort, e.g. low | medium | high | xhigh. Empty = model default. */
+  effort?: string;
+  /** Max concurrent Copilot turns on this worker (default 1). */
+  maxConcurrent?: number;
+  /** Allow subagents (default false). */
+  allowSubagents?: boolean;
+  /** Run in sandbox with restrictions (default true). */
+  sandbox?: boolean;
+  /** Same shape as agent.models (profile or "*" → step type or "verifier"), with Copilot model slugs only. */
+  models?: Record<string, Record<string, string>>;
+}
+
+/** Copilot settings with env overrides applied. */
+export function copilotConfig(): Required<
+  Pick<
+    CopilotConfig,
+    "bin" | "timeoutMs" | "model" | "effort" | "maxConcurrent" | "allowSubagents" | "sandbox"
+  >
+> & { models: Record<string, Record<string, string>> } {
+  if (execution.getStore()?.evaluation?.fixtureAgent)
+    return {
+      bin: join(import.meta.dirname, "..", "test", "fixtures", "fake-copilot.mjs"),
+      timeoutMs: 15000,
+      model: "gpt-test",
+      effort: "medium",
+      maxConcurrent: 1,
+      allowSubagents: false,
+      sandbox: true,
+      models: {},
+    };
+  const c = config.agent.copilot ?? {};
+  const timeout = Number(process.env.COPILOT_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
+  const maxConcurrent = isOwned("copilot.maxConcurrent")
+    ? Number(c.maxConcurrent)
+    : Number(process.env.COPILOT_MAX_CONCURRENT || c.maxConcurrent || 1);
+  return {
+    bin: process.env.COPILOT_BIN || c.bin || "copilot",
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
+    model: isOwned("copilot.model") ? (c.model ?? "") : (process.env.COPILOT_MODEL ?? c.model ?? ""),
+    effort: isOwned("copilot.effort")
+      ? (c.effort ?? "")
+      : (process.env.COPILOT_EFFORT ?? c.effort ?? ""),
+    maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
+    allowSubagents: process.env.COPILOT_ALLOW_SUBAGENTS
+      ? process.env.COPILOT_ALLOW_SUBAGENTS === "true"
+      : (c.allowSubagents ?? false),
+    sandbox: isOwned("copilot.sandbox")
+      ? c.sandbox !== false
+      : process.env.COPILOT_SANDBOX
+        ? process.env.COPILOT_SANDBOX === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},
   };
@@ -690,8 +846,5 @@ export const config = load();
 
 /** Evaluation overrides are per async execution, never shared mutable flags. */
 export function codeIntelligenceEnabled() {
-  return (
-    execution.getStore()?.evaluation?.codeIntelligence ??
-    config.codeIntelligence.enabled
-  );
+  return execution.getStore()?.evaluation?.codeIntelligence ?? config.codeIntelligence.enabled;
 }

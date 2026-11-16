@@ -51,9 +51,7 @@ export async function publish(
 ) {
   return withTx(async (c) => {
     // Serializes same-repository publication only, without holding a lock while parsing.
-    await q(c, "SELECT id FROM repositories WHERE id=$1 FOR UPDATE", [
-      input.repository_id,
-    ]);
+    await q(c, "SELECT id FROM repositories WHERE id=$1 FOR UPDATE", [input.repository_id]);
     if (
       fence &&
       !(await one(
@@ -64,11 +62,9 @@ export async function publish(
     )
       throw new Error("Index lease lost");
     if (fence) {
-      await q(
-        c,
-        "SELECT instance_id FROM platform_instances WHERE instance_id=$1 FOR SHARE",
-        [config.instanceId],
-      );
+      await q(c, "SELECT instance_id FROM platform_instances WHERE instance_id=$1 FOR SHARE", [
+        config.instanceId,
+      ]);
       if (!(await ownsInstance(c))) throw new Error("Index lease lost");
     }
     await validate?.();
@@ -118,10 +114,7 @@ export async function extractionBatch(
   const unique = new Map(
     inputs.map((i) => {
       const key = `${languageOf(i.path)}:${hash(i.source)}`;
-      return [
-        key,
-        { ...i, language: languageOf(i.path)!, content_hash: hash(i.source) },
-      ];
+      return [key, { ...i, language: languageOf(i.path)!, content_hash: hash(i.source) }];
     }),
   );
   const requests = [...unique.values()];
@@ -176,20 +169,16 @@ export async function extractionBatch(
       ON CONFLICT DO NOTHING RETURNING id,language,content_hash`,
         [
           JSON.stringify(
-            parsed.map(
-              ({ language, parser_version, content_hash, parse_errors }) => ({
-                language,
-                parser_version,
-                content_hash,
-                parse_errors,
-              }),
-            ),
+            parsed.map(({ language, parser_version, content_hash, parse_errors }) => ({
+              language,
+              parser_version,
+              content_hash,
+              parse_errors,
+            })),
           ),
         ],
       );
-      const fresh = new Map(
-        inserted.map((r) => [`${r.language}:${r.content_hash}`, r.id]),
-      );
+      const fresh = new Map(inserted.map((r) => [`${r.language}:${r.content_hash}`, r.id]));
       for (const e of parsed) {
         const id = fresh.get(`${e.language}:${e.content_hash}`);
         if (!id) continue;
@@ -208,8 +197,7 @@ export async function extractionBatch(
             [id, ...Object.values(r)],
           );
       }
-      for (const r of await lookup(c))
-        result.set(`${r.language}:${r.content_hash}`, r.id);
+      for (const r of await lookup(c)) result.set(`${r.language}:${r.content_hash}`, r.id);
     });
   return result;
 }

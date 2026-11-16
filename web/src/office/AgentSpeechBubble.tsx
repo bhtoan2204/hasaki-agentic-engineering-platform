@@ -12,8 +12,7 @@ export function AgentSpeechBubble({
   y: number;
   emphasis?: boolean;
 }) {
-  if (agent.pose === "skipped" || (agent.pose === "idle" && !agent.step))
-    return null;
+  if (agent.pose === "skipped" || (agent.pose === "idle" && !agent.step)) return null;
   return (
     <div
       className={`o-bubble pose-${agent.pose}${emphasis ? " is-em" : ""}`}
@@ -21,9 +20,7 @@ export function AgentSpeechBubble({
       aria-hidden
     >
       <span className="o-bubble-text">{agent.bubble}</span>
-      {agent.activeCount > 1 && (
-        <span className="o-bubble-count">×{agent.activeCount}</span>
-      )}
+      {agent.activeCount > 1 && <span className="o-bubble-count">×{agent.activeCount}</span>}
     </div>
   );
 }

@@ -12,7 +12,7 @@ Use `config.agent.fallback` on an agent/coding-agent step (`config.fallback` is 
     "provider": "claude",
     "fallback": {
       "mode": "manual",
-      "providers": ["claude", "codex", "cursor"],
+      "providers": ["claude", "codex", "cursor", "antigravity"],
       "max_switches": 2,
       "allow_unknown_cost": false,
       "allow_budget_failure": false
@@ -24,7 +24,7 @@ Use `config.agent.fallback` on an agent/coding-agent step (`config.fallback` is 
 - `manual` is the default. Saving a workflow or selecting a target never implicitly enables automatic failover.
 - `disabled` preserves the existing failure/retry policy and rejects handoff requests.
 - `automatic` must be explicit. The existing scheduler polls durable READY handoffs and rechecks one eligible record at a time, including after restart. Failed readiness checks are retried no more often than once per minute.
-- Provider lists are ordered, unique and bounded. Switches across all attempts of a logical step are bounded by `max_switches` (default 2); automatic continuation never revisits a previously used provider. A user can explicitly resume the original provider after recovery without counting that as a provider switch.
+- Provider lists are ordered, unique and bounded. Switches across all attempts of a logical step are bounded by `max_switches` (default 2); automatic continuation never revisits a previously used provider and stops when that budget is exhausted. An explicit manual confirmation past the budget continues and records a warning. A user can explicitly resume the original provider after recovery without counting that as a provider switch.
 - Optional `max_reported_cost_usd` and `max_reported_tokens` enforce reported totals. Incomplete coverage blocks automatic continuation when a corresponding limit is configured. A known subtotal is not a complete spend total.
 
 The Phase 1 normalized taxonomy and structured provider codes determine eligibility. Provider diagnostics are distinguished from integration failures: a Bitbucket 401 is not evidence that the AI provider requires authentication.
@@ -94,7 +94,7 @@ POST /api/runs/123/steps/implement/handoff-resume
 }
 ```
 
-`GET /api/runs/:id/steps/:key` includes handoffs, checkpoint previews and history. `GET /api/runs/:id/steps/:key/handoff-providers` exposes readiness/model options without model calls. `GET /api/runs/:id/handoffs` exposes metrics for dashboards. Requests with stale attempt/generation/fingerprint, a replaced worker, revoked permissions, ungranted approvals, unanswered questions, canceled/paused runs, conflicting running attempts or exhausted switch budgets fail closed.
+`GET /api/runs/:id/steps/:key` includes handoffs, checkpoint previews and history. `GET /api/runs/:id/steps/:key/handoff-providers` exposes readiness/model options without model calls. `GET /api/runs/:id/handoffs` exposes metrics for dashboards. Requests with stale attempt/generation/fingerprint, a replaced worker, revoked permissions, ungranted approvals, unanswered questions, canceled/paused runs or conflicting running attempts fail closed. An exhausted switch budget stops automatic continuation; a manual confirmation past it is a warning, not a rejection.
 
 Concurrent confirmation is serialized under the existing run/step locks. The job idempotency key and unique target-attempt binding allow one effective continuation. Old fenced results cannot complete it. Generic retry/reexecute cannot bypass a pending handoff. `provider_handoff.request`, `.reinspect`, `.resume`, existing support audits and durable provider-handoff timeline events make the switch traceable. Automatic actions have an explicit system-origin flag and timeline event.
 

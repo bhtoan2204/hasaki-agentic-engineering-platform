@@ -12,7 +12,11 @@ export async function putUserSecret(userId: number, kind: string, plain: string)
 }
 
 export async function getUserSecret(userId: number, kind: string): Promise<string | null> {
-  const row = await one<{ ciphertext: string }>(pool, "SELECT ciphertext FROM user_secrets WHERE user_id = $1 AND kind = $2", [userId, kind]);
+  const row = await one<{ ciphertext: string }>(
+    pool,
+    "SELECT ciphertext FROM user_secrets WHERE user_id = $1 AND kind = $2",
+    [userId, kind],
+  );
   if (!row) return null;
   return decryptSecret(row.ciphertext);
 }
@@ -32,11 +36,21 @@ export async function putSharedSecret(kind: string, plain: string) {
 }
 
 export async function getSharedSecret(kind: string): Promise<string | null> {
-  const row = await one<{ ciphertext: string }>(pool, "SELECT ciphertext FROM shared_secrets WHERE kind = $1", [kind]);
+  const row = await one<{ ciphertext: string }>(
+    pool,
+    "SELECT ciphertext FROM shared_secrets WHERE kind = $1",
+    [kind],
+  );
   if (!row) return null;
   return decryptSecret(row.ciphertext);
 }
 
-export async function usersWithSecret(kind: string): Promise<Array<{ id: number; active: boolean }>> {
-  return q(pool, `SELECT u.id, u.active FROM user_secrets s JOIN users u ON u.id = s.user_id WHERE s.kind = $1`, [kind]);
+export async function usersWithSecret(
+  kind: string,
+): Promise<Array<{ id: number; active: boolean }>> {
+  return q(
+    pool,
+    `SELECT u.id, u.active FROM user_secrets s JOIN users u ON u.id = s.user_id WHERE s.kind = $1`,
+    [kind],
+  );
 }

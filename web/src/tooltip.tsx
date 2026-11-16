@@ -25,8 +25,7 @@ export function TipLayer() {
     const shown = { el: null as HTMLElement | null };
     const clearDescribed = () => {
       if (described.el) {
-        if (described.prev == null)
-          described.el.removeAttribute("aria-describedby");
+        if (described.prev == null) described.el.removeAttribute("aria-describedby");
         else described.el.setAttribute("aria-describedby", described.prev);
       }
       described.el = null;
@@ -63,9 +62,7 @@ export function TipLayer() {
       setBox(null);
     };
     const fromEvent = (target: EventTarget | null) =>
-      target instanceof Element
-        ? target.closest<HTMLElement>("[data-tip]")
-        : null;
+      target instanceof Element ? target.closest<HTMLElement>("[data-tip]") : null;
     const onOver = (e: MouseEvent) => {
       hover.current = fromEvent(e.target);
       pick();
@@ -137,8 +134,7 @@ export function TipLayer() {
       let top = !fitsAbove || a.top < t.height + GAP + MARGIN ? below : above;
       if (!fitsBelow && fitsAbove) top = above;
       if (top < MARGIN) top = MARGIN;
-      if (top + t.height > vh - MARGIN)
-        top = Math.max(MARGIN, vh - MARGIN - t.height);
+      if (top + t.height > vh - MARGIN) top = Math.max(MARGIN, vh - MARGIN - t.height);
       const coversAnchor = top < a.bottom && top + t.height > a.top;
       if (coversAnchor && below + t.height <= vh - MARGIN) top = below;
       let left = a.left + a.width / 2 - t.width / 2;

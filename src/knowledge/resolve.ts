@@ -15,7 +15,14 @@
  * candidate query (knowledge.candidates): each candidate already is the version in effect.
  */
 
-export const SCOPES = ["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY", "WORKFLOW", "STEP"] as const;
+export const SCOPES = [
+  "GLOBAL",
+  "ORGANIZATION",
+  "PROJECT",
+  "REPOSITORY",
+  "WORKFLOW",
+  "STEP",
+] as const;
 export type Scope = (typeof SCOPES)[number];
 export const CATEGORIES = [
   "business_rule",
@@ -68,6 +75,12 @@ export interface ResolutionContext {
   organization: string;
   project: string;
   repositories: string[];
+  /**
+   * Projects the selected repositories belong to (repository registry). PROJECT scope and `applicability.projects`
+   * also match through them, so project knowledge reaches a run on that project's repositories even when the run has
+   * no project set (manual request) or was started from a related project.
+   */
+  repositoryProjects?: string[];
   workflowKey: string;
   stepKey: string;
   stepType: string;
@@ -76,24 +89,39 @@ export interface ResolutionContext {
   explicit: string[];
   /** Evaluation instant for expiry (default: now). */
   now?: Date;
+  ponytailEnabled?: boolean;
 }
 
 export interface Resolution {
   applied: Array<KnowledgeCandidate & { reason: string }>;
-  overridden: Array<{ key: string; version: number; by: string; conflict_key: string; reason?: "conflict" | "superseded" | "expired" }>;
+  overridden: Array<{
+    key: string;
+    version: number;
+    by: string;
+    conflict_key: string;
+    reason?: "conflict" | "superseded" | "expired" | "unavailable";
+    /** Why an item was left out (reason "unavailable"). */
+    detail?: string;
+  }>;
 }
 
 const eqi = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const anyEq = (list: string[], v: string) => list.some((x) => eqi(x, v));
+/** The run's project, or a project one of its selected repositories belongs to. */
+const inProject = (ctx: ResolutionContext, project: string) =>
+  (!!ctx.project && eqi(project, ctx.project)) || anyEq(ctx.repositoryProjects ?? [], project);
 
-export function scopeMatches(c: Pick<KnowledgeCandidate, "scope_type" | "scope_ref">, ctx: ResolutionContext): boolean {
+export function scopeMatches(
+  c: Pick<KnowledgeCandidate, "scope_type" | "scope_ref">,
+  ctx: ResolutionContext,
+): boolean {
   switch (c.scope_type) {
     case "GLOBAL":
       return true;
     case "ORGANIZATION":
       return eqi(c.scope_ref, ctx.organization);
     case "PROJECT":
-      return !!ctx.project && eqi(c.scope_ref, ctx.project);
+      return inProject(ctx, c.scope_ref);
     case "REPOSITORY":
       return anyEq(ctx.repositories, c.scope_ref);
     case "WORKFLOW":
@@ -108,7 +136,7 @@ export function applicabilityMatches(a: Applicability, ctx: ResolutionContext): 
   if (a.step_types?.length && !anyEq(a.step_types, ctx.stepType)) return false;
   if (a.step_keys?.length && !anyEq(a.step_keys, ctx.stepKey)) return false;
   if (a.workflows?.length && !anyEq(a.workflows, ctx.workflowKey)) return false;
-  if (a.projects?.length && !anyEq(a.projects, ctx.project)) return false;
+  if (a.projects?.length && !a.projects.some((p) => inProject(ctx, p))) return false;
   if (a.repos?.length && !a.repos.some((r) => anyEq(ctx.repositories, r))) return false;
   if (a.keywords?.length) {
     const text = ctx.text.toLowerCase();
@@ -120,52 +148,135 @@ export function applicabilityMatches(a: Applicability, ctx: ResolutionContext): 
 const rank = (s: Scope) => SCOPES.indexOf(s);
 
 const RESTRICTING = ["repos", "projects", "workflows", "step_keys", "step_types"] as const;
-const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
-const describeRestriction = (a: Applicability) => RESTRICTING.filter((k) => a[k]?.length).map((k) => `${k} ${a[k]!.join(", ")}`).join("; ");
+export const isCodebaseMap = (k: { key: string; title: string }) =>
+  /codebase[ ._-]?map/i.test(k.key + " " + k.title);
+export const isRestricted = (a: Applicability) => RESTRICTING.some((k) => (a[k]?.length ?? 0) > 0);
+const describeRestriction = (a: Applicability) =>
+  RESTRICTING.filter((k) => a[k]?.length)
+    .map((k) => `${k} ${a[k]!.join(", ")}`)
+    .join("; ");
+
+export const PRECEDENCE_STATEMENT =
+  "Instruction precedence: security/business invariants (enforced, security_policy, business_rule) > mandatory engineering rules > task requirements > applicable skills > optional guidance. Tests and verification remain governed by the TDD and verification skills and platform gates.";
+
+export function authorityTier(
+  k: Pick<KnowledgeCandidate, "category" | "enforced" | "metadata">,
+): number {
+  if (k.enforced || k.category === "security_policy" || k.category === "business_rule") return 0;
+  if (k.metadata.mandatory === true) return 1;
+  if (k.metadata.task_requirement === true) return 2;
+  return k.category === "agent_skill" ? 3 : 4;
+}
+
+const isPonytail = (k: Pick<KnowledgeCandidate, "metadata">) => k.metadata.pilot === "ponytail";
 
 /** Total order: negative when `a` beats `b`. */
 export function compareCandidates(a: KnowledgeCandidate, b: KnowledgeCandidate): number {
   if (a.enforced !== b.enforced) return a.enforced ? -1 : 1;
   if (rank(a.scope_type) !== rank(b.scope_type))
-    return a.enforced ? rank(a.scope_type) - rank(b.scope_type) : rank(b.scope_type) - rank(a.scope_type);
+    return a.enforced
+      ? rank(a.scope_type) - rank(b.scope_type)
+      : rank(b.scope_type) - rank(a.scope_type);
   if (a.priority !== b.priority) return b.priority - a.priority;
   if (a.version !== b.version) return b.version - a.version;
   return a.key.localeCompare(b.key);
 }
 
-export function resolveKnowledge(candidates: KnowledgeCandidate[], ctx: ResolutionContext): Resolution {
+export function resolveKnowledge(
+  candidates: KnowledgeCandidate[],
+  ctx: ResolutionContext,
+): Resolution {
   const now = (ctx.now ?? new Date()).getTime();
   let eligible: Array<KnowledgeCandidate & { reason: string }> = [];
   const overridden: Resolution["overridden"] = [];
   for (const c of candidates) {
+    if (isPonytail(c) && !ctx.explicit.includes(c.key) && !ctx.ponytailEnabled) continue;
+    if (
+      isPonytail(c) &&
+      (ctx.stepType === "command" || !applicabilityMatches(c.applicability, ctx))
+    )
+      continue;
     if (c.expires_at && new Date(c.expires_at).getTime() <= now) {
-      if (ctx.explicit.includes(c.key)) overridden.push({ key: c.key, version: c.version, by: "", conflict_key: c.conflict_key ?? "", reason: "expired" });
+      if (ctx.explicit.includes(c.key))
+        overridden.push({
+          key: c.key,
+          version: c.version,
+          by: "",
+          conflict_key: c.conflict_key ?? "",
+          reason: "expired",
+        });
       continue;
     }
     if (ctx.explicit.includes(c.key)) eligible.push({ ...c, reason: "assigned to step" });
-    else if (c.category !== "agent_skill" && scopeMatches(c, ctx) && applicabilityMatches(c.applicability, ctx))
-      eligible.push({ ...c, reason: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""} scope` });
-    else if (c.category === "agent_skill" && scopeMatches(c, ctx) && (c.scope_type !== "GLOBAL" || isRestricted(c.applicability)) && applicabilityMatches(c.applicability, ctx))
+    else if (
+      c.category !== "agent_skill" &&
+      scopeMatches(c, ctx) &&
+      applicabilityMatches(c.applicability, ctx)
+    )
+      eligible.push({
+        ...c,
+        reason: `${c.scope_type}${c.scope_ref ? ":" + c.scope_ref : ""} scope`,
+      });
+    else if (
+      c.category === "agent_skill" &&
+      scopeMatches(c, ctx) &&
+      (c.scope_type !== "GLOBAL" || isRestricted(c.applicability)) &&
+      applicabilityMatches(c.applicability, ctx)
+    )
       // Skills are opt-in: explicitly assigned, scoped narrower than GLOBAL, or restricted by applicability (repos, projects...).
-      eligible.push({ ...c, reason: c.scope_type !== "GLOBAL" ? `skill scoped to ${c.scope_type}:${c.scope_ref}` : `skill for ${describeRestriction(c.applicability)}` });
+      eligible.push({
+        ...c,
+        reason:
+          c.scope_type !== "GLOBAL"
+            ? `skill scoped to ${c.scope_type}:${c.scope_ref}`
+            : `skill for ${describeRestriction(c.applicability)}`,
+      });
   }
   // Supersession: drop an item when its successor applies here too (never an enforced policy).
   const eligibleKeys = new Set(eligible.map((c) => c.key));
-  const superseded = eligible.filter((c) => !c.enforced && c.superseded_by && eligibleKeys.has(c.superseded_by));
-  for (const c of superseded) overridden.push({ key: c.key, version: c.version, by: c.superseded_by!, conflict_key: c.conflict_key ?? "", reason: "superseded" });
+  const superseded = eligible.filter(
+    (c) => !c.enforced && c.superseded_by && eligibleKeys.has(c.superseded_by),
+  );
+  for (const c of superseded)
+    overridden.push({
+      key: c.key,
+      version: c.version,
+      by: c.superseded_by!,
+      conflict_key: c.conflict_key ?? "",
+      reason: "superseded",
+    });
   eligible = eligible.filter((c) => !superseded.includes(c));
   const applied: Resolution["applied"] = [];
   const groups = new Map<string, typeof eligible>();
   for (const c of eligible) {
     if (!c.conflict_key) applied.push(c);
-    else (groups.get(c.conflict_key) ?? groups.set(c.conflict_key, []).get(c.conflict_key)!).push(c);
+    else
+      (groups.get(c.conflict_key) ?? groups.set(c.conflict_key, []).get(c.conflict_key)!).push(c);
   }
   for (const [ck, group] of groups) {
-    group.sort(compareCandidates);
+    // Precedence tiers only arbitrate groups a Ponytail item joins; existing groups keep their winners.
+    const tiered = group.some(isPonytail);
+    group.sort(
+      (a, b) => (tiered ? authorityTier(a) - authorityTier(b) : 0) || compareCandidates(a, b),
+    );
     applied.push(group[0]);
-    for (const loser of group.slice(1)) overridden.push({ key: loser.key, version: loser.version, by: group[0].key, conflict_key: ck, reason: "conflict" });
+    for (const loser of group.slice(1))
+      overridden.push({
+        key: loser.key,
+        version: loser.version,
+        by: group[0].key,
+        conflict_key: ck,
+        reason: "conflict",
+      });
   }
   // Stable presentation order: category, then scope (broad first), then key.
-  applied.sort((a, b) => a.category.localeCompare(b.category) || rank(a.scope_type) - rank(b.scope_type) || a.key.localeCompare(b.key));
+  const tiered = applied.some(isPonytail);
+  applied.sort(
+    (a, b) =>
+      (tiered ? authorityTier(a) - authorityTier(b) : 0) ||
+      a.category.localeCompare(b.category) ||
+      rank(a.scope_type) - rank(b.scope_type) ||
+      a.key.localeCompare(b.key),
+  );
   return { applied, overridden };
 }

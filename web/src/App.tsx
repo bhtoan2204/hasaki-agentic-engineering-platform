@@ -9,6 +9,7 @@ import {
   BookOpen,
   Building2,
   ClipboardList,
+  FileSearch,
   FolderGit2,
   Inbox,
   LayoutDashboard,
@@ -17,6 +18,7 @@ import {
   Moon,
   PlayCircle,
   PlugZap,
+  Settings2,
   Siren,
   Sun,
   Workflow,
@@ -24,12 +26,14 @@ import {
 } from "lucide-react";
 import {
   api,
+  isStateChange,
   setAuthed,
   setCsrf,
   setSupportView,
   useLive,
   type LiveState,
 } from "./api.ts";
+import { AgentHealthBar } from "./agentProvider.tsx";
 import { AccountMenu, AccountPage } from "./pages/Account.tsx";
 import { Loading } from "./ui.tsx";
 import "./shell-account.css";
@@ -48,7 +52,9 @@ import { InsightsPage } from "./pages/Insights.tsx";
 import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
+import { InvestigationsPage } from "./pages/Investigations.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
+import { SettingsPage } from "./pages/Settings.tsx";
 import { ProductionErrorsPage } from "./pages/prodErrors/ProductionErrorsPage.tsx";
 import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
 import { useI18n } from "./i18n/index.tsx";
@@ -102,6 +108,7 @@ const NAV: Array<{
       { key: "workflows", labelKey: "nav.workflows", icon: Workflow },
       { key: "questions", labelKey: "nav.questions", icon: Inbox },
       { key: "prod-errors", labelKey: "nav.prodErrors", icon: Siren },
+      { key: "investigations", labelKey: "nav.investigations", icon: FileSearch },
     ],
   },
   {
@@ -117,6 +124,7 @@ const NAV: Array<{
 const LABEL = {
   ...Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.key, i]))),
   users: { labelKey: "auth.users", icon: Users },
+  settings: { labelKey: "nav.settings", icon: Settings2 },
   account: { labelKey: "auth.account", icon: UserRound },
 } as Record<string, { labelKey: string; icon: LucideIcon }>;
 
@@ -155,8 +163,9 @@ export function App() {
     setNotice(message);
   };
   const refreshCount = () =>
-    api<any[]>("/api/questions")
-      .then((q) => setOpenQuestions(q.length))
+    // The badge counts everything waiting for a human: open questions AND steps waiting for approval.
+    Promise.all([api<any[]>("/api/questions"), api<any[]>("/api/approvals").catch(() => [])])
+      .then(([q, a]) => setOpenQuestions(q.length + a.length))
       .catch(() => {});
   useEffect(() => {
     api<{ user: SessionUser; csrf: string }>("/api/auth/me")
@@ -179,8 +188,7 @@ export function App() {
     if (me) void refreshCount();
   }, [me]);
   useEffect(() => {
-    if (me?.role === "member" && hash.startsWith("/users"))
-      location.hash = "/overview";
+    if (me?.role === "member" && hash.startsWith("/users")) location.hash = "/overview";
   }, [me, hash]);
   useEffect(() => {
     setNavOpen(false);
@@ -219,9 +227,7 @@ export function App() {
       }
       if (e.key !== "Tab" || document.getElementById("account-menu")) return;
       const items = [
-        ...(sidebar.current?.querySelectorAll<HTMLElement>(
-          "a, button:not(:disabled)",
-        ) ?? []),
+        ...(sidebar.current?.querySelectorAll<HTMLElement>("a, button:not(:disabled)") ?? []),
       ].filter((el) => el.getClientRects().length > 0);
       const first = items[0],
         last = items[items.length - 1];
@@ -240,7 +246,7 @@ export function App() {
   const live: LiveState = useLive(
     null,
     (p) => {
-      if (!p || p.kind === "status" || p.kind === "system") void refreshCount();
+      if (isStateChange(p)) void refreshCount();
     },
     !!me,
   );
@@ -282,38 +288,30 @@ export function App() {
       page = <KnowledgePage itemKey={parts[1]} subKey={parts[2]} />;
       break;
     case "repositories":
-      page = <RepositoriesPage name={parts[1]} query={queryPart} />;
+      page = <RepositoriesPage name={parts[1]} query={queryPart} me={me} />;
       break;
     case "prod-errors":
-      page = (
-        <ProductionErrorsPage
-          route={parts[1]}
-          fingerprint={parts[2]}
-          query={queryPart}
-        />
-      );
+      page = <ProductionErrorsPage route={parts[1]} fingerprint={parts[2]} query={queryPart} />;
+      break;
+    case "investigations":
+      page = <InvestigationsPage id={parts[1] ? Number(parts[1]) : undefined} />;
       break;
     case "integrations":
-      page = <IntegrationsPage />;
+      page = <IntegrationsPage me={me} />;
+      break;
+    case "settings":
+      page = me?.role === "admin" ? <SettingsPage /> : <OverviewPage />;
       break;
     case "insights":
       page = <InsightsPage tab={parts[1]} />;
       break;
     case "users":
       page =
-        me?.role === "admin" ? (
-          <UsersPage me={me} onSignedOut={signedOut} />
-        ) : (
-          <OverviewPage />
-        );
+        me?.role === "admin" ? <UsersPage me={me} onSignedOut={signedOut} /> : <OverviewPage />;
       break;
     case "account":
       page = me && (
-        <AccountPage
-          me={me}
-          passwordMode={parts[1] === "password"}
-          onSignedOut={signedOut}
-        />
+        <AccountPage me={me} passwordMode={parts[1] === "password"} onSignedOut={signedOut} />
       );
       break;
     case "office":
@@ -341,9 +339,7 @@ export function App() {
   const CurrentIcon = current.icon;
 
   return (
-    <div
-      className={`app${navOpen ? " nav-open" : ""}${collapsed ? " sidebar-collapsed" : ""}`}
-    >
+    <div className={`app${navOpen ? " nav-open" : ""}${collapsed ? " sidebar-collapsed" : ""}`}>
       <GlobalChibiCompanion section={section} />
       <aside
         ref={sidebar}
@@ -363,28 +359,16 @@ export function App() {
         >
           <X size={18} />
         </button>
-        <a
-          className="sb-brand"
-          href="#/overview"
-          aria-label={`${BRAND.product} — Overview`}
-        >
+        <a className="sb-brand" href="#/overview" aria-label={`${BRAND.product} — Overview`}>
           <BrandLogo size={40} withName />
         </a>
         <button
           className="sb-link sb-toggle"
           onClick={() => setCollapsed(!collapsed)}
-          aria-label={t(
-            collapsed ? "auth.expandSidebar" : "auth.collapseSidebar",
-          )}
-          data-tip={t(
-            collapsed ? "auth.expandSidebar" : "auth.collapseSidebar",
-          )}
+          aria-label={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")}
+          data-tip={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")}
         >
-          {collapsed ? (
-            <PanelLeftOpen size={18} />
-          ) : (
-            <PanelLeftClose size={18} />
-          )}
+          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           <span>{t("auth.collapseSidebar")}</span>
         </button>
         <nav className="sb-nav">
@@ -429,6 +413,16 @@ export function App() {
                 <Users size={18} />
                 <span>{t("auth.users")}</span>
               </a>
+              <a
+                href="#/settings"
+                className={`sb-link${section === "settings" ? " on" : ""}`}
+                aria-current={section === "settings" ? "page" : undefined}
+                aria-label={t("nav.settings")}
+                data-tip={collapsed ? t("nav.settings") : undefined}
+              >
+                <Settings2 size={18} />
+                <span>{t("nav.settings")}</span>
+              </a>
               <button
                 className={`sb-link sb-support${support ? " on" : ""}`}
                 aria-pressed={support}
@@ -465,11 +459,7 @@ export function App() {
         </div>
       </aside>
       {navOpen && (
-        <div
-          className="scrim"
-          style={{ zIndex: 55 }}
-          onClick={() => setNavOpen(false)}
-        />
+        <div className="scrim" style={{ zIndex: 55 }} onClick={() => setNavOpen(false)} />
       )}
 
       <div className="main" inert={navOpen || undefined}>
@@ -495,11 +485,8 @@ export function App() {
             </span>
           </div>
           <div className="tb-right">
-            <span
-              className={`live-pill is-${live}`}
-              tabIndex={0}
-              data-tip={t("live.tip")}
-            >
+            <AgentHealthBar />
+            <span className={`live-pill is-${live}`} tabIndex={0} data-tip={t("live.tip")}>
               <i />{" "}
               <b>
                 {live === "sse"
@@ -509,11 +496,7 @@ export function App() {
                     : t("live.connecting")}
               </b>
             </span>
-            <div
-              className="lang-switch"
-              role="group"
-              aria-label={t("lang.switch")}
-            >
+            <div className="lang-switch" role="group" aria-label={t("lang.switch")}>
               {(["vi", "en"] as UiLocale[]).map((code) => (
                 <button
                   key={code}
@@ -534,16 +517,12 @@ export function App() {
               data-tip={t("inbox.tip")}
             >
               <Inbox size={17} />
-              {openQuestions > 0 && (
-                <span className="count">{openQuestions}</span>
-              )}
+              {openQuestions > 0 && <span className="count">{openQuestions}</span>}
             </a>
             <button
               className="ghost icon"
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              aria-label={
-                theme === "light" ? t("theme.toDark") : t("theme.toLight")
-              }
+              aria-label={theme === "light" ? t("theme.toDark") : t("theme.toLight")}
               data-tip={theme === "light" ? t("theme.dark") : t("theme.light")}
             >
               {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
@@ -552,9 +531,7 @@ export function App() {
         </header>
         <main
           ref={pageRef}
-          onScroll={(e) =>
-            scrollPositions.current.set(pathPart, e.currentTarget.scrollTop)
-          }
+          onScroll={(e) => scrollPositions.current.set(pathPart, e.currentTarget.scrollTop)}
           tabIndex={-1}
           className={full ? "page full" : "page"}
           key={`${me.id}:${support}`}

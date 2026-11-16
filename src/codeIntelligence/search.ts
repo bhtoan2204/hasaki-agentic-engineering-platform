@@ -2,29 +2,19 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, q } from "../db/pool.ts";
-import {
-  rankRepositories,
-  type RepositoryRow,
-  type RankedRepository,
-} from "../repos/service.ts";
+import { rankRepositories, type RepositoryRow, type RankedRepository } from "../repos/service.ts";
 import { workspacesOf } from "../git/provider.ts";
 import { redactSecrets } from "../integrations/redact.ts";
 import { effectiveSql, snapshot, type Snapshot } from "./store.ts";
-import {
-  baseCommit,
-  changes,
-  git,
-  readSource,
-  eligible,
-  safePath,
-  hash,
-} from "./git.ts";
+import { baseCommit, changes, git, readSource, eligible, safePath, hash } from "./git.ts";
 import { localScope, enqueue } from "./indexer.ts";
 const exec = promisify(execFile);
 export interface SearchScope {
   repositories: string[];
   allowed: string[];
   runId?: number;
+  /** When one run has several worktrees of the same repository, read this checkout rather than the first. */
+  workspaces?: Readonly<Record<string, string>>;
   /** Metadata ranking may inspect existing sources but must never provision or schedule clones. */
   provision?: boolean;
 }
@@ -47,19 +37,18 @@ export interface Hit {
   content_hash?: string;
 }
 function authorize(s: SearchScope) {
-  if (
-    s.repositories.length > 30 ||
-    s.repositories.some((r) => !s.allowed.includes(r))
-  )
+  if (s.repositories.length > 30 || s.repositories.some((r) => !s.allowed.includes(r)))
     throw new Error("Unauthorized repository search");
 }
 export const queryTerms = (text: string) =>
-  [...new Set(text.match(/[A-Za-z_][A-Za-z0-9_./:-]{2,127}/g) ?? [])].slice(
-    0,
-    24,
-  );
-export async function fresh(repoName: string, runId?: number, provision = false) {
-  const local = await localScope(repoName, runId, provision);
+  [...new Set(text.match(/[A-Za-z_][A-Za-z0-9_./:-]{2,127}/g) ?? [])].slice(0, 24);
+export async function fresh(
+  repoName: string,
+  runId?: number,
+  provision = false,
+  workspacePath?: string,
+) {
+  const local = await localScope(repoName, runId, provision, workspacePath);
   const base = await baseCommit(local.primary, local.repo.default_branch || config.baseBranch);
   const baseline = await snapshot(local.repo.id, `base:${base}`);
   if (!baseline) return { ...local, index: null, base };
@@ -80,9 +69,7 @@ const provenance = (s: Snapshot) => ({
 });
 async function scopeRun(name: string, scope: SearchScope) {
   if (!scope.runId) return undefined;
-  return (await workspacesOf(scope.runId)).some((w) => w.repo === name)
-    ? scope.runId
-    : undefined;
+  return (await workspacesOf(scope.runId)).some((w) => w.repo === name) ? scope.runId : undefined;
 }
 /** Only published and freshly validated snapshot mappings are queried. Failure is a live-search fallback. */
 export async function searchSymbols(
@@ -100,10 +87,11 @@ export async function searchSymbols(
   for (const repo of scope.repositories) {
     try {
       const run = await scopeRun(repo, scope);
-      const f = await fresh(repo, run, scope.provision === true);
+      const checkout = scope.workspaces?.[repo];
+      const f = await fresh(repo, run, scope.provision === true, checkout);
       if (!f.index) {
         fallback_count++;
-        if (scope.provision !== false) await enqueue(repo, run).catch(() => { });
+        if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
         hits.push(
           ...(await searchCodeExact(
             terms[0],
@@ -130,16 +118,15 @@ export async function searchSymbols(
         ORDER BY f.file_path,r.line,r.id LIMIT 8`,
         [f.index.id, terms],
       );
-      const recheck = await fresh(repo, run, scope.provision === true);
+      const recheck = await fresh(repo, run, scope.provision === true, checkout);
       if (recheck.index?.id !== f.index.id) {
         fallback_count++;
-        if (scope.provision !== false) await enqueue(repo, run).catch(() => { });
+        if (scope.provision !== false) await enqueue(repo, run).catch(() => {});
         continue;
       }
       if (!rows.length && !edges.length) {
         fallback_count++;
-        const preferred =
-          terms.find((t) => /[a-z][A-Z]|_|[./]/.test(t)) ?? terms[0];
+        const preferred = terms.find((t) => /[a-z][A-Z]|_|[./]/.test(t)) ?? terms[0];
         hits.push(
           ...(await searchCodeExact(
             preferred,
@@ -194,8 +181,7 @@ export async function searchSymbols(
       .sort(
         (a, b) =>
           b.confidence - a.confidence ||
-          Number(b.match_type === "qualified") -
-          Number(a.match_type === "qualified") ||
+          Number(b.match_type === "qualified") - Number(a.match_type === "qualified") ||
           a.repository.localeCompare(b.repository) ||
           a.file_path.localeCompare(b.file_path) ||
           a.line_range[0] - b.line_range[0],
@@ -212,7 +198,9 @@ export async function findDefinitions(symbol: string, scope: SearchScope) {
     ...result,
     hits: result.hits.filter(isDefinition),
     // Text matches from a stale/unavailable index are never presented as definitions — but never hidden either.
-    text_candidates: result.fallback_count ? result.hits.filter((h) => !isDefinition(h) && h.match_type === "text").slice(0, 10) : [],
+    text_candidates: result.fallback_count
+      ? result.hits.filter((h) => !isDefinition(h) && h.match_type === "text").slice(0, 10)
+      : [],
   };
 }
 /** Syntax edges are preserved as candidates. Name equality never promotes them to resolved calls. */
@@ -234,7 +222,8 @@ export async function findDependencies(
     for (const repo of scope.repositories) {
       try {
         const run = await scopeRun(repo, scope);
-        const f = await fresh(repo, run, scope.provision === true);
+        const checkout = scope.workspaces?.[repo];
+        const f = await fresh(repo, run, scope.provision === true, checkout);
         if (!f.index) {
           if (report && !report.unavailable.includes(repo)) report.unavailable.push(repo);
           continue;
@@ -246,17 +235,13 @@ export async function findDependencies(
           [
             f.index.id,
             direction === "in"
-              ? [
-                ...new Set([
-                  ...frontier,
-                  ...frontier.map((n) => n.split(".").pop()!),
-                ]),
-              ]
+              ? [...new Set([...frontier, ...frontier.map((n) => n.split(".").pop()!)])]
               : frontier,
           ],
         );
-        if ((await fresh(repo, run)).index?.id !== f.index.id) {
-          if (report && !report.unavailable.includes(repo)) report.unavailable.push(`${repo} (index changed during the query)`);
+        if ((await fresh(repo, run, scope.provision === true, checkout)).index?.id !== f.index.id) {
+          if (report && !report.unavailable.includes(repo))
+            report.unavailable.push(`${repo} (index changed during the query)`);
           continue;
         }
         for (const r of rows) {
@@ -277,7 +262,8 @@ export async function findDependencies(
         }
       } catch (e) {
         /* unavailable repositories are not allowed to interrupt navigation — but are reported */
-        if (report && !report.unavailable.includes(repo)) report.unavailable.push(`${repo} (${(e as Error).message.split("\n")[0].slice(0, 120)})`);
+        if (report && !report.unavailable.includes(repo))
+          report.unavailable.push(`${repo} (${(e as Error).message.split("\n")[0].slice(0, 120)})`);
       }
     }
     frontier = [...new Set(next)].slice(0, 24);
@@ -301,9 +287,7 @@ export async function findDependencies(
     frontier = [
       ...new Set([
         ...frontier,
-        ...candidates.hits
-          .map((h) => h.qualified_name)
-          .filter((n): n is string => !!n),
+        ...candidates.hits.map((h) => h.qualified_name).filter((n): n is string => !!n),
       ]),
     ].slice(0, 50);
   }
@@ -312,13 +296,15 @@ export async function findDependencies(
 export const findReferences = (symbol: string, scope: SearchScope) =>
   findDependencies(symbol, scope, 1, "in");
 /** Files an exact text search may read outside the indexed languages (config, logs, docs) — never secret material. */
-const SECRET_FILE = /(?:^|\/)\.env(?:\.[^/]*)?$|\.(?:pem|key|p12|pfx|jks|keystore)$|(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)|(?:^|\/)[^/]*secret[^/]*$|(?:^|\/)\.npmrc$|(?:^|\/)\.netrc$/i;
+const SECRET_FILE =
+  /(?:^|\/)\.env(?:\.[^/]*)?$|\.(?:pem|key|p12|pfx|jks|keystore)$|(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)|(?:^|\/)[^/]*secret[^/]*$|(?:^|\/)\.npmrc$|(?:^|\/)\.netrc$/i;
 export function eligibleText(p: string) {
   const parts = p.split("/");
   return (
     !SECRET_FILE.test(p) &&
     !parts.some((s) => /^(?:\.git|dist|build|coverage)$/.test(s)) &&
-    (config.codeIntelligence.includeDependencies || !parts.some((s) => /^(?:node_modules|vendor)$/.test(s))) &&
+    (config.codeIntelligence.includeDependencies ||
+      !parts.some((s) => /^(?:node_modules|vendor)$/.test(s))) &&
     !config.codeIntelligence.excludes.some((x) => p.includes(x))
   );
 }
@@ -338,11 +324,13 @@ export async function searchCodeExact(
   const hits: Hit[] = [];
   for (const name of scope.repositories) {
     const run = await scopeRun(name, scope);
-    const { root } = await localScope(name, run, scope.provision !== false);
-    const before = await changes(
-      root,
-      (await git(root, ["rev-parse", "HEAD"])).trim(),
+    const { root } = await localScope(
+      name,
+      run,
+      scope.provision !== false,
+      scope.workspaces?.[name],
     );
+    const before = await changes(root, (await git(root, ["rev-parse", "HEAD"])).trim());
     const repositoryHits: Hit[] = [];
     let stdout = "";
     try {
@@ -357,7 +345,18 @@ export async function searchCodeExact(
             "--max-filesize",
             String(config.codeIntelligence.maxFileBytes),
             ...(opts.anyFile
-              ? ["--glob", "!**/.env*", "--glob", "!**/*.{pem,key,p12,pfx,jks,keystore}", "--glob", "!**/*secret*", "--glob", "!**/node_modules/**", "--glob", "!**/vendor/**"]
+              ? [
+                  "--glob",
+                  "!**/.env*",
+                  "--glob",
+                  "!**/*.{pem,key,p12,pfx,jks,keystore}",
+                  "--glob",
+                  "!**/*secret*",
+                  "--glob",
+                  "!**/node_modules/**",
+                  "--glob",
+                  "!**/vendor/**",
+                ]
               : ["--glob", "*.{go,ts,tsx,proto,sql}"]),
             "--",
             pattern,
@@ -374,13 +373,10 @@ export async function searchCodeExact(
     } catch (e) {
       if ((e as any).code === 1) continue;
       if ((e as NodeJS.ErrnoException).code === "ENOENT")
-        throw new Error(
-          "ripgrep unavailable; install rg on the assigned worker",
-        );
+        throw new Error("ripgrep unavailable; install rg on the assigned worker");
       throw new Error("Bounded exact search unavailable");
     }
-    if ((await changes(root, before.head)).generation !== before.generation)
-      continue;
+    if ((await changes(root, before.head)).generation !== before.generation) continue;
     for (const line of stdout.split("\n").filter(Boolean)) {
       const row = JSON.parse(line);
       if (row.type !== "match") continue;
@@ -429,21 +425,19 @@ export function applyEvidence(
       const bonus = Math.min(
         w.cap,
         (kinds.has("exact_symbol") ? w.exact : 0) +
-        (kinds.has("qualified") ? w.qualified : 0) +
-        (kinds.has("path") ? w.path : 0) +
-        (kinds.has("text") ? w.text : 0) +
-        (dependencyRepos.has(r.repo) || kinds.has("dependency")
-          ? w.dependency
-          : 0),
+          (kinds.has("qualified") ? w.qualified : 0) +
+          (kinds.has("path") ? w.path : 0) +
+          (kinds.has("text") ? w.text : 0) +
+          (dependencyRepos.has(r.repo) || kinds.has("dependency") ? w.dependency : 0),
       );
       return {
         ...r,
         score: r.score + bonus,
         reasons: bonus
           ? [
-            ...r.reasons,
-            `code evidence +${bonus}: ${[...kinds].sort().join(", ")}${dependencyRepos.has(r.repo) ? ", import/dependency candidate" : ""}`,
-          ]
+              ...r.reasons,
+              `code evidence +${bonus}: ${[...kinds].sort().join(", ")}${dependencyRepos.has(r.repo) ? ", import/dependency candidate" : ""}`,
+            ]
           : r.reasons,
       };
     })
@@ -469,9 +463,7 @@ export async function hybridRank(
     const dependencies = new Set<string>();
     // Registry dependencies remain explicit evidence; syntax imports support candidate discovery only.
     for (const r of repos)
-      if (
-        r.dependencies.some((d) => found.hits.some((h) => h.repository === d))
-      )
+      if (r.dependencies.some((d) => found.hits.some((h) => h.repository === d)))
         dependencies.add(r.name);
     return applyEvidence(old, found.hits, dependencies);
   } catch {
@@ -493,8 +485,7 @@ export async function buildCodeContext(text: string, scope: SearchScope) {
   const supporting: Hit[] = [];
   for (const name of qualified) {
     const edges = await findDependencies(name, scope, 1);
-    for (const edge of edges)
-      supporting.push(...(edge.candidate_definitions ?? []));
+    for (const edge of edges) supporting.push(...(edge.candidate_definitions ?? []));
     const callers = await findReferences(name, scope);
     for (const edge of callers.slice(0, 3))
       supporting.push({
@@ -518,17 +509,18 @@ export async function buildCodeContext(text: string, scope: SearchScope) {
       const scopeKey = `${hit.repository}:${hit.snapshot.run_id}`;
       const rootPromise =
         localRoots.get(scopeKey) ??
-        localScope(hit.repository, hit.snapshot.run_id ?? undefined);
+        localScope(
+          hit.repository,
+          hit.snapshot.run_id ?? undefined,
+          false,
+          scope.workspaces?.[hit.repository],
+        );
       localRoots.set(scopeKey, rootPromise);
       const local = await rootPromise;
       let source: string | null;
       if (hit.snapshot.run_id || hit.snapshot.id === null)
         source = await readSource(local.root, hit.file_path);
-      else
-        source = await git(local.root, [
-          "show",
-          `${hit.snapshot.commit}:${hit.file_path}`,
-        ]);
+      else source = await git(local.root, ["show", `${hit.snapshot.commit}:${hit.file_path}`]);
       if (source === null || hash(source) !== hit.content_hash) continue;
       const block = `${hit.repository}/${hit.file_path}:${first}-${end} commit=${hit.snapshot.commit} worktree_run=${hit.snapshot.run_id ?? "base"} generation=${hit.snapshot.generation}\n${hit.signature ?? ""}\n${redactSecrets(
         source
@@ -545,9 +537,7 @@ export async function buildCodeContext(text: string, scope: SearchScope) {
       /* source changed or disappeared: skip stale snippet */
     }
   }
-  const body = parts
-    .join("\n\n")
-    .slice(0, config.codeIntelligence.contextTokens * 4);
+  const body = parts.join("\n\n").slice(0, config.codeIntelligence.contextTokens * 4);
   return {
     body,
     hits: primary.slice(0, 10),

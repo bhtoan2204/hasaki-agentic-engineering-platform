@@ -1,5 +1,6 @@
 import { useI18n } from "./i18n/index.tsx";
 import { useApi } from "./api.ts";
+import { ModelSelect, type CatalogModel } from "./ModelSelect.tsx";
 import { Field } from "./ui.tsx";
 
 /** Shared configuration form; the server validates inherited providers and CLI capabilities. */
@@ -13,9 +14,8 @@ export function StepAgentFields({
   onChange: (v: Record<string, any>) => void;
 }) {
   const { locale } = useI18n();
-  const { data: providers } = useApi<Array<{ id: string; models?: string[] }>>(
-    "/api/agent-providers",
-  );
+  const { data: providers } =
+    useApi<Array<{ id: string; models?: CatalogModel[] }>>("/api/agent-providers");
   const en = locale === "en";
   const set = (key: string, val: unknown) => {
     const next = { ...value };
@@ -28,32 +28,21 @@ export function StepAgentFields({
     <>
       {allowVerification && (
         <details>
-          <summary>
-            {en ? "Provider fallback policy" : "Chính sách agent dự phòng"}
-          </summary>
+          <summary>{en ? "Provider fallback policy" : "Chính sách agent dự phòng"}</summary>
           <Field label={en ? "Fallback mode" : "Chế độ dự phòng"}>
             <select
               value={value.fallback?.mode ?? "manual"}
-              onChange={(e) =>
-                set("fallback", { ...value.fallback, mode: e.target.value })
-              }
+              onChange={(e) => set("fallback", { ...value.fallback, mode: e.target.value })}
             >
               {["disabled", "manual", "automatic"].map((m) => (
                 <option key={m}>{m}</option>
               ))}
             </select>
           </Field>
-          <Field
-            label={en ? "Fallback provider order" : "Thứ tự agent dự phòng"}
-          >
+          <Field label={en ? "Fallback provider order" : "Thứ tự agent dự phòng"}>
             <input
               value={(
-                value.fallback?.providers ?? [
-                  "claude",
-                  "codex",
-                  "cursor",
-                  "antigravity",
-                ]
+                value.fallback?.providers ?? ["claude", "codex", "cursor", "antigravity", "copilot"]
               ).join(", ")}
               onChange={(e) =>
                 set("fallback", {
@@ -80,6 +69,21 @@ export function StepAgentFields({
               }
             />
           </Field>
+          <label>
+            <input
+              type="checkbox"
+              checked={value.fallback?.auto_health ?? true}
+              onChange={(e) =>
+                set("fallback", {
+                  ...value.fallback,
+                  auto_health: e.target.checked,
+                })
+              }
+            />
+            {en
+              ? "Skip an agent that is disconnected or out of quota and use the next healthy one"
+              : "Bỏ agent mất kết nối hoặc hết hạn mức và dùng agent khỏe kế tiếp"}
+          </label>
           <label>
             <input
               type="checkbox"
@@ -127,50 +131,46 @@ export function StepAgentFields({
               })
             }
           >
-            <option value="">
-              {en ? "Inherit run default" : "Theo mặc định lượt chạy"}
-            </option>
+            <option value="">{en ? "Inherit run default" : "Theo mặc định lượt chạy"}</option>
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
             <option value="cursor">Cursor</option>
             <option value="antigravity">Antigravity</option>
+            <option value="copilot">Copilot</option>
           </select>
         </Field>
         <Field
           label={en ? "Provider model" : "Mô hình của nhà cung cấp"}
           hint={
             en
-              ? "Empty: provider routing/account default. Use a model identifier supported by the selected provider."
-              : "Để trống: định tuyến/mặc định tài khoản. Dùng mã mô hình được nhà cung cấp hỗ trợ."
+              ? "Empty uses the account default. The list is the models this provider can run on this machine."
+              : "Để trống dùng mặc định tài khoản. Danh sách là model provider này chạy được trên máy này."
           }
         >
-          <input
-            aria-label={en ? "Provider model" : "Mô hình của nhà cung cấp"}
-            list={`agent-models-${provider ?? "inherit"}`}
+          <ModelSelect
+            ariaLabel={en ? "Provider model" : "Mô hình của nhà cung cấp"}
             value={value.model ?? ""}
-            onChange={(e) => set("model", e.target.value || null)}
+            emptyLabel={en ? "Account default" : "Mặc định tài khoản"}
+            models={
+              provider === "claude"
+                ? [
+                    { slug: "sonnet", name: "Sonnet" },
+                    { slug: "opus", name: "Opus" },
+                    { slug: "haiku", name: "Haiku" },
+                  ]
+                : provider === "cursor"
+                  ? [{ slug: "auto", name: "Auto" }]
+                  : (providers?.find((p) => p.id === provider)?.models ?? [])
+            }
+            onChange={(model) => set("model", model || null)}
           />
-          <datalist id={`agent-models-${provider ?? "inherit"}`}>
-            {(provider === "claude"
-              ? ["sonnet", "opus", "haiku"]
-              : provider === "cursor"
-                ? ["auto"]
-                : (providers?.find((p) => p.id === provider)?.models ?? [])
-            ).map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
         </Field>
         <Field label={en ? "Execution profile" : "Hồ sơ thực thi"}>
           <select
             value={value.execution_profile ?? ""}
-            onChange={(e) =>
-              set("execution_profile", e.target.value || undefined)
-            }
+            onChange={(e) => set("execution_profile", e.target.value || undefined)}
           >
-            <option value="">
-              {en ? "Run default" : "Mặc định lượt chạy"}
-            </option>
+            <option value="">{en ? "Run default" : "Mặc định lượt chạy"}</option>
             {["FAST", "STANDARD", "DEEP"].map((v) => (
               <option key={v}>{v}</option>
             ))}
@@ -182,9 +182,7 @@ export function StepAgentFields({
             value={value.reasoning_effort ?? ""}
             onChange={(e) => set("reasoning_effort", e.target.value || null)}
           >
-            <option value="">
-              {en ? "Provider default" : "Mặc định nhà cung cấp"}
-            </option>
+            <option value="">{en ? "Provider default" : "Mặc định nhà cung cấp"}</option>
             {(provider === "codex"
               ? ["none", "minimal", "low", "medium", "high", "xhigh"]
               : ["low", "medium", "high", "xhigh", "max"]
@@ -199,12 +197,7 @@ export function StepAgentFields({
             min={1000}
             max={86400000}
             value={value.timeout_ms ?? ""}
-            onChange={(e) =>
-              set(
-                "timeout_ms",
-                e.target.value ? Number(e.target.value) : undefined,
-              )
-            }
+            onChange={(e) => set("timeout_ms", e.target.value ? Number(e.target.value) : undefined)}
           />
         </Field>
         <Field label={en ? "Context token budget" : "Ngân sách token ngữ cảnh"}>
@@ -214,10 +207,7 @@ export function StepAgentFields({
             max={64000}
             value={value.context_tokens ?? ""}
             onChange={(e) =>
-              set(
-                "context_tokens",
-                e.target.value ? Number(e.target.value) : undefined,
-              )
+              set("context_tokens", e.target.value ? Number(e.target.value) : undefined)
             }
           />
         </Field>
@@ -237,9 +227,7 @@ export function StepAgentFields({
             }
           />
         </Field>
-        <Field
-          label={en ? "Retry backoff (s)" : "Thời gian chờ thử lại (giây)"}
-        >
+        <Field label={en ? "Retry backoff (s)" : "Thời gian chờ thử lại (giây)"}>
           <input
             type="number"
             min={0}
@@ -269,9 +257,7 @@ export function StepAgentFields({
             onChange={(e) =>
               set(
                 "verification",
-                e.target.value
-                  ? { ...value.verification, command: e.target.value }
-                  : undefined,
+                e.target.value ? { ...value.verification, command: e.target.value } : undefined,
               )
             }
           />

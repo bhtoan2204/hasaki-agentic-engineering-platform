@@ -87,7 +87,12 @@ export function classify(branch: GoTestReport, base: GoTestReport): Classificati
     if (b.status !== "fail") continue;
     const base0 = base[pkg];
     if (!base0) {
-      out.regressions.push({ package: pkg, tests: b.tests, build_errors: b.buildErrors, reason: "package does not exist or was not tested on the base branch" });
+      out.regressions.push({
+        package: pkg,
+        tests: b.tests,
+        build_errors: b.buildErrors,
+        reason: "package does not exist or was not tested on the base branch",
+      });
       continue;
     }
     const baseTests = new Set(base0.status === "fail" ? base0.tests : []);
@@ -99,8 +104,19 @@ export function classify(branch: GoTestReport, base: GoTestReport): Classificati
     // A package failing with no identifiable test/compile error (e.g. panic in TestMain) is new only if base passed.
     const opaqueNew = !b.tests.length && !b.buildErrors.length && base0.status !== "fail";
     if (newTests.length || newErrors.length || opaqueNew)
-      out.regressions.push({ package: pkg, tests: newTests, build_errors: newErrors, reason: opaqueNew ? "package fails on the branch but passes on base" : "new failures compared to base" });
-    if (oldTests.length || oldErrors.length || (!b.tests.length && !b.buildErrors.length && base0.status === "fail"))
+      out.regressions.push({
+        package: pkg,
+        tests: newTests,
+        build_errors: newErrors,
+        reason: opaqueNew
+          ? "package fails on the branch but passes on base"
+          : "new failures compared to base",
+      });
+    if (
+      oldTests.length ||
+      oldErrors.length ||
+      (!b.tests.length && !b.buildErrors.length && base0.status === "fail")
+    )
       out.pre_existing.push({ package: pkg, tests: oldTests, build_errors: oldErrors });
   }
   return out;
@@ -119,7 +135,10 @@ async function git(cwd: string, ...args: string[]) {
 export async function goBaseline(
   workspace: string,
   packages: string[],
-  run: (command: string, cwd: string) => Promise<{ code: number | null; output: string; timedOut: boolean }>,
+  run: (
+    command: string,
+    cwd: string,
+  ) => Promise<{ code: number | null; output: string; timedOut: boolean }>,
 ): Promise<{ sha: string; report: GoTestReport; cached: string[] }> {
   const sha = await git(workspace, "rev-parse", `origin/${await workspaceBaseBranch(workspace)}`);
   const repoKey = await git(workspace, "rev-parse", "--git-common-dir");
@@ -127,36 +146,73 @@ export async function goBaseline(
   const cached: string[] = [];
   const todo: string[] = [];
   const persisted = new Map(
-    (await q<{ package: string; report: GoPackageResult }>(pool, "SELECT package, report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2 AND package = ANY($3)", [repoKey, sha, packages])).map((r) => [r.package, r.report]),
+    (
+      await q<{ package: string; report: GoPackageResult }>(
+        pool,
+        "SELECT package, report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2 AND package = ANY($3)",
+        [repoKey, sha, packages],
+      )
+    ).map((r) => [r.package, r.report]),
   );
   for (const p of packages) {
-    const hit = baselineCache.get(`${repoKey}@${sha}:${p}`) ?? (persisted.has(p) ? { [p]: persisted.get(p)! } : undefined);
-    if (hit) Object.assign(report, hit), cached.push(p);
+    const hit =
+      baselineCache.get(`${repoKey}@${sha}:${p}`) ??
+      (persisted.has(p) ? { [p]: persisted.get(p)! } : undefined);
+    if (hit) (Object.assign(report, hit), cached.push(p));
     else todo.push(p);
   }
   if (todo.length) {
-    const dir = join(config.dataDir, "baselines", `${sha.slice(0, 12)}-${process.pid}-${Date.now()}`);
+    const dir = join(
+      config.dataDir,
+      "baselines",
+      `${sha.slice(0, 12)}-${process.pid}-${Date.now()}`,
+    );
     mkdirSync(join(config.dataDir, "baselines"), { recursive: true });
     await git(workspace, "worktree", "add", "--detach", dir, sha);
     try {
       // Packages that only exist on the branch would make `go test` abort for all packages: test only those present on base.
-      const listed = await exec("go", ["list", "-e", "-f", "{{.ImportPath}}|{{if .Error}}err{{end}}|{{len .GoFiles}}{{len .TestGoFiles}}{{len .XTestGoFiles}}", ...todo], { cwd: dir, maxBuffer: 8 * 1024 * 1024 })
+      const listed = await exec(
+        "go",
+        [
+          "list",
+          "-e",
+          "-f",
+          "{{.ImportPath}}|{{if .Error}}err{{end}}|{{len .GoFiles}}{{len .TestGoFiles}}{{len .XTestGoFiles}}",
+          ...todo,
+        ],
+        { cwd: dir, maxBuffer: 8 * 1024 * 1024 },
+      )
         .then((r) => r.stdout)
         .catch((e) => String(e.stdout ?? ""));
-      const present = new Set(listed.split("\n").filter((l) => l && l.split("|")[1] === "" && l.split("|")[2] !== "000").map((l) => l.split("|")[0]));
+      const present = new Set(
+        listed
+          .split("\n")
+          .filter((l) => l && l.split("|")[1] === "" && l.split("|")[2] !== "000")
+          .map((l) => l.split("|")[0]),
+      );
       const testable = todo.filter((p) => present.has(p));
-      const r = testable.length ? await run(`go test -short -timeout 5m ${testable.join(" ")}`, dir) : { code: 0, output: "", timedOut: false };
+      const r = testable.length
+        ? await run(`go test -short -timeout 5m ${testable.join(" ")}`, dir)
+        : { code: 0, output: "", timedOut: false };
       const parsed = parseGoTest(r.output);
       for (const p of todo) {
-        const res = parsed[p] ?? (r.timedOut ? { status: "fail" as const, tests: [], buildErrors: ["timed out"] } : undefined);
+        const res =
+          parsed[p] ??
+          (r.timedOut
+            ? { status: "fail" as const, tests: [], buildErrors: ["timed out"] }
+            : undefined);
         if (res) {
           report[p] = res;
           baselineCache.set(`${repoKey}@${sha}:${p}`, { [p]: res });
-          await q(pool, "INSERT INTO test_baselines (repo_key, base_sha, package, report) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING", [repoKey, sha, p, json(res)]);
+          await q(
+            pool,
+            "INSERT INTO test_baselines (repo_key, base_sha, package, report) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+            [repoKey, sha, p, json(res)],
+          );
         }
       }
     } finally {
-      await git(workspace, "worktree", "remove", "--force", dir).catch(() => { });
+      await git(workspace, "worktree", "remove", "--force", dir).catch(() => {});
     }
   }
   return { sha, report, cached };
@@ -167,12 +223,26 @@ export async function goBaseline(
  * GO_TEST_SKIP so the branch run does not wait again for failures that are already established as pre-existing
  * (e.g. integration tests timing out on an unreachable DB). A new base commit has no entries, so nothing stale is skipped.
  */
-export async function knownBaseFailures(workspace: string): Promise<{ sha: string; tests: string[]; skipRegex: string | null }> {
+export async function knownBaseFailures(
+  workspace: string,
+): Promise<{ sha: string; tests: string[]; skipRegex: string | null }> {
   try {
     const sha = await git(workspace, "rev-parse", `origin/${await workspaceBaseBranch(workspace)}`);
     const repoKey = await git(workspace, "rev-parse", "--git-common-dir");
-    const rows = await q<{ report: GoPackageResult }>(pool, "SELECT report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2", [repoKey, sha]);
-    const tests = [...new Set(rows.flatMap((r) => (r.report.status === "fail" && !r.report.buildErrors.length ? r.report.tests : [])).map((t) => t.split("/")[0]))].sort();
+    const rows = await q<{ report: GoPackageResult }>(
+      pool,
+      "SELECT report FROM test_baselines WHERE repo_key = $1 AND base_sha = $2",
+      [repoKey, sha],
+    );
+    const tests = [
+      ...new Set(
+        rows
+          .flatMap((r) =>
+            r.report.status === "fail" && !r.report.buildErrors.length ? r.report.tests : [],
+          )
+          .map((t) => t.split("/")[0]),
+      ),
+    ].sort();
     const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return { sha, tests, skipRegex: tests.length ? `^(${tests.map(esc).join("|")})$` : null };
   } catch {

@@ -12,7 +12,11 @@ export async function loadPersonalIntegrations() {
   if (!id || Date.now() - (loaded.get(id) ?? 0) < 15_000) return;
   let p = pending.get(id);
   if (!p) {
-    p = Promise.all([loadArgoToken(), loadSplunkCookie(), loadKafkaCookie(), loadVaultToken()]).then(() => { loaded.set(id, Date.now()); }).finally(() => pending.delete(id));
+    p = Promise.all([loadArgoToken(), loadSplunkCookie(), loadKafkaCookie(), loadVaultToken()])
+      .then(() => {
+        loaded.set(id, Date.now());
+      })
+      .finally(() => pending.delete(id));
     pending.set(id, p);
   }
   await p;

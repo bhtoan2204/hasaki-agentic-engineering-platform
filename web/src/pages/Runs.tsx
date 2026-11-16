@@ -32,11 +32,7 @@ import "./Runs.css";
 const DONE_STEP = new Set(["COMPLETED", "SKIPPED"]);
 
 /** Segmented progress bar: one segment per step, coloured by its status (pending steps stay on the track). */
-function StepProgress({
-  steps,
-}: {
-  steps: Array<{ key: string; status: string }> | null;
-}) {
+function StepProgress({ steps }: { steps: Array<{ key: string; status: string }> | null }) {
   const { status, t } = useI18n();
   const list = steps ?? [];
   if (!list.length) return <span className="muted small">—</span>;
@@ -53,8 +49,7 @@ function StepProgress({
             key={s.key}
             title={`${s.key}: ${status(s.status)}`}
             style={{
-              background:
-                s.status === "PENDING" ? undefined : STATUS_COLORS[s.status],
+              background: s.status === "PENDING" ? undefined : STATUS_COLORS[s.status],
             }}
           />
         ))}
@@ -110,9 +105,7 @@ export function RunsTable({ runs }: { runs: any[] }) {
                 </div>
                 {(r.branch || r.work_item_code) && (
                   <div className="runs-meta">
-                    {r.work_item_code && (
-                      <span className="mono">{r.work_item_code}</span>
-                    )}
+                    {r.work_item_code && <span className="mono">{r.work_item_code}</span>}
                     {r.branch && (
                       <span className="runs-branch mono" title={r.branch}>
                         <GitBranch size={12} strokeWidth={2} />
@@ -179,15 +172,9 @@ export function RunsPage() {
     [status],
   );
   // Stat cards always describe the unfiltered list; when a status filter is active fetch it separately.
-  const { data: allRuns, reload: reloadAll } = useApi<any[]>(
-    status ? "/api/runs" : null,
-    [status],
-  );
+  const { data: allRuns, reload: reloadAll } = useApi<any[]>(status ? "/api/runs" : null, [status]);
   const { data: wfs } = useApi<any[]>("/api/workflows");
-  useLive(
-    null,
-    (p) => (!p || p.kind === "status") && (reload(), status && reloadAll()),
-  );
+  useLive(null, (p) => (!p || p.kind === "status") && (reload(), status && reloadAll()));
   const [wf, setWf] = useState("");
   const [q, setQ] = useState("");
 
@@ -261,11 +248,7 @@ export function RunsPage() {
           tone="wait"
           label={t("ov.waitingYou")}
           value={base ? counts.waiting : "—"}
-          hint={
-            base
-              ? t("runs.waitHint", { q: openQs, p: counts.paused })
-              : undefined
-          }
+          hint={base ? t("runs.waitHint", { q: openQs, p: counts.paused }) : undefined}
           onClick={() => toggle("WAITING")}
         />
         <StatCard
@@ -292,9 +275,7 @@ export function RunsPage() {
             onChange={setStatus}
             options={[
               ["", t("common.all")],
-              ...STATUS_FILTERS.map(
-                (s) => [s, statusName(s)] as [string, string],
-              ),
+              ...STATUS_FILTERS.map((s) => [s, statusName(s)] as [string, string]),
             ]}
           />
         </div>
@@ -318,8 +299,7 @@ export function RunsPage() {
         <RunsTable runs={shown} />
       )}
       <div className="muted small runs-foot">
-        {t("runs.orPrefix")} <a href="#/work-items">{t("nav.workItems")}</a>{" "}
-        {t("runs.orSuffix")}
+        {t("runs.orPrefix")} <a href="#/work-items">{t("nav.workItems")}</a> {t("runs.orSuffix")}
       </div>
     </div>
   );

@@ -7,7 +7,8 @@ export { pool };
  * They are kept read-mostly for history and the backwards-compatible /api/tasks endpoints;
  * new execution state lives in the workflow_* tables (see src/workflow).
  */
-const q = async <T = any>(sql: string, params: unknown[] = []) => (await pool.query(sql, params)).rows as T[];
+const q = async <T = any>(sql: string, params: unknown[] = []) =>
+  (await pool.query(sql, params)).rows as T[];
 
 export type TaskStatus = "queued" | "running" | "waiting_answer" | "review" | "idle" | "failed";
 
@@ -29,9 +30,17 @@ export const tasks = {
     return (await q<TaskRow>("SELECT * FROM tasks WHERE code = $1", [code]))[0];
   },
   list() {
-    return q("SELECT code, name, project, status, error, created_at, updated_at FROM tasks ORDER BY updated_at DESC");
+    return q(
+      "SELECT code, name, project, status, error, created_at, updated_at FROM tasks ORDER BY updated_at DESC",
+    );
   },
-  async upsert(code: string, workId: number | null, name: string, project: string, payload: unknown) {
+  async upsert(
+    code: string,
+    workId: number | null,
+    name: string,
+    project: string,
+    payload: unknown,
+  ) {
     await q(
       `INSERT INTO tasks (code, work_id, name, project, payload, status) VALUES ($1, $2, $3, $4, $5, 'queued')
        ON CONFLICT (code) DO UPDATE SET work_id = excluded.work_id, name = excluded.name, project = excluded.project,
@@ -40,7 +49,11 @@ export const tasks = {
     );
   },
   async setStatus(code: string, status: TaskStatus, error: string | null = null) {
-    await q("UPDATE tasks SET status = $1, error = $2, updated_at = now() WHERE code = $3", [status, error, code]);
+    await q("UPDATE tasks SET status = $1, error = $2, updated_at = now() WHERE code = $3", [
+      status,
+      error,
+      code,
+    ]);
     await events.add(code, "status", error ? `${status}: ${error}` : status);
   },
   async setSession(code: string, sessionId: string) {
@@ -50,7 +63,11 @@ export const tasks = {
 
 export const events = {
   async add(code: string, kind: string, content: string) {
-    await q("INSERT INTO events (task_code, kind, content) VALUES ($1, $2, $3)", [code, kind, content]);
+    await q("INSERT INTO events (task_code, kind, content) VALUES ($1, $2, $3)", [
+      code,
+      kind,
+      content,
+    ]);
   },
   list(code: string, afterId = 0) {
     return q("SELECT * FROM events WHERE task_code = $1 AND id > $2 ORDER BY id", [code, afterId]);
@@ -68,26 +85,38 @@ export interface QuestionRow {
 
 export const questions = {
   async add(code: string, x: { question: string; context?: string; options?: string[] }) {
-    await q("INSERT INTO questions (task_code, question, context, options) VALUES ($1, $2, $3, $4)", [
-      code,
-      x.question,
-      x.context ?? "",
-      JSON.stringify(x.options ?? []),
-    ]);
+    await q(
+      "INSERT INTO questions (task_code, question, context, options) VALUES ($1, $2, $3, $4)",
+      [code, x.question, x.context ?? "", JSON.stringify(x.options ?? [])],
+    );
   },
   list(code: string) {
     return q<QuestionRow>("SELECT * FROM questions WHERE task_code = $1 ORDER BY id", [code]);
   },
   open(code: string) {
-    return q<QuestionRow>("SELECT * FROM questions WHERE task_code = $1 AND answer IS NULL ORDER BY id", [code]);
+    return q<QuestionRow>(
+      "SELECT * FROM questions WHERE task_code = $1 AND answer IS NULL ORDER BY id",
+      [code],
+    );
   },
   async answer(id: string, code: string, answer: string) {
-    await q("UPDATE questions SET answer = $1, answered_at = now() WHERE id = $2 AND task_code = $3", [answer, id, code]);
+    await q(
+      "UPDATE questions SET answer = $1, answered_at = now() WHERE id = $2 AND task_code = $3",
+      [answer, id, code],
+    );
   },
 };
 
 export const prs = {
-  async upsert(p: { code: string; repo: string; branch: string; url: string; title: string; summary: string; decisions: unknown }) {
+  async upsert(p: {
+    code: string;
+    repo: string;
+    branch: string;
+    url: string;
+    title: string;
+    summary: string;
+    decisions: unknown;
+  }) {
     await q(
       `INSERT INTO prs (task_code, repo, branch, url, title, summary, decisions) VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (task_code, repo) DO UPDATE SET url = excluded.url, title = excluded.title,
@@ -101,7 +130,14 @@ export const prs = {
 };
 
 export const inbox = {
-  async upsert(t: { workId: number; code: string; name: string; project: string; raw: unknown; ownerId: number }) {
+  async upsert(t: {
+    workId: number;
+    code: string;
+    name: string;
+    project: string;
+    raw: unknown;
+    ownerId: number;
+  }) {
     await q(
       `INSERT INTO inbox (work_id, code, name, project, raw, owner_id) VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (owner_id, work_id) WHERE owner_id IS NOT NULL DO UPDATE SET code = excluded.code, name = excluded.name, project = excluded.project,
@@ -120,18 +156,30 @@ export const inbox = {
     );
   },
   async markPicked(workId: number, ownerId: number) {
-    await q("UPDATE inbox SET picked = true WHERE work_id = $1 AND owner_id = $2", [workId, ownerId]);
+    await q("UPDATE inbox SET picked = true WHERE work_id = $1 AND owner_id = $2", [
+      workId,
+      ownerId,
+    ]);
   },
   async unpicked(ownerId: number) {
-    return q<{ work_id: string; code: string }>("SELECT work_id, code FROM inbox WHERE NOT picked AND owner_id = $1 ORDER BY work_id", [ownerId]);
+    return q<{ work_id: string; code: string }>(
+      "SELECT work_id, code FROM inbox WHERE NOT picked AND owner_id = $1 ORDER BY work_id",
+      [ownerId],
+    );
   },
 };
 
 export const settings = {
   async get(key: string) {
-    return (await q<{ value: string }>("SELECT value FROM settings WHERE key = $1", [key]))[0]?.value || null;
+    return (
+      (await q<{ value: string }>("SELECT value FROM settings WHERE key = $1", [key]))[0]?.value ||
+      null
+    );
   },
   async set(key: string, value: string) {
-    await q("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [key, value]);
+    await q(
+      "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      [key, value],
+    );
   },
 };

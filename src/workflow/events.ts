@@ -1,12 +1,33 @@
 import { pool, q, json, insertDeferred, type Db } from "../db/pool.ts";
 
 /** Event kinds that make up an agent conversation; the run timeline hides the verbose ones. */
-export const TRANSCRIPT_ONLY = ["system_prompt", "prompt", "thinking", "tool_result", "result", "log"];
+export const TRANSCRIPT_ONLY = [
+  "system_prompt",
+  "prompt",
+  "thinking",
+  "tool_result",
+  "result",
+  "log",
+];
 
 export const runEvents = {
   /** Inside withTx the row is written at COMMIT together with the transaction's other events (one round trip). */
-  async add(db: Db, runId: number, kind: string, content: string, stepId: number | null = null, attemptId: number | null = null, data: unknown = null) {
-    await insertDeferred(db, "workflow_events", ["run_id", "step_id", "attempt_id", "kind", "content", "data"], [runId, stepId, attemptId, kind, content, json(data)]);
+  async add(
+    db: Db,
+    runId: number,
+    kind: string,
+    content: string,
+    stepId: number | null = null,
+    attemptId: number | null = null,
+    data: unknown = null,
+    level: string | null = null,
+  ) {
+    await insertDeferred(
+      db,
+      "workflow_events",
+      ["run_id", "step_id", "attempt_id", "kind", "content", "data", "level"],
+      [runId, stepId, attemptId, kind, content, json(data), level],
+    );
   },
   /** Run timeline: status changes, notes, tool calls (truncated); full transcripts are fetched per attempt. */
   list(runId: number, afterId = 0, db: Db = pool) {
@@ -16,11 +37,15 @@ export const runEvents = {
               CASE WHEN length(e.content) > 600 THEN left(e.content, 600) || '…' ELSE e.content END AS content
          FROM workflow_events e LEFT JOIN workflow_steps s ON s.id = e.step_id
         WHERE e.run_id = $1 AND e.id > $2 AND e.kind <> ALL($3) ORDER BY e.id LIMIT 2000`,
-      [runId, afterId, TRANSCRIPT_ONLY],
+      [runId, afterId, [...TRANSCRIPT_ONLY, "trace"]],
     );
   },
-  /** Everything that happened inside one attempt, in order (incremental with `afterId`). */
+  /** Everything that happened inside one attempt, in order (incremental with `afterId`); trace logs have their own API. */
   transcript(attemptId: number, afterId = 0, db: Db = pool) {
-    return q(db, "SELECT id, kind, content, data, created_at FROM workflow_events WHERE attempt_id = $1 AND id > $2 ORDER BY id LIMIT 5000", [attemptId, afterId]);
+    return q(
+      db,
+      "SELECT id, kind, content, data, created_at FROM workflow_events WHERE attempt_id = $1 AND id > $2 AND kind <> 'trace' ORDER BY id LIMIT 5000",
+      [attemptId, afterId],
+    );
   },
 };

@@ -1,3 +1,6 @@
+import { livePrerequisites } from "./livePrerequisites.ts";
+import { unsupportedLiveTools } from "./liveProvider.ts";
+import { materializePonytailSuite } from "./ponytailSuite.ts";
 import { compareContextEffect } from "./contextEffect.ts";
 import { contextInventory } from "./controls.ts";
 import { pool, q, one, withTx } from "../db/pool.ts";
@@ -19,22 +22,24 @@ import { HttpError } from "../http/error.ts";
 
 export { ConfigurationSchema } from "./configuration.ts";
 import { ConfigurationSchema } from "./configuration.ts";
-export async function publishBuiltinSuite() {
+export async function publishBuiltinSuite(
+  variant: "backend-v1" | "knowledge-ponytail-v1" = "backend-v1",
+) {
   return withTx(async (c) => {
     await q(c, "SELECT pg_advisory_xact_lock($1)", [727_027]);
-    const suite = await materializeSuite(),
+    const suite =
+        variant === "knowledge-ponytail-v1"
+          ? await materializePonytailSuite()
+          : await materializeSuite(),
       content = JSON.stringify(suite),
       hash = sha256(content);
-    const old = await one(
-      c,
-      "SELECT * FROM benchmark_suites WHERE suite_key=$1 AND version=$2",
-      [suite.key, suite.version],
-    );
+    const old = await one(c, "SELECT * FROM benchmark_suites WHERE suite_key=$1 AND version=$2", [
+      suite.key,
+      suite.version,
+    ]);
     if (old) {
       if (old.content_hash !== hash)
-        throw new Error(
-          "Immutable benchmark version changed; publish a new suite version",
-        );
+        throw new Error("Immutable benchmark version changed; publish a new suite version");
       return old;
     }
     const row = await one(
@@ -57,14 +62,13 @@ export async function publishBuiltinSuite() {
           JSON.stringify(task),
         ],
       );
-    for (const logical of Object.keys(suite.repositories))
+    for (const logical of variant === "backend-v1" ? Object.keys(suite.repositories) : [])
       await repositories.upsert(
         fixtureName(logical),
         {
           provider: "benchmark",
           projects: [`__benchmark:${suite.key}`],
-          description:
-            "Synthetic evaluation fixture; never a production repository",
+          description: "Synthetic evaluation fixture; never a production repository",
           allowed_actions: ["read", "write"],
         },
         c,
@@ -92,10 +96,7 @@ export async function createEvaluation(
   if (!config.evaluation.enabled)
     throw new HttpError(409, "Evaluation framework is disabled on this worker");
   if (!input.request_key || input.request_key.length > 160)
-    throw new HttpError(
-      400,
-      "A bounded request_key is required for idempotency",
-    );
+    throw new HttpError(400, "A bounded request_key is required for idempotency");
   const cfg = ConfigurationSchema.parse(input.configuration ?? {}),
     scoring = ScoringSchema.parse(input.scoring ?? defaultScoring);
   if (
@@ -103,17 +104,23 @@ export async function createEvaluation(
     cfg.repetitions > config.evaluation.maxRepetitions ||
     cfg.max_case_seconds > config.evaluation.maxCaseSeconds ||
     cfg.max_tokens > config.evaluation.maxTokens ||
-    cfg.max_cost_usd > config.evaluation.maxCostUsd
+    cfg.max_cost_usd > config.evaluation.maxCostUsd ||
+    cfg.max_suite_cost_usd > config.evaluation.maxSuiteCostUsd
   )
     throw new HttpError(400, "Evaluation exceeds local execution limits");
   if (cfg.mode === "live" && (!input.paid_approval || !isAdmin))
-    throw new HttpError(
-      403,
-      "Live paid evaluation requires explicit administrator approval",
-    );
-  const row = await one(pool, "SELECT * FROM benchmark_suites WHERE id=$1", [
-    input.suite_id,
-  ]);
+    throw new HttpError(403, "Live paid evaluation requires explicit administrator approval");
+  if (cfg.mode === "live" && cfg.allowed_tools) {
+    const unsupported = unsupportedLiveTools(cfg.allowed_tools);
+    if (!cfg.allowed_tools.length || unsupported.length)
+      throw new HttpError(
+        400,
+        unsupported.length
+          ? `Live evaluations cannot allow: ${unsupported.join(", ")}`
+          : "Live evaluations need at least one allowed tool",
+      );
+  }
+  const row = await one(pool, "SELECT * FROM benchmark_suites WHERE id=$1", [input.suite_id]);
   if (!row) throw new HttpError(404, "Suite not found");
   const suite = SuiteSchema.parse(row.manifest),
     cases = suite.cases.slice(0, cfg.case_limit);
@@ -125,40 +132,33 @@ export async function createEvaluation(
     blocked = (e as Error).message;
   }
   if (cfg.mode === "live")
-    blocked =
-      "Live execution is BLOCKED: this installation has no verified provider connector enforcing both hard token/cost budgets and outbound API isolation. Approval is recorded, not treated as a sandbox guarantee.";
-  const inventory = cfg.provider_sequence
-    ? await contextInventory(ownerId)
-    : null;
+    blocked = blocked ? `Live execution is BLOCKED: ${blocked}` : await livePrerequisites(cfg);
+  const inventory = cfg.provider_sequence ? await contextInventory(ownerId) : null;
   const frozen = {
     context_inventory_hash: inventory,
     ...cfg,
     sandbox,
     blocked,
-    paid_approval:
-      cfg.mode === "live"
-        ? { by: ownerId, at: new Date().toISOString() }
-        : null,
+    paid_approval: cfg.mode === "live" ? { by: ownerId, at: new Date().toISOString() } : null,
     harness_hash: suite.harness_hash,
+    estimated_usd_per_million: config.evaluation.estimatedUsdPerMillion,
   };
   const hashConfiguration: Record<string, unknown> = { ...cfg };
   if (!cfg.provider_sequence) delete hashConfiguration.context_tokens; // Preserve legacy request-key hashes.
+  if (!cfg.ponytail) delete hashConfiguration.ponytail;
+  if (cfg.max_suite_cost_usd === 300) delete hashConfiguration.max_suite_cost_usd;
   const hash = sha256(JSON.stringify({ ...hashConfiguration, scoring }));
   return withTx(async (c) => {
     await q(c, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       `evaluation:${ownerId}:${input.request_key}`,
     ]);
-    const old = await one(
-      c,
-      "SELECT * FROM evaluation_runs WHERE owner_id=$1 AND request_key=$2",
-      [ownerId, input.request_key],
-    );
+    const old = await one(c, "SELECT * FROM evaluation_runs WHERE owner_id=$1 AND request_key=$2", [
+      ownerId,
+      input.request_key,
+    ]);
     if (old) {
       if (old.configuration_hash !== hash || old.suite_id !== row.id)
-        throw new HttpError(
-          409,
-          "Idempotency key reused with a different configuration",
-        );
+        throw new HttpError(409, "Idempotency key reused with a different configuration");
       return old;
     }
     const constraints = sha256(
@@ -173,14 +173,14 @@ export async function createEvaluation(
         sandbox,
         ...(cfg.provider_sequence
           ? {
-            controlled_version: "provider-benchmark-v1",
-            context_inventory_hash: inventory,
-            mode: cfg.mode,
-            adapter: cfg.adapter,
-            prompt: cfg.prompt_version,
-            tools: cfg.allowed_tools ?? null,
-            context_tokens: cfg.context_tokens,
-          }
+              controlled_version: "provider-benchmark-v1",
+              context_inventory_hash: inventory,
+              mode: cfg.mode,
+              adapter: cfg.adapter,
+              prompt: cfg.prompt_version,
+              tools: cfg.allowed_tools ?? null,
+              context_tokens: cfg.context_tokens,
+            }
           : {}),
       }),
     );
@@ -197,11 +197,7 @@ export async function createEvaluation(
         input.request_key,
       ],
     );
-    const ids = await q(
-      c,
-      "SELECT id,task_id FROM benchmark_cases WHERE suite_id=$1",
-      [row.id],
-    );
+    const ids = await q(c, "SELECT id,task_id FROM benchmark_cases WHERE suite_id=$1", [row.id]);
     const tasks: any[] = [];
     for (let repetition = 1; repetition <= cfg.repetitions; repetition++)
       for (const task of cases) {
@@ -209,12 +205,7 @@ export async function createEvaluation(
         const cr = await one(
           c,
           `INSERT INTO evaluation_case_runs(evaluation_id,case_id,repetition,workflow_step_key) VALUES($1,$2,$3,$4) RETURNING id`,
-          [
-            evaluation!.id,
-            ids.find((r) => r.task_id === task.task_id)!.id,
-            repetition,
-            key,
-          ],
+          [evaluation!.id, ids.find((r) => r.task_id === task.task_id)!.id, repetition, key],
         );
         const previous = tasks.length ? tasks[tasks.length - 1].key : null;
         const phases = cfg.provider_sequence ?? [];
@@ -230,20 +221,51 @@ export async function createEvaluation(
                   : ordinal === phases.length - 1
                     ? "verification"
                     : "implementation";
+          const semantic =
+            role === "verification"
+              ? "review"
+              : role === "implementation"
+                ? task.category === "review"
+                  ? "review"
+                  : "implement"
+                : null;
           tasks.push({
             key: phaseKey,
-            type: role === "implementation" ? "coding_agent" : "agent",
+            type:
+              role === "implementation" && task.category !== "review" ? "coding_agent" : "agent",
             name: `${task.task_id}: ${agent.provider} · ${role}`,
-            depends_on: ordinal
-              ? [`${key}_p${ordinal}`]
-              : previous
-                ? [previous]
-                : [],
+            depends_on: ordinal ? [`${key}_p${ordinal}`] : previous ? [previous] : [],
             config: {
-              evaluation_phase: { case_run_id: cr!.id, ordinal, role },
+              evaluation_phase: {
+                case_run_id: cr!.id,
+                ordinal,
+                role,
+                ponytail: cfg.ponytail,
+                ...((cfg.ponytail || cfg.mode === "live") && semantic
+                  ? { semantic_role: semantic }
+                  : {}),
+              },
               instructions: task.description,
+              ...(task.category === "review" ? { independent: true } : {}),
+              ...(cfg.ponytail && semantic
+                ? {
+                    skills: [
+                      semantic === "review" ? "skill.ext.ponytail-review" : "skill.ext.ponytail",
+                    ],
+                  }
+                : {}),
               agent: {
                 ...agent,
+                ...(task.validation.commands
+                  ? {
+                      verification: {
+                        command: task.validation.commands.join(" && "),
+                        max_repairs: 1,
+                        baseline: false,
+                        timeout_seconds: cfg.max_case_seconds,
+                      },
+                    }
+                  : {}),
                 fallback: { mode: "disabled" },
                 model: agent.model ?? null,
                 execution_profile: "STANDARD",
@@ -259,14 +281,7 @@ export async function createEvaluation(
           await q(
             c,
             "INSERT INTO evaluation_provider_phases(case_run_id,ordinal,step_key,provider,model,role) VALUES($1,$2,$3,$4,$5,$6)",
-            [
-              cr!.id,
-              ordinal,
-              phaseKey,
-              agent.provider,
-              agent.model ?? null,
-              role,
-            ],
+            [cr!.id, ordinal, phaseKey, agent.provider, agent.model ?? null, role],
           );
         }
         tasks.push({
@@ -275,8 +290,7 @@ export async function createEvaluation(
           name: `${task.task_id} · repetition ${repetition}`,
           depends_on: tasks.length ? [tasks[tasks.length - 1].key] : [],
           config: { action: "benchmark_case", case_run_id: cr!.id },
-          requires_approval:
-            !!task.clarification && cfg.mode !== "dry_run" && !blocked,
+          requires_approval: !!task.clarification && cfg.mode !== "dry_run" && !blocked,
           max_attempts: 2,
           retry_backoff_seconds: 0,
         });
@@ -291,7 +305,9 @@ export async function createEvaluation(
       definitionKey: definition.key,
       ownerId,
       title: `Evaluation ${evaluation!.id}: ${suite.key}`,
-      repositories: Object.keys(suite.repositories).map(fixtureName),
+      repositories: Object.keys(suite.repositories).map((name) =>
+        suite.key === "knowledge-ponytail-v1" ? name : fixtureName(name),
+      ),
       inputs: { project: `__benchmark:${suite.key}` },
       start: false,
       agentProvider: "codex",
@@ -359,18 +375,12 @@ export async function createComparison(
       "Comparisons require identical suite versions, case/repetition sets, validation, scoring and execution constraints",
     );
   if (a.configuration.provider_sequence || b.configuration.provider_sequence) {
-    if (
-      !a.configuration.provider_sequence ||
-      !b.configuration.provider_sequence
-    )
-      throw new HttpError(
-        409,
-        "Legacy and controlled provider experiments cannot be paired",
-      );
+    if (!a.configuration.provider_sequence || !b.configuration.provider_sequence)
+      throw new HttpError(409, "Legacy and controlled provider experiments cannot be paired");
     if (
       a.configuration.context_variant !== b.configuration.context_variant &&
       JSON.stringify(a.configuration.provider_sequence) !==
-      JSON.stringify(b.configuration.provider_sequence)
+        JSON.stringify(b.configuration.provider_sequence)
     )
       throw new HttpError(
         409,
@@ -384,20 +394,17 @@ export async function createComparison(
   );
 }
 export async function comparisonDetail(id: number, ownerId: number) {
-  const pair = await one(
-    pool,
-    "SELECT * FROM evaluation_comparisons WHERE id=$1 AND owner_id=$2",
-    [id, ownerId],
-  );
+  const pair = await one(pool, "SELECT * FROM evaluation_comparisons WHERE id=$1 AND owner_id=$2", [
+    id,
+    ownerId,
+  ]);
   if (!pair) throw new HttpError(404, "Comparison not found");
   const [a, b] = await Promise.all([
     evaluationDetail(pair.baseline_id, ownerId),
     evaluationDetail(pair.candidate_id, ownerId),
   ]);
   const critical = new Set<string>(
-    a.cases
-      .filter((c: any) => c.definition.critical)
-      .map((c: any) => c.task_id),
+    a.cases.filter((c: any) => c.definition.critical).map((c: any) => c.task_id),
   );
   const report = compareResults(
     a.cases.filter((c: any) => c.case_run_id),
@@ -406,10 +413,7 @@ export async function comparisonDetail(id: number, ownerId: number) {
     critical,
     pair.policy,
   );
-  if (
-    report.verdict === "PASS" &&
-    (a.status !== "COMPLETED" || b.status !== "COMPLETED")
-  )
+  if (report.verdict === "PASS" && (a.status !== "COMPLETED" || b.status !== "COMPLETED"))
     report.verdict = "INCONCLUSIVE";
   return { ...pair, report, context_report: compareContextEffect(a, b) };
 }

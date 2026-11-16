@@ -11,9 +11,7 @@ export function trustedProductionReturn(value: string | null): string {
   const [path, ...query] = value.split("?");
   const legacy = legacyProductionRoute(path, query.join("?"));
   if (legacy) return legacy;
-  return /^\/prod-errors(?:\/(?:overview|incidents|services|service|settings))?$/.test(
-    path,
-  )
+  return /^\/prod-errors(?:\/(?:overview|incidents|services|service|settings))?$/.test(path)
     ? value
     : "/prod-errors/incidents";
 }

@@ -1,8 +1,23 @@
 import { z } from "zod";
+
+/** Shown to the developer as-is. A one-word probe such as "test" must not pause the step. */
+export function developerQuestionIssue(question: string): string | null {
+  const value = question.trim();
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && value.length >= 12) return null;
+  return 'This text is shown to the developer and pauses the step. Send the real question in at least two words, with context (the SPL, the window, the error). Do not send a schema probe such as "test".';
+}
 const query = z.string().trim().min(1).max(512);
 const limit = z.number().int().min(1).max(20).default(8);
+/** Any integer is accepted; get_run_context clamps it. A hard range error makes the agent guess the other field. */
+const page = (fallback: number) => z.number().int().default(fallback);
 const repos = z.array(z.string().min(1).max(160)).min(1).max(30).optional();
-const definition = <S extends z.ZodRawShape>(name: string, description: string, shape: S, readOnly = true) => ({
+const definition = <S extends z.ZodRawShape>(
+  name: string,
+  description: string,
+  shape: S,
+  readOnly = true,
+) => ({
   name,
   logicalName: `platform.${name}`,
   description,
@@ -13,13 +28,22 @@ export const CONTEXT_TOOLS = [
   definition(
     "search_code",
     "Search relevant symbols or exact code in this run's authorized repositories. Syntax hits are candidates, not semantic proof.",
-    { query, repositories: repos, operation: z.enum(["symbols", "exact", "context"]).default("symbols"), limit },
+    {
+      query,
+      repositories: repos,
+      operation: z.enum(["symbols", "exact", "context"]).default("symbols"),
+      limit,
+    },
   ),
-  definition("get_symbol", "Find definitions of a symbol with source snapshot provenance; no arbitrary file access.", {
-    symbol: query,
-    repositories: repos,
-    limit,
-  }),
+  definition(
+    "get_symbol",
+    "Find definitions of a symbol with source snapshot provenance; no arbitrary file access.",
+    {
+      symbol: query,
+      repositories: repos,
+      limit,
+    },
+  ),
   definition(
     "find_dependencies",
     "Find bounded syntax dependency candidates; unresolved references remain uncertain.",
@@ -52,7 +76,7 @@ export const CONTEXT_TOOLS = [
   ),
   definition(
     "get_run_context",
-    "Read the current durable context pack and its source references, including unfinished work. Paginate entries; no full run history.",
+    "Read the current durable context pack and its source references, including unfinished work. Paginate entries; no full run history. offset/limit select entries (limit is clamped to 1–20). handoff_offset/handoff_limit select characters of a handoff (handoff_limit is clamped to 100–12000).",
     {
       section: z
         .enum([
@@ -69,10 +93,10 @@ export const CONTEXT_TOOLS = [
         .default("all"),
       handoff_workspace: z.boolean().default(false),
       handoff_source_pack: z.boolean().default(false),
-      handoff_offset: z.number().int().min(0).max(1000000).default(0),
-      handoff_limit: z.number().int().min(100).max(12000).default(6000),
-      offset: z.number().int().min(0).max(1000).default(0),
-      limit,
+      handoff_offset: page(0),
+      handoff_limit: page(6000),
+      offset: page(0),
+      limit: page(8),
     },
   ),
   definition(
@@ -103,4 +127,5 @@ export const CONTEXT_TOOLS = [
     false,
   ),
 ];
-export const contextTool = (name: string) => CONTEXT_TOOLS.find((t) => t.name === name.replace(/^platform\./, ""));
+export const contextTool = (name: string) =>
+  CONTEXT_TOOLS.find((t) => t.name === name.replace(/^platform\./, ""));

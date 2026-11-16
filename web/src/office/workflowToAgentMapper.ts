@@ -18,24 +18,12 @@ import type {
  * actually did (step statuses, attempts, open questions, transcript tool calls).
  */
 
-export const ROLES: Role[] = [
-  "analyst",
-  "architect",
-  "developer",
-  "tester",
-  "reviewer",
-  "pr",
-];
+export const ROLES: Role[] = ["analyst", "architect", "developer", "tester", "reviewer", "pr"];
 
 /** Display info per role — configured in characters.ts (names, looks, personality are not mapping logic). */
 export const ROLE_INFO = CHARACTERS;
 
-const ACTIVE: string[] = [
-  "RUNNING",
-  "RETRYING",
-  "WAITING_INPUT",
-  "WAITING_APPROVAL",
-];
+const ACTIVE: string[] = ["RUNNING", "RETRYING", "WAITING_INPUT", "WAITING_APPROVAL"];
 const CELEBRATE_MS = 8000;
 
 /** Which character owns a step. Human gates belong to the character whose work they gate (their first dependency). */
@@ -71,8 +59,7 @@ export function roleOfStep(
       if (/review|report/.test(text)) return "reviewer";
       return "analyst";
     default: // agent — design words win over "review" ("Architecture Review & Plan" is planning)
-      if (/plan|design|architect|proposal|approach/.test(text))
-        return "architect";
+      if (/plan|design|architect|proposal|approach/.test(text)) return "architect";
       if (/review|security|audit|\bqa\b|report/.test(text)) return "reviewer";
       if (/test/.test(text)) return "tester";
       return "analyst";
@@ -93,10 +80,7 @@ const RANK: Record<string, number> = {
 };
 
 /** The step that should drive the character: active first, then the most recent outcome, then what is next. */
-export function primaryStep(
-  steps: StepLite[],
-  attempts: AttemptLite[],
-): StepLite | null {
+export function primaryStep(steps: StepLite[], attempts: AttemptLite[]): StepLite | null {
   if (!steps.length) return null;
   const finished = (s: StepLite) => {
     const a = attempts.find((x) => x.id === s.current_attempt_id);
@@ -126,9 +110,7 @@ export function poseOf(
     case "WAITING_APPROVAL":
       return "approval";
     case "COMPLETED":
-      return finishedAt && now - Date.parse(finishedAt) < CELEBRATE_MS
-        ? "celebrate"
-        : "done";
+      return finishedAt && now - Date.parse(finishedAt) < CELEBRATE_MS ? "celebrate" : "done";
     case "FAILED":
       return "frustrated";
     case "CANCELED":
@@ -154,8 +136,7 @@ const base = (p: unknown) =>
     .split("/")
     .filter(Boolean)
     .pop() ?? "";
-const clip = (s: string, n: number) =>
-  s.length > n ? s.slice(0, n - 1) + "…" : s;
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 /** A real tool call → what the hands do + a short human description. Unknown tools fall back to the role's work. */
 export function activityFromTool(
@@ -199,11 +180,7 @@ export function activityFromTool(
       };
     case "Bash": {
       const cmd = String(i.command ?? "").trim();
-      if (
-        /\b(go test|npm (run )?test|pytest|jest|vitest|cargo test|make test)\b/.test(
-          cmd,
-        )
-      )
+      if (/\b(go test|npm (run )?test|pytest|jest|vitest|cargo test|make test)\b/.test(cmd))
         return { activity: "testing", text: say("office.act.test") };
       if (/^\s*(cd \S+\s*&&\s*)?git\b/.test(cmd))
         return {
@@ -276,8 +253,7 @@ export function activityFromEvents(
     const e = events[i];
     if (e.kind === "tool" && e.data?.name)
       return activityFromTool(String(e.data.name), e.data.input, locale);
-    if (e.kind === "thinking")
-      return { activity: "thinking", text: say("office.act.thinking") };
+    if (e.kind === "thinking") return { activity: "thinking", text: say("office.act.thinking") };
     if (e.kind === "agent" && e.content?.trim())
       return {
         activity: "writing",
@@ -303,17 +279,11 @@ function firstLine(err: any) {
   return clip(String(m).split("\n")[0], 60);
 }
 
-export function mapOffice(
-  snap: OfficeSnapshot,
-  now: number,
-  locale: UiLocale = "vi",
-): AgentView[] {
+export function mapOffice(snap: OfficeSnapshot, now: number, locale: UiLocale = "vi"): AgentView[] {
   const say = (key: string, params?: Record<string, string | number>) =>
     translate(locale, key, params);
   const byRole = new Map<Role, StepLite[]>(ROLES.map((r) => [r, []]));
-  for (const s of [...snap.steps].sort(
-    (a, b) => (a.position ?? 0) - (b.position ?? 0),
-  ))
+  for (const s of [...snap.steps].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)))
     byRole.get(roleOfStep(s, snap.graph))!.push(s);
 
   return ROLES.map((role) => {
@@ -325,18 +295,12 @@ export function mapOffice(
       : null;
     const pose = step ? poseOf(status, attempt?.finished_at, now) : "idle";
     const openQuestions = step
-      ? snap.questions.filter(
-          (q) => q.step_key === step.key && q.status === "open",
-        ).length
+      ? snap.questions.filter((q) => q.step_key === step.key && q.status === "open").length
       : 0;
     const activeCount = steps.filter((s) => ACTIVE.includes(s.status)).length;
     const live =
       step && pose === "work"
-        ? activityFromEvents(
-            attempt ? snap.events[attempt.id] : undefined,
-            step.type,
-            locale,
-          )
+        ? activityFromEvents(attempt ? snap.events[attempt.id] : undefined, step.type, locale)
         : null;
     const activity: Activity | null =
       pose === "work"
@@ -365,8 +329,7 @@ export function mapOffice(
         break;
       case "work":
         bubble =
-          (retrying ? say("office.bubble.retryPrefix") : "") +
-          (live?.text ?? `${stepName}…`);
+          (retrying ? say("office.bubble.retryPrefix") : "") + (live?.text ?? `${stepName}…`);
         break;
       case "ask":
         bubble = openQuestions

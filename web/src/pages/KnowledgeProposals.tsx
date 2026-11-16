@@ -22,6 +22,7 @@ import {
   navigate,
   SkeletonRows,
   time,
+  toast,
 } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
@@ -37,14 +38,7 @@ const STATUS_TONE: Record<string, string> = {
   rolled_back: "CANCELED",
   obsolete: "CANCELED",
 };
-const STATUSES = [
-  "pending",
-  "approved",
-  "rejected",
-  "rolled_back",
-  "obsolete",
-  "",
-] as const;
+const STATUSES = ["pending", "approved", "rejected", "rolled_back", "obsolete", ""] as const;
 
 export function ProposalStatus({ s }: { s: string }) {
   const { t } = useI18n();
@@ -74,32 +68,56 @@ function Section({
   );
 }
 
-export function ProposalsPanel({
-  id,
-  onChanged,
-}: {
-  id?: string;
-  onChanged: () => void;
-}) {
+export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () => void }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("pending");
-  const list = useApi<any[]>(
-    `/api/knowledge-proposals${status ? `?status=${status}` : ""}`,
-    [status],
-  );
+  const list = useApi<any[]>(`/api/knowledge-proposals${status ? `?status=${status}` : ""}`, [
+    status,
+  ]);
+  // Bulk review: only pending proposals are selectable; the selection is dropped whenever the list changes.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  useEffect(() => setSelected(new Set()), [status, list.data]);
+  const pendingIds = (list.data ?? [])
+    .filter((p) => p.status === "pending")
+    .map((p) => Number(p.id));
+  const toggle = (pid: number) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(pid)) n.delete(pid);
+      else n.add(pid);
+      return n;
+    });
+  const allSelected = pendingIds.length > 0 && pendingIds.every((pid) => selected.has(pid));
+  const bulk = async (what: "approve" | "reject") => {
+    const ids = pendingIds.filter((pid) => selected.has(pid));
+    if (!ids.length || !confirm(t(`kp.bulk.confirm.${what}`, { n: ids.length }))) return;
+    setBulkBusy(true);
+    // One request per proposal, sequentially: each keeps its own reviewer check, validation and audit trail, and one
+    // failure (e.g. validation) does not block the others.
+    const failed: string[] = [];
+    for (const pid of ids) {
+      try {
+        await api(`/api/knowledge-proposals/${pid}/${what}`, { comment: "" });
+      } catch (e) {
+        failed.push(`#${pid}: ${(e as Error).message}`);
+      }
+    }
+    setBulkBusy(false);
+    const okN = ids.length - failed.length;
+    if (okN) toast(t(`kp.bulk.done.${what}`, { n: okN }), "ok");
+    if (failed.length)
+      toast(t("kp.bulk.failed", { n: failed.length, detail: failed.slice(0, 3).join("; ") }));
+    list.reload();
+    onChanged();
+  };
   const back = (
     <button className="quiet sm kn-back" onClick={() => navigate("/knowledge")}>
       <ArrowLeft size={15} />
       {t("kn.back")}
     </button>
   );
-  if (id)
-    return (
-      <ProposalDetail
-        id={Number(id)}
-        onChanged={() => (list.reload(), onChanged())}
-      />
-    );
+  if (id) return <ProposalDetail id={Number(id)} onChanged={() => (list.reload(), onChanged())} />;
   return (
     <div className="kn-editor">
       {back}
@@ -136,72 +154,108 @@ export function ProposalsPanel({
             {t("kp.emptyBody")}
           </EmptyState>
         ) : (
-          <ul className="kp-list">
-            {list.data.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  className="kn-item"
-                  onClick={() => navigate(`/knowledge/~proposals/${p.id}`)}
-                >
-                  <span className="kn-item-icon">
-                    {p.source_kind === "skill_evolution" ? (
-                      <Sparkles size={16} />
-                    ) : p.source_kind === "repository_import" ? (
-                      <GitCompare size={16} />
-                    ) : (
-                      <Lightbulb size={16} />
-                    )}
-                  </span>
-                  <span className="kn-item-body">
-                    <span className="kn-item-title">
-                      <b>{p.proposed?.title || p.target_key || `#${p.id}`}</b>
-                      <ProposalStatus s={p.status} />
-                      <span className="kn-tag">{p.change_type}</span>
-                    </span>
-                    <span className="kn-item-key mono">
-                      #{p.id}
-                      {p.target_key
-                        ? ` · ${p.target_key}${p.target_version ? ` v${p.target_version}` : ""}`
-                        : ""}
-                    </span>
-                    <span className="kn-item-meta">
-                      <span className="kn-tag">
-                        {t(`kp.source.${p.source_kind}`)}
-                      </span>
-                      {p.proposed?.scope_type && (
-                        <span className="kn-tag mono">
-                          {p.proposed.scope_type}
-                          {p.proposed.scope_ref
-                            ? `:${p.proposed.scope_ref}`
-                            : ""}
-                        </span>
+          <>
+            {pendingIds.length > 0 && (
+              <div className="kp-bulk" role="toolbar" aria-label={t("kp.bulk.toolbar")}>
+                <label className="kp-check">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selected.size > 0 && !allSelected;
+                    }}
+                    onChange={() => setSelected(allSelected ? new Set() : new Set(pendingIds))}
+                  />
+                  {t("kp.bulk.selectAll", { n: pendingIds.length })}
+                </label>
+                <span className="muted small">{t("kp.bulk.selected", { n: selected.size })}</span>
+                <span className="kp-bulk-actions">
+                  <button
+                    className="sm"
+                    disabled={!selected.size || bulkBusy}
+                    aria-busy={bulkBusy}
+                    onClick={() => bulk("approve")}
+                  >
+                    <CheckCircle2 size={14} />
+                    {t("kp.bulk.approve", { n: selected.size })}
+                  </button>
+                  <button
+                    className="ghost sm"
+                    disabled={!selected.size || bulkBusy}
+                    onClick={() => bulk("reject")}
+                  >
+                    <XCircle size={14} />
+                    {t("kp.bulk.reject", { n: selected.size })}
+                  </button>
+                </span>
+              </div>
+            )}
+            <ul className="kp-list">
+              {list.data.map((p) => (
+                <li key={p.id} className={p.status === "pending" ? "kp-row" : undefined}>
+                  {p.status === "pending" && (
+                    <input
+                      type="checkbox"
+                      className="kp-row-check"
+                      aria-label={t("kp.bulk.selectOne", { id: p.id })}
+                      checked={selected.has(Number(p.id))}
+                      onChange={() => toggle(Number(p.id))}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    className="kn-item"
+                    onClick={() => navigate(`/knowledge/~proposals/${p.id}`)}
+                  >
+                    <span className="kn-item-icon">
+                      {p.source_kind === "skill_evolution" ? (
+                        <Sparkles size={16} />
+                      ) : p.source_kind === "repository_import" ? (
+                        <GitCompare size={16} />
+                      ) : (
+                        <Lightbulb size={16} />
                       )}
-                      <span className="kn-tag">
-                        {t("kp.confidence", {
-                          n: Math.round(Number(p.confidence) * 100),
-                        })}
-                      </span>
-                      <span className="kn-tag">
-                        {t("kp.evidenceN", { n: p.evidence_count })}
-                      </span>
-                      {p.validation_passed === "false" && (
-                        <span className="kn-tag kp-warn">
-                          {t("kp.validationFailed")}
-                        </span>
-                      )}
-                      {p.source_run_id && (
-                        <span className="muted small">
-                          Run #{p.source_run_id}
-                        </span>
-                      )}
-                      <span className="muted small">{time(p.created_at)}</span>
                     </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+                    <span className="kn-item-body">
+                      <span className="kn-item-title">
+                        <b>{p.proposed?.title || p.target_key || `#${p.id}`}</b>
+                        <ProposalStatus s={p.status} />
+                        <span className="kn-tag">{p.change_type}</span>
+                      </span>
+                      <span className="kn-item-key mono">
+                        #{p.id}
+                        {p.target_key
+                          ? ` · ${p.target_key}${p.target_version ? ` v${p.target_version}` : ""}`
+                          : ""}
+                      </span>
+                      <span className="kn-item-meta">
+                        <span className="kn-tag">{t(`kp.source.${p.source_kind}`)}</span>
+                        {p.proposed?.scope_type && (
+                          <span className="kn-tag mono">
+                            {p.proposed.scope_type}
+                            {p.proposed.scope_ref ? `:${p.proposed.scope_ref}` : ""}
+                          </span>
+                        )}
+                        <span className="kn-tag">
+                          {t("kp.confidence", {
+                            n: Math.round(Number(p.confidence) * 100),
+                          })}
+                        </span>
+                        <span className="kn-tag">{t("kp.evidenceN", { n: p.evidence_count })}</span>
+                        {p.validation_passed === "false" && (
+                          <span className="kn-tag kp-warn">{t("kp.validationFailed")}</span>
+                        )}
+                        {p.source_run_id && (
+                          <span className="muted small">Run #{p.source_run_id}</span>
+                        )}
+                        <span className="muted small">{time(p.created_at)}</span>
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
     </div>
@@ -210,15 +264,11 @@ export function ProposalsPanel({
 
 function Diff({ lines }: { lines: Array<{ op: string; line: string }> }) {
   const { t } = useI18n();
-  if (!lines?.length)
-    return <div className="muted small">{t("kp.noDiff")}</div>;
+  if (!lines?.length) return <div className="muted small">{t("kp.noDiff")}</div>;
   return (
     <pre className="kp-diff" aria-label={t("kp.diff")}>
       {lines.map((d, i) => (
-        <div
-          key={i}
-          className={d.op === "+" ? "is-add" : d.op === "-" ? "is-del" : ""}
-        >
+        <div key={i} className={d.op === "+" ? "is-add" : d.op === "-" ? "is-del" : ""}>
           <span aria-hidden>{d.op}</span> {d.line || " "}
         </div>
       ))}
@@ -226,19 +276,9 @@ function Diff({ lines }: { lines: Array<{ op: string; line: string }> }) {
   );
 }
 
-function ProposalDetail({
-  id,
-  onChanged,
-}: {
-  id: number;
-  onChanged: () => void;
-}) {
+function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
   const { t } = useI18n();
-  const {
-    data: p,
-    error,
-    reload,
-  } = useApi<any>(`/api/knowledge-proposals/${id}`, [id]);
+  const { data: p, error, reload } = useApi<any>(`/api/knowledge-proposals/${id}`, [id]);
   const [comment, setComment] = useState("");
   const [edit, setEdit] = useState<{
     content: string;
@@ -260,10 +300,7 @@ function ProposalDetail({
       });
   }, [p]);
   const back = (
-    <button
-      className="quiet sm"
-      onClick={() => navigate("/knowledge/~proposals")}
-    >
+    <button className="quiet sm" onClick={() => navigate("/knowledge/~proposals")}>
       <ArrowLeft size={15} />
       {t("kp.backToList")}
     </button>
@@ -287,8 +324,7 @@ function ProposalDetail({
     const body: any = { comment };
     if (what === "approve") {
       const edits: any = {};
-      if (edit.content !== (p.proposed?.content ?? ""))
-        edits.content = edit.content;
+      if (edit.content !== (p.proposed?.content ?? "")) edits.content = edit.content;
       if (
         edit.scope_type !== p.proposed?.scope_type ||
         edit.scope_ref !== (p.proposed?.scope_ref ?? "")
@@ -300,41 +336,27 @@ function ProposalDetail({
       const ef = edit.effective_from
         ? new Date(`${edit.effective_from}T00:00:00`).toISOString()
         : null;
-      if ((ef ?? null) !== (p.proposed?.effective_from ?? null))
-        edits.effective_from = ef;
+      if ((ef ?? null) !== (p.proposed?.effective_from ?? null)) edits.effective_from = ef;
       Object.assign(body, {
         edits,
         accept_current_version: accept,
         override_validation: override,
       });
     }
-    if (
-      await act(
-        () => api(`/api/knowledge-proposals/${id}/${what}`, body),
-        t(`kp.done.${what}`),
-      )
-    )
+    if (await act(() => api(`/api/knowledge-proposals/${id}/${what}`, body), t(`kp.done.${what}`)))
       done();
   };
-  const scopeEditable =
-    pending && (p.change_type === "SUPERSEDE" || p.change_type === "CREATE");
-  const resultKey =
-    p.applied?.created_key ?? p.applied?.item_key ?? p.target_key;
+  const scopeEditable = pending && (p.change_type === "SUPERSEDE" || p.change_type === "CREATE");
+  const resultKey = p.applied?.created_key ?? p.applied?.item_key ?? p.target_key;
   return (
     <div className="kn-editor">
       {back}
       <div className="card kn-head">
         <span className="kn-head-icon">
-          {p.source_kind === "skill_evolution" ? (
-            <Sparkles size={20} />
-          ) : (
-            <Lightbulb size={20} />
-          )}
+          {p.source_kind === "skill_evolution" ? <Sparkles size={20} /> : <Lightbulb size={20} />}
         </span>
         <div className="kn-head-main">
-          <h2 className="kn-head-title">
-            {p.proposed?.title || p.target_key || `#${p.id}`}
-          </h2>
+          <h2 className="kn-head-title">{p.proposed?.title || p.target_key || `#${p.id}`}</h2>
           <div className="kn-item-meta">
             <ProposalStatus s={p.status} />
             <span className="kn-tag">{p.change_type}</span>
@@ -367,8 +389,8 @@ function ProposalDetail({
         {p.parent && (
           <div className="kp-note small">
             {t("kp.derivedFrom")}{" "}
-            <a href={`#/knowledge/~proposals/${p.parent.id}`}>#{p.parent.id}</a>{" "}
-            ({p.parent.change_type} {p.parent.target_key ?? ""})
+            <a href={`#/knowledge/~proposals/${p.parent.id}`}>#{p.parent.id}</a> (
+            {p.parent.change_type} {p.parent.target_key ?? ""})
           </div>
         )}
         {p.uncertainty && (
@@ -414,14 +436,10 @@ function ProposalDetail({
             </div>
             <div>
               <div className="kn-sub-head">
-                {p.change_type === "DEPRECATE"
-                  ? t("kp.deprecated")
-                  : t("kp.newRule")}
+                {p.change_type === "DEPRECATE" ? t("kp.deprecated") : t("kp.newRule")}
               </div>
               <pre className="kp-text">
-                {p.change_type === "DEPRECATE"
-                  ? t("kp.deprecatedBody")
-                  : p.proposed?.content}
+                {p.change_type === "DEPRECATE" ? t("kp.deprecatedBody") : p.proposed?.content}
               </pre>
             </div>
           </div>
@@ -443,9 +461,7 @@ function ProposalDetail({
                       <>
                         {" "}
                         ·{" "}
-                        <a
-                          href={`#/runs/${e.ref.run_id}${e.ref.step ? `/${e.ref.step}` : ""}`}
-                        >
+                        <a href={`#/runs/${e.ref.run_id}${e.ref.step ? `/${e.ref.step}` : ""}`}>
                           Run #{e.ref.run_id}
                           {e.ref.step ? ` / ${e.ref.step}` : ""}
                         </a>
@@ -518,30 +534,21 @@ function ProposalDetail({
                   <dt>{t("kp.competing")}</dt>
                   <dd>
                     {p.impacts.competing_rules.map((r: any) => (
-                      <a
-                        key={r.key}
-                        className="pill mono"
-                        href={`#/knowledge/${r.key}`}
-                      >
+                      <a key={r.key} className="pill mono" href={`#/knowledge/${r.key}`}>
                         {r.key}
                       </a>
                     ))}
                   </dd>
                 </div>
               )}
-              {p.impacts?.open_proposals?.filter((x: any) => x.id !== p.id)
-                .length > 0 && (
+              {p.impacts?.open_proposals?.filter((x: any) => x.id !== p.id).length > 0 && (
                 <div className="kn-kv-row">
                   <dt>{t("kp.otherOpen")}</dt>
                   <dd>
                     {p.impacts.open_proposals
                       .filter((x: any) => x.id !== p.id)
                       .map((x: any) => (
-                        <a
-                          key={x.id}
-                          className="pill"
-                          href={`#/knowledge/~proposals/${x.id}`}
-                        >
+                        <a key={x.id} className="pill" href={`#/knowledge/~proposals/${x.id}`}>
                           #{x.id}
                         </a>
                       ))}
@@ -583,9 +590,7 @@ function ProposalDetail({
                   </a>{" "}
                   <ProposalStatus s={c.status} />{" "}
                   {c.validation && !c.validation.passed && (
-                    <span className="kn-tag kp-warn">
-                      {t("kp.validationFailed")}
-                    </span>
+                    <span className="kn-tag kp-warn">{t("kp.validationFailed")}</span>
                   )}
                 </li>
               ))}
@@ -613,9 +618,7 @@ function ProposalDetail({
               <>
                 <span>{t("kp.applied")}</span>
                 <span className="mono">
-                  {resultKey ? (
-                    <a href={`#/knowledge/${resultKey}`}>{resultKey}</a>
-                  ) : null}{" "}
+                  {resultKey ? <a href={`#/knowledge/${resultKey}`}>{resultKey}</a> : null}{" "}
                   {p.applied.new_version
                     ? `v${p.applied.previous_version} → v${p.applied.new_version}`
                     : ""}
@@ -643,14 +646,9 @@ function ProposalDetail({
               <Field label={t("kp.finalText")} hint={t("kp.finalTextHint")}>
                 <textarea
                   className="kn-textarea"
-                  rows={Math.min(
-                    14,
-                    Math.max(4, edit.content.split("\n").length + 1),
-                  )}
+                  rows={Math.min(14, Math.max(4, edit.content.split("\n").length + 1))}
                   value={edit.content}
-                  onChange={(e) =>
-                    setEdit({ ...edit, content: e.target.value })
-                  }
+                  onChange={(e) => setEdit({ ...edit, content: e.target.value })}
                 />
               </Field>
             )}
@@ -660,24 +658,18 @@ function ProposalDetail({
                   <Field label={t("kn.scope")}>
                     <select
                       value={edit.scope_type}
-                      onChange={(e) =>
-                        setEdit({ ...edit, scope_type: e.target.value })
-                      }
+                      onChange={(e) => setEdit({ ...edit, scope_type: e.target.value })}
                     >
-                      {["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY"].map(
-                        (s) => (
-                          <option key={s}>{s}</option>
-                        ),
-                      )}
+                      {["GLOBAL", "ORGANIZATION", "PROJECT", "REPOSITORY"].map((s) => (
+                        <option key={s}>{s}</option>
+                      ))}
                     </select>
                   </Field>
                   {edit.scope_type !== "GLOBAL" && (
                     <Field label={t("kn.scopeRef")}>
                       <input
                         value={edit.scope_ref}
-                        onChange={(e) =>
-                          setEdit({ ...edit, scope_ref: e.target.value })
-                        }
+                        onChange={(e) => setEdit({ ...edit, scope_ref: e.target.value })}
                       />
                     </Field>
                   )}
@@ -687,9 +679,7 @@ function ProposalDetail({
                 <input
                   type="date"
                   value={edit.effective_from}
-                  onChange={(e) =>
-                    setEdit({ ...edit, effective_from: e.target.value })
-                  }
+                  onChange={(e) => setEdit({ ...edit, effective_from: e.target.value })}
                 />
               </Field>
             </div>
@@ -756,9 +746,7 @@ function ProposalDetail({
             />
             <button
               className="ghost"
-              onClick={() =>
-                confirm(t("kp.rollbackConfirm")) && decide("rollback")
-              }
+              onClick={() => confirm(t("kp.rollbackConfirm")) && decide("rollback")}
             >
               <RotateCcw size={15} />
               {t("kp.rollback")}

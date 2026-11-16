@@ -36,14 +36,7 @@ const R = ({
   />
 );
 
-export type ScreenMode =
-  | "off"
-  | "saver"
-  | "boot"
-  | "work"
-  | "ok"
-  | "fail"
-  | "wait";
+export type ScreenMode = "off" | "saver" | "boot" | "work" | "ok" | "fail" | "wait";
 export function screenMode(pose: Pose): ScreenMode {
   switch (pose) {
     case "work":
@@ -243,15 +236,7 @@ export function Keyboard({ x, y }: { x: number; y: number }) {
   );
 }
 
-export function Mug({
-  x,
-  y,
-  steam,
-}: {
-  x: number;
-  y: number;
-  steam?: boolean;
-}) {
+export function Mug({ x, y, steam }: { x: number; y: number; steam?: boolean }) {
   return (
     <g>
       {steam && (
@@ -293,13 +278,7 @@ export function Monitor({
       <R x={x + w / 2 - 2} y={y + h} w={4} h={3} c="#4b5262" />
       <R x={x + w / 2 - 5} y={y + h + 3} w={10} h={1} c="#4b5262" />
       <R x={x - 1} y={y - 1} w={w + 2} h={h + 2} c="#262a35" />
-      <R
-        x={sx}
-        y={sy}
-        w={sw}
-        h={sh}
-        c={mode === "off" ? "#151821" : "var(--o-screen)"}
-      />
+      <R x={sx} y={sy} w={sw} h={sh} c={mode === "off" ? "#151821" : "var(--o-screen)"} />
       <clipPath id={id}>
         <rect x={sx} y={sy} width={sw} height={sh} />
       </clipPath>
@@ -312,14 +291,7 @@ export function Monitor({
         {mode === "boot" && (
           <g className="s-boot">
             {[0, 1, 2].map((i) => (
-              <R
-                key={i}
-                x={sx + 3 + i * 4}
-                y={sy + sh / 2}
-                w={2}
-                h={2}
-                c="#93c5fd"
-              />
+              <R key={i} x={sx + 3 + i * 4} y={sy + sh / 2} w={2} h={2} c="#93c5fd" />
             ))}
           </g>
         )}
@@ -358,20 +330,8 @@ export function Monitor({
             <R x={sx} y={sy} w={sw} h={sh} c="#3b0f12" />
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <g key={i}>
-                <R
-                  x={sx + sw / 2 - 3 + i}
-                  y={sy + sh / 2 - 3 + i}
-                  w={1.4}
-                  h={1.4}
-                  c="#f87171"
-                />
-                <R
-                  x={sx + sw / 2 + 2 - i}
-                  y={sy + sh / 2 - 3 + i}
-                  w={1.4}
-                  h={1.4}
-                  c="#f87171"
-                />
+                <R x={sx + sw / 2 - 3 + i} y={sy + sh / 2 - 3 + i} w={1.4} h={1.4} c="#f87171" />
+                <R x={sx + sw / 2 + 2 - i} y={sy + sh / 2 - 3 + i} w={1.4} h={1.4} c="#f87171" />
               </g>
             ))}
           </g>
@@ -379,28 +339,14 @@ export function Monitor({
         {mode === "work" && kind === "code" && (
           <g className="s-scroll">
             {CODE.concat(CODE).map(([ind, len, c], i) => (
-              <R
-                key={i}
-                x={sx + 2 + ind * 2}
-                y={sy + 2 + i * 2}
-                w={len}
-                h={1}
-                c={c}
-              />
+              <R key={i} x={sx + 2 + ind * 2} y={sy + 2 + i * 2} w={len} h={1} c={c} />
             ))}
           </g>
         )}
         {mode === "work" && kind === "tests" && (
           <g>
             <R x={sx + 2} y={sy + 2} w={sw - 4} h={2} c="#1e293b" />
-            <R
-              x={sx + 2}
-              y={sy + 2}
-              w={sw - 4}
-              h={2}
-              c="#22c55e"
-              className="s-progress"
-            />
+            <R x={sx + 2} y={sy + 2} w={sw - 4} h={2} c="#22c55e" className="s-progress" />
             {Array.from({ length: 12 }, (_, i) => (
               <R
                 key={i}
@@ -420,14 +366,7 @@ export function Monitor({
             {DIFF.map(([c, len], i) => (
               <R key={i} x={sx + 1} y={sy + 1 + i * 2} w={len} h={1} c={c} />
             ))}
-            <R
-              x={sx}
-              y={sy + 1}
-              w={sw}
-              h={2}
-              c="rgba(250,204,21,.35)"
-              className="s-scan"
-            />
+            <R x={sx} y={sy + 1} w={sw} h={2} c="rgba(250,204,21,.35)" className="s-scan" />
           </g>
         )}
       </g>
@@ -458,15 +397,7 @@ const DIFF: Array<[string, number]> = [
 ];
 
 // ------------------------------------------------------------------ role stations
-export function Whiteboard({
-  x,
-  y,
-  mode,
-}: {
-  x: number;
-  y: number;
-  mode: ScreenMode;
-}) {
+export function Whiteboard({ x, y, mode }: { x: number; y: number; mode: ScreenMode }) {
   return (
     <g className="o-board" data-mode={mode}>
       <R x={x} y={y} w={46} h={34} c="var(--o-trim-dark)" />
@@ -475,14 +406,7 @@ export function Whiteboard({
       <R x={x + 30} y={y + 32} w={4} h={1} c="#2f6b4f" />
       <R x={x + 35} y={y + 32} w={4} h={1} c="#2563eb" />
       <g className="b-diagram" fill="none" strokeWidth={0.8}>
-        <rect
-          x={x + 5}
-          y={y + 5}
-          width={10}
-          height={6}
-          stroke="#2563eb"
-          className="b-line"
-        />
+        <rect x={x + 5} y={y + 5} width={10} height={6} stroke="#2563eb" className="b-line" />
         <rect
           x={x + 28}
           y={y + 5}
@@ -531,14 +455,7 @@ export function Whiteboard({
             [5, 2],
             [6, 1],
           ].map(([cx, cy], i) => (
-            <R
-              key={i}
-              x={x + 37 + cx}
-              y={y + 20 + cy}
-              w={1.2}
-              h={1.2}
-              c="#16a34a"
-            />
+            <R key={i} x={x + 37 + cx} y={y + 20 + cy} w={1.2} h={1.2} c="#16a34a" />
           ))}
         </g>
       )}
@@ -560,14 +477,7 @@ export function PaperStack({ x, y }: { x: number; y: number }) {
   return (
     <g>
       {[0, 1, 2, 3].map((i) => (
-        <R
-          key={i}
-          x={x + (i % 2)}
-          y={y - i * 2}
-          w={10}
-          h={2}
-          c={i % 2 ? "#ffffff" : "#eceae4"}
-        />
+        <R key={i} x={x + (i % 2)} y={y - i * 2} w={10} h={2} c={i % 2 ? "#ffffff" : "#eceae4"} />
       ))}
       <R x={x + 2} y={y - 7} w={6} h={1} c="#2f6b4f" />
     </g>
@@ -578,14 +488,7 @@ export function Lamp({ x, y, on }: { x: number; y: number; on: boolean }) {
   return (
     <g>
       {on && (
-        <ellipse
-          cx={x + 4}
-          cy={y + 12}
-          rx={9}
-          ry={4}
-          fill="var(--o-glow)"
-          className="o-glow"
-        />
+        <ellipse cx={x + 4} cy={y + 12} rx={9} ry={4} fill="var(--o-glow)" className="o-glow" />
       )}
       <R x={x + 3} y={y + 4} w={1} h={8} c="#3f4553" />
       <R x={x} y={y} w={8} h={4} c="#2f6b4f" />
@@ -609,15 +512,7 @@ export function CoffeeCorner({ x, y }: { x: number; y: number }) {
   );
 }
 
-export function PackTable({
-  x,
-  y,
-  mode,
-}: {
-  x: number;
-  y: number;
-  mode: ScreenMode;
-}) {
+export function PackTable({ x, y, mode }: { x: number; y: number; mode: ScreenMode }) {
   return (
     <g className="o-pack" data-mode={mode}>
       {/* outbox tray with PR labels */}
@@ -639,15 +534,7 @@ export function PackTable({
   );
 }
 
-export function HelpDesk({
-  x,
-  y,
-  waiting,
-}: {
-  x: number;
-  y: number;
-  waiting: number;
-}) {
+export function HelpDesk({ x, y, waiting }: { x: number; y: number; waiting: number }) {
   const { t } = useI18n();
   return (
     <g className="o-help" data-waiting={waiting || undefined}>
@@ -660,20 +547,12 @@ export function HelpDesk({
         c={waiting ? "#f59e0b" : "var(--o-trim-dark)"}
         className={waiting ? "o-sign-on" : undefined}
       />
-      <R
-        x={x + 9}
-        y={y - 51}
-        w={46}
-        h={14}
-        c={waiting ? "#fff7e0" : "var(--o-sign)"}
-      />
+      <R x={x + 9} y={y - 51} w={46} h={14} c={waiting ? "#fff7e0" : "var(--o-sign)"} />
       <text x={x + 32} y={y - 45.4} textAnchor="middle" className="o-sign-text">
         {t("office.sign")}
       </text>
       <text x={x + 32} y={y - 40} textAnchor="middle" className="o-sign-sub">
-        {waiting
-          ? t("office.waitingSign", { n: waiting })
-          : t("office.nobodyWaiting")}
+        {waiting ? t("office.waitingSign", { n: waiting }) : t("office.nobodyWaiting")}
       </text>
       {/* counter */}
       <R x={x} y={y} w={66} h={4} c="var(--o-wood-top)" />
@@ -682,14 +561,7 @@ export function HelpDesk({
       <R x={x + 1} y={y + 5} w={64} h={1} c="#4f9474" />
       <HasakiMark x={x + 28} y={y + 8} />
       {/* bell */}
-      <R
-        x={x + 52}
-        y={y - 4}
-        w={7}
-        h={3}
-        c="#f5c542"
-        className={waiting ? "o-bell" : undefined}
-      />
+      <R x={x + 52} y={y - 4} w={7} h={3} c="#f5c542" className={waiting ? "o-bell" : undefined} />
       <R x={x + 55} y={y - 5} w={1} h={1} c="#a16207" />
       <R x={x + 51} y={y - 1} w={9} h={1} c="#a16207" />
     </g>
@@ -868,15 +740,7 @@ export function PendantLamp({ x, len = 8 }: { x: number; len?: number }) {
 }
 
 /** Handheld barcode scanner (packing station). */
-export function Scanner({
-  x,
-  y,
-  active,
-}: {
-  x: number;
-  y: number;
-  active: boolean;
-}) {
+export function Scanner({ x, y, active }: { x: number; y: number; active: boolean }) {
   return (
     <g>
       <R x={x} y={y} w={6} h={3} c="#2f3340" />
@@ -890,15 +754,7 @@ export function Scanner({
         className={active ? "o-scan-led" : undefined}
       />
       {active && (
-        <R
-          x={x + 6}
-          y={y + 1.2}
-          w={7}
-          h={0.5}
-          c="#ff3b30"
-          opacity={0.75}
-          className="o-scan-beam"
-        />
+        <R x={x + 6} y={y + 1.2} w={7} h={0.5} c="#ff3b30" opacity={0.75} className="o-scan-beam" />
       )}
     </g>
   );
@@ -913,43 +769,21 @@ export function ShippingBox({ x, y }: { x: number; y: number }) {
       <R x={x + 6} y={y} w={2} h={10} c="#2f6b4f" />
       <R x={x + 9} y={y + 4} w={4} h={4} c="#ffffff" />
       {[0, 1, 2, 3].map((i) => (
-        <R
-          key={i}
-          x={x + 9.4 + i * 0.9}
-          y={y + 4.6}
-          w={0.4}
-          h={2.6}
-          c="#1f1f26"
-        />
+        <R key={i} x={x + 9.4 + i * 0.9} y={y + 4.6} w={0.4} h={2.6} c="#1f1f26" />
       ))}
     </g>
   );
 }
 
 /** Wall sign with the official Hasaki logo on a white plate (logo never recoloured). */
-export function LogoSign({
-  x,
-  y,
-  href,
-}: {
-  x: number;
-  y: number;
-  href: string;
-}) {
+export function LogoSign({ x, y, href }: { x: number; y: number; href: string }) {
   return (
     <g>
       <R x={x + 1} y={y + 15} w={86} h={2} c="rgba(0,0,0,.18)" />
       <R x={x} y={y} w={86} h={16} c="#2f6b4f" />
       <R x={x} y={y} w={86} h={1} c="#4f9474" />
       <R x={x} y={y + 15} w={86} h={1} c="#183d2c" />
-      <rect
-        x={x + 2}
-        y={y + 1.5}
-        width={13}
-        height={13}
-        rx={2.5}
-        fill="#ffffff"
-      />
+      <rect x={x + 2} y={y + 1.5} width={13} height={13} rx={2.5} fill="#ffffff" />
       <image
         href={href}
         x={x + 2}

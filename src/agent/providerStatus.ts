@@ -1,14 +1,17 @@
-import { codexConfig, antigravityConfig } from "../config.ts";
+import { codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
+import { providerEnabled } from "./provider.ts";
+import { probeAgentHealth, rememberedQuota } from "./health.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
+import { copilotCapabilities } from "./copilot/capabilities.ts";
 
 /**
  * Readiness of each agent provider on this worker, for the run forms. Probes the installed CLIs only (version, flags,
  * login status, model catalog); no model is called, nothing is billed, and no credential is read or returned.
  */
 export async function agentProviderStatus(refresh = false) {
-  const [cursor, codex, antigravity] = await Promise.all([
+  const [cursor, codex, antigravity, copilot, claudeHealth] = await Promise.all([
     cursorCapabilities(refresh).catch((e) => ({
       ok: false,
       error: String(e?.message ?? e),
@@ -19,32 +22,86 @@ export async function agentProviderStatus(refresh = false) {
     antigravityCapabilities(refresh).catch(
       (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
     ),
+    copilotCapabilities(refresh).catch(
+      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
+    ),
+    probeAgentHealth(["claude"]).then((rows) => rows[0]),
   ]);
   const cfg = codexConfig();
   const agyCfg = antigravityConfig();
+  const copilotCfg = copilotConfig();
   return [
-    { id: "claude", ok: true },
+    {
+      id: "claude",
+      enabled: providerEnabled("claude"),
+      ok: claudeHealth.connected && claudeHealth.quota !== "exhausted",
+      error: claudeHealth.reason,
+      quota: claudeHealth.quota,
+    },
     {
       id: "cursor",
-      ok: cursor.ok,
-      error: cursor.ok ? undefined : cursor.error,
+      enabled: providerEnabled("cursor"),
+      ok: cursor.ok && rememberedQuota("cursor") !== "exhausted",
+      error:
+        rememberedQuota("cursor") === "exhausted"
+          ? "quota exhausted"
+          : cursor.ok
+            ? undefined
+            : cursor.error,
+      quota: rememberedQuota("cursor"),
     },
     {
       id: "codex",
-      ok: codex.ok,
-      error: codex.ok ? undefined : codex.error,
+      enabled: providerEnabled("codex"),
+      ok: codex.ok && rememberedQuota("codex") !== "exhausted",
+      error:
+        rememberedQuota("codex") === "exhausted"
+          ? "quota exhausted"
+          : codex.ok
+            ? undefined
+            : codex.error,
+      quota: rememberedQuota("codex"),
       kind: "kind" in codex ? codex.kind : undefined,
       version: "version" in codex ? codex.version : undefined,
       /** e.g. "ChatGPT": how the WORKER's Codex CLI is logged in. Runs execute with that account, not per platform user. */
       auth: "auth" in codex ? codex.auth : undefined,
       model: cfg.model || null,
       reasoning_effort: cfg.reasoningEffort || null,
-      models: "models" in codex ? codex.models?.map((m) => m.slug) : undefined,
+      models:
+        "models" in codex ? codex.models?.map((m) => ({ slug: m.slug, name: m.slug })) : undefined,
+    },
+    {
+      id: "copilot",
+      enabled: providerEnabled("copilot"),
+      ok: copilot.ok && rememberedQuota("copilot") !== "exhausted",
+      error:
+        rememberedQuota("copilot") === "exhausted"
+          ? "quota exhausted"
+          : copilot.ok
+            ? undefined
+            : copilot.error,
+      quota: rememberedQuota("copilot"),
+      kind: "kind" in copilot ? copilot.kind : undefined,
+      version: "version" in copilot ? copilot.version : undefined,
+      auth: "auth" in copilot ? copilot.auth : undefined,
+      model: copilotCfg.model || null,
+      reasoning_effort: copilotCfg.effort || null,
+      models:
+        "models" in copilot
+          ? copilot.models?.map((m) => ({ slug: m.slug, name: m.name || m.slug }))
+          : undefined,
     },
     {
       id: "antigravity",
-      ok: antigravity.ok,
-      error: antigravity.ok ? undefined : antigravity.error,
+      enabled: providerEnabled("antigravity"),
+      ok: antigravity.ok && rememberedQuota("antigravity") !== "exhausted",
+      error:
+        rememberedQuota("antigravity") === "exhausted"
+          ? "quota exhausted"
+          : antigravity.ok
+            ? undefined
+            : antigravity.error,
+      quota: rememberedQuota("antigravity"),
       kind: "kind" in antigravity ? antigravity.kind : undefined,
       version: "version" in antigravity ? antigravity.version : undefined,
       auth: "auth" in antigravity ? antigravity.auth : undefined,
@@ -52,7 +109,7 @@ export async function agentProviderStatus(refresh = false) {
       reasoning_effort: agyCfg.effort || null,
       models:
         "models" in antigravity
-          ? antigravity.models?.map((m) => m.slug)
+          ? antigravity.models?.map((m) => ({ slug: m.slug, name: m.name || m.slug }))
           : undefined,
     },
   ];

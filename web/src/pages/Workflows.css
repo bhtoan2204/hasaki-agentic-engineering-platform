@@ -1,28 +1,28 @@
 /* Workflow Studio landing (#/workflows) */
 .wfs-toolbar {
-  justify-content: space-between
+  justify-content: space-between;
 }
 
 .wfs-toolbar .segmented {
   max-width: 100%;
-  overflow-x: auto
+  overflow-x: auto;
 }
 
 .wfs-n {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
-  margin-left: 2px
+  margin-left: 2px;
 }
 
 .segmented button.on .wfs-n {
-  color: var(--brand)
+  color: var(--brand);
 }
 
 .wfs-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  gap: var(--sp-4)
+  gap: var(--sp-4);
 }
 
 .wfs-card {
@@ -37,24 +37,27 @@
   padding: var(--sp-4) var(--sp-5);
   box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: box-shadow .18s, transform .18s, border-color .18s;
+  transition:
+    box-shadow 0.18s,
+    transform 0.18s,
+    border-color 0.18s;
 }
 
 .wfs-card:hover {
   box-shadow: var(--shadow-2);
   transform: translateY(-2px);
-  border-color: var(--line-strong)
+  border-color: var(--line-strong);
 }
 
 .wfs-card:focus-visible {
   outline: 2px solid var(--brand);
-  outline-offset: 2px
+  outline-offset: 2px;
 }
 
 .wfs-card-top {
   display: flex;
   align-items: flex-start;
-  gap: var(--sp-3)
+  gap: var(--sp-3);
 }
 
 .wfs-card-icon {
@@ -65,7 +68,7 @@
   place-items: center;
   flex: none;
   color: var(--brand);
-  background: linear-gradient(135deg, var(--brand-50), var(--blush))
+  background: linear-gradient(135deg, var(--brand-50), var(--blush));
 }
 
 .wfs-card-title {
@@ -73,7 +76,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  line-height: 1.3
+  line-height: 1.3;
 }
 
 .wfs-card-title b {
@@ -81,36 +84,36 @@
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .wfs-card-title .mono {
   font-size: 11.5px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .wfs-card-top button {
-  opacity: .85
+  opacity: 0.85;
 }
 
 .wfs-card:hover .wfs-card-top button {
-  opacity: 1
+  opacity: 1;
 }
 
 .wfs-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  align-items: center
+  align-items: center;
 }
 
 .wfs-tpl {
   margin: 0;
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 9px
+  padding: 2px 9px;
 }
 
 .wfs-desc {
@@ -122,14 +125,14 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 2.9em
+  min-height: 2.9em;
 }
 
 .wfs-types {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  min-height: 24px
+  min-height: 24px;
 }
 
 .wfs-type {
@@ -141,27 +144,27 @@
   padding: 3px 8px;
   border-radius: var(--r-pill);
   color: var(--tone);
-  background: var(--tone-bg)
+  background: var(--tone-bg);
 }
 
 .tone-ai {
   --tone: var(--brand-700);
-  --tone-bg: var(--brand-50)
+  --tone-bg: var(--brand-50);
 }
 
 .tone-human {
   --tone: var(--st-wait);
-  --tone-bg: var(--st-wait-bg)
+  --tone-bg: var(--st-wait-bg);
 }
 
 .tone-logic {
   --tone: var(--st-run);
-  --tone-bg: var(--st-run-bg)
+  --tone-bg: var(--st-run-bg);
 }
 
 .tone-ship {
   --tone: var(--st-ok);
-  --tone-bg: var(--st-ok-bg)
+  --tone-bg: var(--st-ok-bg);
 }
 
 .wfs-meta {
@@ -172,14 +175,14 @@
   padding-top: var(--sp-3);
   border-top: 1px dashed var(--line);
   color: var(--muted);
-  font-size: var(--fs-xs)
+  font-size: var(--fs-xs);
 }
 
 .wfs-meta span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  white-space: nowrap
+  white-space: nowrap;
 }
 
 .wfs-new {
@@ -201,11 +204,11 @@
 .wfs-new:hover {
   background: linear-gradient(135deg, var(--brand-50), var(--blush));
   border-color: var(--brand-400);
-  color: var(--brand-700)
+  color: var(--brand-700);
 }
 
 .wfs-new b {
-  font-size: var(--fs-md)
+  font-size: var(--fs-md);
 }
 
 .wfs-new-icon {
@@ -216,15 +219,15 @@
   place-items: center;
   background: var(--surface);
   color: var(--brand);
-  box-shadow: var(--shadow-1)
+  box-shadow: var(--shadow-1);
 }
 
 .wfs-empty {
-  padding: var(--sp-6)
+  padding: var(--sp-6);
 }
 
 .wfs-form p {
-  margin: var(--sp-2) 0
+  margin: var(--sp-2) 0;
 }
 
 .wfs-src {
@@ -234,7 +237,7 @@
   padding: var(--sp-3);
   border-radius: var(--r-md);
   background: linear-gradient(135deg, var(--brand-50), var(--blush));
-  margin-bottom: var(--sp-2)
+  margin-bottom: var(--sp-2);
 }
 
 .wfs-src-icon {
@@ -245,20 +248,20 @@
   place-items: center;
   background: var(--surface);
   color: var(--brand);
-  flex: none
+  flex: none;
 }
 
 @media (max-width: 640px) {
   .wfs-toolbar {
     flex-direction: column;
-    align-items: stretch
+    align-items: stretch;
   }
 
   .wfs-toolbar .search {
-    max-width: none
+    max-width: none;
   }
 
   .wfs-card {
-    padding: var(--sp-4)
+    padding: var(--sp-4);
   }
 }

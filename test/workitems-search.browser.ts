@@ -6,16 +6,40 @@ import { handle } from "../src/http/app.ts";
 import { pool } from "../src/db/pool.ts";
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true, args: ["--no-sandbox"] });
+const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_PATH,
+  headless: true,
+  args: ["--no-sandbox"],
+});
 try {
   const page = await browser.newPage();
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/stream") return route.fulfill({ contentType: "text/event-stream", body: 'event: hello\ndata: {}\n\n' });
-    const body = path === "/api/auth/me" ? { user: { id: 123, username: "toan", role: "member" }, csrf: "mock" }
-      : path === "/api/work/status" ? { browserMode: "hosted", connectionState: "idle", loggedIn: false }
-      : path === "/api/work-items" ? [{ id: 1, code: "WI-1", title: "Search regression", source: "manual", status: "open", project: "Test", run_count: 0 }]
-      : path === "/api/meta" ? {} : [];
+    if (path === "/api/stream")
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: "event: hello\ndata: {}\n\n",
+      });
+    const body =
+      path === "/api/auth/me"
+        ? { user: { id: 123, username: "toan", role: "member" }, csrf: "mock" }
+        : path === "/api/work/status"
+          ? { browserMode: "hosted", connectionState: "idle", loggedIn: false }
+          : path === "/api/work-items"
+            ? [
+                {
+                  id: 1,
+                  code: "WI-1",
+                  title: "Search regression",
+                  source: "manual",
+                  status: "open",
+                  project: "Test",
+                  run_count: 0,
+                },
+              ]
+            : path === "/api/meta"
+              ? {}
+              : [];
     await route.fulfill({ json: body });
   });
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/#/work-items`;
@@ -40,5 +64,12 @@ try {
   await page.reload();
   await search.waitFor();
   assert.equal(await search.inputValue(), "");
-  console.log("PASS: empty search after load/refresh, filtering and clear, token form isolated from search; APIs mocked.");
-} finally { await browser.close(); server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); await pool.end(); }
+  console.log(
+    "PASS: empty search after load/refresh, filtering and clear, token form isolated from search; APIs mocked.",
+  );
+} finally {
+  await browser.close();
+  server.closeAllConnections();
+  await new Promise<void>((r) => server.close(() => r()));
+  await pool.end();
+}

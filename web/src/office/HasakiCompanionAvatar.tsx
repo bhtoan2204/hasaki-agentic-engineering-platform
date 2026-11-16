@@ -79,17 +79,9 @@ export function HasakiCompanionAvatar({
               stroke="#183d2c"
               strokeWidth="3"
             />
-            <path
-              d="M43 155 Q80 150 117 155 L114 166 Q80 171 46 166Z"
-              fill="#d6e8de"
-            />
+            <path d="M43 155 Q80 150 117 155 L114 166 Q80 171 46 166Z" fill="#d6e8de" />
             <path d="M74 158l-8 5h12l-3 5 12-7h-10l4-3Z" fill="#2f6b4f" />
-            <path
-              d="M49 172h62l5 6H44Z"
-              fill="#f7e6c5"
-              stroke="#183d2c"
-              strokeWidth="2"
-            />
+            <path d="M49 172h62l5 6H44Z" fill="#f7e6c5" stroke="#183d2c" strokeWidth="2" />
           </g>
           <g className="hc-checklist">
             <rect
@@ -216,13 +208,7 @@ export function HasakiCompanionAvatar({
             stroke="#852940"
             strokeWidth="2"
           />
-          <path
-            d="M43 53 Q40 76 46 91"
-            fill="none"
-            stroke="#9d7483"
-            strokeWidth="3"
-            opacity=".7"
-          />
+          <path d="M43 53 Q40 76 46 91" fill="none" stroke="#9d7483" strokeWidth="3" opacity=".7" />
         </g>
         <g className="hc-raised-hand">
           <path
@@ -232,26 +218,11 @@ export function HasakiCompanionAvatar({
             strokeWidth="2.4"
             strokeLinejoin="round"
           />
-          <path
-            d="M109 151l8 5"
-            stroke="#f3aabc"
-            strokeWidth="4"
-            strokeLinecap="round"
-          />
+          <path d="M109 151l8 5" stroke="#f3aabc" strokeWidth="4" strokeLinecap="round" />
         </g>
         <g className="hc-handoff">
-          <path
-            d="M111 94h31v22h-31z"
-            fill="#fff8e9"
-            stroke="#806046"
-            strokeWidth="2"
-          />
-          <path
-            d="M117 101h18M117 107h13"
-            stroke="#2f6b4f"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
+          <path d="M111 94h31v22h-31z" fill="#fff8e9" stroke="#806046" strokeWidth="2" />
+          <path d="M117 101h18M117 107h13" stroke="#2f6b4f" strokeWidth="2" strokeLinecap="round" />
           <path
             d="M109 105h-9m0 0 4-4m-4 4 4 4"
             fill="none"
@@ -262,14 +233,7 @@ export function HasakiCompanionAvatar({
           />
         </g>
         <g className="hc-clock">
-          <circle
-            cx="132"
-            cy="82"
-            r="13"
-            fill="#fff8e9"
-            stroke="#bd4670"
-            strokeWidth="2.5"
-          />
+          <circle cx="132" cy="82" r="13" fill="#fff8e9" stroke="#bd4670" strokeWidth="2.5" />
           <path
             d="M132 74v8l5 3"
             fill="none"
@@ -279,28 +243,9 @@ export function HasakiCompanionAvatar({
           />
         </g>
         <g className="hc-thought">
-          <circle
-            cx="123"
-            cy="45"
-            r="8"
-            fill="#fff8e9"
-            stroke="#806046"
-            strokeWidth="2"
-          />
-          <circle
-            cx="132"
-            cy="34"
-            r="4"
-            fill="#fff8e9"
-            stroke="#806046"
-            strokeWidth="1.5"
-          />
-          <path
-            d="M120 45h6m-3-3v6"
-            stroke="#bd4670"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
+          <circle cx="123" cy="45" r="8" fill="#fff8e9" stroke="#806046" strokeWidth="2" />
+          <circle cx="132" cy="34" r="4" fill="#fff8e9" stroke="#806046" strokeWidth="1.5" />
+          <path d="M120 45h6m-3-3v6" stroke="#bd4670" strokeWidth="1.5" strokeLinecap="round" />
         </g>
         <g className="hc-confetti">
           <path
@@ -309,12 +254,7 @@ export function HasakiCompanionAvatar({
             strokeWidth="3"
             strokeLinecap="round"
           />
-          <path
-            d="M36 88l-9 1m98 16 9 2"
-            stroke="#d94d72"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
+          <path d="M36 88l-9 1m98 16 9 2" stroke="#d94d72" strokeWidth="3" strokeLinecap="round" />
         </g>
         <g className="hc-zzz">
           <path
