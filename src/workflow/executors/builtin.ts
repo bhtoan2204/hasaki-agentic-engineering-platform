@@ -26,6 +26,7 @@ import {
   allWorkspacesOf,
   prepareWorkspace,
   gitProviderFor,
+  installNodeDependencies,
   subtaskWorkspacesOf,
   workspaceBase,
   workspacesOf,
@@ -88,7 +89,12 @@ export const humanApprovalExecutor: StepExecutor = {
   async execute(ctx) {
     const cfg = ctx.step.config;
     const shown = Object.fromEntries(
-      [...new Set([...(cfg.show_outputs as string[] ?? ctx.step.depends_on), ...(typeof cfg.approve_scope_from === "string" ? [cfg.approve_scope_from] : [])])].map((k) => [k, ctx.input.upstream[k]?.output ?? null]),
+      [
+        ...new Set([
+          ...((cfg.show_outputs as string[]) ?? ctx.step.depends_on),
+          ...(typeof cfg.approve_scope_from === "string" ? [cfg.approve_scope_from] : []),
+        ]),
+      ].map((k) => [k, ctx.input.upstream[k]?.output ?? null]),
     );
     const request: Record<string, unknown> = {
       message: cfg.message ?? `Approve "${ctx.step.name}"?`,
@@ -101,27 +107,63 @@ export const humanApprovalExecutor: StepExecutor = {
         cfg.approve_scope_from,
         ctx.input.upstream[cfg.approve_scope_from]?.output,
       );
-      if (!scope && cfg.require_scope === true) return { kind: "failed", error: "A concrete revised scope is required before approval; reconcile the scope-plan output.", retryable: false };
+      if (!scope && cfg.require_scope === true)
+        return {
+          kind: "failed",
+          error:
+            "A concrete revised scope is required before approval; reconcile the scope-plan output.",
+          retryable: false,
+        };
       if (scope)
         Object.assign(request, {
           scope,
           requires_risk_acknowledgement: scope.gate ? !scope.gate.satisfied : scope.risk === "HIGH",
         });
     }
-    const executableTests = [...new Set(Object.values(shown).flatMap(output => {
-      const o = output as { required_tests?: unknown; subtasks?: Array<{ required_tests?: unknown }> } | null;
-      return [...(Array.isArray(o?.required_tests) ? o.required_tests : []), ...(o?.subtasks ?? []).flatMap(t => Array.isArray(t.required_tests) ? t.required_tests : [])];
-    }))];
-    for (const coding of ctx.run.graph.steps.filter(s => s.type === "coding_agent" && ancestors(ctx.run.graph.steps, s.key).has(ctx.step.key))) {
-      const tests = (coding.config.verify as { required_tests?: unknown } | undefined)?.required_tests;
-      if (Array.isArray(tests)) for (const id of tests) if (!executableTests.includes(id)) executableTests.push(id);
+    const executableTests = [
+      ...new Set(
+        Object.values(shown).flatMap((output) => {
+          const o = output as {
+            required_tests?: unknown;
+            subtasks?: Array<{ required_tests?: unknown }>;
+          } | null;
+          return [
+            ...(Array.isArray(o?.required_tests) ? o.required_tests : []),
+            ...(o?.subtasks ?? []).flatMap((t) =>
+              Array.isArray(t.required_tests) ? t.required_tests : [],
+            ),
+          ];
+        }),
+      ),
+    ];
+    for (const coding of ctx.run.graph.steps.filter(
+      (s) => s.type === "coding_agent" && ancestors(ctx.run.graph.steps, s.key).has(ctx.step.key),
+    )) {
+      const tests = (coding.config.verify as { required_tests?: unknown } | undefined)
+        ?.required_tests;
+      if (Array.isArray(tests))
+        for (const id of tests) if (!executableTests.includes(id)) executableTests.push(id);
     }
     if (executableTests.length) {
-      const repos = ctx.run.selected_repositories.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories;
+      const repos = ctx.run.selected_repositories.length
+        ? ctx.run.selected_repositories
+        : ctx.run.allowed_repositories;
       const prepared = await workspacesOf(ctx.run.id);
-      const targets = await Promise.all(repos.map(async repo => ({ repo, path: prepared.find(w => w.repo === repo)?.path ?? repoPath((await repositories.get(repo))!) })));
+      const targets = await Promise.all(
+        repos.map(async (repo) => ({
+          repo,
+          path:
+            prepared.find((w) => w.repo === repo)?.path ??
+            repoPath((await repositories.get(repo))!),
+        })),
+      );
       const checked = await requiredTestTargets(targets, executableTests, true);
-      if (checked.problems.length) return { kind: "failed", retryable: false, error: `Invalid required tests before approval: ${checked.problems.join("; ")}` };
+      if (checked.problems.length)
+        return {
+          kind: "failed",
+          retryable: false,
+          error: `Invalid required tests before approval: ${checked.problems.join("; ")}`,
+        };
       request.required_tests = executableTests;
     }
     if (cfg.select_repositories) {
@@ -233,8 +275,14 @@ let verificationGoCache: string | undefined;
 type CommandResult = { code: number | null; output: string; timedOut: boolean };
 
 /** Worker verification always uses the existing isolation policy, including non-self repositories. */
-export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps["run"] =
-  (command, cwd, env, timeoutMs, signal, onChunk) => runCommand(command, cwd, env, timeoutMs, signal, onChunk, true);
+export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps["run"] = (
+  command,
+  cwd,
+  env,
+  timeoutMs,
+  signal,
+  onChunk,
+) => runCommand(command, cwd, env, timeoutMs, signal, onChunk, true);
 
 export async function runCommand(
   command: string,
@@ -245,6 +293,9 @@ export async function runCommand(
   onChunk?: (text: string) => void,
   verification = false,
 ) {
+  // The sandboxed helper only validates; the worker installs and signs dependencies before any command that calls it.
+  if (command.includes("PLATFORM_NODE_DEPENDENCIES") && existsSync(join(cwd, "package.json")))
+    await installNodeDependencies(cwd).catch(() => false);
   const proc = await commandProcessEnv(cwd, env, verification);
   const useBwrap = proc.isolation?.mode === "bwrap";
   // commandProcessEnv owns the complete environment; never reintroduce scrubbed worker values.
@@ -269,7 +320,9 @@ export async function runCommand(
       timedOut: false,
     };
   Object.assign(childEnv, pg);
-  childEnv.PLATFORM_NODE_DEPENDENCIES = fileURLToPath(new URL("../../git/nodeDependencies.ts", import.meta.url));
+  childEnv.PLATFORM_NODE_DEPENDENCIES = fileURLToPath(
+    new URL("../../git/nodeDependencies.ts", import.meta.url),
+  );
   // Only the dependency helper learns where evidence lives: a shell variable (not exported) plus a `node` wrapper below.
   const evidenceDir = join(config.dataDir, "dependency-evidence").replaceAll("'", "'\\''");
   // Login profiles may drop inherited toolchains (Nix keeps node and npm in separate prefixes).
@@ -1218,14 +1271,33 @@ export const pullRequestExecutor: StepExecutor = {
       )
       .map((x) => ({ step: x.key, heads: x.output.tested_heads as Record<string, string> }));
     const verifiers = steps.filter((x) => x.independent);
-    const finalVerification = await verifyPublication(ctx, steps, workspaces,
-      runVerificationCommand, pgEvidenceStore(pool));
-    const finalRepos = new Set(finalVerification.tested.flatMap(t => Object.keys(t.heads)));
-    const publicationTested = [...tested.map(t => ({ ...t, heads: Object.fromEntries(Object.entries(t.heads).filter(([repo]) => !finalRepos.has(repo))) })), ...finalVerification.tested];
+    const finalVerification = await verifyPublication(
+      ctx,
+      steps,
+      workspaces,
+      runVerificationCommand,
+      pgEvidenceStore(pool),
+    );
+    const finalRepos = new Set(finalVerification.tested.flatMap((t) => Object.keys(t.heads)));
+    const publicationTested = [
+      ...tested.map((t) => ({
+        ...t,
+        heads: Object.fromEntries(
+          Object.entries(t.heads).filter(([repo]) => !finalRepos.has(repo)),
+        ),
+      })),
+      ...finalVerification.tested,
+    ];
     const problems = [
       ...new Set([
         ...finalVerification.problems,
-        ...prePublishProblems({ publish, scope, state, renewedRevision, tested: publicationTested }),
+        ...prePublishProblems({
+          publish,
+          scope,
+          state,
+          renewedRevision,
+          tested: publicationTested,
+        }),
         ...(verifiers.length ? verificationGate(verifiers, publish) : []),
       ]),
     ];

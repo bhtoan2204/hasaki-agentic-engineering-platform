@@ -1252,6 +1252,7 @@ const agentExecutor: StepExecutor = {
             },
             // Skills come from the platform registry (read_knowledge); Claude Code settings layers only if configured.
             settingSources,
+            settings: { attribution: { commit: "", pr: "" } },
             mcpServers: {
               platform: platformServer(ctx, mode, policy, (o) => (submitted = o), metrics),
             },

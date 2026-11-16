@@ -41,7 +41,6 @@ export const SUBAGENT_PLATFORM_TOOLS = [
   ...CONTEXT_TOOLS.filter((t) => t.readOnly).map((t) => t.name),
 ].map((t) => `mcp__platform__${t}`);
 
-
 export interface ToolCallRecord {
   tool: string;
   inputHash: string;
@@ -70,8 +69,11 @@ export class ToolLoopDetector {
   record(tool: string, input: unknown, status: "ok" | "error" | "denied" = "ok", error?: string) {
     tool = tool.replace(/^mcp__platform__|^platform\./, "");
     const inputHash = stableJson(input ?? {});
-    const resultHash = error === undefined ? undefined : createHash("sha256").update(error).digest("hex");
-    const previous = this.history.findLast(call => call.tool === tool && call.inputHash === inputHash);
+    const resultHash =
+      error === undefined ? undefined : createHash("sha256").update(error).digest("hex");
+    const previous = this.history.findLast(
+      (call) => call.tool === tool && call.inputHash === inputHash,
+    );
     if (previous?.resultHash && resultHash && previous.resultHash !== resultHash) this.history = [];
     this.history.push({
       tool,
@@ -119,7 +121,11 @@ export class ToolLoopDetector {
             break;
           }
         }
-        if (cycleMatches >= this.cycleThreshold && tool === prev.tool && inputHash === prev.inputHash) {
+        if (
+          cycleMatches >= this.cycleThreshold &&
+          tool === prev.tool &&
+          inputHash === prev.inputHash
+        ) {
           return {
             isLoop: true,
             reason: `Cyclic tool call loop detected: alternating pattern between ${prev.tool} and ${last.tool} repeated ${cycleMatches} times without progress`,
@@ -610,7 +616,8 @@ function loopStructure(input: string[]): { commands: string[] } | { error: strin
     if (/^(until|select|if|then|elif|else|fi|case|esac|function)\b|^[{}()]|^\(\(/.test(s))
       return { error: `"${s.slice(0, 40)}" không được hỗ trợ` };
     // `if a && b; then`: every part of the condition list is a command; loops take nothing before `do`.
-    if (top && !top.open && top.kind !== "if") return { error: `có lệnh giữa "${top.kind}" và "do"` };
+    if (top && !top.open && top.kind !== "if")
+      return { error: `có lệnh giữa "${top.kind}" và "do"` };
     commands.push(s);
   }
   if (stack.length)
@@ -864,6 +871,9 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     return deny("refusing to read secret files in a protected checkout");
   const scan = scanText(p);
   for (const [re, why] of ALWAYS_DENIED) if (re.test(scan)) return deny(why);
+  // Heredoc bodies are not in `scan`, but they are commit messages: check the raw command.
+  if (/\bgit\b[\s\S]*\bcommit\b/.test(scan) && /co-authored-by:/i.test(command))
+    return deny("commit messages must not carry a Co-Authored-By trailer — remove it and commit again");
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
   const fsScan = filesystemScanViolation(p);
@@ -994,22 +1004,37 @@ export function decide(
     if (loop.isLoop) return deny(loop.reason!);
   }
   if (ctx.micro) {
-    const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(tool);
+    const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(
+      tool,
+    );
     if (!control && ++ctx.micro.calls > ctx.micro.limit) {
-      ctx.micro.exhausted = true; ctx.micro.reason = "MICRO tool budget exhausted";
+      ctx.micro.exhausted = true;
+      ctx.micro.reason = "MICRO tool budget exhausted";
       return deny("MICRO tool budget exhausted; call escalate_profile before continuing");
     }
-    if (agentId || tool === "Task" || tool === "Agent") return deny("MICRO does not permit subagents");
+    if (agentId || tool === "Task" || tool === "Agent")
+      return deny("MICRO does not permit subagents");
     if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
       const path = String(input.file_path ?? input.notebook_path ?? "");
-      if (!path || !ctx.workspaces.some(root => ctx.micro!.files.some(file => resolve(root, file) === resolve(cwd ?? root, path)))) {
-        ctx.micro.exhausted = true; ctx.micro.reason = "proposed edit exceeds MICRO scope";
-        return deny("edit exceeds verified MICRO file scope; call escalate_profile before expanding scope");
+      if (
+        !path ||
+        !ctx.workspaces.some((root) =>
+          ctx.micro!.files.some((file) => resolve(root, file) === resolve(cwd ?? root, path)),
+        )
+      ) {
+        ctx.micro.exhausted = true;
+        ctx.micro.reason = "proposed edit exceeds MICRO scope";
+        return deny(
+          "edit exceeds verified MICRO file scope; call escalate_profile before expanding scope",
+        );
       }
     }
     // Even a nominal test/read command can execute repository code in an unsandboxed coding process.
     // Bounded platform reads and explicit edit tools suffice; the trusted harness performs verification.
-    if (tool === "Bash") return deny("MICRO shell execution has uncertain write scope; use bounded platform reads and explicit edits, or escalate. The platform runs mandatory verification.");
+    if (tool === "Bash")
+      return deny(
+        "MICRO shell execution has uncertain write scope; use bounded platform reads and explicit edits, or escalate. The platform runs mandatory verification.",
+      );
   }
   if (!toolAllowed(tool, ctx.allowedTools))
     return deny(`tool ${tool} is excluded by this attempt's allowed_tools`);

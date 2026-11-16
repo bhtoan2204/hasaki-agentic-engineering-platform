@@ -4,10 +4,21 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { EvidenceCache, memoryEvidenceStore, evidenceKey, notReusableReason } from "../src/agent/verifyEvidence.ts";
-import { verifyConfig, verifyWorkspaces, type RepoVerification, type VerifyDeps } from "../src/agent/verify.ts";
+import {
+  EvidenceCache,
+  memoryEvidenceStore,
+  evidenceKey,
+  notReusableReason,
+} from "../src/agent/verifyEvidence.ts";
+import {
+  verifyConfig,
+  verifyWorkspaces,
+  type RepoVerification,
+  type VerifyDeps,
+} from "../src/agent/verify.ts";
 
-const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-C", cwd, ...a], { stdio: "pipe" }).toString();
+const git = (cwd: string, ...a: string[]) =>
+  execFileSync("git", ["-C", cwd, ...a], { stdio: "pipe" }).toString();
 
 async function repo() {
   const dir = await mkdtemp(join(tmpdir(), "evidence-"));
@@ -20,11 +31,20 @@ async function repo() {
   return dir;
 }
 
-function setup(dir: string, store = memoryEvidenceStore(), opts: { code?: number; delay?: number; contract?: string; command?: string } = {}) {
+function setup(
+  dir: string,
+  store = memoryEvidenceStore(),
+  opts: { code?: number; delay?: number; contract?: string; command?: string } = {},
+) {
   let calls = 0;
   const logs: string[] = [];
-  const mk = (scope = { runId: 1, stepKey: "implement", attemptId: 7 }) => new EvidenceCache(store, scope);
-  let cfg = { ...verifyConfig({ verify: { command: opts.command ?? "true" } }, "true")!, baseline: null as null, contractRevision: opts.contract ?? "c1" };
+  const mk = (scope = { runId: 1, stepKey: "implement", attemptId: 7 }) =>
+    new EvidenceCache(store, scope);
+  let cfg = {
+    ...verifyConfig({ verify: { command: opts.command ?? "true" } }, "true")!,
+    baseline: null as null,
+    contractRevision: opts.contract ?? "c1",
+  };
   const deps = (cache?: EvidenceCache): VerifyDeps => ({
     run: async () => {
       calls++;
@@ -35,8 +55,28 @@ function setup(dir: string, store = memoryEvidenceStore(), opts: { code?: number
     ...(cache ? { evidence: cache } : {}),
   });
   const go = (c: typeof cfg, cache?: EvidenceCache, env = {}) =>
-    verifyWorkspaces([{ repo: "r", path: dir }], [dir], c, 1, new AbortController().signal, deps(cache), env);
-  return { get cfg() { return cfg; }, set cfg(v) { cfg = v; }, go, mk, calls: () => calls, logs, store };
+    verifyWorkspaces(
+      [{ repo: "r", path: dir }],
+      [dir],
+      c,
+      1,
+      new AbortController().signal,
+      deps(cache),
+      env,
+    );
+  return {
+    get cfg() {
+      return cfg;
+    },
+    set cfg(v) {
+      cfg = v;
+    },
+    go,
+    mk,
+    calls: () => calls,
+    logs,
+    store,
+  };
 }
 
 test("second identical request reuses the pass and records a hit", async () => {
@@ -104,7 +144,8 @@ test("dependency file edit that keeps HEAD/fingerprint equal cannot be hidden: e
   const t = setup(dir);
   const cache = t.mk();
   await writeFile(join(dir, "go.mod"), "module a\n");
-  git(dir, "add", "-A"); git(dir, "commit", "-qm", "go");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "go");
   await t.go(t.cfg, cache);
   await writeFile(join(dir, "go.mod"), "module b\n");
   await t.go(t.cfg, cache);
@@ -126,12 +167,29 @@ test("failed results are never stored or reused", async () => {
 });
 
 test("notReusableReason rejects every non-clean state", () => {
-  const base = { status: "passed" as const, passed: true, exit_code: 0, timed_out: false, weakened: [], needs_review: false, tested_state: { head: "h", fingerprint: "f" } } as unknown as RepoVerification;
+  const base = {
+    status: "passed" as const,
+    passed: true,
+    exit_code: 0,
+    timed_out: false,
+    weakened: [],
+    needs_review: false,
+    tested_state: { head: "h", fingerprint: "f" },
+  } as unknown as RepoVerification;
   assert.equal(notReusableReason(base), null);
-  const bads: Array<Partial<RepoVerification>> = [{ status: "failed" }, { status: "error" }, { status: "skipped" }, { timed_out: true }, { exit_code: 1 },
-    { needs_review: true }, { status: "accepted_preexisting", needs_review: true }, { weakened: ["x"] }, { error: "e" }, { tested_state: undefined }];
-  for (const bad of bads)
-    assert.ok(notReusableReason({ ...base, ...bad }), JSON.stringify(bad));
+  const bads: Array<Partial<RepoVerification>> = [
+    { status: "failed" },
+    { status: "error" },
+    { status: "skipped" },
+    { timed_out: true },
+    { exit_code: 1 },
+    { needs_review: true },
+    { status: "accepted_preexisting", needs_review: true },
+    { weakened: ["x"] },
+    { error: "e" },
+    { tested_state: undefined },
+  ];
+  for (const bad of bads) assert.ok(notReusableReason({ ...base, ...bad }), JSON.stringify(bad));
 });
 
 test("10 concurrent identical requests run once; map empties", async () => {
@@ -141,7 +199,8 @@ test("10 concurrent identical requests run once; map empties", async () => {
   const res = await Promise.all(Array.from({ length: 10 }, () => t.go(t.cfg, cache)));
   assert.equal(t.calls(), 1);
   assert.ok(res.every((r) => r.passed));
-  assert.equal(cache.stats.duplicates_avoided, 9);
+  // A follower whose key is computed after the leader finished gets a stored hit instead of joining the flight.
+  assert.equal(cache.stats.duplicates_avoided + cache.stats.hits, 9);
   assert.equal(cache.pending, 0);
   await rm(dir, { recursive: true });
 });
@@ -153,7 +212,12 @@ test("leader failure is not cached; next request reruns", async () => {
   let n = 0;
   const cfg = { ...verifyConfig({ verify: { command: "true" } }, "true")!, baseline: null as null };
   const deps = (fail: boolean): VerifyDeps => ({
-    run: async () => { n++; await new Promise((r) => setTimeout(r, 20)); if (fail) throw new Error("boom"); return { code: 0, output: "", timedOut: false }; },
+    run: async () => {
+      n++;
+      await new Promise((r) => setTimeout(r, 20));
+      if (fail) throw new Error("boom");
+      return { code: 0, output: "", timedOut: false };
+    },
     evidence: cache,
   });
   const sig = new AbortController().signal;
@@ -187,7 +251,15 @@ test("new process (new cache, same store) hits; other run and other contract do 
 
 test("a failing store means a rerun, never a false pass", async () => {
   const dir = await repo();
-  const broken = { find: async () => { throw new Error("db down"); }, latest: async () => null, save: async () => { throw new Error("db down"); } };
+  const broken = {
+    find: async () => {
+      throw new Error("db down");
+    },
+    latest: async () => null,
+    save: async () => {
+      throw new Error("db down");
+    },
+  };
   const cache = new EvidenceCache(broken, { runId: 1, stepKey: "s" });
   const t = setup(dir);
   const r = await t.go(t.cfg, cache);

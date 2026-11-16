@@ -236,6 +236,16 @@ test("tool policy: edits confined to worktrees, analysis is read-only", () => {
   assert.ok(!decide("SomethingNew", {}, coding).allow);
 });
 
+test("tool policy: commits cannot carry a Co-Authored-By trailer", () => {
+  for (const cmd of [
+    'git commit -m "fix: x\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"',
+    "git commit -q -F - <<'EOF'\nfeat: y\n\nco-authored-by: Cursor <cursoragent@cursor.com>\nEOF",
+    'git -C /w commit --amend -m "z\n\nCo-authored-by: A <a@b>"',
+  ])
+    assert.ok(!decideBash(cmd, coding).allow, cmd);
+  assert.ok(decideBash('git commit -m "fix: plain message"', coding).allow);
+});
+
 test("tool policy: dangerous shell denied everywhere, analysis shell allowlisted", () => {
   for (const cmd of [
     "git push origin x",
@@ -664,7 +674,7 @@ describe("Bash policy: heredoc data vs shell syntax", () => {
     baseBranch: "release/prod",
     protectedRoots: ["/home/me/src"],
   };
-  // verbatim shape of the logged command (message shortened), incl. ~128k and a Co-Authored-By trailer with <email>
+  // verbatim shape of the logged command (message shortened), incl. ~128k and a trailer with <email>
   const original = [
     `git add -A && git commit -q -F - <<'EOF' ; echo $?; git log --oneline -1`,
     `perf(scheduler): page auto change stock shipments by id`,
@@ -674,7 +684,7 @@ describe("Bash policy: heredoc data vs shell syntax", () => {
     ``,
     `task: HSK-OO04123R`,
     ``,
-    `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`,
+    `Reviewed-by: QA <qa@example.com>`,
     `EOF`,
   ].join("\n");
 
@@ -690,7 +700,7 @@ describe("Bash policy: heredoc data vs shell syntax", () => {
     assert.deepEqual(p.redirects, []);
     assert.equal(p.heredocs.length, 1);
     assert.equal(p.heredocs[0].data, true);
-    assert.match(p.heredocs[0].body, /~128k[\s\S]*<noreply@anthropic.com>/);
+    assert.match(p.heredocs[0].body, /~128k[\s\S]*<qa@example.com>/);
     assert.deepEqual(pathsIn(original), []);
   });
 
