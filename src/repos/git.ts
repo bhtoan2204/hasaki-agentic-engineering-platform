@@ -109,6 +109,15 @@ export async function remoteGit(url: string, args: string[], cwd?: string): Prom
       throw new Error(
         `${host} authentication required: update personal credentials and check repository permissions in Integrations`,
       );
+    // GitHub refuses workflow-file changes from tokens without the workflow permission; say so instead of "failed".
+    if (
+      /refusing to allow .*(?:workflow|\.github\/workflows)/i.test(
+        String((e as { stderr?: string }).stderr ?? ""),
+      )
+    )
+      throw new Error(
+        `${host} rejected the push: the token may not change .github/workflows files. Give your token the Workflows (read and write) permission, or the "workflow" scope for a classic token, and save it again in Integrations`,
+      );
     if (/Unsafe local Git network configuration/.test((e as Error).message)) throw e;
     // Never propagate a child_process error: it includes command/output and potentially server-echoed credentials.
     throw new Error(
