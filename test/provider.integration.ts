@@ -13,7 +13,7 @@ import { cursorToolDecision } from "../src/agent/cursor/policyWatch.ts";
 import { cursorAgentTurn, cursorCapabilities } from "../src/agent/cursor/run.ts";
 import { attemptIsLive, dispatchPlatformTool } from "../src/agent/platformTools.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
-import { dependencyFingerprint, nodeModulesReady } from "../src/git/provider.ts";
+import { nodeModulesReady, recordDependencies } from "../src/git/provider.ts";
 
 before(async () => {
   await migrate();
@@ -295,24 +295,17 @@ test("Cursor shares the attempt collector across invocations without overwriting
   assert.equal(metrics.cost_usd, null);
 });
 
-test("node_modules counts as installed only after a package manager finished", () => {
+test("node_modules counts as installed only after the worker signed a complete install", async () => {
   const ws = mkdtempSync(join(tmpdir(), "node-modules-ready-"));
-  assert.equal(nodeModulesReady(ws), false);
+  assert.equal(await nodeModulesReady(ws), false);
   mkdirSync(join(ws, "node_modules", "zod"), { recursive: true });
-  assert.equal(
-    nodeModulesReady(ws),
-    false,
-    "a partial install has packages but no completion marker",
-  );
+  assert.equal(await nodeModulesReady(ws), false, "a partial install has packages but no worker evidence");
   writeFileSync(join(ws, "node_modules", ".package-lock.json"), "{}");
-  assert.equal(nodeModulesReady(ws), false, "package-manager marker alone cannot prove current dependency state");
   writeFileSync(join(ws, "package.json"), "{}");
-  writeFileSync(join(ws, "node_modules", ".platform-ready"), dependencyFingerprint(ws)!);
-  assert.equal(nodeModulesReady(ws), true);
+  writeFileSync(join(ws, "node_modules", ".platform-ready"), "forged");
+  assert.equal(await nodeModulesReady(ws), false, "markers inside the workspace cannot prove current dependency state");
+  assert.equal(await recordDependencies(ws), true);
+  assert.equal(await nodeModulesReady(ws), true);
   writeFileSync(join(ws, "package-lock.json"), "changed");
-  assert.equal(nodeModulesReady(ws), false, "lockfile changes invalidate the install");
-  const pnpm = mkdtempSync(join(tmpdir(), "node-modules-ready-"));
-  mkdirSync(join(pnpm, "node_modules"));
-  writeFileSync(join(pnpm, "node_modules", ".modules.yaml"), "");
-  assert.equal(nodeModulesReady(pnpm), false);
+  assert.equal(await nodeModulesReady(ws), false, "lockfile changes invalidate the install");
 });

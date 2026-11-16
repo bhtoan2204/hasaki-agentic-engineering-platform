@@ -4,7 +4,7 @@
  */
 
 // Resolve the trusted helper on the current worker, not from a persisted machine-specific path.
-const NODE_DEPENDENCIES = 'node "${PLATFORM_NODE_DEPENDENCIES:?Verification worker dependency helper is unavailable}" "$PWD"';
+const NODE_DEPENDENCIES = 'node "${PLATFORM_NODE_DEPENDENCIES:?Verification worker dependency helper is unavailable}" "$PWD"\nunset PLATFORM_DEPENDENCY_EVIDENCE_DIR';
 
 // Tests only the Go packages touched on the branch (oms-api has a known red baseline elsewhere), npm otherwise.
 export const TEST_COMMAND = `set -e

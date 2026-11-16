@@ -263,9 +263,9 @@ test("MICRO verification reuses dependencies with a matching worker fingerprint"
     await mkdir(join(root, "node_modules", "dependency"), { recursive: true });
     await mkdir(join(root, "bin"));
     await writeFile(join(root, "package.json"), "{}");
-    const { dependencyFingerprint } = await import("../src/git/provider.ts");
+    const { recordDependencies } = await import("../src/git/provider.ts");
     const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
-    await writeFile(join(root, "node_modules", ".platform-ready"), dependencyFingerprint(root)!);
+    await recordDependencies(root);
     await writeFile(join(root, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf "%s\\n" "$*" >> "$CALLS"\n`, { mode: 0o755 });
     execFileSync("bash", ["-c", FEATURE_MICRO_TARGETED_COMMAND], { cwd: root,
       env: { ...process.env, PLATFORM_NODE_DEPENDENCIES: join(import.meta.dirname, "..", "src", "git", "nodeDependencies.ts"), PLATFORM_SELF_TEST: "0", BASE_BRANCH: "main", PATH: `${join(root, "bin")}:${process.env.PATH}`, CALLS: join(root, "calls") }, stdio: "pipe" });

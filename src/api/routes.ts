@@ -221,6 +221,7 @@ import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
 import { metricsSummary, runMetrics } from "./metrics.ts";
+import { dependencyMetrics } from "../git/nodeDependencies.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
 import type { FeedbackMode } from "../workflow/replan.ts";
 
@@ -639,6 +640,15 @@ export const routes: Route[] = [
         singleflightInflight: singleflightInflight(),
         pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
       };
+    },
+  ],
+  // Dependency readiness: validation/install timings, cache hit rate, full vs incremental, I/O and event loop lag. Admin only.
+  [
+    "GET",
+    /^\/api\/metrics\/dependencies$/,
+    (c) => {
+      requireAdmin(c.actor);
+      return dependencyMetrics();
     },
   ],
   [

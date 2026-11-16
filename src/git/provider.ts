@@ -36,10 +36,15 @@ export function npmCacheDir() {
   return join(config.dataDir, "npm-cache");
 }
 
-export { dependencyFingerprint, nodeModulesReady } from "./nodeDependencies.ts";
+/** Signed readiness evidence lives with the worker, never in the agent-writable workspace. */
+export function dependencyEvidenceDir() {
+  return join(config.dataDir, "dependency-evidence");
+}
+
+export { dependencyFingerprint, nodeModulesReady, recordDependencies } from "./nodeDependencies.ts";
 /** Worker preparation and verification shells share exactly the same readiness implementation. */
 export async function installNodeDependencies(workspace: string): Promise<boolean> {
-  return ensureNodeDependencies(workspace, npmCacheDir());
+  return ensureNodeDependencies(workspace, npmCacheDir(), { evidenceDir: dependencyEvidenceDir() });
 }
 
 /**

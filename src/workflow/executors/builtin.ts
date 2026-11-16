@@ -269,6 +269,7 @@ export async function runCommand(
     };
   Object.assign(childEnv, pg);
   childEnv.PLATFORM_NODE_DEPENDENCIES = fileURLToPath(new URL("../../git/nodeDependencies.ts", import.meta.url));
+  childEnv.PLATFORM_DEPENDENCY_EVIDENCE_DIR = join(config.dataDir, "dependency-evidence");
   // Login profiles may drop inherited toolchains (Nix keeps node and npm in separate prefixes).
   // Keep the profile's priority, then append missing inherited directories before adding PostgreSQL.
   childEnv.PLATFORM_COMMAND_PATH = childEnv.PATH ?? "";

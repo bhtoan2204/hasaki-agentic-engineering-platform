@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { requiredTestTargets, verifyWorkspaces } from "../src/agent/verify.ts";
 import {
-  dependencyFingerprint,
   installNodeDependencies,
   nodeModulesReady,
 } from "../src/git/nodeDependencies.ts";
@@ -144,8 +143,8 @@ test("dependency readiness rejects a forged presence marker, missing packages an
   const { path } = fixture(t);
   writeFileSync(join(path, "package.json"), JSON.stringify({ dependencies: { example: "1.0.0" } }));
   mkdirSync(join(path, "node_modules"));
-  writeFileSync(join(path, "node_modules", ".platform-ready"), dependencyFingerprint(path)!);
-  assert.equal(nodeModulesReady(path), false);
+  writeFileSync(join(path, "node_modules", ".platform-ready"), "forged by the agent");
+  assert.equal(await nodeModulesReady(path), false);
   const bin = join(path, "bin");
   mkdirSync(bin);
   writeFileSync(
@@ -157,12 +156,12 @@ test("dependency readiness rejects a forged presence marker, missing packages an
   process.env.PATH = `${bin}:${oldPath}`;
   try {
     await installNodeDependencies(path);
-    assert.equal(nodeModulesReady(path), true);
+    assert.equal(await nodeModulesReady(path, { strict: true }), true);
     writeFileSync(join(path, "node_modules", "example", "index.js"), "module.exports = 999");
-    assert.equal(nodeModulesReady(path), false);
+    assert.equal(await nodeModulesReady(path, { strict: true }), false);
     await installNodeDependencies(path);
     rmSync(join(path, "node_modules", "example"), { recursive: true });
-    assert.equal(nodeModulesReady(path), false);
+    assert.equal(await nodeModulesReady(path, { strict: true }), false);
   } finally {
     process.env.PATH = oldPath;
   }

@@ -5,17 +5,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { FEATURE_MICRO_TARGETED_COMMAND, FEATURE_TARGETED_COMMAND, FEATURE_REGRESSION_COMMAND } from "../src/workflow/templates.ts";
-import { dependencyFingerprint } from "../src/git/provider.ts";
+import { recordDependencies } from "../src/git/provider.ts";
 
 for (const [profile, command] of Object.entries({ MICRO: FEATURE_MICRO_TARGETED_COMMAND, TARGETED: FEATURE_TARGETED_COMMAND, REGRESSION: FEATURE_REGRESSION_COMMAND })) {
-  test(`${profile} installs changed dependencies once and reuses the new fingerprint`, t => {
+  test(`${profile} installs changed dependencies once and reuses the new fingerprint`, async t => {
     const path = mkdtempSync(join(tmpdir(), "dependency-profile-"));
     t.after(() => rmSync(path, { recursive: true, force: true }));
     mkdirSync(join(path, "node_modules", "existing"), { recursive: true });
     mkdirSync(join(path, "bin"));
     writeFileSync(join(path, "package.json"), "{}");
     writeFileSync(join(path, "package-lock.json"), "original lock");
-    writeFileSync(join(path, "node_modules", ".platform-ready"), dependencyFingerprint(path)!);
+    await recordDependencies(path);
     const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
     const calls = join(path, "calls");
     writeFileSync(join(path, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf '%s\\n' "$*" >> "$CALLS"\n`, { mode: 0o755 });

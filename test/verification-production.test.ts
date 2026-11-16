@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { verifyWorkspaces } from "../src/agent/verify.ts";
 import { runVerificationCommand as runCommand } from "../src/workflow/executors/builtin.ts";
 import { FEATURE_TARGETED_COMMAND, PLATFORM_TARGETED_COMMAND } from "../src/workflow/templates.ts";
-import { dependencyFingerprint } from "../src/git/provider.ts";
+import { recordDependencies } from "../src/git/provider.ts";
 
 function fixture(t: { after(fn: () => void): void }, name: string) {
   const path = mkdtempSync(join(tmpdir(), `verification-${name}-`));
@@ -44,7 +44,7 @@ test("production platform shell verification records Node required-test evidence
   mkdirSync(join(path, "node_modules", ".bin"), { recursive: true });
   writeFileSync(join(path, "package.json"), JSON.stringify({ scripts: { test: "node --test test/business.test.ts" } }));
   writeFileSync(join(path, "node_modules", ".bin", "tsc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  writeFileSync(join(path, "node_modules", ".platform-ready"), dependencyFingerprint(path)!);
+  await recordDependencies(path);
   writeFileSync(join(path, "test", "env.ts"), "");
   writeFileSync(join(path, "test", "business.test.ts"), 'import { test } from "node:test"; import assert from "node:assert/strict"; test("preserves business flow", () => assert.equal(2+2, 4));\n');
   git("add", "."); git("commit", "-qm", "business test");
