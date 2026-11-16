@@ -31,6 +31,7 @@ import {
   workspaceBase,
   workspacesOf,
 } from "../../git/provider.ts";
+import { publishReviewComment, reviewCommentBody } from "../../git/reviewComment.ts";
 import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
@@ -1388,7 +1389,18 @@ export const pullRequestExecutor: StepExecutor = {
         title,
         description,
         draft: mode === "draft",
+        remoteUrl: registry?.repository_url ?? null,
       });
+      // CI evidence for verification and review steps, when the host reports pipelines. Never blocks publication.
+      let pipeline: { id: number; status: string; url: string | null } | null = null;
+      if (provider.pipelines)
+        pipeline = await provider
+          .pipelines({ repo: slug, remoteUrl: registry?.repository_url ?? null, ref: w.branch })
+          .then((r) => {
+            const p = r.pipelines[0];
+            return p ? { id: p.id, status: p.status, url: p.url } : null;
+          })
+          .catch(() => null);
       await q(
         pool,
         `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id)
@@ -1412,13 +1424,31 @@ export const pullRequestExecutor: StepExecutor = {
           ctx.step.id,
         ],
       );
-      await ctx.log("system", `PR ${w.repo}: ${pr.url} (${pr.note})`);
+      await ctx.log(
+        "system",
+        `PR ${w.repo}: ${pr.url} (${pr.note})${pipeline ? `; pipeline #${pipeline.id} ${pipeline.status}` : ""}`,
+      );
+      // The run's review findings go onto the PR/MR as one comment (hosts that support comments; once per run).
+      const reviewBody = provider.commentOnPullRequest
+        ? reviewCommentBody(ctx.input.upstream, ctx.run.id)
+        : null;
+      const reviewComment = reviewBody
+        ? await publishReviewComment(
+            provider,
+            { repo: slug, url: pr.url, remoteUrl: registry?.repository_url ?? null },
+            reviewBody,
+            ctx.run.id,
+          )
+        : null;
+      if (reviewComment) await ctx.log("system", `${w.repo}: review comment ${reviewComment.reason}`);
       out.push({
         repo: w.repo,
         url: pr.url,
         created: pr.created,
         note: pr.note,
         draft: mode === "draft",
+        ...(pipeline ? { pipeline } : {}),
+        ...(reviewComment ? { review_comment: reviewComment } : {}),
       });
     }
     return { kind: "completed", output: { pull_requests: out } };

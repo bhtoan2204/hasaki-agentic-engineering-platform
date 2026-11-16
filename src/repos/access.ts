@@ -22,8 +22,10 @@ import { pool, q, one, withTx, type Db } from "../db/pool.ts";
 import { CacheAside, singleflight } from "../cache/index.ts";
 import { getUserSecret } from "../auth/secrets.ts";
 import { repositories, projectScope, type RepositoryRow } from "./service.ts";
-import { repositoryRemote } from "./remote.ts";
+import { repositoryRemote, type CanonicalRemote } from "./remote.ts";
 import { githubRepositoryAccess } from "../github.ts";
+import { gitlabRepositoryAccess, gitlabSecretKey } from "../gitlab.ts";
+import { gitHost, isGitHost } from "../git/hosts.ts";
 
 export type RepoAction = "read" | "write" | "pull_request";
 export type AccessLevel = "none" | RepoAction;
@@ -112,12 +114,11 @@ function loadUser(userId: number, db: Db) {
 
 const ttlSeconds = () => Math.max(30, Number(config.bitbucket.permissionTtlSeconds ?? 900));
 /** Hosted remotes whose permissions are checked with the user's own token. Local and benchmark rows are not. */
-const onHosted = (r: RepositoryRow) =>
-  !!r.repository_url && (r.provider === "bitbucket" || r.provider === "github");
+const onHosted = (r: RepositoryRow) => !!r.repository_url && isGitHost(r.provider);
 const hostPolicy = (r: RepositoryRow) =>
-  (r.provider === "github"
-    ? config.github.accessVerification
-    : config.bitbucket.accessVerification) ?? "strict";
+  isGitHost(r.provider)
+    ? gitHost(r.provider).policy()
+    : (config.bitbucket.accessVerification ?? "strict");
 
 function compute(
   userId: number,
@@ -466,6 +467,51 @@ export function setGithubPermissionChecker(fn: typeof githubChecker | null) {
   githubChecker = fn ?? githubRepositoryAccess;
 }
 
+let gitlabChecker: typeof gitlabRepositoryAccess = gitlabRepositoryAccess;
+export function setGitlabPermissionChecker(fn: typeof gitlabChecker | null) {
+  gitlabChecker = fn ?? gitlabRepositoryAccess;
+}
+
+const unknownVerdict = (reason: string): Verdict => ({
+  state: "unknown",
+  can_read: null,
+  can_write: null,
+  reason,
+});
+
+/**
+ * Per-host permission check with the user's own credentials. `secret` reads one user secret (memoised per refresh).
+ * A shared service account proves nothing about this user: without personal credentials the state is unknown.
+ */
+type HostVerifier = (
+  secret: (kind: string) => Promise<string | null>,
+  remote: CanonicalRemote,
+) => Promise<Verdict>;
+const verifiers: Record<CanonicalRemote["provider"], HostVerifier> = {
+  async bitbucket(secret, remote) {
+    const user = await secret("bitbucket_user");
+    const token = await secret("bitbucket_token");
+    if (!user || !token)
+      return unknownVerdict("no personal Bitbucket credentials (Integrations → Bitbucket)");
+    return checker({ user, token }, remote.workspace, remote.slug);
+  },
+  async github(secret, remote) {
+    const token = await secret("github_token");
+    if (!token) return unknownVerdict("no personal GitHub token (Integrations → GitHub)");
+    return githubChecker(token, remote.workspace, remote.slug);
+  },
+  async gitlab(secret, remote) {
+    const token = await secret(gitlabSecretKey(remote.host));
+    if (!token)
+      return unknownVerdict(`no personal GitLab token for ${remote.host} (Integrations → GitLab)`);
+    return gitlabChecker(token, {
+      host: remote.host,
+      workspace: remote.workspace,
+      slug: remote.slug,
+    });
+  },
+};
+
 async function askBitbucket(
   creds: { user: string; token: string },
   ws: string,
@@ -541,41 +587,27 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
   await singleflight(
     `bitbucket-permissions:${userId}:${due.map((r) => r.id).join(",")}`,
     async () => {
-      const user = await getUserSecret(userId, "bitbucket_user");
-      const token = await getUserSecret(userId, "bitbucket_token");
-      const githubToken = await getUserSecret(userId, "github_token");
-      // A shared service account proves nothing about this user: without personal credentials the state is unknown.
-      const creds = user && token ? { user, token } : null;
+      const memo = new Map<string, Promise<string | null>>();
+      const secret = (kind: string) => {
+        if (!memo.has(kind)) memo.set(kind, getUserSecret(userId, kind));
+        return memo.get(kind)!;
+      };
       const verdicts: Array<[RepositoryRow, Verdict]> = [];
       for (let i = 0; i < due.length; i += 4)
         verdicts.push(
           ...(await Promise.all(
             due.slice(i, i + 4).map(async (r): Promise<[RepositoryRow, Verdict]> => {
-              const remote = repositoryRemote(r.repository_url!);
-              if (r.provider === "github") {
-                if (!githubToken)
-                  return [
-                    r,
-                    {
-                      state: "unknown",
-                      can_read: null,
-                      can_write: null,
-                      reason: "no personal GitHub token (Integrations → GitHub)",
-                    },
-                  ];
-                return [r, await githubChecker(githubToken, remote.workspace, remote.slug)];
-              }
-              if (!creds)
+              let remote: CanonicalRemote;
+              try {
+                remote = repositoryRemote(r.repository_url!);
+              } catch {
+                // e.g. a GitLab host removed from config.gitlab.instances: unknown, never an error for the listing.
                 return [
                   r,
-                  {
-                    state: "unknown",
-                    can_read: null,
-                    can_write: null,
-                    reason: "no personal Bitbucket credentials (Integrations → Bitbucket)",
-                  },
+                  unknownVerdict("repository URL is not accepted by this instance's configuration"),
                 ];
-              return [r, await checker(creds, remote.workspace, remote.slug)];
+              }
+              return [r, await verifiers[remote.provider](secret, remote)];
             }),
           )),
         );

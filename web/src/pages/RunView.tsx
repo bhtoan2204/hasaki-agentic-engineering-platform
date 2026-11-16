@@ -748,7 +748,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                         <a href={p.url} target="_blank" rel="noopener">
                           {p.title}
                         </a>
+                        {p.state ? ` · ${p.state}` : ""}
                       </div>
+                      {p.provider === "gitlab" && (!p.state || p.state === "OPEN") && (
+                        <PullRequestControls id={p.id} onDone={reload} />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1275,4 +1279,68 @@ function focusNodes(ids: string[], key?: string) {
   const i = key ? ids.indexOf(key) : -1;
   const from = i < 0 ? 0 : Math.max(0, Math.min(i - 2, ids.length - 5));
   return ids.slice(from, from + 5).map((id) => ({ id }));
+}
+
+type PipelineView = { id: number; status: string; url: string | null };
+type PullRequestStatus = {
+  provider: string;
+  readiness: {
+    mergeable: boolean;
+    reasons: string[];
+    approvals: { required: number; given: number; enforced: boolean } | null;
+    pipeline: PipelineView | null;
+  } | null;
+  pipelines: PipelineView[] | null;
+};
+
+/**
+ * Merge readiness, CI pipeline and the human-only merge/close actions of one PR/MR. The server re-checks the run
+ * owner's permission, mergeability, approvals and the required pipeline at the moment of the action.
+ */
+function PullRequestControls({ id, onDone }: { id: number; onDone: () => void }) {
+  const { t } = useI18n();
+  const [st, setSt] = useState<PullRequestStatus | null>(null);
+  const load = async () =>
+    setSt((await act(() => api<PullRequestStatus>(`/api/pull-requests/${id}/status`))) ?? null);
+  const pipeline = st?.pipelines?.[0] ?? st?.readiness?.pipeline ?? null;
+  return (
+    <div className="small" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <button className="sm ghost" onClick={load}>
+        {t("rv.pr.status")}
+      </button>
+      {pipeline && (
+        <span className={`badge ${pipeline.status === "success" ? "ok" : pipeline.status === "failed" ? "err" : ""}`}>
+          {t("rv.pr.pipeline")} #{pipeline.id}: {pipeline.status}
+        </span>
+      )}
+      {st?.readiness && (
+        <span className="muted" title={st.readiness.reasons.join("; ")}>
+          {st.readiness.mergeable ? t("rv.pr.mergeable") : `${t("rv.pr.notMergeable")}: ${st.readiness.reasons.join("; ")}`}
+          {st.readiness.approvals && !st.readiness.approvals.enforced ? ` · ${t("rv.pr.approvalsNotEnforced")}` : ""}
+        </span>
+      )}
+      {st?.readiness?.mergeable && (
+        <button
+          className="sm"
+          onClick={async () => {
+            if (!confirm(t("rv.pr.mergeConfirm"))) return;
+            if (await act(() => api(`/api/pull-requests/${id}/merge`, {}), t("rv.pr.merged"))) onDone();
+          }}
+        >
+          {t("rv.pr.merge")}
+        </button>
+      )}
+      {st && (
+        <button
+          className="sm ghost"
+          onClick={async () => {
+            if (!confirm(t("rv.pr.closeConfirm"))) return;
+            if (await act(() => api(`/api/pull-requests/${id}/close`, {}), t("rv.pr.closed"))) onDone();
+          }}
+        >
+          {t("rv.pr.close")}
+        </button>
+      )}
+    </div>
+  );
 }

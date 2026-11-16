@@ -6,6 +6,14 @@
 const SECRETS: Array<[RegExp, string]> = [
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, "$1 ***"],
   [/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g, "<jwt>"],
+  // GitLab tokens (personal glpat-, deploy gldt-, trigger glptt-, runner glrt-, ...), the PRIVATE-TOKEN header and
+  // credentials embedded in a Git URL (https://oauth2:<token>@host).
+  [
+    /\bgl(?:pat|dt|ptt|rt|rtr|cbt|imt|ft|soat|oas|agent|wt|ffct)-[A-Za-z0-9_-]{16,}/g,
+    "<gitlab-token>",
+  ],
+  [/(PRIVATE-TOKEN\s*:\s*)\S+/gi, "$1***"],
+  [/(\/\/[^/@\s:]+:)[^@\s/]{4,}@/g, "$1***@"],
   [
     /((?:password|passwd|secret|api[_-]?key|[a-z_-]*token|client[_-]?secret)["']?\s*[:=]\s*["']?)[^\s"',;&}]{4,}/gi,
     "$1***",

@@ -116,9 +116,10 @@ export function BitbucketState({
   host?: string;
 }) {
   const { t } = useI18n();
+  const own = host === "github" ? "gh" : host === "gitlab" ? "gl" : null;
   const key =
-    host === "github" && (state === "denied" || state === "not_applicable")
-      ? `repo.gh.${state}`
+    own && (state === "denied" || state === "not_applicable")
+      ? `repo.${own}.${state}`
       : `repo.bb.${state}`;
   return (
     <span className={`repo-bb is-${state}${stale ? " is-stale" : ""}`} title={reason || undefined}>

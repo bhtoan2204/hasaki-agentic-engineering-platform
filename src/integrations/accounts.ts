@@ -1,5 +1,14 @@
 import { networkCode } from "../telegram/client.ts";
 import { forgetBitbucketChecks } from "../repos/access.ts";
+import { gitlabHosts } from "../repos/remote.ts";
+import {
+  GitlabError,
+  glab,
+  gitlabSecretKey,
+  gitlabSshKeySecret,
+  validSshPrivateKey,
+  type GlToken,
+} from "../gitlab.ts";
 import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
 import { botKey } from "../telegram/client.ts";
 import { pool, one, q } from "../db/pool.ts";
@@ -385,6 +394,188 @@ export async function clearGithub(userId?: number) {
     );
   }
   return githubStatus(userId);
+}
+
+/** Allowed instances and, per instance, whether this user saved a token. Tokens are never returned. */
+export async function gitlabStatus(userId?: number) {
+  const shared = !!(config.gitlab.allowSharedCredentials && config.gitlab.token);
+  const instances = [];
+  for (const host of gitlabHosts()) {
+    const personal = userId ? !!(await getUserSecret(userId, gitlabSecretKey(host))) : false;
+    const instance = config.gitlab.instances.find((i) => i.host === host);
+    instances.push({
+      host,
+      base_url: `https://${host}`,
+      configured: personal || shared,
+      personal,
+      source: personal ? "user" : shared ? "shared" : "none",
+      // SSH transport needs pinned host keys in config plus the user's own key; only presence is reported.
+      ssh_available: !!instance?.sshHostKeys?.length,
+      ssh_key: userId ? !!(await getUserSecret(userId, gitlabSshKeySecret(host))) : false,
+    });
+  }
+  return { instances, shared };
+}
+
+function gitlabHostOf(input: unknown): string {
+  // Accept a bare host or a base URL ("https://gitlab.hasaki.work/"); it must be an allow-listed instance.
+  const raw = String(input ?? "")
+    .trim()
+    .toLowerCase();
+  const host = raw.replace(/^https:\/\//, "").replace(/\/+$/, "");
+  if (!host || !gitlabHosts().includes(host))
+    throw new HttpError(
+      400,
+      `GitLab instance is not allowed: use one of ${gitlabHosts().join(", ") || "(none configured)"} (config.gitlab.instances)`,
+    );
+  return host;
+}
+
+type GitlabCheck = {
+  ok: boolean;
+  /** ok | auth | permission | connectivity | http | scope */
+  kind: string;
+  message: string;
+  account: string | null;
+  scopes: string[] | null;
+};
+
+/**
+ * Validate a token against one instance: who it belongs to and which scopes it has. Personal and project access
+ * tokens answer /personal_access_tokens/self (GitLab 15.5+); older instances fall back to /user (scopes unknown).
+ */
+async function checkGitlabToken(host: string, token: string): Promise<GitlabCheck> {
+  try {
+    let scopes: string[] | null = null;
+    let account: string | null = null;
+    try {
+      const { body } = await glab<GlToken>(host, token, "/personal_access_tokens/self");
+      scopes = Array.isArray(body?.scopes) ? body.scopes.map(String) : null;
+      if (body?.active === false || body?.revoked === true)
+        return {
+          ok: false,
+          kind: "auth",
+          message: `GitLab ${host}: the token is revoked or expired`,
+          account,
+          scopes,
+        };
+    } catch (e) {
+      if (!(e instanceof GitlabError) || e.kind === "auth" || e.kind === "connectivity") throw e;
+    }
+    const { body: me } = await glab<{ username?: string }>(host, token, "/user");
+    account = me?.username ?? null;
+    if (scopes) {
+      const has = (x: string) => scopes!.includes(x);
+      if (!has("api") && !(has("write_repository") && (has("read_api") || has("read_repository"))))
+        return {
+          ok: false,
+          kind: "scope",
+          message:
+            "GitLab token needs the api scope (merge requests, comments, merge), or read_api + read_repository + write_repository for read and push only",
+          account,
+          scopes,
+        };
+    }
+    return {
+      ok: true,
+      kind: "ok",
+      message: `Connected to ${host}${account ? ` as ${account}` : ""}`,
+      account,
+      scopes,
+    };
+  } catch (e) {
+    if (e instanceof GitlabError)
+      return { ok: false, kind: e.kind, message: e.message, account: null, scopes: null };
+    return {
+      ok: false,
+      kind: "http",
+      message: `GitLab ${host}: check failed`,
+      account: null,
+      scopes: null,
+    };
+  }
+}
+
+async function forgetGitlabChecks(userId: number) {
+  await q(
+    pool,
+    `DELETE FROM repository_bitbucket_permissions p USING repositories r
+     WHERE p.repository_id = r.id AND p.user_id = $1 AND r.provider = 'gitlab'`,
+    [userId],
+  );
+}
+
+/** Save a personal or project access token for one allow-listed instance after checking it. */
+export async function setGitlab(
+  input: { host?: string; base_url?: string; token?: string },
+  userId?: number,
+) {
+  const host = gitlabHostOf(input.host ?? input.base_url);
+  const token = String(input.token ?? "").trim();
+  if (!token) throw new HttpError(400, "GitLab token is required");
+  if (!userId) throw new HttpError(400, "GitLab credentials are saved per user");
+  const check = await checkGitlabToken(host, token);
+  if (!check.ok) throw new HttpError(check.kind === "connectivity" ? 502 : 400, check.message);
+  await putUserSecret(userId, gitlabSecretKey(host), token);
+  await forgetGitlabChecks(userId);
+  return { ...(await gitlabStatus(userId)), host, account: check.account, scopes: check.scopes };
+}
+
+/** Test the saved token of one instance; reports auth, permission and connectivity failures distinctly. */
+export async function testGitlab(input: { host?: string; base_url?: string }, userId?: number) {
+  const host = gitlabHostOf(input.host ?? input.base_url);
+  const token =
+    (userId ? await getUserSecret(userId, gitlabSecretKey(host)) : null) ||
+    (config.gitlab.allowSharedCredentials ? config.gitlab.token : "");
+  if (!token)
+    return {
+      host,
+      ok: false,
+      kind: "auth",
+      message: `No GitLab token saved for ${host}`,
+      account: null,
+      scopes: null,
+    };
+  return { host, ...(await checkGitlabToken(host, token)) };
+}
+
+/**
+ * Save the user's SSH private key for Git transport to one instance. Accepted only when the instance pins its host
+ * keys (config.gitlab.instances[].sshHostKeys) and the key is an unencrypted OpenSSH/PEM private key. The key is
+ * stored encrypted like other personal secrets and never returned.
+ */
+export async function setGitlabSshKey(
+  input: { host?: string; base_url?: string; ssh_key?: string },
+  userId?: number,
+) {
+  const host = gitlabHostOf(input.host ?? input.base_url);
+  if (!userId) throw new HttpError(400, "GitLab credentials are saved per user");
+  if (!config.gitlab.instances.find((i) => i.host === host)?.sshHostKeys?.length)
+    throw new HttpError(
+      400,
+      `SSH is not enabled for ${host}: an operator must pin its host keys in config.gitlab.instances[].sshHostKeys`,
+    );
+  const key = String(input.ssh_key ?? "");
+  if (!validSshPrivateKey(key))
+    throw new HttpError(
+      400,
+      "Paste an unencrypted OpenSSH private key (-----BEGIN OPENSSH PRIVATE KEY-----); passphrase-protected keys cannot be used non-interactively",
+    );
+  await putUserSecret(userId, gitlabSshKeySecret(host), key.trim() + "\n");
+  return gitlabStatus(userId);
+}
+
+export async function clearGitlab(input: { host?: string; base_url?: string }, userId?: number) {
+  if (userId) {
+    const hosts =
+      input?.host || input?.base_url ? [gitlabHostOf(input.host ?? input.base_url)] : gitlabHosts();
+    for (const host of hosts) {
+      await deleteUserSecret(userId, gitlabSecretKey(host));
+      await deleteUserSecret(userId, gitlabSshKeySecret(host));
+    }
+    await forgetGitlabChecks(userId);
+  }
+  return gitlabStatus(userId);
 }
 
 export async function clearBitbucket(userId?: number) {

@@ -15,6 +15,30 @@ import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest, pullRequestState } from "../bitbucket.ts";
 import { openGithubPullRequest, githubPullRequestState } from "../github.ts";
 import {
+  closeGitlabMergeRequest,
+  commentOnGitlabMergeRequest,
+  getGitlabMergeRequest,
+  gitlabJobLog,
+  gitlabMergeReadiness,
+  gitlabMergeRequestChanges,
+  gitlabMergeRequestDiscussions,
+  gitlabMergeRequestState,
+  gitlabPipelines,
+  gitlabProjectMetadata,
+  gitlabRemoteOf,
+  mergeGitlabMergeRequest,
+  openGitlabMergeRequest,
+} from "../gitlab.ts";
+import type {
+  ChangeRequest,
+  ChangeRequestChanges,
+  ChangeRequestDiscussion,
+  ChangeRequestState,
+  MergeReadiness,
+  PipelineSummary,
+  PullRequestRef,
+} from "./model.ts";
+import {
   branchWorktree,
   moveWorktree,
   prepareBranch,
@@ -51,9 +75,20 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
   return ensureNodeDependencies(workspace, npmCacheDir(), { evidenceDir: dependencyEvidenceDir(), strict: true });
 }
 
+export type {
+  ChangeRequest,
+  ChangeRequestChanges,
+  ChangeRequestDiscussion,
+  ChangeRequestState,
+  MergeReadiness,
+  PipelineSummary,
+  PullRequestRef,
+} from "./model.ts";
+
 /**
- * Seam for Git hosting. Bitbucket and GitHub implement the same calls. Worktree management stays in src/git.ts.
- * Tests replace both hosts at once via setGitProvider.
+ * Seam for Git hosting (REST half; transport and access live in ./hosts.ts). Bitbucket, GitHub and GitLab implement
+ * the same calls; the optional ones report "unsupported" for providers without them. Worktree management stays in
+ * src/git.ts. Tests replace every host at once via setGitProvider, or one host via setGitProviderFor.
  */
 export interface GitProvider {
   name: string;
@@ -67,16 +102,63 @@ export interface GitProvider {
     title: string;
     description: string;
     draft: boolean;
+    /** Canonical registry URL; required by hosts with several instances (GitLab), ignored by the others. */
+    remoteUrl?: string | null;
   }): Promise<{
     url: string;
     created: boolean;
     note: string;
   }>;
   /** Read-only lifecycle state of an existing PR (null: not a PR, e.g. a create-PR link). */
-  pullRequestState?(pr: {
+  pullRequestState?(
+    pr: PullRequestRef,
+  ): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
+  /** Unified read model. */
+  getPullRequest?(pr: PullRequestRef): Promise<ChangeRequest>;
+  pullRequestChanges?(
+    pr: PullRequestRef,
+    opts?: { maxFiles?: number; maxDiffBytes?: number },
+  ): Promise<ChangeRequestChanges>;
+  pullRequestDiscussions?(
+    pr: PullRequestRef,
+  ): Promise<{ discussions: ChangeRequestDiscussion[]; truncated: boolean }>;
+  /** Posted by platform code paths only (never a free agent tool). */
+  commentOnPullRequest?(pr: PullRequestRef, body: string): Promise<{ id: number; url: string }>;
+  /** Provider mergeability + approvals + pipeline under the shared merge policy (git/model.ts). */
+  mergeReadiness?(pr: PullRequestRef): Promise<MergeReadiness>;
+  /** Human-triggered only: re-checks readiness and merges pinned to the checked head. */
+  mergePullRequest?(
+    pr: PullRequestRef,
+    opts: { deleteSourceBranch: boolean },
+  ): Promise<{
+    merged: boolean;
+    state: ChangeRequestState | null;
+    merge_commit: string | null;
+    reasons: string[];
+  }>;
+  closePullRequest?(pr: PullRequestRef): Promise<{ state: ChangeRequestState | null }>;
+  /** Recent CI pipelines of a branch (`ref`) or a PR (`url`); the newest includes its jobs. */
+  pipelines?(q: {
     repo: string;
-    url: string;
-  }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
+    remoteUrl?: string | null;
+    ref?: string;
+    url?: string;
+  }): Promise<{ pipelines: PipelineSummary[]; truncated: boolean }>;
+  /** Default and protected branches of the repository, as the host reports them. */
+  repositoryMetadata?(q: { repo: string; remoteUrl?: string | null }): Promise<{
+    default_branch: string | null;
+    protected_branches: string[];
+    protected_branches_truncated: boolean;
+    visibility: string | null;
+    web_url: string | null;
+  }>;
+  /** Redacted tail of one CI job log. */
+  jobLog?(q: {
+    repo: string;
+    remoteUrl?: string | null;
+    jobId: number;
+    tail?: number;
+  }): Promise<{ log: string; truncated: boolean }>;
 }
 
 async function pushFromWorktree(path: string, branch: string, base?: string, expectedSha?: string) {
@@ -124,16 +206,69 @@ export const githubProvider: GitProvider = {
   pullRequestState: (pr) => githubPullRequestState(pr.repo, pr.url),
 };
 
+export const gitlabProvider: GitProvider = {
+  name: "gitlab",
+  push: (path, branch, base, expectedSha) => pushFromWorktree(path, branch, base, expectedSha),
+  openOrUpdatePullRequest: (pr) =>
+    openGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.source, pr.title, pr.description, {
+      draft: pr.draft,
+      dest: pr.target,
+    }),
+  pullRequestState: (pr) => gitlabMergeRequestState(gitlabRemoteOf(pr.remoteUrl), pr.url),
+  getPullRequest: (pr) => getGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url),
+  pullRequestChanges: (pr, opts) =>
+    gitlabMergeRequestChanges(gitlabRemoteOf(pr.remoteUrl), pr.url, opts),
+  pullRequestDiscussions: (pr) => gitlabMergeRequestDiscussions(gitlabRemoteOf(pr.remoteUrl), pr.url),
+  commentOnPullRequest: (pr, body) =>
+    commentOnGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url, body),
+  mergeReadiness: (pr) => gitlabMergeReadiness(gitlabRemoteOf(pr.remoteUrl), pr.url),
+  mergePullRequest: (pr, opts) => mergeGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url, opts),
+  closePullRequest: (pr) => closeGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url),
+  pipelines: (q) => gitlabPipelines(gitlabRemoteOf(q.remoteUrl), { ref: q.ref, url: q.url }),
+  jobLog: (q) => gitlabJobLog(gitlabRemoteOf(q.remoteUrl), q.jobId, q.tail),
+  repositoryMetadata: (q) => gitlabProjectMetadata(gitlabRemoteOf(q.remoteUrl)),
+};
+
+/** Production adapters by repositories.provider. */
+const registry = new Map<string, GitProvider>([
+  ["bitbucket", bitbucketProvider],
+  ["github", githubProvider],
+  ["gitlab", gitlabProvider],
+  // Legacy registry rows without a hosted remote kept the Bitbucket adapter before the registry existed.
+  ["local", bitbucketProvider],
+  ["benchmark", bitbucketProvider],
+]);
+/** Per-host test overrides (contract tests). */
+const hostOverrides = new Map<string, GitProvider>();
+
+/** Register (or replace) the adapter of one host. Adding a provider is this call plus a hosts.ts entry. */
+export function registerGitProvider(host: string, p: GitProvider) {
+  registry.set(host, p);
+}
+export const registeredGitProviders = () => [...new Set([...registry.keys(), ...hostOverrides.keys()])];
+
 /** When set, tests and benchmarks handle every host. Production dispatches by repository provider. */
 let override: GitProvider | null = null;
 export const gitProvider = () => override ?? bitbucketProvider;
+/**
+ * The adapter for a repository's provider. Null or empty is a legacy row and stays Bitbucket; an unknown value
+ * fails closed instead of silently sending credentials to Bitbucket.
+ */
 export function gitProviderFor(provider?: string | null): GitProvider {
   if (override) return override;
-  return provider === "github" ? githubProvider : bitbucketProvider;
+  const key = provider || "bitbucket";
+  const p = hostOverrides.get(key) ?? registry.get(key);
+  if (!p) throw new Error(`No Git provider registered for "${key}"`);
+  return p;
 }
 /** Replace the provider for every host (tests and benchmarks). Pass bitbucketProvider to restore production dispatch. */
 export function setGitProvider(p: GitProvider) {
   override = p === bitbucketProvider ? null : p;
+}
+/** Replace one host's provider (contract tests). Pass null to restore it. */
+export function setGitProviderFor(host: string, p: GitProvider | null) {
+  if (p) hostOverrides.set(host, p);
+  else hostOverrides.delete(host);
 }
 
 /** Filesystem-safe worktree directory key for a branch ("wf/run-12" → "wf_run-12"). */

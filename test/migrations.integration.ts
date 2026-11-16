@@ -69,3 +69,43 @@ test("schema constraints reject invalid keys and statuses", async () => {
     /check constraint/,
   );
 });
+
+test("060: existing Bitbucket/GitHub remotes still satisfy the constraint; GitLab accepts nested groups only in canonical form", async () => {
+  await migrate(pool);
+  const add = (name: string, provider: string, url: string) =>
+    pool.query(`INSERT INTO repositories (name, provider, repository_url) VALUES ($1, $2, $3)`, [
+      name,
+      provider,
+      url,
+    ]);
+  await add("m060-bb", "bitbucket", "https://bitbucket.org/acme/shop.git");
+  await add("m060-gh", "github", "https://github.com/acme/shop.git");
+  await add("m060-gl", "gitlab", "https://gitlab.com/acme/shop.git");
+  await add(
+    "m060-gl-nested",
+    "gitlab",
+    "https://gitlab.hasaki.work/platform/backend/team/oms-api.git",
+  );
+  for (const bad of [
+    "https://user:token@gitlab.com/acme/shop.git",
+    "https://gitlab.com/shop.git",
+    "https://gitlab.com/acme/../shop.git",
+    "https://gitlab.com/Acme/shop.git",
+    "https://gitlab.com/acme/shop",
+    "http://gitlab.com/acme/shop.git",
+  ])
+    await assert.rejects(
+      add(`m060-bad-${bad.length}-${Math.random()}`, "gitlab", bad),
+      /check constraint/,
+      bad,
+    );
+  // A GitHub URL still cannot be stored under the bitbucket provider (clauses are per provider).
+  await assert.rejects(
+    add("m060-mismatch", "bitbucket", "https://github.com/acme/other.git"),
+    /check constraint/,
+  );
+  const { rows } = await pool.query(
+    `SELECT delete_source_branch FROM repositories WHERE name = 'm060-gl-nested'`,
+  );
+  assert.equal(rows[0].delete_source_branch, false);
+});

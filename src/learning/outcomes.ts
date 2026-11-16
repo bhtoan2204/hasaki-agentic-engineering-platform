@@ -16,7 +16,7 @@
  */
 import { config } from "../config.ts";
 import { pool, q, one, json, type Db } from "../db/pool.ts";
-import { gitProviderFor, workspacesOf } from "../git/provider.ts";
+import { gitProviderFor, registeredGitProviders, workspacesOf } from "../git/provider.ts";
 import { repositoryBaseBranch, repositoryReference } from "../repos/service.ts";
 import { collectScopeState, TEST_FILE } from "../agent/scopeGuard.ts";
 import { costTotalsForRuns } from "../report/cost.ts";
@@ -503,7 +503,7 @@ export async function collectOutcomeFacts(
  * A merge is recorded only when the provider says MERGED; failures leave the state unknown, never guessed.
  */
 export async function syncPullRequestStates(opts: { runId?: number; limit?: number } = {}) {
-  if (!gitProviderFor("bitbucket").pullRequestState && !gitProviderFor("github").pullRequestState)
+  if (!registeredGitProviders().some((host) => gitProviderFor(host).pullRequestState))
     return { checked: 0, updated: 0, errors: ["the git provider cannot report PR states"] };
   const rows = await q<any>(
     pool,
@@ -522,6 +522,7 @@ export async function syncPullRequestStates(opts: { runId?: number; limit?: numb
       const st = await provider.pullRequestState({
         repo: reg ? repositoryReference(reg) : r.repo,
         url: r.url,
+        remoteUrl: reg?.repository_url ?? null,
       });
       if (!st) continue;
       const state = ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"].includes(st.state)
