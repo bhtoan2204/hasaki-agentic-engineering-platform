@@ -242,7 +242,7 @@ export const knowledgeRepository = {
   },
 
   upsertProposal(params: unknown[], db: Db = pool) {
-    return one<any>(
+    return one(
       db,
       `INSERT INTO knowledge_proposals (owner_id, parent_id, change_type, target_item_id, target_key, target_version, existing_rule, proposed, domain, confidence, uncertainty,
                                         evidence, impacts, validation, source_kind, source_run_id, dedupe_key, created_by)

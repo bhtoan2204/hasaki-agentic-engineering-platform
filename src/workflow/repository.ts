@@ -90,11 +90,11 @@ export const workflowRepository = {
   },
 
   findArtifactById(id: number, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM workflow_artifacts WHERE id = $1", [id]);
+    return one(db, "SELECT * FROM workflow_artifacts WHERE id = $1", [id]);
   },
 
   findArtifactByIdAndRun(id: number, runId: number, kind?: string, db: Db = pool) {
-    return one<any>(
+    return one<{ content: string }>(
       db,
       "SELECT content FROM workflow_artifacts WHERE id = $1 AND run_id = $2 AND ($3::text IS NULL OR kind = $3)",
       [id, runId, kind ?? null],
@@ -132,7 +132,7 @@ export const workflowRepository = {
 
   async getRunExecutionMetrics(runId: number, db: Db = pool) {
     const [attempts, toolRows, [run], telemetry] = await Promise.all([
-      q<any>(
+      q(
         db,
         `SELECT a.id, a.agent_provider, a.agent_model, a.effective_agent, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
               (extract(epoch FROM (COALESCE(a.finished_at, now()) - a.started_at)) * 1000)::bigint AS exec_ms,
@@ -143,23 +143,21 @@ export const workflowRepository = {
         WHERE a.run_id = $1 ORDER BY a.id`,
         [runId],
       ),
-      q<any>(
+      q(
         db,
         `SELECT t.attempt_id, t.data->>'name' AS name, (extract(epoch FROM (r.created_at - t.created_at)) * 1000)::bigint AS ms
          FROM workflow_events t JOIN workflow_events r ON r.attempt_id = t.attempt_id AND r.kind = 'tool_result' AND r.data->>'tool_use_id' = t.data->>'id'
         WHERE t.run_id = $1 AND t.kind = 'tool'`,
         [runId],
       ),
-      q<any>(
+      q(
         db,
         "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1",
         [runId],
       ),
-      q<any>(
-        db,
-        "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1 ORDER BY attempt_id",
-        [runId],
-      ),
+      q(db, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1 ORDER BY attempt_id", [
+        runId,
+      ]),
     ]);
     return { attempts, toolRows, run, telemetry };
   },
@@ -211,7 +209,7 @@ export const workflowRepository = {
         [runId],
       ),
       q<StepRow>(db, "SELECT * FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]),
-      q<any>(
+      q(
         db,
         `SELECT a.id, a.step_id, a.run_id, a.number, a.generation, a.status,
                 a.agent_provider, a.agent_model, a.metrics, a.error,
@@ -224,19 +222,19 @@ export const workflowRepository = {
           WHERE a.run_id = $1 ORDER BY a.id`,
         [runId],
       ),
-      q<any>(
+      q(
         db,
         "SELECT q.*, s.key AS step_key FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id WHERE q.run_id = $1 ORDER BY q.id",
         [runId],
       ),
-      q<any>(
+      q(
         db,
         "SELECT id, step_id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE run_id = $1 ORDER BY id",
         [runId],
       ),
-      q<any>(db, "SELECT * FROM pull_requests WHERE run_id = $1 ORDER BY id", [runId]),
-      q<any>(db, "SELECT * FROM execution_workspaces WHERE run_id = $1 ORDER BY id", [runId]),
-      q<any>(
+      q(db, "SELECT * FROM pull_requests WHERE run_id = $1 ORDER BY id", [runId]),
+      q(db, "SELECT * FROM execution_workspaces WHERE run_id = $1 ORDER BY id", [runId]),
+      q(
         db,
         "SELECT id, step_id, attempt_id, reason, data, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id",
         [runId],

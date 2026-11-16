@@ -1,19 +1,28 @@
+export interface SnapshotContent {
+  upstream?: unknown;
+  [key: string]: unknown;
+}
+
 import { pool, q, one, json, type Db } from "../db/pool.ts";
 
 export const agentRepository = {
   findContextSnapshotById(id: number, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM context_snapshots WHERE id = $1", [id]);
+    return one(db, "SELECT * FROM context_snapshots WHERE id = $1", [id]);
   },
 
   findContextSnapshotContent(id: number, db: Db = pool) {
-    return one<{ content: any }>(db, "SELECT content FROM context_snapshots WHERE id = $1", [id]);
+    return one<{ content: SnapshotContent }>(
+      db,
+      "SELECT content FROM context_snapshots WHERE id = $1",
+      [id],
+    );
   },
 
   findContextPackByAttemptId(
     params: { attemptId: number; runId: number; stepId: number; ownerId?: number | null },
     db: Db = pool,
   ) {
-    return one<any>(
+    return one(
       db,
       "SELECT id,snapshot_id,content_hash,content,created_at FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",
       [params.attemptId, params.runId, params.stepId, params.ownerId ?? null],
@@ -24,7 +33,7 @@ export const agentRepository = {
     params: { attemptId: number; runId: number; stepId: number; ownerId?: number | null },
     db: Db = pool,
   ) {
-    return one<{ content: any }>(
+    return one<{ content: SnapshotContent }>(
       db,
       "SELECT content FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",
       [params.attemptId, params.runId, params.stepId, params.ownerId ?? null],
@@ -68,7 +77,7 @@ export const agentRepository = {
     return q<{
       session_id: string;
       attempt_id: number;
-      snapshot: any;
+      snapshot: SnapshotContent;
     }>(
       db,
       `SELECT s.session_id, s.attempt_id, cs.content AS snapshot
@@ -112,11 +121,11 @@ export const agentRepository = {
   },
 
   findAgentRecommendationById(id: number, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM agent_recommendations WHERE id=$1", [id]);
+    return one(db, "SELECT * FROM agent_recommendations WHERE id=$1", [id]);
   },
 
   listAgentRecommendations(ownerId: number, limit = 50, db: Db = pool) {
-    return q<any>(
+    return q(
       db,
       "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT $2",
       [ownerId, limit],
@@ -136,7 +145,7 @@ export const agentRepository = {
     stepId: number,
     db: Db = pool,
   ) {
-    return one<any>(
+    return one(
       db,
       "SELECT id,source_attempt_id,package FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",
       [targetAttemptId, runId, stepId],

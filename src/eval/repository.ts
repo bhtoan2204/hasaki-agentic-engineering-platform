@@ -6,7 +6,7 @@ export const evalRepository = {
   },
 
   findSuiteByKeyAndVersion(suiteKey: string, version: string | number, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM benchmark_suites WHERE suite_key=$1 AND version=$2", [
+    return one(db, "SELECT * FROM benchmark_suites WHERE suite_key=$1 AND version=$2", [
       suiteKey,
       version,
     ]);
@@ -20,7 +20,7 @@ export const evalRepository = {
     manifest: string,
     db: Db = pool,
   ) {
-    return one<any>(
+    return one(
       db,
       "INSERT INTO benchmark_suites(suite_key,version,content_hash,title,manifest) VALUES($1,$2,$3,$4,$5) RETURNING *",
       [suiteKey, version, contentHash, title, manifest],
@@ -53,7 +53,7 @@ export const evalRepository = {
   },
 
   findSuiteById(id: number, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM benchmark_suites WHERE id=$1", [id]);
+    return one(db, "SELECT * FROM benchmark_suites WHERE id=$1", [id]);
   },
 
   async lockEvaluationRequest(lockKey: string, db: Db): Promise<void> {
@@ -61,7 +61,7 @@ export const evalRepository = {
   },
 
   findEvaluationRunByRequestKey(ownerId: number, requestKey: string, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM evaluation_runs WHERE owner_id=$1 AND request_key=$2", [
+    return one(db, "SELECT * FROM evaluation_runs WHERE owner_id=$1 AND request_key=$2", [
       ownerId,
       requestKey,
     ]);
@@ -77,7 +77,7 @@ export const evalRepository = {
     requestKey: string,
     db: Db = pool,
   ) {
-    return one<any>(
+    return one(
       db,
       `INSERT INTO evaluation_runs(suite_id,owner_id,configuration,configuration_hash,scoring,constraints_hash,request_key) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [suiteId, ownerId, configuration, configHash, scoring, constraintsHash, requestKey],
@@ -130,7 +130,7 @@ export const evalRepository = {
   },
 
   findEvaluationById(id: number, ownerId: number, db: Db = pool) {
-    return one<any>(
+    return one(
       db,
       `SELECT e.*,r.status,r.created_at AS workflow_created_at,r.started_at,r.finished_at,r.definition_version_id FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id WHERE e.id=$1 AND e.owner_id=$2`,
       [id, ownerId],
@@ -138,7 +138,7 @@ export const evalRepository = {
   },
 
   findEvaluationCases(evaluationId: number, workflowRunId: number, db: Db = pool) {
-    return q<any>(
+    return q(
       db,
       `SELECT cr.id,cr.repetition,cr.workflow_step_key,c.task_id,c.category,c.difficulty,c.origin,c.definition,c.base_commit,s.status AS step_status,s.current_attempt_id,er.*,sample.completion_duration_ms
        FROM evaluation_case_runs cr JOIN benchmark_cases c ON c.id=cr.case_id LEFT JOIN workflow_steps s ON s.run_id=$2 AND s.key=cr.workflow_step_key LEFT JOIN eval_results er ON er.case_run_id=cr.id LEFT JOIN evaluation_analytics_samples sample ON sample.case_run_id=cr.id WHERE cr.evaluation_id=$1 ORDER BY cr.repetition,c.task_id`,
@@ -147,7 +147,7 @@ export const evalRepository = {
   },
 
   listEvaluationsByOwner(ownerId: number, db: Db = pool) {
-    return q<any>(
+    return q(
       db,
       `SELECT e.id,e.suite_id,e.configuration,e.created_at,e.workflow_run_id,r.status,count(cr.id)::int AS tasks,count(er.id)::int AS finished,count(er.id) FILTER(WHERE er.correct)::int AS successes,round(avg(er.quality_score),2) AS average_score FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id JOIN evaluation_case_runs cr ON cr.evaluation_id=e.id LEFT JOIN eval_results er ON er.case_run_id=cr.id WHERE e.owner_id=$1 GROUP BY e.id,r.status ORDER BY e.id DESC LIMIT 100`,
       [ownerId],
@@ -161,7 +161,7 @@ export const evalRepository = {
     policy: string,
     db: Db = pool,
   ) {
-    return one<any>(
+    return one(
       db,
       "INSERT INTO evaluation_comparisons(owner_id,baseline_id,candidate_id,policy) VALUES($1,$2,$3,$4) RETURNING *",
       [ownerId, baselineId, candidateId, policy],
@@ -169,7 +169,7 @@ export const evalRepository = {
   },
 
   findComparisonById(id: number, ownerId: number, db: Db = pool) {
-    return one<any>(db, "SELECT * FROM evaluation_comparisons WHERE id=$1 AND owner_id=$2", [
+    return one(db, "SELECT * FROM evaluation_comparisons WHERE id=$1 AND owner_id=$2", [
       id,
       ownerId,
     ]);

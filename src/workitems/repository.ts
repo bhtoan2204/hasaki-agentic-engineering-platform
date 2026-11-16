@@ -9,7 +9,7 @@ export interface WorkItemRow {
   title: string;
   description: string;
   project: string;
-  payload: any;
+  payload: unknown;
   status: string;
   automation_policy: {
     workflow: string;
