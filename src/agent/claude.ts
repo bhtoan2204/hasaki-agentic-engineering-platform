@@ -137,6 +137,7 @@ import {
   scopeCheck,
   unavailableSources,
 } from "./evidence.ts";
+import { EvidenceCache, pgEvidenceStore } from "./verifyEvidence.ts";
 import {
   diffTestsAgainstBase,
   repairPrompt,
@@ -1888,6 +1889,12 @@ ${validation.errors.join("; ")}`,
         artifact: (name, content, data) =>
           ctx.artifact("log", name, content, { ...data, verification: true }),
         log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
+        // Rebuilt from the live worktree on every verification, so resume, retry and handoff trust no in-memory state.
+        evidence: new EvidenceCache(pgEvidenceStore(pool), {
+          runId: ctx.run.id,
+          stepKey: ctx.step.key,
+          attemptId: ctx.attempt?.id ?? null,
+        }),
       };
       let accepted = output;
       const loop = await verificationLoop<ExecResult>({

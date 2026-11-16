@@ -1,6 +1,7 @@
 import { config } from "../config.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { StepRow } from "../workflow/types.ts";
+import { EvidenceCache, type EvidenceStore } from "./verifyEvidence.ts";
 import { verifyConfig, verifyWorkspaces, type VerifyDeps, type VerifyConfig } from "./verify.ts";
 import { executionContractProblems, type MandatoryExecutionContract } from "./executionContract.ts";
 import { diffTestsAgainstBase } from "./verify.ts";
@@ -15,6 +16,8 @@ export async function verifyPublication(
   >,
   workspaces: Array<{ repo: string; path: string; branch: string }>,
   run: VerifyDeps["run"],
+  /** Optional: reuse a passed verification of this exact integrated state (same key as coding-step verification). */
+  evidenceStore?: EvidenceStore,
 ) {
   const problems: string[] = [];
   const tested: Array<{ step: string; heads: Record<string, string> }> = [];
@@ -52,6 +55,9 @@ export async function verifyPublication(
       ctx.signal,
       {
         run: execute,
+        ...(evidenceStore
+          ? { evidence: new EvidenceCache(evidenceStore, { runId: ctx.run.id, stepKey: `publication:${key}`, attemptId: ctx.attempt?.id ?? null }) }
+          : {}),
         knownFailures: knownBaseFailures,
         baseline: async (repo, failing) =>
           (

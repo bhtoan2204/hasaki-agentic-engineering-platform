@@ -693,3 +693,31 @@ test("a retry and a provider handoff preserve implementation already observed in
     }
   }
 });
+
+test("a re-execution or retry keeps implementation observed in an earlier generation that never completed", async () => {
+  process.env.FAKE_LIFECYCLE_ACTION = "fail-after-edit";
+  const run = await start("STANDARD", true, false, false);
+  let coding = await reachCoding(run.id);
+  assert.equal(coding.status, "FAILED");
+  process.env.FAKE_LIFECYCLE_ACTION = "noop";
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  coding = (await step(run.id))!;
+  assert.equal(coding.status, "COMPLETED", JSON.stringify(coding.error));
+  assert.notEqual(
+    coding.output.implementation_evidence.baseline[repo].content,
+    coding.output.implementation_evidence.observed[repo].content,
+  );
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  coding = (await step(run.id))!;
+  assert.equal(coding.status, "FAILED", "accepted implementation cannot be claimed again");
+  await retryStep(run.id, "implement");
+  await drain();
+  coding = (await step(run.id))!;
+  assert.equal(
+    coding.status,
+    "FAILED",
+    "accepted implementation cannot be claimed by a retry either",
+  );
+});
