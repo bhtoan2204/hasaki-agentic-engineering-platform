@@ -145,6 +145,22 @@ function legacyModelFor(
       "profile ",
       provider === "claude" ? "routing " : `${provider} routing `,
     );
+  if (
+    !source.startsWith(provider === "claude" ? "routing " : `${provider} routing `) &&
+    !source.startsWith("step config")
+  ) {
+    if (provider === "claude") {
+      source = values.model ? "global default" : "sdk default";
+    } else if (provider === "codex") {
+      source = values.model ? "agent.codex.model" : "codex account default";
+    } else if (provider === "antigravity") {
+      source = values.model ? "agent.antigravity.model" : "antigravity default";
+    } else if (provider === "copilot") {
+      source = values.model ? "agent.copilot.model" : "copilot default";
+    } else if (provider === "cursor") {
+      source = values.model ? "agent.cursor.model" : "cursor default";
+    }
+  }
   return { model: values.model ?? "", source, effort: values.reasoning_effort ?? "" };
 }
 export function modelFor(
