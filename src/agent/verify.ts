@@ -86,12 +86,12 @@ const globRe = (glob: string) =>
     "^" +
       glob
         .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*\*\//g, "\u0000")
-        .replace(/\*\*/g, "\u0001")
+        .replace(/\*\*\//g, "@@DIR@@")
+        .replace(/\*\*/g, "@@ANY@@")
         .replace(/\*/g, "[^/]*")
         .replace(/\?/g, "[^/]")
-        .replace(/\u0000/g, "(?:.*/)?")
-        .replace(/\u0001/g, ".*") +
+        .replace(/@@DIR@@/g, "(?:.*/)?")
+        .replace(/@@ANY@@/g, ".*") +
       "$",
   );
 const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$/;
