@@ -1,13 +1,8 @@
 import { Field } from "./ui.tsx";
-
-export interface AgentValues {
-  model?: string | null;
-  reasoning_effort?: string | null;
-  max_turns?: number;
-  timeout_ms?: number;
-  options?: { sandbox?: boolean; max_concurrent?: number };
-}
+import type { AgentValues } from "./agentConfiguration.ts";
+export type { AgentValues } from "./agentConfiguration.ts";
 export interface AgentControls {
+  model?: boolean | null;
   max_turns: boolean;
   efforts: string[];
   options: string[];
@@ -45,47 +40,54 @@ export function AgentValueFields({
   const name = (text: string) => `${label}${label ? " " : ""}${text}`;
   return (
     <div className="agent-value-fields">
-      <Field
-        label={name("model")}
-        hint={
-          value.model === null
-            ? "Account/CLI default (external)"
-            : "Empty inherits from the next configuration level"
-        }
-      >
-        <input
-          aria-label={name("model")}
-          value={value.model ?? ""}
-          placeholder="Inherit"
-          onChange={(event) => set("model", event.target.value || undefined)}
-        />
-        <select
-          aria-label={name("model selection")}
-          value={value.model === null ? "__account__" : (value.model ?? "")}
-          onChange={(event) =>
-            set(
-              "model",
-              event.target.value === "__account__" ? null : event.target.value || undefined,
-            )
+      {controls?.model !== false && (
+        <Field
+          label={name("model")}
+          hint={
+            value.model === null
+              ? "Account/CLI default (external)"
+              : "Empty inherits from the next configuration level"
           }
         >
-          <option value="">Inherit</option>
-          <option value="__account__">Account/CLI default</option>
-          {value.model && !selected && (
-            <option value={value.model}>{value.model} (saved selection)</option>
+          <input
+            aria-label={name("model")}
+            value={value.model ?? ""}
+            placeholder="Inherit"
+            onChange={(event) => set("model", event.target.value || undefined)}
+          />
+          <select
+            aria-label={name("model selection")}
+            value={value.model === null ? "__account__" : (value.model ?? "")}
+            onChange={(event) =>
+              set(
+                "model",
+                event.target.value === "__account__" ? null : event.target.value || undefined,
+              )
+            }
+          >
+            <option value="">Inherit</option>
+            <option value="__account__">Account/CLI default</option>
+            {value.model && !selected && (
+              <option value={value.model}>{value.model} (saved selection)</option>
+            )}
+            {models.map((model) => (
+              <option key={model.slug} value={model.slug}>
+                {model.name ?? model.slug}
+              </option>
+            ))}
+          </select>
+          {discovery === "available" && value.model && !selected && (
+            <small className="set-warn">
+              Model is absent from the current catalog; execution will validate availability.
+            </small>
           )}
-          {models.map((model) => (
-            <option key={model.slug} value={model.slug}>
-              {model.name ?? model.slug}
-            </option>
-          ))}
-        </select>
-        {discovery === "available" && value.model && !selected && (
-          <small className="set-warn">
-            Model is absent from the current catalog; execution will validate availability.
-          </small>
-        )}
-      </Field>
+        </Field>
+      )}
+      {controls?.model === false && value.model && (
+        <p className="small set-warn">
+          Model selection is unsupported by this CLI. Saved model {value.model} is retained.
+        </p>
+      )}
       {!!efforts.length && (
         <Field label={name("reasoning effort")}>
           <select

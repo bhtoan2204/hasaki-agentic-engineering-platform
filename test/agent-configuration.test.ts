@@ -1,6 +1,99 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/config.ts";
+import { providerDraftPatch } from "../web/src/agentConfiguration.ts";
+import { previewAgentValues } from "../src/agent/configuration.ts";
+import { providerControlState } from "../src/agent/providerCapabilities.ts";
+
+test("profile-only saves retain environment defaults while explicit edits pin only their fields", () => {
+  const previous = process.env.CURSOR_AGENT_TIMEOUT_MS;
+  try {
+    process.env.CURSOR_AGENT_TIMEOUT_MS = "10000";
+    const document = legacyAgentConfiguration();
+    const provider = "cursor";
+    const draft = {
+      ...document.providers[provider],
+      profiles: { FAST: { agent: { timeout_ms: 30000 } } },
+    };
+    const patch = providerDraftPatch(draft, []);
+    assert.equal(Object.hasOwn(patch, "defaults"), false);
+    const saved = patchProviderConfiguration(document, provider, 0, patch);
+    process.env.CURSOR_AGENT_TIMEOUT_MS = "20000";
+    assert.equal(refreshEnvironmentDefaults(saved).providers[provider].defaults.timeout_ms, 20000);
+    const edited = providerDraftPatch(
+      { ...draft, defaults: { ...draft.defaults, timeout_ms: 40000 } },
+      ["timeout_ms"],
+    );
+    const pinned = patchProviderConfiguration(document, provider, 0, edited);
+    assert.equal(refreshEnvironmentDefaults(pinned).providers[provider].defaults.timeout_ms, 40000);
+  } finally {
+    if (previous === undefined) delete process.env.CURSOR_AGENT_TIMEOUT_MS;
+    else process.env.CURSOR_AGENT_TIMEOUT_MS = previous;
+  }
+});
+
+test("draft preview and saved values use the same per-field provenance", () => {
+  const document = legacyAgentConfiguration();
+  const provider = "claude";
+  document.providers[provider].defaults = { model: "haiku", timeout_ms: 10000 };
+  document.providers[provider].default_sources = {
+    model: "environment FIXTURE_MODEL",
+    timeout_ms: "provider default",
+  };
+  const patch = { defaults: { model: "opus", timeout_ms: 10000 }, default_fields: ["model"] };
+  const preview = previewAgentValues(document, provider, "STANDARD", "agent", patch);
+  assert.equal(preview.values.model, "opus");
+  assert.equal(preview.sources.model, "provider default");
+  assert.equal(preview.sources.timeout_ms, "provider default");
+  const saved = patchProviderConfiguration(document, provider, 0, patch);
+  assert.deepEqual(preview, resolveAgentValues(saved, provider, "STANDARD", "agent"));
+});
+
+test("Cursor model controls follow confirmed CLI support and keep unavailable discovery distinct", () => {
+  assert.equal(
+    providerControlState("cursor", { available: true, supportsModel: false }).model,
+    false,
+  );
+  assert.equal(
+    providerControlState("cursor", { available: true, supportsModel: true }).model,
+    true,
+  );
+  assert.equal(providerControlState("cursor", { available: false }).model, null);
+  assert.equal(providerControlState("claude", { available: false }).model, true);
+});
+
+test("editing one provider option preserves other environment fallbacks", () => {
+  const previous = process.env.COPILOT_MAX_CONCURRENT;
+  try {
+    process.env.COPILOT_MAX_CONCURRENT = "2";
+    const document = legacyAgentConfiguration();
+    const provider = "copilot";
+    const entry = document.providers[provider];
+    const draft = {
+      ...entry,
+      defaults: { ...entry.defaults, options: { ...entry.defaults.options, sandbox: false } },
+    };
+    const saved = patchProviderConfiguration(
+      document,
+      provider,
+      entry.revision,
+      providerDraftPatch(draft, ["options.sandbox"]),
+    );
+    assert.equal(saved.providers[provider].defaults.options?.sandbox, false);
+    assert.equal(
+      saved.providers[provider].default_sources?.["options.sandbox"],
+      "provider default",
+    );
+    assert.equal(saved.providers[provider].default_sources?.model, entry.default_sources?.model);
+    process.env.COPILOT_MAX_CONCURRENT = "3";
+    const fresh = refreshEnvironmentDefaults(saved);
+    assert.equal(fresh.providers[provider].defaults.options?.max_concurrent, 3);
+    assert.equal(fresh.providers[provider].defaults.options?.sandbox, false);
+  } finally {
+    if (previous === undefined) delete process.env.COPILOT_MAX_CONCURRENT;
+    else process.env.COPILOT_MAX_CONCURRENT = previous;
+  }
+});
 
 test("provider defaults remain identical across persistence and disable/re-enable", () => {
   const stored = legacyAgentConfiguration();

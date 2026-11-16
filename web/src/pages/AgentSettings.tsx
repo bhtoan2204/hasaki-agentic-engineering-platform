@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, useApi } from "../api.ts";
+import { changedDefaultFields, providerDraftPatch } from "../agentConfiguration.ts";
 import {
   AgentValueFields,
   type AgentValues,
@@ -26,6 +27,7 @@ interface View {
 }
 interface Catalog {
   id: string;
+  controls?: AgentControls;
   models?: AgentCatalogModel[];
   discovery?: string;
   cache?: string;
@@ -38,6 +40,7 @@ export function AgentSettings() {
   const catalog = useApi<Catalog[]>("/api/agent-providers");
   const [provider, setProvider] = useState("claude");
   const [drafts, setDrafts] = useState<Record<string, ProviderConfiguration>>({});
+  const [editedDefaults, setEditedDefaults] = useState<Record<string, string[]>>({});
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<
@@ -55,6 +58,7 @@ export function AgentSettings() {
       );
   }, [data]);
   const draft = drafts[provider];
+  const defaultFields = editedDefaults[provider];
   useEffect(() => {
     if (!data || !draft) return;
     let active = true;
@@ -68,7 +72,7 @@ export function AgentSettings() {
                 provider,
                 scope,
                 role,
-                draft: { defaults: draft.defaults, profiles: draft.profiles },
+                draft: providerDraftPatch(draft, defaultFields ?? []),
               },
             );
             return [`${scope}/${role}`, result] as const;
@@ -86,7 +90,7 @@ export function AgentSettings() {
       active = false;
       clearTimeout(timer);
     };
-  }, [data, draft, provider]);
+  }, [data, draft, provider, defaultFields]);
   if (error) return <ErrorBox error={error} />;
   if (!data || !draft)
     return (
@@ -100,6 +104,7 @@ export function AgentSettings() {
     setNote("");
   };
   const currentCatalog = catalog.data?.find((entry) => entry.id === provider);
+  const controls = currentCatalog?.controls ?? data.controls[provider];
   const save = async () => {
     setBusy(true);
     setNote("");
@@ -107,13 +112,14 @@ export function AgentSettings() {
       const next = await api<View>("/api/settings/agents/provider", {
         provider,
         revision: draft.revision,
-        patch: { enabled: draft.enabled, defaults: draft.defaults, profiles: draft.profiles },
+        patch: providerDraftPatch(draft, defaultFields ?? []),
       });
       setData(next);
       setDrafts((old) => ({
         ...old,
         [provider]: structuredClone(next.document.providers[provider]),
       }));
+      setEditedDefaults((old) => ({ ...old, [provider]: [] }));
       setNote("Provider saved");
     } catch (error) {
       setNote((error as Error).message);
@@ -190,10 +196,17 @@ export function AgentSettings() {
       <AgentValueFields
         label="Default"
         value={draft.defaults}
-        controls={data.controls[provider]}
+        controls={controls}
         models={currentCatalog?.models}
         discovery={currentCatalog?.discovery}
-        onChange={(defaults) => update({ ...draft, defaults })}
+        onChange={(defaults) => {
+          const changed = changedDefaultFields(draft.defaults, defaults);
+          setEditedDefaults((old) => ({
+            ...old,
+            [provider]: [...new Set([...(old[provider] ?? []), ...changed])],
+          }));
+          update({ ...draft, defaults });
+        }}
       />
       <h4>Models and execution options by profile and role</h4>
       {data.scopes.map((scope) => (
@@ -213,7 +226,7 @@ export function AgentSettings() {
                 <AgentValueFields
                   label={`${scope}/${role}`}
                   value={draft.profiles[scope]?.[role] ?? {}}
-                  controls={data.controls[provider]}
+                  controls={controls}
                   models={currentCatalog?.models}
                   discovery={currentCatalog?.discovery}
                   onChange={(values) =>

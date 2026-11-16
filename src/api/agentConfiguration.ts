@@ -4,7 +4,7 @@ import {
   ProviderPatch,
   ROUTING_SCOPES,
   ROUTING_ROLES,
-  resolveAgentValues,
+  previewAgentValues,
 } from "../agent/configuration.ts";
 import { providerControls } from "../agent/providerCapabilities.ts";
 import { loadAgentConfiguration, saveProviderConfiguration } from "../agent/configurationStore.ts";
@@ -40,10 +40,5 @@ export async function previewAgentConfiguration(raw: unknown) {
     .strict()
     .parse(raw);
   const document = await loadAgentConfiguration();
-  document.providers[input.provider] = {
-    ...document.providers[input.provider],
-    ...input.draft,
-    enabled: true,
-  };
-  return resolveAgentValues(document, input.provider, input.scope, input.role);
+  return previewAgentValues(document, input.provider, input.scope, input.role, input.draft ?? {});
 }

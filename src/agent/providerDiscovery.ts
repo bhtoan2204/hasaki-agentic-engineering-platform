@@ -4,6 +4,7 @@ export interface DiscoveredModel {
   efforts?: string[];
 }
 export interface ProviderDiscovery {
+  supportsModel?: boolean;
   models: DiscoveredModel[];
   available: boolean;
   discovery: "available" | "unavailable";
@@ -13,6 +14,7 @@ export interface ProviderDiscovery {
 }
 export type DiscoveryProbe = () => Promise<{
   ok: boolean;
+  supportsModel?: boolean;
   models?: DiscoveredModel[];
   version?: string;
 }>;
@@ -38,6 +40,7 @@ export class DiscoveryCache {
         const result = await probe();
         if (!result.ok) throw new Error("Provider unavailable");
         const value: ProviderDiscovery = {
+          supportsModel: result.supportsModel,
           available: true,
           models: result.models ?? [],
           discovery: result.models ? "available" : "unavailable",
@@ -49,6 +52,7 @@ export class DiscoveryCache {
         return value;
       } catch {
         return {
+          supportsModel: old?.supportsModel,
           available: false,
           models: old?.models ?? [],
           discovery: "unavailable" as const,

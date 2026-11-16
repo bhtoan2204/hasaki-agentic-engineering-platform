@@ -10,7 +10,7 @@ import { copilotCapabilities } from "./copilot/capabilities.ts";
 import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
 import { probeAgentHealth } from "./health.ts";
 import { DiscoveryCache, type DiscoveryProbe } from "./providerDiscovery.ts";
-import { providerControls } from "./providerCapabilities.ts";
+import { providerControlState } from "./providerCapabilities.ts";
 import { loadAgentConfiguration } from "./configurationStore.ts";
 
 /** Operational availability, discovery and supported controls are independent facts. */
@@ -31,7 +31,7 @@ export async function agentProviderStatus(refresh = false) {
         ? undefined
         : "Provider unavailable on this worker; check Integrations",
       quota: status?.quota ?? "unknown",
-      controls: providerControls[id],
+      controls: providerControlState(id, discovery),
       ...discovery,
       model: document.providers[id].defaults.model ?? null,
       reasoning_effort: document.providers[id].defaults.reasoning_effort ?? null,

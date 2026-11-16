@@ -359,7 +359,27 @@ export function convertLegacyConfiguration(
 export const ProviderPatch = ProviderConfiguration.omit({
   revision: true,
   default_sources: true,
-}).partial();
+})
+  .partial()
+  .extend({
+    default_fields: z
+      .array(
+        z.enum([
+          "model",
+          "reasoning_effort",
+          "max_turns",
+          "timeout_ms",
+          "options.sandbox",
+          "options.max_concurrent",
+        ]),
+      )
+      .max(6)
+      .optional(),
+  })
+  .refine(
+    (patch) => !patch.default_fields?.length || patch.defaults !== undefined,
+    "Edited default fields require defaults",
+  );
 export function patchProviderConfiguration(
   document: AgentConfiguration,
   provider: AgentProvider,
@@ -369,22 +389,62 @@ export function patchProviderConfiguration(
   if (document.providers[provider].revision !== revision)
     throw new Error("Agent configuration revision conflict");
   const patch = ProviderPatch.parse(raw);
+  const { default_fields, ...settings } = patch;
   const next = structuredClone(document);
-  next.providers[provider] = { ...next.providers[provider], ...patch, revision: revision + 1 };
-  if (patch.defaults)
+  const old = document.providers[provider];
+  next.providers[provider] = { ...next.providers[provider], ...settings, revision: revision + 1 };
+  if (default_fields !== undefined) {
+    const defaults = structuredClone(old.defaults);
+    const sources = { ...old.default_sources };
+    for (const key of default_fields) {
+      if (key === "options.sandbox" || key === "options.max_concurrent") {
+        const option = key === "options.sandbox" ? "sandbox" : "max_concurrent";
+        const value = patch.defaults?.options?.[option];
+        defaults.options = { ...defaults.options };
+        if (value === undefined) delete defaults.options[option];
+        else Object.assign(defaults.options, { [option]: value });
+        sources[key] = value === undefined ? "legacy provider default" : "provider default";
+      } else {
+        const value = patch.defaults?.[key];
+        if (value === undefined) delete defaults[key];
+        else Object.assign(defaults, { [key]: value });
+        sources[key] = value === undefined ? "legacy provider default" : "provider default";
+      }
+    }
+    next.providers[provider].defaults = defaults;
+    next.providers[provider].default_sources = sources;
+  } else if (patch.defaults) {
     next.providers[provider].default_sources = Object.fromEntries(
       (["model", "reasoning_effort", "timeout_ms", "max_turns"] as const).map((key) => [
         key,
         patch.defaults![key] !== undefined ? "provider default" : "legacy provider default",
       ]),
     );
-  if (patch.defaults)
     for (const key of ["sandbox", "max_concurrent"] as const)
       next.providers[provider].default_sources![`options.${key}`] =
         patch.defaults.options?.[key] !== undefined
           ? "provider default"
           : "legacy provider default";
+  }
   return parseAgentConfiguration(next);
+}
+
+/** Draft previews apply precisely the same edits and source rules as persistence. */
+export function previewAgentValues(
+  document: AgentConfiguration,
+  provider: AgentProvider,
+  scope: string,
+  role: string,
+  draft: unknown,
+) {
+  const patch = ProviderPatch.parse(draft);
+  const preview = patchProviderConfiguration(
+    document,
+    provider,
+    document.providers[provider].revision,
+    { ...patch, enabled: true },
+  );
+  return resolveAgentValues(refreshEnvironmentDefaults(preview), provider, scope, role);
 }
 
 /** Refresh only imported fallback inputs. Explicitly saved defaults and old run snapshots remain untouched. */

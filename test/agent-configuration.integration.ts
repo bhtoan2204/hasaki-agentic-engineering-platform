@@ -105,6 +105,57 @@ test("legacy Settings edits delegate to canonical routing after initial import",
 
 import { saveDefaultProvider } from "../src/agent/configurationStore.ts";
 import { previewAgentConfiguration } from "../src/api/agentConfiguration.ts";
+import { patchAgentProvider } from "../src/api/agentConfiguration.ts";
+import { providerDraftPatch } from "../web/src/agentConfiguration.ts";
+
+test("Settings saves and previews preserve environment models until that field is edited", async () => {
+  const previous = process.env.CODEX_MODEL;
+  const provider = "codex";
+  try {
+    process.env.CODEX_MODEL = "gpt-environment-one";
+    const document = await loadAgentConfiguration();
+    const draft = {
+      ...document.providers[provider],
+      profiles: { FAST: { agent: { reasoning_effort: "high" as const } } },
+    };
+    await patchAgentProvider({
+      provider,
+      revision: draft.revision,
+      patch: providerDraftPatch(draft, []),
+    });
+    process.env.CODEX_MODEL = "gpt-environment-two";
+    const inherited = await loadAgentConfiguration();
+    assert.equal(inherited.providers[provider].defaults.model, "gpt-environment-two");
+    const edited = providerDraftPatch(
+      {
+        ...inherited.providers[provider],
+        defaults: { ...inherited.providers[provider].defaults, model: "gpt-explicit" },
+      },
+      ["model"],
+    );
+    const preview = await previewAgentConfiguration({
+      provider,
+      scope: "STANDARD",
+      role: "agent",
+      draft: edited,
+    });
+    assert.equal(preview.values.model, "gpt-explicit");
+    assert.equal(preview.sources.model, "provider default");
+    await patchAgentProvider({
+      provider,
+      revision: inherited.providers[provider].revision,
+      patch: edited,
+    });
+    process.env.CODEX_MODEL = "gpt-environment-three";
+    assert.equal(
+      (await loadAgentConfiguration()).providers[provider].defaults.model,
+      "gpt-explicit",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_MODEL;
+    else process.env.CODEX_MODEL = previous;
+  }
+});
 test("default changes and disable/re-enable preserve independent provider values and preview routing", async () => {
   const before = await loadAgentConfiguration();
   await saveDefaultProvider({ provider: "copilot", revision: before.default_revision ?? 0 });

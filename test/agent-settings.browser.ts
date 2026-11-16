@@ -6,8 +6,12 @@ import { chromium } from "playwright-core";
 import { createUser } from "../src/auth/users.ts";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
+import { AGENT_PROVIDERS } from "../src/agent/provider.ts";
+import { providerControlState } from "../src/agent/providerCapabilities.ts";
 
 test("provider Settings retain drafts and hide unsupported controls", async () => {
+  const previousModel = process.env.CODEX_MODEL;
+  process.env.CODEX_MODEL = "gpt-environment-one";
   await createUser({
     username: "agent-settings-admin",
     password: "local-browser-password",
@@ -22,6 +26,17 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
   });
   try {
     const page = await browser.newPage();
+    await page.route("**/api/agent-providers*", (route) =>
+      route.fulfill({
+        json: AGENT_PROVIDERS.map((id) => ({
+          id,
+          ok: true,
+          models: [],
+          discovery: "unavailable",
+          controls: providerControlState(id, { available: true, supportsModel: id !== "cursor" }),
+        })),
+      }),
+    );
     await page.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));
     await page.goto(`${base}/#/settings`);
     await page.locator('[name="username"]').fill("agent-settings-admin");
@@ -32,6 +47,8 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
       assert.equal(await page.getByRole("tab", { name: provider, exact: true }).count(), 1);
     await page.getByLabel("Default model", { exact: true }).fill("saved-draft");
     await page.getByRole("tab", { name: "cursor", exact: true }).click();
+    assert.equal(await page.getByLabel("Default model", { exact: true }).count(), 0);
+    assert.equal(await page.getByLabel("Default model selection", { exact: true }).count(), 0);
     assert.equal(await page.getByLabel("Default reasoning effort", { exact: true }).count(), 0);
     assert.equal(await page.getByLabel("Default maximum turns", { exact: true }).count(), 0);
     await page.getByRole("tab", { name: "claude", exact: true }).click();
@@ -48,7 +65,26 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
       await page.getByLabel("Default model", { exact: true }).inputValue(),
       "saved-draft",
     );
+    await page.getByRole("tab", { name: "codex", exact: true }).click();
+    await page.getByLabel("FAST/agent model", { exact: true }).fill("gpt-profile");
+    const saving = page.waitForRequest(
+      (request) =>
+        request.url().endsWith("/api/settings/agents/provider") && request.method() === "POST",
+    );
+    await page.getByRole("button", { name: "Save provider", exact: true }).click();
+    const payload = (await saving).postDataJSON();
+    assert.equal(Object.hasOwn(payload.patch, "defaults"), false);
+    await page.getByText("Provider saved", { exact: true }).waitFor();
+    process.env.CODEX_MODEL = "gpt-environment-two";
+    await page.reload();
+    await page.getByRole("tab", { name: "codex", exact: true }).click();
+    assert.equal(
+      await page.getByLabel("Default model", { exact: true }).inputValue(),
+      "gpt-environment-two",
+    );
   } finally {
+    if (previousModel === undefined) delete process.env.CODEX_MODEL;
+    else process.env.CODEX_MODEL = previousModel;
     await browser.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await pool.end();
