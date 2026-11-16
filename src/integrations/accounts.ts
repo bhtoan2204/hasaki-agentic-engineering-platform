@@ -1,7 +1,14 @@
 import { networkCode } from "../telegram/client.ts";
 import { forgetBitbucketChecks } from "../repos/access.ts";
 import { gitlabHosts } from "../repos/remote.ts";
-import { GitlabError, glab, gitlabSecretKey, type GlToken } from "../gitlab.ts";
+import {
+  GitlabError,
+  glab,
+  gitlabSecretKey,
+  gitlabSshKeySecret,
+  validSshPrivateKey,
+  type GlToken,
+} from "../gitlab.ts";
 import { bindingStatus, advisoryKey, observedChats } from "../telegram/store.ts";
 import { botKey } from "../telegram/client.ts";
 import { pool, one, q } from "../db/pool.ts";
@@ -395,12 +402,16 @@ export async function gitlabStatus(userId?: number) {
   const instances = [];
   for (const host of gitlabHosts()) {
     const personal = userId ? !!(await getUserSecret(userId, gitlabSecretKey(host))) : false;
+    const instance = config.gitlab.instances.find((i) => i.host === host);
     instances.push({
       host,
       base_url: `https://${host}`,
       configured: personal || shared,
       personal,
       source: personal ? "user" : shared ? "shared" : "none",
+      // SSH transport needs pinned host keys in config plus the user's own key; only presence is reported.
+      ssh_available: !!instance?.sshHostKeys?.length,
+      ssh_key: userId ? !!(await getUserSecret(userId, gitlabSshKeySecret(host))) : false,
     });
   }
   return { instances, shared };
@@ -528,11 +539,40 @@ export async function testGitlab(input: { host?: string; base_url?: string }, us
   return { host, ...(await checkGitlabToken(host, token)) };
 }
 
+/**
+ * Save the user's SSH private key for Git transport to one instance. Accepted only when the instance pins its host
+ * keys (config.gitlab.instances[].sshHostKeys) and the key is an unencrypted OpenSSH/PEM private key. The key is
+ * stored encrypted like other personal secrets and never returned.
+ */
+export async function setGitlabSshKey(
+  input: { host?: string; base_url?: string; ssh_key?: string },
+  userId?: number,
+) {
+  const host = gitlabHostOf(input.host ?? input.base_url);
+  if (!userId) throw new HttpError(400, "GitLab credentials are saved per user");
+  if (!config.gitlab.instances.find((i) => i.host === host)?.sshHostKeys?.length)
+    throw new HttpError(
+      400,
+      `SSH is not enabled for ${host}: an operator must pin its host keys in config.gitlab.instances[].sshHostKeys`,
+    );
+  const key = String(input.ssh_key ?? "");
+  if (!validSshPrivateKey(key))
+    throw new HttpError(
+      400,
+      "Paste an unencrypted OpenSSH private key (-----BEGIN OPENSSH PRIVATE KEY-----); passphrase-protected keys cannot be used non-interactively",
+    );
+  await putUserSecret(userId, gitlabSshKeySecret(host), key.trim() + "\n");
+  return gitlabStatus(userId);
+}
+
 export async function clearGitlab(input: { host?: string; base_url?: string }, userId?: number) {
   if (userId) {
     const hosts =
       input?.host || input?.base_url ? [gitlabHostOf(input.host ?? input.base_url)] : gitlabHosts();
-    for (const host of hosts) await deleteUserSecret(userId, gitlabSecretKey(host));
+    for (const host of hosts) {
+      await deleteUserSecret(userId, gitlabSecretKey(host));
+      await deleteUserSecret(userId, gitlabSshKeySecret(host));
+    }
     await forgetGitlabChecks(userId);
   }
   return gitlabStatus(userId);

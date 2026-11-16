@@ -24,6 +24,7 @@ import {
   gitlabMergeRequestDiscussions,
   gitlabMergeRequestState,
   gitlabPipelines,
+  gitlabProjectMetadata,
   gitlabRemoteOf,
   mergeGitlabMergeRequest,
   openGitlabMergeRequest,
@@ -143,6 +144,14 @@ export interface GitProvider {
     ref?: string;
     url?: string;
   }): Promise<{ pipelines: PipelineSummary[]; truncated: boolean }>;
+  /** Default and protected branches of the repository, as the host reports them. */
+  repositoryMetadata?(q: { repo: string; remoteUrl?: string | null }): Promise<{
+    default_branch: string | null;
+    protected_branches: string[];
+    protected_branches_truncated: boolean;
+    visibility: string | null;
+    web_url: string | null;
+  }>;
   /** Redacted tail of one CI job log. */
   jobLog?(q: {
     repo: string;
@@ -217,6 +226,7 @@ export const gitlabProvider: GitProvider = {
   closePullRequest: (pr) => closeGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url),
   pipelines: (q) => gitlabPipelines(gitlabRemoteOf(q.remoteUrl), { ref: q.ref, url: q.url }),
   jobLog: (q) => gitlabJobLog(gitlabRemoteOf(q.remoteUrl), q.jobId, q.tail),
+  repositoryMetadata: (q) => gitlabProjectMetadata(gitlabRemoteOf(q.remoteUrl)),
 };
 
 /** Production adapters by repositories.provider. */

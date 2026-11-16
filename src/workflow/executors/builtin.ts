@@ -31,6 +31,7 @@ import {
   workspaceBase,
   workspacesOf,
 } from "../../git/provider.ts";
+import { publishReviewComment, reviewCommentBody } from "../../git/reviewComment.ts";
 import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
@@ -1427,6 +1428,19 @@ export const pullRequestExecutor: StepExecutor = {
         "system",
         `PR ${w.repo}: ${pr.url} (${pr.note})${pipeline ? `; pipeline #${pipeline.id} ${pipeline.status}` : ""}`,
       );
+      // The run's review findings go onto the PR/MR as one comment (hosts that support comments; once per run).
+      const reviewBody = provider.commentOnPullRequest
+        ? reviewCommentBody(ctx.input.upstream, ctx.run.id)
+        : null;
+      const reviewComment = reviewBody
+        ? await publishReviewComment(
+            provider,
+            { repo: slug, url: pr.url, remoteUrl: registry?.repository_url ?? null },
+            reviewBody,
+            ctx.run.id,
+          )
+        : null;
+      if (reviewComment) await ctx.log("system", `${w.repo}: review comment ${reviewComment.reason}`);
       out.push({
         repo: w.repo,
         url: pr.url,
@@ -1434,6 +1448,7 @@ export const pullRequestExecutor: StepExecutor = {
         note: pr.note,
         draft: mode === "draft",
         ...(pipeline ? { pipeline } : {}),
+        ...(reviewComment ? { review_comment: reviewComment } : {}),
       });
     }
     return { kind: "completed", output: { pull_requests: out } };

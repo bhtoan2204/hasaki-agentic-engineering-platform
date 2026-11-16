@@ -1,7 +1,7 @@
 import { config } from "../config.ts";
 import { resolveBitbucket } from "../bitbucket.ts";
 import { resolveGithub } from "../github.ts";
-import { resolveGitlab } from "../gitlab.ts";
+import { resolveGitlab, resolveGitlabSsh } from "../gitlab.ts";
 import type { CanonicalRemote, GitHost } from "../repos/remote.ts";
 
 /**
@@ -18,6 +18,30 @@ export interface GitHostAdapter {
   gitCredentials(remote: CanonicalRemote): Promise<{ user: string; token: string }>;
   /** Extra `-c key=value` Git options for this remote (e.g. an internal CA bundle). Never secrets. */
   gitOptions?(remote: CanonicalRemote): string[];
+  /**
+   * SSH transport for this remote when the run owner set it up (private key + pinned host keys), else null and the
+   * HTTPS token transport is used. `url` is the SSH form of the canonical identity; it is only used as a
+   * command-line rewrite, never stored in Git config.
+   */
+  sshTransport?(remote: CanonicalRemote): Promise<SshTransport | null>;
+}
+
+export interface SshTransport {
+  url: string;
+  privateKey: string;
+  /** known_hosts lines for exactly this host (and port). */
+  knownHosts: string;
+}
+
+/** SSH URL of a canonical HTTPS identity: ssh://git@host[:port]/<path>.git */
+export function sshUrlOf(remote: CanonicalRemote, port: number | null): string {
+  return `ssh://git@${remote.host}${port ? `:${port}` : ""}/${remote.workspace}/${remote.slug}.git`;
+}
+
+/** known_hosts content pinning `keys` ("<type> <base64>") to the host (bracketed with a non-default port). */
+export function knownHostsFor(host: string, port: number | null, keys: string[]): string {
+  const name = port ? `[${host}]:${port}` : host;
+  return keys.map((k) => `${name} ${k}`).join("\n") + "\n";
 }
 
 export const gitHosts: Record<GitHost, GitHostAdapter> = {
@@ -63,6 +87,15 @@ export const gitHosts: Record<GitHost, GitHostAdapter> = {
     gitOptions(remote) {
       const ca = config.gitlab.instances.find((i) => i.host === remote.host)?.caFile;
       return ca ? ["-c", `http.https://${remote.host}/.sslCAInfo=${ca}`] : [];
+    },
+    async sshTransport(remote) {
+      const ssh = await resolveGitlabSsh(remote.host);
+      if (!ssh) return null;
+      return {
+        url: sshUrlOf(remote, ssh.port),
+        privateKey: ssh.privateKey,
+        knownHosts: knownHostsFor(remote.host, ssh.port, ssh.hostKeys),
+      };
     },
   },
 };

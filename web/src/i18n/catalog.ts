@@ -1573,6 +1573,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.gl.token": "Token",
     "ig.gl.saved": "Đã lưu GitLab",
     "ig.gl.test": "Kiểm tra kết nối",
+    "ig.gl.sshKey": "SSH key (tuỳ chọn)",
+    "ig.gl.sshKeyHint":
+      "Private key OpenSSH không có passphrase. Khi đã lưu, Git dùng SSH với host key được ghim trong cấu hình; token vẫn cần cho API và kiểm tra quyền.",
+    "ig.gl.sshSave": "Lưu SSH key",
+    "ig.gl.sshSaved": "Đã lưu SSH key",
     "ig.gl.err.auth": "Lỗi xác thực",
     "ig.gl.err.permission": "Không đủ quyền",
     "ig.gl.err.connectivity": "Lỗi kết nối",
@@ -3946,6 +3951,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.gl.token": "Token",
     "ig.gl.saved": "GitLab saved",
     "ig.gl.test": "Test connection",
+    "ig.gl.sshKey": "SSH key (optional)",
+    "ig.gl.sshKeyHint":
+      "Unencrypted OpenSSH private key. Once saved, Git uses SSH with the host keys pinned in config; the token is still needed for the API and permission checks.",
+    "ig.gl.sshSave": "Save SSH key",
+    "ig.gl.sshSaved": "SSH key saved",
     "ig.gl.err.auth": "Authentication error",
     "ig.gl.err.permission": "Permission error",
     "ig.gl.err.connectivity": "Connectivity error",

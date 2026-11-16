@@ -170,6 +170,31 @@ const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "
 const DEFAULT_MAX_PAGES = 20;
 
 export const gitlabSecretKey = (host: string) => `gitlab_token:${host.toLowerCase()}`;
+/** Personal SSH private key for Git transport to one instance (user secret). */
+export const gitlabSshKeySecret = (host: string) => `gitlab_ssh_key:${host.toLowerCase()}`;
+
+/** Unencrypted OpenSSH/PEM private key (Git runs non-interactively, so a passphrase cannot be entered). */
+export function validSshPrivateKey(value: string): boolean {
+  const key = value.trim();
+  const m =
+    /^-----BEGIN ((?:OPENSSH|RSA|EC) PRIVATE KEY)-----\r?\n[\s\S]+\r?\n-----END \1-----$/.exec(key);
+  return !!m && !/Proc-Type:\s*4,ENCRYPTED/i.test(key) && key.length <= 16_384;
+}
+
+/**
+ * The run owner's SSH transport for one remote, or null when SSH is not set up: it needs both the user's key and
+ * pinned host keys for that instance. The key is never shared between users and never read from config.
+ */
+export async function resolveGitlabSsh(host: string) {
+  const h = assertAllowedHost(host);
+  const instance = config.gitlab.instances.find((i) => i.host === h);
+  if (!instance?.sshHostKeys?.length) return null;
+  const userId = currentUserId();
+  if (!userId) return null;
+  const key = await getUserSecret(userId, gitlabSshKeySecret(h));
+  if (!key) return null;
+  return { privateKey: key, hostKeys: instance.sshHostKeys, port: instance.sshPort ?? null };
+}
 
 function assertAllowedHost(host: string) {
   if (!gitlabHosts().includes(host.toLowerCase()))

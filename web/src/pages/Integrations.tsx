@@ -1125,10 +1125,18 @@ function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
 function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<{
-    instances: Array<{ host: string; base_url: string; configured: boolean; personal: boolean }>;
+    instances: Array<{
+      host: string;
+      base_url: string;
+      configured: boolean;
+      personal: boolean;
+      ssh_available: boolean;
+      ssh_key: boolean;
+    }>;
   }>("/api/integrations/gitlab");
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
+  const [sshKey, setSshKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState<{ ok: boolean; kind: string; message: string } | null>(null);
   const instances = st?.instances ?? [];
@@ -1145,6 +1153,18 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
     setBusy(false);
     if (r) {
       setToken("");
+      reload();
+    }
+  };
+  const saveSsh = async () => {
+    setBusy(true);
+    const r = await act(
+      () => api<unknown>("/api/integrations/gitlab/ssh-key", { host: selected, ssh_key: sshKey }),
+      t("ig.gl.sshSaved"),
+    );
+    setBusy(false);
+    if (r) {
+      setSshKey("");
       reload();
     }
   };
@@ -1187,6 +1207,22 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
           onChange={(e) => setToken(e.target.value)}
         />
       </Field>
+      {current?.ssh_available && (
+        <Field label={t("ig.gl.sshKey")} hint={t("ig.gl.sshKeyHint")}>
+          <textarea
+            rows={3}
+            autoComplete="off"
+            spellCheck={false}
+            value={sshKey}
+            placeholder={current.ssh_key ? t("ig.keep") : "-----BEGIN OPENSSH PRIVATE KEY-----"}
+            onChange={(e) => setSshKey(e.target.value)}
+          />
+          <button className="sm ghost" disabled={busy || !sshKey} onClick={saveSsh}>
+            <KeyRound size={14} strokeWidth={2} />
+            {t("ig.gl.sshSave")}
+          </button>
+        </Field>
+      )}
       {check && (
         <p className={`small ${check.ok ? "" : "error"}`}>
           {check.ok ? "✓ " : `${t(`ig.gl.err.${check.kind}`)}: `}

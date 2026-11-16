@@ -93,6 +93,7 @@ import {
   githubStatus,
   gitlabStatus,
   setGitlab,
+  setGitlabSshKey,
   testGitlab,
   setBitbucket,
   setGithub,
@@ -1150,10 +1151,19 @@ export const routes: Route[] = [
     /^\/api\/pull-requests\/(\d+)\/(merge|close)$/,
     async (c) => {
       const id = num(c.p[0]);
-      const result =
-        c.p[1] === "merge"
-          ? await mergePullRequestAction(c.actor.id, id)
-          : await closePullRequestAction(c.actor.id, id);
+      let result;
+      try {
+        result =
+          c.p[1] === "merge"
+            ? await mergePullRequestAction(c.actor.id, id)
+            : await closePullRequestAction(c.actor.id, id);
+      } catch (e) {
+        // Refusals (permission, policy, provider) are audited too, with the reason only.
+        await audit(c.actor.id, `pull_request.${c.p[1]}_refused`, "pull_request", String(id), {
+          reason: String((e as Error).message).slice(0, 500),
+        });
+        throw e;
+      }
       await audit(c.actor.id, `pull_request.${c.p[1]}`, "pull_request", String(id), result);
       return result;
     },
@@ -2073,6 +2083,11 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/gitlab$/, ({ actor }) => gitlabStatus(actor.id)],
   ["POST", /^\/api\/integrations\/gitlab$/, ({ body, actor }) => setGitlab(body, actor.id)],
   ["POST", /^\/api\/integrations\/gitlab\/test$/, ({ body, actor }) => testGitlab(body, actor.id)],
+  [
+    "POST",
+    /^\/api\/integrations\/gitlab\/ssh-key$/,
+    ({ body, actor }) => setGitlabSshKey(body, actor.id),
+  ],
   [
     "POST",
     /^\/api\/integrations\/gitlab\/clear$/,

@@ -36,7 +36,18 @@ export interface GitlabInstance {
   host: string;
   /** PEM bundle for an internal CA, used for Git transport to this host (http.<url>.sslCAInfo). TLS is never disabled. */
   caFile?: string;
+  /**
+   * Pinned SSH host keys ("ssh-ed25519 AAAA…") for Git over SSH. SSH transport is used only when this is set and the
+   * user saved an SSH key for the host; StrictHostKeyChecking stays on, unknown keys are never accepted.
+   */
+  sshHostKeys?: string[];
+  /** SSH port when the instance does not listen on 22. */
+  sshPort?: number;
 }
+
+/** One OpenSSH public host key: "<type> <base64>" (comments dropped). */
+export const SSH_HOST_KEY =
+  /^(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa|sk-ssh-ed25519@openssh\.com) ([A-Za-z0-9+/]+={0,3})(?:\s.*)?$/;
 
 export interface Config {
   knowledge: { ponytail: { enabled: boolean; mapChars: number } };
@@ -699,7 +710,19 @@ export function gitlabConfig(raw: Config["gitlab"]): Config["gitlab"] {
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)) continue;
     if (seen.has(host)) continue;
     seen.add(host);
-    instances.push({ host, ...(i.caFile ? { caFile: String(i.caFile) } : {}) });
+    const keys = (Array.isArray(i.sshHostKeys) ? i.sshHostKeys : [])
+      .map((k) => SSH_HOST_KEY.exec(String(k).trim()))
+      .filter((m): m is RegExpExecArray => !!m)
+      .map((m) => `${m[1]} ${m[2]}`);
+    const port = Number(i.sshPort);
+    instances.push({
+      host,
+      ...(i.caFile ? { caFile: String(i.caFile) } : {}),
+      ...(keys.length ? { sshHostKeys: keys } : {}),
+      ...(Number.isInteger(port) && port > 0 && port < 65536 && port !== 22
+        ? { sshPort: port }
+        : {}),
+    });
   }
   return { ...raw, instances };
 }

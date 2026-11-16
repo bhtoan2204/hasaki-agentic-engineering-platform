@@ -27,7 +27,15 @@ answer "unsupported for <provider>" for the rest.
 
 ```json
 "gitlab": {
-  "instances": [{ "host": "gitlab.com" }, { "host": "gitlab.hasaki.work", "caFile": "/etc/ssl/certs/hasaki-ca.pem" }],
+  "instances": [
+    { "host": "gitlab.com" },
+    {
+      "host": "gitlab.hasaki.work",
+      "caFile": "/etc/ssl/certs/hasaki-ca.pem",
+      "sshHostKeys": ["ssh-ed25519 AAAA…"],
+      "sshPort": 22
+    }
+  ],
   "token": "",
   "allowSharedCredentials": false,
   "accessVerification": "strict",
@@ -70,9 +78,30 @@ the short-lived child environment, never in arguments, `remote.origin.url`, Git 
 error text are passed through `redactSecrets`, which masks `glpat-`-style tokens, `PRIVATE-TOKEN:` headers and
 credentials embedded in URLs.
 
-SSH: origins such as `git@gitlab.hasaki.work:group/project.git` or `ssh://git@host:port/group/project.git` are
-recognised and mapped to the HTTPS identity. The platform's own transport is HTTPS with the token; an SSH-key transport
-(per-user key, pinned host keys, `StrictHostKeyChecking=yes`) is not part of this change.
+### SSH transport
+
+Git over SSH is available per instance and per user:
+
+1. An operator pins the instance's SSH host keys in `config.gitlab.instances[].sshHostKeys` (the `<type> <base64>`
+   part of `ssh-keyscan` output, verified out of band), plus `sshPort` when it is not 22. Without pinned keys SSH is
+   off for that instance and cannot be enabled from the UI.
+2. Each member saves an unencrypted OpenSSH private key for that instance under **Integrations → GitLab → SSH key**
+   (user secret `gitlab_ssh_key:<host>`). Passphrase-protected keys are refused because Git runs non-interactively.
+   Add the matching public key to the member's GitLab account (or as a deploy key with write access).
+
+When both exist for the run owner, every fetch, clone and push for that repository uses SSH:
+
+- the key and a `known_hosts` file holding only the pinned keys are written as 0600 files in the per-call temp
+  directory and removed afterwards;
+- `GIT_SSH_COMMAND` is `ssh -F /dev/null -i <key> -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes
+  -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<pinned> -o GlobalKnownHostsFile=/dev/null`; an unknown or
+  changed host key fails with "SSH host key verification failed", it is never accepted;
+- only `protocol.ssh` is allowed on that call, and the canonical HTTPS URL is rewritten to SSH with a command-line
+  `url.<ssh>.insteadOf=<https>`, so `remote.origin.url` and Git config keep the HTTPS identity and never hold a key.
+
+The access token is still required for the REST API (merge requests, pipelines) and for permission verification; SSH
+replaces only the Git transport. Detected SSH origins (`git@host:group/project.git`, `ssh://git@host:port/...`) of
+allow-listed hosts map to the same HTTPS identity.
 
 ## API client behaviour
 
@@ -91,13 +120,19 @@ recognised and mapped to the HTTPS identity. The platform's own transport is HTT
   the latest pipeline of the branch is added to the step output and log when GitLab reports one.
 - Read-only agent tools, for every provider that supports them: `git.pull_request` (state and merge readiness),
   `git.pull_request_diff`, `git.pull_request_discussions`, `git.pipelines` and `git.job_log` (tail of a failed job,
-  redacted). They only read repositories in the run's allowed set and only MRs of that repository.
+  redacted), plus `git.repository` (default and protected branches). They only read repositories in the run's allowed
+  set and only MRs of that repository.
+- Review comments: when the run has review steps (`{ approved | verdict, findings, summary }`), the PR step posts their
+  findings as one comment on the MR through `provider.commentOnPullRequest` (secrets masked). A hidden marker
+  (`<!-- platform-review:run-<id> -->`) makes retries skip it. No agent tool can post comments; posting failures are
+  logged and never fail the published MR.
 - PR state sync (`syncPullRequestStates`) maps `opened` → OPEN, `merged` → MERGED, `closed` → DECLINED.
 
 ## Merge policy
 
 Merging is never automatic and never an agent tool. The run owner merges or closes from the run page
-(`POST /api/pull-requests/:id/merge|close`). At that moment the server:
+(`POST /api/pull-requests/:id/merge|close`); both successful and refused actions are audited. At that moment the
+server:
 
 1. requires the acting user to own the run and to still hold `pull_request` permission on the repository
    (`requireRunRepositoryAccess`);

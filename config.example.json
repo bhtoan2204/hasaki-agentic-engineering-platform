@@ -22,7 +22,10 @@
     "accessVerification": "strict"
   },
   "gitlab": {
-    "instances": [{ "host": "gitlab.com" }, { "host": "gitlab.hasaki.work", "caFile": "" }],
+    "instances": [
+      { "host": "gitlab.com" },
+      { "host": "gitlab.hasaki.work", "caFile": "", "sshHostKeys": [], "sshPort": 22 }
+    ],
     "token": "",
     "allowSharedCredentials": false,
     "accessVerification": "strict",

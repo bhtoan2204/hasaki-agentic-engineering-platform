@@ -965,6 +965,29 @@ function registerGitHostingTools() {
     },
   });
   registerIntegrationTool({
+    name: "git.repository",
+    summary:
+      "Default branch and protected branches of an allowed repository, as its Git host reports them.",
+    description:
+      "Read-only. Repository metadata from the host (default branch, protected branches, visibility).",
+    input: z.object({ repo: z.string() }),
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo }, ctx) => {
+      allowedRepo(repo, ctx);
+      const registry = await repositories.get(repo);
+      if (!registry) throw new Error(`repository "${repo}" is not registered`);
+      const { gitProviderFor } = await import("../git/provider.ts");
+      const provider = gitProviderFor(registry.provider);
+      if (!provider.repositoryMetadata)
+        return unsupportedFor(provider.name, "Reading repository metadata");
+      return provider.repositoryMetadata({
+        repo: repositoryReference(registry),
+        remoteUrl: registry.repository_url ?? null,
+      });
+    },
+  });
+  registerIntegrationTool({
     name: "git.job_log",
     summary: "Tail of one CI job log (secrets redacted), to analyse a failed pipeline.",
     description: "Read-only. `job_id` from git.pipelines; `tail` lines (default 200, max 2000).",
