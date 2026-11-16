@@ -31,7 +31,7 @@ export function cookieSecure(req: IncomingMessage) {
   if (process.env.COOKIE_SECURE === "0" && process.env.NODE_ENV !== "production") return false;
   if (process.env.NODE_ENV === "production" || (req.socket as { encrypted?: boolean }).encrypted)
     return true;
-  const host = String(req.headers.host ?? "").replace(/:d+$/, "");
+  const host = String(req.headers.host ?? "").replace(/:\d+$/, "");
   return host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]";
 }
 
