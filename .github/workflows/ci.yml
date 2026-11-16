@@ -34,6 +34,16 @@ jobs:
         run: npm ci --no-audit --no-fund
       - run: npm run typecheck
 
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Pure static import-graph analysis (src/architecture/check.ts): no dependencies to install.
+      - run: npm run arch:check
+
   test:
     runs-on: ubuntu-latest
     strategy:
