@@ -23,6 +23,7 @@ import {
   requireRunRepositoryAccess,
   resolveEffectiveRepositoryPermissions,
   setBitbucketPermissionChecker,
+  refreshBitbucket,
 } from "../src/repos/access.ts";
 import { selectRepositories, startRun, retryStep, getRun } from "../src/workflow/engine.ts";
 import { definitions } from "../src/workflow/definitions.ts";
@@ -776,4 +777,67 @@ test("deleting a repository removes its grants and checks with it", async () => 
     (await q(pool, "SELECT 1 FROM user_repository_access WHERE repository_id = $1", [id])).length,
     0,
   );
+});
+
+test("the repository list answers from expired checks and refreshes them in the background", async () => {
+  await A("/api/repositories");
+  await q(pool, "UPDATE repository_bitbucket_permissions SET expires_at = now() - interval '1 minute' WHERE user_id = $1", [ids["acl-a"]]);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const slowCalls: string[] = [];
+  setBitbucketPermissionChecker(async (creds, _ws, slug) => {
+    slowCalls.push(slug);
+    await gate;
+    const own = creds.user.startsWith("acl-a") ? "repo-a" : "repo-b";
+    return slug === own || slug === "repo-c"
+      ? { state: "verified", can_read: true, can_write: true, reason: "test" }
+      : { state: "denied", can_read: false, can_write: false, reason: "test: no access" };
+  });
+  try {
+    const listed = await A("/api/repositories");
+    assert.equal(listed.status, 200);
+    assert.ok(names(listed.body).includes("repo-a"), "the last known verdict answers while the host is slow");
+    for (let i = 0; i < 50 && !slowCalls.length; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(slowCalls.length > 0, "expired checks are refreshed behind the response");
+    // An entry point that starts work still waits for a fresh answer.
+    let settled = false;
+    const blocking = resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a", { verify: true }).then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(settled, false);
+    release();
+    await blocking;
+  } finally {
+    release();
+    setBitbucketPermissionChecker(async (creds, _ws, slug) => {
+      bitbucketCalls++;
+      const own = creds.user.startsWith("acl-a") ? "repo-a" : "repo-b";
+      if (slug === own || slug === "repo-c")
+        return { state: "verified", can_read: true, can_write: true, reason: "test" };
+      return { state: "denied", can_read: false, can_write: false, reason: "test: no access" };
+    });
+  }
+});
+
+test("a host outage does not erase a recent verdict; a real answer still replaces it", async () => {
+  const repoA = (await repositories.get("repo-a"))!;
+  await refreshBitbucket(ids["acl-a"], [repoA], true);
+  setBitbucketPermissionChecker(async () => ({ state: "unknown", can_read: null, can_write: null, reason: "Bitbucket unreachable" }));
+  try {
+    await refreshBitbucket(ids["acl-a"], [repoA], true);
+    const p = await resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a");
+    assert.equal(p!.bitbucket.state, "verified", "an unreachable host keeps the last definite answer");
+    assert.ok(names((await A("/api/repositories")).body).includes("repo-a"));
+    setBitbucketPermissionChecker(async () => ({ state: "denied", can_read: false, can_write: false, reason: "test: revoked" }));
+    await refreshBitbucket(ids["acl-a"], [repoA], true);
+    assert.equal((await resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a"))!.bitbucket.state, "denied");
+  } finally {
+    setBitbucketPermissionChecker(async (creds, _ws, slug) => {
+      bitbucketCalls++;
+      const own = creds.user.startsWith("acl-a") ? "repo-a" : "repo-b";
+      if (slug === own || slug === "repo-c")
+        return { state: "verified", can_read: true, can_write: true, reason: "test" };
+      return { state: "denied", can_read: false, can_write: false, reason: "test: no access" };
+    });
+    await refreshBitbucket(ids["acl-a"], [repoA], true);
+  }
 });

@@ -136,7 +136,13 @@ export function frontmatter(text: string): { fields: Record<string, string>; bod
 
 export function looksSecret(text: string) {
   if (SECRET_RE.some((re) => re.test(text))) return true;
-  for (const m of text.matchAll(SECRET_ASSIGNMENT)) if (!IDENTIFIER_PATH.test(m[2])) return true;
+  for (const m of text.matchAll(SECRET_ASSIGNMENT)) {
+    if (IDENTIFIER_PATH.test(m[2])) continue;
+    // PayPal approval links carry the order ID as `token`; it is a public identifier, not a credential.
+    if (/paypal\.com\/checkoutnow\?$/i.test(text.slice(Math.max(0, m.index - 60), m.index)))
+      continue;
+    return true;
+  }
   return false;
 }
 
@@ -771,6 +777,90 @@ export async function importSkillDirectory(opts: {
     dryRun: opts.dryRun,
     owned: false,
     createdBy: opts.createdBy ?? "local skill import",
+  });
+  return report;
+}
+
+/**
+ * Import a registered repository's knowledge from a LOCAL checkout: its agent instructions (CLAUDE.md / AGENTS.md,
+ * inlined, same keys as the repository import) and every Markdown file under docs/ (on demand). For docs the
+ * platform-managed checkout cannot see (git-ignored, unpushed or on another branch). Re-running updates in place.
+ */
+export async function importLocalCheckout(opts: {
+  dir: string;
+  repo: string;
+  dryRun?: boolean;
+  createdBy?: string;
+}): Promise<ImportReport> {
+  const root = opts.dir.replace(/[\\/]+$/, "");
+  const repo = await repositories.get(opts.repo);
+  if (!repo) throw new Error(`unknown repository ${opts.repo}`);
+  if (!existsSync(root) || !statSync(root).isDirectory())
+    throw new Error(`${root} is not a directory`);
+  const skipped: ImportReport["skipped"] = [];
+  const read = (f: string) => readChecked(root, repo.name, f, skipped);
+  const src = (file: string, text: string) => ({
+    repo: repo.name,
+    path: relative(root, file).replaceAll("\\", "/"),
+    sha256: sha(text),
+  });
+  const candidates: ImportCandidate[] = [];
+  const seen = new Set<string>();
+  for (const f of ["CLAUDE.md", "AGENTS.md"]) {
+    const file = join(root, f);
+    if (!existsSync(file)) continue;
+    const text = read(file);
+    if (!text || seen.has(sha(text))) continue;
+    seen.add(sha(text));
+    candidates.push({
+      key: slug(`${repo.name}.${f.replace(/\.md$/i, "")}`),
+      category: "repository_convention",
+      scope_type: "REPOSITORY",
+      scope_ref: repo.name,
+      title: `${repo.name}: ${f}`,
+      content: text,
+      metadata: {
+        load: "inline",
+        description: firstParagraph(text),
+        imported_from_local_checkout: true,
+      },
+      source: [src(file, text)],
+    });
+  }
+  for (const file of walk(join(root, "docs"), 4)
+    .filter((f) => /\.md$|\/llms\.txt$/i.test(f))
+    .sort()) {
+    const text = read(file);
+    if (!text) continue;
+    const rel = relative(root, file).replaceAll("\\", "/");
+    candidates.push({
+      key: slug(`${repo.name}.${rel.replace(/\.(md|txt)$/i, "").replace(/\//g, ".")}`),
+      category: /architecture/i.test(rel) ? "architecture_guideline" : "domain_knowledge",
+      scope_type: "REPOSITORY",
+      scope_ref: repo.name,
+      title: `${repo.name}: ${firstHeading(text.replace(/^---[\s\S]*?---/, "")) ?? rel}`,
+      content: text,
+      metadata: {
+        load: "on_demand",
+        description: firstParagraph(text),
+        imported_from_local_checkout: true,
+      },
+      source: [src(file, text)],
+    });
+  }
+  const report: ImportReport = {
+    candidates: [],
+    skipped,
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    retired: 0,
+    conflicts: 0,
+  };
+  await applyCandidates(candidates, report, {
+    dryRun: opts.dryRun,
+    owned: false,
+    createdBy: opts.createdBy ?? "local checkout import",
   });
   return report;
 }

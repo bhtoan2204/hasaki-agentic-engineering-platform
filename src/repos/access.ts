@@ -225,8 +225,12 @@ function compute(
 
 export interface ResolveOptions {
   db?: Db;
-  /** Refresh missing/expired Bitbucket checks first (entry points). Default false (last known result). */
-  verify?: boolean;
+  /**
+   * true: refresh missing/expired host checks first (entry points that start work). "listing": wait only for
+   * repositories never checked; expired ones keep their last result now and are refreshed in the background.
+   * Default false (last known result).
+   */
+  verify?: boolean | "listing";
   /** Run project (only to admit __benchmark fixtures). */
   project?: string;
 }
@@ -238,7 +242,8 @@ export async function effectivePermissions(
 ): Promise<Map<string, EffectivePermissions>> {
   const db = opts.db ?? pool;
   const all = await repositories.list(db);
-  if (opts.verify) await refreshBitbucket(userId, all, false);
+  if (opts.verify === "listing") await refreshForListing(userId, all);
+  else if (opts.verify) await refreshBitbucket(userId, all, false);
   const { grants, checks } = await loadUser(userId, db);
   const g = new Map(grants.map((x) => [x.repository_id, x]));
   const c = new Map(checks.map((x) => [x.repository_id, x]));
@@ -571,6 +576,21 @@ async function askBitbucket(
 }
 
 /** Refresh missing/expired checks of `userId` for `repos` (all of them with `force`). One flight per user at a time. */
+/** Listings must not wait on the hosts: only never-checked repositories block; expired checks refresh behind. */
+async function refreshForListing(userId: number, all: RepositoryRow[]) {
+  const { checks } = await loadUser(userId, pool);
+  const checked = new Set(checks.map((c) => c.repository_id));
+  const never = all.filter((r) => !checked.has(Number(r.id)));
+  if (never.length) await refreshBitbucket(userId, never, false);
+  void refreshBitbucket(userId, all, false).catch(() => {});
+}
+
+/** Host permission checks run this many at a time (each is a network round trip to Bitbucket/GitHub/GitLab). */
+const CHECK_CONCURRENCY = 10;
+/** Network/host-side failures (not answers about the user): these never downgrade a recent definite verdict. */
+const TRANSIENT_HOST_FAILURE = /^(Bitbucket|GitHub|GitLab) (unreachable|429|5\d\d)$/;
+const KEEP_DEFINITE_ON_OUTAGE_MS = 24 * 3600_000;
+
 export async function refreshBitbucket(userId: number, repos: RepositoryRow[], force: boolean) {
   const now = Date.now();
   const { checks } = await loadUser(userId, pool);
@@ -593,10 +613,10 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
         return memo.get(kind)!;
       };
       const verdicts: Array<[RepositoryRow, Verdict]> = [];
-      for (let i = 0; i < due.length; i += 4)
+      for (let i = 0; i < due.length; i += CHECK_CONCURRENCY)
         verdicts.push(
           ...(await Promise.all(
-            due.slice(i, i + 4).map(async (r): Promise<[RepositoryRow, Verdict]> => {
+            due.slice(i, i + CHECK_CONCURRENCY).map(async (r): Promise<[RepositoryRow, Verdict]> => {
               let remote: CanonicalRemote;
               try {
                 remote = repositoryRemote(r.repository_url!);
@@ -614,6 +634,23 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
       for (const [r, v] of verdicts) {
         // An unknown result is retried sooner than a definite one.
         const ttl = v.state === "unknown" ? Math.min(120, ttlSeconds()) : ttlSeconds();
+        // A host outage must not erase a recent definite verdict (repositories would vanish from the user's list);
+        // keep it and retry soon. Git operations still use the user's own token, so the host enforces revocations.
+        const prev = known.get(Number(r.id));
+        if (
+          v.state === "unknown" &&
+          TRANSIENT_HOST_FAILURE.test(v.reason) &&
+          prev &&
+          prev.state !== "unknown" &&
+          now - new Date(prev.checked_at).getTime() < KEEP_DEFINITE_ON_OUTAGE_MS
+        ) {
+          await q(
+            pool,
+            "UPDATE repository_bitbucket_permissions SET expires_at = now() + make_interval(secs => $3) WHERE user_id = $1 AND repository_id = $2",
+            [userId, r.id, ttl],
+          );
+          continue;
+        }
         await q(
           pool,
           `INSERT INTO repository_bitbucket_permissions (user_id, repository_id, state, can_read, can_write, reason, checked_at, expires_at)

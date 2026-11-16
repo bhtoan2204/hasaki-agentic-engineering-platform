@@ -1613,7 +1613,7 @@ export const routes: Route[] = [
           rows.map(async (r) => ({ ...publicRepository(r), self: await isSelfRepository(r) })),
         );
       }
-      const mine = await listAccessibleRepositories(actor.id, { verify: true });
+      const mine = await listAccessibleRepositories(actor.id, { verify: "listing" });
       const visible = new Set(mine.map((m) => m.repository.name));
       return Promise.all(
         mine.map(async (m) => ({
