@@ -234,7 +234,17 @@ test("graph bindings preserve every configured approval source and keep prose ou
 
 test("worker verification cannot write a protected path outside its worktree", async (t) => {
   const { path } = fixture(t);
-  const protectedRoot = mkdtempSync("/var/tmp/verification-protected-");
+  // Prefer /var/tmp; some sandboxes mount it read-only (EROFS), so fall back to the next writable location.
+  const protectedRoot = (() => {
+    for (const base of ["/var/tmp", tmpdir()]) {
+      try {
+        return mkdtempSync(join(base, "verification-protected-"));
+      } catch (error) {
+        if (!["EROFS", "EACCES", "EPERM", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      }
+    }
+    throw new Error("no writable location for the protected-path fixture");
+  })();
   t.after(() => rmSync(protectedRoot, { recursive: true, force: true }));
   const protectedFile = join(protectedRoot, "sentinel");
   writeFileSync(protectedFile, "protected");
