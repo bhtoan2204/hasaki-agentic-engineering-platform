@@ -1,0 +1,81 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import {
+  buildGraph,
+  compareToBaseline,
+  findCycles,
+  findViolations,
+  parseImports,
+  runCheck,
+  type Baseline,
+  type Graph,
+} from "../src/architecture/check.ts";
+
+const graphOf = (src: Record<string, string>): Graph =>
+  buildGraph(Object.keys(src), (f) => src[f], () => true);
+
+test("parseImports finds static, re-export, type and dynamic relative imports only", () => {
+  const specs = parseImports(
+    [
+      'import { a } from "./a.ts";',
+      'import type { B } from "../b.ts";',
+      'export * from "./c.ts";',
+      'import "./side.ts";',
+      'import x from "node:fs";',
+      'const m = await import("./dyn.ts");',
+    ].join("\n"),
+  );
+  assert.deepEqual(specs.sort(), ["../b.ts", "./a.ts", "./c.ts", "./dyn.ts", "./side.ts"]);
+});
+
+test("findCycles reports a two-file cycle and ignores acyclic edges", () => {
+  const g = graphOf({
+    "src/a.ts": 'import "./b.ts";',
+    "src/b.ts": 'import "./a.ts";',
+    "src/c.ts": 'import "./a.ts";',
+  });
+  assert.deepEqual(findCycles(g), [["src/a.ts", "src/b.ts"]]);
+});
+
+test("workflow importing the Claude module or a provider adapter is a core violation", () => {
+  const g = graphOf({
+    "src/workflow/x.ts": 'import "../agent/claude.ts"; import "../agent/codex/run.ts";',
+    "src/agent/claude.ts": "",
+    "src/agent/codex/run.ts": "",
+  });
+  const keys = findViolations(g).map((v) => v.key);
+  assert.ok(keys.includes("no-provider-from-core:src/workflow/x.ts->src/agent/claude.ts"));
+  assert.ok(keys.includes("no-provider-from-core:src/workflow/x.ts->src/agent/codex/run.ts"));
+});
+
+test("importing a provider internal file from outside is flagged, its entry file is not", () => {
+  const g = graphOf({
+    "src/agent/other.ts": 'import "./codex/policy.ts"; import "./codex/run.ts";',
+    "src/agent/codex/policy.ts": "",
+    "src/agent/codex/run.ts": 'import "./policy.ts";',
+  });
+  const v = findViolations(g);
+  assert.deepEqual(v.map((x) => x.key), ["no-provider-internals:src/agent/other.ts->src/agent/codex/policy.ts"]);
+});
+
+test("baseline ratchet rejects new violations and tolerates a shrunken baselined cycle", () => {
+  const g = graphOf({
+    "src/a.ts": 'import "./b.ts";',
+    "src/b.ts": 'import "./a.ts";',
+  });
+  const violations = findViolations(g);
+  assert.equal(compareToBaseline(violations, { violations: [] }).newViolations.length, 1);
+  const bigger = { violations: ["no-circular:src/a.ts,src/b.ts,src/c.ts"] };
+  assert.equal(compareToBaseline(violations, bigger).newViolations.length, 0);
+  assert.deepEqual(compareToBaseline(violations, bigger).stale, ["no-circular:src/a.ts,src/b.ts,src/c.ts"]);
+});
+
+test("the checked-in source tree has no violation outside architecture/baseline.json", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const baseline = JSON.parse(readFileSync(join(root, "architecture", "baseline.json"), "utf8")) as Baseline;
+  const result = runCheck(root, baseline);
+  assert.deepEqual(result.newViolations.map((v) => v.detail), []);
+});
