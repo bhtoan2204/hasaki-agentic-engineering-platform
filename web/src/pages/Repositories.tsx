@@ -937,6 +937,16 @@ function NewRepoDrawer({
   );
 }
 
+const REPO_NAME = /^[A-Za-z0-9._-]+$/;
+const slugOf = (name: string) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+const repoSlugFromUrl = (url: string) =>
+  /\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1] ?? "";
+
 function RepoForm({
   form,
   setForm,
@@ -951,12 +961,18 @@ function RepoForm({
   bare?: boolean;
 }) {
   const { t } = useI18n();
+  const nameInvalid = isNew && !!form.name && !REPO_NAME.test(form.name);
   const body = (
     <>
-      <Field label={t("repo.name")}>
+      <Field
+        label={t("repo.name")}
+        hint={nameInvalid ? t("repo.nameInvalid", { suggestion: slugOf(form.name) }) : undefined}
+      >
         <input
           value={form.name}
           disabled={!isNew}
+          aria-invalid={nameInvalid || undefined}
+          placeholder="payment-paypal"
           onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
       </Field>
@@ -977,7 +993,16 @@ function RepoForm({
               ? "https://github.com/owner/repository.git"
               : "https://bitbucket.org/workspace/repository.git"
           }
-          onChange={(e) => setForm({ ...form, repository_url: e.target.value })}
+          onChange={(e) => {
+            const repository_url = e.target.value;
+            // A new repository is usually named after its URL slug; keep a name the user typed.
+            const fromOld = repoSlugFromUrl(form.repository_url ?? "");
+            const name =
+              isNew && (!form.name || form.name === fromOld)
+                ? repoSlugFromUrl(repository_url) || form.name
+                : form.name;
+            setForm({ ...form, repository_url, name });
+          }}
         />
       </Field>
       <button
@@ -1046,7 +1071,7 @@ function RepoForm({
           {t("kn.enabled")}
         </label>
         <span className="grow" />
-        <button disabled={!form.name} onClick={onSave}>
+        <button disabled={!form.name || nameInvalid} onClick={onSave}>
           <Save size={15} />
           {t("kn.save")}
         </button>

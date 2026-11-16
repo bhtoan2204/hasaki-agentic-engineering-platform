@@ -704,6 +704,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.noneFit": "Không có repo nào phù hợp.",
     "repo.saved": "Đã lưu",
     "repo.name": "Tên repository",
+    "repo.nameInvalid":
+      "Tên chỉ gồm chữ, số, dấu chấm, gạch dưới, gạch ngang (không dấu cách, không dấu ngoặc). Gợi ý: {suggestion}",
     "repo.workspace": "Workspace trên máy này",
     "repo.legacyLayout": "Bố trí cũ (đã ngừng dùng)",
     "repo.instanceDefault": "Mặc định của máy",
@@ -3037,6 +3039,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.noneFit": "No repo fits.",
     "repo.saved": "Saved",
     "repo.name": "Repository name",
+    "repo.nameInvalid":
+      "Use letters, digits, dot, underscore or hyphen only (no spaces or brackets). Suggestion: {suggestion}",
     "repo.workspace": "Workspace on this instance",
     "repo.legacyLayout": "Legacy layout (deprecated)",
     "repo.instanceDefault": "Instance default",
@@ -3556,8 +3560,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wfe.standalone": "(none — run on its own)",
     "wfe.repos": "Repositories (empty = discover them)",
     "wfe.selfRepo": "Platform application: {repos}. The repository step uses this automatically.",
-    "wfe.selfRepoMissing":
-      "This platform's repository is not registered, or you cannot access it.",
+    "wfe.selfRepoMissing": "This platform's repository is not registered, or you cannot access it.",
     "wfe.noRepos": "No repository is enabled.",
     "wfe.inputs": "Inputs (JSON)",
     "wfe.inputsHint": 'e.g. {"project":"OMS","focus":"refund"}',
