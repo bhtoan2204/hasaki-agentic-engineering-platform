@@ -58,7 +58,7 @@ export async function installNodeDependencies(workspace: string): Promise<boolea
 export interface GitProvider {
   name: string;
   /** Push `branch` from a worktree; must refuse dirty trees / branches without commits. Returns the commit list. */
-  push(path: string, branch: string, base?: string): Promise<{ commits: string; note?: string }>;
+  push(path: string, branch: string, base?: string, expectedSha?: string): Promise<{ commits: string; note?: string }>;
   /** Idempotent: updates the open PR for source → target if there is one. */
   openOrUpdatePullRequest(pr: {
     repo: string;
@@ -79,7 +79,7 @@ export interface GitProvider {
   }): Promise<{ state: string; merged_at: string | null; merge_commit: string | null } | null>;
 }
 
-async function pushFromWorktree(path: string, branch: string, base?: string) {
+async function pushFromWorktree(path: string, branch: string, base?: string, expectedSha?: string) {
   const row = await one(
     pool,
     "SELECT r.*, w.run_id AS workspace_run_id FROM repositories r JOIN execution_workspaces w ON w.repo=r.name WHERE w.path=$1",
@@ -98,13 +98,13 @@ async function pushFromWorktree(path: string, branch: string, base?: string) {
   await validateCheckout(row, path);
   await prepareRepository(row);
   return repositoryLock(row, () =>
-    pushBranch(path, branch, base || row.default_branch || config.baseBranch),
+    pushBranch(path, branch, base || row.default_branch || config.baseBranch, expectedSha),
   );
 }
 
 export const bitbucketProvider: GitProvider = {
   name: "bitbucket",
-  push: (path, branch, base) => pushFromWorktree(path, branch, base),
+  push: (path, branch, base, expectedSha) => pushFromWorktree(path, branch, base, expectedSha),
   openOrUpdatePullRequest: (pr) =>
     openPullRequest(pr.repo, pr.source, pr.title, pr.description, {
       draft: pr.draft,
@@ -115,7 +115,7 @@ export const bitbucketProvider: GitProvider = {
 
 export const githubProvider: GitProvider = {
   name: "github",
-  push: (path, branch, base) => pushFromWorktree(path, branch, base),
+  push: (path, branch, base, expectedSha) => pushFromWorktree(path, branch, base, expectedSha),
   openOrUpdatePullRequest: (pr) =>
     openGithubPullRequest(pr.repo, pr.source, pr.title, pr.description, {
       draft: pr.draft,

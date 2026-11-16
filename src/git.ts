@@ -174,19 +174,44 @@ export async function prepareBranch(
   return { repo, branch, path: wt, createdFrom: base };
 }
 
-export async function pushBranch(path: string, branch: string, baseBranch = config.baseBranch) {
+export async function pushBranch(
+  path: string,
+  branch: string,
+  baseBranch = config.baseBranch,
+  /** The commit that was verified. When given, exactly this commit is pushed and nothing else. */
+  expectedSha?: string,
+) {
   repositoryBranch(branch);
   repositoryBranch(baseBranch);
   const dirty = await git(path, "status", "--porcelain");
   if (dirty) throw new Error(`uncommitted changes in ${path}, commit them first:\n${dirty}`);
+  if (expectedSha) {
+    const head = await git(path, "rev-parse", "HEAD");
+    const tip = await git(path, "rev-parse", `refs/heads/${branch}`);
+    if (head !== expectedSha || tip !== expectedSha)
+      throw new Error(
+        `refusing to push: verified commit ${expectedSha.slice(0, 12)} but HEAD is ${head.slice(0, 12)} and ${branch} is ${tip.slice(0, 12)} — re-run verification`,
+      );
+  }
   const ahead = await git(path, "rev-list", "--count", `origin/${baseBranch}..${branch}`);
   if (ahead === "0") throw new Error(`${branch} has no commits ahead of ${baseBranch}`);
   let note: string | undefined;
   try {
-    await git(path, "push", "-u", "origin", branch);
+    if (expectedSha) {
+      await git(path, "push", "origin", `${expectedSha}:refs/heads/${branch}`);
+      await git(path, "branch", "--set-upstream-to", `origin/${branch}`, branch).catch(() => {});
+    } else await git(path, "push", "-u", "origin", branch);
   } catch (e) {
     if (!/non-fast-forward|fetch first|\[rejected\]/.test((e as Error).message)) throw e;
     note = await rewriteOwnBranch(path, branch, e as Error);
+  }
+  if (expectedSha) {
+    // The published commit must be the verified one, whatever happened in between.
+    const remote = (await git(path, "ls-remote", "origin", `refs/heads/${branch}`)).split(/\s/)[0];
+    if (remote !== expectedSha)
+      throw new Error(
+        `published ${branch} is ${remote ? remote.slice(0, 12) : "missing"} but the verified commit is ${expectedSha.slice(0, 12)}`,
+      );
   }
   return {
     commits: await git(path, "log", "--format=%h %s", `origin/${baseBranch}..${branch}`),

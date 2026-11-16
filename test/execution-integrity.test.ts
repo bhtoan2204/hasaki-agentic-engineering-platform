@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { requiredTestTargets, verifyWorkspaces } from "../src/agent/verify.ts";
 import {
@@ -94,7 +94,7 @@ test("mandatory verification fingerprints workspaces even without additional tes
     0,
     new AbortController().signal,
     {
-      run: async () => ({ code: 0, timedOut: false, output: "passed" }),
+      run: async () => ({ code: 0, timedOut: false, output: "# tests 1\n# pass 1\n# skipped 0" }),
       diffTests: async () => "",
     },
   );
@@ -233,13 +233,18 @@ test("graph bindings preserve every configured approval source and keep prose ou
 
 test("worker verification cannot write a protected path outside its worktree", async (t) => {
   const { path } = fixture(t);
-  // Verification sandboxes mount / read-only (so /var/tmp) and keep /tmp writable; the checkout is read-only inside the inner one.
+  // The sandbox binds /tmp read-write on purpose, so the protected location must be outside both the worktree and
+  // /tmp. Prefer /var/tmp; some sandboxes mount it read-only (EROFS), so use the next writable non-/tmp location.
   const protectedRoot = (() => {
-    try {
-      return mkdtempSync("/var/tmp/verification-protected-");
-    } catch {
-      return mkdtempSync(join(process.cwd(), ".verification-protected-"));
+    for (const base of ["/var/tmp", process.cwd(), homedir()]) {
+      if (base === "/tmp" || base.startsWith("/tmp/")) continue;
+      try {
+        return mkdtempSync(join(base, "verification-protected-"));
+      } catch (error) {
+        if (!["EROFS", "EACCES", "EPERM", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      }
     }
+    throw new Error("no writable location outside /tmp for the protected-path fixture");
   })();
   t.after(() => rmSync(protectedRoot, { recursive: true, force: true }));
   const protectedFile = join(protectedRoot, "sentinel");

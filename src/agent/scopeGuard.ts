@@ -341,3 +341,25 @@ export function prePublishProblems(input: {
   }
   return problems;
 }
+
+/**
+ * Final check (pure) immediately before pushing: what was verified at the pre-publish gate must still be exactly what
+ * is about to be published. Any difference means the workspace changed after verification: re-verify, do not publish.
+ */
+export function finalPublishProblems(input: {
+  repo: string;
+  verified: { head: string; fingerprint: string; branchTip: string };
+  now: { head: string; fingerprint: string; branchTip: string } | null;
+  /** The attempt was canceled or fenced out. */
+  ownershipLost: boolean;
+}): string[] {
+  const { repo, verified: v, now: n } = input;
+  const problems: string[] = [];
+  if (input.ownershipLost) problems.push(`${repo}: this attempt no longer owns the step`);
+  if (!n) return [...problems, `${repo}: workspace state could not be read right before publishing`];
+  if (n.head !== v.head) problems.push(`${repo}: HEAD moved from ${v.head.slice(0, 12)} to ${n.head.slice(0, 12)} after verification`);
+  if (n.branchTip !== v.branchTip)
+    problems.push(`${repo}: branch tip moved from ${v.branchTip.slice(0, 12)} to ${n.branchTip.slice(0, 12)} after verification`);
+  if (n.fingerprint !== v.fingerprint) problems.push(`${repo}: workspace content changed after verification (fingerprint mismatch)`);
+  return problems;
+}

@@ -5,6 +5,7 @@ import { EvidenceCache, type EvidenceStore } from "./verifyEvidence.ts";
 import { verifyConfig, verifyWorkspaces, type VerifyDeps, type VerifyConfig } from "./verify.ts";
 import { executionContractProblems, type MandatoryExecutionContract } from "./executionContract.ts";
 import { diffTestsAgainstBase } from "./verify.ts";
+import { changedFiles } from "./scopeGuard.ts";
 import { workspaceBase } from "../git/provider.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 
@@ -72,6 +73,7 @@ export async function verifyPublication(
             )
           ).report,
         diffTests: (path) => diffTestsAgainstBase(path, bases.get(path)!),
+        changedFiles: async (path) => (await changedFiles(path, `origin/${bases.get(path)!}`)).all,
         artifact: (name, content, data) =>
           ctx.artifact("publication_verification", name, content, data),
         log: (text, data) => ctx.log("system", text, data),

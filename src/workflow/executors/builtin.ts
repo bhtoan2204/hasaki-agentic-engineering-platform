@@ -57,7 +57,7 @@ import {
   verificationGate,
   type PublishState,
 } from "../../agent/independentReview.ts";
-import { collectScopeState, prePublishProblems, samePatch } from "../../agent/scopeGuard.ts";
+import { collectScopeState, finalPublishProblems, prePublishProblems, samePatch, worktreeFingerprint } from "../../agent/scopeGuard.ts";
 import { feedbackSignals } from "../replan.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
@@ -1221,6 +1221,7 @@ export const pullRequestExecutor: StepExecutor = {
       [ctx.run.id],
     );
     const publish: Record<string, PublishState> = {};
+    const gateState: Record<string, { head: string; fingerprint: string } | null> = {};
     for (const w of workspaces.filter((x) => ctx.run.selected_repositories.includes(x.repo))) {
       const branchTip = await revParse(w.path, `refs/heads/${w.branch}`);
       // Commits tested / verified before a rebase or a base merge still count when the branch's own change is unchanged.
@@ -1240,6 +1241,7 @@ export const pullRequestExecutor: StepExecutor = {
           "system",
           `${w.repo}: ${equivalent.map((h) => h.slice(0, 12)).join(", ")} carries the same change as ${branchTip.slice(0, 12)} relative to ${bases[w.repo].ref} (rebased or base merged in): its tests and verification still count`,
         );
+      gateState[w.repo] = await worktreeFingerprint(w.path).catch(() => null);
       publish[w.repo] = {
         head: await headOf(w.path).catch(() => ""),
         branchTip,
@@ -1331,9 +1333,27 @@ export const pullRequestExecutor: StepExecutor = {
       const registry = await repositories.get(w.repo);
       const provider = gitProviderFor(registry?.provider);
       const { title, summary, decisions } = prFields(source, w.repo, code, ctx.run.title);
+      // Last check before the push: what the gate verified must still be exactly what is published.
+      const gate = gateState[w.repo];
+      const nowState = await worktreeFingerprint(w.path).catch(() => null);
+      const finalProblems = finalPublishProblems({
+        repo: w.repo,
+        verified: { ...(gate ?? { head: "", fingerprint: "" }), branchTip: publish[w.repo].branchTip },
+        now: nowState && { ...nowState, branchTip: await revParse(w.path, `refs/heads/${w.branch}`) },
+        ownershipLost: ctx.signal.aborted,
+      });
+      if (!gate) finalProblems.push(`${w.repo}: no verified workspace state was captured`);
+      if (finalProblems.length) {
+        await ctx.log("system", `PR blocked right before the push:\n- ${finalProblems.join("\n- ")}`);
+        return {
+          kind: "failed",
+          error: `workspace changed after verification: ${finalProblems.join("; ")} — re-run verification`,
+          retryable: false,
+        };
+      }
       let commits: string;
       try {
-        const pushed = await provider.push(w.path, w.branch, bases[w.repo]?.target);
+        const pushed = await provider.push(w.path, w.branch, bases[w.repo]?.target, publish[w.repo].branchTip);
         commits = pushed.commits;
         if (pushed.note) await ctx.log("system", `${w.repo}: ${pushed.note}`);
       } catch (e) {

@@ -49,7 +49,8 @@ function setup(
     run: async () => {
       calls++;
       if (opts.delay) await new Promise((r) => setTimeout(r, opts.delay));
-      return { code: opts.code ?? 0, output: "ok", timedOut: false };
+      // Exit 0 alone is not evidence (NOT_EXECUTED); report a test that ran, like a real runner.
+      return { code: opts.code ?? 0, output: "# pass 1\n# fail 0\n", timedOut: false };
     },
     log: (t) => void logs.push(t),
     ...(cache ? { evidence: cache } : {}),
@@ -216,7 +217,7 @@ test("leader failure is not cached; next request reruns", async () => {
       n++;
       await new Promise((r) => setTimeout(r, 20));
       if (fail) throw new Error("boom");
-      return { code: 0, output: "", timedOut: false };
+      return { code: 0, output: "# pass 1\n# fail 0\n", timedOut: false };
     },
     evidence: cache,
   });

@@ -42,6 +42,11 @@ export interface VerifyConfig {
   allowTestWeakening: boolean;
   requiredTests?: string[];
   contractRevision?: string;
+  /**
+   * Explicit, workflow-defined policy under which a change without executable tests (docs, config) is NOT_APPLICABLE
+   * instead of NOT_EXECUTED. Honoured only when every changed file matches `allowedPaths`; never read from agent output.
+   */
+  notApplicable?: { allowedPaths: string[]; reason: string };
 }
 
 /**
@@ -65,7 +70,84 @@ export function verifyConfig(
     baseline: o.baseline === null || o.baseline === false ? null : "go",
     allowTestWeakening: o.allow_test_weakening === true,
     ...(Array.isArray(o.required_tests) ? { requiredTests: o.required_tests } : {}),
+    ...notApplicablePolicy(o.not_applicable),
   };
+}
+
+function notApplicablePolicy(v: unknown): { notApplicable?: NonNullable<VerifyConfig["notApplicable"]> } {
+  const o = v as { allowed_paths?: unknown; reason?: unknown } | null;
+  if (!o || typeof o !== "object" || !Array.isArray(o.allowed_paths)) return {};
+  const allowedPaths = o.allowed_paths.filter((x): x is string => typeof x === "string" && !!x.trim());
+  const reason = typeof o.reason === "string" ? o.reason.trim() : "";
+  return allowedPaths.length && reason ? { notApplicable: { allowedPaths, reason } } : {};
+}
+
+const globRe = (glob: string) =>
+  new RegExp(
+    "^" +
+      glob
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*\*\//g, "@@DIR@@")
+        .replace(/\*\*/g, "@@ANY@@")
+        .replace(/\*/g, "[^/]*")
+        .replace(/\?/g, "[^/]")
+        .replace(/@@DIR@@/g, "(?:.*/)?")
+        .replace(/@@ANY@@/g, ".*") +
+      "$",
+  );
+const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$/;
+
+/** True only when there is at least one changed file and every one is covered by the policy and is not a test file. */
+export function notApplicableCovers(policy: VerifyConfig["notApplicable"], files: string[]): boolean {
+  if (!policy || !files.length) return false;
+  const res = policy.allowedPaths.map(globRe);
+  return files.every((f) => !TEST_FILE.test(f) && res.some((re) => re.test(f)));
+}
+
+/**
+ * What the test command's output proves. `executed` = tests that actually ran and passed (null: no recognised runner
+ * summary), `skipped` = tests the runner skipped, `marker` = the command itself said nothing was run. Exit code 0 is
+ * never evidence on its own.
+ */
+export function testEvidence(output: string): { executed: number | null; skipped: number; marker: boolean } {
+  const marker =
+    /VERIFY_NOT_EXECUTED|no test runner detected|no matching test files|no Go packages changed|no platform test harness/.test(
+      output,
+    );
+  let executed = 0;
+  let skipped = 0;
+  let recognised = false;
+  const node = (name: string) => {
+    const m = output.match(new RegExp(`^(?:#|ℹ)\\s+${name}\\s+(\\d+)\\s*$`, "gm"));
+    return m ? m.reduce((n, l) => n + Number(l.match(/(\d+)\s*$/)![1]), 0) : null;
+  };
+  const pass = node("pass");
+  if (pass !== null) {
+    recognised = true;
+    executed += pass;
+    skipped += (node("skipped") ?? 0) + (node("todo") ?? 0);
+  }
+  const jest = output.match(/^Tests:.*?(\d+) passed/m) ?? output.match(/^\s*Tests\s+.*?(\d+) passed/m);
+  if (jest) {
+    recognised = true;
+    executed += Number(jest[1]);
+  }
+  // Go: `ok  pkg  0.2s` (a package with `[no tests to run]` or `[no test files]` proves nothing) or verbose `--- PASS`.
+  const goOk = (output.match(/^ok\s+\S+\s+(?:\(cached\)|[\d.]+s)\s*$/gm) ?? []).length;
+  const goPass = (output.match(/^\s*--- PASS: /gm) ?? []).length;
+  if (goOk || goPass) {
+    recognised = true;
+    executed += Math.max(goOk, goPass);
+  }
+  // `go test -json`: one event per line; only test-level pass/skip events count (package events prove nothing).
+  const jsonPass = (output.match(/"Action":"pass"[^\n]*"Test":"/g) ?? []).length;
+  const jsonSkip = (output.match(/"Action":"skip"[^\n]*"Test":"/g) ?? []).length;
+  if (jsonPass || jsonSkip) {
+    recognised = true;
+    executed += jsonPass;
+    skipped += jsonSkip;
+  }
+  return { executed: recognised ? executed : null, skipped, marker };
 }
 
 /**
@@ -78,7 +160,24 @@ export function verifyConfig(
  *   not be restored — nothing was tested,
  *   never counted as passed, not repairable by the agent.
  */
-export type RepoStatus = "passed" | "accepted_preexisting" | "failed" | "error" | "skipped";
+export type RepoStatus =
+  | "passed"
+  | "accepted_preexisting"
+  | "failed"
+  | "error"
+  | "skipped"
+  | "not_executed"
+  | "not_applicable";
+export type VerificationOutcome = "PASSED" | "FAILED" | "NOT_EXECUTED" | "NOT_APPLICABLE";
+/** Reported outcome of a repo's verification, derived from its status. */
+export const outcomeOf = (status: RepoStatus): VerificationOutcome =>
+  status === "passed" || status === "accepted_preexisting"
+    ? "PASSED"
+    : status === "not_applicable"
+      ? "NOT_APPLICABLE"
+      : status === "not_executed" || status === "skipped" || status === "error"
+        ? "NOT_EXECUTED"
+        : "FAILED";
 
 /** The reason a test command gave for not running at all (dedicated exit + marker line), or null. */
 export function environmentUnavailable(code: number | null, output: string): string | null {
@@ -93,8 +192,11 @@ export interface RepoVerification {
   required_tests?: Record<string, "passed" | "failed" | "skipped" | "not_executed">;
   repo: string;
   status: RepoStatus;
-  /** passed or accepted_preexisting. */
+  /** passed, accepted_preexisting or an authorized not_applicable. */
   passed: boolean;
+  outcome?: VerificationOutcome;
+  /** Tests that provably ran (null: no recognised runner summary) and tests the runner skipped. */
+  test_evidence?: { executed: number | null; skipped: number; marker: boolean };
   exit_code: number | null;
   timed_out: boolean;
   duration_ms: number;
@@ -230,6 +332,8 @@ export interface VerifyDeps {
   /** Tests skipped up front because they are known to fail on the same base commit. */
   knownFailures?(path: string): Promise<{ skipRegex: string | null; tests: string[] } | null>;
   diffTests?(path: string): Promise<string>;
+  /** Every file changed against the base (committed, staged, unstaged, untracked); used by the NOT_APPLICABLE policy. */
+  changedFiles?(path: string): Promise<string[]>;
   artifact?(name: string, content: string, data: Record<string, unknown>): Promise<number>;
   log?(text: string, data?: Record<string, unknown>): Promise<void> | void;
   /** Optional evidence reuse + singleflight. Absent = always run (backward compatible). */
@@ -577,6 +681,27 @@ export async function verifyWorkspaces(
         entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
       }
     }
+    if (
+      entry.status === "passed" &&
+      !(cfg.requiredTests?.length && Object.values(entry.required_tests ?? {}).every((x) => x === "passed"))
+    ) {
+      const ev = testEvidence(r.output);
+      entry.test_evidence = ev;
+      if (!ev.executed || ev.executed <= 0) {
+        entry.status = "not_executed";
+        entry.needs_review = true;
+        entry.note = ev.marker
+          ? "exit 0, but the command reported that no tests were run"
+          : ev.skipped
+            ? `exit 0, but every test was skipped (${ev.skipped})`
+            : "exit 0, but the output contains no evidence that any test ran";
+        const files = deps.changedFiles ? await deps.changedFiles(p).catch(() => []) : [];
+        if (notApplicableCovers(cfg.notApplicable, files)) {
+          entry.status = "not_applicable";
+          entry.note = `no executable tests apply: ${cfg.notApplicable!.reason}`;
+        }
+      }
+    }
     {
       const afterState = await worktreeFingerprint(p).catch(() => null);
       if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
@@ -587,7 +712,11 @@ export async function verifyWorkspaces(
       } else entry.tested_state = afterState;
       entry.contract_revision = cfg.contractRevision;
     }
-    entry.passed = entry.status === "passed" || entry.status === "accepted_preexisting";
+    entry.passed =
+      entry.status === "passed" ||
+      entry.status === "accepted_preexisting" ||
+      entry.status === "not_applicable";
+    entry.outcome = outcomeOf(entry.status);
     entry.duration_ms = Date.now() - started;
     if (deps.artifact)
       entry.artifact_id = await deps.artifact(`verify-${round}-${w.repo}.log`, r.output, {
@@ -616,7 +745,8 @@ export async function verifyWorkspaces(
   return {
     round,
     passed: repos.every((r) => r.passed),
-    error: repos.some((r) => r.status === "error"),
+    // Nothing ran: the agent cannot fix that by repairing code, so it is not a repairable failure.
+    error: repos.some((r) => r.status === "error" || r.status === "not_executed"),
     needs_review: repos.some((r) => r.needs_review),
     repos,
     signature: failureSignature(repos),
@@ -787,8 +917,9 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
     needs_review: reviewReasons.length > 0,
     review_reasons: reviewReasons,
     errors: (last?.repos ?? [])
-      .filter((r) => r.status === "error")
-      .map((r) => `${r.repo}: ${r.error}`),
+      .filter((r) => r.status === "error" || r.status === "not_executed")
+      .map((r) => `${r.repo}: ${r.error ?? r.note}`),
+    outcome_by_repo: Object.fromEntries((last?.repos ?? []).map((r) => [r.repo, r.outcome ?? outcomeOf(r.status)])),
     rounds: res.rounds.length,
     repairs: res.repairs,
     max_repairs: cfg.maxRepairs,
@@ -803,6 +934,8 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
         ({
           repo,
           status,
+          outcome,
+          evidence,
           passed,
           exit_code,
           timed_out,
@@ -821,6 +954,8 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
         }) => ({
           repo,
           status,
+          outcome: outcome ?? outcomeOf(status),
+          evidence,
           passed,
           exit_code,
           timed_out,

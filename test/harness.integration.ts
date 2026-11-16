@@ -205,7 +205,7 @@ test("verify: pre-existing failures are accepted only when a re-run without them
     run: fakeRun(
       [
         { code: 1, output: GO_FAIL("TestPay") },
-        { code: 0, output: "ok" },
+        { code: 0, output: "ok  \texample.com/svc/pkg\t0.1s" },
       ],
       envs,
     ),
@@ -278,7 +278,7 @@ test("verify: unknown / unclassified failures never pass", async () => {
 
 test("verify: integrity check that cannot run → error (never clean)", async () => {
   const r = await verifyWorkspaces(WS, ROOTS, CFG, 1, never, {
-    run: fakeRun([{ code: 0, output: "ok" }]),
+    run: fakeRun([{ code: 0, output: "ok  \texample.com/svc/pkg\t0.1s" }]),
     diffTests: async () => {
       throw new Error("fatal: bad revision 'origin/release/prod'");
     },
@@ -289,12 +289,12 @@ test("verify: integrity check that cannot run → error (never clean)", async ()
 
 test("verify: exit 0 but tests weakened → failed; soft signals → passed + needs review", async () => {
   const hard = await verifyWorkspaces(WS, ROOTS, CFG, 1, never, {
-    run: fakeRun([{ code: 0, output: "ok" }]),
+    run: fakeRun([{ code: 0, output: "ok  \texample.com/svc/pkg\t0.1s" }]),
     diffTests: async () => "+++ b/a_test.go\n-func TestX(t *testing.T) {\n",
   });
   assert.deepEqual([hard.repos[0].status, hard.repos[0].weakened], ["failed", ["TestX removed"]]);
   const soft = await verifyWorkspaces(WS, ROOTS, CFG, 1, never, {
-    run: fakeRun([{ code: 0, output: "ok" }]),
+    run: fakeRun([{ code: 0, output: "ok  \texample.com/svc/pkg\t0.1s" }]),
     diffTests: async () =>
       "+++ b/a_test.go\n-\tassert.Equal(t,1,x)\n-\tassert.Equal(t,2,y)\n-\tassert.Equal(t,3,z)\n",
   });
@@ -306,7 +306,7 @@ test("verify: exit 0 but tests weakened → failed; soft signals → passed + ne
     1,
     never,
     {
-      run: fakeRun([{ code: 0, output: "ok" }]),
+      run: fakeRun([{ code: 0, output: "ok  \texample.com/svc/pkg\t0.1s" }]),
       diffTests: async () => "-func TestX(t *testing.T) {\n",
     },
   );
@@ -490,7 +490,7 @@ test("loop: a repo whose worktree could not be restored is skipped; the others a
   const run: VerifyDeps["run"] = async (_c, cwd) => (
     ran.push(cwd),
     repairs
-      ? { code: 0, output: "ok", timedOut: false }
+      ? { code: 0, output: "ok  \texample.com/svc/pkg\t0.1s", timedOut: false }
       : { code: 1, output: GO_FAIL("TestA"), timedOut: false }
   );
   const res = await verificationLoop({
