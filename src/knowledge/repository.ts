@@ -204,13 +204,13 @@ export const knowledgeRepository = {
       db,
       `SELECT p.id, p.status, p.change_type, p.target_key, p.target_version, p.proposed, p.domain, p.confidence, p.source_kind, p.source_run_id, p.parent_id,
               p.owner_id, p.created_at, p.updated_at, p.reviewed_by, p.reviewed_at, jsonb_array_length(p.evidence) AS evidence_count,
-              p.validation->>passed AS validation_passed, r.title AS run_title
+              p.validation->>'passed' AS validation_passed, r.title AS run_title
          FROM knowledge_proposals p LEFT JOIN workflow_runs r ON r.id = p.source_run_id
         WHERE ($1::text IS NULL OR p.status = $1)
           AND ($2::bigint IS NULL OR p.source_run_id = $2)
-          AND ($3::text IS NULL OR p.target_key = $3 OR p.proposed->>key = $3 OR p.applied->>created_key = $3)
+          AND ($3::text IS NULL OR p.target_key = $3 OR p.proposed->>'key' = $3 OR p.applied->>'created_key' = $3)
           AND ($4::bool OR p.owner_id = $5 OR p.owner_id IS NULL)
-        ORDER BY (p.status = pending) DESC, p.id DESC LIMIT 300`,
+        ORDER BY (p.status = 'pending') DESC, p.id DESC LIMIT 300`,
       [
         filter.status ?? null,
         filter.runId ?? null,

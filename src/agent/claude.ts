@@ -67,6 +67,7 @@ import {
 import { missingContractKeys, validateOutputContract } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { agentRepository } from "./repository.ts";
+import { workflowRepository } from "../workflow/repository.ts";
 import {
   installNodeDependencies,
   restoreMissingWorkspaces,
@@ -1577,11 +1578,7 @@ const agentExecutor: StepExecutor = {
       ...(ctx.input.pending?.resume?.checkpoint?.verification?.rounds ?? []),
     ];
     const openQuestions = async () =>
-      (await one<{ n: number }>(
-        pool,
-        "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'",
-        [ctx.attempt.id],
-      ))!.n > 0;
+      (await workflowRepository.findOpenQuestionsCount(ctx.attempt.id)) > 0;
     const pause = async (lastText: string): Promise<ExecResult> => {
       const session = await agentRepository.findLastSession(ctx.attempt.id);
       return {
@@ -2043,11 +2040,7 @@ ${validation.errors.join("; ")}`,
             { verification: failed.round, provider },
           );
           const sid = (
-            await one(
-              pool,
-              "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1",
-              [ctx.attempt.id, provider],
-            )
+            await agentRepository.findResumableSession(ctx.attempt.id, provider)
           )?.session_id;
           const msg = repairPrompt(failed, n, vcfg, outputLocale(ctx.run));
           submitted = undefined;

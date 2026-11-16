@@ -95,6 +95,14 @@ export const agentRepository = {
     );
   },
 
+  findResumableSession(attemptId: number, provider: string, db: Db = pool) {
+    return one<{ session_id: string }>(
+      db,
+      "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 AND resumable ORDER BY id DESC LIMIT 1",
+      [attemptId, provider],
+    );
+  },
+
   markSessionNotResumable(sessionId: string, provider: string, db: Db = pool) {
     return q(
       db,
