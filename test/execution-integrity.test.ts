@@ -234,7 +234,14 @@ test("graph bindings preserve every configured approval source and keep prose ou
 
 test("worker verification cannot write a protected path outside its worktree", async (t) => {
   const { path } = fixture(t);
-  const protectedRoot = mkdtempSync("/var/tmp/verification-protected-");
+  // Verification sandboxes mount / read-only (so /var/tmp) and keep /tmp writable; the checkout is read-only inside the inner one.
+  const protectedRoot = (() => {
+    try {
+      return mkdtempSync("/var/tmp/verification-protected-");
+    } catch {
+      return mkdtempSync(join(process.cwd(), ".verification-protected-"));
+    }
+  })();
   t.after(() => rmSync(protectedRoot, { recursive: true, force: true }));
   const protectedFile = join(protectedRoot, "sentinel");
   writeFileSync(protectedFile, "protected");
