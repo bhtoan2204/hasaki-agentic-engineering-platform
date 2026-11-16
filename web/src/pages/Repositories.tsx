@@ -93,6 +93,20 @@ function Actions({ items }: { items?: string[] }) {
   );
 }
 const repoDir = (r: any) => r.repository_url || r.path || r.name;
+/** Display name of a repository's Git host. */
+const HOST_LABEL: Record<string, string> = {
+  bitbucket: "Bitbucket",
+  github: "GitHub",
+  gitlab: "GitLab",
+};
+const hostLabel = (provider?: string) =>
+  HOST_LABEL[provider || "bitbucket"] ?? provider ?? "Bitbucket";
+/** Placeholder URL per provider; GitLab accepts nested groups on allow-listed instances. */
+const URL_PLACEHOLDER: Record<string, string> = {
+  bitbucket: "https://bitbucket.org/workspace/repository.git",
+  github: "https://github.com/owner/repository.git",
+  gitlab: "https://gitlab.com/group/subgroup/project.git",
+};
 
 /** The caller's effective access to one repository (platform grant ∩ Bitbucket ∩ repository policy). */
 function AccessCard({ access, provider }: { access: any; provider?: string }) {
@@ -112,7 +126,7 @@ function AccessCard({ access, provider }: { access: any; provider?: string }) {
           <dd>{access.source ? t(`repo.source.${access.source}`) : "—"}</dd>
         </div>
         <div>
-          <dt>{provider === "github" ? "GitHub" : "Bitbucket"}</dt>
+          <dt>{hostLabel(provider)}</dt>
           <dd>
             <BitbucketState
               host={provider}
@@ -814,9 +828,7 @@ export function RepositoriesPage({
                     {r.access?.bitbucket?.state &&
                       r.access.bitbucket.state !== "not_applicable" && (
                         <div>
-                          <span className="repo-label-inline">
-                            {r.provider === "github" ? "GitHub" : "Bitbucket"}
-                          </span>
+                          <span className="repo-label-inline">{hostLabel(r.provider)}</span>
                           <BitbucketState
                             host={r.provider}
                             state={r.access.bitbucket.state}
@@ -947,6 +959,56 @@ const slugOf = (name: string) =>
 const repoSlugFromUrl = (url: string) =>
   /\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1] ?? "";
 
+/**
+ * GitLab instance (base URL) for the repository URL. Only instances in config.gitlab.instances are offered: the
+ * server derives the API base from the URL host and refuses any other host.
+ */
+type InstanceForm = { repository_url?: string } & Record<string, unknown>;
+function GitlabInstanceField<F extends InstanceForm>({
+  form,
+  setForm,
+}: {
+  form: F;
+  setForm: (f: F) => void;
+}) {
+  const { t } = useI18n();
+  const { data } = useApi<{
+    instances: Array<{ host: string; base_url: string; configured: boolean }>;
+  }>("/api/integrations/gitlab");
+  const current = /^https:\/\/([^/]+)\//.exec(form.repository_url ?? "")?.[1]?.toLowerCase() ?? "";
+  const instances = data?.instances ?? [];
+  return (
+    <Field
+      label={t("repo.gl.instance")}
+      hint={
+        current && instances.length && !instances.some((i) => i.host === current)
+          ? t("repo.gl.instanceNotAllowed", { host: current })
+          : t("repo.gl.instanceHint")
+      }
+    >
+      <select
+        value={instances.some((i) => i.host === current) ? current : ""}
+        onChange={(e) => {
+          const host = e.target.value;
+          const path = (form.repository_url ?? "").replace(/^https:\/\/[^/]+\/?/, "");
+          setForm({
+            ...form,
+            repository_url: host ? `https://${host}/${path}` : form.repository_url,
+          });
+        }}
+      >
+        <option value="">—</option>
+        {instances.map((i) => (
+          <option key={i.host} value={i.host}>
+            {i.base_url}
+            {i.configured ? "" : ` (${t("repo.gl.noToken")})`}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
 function RepoForm({
   form,
   setForm,
@@ -983,16 +1045,14 @@ function RepoForm({
         >
           <option value="bitbucket">Bitbucket</option>
           <option value="github">GitHub</option>
+          <option value="gitlab">GitLab</option>
         </select>
       </Field>
+      {form.provider === "gitlab" && <GitlabInstanceField form={form} setForm={setForm} />}
       <Field label={t("repo.url")}>
         <input
           value={form.repository_url ?? ""}
-          placeholder={
-            form.provider === "github"
-              ? "https://github.com/owner/repository.git"
-              : "https://bitbucket.org/workspace/repository.git"
-          }
+          placeholder={URL_PLACEHOLDER[form.provider || "bitbucket"] ?? URL_PLACEHOLDER.bitbucket}
           onChange={(e) => {
             const repository_url = e.target.value;
             // A new repository is usually named after its URL slug; keep a name the user typed.
@@ -1070,6 +1130,16 @@ function RepoForm({
           />{" "}
           {t("kn.enabled")}
         </label>
+        {form.provider === "gitlab" && (
+          <label className="repo-toggle" title={t("repo.gl.deleteSourceHint")}>
+            <input
+              type="checkbox"
+              checked={form.delete_source_branch === true}
+              onChange={(e) => setForm({ ...form, delete_source_branch: e.target.checked })}
+            />{" "}
+            {t("repo.gl.deleteSource")}
+          </label>
+        )}
         <span className="grow" />
         <button disabled={!form.name || nameInvalid} onClick={onSave}>
           <Save size={15} />

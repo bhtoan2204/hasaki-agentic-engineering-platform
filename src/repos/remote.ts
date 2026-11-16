@@ -1,12 +1,39 @@
+import { config } from "../config.ts";
+
 /** Portable identity. Never accept credentials, redirects, alternate protocols or URL path escapes. */
-export type GitHost = "bitbucket" | "github";
+export type GitHost = "bitbucket" | "github" | "gitlab";
 
 export interface CanonicalRemote {
   url: string;
-  /** Bitbucket workspace or GitHub owner. */
+  /** Bitbucket workspace, GitHub owner or GitLab namespace path ("group/subgroup"). */
   workspace: string;
   slug: string;
   provider: GitHost;
+  /** Host name of the remote (GitLab instances differ per repository). */
+  host: string;
+}
+
+/** Most namespace levels accepted in a GitLab path (GitLab itself allows 20 levels of subgroups). */
+const GITLAB_MAX_NAMESPACE = 20;
+const GITLAB_SEGMENT = /^[a-z0-9][a-z0-9._-]*$/;
+
+/** Allow-listed GitLab hosts (config.gitlab.instances). Exact, case-insensitive host match; no ports. */
+export function gitlabHosts(): string[] {
+  return (config.gitlab?.instances ?? []).map((i) => i.host.toLowerCase());
+}
+
+function gitlabRemote(value: string): CanonicalRemote | null {
+  const m = /^https:\/\/([^/@:]+)\/(.+?)(?:\.git)?\/?$/i.exec(value);
+  if (!m) return null;
+  const host = m[1].toLowerCase();
+  if (!gitlabHosts().includes(host)) return null;
+  const parts = m[2].toLowerCase().split("/");
+  if (parts.length < 2 || parts.length > GITLAB_MAX_NAMESPACE + 1) return null;
+  if (parts.some((p) => !GITLAB_SEGMENT.test(p) || p.includes("..") || p.endsWith(".")))
+    return null;
+  const slug = parts.pop()!;
+  const workspace = parts.join("/");
+  return { url: `https://${host}/${workspace}/${slug}.git`, workspace, slug, provider: "gitlab", host };
 }
 
 export function repositoryRemote(value: unknown): CanonicalRemote {
@@ -24,6 +51,7 @@ export function repositoryRemote(value: unknown): CanonicalRemote {
       workspace,
       slug,
       provider: "bitbucket",
+      host: "bitbucket.org",
     };
   }
   const github =
@@ -38,10 +66,13 @@ export function repositoryRemote(value: unknown): CanonicalRemote {
       workspace,
       slug,
       provider: "github",
+      host: "github.com",
     };
   }
+  const gitlab = gitlabRemote(value);
+  if (gitlab) return gitlab;
   throw new Error(
-    "Use https://bitbucket.org/<workspace>/<repository>.git or https://github.com/<owner>/<repository>.git",
+    "Use https://bitbucket.org/<workspace>/<repository>.git, https://github.com/<owner>/<repository>.git or https://<allowed GitLab host>/<group>[/<subgroup>...]/<project>.git",
   );
 }
 
@@ -63,10 +94,9 @@ export function repositoryBranch(value: unknown): string {
 export const legacyBitbucketHttpsUrl = (value: string) =>
   value.replace(/^git@bitbucket\.org:([^/]+)\/([^/]+)$/, "https://bitbucket.org/$1/$2");
 
-/** Normalize a detected origin (HTTPS or the two legacy SSH forms) for comparison. Registration stays strict. */
+/** Normalize a detected origin (HTTPS or the legacy SSH forms) for comparison. Registration stays strict. */
 export function canonicalizeDetectedUrl(value: string): string | null {
-  const ssh = value
-    .trim()
+  const ssh = gitlabSshToHttps(value.trim())
     .replace(
       /^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/,
       "https://github.com/$1/$2.git",
@@ -78,4 +108,13 @@ export function canonicalizeDetectedUrl(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** `git@<allowed host>:ns/project.git` and `ssh://git@<allowed host>[:port]/ns/project.git` → HTTPS identity. */
+function gitlabSshToHttps(value: string): string {
+  const m =
+    /^git@([^:/]+):([^\s]+?)(?:\.git)?$/.exec(value) ??
+    /^ssh:\/\/git@([^:/]+)(?::\d{1,5})?\/([^\s]+?)(?:\.git)?$/.exec(value);
+  if (!m || !gitlabHosts().includes(m[1].toLowerCase())) return value;
+  return `https://${m[1].toLowerCase()}/${m[2]}.git`;
 }

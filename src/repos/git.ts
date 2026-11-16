@@ -3,34 +3,17 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveBitbucket } from "../bitbucket.ts";
-import { resolveGithub } from "../github.ts";
-import { repositoryRemote, type GitHost } from "./remote.ts";
+import { gitHost } from "../git/hosts.ts";
+import { repositoryRemote, type CanonicalRemote } from "./remote.ts";
 
 const exec = promisify(execFile);
 /** Secrets exist only in the short-lived child environment, never arguments, config, or error objects. */
 async function credentialsFor(
   url: string,
-): Promise<{ user: string; token: string; provider: GitHost }> {
+): Promise<{ user: string; token: string; remote: CanonicalRemote }> {
   const remote = repositoryRemote(url);
-  if (remote.provider === "github") {
-    const creds = await resolveGithub();
-    if (!creds)
-      throw new Error(
-        "GitHub authentication required: save a personal access token in Integrations. A shared token is used only when github.allowSharedCredentials is true, and it is not a permission grant.",
-      );
-    return { user: "x-access-token", token: creds.token, provider: "github" };
-  }
-  const creds = await resolveBitbucket();
-  if (!creds)
-    throw new Error(
-      "Bitbucket authentication required: save personal credentials in Integrations or configure the authorized service account",
-    );
-  return {
-    user: creds.user.includes("@") ? "x-bitbucket-api-token-auth" : creds.user,
-    token: creds.token,
-    provider: "bitbucket",
-  };
+  const creds = await gitHost(remote.provider).gitCredentials(remote);
+  return { ...creds, remote };
 }
 
 export async function remoteGit(url: string, args: string[], cwd?: string): Promise<string> {
@@ -87,13 +70,14 @@ export async function remoteGit(url: string, args: string[], cwd?: string): Prom
         "protocol.allow=never",
         "-c",
         "protocol.https.allow=always",
+        ...(gitHost(creds.remote.provider).gitOptions?.(creds.remote) ?? []),
         ...args,
       ],
       { cwd: cwd ?? dir, env, timeout: 180_000, maxBuffer: 8 * 1024 * 1024 },
     );
     return result.stdout.trim();
   } catch (e) {
-    const host = creds.provider === "github" ? "GitHub" : "Bitbucket";
+    const host = gitHost(creds.remote.provider).label;
     // Preserve the existing lease-protected recovery signal without exposing server output.
     if (
       /non-fast-forward|fetch first|\[rejected\]/i.test(

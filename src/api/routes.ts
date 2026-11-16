@@ -88,8 +88,12 @@ import {
   bitbucketStatus,
   clearBitbucket,
   clearGithub,
+  clearGitlab,
   clearTelegram,
   githubStatus,
+  gitlabStatus,
+  setGitlab,
+  testGitlab,
   setBitbucket,
   setGithub,
   setTelegram,
@@ -173,6 +177,11 @@ import {
   type EffectivePermissions,
 } from "../repos/access.ts";
 import { definitions } from "../workflow/definitions.ts";
+import {
+  closePullRequestAction,
+  mergePullRequestAction,
+  pullRequestStatus,
+} from "../git/pullRequests.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { runEvents } from "../workflow/events.ts";
 import { buildTrace, isTraceLevel, searchLogs } from "../workflow/trace.ts";
@@ -1128,6 +1137,27 @@ export const routes: Route[] = [
         [support(c), c.actor.id],
       ),
   ],
+  // Merge readiness and CI of one PR/MR (read-only; run owner only).
+  [
+    "GET",
+    /^\/api\/pull-requests\/(\d+)\/status$/,
+    (c) => pullRequestStatus(c.actor.id, num(c.p[0])),
+  ],
+  // Human-only merge/close. Re-checked against the owner's permission and the host's mergeability, approvals and
+  // required pipeline at the moment of the action; no agent tool or engine path reaches these.
+  [
+    "POST",
+    /^\/api\/pull-requests\/(\d+)\/(merge|close)$/,
+    async (c) => {
+      const id = num(c.p[0]);
+      const result =
+        c.p[1] === "merge"
+          ? await mergePullRequestAction(c.actor.id, id)
+          : await closePullRequestAction(c.actor.id, id);
+      await audit(c.actor.id, `pull_request.${c.p[1]}`, "pull_request", String(id), result);
+      return result;
+    },
+  ],
 
   // ------------------------------------------------------------ questions inbox
   ["GET", /^\/api\/questions$/, (c) => openQuestions(pool, mine(c))],
@@ -2040,6 +2070,14 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/github$/, ({ actor }) => githubStatus(actor.id)],
   ["POST", /^\/api\/integrations\/github$/, ({ body, actor }) => setGithub(body, actor.id)],
   ["POST", /^\/api\/integrations\/github\/clear$/, ({ actor }) => clearGithub(actor.id)],
+  ["GET", /^\/api\/integrations\/gitlab$/, ({ actor }) => gitlabStatus(actor.id)],
+  ["POST", /^\/api\/integrations\/gitlab$/, ({ body, actor }) => setGitlab(body, actor.id)],
+  ["POST", /^\/api\/integrations\/gitlab\/test$/, ({ body, actor }) => testGitlab(body, actor.id)],
+  [
+    "POST",
+    /^\/api\/integrations\/gitlab\/clear$/,
+    ({ body, actor }) => clearGitlab(body ?? {}, actor.id),
+  ],
   [
     "POST",
     /^\/api\/integrations\/bitbucket\/adopt-env$/,
@@ -2286,7 +2324,8 @@ function memberRepository(
 function publicRepository(repo: import("../repos/service.ts").RepositoryRow) {
   const path = /^(?:[\\/]|[A-Za-z]:|~)/.test(repo.path) ? "" : repo.path;
   let remote_slug = repo.remote_slug;
-  if (!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?$/.test(remote_slug)) {
+  // GitLab references keep their nested namespace ("group/sub/project").
+  if (!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+){0,20}$/.test(remote_slug)) {
     try {
       const remote = repositoryRemote(remote_slug);
       remote_slug = `${remote.workspace}/${remote.slug}`;

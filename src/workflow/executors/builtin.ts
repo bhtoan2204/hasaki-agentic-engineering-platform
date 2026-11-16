@@ -1388,7 +1388,18 @@ export const pullRequestExecutor: StepExecutor = {
         title,
         description,
         draft: mode === "draft",
+        remoteUrl: registry?.repository_url ?? null,
       });
+      // CI evidence for verification and review steps, when the host reports pipelines. Never blocks publication.
+      let pipeline: { id: number; status: string; url: string | null } | null = null;
+      if (provider.pipelines)
+        pipeline = await provider
+          .pipelines({ repo: slug, remoteUrl: registry?.repository_url ?? null, ref: w.branch })
+          .then((r) => {
+            const p = r.pipelines[0];
+            return p ? { id: p.id, status: p.status, url: p.url } : null;
+          })
+          .catch(() => null);
       await q(
         pool,
         `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id)
@@ -1412,13 +1423,17 @@ export const pullRequestExecutor: StepExecutor = {
           ctx.step.id,
         ],
       );
-      await ctx.log("system", `PR ${w.repo}: ${pr.url} (${pr.note})`);
+      await ctx.log(
+        "system",
+        `PR ${w.repo}: ${pr.url} (${pr.note})${pipeline ? `; pipeline #${pipeline.id} ${pipeline.status}` : ""}`,
+      );
       out.push({
         repo: w.repo,
         url: pr.url,
         created: pr.created,
         note: pr.note,
         draft: mode === "draft",
+        ...(pipeline ? { pipeline } : {}),
       });
     }
     return { kind: "completed", output: { pull_requests: out } };

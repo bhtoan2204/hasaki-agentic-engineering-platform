@@ -21,6 +21,14 @@
     "allowSharedCredentials": false,
     "accessVerification": "strict"
   },
+  "gitlab": {
+    "instances": [{ "host": "gitlab.com" }, { "host": "gitlab.hasaki.work", "caFile": "" }],
+    "token": "",
+    "allowSharedCredentials": false,
+    "accessVerification": "strict",
+    "requestTimeoutMs": 30000,
+    "maxRetries": 3
+  },
   "platform": {
     "repositoryUrl": "",
     "trustedOperatorIsolation": false,

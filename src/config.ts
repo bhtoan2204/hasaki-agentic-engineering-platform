@@ -31,6 +31,13 @@ export interface CodeIntelligenceConfig {
   };
 }
 
+export interface GitlabInstance {
+  /** Lower-case host name, e.g. "gitlab.com" or "gitlab.hasaki.work". No scheme, path or port. */
+  host: string;
+  /** PEM bundle for an internal CA, used for Git transport to this host (http.<url>.sslCAInfo). TLS is never disabled. */
+  caFile?: string;
+}
+
 export interface Config {
   knowledge: { ponytail: { enabled: boolean; mapChars: number } };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
@@ -105,6 +112,20 @@ export interface Config {
     /** Same meanings as bitbucket.accessVerification, checked with the user's GitHub token. */
     accessVerification?: "strict" | "personal" | "trusted";
     token: string;
+  };
+  /**
+   * GitLab.com and self-hosted GitLab. Only hosts listed in `instances` are accepted as repository URLs, so a token is
+   * never sent to an unregistered host. Personal tokens live in user secrets (`gitlab_token:<host>`); the process token
+   * (GITLAB_TOKEN) is used only when allowSharedCredentials is true, and never as a permission grant.
+   */
+  gitlab: {
+    instances: GitlabInstance[];
+    allowSharedCredentials?: boolean;
+    /** Same meanings as bitbucket.accessVerification, checked with the user's GitLab token. */
+    accessVerification?: "strict" | "personal" | "trusted";
+    token: string;
+    requestTimeoutMs?: number;
+    maxRetries?: number;
   };
   /**
    * This installation's own source repository. Empty repositoryUrl is detected from the live checkout's origin.
@@ -380,6 +401,14 @@ const defaults: Config = {
   fileBaseUrl: "",
   bitbucket: { workspace: "hasaki-tech", user: "", token: "", reviewers: [] },
   github: { allowSharedCredentials: false, accessVerification: "strict", token: "" },
+  gitlab: {
+    instances: [{ host: "gitlab.com" }],
+    allowSharedCredentials: false,
+    accessVerification: "strict",
+    token: "",
+    requestTimeoutMs: 30_000,
+    maxRetries: 3,
+  },
   platform: { repositoryUrl: "", trustedOperatorIsolation: false, testDatabaseAdminUrl: "" },
   notifyWebhook: "",
   publicUrl: "",
@@ -504,6 +533,7 @@ function load(): Config {
     },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     github: { ...defaults.github, ...(fromFile.github ?? {}) },
+    gitlab: gitlabConfig({ ...defaults.gitlab, ...(fromFile.gitlab ?? {}) }),
     platform: { ...defaults.platform, ...(fromFile.platform ?? {}) },
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
@@ -641,6 +671,7 @@ function load(): Config {
   cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
   cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;
   cfg.github.token = process.env.GITHUB_TOKEN ?? cfg.github.token;
+  cfg.gitlab.token = process.env.GITLAB_TOKEN ?? cfg.gitlab.token;
   if (process.env.PLATFORM_REPOSITORY_URL)
     cfg.platform.repositoryUrl = process.env.PLATFORM_REPOSITORY_URL;
   if (process.env.PLATFORM_TRUSTED_OPERATOR_ISOLATION === "1")
@@ -657,6 +688,22 @@ function load(): Config {
 }
 
 /** Positive integer from config.json or the environment. NaN, fractions, and values below 1 are rejected. */
+/** Normalise the GitLab instance allow-list: bare lower-case host names only; anything else is dropped. */
+export function gitlabConfig(raw: Config["gitlab"]): Config["gitlab"] {
+  const seen = new Set<string>();
+  const instances: GitlabInstance[] = [];
+  for (const i of Array.isArray(raw.instances) ? raw.instances : []) {
+    const host = String((i as GitlabInstance)?.host ?? "")
+      .trim()
+      .toLowerCase();
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)) continue;
+    if (seen.has(host)) continue;
+    seen.add(host);
+    instances.push({ host, ...(i.caFile ? { caFile: String(i.caFile) } : {}) });
+  }
+  return { ...raw, instances };
+}
+
 export function positiveInt(name: string, raw: unknown): number {
   if (typeof raw !== "number" && typeof raw !== "string")
     throw new Error(`${name} must be a positive integer`);

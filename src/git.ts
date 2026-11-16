@@ -21,8 +21,9 @@ async function git(cwd: string, ...args: string[]) {
     const raw = (
       await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])
     ).stdout.trim();
-    const remote = canonicalizeDetectedUrl(legacyBitbucketHttpsUrl(raw)) ?? "";
-    if (remote.startsWith("https://bitbucket.org/") || remote.startsWith("https://github.com/")) {
+    // Any registered host (Bitbucket, GitHub, allow-listed GitLab) goes through the askpass transport.
+    const remote = canonicalizeDetectedUrl(legacyBitbucketHttpsUrl(raw));
+    if (remote) {
       // Use the validated explicit URL, not mutable pushurl or URL rewrite configuration.
       const canonical = repositoryRemote(remote).url;
       const safe = args.map((a) => (a === "origin" ? canonical : a));
