@@ -1,25 +1,9 @@
-import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
+import { pool, withTx, type Db } from "../db/pool.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { listRuns, startRun } from "../workflow/engine.ts";
+import { workItemsRepository, type WorkItemRow, type WorkItemListFilter } from "./repository.ts";
 
-export interface WorkItemRow {
-  id: number;
-  code: string;
-  source: "manual" | "hasaki_work" | "jira" | "legacy";
-  external_key: string | null;
-  external_id: string | null;
-  title: string;
-  description: string;
-  project: string;
-  payload: any;
-  status: string;
-  automation_policy: {
-    workflow: string;
-    inputs?: Record<string, unknown>;
-  } | null;
-  legacy_task_code: string | null;
-  owner_id?: number | null;
-}
+export { type WorkItemRow } from "./repository.ts";
 
 export interface ImportInput {
   source: WorkItemRow["source"];
@@ -34,87 +18,64 @@ export interface ImportInput {
 }
 
 export const workItems = {
-  list(
-    filter: {
-      source?: string;
-      status?: string;
-      ownerId?: number;
-      all?: boolean;
-    } = {},
-    db: Db = pool,
-  ) {
-    return q(
-      db,
-      `SELECT w.id, w.code, w.source, w.title, w.project, w.status, w.automation_policy, w.owner_id, w.created_at, w.updated_at,
-              (SELECT count(*)::int FROM workflow_runs r WHERE r.work_item_id = w.id) AS run_count,
-              (SELECT r.status FROM workflow_runs r WHERE r.work_item_id = w.id ORDER BY r.id DESC LIMIT 1) AS last_run_status,
-              (SELECT r.id FROM workflow_runs r WHERE r.work_item_id = w.id ORDER BY r.id DESC LIMIT 1) AS last_run_id
-         FROM work_items w
-        WHERE ($1::text IS NULL OR w.source = $1) AND ($2::text IS NULL OR w.status = $2)
-          AND w.owner_id IS NOT NULL AND ($3::bool OR w.owner_id = $4)
-        ORDER BY w.updated_at DESC LIMIT 500`,
-      [filter.source ?? null, filter.status ?? null, !!filter.all, filter.ownerId ?? null],
-    );
+  list(filter: WorkItemListFilter = {}, db: Db = pool, repo = workItemsRepository) {
+    return repo.listWorkItems(filter, db);
   },
 
-  get(id: number, db: Db = pool) {
-    return one<WorkItemRow>(db, "SELECT * FROM work_items WHERE id = $1", [id]);
-  },
-  byCode(code: string, ownerId: number, db: Db = pool) {
-    return one<WorkItemRow>(db, "SELECT * FROM work_items WHERE code = $1 AND owner_id = $2", [
-      code,
-      ownerId,
-    ]);
+  get(id: number, db: Db = pool, repo = workItemsRepository) {
+    return repo.getWorkItemById(id, db);
   },
 
-  async detail(id: number) {
-    const wi = await workItems.get(id);
+  byCode(code: string, ownerId: number, db: Db = pool, repo = workItemsRepository) {
+    return repo.getWorkItemByCode(code, ownerId, db);
+  },
+
+  async detail(id: number, repo = workItemsRepository) {
+    const wi = await repo.getWorkItemById(id);
     if (!wi) return undefined;
     const [runs, prs] = await Promise.all([
       listRuns({ workItemId: id }),
-      q(pool, "SELECT * FROM pull_requests WHERE work_item_id = $1 ORDER BY id", [id]),
+      repo.listPullRequests(id),
     ]);
     const legacy = wi.legacy_task_code
       ? {
-          questions: await q(pool, "SELECT * FROM questions WHERE task_code = $1 ORDER BY id", [
-            wi.legacy_task_code,
-          ]),
-          events: await q(
-            pool,
-            "SELECT * FROM events WHERE task_code = $1 ORDER BY id DESC LIMIT 200",
-            [wi.legacy_task_code],
-          ),
+          questions: await repo.listLegacyQuestions(wi.legacy_task_code),
+          events: await repo.listLegacyEvents(wi.legacy_task_code),
         }
       : null;
     return { ...wi, runs, pull_requests: prs, legacy };
   },
 
   /** Manual engineering request. Code REQ-<id> doubles as the branch name. */
-  async createManual(x: {
-    title: string;
-    description?: string;
-    project?: string;
-    code?: string;
-    ownerId?: number;
-  }) {
+  async createManual(
+    x: {
+      title: string;
+      description?: string;
+      project?: string;
+      code?: string;
+      ownerId?: number;
+    },
+    repo = workItemsRepository,
+  ) {
     if (!x.title?.trim()) throw new Error("title is required");
     const ownerId =
       x.ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
     if (!ownerId) throw new Error("owner is required");
     return withTx(async (c) => {
-      const { id } = (await one<{ id: number }>(
-        c,
-        "SELECT nextval('work_items_id_seq')::bigint AS id",
-      ))!;
+      const id = await repo.getNextWorkItemId(c);
       const code = x.code?.trim() || `REQ-${id}`;
       if (!/^[A-Za-z0-9._-]+$/.test(code))
         throw new Error("code may contain only letters, digits, . _ -");
-      await q(
+      await repo.insertManualWorkItem(
+        id,
+        code,
+        x.title.trim(),
+        x.description ?? "",
+        x.project ?? "",
+        ownerId,
         c,
-        "INSERT INTO work_items (id, code, source, title, description, project, owner_id) VALUES ($1, $2, 'manual', $3, $4, $5, $6)",
-        [id, code, x.title.trim(), x.description ?? "", x.project ?? "", ownerId],
       );
-      return (await workItems.get(id, c))!;
+      return (await repo.getWorkItemById(id, c))!;
     });
   },
 
@@ -122,50 +83,47 @@ export const workItems = {
    * Import or refresh an external work item. NEVER starts a run by itself; the caller decides
    * (explicit user action, or the item's automation policy via `applyAutomationPolicy`).
    */
-  async upsertImported(x: ImportInput): Promise<{ item: WorkItemRow; created: boolean }> {
+  async upsertImported(
+    x: ImportInput,
+    repo = workItemsRepository,
+  ): Promise<{ item: WorkItemRow; created: boolean }> {
     const ownerId =
       x.ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
     if (!ownerId) throw new Error("owner is required");
     return withTx(async (c) => {
-      const existing = await one<WorkItemRow>(
-        c,
-        "SELECT * FROM work_items WHERE code = $1 AND owner_id = $2 FOR UPDATE",
-        [x.code, ownerId],
-      );
+      const existing = await repo.findWorkItemForUpdate(x.code, ownerId, c);
       if (existing) {
-        await q(
+        await repo.updateImportedWorkItem(
+          existing.id,
+          {
+            title: x.title,
+            description:
+              (existing as any).description_source === "manual" || !x.description
+                ? existing.description
+                : x.description,
+            project: x.project ?? existing.project,
+            payload: x.payload ?? existing.payload,
+            externalId: x.externalId,
+          },
           c,
-          `UPDATE work_items SET title = $2, description = $3, project = $4, payload = $5, external_id = COALESCE($6, external_id), updated_at = now() WHERE id = $1`,
-          [
-            existing.id,
-            x.title,
-            (existing as any).description_source === "manual" || !x.description
-              ? existing.description
-              : x.description,
-            x.project ?? existing.project,
-            json(x.payload ?? existing.payload),
-            x.externalId ?? null,
-          ],
         );
-        return { item: (await workItems.get(existing.id, c))!, created: false };
+        return { item: (await repo.getWorkItemById(existing.id, c))!, created: false };
       }
-      const row = await one<WorkItemRow>(
-        c,
-        `INSERT INTO work_items (code, source, external_key, external_id, title, description, project, payload, automation_policy, owner_id)
-         VALUES ($1, $2, $1, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-        [
-          x.code,
-          x.source,
-          x.externalId ?? null,
-          x.title,
-          x.description ?? "",
-          x.project ?? "",
-          json(x.payload ?? {}),
-          json(x.automationPolicy ?? null),
+      const row = await repo.insertImportedWorkItem(
+        {
+          code: x.code,
+          source: x.source,
+          externalId: x.externalId,
+          title: x.title,
+          description: x.description,
+          project: x.project,
+          payload: x.payload,
+          automationPolicy: x.automationPolicy,
           ownerId,
-        ],
+        },
+        c,
       );
-      return { item: row!, created: true };
+      return { item: row, created: true };
     });
   },
 
@@ -178,31 +136,18 @@ export const workItems = {
       status?: string;
       automation_policy?: unknown;
     },
+    repo = workItemsRepository,
   ) {
-    const keys = (
-      ["title", "description", "project", "status", "automation_policy"] as const
-    ).filter((k) => patch[k] !== undefined);
-    if (patch.description !== undefined)
-      await q(pool, "UPDATE work_items SET description_source = 'manual' WHERE id = $1", [id]);
-    if (keys.length)
-      await q(
-        pool,
-        `UPDATE work_items SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
-        [id, ...keys.map((k) => (k === "automation_policy" ? json(patch[k]) : patch[k]))],
-      );
-    return workItems.get(id);
+    await repo.updateWorkItem(id, patch);
+    return repo.getWorkItemById(id);
   },
 };
 
 /** The only automatic execution path: an explicit, stored automation policy naming a workflow. */
-export async function applyAutomationPolicy(item: WorkItemRow) {
+export async function applyAutomationPolicy(item: WorkItemRow, repo = workItemsRepository) {
   const wf = item.automation_policy?.workflow;
   if (!wf) return null;
-  const active = await one(
-    pool,
-    "SELECT id FROM workflow_runs WHERE work_item_id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELED') LIMIT 1",
-    [item.id],
-  );
+  const active = await repo.findActiveRunForWorkItem(item.id);
   if (active) return null;
   return startRun({
     definitionKey: wf,

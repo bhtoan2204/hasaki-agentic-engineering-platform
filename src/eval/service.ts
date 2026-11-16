@@ -3,7 +3,8 @@ import { unsupportedLiveTools } from "./liveProvider.ts";
 import { materializePonytailSuite } from "./ponytailSuite.ts";
 import { compareContextEffect } from "./contextEffect.ts";
 import { contextInventory } from "./controls.ts";
-import { pool, q, one, withTx } from "../db/pool.ts";
+import { withTx } from "../db/pool.ts";
+import { evalRepository } from "./repository.ts";
 import { config } from "../config.ts";
 import { definitions } from "../workflow/definitions.ts";
 import { startRun, cancelRun } from "../workflow/engine.ts";
@@ -24,43 +25,34 @@ export { ConfigurationSchema } from "./configuration.ts";
 import { ConfigurationSchema } from "./configuration.ts";
 export async function publishBuiltinSuite(
   variant: "backend-v1" | "knowledge-ponytail-v1" = "backend-v1",
+  repo = evalRepository,
 ) {
   return withTx(async (c) => {
-    await q(c, "SELECT pg_advisory_xact_lock($1)", [727_027]);
+    await repo.lockSuitePublish(c);
     const suite =
         variant === "knowledge-ponytail-v1"
           ? await materializePonytailSuite()
           : await materializeSuite(),
       content = JSON.stringify(suite),
       hash = sha256(content);
-    const old = await one(c, "SELECT * FROM benchmark_suites WHERE suite_key=$1 AND version=$2", [
-      suite.key,
-      suite.version,
-    ]);
+    const old = await repo.findSuiteByKeyAndVersion(suite.key, suite.version, c);
     if (old) {
       if (old.content_hash !== hash)
         throw new Error("Immutable benchmark version changed; publish a new suite version");
       return old;
     }
-    const row = await one(
-      c,
-      "INSERT INTO benchmark_suites(suite_key,version,content_hash,title,manifest) VALUES($1,$2,$3,$4,$5) RETURNING *",
-      [suite.key, suite.version, hash, suite.title, content],
-    );
+    const row = await repo.insertSuite(suite.key, suite.version, hash, suite.title, content, c);
     for (const task of suite.cases)
-      await q(
+      await repo.insertCase(
+        row!.id,
+        task.task_id,
+        task.category,
+        task.difficulty,
+        task.origin,
+        task.repository,
+        task.base_commit,
+        JSON.stringify(task),
         c,
-        `INSERT INTO benchmark_cases(suite_id,task_id,category,difficulty,origin,repository,base_commit,definition) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [
-          row!.id,
-          task.task_id,
-          task.category,
-          task.difficulty,
-          task.origin,
-          task.repository,
-          task.base_commit,
-          JSON.stringify(task),
-        ],
       );
     for (const logical of variant === "backend-v1" ? Object.keys(suite.repositories) : [])
       await repositories.upsert(
@@ -76,11 +68,8 @@ export async function publishBuiltinSuite(
     return row!;
   });
 }
-export async function listSuites() {
-  return q(
-    pool,
-    `SELECT s.id,s.suite_key,s.version,s.title,s.content_hash,count(c.id)::int AS cases,array_agg(DISTINCT c.category) AS categories FROM benchmark_suites s JOIN benchmark_cases c ON c.suite_id=s.id GROUP BY s.id ORDER BY s.suite_key,s.version DESC`,
-  );
+export async function listSuites(repo = evalRepository) {
+  return repo.listSuitesWithCaseCount();
 }
 export async function createEvaluation(
   ownerId: number,
@@ -92,6 +81,7 @@ export async function createEvaluation(
     paid_approval?: boolean;
   },
   isAdmin = false,
+  repo = evalRepository,
 ) {
   if (!config.evaluation.enabled)
     throw new HttpError(409, "Evaluation framework is disabled on this worker");
@@ -120,7 +110,7 @@ export async function createEvaluation(
           : "Live evaluations need at least one allowed tool",
       );
   }
-  const row = await one(pool, "SELECT * FROM benchmark_suites WHERE id=$1", [input.suite_id]);
+  const row = await repo.findSuiteById(input.suite_id);
   if (!row) throw new HttpError(404, "Suite not found");
   const suite = SuiteSchema.parse(row.manifest),
     cases = suite.cases.slice(0, cfg.case_limit);
@@ -149,13 +139,8 @@ export async function createEvaluation(
   if (cfg.max_suite_cost_usd === 300) delete hashConfiguration.max_suite_cost_usd;
   const hash = sha256(JSON.stringify({ ...hashConfiguration, scoring }));
   return withTx(async (c) => {
-    await q(c, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-      `evaluation:${ownerId}:${input.request_key}`,
-    ]);
-    const old = await one(c, "SELECT * FROM evaluation_runs WHERE owner_id=$1 AND request_key=$2", [
-      ownerId,
-      input.request_key,
-    ]);
+    await repo.lockEvaluationRequest(`evaluation:${ownerId}:${input.request_key}`, c);
+    const old = await repo.findEvaluationRunByRequestKey(ownerId, input.request_key, c);
     if (old) {
       if (old.configuration_hash !== hash || old.suite_id !== row.id)
         throw new HttpError(409, "Idempotency key reused with a different configuration");
@@ -184,28 +169,27 @@ export async function createEvaluation(
           : {}),
       }),
     );
-    const evaluation = await one(
+    const evaluation = await repo.insertEvaluationRun(
+      row.id,
+      ownerId,
+      JSON.stringify(frozen),
+      hash,
+      JSON.stringify(scoring),
+      constraints,
+      input.request_key,
       c,
-      `INSERT INTO evaluation_runs(suite_id,owner_id,configuration,configuration_hash,scoring,constraints_hash,request_key) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [
-        row.id,
-        ownerId,
-        JSON.stringify(frozen),
-        hash,
-        JSON.stringify(scoring),
-        constraints,
-        input.request_key,
-      ],
     );
-    const ids = await q(c, "SELECT id,task_id FROM benchmark_cases WHERE suite_id=$1", [row.id]);
+    const ids = await repo.listCasesBySuiteId(row.id, c);
     const tasks: any[] = [];
     for (let repetition = 1; repetition <= cfg.repetitions; repetition++)
       for (const task of cases) {
         const key = `case_${task.task_id.slice(-3)}_r${repetition}`;
-        const cr = await one(
+        const cr = await repo.insertCaseRun(
+          evaluation!.id,
+          ids.find((r) => r.task_id === task.task_id)!.id,
+          repetition,
+          key,
           c,
-          `INSERT INTO evaluation_case_runs(evaluation_id,case_id,repetition,workflow_step_key) VALUES($1,$2,$3,$4) RETURNING id`,
-          [evaluation!.id, ids.find((r) => r.task_id === task.task_id)!.id, repetition, key],
         );
         const previous = tasks.length ? tasks[tasks.length - 1].key : null;
         const phases = cfg.provider_sequence ?? [];
@@ -278,10 +262,14 @@ export async function createEvaluation(
             },
             max_attempts: 1,
           });
-          await q(
+          await repo.insertProviderPhase(
+            cr!.id,
+            ordinal,
+            phaseKey,
+            agent.provider,
+            agent.model ?? null,
+            role,
             c,
-            "INSERT INTO evaluation_provider_phases(case_run_id,ordinal,step_key,provider,model,role) VALUES($1,$2,$3,$4,$5,$6)",
-            [cr!.id, ordinal, phaseKey, agent.provider, agent.model ?? null, role],
           );
         }
         tasks.push({
@@ -312,26 +300,14 @@ export async function createEvaluation(
       start: false,
       agentProvider: "codex",
     });
-    await q(c, "UPDATE evaluation_runs SET workflow_run_id=$2 WHERE id=$1", [
-      evaluation!.id,
-      run.id,
-    ]);
+    await repo.updateEvaluationWorkflowRunId(evaluation!.id, run.id, c);
     return { ...evaluation, workflow_run_id: run.id };
   });
 }
-export async function evaluationDetail(id: number, ownerId: number) {
-  const row = await one(
-    pool,
-    `SELECT e.*,r.status,r.created_at AS workflow_created_at,r.started_at,r.finished_at,r.definition_version_id FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id WHERE e.id=$1 AND e.owner_id=$2`,
-    [id, ownerId],
-  );
+export async function evaluationDetail(id: number, ownerId: number, repo = evalRepository) {
+  const row = await repo.findEvaluationById(id, ownerId);
   if (!row) throw new HttpError(404, "Evaluation not found");
-  const cases = await q(
-    pool,
-    `SELECT cr.id,cr.repetition,cr.workflow_step_key,c.task_id,c.category,c.difficulty,c.origin,c.definition,c.base_commit,s.status AS step_status,s.current_attempt_id,er.*,sample.completion_duration_ms
- FROM evaluation_case_runs cr JOIN benchmark_cases c ON c.id=cr.case_id LEFT JOIN workflow_steps s ON s.run_id=$2 AND s.key=cr.workflow_step_key LEFT JOIN eval_results er ON er.case_run_id=cr.id LEFT JOIN evaluation_analytics_samples sample ON sample.case_run_id=cr.id WHERE cr.evaluation_id=$1 ORDER BY cr.repetition,c.task_id`,
-    [id, row.workflow_run_id],
-  );
+  const cases = await repo.findEvaluationCases(id, row.workflow_run_id);
   return {
     ...row,
     cases: cases.map((c) => ({
@@ -347,12 +323,8 @@ export async function evaluationDetail(id: number, ownerId: number) {
     ),
   };
 }
-export async function evaluationList(ownerId: number) {
-  return q(
-    pool,
-    `SELECT e.id,e.suite_id,e.configuration,e.created_at,e.workflow_run_id,r.status,count(cr.id)::int AS tasks,count(er.id)::int AS finished,count(er.id) FILTER(WHERE er.correct)::int AS successes,round(avg(er.quality_score),2) AS average_score FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id JOIN evaluation_case_runs cr ON cr.evaluation_id=e.id LEFT JOIN eval_results er ON er.case_run_id=cr.id WHERE e.owner_id=$1 GROUP BY e.id,r.status ORDER BY e.id DESC LIMIT 100`,
-    [ownerId],
-  );
+export async function evaluationList(ownerId: number, repo = evalRepository) {
+  return repo.listEvaluationsByOwner(ownerId);
 }
 export async function cancelEvaluation(id: number, ownerId: number) {
   const row = await evaluationDetail(id, ownerId);
@@ -363,6 +335,7 @@ export async function createComparison(
   baseline: number,
   candidate: number,
   rawPolicy: unknown,
+  repo = evalRepository,
 ) {
   const policy = PolicySchema.parse(rawPolicy ?? {});
   const [a, b] = await Promise.all([
@@ -387,17 +360,10 @@ export async function createComparison(
         "Context A/B comparisons must hold the provider/model sequence fixed",
       );
   }
-  return one(
-    pool,
-    "INSERT INTO evaluation_comparisons(owner_id,baseline_id,candidate_id,policy) VALUES($1,$2,$3,$4) RETURNING *",
-    [ownerId, baseline, candidate, JSON.stringify(policy)],
-  );
+  return repo.insertComparison(ownerId, baseline, candidate, JSON.stringify(policy));
 }
-export async function comparisonDetail(id: number, ownerId: number) {
-  const pair = await one(pool, "SELECT * FROM evaluation_comparisons WHERE id=$1 AND owner_id=$2", [
-    id,
-    ownerId,
-  ]);
+export async function comparisonDetail(id: number, ownerId: number, repo = evalRepository) {
+  const pair = await repo.findComparisonById(id, ownerId);
   if (!pair) throw new HttpError(404, "Comparison not found");
   const [a, b] = await Promise.all([
     evaluationDetail(pair.baseline_id, ownerId),

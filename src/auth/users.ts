@@ -1,6 +1,7 @@
-import { pool, q, one, withTx, type Db } from "../db/pool.ts";
+import { pool, withTx, type Db } from "../db/pool.ts";
 import { hashPassword } from "./password.ts";
 import { forgetUserSessions } from "./sessionCache.ts";
+import { authRepository } from "./repository.ts";
 
 export type Role = "admin" | "member";
 export type PublicUser = { id: number; username: string; role: Role; active: boolean };
@@ -30,69 +31,44 @@ export function publicUser(row: {
 export async function createUser(
   input: { username: string; password: string; role: Role },
   db: Db = pool,
+  repo = authRepository,
 ) {
   const username = assertUsername(input.username);
   if (input.role !== "admin" && input.role !== "member")
     throw new Error("role must be admin or member");
   const password_hash = await hashPassword(input.password);
-  const row = await one(
-    db,
-    `INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role, active`,
-    [username, password_hash, input.role],
-  );
-  return publicUser(row!);
+  const row = await repo.insertUser(username, password_hash, input.role, db);
+  return publicUser(row);
 }
 
-export async function listUsers() {
-  const rows = await q<{ id: number; username: string; role: string; active: boolean }>(
-    pool,
-    "SELECT id, username, role, active FROM users ORDER BY username",
-  );
+export async function listUsers(db: Db = pool, repo = authRepository) {
+  const rows = await repo.listAllUsers(db);
   return rows.map(publicUser);
 }
 
-export async function setPassword(userId: number, password: string) {
+export async function setPassword(userId: number, password: string, repo = authRepository) {
   const password_hash = await hashPassword(password);
   await withTx(async (c) => {
-    const row = await one(
-      c,
-      "UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1 RETURNING id",
-      [userId, password_hash],
-    );
+    const row = await repo.updateUserPassword(userId, password_hash, c);
     if (!row) throw new Error("user not found");
-    await q(c, "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [
-      userId,
-    ]);
+    await repo.revokeSessionsByUserId(userId, c);
   });
   forgetUserSessions(userId);
 }
 
-export async function setActive(userId: number, active: boolean) {
+export async function setActive(userId: number, active: boolean, repo = authRepository) {
   await withTx(async (c) => {
-    const row = await one(
-      c,
-      "UPDATE users SET active = $2, updated_at = now() WHERE id = $1 RETURNING id",
-      [userId, active],
-    );
+    const row = await repo.updateUserActive(userId, active, c);
     if (!row) throw new Error("user not found");
-    if (!active)
-      await q(
-        c,
-        "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
-        [userId],
-      );
+    if (!active) await repo.revokeSessionsByUserId(userId, c);
   });
   forgetUserSessions(userId);
 }
 
-export async function userByUsername(username: string) {
-  return one<{
-    id: number;
-    username: string;
-    role: string;
-    active: boolean;
-    password_hash: string;
-  }>(pool, "SELECT id, username, role, active, password_hash FROM users WHERE username = $1", [
-    assertUsername(username),
-  ]);
+export async function userByUsername(username: string, db: Db = pool, repo = authRepository) {
+  return repo.findUserByUsername(assertUsername(username), db);
+}
+
+export async function userById(userId: number, db: Db = pool, repo = authRepository) {
+  return repo.findUserById(userId, db);
 }

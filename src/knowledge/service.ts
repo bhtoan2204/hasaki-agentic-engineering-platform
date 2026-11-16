@@ -1,4 +1,5 @@
-import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
+import { pool, q, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
+import { knowledgeRepository } from "./repository.ts";
 import { CacheAside } from "../cache/index.ts";
 import { CATEGORIES, SCOPES, type KnowledgeCandidate } from "./resolve.ts";
 import { isExternal } from "./external.ts";
@@ -36,58 +37,24 @@ function check(x: Partial<KnowledgeInput>) {
 }
 
 export const knowledge = {
-  list(filter: { category?: string; ownerId?: number; all?: boolean } = {}, db: Db = pool) {
-    const scoped = filter.ownerId != null || filter.all === true;
-    return q(
-      db,
-      `SELECT i.*, v.content, v.applicability, v.metadata, v.effective_from, v.created_at AS version_created_at
-         FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
-        WHERE ($1::text IS NULL OR i.category = $1)
-          AND (
-            ($2::bool AND i.owner_id IS NULL)
-            OR ($3::bool AND (i.owner_id IS NULL OR i.owner_id = $4))
-            OR ($5::bool)
-          )
-        ORDER BY i.category, i.scope_type, i.owner_id NULLS FIRST, i.key`,
-      [
-        filter.category ?? null,
-        !scoped,
-        filter.ownerId != null && !filter.all,
-        filter.ownerId ?? null,
-        !!filter.all,
-      ],
-    );
+  list(
+    filter: { category?: string; ownerId?: number; all?: boolean } = {},
+    db: Db = pool,
+    repo = knowledgeRepository,
+  ) {
+    return repo.listKnowledgeItems(filter, db);
   },
 
   /** Shared item when ownerId is omitted. Pass the owner to read that user's private item. */
-  async get(key: string, db: Db = pool, ownerId: number | null = null) {
-    const item = await one(
-      db,
-      "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2",
-      [key, ownerId],
-    );
+  async get(key: string, db: Db = pool, ownerId: number | null = null, repo = knowledgeRepository) {
+    const item = await repo.getKnowledgeItemByKey(key, ownerId, db);
     if (!item) return undefined;
-    const versions = await q(
-      db,
-      "SELECT * FROM knowledge_versions WHERE item_id = $1 ORDER BY version DESC",
-      [item.id],
-    );
-    const audit = await q(
-      db,
-      "SELECT * FROM knowledge_audit WHERE item_id = $1 ORDER BY id DESC LIMIT 100",
-      [item.id],
-    );
-    // Supersession both ways, plus the version in effect now (a later approved version may take effect in the future).
+    const versions = await repo.getKnowledgeVersions(item.id, db);
+    const audit = await repo.getKnowledgeAudit(item.id, 100, db);
     const superseded_by = item.superseded_by
-      ? ((await one(db, "SELECT key, title, enabled FROM knowledge_items WHERE id = $1", [
-          item.superseded_by,
-        ])) ?? null)
+      ? ((await repo.findSupersededByItem(item.superseded_by, db)) ?? null)
       : null;
-    const supersedes = await q(
-      db,
-      "SELECT key, title, enabled, superseded_at FROM knowledge_items WHERE superseded_by = $1 ORDER BY key",
-      [item.id],
-    );
+    const supersedes = await repo.findSupersedesItems(item.id, db);
     const now = Date.now();
     const effective_version =
       versions.find(
@@ -105,24 +72,22 @@ export const knowledge = {
     };
   },
 
-  async revert(key: string, version: number, ownerId: number | null, by: string) {
+  async revert(
+    key: string,
+    version: number,
+    ownerId: number | null,
+    by: string,
+    repo = knowledgeRepository,
+  ) {
     return withTx(async (c) => {
-      const item = await one(
-        c,
-        "SELECT i.id, v.metadata FROM knowledge_items i JOIN knowledge_versions v ON v.item_id=i.id AND v.version=i.current_version WHERE i.key=$1 AND i.owner_id IS NOT DISTINCT FROM $2 FOR UPDATE OF i",
-        [key, ownerId],
-      );
+      const item = await repo.findItemForRevert(key, ownerId, c);
       if (!item) throw new Error("knowledge item not found");
       if (isExternal(item.metadata))
         throw new HttpError(
           409,
           "third-party skills follow their pinned manifest: re-import instead of reverting",
         );
-      const previous = await one(
-        c,
-        "SELECT * FROM knowledge_versions WHERE item_id=$1 AND version=$2",
-        [item.id, version],
-      );
+      const previous = await repo.findItemVersion(item.id, version, c);
       if (!previous) throw new Error("knowledge version not found");
       return knowledge.update(
         key,
@@ -142,49 +107,47 @@ export const knowledge = {
   },
 
   /** `db`: run inside the caller's transaction (proposal approval), else a new one. */
-  async create(x: KnowledgeInput, db?: Db) {
+  async create(x: KnowledgeInput, db?: Db, repo = knowledgeRepository) {
     check(x);
     const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
     return run(async (c) => {
       const scopeRef = x.scope_type === "GLOBAL" ? "" : (x.scope_ref ?? "");
-      const item = await one(
+      const item = (await repo.insertKnowledgeItem(
+        {
+          key: x.key,
+          category: x.category,
+          scope_type: x.scope_type,
+          scope_ref: scopeRef,
+          title: x.title,
+          conflict_key: x.conflict_key || null,
+          priority: x.priority ?? 0,
+          enforced: x.enforced ?? false,
+          enabled: x.enabled ?? true,
+          ownerId: x.ownerId ?? null,
+        },
         c,
-        `INSERT INTO knowledge_items (key, category, scope_type, scope_ref, title, conflict_key, priority, enforced, enabled, current_version, owner_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10) RETURNING *`,
-        [
-          x.key,
-          x.category,
-          x.scope_type,
-          scopeRef,
-          x.title,
-          x.conflict_key || null,
-          x.priority ?? 0,
-          x.enforced ?? false,
-          x.enabled ?? true,
-          x.ownerId ?? null,
-        ],
-      );
-      await q(
+      ))!;
+      await repo.insertKnowledgeVersion(
+        {
+          item_id: item.id,
+          version: 1,
+          content: x.content,
+          applicability: x.applicability,
+          metadata: x.metadata,
+          change_note: x.change_note ?? "created",
+          created_by: x.created_by ?? "",
+          effective_from: x.effective_from ?? null,
+        },
         c,
-        `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
-        [
-          item.id,
-          x.content,
-          json(x.applicability ?? {}),
-          json(x.metadata ?? {}),
-          x.change_note ?? "created",
-          x.created_by ?? "",
-          x.effective_from ?? null,
-        ],
       );
-      await q(
+      await repo.insertKnowledgeAudit(
+        item.id,
+        "created",
+        { scope: x.scope_type, scope_ref: scopeRef },
         c,
-        "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'created', $2)",
-        [item.id, json({ scope: x.scope_type, scope_ref: scopeRef })],
       );
-      // Creating a deleted shared key again is an explicit decision: the importer/seeds may produce it again too.
-      if (x.ownerId == null) await q(c, "DELETE FROM knowledge_deletions WHERE key = $1", [x.key]);
-      return knowledge.get(x.key, c, x.ownerId ?? null);
+      if (x.ownerId == null) await repo.deleteKnowledgeDeletion(x.key, c);
+      return knowledge.get(x.key, c, x.ownerId ?? null, repo);
     });
   },
 
@@ -192,21 +155,19 @@ export const knowledge = {
    * Content/applicability/metadata changes create a new version (history is never rewritten);
    * item attribute changes (scope, enabled, priority...) are recorded in the audit log.
    */
-  async update(key: string, x: Partial<KnowledgeInput>, ownerId: number | null = null, db?: Db) {
+  async update(
+    key: string,
+    x: Partial<KnowledgeInput>,
+    ownerId: number | null = null,
+    db?: Db,
+    repo = knowledgeRepository,
+  ) {
     check(x);
     const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
     return run(async (c) => {
-      const item = await one(
-        c,
-        "SELECT * FROM knowledge_items WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE",
-        [key, ownerId],
-      );
+      const item = await repo.findItemForUpdate(key, ownerId, c);
       if (!item) throw new Error(`knowledge item "${key}" not found`);
-      const cur = await one(
-        c,
-        "SELECT * FROM knowledge_versions WHERE item_id = $1 AND version = $2",
-        [item.id, item.current_version],
-      );
+      const cur = await repo.findItemVersion(item.id, item.current_version, c);
       const content = x.content ?? cur.content;
       const applicability = x.applicability ?? cur.applicability;
       const metadata = x.metadata ?? cur.metadata;
@@ -218,36 +179,29 @@ export const knowledge = {
         (x.effective_from ?? null) !== null
       ) {
         const version = item.current_version + 1;
-        await q(
-          c,
-          `INSERT INTO knowledge_versions (item_id, version, content, applicability, metadata, change_note, created_by, effective_from) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            item.id,
+        await repo.insertKnowledgeVersion(
+          {
+            item_id: item.id,
             version,
             content,
-            json(applicability),
-            json(metadata),
-            x.change_note ?? "",
-            x.created_by ?? "",
-            x.effective_from ?? null,
-          ],
-        );
-        await q(
+            applicability,
+            metadata,
+            change_note: x.change_note ?? "",
+            created_by: x.created_by ?? "",
+            effective_from: x.effective_from ?? null,
+          },
           c,
-          "UPDATE knowledge_items SET current_version = $2, updated_at = now() WHERE id = $1",
-          [item.id, version],
         );
-        await q(
+        await repo.updateKnowledgeItemCurrentVersion(item.id, version, c);
+        await repo.insertKnowledgeAudit(
+          item.id,
+          "version",
+          {
+            version,
+            note: x.change_note ?? "",
+            ...(x.effective_from ? { effective_from: x.effective_from } : {}),
+          },
           c,
-          "INSERT INTO knowledge_audit (item_id, action, detail) VALUES ($1, 'version', $2)",
-          [
-            item.id,
-            json({
-              version,
-              note: x.change_note ?? "",
-              ...(x.effective_from ? { effective_from: x.effective_from } : {}),
-            }),
-          ],
         );
       }
       const attrs = (
@@ -269,11 +223,7 @@ export const knowledge = {
               ? ""
               : x[k],
         );
-        await q(
-          c,
-          `UPDATE knowledge_items SET ${attrs.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
-          [item.id, ...vals],
-        );
+        await repo.updateKnowledgeItemFields(item.id, attrs as unknown as string[], vals, c);
         const action =
           attrs.length === 1 && attrs[0] === "enabled"
             ? x.enabled
@@ -286,7 +236,7 @@ export const knowledge = {
           json(Object.fromEntries(attrs.map((k) => [k, { from: item[k], to: x[k] }]))),
         ]);
       }
-      return knowledge.get(key, c, ownerId);
+      return knowledge.get(key, c, ownerId, repo);
     });
   },
 

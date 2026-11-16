@@ -1,5 +1,11 @@
 import { validateExecutionAuthorization } from "./executionContract.ts";
-import { executionWorkspaces, implementationBaseline, implementationChanged, observeImplementation, loadImplementationBaseline } from "./implementationEvidence.ts";
+import {
+  executionWorkspaces,
+  implementationBaseline,
+  implementationChanged,
+  observeImplementation,
+  loadImplementationBaseline,
+} from "./implementationEvidence.ts";
 import { worktreeFingerprint, changedFiles } from "./scopeGuard.ts";
 import { refreshToolProgress } from "./toolRuntime.ts";
 import { selectVerificationScope } from "./verificationScope.ts";
@@ -60,6 +66,7 @@ import {
 } from "./metrics.ts";
 import { missingContractKeys, validateOutputContract } from "./contract.ts";
 import { pool, q, one } from "../db/pool.ts";
+import { agentRepository } from "./repository.ts";
 import {
   installNodeDependencies,
   restoreMissingWorkspaces,
@@ -426,26 +433,14 @@ export async function resumableSession(
   provider: AgentProvider,
 ): Promise<{ sessionId: string; fromAttempt?: number } | null> {
   const resume = ctx.input.pending?.resume;
-  const candidates = await q<{
-    session_id: string;
-    attempt_id: number;
-    snapshot: any;
-  }>(
-    pool,
-    `SELECT s.session_id, s.attempt_id, cs.content AS snapshot
-       FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id LEFT JOIN context_snapshots cs ON cs.id = a.context_snapshot_id
-      WHERE a.step_id = $1 AND s.resumable AND s.cwd = $2 AND s.provider = $3 AND (a.effective_agent IS NOT DISTINCT FROM $4::jsonb) ORDER BY s.id DESC LIMIT 5`,
-    [
-      ctx.step.id,
-      cwd,
-      provider,
-      ctx.attempt?.effective_agent ? JSON.stringify(ctx.attempt.effective_agent) : null,
-    ],
+  const candidates = await agentRepository.findCandidateSessions(
+    ctx.step.id,
+    cwd,
+    provider,
+    ctx.attempt?.effective_agent,
   );
   if (!candidates.length) return null;
-  const current = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [
-    ctx.context.snapshot_id,
-  ]);
+  const current = await agentRepository.findContextSnapshotContent(ctx.context.snapshot_id);
   const sameUpstream = (snap: any) =>
     JSON.stringify(snap?.upstream ?? {}) === JSON.stringify(current?.content?.upstream ?? {});
   // 1. resume after answers: the paused attempt's own session.
@@ -576,7 +571,10 @@ const agentExecutor: StepExecutor = {
               ? "Google Antigravity CLI"
               : "GitHub Copilot CLI";
       // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
-      if (ctx.run.profile !== "MICRO" && (ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true)
+      if (
+        ctx.run.profile !== "MICRO" &&
+        (ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true
+      )
         return {
           kind: "failed",
           error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`,
@@ -589,7 +587,12 @@ const agentExecutor: StepExecutor = {
             target: "STANDARD",
             risk: "unknown",
             reason: "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
-            expectedRevision: (ctx.run.graph as (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }) | undefined)?.profile_revision ?? 0,
+            expectedRevision:
+              (
+                ctx.run.graph as
+                  | (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number })
+                  | undefined
+              )?.profile_revision ?? 0,
           },
         };
       const cap =
@@ -682,17 +685,53 @@ const agentExecutor: StepExecutor = {
             target: "STANDARD",
             risk: "unknown",
             reason: "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
-            expectedRevision: (ctx.run.graph as (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }) | undefined)?.profile_revision ?? 0,
+            expectedRevision:
+              (
+                ctx.run.graph as
+                  | (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number })
+                  | undefined
+              )?.profile_revision ?? 0,
           },
         };
-      for (const workspace of ws) if (!(await validateMicroWorkspace(workspace.path, ctx.step.config.micro_source_revision, ctx.step.config.micro_hashes)))
-        return { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: "prepared workspace no longer matches verified admission evidence", expectedRevision: (ctx.run.graph as (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }) | undefined)?.profile_revision ?? 0 } };
+      for (const workspace of ws)
+        if (
+          !(await validateMicroWorkspace(
+            workspace.path,
+            ctx.step.config.micro_source_revision,
+            ctx.step.config.micro_hashes,
+          ))
+        )
+          return {
+            kind: "profile_escalation",
+            request: {
+              target: "STANDARD",
+              risk: "unknown",
+              reason: "prepared workspace no longer matches verified admission evidence",
+              expectedRevision:
+                (
+                  ctx.run.graph as
+                    | (import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number })
+                    | undefined
+                )?.profile_revision ?? 0,
+            },
+          };
     }
     const delegationCfg = ctx.step.config.delegation as
       { enabled?: boolean; agents?: string[] } | undefined;
     const delegation = ctx.run.profile !== "MICRO" && delegationCfg?.enabled === true;
     const policy: PolicyContext = {
-      ...(ctx.run.profile === "MICRO" ? { micro: { files: Array.isArray(ctx.step.config.micro_scope) ? ctx.step.config.micro_scope as string[] : [], calls: 0, limit: 20, exhausted: false } } : {}),
+      ...(ctx.run.profile === "MICRO"
+        ? {
+            micro: {
+              files: Array.isArray(ctx.step.config.micro_scope)
+                ? (ctx.step.config.micro_scope as string[])
+                : [],
+              calls: 0,
+              limit: 20,
+              exhausted: false,
+            },
+          }
+        : {}),
       mode,
       workspaces: ws.map((w) => w.path),
       baseBranch: config.baseBranch,
@@ -757,8 +796,12 @@ const agentExecutor: StepExecutor = {
     if (mode === "coding" && !independent) {
       const contract = ctx.input.execution_contract;
       const problems = await validateExecutionAuthorization(ctx);
-      if (problems.length) return { kind: "failed", retryable: false,
-        error: `Mandatory execution contract is incomplete: ${problems.join("; ")}` };
+      if (problems.length)
+        return {
+          kind: "failed",
+          retryable: false,
+          error: `Mandatory execution contract is incomplete: ${problems.join("; ")}`,
+        };
       await ctx.artifact(
         "execution_contract",
         "approved execution contract",
@@ -768,7 +811,7 @@ const agentExecutor: StepExecutor = {
     }
     if (mode === "coding" && !independent) {
       implementationStart = await implementationBaseline(ctx);
-      policy.workspaces = (await executionWorkspaces(ctx)).map(w => w.path);
+      policy.workspaces = (await executionWorkspaces(ctx)).map((w) => w.path);
     }
     // Independent verification never continues an earlier conversation: fresh session, platform evidence only.
     const resume = independent ? null : await resumableSession(ctx, cwd, provider);
@@ -1004,7 +1047,8 @@ const agentExecutor: StepExecutor = {
         input.agent_id,
       );
       if (d.allow) {
-        if (!input.tool_name.startsWith("mcp__platform__")) policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
+        if (!input.tool_name.startsWith("mcp__platform__"))
+          policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
         hookAllowed.add(callKey(input.tool_name, input.tool_input));
         if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
         return {};
@@ -1077,25 +1121,31 @@ const agentExecutor: StepExecutor = {
         const promptTokens = Math.ceil(prompt.length / 4);
         const systemAppendTokens = Math.ceil(systemAppend.length / 4);
         const totalPromptTokens = Math.ceil((systemAppend.length + prompt.length) / 4);
-        await ctx.recordMetrics({
-          prompt_context: {
-            measurement: "character_estimate_not_provider_usage",
-            system_append_tokens: systemAppendTokens,
-            user_prompt_tokens: promptTokens,
-            known_prompt_tokens: totalPromptTokens,
-            full_input_tokens: null,
-            tool_schema_tokens: null,
-            session_history_tokens: null,
-            provider_system_tokens: null,
-            resumed: !!resumeId,
-          },
-          ...(live ? { evaluation_context: {
-            system_append_tokens: systemAppendTokens,
-            pack_tokens: ctx.context.contextPack?.estimated_tokens ?? 0,
-            user_prompt_tokens: promptTokens,
-            total_prompt_tokens: totalPromptTokens,
-          } } : {}),
-        }).catch(() => {});
+        await ctx
+          .recordMetrics({
+            prompt_context: {
+              measurement: "character_estimate_not_provider_usage",
+              system_append_tokens: systemAppendTokens,
+              user_prompt_tokens: promptTokens,
+              known_prompt_tokens: totalPromptTokens,
+              full_input_tokens: null,
+              tool_schema_tokens: null,
+              session_history_tokens: null,
+              provider_system_tokens: null,
+              resumed: !!resumeId,
+            },
+            ...(live
+              ? {
+                  evaluation_context: {
+                    system_append_tokens: systemAppendTokens,
+                    pack_tokens: ctx.context.contextPack?.estimated_tokens ?? 0,
+                    user_prompt_tokens: promptTokens,
+                    total_prompt_tokens: totalPromptTokens,
+                  },
+                }
+              : {}),
+          })
+          .catch(() => {});
       }
       await ctx.log("prompt", prompt, {
         resume_session: resumeId ?? null,
@@ -1478,11 +1528,7 @@ const agentExecutor: StepExecutor = {
           !TERMINAL_FAILURES.has(result.failure ?? "")
         ) {
           // Session missing or not resumable: rebuild from durable artifacts instead (answers and progress notes included).
-          await q(
-            pool,
-            "UPDATE agent_sessions SET resumable = false WHERE session_id = $1 AND provider = $2",
-            [resume.sessionId, provider],
-          );
+          await agentRepository.markSessionNotResumable(resume.sessionId, provider);
           await ctx.log(
             "system",
             `session resume failed (${result.text}); rebuilding context from persisted step history (${ctx.input.answers.length} answer(s), checkpoint notes of attempt ${resume.fromAttempt ?? "-"})`,
@@ -1537,11 +1583,7 @@ const agentExecutor: StepExecutor = {
         [ctx.attempt.id],
       ))!.n > 0;
     const pause = async (lastText: string): Promise<ExecResult> => {
-      const session = await one(
-        pool,
-        "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1",
-        [ctx.attempt.id],
-      );
+      const session = await agentRepository.findLastSession(ctx.attempt.id);
       return {
         kind: "waiting_input",
         checkpoint: {
@@ -1555,9 +1597,22 @@ const agentExecutor: StepExecutor = {
       };
     };
     if (ctx.run.profile === "MICRO" && (submitted?.profile_escalation || policy.micro?.exhausted)) {
-      const request = submitted?.profile_escalation as import("../workflow/profileRuntime.ts").EscalationRequest | undefined;
-      return { kind: "profile_escalation", request: request ?? { reason: policy.micro?.reason ?? "MICRO scope or tool budget exceeded", risk: "unknown", target: "STANDARD",
-        expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } };
+      const request = submitted?.profile_escalation as
+        import("../workflow/profileRuntime.ts").EscalationRequest | undefined;
+      return {
+        kind: "profile_escalation",
+        request: request ?? {
+          reason: policy.micro?.reason ?? "MICRO scope or tool budget exceeded",
+          risk: "unknown",
+          target: "STANDARD",
+          expectedRevision:
+            (
+              ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & {
+                profile_revision?: number;
+              }
+            ).profile_revision ?? 0,
+        },
+      };
     }
     if (result.isError)
       return {
@@ -1602,8 +1657,7 @@ const agentExecutor: StepExecutor = {
         if (!submitted)
           return {
             kind: "failed",
-            error:
-              `${pName} finished the turn without calling submit_result; no step output was recorded.`,
+            error: `${pName} finished the turn without calling submit_result; no step output was recorded.`,
             retryable: true,
           };
         const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
@@ -1614,7 +1668,10 @@ const agentExecutor: StepExecutor = {
             retryable: true,
             details: { submitted },
           };
-        const validation = validateOutputContract(ctx.step.config.output_schema ?? ctx.step.config.output_contract, submitted);
+        const validation = validateOutputContract(
+          ctx.step.config.output_schema ?? ctx.step.config.output_contract,
+          submitted,
+        );
         if (!validation.valid)
           return {
             kind: "failed",
@@ -1625,12 +1682,24 @@ ${validation.errors.join("; ")}`,
           };
       }
     }
-    const terminalCodingFailure = (candidate: Record<string, unknown> | undefined): ExecResult | null => {
+    const terminalCodingFailure = (
+      candidate: Record<string, unknown> | undefined,
+    ): ExecResult | null => {
       if (mode !== "coding" || independent) return null;
-      const outcome = candidate?.outcome === "FAILED" ? "FAILED" :
-        candidate?.outcome === "BLOCKED" || candidate?.blocked === true ? "BLOCKED" : null;
-      return outcome ? { kind: "failed", retryable: false,
-        error: `Coding outcome ${outcome} cannot complete successfully`, details: { submitted: candidate } } : null;
+      const outcome =
+        candidate?.outcome === "FAILED"
+          ? "FAILED"
+          : candidate?.outcome === "BLOCKED" || candidate?.blocked === true
+            ? "BLOCKED"
+            : null;
+      return outcome
+        ? {
+            kind: "failed",
+            retryable: false,
+            error: `Coding outcome ${outcome} cannot complete successfully`,
+            details: { submitted: candidate },
+          }
+        : null;
     };
     const terminalSubmission = terminalCodingFailure(submitted);
     if (terminalSubmission) return terminalSubmission;
@@ -1775,9 +1844,12 @@ ${validation.errors.join("; ")}`,
     }
 
     // ---- verification-and-repair loop (coding steps): success only when the mandatory checks pass
-    const vcfg = mode === "coding" ? (ctx.input.execution_contract?.verification
-      ? { ...(ctx.input.execution_contract.verification as import("./verify.ts").VerifyConfig) }
-      : verifyConfig(ctx.step.config, TEST_COMMAND)) : null;
+    const vcfg =
+      mode === "coding"
+        ? ctx.input.execution_contract?.verification
+          ? { ...(ctx.input.execution_contract.verification as import("./verify.ts").VerifyConfig) }
+          : verifyConfig(ctx.step.config, TEST_COMMAND)
+        : null;
     if (vcfg && !independent) {
       const contract = ctx.input.execution_contract!;
       vcfg.requiredTests = [
@@ -1786,7 +1858,11 @@ ${validation.errors.join("; ")}`,
       vcfg.contractRevision = contract.provenance?.revision;
     }
     if (mode === "coding" && !independent && !vcfg)
-      return { kind: "failed", retryable: false, error: "Mandatory implementation verification is disabled" };
+      return {
+        kind: "failed",
+        retryable: false,
+        error: "Mandatory implementation verification is disabled",
+      };
 
     if (mode === "coding" && !vcfg) {
       // Only the versioned workflow definition can turn the gate off; record it so evaluation never counts it as passed.
@@ -1814,19 +1890,57 @@ ${validation.errors.join("; ")}`,
         (w) =>
           !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
       );
-      const assessMicroScope = async (): Promise<{ escalate: false } | { escalate: true; result: ExecResult }> => {
-        const state = await collectScopeState(await Promise.all(trees.map(async w => ({ repo: w.repo, path: w.path, base: (await workspaceBase(ctx.run, w)).ref }))));
+      const assessMicroScope = async (): Promise<
+        { escalate: false } | { escalate: true; result: ExecResult }
+      > => {
+        const state = await collectScopeState(
+          await Promise.all(
+            trees.map(async (w) => ({
+              repo: w.repo,
+              path: w.path,
+              base: (await workspaceBase(ctx.run, w)).ref,
+            })),
+          ),
+        );
         const files = Object.values(state.files).flat();
-        const approved = Array.isArray(ctx.step.config.micro_scope) ? ctx.step.config.micro_scope as string[] : [];
+        const approved = Array.isArray(ctx.step.config.micro_scope)
+          ? (ctx.step.config.micro_scope as string[])
+          : [];
         let impactKnown = false;
-        if (trees.length === 1 && files.every(file => approved.includes(file))) {
+        if (trees.length === 1 && files.every((file) => approved.includes(file))) {
           await indexRepository(trees[0].repo, ctx.run.id).catch(() => null);
-          impactKnown = (await collectMicroEvidence(trees[0].repo, files, 0, ctx.run.id))?.impactKnown === true;
+          impactKnown =
+            (await collectMicroEvidence(trees[0].repo, files, 0, ctx.run.id))?.impactKnown === true;
         }
-        const scope = selectVerificationScope({ files, approvedFiles: approved, impactKnown, risk: "low", mandatory: vcfg.command, targeted: vcfg.command, broad: vcfg.broadCommand });
+        const scope = selectVerificationScope({
+          files,
+          approvedFiles: approved,
+          impactKnown,
+          risk: "low",
+          mandatory: vcfg.command,
+          targeted: vcfg.command,
+          broad: vcfg.broadCommand,
+        });
         await ctx.recordMetrics({ verification_scope: scope });
-        if (scope.escalate) return { escalate: true, result: { kind: "profile_escalation", request: { target: "STANDARD", risk: "unknown", reason: scope.reasons.join("; "), expectedRevision: (ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & { profile_revision?: number }).profile_revision ?? 0 } } };
-        vcfg.command = scope.commands.map(command => `{\n${command}\n}`).join("\n");
+        if (scope.escalate)
+          return {
+            escalate: true,
+            result: {
+              kind: "profile_escalation",
+              request: {
+                target: "STANDARD",
+                risk: "unknown",
+                reason: scope.reasons.join("; "),
+                expectedRevision:
+                  (
+                    ctx.run.graph as import("../workflow/types.ts").WorkflowSpec & {
+                      profile_revision?: number;
+                    }
+                  ).profile_revision ?? 0,
+              },
+            },
+          };
+        vcfg.command = scope.commands.map((command) => `{\n${command}\n}`).join("\n");
         return { escalate: false };
       };
       if (ctx.run.profile === "MICRO") {
@@ -1887,7 +2001,8 @@ ${validation.errors.join("; ")}`,
             )
           ).report,
         diffTests: async (p) => diffTestsAgainstBase(p, await workspaceBaseBranch(p)),
-        changedFiles: async (p) => (await changedFiles(p, `origin/${await workspaceBaseBranch(p)}`)).all,
+        changedFiles: async (p) =>
+          (await changedFiles(p, `origin/${await workspaceBaseBranch(p)}`)).all,
         artifact: (name, content, data) =>
           ctx.artifact("log", name, content, { ...data, verification: true }),
         log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
@@ -2032,9 +2147,7 @@ ${validation.errors.join("; ")}`,
     // final verification round) vs the human-approved scope. Any violation needs a renewed approval bound to the exact
     // revision; the PR step re-validates it. The agent's own deviation report is recorded but never relied on.
     if (mode === "coding" && !independent) {
-      const all = (await executionWorkspaces(ctx)).filter(
-        (w) => !unrestored.has(w.repo),
-      );
+      const all = (await executionWorkspaces(ctx)).filter((w) => !unrestored.has(w.repo));
       const state = await collectScopeState(
         await Promise.all(
           all.map(async (w) => ({
@@ -2044,11 +2157,18 @@ ${validation.errors.join("; ")}`,
           })),
         ),
       );
-      if (state.unreadable.length) return { kind: "failed", retryable: false, error: state.unreadable.join("; ") };
+      if (state.unreadable.length)
+        return { kind: "failed", retryable: false, error: state.unreadable.join("; ") };
       if (output.outcome === "NO_CHANGE_REQUIRED" || output.no_change_required === true)
-        return { kind: "failed", retryable: false, error: "NO_CHANGE_REQUIRED needs independent requirement-satisfaction evidence; this executor cannot establish it" };
+        return {
+          kind: "failed",
+          retryable: false,
+          error:
+            "NO_CHANGE_REQUIRED needs independent requirement-satisfaction evidence; this executor cannot establish it",
+        };
       const authorizationProblems = await validateExecutionAuthorization(ctx);
-      if (authorizationProblems.length) return { kind: "failed", retryable: false, error: authorizationProblems.join("; ") };
+      if (authorizationProblems.length)
+        return { kind: "failed", retryable: false, error: authorizationProblems.join("; ") };
       const implementationEnd = await observeImplementation(ctx);
       implementationStart = await loadImplementationBaseline(ctx.step.id, ctx.step.generation);
       if (
@@ -2151,9 +2271,16 @@ ${validation.errors.join("; ")}`,
       }
     }
     if (!independent && (ctx.step.config.output_schema || ctx.step.config.output_contract)) {
-      const validation = validateOutputContract(ctx.step.config.output_schema ?? ctx.step.config.output_contract, output);
-      if (!validation.valid) return { kind: "failed", retryable: false,
-        error: `Final output contract validation failed: ${validation.errors.join("; ")}` };
+      const validation = validateOutputContract(
+        ctx.step.config.output_schema ?? ctx.step.config.output_contract,
+        output,
+      );
+      if (!validation.valid)
+        return {
+          kind: "failed",
+          retryable: false,
+          error: `Final output contract validation failed: ${validation.errors.join("; ")}`,
+        };
     }
     const terminalOutput = terminalCodingFailure(output);
     if (terminalOutput) return terminalOutput;

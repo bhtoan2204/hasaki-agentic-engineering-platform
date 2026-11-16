@@ -8,6 +8,7 @@ import {
   buildCodeContext,
 } from "../codeIntelligence/search.ts";
 import { pool, q, one } from "../db/pool.ts";
+import { agentRepository } from "./repository.ts";
 import { repositories, rankRepositories } from "../repos/service.ts";
 import { scoreKnowledge, summarizeValue } from "../context/plan.ts";
 import { memoryFreshness } from "../knowledge/memory.ts";
@@ -340,11 +341,12 @@ export async function executeContextTool(
       };
     }
     case "get_run_context": {
-      const pack = await one(
-        pool,
-        "SELECT id,snapshot_id,content_hash,content,created_at FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",
-        [env.attemptId, env.runId, env.stepId, env.ownerId],
-      );
+      const pack = await agentRepository.findContextPackByAttemptId({
+        attemptId: env.attemptId,
+        runId: env.runId,
+        stepId: env.stepId,
+        ownerId: env.ownerId,
+      });
       if (!pack)
         return {
           available: false,
@@ -354,8 +356,7 @@ export async function executeContextTool(
       const entries = pack.content.entries.filter(
         (e: any) => args.section === "all" || e.section === args.section,
       );
-      const clamp = (n: number, min: number, max: number) =>
-        Math.min(max, Math.max(min, n));
+      const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
       const offset = clamp(args.offset, 0, 1000);
       const entryLimit = clamp(args.limit, 1, 20);
       return {
@@ -371,10 +372,10 @@ export async function executeContextTool(
         provider_handoff:
           args.section === "all" || args.section === "continuity"
             ? await (async () => {
-                const h = await one(
-                  pool,
-                  "SELECT id,source_attempt_id,package FROM provider_handoffs WHERE target_attempt_id=$1 AND run_id=$2 AND step_id=$3 AND status='RESUMED'",
-                  [env.attemptId, env.runId, env.stepId],
+                const h = await agentRepository.findProviderHandoffForTarget(
+                  env.attemptId,
+                  env.runId,
+                  env.stepId,
                 );
                 if (!h) return null;
                 const details =
@@ -386,11 +387,12 @@ export async function executeContextTool(
                       )
                     : null;
                 const original = args.handoff_source_pack
-                  ? await one(
-                      pool,
-                      "SELECT content FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",
-                      [h.source_attempt_id, env.runId, env.stepId, env.ownerId],
-                    )
+                  ? await agentRepository.findContextPackContent({
+                      attemptId: h.source_attempt_id,
+                      runId: env.runId,
+                      stepId: env.stepId,
+                      ownerId: env.ownerId,
+                    })
                   : null;
                 const text = original
                     ? JSON.stringify(original.content)
