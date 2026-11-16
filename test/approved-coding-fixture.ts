@@ -46,8 +46,9 @@ export async function approvedCodingFixture(runId: number, key: string, maxRepai
   }
   await q(pool, "UPDATE workflow_steps SET depends_on=$3,config=$4 WHERE run_id=$1 AND key=$2", [runId, approvalKey, [planKey], JSON.stringify({ show_outputs: [planKey] })]);
   // The fixture's workspace has no branch diff against origin, so the default targeted command would select no
-  // package and (correctly) report NOT_EXECUTED. Run the fixture's own test file so real test evidence exists.
-  const command = "go test -short ./transport_test.go";
+  // package and (correctly) report NOT_EXECUTED. Run the workspace package itself (so transport.go is compiled
+  // together with transport_test.go); -v prints the "--- PASS" lines that testEvidence recognises as real evidence.
+  const command = "go test -count=1 -v .";
   run.graph.steps.push(...validateSpec({ name: "fixture", steps: [{ key: planKey, type: "agent" }, { key: approvalKey, type: "human_approval", depends_on: [planKey] }] }).steps);
   const coding = run.graph.steps.find(s => s.key === key)!;
   await q(pool, "UPDATE workflow_steps SET depends_on=$3 WHERE run_id=$1 AND key=$2", [runId, planKey, coding.depends_on ?? []]);
