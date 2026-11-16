@@ -39,6 +39,15 @@ async function measure<T>(fn: () => Promise<T> | T) {
   return { value, ms, lagMax: Number.isFinite(lag.max) ? lag.max / 1e6 : 0 };
 }
 
+/** Median of several runs (after one warm-up) so one cold or noisy sample does not decide the comparison. */
+async function median<T>(fn: () => Promise<T> | T, runs = 7) {
+  await fn();
+  const samples = [];
+  for (let i = 0; i < runs; i++) { resetDependencyMetrics(); samples.push(await measure(fn)); }
+  samples.sort((a, b) => a.ms - b.ms);
+  return samples[Math.floor(runs / 2)];
+}
+
 async function build(workspace: string, files: number) {
   const perPackage = 25, packages = Math.ceil(files / perPackage);
   await writeFile(join(workspace, "package.json"), "{}");
@@ -59,13 +68,13 @@ try {
     await build(workspace, files);
     const row = (label: string, ms: number, lag: number, stat: number, read: number, bytes: number) =>
       rows.push([name, String(files), label, ms.toFixed(1), lag.toFixed(1), String(stat), String(read), String(bytes)]);
-    const old = await measure(() => legacy(join(workspace, "node_modules")));
+    const old = await median(() => legacy(join(workspace, "node_modules")));
     // A synchronous walk blocks the loop for its whole duration; a timer histogram cannot observe that, so report the block itself.
     row("legacy sync full hash", old.ms, old.ms, old.value.files, old.value.files, old.value.bytes);
     await recordDependencies(workspace, { evidenceDir });
     for (const [label, strict] of [["new incremental (unchanged)", false], ["new strict (trust boundary)", true]] as const) {
-      resetDependencyMetrics();
-      const r = await measure(() => validateDependencies(workspace, { evidenceDir, strict }));
+      if (strict) resetDependencyMetrics();
+      const r = await (strict ? measure : median)(() => validateDependencies(workspace, { evidenceDir, strict }));
       if (!r.value.ready) throw new Error(`${name}: ${label} unexpectedly not ready`);
       if (!strict && dependencyStats.bytesHashed !== 0) throw new Error(`${name}: the fast path hashed ${dependencyStats.bytesHashed} bytes`);
       row(label, r.ms, r.lagMax, dependencyStats.filesStatted, dependencyStats.filesRead, dependencyStats.bytesHashed);

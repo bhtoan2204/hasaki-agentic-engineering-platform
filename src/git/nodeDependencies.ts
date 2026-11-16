@@ -1,8 +1,8 @@
 import { homedir, tmpdir } from "node:os";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
-import { constants, createReadStream } from "node:fs";
-import { access, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants, createReadStream, lstatSync, readdirSync } from "node:fs";
+import { access, lstat, mkdir, mkdtemp, open, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { join, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,45 +119,59 @@ function npmVersion() {
 /** Digest of everything that decides which dependencies would be installed. Null: never ready (credentials in the repo). */
 export async function dependencyFingerprint(workspace: string, opts: DependencyOptions = {}): Promise<string | null> {
   try {
-    const present = async (file: string) => access(join(workspace, file)).then(() => true, () => false);
-    if (!(await present("package.json"))) return null;
+    const FILES = ["package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", ".nvmrc", ".node-version"];
     // These may contain credentials. Do not read them or guess their effect on installation.
-    for (const file of [".npmrc", ".yarnrc.yml"]) if (await present(file)) return null;
-    const hash = createHash("sha256").update(JSON.stringify({ node: opts.nodeVersion ?? process.version, npm: await npmVersion(),
+    const credentialed = [".npmrc", ".yarnrc.yml"];
+    const [version, contents, risky] = await Promise.all([
+      npmVersion(),
+      Promise.all(FILES.map((file) => readFile(join(workspace, file)).catch(() => null))),
+      Promise.all(credentialed.map((file) => access(join(workspace, file)).then(() => true, () => false))),
+    ]);
+    if (contents[0] === null || risky.some(Boolean)) return null;
+    const hash = createHash("sha256").update(JSON.stringify({ node: opts.nodeVersion ?? process.version, npm: version,
       platform: process.platform, arch: process.arch, ignoreScripts: true,
       nodeEnv: process.env.NODE_ENV ?? "", omit: process.env.npm_config_omit ?? "",
       include: process.env.npm_config_include ?? "", legacyPeerDeps: process.env.npm_config_legacy_peer_deps ?? "",
       registry: process.env.npm_config_registry ?? "" }));
-    for (const file of ["package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", ".nvmrc", ".node-version"])
-      hash.update(file).update("\0").update(await readFile(join(workspace, file)).catch(() => "absent")).update("\0");
+    FILES.forEach((file, i) => hash.update(file).update("\0").update(contents[i] ?? "absent").update("\0"));
     return hash.digest("hex");
   } catch { return null; }
 }
 
 interface Entry { rel: string; path: string; kind: "f" | "d" | "l"; mode: bigint; size: bigint; mtime: bigint; ctime: bigint; ino: bigint }
 
+const SLICE_MS = 4;
+const yieldLoop = () => new Promise<void>((done) => setImmediate(done));
+
 /**
- * Bounded async walk, lstat only. A missing directory is an empty tree. One directory is scanned per concurrency slot
- * (its entries are stat'd back to back), which keeps promise overhead low while at most FS_CONCURRENCY directories are in flight.
+ * lstat-only walk, cooperatively time-sliced: synchronous syscalls (several times cheaper per file than a promise per
+ * stat) run for at most SLICE_MS, then the loop gets control back via setImmediate. No single traversal step blocks the
+ * event loop for more than a few milliseconds, whatever the tree size. A missing directory is an empty tree.
  */
-async function walkTree(root: string, gate: Gate): Promise<Entry[]> {
+async function walkTree(root: string): Promise<Entry[]> {
   const out: Entry[] = [];
-  const visit = async (dir: string, prefix: string): Promise<void> => {
-    const subdirs: [string, string][] = [];
-    await gate.run(async () => {
-      for (const name of await readdir(dir)) {
+  const pending: [string, string][] = [[root, ""]];
+  let sliceStart = performance.now();
+  try {
+    while (pending.length) {
+      const [dir, prefix] = pending.pop()!;
+      let names: string[];
+      try { names = readdirSync(dir); } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT" && dir === root) return out;
+        throw e;
+      }
+      for (const name of names) {
         const path = join(dir, name), rel = `${prefix}/${name}`;
-        const st = await lstat(path, { bigint: true });
+        const st = lstatSync(path, { bigint: true });
         dependencyStats.filesStatted++;
         const kind = st.isSymbolicLink() ? "l" : st.isDirectory() ? "d" : st.isFile() ? "f" : null;
         if (!kind) throw new Error("Unsupported dependency entry");
         out.push({ rel, path, kind, mode: st.mode, size: st.size, mtime: st.mtimeNs, ctime: st.ctimeNs, ino: st.ino });
-        if (kind === "d") subdirs.push([path, rel]);
+        if (kind === "d") pending.push([path, rel]);
       }
-    });
-    await Promise.all(subdirs.map(([path, rel]) => visit(path, rel)));
-  };
-  await visit(root, "").catch((e) => { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; });
+      if (performance.now() - sliceStart > SLICE_MS) { await yieldLoop(); sliceStart = performance.now(); }
+    }
+  } finally { /* nothing to release */ }
   return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 }
 
@@ -229,13 +243,18 @@ interface Evidence {
   digest: string; snapshot: string; files: number; checkedAt: number;
 }
 
+const keyCache = new Map<string, string>();
 async function signingKey(dir: string) {
+  const cached = keyCache.get(dir);
+  if (cached) return cached;
   const file = join(dir, ".key");
   await mkdir(dir, { recursive: true, mode: 0o700 });
   try {
     await writeFile(file, randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 });
   } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
-  return readFile(file, "utf8");
+  const key = await readFile(file, "utf8");
+  if (key.length >= 32) keyCache.set(dir, key);
+  return key;
 }
 const sign = (key: string, payload: string) => createHmac("sha256", key).update(payload).digest("hex");
 const evidenceFile = (dir: string, realWorkspace: string) => join(dir, `${createHash("sha256").update(realWorkspace).digest("hex")}.json`);
@@ -309,7 +328,7 @@ async function validate(workspace: string, opts: DependencyOptions): Promise<Val
   const now = (opts.now ?? Date.now)();
   const gate = new Gate(FS_CONCURRENCY);
   let entries: Entry[];
-  try { entries = await walkTree(join(workspace, "node_modules"), gate); } catch { return no("unreadable installed tree"); }
+  try { entries = await walkTree(join(workspace, "node_modules")); } catch { return no("unreadable installed tree"); }
   if (!opts.strict && now - evidence.checkedAt < FAST_PATH_MAX_AGE_MS && snapshotDigest(entries) === evidence.snapshot) return { ready: true, mode: "incremental" };
   // Full verification: the signed content digest is the authority; metadata only decides how often we pay for it.
   let digest: string;
@@ -335,7 +354,7 @@ export async function recordDependencies(workspace: string, opts: DependencyOpti
   if (deps && !(await completeInstall(workspace))) return false;
   const id = await identity(workspace);
   const gate = new Gate(FS_CONCURRENCY);
-  const entries = await walkTree(join(workspace, "node_modules"), gate);
+  const entries = await walkTree(join(workspace, "node_modules"));
   const digest = await contentDigest(workspace, entries, gate);
   await writeEvidence(evidenceDirectory(opts), { v: EVIDENCE_SCHEMA, workspace: id.real, dev: id.dev, ino: id.ino, fingerprint,
     digest, snapshot: snapshotDigest(entries), files: entries.length, checkedAt: (opts.now ?? Date.now)() });
