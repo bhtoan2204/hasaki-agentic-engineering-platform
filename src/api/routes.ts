@@ -1,3 +1,6 @@
+import { workItemsRepository } from "../workitems/repository.ts";
+import { workflowRepository } from "../workflow/repository.ts";
+import { agentRepository } from "../agent/repository.ts";
 import { loadKnowledgeAudit } from "../knowledge/auditLoader.ts";
 import {
   createBinding,
@@ -505,10 +508,7 @@ export const routes: Route[] = [
     /^\/api\/work-items\/(\d+)\/budget$/,
     async (c) => {
       await requireWorkItem(c.actor, num(c.p[0]), support(c));
-      await q(pool, "UPDATE work_items SET budget_usd = $2, updated_at = now() WHERE id = $1", [
-        num(c.p[0]),
-        budgetOf(c.body),
-      ]);
+      await workItemsRepository.updateWorkItemBudget(num(c.p[0]), budgetOf(c.body));
       return must(await workItemCost(num(c.p[0])), "work item");
     },
   ],
@@ -819,7 +819,7 @@ export const routes: Route[] = [
           (await recordRunOutcome(id)) ?? { pending: true, reason: "the run has not finished" }
         );
       return (
-        (await one(pool, "SELECT outcome FROM workflow_runs WHERE id = $1", [id]))?.outcome ??
+        (await workflowRepository.getRunOutcome(id)) ??
         (await recordRunOutcome(id)) ?? { pending: true, reason: "the run has not finished" }
       );
     },
@@ -878,10 +878,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/budget$/,
     async (c) => {
       await requireRun(c.actor, num(c.p[0]), support(c));
-      await q(pool, "UPDATE workflow_runs SET budget_usd = $2, updated_at = now() WHERE id = $1", [
-        num(c.p[0]),
-        budgetOf(c.body),
-      ]);
+      await workflowRepository.updateRunBudget(num(c.p[0]), budgetOf(c.body));
       return runCost(num(c.p[0]));
     },
   ],
@@ -1004,7 +1001,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/handoffs$/,
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
-      q(pool, "SELECT * FROM provider_handoff_metrics WHERE run_id=$1 ORDER BY id", [num(c.p[0])])
+      workflowRepository.getProviderHandoffMetrics(num(c.p[0]))
     ),
   ],
   [
@@ -1113,10 +1110,7 @@ export const routes: Route[] = [
     /^\/api\/artifacts\/(\d+)$/,
     async (c) => (
       await requireArtifact(c.actor, num(c.p[0]), support(c)),
-      must(
-        await one(pool, "SELECT * FROM workflow_artifacts WHERE id = $1", [num(c.p[0])]),
-        "artifact",
-      )
+      must(await workflowRepository.findArtifactById(num(c.p[0])), "artifact")
     ),
   ],
   [
@@ -1124,10 +1118,7 @@ export const routes: Route[] = [
     /^\/api\/snapshots\/(\d+)$/,
     async (c) => (
       await requireSnapshot(c.actor, num(c.p[0]), support(c)),
-      must(
-        await one(pool, "SELECT * FROM context_snapshots WHERE id = $1", [num(c.p[0])]),
-        "snapshot",
-      )
+      must(await agentRepository.findContextSnapshotById(num(c.p[0])), "snapshot")
     ),
   ],
   [
@@ -1448,7 +1439,7 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/agent-recommendations\/(\d+)$/,
     async (c) => {
-      const row = await one(pool, "SELECT * FROM agent_recommendations WHERE id=$1", [num(c.p[0])]);
+      const row = await agentRepository.findAgentRecommendationById(num(c.p[0]));
       if (!row) throw new HttpError(404, "Recommendation not found");
       await requireOwner(c.actor, row.owner_id, support(c), "agent_recommendation", String(row.id));
       return row;
@@ -1457,10 +1448,7 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/agent-recommendations$/,
-    (c) =>
-      q(pool, "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50", [
-        c.actor.id,
-      ]),
+    (c) => agentRepository.listAgentRecommendations(c.actor.id, 50),
   ],
   ["POST", /^\/api\/agent-optimization$/, (c) => saveOptimizationPolicy(c.actor.id, c.body)],
   ["GET", /^\/api\/agent-optimization$/, (c) => optimizationPolicies(c.actor.id)],
@@ -1583,11 +1571,11 @@ export const routes: Route[] = [
     async (c) => {
       const id = num(c.p[0]);
       await requireRun(c.actor, id, support(c));
-      const run = await one(pool, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [id]);
-      const health = await instanceHealth(run?.worker_instance ?? null);
+      const workerInstance = await workflowRepository.getRunWorkerInstance(id);
+      const health = await instanceHealth(workerInstance ?? null);
       return {
         ...health,
-        local: run?.worker_instance === config.instanceId,
+        local: workerInstance === config.instanceId,
         available: health.health === "ONLINE",
       };
     },
@@ -2085,7 +2073,10 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/integrations\/gitlab$/,
-    async ({ actor }) => ({ ...(await gitlabStatus(actor.id)), can_manage: actor.role === "admin" }),
+    async ({ actor }) => ({
+      ...(await gitlabStatus(actor.id)),
+      can_manage: actor.role === "admin",
+    }),
   ],
   [
     "POST",

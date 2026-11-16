@@ -3,39 +3,15 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveRepoPath } from "./paths.ts";
 import { repositoryRemote, repositoryBranch } from "./remote.ts";
 import { config } from "../config.ts";
-import { pool, q, one, inTx, txWrote, withTx, type Db } from "../db/pool.ts";
+import { pool, inTx, txWrote, withTx, type Db } from "../db/pool.ts";
+import { reposRepository, type RepositoryRow } from "./repository.ts";
+export { type RepositoryRow } from "./repository.ts";
 import { CacheAside } from "../cache/index.ts";
-
-export interface RepositoryRow {
-  id: number;
-  name: string;
-  /** Relative to reposRoot; '' = same as name. */
-  path: string;
-  provider: string;
-  remote_slug: string;
-  repository_url?: string | null;
-  default_branch?: string;
-  description: string;
-  projects: string[];
-  services: string[];
-  owners: string[];
-  tags: string[];
-  dependencies: string[];
-  architecture: string;
-  /** Operator label. Empty when unset. Not an authorization grant. */
-  category?: string;
-  /** GitLab: remove the source branch when a human merges through the platform. Default false. */
-  delete_source_branch?: boolean;
-  allowed_actions: string[];
-  enabled: boolean;
-  /** Explicit access for every active user ('none' = only per-user grants; see repos/access.ts). */
-  shared_access?: "none" | "read" | "write" | "pull_request";
-}
 
 /** The registry is small and read on every run start, discovery, PR and authorization check. */
 const repoCache = new CacheAside<RepositoryRow[]>("repositories", ["repositories"], 60_000, 1);
-function allRepositories(db: Db): Promise<RepositoryRow[]> {
-  const load = () => q<RepositoryRow>(db, "SELECT * FROM repositories ORDER BY name");
+function allRepositories(db: Db, repo = reposRepository): Promise<RepositoryRow[]> {
+  const load = () => repo.findAllRepositories(db);
   return inTx(db) && txWrote(db, "repositories") ? load() : repoCache.get("all", load);
 }
 
@@ -64,13 +40,13 @@ export class RepositoryInUseError extends Error {
 }
 
 export const repositories = {
-  list(db: Db = pool) {
-    return allRepositories(db);
+  list(db: Db = pool, repo = reposRepository) {
+    return allRepositories(db, repo);
   },
-  async get(name: string, db: Db = pool) {
-    return (await allRepositories(db)).find((r) => r.name === name);
+  async get(name: string, db: Db = pool, repo = reposRepository) {
+    return (await allRepositories(db, repo)).find((r) => r.name === name);
   },
-  async upsert(name: string, patch: Partial<RepositoryRow>, db: Db = pool) {
+  async upsert(name: string, patch: Partial<RepositoryRow>, db: Db = pool, repo = reposRepository) {
     if (!/^[A-Za-z0-9._-]+$/.test(name) || [".", ".."].includes(name))
       throw new Error(`invalid repository name "${name}"`);
     if (patch.path && (isAbsolute(patch.path) || patch.path.split(/[\\/]/).includes("..")))
@@ -96,17 +72,13 @@ export const repositories = {
     if (patch.delete_source_branch != null)
       patch.delete_source_branch = patch.delete_source_branch === true;
     if (patch.default_branch) repositoryBranch(patch.default_branch);
-    const existing = await repositories.get(name, db);
+    const existing = await repositories.get(name, db, repo);
     if (
       existing?.repository_url &&
       patch.repository_url !== undefined &&
       patch.repository_url !== existing.repository_url
     ) {
-      const active = await one(
-        db,
-        "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1",
-        [name],
-      );
+      const active = await repo.findActiveRunsUsingRepo(name, db);
       if (active) throw new Error("Repository remote cannot change while runs are active");
     }
     if (existing?.repository_url && patch.repository_url === undefined) {
@@ -117,20 +89,22 @@ export const repositories = {
     const cols = EDITABLE.filter((k) => patch[k] !== undefined);
     if (!existing) {
       // Registering a deleted name again is explicit: discovery may pick it up again from now on.
-      await q(db, "DELETE FROM repository_exclusions WHERE name = $1", [name]);
-      await q(
+      await repo.deleteExclusion(name, db);
+      await repo.insertRepository(
+        name,
+        cols as unknown as string[],
+        cols.map((k) => patch[k]),
         db,
-        `INSERT INTO repositories (name${cols.length ? ", " + cols.join(", ") : ""}) VALUES ($1${cols.map((_, i) => `, $${i + 2}`).join("")}) ON CONFLICT (name) DO NOTHING`,
-        [name, ...cols.map((k) => patch[k])],
       );
     } else if (cols.length) {
-      await q(
+      await repo.updateRepository(
+        name,
+        cols as unknown as string[],
+        cols.map((k) => patch[k]),
         db,
-        `UPDATE repositories SET ${cols.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE name = $1`,
-        [name, ...cols.map((k) => patch[k])],
       );
     }
-    return repositories.get(name, db);
+    return repositories.get(name, db, repo);
   },
 
   /**
@@ -139,27 +113,17 @@ export const repositories = {
    * so discovery from config.projects (group folders) does not register it again on the next start. Refused while
    * an unfinished run may use it.
    */
-  async remove(name: string, deletedBy: number | null = null) {
+  async remove(name: string, deletedBy: number | null = null, repo = reposRepository) {
     return withTx(async (c) => {
-      const existing = await one(c, "SELECT id FROM repositories WHERE name = $1 FOR UPDATE", [
-        name,
-      ]);
+      const existing = await repo.findRepositoryForUpdate(name, c);
       if (!existing) return false;
-      const active = await one(
-        c,
-        "SELECT id FROM workflow_runs WHERE $1=ANY(allowed_repositories) AND status NOT IN ('COMPLETED','FAILED','CANCELED') LIMIT 1",
-        [name],
-      );
+      const active = await repo.findActiveRunsUsingRepo(name, c);
       if (active)
         throw new RepositoryInUseError(
           `Repository is used by unfinished run #${active.id}; finish or cancel it first, or disable the repository`,
         );
-      await q(c, "DELETE FROM repositories WHERE name = $1", [name]);
-      await q(
-        c,
-        "INSERT INTO repository_exclusions (name, deleted_by) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET deleted_by = EXCLUDED.deleted_by, deleted_at = now()",
-        [name, deletedBy],
-      );
+      await repo.deleteRepository(name, c);
+      await repo.insertExclusion(name, deletedBy, c);
       return true;
     });
   },
@@ -254,25 +218,24 @@ export function configuredRepositories(): Map<string, { rel: string; projects: s
 }
 
 /** Distinct projects the given repositories belong to (registry `projects`), for project-scoped knowledge. */
-export async function projectsOfRepositories(names: string[], db: Db = pool): Promise<string[]> {
+export async function projectsOfRepositories(
+  names: string[],
+  db: Db = pool,
+  repo = reposRepository,
+): Promise<string[]> {
   if (!names.length) return [];
-  const rows = await q<{ projects: string[] }>(
-    db,
-    "SELECT projects FROM repositories WHERE lower(name) = ANY($1)",
-    [names.map((n) => n.toLowerCase())],
-  );
+  const rows = await repo.findProjectsByRepoNames(names, db);
   return [...new Set(rows.flatMap((r) => r.projects ?? []))];
 }
 
-export async function syncRepositoriesFromConfig() {
-  const excluded = new Set(
-    (await q<{ name: string }>(pool, "SELECT name FROM repository_exclusions")).map((r) => r.name),
-  );
+export async function syncRepositoriesFromConfig(repo = reposRepository) {
+  const excluded = new Set((await repo.listExclusionNames(pool)).map((r) => r.name));
   for (const [name, { rel, projects }] of configuredRepositories()) {
     if (excluded.has(name)) continue; // deleted by an admin; only an explicit registration brings it back
-    const existing = await repositories.get(name);
+    const existing = await repositories.get(name, pool, repo);
     const path = rel === name ? "" : rel;
-    if (!existing) await repositories.upsert(name, { path, projects, remote_slug: name });
+    if (!existing)
+      await repositories.upsert(name, { path, projects, remote_slug: name }, pool, repo);
   }
   // Existing shared entries are never changed based on this installation's config or filesystem.
 }
@@ -363,12 +326,8 @@ export function isAmbiguous(ranked: RankedRepository[]) {
 export async function repositoryBaseBranch(name: string): Promise<string> {
   return (await repositories.get(name))?.default_branch || config.baseBranch;
 }
-export async function workspaceBaseBranch(path: string): Promise<string> {
-  const row = await one(
-    pool,
-    "SELECT r.default_branch FROM repositories r JOIN execution_workspaces w ON r.name=w.repo WHERE w.path=$1 LIMIT 1",
-    [path],
-  );
+export async function workspaceBaseBranch(path: string, repo = reposRepository): Promise<string> {
+  const row = await repo.findDefaultBranchByWorkspacePath(path, pool);
   return row?.default_branch || config.baseBranch;
 }
 

@@ -1,3 +1,4 @@
+import { workflowRepository, type RunListFilter } from "./repository.ts";
 import { completeForRun } from "../agent/complete.ts";
 export { releaseAttempt, reapExpiredLeases, safeRecovery } from "./recovery.ts";
 import { existsSync } from "node:fs";
@@ -853,10 +854,18 @@ export async function reexecuteStep(
             at: new Date().toISOString(),
           }
         : null;
-    const retrySource = opts.retry ? await one<{ current_attempt_id: number | null; status: string }>(c,
-      "SELECT current_attempt_id,status FROM workflow_steps WHERE run_id=$1 AND key=$2", [runId, stepKey]) : null;
-    const retry = retrySource?.current_attempt_id && ["FAILED", "CANCELED", "RETRYING"].includes(retrySource.status)
-      ? { source_attempt_id: retrySource.current_attempt_id } : undefined;
+    const retrySource = opts.retry
+      ? await one<{ current_attempt_id: number | null; status: string }>(
+          c,
+          "SELECT current_attempt_id,status FROM workflow_steps WHERE run_id=$1 AND key=$2",
+          [runId, stepKey],
+        )
+      : null;
+    const retry =
+      retrySource?.current_attempt_id &&
+      ["FAILED", "CANCELED", "RETRYING"].includes(retrySource.status)
+        ? { source_attempt_id: retrySource.current_attempt_id }
+        : undefined;
     const pending =
       feedback || opts.input || reexecute || retry
         ? {
@@ -2250,11 +2259,11 @@ export async function finishAttempt(
  * Validate the existing owner before starting/resuming/retrying. Local workspaces never move with an API action.
  */
 async function adoptRun(c: Db, runId: number) {
-  const run = await one(c, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [runId]);
-  if (run?.worker_instance !== config.instanceId)
+  const workerInstance = await workflowRepository.getRunWorkerInstance(runId, c);
+  if (workerInstance !== config.instanceId)
     throw new EngineError(
-      run?.worker_instance
-        ? `Run belongs to ${run.worker_instance}; continue on that installation. Ownership is never transferred automatically.`
+      workerInstance
+        ? `Run belongs to ${workerInstance}; continue on that installation. Ownership is never transferred automatically.`
         : "Legacy run has no assigned instance. An administrator must verify its worktrees and explicitly assign worker_instance.",
       409,
     );
@@ -2265,7 +2274,7 @@ async function adoptRun(c: Db, runId: number) {
 export async function getRun(runId: number, db: Db = pool) {
   // Both reads go out together on the pool (one round trip); inside a transaction the client queues them anyway.
   const [run, steps] = await Promise.all([
-    one<RunRow>(db, "SELECT * FROM workflow_runs WHERE id = $1", [runId]),
+    workflowRepository.findRunById(runId, db),
     stepsOf(db, runId),
   ]);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
@@ -2284,87 +2293,14 @@ async function txThenRun(
   return getRun(runId);
 }
 
-export function listRuns(
-  filter: {
-    workItemId?: number;
-    status?: string;
-    limit?: number;
-    ownerId?: number;
-    all?: boolean;
-  } = {},
-  db: Db = pool,
-) {
-  const scope = filter.all
-    ? "AND r.owner_id IS NOT NULL"
-    : filter.ownerId
-      ? "AND r.owner_id = " + Number(filter.ownerId)
-      : "";
-  return q(
-    db,
-    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.agent_provider, r.owner_id, r.created_at, r.updated_at, r.finished_at,
-            v.version AS definition_version, w.code AS work_item_code,
-            (SELECT count(*)::int FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'open') AS open_questions,
-            (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps
-       FROM workflow_runs r JOIN workflow_definition_versions v ON v.id = r.definition_version_id
-       LEFT JOIN work_items w ON w.id = r.work_item_id
-      WHERE ($1::bigint IS NULL OR r.work_item_id = $1) AND ($2::text IS NULL OR r.status = $2) ${scope}
-      ORDER BY r.id DESC LIMIT $3`,
-    [filter.workItemId ?? null, filter.status ?? null, filter.limit ?? 100],
-  );
+export function listRuns(filter: RunListFilter = {}, db: Db = pool) {
+  return workflowRepository.listRuns(filter, db);
 }
 
 /** Run page payload. All reads go out together (one round-trip of latency, not one per query). */
 export async function runDetail(runId: number) {
   const [run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints] =
-    await Promise.all([
-      one<
-        RunRow & {
-          definition_version: number;
-          wi_id: number | null;
-          wi_code: string;
-          wi_title: string;
-          wi_source: string;
-          wi_project: string;
-        }
-      >(
-        pool,
-        `SELECT r.*, v.version AS definition_version, w.id AS wi_id, w.code AS wi_code, w.title AS wi_title, w.source AS wi_source, w.project AS wi_project
-         FROM workflow_runs r LEFT JOIN workflow_definition_versions v ON v.id = r.definition_version_id LEFT JOIN work_items w ON w.id = r.work_item_id
-        WHERE r.id = $1`,
-        [runId],
-      ),
-      stepsOf(pool, runId),
-      q(
-        pool,
-        `SELECT a.id, a.step_id, a.run_id, a.number, a.generation, a.status,
-                a.agent_provider, a.agent_model, a.metrics, a.error,
-                a.invalidated_at, a.resolved_at, a.started_at, a.finished_at,
-                a.executor_stopped_at, a.context_snapshot_id, a.agent_session_id,
-                CASE WHEN a.output ? 'verification'
-                     THEN jsonb_build_object('verification', a.output->'verification') END AS output,
-                s.key AS step_key
-           FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
-          WHERE a.run_id = $1 ORDER BY a.id`,
-        [runId],
-      ),
-      q(
-        pool,
-        "SELECT q.*, s.key AS step_key FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id WHERE q.run_id = $1 ORDER BY q.id",
-        [runId],
-      ),
-      q(
-        pool,
-        "SELECT id, step_id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE run_id = $1 ORDER BY id",
-        [runId],
-      ),
-      q(pool, "SELECT * FROM pull_requests WHERE run_id = $1 ORDER BY id", [runId]),
-      q(pool, "SELECT * FROM execution_workspaces WHERE run_id = $1 ORDER BY id", [runId]),
-      q(
-        pool,
-        "SELECT id, step_id, attempt_id, reason, data, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id",
-        [runId],
-      ),
-    ]);
+    await workflowRepository.findRunDetail(runId);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
   const { wi_id, wi_code, wi_title, wi_source, wi_project, ...row } = run;
   const work_item =

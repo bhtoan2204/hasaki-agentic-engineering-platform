@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { HttpError } from "../http/error.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
+import { knowledgeRepository } from "./repository.ts";
 import { knowledge } from "./service.ts";
 import { CATEGORIES, SCOPES } from "./resolve.ts";
 
@@ -307,17 +308,7 @@ export async function createProposal(
     return { proposal: done, created: false, reason: `already approved as proposal #${done.id}` };
   const confidence = Math.max(0, Math.min(1, Number(x.confidence ?? 0.5) || 0));
   // Insert, or fold into the open duplicate: evidence is appended (deduplicated by quote+source), confidence kept at the max.
-  const row = await one(
-    db,
-    `INSERT INTO knowledge_proposals (owner_id, parent_id, change_type, target_item_id, target_key, target_version, existing_rule, proposed, domain, confidence, uncertainty,
-                                      evidence, impacts, validation, source_kind, source_run_id, dedupe_key, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-     ON CONFLICT (dedupe_key) WHERE status = 'pending' DO UPDATE SET
-       evidence = knowledge_proposals.evidence || (SELECT COALESCE(jsonb_agg(e), '[]'::jsonb) FROM jsonb_array_elements(EXCLUDED.evidence) e
-                                                    WHERE NOT knowledge_proposals.evidence @> jsonb_build_array(e)),
-       confidence = GREATEST(knowledge_proposals.confidence, EXCLUDED.confidence),
-       updated_at = now()
-     RETURNING *, (xmax = 0) AS inserted`,
+  const row = await knowledgeRepository.upsertProposal(
     [
       x.ownerId,
       x.parentId ?? null,
@@ -338,6 +329,7 @@ export async function createProposal(
       key,
       x.createdBy ?? "",
     ],
+    db,
   );
   const { inserted, ...proposal } = row;
   return {
@@ -350,44 +342,17 @@ export async function createProposal(
 export async function listProposals(
   filter: { ownerId: number; all?: boolean; status?: string; runId?: number; targetKey?: string },
   db: Db = pool,
+  repo = knowledgeRepository,
 ) {
-  return q(
-    db,
-    `SELECT p.id, p.status, p.change_type, p.target_key, p.target_version, p.proposed, p.domain, p.confidence, p.source_kind, p.source_run_id, p.parent_id,
-            p.owner_id, p.created_at, p.updated_at, p.reviewed_by, p.reviewed_at, jsonb_array_length(p.evidence) AS evidence_count,
-            p.validation->>'passed' AS validation_passed, r.title AS run_title
-       FROM knowledge_proposals p LEFT JOIN workflow_runs r ON r.id = p.source_run_id
-      WHERE ($1::text IS NULL OR p.status = $1)
-        AND ($2::bigint IS NULL OR p.source_run_id = $2)
-        AND ($3::text IS NULL OR p.target_key = $3 OR p.proposed->>'key' = $3 OR p.applied->>'created_key' = $3)
-        AND ($4::bool OR p.owner_id = $5 OR p.owner_id IS NULL)
-      ORDER BY (p.status = 'pending') DESC, p.id DESC LIMIT 300`,
-    [
-      filter.status ?? null,
-      filter.runId ?? null,
-      filter.targetKey ?? null,
-      !!filter.all,
-      filter.ownerId,
-    ],
-  );
+  return repo.listProposals(filter, db);
 }
 
 /** Proposal with what a reviewer needs: old vs new text and diff, target state now, children (skill updates), conflicts. */
-export async function getProposal(id: number, db: Db = pool) {
-  const p = await one(db, "SELECT * FROM knowledge_proposals WHERE id = $1", [id]);
+export async function getProposal(id: number, db: Db = pool, repo = knowledgeRepository) {
+  const p = await repo.getProposalById(id, db);
   if (!p) return undefined;
-  const target = p.target_item_id
-    ? await one(
-        db,
-        "SELECT i.id, i.key, i.title, i.category, i.scope_type, i.scope_ref, i.current_version, i.enabled, i.owner_id, i.superseded_by, i.expires_at, v.content FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version WHERE i.id = $1",
-        [p.target_item_id],
-      )
-    : null;
-  const children = await q(
-    db,
-    "SELECT id, status, change_type, target_key, validation, created_at FROM knowledge_proposals WHERE parent_id = $1 ORDER BY id",
-    [id],
-  );
+  const target = p.target_item_id ? await repo.getProposalTargetItem(p.target_item_id, db) : null;
+  const children = await repo.getChildProposals(id, db);
   const parent = p.parent_id
     ? await one(
         db,

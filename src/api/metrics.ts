@@ -1,3 +1,4 @@
+import { workflowRepository } from "../workflow/repository.ts";
 import { summarizeProfiles, type ProfileSample } from "../workflow/profileMetrics.ts";
 import { usageSummary } from "../agent/telemetry.ts";
 import { pool, q, one } from "../db/pool.ts";
@@ -13,35 +14,8 @@ import { pool, q, one } from "../db/pool.ts";
  *   cost_usd  SDK estimate (not a bill)
  */
 export async function runMetrics(runId: number) {
-  const [attempts, toolRows, [run], telemetry] = await Promise.all([
-    q(
-      pool,
-      `SELECT a.id, a.agent_provider, a.agent_model, a.effective_agent, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
-            (extract(epoch FROM (COALESCE(a.finished_at, now()) - a.started_at)) * 1000)::bigint AS exec_ms,
-            GREATEST(0, (extract(epoch FROM (a.started_at - GREATEST(j.available_at, j.created_at))) * 1000))::bigint AS queue_ms,
-            CASE WHEN a.status IN ('WAITING_INPUT', 'WAITING_APPROVAL') OR a.resolved_at IS NOT NULL
-                 THEN (extract(epoch FROM (COALESCE(a.resolved_at, now()) - a.finished_at)) * 1000)::bigint ELSE 0 END AS human_ms
-       FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id LEFT JOIN workflow_jobs j ON j.id = a.job_id
-      WHERE a.run_id = $1 ORDER BY a.id`,
-      [runId],
-    ),
-    // Tool execution time from paired events (measured at event-write granularity).
-    q(
-      pool,
-      `SELECT t.attempt_id, t.data->>'name' AS name, (extract(epoch FROM (r.created_at - t.created_at)) * 1000)::bigint AS ms
-       FROM workflow_events t JOIN workflow_events r ON r.attempt_id = t.attempt_id AND r.kind = 'tool_result' AND r.data->>'tool_use_id' = t.data->>'id'
-      WHERE t.run_id = $1 AND t.kind = 'tool'`,
-      [runId],
-    ),
-    q(
-      pool,
-      "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1",
-      [runId],
-    ),
-    q(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1 ORDER BY attempt_id", [
-      runId,
-    ]),
-  ]);
+  const { attempts, toolRows, run, telemetry } =
+    await workflowRepository.getRunExecutionMetrics(runId);
   const toolMs = new Map<number, number>();
   const byTool: Record<string, { calls: number; ms: number }> = {};
   for (const t of toolRows) {
@@ -182,19 +156,49 @@ export async function runMetrics(runId: number) {
     Object.entries(perStep).sort(
       (a, b) => b[1].exec_ms + b[1].queue_ms - (a[1].exec_ms + a[1].queue_ms),
     )[0]?.[0] ?? null;
-  const initialProfile = run?.profile_decision?.initial_profile ?? run?.profile_decision?.signals?.initial_profile ?? run?.profile;
-  const adaptiveSamples: ProfileSample[] = attempts.filter(a => ["agent", "coding_agent"].includes(a.step_type)).map(a => {
-    const t = telemetry.find(t => Number(t.attempt_id) === Number(a.id));
-    const sessions = Object.keys(t?.provider_sessions ?? {});
-    return { fixture: String(runId), repetition: Number(a.number), base: "run-evidence", provider: a.agent_provider ?? "unknown", model: a.agent_model ?? "unknown", cache: "unknown", checks: [],
-      initialProfile: a.effective_agent?.execution_profile ?? initialProfile ?? "STANDARD", finalProfile: run?.profile ?? "STANDARD",
-      wallMs: Number(a.exec_ms), activeMs: t?.provider_execution_ms == null ? null : Number(t.provider_execution_ms), queueMs: a.queue_ms == null ? null : Number(a.queue_ms),
-      invocations: sessions.length || null, tokens: t?.input_tokens == null || t?.output_tokens == null ? null : Number(t.input_tokens) + Number(t.output_tokens),
-      contextTokens: a.metrics?.context_pack?.estimated_tokens ?? null, verificationMs: a.metrics?.verification?.duration_ms ?? null, correct: null, expectedProfile: null };
-  });
+  const initialProfile =
+    run?.profile_decision?.initial_profile ??
+    run?.profile_decision?.signals?.initial_profile ??
+    run?.profile;
+  const adaptiveSamples: ProfileSample[] = attempts
+    .filter((a) => ["agent", "coding_agent"].includes(a.step_type))
+    .map((a) => {
+      const t = telemetry.find((t) => Number(t.attempt_id) === Number(a.id));
+      const sessions = Object.keys(t?.provider_sessions ?? {});
+      return {
+        fixture: String(runId),
+        repetition: Number(a.number),
+        base: "run-evidence",
+        provider: a.agent_provider ?? "unknown",
+        model: a.agent_model ?? "unknown",
+        cache: "unknown",
+        checks: [],
+        initialProfile: a.effective_agent?.execution_profile ?? initialProfile ?? "STANDARD",
+        finalProfile: run?.profile ?? "STANDARD",
+        wallMs: Number(a.exec_ms),
+        activeMs: t?.provider_execution_ms == null ? null : Number(t.provider_execution_ms),
+        queueMs: a.queue_ms == null ? null : Number(a.queue_ms),
+        invocations: sessions.length || null,
+        tokens:
+          t?.input_tokens == null || t?.output_tokens == null
+            ? null
+            : Number(t.input_tokens) + Number(t.output_tokens),
+        contextTokens: a.metrics?.context_pack?.estimated_tokens ?? null,
+        verificationMs: a.metrics?.verification?.duration_ms ?? null,
+        correct: null,
+        expectedProfile: null,
+      };
+    });
   return {
-    adaptive: { initial_profile: initialProfile, final_profile: run?.profile, classification_invocation: run?.profile_decision?.signals?.classification_invocation ?? null,
-      segments: summarizeProfiles(adaptiveSamples), samples: adaptiveSamples, accuracy_note: "Accuracy requires independently adjudicated labels; escalation alone is not a classification error." },
+    adaptive: {
+      initial_profile: initialProfile,
+      final_profile: run?.profile,
+      classification_invocation: run?.profile_decision?.signals?.classification_invocation ?? null,
+      segments: summarizeProfiles(adaptiveSamples),
+      samples: adaptiveSamples,
+      accuracy_note:
+        "Accuracy requires independently adjudicated labels; escalation alone is not a classification error.",
+    },
     telemetry: { attempts: telemetry, ...telemetryGroups(telemetry) },
     run_id: runId,
     profile: run?.profile,

@@ -22,6 +22,7 @@ import { pool, q, one, withTx, type Db } from "../db/pool.ts";
 import { CacheAside, singleflight } from "../cache/index.ts";
 import { getUserSecret } from "../auth/secrets.ts";
 import { repositories, projectScope, type RepositoryRow } from "./service.ts";
+import { reposRepository, type GrantRow, type CheckRow } from "./repository.ts";
 import { repositoryRemote, type CanonicalRemote } from "./remote.ts";
 import { githubRepositoryAccess } from "../github.ts";
 import { gitlabRepositoryAccess, gitlabSecretKey } from "../gitlab.ts";
@@ -69,22 +70,6 @@ export class RepositoryAccessError extends HttpError {
   }
 }
 
-type GrantRow = {
-  repository_id: number;
-  can_read: boolean;
-  can_write: boolean;
-  can_create_pr: boolean;
-};
-type CheckRow = {
-  repository_id: number;
-  state: "verified" | "denied" | "unknown";
-  can_read: boolean | null;
-  can_write: boolean | null;
-  reason: string;
-  checked_at: Date;
-  expires_at: Date;
-};
-
 /** Per-user grants and Bitbucket checks; cleared by any committed write to these tables (in every process). */
 const userCache = new CacheAside<{ grants: GrantRow[]; checks: CheckRow[] }>(
   "repository_access",
@@ -92,23 +77,8 @@ const userCache = new CacheAside<{ grants: GrantRow[]; checks: CheckRow[] }>(
   60_000,
   200,
 );
-function loadUser(userId: number, db: Db) {
-  const load = async () => ({
-    grants: (
-      await q<GrantRow>(
-        db,
-        "SELECT repository_id, can_read, can_write, can_create_pr FROM user_repository_access WHERE user_id = $1",
-        [userId],
-      )
-    ).map((g) => ({ ...g, repository_id: Number(g.repository_id) })),
-    checks: (
-      await q<CheckRow>(
-        db,
-        "SELECT repository_id, state, can_read, can_write, reason, checked_at, expires_at FROM repository_bitbucket_permissions WHERE user_id = $1",
-        [userId],
-      )
-    ).map((c) => ({ ...c, repository_id: Number(c.repository_id) })),
-  });
+function loadUser(userId: number, db: Db, repo = reposRepository) {
+  const load = () => repo.getUserGrantsAndChecks(userId, db);
   return db === pool ? userCache.get(String(userId), load) : load();
 }
 
@@ -616,19 +586,23 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
       for (let i = 0; i < due.length; i += CHECK_CONCURRENCY)
         verdicts.push(
           ...(await Promise.all(
-            due.slice(i, i + CHECK_CONCURRENCY).map(async (r): Promise<[RepositoryRow, Verdict]> => {
-              let remote: CanonicalRemote;
-              try {
-                remote = repositoryRemote(r.repository_url!);
-              } catch {
-                // e.g. a GitLab host removed from config.gitlab.instances: unknown, never an error for the listing.
-                return [
-                  r,
-                  unknownVerdict("repository URL is not accepted by this instance's configuration"),
-                ];
-              }
-              return [r, await verifiers[remote.provider](secret, remote)];
-            }),
+            due
+              .slice(i, i + CHECK_CONCURRENCY)
+              .map(async (r): Promise<[RepositoryRow, Verdict]> => {
+                let remote: CanonicalRemote;
+                try {
+                  remote = repositoryRemote(r.repository_url!);
+                } catch {
+                  // e.g. a GitLab host removed from config.gitlab.instances: unknown, never an error for the listing.
+                  return [
+                    r,
+                    unknownVerdict(
+                      "repository URL is not accepted by this instance's configuration",
+                    ),
+                  ];
+                }
+                return [r, await verifiers[remote.provider](secret, remote)];
+              }),
           )),
         );
       for (const [r, v] of verdicts) {
@@ -665,30 +639,27 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
 }
 
 /** Forget cached Bitbucket checks (credentials changed, explicit revalidation). */
-export async function forgetBitbucketChecks(filter: { userId?: number; repositoryId?: number }) {
-  await q(
-    pool,
-    "DELETE FROM repository_bitbucket_permissions WHERE ($1::bigint IS NULL OR user_id = $1) AND ($2::bigint IS NULL OR repository_id = $2)",
-    [filter.userId ?? null, filter.repositoryId ?? null],
-  );
+export async function forgetBitbucketChecks(
+  filter: { userId?: number; repositoryId?: number },
+  repo = reposRepository,
+) {
+  await repo.deleteBitbucketChecks(filter, pool);
 }
 
 /** Explicit revalidation: drop the cached checks and ask Bitbucket again now. */
-export async function revalidateBitbucket(filter: { userId?: number; repository?: RepositoryRow }) {
-  await forgetBitbucketChecks({
-    userId: filter.userId,
-    repositoryId: filter.repository ? Number(filter.repository.id) : undefined,
-  });
+export async function revalidateBitbucket(
+  filter: { userId?: number; repository?: RepositoryRow },
+  repo = reposRepository,
+) {
+  await forgetBitbucketChecks(
+    {
+      userId: filter.userId,
+      repositoryId: filter.repository ? Number(filter.repository.id) : undefined,
+    },
+    repo,
+  );
   const users =
-    filter.userId != null
-      ? [filter.userId]
-      : (
-          await q<{ user_id: number }>(
-            pool,
-            "SELECT DISTINCT user_id FROM user_repository_access WHERE ($1::bigint IS NULL OR repository_id = $1)",
-            [filter.repository?.id ?? null],
-          )
-        ).map((u) => Number(u.user_id));
+    filter.userId != null ? [filter.userId] : await repo.listUsersWithGrants(filter.repository?.id);
   const repos = filter.repository ? [filter.repository] : await repositories.list();
   for (const u of users) await refreshBitbucket(u, repos, true);
   return { users: users.length };
@@ -731,6 +702,7 @@ export async function setRepositoryAccessMany(
   level: AccessLevel,
   grantedBy: number | null,
   names?: string[],
+  repo = reposRepository,
 ) {
   if (!ACCESS_LEVELS.includes(level)) throw new HttpError(400, `invalid access level "${level}"`);
   const u = await one<{ id: number }>(pool, "SELECT id FROM users WHERE id = $1", [userId]);
@@ -743,21 +715,8 @@ export async function setRepositoryAccessMany(
   const f = flags(level);
   await withTx(async (c) => {
     const ids = targets.map((r) => Number(r.id));
-    if (level === "none")
-      await q(
-        c,
-        "DELETE FROM user_repository_access WHERE user_id = $1 AND repository_id = ANY($2::bigint[])",
-        [userId, ids],
-      );
-    else
-      await q(
-        c,
-        `INSERT INTO user_repository_access (user_id, repository_id, can_read, can_write, can_create_pr, granted_by)
-         SELECT $1, id, $3, $4, $5, $6 FROM unnest($2::bigint[]) AS id
-         ON CONFLICT (user_id, repository_id) DO UPDATE SET can_read = EXCLUDED.can_read, can_write = EXCLUDED.can_write,
-           can_create_pr = EXCLUDED.can_create_pr, granted_by = EXCLUDED.granted_by, updated_at = now()`,
-        [userId, ids, f.read, f.write, f.pull_request, grantedBy],
-      );
+    if (level === "none") await repo.deleteGrantMany(userId, ids, c);
+    else await repo.upsertGrantMany(userId, ids, f, grantedBy, c);
   });
   return { user_id: userId, level, repositories: targets.map((r) => r.name) };
 }
@@ -768,6 +727,7 @@ export async function setRepositoryAccess(
   userId: number,
   level: AccessLevel,
   grantedBy: number,
+  repo = reposRepository,
 ) {
   if (!ACCESS_LEVELS.includes(level)) throw new Error(`invalid access level "${level}"`);
   if (repository.provider === "benchmark")
@@ -775,25 +735,11 @@ export async function setRepositoryAccess(
   const u = await one<{ id: number }>(pool, "SELECT id FROM users WHERE id = $1", [userId]);
   if (!u) throw new RepositoryAccessError(404, "User not found");
   return withTx(async (c) => {
-    const before = await one<GrantRow>(
-      c,
-      "SELECT repository_id, can_read, can_write, can_create_pr FROM user_repository_access WHERE user_id = $1 AND repository_id = $2",
-      [userId, repository.id],
-    );
-    if (level === "none")
-      await q(c, "DELETE FROM user_repository_access WHERE user_id = $1 AND repository_id = $2", [
-        userId,
-        repository.id,
-      ]);
+    const before = await repo.findGrant(userId, repository.id, c);
+    if (level === "none") await repo.deleteGrant(userId, repository.id, c);
     else {
       const f = flags(level);
-      await q(
-        c,
-        `INSERT INTO user_repository_access (user_id, repository_id, can_read, can_write, can_create_pr, granted_by) VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (user_id, repository_id) DO UPDATE SET can_read = EXCLUDED.can_read, can_write = EXCLUDED.can_write,
-           can_create_pr = EXCLUDED.can_create_pr, granted_by = EXCLUDED.granted_by, updated_at = now()`,
-        [userId, repository.id, f.read, f.write, f.pull_request, grantedBy],
-      );
+      await repo.upsertGrant(userId, repository.id, f, grantedBy, c);
     }
     return {
       before: before
@@ -808,40 +754,22 @@ export async function setRepositoryAccess(
   });
 }
 
-export async function setSharedAccess(repository: RepositoryRow, level: AccessLevel) {
+export async function setSharedAccess(
+  repository: RepositoryRow,
+  level: AccessLevel,
+  repo = reposRepository,
+) {
   if (!ACCESS_LEVELS.includes(level)) throw new Error(`invalid access level "${level}"`);
   if (repository.provider === "benchmark") throw new Error("Benchmark fixtures are not shared");
   const before: AccessLevel = repository.shared_access ?? "none";
-  await q(pool, "UPDATE repositories SET shared_access = $2, updated_at = now() WHERE id = $1", [
-    repository.id,
-    level,
-  ]);
+  await repo.updateSharedAccess(repository.id, level, pool);
   return { before, after: level };
 }
 
 /** Admin view: every registry repository × every user, with grants, shared level and last Bitbucket checks. */
-export async function accessMatrix() {
+export async function accessMatrix(repo = reposRepository) {
   const repos = (await repositories.list()).filter((r) => r.provider !== "benchmark");
-  const users = await q<{ id: number; username: string; role: string; active: boolean }>(
-    pool,
-    "SELECT id, username, role, active FROM users ORDER BY username",
-  );
-  const grants = await q<{
-    user_id: number;
-    repository_id: number;
-    can_read: boolean;
-    can_write: boolean;
-    can_create_pr: boolean;
-    granted_by: string | null;
-    updated_at: Date;
-  }>(
-    pool,
-    "SELECT a.user_id, a.repository_id, a.can_read, a.can_write, a.can_create_pr, g.username AS granted_by, a.updated_at FROM user_repository_access a LEFT JOIN users g ON g.id = a.granted_by",
-  );
-  const checks = await q<CheckRow & { user_id: number }>(
-    pool,
-    "SELECT user_id, repository_id, state, can_read, can_write, reason, checked_at, expires_at FROM repository_bitbucket_permissions",
-  );
+  const { users, grants, checks } = await repo.getAccessMatrixData(pool);
   return {
     policy: config.bitbucket.accessVerification ?? "strict",
     repositories: repos.map((r) => ({

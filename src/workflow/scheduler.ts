@@ -6,7 +6,8 @@ import { instanceSession } from "../instances.ts";
 import { config } from "../config.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
-import { pool, one, q, retryTransient } from "../db/pool.ts";
+import { retryTransient } from "../db/pool.ts";
+import { workflowRepository } from "./repository.ts";
 import {
   beginAttempt,
   continueHealthyHandoffForAttempt,
@@ -64,7 +65,9 @@ export async function purgeDebugEventsThrottled(now = Date.now()) {
   if (now - lastTracePurge < 3_600_000) return 0;
   lastTracePurge = now;
   const days = Number(process.env.TRACE_DEBUG_RETENTION_DAYS);
-  return purgeDebugEvents(Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays);
+  return purgeDebugEvents(
+    Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays,
+  );
 }
 
 let automaticHandoff: Promise<void> | null = null;
@@ -88,22 +91,12 @@ export async function claimJob(
   leaseSeconds: number,
   onlyTypes?: string[],
 ): Promise<JobRow | undefined> {
-  const job = await one<JobRow>(
-    pool,
-    `UPDATE workflow_jobs j
-        SET status = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
-            fencing_token = j.fencing_token + 1, claims = j.claims + 1, updated_at = now()
-      WHERE j.id = (
-        SELECT j2.id FROM workflow_jobs j2 JOIN workflow_runs r ON r.id = j2.run_id JOIN workflow_steps s ON s.id = j2.step_id
-         WHERE j2.status = 'queued' AND j2.available_at <= now()
-           AND (r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') OR (r.status = 'PAUSED' AND j2.force))
-           AND ($3::text[] IS NULL OR s.type = ANY($3))
-           AND r.worker_instance = $4
-           AND NOT EXISTS (SELECT 1 FROM platform_instances i WHERE i.instance_id = $4 AND (i.session_id <> $5 OR i.stopped_at IS NOT NULL))
-         ORDER BY j2.available_at, j2.id
-         FOR UPDATE OF j2 SKIP LOCKED LIMIT 1)
-      RETURNING j.*`,
-    [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId, instanceSession],
+  const job = await workflowRepository.claimNextJob(
+    leaseOwner(workerId),
+    leaseSeconds,
+    onlyTypes ?? null,
+    config.instanceId,
+    instanceSession,
   );
   // Fire-and-forget: tracing must never delay or fail a claim.
   if (job)
@@ -113,27 +106,20 @@ export async function claimJob(
       level: "DEBUG",
       event: "job.claimed",
       message: `job ${job.id} claimed by ${workerId}`,
-      data: { job_id: job.id, fencing_token: job.fencing_token, claims: job.claims, lease_seconds: leaseSeconds },
+      data: {
+        job_id: job.id,
+        fencing_token: job.fencing_token,
+        claims: job.claims,
+        lease_seconds: leaseSeconds,
+      },
     });
   return job;
 }
 
 /** What the workers are doing right now (for "why is my step waiting?" in the UI). */
 export async function schedulerStatus() {
-  const running = await q(
-    pool,
-    `SELECT j.id AS job_id, j.run_id, r.title AS run_title, s.key AS step_key, s.name AS step_name, s.type AS step_type, j.lease_owner,
-            a.started_at, extract(epoch FROM now() - a.started_at)::int AS running_seconds
-       FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
-       LEFT JOIN workflow_step_attempts a ON a.job_id = j.id AND a.status = 'RUNNING'
-      WHERE j.status = 'running' ORDER BY j.id`,
-  );
-  const queued = await q(
-    pool,
-    `SELECT j.id AS job_id, j.run_id, s.key AS step_key, s.type AS step_type, j.available_at, r.worker_instance
-       FROM workflow_jobs j JOIN workflow_steps s ON s.id = j.step_id JOIN workflow_runs r ON r.id = j.run_id
-      WHERE j.status = 'queued' AND r.status NOT IN ('PAUSED', 'CANCELED', 'PENDING') ORDER BY j.available_at, j.id`,
-  );
+  const running = await workflowRepository.getSchedulerStatusRunning();
+  const queued = await workflowRepository.getSchedulerStatusQueued();
   return {
     instance: config.instanceId,
     workers: config.scheduler.workers,
@@ -150,10 +136,8 @@ export async function processJob(
   workerId: string,
   opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds">,
 ) {
-  const step = await one<{ type: string }>(pool, "SELECT type FROM workflow_steps WHERE id = $1", [
-    job.step_id,
-  ]);
-  if (step && (await deferIfBranchBusy(job, step.type))) return;
+  const stepType = await workflowRepository.findStepType(job.step_id);
+  if (stepType && (await deferIfBranchBusy(job, stepType))) return;
   const begun = await beginAttempt(job, workerId);
   if (!begun) return;
   const attemptTrace = {
@@ -174,9 +158,7 @@ export async function processJob(
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
     try {
-      if (
-        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds, begun.attempt.id))
-      )
+      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds, begun.attempt.id)))
         ac.abort();
     } catch (e) {
       ac.abort();
@@ -254,12 +236,7 @@ export async function processJob(
         },
       };
     await retryTransient(
-      () =>
-        q(
-          pool,
-          "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2",
-          [begun.attempt.id, job.fencing_token],
-        ),
+      () => workflowRepository.recordExecutorTermination(begun.attempt.id, job.fencing_token),
       `record executor termination ${job.id}`,
     );
     const handoff = await prepareProviderPause(begun, result);
