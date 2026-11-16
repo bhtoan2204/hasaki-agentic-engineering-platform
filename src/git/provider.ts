@@ -42,9 +42,13 @@ export function dependencyEvidenceDir() {
 }
 
 export { dependencyFingerprint, nodeModulesReady, recordDependencies } from "./nodeDependencies.ts";
-/** Worker preparation and verification shells share exactly the same readiness implementation. */
+/**
+ * Worker preparation and verification shells share exactly the same readiness implementation.
+ * Both callers (workspace preparation and the coding turn) are trust boundaries: the agent may have changed node_modules since the
+ * last check, so readiness is decided by a full re-hash, never by the metadata fast path.
+ */
 export async function installNodeDependencies(workspace: string): Promise<boolean> {
-  return ensureNodeDependencies(workspace, npmCacheDir(), { evidenceDir: dependencyEvidenceDir() });
+  return ensureNodeDependencies(workspace, npmCacheDir(), { evidenceDir: dependencyEvidenceDir(), strict: true });
 }
 
 /**

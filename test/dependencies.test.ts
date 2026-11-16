@@ -235,3 +235,43 @@ test("the verification helper fails fast, without EROFS noise, when it cannot wr
   assert.doesNotMatch(run.stderr, /EROFS|EACCES|ENOTDIR|\n\s+at /);
   assert.equal(await readFile(join(dir, "calls"), "utf8").catch(() => ""), "", "no install was attempted");
 });
+
+test("the coding-turn and prepare entry point re-hashes in full even when a fresh metadata snapshot exists", async (t) => {
+  const { dir } = await fixture(t);
+  const { installNodeDependencies: atTrustBoundary, dependencyEvidenceDir } = await import("../src/git/provider.ts");
+  const { rm: remove } = await import("node:fs/promises");
+  const { realpath } = await import("node:fs/promises");
+  const { createHash } = await import("node:crypto");
+  assert.equal(await atTrustBoundary(dir), true, "first call installs");
+  resetDependencyMetrics();
+  assert.equal(await atTrustBoundary(dir), false, "nothing to install the second time");
+  assert.ok(dependencyStats.bytesHashed > 0, "a full re-hash decided readiness, not the metadata fast path");
+  assert.equal(dependencyStats.fullValidations >= 1, true);
+  // The same state through the default (non-strict) check would have been an incremental hit that hashes nothing.
+  resetDependencyMetrics();
+  assert.equal(await nodeModulesReady(dir, { evidenceDir: dependencyEvidenceDir() }), true);
+  assert.equal(dependencyStats.bytesHashed, 0);
+  await remove(join(dependencyEvidenceDir(), `${createHash("sha256").update(await realpath(dir)).digest("hex")}.json`), { force: true });
+});
+
+test("agents cannot write the worker-owned dependency evidence directory", async () => {
+  const { protectedRootsFor } = await import("../src/platform/selfDevelopment.ts");
+  const { decide, decideBash } = await import("../src/agent/toolPolicy.ts");
+  const { dependencyEvidenceDir } = await import("../src/git/provider.ts");
+  const evidence = dependencyEvidenceDir();
+  const ctx = { mode: "coding" as const, workspaces: ["/data/worktrees/T1/app"], baseBranch: "main", protectedRoots: protectedRootsFor([]) };
+  assert.ok(ctx.protectedRoots.includes(evidence));
+  assert.equal(decide("Write", { file_path: join(evidence, "forged.json"), content: "{}" }, ctx).allow, false);
+  assert.equal(decide("Edit", { file_path: join(evidence, ".key"), old_string: "a", new_string: "b" }, ctx).allow, false);
+  assert.equal(decideBash(`printf '{}' > ${join(evidence, "forged.json")}`, ctx, "/data/worktrees/T1/app").allow, false);
+  assert.equal(decideBash(`rm -f ${join(evidence, "x.json")}`, ctx, "/data/worktrees/T1/app").allow, false);
+});
+
+test("commands do not inherit the evidence directory; only the dependency helper receives it", async (t) => {
+  const { runVerificationCommand } = await import("../src/workflow/executors/builtin.ts");
+  const { dir } = await fixture(t);
+  const result = await runVerificationCommand(`node -e 'console.log("evidence=" + (process.env.PLATFORM_DEPENDENCY_EVIDENCE_DIR ?? "unset"))'; env | grep -c PLATFORM_DEPENDENCY_EVIDENCE_DIR || true`, dir, {}, 30000, new AbortController().signal);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /evidence=unset/);
+  assert.match(result.output, /\n0\n?$/);
+});

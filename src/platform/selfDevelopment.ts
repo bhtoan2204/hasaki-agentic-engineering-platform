@@ -129,7 +129,8 @@ export function overlapsLiveApplication(path: string): boolean {
 
 export function protectedRootsFor(paths: string[]): string[] {
   const live = liveApplicationRoot();
-  return [...new Set([...paths.filter(Boolean), ...(live ? [live] : [])])];
+  // Worker-owned dependency readiness evidence and its signing key: an agent must never be able to write them.
+  return [...new Set([...paths.filter(Boolean), ...(live ? [live] : []), join(config.dataDir, "dependency-evidence")])];
 }
 
 /**

@@ -269,7 +269,8 @@ export async function runCommand(
     };
   Object.assign(childEnv, pg);
   childEnv.PLATFORM_NODE_DEPENDENCIES = fileURLToPath(new URL("../../git/nodeDependencies.ts", import.meta.url));
-  childEnv.PLATFORM_DEPENDENCY_EVIDENCE_DIR = join(config.dataDir, "dependency-evidence");
+  // Only the dependency helper learns where evidence lives: a shell variable (not exported) plus a `node` wrapper below.
+  const evidenceDir = join(config.dataDir, "dependency-evidence").replaceAll("'", "'\\''");
   // Login profiles may drop inherited toolchains (Nix keeps node and npm in separate prefixes).
   // Keep the profile's priority, then append missing inherited directories before adding PostgreSQL.
   childEnv.PLATFORM_COMMAND_PATH = childEnv.PATH ?? "";
@@ -283,7 +284,9 @@ for platform_command_dir in "\${platform_command_dirs[@]}"; do
 done
 export PATH
 unset PLATFORM_COMMAND_PATH platform_command_dirs platform_command_dir`;
-  const script = `${restorePath}\n${pg[TEST_POSTGRES_BIN_ENV] ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n` : ""}${command}`;
+  const helperScope = `platform_evidence_dir='${evidenceDir}'
+node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DEPENDENCY_EVIDENCE_DIR="$platform_evidence_dir" command node "$@"; else command node "$@"; fi; }`;
+  const script = `${restorePath}\n${helperScope}\n${pg[TEST_POSTGRES_BIN_ENV] ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n` : ""}${command}`;
   const r = await new Promise<CommandResult>((resolve) => {
     const child = spawn(
       useBwrap ? "bwrap" : "bash",
