@@ -212,6 +212,7 @@ export async function workflowAnalytics(f: AnalyticsFilters, scope: AnalyticsSco
     steps: Record<string, unknown>[];
     trend: Record<string, unknown>[];
     verification_trend: Record<string, unknown>[];
+    verification_evidence: Record<string, unknown> | null;
     evidence: Record<string, unknown>;
     details: Record<string, unknown>[];
     hotspots: {
@@ -253,6 +254,20 @@ verification_rows AS (
     count(*) FILTER(WHERE metrics->'verification'->>'passed' IN ('true','false') OR metrics->'independent_verification'->>'verdict' IN ('PASS','FAIL'))::int AS evaluated
   FROM attempts GROUP BY 1 ORDER BY 1
 ),
+verification_evidence_row AS (
+  SELECT
+    COALESCE(sum((metrics->'verification'->'evidence'->>'hits')::int),0)::int AS hits,
+    COALESCE(sum((metrics->'verification'->'evidence'->>'misses')::int),0)::int AS misses,
+    COALESCE(sum((metrics->'verification'->'evidence'->>'reused')::int),0)::int AS reused,
+    COALESCE(sum((metrics->'verification'->'evidence'->>'duplicates_avoided')::int),0)::int AS duplicates_avoided,
+    COALESCE(sum((metrics->'verification'->'evidence'->>'saved_ms')::numeric),0)::bigint AS saved_ms,
+    COALESCE(sum((metrics->'verification'->>'duration_ms')::numeric),0)::bigint AS duration_ms,
+    COALESCE((SELECT jsonb_object_agg(reason, n) FROM (
+      SELECT i AS reason, count(*)::int AS n FROM attempts a2,
+        jsonb_array_elements_text(COALESCE(a2.metrics->'verification'->'evidence'->'invalidations','[]'::jsonb)) i
+      GROUP BY i) x), '{}'::jsonb) AS invalidation_reasons
+  FROM attempts WHERE metrics->'verification'->'evidence' IS NOT NULL
+),
 evidence_row AS (
   SELECT
     (SELECT count(*)::int FROM runs) AS runs,
@@ -292,6 +307,7 @@ SELECT
   COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.execution_ms DESC NULLS LAST, s.workflow, s.step_key) FROM step_page s), '[]'::jsonb) AS steps,
   COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.bucket) FROM trend_rows t), '[]'::jsonb) AS trend,
   COALESCE((SELECT jsonb_agg(to_jsonb(v) ORDER BY v.bucket) FROM verification_rows v), '[]'::jsonb) AS verification_trend,
+  (SELECT to_jsonb(v) FROM verification_evidence_row v) AS verification_evidence,
   (SELECT to_jsonb(e) FROM evidence_row e) AS evidence,
   COALESCE((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.created_at DESC, d.run_id DESC) FROM detail_page d), '[]'::jsonb) AS details,
   jsonb_build_object(

@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { normalizeScopePath } from "./scopeGuard.ts";
 import { worktreeFingerprint } from "./scopeGuard.ts";
+import { baseTip, envFingerprint, type EvidenceCache, type EvidenceParts, type EvidenceStats } from "./verifyEvidence.ts";
 import { execFile } from "node:child_process";
 import { realpath, stat, readFile } from "node:fs/promises";
 import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
@@ -112,6 +113,8 @@ export interface RepoVerification {
   error?: string;
   artifact_id?: number;
   commit_sha?: string;
+  /** Present when this result was served from verification evidence instead of running the command. */
+  evidence?: { reused: true; key: string; source_attempt_id: number | null; original_duration_ms: number; saved_ms: number; joined?: boolean };
 }
 export interface VerificationRound {
   round: number;
@@ -123,6 +126,8 @@ export interface VerificationRound {
   /** Stable fingerprint of the failure set; equal consecutive signatures = no progress. */
   signature: string;
   duration_ms: number;
+  /** Evidence-cache counters for this round (absent when reuse is not configured). */
+  evidence?: EvidenceStats;
 }
 
 /** Lines that explain a failure (test failures, compile errors, panics, assertion output), bounded. */
@@ -227,6 +232,8 @@ export interface VerifyDeps {
   diffTests?(path: string): Promise<string>;
   artifact?(name: string, content: string, data: Record<string, unknown>): Promise<number>;
   log?(text: string, data?: Record<string, unknown>): Promise<void> | void;
+  /** Optional evidence reuse + singleflight. Absent = always run (backward compatible). */
+  evidence?: EvidenceCache;
 }
 
 /**
@@ -382,6 +389,37 @@ export async function verifyWorkspaces(
     const started = Date.now();
     const beforeState = await worktreeFingerprint(p).catch(() => null);
     const baseEnv = { ...env, REPO: w.repo, ...(w.branch ? { BRANCH: w.branch } : {}) };
+    // Evidence reuse: any failure to establish the full key means a real run (fail closed).
+    let flight: Extract<Awaited<ReturnType<EvidenceCache["begin"]>>, { kind: "lead" }> | null = null;
+    if (deps.evidence && beforeState) {
+      const parts = await evidenceParts(p, w, cfg, beforeState, baseEnv, known?.skipRegex ?? null).catch(() => null);
+      const d = parts ? await deps.evidence.begin(w.repo, parts) : null;
+      const reuse = (e: RepoVerification, extra: Partial<NonNullable<RepoVerification["evidence"]>>, key: string, why: string) => {
+        const entry: RepoVerification = {
+          ...e,
+          evidence: { reused: true, key, source_attempt_id: null, original_duration_ms: e.duration_ms, saved_ms: e.duration_ms, ...extra },
+          duration_ms: Date.now() - started,
+        };
+        return deps.log?.(`■ verify ${w.repo}: ${entry.status.toUpperCase()} (reused evidence ${key.slice(0, 12)}: ${why})`,
+          { repo: w.repo, verification: round, status: entry.status, evidence: { reused: true, key } }), entry;
+      };
+      if (d?.kind === "hit") {
+        repos.push(reuse(d.record.result, { source_attempt_id: d.record.attempt_id }, d.key, `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`));
+        continue;
+      }
+      if (d?.kind === "joined") {
+        const shared = await d.promise;
+        if (shared && !signal.aborted) {
+          repos.push(reuse(shared, { joined: true }, d.key, "joined identical in-flight verification"));
+          continue;
+        }
+      }
+      if (d?.kind === "lead") {
+        flight = d;
+        await deps.log?.(`◆ verify ${w.repo}: evidence miss (${d.reason}) key ${d.key.slice(0, 12)}`, { repo: w.repo, verification: round, evidence: { key: d.key, reason: d.reason } });
+      }
+    }
+    try {
     const runWith = (skip: string | null) =>
       deps.run(
         cfg.command,
@@ -562,7 +600,13 @@ export async function verifyWorkspaces(
       `■ verify ${w.repo}: ${entry.status.toUpperCase()}${entry.note ? ` (${entry.note})` : ""}${entry.error ? ` — ${entry.error}` : ""}${entry.weakened.length ? ` — tests weakened: ${entry.weakened.join(", ")}` : ""}${entry.suspected.length ? ` — review: ${entry.suspected.join(", ")}` : ""}`,
       { repo: w.repo, verification: round, status: entry.status },
     );
+    const why = flight ? await flight.settle(entry) : null;
+    if (flight && why) await deps.log?.(`◆ verify ${w.repo}: evidence not stored (${why})`, { repo: w.repo, verification: round, evidence: { key: flight.key, not_stored: why } });
     repos.push(entry);
+    } catch (e) {
+      flight?.fail();
+      throw e;
+    }
   }
   if (required.problems.length && repos.length) {
     repos[0].status = "failed";
@@ -577,6 +621,34 @@ export async function verifyWorkspaces(
     repos,
     signature: failureSignature(repos),
     duration_ms: Date.now() - t0,
+    ...(deps.evidence ? { evidence: structuredClone(deps.evidence.stats) } : {}),
+  };
+}
+
+async function evidenceParts(
+  path: string,
+  w: { repo: string; skip?: string },
+  cfg: VerifyConfig,
+  state: { head: string; fingerprint: string },
+  env: Record<string, string>,
+  skip: string | null,
+): Promise<EvidenceParts> {
+  const vars = ["BASE_BRANCH", "RUN_ID", "REPO", "BRANCH"].map((k) => `${k}=${env[k] ?? ""}`).join("\n");
+  return {
+    repo_name: w.repo,
+    workspace: path,
+    head: state.head,
+    workspace_fingerprint: state.fingerprint,
+    base_tip: await baseTip(path, env.BASE_BRANCH),
+    contract_revision: cfg.contractRevision ?? "",
+    command: cfg.command,
+    selectors: [...(cfg.requiredTests ?? [])].sort().join("\n"),
+    policy: `allowTestWeakening=${cfg.allowTestWeakening}`,
+    baseline: String(cfg.baseline),
+    timeout: String(cfg.timeoutMs),
+    env_fingerprint: await envFingerprint(path),
+    env_vars: vars,
+    skip: skip ?? "",
   };
 }
 
@@ -722,6 +794,10 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
     max_repairs: cfg.maxRepairs,
     duration_ms: res.rounds.reduce((s, r) => s + r.duration_ms, 0),
     failure_signatures: res.rounds.filter((r) => !r.passed).map((r) => r.signature),
+    // Cumulative evidence-cache counters (the cache lives for the whole step), from the last round that has them.
+    ...(res.rounds.findLast((r) => r.evidence)?.evidence
+      ? { evidence: res.rounds.findLast((r) => r.evidence)!.evidence }
+      : {}),
     last:
       last?.repos.map(
         ({
