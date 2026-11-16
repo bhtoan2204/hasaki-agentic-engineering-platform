@@ -24,6 +24,8 @@ export interface RepositoryRow {
   architecture: string;
   /** Operator label. Empty when unset. Not an authorization grant. */
   category?: string;
+  /** GitLab: remove the source branch when a human merges through the platform. Default false. */
+  delete_source_branch?: boolean;
   allowed_actions: string[];
   enabled: boolean;
   /** Explicit access for every active user ('none' = only per-user grants; see repos/access.ts). */
@@ -49,6 +51,7 @@ const EDITABLE = [
   "dependencies",
   "architecture",
   "category",
+  "delete_source_branch",
   "allowed_actions",
   "enabled",
   "remote_slug",
@@ -90,6 +93,8 @@ export const repositories = {
         throw new Error("Invalid repository category");
       patch.category = patch.category.trim();
     }
+    if (patch.delete_source_branch != null)
+      patch.delete_source_branch = patch.delete_source_branch === true;
     if (patch.default_branch) repositoryBranch(patch.default_branch);
     const existing = await repositories.get(name, db);
     if (

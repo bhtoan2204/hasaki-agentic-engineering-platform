@@ -135,6 +135,12 @@ const FAMILIES: Array<{ key: string; label: string; match: RegExp }> = [
   { key: "hasaki_work", label: "Hasaki Work tasks", match: /^hasaki_work\./ },
   { key: "bitbucket", label: "Bitbucket pull requests", match: /^bitbucket\./ },
   {
+    key: "git",
+    label:
+      "Git hosting (any provider): pull/merge request, diff, discussions, CI pipelines and failed job logs",
+    match: /^git\./,
+  },
+  {
     key: "code_intelligence",
     label: "code intelligence index (symbols, references, dependencies)",
     match: /^code_intelligence\./,
@@ -722,6 +728,7 @@ export function registerBuiltinTools() {
       return listPullRequests(slug, { branch, state });
     },
   });
+  registerGitHostingTools();
   registerIntegrationTool({
     name: "repositories.search",
     summary:
@@ -834,5 +841,176 @@ export function registerBuiltinTools() {
     available: () => true,
     handler: async ({ database, sql, max_rows }, ctx) =>
       runQuery(await databaseForRun(database, ctx.allowedRepositories), sql, max_rows),
+  });
+}
+
+// ---------------------------------------------------------------- provider-agnostic Git hosting (read-only)
+
+/**
+ * The PR/MR of `repo` the tool reads: the given URL (it must belong to this repository) or the latest one this run
+ * opened. Dispatch is by the registry's provider; a provider without the capability answers "unsupported".
+ */
+async function hostedPullRequest(repo: string, url: string | undefined, ctx: ToolCallContext) {
+  allowedRepo(repo, ctx);
+  const registry = await repositories.get(repo);
+  if (!registry) throw new Error(`repository "${repo}" is not registered`);
+  const { gitProviderFor } = await import("../git/provider.ts");
+  const provider = gitProviderFor(registry.provider);
+  let target = url;
+  if (!target) {
+    const rows = await q<{ url: string }>(
+      pool,
+      "SELECT url FROM pull_requests WHERE repo = $1 AND run_id = $2 ORDER BY updated_at DESC LIMIT 1",
+      [repo, ctx.runId],
+    );
+    target = rows[0]?.url;
+    if (!target) throw new Error(`this run has no pull request for ${repo}; pass url`);
+  }
+  const web = registry.repository_url?.replace(/\.git$/, "") ?? "";
+  if (!web || !target.toLowerCase().startsWith(web.toLowerCase() + "/"))
+    throw new Error(`url does not belong to repository ${repo}`);
+  return {
+    provider,
+    ref: {
+      repo: repositoryReference(registry),
+      url: target,
+      remoteUrl: registry.repository_url ?? null,
+    },
+  };
+}
+
+const unsupportedFor = (provider: string, what: string) => ({
+  supported: false,
+  reason: `${what} is unsupported for ${provider} repositories`,
+});
+
+function registerGitHostingTools() {
+  const prInput = z.object({ repo: z.string(), url: z.string().optional() });
+  registerIntegrationTool({
+    name: "git.pull_request",
+    summary:
+      "One pull/merge request of an allowed repository: state, branches, draft, merge readiness.",
+    description:
+      "Read-only. `repo` is the registry name; `url` the PR/MR link (default: the latest one this run opened). Includes mergeability, approvals and head pipeline when the provider reports them.",
+    input: prInput,
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo, url }, ctx) => {
+      const { provider, ref } = await hostedPullRequest(repo, url, ctx);
+      if (!provider.getPullRequest) return unsupportedFor(provider.name, "Reading a pull request");
+      return {
+        pull_request: await provider.getPullRequest(ref),
+        readiness: provider.mergeReadiness ? await provider.mergeReadiness(ref) : null,
+      };
+    },
+  });
+  registerIntegrationTool({
+    name: "git.pull_request_diff",
+    summary: "Changed files and unified diff of a pull/merge request (capped).",
+    description:
+      "Read-only. Files with status and per-file unified diff; `truncated` is true when files or diff text were cut.",
+    input: prInput.extend({ max_files: z.number().int().min(1).max(1000).optional() }),
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo, url, max_files }, ctx) => {
+      const { provider, ref } = await hostedPullRequest(repo, url, ctx);
+      if (!provider.pullRequestChanges)
+        return unsupportedFor(provider.name, "Reading a pull request diff");
+      return provider.pullRequestChanges(ref, { maxFiles: max_files, maxDiffBytes: 30_000 });
+    },
+  });
+  registerIntegrationTool({
+    name: "git.pull_request_discussions",
+    summary: "Review comments and discussions of a pull/merge request.",
+    description: "Read-only. Threads with notes, inline positions and resolution state.",
+    input: prInput,
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo, url }, ctx) => {
+      const { provider, ref } = await hostedPullRequest(repo, url, ctx);
+      if (!provider.pullRequestDiscussions)
+        return unsupportedFor(provider.name, "Reading discussions");
+      return provider.pullRequestDiscussions(ref);
+    },
+  });
+  registerIntegrationTool({
+    name: "git.pipelines",
+    summary: "CI pipelines and job statuses of a branch or pull/merge request.",
+    description:
+      "Read-only. Recent pipelines of `branch` (or of the PR/MR at `url`, default this run's latest); the newest includes its jobs and failure reasons.",
+    input: z.object({
+      repo: z.string(),
+      branch: z.string().optional(),
+      url: z.string().optional(),
+    }),
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo, branch, url }, ctx) => {
+      if (branch) {
+        allowedRepo(repo, ctx);
+        const registry = await repositories.get(repo);
+        if (!registry) throw new Error(`repository "${repo}" is not registered`);
+        const { gitProviderFor } = await import("../git/provider.ts");
+        const provider = gitProviderFor(registry.provider);
+        if (!provider.pipelines) return unsupportedFor(provider.name, "Reading pipelines");
+        return provider.pipelines({
+          repo: repositoryReference(registry),
+          remoteUrl: registry.repository_url ?? null,
+          ref: branch,
+        });
+      }
+      const { provider, ref } = await hostedPullRequest(repo, url, ctx);
+      if (!provider.pipelines) return unsupportedFor(provider.name, "Reading pipelines");
+      return provider.pipelines({ repo: ref.repo, remoteUrl: ref.remoteUrl, url: ref.url });
+    },
+  });
+  registerIntegrationTool({
+    name: "git.repository",
+    summary:
+      "Default branch and protected branches of an allowed repository, as its Git host reports them.",
+    description:
+      "Read-only. Repository metadata from the host (default branch, protected branches, visibility).",
+    input: z.object({ repo: z.string() }),
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo }, ctx) => {
+      allowedRepo(repo, ctx);
+      const registry = await repositories.get(repo);
+      if (!registry) throw new Error(`repository "${repo}" is not registered`);
+      const { gitProviderFor } = await import("../git/provider.ts");
+      const provider = gitProviderFor(registry.provider);
+      if (!provider.repositoryMetadata)
+        return unsupportedFor(provider.name, "Reading repository metadata");
+      return provider.repositoryMetadata({
+        repo: repositoryReference(registry),
+        remoteUrl: registry.repository_url ?? null,
+      });
+    },
+  });
+  registerIntegrationTool({
+    name: "git.job_log",
+    summary: "Tail of one CI job log (secrets redacted), to analyse a failed pipeline.",
+    description: "Read-only. `job_id` from git.pipelines; `tail` lines (default 200, max 2000).",
+    input: z.object({
+      repo: z.string(),
+      job_id: z.number().int().positive(),
+      tail: z.number().int().min(1).max(2000).optional(),
+    }),
+    readOnly: true,
+    available: () => true,
+    handler: async ({ repo, job_id, tail }, ctx) => {
+      allowedRepo(repo, ctx);
+      const registry = await repositories.get(repo);
+      if (!registry) throw new Error(`repository "${repo}" is not registered`);
+      const { gitProviderFor } = await import("../git/provider.ts");
+      const provider = gitProviderFor(registry.provider);
+      if (!provider.jobLog) return unsupportedFor(provider.name, "Reading job logs");
+      return provider.jobLog({
+        repo: repositoryReference(registry),
+        remoteUrl: registry.repository_url ?? null,
+        jobId: job_id,
+        tail,
+      });
+    },
   });
 }

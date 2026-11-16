@@ -111,3 +111,15 @@ the step continues the run. One user's access is never used for another user's r
   are then filtered per viewer as above.
 - Bitbucket write verification depends on the workspace permission API answering for the user; with `strict` and a
   non-admin Bitbucket account, write/PR may stay undetermined (choose `personal` to rely on Bitbucket enforcing pushes).
+
+## GitLab verification
+
+GitLab repositories are verified with the user's own token for that instance (user secret `gitlab_token:<host>`,
+saved under Integrations → GitLab). `GET /projects/:id` answers the effective access level: project or group access
+of 30 (Developer) or higher is write, 20 (Reporter) is read only, below 20 is denied, and 403/404 is denied. A
+rejected token or an unreachable instance is `unknown`, which strict policy treats as not allowed.
+`gitlab.accessVerification` has the same meanings as the Bitbucket and GitHub settings. A shared `GITLAB_TOKEN`
+(only with `gitlab.allowSharedCredentials`) is used for transport and API calls, never as a permission grant.
+A registry row whose URL is no longer accepted (for example its host was removed from `config.gitlab.instances`)
+is recorded as `unknown` instead of failing the listing. Tests replace the verifier with
+`setGitlabPermissionChecker`.

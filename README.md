@@ -76,7 +76,7 @@ The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a
 
 ## Self-development
 
-The running installation can be a normal registered repository. An administrator registers its GitHub (or Bitbucket) URL, default branch and category, then grants access per user. Admin rights do not grant source access. The workflow `platform-self-development` is the built-in template: analyse, confirm repositories, plan, approve, implement in a worktree, targeted tests, independent review, full `npm test`, then a pull request. It uses the existing engine, checkpoints and UI.
+The running installation can be a normal registered repository. An administrator registers its GitHub (or Bitbucket, or GitLab) URL, default branch and category, then grants access per user. Admin rights do not grant source access. The workflow `platform-self-development` is the built-in template: analyse, confirm repositories, plan, approve, implement in a worktree, targeted tests, independent review, full `npm test`, then a pull request. It uses the existing engine, checkpoints and UI.
 
 The live checkout is never the worktree. Git operations refuse that directory, edits outside the run worktree are denied, and test commands for that repository do not receive `DATABASE_URL`, `AUTH_SECRET` or Git tokens. When `bwrap` is installed, those commands run with the live tree mounted read-only. Without it, set `platform.trustedOperatorIsolation` only on a single-operator workstation; Claude and Cursor coding stay policy-enforced and are refused until that flag is set. Codex coding uses its OS sandbox. The server is not restarted and nothing is merged automatically.
 
@@ -369,6 +369,8 @@ See the [P2 validation report](docs/validation/p2-finalization.md), [measured pa
 Administrators add `https://bitbucket.org/<workspace>/<repository>.git` and a default branch on **Repositories**, preserving project mappings and repository permissions. Members use that shared registration with their own Bitbucket credentials. Each assigned instance automatically clones into its dataDir, then creates an isolated run worktree for Claude/Codex/Cursor. No source-path mapping is needed for new repositories. Connection testing, preparation, refresh and workspace status are available on the repository detail page.
 
 Existing paths remain deprecated legacy hints; IDs, knowledge, dependencies and historical runs are preserved by migration 028. Review legacy evidence with `npm run repositories:migrate`; use `-- --apply` only after reviewing the report. Missing or ambiguous remotes remain unresolved rather than being guessed from repository names.
+
+GitHub (`https://github.com/<owner>/<repository>.git`) and GitLab (`https://<instance>/<group>[/<subgroup>...]/<project>.git`, gitlab.com and the self-hosted instances listed in `config.gitlab.instances`, e.g. gitlab.hasaki.work) work the same way with each member's own token. GitLab setup, minimum token scopes, internal CA and merge policy are in the [GitLab guide](docs/architecture/gitlab.md).
 
 Read the [repository architecture](docs/architecture/repositories.md), [migration guide](docs/architecture/repository-migration.md), [multi-instance development guide](docs/architecture/multi-instance-development.md) and [Bitbucket credential guide](docs/architecture/bitbucket-credentials.md). Separate directories preserve application ownership; workers sharing an OS account do not provide OS security isolation.
 

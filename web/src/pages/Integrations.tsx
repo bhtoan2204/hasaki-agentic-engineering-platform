@@ -1118,6 +1118,148 @@ function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
   );
 }
 
+/**
+ * Per-instance GitLab access token (personal or project access token). The host must be one of the instances the
+ * server allows (config.gitlab.instances); the token is never shown again, only whether one is saved.
+ */
+function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
+  const { t } = useI18n();
+  const { data: st, reload } = useApi<{
+    instances: Array<{
+      host: string;
+      base_url: string;
+      configured: boolean;
+      personal: boolean;
+      ssh_available: boolean;
+      ssh_key: boolean;
+    }>;
+  }>("/api/integrations/gitlab");
+  const [host, setHost] = useState("");
+  const [token, setToken] = useState("");
+  const [sshKey, setSshKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [check, setCheck] = useState<{ ok: boolean; kind: string; message: string } | null>(null);
+  const instances = st?.instances ?? [];
+  const selected = host || instances[0]?.host || "";
+  const current = instances.find((i) => i.host === selected);
+  const connected = instances.filter((i) => i.configured);
+  const save = async () => {
+    setBusy(true);
+    setCheck(null);
+    const r = await act(
+      () => api<unknown>("/api/integrations/gitlab", { host: selected, token }),
+      t("ig.gl.saved"),
+    );
+    setBusy(false);
+    if (r) {
+      setToken("");
+      reload();
+    }
+  };
+  const saveSsh = async () => {
+    setBusy(true);
+    const r = await act(
+      () => api<unknown>("/api/integrations/gitlab/ssh-key", { host: selected, ssh_key: sshKey }),
+      t("ig.gl.sshSaved"),
+    );
+    setBusy(false);
+    if (r) {
+      setSshKey("");
+      reload();
+    }
+  };
+  const test = async () => {
+    setBusy(true);
+    const r = await act(() =>
+      api<{ ok: boolean; kind: string; message: string }>("/api/integrations/gitlab/test", {
+        host: selected,
+      }),
+    );
+    setBusy(false);
+    if (r) setCheck(r);
+  };
+  return (
+    <Row
+      id="gitlab"
+      icon={GitPullRequest}
+      title="GitLab"
+      health={!st ? "loading" : connected.length ? "ok" : "off"}
+      {...p}
+      summary={connected.length ? connected.map((i) => i.host).join(", ") : t("ig.gl.summaryOff")}
+    >
+      <p className="muted small">{t("ig.gl.body")}</p>
+      <Field label={t("ig.gl.instance")} hint={t("ig.gl.instanceHint")}>
+        <select value={selected} onChange={(e) => (setHost(e.target.value), setCheck(null))}>
+          {instances.map((i) => (
+            <option key={i.host} value={i.host}>
+              {i.base_url}
+              {i.personal ? ` · ${t("ig.gl.saved")}` : ""}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={t("ig.gl.token")}>
+        <input
+          type="password"
+          autoComplete="off"
+          value={token}
+          placeholder={current?.personal ? t("ig.keep") : "glpat-…"}
+          onChange={(e) => setToken(e.target.value)}
+        />
+      </Field>
+      {current?.ssh_available && (
+        <Field label={t("ig.gl.sshKey")} hint={t("ig.gl.sshKeyHint")}>
+          <textarea
+            rows={3}
+            autoComplete="off"
+            spellCheck={false}
+            value={sshKey}
+            placeholder={current.ssh_key ? t("ig.keep") : "-----BEGIN OPENSSH PRIVATE KEY-----"}
+            onChange={(e) => setSshKey(e.target.value)}
+          />
+          <button className="sm ghost" disabled={busy || !sshKey} onClick={saveSsh}>
+            <KeyRound size={14} strokeWidth={2} />
+            {t("ig.gl.sshSave")}
+          </button>
+        </Field>
+      )}
+      {check && (
+        <p className={`small ${check.ok ? "" : "error"}`}>
+          {check.ok ? "✓ " : `${t(`ig.gl.err.${check.kind}`)}: `}
+          {check.message}
+        </p>
+      )}
+      <div className="ig-actions">
+        <button className="sm" disabled={busy || !token || !selected} onClick={save}>
+          <KeyRound size={14} strokeWidth={2} />
+          {busy ? t("ig.checking") : t("ig.save")}
+        </button>
+        <button className="sm ghost" disabled={busy || !current?.configured} onClick={test}>
+          {t("ig.gl.test")}
+        </button>
+        {current?.personal && (
+          <button
+            className="sm ghost"
+            onClick={async () => {
+              const ok = await act(
+                () => api("/api/integrations/gitlab/clear", { host: selected }),
+                t("ig.removed"),
+              );
+              if (!ok) return;
+              setToken("");
+              setCheck(null);
+              reload();
+            }}
+          >
+            <LogOut size={14} strokeWidth={2} />
+            {t("ig.removePlatform")}
+          </button>
+        )}
+      </div>
+    </Row>
+  );
+}
+
 function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/telegram");
@@ -1429,6 +1571,7 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
         <div className="ig-list">
           <Bitbucket {...row("bitbucket")} />
           <GitHubAccount {...row("github")} />
+          <GitLabAccount {...row("gitlab")} />
           <Telegram {...row("telegram")} />
         </div>
       </section>

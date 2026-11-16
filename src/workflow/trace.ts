@@ -51,13 +51,15 @@ function clip(v: unknown, max: number): unknown {
   return v;
 }
 
+/** GitLab personal, deploy, trigger, runner, ... tokens (same prefixes as integrations/redact.ts). */
+const GITLAB_TOKEN = /\bgl(?:pat|dt|ptt|rt|rtr|cbt|imt|ft|soat|oas|agent|wt|ffct)-[A-Za-z0-9_-]{16,}/g;
 const GITHUB_TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g;
 
 const secretKey = (k: string) => redactSecrets(`"${k}":"probe-value"`).endsWith('***"');
 
 // redactContextValue only masks exact key names; this restores the key+value patterns (github_token, db_password...).
 function maskFields(v: unknown): unknown {
-  if (typeof v === "string") return v.replace(GITHUB_TOKEN, "[redacted]");
+  if (typeof v === "string") return v.replace(GITHUB_TOKEN, "[redacted]").replace(GITLAB_TOKEN, "[redacted]");
   if (Array.isArray(v)) return v.map(maskFields);
   if (v && typeof v === "object")
     return Object.fromEntries(
