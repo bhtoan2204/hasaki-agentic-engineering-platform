@@ -13,6 +13,7 @@ export const cfgPath = join(root, "config.json");
 writeFileSync(
   cfgPath,
   JSON.stringify({
+    instanceId: "platform-test-worker",
     reposRoot: join(root, "repos"),
     dataDir: join(root, "data"),
     projects: { OMS: ["oms-api", "oms-background"], Payment: ["payment-src"] },

@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
+import {
+  AgentValues,
+  legacyAgentConfiguration,
+  resolveAgentValues,
+  validateConfigurationValues,
+  type AgentConfiguration,
+  type FieldSources,
+} from "./configuration.ts";
 import {
   agentProvider,
   AGENT_PROVIDERS,
@@ -46,6 +53,8 @@ export const StepAgentConfig = z
       .nullable()
       .optional(),
     execution_profile: z.enum(["MICRO", "FAST", "STANDARD", "DEEP"]).optional(),
+    options: AgentValues.shape.options,
+    max_turns: z.number().int().min(1).max(500).optional(),
     timeout_ms: z.number().int().min(1000).max(86_400_000).optional(),
     retry: z
       .object({
@@ -87,32 +96,12 @@ export interface EffectiveAgent extends StepAgentConfig {
   model: string | null;
   execution_profile: "MICRO" | "FAST" | "STANDARD" | "DEEP";
   source: string;
+  field_sources?: FieldSources;
 }
 
 export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) {
   if (!provider) return;
-  const model = a.model?.toLowerCase();
-  if (model && provider === "codex" && /claude|^(sonnet|opus|haiku)/.test(model))
-    throw new Error("Codex cannot use a Claude model identifier");
-  if (model && provider === "claude" && /^(gpt|codex|o[134](?:-|$))/.test(model))
-    throw new Error("Claude cannot use a Codex/OpenAI model identifier");
-  if (model && provider === "cursor" && /^claude-/.test(model))
-    throw new Error("Cursor requires its own model alias, not a Claude SDK model identifier");
-  if (model && provider === "antigravity" && /^(o[134](?:-|$))/.test(model))
-    throw new Error(
-      "Antigravity requires supported Gemini, Claude, or OSS models, not OpenAI model identifiers",
-    );
-  if (a.reasoning_effort) {
-    if (provider === "cursor") throw new Error("Cursor does not support explicit reasoning_effort");
-    if (provider === "claude" && ["none", "minimal"].includes(a.reasoning_effort))
-      throw new Error("Unsupported Claude reasoning_effort");
-    if (provider === "codex" && a.reasoning_effort === "max")
-      throw new Error("Unsupported Codex reasoning_effort");
-    if (provider === "antigravity" && ["none", "minimal"].includes(a.reasoning_effort))
-      throw new Error("Unsupported Antigravity reasoning_effort");
-    if (provider === "copilot" && ["none", "minimal"].includes(a.reasoning_effort))
-      throw new Error("Unsupported Copilot reasoning_effort");
-  }
+  validateConfigurationValues(provider, a);
   if (provider === "cursor" && a.allowed_tools != null)
     throw new Error(
       "Cursor cannot enforce a custom native tool allowlist; use its existing platform policy",
@@ -123,188 +112,120 @@ export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) 
     );
 }
 
-export function modelFor(
-  step: { type: string; config: Record<string, any> },
-  profile?: string | null,
-): { model: string; source: string } {
-  if (typeof step.config.model === "string" && step.config.model)
-    return { model: step.config.model, source: "step config" };
-  const role = step.config.independent === true ? "verifier" : step.type;
-  for (const scope of [profile ?? "", "*"]) {
-    const m = config.agent.models?.[scope]?.[role];
-    if (m) return { model: m, source: `routing ${scope}/${role}` };
-  }
-  return {
-    model: config.model ?? "",
-    source: config.model ? "global default" : "sdk default",
-  };
-}
-export function codexModelFor(
-  step: { type: string; config: Record<string, any> },
-  profile?: string | null,
-): { model: string; source: string; effort: string } {
-  const c = codexConfig();
-  const effort = step.config.codex_reasoning_effort || c.reasoningEffort;
-  if (step.config.codex_model)
-    return {
-      model: step.config.codex_model,
-      source: "step config (codex_model)",
-      effort,
-    };
-  const role = step.config.independent === true ? "verifier" : step.type;
-  for (const scope of [profile ?? "", "*"]) {
-    const model = c.models[scope]?.[role];
-    if (model) return { model, source: `codex routing ${scope}/${role}`, effort };
-  }
-  return {
-    model: c.model,
-    source: c.model ? "agent.codex.model" : "codex account default",
-    effort,
-  };
-}
-
-
-export function copilotModelFor(
+/** Compatibility exports delegate to the same provider-aware resolver. */
+function legacyModelFor(
+  provider: AgentProvider,
   step: { type: string; config: Record<string, unknown> },
   profile?: string | null,
-): { model: string; source: string; effort: string } {
-  const c = copilotConfig();
-  const cfg = step.config;
-  const agent = cfg.agent as { model?: string; reasoning_effort?: string } | undefined;
-  const effort =
-    agent?.reasoning_effort ||
-    (typeof cfg.copilot_effort === "string" ? cfg.copilot_effort : "") ||
-    (typeof cfg.effort === "string" ? cfg.effort : "") ||
-    c.effort;
-  if (agent?.model)
-    return {
-      model: agent.model,
-      source: "step config (agent.model)",
-      effort,
-    };
-  if (typeof cfg.copilot_model === "string")
-    return {
-      model: cfg.copilot_model,
-      source: "step config (copilot_model)",
-      effort,
-    };
-  const role = cfg.independent === true ? "verifier" : step.type;
-  for (const scope of [profile ?? "", "*"]) {
-    const model = c.models[scope]?.[role];
-    if (model) return { model, source: `copilot routing ${scope}/${role}`, effort };
-  }
-  return {
-    model: c.model,
-    source: c.model ? "agent.copilot.model" : "copilot default",
-    effort,
-  };
-}
-
-export function antigravityModelFor(
-  step: { type: string; config: Record<string, any> },
-  profile?: string | null,
-): { model: string; source: string; effort: string } {
-  const c = antigravityConfig();
-  const effort =
-    step.config.agent?.reasoning_effort ||
-    step.config.antigravity_effort ||
-    step.config.effort ||
-    c.effort;
-  if (step.config.agent?.model)
-    return {
-      model: step.config.agent.model,
-      source: "step config (agent.model)",
-      effort,
-    };
-  if (step.config.antigravity_model)
-    return {
-      model: step.config.antigravity_model,
-      source: "step config (antigravity_model)",
-      effort,
-    };
+) {
   const role = step.config.independent === true ? "verifier" : step.type;
-  for (const scope of [profile ?? "", "*"]) {
-    const model = c.models[scope]?.[role];
-    if (model) return { model, source: `antigravity routing ${scope}/${role}`, effort };
-  }
-  return {
-    model: c.model,
-    source: c.model ? "agent.antigravity.model" : "antigravity default",
-    effort,
+  const agent = StepAgentConfig.parse(step.config.agent ?? {});
+  const explicit = {
+    ...legacyStepValues(provider, step.config),
+    ...Object.fromEntries(
+      ["model", "reasoning_effort", "max_turns", "timeout_ms", "options"]
+        .filter((key) => agent[key as keyof typeof agent] !== undefined)
+        .map((key) => [key, agent[key as keyof typeof agent]]),
+    ),
   };
+  const document = legacyAgentConfiguration();
+  // Legacy preview callers inspect saved routing even when the provider is disabled.
+  document.providers[provider].enabled = true;
+  const { values, sources } = resolveAgentValues(document, provider, profile ?? "", role, explicit);
+  let source = sources.model ?? "account/CLI default (external)";
+  if (source === "step")
+    source = agent.model !== undefined ? "step config (agent.model)" :
+      provider === "claude" ? "step config" : `step config (${provider}_model)`;
+  if (source.startsWith("profile "))
+    source = source.replace(
+      "profile ",
+      provider === "claude" ? "routing " : `${provider} routing `,
+    );
+  return { model: values.model ?? "", source, effort: values.reasoning_effort ?? "" };
+}
+export function modelFor(
+  step: { type: string; config: Record<string, unknown> },
+  profile?: string | null,
+) {
+  const { model, source } = legacyModelFor("claude", step, profile);
+  return { model, source };
+}
+export const codexModelFor = (
+  step: { type: string; config: Record<string, unknown> },
+  profile?: string | null,
+) => legacyModelFor("codex", step, profile);
+export const antigravityModelFor = (
+  step: { type: string; config: Record<string, unknown> },
+  profile?: string | null,
+) => legacyModelFor("antigravity", step, profile);
+export const copilotModelFor = (
+  step: { type: string; config: Record<string, unknown> },
+  profile?: string | null,
+) => legacyModelFor("copilot", step, profile);
+
+function legacyStepValues(provider: AgentProvider, cfg: Record<string, unknown>) {
+  const model = provider === "claude" ? cfg.model : cfg[`${provider}_model`];
+  const effort = provider === "codex" ? cfg.codex_reasoning_effort :
+    provider === "copilot" || provider === "antigravity" ? cfg[`${provider}_effort`] ?? cfg.effort : undefined;
+  return AgentValues.parse({
+    ...(model ? { model } : {}),
+    ...(effort ? { reasoning_effort: effort } : {}),
+    ...(provider === "claude" && cfg.max_turns !== undefined ? { max_turns: cfg.max_turns } : {}),
+  });
 }
 
 /** Resolve once at claim time; the persisted result is the execution authority. */
 export function resolveStepAgent(
-  run: { agent_provider?: string | null; profile?: string | null },
+  run: {
+    agent_provider?: string | null;
+    profile?: string | null;
+    agent_configuration?: AgentConfiguration | null;
+  },
   step: { type: string; config: Record<string, any>; agent_override?: unknown },
 ): EffectiveAgent | null {
   if (!["agent", "coding_agent"].includes(step.type)) return null;
   step = { ...step, config: step.config ?? {} };
+  const snapshot = run.agent_configuration ?? legacyAgentConfiguration();
   const base = StepAgentConfig.parse(step.config.agent ?? {});
-  const override = step.agent_override == null ? null : StepAgentConfig.parse(step.agent_override);
+  const override =
+    step.agent_override == null ? null : StepAgentOverrideConfig.parse(step.agent_override);
   const changedProvider =
     override?.provider != null && override.provider !== (base.provider ?? agentProvider(run));
   const merged = {
     ...base,
-    ...(changedProvider ? { model: null, reasoning_effort: null } : {}),
+    ...(changedProvider
+      ? { model: undefined, reasoning_effort: undefined, max_turns: undefined, options: undefined }
+      : {}),
     ...override,
   };
   let provider =
-    merged.provider ??
-    (run.agent_provider ? agentProvider(run) : (config.agent.defaultProvider ?? "claude"));
+    merged.provider ?? (run.agent_provider ? agentProvider(run) : snapshot.default_provider);
   validateAgentOptions(merged, provider);
-  const active = substituteEnabledProvider(provider);
-  if (active !== provider) {
-    merged.model = null;
-    merged.reasoning_effort = null;
-    provider = active;
-  }
+  // A frozen run never substitutes a provider because today's enabled flags changed.
+  if (!run.agent_configuration) provider = substituteEnabledProvider(provider);
   const profile =
     run.profile === "MICRO" ? "MICRO" : (merged.execution_profile ?? run.profile ?? "STANDARD");
   if (run.profile === "MICRO") {
     merged.context_tokens = Math.min(12000, merged.context_tokens ?? 12000);
     merged.timeout_ms = Math.min(600000, merged.timeout_ms ?? 600000);
   }
-  const legacy = { ...step, config: { ...step.config } };
-  if (Object.hasOwn(merged, "model")) {
-    delete legacy.config.model;
-    delete legacy.config.codex_model;
-    delete legacy.config.antigravity_model;
-    delete legacy.config.copilot_model;
-  }
-  const routed =
-    provider === "claude"
-      ? modelFor(legacy, profile)
-      : provider === "codex"
-        ? codexModelFor(legacy, profile)
-        : provider === "antigravity"
-          ? antigravityModelFor(legacy, profile)
-          : provider === "copilot"
-            ? copilotModelFor(legacy, profile)
-            : { model: "" };
-  const model = merged.model ?? routed.model ?? null;
-  const reasoning_effort =
-    merged.reasoning_effort === undefined && (provider === "codex" || provider === "antigravity" || provider === "copilot")
-      ? (provider === "codex"
-          ? codexModelFor(legacy, profile).effort
-          : provider === "antigravity"
-            ? antigravityModelFor(legacy, profile).effort
-            : copilotModelFor(legacy, profile).effort) || null
-      : merged.reasoning_effort;
-  validateAgentOptions(
-    {
-      ...merged,
-      model: model || null,
-      reasoning_effort: reasoning_effort as StepAgentConfig["reasoning_effort"],
-    },
-    provider,
-  );
+  const explicit = {
+    ...(!changedProvider ? legacyStepValues(provider, step.config) : {}),
+    ...Object.fromEntries(
+      ["model", "reasoning_effort", "max_turns", "timeout_ms", "options"]
+        .filter((key) => merged[key as keyof typeof merged] !== undefined)
+        .map((key) => [key, merged[key as keyof typeof merged]]),
+    ),
+  };
+  const role = step.config.independent === true ? "verifier" : step.type;
+  const { values, sources } = resolveAgentValues(snapshot, provider, profile, role, explicit);
+  validateAgentOptions({ ...merged, ...values }, provider);
   return {
     ...merged,
     provider,
-    model: model || null,
-    reasoning_effort: reasoning_effort as EffectiveAgent["reasoning_effort"],
+    ...values,
+    model: values.model ?? null,
+    field_sources: sources,
     execution_profile: profile as EffectiveAgent["execution_profile"],
     source: override
       ? "manual override"

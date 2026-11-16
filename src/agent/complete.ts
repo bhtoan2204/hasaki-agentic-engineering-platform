@@ -8,6 +8,21 @@ import { cursorComplete } from "./cursor/run.ts";
 import { antigravityComplete } from "./antigravity/run.ts";
 import { copilotComplete } from "./copilot/run.ts";
 import { agentProvider, type AgentProvider } from "./provider.ts";
+import type { AgentConfiguration } from "./configuration.ts";
+import { resolveStepAgent } from "./stepAgent.ts";
+
+export interface CompletionRun {
+  agent_provider?: string | null;
+  profile?: string | null;
+  agent_configuration?: AgentConfiguration | null;
+}
+
+/** Auxiliary calls share the run's analysis routing and cannot invent historical defaults. */
+export function completionAgent(run: CompletionRun | null | undefined) {
+  if (run?.agent_configuration === null)
+    throw new Error("Historical run requires configuration recovery before completion");
+  return resolveStepAgent(run ?? {}, { type: "agent", config: {} })!;
+}
 
 /**
  * One-shot, tool-less text completion for the auxiliary AI calls that belong to a run (repository ranking, report

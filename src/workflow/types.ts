@@ -146,6 +146,7 @@ export const WorkflowSpec = z.object({
 export type WorkflowSpec = z.infer<typeof WorkflowSpec>;
 
 export interface RunRow {
+  agent_configuration?: import("../agent/configuration.ts").AgentConfiguration | null;
   id: number;
   definition_version_id: number;
   definition_key: string;

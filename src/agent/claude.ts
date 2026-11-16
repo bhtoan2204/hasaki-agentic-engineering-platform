@@ -500,6 +500,12 @@ const agentExecutor: StepExecutor = {
       return executeProviderPhase(ctx);
     }
     const mode: ToolMode = ctx.step.type === "coding_agent" ? "coding" : "analysis";
+    if (ctx.run.agent_configuration === null && !ctx.attempt?.effective_agent)
+      return { kind: "waiting_input", questions: [{
+        question: "Recover configuration for this historical run?",
+        context: "This run has no run-start configuration snapshot and this step has no durable effective settings. Original inherited defaults are unknown. Continuing explicitly freezes current settings for remaining steps; existing attempts stay unchanged.",
+        options: ["Use current configuration for remaining steps"],
+      }], checkpoint: { agent_configuration_recovery: true } };
     const effective = ctx.attempt?.effective_agent ?? resolveStepAgent(ctx.run, ctx.step)!;
     const provider = effective.provider;
     const unavailable = ctx.context?.unavailableSkills ?? [];
