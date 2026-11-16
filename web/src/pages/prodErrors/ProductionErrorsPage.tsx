@@ -1,18 +1,8 @@
 import { RefreshCw, Siren } from "lucide-react";
 import { useApi, useLive } from "../../api.ts";
-import {
-  EmptyState,
-  ErrorBox,
-  PageHeader,
-  Button,
-  Tabs,
-  navigate,
-} from "../../ui.tsx";
+import { EmptyState, ErrorBox, PageHeader, Button, Tabs, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import {
-  AnalyticsFilters,
-  defaultFilters,
-} from "../analytics/AnalyticsFilters.tsx";
+import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.tsx";
 import { AnalyticsSkeleton, type Row } from "../analytics/shared.tsx";
 import { ProdErrorsPage } from "../ProdErrors.tsx";
 import { ProductionOverview } from "./ProductionOverview.tsx";
@@ -86,13 +76,10 @@ export function ProductionErrorsPage({
 }) {
   const { t } = useI18n();
   const params = new URLSearchParams(raw);
-  for (const [k, v] of Object.entries(defaultFilters()))
-    if (v && !params.has(k)) params.set(k, v);
+  for (const [k, v] of Object.entries(defaultFilters())) if (v && !params.has(k)) params.set(k, v);
   const query = params.toString();
   const detail = route === "service";
-  const incident =
-    route === "incident" ||
-    (!!route && !TABS.includes(route as Tab) && !detail);
+  const incident = route === "incident" || (!!route && !TABS.includes(route as Tab) && !detail);
   const tab: Tab = detail
     ? params.get("return_tab") === "services"
       ? "services"
@@ -102,8 +89,7 @@ export function ProductionErrorsPage({
       : TABS.includes(route as Tab)
         ? (route as Tab)
         : "overview";
-  const analytical =
-    !incident && (detail || tab === "overview" || tab === "services");
+  const analytical = !incident && (detail || tab === "overview" || tab === "services");
   const {
     data: options,
     error,
@@ -124,30 +110,20 @@ export function ProductionErrorsPage({
   };
   return (
     <div className="ins an pe-workspace">
-      <PageHeader
-        icon={Siren}
-        title={t("pe.title")}
-        subtitle={t("an.productionWorkspace")}
-      />
+      <PageHeader icon={Siren} title={t("pe.title")} subtitle={t("an.productionWorkspace")} />
       <Tabs<Tab>
         value={tab}
         tabs={TABS.map((k) => [k, t(`an.productionTab.${k}`)])}
         onChange={(k) => {
           const p = new URLSearchParams(query);
-          for (const key of ["view", "return_query", "return_tab", "page"])
-            p.delete(key);
+          for (const key of ["view", "return_query", "return_tab", "page"]) p.delete(key);
           navigate(`/prod-errors/${k}?${p}`);
         }}
       />
       {analytical && (
         <>
           {error && <ErrorBox error={error} onRetry={reload} />}
-          <AnalyticsFilters
-            domain="production"
-            query={query}
-            options={options}
-            onApply={change}
-          />
+          <AnalyticsFilters domain="production" query={query} options={options} onApply={change} />
           {!detail && (
             <div className="an-range-buttons" aria-label={t("an.customRange")}>
               {[
@@ -157,11 +133,7 @@ export function ProductionErrorsPage({
                 [7, "range7d"],
                 [30, "range30d"],
               ].map(([n, key]) => (
-                <button
-                  key={key}
-                  className="ghost xs"
-                  onClick={() => range(Number(n))}
-                >
+                <button key={key} className="ghost xs" onClick={() => range(Number(n))}>
                   {t(`an.${key}`)}
                 </button>
               ))}

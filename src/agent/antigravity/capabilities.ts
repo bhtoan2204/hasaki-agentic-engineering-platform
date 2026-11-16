@@ -35,11 +35,9 @@ const REQUIRED_FLAGS = [
   "--sandbox",
   "--conversation",
 ];
-const NO_FALLBACK =
-  "The platform will not fall back to Claude or another provider.";
+const NO_FALLBACK = "The platform will not fall back to Claude or another provider.";
 
-let capCache: { key: string; at: number; value: AntigravityCapability } | null =
-  null;
+let capCache: { key: string; at: number; value: AntigravityCapability } | null = null;
 
 export function resetCapabilitiesCache(): void {
   capCache = null;
@@ -51,8 +49,7 @@ export function antigravityEnv(
 ): NodeJS.ProcessEnv {
   const out = agentEnvironment(base, "antigravity");
   if (execution.getStore()?.evaluation?.fixtureAgent) {
-    for (const k of Object.keys(out))
-      if (k.startsWith("FAKE_AGY_")) delete out[k];
+    for (const k of Object.keys(out)) if (k.startsWith("FAKE_AGY_")) delete out[k];
     out.FAKE_AGY_MODE = "ok";
   }
   return { ...out, ...extra };
@@ -75,23 +72,14 @@ export async function antigravityCapabilities(
     ...(selection ? { model: selection.model, effort: selection.effort } : {}),
   };
   const key = `${cfg.bin}\u0000${cfg.model}\u0000${cfg.effort}\u0000${process.env.FAKE_AGY_MODE ?? ""}`;
-  if (
-    !force &&
-    capCache &&
-    capCache.key === key &&
-    Date.now() - capCache.at < 5 * 60_000
-  )
+  if (!force && capCache && capCache.key === key && Date.now() - capCache.at < 5 * 60_000)
     return capCache.value;
   const value = await probe(cfg.bin, cfg.model, cfg.effort);
   capCache = { key, at: Date.now(), value };
   return value;
 }
 
-async function probe(
-  bin: string,
-  model: string,
-  effort: string,
-): Promise<AntigravityCapability> {
+async function probe(bin: string, model: string, effort: string): Promise<AntigravityCapability> {
   let version = "";
   try {
     const v = await run(bin, ["--version"]);
@@ -137,16 +125,11 @@ async function probe(
   }
 
   // Detect worker authentication status: OAuth token file presence or model listing success
-  const tokenFile = join(
-    homedir(),
-    ".gemini",
-    "antigravity-cli",
-    "antigravity-oauth-token",
-  );
+  const tokenFile = join(homedir(), ".gemini", "antigravity-cli", "antigravity-oauth-token");
   let hasToken = false;
   try {
     hasToken = existsSync(tokenFile) && statSync(tokenFile).size > 0;
-  } catch { }
+  } catch {}
 
   const models = await modelCatalog(bin);
   if (!models && !execution.getStore()?.evaluation?.fixtureAgent) {
@@ -178,9 +161,7 @@ async function probe(
   return cap;
 }
 
-export async function modelCatalog(
-  bin: string,
-): Promise<AntigravityModel[] | null> {
+export async function modelCatalog(bin: string): Promise<AntigravityModel[] | null> {
   try {
     const r = await run(bin, ["models"], 30_000);
     const stdout = r.stdout;
@@ -223,9 +204,7 @@ export function checkModel(
   effort: string,
 ): string | null {
   if (!models.length) return null;
-  const m = model
-    ? models.find((x) => x.slug === model || x.name === model)
-    : null;
+  const m = model ? models.find((x) => x.slug === model || x.name === model) : null;
   if (model && !m) {
     return `Antigravity model "${model}" is not available to the worker's account (available: ${models.map((x) => x.slug).join(", ")}).`;
   }

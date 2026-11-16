@@ -1,0 +1,640 @@
+import { config } from "../src/config.ts";
+import { repositories } from "../src/repos/service.ts";
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { createServer, type Server } from "node:http";
+import { pool, q, one } from "../src/db/pool.ts";
+import { migrate } from "../src/db/migrate.ts";
+import { seedTemplates } from "../src/workflow/definitions.ts";
+import { seedKnowledge } from "../src/knowledge/service.ts";
+import { handle } from "../src/http/app.ts";
+import { createUser, setActive, setPassword } from "../src/auth/users.ts";
+import { claimLegacy } from "../src/auth/legacy.ts";
+import { knowledge } from "../src/knowledge/service.ts";
+import { workItems } from "../src/workitems/service.ts";
+import { startRun } from "../src/workflow/engine.ts";
+import { putUserSecret, getUserSecret } from "../src/auth/secrets.ts";
+import { sessionFromRequest } from "../src/auth/sessions.ts";
+
+let server: Server;
+let base = "";
+
+function client() {
+  let cookie = "";
+  let csrf = "";
+  return {
+    cookie: () => cookie,
+    async login(username: string, password: string) {
+      const r = await fetch(base + "/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const raw =
+        typeof r.headers.getSetCookie === "function"
+          ? r.headers.getSetCookie()
+          : [r.headers.get("set-cookie") ?? ""];
+      cookie = raw
+        .map((c) => c.split(";")[0])
+        .filter(Boolean)
+        .join("; ");
+      const body = await r.json();
+      csrf = body.csrf ?? "";
+      return { status: r.status, body };
+    },
+    async call(path: string, body?: unknown) {
+      const headers: Record<string, string> = {};
+      if (cookie) headers.cookie = cookie;
+      if (body !== undefined) {
+        headers["content-type"] = "application/json";
+        if (csrf) headers["x-csrf-token"] = csrf;
+      }
+      const r = await fetch(base + path, {
+        method: body !== undefined ? "POST" : "GET",
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      const text = await r.text();
+      let parsed: any = {};
+      try {
+        parsed = text ? JSON.parse(text) : {};
+      } catch {
+        parsed = { raw: text };
+      }
+      return { status: r.status, body: parsed, text };
+    },
+  };
+}
+
+before(async () => {
+  await migrate();
+  await seedTemplates();
+  await seedKnowledge();
+  await createUser({ username: "admin", password: "admin-password", role: "admin" });
+  await createUser({ username: "membera", password: "member-a-password", role: "member" });
+  await createUser({ username: "memberb", password: "member-b-password", role: "member" });
+  server = createServer(handle);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  base = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+});
+
+after(async () => {
+  server?.close();
+  await pool.end();
+});
+
+test("anonymous callers cannot use protected APIs, downloads or the event stream", async () => {
+  const anon = client();
+  assert.equal((await anon.call("/api/health")).status, 200);
+  assert.equal((await anon.call("/api/ui-messages")).status, 200);
+  assert.equal((await anon.call("/api/work-items")).status, 401);
+  assert.equal((await anon.call("/api/runs")).status, 401);
+  assert.equal((await anon.call("/api/artifacts/1/raw")).status, 401);
+  assert.equal((await anon.call("/api/stream")).status, 401);
+  assert.equal(
+    (await anon.call("/api/auth/login", { username: "nobody", password: "wrong-password" })).status,
+    401,
+  );
+});
+
+test("member A cannot read or mutate member B by id, and a mixed answer batch writes nothing", async () => {
+  const a = client();
+  const b = client();
+  assert.equal((await a.login("membera", "member-a-password")).status, 200);
+  assert.equal((await b.login("memberb", "member-b-password")).status, 200);
+  const itemA = await (await a.call("/api/work-items", { title: "A only", project: "OMS" })).body;
+  const itemB = await (await b.call("/api/work-items", { title: "B only", project: "OMS" })).body;
+  assert.equal((await a.call(`/api/work-items/${itemB.id}`)).status, 404);
+  assert.equal((await b.call(`/api/work-items/${itemA.id}`)).status, 404);
+  assert.equal((await a.call(`/api/work-items/${itemB.id}`, { title: "stolen" })).status, 404);
+  const runA = await (
+    await a.call("/api/runs", {
+      workflow: "bug-investigation",
+      work_item_id: itemA.id,
+      start: false,
+    })
+  ).body;
+  const runB = await (
+    await b.call("/api/runs", {
+      workflow: "bug-investigation",
+      work_item_id: itemB.id,
+      start: false,
+    })
+  ).body;
+  assert.equal((await a.call(`/api/runs/${runB.id}`)).status, 404);
+  assert.equal((await a.call(`/api/runs/${runB.id}/pause`, {})).status, 404);
+  assert.equal((await a.call(`/api/runs/${runB.id}/cancel`, {})).status, 404);
+  const stepA = (
+    await q<{ id: number }>(
+      pool,
+      "SELECT id FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1",
+      [runA.id],
+    )
+  )[0];
+  const stepB = (
+    await q<{ id: number }>(
+      pool,
+      "SELECT id FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1",
+      [runB.id],
+    )
+  )[0];
+  const qa = await one<{ id: number }>(
+    pool,
+    "INSERT INTO workflow_questions (run_id, step_id, question, status) VALUES ($1, $2, 'a?', 'open') RETURNING id",
+    [runA.id, stepA.id],
+  );
+  const qb = await one<{ id: number }>(
+    pool,
+    "INSERT INTO workflow_questions (run_id, step_id, question, status) VALUES ($1, $2, 'b?', 'open') RETURNING id",
+    [runB.id, stepB.id],
+  );
+  const mixed = await a.call("/api/questions/answers", {
+    answers: { [qa!.id]: "yes", [qb!.id]: "no" },
+  });
+  assert.equal(mixed.status, 404);
+  const still = await one<{ status: string }>(
+    pool,
+    "SELECT status FROM workflow_questions WHERE id = $1",
+    [qa!.id],
+  );
+  assert.equal(still?.status, "open");
+  assert.equal(
+    runA.owner_id,
+    (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!.id,
+  );
+  assert.equal(runA.agent_provider, "claude");
+  const cursor = await (
+    await a.call("/api/runs", {
+      workflow: "bug-investigation",
+      title: "cursor",
+      start: false,
+      agent_provider: "cursor",
+    })
+  ).body;
+  assert.equal(cursor.agent_provider, "cursor");
+  assert.equal(cursor.owner_id, runA.owner_id);
+});
+
+test("two members import the same external task as separate private rows", async () => {
+  const ua = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!;
+  const ub = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'memberb'"))!;
+  const first = await workItems.upsertImported({
+    source: "hasaki_work",
+    code: "HSK-SAME",
+    title: "A copy",
+    ownerId: ua.id,
+  });
+  const again = await workItems.upsertImported({
+    source: "hasaki_work",
+    code: "HSK-SAME",
+    title: "A again",
+    ownerId: ua.id,
+  });
+  const other = await workItems.upsertImported({
+    source: "hasaki_work",
+    code: "HSK-SAME",
+    title: "B copy",
+    ownerId: ub.id,
+  });
+  assert.equal(first.created, true);
+  assert.equal(again.created, false);
+  assert.equal(again.item.id, first.item.id);
+  assert.equal(other.created, true);
+  assert.notEqual(other.item.id, first.item.id);
+  const run = await startRun({
+    definitionKey: "bug-investigation",
+    workItemId: first.item.id,
+    start: false,
+  });
+  assert.equal(run.owner_id, ua.id);
+  assert.equal(run.inputs.task_code, "HSK-SAME");
+  assert.equal(run.branch, `u${ua.id}-HSK-SAME`);
+});
+
+test("shared templates are usable by members and writable only by an admin", async () => {
+  const a = client();
+  const admin = client();
+  await a.login("membera", "member-a-password");
+  await admin.login("admin", "admin-password");
+  assert.equal((await a.call("/api/workflows/bug-investigation")).status, 200);
+  assert.equal(
+    (await a.call("/api/workflows/bug-investigation/draft", { spec: { name: "x", steps: [] } }))
+      .status,
+    403,
+  );
+  const cloned = await a.call("/api/workflows/bug-investigation/clone", {});
+  assert.equal(cloned.status, 200);
+  assert.equal(
+    cloned.body.owner_id,
+    (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!.id,
+  );
+  const priv = await knowledge.create({
+    key: "private-note-a",
+    category: "business_rule",
+    scope_type: "GLOBAL",
+    title: "A note",
+    content: "only A",
+    ownerId: cloned.body.owner_id,
+  });
+  const ownerB = (await one<{ id: number }>(
+    pool,
+    "SELECT id FROM users WHERE username = 'memberb'",
+  ))!.id;
+  const seenByB = (await knowledge.candidates(pool, ownerB)).some(
+    (k) => k.key === "private-note-a",
+  );
+  const seenByA = (await knowledge.candidates(pool, Number(priv.owner_id))).some(
+    (k) => k.key === "private-note-a",
+  );
+  assert.equal(seenByB, false);
+  assert.equal(seenByA, true);
+});
+
+test("secrets stay on the owning account, and logout, reset and deactivation revoke the session", async () => {
+  const a = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!;
+  const b = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'memberb'"))!;
+  await Promise.all([
+    putUserSecret(a.id, "hasaki_token", "aaa.bbb.ccc"),
+    putUserSecret(b.id, "hasaki_token", "ddd.eee.fff"),
+  ]);
+  assert.equal(await getUserSecret(a.id, "hasaki_token"), "aaa.bbb.ccc");
+  assert.equal(await getUserSecret(b.id, "hasaki_token"), "ddd.eee.fff");
+  const member = client();
+  await member.login("membera", "member-a-password");
+  assert.equal((await member.call("/api/auth/logout", {})).status, 200);
+  assert.equal((await member.call("/api/work-items")).status, 401);
+  await member.login("membera", "member-a-password");
+  await setPassword(a.id, "member-a-password");
+  assert.equal((await member.call("/api/work-items")).status, 401);
+  await member.login("membera", "member-a-password");
+  await setActive(a.id, false);
+  assert.equal((await member.call("/api/work-items")).status, 401);
+  await assert.rejects(
+    startRun({
+      definitionKey: "bug-investigation",
+      title: "inactive",
+      ownerId: a.id,
+      start: false,
+    }),
+    /not active/,
+  );
+  await setActive(a.id, true);
+});
+
+test("unassigned legacy rows stay hidden until an admin claims them", async () => {
+  await q(
+    pool,
+    "INSERT INTO work_items (code, source, title, owner_id) VALUES ('LEGACY-1', 'manual', 'old', NULL)",
+  );
+  const member = client();
+  const admin = client();
+  await member.login("memberb", "member-b-password");
+  await admin.login("admin", "admin-password");
+  const listed = await member.call("/api/work-items");
+  assert.equal(
+    listed.body.some((w: { code: string }) => w.code === "LEGACY-1"),
+    false,
+  );
+  const id = (await one<{ id: number }>(
+    pool,
+    "SELECT id FROM work_items WHERE code = 'LEGACY-1' AND owner_id IS NULL",
+  ))!.id;
+  assert.equal((await admin.call(`/api/work-items/${id}`)).status, 404);
+  const adminId = (await one<{ id: number }>(
+    pool,
+    "SELECT id FROM users WHERE username = 'admin'",
+  ))!.id;
+  const ownedBefore = (
+    await pool.query("SELECT id, owner_id FROM work_items WHERE owner_id IS NOT NULL ORDER BY id")
+  ).rows;
+  const sharedBefore = (
+    await pool.query("SELECT id FROM knowledge_items WHERE owner_id IS NULL ORDER BY id")
+  ).rows;
+  const claimed = await claimLegacy(adminId);
+  assert.deepEqual(
+    (
+      await pool.query(
+        "SELECT id, owner_id FROM work_items WHERE id = ANY($1::bigint[]) ORDER BY id",
+        [ownedBefore.map((r) => r.id)],
+      )
+    ).rows,
+    ownedBefore,
+  );
+  assert.deepEqual(
+    (await pool.query("SELECT id FROM knowledge_items WHERE owner_id IS NULL ORDER BY id")).rows,
+    sharedBefore,
+  );
+  assert.ok(claimed.work_items >= 1);
+  assert.equal((await admin.call(`/api/work-items/${id}`)).status, 200);
+  assert.equal((await member.call(`/api/work-items/${id}`)).status, 404);
+  const shared = await one<{ owner_id: number | null }>(
+    pool,
+    "SELECT owner_id FROM workflow_definitions WHERE key = 'bug-investigation' AND owner_id IS NULL",
+  );
+  assert.ok(shared);
+  assert.equal(shared.owner_id, null);
+});
+
+test("a resumed run keeps the owner stored on the row", async () => {
+  const a = (await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'membera'"))!;
+  const run = await startRun({
+    definitionKey: "bug-investigation",
+    title: "resume owner",
+    ownerId: a.id,
+    start: false,
+    agentProvider: "cursor",
+  });
+  const again = await one<{ owner_id: number; agent_provider: string }>(
+    pool,
+    "SELECT owner_id, agent_provider FROM workflow_runs WHERE id = $1",
+    [run.id],
+  );
+  assert.equal(again?.owner_id, a.id);
+  assert.equal(again?.agent_provider, "cursor");
+  const req = { headers: { cookie: "" }, socket: {} } as any;
+  assert.equal(await sessionFromRequest(req), null);
+});
+
+test("Chrome hosted endpoint stays authenticated, CSRF protected and cannot be enabled by client input", async () => {
+  const member = client();
+  await member.login("memberb", "member-b-password");
+  const result = await member.call("/api/work/login-window", { userId: 1, browserMode: "local" });
+  assert.equal(result.status, 403);
+  assert.equal(result.body.error, "chrome_hosted");
+  assert.equal((await member.call("/api/work/status")).body.browserMode, "hosted");
+});
+
+test("personal Chrome endpoint rejects another member even with a forged owner in the body", async () => {
+  const previous = {
+    mode: process.env.HASAKI_WORK_BROWSER_MODE,
+    profile: process.env.HASAKI_WORK_CHROME_PROFILE,
+    owner: process.env.HASAKI_WORK_EXISTING_CHROME_USER,
+    host: process.env.HOST,
+  };
+  try {
+    process.env.HASAKI_WORK_BROWSER_MODE = "local";
+    process.env.HASAKI_WORK_CHROME_PROFILE = "existing";
+    process.env.HASAKI_WORK_EXISTING_CHROME_USER = "toan";
+    process.env.HOST = "127.0.0.1";
+    const member = client();
+    await member.login("memberb", "member-b-password");
+    const result = await member.call("/api/work/login-window", { username: "toan", userId: 1 });
+    assert.equal(result.status, 403);
+    assert.equal(result.body.error, "chrome_existing_owner");
+  } finally {
+    for (const [k, v] of Object.entries({
+      HASAKI_WORK_BROWSER_MODE: previous.mode,
+      HASAKI_WORK_CHROME_PROFILE: previous.profile,
+      HASAKI_WORK_EXISTING_CHROME_USER: previous.owner,
+      HOST: previous.host,
+    })) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test("P1 status is authenticated; reindex and cancellation require an administrator; disabling is reversible", async () => {
+  const previous = config.codeIntelligence.enabled;
+  try {
+    config.codeIntelligence.enabled = true;
+    const admin = client(),
+      member = client();
+    await admin.login("admin", "admin-password");
+    await member.login("membera", "member-a-password");
+    await repositories.upsert("p1-api-status", { projects: ["P1"] });
+    assert.equal((await client().call("/api/repositories/index-status")).status, 401);
+    const memberId = (await one<{ id: number }>(
+      pool,
+      "SELECT id FROM users WHERE username = 'membera'",
+    ))!.id;
+    assert.ok(
+      !(await member.call("/api/repositories/index-status")).body.repositories.some(
+        (r: any) => r.name === "p1-api-status",
+      ),
+      "status follows repository access",
+    );
+    assert.equal(
+      (
+        await admin.call("/api/repositories/p1-api-status/access", {
+          user_id: memberId,
+          level: "read",
+        })
+      ).status,
+      200,
+    );
+    assert.equal((await member.call("/api/repositories/p1-api-status/reindex", {})).status, 403);
+    const queued = await admin.call("/api/repositories/p1-api-status/reindex", {});
+    assert.equal(queued.status, 200);
+    assert.equal(queued.body.job.status, "queued");
+    const status = await member.call("/api/repositories/index-status");
+    assert.equal(status.status, 200);
+    assert.equal(
+      status.body.repositories.find((r: any) => r.name === "p1-api-status").status,
+      "queued",
+    );
+    assert.equal(
+      (await member.call(`/api/repositories/index-runs/${queued.body.job.id}/cancel`, {})).status,
+      403,
+    );
+    assert.equal(
+      (await admin.call(`/api/repositories/index-runs/${queued.body.job.id}/cancel`, {})).status,
+      200,
+    );
+    config.codeIntelligence.enabled = false;
+    assert.deepEqual((await admin.call("/api/repositories/index-status")).body, {
+      enabled: false,
+      repositories: [],
+    });
+  } finally {
+    config.codeIntelligence.enabled = previous;
+  }
+});
+
+test("P2 suites and evaluation results require authentication and preserve evaluation ownership", async () => {
+  const previous = config.evaluation.enabled;
+  config.evaluation.enabled = true;
+  try {
+    const admin = client(),
+      a = client(),
+      b = client();
+    await admin.login("admin", "admin-password");
+    await a.login("membera", "member-a-password");
+    await b.login("memberb", "member-b-password");
+    assert.equal((await client().call("/api/benchmark-suites")).status, 401);
+    assert.equal((await a.call("/api/benchmark-suites/publish", {})).status, 403);
+    const suite = await admin.call("/api/benchmark-suites/publish", {});
+    assert.equal(suite.status, 200);
+    const evaluation = await a.call("/api/evaluation-runs", {
+      suite_id: suite.body.id,
+      request_key: "http-evaluation",
+      configuration: { mode: "dry_run", case_limit: 1 },
+    });
+    assert.equal(evaluation.status, 200);
+    assert.equal((await b.call(`/api/evaluation-runs/${evaluation.body.id}`)).status, 404);
+    assert.equal(
+      (await b.call(`/api/evaluation-runs/${evaluation.body.id}/start`, {})).status,
+      404,
+    );
+    assert.equal(
+      (await b.call(`/api/evaluation-runs/${evaluation.body.id}/cancel`, {})).status,
+      404,
+    );
+    assert.equal((await a.call(`/api/evaluation-runs/${evaluation.body.id}`)).status, 200);
+    assert.equal(
+      (
+        await a.call("/api/evaluation-runs", {
+          suite_id: suite.body.id,
+          request_key: "http-live",
+          configuration: { mode: "live", provider: "claude" },
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (await a.call(`/api/evaluation-runs/${evaluation.body.id}/cancel`, {})).status,
+      200,
+    );
+  } finally {
+    config.evaluation.enabled = previous;
+  }
+});
+
+test("repository URL administration is admin-only, granted members share identity and local status never exposes paths", async () => {
+  const admin = client(),
+    member = client();
+  await admin.login("admin", "admin-password");
+  await member.login("membera", "member-a-password");
+  const savedPolicy = config.bitbucket.accessVerification;
+  config.bitbucket.accessVerification = "trusted"; // the member has no personal Bitbucket token in this test
+  try {
+    const definition = {
+      repository_url: "https://bitbucket.org/portable-team/shared",
+      default_branch: "main",
+      projects: ["Portable"],
+      provider: "bitbucket",
+    };
+    assert.equal((await member.call("/api/repositories/url-registry", definition)).status, 403);
+    const created = await admin.call("/api/repositories/url-registry", definition);
+    assert.equal(created.status, 200);
+    assert.equal(created.body.repository_url, definition.repository_url + ".git");
+    assert.equal(
+      (await admin.call("/api/repositories/url-registry-duplicate", definition)).status,
+      409,
+    );
+    assert.equal(
+      (await admin.call("/api/repositories/no-url", { description: "old registration" })).status,
+      400,
+    );
+    assert.equal(
+      (await member.call("/api/repositories/url-registry/workspace")).status,
+      404,
+      "registered is not granted",
+    );
+    const memberId = (await one<{ id: number }>(
+      pool,
+      "SELECT id FROM users WHERE username = 'membera'",
+    ))!.id;
+    assert.equal(
+      (
+        await admin.call("/api/repositories/url-registry/access", {
+          user_id: memberId,
+          level: "read",
+        })
+      ).status,
+      200,
+    );
+    const rows = await member.call("/api/repositories");
+    assert.equal(rows.status, 200);
+    assert.equal(rows.body.find((r: any) => r.name === "url-registry").id, created.body.id);
+    const status = await member.call("/api/repositories/url-registry/workspace");
+    assert.equal(status.status, 200);
+    assert.equal(status.body.status, "not_cloned");
+    assert.ok(!status.text.includes(config.dataDir));
+    const connection = await member.call("/api/repositories/url-registry/test-connection", {});
+    assert.equal(connection.status, 400);
+    assert.match(connection.body.error, /authentication required/);
+    await repositories.upsert("url-registry", { enabled: false });
+    assert.equal(
+      (await member.call("/api/repositories/url-registry/prepare", {})).status,
+      404,
+      "a disabled repository is not accessible",
+    );
+    assert.equal(
+      (
+        await member.call("/api/repositories/validate-url", {
+          repository_url: "https://bitbucket.org/team/repo",
+        })
+      ).status,
+      403,
+      "registration helper is admin-only",
+    );
+    const invalid = await admin.call("/api/repositories/validate-url", {
+      repository_url: "https://person:private-token@bitbucket.org/team/repo",
+    });
+    assert.equal(invalid.status, 400);
+    assert.ok(!invalid.text.includes("private-token"));
+  } finally {
+    config.bitbucket.accessVerification = savedPolicy;
+  }
+});
+
+test("metrics use owner scope; explicit admin support access is audited including cache hits", async () => {
+  const a = client();
+  const b = client();
+  const admin = client();
+  await a.login("membera", "member-a-password");
+  await b.login("memberb", "member-b-password");
+  await admin.login("admin", "admin-password");
+  const run = (
+    await b.call("/api/runs", {
+      workflow: "bug-investigation",
+      title: "private telemetry",
+      start: false,
+    })
+  ).body;
+  const step = await one(
+    pool,
+    "SELECT id FROM workflow_steps WHERE run_id = $1 ORDER BY position LIMIT 1",
+    [run.id],
+  );
+  await q(
+    pool,
+    `INSERT INTO workflow_step_attempts (run_id,step_id,number,generation,status,metrics)
+    VALUES ($1,$2,1,1,'COMPLETED','{"provider":"codex","model":"private-model","tokens":{"input":6789}}')`,
+    [run.id, step.id],
+  );
+  assert.equal((await a.call(`/api/metrics/runs/${run.id}`)).status, 404);
+  assert.equal((await admin.call(`/api/metrics/runs/${run.id}`)).status, 404);
+  assert.equal((await admin.call(`/api/metrics/runs/${run.id}?scope=all`)).status, 200);
+  const own = await a.call("/api/metrics/summary?days=3&scope=all");
+  assert.equal(own.status, 200);
+  assert.ok(!own.body.telemetry.by_model.some((r: any) => r.key === "codex/private-model"));
+  for (let i = 0; i < 2; i++) {
+    const all = await admin.call("/api/metrics/summary?days=3&scope=all");
+    assert.equal(all.status, 200);
+    assert.ok(all.body.telemetry.by_model.some((r: any) => r.key === "codex/private-model"));
+  }
+  const log = await one(
+    pool,
+    "SELECT count(*)::int AS n FROM audit_log WHERE action = 'support.list' AND resource_type = 'metrics'",
+  );
+  assert.equal(log.n, 2);
+});
+
+test("login sessions last 3 days by default (cookie Max-Age and stored expiry)", async () => {
+  const r = await fetch(base + "/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "membera", password: "member-a-password" }),
+  });
+  assert.equal(r.status, 200);
+  const setCookie = r.headers.getSetCookie().find((c) => c.startsWith("sid=")) ?? "";
+  assert.match(setCookie, /Max-Age=259200(;|$)/, "72 h = 259200 s");
+  const row = await one<{ s: number }>(
+    pool,
+    "SELECT extract(epoch FROM expires_at - created_at)::int AS s FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = 'membera') ORDER BY created_at DESC LIMIT 1",
+  );
+  assert.ok(row && Math.abs(row.s - 259200) < 60, `stored expiry ${row?.s}s`);
+});

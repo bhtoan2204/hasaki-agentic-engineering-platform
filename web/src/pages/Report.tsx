@@ -99,11 +99,7 @@ function EvidenceAdder({
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
-      <button
-        className="xs ghost"
-        disabled={busy || !note.trim()}
-        onClick={() => send({ note })}
-      >
+      <button className="xs ghost" disabled={busy || !note.trim()} onClick={() => send({ note })}>
         <StickyNote size={11} /> {t("rp.addNote")}
       </button>
     </div>
@@ -125,17 +121,13 @@ export function ReportPanel({
   onChanged: () => void;
 }) {
   const { t } = useI18n();
-  const waiting =
-    step.status === "WAITING_APPROVAL" ? step.approval?.request : null;
-  const final =
-    step.status === "COMPLETED" && step.output?.report ? step.output : null;
+  const waiting = step.status === "WAITING_APPROVAL" ? step.approval?.request : null;
+  const final = step.status === "COMPLETED" && step.output?.report ? step.output : null;
   const current = final ?? waiting;
   const report = current?.report;
   const [md, setMd] = useState<string>(current?.markdown ?? "");
   const [comment, setComment] = useState("");
-  const [view, setView] = useState<
-    "report" | "markdown" | "evidence" | "history"
-  >("report");
+  const [view, setView] = useState<"report" | "markdown" | "evidence" | "history">("report");
   useEffect(() => setMd(current?.markdown ?? ""), [current?.markdown]);
   const uploads = artifacts.filter((a) => a.kind === "evidence");
   const versions = artifacts.filter((a) => a.kind === "report");
@@ -151,9 +143,7 @@ export function ReportPanel({
               ? t("rp.pending")
               : t("rp.missing", { status: step.status })}
         </Empty>
-        {step.config?.ai_suggest && (
-          <SpecPreview spec={step.config.ai_suggest} />
-        )}
+        {step.config?.ai_suggest && <SpecPreview spec={step.config.ai_suggest} />}
       </div>
     );
   const regenerate = async () =>
@@ -182,8 +172,7 @@ export function ReportPanel({
       <div className="rv-card" style={{ marginTop: 4 }}>
         <div className="rv-card-head" style={{ marginBottom: 4 }}>
           <h4>
-            <ClipboardList size={16} /> {report.task?.code} ·{" "}
-            {report.task?.title}
+            <ClipboardList size={16} /> {report.task?.code} · {report.task?.title}
           </h4>
           {final ? (
             <Badge s="COMPLETED">{t("rp.approvedBadge")}</Badge>
@@ -194,12 +183,11 @@ export function ReportPanel({
         <div className="muted small">
           {report.object && (
             <>
-              {report.object}: <b className="mono">{report.object_value}</b>{" "}
-              ·{" "}
+              {report.object}: <b className="mono">{report.object_value}</b> ·{" "}
             </>
           )}
-          suggest <span className="mono">{report.suggest_id}</span> ·{" "}
-          {report.generated_by} · {time(report.generated_at)}
+          suggest <span className="mono">{report.suggest_id}</span> · {report.generated_by} ·{" "}
+          {time(report.generated_at)}
         </div>
         <div className="rv-minis" style={{ marginTop: 10 }}>
           <div className="rv-mini tone-ok">
@@ -244,16 +232,13 @@ export function ReportPanel({
           </div>
           {report.sections.map((s: any) => (
             <div key={s.name}>
-              <h3 style={{ textTransform: "none", letterSpacing: 0 }}>
-                {s.name}
-              </h3>
+              <h3 style={{ textTransform: "none", letterSpacing: 0 }}>{s.name}</h3>
               {s.requirements.map((r: any) => (
                 <div
                   key={r.id}
                   className="rp-req"
                   style={{
-                    ["--rp-c" as any]:
-                      ST_COLOR[r.status] ?? "var(--line-strong)",
+                    ["--rp-c" as any]: ST_COLOR[r.status] ?? "var(--line-strong)",
                   }}
                 >
                   <div className="rp-req-head">
@@ -267,8 +252,7 @@ export function ReportPanel({
                     <div style={{ marginTop: 6 }}>
                       {r.evidence.map((e: any) => (
                         <div key={e.id} className="rp-ev">
-                          <Link2 size={12} />{" "}
-                          <span className="mono muted">{e.id}</span> {e.title}{" "}
+                          <Link2 size={12} /> <span className="mono muted">{e.id}</span> {e.title}{" "}
                           {e.ref?.url && (
                             <a href={e.ref.url} target="_blank" rel="noopener">
                               {t("rp.open")}
@@ -286,10 +270,7 @@ export function ReportPanel({
                           {e.ref?.step_key && (
                             <>
                               {" "}
-                              ·{" "}
-                              <a href={`#/runs/${run.id}/${e.ref.step_key}`}>
-                                {e.ref.step_key}
-                              </a>
+                              · <a href={`#/runs/${run.id}/${e.ref.step_key}`}>{e.ref.step_key}</a>
                             </>
                           )}
                         </div>
@@ -314,11 +295,7 @@ export function ReportPanel({
                     </div>
                   )}
                   {!final && r.status !== "VERIFIED" && (
-                    <EvidenceAdder
-                      runId={run.id}
-                      requirementId={r.id}
-                      onDone={onChanged}
-                    />
+                    <EvidenceAdder runId={run.id} requirementId={r.id} onDone={onChanged} />
                   )}
                 </div>
               ))}
@@ -343,9 +320,7 @@ export function ReportPanel({
       {view === "markdown" && (
         <div>
           <div className="row tight">
-            <span className="muted small grow">
-              {final ? t("rp.finalMd") : t("rp.editMd")}
-            </span>
+            <span className="muted small grow">{final ? t("rp.finalMd") : t("rp.editMd")}</span>
             <Copy text={md} label={t("rp.copyMd")} />
           </div>
           {final ? (
@@ -380,10 +355,7 @@ export function ReportPanel({
               ) : (
                 <Paperclip size={14} color="var(--brand)" />
               )}
-              <span
-                className="grow"
-                style={{ minWidth: 0, overflowWrap: "anywhere" }}
-              >
+              <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                 {a.data?.note_only ? t("rp.note") : a.name}{" "}
                 {a.data?.requirement_id && (
                   <span className="mono muted">→ {a.data.requirement_id}</span>
@@ -402,9 +374,8 @@ export function ReportPanel({
                 <button
                   className="xs ghost"
                   onClick={async () =>
-                    (await act(() =>
-                      api(`/api/artifacts/${a.id}/delete-evidence`, {}),
-                    )) && onChanged()
+                    (await act(() => api(`/api/artifacts/${a.id}/delete-evidence`, {}))) &&
+                    onChanged()
                   }
                 >
                   <Trash2 size={11} /> {t("rp.delete")}
@@ -412,9 +383,7 @@ export function ReportPanel({
               )}
             </div>
           ))}
-          {!uploads.length && (
-            <div className="muted small">{t("qx.noneYet")}</div>
-          )}
+          {!uploads.length && <div className="muted small">{t("qx.noneYet")}</div>}
         </div>
       )}
       {view === "history" && (
@@ -422,17 +391,12 @@ export function ReportPanel({
           {versions.map((a) => (
             <div key={a.id} className="rp-file">
               <FileText size={14} color="var(--muted)" />{" "}
-              <a
-                href={`/api/artifacts/${a.id}/raw`}
-                target="_blank"
-                rel="noopener"
-              >
+              <a href={`/api/artifacts/${a.id}/raw`} target="_blank" rel="noopener">
                 {a.name}
               </a>{" "}
               <span className="muted">
                 {time(a.created_at)} · attempt{" "}
-                {attempts.find((t: any) => t.id === a.attempt_id)?.number ??
-                  "?"}
+                {attempts.find((t: any) => t.id === a.attempt_id)?.number ?? "?"}
               </span>{" "}
               {a.data?.final && <Badge s="COMPLETED">final</Badge>}
             </div>

@@ -148,12 +148,12 @@ Typical findings:
 
 ## Tests and actual verification
 
-CI does not need a live bot. `test/telegram.test.ts` starts a mocked Telegram HTTP server and runs real PostgreSQL/domain transactions. It covers binding/privacy, callbacks, >20-option ForceReply fallback, bounded inbox retries/dead-lettering, receiver status, cross-instance credential refresh, cleanup retention, replay/concurrency, expired/stale/changed contexts, canceled/paused/offline runs, rejection policy/reasons, choices/free text, simultaneous prompts, cancel/reopen, confirmations, handoff fencing, API failures, transaction rollback, webhook authentication, session/CSRF, receiver ownership/crash takeover, polling offsets, and both transport runtimes.
+CI does not need a live bot. `test/telegram.integration.ts` starts a mocked Telegram HTTP server and runs real PostgreSQL/domain transactions. It covers binding/privacy, callbacks, >20-option ForceReply fallback, bounded inbox retries/dead-lettering, receiver status, cross-instance credential refresh, cleanup retention, replay/concurrency, expired/stale/changed contexts, canceled/paused/offline runs, rejection policy/reasons, choices/free text, simultaneous prompts, cancel/reopen, confirmations, handoff fencing, API failures, transaction rollback, webhook authentication, session/CSRF, receiver ownership/crash takeover, polling offsets, and both transport runtimes.
 
 `test/telegram.browser.ts` runs real Chromium/settings UI and HTTP/DB with a mocked bot. It verifies connection links, binding completion, receiver status, owner preferences/language, credential visibility, disconnect and VI/EN light/dark layouts at 1440px/390px.
 
 ```bash
-node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test test/telegram.test.ts
+node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test test/telegram.integration.ts
 CHROMIUM_BIN=/path/to/chromium node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/telegram.browser.ts
 npm run typecheck
 npm run build

@@ -4,7 +4,7 @@ Phase 3 adds provider-neutral, durable context packs and a shared logical tool i
 
 ## Execution path
 
-Before Claude, Codex or Cursor launches an agent step, the shared executor validates its live owner/attempt binding and builds or reloads the attempt's context pack. Context retrieval runs outside the engine's run-lock transaction. Existing immutable `context_snapshots` remain the source of applicability, pinned upstream attempts, knowledge versions, and verification policy. Packs persist in PostgreSQL before provider execution.
+Before Claude, Codex, Cursor or Antigravity launches an agent step, the shared executor validates its live owner/attempt binding and builds or reloads the attempt's context pack. Context retrieval runs outside the engine's run-lock transaction. Existing immutable `context_snapshots` remain the source of applicability, pinned upstream attempts, knowledge versions, and verification policy. Packs persist in PostgreSQL before provider execution.
 
 The user prompt receives bounded request/evidence entries; curated rules remain in the system prompt. External task text, repository content, production signatures, checkpoints, and earlier agent claims are explicitly untrusted evidence. Existing validated `code_intelligence` snippet blocks and metrics are preserved: the pack calls the original `buildCodeContext` implementation, which checks source hashes and index/worktree generation. Resuming an attempt's conversation with a new durable attempt builds a fresh pack, so changed worktree snippets refresh.
 

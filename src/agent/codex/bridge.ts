@@ -11,7 +11,9 @@ import { bridgeToolsFor, serveStdio } from "../mcpBridge.ts";
 const socket = process.env.PLATFORM_BROKER_SOCKET;
 const token = process.env.PLATFORM_BROKER_TOKEN;
 if (!socket || !token) {
-  process.stderr.write("platform bridge refused to start: missing per-attempt broker credentials\n");
+  process.stderr.write(
+    "platform bridge refused to start: missing per-attempt broker credentials\n",
+  );
   process.exit(1);
 }
 
@@ -21,7 +23,9 @@ serveStdio({
   async call(name, args) {
     try {
       const r = await brokerRequest(socket, { token, kind: "tool", name, args }, 30 * 60 * 1000);
-      return r?.ok ? String(r.text ?? "") : `ERROR: platform broker refused ${name}: ${r?.error ?? "unknown error"}`;
+      return r?.ok
+        ? String(r.text ?? "")
+        : `ERROR: platform broker refused ${name}: ${r?.error ?? "unknown error"}`;
     } catch (e) {
       return `ERROR: platform broker unavailable: ${(e as Error).message}`;
     }

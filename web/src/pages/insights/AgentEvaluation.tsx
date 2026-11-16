@@ -3,10 +3,7 @@ import { FlaskConical, RefreshCw } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { PageHeader, ErrorBox, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import {
-  AnalyticsFilters,
-  defaultFilters,
-} from "../analytics/AnalyticsFilters.tsx";
+import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.tsx";
 import { Notice, AnalyticsSkeleton, fmt } from "../analytics/shared.tsx";
 import { EvaluationScorecards } from "./EvaluationScorecards.tsx";
 import { EvaluationDimensions } from "./EvaluationDimensions.tsx";
@@ -18,13 +15,11 @@ export function AgentEvaluation() {
   const { locale } = useI18n();
   const en = locale === "en";
   const p = new URLSearchParams(location.hash.split("?")[1] ?? "");
-  for (const [k, v] of Object.entries(defaultFilters()))
-    if (v && !p.has(k)) p.set(k, v);
+  for (const [k, v] of Object.entries(defaultFilters())) if (v && !p.has(k)) p.set(k, v);
   const query = p.toString(),
     response = useApi<any>(`/api/agent-evaluation?${query}`),
     options = useApi<any>("/api/analytics/options");
-  const change = (params: URLSearchParams) =>
-    navigate(`/insights/evaluation?${params}`);
+  const change = (params: URLSearchParams) => navigate(`/insights/evaluation?${params}`);
   const filter = (key: string, value: string) => {
     const next = new URLSearchParams(query);
     if (value) next.set(key, value);
@@ -67,10 +62,7 @@ export function AgentEvaluation() {
             {r.category} · {r.context_variant}
           </span>
           <br />
-          <button
-            className="quiet xs"
-            onClick={() => filter("cohort", r.constraints_hash)}
-          >
+          <button className="quiet xs" onClick={() => filter("cohort", r.constraints_hash)}>
             {r.constraints_hash?.slice(0, 12)}
           </button>
         </>
@@ -168,10 +160,7 @@ export function AgentEvaluation() {
         </label>
         <label>
           {en ? "Control cohort" : "Nhóm kiểm soát"}
-          <input
-            value={p.get("cohort") ?? ""}
-            onChange={(e) => filter("cohort", e.target.value)}
-          />
+          <input value={p.get("cohort") ?? ""} onChange={(e) => filter("cohort", e.target.value)} />
         </label>
       </div>
       <Notice>
@@ -179,18 +168,13 @@ export function AgentEvaluation() {
           ? "Fixture controls are not model rankings. Compare only the same cohort, category and context policy. Unknown usage/cost stays unknown; estimates are not API bills. Production observations are not causal benchmark conclusions."
           : "Fixture không xếp hạng mô hình. Chỉ so sánh cùng nhóm, loại nhiệm vụ và chính sách ngữ cảnh. Chi phí/token chưa báo cáo vẫn chưa rõ; ước tính không phải hóa đơn API. Quan sát sản xuất không phải kết luận nhân quả."}
       </Notice>
-      {response.error && (
-        <ErrorBox error={response.error} onRetry={response.reload} />
-      )}
+      {response.error && <ErrorBox error={response.error} onRetry={response.reload} />}
       {!data && !response.error && <AnalyticsSkeleton />}
       {data && (
         <>
           <EvaluationScorecards data={data} common={common} />
           <EvaluationDimensions data={data} common={common} />
-          <EvaluationEvidence
-            data={data}
-            onPage={(n) => filter("page", String(n))}
-          />
+          <EvaluationEvidence data={data} onPage={(n) => filter("page", String(n))} />
         </>
       )}
       <ContextPairedStudy />

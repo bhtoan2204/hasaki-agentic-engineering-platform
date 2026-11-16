@@ -69,7 +69,7 @@ function toolIcon(name: string): LucideIcon {
     ? FolderSearch
     : EDIT_TOOLS.includes(name)
       ? Pencil
-      : name === "Bash"
+      : name === "Bash" || name === "run_command" || name === "exec_command"
         ? SquareTerminal
         : Wrench;
 }
@@ -97,13 +97,21 @@ function StatTile({
   );
 }
 
+function toolName(data: any): string {
+  return String(data?.name ?? data?.tool ?? "");
+}
+
 function toolHint(input: any = {}) {
+  const args = input.args && typeof input.args === "object" ? input.args : {};
   return String(
     input.file_path ??
       input.notebook_path ??
       input.path ??
       input.pattern ??
       input.command ??
+      args.command ??
+      args.CommandLine ??
+      args.cmd ??
       input.repo ??
       input.url ??
       input.query ??
@@ -111,6 +119,20 @@ function toolHint(input: any = {}) {
       input.step_key ??
       "",
   ).split("\n")[0];
+}
+
+/** Token deltas were stored as separate rows. Show one message until a tool or another kind interrupts. */
+export function coalesceStream<T extends { kind: string; content: string }>(events: T[]): T[] {
+  const out: T[] = [];
+  for (const e of events) {
+    const prev = out[out.length - 1];
+    if (prev && (e.kind === "agent" || e.kind === "thinking") && prev.kind === e.kind) {
+      out[out.length - 1] = { ...prev, content: prev.content + e.content };
+      continue;
+    }
+    out.push(e);
+  }
+  return out;
 }
 
 /**
@@ -142,9 +164,7 @@ export function Transcript({
   }, [attemptId]);
   useEffect(() => {
     let stop = false;
-    api<Ev[]>(
-      `/api/attempts/${attemptId}/transcript?after=${last.current}`,
-    ).then((rows) => {
+    api<Ev[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
       if (stop || !rows.length) return;
       last.current = rows[rows.length - 1].id;
       setEvents((prev) => [...prev, ...rows]);
@@ -157,29 +177,31 @@ export function Transcript({
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [events, follow, filter]);
 
+  const stream = useMemo(() => coalesceStream(events), [events]);
   const results = useMemo(() => {
     const m: Record<string, Ev> = {};
     for (const e of events)
-      if (e.kind === "tool_result" && e.data?.tool_use_id)
-        m[e.data.tool_use_id] = e;
+      if (e.kind === "tool_result" && e.data?.tool_use_id) m[e.data.tool_use_id] = e;
     return m;
   }, [events]);
-  const tools = events.filter((e) => e.kind === "tool" && e.data?.name);
+  const tools = stream.filter((e) => e.kind === "tool" && toolName(e.data));
   const filesRead = [
     ...new Set(
       tools
-        .filter((e) => READ_TOOLS.includes(e.data.name))
-        .map((e) => toolHint(e.data.input)),
+        .filter((e) => READ_TOOLS.includes(toolName(e.data)))
+        .map((e) => toolHint(e.data.input ?? e.data.args)),
     ),
   ];
   const filesModified = [
     ...new Set(
       tools
-        .filter((e) => EDIT_TOOLS.includes(e.data.name))
-        .map((e) => toolHint(e.data.input)),
+        .filter((e) => EDIT_TOOLS.includes(toolName(e.data)))
+        .map((e) => toolHint(e.data.input ?? e.data.args)),
     ),
   ];
-  const commands = tools.filter((e) => e.data.name === "Bash");
+  const commands = tools.filter((e) =>
+    ["Bash", "run_command", "exec_command"].includes(toolName(e.data)),
+  );
   const errors = events.filter(
     (e) =>
       (e.kind === "tool_result" && e.data?.is_error) ||
@@ -188,7 +210,8 @@ export function Transcript({
   );
   const result = [...events].reverse().find((e) => e.kind === "result");
 
-  const visible = events.filter((e) => {
+  const visible = stream.filter((e) => {
+    const name = toolName(e.data);
     switch (filter) {
       case "all":
         return (
@@ -201,16 +224,13 @@ export function Transcript({
       case "tools":
         return e.kind === "tool";
       case "read":
-        return e.kind === "tool" && READ_TOOLS.includes(e.data?.name);
+        return e.kind === "tool" && READ_TOOLS.includes(name);
       case "modified":
-        return e.kind === "tool" && EDIT_TOOLS.includes(e.data?.name);
+        return e.kind === "tool" && EDIT_TOOLS.includes(name);
       case "commands":
-        return e.kind === "tool" && e.data?.name === "Bash";
+        return e.kind === "tool" && ["Bash", "run_command", "exec_command"].includes(name);
       case "errors":
-        return (
-          errors.includes(e) ||
-          (e.kind === "tool" && results[e.data?.id]?.data?.is_error)
-        );
+        return errors.includes(e) || (e.kind === "tool" && results[e.data?.id]?.data?.is_error);
       case "reasoning":
         return e.kind === "thinking";
       case "prompts":
@@ -221,22 +241,14 @@ export function Transcript({
   return (
     <div>
       <div className="tr-stats">
-        <StatTile
-          icon={FolderSearch}
-          n={filesRead.length}
-          label={t("tr.filesRead")}
-        >
+        <StatTile icon={FolderSearch} n={filesRead.length} label={t("tr.filesRead")}>
           <div className="mono" title={filesRead.join("\n")}>
             {filesRead.map((f) => (
               <div key={f}>{f}</div>
             ))}
           </div>
         </StatTile>
-        <StatTile
-          icon={Pencil}
-          n={filesModified.length}
-          label={t("tr.filesModified")}
-        >
+        <StatTile icon={Pencil} n={filesModified.length} label={t("tr.filesModified")}>
           <div className="mono" title={filesModified.join("\n")}>
             {filesModified.map((f) => (
               <div key={f}>{f}</div>
@@ -249,10 +261,7 @@ export function Transcript({
           label={
             <>
               {t("tr.commands")} ·{" "}
-              <b
-                className={errors.length ? "err" : ""}
-                style={{ fontSize: "inherit" }}
-              >
+              <b className={errors.length ? "err" : ""} style={{ fontSize: "inherit" }}>
                 {errors.length}
               </b>{" "}
               {t("tr.errors")}
@@ -261,8 +270,7 @@ export function Transcript({
         >
           {result && (
             <div className="muted small" style={{ marginTop: 4 }}>
-              {t("tr.turns", { n: result.data?.num_turns })} ·{" "}
-              {dur(result.data?.duration_ms)}
+              {t("tr.turns", { n: result.data?.num_turns })} · {dur(result.data?.duration_ms)}
               {result.data?.total_cost_usd != null &&
                 ` · $${Number(result.data.total_cost_usd).toFixed(3)}`}
             </div>
@@ -290,11 +298,7 @@ export function Transcript({
           className="small muted"
           style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
         >
-          <input
-            type="checkbox"
-            checked={follow}
-            onChange={(e) => setFollow(e.target.checked)}
-          />{" "}
+          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />{" "}
           {t("tr.follow")}
         </label>
       </div>
@@ -304,10 +308,7 @@ export function Transcript({
         onScroll={() => {
           if (!box.current) return;
           const isNearBottom =
-            box.current.scrollHeight -
-              box.current.scrollTop -
-              box.current.clientHeight <
-            50;
+            box.current.scrollHeight - box.current.scrollTop - box.current.clientHeight < 50;
           if (!isNearBottom && follow) setFollow(false);
           else if (isNearBottom && !follow) setFollow(true);
         }}
@@ -335,17 +336,7 @@ export function Transcript({
   );
 }
 
-function Entry({
-  e,
-  result,
-  live,
-  agent,
-}: {
-  e: Ev;
-  result?: Ev;
-  live: boolean;
-  agent: string;
-}) {
+function Entry({ e, result, live, agent }: { e: Ev; result?: Ev; live: boolean; agent: string }) {
   const { t } = useI18n();
   const sub = e.data?.parent ? " sub" : "";
   const when = <span>{time(e.created_at)}</span>;
@@ -354,8 +345,7 @@ function Entry({
       return (
         <details className="msg reason">
           <summary>
-            <Av icon={ScrollText} />{" "}
-            {t("tr.system", { tools: (e.data?.tools ?? []).join(", ") })}{" "}
+            <Av icon={ScrollText} /> {t("tr.system", { tools: (e.data?.tools ?? []).join(", ") })}{" "}
             {e.data?.knowledge?.length
               ? t("tr.knowledge", { items: e.data.knowledge.join(", ") })
               : ""}
@@ -373,18 +363,14 @@ function Entry({
           <div className="who">
             <Av icon={Send} />
             <b>{t("tr.toAgent", { name: agent })}</b>{" "}
-            {e.data?.resume_session && (
-              <Badge s="READY">{t("tr.resume")}</Badge>
-            )}{" "}
-            {when}
+            {e.data?.resume_session && <Badge s="READY">{t("tr.resume")}</Badge>} {when}
             <span className="grow" />
             <Copy text={e.content} label={t("tr.copyPrompt")} />
           </div>
           {e.content.length > 2500 ? (
             <details>
               <summary>
-                {e.content.slice(0, 160)}… (
-                {t("tr.chars", { n: e.content.length })})
+                {e.content.slice(0, 160)}… ({t("tr.chars", { n: e.content.length })})
               </summary>
               <div className="pre">{e.content}</div>
             </details>
@@ -415,27 +401,28 @@ function Entry({
         </details>
       );
     case "tool": {
-      if (!e.data?.name)
+      const name = toolName(e.data);
+      if (!name)
         return (
           <div className={"msg note" + sub}>
             {when} {e.content}
           </div>
         );
       const err = result?.data?.is_error;
-      const TI = toolIcon(e.data.name);
+      const TI = toolIcon(name);
       return (
         <div className={"msg tool" + sub + (err ? " toolerr" : "")}>
           <div className="who">
             <Av icon={TI} />
-            <b>{e.data.name.replace(/^mcp__platform__/, "platform·")}</b>
-            <span className="mono">{toolHint(e.data.input).slice(0, 160)}</span>
+            <b>{name.replace(/^mcp__platform__/, "platform·")}</b>
+            <span className="mono">{toolHint(e.data.input ?? e.data.args).slice(0, 160)}</span>
             {when}
             {err && <Badge s="FAILED">{t("common.error")}</Badge>}
             {!result && live && <Badge s="RUNNING">{t("tr.running")}</Badge>}
           </div>
           <details>
             <summary>{t("tr.input")}</summary>
-            <pre>{JSON.stringify(e.data.input, null, 2)}</pre>
+            <pre>{JSON.stringify(e.data.input ?? e.data.args ?? {}, null, 2)}</pre>
           </details>
           {result && (
             <details open={err}>
@@ -468,10 +455,9 @@ function Entry({
           ) : (
             <CheckCircle2 size={15} color="var(--st-ok)" />
           )}
-          <b>{t("tr.finished")}</b> · {t("tr.turns", { n: d.num_turns ?? "?" })}{" "}
-          · {dur(d.duration_ms)}
-          {d.total_cost_usd != null &&
-            ` · $${Number(d.total_cost_usd).toFixed(3)}`}
+          <b>{t("tr.finished")}</b> · {t("tr.turns", { n: d.num_turns ?? "?" })} ·{" "}
+          {dur(d.duration_ms)}
+          {d.total_cost_usd != null && ` · $${Number(d.total_cost_usd).toFixed(3)}`}
           {d.usage &&
             ` · ${t("tr.tokens", { inn: d.usage.input_tokens ?? 0, out: d.usage.output_tokens ?? 0 })}`}{" "}
           <span className="muted small">{time(e.created_at)}</span>

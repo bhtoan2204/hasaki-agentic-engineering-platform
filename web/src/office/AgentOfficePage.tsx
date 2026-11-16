@@ -4,11 +4,7 @@ import { AgentDetailsPanel } from "./AgentDetailsPanel.tsx";
 import { usePreviewOffice } from "./demo.ts";
 import { OfficeScene } from "./OfficeScene.tsx";
 import { OfficeToolbar } from "./OfficeToolbar.tsx";
-import {
-  useNow,
-  useOfficeExecutionState,
-  useOfficeRuns,
-} from "./useOfficeExecutionState.ts";
+import { useNow, useOfficeExecutionState, useOfficeRuns } from "./useOfficeExecutionState.ts";
 import { mapOffice, ROLE_INFO } from "./workflowToAgentMapper.ts";
 import { useI18n } from "../i18n/index.tsx";
 import type { OfficeSnapshot, Role } from "./types.ts";
@@ -37,8 +33,7 @@ function savePref(key: string, v: boolean) {
   } catch {}
 }
 const reducedMotion = () =>
-  typeof matchMedia !== "undefined" &&
-  matchMedia("(prefers-reduced-motion: reduce)").matches;
+  typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Route: #/office[/<runId> | /preview]. */
 export function AgentOfficePage({ param }: { param?: string }) {
@@ -50,9 +45,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
 
   const [selected, setSelected] = useState<Role | null>(null);
   const [focusStep, setFocusStep] = useState<string | null>(null);
-  const [animate, setAnimate] = useState(() =>
-    pref("office.animate", !reducedMotion()),
-  );
+  const [animate, setAnimate] = useState(() => pref("office.animate", !reducedMotion()));
   const [compact, setCompact] = useState(() => pref("office.compact", false));
   const [fullscreen, setFullscreen] = useState(false);
   const shell = useRef<HTMLDivElement>(null);
@@ -61,13 +54,8 @@ export function AgentOfficePage({ param }: { param?: string }) {
   const demo = usePreviewOffice(preview);
   const now = useNow(1000);
   const snapshot = preview ? demo.snapshot : (real.snapshot ?? EMPTY);
-  const agents = useMemo(
-    () => mapOffice(snapshot, now, locale),
-    [snapshot, now, locale],
-  );
-  const sel = selected
-    ? (agents.find((a) => a.role === selected) ?? null)
-    : null;
+  const agents = useMemo(() => mapOffice(snapshot, now, locale), [snapshot, now, locale]);
+  const sel = selected ? (agents.find((a) => a.role === selected) ?? null) : null;
 
   useEffect(() => setFocusStep(sel?.step?.key ?? null), [sel?.step?.key]);
   useEffect(() => setSelected(null), [runId, preview]);
@@ -89,9 +77,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
   }, []);
 
   const running = agents.filter((a) => a.pose === "work").length;
-  const waiting = agents.filter(
-    (a) => a.pose === "ask" || a.pose === "approval",
-  ).length;
+  const waiting = agents.filter((a) => a.pose === "ask" || a.pose === "approval").length;
   const failed = agents.filter((a) => a.pose === "frustrated").length;
   const run = snapshot.run;
   const events = sel?.attempt ? (snapshot.events[sel.attempt.id] ?? []) : [];
@@ -108,13 +94,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
         onRun={(id) => navigate(id ? `/office/${id}` : "/office")}
         preview={preview}
         onPreview={(on) =>
-          navigate(
-            on
-              ? "/office/preview"
-              : pinnedRun
-                ? `/office/${pinnedRun}`
-                : "/office",
-          )
+          navigate(on ? "/office/preview" : pinnedRun ? `/office/${pinnedRun}` : "/office")
         }
         animate={animate}
         onAnimate={(v) => (setAnimate(v), savePref("office.animate", v))}
@@ -145,16 +125,11 @@ export function AgentOfficePage({ param }: { param?: string }) {
               <span className="muted">{t("office.simRun")}</span>
             ) : run ? (
               <>
-                <b>Run #{run.id}</b>{" "}
-                <span className="office-runtitle">{run.title}</span>{" "}
-                <span className={`office-runstatus s-${run.status}`}>
-                  {run.status}
-                </span>
+                <b>Run #{run.id}</b> <span className="office-runtitle">{run.title}</span>{" "}
+                <span className={`office-runstatus s-${run.status}`}>{run.status}</span>
               </>
             ) : real.error ? (
-              <span className="err">
-                {t("office.loadFail", { error: real.error })}
-              </span>
+              <span className="err">{t("office.loadFail", { error: real.error })}</span>
             ) : (
               <span className="muted">
                 {real.loading ? t("office.loading") : t("office.break")}
@@ -162,21 +137,9 @@ export function AgentOfficePage({ param }: { param?: string }) {
             )}
             <span className="grow" />
             <span className="office-stats" aria-live="polite">
-              {running > 0 && (
-                <span className="st-run">
-                  {t("ov.working", { n: running })}
-                </span>
-              )}
-              {waiting > 0 && (
-                <span className="st-wait">
-                  {t("ov.needYou", { n: waiting })}
-                </span>
-              )}
-              {failed > 0 && (
-                <span className="st-fail">
-                  {t("office.failedN", { n: failed })}
-                </span>
-              )}
+              {running > 0 && <span className="st-run">{t("ov.working", { n: running })}</span>}
+              {waiting > 0 && <span className="st-wait">{t("ov.needYou", { n: waiting })}</span>}
+              {failed > 0 && <span className="st-fail">{t("office.failedN", { n: failed })}</span>}
             </span>
           </div>
 
@@ -192,10 +155,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
             <div className="office-idle-card">
               <div>
                 <b>{t("office.idleTitle")}</b> {t("office.idleBody")}{" "}
-                <button
-                  className="linkish"
-                  onClick={() => navigate("/office/preview")}
-                >
+                <button className="linkish" onClick={() => navigate("/office/preview")}>
                   {t("office.preview")}
                 </button>
               </div>
@@ -214,17 +174,13 @@ export function AgentOfficePage({ param }: { param?: string }) {
               <li key={a.role}>
                 <button
                   className={`office-chip pose-${a.pose}${selected === a.role ? " is-sel" : ""}`}
-                  onClick={() =>
-                    setSelected((s) => (s === a.role ? null : a.role))
-                  }
+                  onClick={() => setSelected((s) => (s === a.role ? null : a.role))}
                   aria-pressed={selected === a.role}
                   title={a.detail}
                 >
                   <span className="office-chip-dot" aria-hidden />
                   <b>{ROLE_INFO[a.role].name}</b>{" "}
-                  <span className="muted">
-                    {t(`office.role.${a.role}.title`)}
-                  </span>
+                  <span className="muted">{t(`office.role.${a.role}.title`)}</span>
                   <span className="office-chip-state">{a.status ?? "—"}</span>
                 </button>
               </li>

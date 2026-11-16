@@ -9,15 +9,9 @@ import { migrate } from "../src/db/migrate.ts";
 import { pool, one, q } from "../src/db/pool.ts";
 import { repositories, rankRepositories } from "../src/repos/service.ts";
 import { indexRepository } from "../src/codeIntelligence/indexer.ts";
-import {
-  searchSymbols,
-  hybridRank,
-  buildCodeContext,
-} from "../src/codeIntelligence/search.ts";
+import { searchSymbols, hybridRank, buildCodeContext } from "../src/codeIntelligence/search.ts";
 if (process.env.PLATFORM_TEST !== "1")
-  throw new Error(
-    "Use --import ./test/setup.ts with the isolated local test database",
-  );
+  throw new Error("Use --import ./test/setup.ts with the isolated local test database");
 config.codeIntelligence.enabled = true;
 await migrate();
 const root = join(config.reposRoot, "ci-benchmark");
@@ -37,10 +31,7 @@ git("init", "-q", "-b", config.baseBranch);
 let sourceBytes = 0;
 for (let i = 0; i < 400; i++) {
   const examples = [
-    [
-      "go",
-      `package pay\ntype Payment${i} struct { ID string }\nfunc Charge${i}() {}\n`,
-    ],
+    ["go", `package pay\ntype Payment${i} struct { ID string }\nfunc Charge${i}() {}\n`],
     [
       "ts",
       `export interface Payment${i} { id: string }; export function Charge${i}() { return 'ok' };`,
@@ -76,15 +67,12 @@ git("commit", "-qm", "incremental");
 const incremental = await timed(() => indexRepository("ci-benchmark"));
 const scope = { repositories: ["ci-benchmark"], allowed: ["ci-benchmark"] };
 const lookup: number[] = [];
-for (let i = 0; i < 20; i++)
-  lookup.push((await timed(() => searchSymbols("Charge101", scope))).ms);
+for (let i = 0; i < 20; i++) lookup.push((await timed(() => searchSymbols("Charge101", scope))).ms);
 const rows = await repositories.list();
 const metadata = await timed(async () =>
   rankRepositories(rows, { text: "Charge101 payment", project: "Bench" }),
 );
-const hybrid = await timed(() =>
-  hybridRank(rows, { text: "Charge101 payment", project: "Bench" }),
-);
+const hybrid = await timed(() => hybridRank(rows, { text: "Charge101 payment", project: "Bench" }));
 const context = await buildCodeContext("Charge101", scope);
 await q(pool, "ANALYZE code_intelligence.symbols");
 const plan = await q(
@@ -105,9 +93,7 @@ const storage = await one(
   `SELECT sum(pg_total_relation_size(c.oid))::bigint AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='code_intelligence' AND c.relkind='r'`,
 );
 const percentile = (x: number[], p: number) =>
-  [...x].sort((a, b) => a - b)[
-    Math.min(x.length - 1, Math.floor(x.length * p))
-  ];
+  [...x].sort((a, b) => a - b)[Math.min(x.length - 1, Math.floor(x.length * p))];
 const report = {
   fixture: {
     files: 400,

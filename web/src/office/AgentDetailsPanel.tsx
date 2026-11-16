@@ -33,14 +33,7 @@ function summarize(e: EventLite): string {
   if (e.kind === "tool" && e.data?.name) {
     const i = e.data.input ?? {};
     const arg =
-      i.file_path ??
-      i.command ??
-      i.pattern ??
-      i.query ??
-      i.key ??
-      i.url ??
-      i.description ??
-      "";
+      i.file_path ?? i.command ?? i.pattern ?? i.query ?? i.key ?? i.url ?? i.description ?? "";
     return `${String(e.data.name).replace(/^mcp__platform__/, "")} ${String(arg).split("\n")[0].slice(0, 120)}`;
   }
   return String(e.content ?? "")
@@ -72,10 +65,7 @@ export function AgentDetailsPanel({
   const s = chibiSprite(agent.role);
   const pal = chibiPalette(agent.role);
   const step = agent.step;
-  const link =
-    step && runId && !preview
-      ? `#/runs/${runId}/${encodeURIComponent(step.key)}`
-      : null;
+  const link = step && runId && !preview ? `#/runs/${runId}/${encodeURIComponent(step.key)}` : null;
   const recent = events
     .filter((e) => e.kind !== "system_prompt" && e.kind !== "prompt")
     .slice(-14)
@@ -105,15 +95,9 @@ export function AgentDetailsPanel({
           <div className="office-panel-name">
             {info.name} <span className="muted">· {title}</span>
           </div>
-          <div className="muted small">
-            {t(`office.role.${agent.role}.does`)}
-          </div>
+          <div className="muted small">{t(`office.role.${agent.role}.does`)}</div>
         </div>
-        <button
-          className="quiet icon"
-          onClick={onClose}
-          aria-label={t("common.close")}
-        >
+        <button className="quiet icon" onClick={onClose} aria-label={t("common.close")}>
           <X size={17} />
         </button>
       </header>
@@ -125,9 +109,7 @@ export function AgentDetailsPanel({
           <div className="office-panel-now">
             <div className="row tight">
               <b>{step.name}</b> <Badge s={step.status} />
-              {agent.retrying && (
-                <span className="small okc">{t("office.retrying")}</span>
-              )}
+              {agent.retrying && <span className="small okc">{t("office.retrying")}</span>}
             </div>
             <div className="small muted mono">
               {step.key} · {step.type}
@@ -169,9 +151,7 @@ export function AgentDetailsPanel({
               </span>
               {link ? (
                 <a className="o-btn" href={link}>
-                  {agent.pose === "ask"
-                    ? t("office.answer")
-                    : t("office.openApproval")}
+                  {agent.pose === "ask" ? t("office.answer") : t("office.openApproval")}
                 </a>
               ) : (
                 <span className="muted small">{t("office.previewOnly")}</span>
@@ -180,10 +160,7 @@ export function AgentDetailsPanel({
           )}
 
           <VerificationCard
-            v={
-              agent.attempt?.metrics?.verification ??
-              agent.attempt?.output?.verification
-            }
+            v={agent.attempt?.metrics?.verification ?? agent.attempt?.output?.verification}
           />
 
           <h3>{t("office.recent")}</h3>
@@ -204,18 +181,14 @@ export function AgentDetailsPanel({
             </ol>
           ) : (
             <p className="muted small">
-              {agent.status === "PENDING"
-                ? t("office.notStarted")
-                : t("office.noEvents")}
+              {agent.status === "PENDING" ? t("office.notStarted") : t("office.noEvents")}
             </p>
           )}
         </>
       )}
 
       <StepHistory
-        attempts={attempts.filter((a) =>
-          agent.steps.some((st) => st.key === a.step_key),
-        )}
+        attempts={attempts.filter((a) => agent.steps.some((st) => st.key === a.step_key))}
       />
 
       {agent.steps.length > 1 && (
@@ -225,9 +198,7 @@ export function AgentDetailsPanel({
             {agent.steps.map((x) => (
               <li key={x.key}>
                 {runId && !preview ? (
-                  <a href={`#/runs/${runId}/${encodeURIComponent(x.key)}`}>
-                    {x.name}
-                  </a>
+                  <a href={`#/runs/${runId}/${encodeURIComponent(x.key)}`}>{x.name}</a>
                 ) : (
                   x.name
                 )}{" "}
@@ -288,18 +259,14 @@ function VerificationCard({ v }: { v: any }) {
         {(v.last ?? []).map((r: any) => (
           <div key={r.repo} className="small office-verify-repo">
             <b>{r.repo}</b>{" "}
-            <span className="mono">
-              {r.status ?? (r.passed ? "passed" : "failed")}
-            </span>
+            <span className="mono">{r.status ?? (r.passed ? "passed" : "failed")}</span>
             {r.regressions?.length > 0 && (
               <span>
                 {" "}
                 ·{" "}
                 {r.regressions
                   .map((g: any) =>
-                    [String(g.package).split("/").pop(), ...(g.tests ?? [])]
-                      .slice(0, 3)
-                      .join(" "),
+                    [String(g.package).split("/").pop(), ...(g.tests ?? [])].slice(0, 3).join(" "),
                   )
                   .join("; ")}
               </span>

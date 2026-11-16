@@ -9,12 +9,7 @@ import { migrate, loadMigrations } from "../db/migrate.ts";
 import { startInstanceHeartbeat } from "../instances.ts";
 import { repositories, rankRepositories } from "../repos/service.ts";
 import { validateCheckout } from "../repos/paths.ts";
-import {
-  enqueue,
-  runIndexOnce,
-  indexRepository,
-  status,
-} from "../codeIntelligence/indexer.ts";
+import { enqueue, runIndexOnce, indexRepository, status } from "../codeIntelligence/indexer.ts";
 import {
   searchSymbols,
   findDependencies,
@@ -30,9 +25,7 @@ import { recordWorkspace } from "../git/provider.ts";
 // Writes to a remote database require an explicit database name in the command, checked against server identity.
 const expected = process.argv[2];
 if (!expected)
-  throw new Error(
-    "Usage: validate-code-intelligence.ts <authorized-development-database-name>",
-  );
+  throw new Error("Usage: validate-code-intelligence.ts <authorized-development-database-name>");
 const selected = ["oms-api", "oms-frontend", "oms-background"];
 const report: any = {
   generated_at: new Date().toISOString(),
@@ -52,21 +45,12 @@ try {
     pool,
     "SELECT current_database() AS database,inet_server_addr()::text AS server",
   );
-  assert.equal(
-    identity!.database,
-    expected,
-    "Development database identity mismatch",
-  );
+  assert.equal(identity!.database, expected, "Development database identity mismatch");
   assert.equal(config.codeIntelligence.enabled, true);
   report.database = identity;
-  const applied = await one(
-    pool,
-    "SELECT checksum FROM schema_migrations WHERE version=26",
-  );
+  const applied = await one(pool, "SELECT checksum FROM schema_migrations WHERE version=26");
   assert.ok(
-    !applied ||
-    applied.checksum ===
-    loadMigrations().find((m) => m.version === 26)!.checksum,
+    !applied || applied.checksum === loadMigrations().find((m) => m.version === 26)!.checksum,
     "Migration checksum mismatch",
   );
   report.migrations = await migrate();
@@ -82,11 +66,8 @@ try {
     const at = performance.now();
     let n = 0;
     while (
-      (await one(
-        pool,
-        "SELECT status FROM code_intelligence.runs WHERE id=$1",
-        [queued.id],
-      ))!.status === "queued" &&
+      (await one(pool, "SELECT status FROM code_intelligence.runs WHERE id=$1", [queued.id]))!
+        .status === "queued" &&
       n++ < 50
     )
       await runIndexOnce();
@@ -103,32 +84,18 @@ try {
     );
     assert.ok(samples.length);
     const sample =
-      samples.find(
-        (s) => s.symbol_kind === "function" || s.symbol_kind === "method",
-      ) ?? samples[0];
+      samples.find((s) => s.symbol_kind === "function" || s.symbol_kind === "method") ?? samples[0];
     const scope = { repositories: [name], allowed: [name] };
-    const lookup = await timed(() =>
-      searchSymbols(sample.qualified_name, scope),
-    );
-    assert.ok(
-      lookup.result.hits.some(
-        (h) => h.qualified_name === sample.qualified_name,
-      ),
-    );
+    const lookup = await timed(() => searchSymbols(sample.qualified_name, scope));
+    assert.ok(lookup.result.hits.some((h) => h.qualified_name === sample.qualified_name));
     const relations = await findDependencies(sample.qualified_name, scope, 1);
     const metadata = await timed(async () =>
       rankRepositories([repo], { text: sample.symbol_name }),
     );
-    const hybrid = await timed(() =>
-      hybridRank([repo], { text: sample.symbol_name }),
-    );
-    const context = await timed(() =>
-      buildCodeContext(sample.qualified_name, scope),
-    );
+    const hybrid = await timed(() => hybridRank([repo], { text: sample.symbol_name }));
+    const context = await timed(() => buildCodeContext(sample.qualified_name, scope));
     assert.ok(context.result.body.length);
-    assert.ok(
-      context.result.body.length <= config.codeIntelligence.contextTokens * 4,
-    );
+    assert.ok(context.result.body.length <= config.codeIntelligence.contextTokens * 4);
     const languages = await q(
       pool,
       `WITH f AS (${effectiveSql}) SELECT e.language,count(*)::int AS files FROM f JOIN code_intelligence.extractions e ON e.id=f.extraction_id GROUP BY e.language ORDER BY e.language`,
@@ -157,9 +124,7 @@ try {
       warm_reindex_ms: warm.ms,
     });
   }
-  const candidates = (await repositories.list()).filter((r) =>
-    selected.includes(r.name),
-  );
+  const candidates = (await repositories.list()).filter((r) => selected.includes(r.name));
   report.scenarios = [];
   for (const indexed of report.repositories) {
     const query = indexed.sample.qualified_name;
@@ -168,14 +133,10 @@ try {
     const definitions = await searchSymbols(query, scope, 50);
     const exactRepositories = [
       ...new Set(
-        definitions.hits
-          .filter((h) => h.qualified_name === query)
-          .map((h) => h.repository),
+        definitions.hits.filter((h) => h.qualified_name === query).map((h) => h.repository),
       ),
     ];
-    const metadata = await timed(async () =>
-      rankRepositories(candidates, { text }),
-    );
+    const metadata = await timed(async () => rankRepositories(candidates, { text }));
     const hybrid = await timed(() => hybridRank(candidates, { text }));
     report.scenarios.push({
       query,
@@ -238,9 +199,7 @@ try {
       `package p1validation\nfunc P1ValidationOnly${i}() {}\n`,
     );
   }
-  const overlays = await Promise.all(
-    created.map((w) => indexRepository(repo.name, w.run)),
-  );
+  const overlays = await Promise.all(created.map((w) => indexRepository(repo.name, w.run)));
   for (let i = 0; i < created.length; i++) {
     const scope = {
       repositories: [repo.name],
@@ -277,10 +236,7 @@ try {
       (h) => h.symbol_name === "P1ValidationUpdated",
     ),
   );
-  await rename(
-    join(a.path, "p1_validation_probe.go"),
-    join(a.path, "p1_validation_renamed.go"),
-  );
+  await rename(join(a.path, "p1_validation_probe.go"), join(a.path, "p1_validation_renamed.go"));
   await indexRepository(repo.name, a.run);
   assert.ok(
     (await searchSymbols("P1ValidationUpdated", scope)).hits.every(
@@ -289,10 +245,7 @@ try {
   );
   await unlink(join(a.path, "p1_validation_renamed.go"));
   await indexRepository(repo.name, a.run);
-  assert.equal(
-    (await searchSymbols("P1ValidationUpdated", scope)).hits.length,
-    0,
-  );
+  assert.equal((await searchSymbols("P1ValidationUpdated", scope)).hits.length, 0);
   assert.equal(
     (
       await searchSymbols("P1ValidationOnly0", {
@@ -314,10 +267,7 @@ try {
     snapshot_ids: overlays.map((x) => x.snapshot.id),
   };
   config.codeIntelligence.enabled = false;
-  assert.equal(
-    (await searchSymbols("P1ValidationUpdated", scope)).hits.length,
-    0,
-  );
+  assert.equal((await searchSymbols("P1ValidationUpdated", scope)).hits.length, 0);
   config.codeIntelligence.enabled = true;
   report.disable = "PASS";
   report.status = (await status()).filter((r) => selected.includes(r.name));
@@ -327,12 +277,10 @@ try {
       pool,
       "UPDATE code_intelligence.runs SET status='canceled',fencing_token=fencing_token+1,updated_at=now() WHERE instance_id=$1 AND run_id=ANY($2::bigint[]) AND status IN ('queued','running')",
       [config.instanceId, created.map((w) => w.run)],
-    ).catch(() => { });
+    ).catch(() => {});
   for (const w of created) {
-    await git(w.root, ["worktree", "remove", "--force", w.path]).catch(
-      () => { },
-    );
-    await cancelRun(w.run).catch(() => { });
+    await git(w.root, ["worktree", "remove", "--force", w.path]).catch(() => {});
+    await cancelRun(w.run).catch(() => {});
   }
   await heartbeat?.stop();
   await pool.end();

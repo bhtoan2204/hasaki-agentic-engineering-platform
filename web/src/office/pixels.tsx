@@ -45,14 +45,7 @@ export const Px = memo(function Px({
   const body = (
     <g className={className}>
       {rects.map((r, k) => (
-        <rect
-          key={k}
-          x={r.x}
-          y={r.y}
-          width={r.w}
-          height={1}
-          fill={pal[r.c] ?? "#f0f"}
-        />
+        <rect key={k} x={r.x} y={r.y} width={r.w} height={1} fill={pal[r.c] ?? "#f0f"} />
       ))}
     </g>
   );
@@ -69,8 +62,7 @@ const HX = 4,
   HH = 19; // head box inside the sprite canvas
 
 type Canvas = string[][];
-const blank = (): Canvas =>
-  Array.from({ length: SPRITE_H }, () => Array(SPRITE_W).fill("."));
+const blank = (): Canvas => Array.from({ length: SPRITE_H }, () => Array(SPRITE_W).fill("."));
 const put = (c: Canvas, x: number, y: number, ch: string) => {
   if (y >= 0 && y < SPRITE_H && x >= 0 && x < SPRITE_W) c[y][x] = ch;
 };
@@ -85,10 +77,7 @@ function outline(c: Canvas, keep = "") {
       if (
         filled(x, y) &&
         !keep.includes(c[y][x]) &&
-        (!filled(x - 1, y) ||
-          !filled(x + 1, y) ||
-          !filled(x, y - 1) ||
-          !filled(x, y + 1))
+        (!filled(x - 1, y) || !filled(x + 1, y) || !filled(x, y - 1) || !filled(x, y + 1))
       )
         out[y][x] = "k";
   return out;
@@ -98,9 +87,7 @@ function inHead(hx: number, hy: number) {
   const cx = (HW - 1) / 2,
     cy = (HH - 1) / 2 + 0.3;
   return (
-    Math.pow(Math.abs(hx - cx) / (HW / 2), 3.2) +
-      Math.pow(Math.abs(hy - cy) / (HH / 2), 3.2) <=
-    1
+    Math.pow(Math.abs(hx - cx) / (HW / 2), 3.2) + Math.pow(Math.abs(hy - cy) / (HH / 2), 3.2) <= 1
   );
 }
 
@@ -108,10 +95,7 @@ type HairFn = (hx: number, hy: number, inside: boolean) => string | null;
 const HAIR: Record<HairStyle, HairFn> = {
   // neat bob with a side part
   bob: (x, y, inside) => {
-    if (
-      inside &&
-      (y < 5 || (y < 7 && x < 13) || ((x <= 2 || x >= 19) && y < 13))
-    )
+    if (inside && (y < 5 || (y < 7 && x < 13) || ((x <= 2 || x >= 19) && y < 13)))
       return y === 2 && x >= 5 && x <= 8 ? "H" : "h";
     if ((x === -1 || x === HW) && y >= 6 && y <= 13) return "h";
     return null;
@@ -119,10 +103,7 @@ const HAIR: Record<HairStyle, HairFn> = {
   // spiky, with a pencil behind the ear
   spiky: (x, y, inside) => {
     if (y === 7 && x >= HW - 1 && x <= HW + 2) return x === HW + 2 ? "Y" : "y";
-    if (
-      inside &&
-      (y < 5 || ((x <= 1 || x >= 20) && y < 9) || (y < 7 && x % 4 === 1))
-    )
+    if (inside && (y < 5 || ((x <= 1 || x >= 20) && y < 9) || (y < 7 && x % 4 === 1)))
       return y === 2 && x >= 13 && x <= 15 ? "H" : "h";
     if (y === -1 && [3, 4, 8, 9, 13, 14, 17, 18].includes(x)) return "h";
     if (y === -2 && [4, 9, 14].includes(x)) return "h";
@@ -130,15 +111,11 @@ const HAIR: Record<HairStyle, HairFn> = {
   },
   // short hair + headphones
   short: (x, y, inside) => {
-    if ((x >= -2 && x <= 0) || (x >= HW - 1 && x <= HW + 1))
-      if (y >= 9 && y <= 13) return "A";
+    if ((x >= -2 && x <= 0) || (x >= HW - 1 && x <= HW + 1)) if (y >= 9 && y <= 13) return "A";
     if (y === -1 && x >= 3 && x <= 18) return "a";
     if (y === 0 && (x === 2 || x === 19)) return "a";
     if ((x === -1 || x === HW) && y >= 1 && y <= 8) return "a";
-    if (
-      inside &&
-      (y < 4 || (y < 6 && x >= 4 && x <= 11) || ((x <= 1 || x >= 20) && y < 8))
-    )
+    if (inside && (y < 4 || (y < 6 && x >= 4 && x <= 11) || ((x <= 1 || x >= 20) && y < 8)))
       return y === 1 && x >= 6 && x <= 9 ? "H" : "h";
     return null;
   },
@@ -148,17 +125,14 @@ const HAIR: Record<HairStyle, HairFn> = {
     if (x >= HW && x <= HW + 2 && y >= 4 && y <= 13 - (x - HW) * 2) return "h";
     if (
       inside &&
-      (y < 4 ||
-        (x < 12 && y < 8 - Math.floor(x / 3)) ||
-        ((x <= 1 || x >= 20) && y < 10))
+      (y < 4 || (x < 12 && y < 8 - Math.floor(x / 3)) || ((x <= 1 || x >= 20) && y < 10))
     )
       return y === 2 && x >= 4 && x <= 7 ? "H" : "h";
     return null;
   },
   // top bun
   bun: (x, y, inside) => {
-    if ((x - 10.5) ** 2 + (y + 2) ** 2 <= 9)
-      return y === -3 && (x === 9 || x === 10) ? "H" : "h";
+    if ((x - 10.5) ** 2 + (y + 2) ** 2 <= 9) return y === -3 && (x === 9 || x === 10) ? "H" : "h";
     if (inside && (y < 5 || ((x <= 2 || x >= 19) && y < 10)))
       return y === 2 && x >= 14 && x <= 16 ? "H" : "h";
     return null;
@@ -167,8 +141,7 @@ const HAIR: Record<HairStyle, HairFn> = {
   cap: (x, y, inside) => {
     if (y === -1 && (x === 10 || x === 11)) return "r";
     if (y === 5 && x >= 3 && x <= HW + 3) return "R";
-    if (inside && y < 5)
-      return y === 2 && (x === 10 || x === 11) ? "w" : y === 4 ? "R" : "r";
+    if (inside && y < 5) return y === 2 && (x === 10 || x === 11) ? "w" : y === 4 ? "R" : "r";
     if (inside && (x <= 2 || x >= 19) && y >= 5 && y < 9) return "h";
     return null;
   },
@@ -195,13 +168,7 @@ function buildHead(role: Role): Grid {
       const inside = inHead(hx, hy);
       const h = hair(hx, hy, inside);
       if (h) put(c, HX + hx, HY + hy, h);
-      else if (inside)
-        put(
-          c,
-          HX + hx,
-          HY + hy,
-          (hx > 15 && hy > 11) || hy >= HH - 2 ? "S" : "s",
-        );
+      else if (inside) put(c, HX + hx, HY + hy, (hx > 15 && hy > 11) || hy >= HH - 2 ? "S" : "s");
     }
   // blush
   for (const [x, y] of [
@@ -218,10 +185,7 @@ function buildHead(role: Role): Grid {
       for (let y = 9; y <= 13; y++)
         for (let x = ox; x <= ox + 3; x++) {
           const border = y === 9 || y === 13 || x === ox || x === ox + 3;
-          const corner =
-            g === "round" &&
-            (y === 9 || y === 13) &&
-            (x === ox || x === ox + 3);
+          const corner = g === "round" && (y === 9 || y === 13) && (x === ox || x === ox + 3);
           if (border && !corner) o[HY + y][HX + x] = "g";
         }
   if (g) for (let x = 9; x <= 12; x++) o[HY + 10][HX + x] = "g";
@@ -238,12 +202,10 @@ function buildBody(): Grid {
   const c = blank();
   const BX = 7,
     BY = HY + HH - 1; // shirt starts under the chin
-  const span = (row: number) =>
-    row === 0 ? [3, 12] : row === 1 ? [1, 14] : [0, 15];
+  const span = (row: number) => (row === 0 ? [3, 12] : row === 1 ? [1, 14] : [0, 15]);
   for (let r = 0; r < 10; r++) {
     const [a, b] = span(r);
-    for (let x = a; x <= b; x++)
-      put(c, BX + x, BY + r, r === 9 || (x >= 12 && r >= 2) ? "R" : "r");
+    for (let x = a; x <= b; x++) put(c, BX + x, BY + r, r === 9 || (x >= 12 && r >= 2) ? "R" : "r");
   }
   // polo: neck, folded white-trimmed collar, button placket
   for (const [x, y] of [
@@ -270,9 +232,7 @@ function buildBody(): Grid {
   // Hasaki-style chest emblem (stylised pixel "H"; the real logo is used on signage — see web/src/brand)
   const logo = ["whwhw", "whhhw", "whwhw"];
   logo.forEach((row, ry) =>
-    [...row].forEach(
-      (ch, rx) => (o[BY + 4 + ry][BX + 10 + rx] = ch === "h" ? "L" : "w"),
-    ),
+    [...row].forEach((ch, rx) => (o[BY + 4 + ry][BX + 10 + rx] = ch === "h" ? "L" : "w")),
   );
   return rows(o);
 }
@@ -287,13 +247,7 @@ function buildArm(side: "L" | "R"): Grid {
         c,
         x0 + x,
         top + y,
-        y < 4
-          ? x === (side === "L" ? 0 : 3)
-            ? "R"
-            : "r"
-          : y === 4
-            ? "C"
-            : "s",
+        y < 4 ? (x === (side === "L" ? 0 : 3) ? "R" : "r") : y === 4 ? "C" : "s",
       );
   return rows(outline(c));
 }
@@ -302,10 +256,8 @@ function buildLeg(side: "L" | "R"): Grid {
   const c = blank();
   const x0 = side === "L" ? 9 : 16;
   const top = HY + HH + 9;
-  for (let y = 0; y < 6; y++)
-    for (let x = 0; x < 5; x++) put(c, x0 + x, top + y, "p");
-  for (let x = -1; x < 5; x++)
-    put(c, x0 + x + (side === "R" ? 1 : 0), top + 6, "K");
+  for (let y = 0; y < 6; y++) for (let x = 0; x < 5; x++) put(c, x0 + x, top + y, "p");
+  for (let x = -1; x < 5; x++) put(c, x0 + x + (side === "R" ? 1 : 0), top + 6, "K");
   return rows(outline(c, "K"));
 }
 
@@ -433,16 +385,7 @@ export const PROPS = {
     pal: { k: "#4b3a33", w: "#fff7ef", r: HASAKI_GREEN },
   },
   bulb: {
-    rows: [
-      "..kkk..",
-      ".kyyyk.",
-      "kyywyyk",
-      "kyyyyyk",
-      ".kyyyk.",
-      "..kak..",
-      "..kak..",
-      "...k...",
-    ],
+    rows: ["..kkk..", ".kyyyk.", "kyywyyk", "kyyyyyk", ".kyyyk.", "..kak..", "..kak..", "...k..."],
     pal: { k: "#6a5418", y: "#ffd84a", w: "#fffbe0", a: "#a3a3b0" },
   },
   question: {
@@ -461,15 +404,7 @@ export const PROPS = {
     pal: { k: "#7a3d00", w: "#ffd36b" },
   },
   check: {
-    rows: [
-      "......kk",
-      ".....kgk",
-      "k...kgk.",
-      "kgk.kgk.",
-      ".kgkgk..",
-      "..kgk...",
-      "...k....",
-    ],
+    rows: ["......kk", ".....kgk", "k...kgk.", "kgk.kgk.", ".kgkgk..", "..kgk...", "...k...."],
     pal: { k: "#14532d", g: "#4ade80" },
   },
   sweat: {
@@ -477,28 +412,11 @@ export const PROPS = {
     pal: { k: "#2563eb", b: "#93c5fd" },
   },
   clip: {
-    rows: [
-      ".kkk.",
-      "kkkkkk",
-      "kwwwwk",
-      "kwgwwk",
-      "kwwgwk",
-      "kgwwwk",
-      "kwwwwk",
-      "kkkkkk",
-    ],
+    rows: [".kkk.", "kkkkkk", "kwwwwk", "kwgwwk", "kwwgwk", "kgwwwk", "kwwwwk", "kkkkkk"],
     pal: { k: "#6b4f2a", w: "#fffdf5", g: "#16a34a" },
   },
   glass: {
-    rows: [
-      ".kkk..",
-      "kbbbk.",
-      "kbwbk.",
-      "kbbbk.",
-      ".kkkk.",
-      "....kk",
-      ".....k",
-    ],
+    rows: [".kkk..", "kbbbk.", "kbwbk.", "kbbbk.", ".kkkk.", "....kk", ".....k"],
     pal: { k: "#3a3a48", b: "#bfe3ff", w: "#ffffff" },
   },
   box: {
@@ -520,14 +438,7 @@ export const PROPS = {
     },
   },
   book: {
-    rows: [
-      "kkkkkkkkk",
-      "kwwwkwwwk",
-      "kwkwkwkwk",
-      "kwwwkwwwk",
-      "kwkwkwkwk",
-      "kkkkkkkkk",
-    ],
+    rows: ["kkkkkkkkk", "kwwwkwwwk", "kwkwkwkwk", "kwwwkwwwk", "kwkwkwkwk", "kkkkkkkkk"],
     pal: { k: "#7c2d12", w: "#fff7ed" },
   },
   plane: {

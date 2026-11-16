@@ -21,11 +21,7 @@ serveStdio({
   framing: "auto",
   async call(name, args) {
     try {
-      const r = await brokerRequest(
-        socket,
-        { token, kind: "tool", name, args },
-        30 * 60 * 1000,
-      );
+      const r = await brokerRequest(socket, { token, kind: "tool", name, args }, 30 * 60 * 1000);
       return r?.ok
         ? String(r.text ?? "")
         : `ERROR: platform broker refused ${name}: ${r?.error ?? "unknown error"}`;

@@ -2,7 +2,11 @@
 import { connect } from "node:net";
 
 /** Client side used by hook.ts and bridge.ts: one request, one reply. */
-export function brokerRequest(socketPath: string, body: Record<string, unknown>, timeoutMs = 120_000): Promise<any> {
+export function brokerRequest(
+  socketPath: string,
+  body: Record<string, unknown>,
+  timeoutMs = 120_000,
+): Promise<any> {
   return new Promise((resolve, reject) => {
     const sock = connect(socketPath);
     let buf = "";

@@ -18,9 +18,7 @@ export function EvaluationRecommendations() {
       const range = new URLSearchParams(location.hash.split("?")[1] ?? "");
       const r = await api("/api/agent-recommendations", {
         ...Object.fromEntries(
-          ["from", "to", "timezone"]
-            .filter((k) => range.has(k))
-            .map((k) => [k, range.get(k)]),
+          ["from", "to", "timezone"].filter((k) => range.has(k)).map((k) => [k, range.get(k)]),
         ),
         category,
         ...(cohort ? { cohort } : {}),
@@ -32,11 +30,7 @@ export function EvaluationRecommendations() {
     d = show?.decision;
   return (
     <Panel
-      title={
-        en
-          ? "Evidence-backed recommendations"
-          : "Khuyến nghị dựa trên bằng chứng"
-      }
+      title={en ? "Evidence-backed recommendations" : "Khuyến nghị dựa trên bằng chứng"}
       hint={
         en
           ? "Controlled, completed live benchmarks only; fixture controls and production observations never establish model superiority."
@@ -46,19 +40,13 @@ export function EvaluationRecommendations() {
       <div className="grid2">
         <Field label={en ? "Task category" : "Loại nhiệm vụ"}>
           <input
-            aria-label={
-              en ? "Recommendation task category" : "Loại nhiệm vụ khuyến nghị"
-            }
+            aria-label={en ? "Recommendation task category" : "Loại nhiệm vụ khuyến nghị"}
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            placeholder={
-              en ? "Exact labeled category" : "Nhãn loại nhiệm vụ chính xác"
-            }
+            placeholder={en ? "Exact labeled category" : "Nhãn loại nhiệm vụ chính xác"}
           />
         </Field>
-        <Field
-          label={en ? "Control cohort (optional)" : "Nhóm kiểm soát (tùy chọn)"}
-        >
+        <Field label={en ? "Control cohort (optional)" : "Nhóm kiểm soát (tùy chọn)"}>
           <input value={cohort} onChange={(e) => setCohort(e.target.value)} />
         </Field>
       </div>
@@ -83,15 +71,11 @@ export function EvaluationRecommendations() {
                 : "Chưa đủ bằng chứng / chưa khả dụng"}
           </h4>
           <p className="small">
-            {en ? "Confidence" : "Độ tin cậy"}: {d.confidence} ·{" "}
-            {en ? "Samples" : "Số mẫu"}: {d.samples ?? 0} ·{" "}
-            {en ? "Distinct tasks" : "Nhiệm vụ khác nhau"}:{" "}
-            {d.distinct_tasks ?? 0} ·{" "}
-            {en ? "Verified success" : "Thành công đã xác minh"}:{" "}
-            {fmt(d.success_rate, "pct")} · {en ? "Median" : "Trung vị"}:{" "}
-            {fmt(d.median_ms, "ms")} ·{" "}
-            {en ? "Cost availability" : "Độ đầy đủ chi phí"}:{" "}
-            {d.cost_availability ?? "Unknown"}
+            {en ? "Confidence" : "Độ tin cậy"}: {d.confidence} · {en ? "Samples" : "Số mẫu"}:{" "}
+            {d.samples ?? 0} · {en ? "Distinct tasks" : "Nhiệm vụ khác nhau"}:{" "}
+            {d.distinct_tasks ?? 0} · {en ? "Verified success" : "Thành công đã xác minh"}:{" "}
+            {fmt(d.success_rate, "pct")} · {en ? "Median" : "Trung vị"}: {fmt(d.median_ms, "ms")} ·{" "}
+            {en ? "Cost availability" : "Độ đầy đủ chi phí"}: {d.cost_availability ?? "Unknown"}
           </p>
           <p className="muted small">{d.reason}</p>
           <details>
@@ -105,8 +89,7 @@ export function EvaluationRecommendations() {
             </p>
             {d.evidence?.map((e: any, i: number) => (
               <p key={i} className="small">
-                {e.plan?.map((p: any) => p.provider).join(" → ")} · {e.samples}{" "}
-                / {e.tasks} ·{" "}
+                {e.plan?.map((p: any) => p.provider).join(" → ")} · {e.samples} / {e.tasks} ·{" "}
                 {e.evaluation_ids?.map((id: number) => (
                   <a
                     style={{ marginRight: 8 }}
@@ -120,14 +103,8 @@ export function EvaluationRecommendations() {
                 ))}
               </p>
             ))}
-            <a
-              href={`/api/agent-recommendations/${show.id}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {en
-                ? "Immutable evidence snapshot"
-                : "Bản chụp bằng chứng bất biến"}
+            <a href={`/api/agent-recommendations/${show.id}`} target="_blank" rel="noreferrer">
+              {en ? "Immutable evidence snapshot" : "Bản chụp bằng chứng bất biến"}
             </a>
           </details>
           {d.status === "RECOMMENDED" && d.plan?.length === 1 && (
@@ -143,11 +120,7 @@ export function EvaluationRecommendations() {
                   : "Áp dụng cho bước lập trình chưa cấu hình trong tương lai. Không đổi workflow đang chạy."}
               </label>
               <label>
-                <input
-                  type="checkbox"
-                  checked={cost}
-                  onChange={(e) => setCost(e.target.checked)}
-                />
+                <input type="checkbox" checked={cost} onChange={(e) => setCost(e.target.checked)} />
                 {en
                   ? "Allow a default when provider cost is unknown"
                   : "Cho phép mặc định khi chưa rõ chi phí"}
@@ -167,9 +140,7 @@ export function EvaluationRecommendations() {
                   })
                 }
               >
-                {en
-                  ? "Save future-default policy"
-                  : "Lưu chính sách mặc định tương lai"}
+                {en ? "Save future-default policy" : "Lưu chính sách mặc định tương lai"}
               </button>
             </div>
           )}
@@ -177,8 +148,7 @@ export function EvaluationRecommendations() {
       )}
       {policies.data?.map((p) => (
         <p key={p.id} className="small">
-          {p.category} ·{" "}
-          {p.enabled ? (en ? "Enabled" : "Đã bật") : en ? "Disabled" : "Đã tắt"}{" "}
+          {p.category} · {p.enabled ? (en ? "Enabled" : "Đã bật") : en ? "Disabled" : "Đã tắt"}{" "}
           <button
             className="quiet xs"
             onClick={() =>

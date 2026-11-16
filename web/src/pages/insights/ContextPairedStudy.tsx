@@ -11,13 +11,7 @@ export function ContextPairedStudy() {
     [b, setB] = useState(""),
     [report, setReport] = useState<any>(null);
   return (
-    <Panel
-      title={
-        en
-          ? "Paired context value assessment"
-          : "Đánh giá giá trị ngữ cảnh theo cặp"
-      }
-    >
+    <Panel title={en ? "Paired context value assessment" : "Đánh giá giá trị ngữ cảnh theo cặp"}>
       <p className="muted small">
         {en
           ? "Hold task, fixture, provider/model route and budgets fixed. Fixture results test the harness only. Live evidence needs repeated, completed trials before measurable benefit can be concluded."
@@ -29,15 +23,11 @@ export function ContextPairedStudy() {
           [b, setB, en ? "Candidate evaluation" : "Đánh giá ứng viên"],
         ].map(([value, set, label], i) => (
           <Field key={i} label={label as string}>
-            <select
-              value={value as string}
-              onChange={(e) => (set as typeof setA)(e.target.value)}
-            >
+            <select value={value as string} onChange={(e) => (set as typeof setA)(e.target.value)}>
               <option value="">—</option>
               {rows.data?.runs?.map((r: any) => (
                 <option key={r.id} value={r.id}>
-                  #{r.id} · {r.configuration.context_variant ?? "legacy"} ·{" "}
-                  {r.status}
+                  #{r.id} · {r.configuration.context_variant ?? "legacy"} · {r.status}
                 </option>
               ))}
             </select>
@@ -65,17 +55,12 @@ export function ContextPairedStudy() {
           <p className="small">
             {en ? "Paired tasks" : "Nhiệm vụ theo cặp"}:{" "}
             {report.context_report?.distinct_paired_tasks ?? "—"} ·{" "}
-            {en
-              ? "Quality improvements / regressions"
-              : "Cải thiện / hồi quy chất lượng"}
-            : {report.context_report?.improved ?? "—"} /{" "}
-            {report.context_report?.regressed ?? "—"} · Δ{" "}
+            {en ? "Quality improvements / regressions" : "Cải thiện / hồi quy chất lượng"}:{" "}
+            {report.context_report?.improved ?? "—"} / {report.context_report?.regressed ?? "—"} · Δ{" "}
             {fmt(report.context_report?.paired_duration_delta_ms, "ms")}
           </p>
           <details>
-            <summary>
-              {en ? "Method and evidence" : "Phương pháp và bằng chứng"}
-            </summary>
+            <summary>{en ? "Method and evidence" : "Phương pháp và bằng chứng"}</summary>
             <pre
               style={{
                 whiteSpace: "pre-wrap",

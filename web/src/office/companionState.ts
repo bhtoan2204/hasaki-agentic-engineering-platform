@@ -50,18 +50,11 @@ export function prioritizeCompanionRuns(runs: any[]) {
   return (
     [...runs].sort((a, b) => {
       const weight = (r: any) => {
-        const stepWeights = (r.steps ?? []).map(
-          (s: any) => STATUS_WEIGHT[s.status] ?? 20,
-        );
+        const stepWeights = (r.steps ?? []).map((s: any) => STATUS_WEIGHT[s.status] ?? 20);
         return Math.min(STATUS_WEIGHT[r.status] ?? 20, ...stepWeights);
       };
-      const timestamp = (r: any) =>
-        Date.parse(String(r.updated_at ?? r.created_at ?? "")) || 0;
-      return (
-        weight(a) - weight(b) ||
-        timestamp(b) - timestamp(a) ||
-        Number(b.id) - Number(a.id)
-      );
+      const timestamp = (r: any) => Date.parse(String(r.updated_at ?? r.created_at ?? "")) || 0;
+      return weight(a) - weight(b) || timestamp(b) - timestamp(a) || Number(b.id) - Number(a.id);
     })[0] ?? null
   );
 }
@@ -101,11 +94,7 @@ export function companionActivity(
     (step as any)?.agent?.provider ??
     (run as any)?.agent_provider ??
     null;
-  const model =
-    attempt?.model ??
-    attempt?.metrics?.model ??
-    (step as any)?.agent?.model ??
-    null;
+  const model = attempt?.model ?? attempt?.metrics?.model ?? (step as any)?.agent?.model ?? null;
   const failureCategory = providerFailureCategory(attempt);
   const common = {
     run,
@@ -119,31 +108,19 @@ export function companionActivity(
     action: "run" as const,
   };
   if (!run) return { ...common, state: "SLEEPING", action: "office" };
-  if (step && isHandoff(step))
-    return { ...common, state: "HANDOFF", action: "handoff" };
+  if (step && isHandoff(step)) return { ...common, state: "HANDOFF", action: "handoff" };
   if (
     step?.status === "FAILED" &&
-    ["RATE_LIMIT", "QUOTA_EXHAUSTED", "PROVIDER_UNAVAILABLE"].includes(
-      failureCategory ?? "",
-    )
+    ["RATE_LIMIT", "QUOTA_EXHAUSTED", "PROVIDER_UNAVAILABLE"].includes(failureCategory ?? "")
   )
     return { ...common, state: "HANDOFF", action: "handoff" };
-  if (
-    step?.status === "WAITING_INPUT" ||
-    pendingQuestion ||
-    agent?.pose === "ask"
-  )
+  if (step?.status === "WAITING_INPUT" || pendingQuestion || agent?.pose === "ask")
     return { ...common, state: "ASKING", action: "question" };
   if (step?.status === "WAITING_APPROVAL" || agent?.pose === "approval")
     return { ...common, state: "APPROVAL_REQUIRED", action: "approval" };
-  if (
-    step?.status === "FAILED" ||
-    run.status === "FAILED" ||
-    agent?.pose === "frustrated"
-  )
+  if (step?.status === "FAILED" || run.status === "FAILED" || agent?.pose === "frustrated")
     return { ...common, state: "FAILED", action: "failure" };
-  if (step?.status === "RETRYING" || agent?.retrying)
-    return { ...common, state: "RETRYING" };
+  if (step?.status === "RETRYING" || agent?.retrying) return { ...common, state: "RETRYING" };
   if (step?.status === "RUNNING") {
     if (agent?.activity === "testing" || step?.type === "command")
       return { ...common, state: "TESTING" };
@@ -152,28 +129,20 @@ export function companionActivity(
       /review|audit|security/i.test(`${step?.key} ${step?.name}`)
     )
       return { ...common, state: "REVIEWING" };
-    if (
-      ["searching", "reading", "browsing", "knowledge"].includes(
-        agent?.activity ?? "",
-      )
-    )
+    if (["searching", "reading", "browsing", "knowledge"].includes(agent?.activity ?? ""))
       return { ...common, state: "RESEARCHING" };
     if (["thinking", "sketching", "planning"].includes(agent?.activity ?? ""))
       return { ...common, state: "THINKING" };
     if (step?.type === "coding_agent") return { ...common, state: "CODING" };
     return { ...common, state: "WORKING" };
   }
-  if (
-    step?.status === "COMPLETED" &&
-    !["COMPLETED", "CANCELED", "FAILED"].includes(run.status)
-  )
+  if (step?.status === "COMPLETED" && !["COMPLETED", "CANCELED", "FAILED"].includes(run.status))
     return { ...common, state: "SUCCESS" };
   if (run.status === "COMPLETED") {
     const finished = attempt?.finished_at ? Date.parse(attempt.finished_at) : 0;
     if (finished && now - finished >= 0 && now - finished < 9000)
       return { ...common, state: "CELEBRATING" };
   }
-  if (run.status === "PAUSED" || run.status === "WAITING")
-    return { ...common, state: "WAITING" };
+  if (run.status === "PAUSED" || run.status === "WAITING") return { ...common, state: "WAITING" };
   return { ...common, state: "SLEEPING", action: "office" };
 }

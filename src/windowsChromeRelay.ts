@@ -8,20 +8,41 @@ export async function windowsChromeRelay(port: number, powershell: string) {
   const children = new Set<ReturnType<typeof spawn>>();
   let stopped = false;
   const server = createServer((socket) => {
-    if (stopped) { socket.destroy(); return; }
+    if (stopped) {
+      socket.destroy();
+      return;
+    }
     sockets.add(socket);
     const script = `$ErrorActionPreference='Stop'; $c=New-Object System.Net.Sockets.TcpClient('127.0.0.1',${port}); try { $s=$c.GetStream(); $a=[Console]::OpenStandardInput().CopyToAsync($s); $b=$s.CopyToAsync([Console]::OpenStandardOutput()); [System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]@($a,$b)) | Out-Null } finally { $c.Dispose() }`;
-    const child = spawn(powershell, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { stdio: ["pipe", "pipe", "ignore"] });
+    const child = spawn(
+      powershell,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { stdio: ["pipe", "pipe", "ignore"] },
+    );
     children.add(child);
     socket.pipe(child.stdin!);
     child.stdout!.pipe(socket);
     child.stdin!.on("error", () => socket.destroy());
     child.on("error", () => socket.destroy());
-    child.on("exit", () => { children.delete(child); socket.destroy(); });
-    socket.on("error", () => { });
-    socket.on("close", () => { sockets.delete(socket); child.kill(); });
+    child.on("exit", () => {
+      children.delete(child);
+      socket.destroy();
+    });
+    socket.on("error", () => {});
+    socket.on("close", () => {
+      sockets.delete(socket);
+      child.kill();
+    });
   });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
   return {
     port: (server.address() as { port: number }).port,
     close() {

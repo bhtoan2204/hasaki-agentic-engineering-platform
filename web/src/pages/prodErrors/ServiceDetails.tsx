@@ -2,14 +2,7 @@ import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { EmptyState, ErrorBox } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
-import {
-  BreakdownBars,
-  DataTable,
-  dateCell,
-  fmt,
-  Panel,
-  type Row,
-} from "../analytics/shared.tsx";
+import { BreakdownBars, DataTable, dateCell, fmt, Panel, type Row } from "../analytics/shared.tsx";
 import { navigate } from "../../ui.tsx";
 import { ObservedTrend } from "./ProductionOverview.tsx";
 
@@ -21,8 +14,7 @@ export function ServiceDetails({ query }: { query: string }) {
   );
   const back = () => {
     const fallback = new URLSearchParams(query);
-    for (const key of ["view", "return_query", "return_tab", "page"])
-      fallback.delete(key);
+    for (const key of ["view", "return_query", "return_tab", "page"]) fallback.delete(key);
     const original = params.get("return_query") ?? fallback.toString();
     navigate(
       `/prod-errors/${params.get("return_tab") === "services" ? "services" : "overview"}?${original ?? query}`,
@@ -87,8 +79,7 @@ export function ServiceDetails({ query }: { query: string }) {
       <header className="an-service-heading">
         <div>
           <div className="eyebrow">
-            {service.environment ?? "—"} ·{" "}
-            {service.namespace ?? t("an.unknownNamespace")}
+            {service.environment ?? "—"} · {service.namespace ?? t("an.unknownNamespace")}
           </div>
           <h2>{service.service}</h2>
         </div>
@@ -133,11 +124,7 @@ export function ServiceDetails({ query }: { query: string }) {
           />
         </Panel>
         <Panel title={t("an.severityMetric")}>
-          <BreakdownBars
-            rows={data.severity ?? []}
-            field="events"
-            labelKey="severity"
-          />
+          <BreakdownBars rows={data.severity ?? []} field="events" labelKey="severity" />
         </Panel>
       </div>
       <Panel title={t("an.topFingerprints")}>
@@ -145,10 +132,7 @@ export function ServiceDetails({ query }: { query: string }) {
           rows={(data.topFingerprints ?? []).map((r: Row) => ({
             ...r,
             open: (
-              <button
-                className="link-button mono"
-                onClick={() => incidentLink(r.fingerprint)}
-              >
+              <button className="link-button mono" onClick={() => incidentLink(r.fingerprint)}>
                 {r.fingerprint}
               </button>
             ),
@@ -180,10 +164,7 @@ export function ServiceDetails({ query }: { query: string }) {
           rows={(data.details ?? []).map((r: Row) => ({
             ...r,
             open: (
-              <button
-                className="link-button mono"
-                onClick={() => incidentLink(r.fingerprint)}
-              >
+              <button className="link-button mono" onClick={() => incidentLink(r.fingerprint)}>
                 {r.fingerprint}
               </button>
             ),

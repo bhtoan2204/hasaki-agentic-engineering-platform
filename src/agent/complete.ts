@@ -6,6 +6,7 @@ import { accumulateMetrics, newMetrics } from "./metrics.ts";
 import { codexComplete } from "./codex/run.ts";
 import { cursorComplete } from "./cursor/run.ts";
 import { antigravityComplete } from "./antigravity/run.ts";
+import { copilotComplete } from "./copilot/run.ts";
 import { agentProvider, type AgentProvider } from "./provider.ts";
 
 /**
@@ -73,6 +74,21 @@ export async function completeForRun(
       },
     };
   }
+  if (provider === "copilot") {
+    const r = await copilotComplete(prompt, { signal });
+    return {
+      text: r.text,
+      provider,
+      metrics: {
+        ...metadata(),
+        provider,
+        model: r.model || null,
+        model_source: r.model ? "agent.copilot.model" : "copilot default",
+        cost_usd: null,
+        tokens: r.tokens,
+      },
+    };
+  }
   if (provider === "antigravity") {
     const r = await antigravityComplete(prompt, { signal });
     return {
@@ -82,9 +98,7 @@ export async function completeForRun(
         ...metadata(),
         provider,
         model: r.model || null,
-        model_source: r.model
-          ? "agent.antigravity.model"
-          : "antigravity default",
+        model_source: r.model ? "agent.antigravity.model" : "antigravity default",
         cost_usd: null,
         tokens: r.tokens,
       },

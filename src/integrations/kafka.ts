@@ -12,7 +12,12 @@ import { cookiePairs } from "./curl.ts";
  */
 
 const SETTING = "kafka_ui_cookie";
-const login = new PersonalSession<{ cookie: string; user: string | null; checkedAt: number; valid: boolean }>();
+const login = new PersonalSession<{
+  cookie: string;
+  user: string | null;
+  checkedAt: number;
+  valid: boolean;
+}>();
 
 const baseUrl = () => config.kafka.baseUrl.replace(/\/$/, "");
 const MAX_CONTENT = 4000;
@@ -20,55 +25,91 @@ const MAX_CONTENT = 4000;
 /** Cookie header, `Cookie:` line, `SESSION=…`, or a Copy-as-cURL command (bash or Windows cmd). */
 export function parseKafkaCookie(raw: string): string {
   const { pairs } = cookiePairs(raw);
-  if (!pairs.some((p) => /^SESSION=/i.test(p))) throw new Error("không thấy cookie SESSION — copy cả header Cookie (hoặc Copy as cURL) của một request tới Kafka UI");
+  if (!pairs.some((p) => /^SESSION=/i.test(p)))
+    throw new Error(
+      "không thấy cookie SESSION — copy cả header Cookie (hoặc Copy as cURL) của một request tới Kafka UI",
+    );
   return pairs.join("; ");
 }
 
 /** The only HTTP verb this integration uses. */
-async function get(path: string, cookie: string, params?: Record<string, string | number | boolean | undefined>, accept = "application/json"): Promise<string> {
+async function get(
+  path: string,
+  cookie: string,
+  params?: Record<string, string | number | boolean | undefined>,
+  accept = "application/json",
+): Promise<string> {
   const url = new URL(baseUrl() + path);
-  for (const [k, v] of Object.entries(params ?? {})) if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
-  const res = await fetch(url, { method: "GET", redirect: "manual", headers: { Cookie: cookie, Accept: accept }, signal: AbortSignal.timeout(config.kafka.timeoutSeconds * 1000) });
+  for (const [k, v] of Object.entries(params ?? {}))
+    if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
+  const res = await fetch(url, {
+    method: "GET",
+    redirect: "manual",
+    headers: { Cookie: cookie, Accept: accept },
+    signal: AbortSignal.timeout(config.kafka.timeoutSeconds * 1000),
+  });
   const text = await res.text();
   if (res.status === 401 || (res.status >= 300 && res.status < 400)) {
     if (login.current && cookie === login.current.cookie) login.current.valid = false;
-    throw new Error("phiên Kafka UI hết hạn hoặc không hợp lệ — người dùng cần dán cookie mới ở trang Integrations (hỏi qua ask_user nếu cần)");
+    throw new Error(
+      "phiên Kafka UI hết hạn hoặc không hợp lệ — người dùng cần dán cookie mới ở trang Integrations (hỏi qua ask_user nếu cần)",
+    );
   }
   if (!res.ok) {
     let msg = text.slice(0, 300);
     try {
       msg = JSON.parse(text).message ?? msg;
-    } catch { }
+    } catch {}
     throw new Error(`Kafka UI ${res.status} ${path}: ${msg}`);
   }
   return text;
 }
-const getJson = async (path: string, cookie: string, params?: Record<string, string | number | boolean | undefined>) => JSON.parse((await get(path, cookie, params)) || "null");
+const getJson = async (
+  path: string,
+  cookie: string,
+  params?: Record<string, string | number | boolean | undefined>,
+) => JSON.parse((await get(path, cookie, params)) || "null");
 
 function requireCookie(): string {
   if (!login.current?.valid)
-    throw new Error(login.current ? "phiên Kafka UI hết hạn — người dùng cần dán cookie mới ở trang Integrations" : "chưa kết nối Kafka UI — người dùng dán cookie ở trang Integrations");
+    throw new Error(
+      login.current
+        ? "phiên Kafka UI hết hạn — người dùng cần dán cookie mới ở trang Integrations"
+        : "chưa kết nối Kafka UI — người dùng dán cookie ở trang Integrations",
+    );
   return login.current.cookie;
 }
 
 async function check(cookie: string) {
   const clusters = await getJson("/api/clusters", cookie);
-  if (!Array.isArray(clusters)) throw new Error("Kafka UI không trả về danh sách cluster cho phiên này");
+  if (!Array.isArray(clusters))
+    throw new Error("Kafka UI không trả về danh sách cluster cho phiên này");
   let user: string | null = null;
   try {
     const a = await getJson("/api/authorization", cookie);
     user = a?.userInfo?.username ?? null;
-  } catch { }
-  return { clusters: clusters.map((c: any) => ({ name: c.name, status: c.status, brokers: c.brokerCount, topics: c.topicCount })), user };
+  } catch {}
+  return {
+    clusters: clusters.map((c: any) => ({
+      name: c.name,
+      status: c.status,
+      brokers: c.brokerCount,
+      topics: c.topicCount,
+    })),
+    user,
+  };
 }
 
 export async function loadKafkaCookie() {
   const saved = await settings.get(SETTING);
-  if (!saved) { if (login.current) login.current = null; return; }
+  if (!saved) {
+    if (login.current) login.current = null;
+    return;
+  }
   try {
     const { cookie, user } = JSON.parse(saved);
     login.current = { cookie, user: user ?? null, checkedAt: 0, valid: true };
-  } catch { }
+  } catch {}
 }
 
 export async function kafkaStatus(force = false) {
@@ -117,24 +158,44 @@ async function clusterName(cluster?: string): Promise<string> {
   const list = await getJson("/api/clusters", requireCookie());
   const online = list.filter((c: any) => c.status !== "offline");
   if (!online.length) throw new Error("Kafka UI không có cluster nào online");
-  if (online.length > 1) throw new Error(`có nhiều cluster (${online.map((c: any) => c.name).join(", ")}) — truyền tham số cluster`);
+  if (online.length > 1)
+    throw new Error(
+      `có nhiều cluster (${online.map((c: any) => c.name).join(", ")}) — truyền tham số cluster`,
+    );
   return online[0].name;
 }
 const enc = encodeURIComponent;
 
 export async function listTopics(query?: string, cluster?: string) {
   const c = await clusterName(cluster);
-  const j = await getJson(`/api/clusters/${enc(c)}/topics`, requireCookie(), { page: 1, perPage: 100, search: query, showInternal: false, orderBy: "NAME" });
+  const j = await getJson(`/api/clusters/${enc(c)}/topics`, requireCookie(), {
+    page: 1,
+    perPage: 100,
+    search: query,
+    showInternal: false,
+    orderBy: "NAME",
+  });
   return {
     cluster: c,
-    topics: (j?.topics ?? []).map((t: any) => ({ topic: t.name, partitions: t.partitionCount, replication: t.replicationFactor, messages: t.messagesCount ?? undefined, cleanup: t.cleanUpPolicy })),
+    topics: (j?.topics ?? []).map((t: any) => ({
+      topic: t.name,
+      partitions: t.partitionCount,
+      replication: t.replicationFactor,
+      messages: t.messagesCount ?? undefined,
+      cleanup: t.cleanUpPolicy,
+    })),
     ...(j?.pageCount > 1 ? { note: "more topics exist — narrow the query" } : {}),
   };
 }
 
 export async function consumerGroups(query?: string, cluster?: string) {
   const c = await clusterName(cluster);
-  const j = await getJson(`/api/clusters/${enc(c)}/consumer-groups/paged`, requireCookie(), { page: 1, perPage: 50, search: query, orderBy: "NAME" });
+  const j = await getJson(`/api/clusters/${enc(c)}/consumer-groups/paged`, requireCookie(), {
+    page: 1,
+    perPage: 50,
+    search: query,
+    orderBy: "NAME",
+  });
   return {
     cluster: c,
     groups: (j?.consumerGroups ?? []).map((g: any) => ({
@@ -157,7 +218,15 @@ export async function consumerGroupDetail(group: string, cluster?: string) {
     state: g.state,
     members: g.members,
     lag: g.consumerLag ?? g.messagesBehind,
-    partitions: (g.partitions ?? []).map((p: any) => ({ topic: p.topic, partition: p.partition, offset: p.currentOffset, end: p.endOffset, lag: p.consumerLag ?? p.messagesBehind, consumer: p.consumerId, host: p.host })),
+    partitions: (g.partitions ?? []).map((p: any) => ({
+      topic: p.topic,
+      partition: p.partition,
+      offset: p.currentOffset,
+      end: p.endOffset,
+      lag: p.consumerLag ?? p.messagesBehind,
+      consumer: p.consumerId,
+      host: p.host,
+    })),
   };
 }
 
@@ -199,9 +268,18 @@ export async function readMessages(q: MessageQuery) {
     keySerde: "String",
     valueSerde: "String",
   };
-  if (q.since_minutes) Object.assign(params, { mode: "FROM_TIMESTAMP", timestamp: Date.now() - Math.round(q.since_minutes * 60_000) });
+  if (q.since_minutes)
+    Object.assign(params, {
+      mode: "FROM_TIMESTAMP",
+      timestamp: Date.now() - Math.round(q.since_minutes * 60_000),
+    });
   else params.mode = "LATEST";
-  const text = await get(`/api/clusters/${enc(c)}/topics/${enc(q.topic)}/messages/v2`, requireCookie(), params, "text/event-stream");
+  const text = await get(
+    `/api/clusters/${enc(c)}/topics/${enc(q.topic)}/messages/v2`,
+    requireCookie(),
+    params,
+    "text/event-stream",
+  );
   const events = parseMessageEvents(text);
   const messages = events
     .filter((e) => (e.type ?? "MESSAGE") === "MESSAGE" && (e.message ?? e.content !== undefined))
@@ -215,10 +293,16 @@ export async function readMessages(q: MessageQuery) {
         timestamp: m.timestamp,
         key: m.key == null ? null : redactSecrets(String(m.key)),
         headers: m.headers && Object.keys(m.headers).length ? m.headers : undefined,
-        value: content.length > MAX_CONTENT ? content.slice(0, MAX_CONTENT) + `… (${content.length - MAX_CONTENT} more chars)` : content,
+        value:
+          content.length > MAX_CONTENT
+            ? content.slice(0, MAX_CONTENT) + `… (${content.length - MAX_CONTENT} more chars)`
+            : content,
       };
     });
-  const errors = events.filter((e) => e.type === "ERROR" || e.error).map((e) => e.message?.message ?? e.error ?? e.phase?.name).filter(Boolean);
+  const errors = events
+    .filter((e) => e.type === "ERROR" || e.error)
+    .map((e) => e.message?.message ?? e.error ?? e.phase?.name)
+    .filter(Boolean);
   const consuming = events.filter((e) => e.type === "CONSUMING").at(-1)?.consuming;
   return {
     cluster: c,

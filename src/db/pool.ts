@@ -13,11 +13,21 @@ export const pool = new pg.Pool({
   // TCP keepalive so a VPN/NAT hop does not silently drop a long-idle client (the next query would then hang).
   keepAlive: true,
   keepAliveInitialDelayMillis: 30000,
+  // A developer shell may set a multi-minute idle timeout and a minimum pool. Those sockets must not pin a
+  // finished test process; checked-out clients and every other handle still keep it alive.
+  allowExitOnIdle: process.env.PLATFORM_TEST === "1",
 });
-// Idle clients can error after a restart or network blip. Log the message only — never the connection string.
-pool.on("error", (err) =>
-  console.error("postgres idle client error:", err.message),
-);
+watchPoolErrors(pool);
+
+/** Idle clients can error after a restart, a network blip, or DROP DATABASE ... FORCE in test teardown. */
+export function watchPoolErrors(target: pg.Pool) {
+  target.on("error", (err: NodeJS.ErrnoException) => {
+    // 57P01 is the backend being closed on purpose (administrator shutdown / DROP ... FORCE).
+    if (err.code === "57P01") return;
+    console.error("postgres idle client error:", err.message);
+  });
+  return target;
+}
 
 /** A pool or a client inside a transaction: every repository function accepts either. */
 export type Db = pg.Pool | pg.PoolClient;
@@ -83,8 +93,7 @@ export async function retryTransient<T>(
  * through q()/one(), which spot `INSERT INTO | UPDATE | DELETE FROM <table>`: inside withTx the tables are reported
  * after COMMIT (a rollback reports nothing), outside a transaction right after the statement.
  */
-const WRITE_RE =
-  /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)/i;
+const WRITE_RE = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)/i;
 const writeListeners: Array<(tables: Set<string>) => void> = [];
 const txWrites = new WeakMap<object, Set<string>>();
 export function onCommittedWrite(fn: (tables: Set<string>) => void) {
@@ -101,8 +110,7 @@ function emitWrites(tables: Set<string>) {
   }
 }
 /** Did this transaction (still open) write `table`? Caches bypass themselves then: the tx must see its own writes. */
-export const txWrote = (db: Db, table: string) =>
-  txWrites.get(db)?.has(table) ?? false;
+export const txWrote = (db: Db, table: string) => txWrites.get(db)?.has(table) ?? false;
 export const inTx = (db: Db) => txWrites.has(db);
 
 async function run(db: Db, sql: string, params: unknown[]) {
@@ -117,11 +125,7 @@ async function run(db: Db, sql: string, params: unknown[]) {
   return r;
 }
 
-export async function q<T = any>(
-  db: Db,
-  sql: string,
-  params: unknown[] = [],
-): Promise<T[]> {
+export async function q<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
   return (await run(db, sql, params)).rows as T[];
 }
 
@@ -144,12 +148,7 @@ const buffered = new WeakMap<
   Map<string, { table: string; columns: string[]; rows: unknown[][] }>
 >();
 
-export async function insertDeferred(
-  db: Db,
-  table: string,
-  columns: string[],
-  values: unknown[],
-) {
+export async function insertDeferred(db: Db, table: string, columns: string[], values: unknown[]) {
   const buf = buffered.get(db);
   if (!buf) {
     await db.query(
@@ -159,9 +158,7 @@ export async function insertDeferred(
     return;
   }
   const k = `${table}(${columns.join(",")})`;
-  (buf.get(k) ?? buf.set(k, { table, columns, rows: [] }).get(k)!).rows.push(
-    values,
-  );
+  (buf.get(k) ?? buf.set(k, { table, columns, rows: [] }).get(k)!).rows.push(values);
 }
 
 async function flushDeferred(c: pg.PoolClient) {
@@ -174,8 +171,7 @@ async function flushDeferred(c: pg.PoolClient) {
       const chunk = rows.slice(i, i + per);
       const params: unknown[] = [];
       const tuples = chunk.map(
-        (r) =>
-          `(${r.map((v) => (params.push(v), `$${params.length}`)).join(", ")})`,
+        (r) => `(${r.map((v) => (params.push(v), `$${params.length}`)).join(", ")})`,
       );
       await c.query(
         `INSERT INTO ${table} (${columns.join(", ")}) VALUES ${tuples.join(", ")}`,
@@ -194,10 +190,7 @@ async function flushDeferred(c: pg.PoolClient) {
  * rolls back (when a transaction is still open) and skips callbacks.
  */
 export async function withTx<T>(
-  fn: (
-    c: pg.PoolClient,
-    afterCommit: (cb: () => unknown) => void,
-  ) => Promise<T>,
+  fn: (c: pg.PoolClient, afterCommit: (cb: () => unknown) => void) => Promise<T>,
   db: pg.Pool = pool,
 ): Promise<T> {
   const c = await db.connect();
@@ -239,5 +232,4 @@ export async function withTx<T>(
   return out;
 }
 
-export const json = (v: unknown) =>
-  v === undefined ? null : JSON.stringify(v);
+export const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));

@@ -25,7 +25,12 @@ import { normalizeScopePath } from "./scopeGuard.ts";
 
 const exec = promisify(execFile);
 
-export const PROVENANCE_STATUSES = ["VERIFIED_BY_PLATFORM", "AGENT_REPORTED", "UNVERIFIED", "CONTRADICTED"] as const;
+export const PROVENANCE_STATUSES = [
+  "VERIFIED_BY_PLATFORM",
+  "AGENT_REPORTED",
+  "UNVERIFIED",
+  "CONTRADICTED",
+] as const;
 export type ProvenanceStatus = (typeof PROVENANCE_STATUSES)[number];
 export interface Provenance {
   by: "platform";
@@ -47,7 +52,12 @@ export interface ProvenanceEnv {
   artifact(id: number): Promise<boolean>;
 }
 
-const mark = (status: ProvenanceStatus, reason: string | null, verifies: Provenance["verifies"] = null, extra: Partial<Provenance> = {}): Provenance => ({ by: "platform", status, verifies, reason, ...extra });
+const mark = (
+  status: ProvenanceStatus,
+  reason: string | null,
+  verifies: Provenance["verifies"] = null,
+  extra: Partial<Provenance> = {},
+): Provenance => ({ by: "platform", status, verifies, reason, ...extra });
 const SHA = /^[0-9a-f]{7,40}$/i;
 
 async function git(path: string, args: string[]) {
@@ -55,8 +65,12 @@ async function git(path: string, args: string[]) {
 }
 
 /** Platform reference syntax for records: tool_call:<id> / tool:<id> / artifact:<id> / artifact_id:<id>. */
-export function parseRecordRef(ref: unknown): { kind: "tool_call" | "artifact"; id: number } | null {
-  const m = String(ref ?? "").trim().match(/^(tool_call|tool|artifact|artifact_id)\s*[:#]\s*(\d{1,18})$/i);
+export function parseRecordRef(
+  ref: unknown,
+): { kind: "tool_call" | "artifact"; id: number } | null {
+  const m = String(ref ?? "")
+    .trim()
+    .match(/^(tool_call|tool|artifact|artifact_id)\s*[:#]\s*(\d{1,18})$/i);
   if (!m) return null;
   return { kind: /^tool/i.test(m[1]) ? "tool_call" : "artifact", id: Number(m[2]) };
 }
@@ -74,23 +88,41 @@ export async function verifyClaimProvenance(raw: any, env: ProvenanceEnv): Promi
     const commit = String(raw?.commit ?? "").trim();
     if (!commit) return mark("UNVERIFIED", "no commit: the location cannot be bound to a revision");
     if (!SHA.test(commit)) return mark("UNVERIFIED", `"${commit.slice(0, 40)}" is not a commit id`);
-    const full = await git(path, ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`]).then((s) => s.trim()).catch(() => "");
-    if (!full) return mark("CONTRADICTED", `commit ${commit.slice(0, 12)} does not exist in ${repo}`);
+    const full = await git(path, ["rev-parse", "--verify", "--quiet", `${commit}^{commit}`])
+      .then((s) => s.trim())
+      .catch(() => "");
+    if (!full)
+      return mark("CONTRADICTED", `commit ${commit.slice(0, 12)} does not exist in ${repo}`);
     const content = await git(path, ["show", `${full}:${n.path}`]).catch(() => null);
-    if (content === null) return mark("CONTRADICTED", `${n.path} does not exist at ${full.slice(0, 12)}`);
+    if (content === null)
+      return mark("CONTRADICTED", `${n.path} does not exist at ${full.slice(0, 12)}`);
     const range = String(raw?.line_range ?? "").trim();
     if (range) {
       const m = range.match(/^L?(\d+)(?:\s*[-–:]\s*L?(\d+))?$/i);
       if (!m) return mark("UNVERIFIED", `line range "${range.slice(0, 40)}" is not checkable`);
-      const lines = content.length ? content.split("\n").length - (content.endsWith("\n") ? 1 : 0) : 0;
+      const lines = content.length
+        ? content.split("\n").length - (content.endsWith("\n") ? 1 : 0)
+        : 0;
       const a = Number(m[1]);
       const b = Number(m[2] ?? m[1]);
-      if (a < 1 || b < a || b > lines) return mark("CONTRADICTED", `lines ${a}-${b} are outside ${n.path} at ${full.slice(0, 12)} (${lines} lines)`);
+      if (a < 1 || b < a || b > lines)
+        return mark(
+          "CONTRADICTED",
+          `lines ${a}-${b} are outside ${n.path} at ${full.slice(0, 12)} (${lines} lines)`,
+        );
     }
     const ref = await env.currentRef(repo);
     if (ref) {
-      const changed = await git(path, ["diff", "--quiet", full, ref, "--", n.path]).then(() => false).catch((e) => (e?.code === 1 ? true : null));
-      if (changed === true) return mark("UNVERIFIED", `${n.path} changed between the cited ${full.slice(0, 12)} and ${ref}: the claim may be outdated`, null, { stale: true });
+      const changed = await git(path, ["diff", "--quiet", full, ref, "--", n.path])
+        .then(() => false)
+        .catch((e) => (e?.code === 1 ? true : null));
+      if (changed === true)
+        return mark(
+          "UNVERIFIED",
+          `${n.path} changed between the cited ${full.slice(0, 12)} and ${ref}: the claim may be outdated`,
+          null,
+          { stale: true },
+        );
     }
     return mark("VERIFIED_BY_PLATFORM", null, "location");
   }
@@ -102,11 +134,19 @@ export async function verifyClaimProvenance(raw: any, env: ProvenanceEnv): Promi
       if (t.status !== "ok") return mark("UNVERIFIED", `tool call ${rec.id} ended ${t.status}`);
       return mark("VERIFIED_BY_PLATFORM", null, "source_record");
     }
-    if (!(await env.artifact(rec.id))) return mark("CONTRADICTED", `artifact ${rec.id} is not a record of this run`);
+    if (!(await env.artifact(rec.id)))
+      return mark("CONTRADICTED", `artifact ${rec.id} is not a record of this run`);
     return mark("VERIFIED_BY_PLATFORM", null, "source_record");
   }
-  if (agentVerified && raw?.source_ref) return mark("AGENT_REPORTED", "the cited source is not a platform record; only the agent vouches for it");
-  return mark("UNVERIFIED", raw?.source_ref ? "the cited source is not a platform record" : "no checkable source");
+  if (agentVerified && raw?.source_ref)
+    return mark(
+      "AGENT_REPORTED",
+      "the cited source is not a platform record; only the agent vouches for it",
+    );
+  return mark(
+    "UNVERIFIED",
+    raw?.source_ref ? "the cited source is not a platform record" : "no checkable source",
+  );
 }
 
 /** Strip any agent-supplied provenance, attach the platform's, and lower `verification_status` where it cannot hold. */
@@ -124,12 +164,24 @@ export function applyProvenance(raw: any, p: Provenance) {
 export async function withProvenance(claims: unknown, env: ProvenanceEnv) {
   if (!Array.isArray(claims)) return claims;
   const list = claims.slice(0, 60);
-  const marks = await Promise.all(list.map((c) => verifyClaimProvenance(typeof c === "string" ? { claim: c } : c, env).catch((e) => mark("UNVERIFIED", `provenance check failed: ${(e as Error).message.split("\n")[0].slice(0, 160)}`))));
+  const marks = await Promise.all(
+    list.map((c) =>
+      verifyClaimProvenance(typeof c === "string" ? { claim: c } : c, env).catch((e) =>
+        mark(
+          "UNVERIFIED",
+          `provenance check failed: ${(e as Error).message.split("\n")[0].slice(0, 160)}`,
+        ),
+      ),
+    ),
+  );
   return list.map((c, i) => applyProvenance(c, marks[i]));
 }
 
 /** The environment of one run: its worktrees and allowed repositories, its tool calls and artifacts only. */
-export async function runProvenanceEnv(run: { id: number; allowed_repositories: string[] }): Promise<ProvenanceEnv> {
+export async function runProvenanceEnv(run: {
+  id: number;
+  allowed_repositories: string[];
+}): Promise<ProvenanceEnv> {
   const ws = new Map((await workspacesOf(run.id).catch(() => [])).map((w) => [w.repo, w.path]));
   return {
     async repoPath(repo) {
@@ -147,7 +199,16 @@ export async function runProvenanceEnv(run: { id: number; allowed_repositories: 
       if (ws.has(repo)) return "HEAD";
       return `origin/${await repositoryBaseBranch(repo).catch(() => config.baseBranch)}`;
     },
-    toolCall: (id) => one<{ status: string }>(pool, "SELECT status FROM agent_context_tool_calls WHERE id = $1 AND run_id = $2", [id, run.id]).then((r) => r ?? null),
-    artifact: async (id) => !!(await one(pool, "SELECT 1 FROM workflow_artifacts WHERE id = $1 AND run_id = $2", [id, run.id])),
+    toolCall: (id) =>
+      one<{ status: string }>(
+        pool,
+        "SELECT status FROM agent_context_tool_calls WHERE id = $1 AND run_id = $2",
+        [id, run.id],
+      ).then((r) => r ?? null),
+    artifact: async (id) =>
+      !!(await one(pool, "SELECT 1 FROM workflow_artifacts WHERE id = $1 AND run_id = $2", [
+        id,
+        run.id,
+      ])),
   };
 }

@@ -4,18 +4,24 @@ import { getUserSecret, putUserSecret, deleteUserSecret } from "../auth/secrets.
 /** Memory sessions are isolated by authenticated actor (or persisted run owner), never process-global logins. */
 export class PersonalSession<T> {
   private sessions = new Map<number, T>();
-  get current(): T | null { return this.sessions.get(currentUserId() ?? 0) ?? null; }
+  get current(): T | null {
+    return this.sessions.get(currentUserId() ?? 0) ?? null;
+  }
   set current(value: T | null) {
     const id = currentUserId() ?? 0;
-    if (!id && process.env.PLATFORM_TEST !== "1") throw new Error("Personal integration requires an authenticated execution owner");
-    if (value === null) this.sessions.delete(id); else this.sessions.set(id, value);
+    if (!id && process.env.PLATFORM_TEST !== "1")
+      throw new Error("Personal integration requires an authenticated execution owner");
+    if (value === null) this.sessions.delete(id);
+    else this.sessions.set(id, value);
   }
 }
 
-async function userId() {
+/** The authenticated actor (run owner inside a worker); the test owner under PLATFORM_TEST. */
+export async function actorId() {
   const id = currentUserId();
   if (id) return id;
-  if (process.env.PLATFORM_TEST === "1") return (await import("../auth/testOwner.ts")).ensureTestOwner();
+  if (process.env.PLATFORM_TEST === "1")
+    return (await import("../auth/testOwner.ts")).ensureTestOwner();
   throw new Error("Personal integration requires an authenticated execution owner");
 }
 
@@ -23,10 +29,11 @@ async function userId() {
 export const personalSettings = {
   async get(kind: string) {
     if (!currentUserId() && process.env.PLATFORM_TEST !== "1") return null;
-    return getUserSecret(await userId(), kind);
+    return getUserSecret(await actorId(), kind);
   },
   async set(kind: string, value: string) {
-    const id = await userId();
-    if (value) await putUserSecret(id, kind, value); else await deleteUserSecret(id, kind);
+    const id = await actorId();
+    if (value) await putUserSecret(id, kind, value);
+    else await deleteUserSecret(id, kind);
   },
 };
