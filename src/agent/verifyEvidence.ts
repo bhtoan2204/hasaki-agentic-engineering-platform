@@ -46,10 +46,12 @@ export interface EvidenceStats {
   saved_ms: number;
   invalidations: string[];
   not_stored: string[];
+  /** Raw store error messages (bounded); kept out of the aggregated reason categories. */
+  store_errors?: string[];
 }
 
 export const emptyStats = (): EvidenceStats => ({
-  hits: 0, misses: 0, reused: 0, duplicates_avoided: 0, saved_ms: 0, invalidations: [], not_stored: [],
+  hits: 0, misses: 0, reused: 0, duplicates_avoided: 0, saved_ms: 0, invalidations: [], not_stored: [], store_errors: [],
 });
 
 export const canonicalJson = (v: unknown): string =>
@@ -147,7 +149,7 @@ export class EvidenceCache {
       const prev = await this.store.latest(this.scope, repo);
       if (prev) reason = firstDifference(prev.parts, { ...parts });
     } catch (e) {
-      reason = `store_error: ${(e as Error).message}`.slice(0, 160);
+      reason = "store_error"; this.stats.store_errors?.push((e as Error).message.slice(0, 160));
     }
     this.stats.misses++;
     this.stats.invalidations.push(reason);
@@ -169,7 +171,7 @@ export class EvidenceCache {
         if (r && !why) {
           try {
             await this.store.save(this.scope, repo, { key, parts, result: r, attempt_id: this.scope.attemptId ?? null, duration_ms: r.duration_ms });
-          } catch (e) { why = `store_error: ${(e as Error).message}`.slice(0, 160); }
+          } catch (e) { why = "store_error"; this.stats.store_errors?.push((e as Error).message.slice(0, 160)); }
         }
         if (why) this.stats.not_stored.push(why);
         finish(r && !notReusableReason(r) ? r : null);

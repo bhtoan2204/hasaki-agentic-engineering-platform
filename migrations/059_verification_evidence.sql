@@ -1,7 +1,7 @@
 -- Migration 059: verification evidence reuse (REQ-96). Additive only; scoped per run.
 CREATE TABLE IF NOT EXISTS verification_evidence (
   id          BIGSERIAL PRIMARY KEY,
-  run_id      BIGINT NOT NULL,
+  run_id      BIGINT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
   step_key    TEXT NOT NULL,
   attempt_id  BIGINT,
   repo        TEXT NOT NULL,

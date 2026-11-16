@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { verifyPublication } from "../../agent/publicationVerification.ts";
+import { pgEvidenceStore } from "../../agent/verifyEvidence.ts";
 import type { StepRow } from "../types.ts";
 import { requireRunRepositoryAccess } from "../../repos/access.ts";
 import { createHash } from "node:crypto";
@@ -1214,7 +1215,7 @@ export const pullRequestExecutor: StepExecutor = {
       .map((x) => ({ step: x.key, heads: x.output.tested_heads as Record<string, string> }));
     const verifiers = steps.filter((x) => x.independent);
     const finalVerification = await verifyPublication(ctx, steps, workspaces,
-      runVerificationCommand);
+      runVerificationCommand, pgEvidenceStore(pool));
     const finalRepos = new Set(finalVerification.tested.flatMap(t => Object.keys(t.heads)));
     const publicationTested = [...tested.map(t => ({ ...t, heads: Object.fromEntries(Object.entries(t.heads).filter(([repo]) => !finalRepos.has(repo))) })), ...finalVerification.tested];
     const problems = [
