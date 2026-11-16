@@ -4,9 +4,11 @@ import { config, antigravityConfig, codexConfig, copilotConfig } from "../src/co
 import { nextHealthyProvider } from "../src/agent/health.ts";
 import { substituteEnabledProvider } from "../src/agent/provider.ts";
 import { applyOperator, resetOperatorForTests } from "../src/platform/operatorSettings.ts";
+import { modelFor } from "../src/agent/stepAgent.ts";
 
 const prev = {
   model: config.model,
+  models: config.agent.models,
   maxTurns: config.maxTurns,
   provider: config.agent.defaultProvider,
   codex: { ...config.agent.codex },
@@ -22,6 +24,7 @@ const prev = {
 after(() => {
   resetOperatorForTests();
   config.model = prev.model;
+  config.agent.models = prev.models;
   config.maxTurns = prev.maxTurns;
   config.agent.defaultProvider = prev.provider;
   config.agent.enabledProviders = undefined;
@@ -111,4 +114,58 @@ test("an off provider is replaced by one that is on, and health fallback skips i
     },
   });
   assert.throws(() => substituteEnabledProvider("claude"), /enabled in Settings/);
+});
+
+test("Claude model routing per profile and role is saved in Settings and restored on clear", () => {
+  resetOperatorForTests();
+  config.agent.models = { "*": { agent: "from-config" } };
+  config.model = "";
+  applyOperator({});
+  const plan = { type: "agent", config: {} };
+  const coding = { type: "coding_agent", config: {} };
+  assert.equal(modelFor(plan, "DEEP").model, "from-config");
+
+  applyOperator({ models: { DEEP: { agent: "opus" } } });
+  assert.deepEqual(modelFor(plan, "DEEP"), { model: "opus", source: "routing DEEP/agent" });
+  assert.equal(
+    modelFor(plan, "STANDARD").model,
+    "",
+    "the saved routing replaces config.json routing",
+  );
+  assert.equal(modelFor(coding, "DEEP").model, "");
+
+  applyOperator({});
+  assert.equal(modelFor(plan, "DEEP").model, "from-config");
+});
+
+test("attachment URL, related projects and Bitbucket access policy are Settings-owned", () => {
+  resetOperatorForTests();
+  const prev = {
+    fileBaseUrl: config.fileBaseUrl,
+    related: config.relatedProjects,
+    access: config.bitbucket.accessVerification,
+  };
+  try {
+    config.fileBaseUrl = "https://files.example/a";
+    config.relatedProjects = { OMS: ["Payment"] };
+    config.bitbucket.accessVerification = "personal";
+    applyOperator({});
+    applyOperator({
+      fileBaseUrl: "https://files.example/b",
+      relatedProjects: { OMS: ["Payment", "Warranty"] },
+      bitbucketAccess: "strict",
+    });
+    assert.equal(config.fileBaseUrl, "https://files.example/b");
+    assert.deepEqual(config.relatedProjects, { OMS: ["Payment", "Warranty"] });
+    assert.equal(config.bitbucket.accessVerification, "strict");
+    applyOperator({});
+    assert.equal(config.fileBaseUrl, "https://files.example/a");
+    assert.deepEqual(config.relatedProjects, { OMS: ["Payment"] });
+    assert.equal(config.bitbucket.accessVerification, "personal");
+  } finally {
+    resetOperatorForTests();
+    config.fileBaseUrl = prev.fileBaseUrl;
+    config.relatedProjects = prev.related;
+    config.bitbucket.accessVerification = prev.access;
+  }
 });

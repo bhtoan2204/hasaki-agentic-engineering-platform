@@ -873,7 +873,9 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
   for (const [re, why] of ALWAYS_DENIED) if (re.test(scan)) return deny(why);
   // Heredoc bodies are not in `scan`, but they are commit messages: check the raw command.
   if (/\bgit\b[\s\S]*\bcommit\b/.test(scan) && /co-authored-by:/i.test(command))
-    return deny("commit messages must not carry a Co-Authored-By trailer — remove it and commit again");
+    return deny(
+      "commit messages must not carry a Co-Authored-By trailer — remove it and commit again",
+    );
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
   const fsScan = filesystemScanViolation(p);

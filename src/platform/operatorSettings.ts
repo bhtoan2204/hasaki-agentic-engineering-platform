@@ -17,10 +17,21 @@ const PROVIDERS = ["claude", "codex", "cursor", "antigravity", "copilot"] as con
 const Provider = z.enum(PROVIDERS);
 const Effort = z.enum(["", "low", "medium", "high", "xhigh"]);
 const AgyEffort = z.enum(["", "low", "medium", "high", "xhigh", "max"]);
+/** Claude model per execution profile ("*" = any) and step role, same shape as config.agent.models. */
+const Models = z.partialRecord(
+  z.enum(["*", "MICRO", "FAST", "STANDARD", "DEEP"]),
+  z.partialRecord(z.enum(["agent", "coding_agent", "verifier"]), z.string().trim().min(1).max(200)),
+);
 
 const Patch = z
   .object({
     model: z.string().max(200).optional(),
+    models: Models.optional(),
+    fileBaseUrl: z.union([z.literal(""), z.url().max(500)]).optional(),
+    relatedProjects: z
+      .record(z.string().trim().min(1).max(80), z.array(z.string().trim().min(1).max(80)).max(50))
+      .optional(),
+    bitbucketAccess: z.enum(["strict", "personal", "trusted"]).optional(),
     maxTurns: z.number().int().min(1).max(500).optional(),
     defaultProvider: Provider.optional(),
     enabledProviders: z
@@ -122,22 +133,37 @@ export function captureOperatorFallback(): OperatorPatch {
       agy.maxConcurrent ||
       1,
   );
-  const copilotConcurrent = Number(process.env.COPILOT_MAX_CONCURRENT || copilot.maxConcurrent || 1);
+  const copilotConcurrent = Number(
+    process.env.COPILOT_MAX_CONCURRENT || copilot.maxConcurrent || 1,
+  );
   const copilotSandbox = process.env.COPILOT_SANDBOX;
   fallback = {
     model: config.model ?? "",
+    models: structuredClone(config.agent.models ?? {}) as OperatorPatch["models"],
+    fileBaseUrl: config.fileBaseUrl ?? "",
+    relatedProjects: structuredClone(config.relatedProjects ?? {}),
+    bitbucketAccess: config.bitbucket.accessVerification ?? "strict",
     maxTurns: config.maxTurns,
     defaultProvider: config.agent.defaultProvider ?? "claude",
     enabledProviders: { ...(config.agent.enabledProviders ?? {}) },
     codex: {
       model: process.env.CODEX_MODEL ?? codex.model ?? "",
       reasoningEffort: (process.env.CODEX_REASONING_EFFORT ?? codex.reasoningEffort ?? "") as
-        "" | "low" | "medium" | "high" | "xhigh",
+        | ""
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh",
     },
     antigravity: {
       model: process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? agy.model ?? "",
       effort: (process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? agy.effort ?? "") as
-        "" | "low" | "medium" | "high" | "xhigh" | "max",
+        | ""
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max",
       sandbox: envFlag("AGY_SANDBOX", "ANTIGRAVITY_SANDBOX") ?? agy.sandbox ?? true,
       maxConcurrent:
         Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? Math.floor(maxConcurrent) : 1,
@@ -151,7 +177,11 @@ export function captureOperatorFallback(): OperatorPatch {
         | "high"
         | "xhigh",
       sandbox:
-        copilotSandbox === "true" ? true : copilotSandbox === "false" ? false : (copilot.sandbox ?? true),
+        copilotSandbox === "true"
+          ? true
+          : copilotSandbox === "false"
+            ? false
+            : (copilot.sandbox ?? true),
       maxConcurrent:
         Number.isFinite(copilotConcurrent) && copilotConcurrent > 0
           ? Math.floor(copilotConcurrent)
@@ -194,6 +224,14 @@ function write(next: OperatorPatch) {
   clearOwned();
   config.model = pick(next, "model", fb.model ?? "");
   own("model", Object.prototype.hasOwnProperty.call(next, "model"));
+  config.agent.models = structuredClone(pick(next, "models", fb.models ?? {})) as Record<
+    string,
+    Record<string, string>
+  >;
+  own("models", Object.prototype.hasOwnProperty.call(next, "models"));
+  config.fileBaseUrl = pick(next, "fileBaseUrl", fb.fileBaseUrl ?? "");
+  config.relatedProjects = structuredClone(pick(next, "relatedProjects", fb.relatedProjects ?? {}));
+  config.bitbucket.accessVerification = pick(next, "bitbucketAccess", fb.bitbucketAccess ?? "strict");
   config.maxTurns = pick(next, "maxTurns", fb.maxTurns ?? config.maxTurns);
   own("maxTurns", Object.prototype.hasOwnProperty.call(next, "maxTurns"));
   const flags = pick(next, "enabledProviders", fb.enabledProviders);
@@ -307,6 +345,10 @@ export function operatorView() {
     fallback: fb,
     effective: {
       model: config.model,
+      models: config.agent.models ?? {},
+      fileBaseUrl: config.fileBaseUrl ?? "",
+      relatedProjects: config.relatedProjects ?? {},
+      bitbucketAccess: config.bitbucket.accessVerification ?? "strict",
       maxTurns: config.maxTurns,
       defaultProvider: config.agent.defaultProvider ?? "claude",
       enabledProviders: {
