@@ -1,6 +1,6 @@
 import { validateExecutionAuthorization } from "./executionContract.ts";
 import { executionWorkspaces, implementationBaseline, implementationChanged, observeImplementation, loadImplementationBaseline } from "./implementationEvidence.ts";
-import { worktreeFingerprint } from "./scopeGuard.ts";
+import { worktreeFingerprint, changedFiles } from "./scopeGuard.ts";
 import { refreshToolProgress } from "./toolRuntime.ts";
 import { selectVerificationScope } from "./verificationScope.ts";
 import { collectMicroEvidence, validateMicroWorkspace } from "../workflow/microEvidence.ts";
@@ -1885,6 +1885,7 @@ ${validation.errors.join("; ")}`,
             )
           ).report,
         diffTests: async (p) => diffTestsAgainstBase(p, await workspaceBaseBranch(p)),
+        changedFiles: async (p) => (await changedFiles(p, `origin/${await workspaceBaseBranch(p)}`)).all,
         artifact: (name, content, data) =>
           ctx.artifact("log", name, content, { ...data, verification: true }),
         log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),

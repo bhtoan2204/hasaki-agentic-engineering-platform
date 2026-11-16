@@ -95,7 +95,7 @@ test("mandatory verification fingerprints workspaces even without additional tes
     0,
     new AbortController().signal,
     {
-      run: async () => ({ code: 0, timedOut: false, output: "passed" }),
+      run: async () => ({ code: 0, timedOut: false, output: "# tests 1\n# pass 1\n# skipped 0" }),
       diffTests: async () => "",
     },
   );
