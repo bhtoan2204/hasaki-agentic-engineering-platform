@@ -108,6 +108,8 @@ import { HttpError } from "../http/error.ts";
 import {
   clearOperatorSettings,
   operatorView,
+  addGitlabInstance,
+  removeGitlabInstance,
   saveOperatorSettings,
 } from "../platform/operatorSettings.ts";
 import {
@@ -2080,7 +2082,35 @@ export const routes: Route[] = [
   ["GET", /^\/api\/integrations\/github$/, ({ actor }) => githubStatus(actor.id)],
   ["POST", /^\/api\/integrations\/github$/, ({ body, actor }) => setGithub(body, actor.id)],
   ["POST", /^\/api\/integrations\/github\/clear$/, ({ actor }) => clearGithub(actor.id)],
-  ["GET", /^\/api\/integrations\/gitlab$/, ({ actor }) => gitlabStatus(actor.id)],
+  [
+    "GET",
+    /^\/api\/integrations\/gitlab$/,
+    async ({ actor }) => ({ ...(await gitlabStatus(actor.id)), can_manage: actor.role === "admin" }),
+  ],
+  [
+    "POST",
+    /^\/api\/integrations\/gitlab\/instances$/,
+    async ({ body, actor }) => (
+      requireAdmin(actor),
+      await addGitlabInstance(body?.host),
+      await audit(actor.id, "settings.gitlab.instance.add", "settings", "operator", {
+        host: body?.host,
+      }),
+      gitlabStatus(actor.id)
+    ),
+  ],
+  [
+    "POST",
+    /^\/api\/integrations\/gitlab\/instances\/remove$/,
+    async ({ body, actor }) => (
+      requireAdmin(actor),
+      await removeGitlabInstance(body?.host),
+      await audit(actor.id, "settings.gitlab.instance.remove", "settings", "operator", {
+        host: body?.host,
+      }),
+      gitlabStatus(actor.id)
+    ),
+  ],
   ["POST", /^\/api\/integrations\/gitlab$/, ({ body, actor }) => setGitlab(body, actor.id)],
   ["POST", /^\/api\/integrations\/gitlab\/test$/, ({ body, actor }) => testGitlab(body, actor.id)],
   [

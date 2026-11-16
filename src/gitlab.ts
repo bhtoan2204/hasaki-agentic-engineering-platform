@@ -198,7 +198,9 @@ export async function resolveGitlabSsh(host: string) {
 
 function assertAllowedHost(host: string) {
   if (!gitlabHosts().includes(host.toLowerCase()))
-    throw new Error(`GitLab host ${host} is not in config.gitlab.instances`);
+    throw new Error(
+      `GitLab host ${host} is not an allowed instance: an admin can add it on Integrations → GitLab`,
+    );
   return host.toLowerCase();
 }
 

@@ -426,7 +426,7 @@ function gitlabHostOf(input: unknown): string {
   if (!host || !gitlabHosts().includes(host))
     throw new HttpError(
       400,
-      `GitLab instance is not allowed: use one of ${gitlabHosts().join(", ") || "(none configured)"} (config.gitlab.instances)`,
+      `GitLab instance is not allowed: use one of ${gitlabHosts().join(", ") || "(none configured)"} — an admin can add the host on Integrations → GitLab`,
     );
   return host;
 }
@@ -553,7 +553,7 @@ export async function setGitlabSshKey(
   if (!config.gitlab.instances.find((i) => i.host === host)?.sshHostKeys?.length)
     throw new HttpError(
       400,
-      `SSH is not enabled for ${host}: an operator must pin its host keys in config.gitlab.instances[].sshHostKeys`,
+      `SSH is not enabled for ${host}: its SSH host keys are not pinned; use HTTPS with an access token`,
     );
   const key = String(input.ssh_key ?? "");
   if (!validSshPrivateKey(key))

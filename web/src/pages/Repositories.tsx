@@ -960,7 +960,7 @@ const repoSlugFromUrl = (url: string) =>
   /\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1] ?? "";
 
 /**
- * GitLab instance (base URL) for the repository URL. Only instances in config.gitlab.instances are offered: the
+ * GitLab instance (base URL) for the repository URL. Only the allowed instances (added on Integrations → GitLab) are offered: the
  * server derives the API base from the URL host and refuses any other host.
  */
 type InstanceForm = { repository_url?: string } & Record<string, unknown>;

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { config } from "../config.ts";
+import { config, gitlabConfig, SSH_HOST_KEY } from "../config.ts";
 import { settings } from "../db.ts";
 import { HttpError } from "../http/error.ts";
 import { clearOwned, own } from "./operatorState.ts";
@@ -32,6 +32,23 @@ const Patch = z
       .record(z.string().trim().min(1).max(80), z.array(z.string().trim().min(1).max(80)).max(50))
       .optional(),
     bitbucketAccess: z.enum(["strict", "personal", "trusted"]).optional(),
+    gitlabInstances: z
+      .array(
+        z
+          .object({
+            host: z
+              .string()
+              .trim()
+              .toLowerCase()
+              .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "GitLab host must be a bare host name, e.g. gitlab.example.com"),
+            sshPort: z.number().int().min(1).max(65535).optional(),
+            sshHostKeys: z.array(z.string().trim().regex(SSH_HOST_KEY, "not an OpenSSH public host key")).max(10).optional(),
+            caFile: z.string().trim().max(500).optional(),
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
     maxTurns: z.number().int().min(1).max(500).optional(),
     defaultProvider: Provider.optional(),
     enabledProviders: z
@@ -143,6 +160,7 @@ export function captureOperatorFallback(): OperatorPatch {
     fileBaseUrl: config.fileBaseUrl ?? "",
     relatedProjects: structuredClone(config.relatedProjects ?? {}),
     bitbucketAccess: config.bitbucket.accessVerification ?? "strict",
+    gitlabInstances: structuredClone(config.gitlab.instances),
     maxTurns: config.maxTurns,
     defaultProvider: config.agent.defaultProvider ?? "claude",
     enabledProviders: { ...(config.agent.enabledProviders ?? {}) },
@@ -232,6 +250,10 @@ function write(next: OperatorPatch) {
   config.fileBaseUrl = pick(next, "fileBaseUrl", fb.fileBaseUrl ?? "");
   config.relatedProjects = structuredClone(pick(next, "relatedProjects", fb.relatedProjects ?? {}));
   config.bitbucket.accessVerification = pick(next, "bitbucketAccess", fb.bitbucketAccess ?? "strict");
+  config.gitlab = gitlabConfig({
+    ...config.gitlab,
+    instances: structuredClone(pick(next, "gitlabInstances", fb.gitlabInstances ?? [])),
+  });
   config.maxTurns = pick(next, "maxTurns", fb.maxTurns ?? config.maxTurns);
   own("maxTurns", Object.prototype.hasOwnProperty.call(next, "maxTurns"));
   const flags = pick(next, "enabledProviders", fb.enabledProviders);
@@ -349,6 +371,7 @@ export function operatorView() {
       fileBaseUrl: config.fileBaseUrl ?? "",
       relatedProjects: config.relatedProjects ?? {},
       bitbucketAccess: config.bitbucket.accessVerification ?? "strict",
+      gitlabInstances: config.gitlab.instances,
       maxTurns: config.maxTurns,
       defaultProvider: config.agent.defaultProvider ?? "claude",
       enabledProviders: {
@@ -421,6 +444,9 @@ export async function loadOperatorSettings() {
 
 export async function saveOperatorSettings(raw: unknown) {
   const next = parse(raw ?? {});
+  // GitLab instances are managed on Integrations; a Settings page save that omits them must not drop them.
+  if (!Object.prototype.hasOwnProperty.call(next, "gitlabInstances") && saved.gitlabInstances)
+    next.gitlabInstances = saved.gitlabInstances;
   const flags = next.enabledProviders;
   if (flags && PROVIDERS.every((p) => flags[p] === false))
     throw new HttpError(400, "At least one agent provider must stay on");
@@ -430,7 +456,37 @@ export async function saveOperatorSettings(raw: unknown) {
 }
 
 export async function clearOperatorSettings() {
-  await settings.set(KEY, "");
-  write({});
+  // Restoring Settings defaults leaves the GitLab instances added on Integrations in place.
+  const keep: OperatorPatch = saved.gitlabInstances ? { gitlabInstances: saved.gitlabInstances } : {};
+  await settings.set(KEY, Object.keys(keep).length ? JSON.stringify(keep) : "");
+  write(keep);
   return operatorView();
+}
+
+/** "http://gitlab.example.com:8443/group/" → "gitlab.example.com". Git and the API always use HTTPS on that host. */
+export function gitlabHostFrom(input: unknown): string {
+  const host = String(input ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
+    .replace(/^[^@/]*@/, "")
+    .replace(/[/?#].*$/, "")
+    .replace(/:\d+$/, "");
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host))
+    throw new HttpError(400, "Enter a GitLab host or URL, e.g. gitlab.example.com");
+  return host;
+}
+
+/** Allow-list one GitLab host (stored with the other operator settings, never in config.json). */
+export async function addGitlabInstance(input: unknown) {
+  const host = gitlabHostFrom(input);
+  const current = saved.gitlabInstances ?? structuredClone(config.gitlab.instances);
+  if (current.some((i) => i.host === host)) return operatorView();
+  return saveOperatorSettings({ ...saved, gitlabInstances: [...current, { host }] });
+}
+
+export async function removeGitlabInstance(input: unknown) {
+  const host = gitlabHostFrom(input);
+  const current = saved.gitlabInstances ?? structuredClone(config.gitlab.instances);
+  return saveOperatorSettings({ ...saved, gitlabInstances: current.filter((i) => i.host !== host) });
 }

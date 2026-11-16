@@ -438,3 +438,19 @@
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 8px 12px;
 }
+
+/* `.field > span` styles labels; this wrapper holds controls. */
+.field > .ig-gl-instance,
+.ig-gl-instance {
+  display: flex;
+  margin-bottom: 0;
+  font-weight: 400;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.ig-gl-instance > select,
+.ig-gl-instance > input {
+  flex: 1;
+  min-width: 0;
+}

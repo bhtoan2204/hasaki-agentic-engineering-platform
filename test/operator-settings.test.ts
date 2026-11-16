@@ -169,3 +169,32 @@ test("attachment URL, related projects and Bitbucket access policy are Settings-
     config.bitbucket.accessVerification = prev.access;
   }
 });
+
+test("GitLab instances are Settings-owned and gate which GitLab URLs are accepted", async () => {
+  const { repositoryRemote } = await import("../src/repos/remote.ts");
+  resetOperatorForTests();
+  const prev = structuredClone(config.gitlab.instances);
+  try {
+    config.gitlab.instances = [{ host: "gitlab.com" }];
+    applyOperator({});
+    assert.throws(() => repositoryRemote("https://gitlab.hasaki.work/payment/payment-paypal.git"));
+    applyOperator({ gitlabInstances: [{ host: "gitlab.hasaki.work", sshPort: 2222 }] });
+    const r = repositoryRemote("https://gitlab.hasaki.work/payment/payment-paypal.git");
+    assert.equal(r.provider, "gitlab");
+    assert.equal(r.host, "gitlab.hasaki.work");
+    assert.deepEqual(config.gitlab.instances, [{ host: "gitlab.hasaki.work", sshPort: 2222 }]);
+    applyOperator({});
+    assert.deepEqual(config.gitlab.instances, [{ host: "gitlab.com" }]);
+  } finally {
+    resetOperatorForTests();
+    config.gitlab.instances = prev;
+  }
+});
+
+test("a GitLab instance can be entered as a URL; only the bare host is kept", async () => {
+  const { gitlabHostFrom } = await import("../src/platform/operatorSettings.ts");
+  assert.equal(gitlabHostFrom("http://gitlab.hasaki.work/"), "gitlab.hasaki.work");
+  assert.equal(gitlabHostFrom(" HTTPS://user@GitLab.Example.com:8443/group/project.git "), "gitlab.example.com");
+  assert.equal(gitlabHostFrom("gitlab.hasaki.work"), "gitlab.hasaki.work");
+  for (const bad of ["", "localhost", "http://", "not a host"]) assert.throws(() => gitlabHostFrom(bad), bad);
+});

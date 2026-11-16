@@ -8,10 +8,12 @@ import {
   LockKeyhole,
   LogOut,
   PlugZap,
+  Plus,
   RefreshCw,
   Send,
   Server,
   ShieldAlert,
+  Trash2,
   Upload,
   Waypoints,
   type LucideIcon,
@@ -1119,8 +1121,8 @@ function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
 }
 
 /**
- * Per-instance GitLab access token (personal or project access token). The host must be one of the instances the
- * server allows (config.gitlab.instances); the token is never shown again, only whether one is saved.
+ * Per-instance GitLab access token (personal or project access token). The host must be one of the allowed instances,
+ * which an admin adds here (stored in the database); the token is never shown again, only whether one is saved.
  */
 function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
@@ -1133,7 +1135,9 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
       ssh_available: boolean;
       ssh_key: boolean;
     }>;
+    can_manage?: boolean;
   }>("/api/integrations/gitlab");
+  const [newHost, setNewHost] = useState("");
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [sshKey, setSshKey] = useState("");
@@ -1168,6 +1172,35 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
       reload();
     }
   };
+  const addInstance = async () => {
+    setBusy(true);
+    const r = await act(
+      () => api<{ instances: Array<{ host: string }> }>("/api/integrations/gitlab/instances", { host: newHost }),
+      t("ig.gl.instanceAdded"),
+    );
+    setBusy(false);
+    if (r) {
+      const added = r.instances.find((i) => !instances.some((x) => x.host === i.host));
+      setNewHost("");
+      if (added) setHost(added.host);
+      setCheck(null);
+      reload();
+    }
+  };
+  const removeInstance = async () => {
+    if (!selected || !confirm(t("ig.gl.instanceRemoveConfirm", { host: selected }))) return;
+    setBusy(true);
+    const r = await act(
+      () => api("/api/integrations/gitlab/instances/remove", { host: selected }),
+      t("ig.removed"),
+    );
+    setBusy(false);
+    if (r) {
+      setHost("");
+      setCheck(null);
+      reload();
+    }
+  };
   const test = async () => {
     setBusy(true);
     const r = await act(() =>
@@ -1189,15 +1222,46 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
     >
       <p className="muted small">{t("ig.gl.body")}</p>
       <Field label={t("ig.gl.instance")} hint={t("ig.gl.instanceHint")}>
-        <select value={selected} onChange={(e) => (setHost(e.target.value), setCheck(null))}>
-          {instances.map((i) => (
-            <option key={i.host} value={i.host}>
-              {i.base_url}
-              {i.personal ? ` · ${t("ig.gl.saved")}` : ""}
-            </option>
-          ))}
-        </select>
+        <span className="ig-gl-instance">
+          <select value={selected} onChange={(e) => (setHost(e.target.value), setCheck(null))}>
+            {instances.map((i) => (
+              <option key={i.host} value={i.host}>
+                {i.base_url}
+                {i.personal ? ` · ${t("ig.gl.saved")}` : ""}
+              </option>
+            ))}
+          </select>
+          {st?.can_manage && selected && (
+            <button
+              type="button"
+              className="sm ghost"
+              disabled={busy}
+              title={t("ig.gl.instanceRemove")}
+              aria-label={t("ig.gl.instanceRemove")}
+              onClick={removeInstance}
+            >
+              <Trash2 size={14} strokeWidth={2} />
+            </button>
+          )}
+        </span>
       </Field>
+      {st?.can_manage && (
+        <Field label={t("ig.gl.instanceAdd")} hint={t("ig.gl.instanceAddHint")}>
+          <span className="ig-gl-instance">
+            <input
+              value={newHost}
+              autoComplete="off"
+              placeholder="https://gitlab.example.com"
+              onChange={(e) => setNewHost(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && newHost.trim() && addInstance()}
+            />
+            <button type="button" className="sm ghost" disabled={busy || !newHost.trim()} onClick={addInstance}>
+              <Plus size={14} strokeWidth={2} />
+              {t("ig.gl.instanceAddButton")}
+            </button>
+          </span>
+        </Field>
+      )}
       <Field label={t("ig.gl.token")}>
         <input
           type="password"
