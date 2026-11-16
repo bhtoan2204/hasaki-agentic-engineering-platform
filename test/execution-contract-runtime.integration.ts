@@ -721,3 +721,44 @@ test("a re-execution or retry keeps implementation observed in an earlier genera
     "accepted implementation cannot be claimed by a retry either",
   );
 });
+
+test("final publication does not rerun a step on the exact revision it already passed on", async () => {
+  process.env.FAKE_LIFECYCLE_ACTION = "edit";
+  const run = await start("STANDARD", true, true);
+  await reachCoding(run.id);
+  await drain();
+  const second = (await step(run.id, "implement-second"))!;
+  assert.equal(second.status, "COMPLETED", JSON.stringify(second.error));
+  const [integrated] = await workspacesOf(run.id);
+  assert.equal(
+    git(integrated.path, "rev-parse", "HEAD"),
+    second.output.verification.last[0].tested_state.head,
+  );
+  const live = (await one(pool, "SELECT * FROM workflow_runs WHERE id=$1", [run.id]))!;
+  const steps = await q<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position", [run.id]);
+  const logs: string[] = [];
+  const commands: string[] = [];
+  const ctx = {
+    run: live,
+    signal: new AbortController().signal,
+    artifact: async () => 1,
+    log: async (_kind: string, text: string) => void logs.push(text),
+  } as unknown as ExecutionContext;
+  const counting: typeof runCommand = (command, ...rest) => (commands.push(command), runCommand(command, ...rest));
+  const result = await verifyPublication(ctx, steps, await workspacesOf(run.id), counting);
+  assert.deepEqual(result.problems, []);
+  assert.ok(logs.some((l) => /final regression: implement-second skipped/.test(l)), logs.join("\n"));
+  assert.ok(result.tested.some((t) => t.step === "publication:implement-second"));
+  // The first implementation step passed on an older commit, so it alone is re-verified on the integrated revision.
+  assert.ok(!logs.some((l) => /final regression: implement skipped/.test(l)));
+  writeFileSync(join(integrated.path, "uncommitted.txt"), "changed after verification\n");
+  const logsAfter: string[] = [];
+  const dirty = await verifyPublication(
+    { ...ctx, log: async (_k: string, text: string) => void logsAfter.push(text) } as unknown as ExecutionContext,
+    steps,
+    await workspacesOf(run.id),
+    runCommand,
+  );
+  assert.ok(!logsAfter.some((l) => /skipped/.test(l)), "an uncommitted change forces a rerun");
+  void dirty;
+});

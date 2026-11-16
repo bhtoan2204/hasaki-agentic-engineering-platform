@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { config } from "../config.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { StepRow } from "../workflow/types.ts";
@@ -8,6 +10,9 @@ import { diffTestsAgainstBase } from "./verify.ts";
 import { changedFiles } from "./scopeGuard.ts";
 import { workspaceBase } from "../git/provider.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
+import { worktreeFingerprint } from "./scopeGuard.ts";
+
+const exec = promisify(execFile);
 
 /** Historical step evidence proves that step. Publication separately tests the integrated workspace. */
 export async function verifyPublication(
@@ -27,7 +32,35 @@ export async function verifyPublication(
     cfg: VerifyConfig,
     trees: typeof workspaces,
     extraEnv: Record<string, string> = {},
+    /** Per repository, the state this step already passed on: head, plus fingerprint when it was recorded. */
+    passedOn?: (repo: string) => { head?: string; fingerprint?: string } | undefined,
   ) => {
+    // Same commit and nothing uncommitted: the step's own passing run already tested exactly what is published.
+    if (passedOn) {
+      const states = await Promise.all(
+        trees.map(async (w) => ({
+          w,
+          now: await worktreeFingerprint(w.path).catch(() => null),
+          clean: await isClean(w.path),
+        })),
+      );
+      const unchanged = states.every(({ w, now, clean }) => {
+        const prior = passedOn(w.repo);
+        if (!now || !prior?.head || prior.head !== now.head) return false;
+        return prior.fingerprint ? prior.fingerprint === now.fingerprint : clean;
+      });
+      if (unchanged) {
+        await ctx.log(
+          "system",
+          `final regression: ${key} skipped — ${states.map(({ w, now }) => `${w.repo}@${now!.head.slice(0, 12)}`).join(", ")} is exactly the revision it already passed on`,
+        );
+        tested.push({
+          step: `publication:${key}`,
+          heads: Object.fromEntries(states.map(({ w, now }) => [w.repo, now!.head])),
+        });
+        return;
+      }
+    }
     const bases = new Map(
       await Promise.all(
         trees.map(
@@ -57,7 +90,13 @@ export async function verifyPublication(
       {
         run: execute,
         ...(evidenceStore
-          ? { evidence: new EvidenceCache(evidenceStore, { runId: ctx.run.id, stepKey: `publication:${key}`, attemptId: ctx.attempt?.id ?? null }) }
+          ? {
+              evidence: new EvidenceCache(evidenceStore, {
+                runId: ctx.run.id,
+                stepKey: `publication:${key}`,
+                attemptId: ctx.attempt?.id ?? null,
+              }),
+            }
           : {}),
         knownFailures: knownBaseFailures,
         baseline: async (repo, failing) =>
@@ -135,7 +174,15 @@ export async function verifyPublication(
       continue;
     }
     if (problems.length) continue;
-    await verify(step.key, cfg, trees);
+    const last = (step.output?.verification?.last ?? []) as Array<{
+      repo: string;
+      passed?: boolean;
+      tested_state?: { head: string; fingerprint: string };
+    }>;
+    await verify(step.key, cfg, trees, {}, (repo) => {
+      const r = last.find((x) => x.repo === repo);
+      return step.output?.verification?.passed === true && r?.passed ? r.tested_state : undefined;
+    });
   }
   // Workflow command steps may carry broader mandatory regressions than the coding contract.
   // Re-run them on the integrated revision; patch equivalence does not prove compatibility with a new base.
@@ -166,8 +213,32 @@ export async function verifyPublication(
         problems.push(`${step.key}: missing workflow regression command`);
         continue;
       }
-      await verify(step.key, cfg, trees, step.config.env as Record<string, string> | undefined);
+      await verify(
+        step.key,
+        cfg,
+        trees,
+        step.config.env as Record<string, string> | undefined,
+        (repo) => {
+          const head = step.output.tested_heads?.[repo];
+          return typeof head === "string" && head ? { head } : undefined;
+        },
+      );
     }
 
   return { problems, tested };
+}
+
+async function isClean(path: string): Promise<boolean> {
+  try {
+    const { stdout } = await exec("git", [
+      "-C",
+      path,
+      "status",
+      "--porcelain",
+      "--untracked-files=normal",
+    ]);
+    return stdout.trim() === "";
+  } catch {
+    return false;
+  }
 }
