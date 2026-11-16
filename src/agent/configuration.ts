@@ -396,7 +396,9 @@ export function refreshEnvironmentDefaults(document: AgentConfiguration): AgentC
     for (const key of ["model", "reasoning_effort", "timeout_ms", "max_turns"] as const) {
       const source = entry.default_sources?.[key];
       if (source?.startsWith("environment ") || source === "legacy provider default") {
-        Object.assign(entry.defaults, { [key]: current.providers[provider].defaults[key] });
+        const value = current.providers[provider].defaults[key];
+        if (value === undefined) delete entry.defaults[key];
+        else Object.assign(entry.defaults, { [key]: value });
         entry.default_sources = {
           ...entry.default_sources,
           [key]: current.providers[provider].default_sources?.[key],

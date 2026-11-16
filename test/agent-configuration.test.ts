@@ -1,6 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/config.ts";
+
+test("provider defaults remain identical across persistence and disable/re-enable", () => {
+  const stored = legacyAgentConfiguration();
+  const provider = "copilot";
+  stored.providers[provider].defaults = {
+    model: null,
+    reasoning_effort: null,
+    timeout_ms: 10000,
+    options: { sandbox: true, max_concurrent: 2 },
+  };
+  stored.providers[provider].default_sources = {
+    model: "provider default",
+    reasoning_effort: "provider default",
+    timeout_ms: "provider default",
+    max_turns: "legacy provider default",
+    "options.sandbox": "provider default",
+    "options.max_concurrent": "provider default",
+  };
+  const before = refreshEnvironmentDefaults(stored);
+  const persisted = JSON.parse(JSON.stringify(before));
+  const disabled = patchProviderConfiguration(persisted, provider, 0, { enabled: false });
+  const enabled = patchProviderConfiguration(disabled, provider, 1, { enabled: true });
+  assert.deepEqual(enabled.providers[provider].defaults, before.providers[provider].defaults);
+  assert.deepEqual(before.providers[provider].defaults, {
+    model: null,
+    reasoning_effort: null,
+    timeout_ms: 10000,
+    options: { sandbox: true, max_concurrent: 2 },
+  });
+});
 import { resolveStepAgent } from "../src/agent/stepAgent.ts";
 import {
   convertLegacyConfiguration,
@@ -346,6 +376,17 @@ test("effort and turn limits inherit independently at every level", () => {
 });
 
 test("canceled auxiliary calls never invoke a provider", async () => {
-  const runner: CompletionRunner = async () => { throw new Error("provider invoked after cancellation"); };
-  await assert.rejects(() => completeForRun({ agent_provider: "claude", agent_configuration: legacyAgentConfiguration() }, "fixture", AbortSignal.abort(), { claude: runner, codex: runner, cursor: runner, antigravity: runner, copilot: runner }), { name: "AbortError" });
+  const runner: CompletionRunner = async () => {
+    throw new Error("provider invoked after cancellation");
+  };
+  await assert.rejects(
+    () =>
+      completeForRun(
+        { agent_provider: "claude", agent_configuration: legacyAgentConfiguration() },
+        "fixture",
+        AbortSignal.abort(),
+        { claude: runner, codex: runner, cursor: runner, antigravity: runner, copilot: runner },
+      ),
+    { name: "AbortError" },
+  );
 });
