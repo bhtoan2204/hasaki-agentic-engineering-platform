@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { config, gitlabConfig, SSH_HOST_KEY } from "../config.ts";
 import { settings } from "../db.ts";
+import { one, q, withTx } from "../db/pool.ts";
+import { importLegacyAgentPatch } from "../agent/configurationStore.ts";
 import { HttpError } from "../http/error.ts";
 import { clearOwned, own } from "./operatorState.ts";
 
@@ -450,7 +452,15 @@ export async function saveOperatorSettings(raw: unknown) {
   const flags = next.enabledProviders;
   if (flags && PROVIDERS.every((p) => flags[p] === false))
     throw new HttpError(400, "At least one agent provider must stay on");
-  await settings.set(KEY, JSON.stringify(next));
+  await withTx(async (db) => {
+    const previous = await one<{ value: string }>(db, "SELECT value FROM settings WHERE key=$1 FOR UPDATE", [KEY]);
+    const old = previous?.value ? JSON.parse(previous.value) : {};
+    const patch: Record<string, unknown> = {};
+    for (const key of ["model", "models", "maxTurns", "defaultProvider", "enabledProviders", "codex", "antigravity", "copilot"] as const)
+      if (Object.hasOwn(next, key) && JSON.stringify(next[key]) !== JSON.stringify(old[key])) patch[key] = next[key];
+    if (Object.keys(patch).length) await importLegacyAgentPatch(db, patch);
+    await q(db, "INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [KEY, JSON.stringify(next)]);
+  });
   write(next);
   return operatorView();
 }

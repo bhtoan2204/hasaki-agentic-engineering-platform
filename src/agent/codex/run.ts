@@ -529,7 +529,8 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   const onAbort = () => stop("canceled");
   ctx.signal.addEventListener("abort", onAbort, { once: true });
   if (ctx.signal.aborted) stop("canceled");
-  const timer = setTimeout(() => stop("timeout"), codexConfig().timeoutMs);
+  const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? codexConfig().timeoutMs;
+  const timer = setTimeout(() => stop("timeout"), timeoutMs);
   child.stdin?.on("error", () => {});
   child.stdin?.end(input.prompt);
 
@@ -790,7 +791,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     return {
       ...base,
       isError: true,
-      text: `Codex execution timeout: turn exceeded the ${Math.round(codexConfig().timeoutMs / 60000)} minute limit and was stopped`,
+      text: `Codex execution timeout: turn exceeded the ${Math.round(timeoutMs / 60000)} minute limit and was stopped`,
       failure: "timeout",
     };
   if (violation)
@@ -851,11 +852,12 @@ export function redact(s: string): string {
  */
 export async function codexComplete(
   prompt: string,
-  opts: { signal?: AbortSignal; model?: string; effort?: string } = {},
+  opts: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number } = {},
 ): Promise<{ text: string; tokens: AgentMetrics["tokens"]; model: string }> {
-  const cap = await codexCapabilities();
-  if (!cap.ok) throw new Error(cap.error);
   const cfg = codexConfig();
+  const cap = await codexCapabilities(false, { model: opts.model ?? cfg.model, effort: opts.effort ?? cfg.reasoningEffort });
+  if (!cap.ok) throw new Error(cap.error);
+  opts.signal?.throwIfAborted();
   const dir = mkdtempSync(join(tmpdir(), "ctp-codex-complete-"));
   const model = opts.model ?? cfg.model;
   const effort = opts.effort ?? cfg.reasoningEffort;
@@ -888,7 +890,7 @@ export async function codexComplete(
   if (child.pid) childGroups.add(child.pid);
   const kill = () => killTree(child);
   opts.signal?.addEventListener("abort", kill, { once: true });
-  const timer = setTimeout(kill, Math.min(cfg.timeoutMs, 10 * 60_000));
+  const timer = setTimeout(kill, Math.min(opts.timeoutMs ?? cfg.timeoutMs, 10 * 60_000));
   child.stdin?.on("error", () => {});
   child.stdin?.end(
     `${prompt}\n\nReply with the requested text only. Do not run commands or modify files.`,

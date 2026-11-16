@@ -134,8 +134,12 @@ function legacyModelFor(
   const { values, sources } = resolveAgentValues(document, provider, profile ?? "", role, explicit);
   let source = sources.model ?? "account/CLI default (external)";
   if (source === "step")
-    source = agent.model !== undefined ? "step config (agent.model)" :
-      provider === "claude" ? "step config" : `step config (${provider}_model)`;
+    source =
+      agent.model !== undefined
+        ? "step config (agent.model)"
+        : provider === "claude"
+          ? "step config"
+          : `step config (${provider}_model)`;
   if (source.startsWith("profile "))
     source = source.replace(
       "profile ",
@@ -165,8 +169,12 @@ export const copilotModelFor = (
 
 function legacyStepValues(provider: AgentProvider, cfg: Record<string, unknown>) {
   const model = provider === "claude" ? cfg.model : cfg[`${provider}_model`];
-  const effort = provider === "codex" ? cfg.codex_reasoning_effort :
-    provider === "copilot" || provider === "antigravity" ? cfg[`${provider}_effort`] ?? cfg.effort : undefined;
+  const effort =
+    provider === "codex"
+      ? cfg.codex_reasoning_effort
+      : provider === "copilot" || provider === "antigravity"
+        ? (cfg[`${provider}_effort`] ?? cfg.effort)
+        : undefined;
   return AgentValues.parse({
     ...(model ? { model } : {}),
     ...(effort ? { reasoning_effort: effort } : {}),
@@ -207,7 +215,6 @@ export function resolveStepAgent(
     run.profile === "MICRO" ? "MICRO" : (merged.execution_profile ?? run.profile ?? "STANDARD");
   if (run.profile === "MICRO") {
     merged.context_tokens = Math.min(12000, merged.context_tokens ?? 12000);
-    merged.timeout_ms = Math.min(600000, merged.timeout_ms ?? 600000);
   }
   const explicit = {
     ...(!changedProvider ? legacyStepValues(provider, step.config) : {}),
@@ -219,6 +226,10 @@ export function resolveStepAgent(
   };
   const role = step.config.independent === true ? "verifier" : step.type;
   const { values, sources } = resolveAgentValues(snapshot, provider, profile, role, explicit);
+  if (run.profile === "MICRO") {
+    if ((values.timeout_ms ?? 600000) > 600000) sources.timeout_ms = "MICRO safety cap";
+    values.timeout_ms = Math.min(600000, values.timeout_ms ?? 600000);
+  }
   validateAgentOptions({ ...merged, ...values }, provider);
   return {
     ...merged,
@@ -244,6 +255,8 @@ export function effectiveStepConfig(
   if (!a) return config;
   return {
     ...config,
+    ...(a.max_turns !== undefined ? { max_turns: a.max_turns } : {}),
+    ...(a.timeout_ms !== undefined ? { timeout_ms: a.timeout_ms } : {}),
     ...(a.context_tokens ? { context_tokens: a.context_tokens } : {}),
     ...(a.verification ? { verify: a.verification } : {}),
   };

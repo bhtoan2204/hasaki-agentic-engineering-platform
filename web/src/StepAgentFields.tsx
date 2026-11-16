@@ -1,6 +1,10 @@
 import { useI18n } from "./i18n/index.tsx";
 import { useApi } from "./api.ts";
-import { ModelSelect, type CatalogModel } from "./ModelSelect.tsx";
+import {
+  AgentValueFields,
+  type AgentControls,
+  type AgentCatalogModel,
+} from "./AgentValueFields.tsx";
 import { Field } from "./ui.tsx";
 
 /** Shared configuration form; the server validates inherited providers and CLI capabilities. */
@@ -15,7 +19,14 @@ export function StepAgentFields({
 }) {
   const { locale } = useI18n();
   const { data: providers } =
-    useApi<Array<{ id: string; models?: CatalogModel[] }>>("/api/agent-providers");
+    useApi<
+      Array<{
+        id: string;
+        models?: AgentCatalogModel[];
+        controls?: AgentControls;
+        discovery?: string;
+      }>
+    >("/api/agent-providers");
   const en = locale === "en";
   const set = (key: string, val: unknown) => {
     const next = { ...value };
@@ -126,8 +137,10 @@ export function StepAgentFields({
               onChange({
                 ...value,
                 provider: e.target.value || undefined,
-                model: null,
-                reasoning_effort: null,
+                model: undefined,
+                reasoning_effort: undefined,
+                max_turns: undefined,
+                options: undefined,
               })
             }
           >
@@ -139,66 +152,34 @@ export function StepAgentFields({
             <option value="copilot">Copilot</option>
           </select>
         </Field>
-        <Field
-          label={en ? "Provider model" : "Mô hình của nhà cung cấp"}
-          hint={
-            en
-              ? "Empty uses the account default. The list is the models this provider can run on this machine."
-              : "Để trống dùng mặc định tài khoản. Danh sách là model provider này chạy được trên máy này."
+        <AgentValueFields
+          label="Step"
+          value={value}
+          onChange={(fields) =>
+            onChange({
+              ...value,
+              ...fields,
+              model: fields.model,
+              reasoning_effort: fields.reasoning_effort,
+              max_turns: fields.max_turns,
+              timeout_ms: fields.timeout_ms,
+              options: fields.options,
+            })
           }
-        >
-          <ModelSelect
-            ariaLabel={en ? "Provider model" : "Mô hình của nhà cung cấp"}
-            value={value.model ?? ""}
-            emptyLabel={en ? "Account default" : "Mặc định tài khoản"}
-            models={
-              provider === "claude"
-                ? [
-                    { slug: "sonnet", name: "Sonnet" },
-                    { slug: "opus", name: "Opus" },
-                    { slug: "haiku", name: "Haiku" },
-                  ]
-                : provider === "cursor"
-                  ? [{ slug: "auto", name: "Auto" }]
-                  : (providers?.find((p) => p.id === provider)?.models ?? [])
-            }
-            onChange={(model) => set("model", model || null)}
-          />
-        </Field>
+          controls={providers?.find((entry) => entry.id === provider)?.controls}
+          models={providers?.find((entry) => entry.id === provider)?.models}
+          discovery={providers?.find((entry) => entry.id === provider)?.discovery}
+        />
         <Field label={en ? "Execution profile" : "Hồ sơ thực thi"}>
           <select
             value={value.execution_profile ?? ""}
             onChange={(e) => set("execution_profile", e.target.value || undefined)}
           >
             <option value="">{en ? "Run default" : "Mặc định lượt chạy"}</option>
-            {["FAST", "STANDARD", "DEEP"].map((v) => (
+            {["MICRO", "FAST", "STANDARD", "DEEP"].map((v) => (
               <option key={v}>{v}</option>
             ))}
           </select>
-        </Field>
-        <Field label={en ? "Reasoning effort" : "Mức suy luận"}>
-          <select
-            disabled={provider === "cursor"}
-            value={value.reasoning_effort ?? ""}
-            onChange={(e) => set("reasoning_effort", e.target.value || null)}
-          >
-            <option value="">{en ? "Provider default" : "Mặc định nhà cung cấp"}</option>
-            {(provider === "codex"
-              ? ["none", "minimal", "low", "medium", "high", "xhigh"]
-              : ["low", "medium", "high", "xhigh", "max"]
-            ).map((v) => (
-              <option key={v}>{v}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label={en ? "Timeout (ms)" : "Thời gian tối đa (ms)"}>
-          <input
-            type="number"
-            min={1000}
-            max={86400000}
-            value={value.timeout_ms ?? ""}
-            onChange={(e) => set("timeout_ms", e.target.value ? Number(e.target.value) : undefined)}
-          />
         </Field>
         <Field label={en ? "Context token budget" : "Ngân sách token ngữ cảnh"}>
           <input

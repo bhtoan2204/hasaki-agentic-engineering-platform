@@ -4,6 +4,7 @@ import {
   parseAgentProvider,
   providerEnabled,
   type AgentProvider,
+  type ProviderFlags,
 } from "./provider.ts";
 import type { EffectiveAgent } from "./stepAgent.ts";
 
@@ -48,11 +49,12 @@ export function nextHealthyProvider(
   order: readonly string[],
   avoid: ReadonlySet<string>,
   health: readonly AgentHealth[],
+  flags?: ProviderFlags,
 ): AgentProvider | null {
   for (const provider of order) {
     if (avoid.has(provider)) continue;
     const parsed = parseAgentProvider(provider);
-    if (!parsed || !providerEnabled(parsed)) continue;
+    if (!parsed || !providerEnabled(parsed, flags)) continue;
     const row = health.find((h) => h.provider === provider);
     if (isUsableAgent(row)) return row!.provider;
   }
@@ -88,11 +90,7 @@ export async function probeAgentHealth(
         provider,
         connected: ready.ok,
         quota,
-        reason: !ready.ok
-          ? ready.error
-          : quota === "exhausted"
-            ? "quota exhausted"
-            : undefined,
+        reason: !ready.ok ? ready.error : quota === "exhausted" ? "quota exhausted" : undefined,
       } satisfies AgentHealth;
     }),
   );

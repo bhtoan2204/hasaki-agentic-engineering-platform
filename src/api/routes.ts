@@ -1,4 +1,6 @@
 import { loadKnowledgeAudit } from "../knowledge/auditLoader.ts";
+import { agentConfigurationView, patchAgentProvider, previewAgentConfiguration } from "./agentConfiguration.ts";
+import { saveDefaultProvider } from "../agent/configurationStore.ts";
 import {
   createBinding,
   disconnect as disconnectTelegram,
@@ -2283,6 +2285,15 @@ export const routes: Route[] = [
     ),
   ],
   ["GET", /^\/api\/settings\/operator$/, ({ actor }) => (requireAdmin(actor), operatorView())],
+  ["GET", /^\/api\/settings\/agents$/, ({ actor }) => (requireAdmin(actor), agentConfigurationView())],
+  ["POST", /^\/api\/settings\/agents\/provider$/, ({ actor, body }) => (requireAdmin(actor), patchAgentProvider(body))],
+  ["PATCH", /^\/api\/settings\/agents\/provider$/, ({ actor, body }) => (requireAdmin(actor), patchAgentProvider(body))],
+  ["POST", /^\/api\/settings\/agents\/default$/, async ({ actor, body }) => {
+    requireAdmin(actor);
+    await saveDefaultProvider(body);
+    return agentConfigurationView();
+  }],
+  ["POST", /^\/api\/settings\/agents\/preview$/, ({ actor, body }) => (requireAdmin(actor), previewAgentConfiguration(body))],
   [
     "POST",
     /^\/api\/settings\/operator$/,

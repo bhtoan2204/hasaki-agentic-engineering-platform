@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bot,
-  Cpu,
   Inbox,
   RotateCcw,
-  Route,
   Server,
   Settings2,
   ShieldCheck,
-  Star,
   Link2,
   Plus,
   Trash2,
@@ -16,22 +13,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
-import { ModelSelect, type CatalogModel } from "../ModelSelect.tsx";
+import { AgentSettings } from "./AgentSettings.tsx";
 import { ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Settings.css";
 
 const PROVIDERS = ["claude", "codex", "cursor", "antigravity", "copilot"] as const;
 type ProviderId = (typeof PROVIDERS)[number];
-const EFFORTS = ["", "low", "medium", "high", "xhigh"] as const;
-const AGY_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"] as const;
-const ROUTING_PROFILES = ["*", "MICRO", "FAST", "STANDARD", "DEEP"] as const;
-const ROUTING_ROLES = ["agent", "coding_agent", "verifier"] as const;
-const CLAUDE_MODELS = [
-  { slug: "sonnet", name: "Sonnet" },
-  { slug: "opus", name: "Opus" },
-  { slug: "haiku", name: "Haiku" },
-];
 
 type Form = {
   model: string;
@@ -59,18 +47,9 @@ type Form = {
 type View = { effective: Form; saved: Partial<Record<keyof Form, unknown>> };
 
 type SectionId =
-  | "agents"
-  | "models"
-  | "providers"
-  | "integration"
-  | "budget"
-  | "scheduler"
-  | "routing"
-  | "work";
+  "agents" | "models" | "providers" | "integration" | "budget" | "scheduler" | "routing" | "work";
 const SECTIONS: Array<{ id: SectionId; icon: LucideIcon; keys: Array<keyof Form> }> = [
-  { id: "agents", icon: Bot, keys: ["enabledProviders", "defaultProvider", "model", "maxTurns"] },
-  { id: "models", icon: Route, keys: ["models"] },
-  { id: "providers", icon: Cpu, keys: ["codex", "antigravity", "copilot"] },
+  { id: "agents", icon: Bot, keys: [] },
   { id: "budget", icon: Wallet, keys: ["costBudget"] },
   { id: "scheduler", icon: Server, keys: ["scheduler"] },
   { id: "routing", icon: ShieldCheck, keys: ["routing"] },
@@ -116,8 +95,6 @@ const normalize = (f: Form): Form => ({ ...f, models: pruneModels(f.models) });
 export function SettingsPage() {
   const { t } = useI18n();
   const { data, error, loading, setData } = useApi<View>("/api/settings/operator");
-  const providers = useApi<Array<{ id: string; models?: CatalogModel[] }>>("/api/agent-providers");
-  const catalog = (id: string) => providers.data?.find((p) => p.id === id)?.models;
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
@@ -128,14 +105,20 @@ export function SettingsPage() {
   const reset = (f: Form) => {
     setForm(f);
     setRelated(
-      Object.entries(f.relatedProjects).map(([project, links]) => ({ project, links: links.join(", ") })),
+      Object.entries(f.relatedProjects).map(([project, links]) => ({
+        project,
+        links: links.join(", "),
+      })),
     );
   };
   const editRelated = (rows: Array<{ project: string; links: string }>) => {
     setRelated(rows);
     const relatedProjects: Form["relatedProjects"] = {};
     for (const r of rows) {
-      const links = r.links.split(",").map((x) => x.trim()).filter(Boolean);
+      const links = r.links
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
       if (r.project.trim() && links.length) relatedProjects[r.project.trim()] = links;
     }
     set({ relatedProjects });
@@ -170,7 +153,22 @@ export function SettingsPage() {
     setBusy(true);
     setNote(null);
     try {
-      const view = await api("/api/settings/operator", normalize(form));
+      const operator = Object.fromEntries(
+        Object.entries(normalize(form)).filter(
+          ([key]) =>
+            ![
+              "model",
+              "models",
+              "maxTurns",
+              "defaultProvider",
+              "enabledProviders",
+              "codex",
+              "antigravity",
+              "copilot",
+            ].includes(key),
+        ),
+      );
+      const view = await api("/api/settings/operator", operator);
       setData(view);
       setNote({ text: t("set.saved"), ok: true });
     } catch (e) {
@@ -248,18 +246,6 @@ export function SettingsPage() {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : null;
   };
-  const enabled = (p: ProviderId) => form.enabledProviders[p] !== false;
-  const modelName = (slug: string) => CLAUDE_MODELS.find((m) => m.slug === slug)?.name ?? slug;
-  /** What an empty routing cell resolves to, in the runtime order. */
-  const inherited = (profile: string, role: string) => {
-    const any = form.models["*"]?.[role];
-    if (profile !== "*" && any)
-      return t("set.inheritFrom", { model: modelName(any), from: t("set.routingAny") });
-    if (form.model)
-      return t("set.inheritFrom", { model: modelName(form.model), from: t("set.claudeModel") });
-    return t("set.inheritDefault");
-  };
-
   const section = (id: SectionId, body: ReactNode, aside?: ReactNode) => {
     const meta = SECTIONS.find((s) => s.id === id)!;
     const changed = meta.keys.some((k) => dirtyKeys.has(k));
@@ -286,38 +272,12 @@ export function SettingsPage() {
     );
   };
 
-  const providerBlock = (id: "codex" | "antigravity" | "copilot", title: string, body: ReactNode) => (
-    <div className={`set-provider${enabled(id) ? "" : " is-off"}`}>
-      <div className="set-provider-head">
-        <h4>{title}</h4>
-        {!enabled(id) && <span className="set-flag">{t("set.providerOff")}</span>}
-      </div>
-      <fieldset disabled={!enabled(id)}>{body}</fieldset>
-    </div>
-  );
-
   const toggle = (checked: boolean, onChange: (v: boolean) => void, label: string) => (
     <span className="set-toggle">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </span>
   );
-
-  const effortSelect = (
-    value: string,
-    options: readonly string[],
-    onChange: (v: string) => void,
-  ) => (
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
-      {options.map((effort) => (
-        <option key={effort || "default"} value={effort}>
-          {effort || t("set.effortDefault")}
-        </option>
-      ))}
-    </select>
-  );
-  const modelHint = (id: string) =>
-    providers.loading || catalog(id)?.length ? undefined : t("set.modelMissing");
 
   return (
     <>
@@ -365,224 +325,7 @@ export function SettingsPage() {
         </nav>
 
         <div className="set-content">
-          {section(
-            "agents",
-            <>
-              <Field label={t("set.providers")} hint={t("set.providersHint")}>
-                <span className="set-chips" role="group">
-                  {PROVIDERS.map((p) => (
-                    <label key={p} className={`set-chip${enabled(p) ? " is-on" : ""}`}>
-                      <input
-                        type="checkbox"
-                        checked={enabled(p)}
-                        onChange={(e) => {
-                          const enabledProviders = { ...form.enabledProviders, [p]: e.target.checked };
-                          const stillOn = PROVIDERS.filter((id) => enabledProviders[id] !== false);
-                          if (!stillOn.length) return;
-                          const defaultProvider = stillOn.includes(form.defaultProvider as ProviderId)
-                            ? form.defaultProvider
-                            : stillOn[0];
-                          set({ enabledProviders, defaultProvider });
-                        }}
-                      />
-                      {p}
-                      {form.defaultProvider === p && (
-                        <Star size={12} className="set-star" aria-label={t("set.provider")} />
-                      )}
-                    </label>
-                  ))}
-                </span>
-              </Field>
-              <div className="grid3 set-grid">
-                <Field label={t("set.provider")}>
-                  <select
-                    value={form.defaultProvider}
-                    onChange={(e) => set({ defaultProvider: e.target.value })}
-                  >
-                    {PROVIDERS.filter(enabled).map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label={t("set.claudeModel")} hint={t("set.claudeModelHint")}>
-                  <ModelSelect
-                    ariaLabel={t("set.claudeModel")}
-                    value={form.model}
-                    models={CLAUDE_MODELS}
-                    emptyLabel={t("set.modelAccount")}
-                    onChange={(model) => set({ model })}
-                  />
-                </Field>
-                <Field label={t("set.maxTurns")}>
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={form.maxTurns}
-                    onChange={(e) => set({ maxTurns: Number(e.target.value) })}
-                  />
-                </Field>
-              </div>
-            </>,
-          )}
-
-          {section(
-            "models",
-            <>
-              <p className="muted small set-lead">{t("set.modelRoutingHint")}</p>
-              {!enabled("claude") && <p className="set-warn small">{t("set.claudeOff")}</p>}
-              <div className="table-wrap">
-                <table className="set-matrix">
-                  <thead>
-                    <tr>
-                      <th>{t("set.routingProfile")}</th>
-                      {ROUTING_ROLES.map((role) => (
-                        <th key={role}>{t(`set.role.${role}`)}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ROUTING_PROFILES.map((profile) => {
-                      const label = profile === "*" ? t("set.routingAny") : profile;
-                      return (
-                        <tr key={profile}>
-                          <th scope="row">{label}</th>
-                          {ROUTING_ROLES.map((role) => {
-                            const value = form.models[profile]?.[role] ?? "";
-                            return (
-                              <td key={role} className={value ? "is-set" : undefined}>
-                                <ModelSelect
-                                  ariaLabel={`${label} · ${t(`set.role.${role}`)}`}
-                                  value={value}
-                                  models={CLAUDE_MODELS}
-                                  emptyLabel={t("set.routingInherit")}
-                                  onChange={(model) =>
-                                    set({
-                                      models: {
-                                        ...form.models,
-                                        [profile]: { ...form.models[profile], [role]: model },
-                                      },
-                                    })
-                                  }
-                                />
-                                {!value && <small className="muted">{inherited(profile, role)}</small>}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>,
-          )}
-
-          {section(
-            "providers",
-            <div className="set-providers">
-              {providerBlock(
-                "codex",
-                t("set.codex"),
-                <div className="grid2">
-                  <Field label={t("set.model")} hint={modelHint("codex")}>
-                    <ModelSelect
-                      ariaLabel={`${t("set.codex")} ${t("set.model")}`}
-                      value={form.codex.model}
-                      models={catalog("codex")}
-                      emptyLabel={t("set.modelAccount")}
-                      onChange={(model) => set({ codex: { ...form.codex, model } })}
-                    />
-                  </Field>
-                  <Field label={t("set.effort")}>
-                    {effortSelect(form.codex.reasoningEffort, EFFORTS, (reasoningEffort) =>
-                      set({ codex: { ...form.codex, reasoningEffort } }),
-                    )}
-                  </Field>
-                </div>,
-              )}
-              {providerBlock(
-                "antigravity",
-                t("set.agy"),
-                <div className="grid2">
-                  <Field label={t("set.model")} hint={modelHint("antigravity")}>
-                    <ModelSelect
-                      ariaLabel={`${t("set.agy")} ${t("set.model")}`}
-                      value={form.antigravity.model}
-                      models={catalog("antigravity")}
-                      emptyLabel={t("set.modelAccount")}
-                      onChange={(model) => set({ antigravity: { ...form.antigravity, model } })}
-                    />
-                  </Field>
-                  <Field label={t("set.effort")}>
-                    {effortSelect(form.antigravity.effort, AGY_EFFORTS, (effort) =>
-                      set({ antigravity: { ...form.antigravity, effort } }),
-                    )}
-                  </Field>
-                  <Field label={t("set.concurrent")}>
-                    <input
-                      type="number"
-                      min={1}
-                      max={8}
-                      value={form.antigravity.maxConcurrent}
-                      onChange={(e) =>
-                        set({ antigravity: { ...form.antigravity, maxConcurrent: Number(e.target.value) } })
-                      }
-                    />
-                  </Field>
-                  <label className="field">
-                    <span>{t("set.sandbox")}</span>
-                    {toggle(
-                      form.antigravity.sandbox,
-                      (sandbox) => set({ antigravity: { ...form.antigravity, sandbox } }),
-                      t("set.sandboxHint"),
-                    )}
-                  </label>
-                </div>,
-              )}
-              {providerBlock(
-                "copilot",
-                t("set.copilot"),
-                <div className="grid2">
-                  <Field label={t("set.model")} hint={modelHint("copilot")}>
-                    <ModelSelect
-                      ariaLabel={`${t("set.copilot")} ${t("set.model")}`}
-                      value={form.copilot.model}
-                      models={catalog("copilot")}
-                      emptyLabel={t("set.modelAccount")}
-                      onChange={(model) => set({ copilot: { ...form.copilot, model } })}
-                    />
-                  </Field>
-                  <Field label={t("set.effort")}>
-                    {effortSelect(form.copilot.effort, EFFORTS, (effort) =>
-                      set({ copilot: { ...form.copilot, effort } }),
-                    )}
-                  </Field>
-                  <Field label={t("set.copilotConcurrent")}>
-                    <input
-                      type="number"
-                      min={1}
-                      max={8}
-                      value={form.copilot.maxConcurrent}
-                      onChange={(e) =>
-                        set({ copilot: { ...form.copilot, maxConcurrent: Number(e.target.value) } })
-                      }
-                    />
-                  </Field>
-                  <label className="field">
-                    <span>{t("set.sandbox")}</span>
-                    {toggle(
-                      form.copilot.sandbox,
-                      (sandbox) => set({ copilot: { ...form.copilot, sandbox } }),
-                      t("set.sandboxHint"),
-                    )}
-                  </label>
-                </div>,
-              )}
-            </div>,
-          )}
+          <AgentSettings />
 
           {section(
             "budget",
@@ -608,7 +351,9 @@ export function SettingsPage() {
                     placeholder={t("set.unlimited")}
                     value={usd(form.costBudget.workItemUsd)}
                     onChange={(e) =>
-                      set({ costBudget: { ...form.costBudget, workItemUsd: parseUsd(e.target.value) } })
+                      set({
+                        costBudget: { ...form.costBudget, workItemUsd: parseUsd(e.target.value) },
+                      })
                     }
                   />
                 </span>
@@ -638,7 +383,10 @@ export function SettingsPage() {
                   value={form.costBudget.action}
                   onChange={(e) =>
                     set({
-                      costBudget: { ...form.costBudget, action: e.target.value as Form["costBudget"]["action"] },
+                      costBudget: {
+                        ...form.costBudget,
+                        action: e.target.value as Form["costBudget"]["action"],
+                      },
                     })
                   }
                 >
@@ -674,7 +422,9 @@ export function SettingsPage() {
                   min={1}
                   max={32}
                   value={form.scheduler.workers}
-                  onChange={(e) => set({ scheduler: { ...form.scheduler, workers: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    set({ scheduler: { ...form.scheduler, workers: Number(e.target.value) } })
+                  }
                 />
               </Field>
               <Field label={t("set.lightWorkers")}>
@@ -735,10 +485,15 @@ export function SettingsPage() {
                     autoComplete="off"
                   />
                 </Field>
-                <Field label={t("set.bitbucketAccess")} hint={t(`set.access.${form.bitbucketAccess}Hint`)}>
+                <Field
+                  label={t("set.bitbucketAccess")}
+                  hint={t(`set.access.${form.bitbucketAccess}Hint`)}
+                >
                   <select
                     value={form.bitbucketAccess}
-                    onChange={(e) => set({ bitbucketAccess: e.target.value as Form["bitbucketAccess"] })}
+                    onChange={(e) =>
+                      set({ bitbucketAccess: e.target.value as Form["bitbucketAccess"] })
+                    }
                   >
                     {(["strict", "personal", "trusted"] as const).map((level) => (
                       <option key={level} value={level}>
@@ -759,16 +514,24 @@ export function SettingsPage() {
                         placeholder={t("set.relatedProject")}
                         value={row.project}
                         onChange={(e) =>
-                          editRelated(related.map((r, j) => (j === i ? { ...r, project: e.target.value } : r)))
+                          editRelated(
+                            related.map((r, j) =>
+                              j === i ? { ...r, project: e.target.value } : r,
+                            ),
+                          )
                         }
                       />
-                      <span aria-hidden className="muted">→</span>
+                      <span aria-hidden className="muted">
+                        →
+                      </span>
                       <input
                         aria-label={t("set.relatedLinks")}
                         placeholder={t("set.relatedLinks")}
                         value={row.links}
                         onChange={(e) =>
-                          editRelated(related.map((r, j) => (j === i ? { ...r, links: e.target.value } : r)))
+                          editRelated(
+                            related.map((r, j) => (j === i ? { ...r, links: e.target.value } : r)),
+                          )
                         }
                       />
                       <button
@@ -810,7 +573,9 @@ export function SettingsPage() {
               <Field label={t("set.autoWorkflow")}>
                 <input
                   value={form.hasakiWork.autoWorkflow}
-                  onChange={(e) => set({ hasakiWork: { ...form.hasakiWork, autoWorkflow: e.target.value } })}
+                  onChange={(e) =>
+                    set({ hasakiWork: { ...form.hasakiWork, autoWorkflow: e.target.value } })
+                  }
                   autoComplete="off"
                 />
               </Field>
@@ -827,14 +592,22 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <div className={`set-savebar${dirty || note ? " is-visible" : ""}`} role="status" aria-live="polite">
+      <div
+        className={`set-savebar${dirty || note ? " is-visible" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
         {dirty ? (
           <span className="set-savebar-text">
             <i className="set-dot is-dirty" aria-hidden />
             {t("set.unsaved", { n: dirtyKeys.size })}
           </span>
         ) : (
-          note && <span className={`set-savebar-text${note.ok ? " is-ok" : " is-error"}`}>{note.text}</span>
+          note && (
+            <span className={`set-savebar-text${note.ok ? " is-ok" : " is-error"}`}>
+              {note.text}
+            </span>
+          )
         )}
         <span className="grow" />
         {dirty && (

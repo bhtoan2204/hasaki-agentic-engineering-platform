@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/config.ts";
 import { resolveStepAgent } from "../src/agent/stepAgent.ts";
-import { convertLegacyConfiguration, patchProviderConfiguration } from "../src/agent/configuration.ts";
+import {
+  convertLegacyConfiguration,
+  patchProviderConfiguration,
+} from "../src/agent/configuration.ts";
 
 test("legacy conversion is idempotent and canonical provider values win", () => {
   const legacy = legacyAgentConfiguration();
@@ -15,10 +18,16 @@ test("legacy conversion is idempotent and canonical provider values win", () => 
 
 test("provider patches preserve other providers and reject stale revisions", () => {
   const original = legacyAgentConfiguration();
-  const next = patchProviderConfiguration(original, "copilot", 0, { defaults: { model: "selected-model" }, enabled: false });
+  const next = patchProviderConfiguration(original, "copilot", 0, {
+    defaults: { model: "selected-model" },
+    enabled: false,
+  });
   assert.deepEqual(next.providers.claude, original.providers.claude);
   assert.equal(next.providers.copilot.revision, 1);
-  assert.throws(() => patchProviderConfiguration(next, "copilot", 0, { enabled: true }), /revision conflict/);
+  assert.throws(
+    () => patchProviderConfiguration(next, "copilot", 0, { enabled: true }),
+    /revision conflict/,
+  );
   const enabled = patchProviderConfiguration(next, "copilot", 1, { enabled: true });
   assert.equal(enabled.providers.copilot.defaults.model, "selected-model");
   assert.equal(original.providers.copilot.revision, 0);
@@ -159,15 +168,184 @@ test("provider options inherit independently and incompatible options are reject
   document.providers.copilot.profiles.DEEP = { agent: { options: { max_concurrent: 3 } } };
   const resolved = resolveAgentValues(document, "copilot", "DEEP", "agent");
   assert.deepEqual(resolved.values.options, { sandbox: true, max_concurrent: 3 });
-  assert.throws(() => resolveAgentValues(document, "cursor", "DEEP", "agent", { options: { sandbox: true } }), /does not support/);
+  assert.throws(
+    () => resolveAgentValues(document, "cursor", "DEEP", "agent", { options: { sandbox: true } }),
+    /does not support/,
+  );
 });
 
 import { completionAgent } from "../src/agent/complete.ts";
 test("auxiliary completion resolves the frozen analysis mapping rather than mutable defaults", () => {
   const snapshot = legacyAgentConfiguration();
   snapshot.providers.claude.profiles.DEEP = { agent: { model: "haiku", timeout_ms: 12345 } };
-  const agent = completionAgent({ agent_provider: "claude", profile: "DEEP", agent_configuration: snapshot });
+  const agent = completionAgent({
+    agent_provider: "claude",
+    profile: "DEEP",
+    agent_configuration: snapshot,
+  });
   assert.equal(agent.model, "haiku");
   assert.equal(agent.timeout_ms, 12345);
-  assert.throws(() => completionAgent({ agent_provider: "claude", agent_configuration: null }), /recovery/);
+  assert.throws(
+    () => completionAgent({ agent_provider: "claude", agent_configuration: null }),
+    /recovery/,
+  );
+});
+
+import { completeForRun, type CompletionRunner } from "../src/agent/complete.ts";
+import { effectiveStepConfig } from "../src/agent/stepAgent.ts";
+test("actual auxiliary completions forward frozen routing to each provider runner", async () => {
+  const snapshot = legacyAgentConfiguration();
+  for (const provider of AGENT_PROVIDERS) {
+    snapshot.providers[provider].defaults = {
+      model: "frozen-model",
+      timeout_ms: 12345,
+      ...(provider === "cursor" ? {} : { reasoning_effort: "high" as const }),
+    };
+    const runner: CompletionRunner = async (_prompt, opts) => ({
+      text: `${opts.model}/${opts.effort}/${opts.timeoutMs}`,
+      model: opts.model,
+      tokens: null,
+    });
+    const result = await completeForRun(
+      { agent_provider: provider, agent_configuration: snapshot },
+      "fixture",
+      undefined,
+      { claude: runner, codex: runner, cursor: runner, antigravity: runner, copilot: runner },
+    );
+    assert.equal(result.text, `frozen-model/${provider === "cursor" ? "" : "high"}/12345`);
+    assert.equal(result.provider, provider);
+  }
+});
+
+test("effective step config carries resolved execution limits for all executor consumers", () => {
+  const snapshot = legacyAgentConfiguration();
+  snapshot.providers.claude.defaults = { model: "haiku", max_turns: 7, timeout_ms: 12345 };
+  const effective = resolveStepAgent(
+    { agent_provider: "claude", agent_configuration: snapshot },
+    { type: "agent", config: {} },
+  );
+  const cfg = effectiveStepConfig({ max_turns: 99 }, effective);
+  assert.equal(cfg.max_turns, 7);
+  assert.equal(cfg.timeout_ms, 12345);
+});
+
+import { refreshEnvironmentDefaults } from "../src/agent/configuration.ts";
+test("environment defaults refresh for new snapshots without overriding configured profiles or saved defaults", () => {
+  const previous = process.env.CURSOR_AGENT_TIMEOUT_MS;
+  try {
+    process.env.CURSOR_AGENT_TIMEOUT_MS = "10000";
+    const started = legacyAgentConfiguration();
+    process.env.CURSOR_AGENT_TIMEOUT_MS = "20000";
+    const fresh = refreshEnvironmentDefaults(started);
+    assert.equal(started.providers.cursor.defaults.timeout_ms, 10000);
+    assert.equal(fresh.providers.cursor.defaults.timeout_ms, 20000);
+    fresh.providers.cursor.profiles.FAST = { agent: { timeout_ms: 30000 } };
+    assert.equal(resolveAgentValues(fresh, "cursor", "FAST", "agent").values.timeout_ms, 30000);
+    const saved = patchProviderConfiguration(fresh, "cursor", 0, {
+      defaults: { timeout_ms: 40000 },
+    });
+    assert.equal(refreshEnvironmentDefaults(saved).providers.cursor.defaults.timeout_ms, 40000);
+    assert.match(
+      resolveAgentValues(fresh, "cursor", "DEEP", "agent").sources.timeout_ms!,
+      /environment/,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.CURSOR_AGENT_TIMEOUT_MS;
+    else process.env.CURSOR_AGENT_TIMEOUT_MS = previous;
+  }
+});
+
+import { DiscoveryCache } from "../src/agent/providerDiscovery.ts";
+test("discovery separates account keys, deduplicates probes and retains stale catalogs after refresh failures", async () => {
+  let now = 1000,
+    probes = 0;
+  const cache = new DiscoveryCache(() => now, 100);
+  const probe = async () => {
+    probes++;
+    return { ok: true, models: [{ slug: "fixture-model", name: "Fixture", efforts: ["high"] }] };
+  };
+  const [first, duplicate] = await Promise.all([
+    cache.get("worker/account-a", probe),
+    cache.get("worker/account-a", probe),
+  ]);
+  assert.equal(probes, 1);
+  assert.deepEqual(first.models, duplicate.models);
+  assert.equal((await cache.get("worker/account-a", probe)).cache, "cache");
+  await cache.get("worker/account-b", probe);
+  assert.equal(probes, 2);
+  now += 200;
+  const failed = await cache.get("worker/account-a", async () => ({ ok: false }), true);
+  assert.equal(failed.discovery, "unavailable");
+  assert.equal(failed.cache, "stale");
+  assert.deepEqual(failed.models[0].efforts, ["high"]);
+});
+
+test("MICRO routing keeps tighter profile deadlines while enforcing its safety cap", () => {
+  const snapshot = legacyAgentConfiguration();
+  snapshot.providers.claude.profiles.MICRO = { agent: { timeout_ms: 10000 } };
+  const run = { agent_provider: "claude", profile: "MICRO", agent_configuration: snapshot };
+  assert.equal(resolveStepAgent(run, { type: "agent", config: {} })?.timeout_ms, 10000);
+  assert.equal(
+    resolveStepAgent(run, { type: "agent", config: { agent: { timeout_ms: 900000 } } })?.timeout_ms,
+    600000,
+  );
+});
+
+import { nextHealthyProvider } from "../src/agent/health.ts";
+test("handoff selection uses frozen provider enablement rather than later global changes", () => {
+  const previous = config.agent.enabledProviders;
+  try {
+    config.agent.enabledProviders = { claude: false };
+    assert.equal(
+      nextHealthyProvider(
+        ["claude"],
+        new Set(),
+        [{ provider: "claude", connected: true, quota: "ok" }],
+        { claude: true },
+      ),
+      "claude",
+    );
+  } finally {
+    config.agent.enabledProviders = previous;
+  }
+});
+
+test("effort and turn limits inherit independently at every level", () => {
+  const document = legacyAgentConfiguration();
+  const entry = document.providers.claude;
+  entry.defaults = { reasoning_effort: "low", max_turns: 5 };
+  entry.profiles = {
+    "*": { agent: { reasoning_effort: "medium", max_turns: 6 } },
+    DEEP: { agent: { reasoning_effort: "high" } },
+  };
+  const routed = resolveAgentValues(document, "claude", "DEEP", "agent");
+  assert.equal(routed.values.reasoning_effort, "high");
+  assert.equal(routed.values.max_turns, 6);
+  assert.equal(
+    resolveAgentValues(document, "claude", "DEEP", "agent", {
+      reasoning_effort: null,
+      max_turns: 3,
+    }).values.reasoning_effort,
+    null,
+  );
+  assert.equal(
+    resolveAgentValues(document, "claude", "DEEP", "agent", { max_turns: 3 }).values.max_turns,
+    3,
+  );
+  delete entry.profiles.DEEP;
+  assert.equal(
+    resolveAgentValues(document, "claude", "DEEP", "agent").values.reasoning_effort,
+    "medium",
+  );
+  entry.profiles = {};
+  assert.equal(
+    resolveAgentValues(document, "claude", "DEEP", "agent").values.reasoning_effort,
+    "low",
+  );
+  assert.equal(resolveAgentValues(document, "claude", "DEEP", "agent").values.max_turns, 5);
+});
+
+test("canceled auxiliary calls never invoke a provider", async () => {
+  const runner: CompletionRunner = async () => { throw new Error("provider invoked after cancellation"); };
+  await assert.rejects(() => completeForRun({ agent_provider: "claude", agent_configuration: legacyAgentConfiguration() }, "fixture", AbortSignal.abort(), { claude: runner, codex: runner, cursor: runner, antigravity: runner, copilot: runner }), { name: "AbortError" });
 });

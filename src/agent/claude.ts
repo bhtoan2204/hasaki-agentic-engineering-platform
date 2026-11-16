@@ -1250,7 +1250,7 @@ const agentExecutor: StepExecutor = {
               : {}),
             abortController: ac,
             model: routed.model || undefined,
-            maxTurns: Number(ctx.step.config.max_turns ?? config.maxTurns),
+            maxTurns: effective.max_turns ?? Number(ctx.step.config.max_turns ?? config.maxTurns),
             systemPrompt: {
               type: "preset",
               preset: "claude_code",

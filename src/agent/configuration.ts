@@ -1,6 +1,7 @@
 import { providerControls } from "./providerCapabilities.ts";
 import { z } from "zod";
 import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
+import { isOwned } from "../platform/operatorState.ts";
 import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
 
 export const ROUTING_SCOPES = ["*", "MICRO", "FAST", "STANDARD", "DEEP"] as const;
@@ -19,7 +20,13 @@ export const AgentValues = z
       .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
       .nullable()
       .optional(),
-    options: z.object({ sandbox: z.boolean().optional(), max_concurrent: z.number().int().min(1).max(8).optional() }).strict().optional(),
+    options: z
+      .object({
+        sandbox: z.boolean().optional(),
+        max_concurrent: z.number().int().min(1).max(8).optional(),
+      })
+      .strict()
+      .optional(),
     max_turns: z.number().int().min(1).max(500).optional(),
     timeout_ms: z.number().int().min(1000).max(86_400_000).optional(),
   })
@@ -30,6 +37,19 @@ export const ProviderConfiguration = z
     revision: z.number().int().nonnegative(),
     enabled: z.boolean(),
     defaults: AgentValues,
+    default_sources: z
+      .partialRecord(
+        z.enum([
+          "model",
+          "reasoning_effort",
+          "max_turns",
+          "timeout_ms",
+          "options.sandbox",
+          "options.max_concurrent",
+        ]),
+        z.string(),
+      )
+      .optional(),
     profiles: z.partialRecord(
       z.enum(ROUTING_SCOPES),
       z.partialRecord(z.enum(ROUTING_ROLES), AgentValues),
@@ -47,7 +67,14 @@ export const AgentConfiguration = z
   })
   .strict();
 export type AgentConfiguration = z.infer<typeof AgentConfiguration>;
-export type FieldSources = Partial<Record<keyof AgentValues | "options.sandbox" | "options.max_concurrent", string>>;
+export interface CompletionRun {
+  agent_provider?: string | null;
+  profile?: string | null;
+  agent_configuration?: AgentConfiguration | null;
+}
+export type FieldSources = Partial<
+  Record<keyof AgentValues | "options.sandbox" | "options.max_concurrent", string>
+>;
 
 export { providerControls } from "./providerCapabilities.ts";
 
@@ -57,11 +84,17 @@ export function validateConfigurationValues(provider: AgentProvider, values: Age
     throw new Error(`${provider} does not support max_turns`);
   if (values.reasoning_effort && !controls.efforts.includes(values.reasoning_effort)) {
     const label = provider.charAt(0).toUpperCase() + provider.slice(1);
-    throw new Error(provider === "cursor"
-      ? "Cursor does not support explicit reasoning_effort"
-      : `Unsupported ${label} reasoning_effort`);
+    throw new Error(
+      provider === "cursor"
+        ? "Cursor does not support explicit reasoning_effort"
+        : `Unsupported ${label} reasoning_effort`,
+    );
   }
-  if (values.options && Object.keys(values.options).length && !["antigravity", "copilot"].includes(provider))
+  if (
+    values.options &&
+    Object.keys(values.options).length &&
+    !["antigravity", "copilot"].includes(provider)
+  )
     throw new Error(`${provider} does not support these provider options`);
   const model = values.model?.toLowerCase();
   if (model && provider === "codex" && /claude|^(sonnet|opus|haiku)/.test(model))
@@ -112,6 +145,28 @@ export function legacyAgentConfiguration(): AgentConfiguration {
     antigravity,
     copilot,
   };
+  const environment: Record<
+    AgentProvider,
+    Partial<Record<"model" | "reasoning_effort" | "timeout_ms", string[]>>
+  > = {
+    claude: {},
+    codex: {
+      model: ["CODEX_MODEL"],
+      reasoning_effort: ["CODEX_REASONING_EFFORT"],
+      timeout_ms: ["CODEX_TIMEOUT_MS"],
+    },
+    cursor: { timeout_ms: ["CURSOR_AGENT_TIMEOUT_MS"] },
+    antigravity: {
+      model: ["AGY_MODEL", "ANTIGRAVITY_MODEL"],
+      reasoning_effort: ["AGY_EFFORT", "ANTIGRAVITY_EFFORT"],
+      timeout_ms: ["AGY_TIMEOUT_MS", "ANTIGRAVITY_TIMEOUT_MS"],
+    },
+    copilot: {
+      model: ["COPILOT_MODEL"],
+      reasoning_effort: ["COPILOT_EFFORT"],
+      timeout_ms: ["COPILOT_TIMEOUT_MS"],
+    },
+  };
   return AgentConfiguration.parse({
     version: 1,
     default_provider: config.agent.defaultProvider ?? "claude",
@@ -123,11 +178,56 @@ export function legacyAgentConfiguration(): AgentConfiguration {
           {
             revision: 0,
             enabled: config.agent.enabledProviders?.[provider] !== false,
+            default_sources: Object.fromEntries(
+              [
+                "model",
+                "reasoning_effort",
+                "timeout_ms",
+                "max_turns",
+                "options.sandbox",
+                "options.max_concurrent",
+              ].map((key) => {
+                const env = environment[provider][
+                  key as "model" | "reasoning_effort" | "timeout_ms"
+                ]?.find((name) => process.env[name]);
+                const optionEnv =
+                  key === "options.sandbox"
+                    ? provider === "copilot"
+                      ? "COPILOT_SANDBOX"
+                      : "AGY_SANDBOX"
+                    : key === "options.max_concurrent"
+                      ? provider === "copilot"
+                        ? "COPILOT_MAX_CONCURRENT"
+                        : "AGY_MAX_CONCURRENT"
+                      : undefined;
+                const ownedKey =
+                  key === "reasoning_effort"
+                    ? provider === "codex"
+                      ? "reasoningEffort"
+                      : "effort"
+                    : key;
+                const selectedEnv =
+                  env ?? (optionEnv && process.env[optionEnv] ? optionEnv : undefined);
+                return [
+                  key,
+                  selectedEnv && !isOwned(`${provider}.${ownedKey}`)
+                    ? `environment ${selectedEnv}`
+                    : "legacy provider default",
+                ];
+              }),
+            ),
             defaults: {
               model: old.model || null,
               reasoning_effort: old.effort || null,
               timeout_ms: old.timeoutMs,
-              ...(provider === "antigravity" || provider === "copilot" ? { options: { sandbox: legacy[provider].sandbox, max_concurrent: legacy[provider].maxConcurrent } } : {}),
+              ...(provider === "antigravity" || provider === "copilot"
+                ? {
+                    options: {
+                      sandbox: legacy[provider].sandbox,
+                      max_concurrent: legacy[provider].maxConcurrent,
+                    },
+                  }
+                : {}),
               ...(provider === "claude" ? { max_turns: config.maxTurns } : {}),
             },
             profiles: Object.fromEntries(
@@ -170,13 +270,19 @@ export function resolveAgentValues(
   for (const key of ["model", "reasoning_effort", "max_turns", "timeout_ms"] as const) {
     const layer = layers.find(([, value]) => value?.[key] !== undefined);
     if (layer) Object.assign(values, { [key]: layer[1]![key] });
-    sources[key] = layer?.[0] ?? "account/CLI default (external)";
+    sources[key] =
+      layer?.[0] === "provider default"
+        ? (entry.default_sources?.[key] ?? "provider default")
+        : (layer?.[0] ?? "account/CLI default (external)");
   }
   for (const key of ["sandbox", "max_concurrent"] as const) {
     const layer = layers.find(([, value]) => value?.options?.[key] !== undefined);
     if (layer) {
       values.options = { ...values.options, [key]: layer[1]!.options![key] };
-      sources[`options.${key}`] = layer[0];
+      sources[`options.${key}`] =
+        layer[0] === "provider default"
+          ? (entry.default_sources?.[`options.${key}`] ?? layer[0])
+          : layer[0];
     }
   }
   validateConfigurationValues(provider, values);
@@ -191,43 +297,130 @@ export function convertLegacyConfiguration(
 ): AgentConfiguration {
   if (canonical !== undefined) return parseAgentConfiguration(canonical);
   const next = structuredClone(fallback);
-  if (typeof legacy.defaultProvider === "string" && AGENT_PROVIDERS.includes(legacy.defaultProvider as AgentProvider))
+  if (
+    typeof legacy.defaultProvider === "string" &&
+    AGENT_PROVIDERS.includes(legacy.defaultProvider as AgentProvider)
+  )
     next.default_provider = legacy.defaultProvider as AgentProvider;
   const flags = legacy.enabledProviders as Record<string, unknown> | undefined;
   for (const provider of AGENT_PROVIDERS) {
     const entry = next.providers[provider];
     if (typeof flags?.[provider] === "boolean") entry.enabled = flags[provider];
-    const old = (provider === "claude" ? legacy : legacy[provider]) as Record<string, unknown> | undefined;
+    const old = (provider === "claude" ? legacy : legacy[provider]) as
+      Record<string, unknown> | undefined;
     if (!old) continue;
-    if (Object.hasOwn(old, "model")) entry.defaults.model = old.model === "" ? null : AgentValues.shape.model.parse(old.model);
+    if (Object.hasOwn(old, "model"))
+      entry.defaults.model = old.model === "" ? null : AgentValues.shape.model.parse(old.model);
     const effort = provider === "codex" ? old.reasoningEffort : old.effort;
-    if (effort !== undefined) entry.defaults.reasoning_effort = effort === "" ? null : AgentValues.shape.reasoning_effort.parse(effort);
+    if (effort !== undefined)
+      entry.defaults.reasoning_effort =
+        effort === "" ? null : AgentValues.shape.reasoning_effort.parse(effort);
     if (provider === "claude" && old.maxTurns !== undefined)
       entry.defaults.max_turns = AgentValues.shape.max_turns.parse(old.maxTurns);
     if (provider === "antigravity" || provider === "copilot") {
-      if (old.sandbox !== undefined) entry.defaults.options = { ...entry.defaults.options, sandbox: z.boolean().parse(old.sandbox) };
-      if (old.maxConcurrent !== undefined) entry.defaults.options = { ...entry.defaults.options, max_concurrent: z.number().int().min(1).max(8).parse(old.maxConcurrent) };
+      if (old.sandbox !== undefined)
+        entry.defaults.options = {
+          ...entry.defaults.options,
+          sandbox: z.boolean().parse(old.sandbox),
+        };
+      if (old.maxConcurrent !== undefined)
+        entry.defaults.options = {
+          ...entry.defaults.options,
+          max_concurrent: z.number().int().min(1).max(8).parse(old.maxConcurrent),
+        };
     }
     if (old.models !== undefined) {
       const models = z.record(z.string(), z.record(z.string(), z.string())).parse(old.models);
-      entry.profiles = Object.fromEntries(Object.entries(models).map(([scope, roles]) => [scope,
-        Object.fromEntries(Object.entries(roles).filter(([, model]) => !!model).map(([role, model]) => [role, { model }])),
-      ]));
+      entry.profiles = Object.fromEntries(
+        Object.entries(models).map(([scope, roles]) => [
+          scope,
+          Object.fromEntries(
+            Object.entries(roles)
+              .filter(([, model]) => !!model)
+              .map(([role, model]) => [role, { model }]),
+          ),
+        ]),
+      );
     }
+    entry.default_sources = {
+      ...entry.default_sources,
+      ...(Object.hasOwn(old, "model") ? { model: "provider default" } : {}),
+      ...(effort !== undefined ? { reasoning_effort: "provider default" } : {}),
+      ...(provider === "claude" && old.maxTurns !== undefined
+        ? { max_turns: "provider default" }
+        : {}),
+      ...(old.sandbox !== undefined ? { "options.sandbox": "provider default" } : {}),
+      ...(old.maxConcurrent !== undefined ? { "options.max_concurrent": "provider default" } : {}),
+    };
   }
   return parseAgentConfiguration(next);
 }
 
-export const ProviderPatch = ProviderConfiguration.omit({ revision: true }).partial();
+export const ProviderPatch = ProviderConfiguration.omit({
+  revision: true,
+  default_sources: true,
+}).partial();
 export function patchProviderConfiguration(
   document: AgentConfiguration,
   provider: AgentProvider,
   revision: number,
   raw: unknown,
 ): AgentConfiguration {
-  if (document.providers[provider].revision !== revision) throw new Error("Agent configuration revision conflict");
+  if (document.providers[provider].revision !== revision)
+    throw new Error("Agent configuration revision conflict");
   const patch = ProviderPatch.parse(raw);
   const next = structuredClone(document);
   next.providers[provider] = { ...next.providers[provider], ...patch, revision: revision + 1 };
+  if (patch.defaults)
+    next.providers[provider].default_sources = Object.fromEntries(
+      (["model", "reasoning_effort", "timeout_ms", "max_turns"] as const).map((key) => [
+        key,
+        patch.defaults![key] !== undefined ? "provider default" : "legacy provider default",
+      ]),
+    );
+  if (patch.defaults)
+    for (const key of ["sandbox", "max_concurrent"] as const)
+      next.providers[provider].default_sources![`options.${key}`] =
+        patch.defaults.options?.[key] !== undefined
+          ? "provider default"
+          : "legacy provider default";
   return parseAgentConfiguration(next);
+}
+
+/** Refresh only imported fallback inputs. Explicitly saved defaults and old run snapshots remain untouched. */
+export function refreshEnvironmentDefaults(document: AgentConfiguration): AgentConfiguration {
+  const next = structuredClone(document);
+  const current = legacyAgentConfiguration();
+  for (const provider of AGENT_PROVIDERS) {
+    const entry = next.providers[provider];
+    for (const key of ["model", "reasoning_effort", "timeout_ms", "max_turns"] as const) {
+      const source = entry.default_sources?.[key];
+      if (source?.startsWith("environment ") || source === "legacy provider default") {
+        Object.assign(entry.defaults, { [key]: current.providers[provider].defaults[key] });
+        entry.default_sources = {
+          ...entry.default_sources,
+          [key]: current.providers[provider].default_sources?.[key],
+        };
+      }
+    }
+    if (provider === "copilot" || provider === "antigravity")
+      for (const key of ["sandbox", "max_concurrent"] as const) {
+        const source = entry.default_sources?.[`options.${key}`];
+        if (
+          entry.defaults.options?.[key] === undefined ||
+          source?.startsWith("environment ") ||
+          source === "legacy provider default"
+        ) {
+          entry.defaults.options = {
+            ...entry.defaults.options,
+            [key]: current.providers[provider].defaults.options?.[key],
+          };
+          entry.default_sources = {
+            ...entry.default_sources,
+            [`options.${key}`]: current.providers[provider].default_sources?.[`options.${key}`],
+          };
+        }
+      }
+  }
+  return next;
 }

@@ -285,7 +285,7 @@ async function askClaude(
   ctx?: ExecutionContext,
   provider: AgentProvider = "claude",
 ): Promise<any> {
-  const done = await completeForRun({ agent_provider: provider }, prompt, ctx?.signal);
+  const done = await completeForRun({ ...(ctx?.run ?? {}), agent_provider: provider }, prompt, ctx?.signal);
   if (ctx)
     await ctx
       .recordMetrics({ advisor: done.metrics, advisor_cost_usd: done.metrics.cost_usd })

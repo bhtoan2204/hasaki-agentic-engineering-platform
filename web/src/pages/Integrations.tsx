@@ -1608,6 +1608,17 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   );
 }
 
+function AgentAccounts() {
+  const status = useApi<Array<{ id: string; ok: boolean; error?: string }>>("/api/agent-providers");
+  return <section className="ig-group"><h3 className="ig-group-title">Agent CLI accounts</h3>
+    <p className="small muted">Agent CLIs use the account authenticated on the assigned worker. Credentials stay with the CLI; configuration in Settings never changes the account. Authenticate on that worker, then refresh status.</p>
+    {status.error && <p role="alert">{String(status.error)}</p>}
+    {status.data?.map((provider) => <div key={provider.id} className="card"><strong>{provider.id}</strong> · {provider.ok ? "Available on this worker" : "Unavailable on this worker"}
+      {provider.id === "copilot" && <p className="small">Authenticate with <code>copilot auth login</code> on the assigned worker. The platform does not fall back to another account.</p>}
+    </div>)}
+  </section>;
+}
+
 export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {}) {
   const { t } = useI18n();
   const [open, setOpen] = useState<string | null>(null);
@@ -1618,6 +1629,7 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
   return (
     <>
       <PageHeader icon={PlugZap} title={t("ig.title")} subtitle={t("ig.subtitle")} />
+      <AgentAccounts />
       <section className="ig-group">
         <h3 className="ig-group-title">
           {t("ig.sources")} <span className="muted small">· {t("ig.sourcesHint")}</span>

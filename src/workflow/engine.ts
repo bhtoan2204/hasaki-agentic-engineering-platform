@@ -1,4 +1,6 @@
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
+import type { AgentConfiguration } from "../agent/configuration.ts";
+const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) => snapshot ? Object.fromEntries(Object.entries(snapshot.providers).map(([key, entry]) => [key, entry.enabled])) : undefined;
 import { completeForRun } from "../agent/complete.ts";
 export { releaseAttempt, reapExpiredLeases, safeRecovery } from "./recovery.ts";
 import { existsSync } from "node:fs";
@@ -1544,7 +1546,7 @@ async function healthyProviderSwitch(jobId: number) {
     const health = await probeAgentHealth(policy.providers);
     const mine = health.find((h) => h.provider === effective.provider);
     if (isUsableAgent(mine)) return null;
-    const next = nextHealthyProvider(policy.providers, new Set([effective.provider]), health);
+    const next = nextHealthyProvider(policy.providers, new Set([effective.provider]), health, frozenProviderFlags(preview.agent_configuration));
     if (!next) return null;
     return { from: effective.provider, to: next, reason: healthSkipReason(mine) };
   } catch {
@@ -3265,7 +3267,8 @@ async function continueHealthyProvider(
           }
         : row,
     );
-    const next = nextHealthyProvider(order, new Set([failedProvider]), health);
+    const run = await one<RunRow>(pool, "SELECT * FROM workflow_runs WHERE id=$1", [runId]);
+    const next = nextHealthyProvider(order, new Set([failedProvider]), health, frozenProviderFlags(run?.agent_configuration));
     if (!next) return;
     await resumeProviderHandoff(
       runId,
@@ -3346,7 +3349,7 @@ export async function providerHandoffOptions(runId: number, key: string) {
   const catalog = await agentProviderStatus();
   return Promise.all(
     fallbackPolicy(step).providers.map(async (provider) => {
-      if (!providerEnabled(provider))
+      if (!providerEnabled(provider, frozenProviderFlags(run.agent_configuration)))
         return {
           provider,
           ok: false,
