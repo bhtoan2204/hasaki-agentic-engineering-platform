@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { requiredTestTargets, verifyWorkspaces } from "../src/agent/verify.ts";
 import {
@@ -233,12 +233,13 @@ test("graph bindings preserve every configured approval source and keep prose ou
 
 test("worker verification cannot write a protected path outside its worktree", async (t) => {
   const { path } = fixture(t);
-  // Any writable directory outside the verified worktree works. Prefer /var/tmp; verification sandboxes mount it read-only.
+  // Verification sandboxes mount / read-only (so /var/tmp) and keep /tmp writable; the checkout is read-only inside the inner one.
   const protectedRoot = (() => {
-    for (const base of ["/var/tmp", join(homedir(), ".cache"), process.cwd()]) {
-      try { mkdirSync(base, { recursive: true }); return mkdtempSync(join(base, "verification-protected-")); } catch { /* try the next location */ }
+    try {
+      return mkdtempSync("/var/tmp/verification-protected-");
+    } catch {
+      return mkdtempSync(join(process.cwd(), ".verification-protected-"));
     }
-    throw new Error("no writable directory outside the worktree for the protected-path check");
   })();
   t.after(() => rmSync(protectedRoot, { recursive: true, force: true }));
   const protectedFile = join(protectedRoot, "sentinel");
