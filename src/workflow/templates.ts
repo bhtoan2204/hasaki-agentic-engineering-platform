@@ -38,7 +38,8 @@ export const TEST_POLICY =
 /**
  * Verification for this platform (TypeScript). The parent process strips DATABASE_URL and other secrets before the
  * shell starts; these guards refuse to continue if that isolation is missing. Targeted tests map changed modules to
- * unit test files (no PostgreSQL) and integration test files (one shared cluster, only when one matches). The full `npm run test:all` script, integration tests included, runs once, later,
+ * unit test files (no PostgreSQL) and integration test files (one shared cluster, only when one matches).
+ * When no tests match, the repository's unit suite runs as a fallback. The full `npm run test:all` script, integration tests included, runs once, later,
  * on the same commit.
  */
 const SELF_TEST_GUARD = `set -euo pipefail
@@ -135,7 +136,8 @@ if [ -n "$integration" ]; then
   node --disable-warning=ExperimentalWarning test/run-integration.ts $integration
 fi
 if [ -z "$tests" ] && [ -z "$integration" ]; then
-  echo "no matching test files for the diff; targeted suite skipped"
+  echo "== unit suite (targeted selection empty)"
+  npm test
 fi`;
 
 export const PLATFORM_REGRESSION_COMMAND = `${SELF_TEST_GUARD}

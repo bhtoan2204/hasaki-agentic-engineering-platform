@@ -98,6 +98,30 @@ test("platform targeted command: core modules and edited integration files run t
   ]);
 });
 
+test("platform targeted command: unmapped changes fall back to the unit suite", (t) => {
+  const r = repo(t, { test: "x", "test:all": "y" });
+  r.change("src/unmapped.ts");
+  const result = r.run(PLATFORM_TARGETED_COMMAND);
+  assert.deepEqual(result.calls, [
+    "npx --no-install tsc -p . --pretty false --noEmit --incremental false",
+    "npm test",
+  ]);
+  assert.doesNotMatch(result.stdout, /no matching test files|suite skipped/);
+});
+
+test("platform targeted command: an empty diff still runs the unit suite", (t) => {
+  const r = repo(t, { test: "x" });
+  assert.deepEqual(r.run(PLATFORM_TARGETED_COMMAND).calls.slice(1), ["npm test"]);
+});
+
+test("platform targeted command: integration-only matches do not run the fallback", (t) => {
+  const r = repo(t, { test: "x" });
+  r.change("test/live.integration.ts");
+  assert.deepEqual(r.run(PLATFORM_TARGETED_COMMAND).calls.slice(1), [
+    integration("test/live.integration.ts"),
+  ]);
+});
+
 test("platform regression falls back to npm test on checkouts without test:all", (t) => {
   assert.deepEqual(repo(t, { test: "x", "test:all": "y" }).run(PLATFORM_REGRESSION_COMMAND).calls, [
     "npm run test:all",

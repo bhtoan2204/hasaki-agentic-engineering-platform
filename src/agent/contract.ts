@@ -112,7 +112,12 @@ export function validateOutputContract(
   if (objectValue(contract)) {
     try {
       const result = z.fromJSONSchema(contract as z.core.JSONSchema.JSONSchema).safeParse(output);
-      return result.success ? { valid: true, errors: [] } : { valid: false, errors: result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`) };
+      return result.success
+        ? { valid: true, errors: [] }
+        : {
+            valid: false,
+            errors: result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
+          };
     } catch (error) {
       return { valid: false, errors: [`Unsupported output schema: ${String(error)}`] };
     }
@@ -126,7 +131,9 @@ export function validateOutputContract(
   if (typeof output !== "object" || output === null || Array.isArray(output)) {
     return {
       valid: false,
-      errors: [`expected an object for output, received ${output === null ? "null" : Array.isArray(output) ? "array" : typeof output}`],
+      errors: [
+        `expected an object for output, received ${output === null ? "null" : Array.isArray(output) ? "array" : typeof output}`,
+      ],
     };
   }
 
@@ -164,12 +171,7 @@ export function validateOutputContract(
   };
 }
 
-function validateFieldValue(
-  path: string,
-  val: unknown,
-  typeSpec: string,
-  errors: string[],
-): void {
+function validateFieldValue(path: string, val: unknown, typeSpec: string, errors: string[]): void {
   if (!typeSpec) {
     // No specific type required, just presence
     return;
@@ -224,7 +226,9 @@ function validateFieldValue(
     for (let i = 0; i < val.length; i++) {
       const item = val[i];
       if (typeof item !== "object" || item === null || Array.isArray(item)) {
-        errors.push(`${path}[${i}]: expected object, received ${item === null ? "null" : Array.isArray(item) ? "array" : typeof item}`);
+        errors.push(
+          `${path}[${i}]: expected object, received ${item === null ? "null" : Array.isArray(item) ? "array" : typeof item}`,
+        );
         continue;
       }
       for (const f of innerFields) {
@@ -246,7 +250,9 @@ function validateFieldValue(
   const dynamicMapMatch = typeSpec.match(/^\{\s*\[[\w]+\]\s*:\s*(\{[\s\S]*\})\s*\}$/);
   if (dynamicMapMatch) {
     if (typeof val !== "object" || val === null || Array.isArray(val)) {
-      errors.push(`${path}: expected object map, received ${val === null ? "null" : Array.isArray(val) ? "array" : typeof val}`);
+      errors.push(
+        `${path}: expected object map, received ${val === null ? "null" : Array.isArray(val) ? "array" : typeof val}`,
+      );
       return;
     }
     const innerSchema = dynamicMapMatch[1].trim();
@@ -254,7 +260,9 @@ function validateFieldValue(
     const innerFields = parseContractFields(innerBody);
     for (const [mapKey, mapVal] of Object.entries(val as Record<string, unknown>)) {
       if (typeof mapVal !== "object" || mapVal === null || Array.isArray(mapVal)) {
-        errors.push(`${path}["${mapKey}"]: expected object, received ${mapVal === null ? "null" : Array.isArray(mapVal) ? "array" : typeof mapVal}`);
+        errors.push(
+          `${path}["${mapKey}"]: expected object, received ${mapVal === null ? "null" : Array.isArray(mapVal) ? "array" : typeof mapVal}`,
+        );
         continue;
       }
       for (const f of innerFields) {
@@ -275,7 +283,9 @@ function validateFieldValue(
   // Nested object: { ... }
   if (typeSpec.startsWith("{") && typeSpec.endsWith("}")) {
     if (typeof val !== "object" || val === null || Array.isArray(val)) {
-      errors.push(`${path}: expected object, received ${val === null ? "null" : Array.isArray(val) ? "array" : typeof val}`);
+      errors.push(
+        `${path}: expected object, received ${val === null ? "null" : Array.isArray(val) ? "array" : typeof val}`,
+      );
       return;
     }
     const innerBody = typeSpec.slice(1, -1).trim();

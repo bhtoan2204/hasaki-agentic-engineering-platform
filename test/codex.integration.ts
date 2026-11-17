@@ -590,6 +590,22 @@ test("a tool that bypassed the hook stops the run", async () => {
   assert.match(r.text, /pre-execution hook/);
 });
 
+test("Codex turn passes authorized worktrees to the native sandbox", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "codex-session-"));
+  const workspace = mkdtempSync(join(tmpdir(), "codex-worktree-"));
+  const { ctx } = fakeCtx(new AbortController().signal);
+  await codexAgentTurn({
+    ctx,
+    mode: "coding",
+    policy: { mode: "coding", workspaces: [workspace], baseBranch: "main", protectedRoots: [] },
+    cwd,
+    prompt: "hi",
+    metrics: newMetrics(""),
+  });
+  const invocation = fakeLog().find((entry) => entry.argv);
+  assert.ok(invocation.argv.includes(`sandbox_workspace_write.writable_roots=[${JSON.stringify(workspace)}]`));
+});
+
 test("hook denies git push and escalation in a real turn; secrets stay out of the CLI env; tokens are real and cost is null", async () => {
   process.env.FAKE_CODEX_MODE = "push";
   process.env.DATABASE_URL_BACKUP = process.env.DATABASE_URL;

@@ -289,6 +289,8 @@ export interface CodexInvocation {
   mode: ToolMode;
   cwd: string;
   scratch: string;
+  /** Exact worktree paths authorized by the worker's tool policy for this turn. */
+  workspaces?: readonly string[];
   model?: string;
   effort?: string;
   resumeId?: string;
@@ -303,18 +305,15 @@ export function codexArgs(inv: CodexInvocation): string[] {
   ];
   const coding = inv.mode === "coding";
   const cfg: Array<[string, unknown]> = [
-    [
-      "sandbox_mode",
-      coding ? "workspace-write" : "read-only",
-    ],
+    ["sandbox_mode", coding ? "workspace-write" : "read-only"],
     ["approval_policy", "never"],
     ["web_search", "disabled"],
   ];
   // Coding stays inside the native write sandbox. The worker runs infrastructure verification after submission.
   cfg.push(
-      ["sandbox_workspace_write.network_access", false],
-      ["sandbox_workspace_write.writable_roots", []],
-    );
+    ["sandbox_workspace_write.network_access", false],
+    ["sandbox_workspace_write.writable_roots", coding ? [...new Set(inv.workspaces ?? [])] : []],
+  );
   cfg.push(
     ["shell_environment_policy.inherit", "all"],
     ["shell_environment_policy.ignore_default_excludes", false],
@@ -505,6 +504,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     mode: input.mode,
     cwd: input.cwd,
     scratch,
+    workspaces: input.policy.workspaces,
     model: input.model,
     effort: input.effort,
     resumeId: input.resumeId,
