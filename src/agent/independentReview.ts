@@ -605,6 +605,68 @@ export function reusablePass(
   );
 }
 
+/**
+ * A prior FAIL is a checkpoint for an incremental re-review only when it judged the same repositories against the same
+ * base tips; otherwise the whole diff must be reviewed again.
+ */
+export function incrementalCheckpoint(
+  prior: { id: number; output: any } | null | undefined,
+  heads: Record<string, string>,
+  baseTips: Record<string, string>,
+) {
+  const o = prior?.output;
+  if (!o || o.verdict !== "FAIL" || o.independent !== true || !Array.isArray(o.findings)) return null;
+  const was: Record<string, string> = o.verified_heads ?? {};
+  const tips: Record<string, string> | undefined = o.verified_base_tips;
+  const repos = Object.keys(heads).sort();
+  if (!tips || repos.join("\0") !== Object.keys(was).sort().join("\0")) return null;
+  if (repos.some((r) => !was[r] || !baseTips[r] || tips[r] !== baseTips[r])) return null;
+  return { attemptId: prior!.id, heads: was, findings: o.findings as Finding[], summary: String(o.summary ?? "") };
+}
+
+/** Diff of the repair commits since the FAIL checkpoint; null when any checkpoint commit is not an ancestor of HEAD. */
+export async function repairDiff(
+  workspaces: Array<{ repo: string; path: string }>,
+  since: Record<string, string>,
+  maxChars = 60_000,
+) {
+  const parts: string[] = [];
+  let budget = maxChars;
+  for (const w of workspaces) {
+    const from = since[w.repo];
+    const ancestor = await exec("git", ["-C", w.path, "merge-base", "--is-ancestor", from, "HEAD"])
+      .then(() => true)
+      .catch(() => false);
+    if (!ancestor) return null;
+    const range = `${from}..HEAD`;
+    const stat = (await exec("git", ["-C", w.path, "diff", "--stat", range], { maxBuffer: 8 << 20 })).stdout.trim();
+    let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", range], { maxBuffer: 64 << 20 })).stdout;
+    if (diff.length > budget)
+      diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff ${range} in ${w.path} for the rest`;
+    budget -= diff.length;
+    parts.push(`### ${w.repo} ${from.slice(0, 12)}..HEAD (worktree ${w.path})\n${stat || "(no changes)"}\n\n${diff}`);
+  }
+  return parts.join("\n\n");
+}
+
+export function incrementalReviewBrief(checkpoint: { attemptId: number; findings: Finding[]; summary: string }) {
+  const findings = checkpoint.findings.map(
+    (f, i) =>
+      `${i + 1}. [${f.severity}] ${f.file}${f.line ? `:${f.line}` : ""} — ${f.explanation}${f.evidence ? `\n   evidence: ${f.evidence}` : ""}`,
+  );
+  return [
+    `INCREMENTAL RE-REVIEW. The full diff was already reviewed (attempt #${checkpoint.attemptId}) and FAILED only on the findings below; everything else in it was accepted.`,
+    "Review ONLY: (1) whether each finding below is resolved, and (2) the repair diff for new defects or regressions.",
+    "Do not re-review unchanged code. Read surrounding code or run git diff against the base branch only where the repair diff needs that context.",
+    "Report unresolved findings again; PASS when all are resolved and the repair introduced no new defect.",
+    "Previous findings:",
+    ...findings,
+    checkpoint.summary ? `Previous verifier summary: ${checkpoint.summary}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** Deterministic scope results recorded by coding steps that still lack a renewed approval. A PASS cannot override them. */
 export function unresolvedScope(rows: Array<{ key: string; sc: any }>) {
   return rows

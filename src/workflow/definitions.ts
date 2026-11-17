@@ -169,38 +169,116 @@ async function publishTx(c: Db, definitionId: number, changeNote: string) {
   return { version, unchanged: false };
 }
 
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === "object" && !Array.isArray(v);
+const isKeyedList = (v: unknown): v is Array<{ key: string }> =>
+  Array.isArray(v) && v.every((x) => isObject(x) && typeof x.key === "string");
+const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
+
 /**
- * Insert missing templates; publish a new version of a template only when the shipped spec changed AND the
- * user has not published their own edits on top (their latest version still matches a shipped spec hash).
+ * Three-way merge of a template update into a definition: `base` is the template the definition was last seeded
+ * from, `ours` its latest published spec, `theirs` the new template. Local edits win on conflict; keyed lists
+ * (steps) merge per key, other arrays as a whole.
+ */
+export function mergeTemplateSpec(base: unknown, ours: unknown, theirs: unknown): unknown {
+  if (same(ours, base)) return theirs;
+  if (same(theirs, base) || same(ours, theirs)) return ours;
+  if (isObject(ours) && isObject(theirs)) {
+    const b = isObject(base) ? base : {};
+    const out: Record<string, unknown> = {};
+    for (const k of new Set([...Object.keys(theirs), ...Object.keys(ours)])) {
+      const v = mergeTemplateSpec(b[k], ours[k], theirs[k]);
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
+  if (isKeyedList(ours) && isKeyedList(theirs) && (base === undefined || isKeyedList(base))) {
+    const b = new Map((base ?? []).map((x) => [x.key, x]));
+    const o = new Map(ours.map((x) => [x.key, x]));
+    const t = new Set(theirs.map((x) => x.key));
+    const out: unknown[] = [];
+    for (const x of theirs) {
+      if (o.has(x.key)) out.push(mergeTemplateSpec(b.get(x.key), o.get(x.key), x));
+      else if (!b.has(x.key)) out.push(x);
+    }
+    for (const x of ours) if (!t.has(x.key) && !b.has(x.key)) out.push(x);
+    return out;
+  }
+  return ours;
+}
+
+/**
+ * Insert missing templates; when a shipped template changed, merge the update into the definition's latest
+ * version (keeping local edits such as layout or agent overrides) and publish it.
  */
 export async function seedTemplates() {
   for (const t of TEMPLATES) {
     const spec = validateSpec(t.spec);
     const existing = await definitions.get(t.key);
     if (!existing) {
-      await definitions.create({
+      const created = await definitions.create({
         key: t.key,
         spec,
         isTemplate: true,
         changeNote: "built-in template",
       });
+      await q(pool, "UPDATE workflow_definitions SET template_base = $2 WHERE id = $1", [
+        created.id,
+        json(spec),
+      ]);
       continue;
     }
     if (!existing.is_template) continue;
-    const latest = existing.versions[0];
-    if (
-      latest &&
-      latest.spec_hash !== hashOf(spec) &&
-      latest.change_note.startsWith("built-in template")
-    ) {
-      await withTx(async (c) => {
+    await withTx(async (c) => {
+      const d = await one(c, "SELECT * FROM workflow_definitions WHERE id = $1 FOR UPDATE", [
+        existing.id,
+      ]);
+      // An unpublished draft would be overwritten by the publish below; retry on the next start.
+      if (d.draft_spec) return;
+      const latest = await one(
+        c,
+        "SELECT spec, spec_hash FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
+        [d.id],
+      );
+      const base =
+        d.template_base ??
+        (
+          await one(
+            c,
+            `SELECT spec FROM workflow_definition_versions
+              WHERE definition_id = $1 AND change_note LIKE 'built-in template%' ORDER BY version DESC LIMIT 1`,
+            [d.id],
+          )
+        )?.spec;
+      if (!latest || !base || same(base, spec)) return;
+      let next: WorkflowSpec;
+      try {
+        next = validateSpec(mergeTemplateSpec(base, latest.spec, spec));
+      } catch (err) {
+        console.warn(
+          `Template "${t.key}" update not applied: merge with local edits is invalid`,
+          err,
+        );
+        return;
+      }
+      if (hashOf(next) !== latest.spec_hash) {
         await q(c, "UPDATE workflow_definitions SET draft_spec = $2 WHERE id = $1", [
-          existing.id,
-          json(spec),
+          d.id,
+          json(next),
         ]);
-        await publishTx(c, existing.id, "built-in template update");
-      });
-    }
+        await publishTx(
+          c,
+          d.id,
+          same(latest.spec, base)
+            ? "built-in template update"
+            : "built-in template update (local edits kept)",
+        );
+      }
+      await q(c, "UPDATE workflow_definitions SET template_base = $2 WHERE id = $1", [
+        d.id,
+        json(spec),
+      ]);
+    });
   }
 }
 
