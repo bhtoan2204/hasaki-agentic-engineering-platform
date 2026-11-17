@@ -1,116 +1,116 @@
-import { codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
-import { providerEnabled } from "./provider.ts";
-import { probeAgentHealth, rememberedQuota } from "./health.ts";
+import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
+import { currentUserId } from "../auth/execution.ts";
+import { agentEnvironment } from "./environment.ts";
+import { cursorBinary, cursorCapabilities } from "./cursor/run.ts";
 import { codexCapabilities } from "./codex/run.ts";
-import { cursorCapabilities } from "./cursor/run.ts";
 import { antigravityCapabilities } from "./antigravity/capabilities.ts";
 import { copilotCapabilities } from "./copilot/capabilities.ts";
 
-/**
- * Readiness of each agent provider on this worker, for the run forms. Probes the installed CLIs only (version, flags,
- * login status, model catalog); no model is called, nothing is billed, and no credential is read or returned.
- */
+import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
+import { probeAgentHealth } from "./health.ts";
+import { DiscoveryCache, type DiscoveryProbe } from "./providerDiscovery.ts";
+import { providerControlState } from "./providerCapabilities.ts";
+import { loadAgentConfiguration } from "./configurationStore.ts";
+
+/** Operational availability, discovery and supported controls are independent facts. */
 export async function agentProviderStatus(refresh = false) {
-  const [cursor, codex, antigravity, copilot, claudeHealth] = await Promise.all([
-    cursorCapabilities(refresh).catch((e) => ({
-      ok: false,
-      error: String(e?.message ?? e),
-    })),
-    codexCapabilities(refresh).catch(
-      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
-    ),
-    antigravityCapabilities(refresh).catch(
-      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
-    ),
-    copilotCapabilities(refresh).catch(
-      (e) => ({ ok: false, error: String(e?.message ?? e) }) as const,
-    ),
-    probeAgentHealth(["claude"]).then((rows) => rows[0]),
+  const [document, health, discoveries] = await Promise.all([
+    loadAgentConfiguration(),
+    probeAgentHealth(),
+    Promise.all(AGENT_PROVIDERS.map((provider) => discoverProvider(provider, refresh))),
   ]);
-  const cfg = codexConfig();
-  const agyCfg = antigravityConfig();
-  const copilotCfg = copilotConfig();
-  return [
-    {
-      id: "claude",
-      enabled: providerEnabled("claude"),
-      ok: claudeHealth.connected && claudeHealth.quota !== "exhausted",
-      error: claudeHealth.reason,
-      quota: claudeHealth.quota,
+  return AGENT_PROVIDERS.map((id, index) => {
+    const discovery = discoveries[index];
+    const status = health.find((entry) => entry.provider === id);
+    return {
+      id,
+      enabled: document.providers[id].enabled,
+      ok: discovery.available && status?.connected === true && status.quota !== "exhausted",
+      error: discovery.available
+        ? undefined
+        : "Provider unavailable on this worker; check Integrations",
+      quota: status?.quota ?? "unknown",
+      controls: providerControlState(id, discovery),
+      ...discovery,
+      model: document.providers[id].defaults.model ?? null,
+      reasoning_effort: document.providers[id].defaults.reasoning_effort ?? null,
+    };
+  });
+}
+
+const catalogs = new DiscoveryCache();
+async function claudeDiscovery() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  // Keep stdin open for control requests, without sending a model prompt.
+  const prompt: AsyncIterable<SDKUserMessage> = {
+    [Symbol.asyncIterator]: () => ({
+      async next() {
+        if (!controller.signal.aborted)
+          await new Promise<void>((resolve) =>
+            controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        return { done: true, value: undefined };
+      },
+    }),
+  };
+  const session = query({
+    prompt,
+    options: {
+      ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
+        ? {
+            pathToClaudeCodeExecutable:
+              process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin,
+          }
+        : {}),
+      env: agentEnvironment(process.env, "claude"),
+      tools: [],
+      settingSources: [],
+      persistSession: false,
+      abortController: controller,
     },
-    {
-      id: "cursor",
-      enabled: providerEnabled("cursor"),
-      ok: cursor.ok && rememberedQuota("cursor") !== "exhausted",
-      error:
-        rememberedQuota("cursor") === "exhausted"
-          ? "quota exhausted"
-          : cursor.ok
-            ? undefined
-            : cursor.error,
-      quota: rememberedQuota("cursor"),
+  });
+  try {
+    const models = await session.supportedModels();
+    return {
+      ok: true,
+      models: models.map((m) => ({
+        slug: m.value,
+        name: m.displayName,
+        efforts: m.supportedEffortLevels ?? [],
+      })),
+    };
+  } finally {
+    controller.abort();
+    session.close();
+    clearTimeout(timer);
+  }
+}
+export async function discoverProvider(provider: AgentProvider, refresh = false) {
+  const probes: Record<AgentProvider, { bin: string; probe: DiscoveryProbe }> = {
+    claude: { bin: config.agent.claudeBin ?? "sdk", probe: claudeDiscovery },
+    codex: {
+      bin: codexConfig().bin,
+      probe: async () => {
+        const c = await codexCapabilities(refresh, { model: "", effort: "" });
+        return { ...c, models: c.models?.map((m) => ({ ...m, name: m.slug })) };
+      },
     },
-    {
-      id: "codex",
-      enabled: providerEnabled("codex"),
-      ok: codex.ok && rememberedQuota("codex") !== "exhausted",
-      error:
-        rememberedQuota("codex") === "exhausted"
-          ? "quota exhausted"
-          : codex.ok
-            ? undefined
-            : codex.error,
-      quota: rememberedQuota("codex"),
-      kind: "kind" in codex ? codex.kind : undefined,
-      version: "version" in codex ? codex.version : undefined,
-      /** e.g. "ChatGPT": how the WORKER's Codex CLI is logged in. Runs execute with that account, not per platform user. */
-      auth: "auth" in codex ? codex.auth : undefined,
-      model: cfg.model || null,
-      reasoning_effort: cfg.reasoningEffort || null,
-      models:
-        "models" in codex ? codex.models?.map((m) => ({ slug: m.slug, name: m.slug })) : undefined,
+    cursor: { bin: cursorBinary(), probe: async () => cursorCapabilities(refresh) },
+    antigravity: {
+      bin: antigravityConfig().bin,
+      probe: async () => antigravityCapabilities(refresh, { model: "", effort: "" }),
     },
-    {
-      id: "copilot",
-      enabled: providerEnabled("copilot"),
-      ok: copilot.ok && rememberedQuota("copilot") !== "exhausted",
-      error:
-        rememberedQuota("copilot") === "exhausted"
-          ? "quota exhausted"
-          : copilot.ok
-            ? undefined
-            : copilot.error,
-      quota: rememberedQuota("copilot"),
-      kind: "kind" in copilot ? copilot.kind : undefined,
-      version: "version" in copilot ? copilot.version : undefined,
-      auth: "auth" in copilot ? copilot.auth : undefined,
-      model: copilotCfg.model || null,
-      reasoning_effort: copilotCfg.effort || null,
-      models:
-        "models" in copilot
-          ? copilot.models?.map((m) => ({ slug: m.slug, name: m.name || m.slug }))
-          : undefined,
+    copilot: {
+      bin: copilotConfig().bin,
+      probe: async () => copilotCapabilities(refresh, { model: "", effort: "" }),
     },
-    {
-      id: "antigravity",
-      enabled: providerEnabled("antigravity"),
-      ok: antigravity.ok && rememberedQuota("antigravity") !== "exhausted",
-      error:
-        rememberedQuota("antigravity") === "exhausted"
-          ? "quota exhausted"
-          : antigravity.ok
-            ? undefined
-            : antigravity.error,
-      quota: rememberedQuota("antigravity"),
-      kind: "kind" in antigravity ? antigravity.kind : undefined,
-      version: "version" in antigravity ? antigravity.version : undefined,
-      auth: "auth" in antigravity ? antigravity.auth : undefined,
-      model: agyCfg.model || null,
-      reasoning_effort: agyCfg.effort || null,
-      models:
-        "models" in antigravity
-          ? antigravity.models?.map((m) => ({ slug: m.slug, name: m.name || m.slug }))
-          : undefined,
-    },
-  ];
+  };
+  const adapter = probes[provider];
+  return catalogs.get(
+    `${provider}:${adapter.bin}:${config.instanceId}:${currentUserId() ?? "worker"}`,
+    adapter.probe,
+    refresh,
+  );
 }

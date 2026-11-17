@@ -1,4 +1,16 @@
 /* Settings page: section rail, override/dirty flags, model matrix, sticky save bar. Tokens only (dark theme follows). */
+.agent-value-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.agent-profile-role {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-block: var(--sp-3);
+}
+.agent-profile-role .small { overflow-wrap: anywhere; }
 
 .set-layout {
   display: grid;

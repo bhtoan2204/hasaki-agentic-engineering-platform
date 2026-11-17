@@ -242,7 +242,7 @@ export async function antigravityAgentTurn(
   }
 
   const cfg = antigravityConfig();
-  const release = await acquireSlot(cfg.maxConcurrent, input.ctx.signal);
+  const release = await acquireSlot(input.ctx.attempt.effective_agent?.options?.max_concurrent ?? cfg.maxConcurrent, input.ctx.signal);
 
   let broker: Broker | null = null;
   const scratchDir = mkdtempSync(join(tmpdir(), "ctp-agy-scratch-"));
@@ -256,7 +256,7 @@ export async function antigravityAgentTurn(
     let fullText = "";
     let lastError: string | undefined;
     let conversationId = input.resumeId;
-    let model = input.model || cfg.model;
+    let model = input.model ?? "";
     const metrics = input.metrics ?? newMetrics(model);
     const recordModel = async (reported: string) => {
       if (!reported.trim()) return;
@@ -316,7 +316,7 @@ export async function antigravityAgentTurn(
 
     const additionalDirs = workspaces.map((w) => w.path).filter((p) => p !== input.cwd);
 
-    const timeoutMs = cfg.timeoutMs;
+    const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? cfg.timeoutMs;
     const timeoutSec = Math.floor(timeoutMs / 1000);
 
     const settingsPath = join(scratchDir, "settings.json");
@@ -331,7 +331,7 @@ export async function antigravityAgentTurn(
     const args = buildAntigravityArgs({
       model: input.model || undefined,
       effort: input.effort || undefined,
-      sandbox: liveRuntime.getStore() ? true : cfg.sandbox,
+      sandbox: liveRuntime.getStore() ? true : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
       timeoutSeconds: timeoutSec,
       conversationId: input.resumeId || undefined,
       additionalDirs,
@@ -644,7 +644,7 @@ export async function antigravityAgentTurn(
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function antigravityComplete(
   prompt: string,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number },
 ): Promise<{
   text: string;
   model?: string;
@@ -652,14 +652,15 @@ export async function antigravityComplete(
 }> {
   const cfg = antigravityConfig();
   if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
-  const cap = await antigravityCapabilities(false);
+  const cap = await antigravityCapabilities(false, { model: opts?.model ?? cfg.model, effort: opts?.effort ?? cfg.effort });
   if (!cap.ok) {
     throw new Error(cap.error || "Antigravity CLI is not available on this worker");
   }
+  opts?.signal?.throwIfAborted();
 
   const args = buildAntigravityArgs({
-    model: cfg.model || undefined,
-    effort: cfg.effort || undefined,
+    model: (opts?.model ?? cfg.model) || undefined,
+    effort: (opts?.effort ?? cfg.effort) || undefined,
     sandbox: false,
   });
 
@@ -669,7 +670,7 @@ export async function antigravityComplete(
 
   const onAbort = () => killAntigravity(child);
   opts?.signal?.addEventListener("abort", onAbort, { once: true });
-  const timeoutMs = cfg.timeoutMs;
+  const timeoutMs = opts?.timeoutMs ?? cfg.timeoutMs;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -677,7 +678,7 @@ export async function antigravityComplete(
   }, timeoutMs);
 
   let text = "";
-  let model = cfg.model;
+  let model = opts?.model ?? cfg.model;
   let stderr = "";
   let tokens: Record<string, number | null> | null = null;
   const parser = new AntigravityStream();

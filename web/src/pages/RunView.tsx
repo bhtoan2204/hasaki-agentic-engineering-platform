@@ -946,6 +946,7 @@ function ProfileCard({ run }: { run: any }) {
         </h4>
         <ProfileBadge profile={run.profile} />
       </div>
+      {run.agent_configuration && <p className="small muted">Agent configuration version {run.agent_configuration.version} · {run.agent_configuration.capture_source} · {run.agent_configuration.captured_at}</p>}
       {(run.graph?.transitions ?? []).map((transition: { from: string; to: string; reason: string; revision: number }) => (
         <div className="small" key={transition.revision}>{transition.from} → {transition.to} · revision {transition.revision}: {transition.reason}</div>
       ))}

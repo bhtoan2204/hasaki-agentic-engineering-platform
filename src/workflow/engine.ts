@@ -1,3 +1,6 @@
+import { loadAgentConfiguration } from "../agent/configurationStore.ts";
+import type { AgentConfiguration } from "../agent/configuration.ts";
+const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) => snapshot ? Object.fromEntries(Object.entries(snapshot.providers).map(([key, entry]) => [key, entry.enabled])) : undefined;
 import { completeForRun } from "../agent/complete.ts";
 export { releaseAttempt, reapExpiredLeases, safeRecovery } from "./recovery.ts";
 import { existsSync } from "node:fs";
@@ -56,7 +59,6 @@ import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/l
 import {
   providerEnabled,
   resolveAgentProvider,
-  substituteEnabledProvider,
   type AgentProvider,
 } from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
@@ -396,13 +398,14 @@ export async function startRun(input: StartRunInput) {
   let agent_provider: AgentProvider;
   try {
     output_locale = resolveOutputLocale(input.outputLocale);
-    agent_provider = substituteEnabledProvider(
-      resolveAgentProvider(input.agentProvider ?? config.agent.defaultProvider),
-    );
+    agent_provider = resolveAgentProvider(input.agentProvider);
   } catch (e) {
     throw new EngineError((e as Error).message, 400);
   }
   return withTx(async (c, afterCommit) => {
+    const agent_configuration = { ...await loadAgentConfiguration(c), captured_at: new Date().toISOString(), capture_source: "run-start" as const };
+    agent_provider = resolveAgentProvider(input.agentProvider ?? agent_configuration.default_provider);
+    if (!agent_configuration.providers[agent_provider].enabled) throw new EngineError("Requested agent provider is disabled", 400);
     const r = await resolveRunGraph(c, input);
     const { dv, wi, inputs, allowed, selected, graph } = r;
     const { id } = (await one<{ id: number }>(
@@ -441,7 +444,7 @@ export async function startRun(input: StartRunInput) {
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     try {
       for (const step of optimized.graph.steps)
-        resolveStepAgent({ agent_provider, profile: r.decision.profile }, step);
+        resolveStepAgent({ agent_provider, profile: r.decision.profile, agent_configuration }, step);
     } catch (error) {
       throw new EngineError((error as Error).message, 400);
     }
@@ -456,8 +459,8 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance, policy_versions)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance, policy_versions, agent_configuration)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         id,
         dv.id,
@@ -476,6 +479,7 @@ export async function startRun(input: StartRunInput) {
         r.ownerId,
         config.instanceId,
         json(executionPolicyVersions()),
+        json(agent_configuration),
       ],
     );
     for (const decision of optimized.decisions)
@@ -1243,6 +1247,16 @@ export async function answerQuestions(
             "SELECT id, answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'",
             [s.current_attempt_id],
           );
+          if (cp?.data?.agent_configuration_recovery) {
+            if (!replies.some((reply) => reply.answer.trim() === "Use current configuration for remaining steps"))
+              throw new EngineError("Choose the explicit configuration recovery option to continue", 409);
+            const currentRun = await lockRun(c, runId);
+            if (!currentRun.agent_configuration) {
+              const recovered = { ...await loadAgentConfiguration(c), captured_at: new Date().toISOString(), capture_source: "authorized-recovery" };
+              await q(c, "UPDATE workflow_runs SET agent_configuration=$2 WHERE id=$1 AND agent_configuration IS NULL", [runId, json(recovered)]);
+              await runEvents.add(c, runId, "user", `Agent configuration recovered from current settings by ${answeredBy}; historical attempts unchanged`, s.id);
+            }
+          }
           // A step paused by failure recovery: "stop" ends it as FAILED; anything else runs it again.
           const stop =
             (cp?.data?.failure || cp?.data?.recovery || cp?.data?.workspace_conflict) &&
@@ -1513,16 +1527,17 @@ async function healthyProviderSwitch(jobId: number) {
       agent_override: Record<string, any> | null;
       agent_provider: string | null;
       profile: string | null;
+      agent_configuration: RunRow["agent_configuration"];
     }>(
       pool,
-      `SELECT s.type, s.config, s.agent_override, r.agent_provider, r.profile
+      `SELECT s.type, s.config, s.agent_override, r.agent_provider, r.profile, r.agent_configuration
          FROM workflow_jobs j
          JOIN workflow_steps s ON s.id = j.step_id
          JOIN workflow_runs r ON r.id = j.run_id
         WHERE j.id = $1`,
       [jobId],
     );
-    if (!preview || !["agent", "coding_agent"].includes(preview.type)) return null;
+    if (!preview || !preview.agent_configuration || !["agent", "coding_agent"].includes(preview.type)) return null;
     if (preview.config?.delegation?.enabled) return null;
     const policy = fallbackPolicy(preview);
     if (policy.mode === "disabled" || !policy.auto_health) return null;
@@ -1531,7 +1546,7 @@ async function healthyProviderSwitch(jobId: number) {
     const health = await probeAgentHealth(policy.providers);
     const mine = health.find((h) => h.provider === effective.provider);
     if (isUsableAgent(mine)) return null;
-    const next = nextHealthyProvider(policy.providers, new Set([effective.provider]), health);
+    const next = nextHealthyProvider(policy.providers, new Set([effective.provider]), health, frozenProviderFlags(preview.agent_configuration));
     if (!next) return null;
     return { from: effective.provider, to: next, reason: healthSkipReason(mine) };
   } catch {
@@ -1689,7 +1704,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
       }
     }
     if (
-      healthSwitch &&
+      healthSwitch && run.agent_configuration &&
       ["agent", "coding_agent"].includes(step.type) &&
       !step.config.delegation?.enabled
     ) {
@@ -1721,7 +1736,9 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
         );
       }
     }
-    const effective = resolveStepAgent(run, step);
+    const previous = run.agent_configuration === null ? await one<{ effective_agent: AttemptRow["effective_agent"] }>(c,
+      "SELECT effective_agent FROM workflow_step_attempts WHERE step_id=$1 AND effective_agent IS NOT NULL ORDER BY id DESC LIMIT 1", [step.id]) : null;
+    const effective = run.agent_configuration === null ? previous?.effective_agent ?? null : resolveStepAgent(run, step);
     step.config = effectiveStepConfig(step.config, effective);
     const { n } = (await one<{ n: number }>(
       c,
@@ -3250,7 +3267,8 @@ async function continueHealthyProvider(
           }
         : row,
     );
-    const next = nextHealthyProvider(order, new Set([failedProvider]), health);
+    const run = await one<RunRow>(pool, "SELECT * FROM workflow_runs WHERE id=$1", [runId]);
+    const next = nextHealthyProvider(order, new Set([failedProvider]), health, frozenProviderFlags(run?.agent_configuration));
     if (!next) return;
     await resumeProviderHandoff(
       runId,
@@ -3331,7 +3349,7 @@ export async function providerHandoffOptions(runId: number, key: string) {
   const catalog = await agentProviderStatus();
   return Promise.all(
     fallbackPolicy(step).providers.map(async (provider) => {
-      if (!providerEnabled(provider))
+      if (!providerEnabled(provider, frozenProviderFlags(run.agent_configuration)))
         return {
           provider,
           ok: false,

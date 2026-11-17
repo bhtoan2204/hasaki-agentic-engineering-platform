@@ -62,7 +62,7 @@ export interface AnalyzerInput {
 }
 export type ChangeAnalyzer = (
   input: AnalyzerInput,
-  run: { agent_provider?: string | null },
+  run: import("../agent/configuration.ts").CompletionRun,
 ) => Promise<unknown>;
 export interface SkillDraftInput {
   skill: { key: string; title: string; content: string };
@@ -73,7 +73,7 @@ export interface SkillDraftInput {
 }
 export type SkillDrafter = (
   x: SkillDraftInput,
-  run: { agent_provider?: string | null } | null,
+  run: import("../agent/configuration.ts").CompletionRun | null,
 ) => Promise<{ content: string; summary?: string }>;
 
 let analyzer: ChangeAnalyzer | null = null;
@@ -276,6 +276,8 @@ interface RunInfo {
   definition_key: string;
   repositories: string[];
   agent_provider?: string | null;
+  profile?: string | null;
+  agent_configuration?: import("../agent/configuration.ts").AgentConfiguration | null;
 }
 
 /** Deterministic checks on one candidate. Returns the proposal to store or why it was dropped. */
@@ -488,7 +490,7 @@ async function runInfo(
 ): Promise<(RunInfo & { status: string; learning: any }) | undefined> {
   const r = await one(
     db,
-    "SELECT r.id, r.title, r.owner_id, r.status, r.definition_key, r.selected_repositories, r.agent_provider, r.learning, r.inputs, w.project FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1",
+    "SELECT r.id, r.title, r.owner_id, r.status, r.definition_key, r.selected_repositories, r.agent_provider, r.profile, r.agent_configuration, r.learning, r.inputs, w.project FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1",
     [runId],
   );
   if (!r) return undefined;
@@ -500,6 +502,8 @@ async function runInfo(
     definition_key: r.definition_key,
     repositories: r.selected_repositories ?? [],
     agent_provider: r.agent_provider,
+    profile: r.profile,
+    agent_configuration: r.agent_configuration,
     learning: r.learning,
     project: r.project || String(r.inputs?.project ?? ""),
   };
@@ -738,7 +742,7 @@ export async function proposeSkillUpdates(parentId: number, db: Db = pool) {
   const skills: Array<{ key: string }> = p.impacts?.skills ?? [];
   const out: Array<{ key: string; proposal_id?: number; error?: string }> = [];
   const run = p.source_run_id
-    ? await one(db, "SELECT agent_provider FROM workflow_runs WHERE id = $1", [p.source_run_id])
+    ? await one(db, "SELECT agent_provider, agent_configuration, profile FROM workflow_runs WHERE id = $1", [p.source_run_id])
     : null;
   const ownerId = p.owner_id == null ? null : Number(p.owner_id);
   for (const s of skills) {

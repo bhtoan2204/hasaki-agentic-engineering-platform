@@ -1,23 +1,23 @@
-import { agentEnvironment } from "./environment.ts";
 import { randomUUID } from "node:crypto";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
+import { agentEnvironment } from "./environment.ts";
 import { accumulateMetrics, newMetrics } from "./metrics.ts";
 import { codexComplete } from "./codex/run.ts";
 import { cursorComplete } from "./cursor/run.ts";
 import { antigravityComplete } from "./antigravity/run.ts";
 import { copilotComplete } from "./copilot/run.ts";
-import { agentProvider, type AgentProvider } from "./provider.ts";
+import type { AgentProvider } from "./provider.ts";
+import type { CompletionRun } from "./configuration.ts";
+export type { CompletionRun } from "./configuration.ts";
+import { resolveStepAgent } from "./stepAgent.ts";
+import { loadAgentConfiguration } from "./configurationStore.ts";
 
-/**
- * One-shot, tool-less text completion for the auxiliary AI calls that belong to a run (repository ranking, report
- * reasoning, test-failure explanation / answer interpretation). The RUN's provider decides who answers, so a Codex or
- * Cursor run never silently calls Claude. Calls outside a run (no run row) keep the global default: Claude with
- * config.model.
- *
- * Metrics are real or null: Claude reports cost and tokens; Codex reports tokens but no price (ChatGPT plan usage);
- * Cursor reports neither.
- */
+export function completionAgent(run: CompletionRun | null | undefined) {
+  if (run?.agent_configuration === null)
+    throw new Error("Historical run requires configuration recovery before completion");
+  return resolveStepAgent(run ?? {}, { type: "agent", config: {} })!;
+}
 export interface Completion {
   text: string;
   provider: AgentProvider;
@@ -31,113 +31,103 @@ export interface Completion {
     tokens: Record<string, number | null | undefined> | null;
   };
 }
-
-export async function completeForRun(
-  run: { agent_provider?: string | null } | null | undefined,
+export interface CompletionOptions {
+  signal?: AbortSignal;
+  model: string;
+  effort: string;
+  timeoutMs: number;
+}
+export type CompletionRunner = (
   prompt: string,
-  signal?: AbortSignal,
-): Promise<Completion> {
-  const provider = agentProvider(run);
-  const telemetryId = randomUUID();
-  const started = Date.now();
-  const metadata = () => ({
-    telemetry_id: telemetryId,
-    provider_execution_ms: Date.now() - started,
-  });
-  if (provider === "codex") {
-    const r = await codexComplete(prompt, { signal });
-    return {
-      text: r.text,
-      provider,
-      metrics: {
-        ...metadata(),
-        provider,
-        model: r.model || null,
-        model_source: r.model ? "agent.codex.model" : "codex account default",
-        cost_usd: null,
-        tokens: r.tokens,
-      },
-    };
-  }
-  if (provider === "cursor") {
-    const text = await cursorComplete(prompt, signal);
-    return {
-      text,
-      provider,
-      metrics: {
-        ...metadata(),
-        provider,
-        model: null,
-        model_source: "cursor account default",
-        cost_usd: null,
-        tokens: null,
-      },
-    };
-  }
-  if (provider === "copilot") {
-    const r = await copilotComplete(prompt, { signal });
-    return {
-      text: r.text,
-      provider,
-      metrics: {
-        ...metadata(),
-        provider,
-        model: r.model || null,
-        model_source: r.model ? "agent.copilot.model" : "copilot default",
-        cost_usd: null,
-        tokens: r.tokens,
-      },
-    };
-  }
-  if (provider === "antigravity") {
-    const r = await antigravityComplete(prompt, { signal });
-    return {
-      text: r.text,
-      provider,
-      metrics: {
-        ...metadata(),
-        provider,
-        model: r.model || null,
-        model_source: r.model ? "agent.antigravity.model" : "antigravity default",
-        cost_usd: null,
-        tokens: r.tokens,
-      },
-    };
-  }
-  const m = newMetrics(config.model || "default");
-  let text = "";
+  options: CompletionOptions,
+) => Promise<{
+  text: string;
+  model?: string;
+  cost_usd?: number | null;
+  tokens: Completion["metrics"]["tokens"];
+}>;
+const claudeComplete: CompletionRunner = async (prompt, options) => {
+  const metrics = newMetrics(options.model || "default");
   const ac = new AbortController();
   const onAbort = () => ac.abort();
-  signal?.addEventListener("abort", onAbort, { once: true });
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) ac.abort();
+  let text = "";
   try {
     for await (const msg of query({
       prompt,
       options: {
+        ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
+          ? {
+              pathToClaudeCodeExecutable:
+                process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin,
+            }
+          : {}),
         env: agentEnvironment(process.env, "claude"),
         tools: [],
         maxTurns: 1,
-        model: config.model || undefined,
+        model: options.model || undefined,
+        ...(options.effort
+          ? { effort: options.effort as "low" | "medium" | "high" | "xhigh" | "max" }
+          : {}),
         settingSources: [],
         persistSession: false,
         abortController: ac,
       },
     })) {
-      accumulateMetrics(m, msg);
+      accumulateMetrics(metrics, msg);
       if (msg.type === "result" && msg.subtype === "success") text = msg.result;
     }
   } finally {
-    signal?.removeEventListener("abort", onAbort);
+    options.signal?.removeEventListener("abort", onAbort);
   }
+  return { text, model: metrics.model, tokens: metrics.tokens, cost_usd: metrics.cost_usd };
+};
+const runners: Record<AgentProvider, CompletionRunner> = {
+  claude: claudeComplete,
+  codex: codexComplete,
+  cursor: async (prompt, options) => ({
+    text: await cursorComplete(prompt, options.signal, options),
+    model: options.model,
+    tokens: null,
+  }),
+  antigravity: antigravityComplete,
+  copilot: copilotComplete,
+};
+
+/** One tools-free completion using the same frozen analysis routing as ordinary agent steps. */
+export async function completeForRun(
+  run: CompletionRun | null | undefined,
+  prompt: string,
+  signal?: AbortSignal,
+  providers: Record<AgentProvider, CompletionRunner> = runners,
+): Promise<Completion> {
+  signal?.throwIfAborted();
+  const configured =
+    run?.agent_configuration === undefined
+      ? { ...run, agent_configuration: await loadAgentConfiguration() }
+      : run;
+  const resolved = completionAgent(configured);
+  const timeoutMs = Math.min(resolved.timeout_ms ?? 600_000, 600_000);
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const started = Date.now();
+  const result = await providers[resolved.provider](prompt, {
+    model: resolved.model ?? "",
+    effort: resolved.reasoning_effort ?? "",
+    timeoutMs,
+    signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+  });
   return {
-    text,
-    provider,
+    text: result.text,
+    provider: resolved.provider,
     metrics: {
-      ...metadata(),
-      provider,
-      model: m.model,
-      model_source: config.model ? "global default" : "sdk default",
-      cost_usd: m.cost_usd,
-      tokens: m.tokens,
+      telemetry_id: randomUUID(),
+      provider_execution_ms: Date.now() - started,
+      provider: resolved.provider,
+      model: result.model || resolved.model,
+      model_source: resolved.field_sources?.model ?? "account/CLI default (external)",
+      cost_usd: result.cost_usd ?? null,
+      tokens: result.tokens,
     },
   };
 }

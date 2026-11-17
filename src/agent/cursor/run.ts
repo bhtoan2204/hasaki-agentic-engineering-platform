@@ -216,7 +216,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     const onAbort = () => kill();
     input.ctx.signal.addEventListener("abort", onAbort, { once: true });
     if (input.ctx.signal.aborted) kill();
-    const timeoutMs = Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000);
+    const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000);
     const timer = setTimeout(kill, timeoutMs);
 
     const parser = new NdjsonStream();
@@ -478,9 +478,11 @@ function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /** One-shot text completion for auxiliary calls (ranking, report, test explanation). No tools that mutate. */
-export async function cursorComplete(prompt: string, signal?: AbortSignal): Promise<string> {
+export async function cursorComplete(prompt: string, signal?: AbortSignal, options?: { model?: string }): Promise<string> {
+  signal?.throwIfAborted();
   const cap = await cursorCapabilities();
   if (!cap.ok) throw new Error(cap.error);
+  signal?.throwIfAborted();
   const dir = join(tmpdir(), `cursor-complete-${randomBytes(4).toString("hex")}`);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, "prompt.txt");
@@ -499,6 +501,10 @@ export async function cursorComplete(prompt: string, signal?: AbortSignal): Prom
     dir,
     `Reply using only the instructions in ${file}. Do not modify files.`,
   ];
+  if (options?.model) {
+    if (!cap.supportsModel) throw new Error("Cursor CLI does not support model selection");
+    args.push("--model", options.model);
+  }
   const child = spawn(cap.bin, args, {
     cwd: dir,
     env: scrubEnv(process.env),
