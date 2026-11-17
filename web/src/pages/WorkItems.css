@@ -517,6 +517,30 @@
   margin-top: var(--sp-3);
 }
 
+.wi-attachments {
+  margin-top: var(--sp-3);
+}
+
+.wi-attachments-head {
+  margin-bottom: var(--sp-2);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.wi-attachments-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.wi-attachments-grid img {
+  display: block;
+  max-width: min(100%, 360px);
+  max-height: 240px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .wi-section {
   margin: var(--sp-5) 0;
 }

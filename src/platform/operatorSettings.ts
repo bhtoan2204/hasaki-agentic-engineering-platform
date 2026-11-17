@@ -249,7 +249,7 @@ function write(next: OperatorPatch) {
     Record<string, string>
   >;
   own("models", Object.prototype.hasOwnProperty.call(next, "models"));
-  config.fileBaseUrl = pick(next, "fileBaseUrl", fb.fileBaseUrl ?? "");
+  config.fileBaseUrl = pick(next, "fileBaseUrl", "") || fb.fileBaseUrl || "";
   config.relatedProjects = structuredClone(pick(next, "relatedProjects", fb.relatedProjects ?? {}));
   config.bitbucket.accessVerification = pick(next, "bitbucketAccess", fb.bitbucketAccess ?? "strict");
   config.gitlab = gitlabConfig({

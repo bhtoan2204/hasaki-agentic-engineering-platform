@@ -1,5 +1,9 @@
 import { loadKnowledgeAudit } from "../knowledge/auditLoader.ts";
-import { agentConfigurationView, patchAgentProvider, previewAgentConfiguration } from "./agentConfiguration.ts";
+import {
+  agentConfigurationView,
+  patchAgentProvider,
+  previewAgentConfiguration,
+} from "./agentConfiguration.ts";
 import { saveDefaultProvider } from "../agent/configurationStore.ts";
 import {
   createBinding,
@@ -265,6 +269,19 @@ const must = <T>(v: T | undefined | null, what: string): T => {
   return v;
 };
 
+async function workItemWithAttachments(id: number) {
+  const w = must(await workItems.detail(id), "work item");
+  const files: unknown = w.payload?.note_files;
+  const base = config.fileBaseUrl.replace(/\/$/, "");
+  const attachments =
+    base && Array.isArray(files)
+      ? files
+          .filter((f): f is string => typeof f === "string" && !!f)
+          .map((f) => ({ name: f.split("/").pop()!, url: `${base}/${f.replace(/^\//, "")}` }))
+      : [];
+  return { ...w, attachments };
+}
+
 async function workItemByCode(code: string, actor: Actor) {
   return must(await workItems.byCode(code, actor.id), "task");
 }
@@ -462,7 +479,7 @@ export const routes: Route[] = [
     async (c) => (
       await requireWorkItem(c.actor, num(c.p[0]), support(c)),
       {
-        ...must(await workItems.detail(num(c.p[0])), "work item"),
+        ...(await workItemWithAttachments(num(c.p[0]))),
         prod_errors: await groupsForWorkItem(num(c.p[0])),
       }
     ),
@@ -2006,13 +2023,20 @@ export const routes: Route[] = [
       })
     ),
   ],
-  ["GET", /^\/api\/slop\/settings$/, async () => ({ defaults: config.slop, stored: await loadStoredSlopSettings() })],
+  [
+    "GET",
+    /^\/api\/slop\/settings$/,
+    async () => ({ defaults: config.slop, stored: await loadStoredSlopSettings() }),
+  ],
   [
     "POST",
     /^\/api\/slop\/settings$/,
     async ({ body, actor }) => (
       requireAdmin(actor),
-      saveSlopSettings(body, (await repositories.list()).map((r) => r.name))
+      saveSlopSettings(
+        body,
+        (await repositories.list()).map((r) => r.name),
+      )
     ),
   ],
   [
@@ -2097,7 +2121,10 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/integrations\/gitlab$/,
-    async ({ actor }) => ({ ...(await gitlabStatus(actor.id)), can_manage: actor.role === "admin" }),
+    async ({ actor }) => ({
+      ...(await gitlabStatus(actor.id)),
+      can_manage: actor.role === "admin",
+    }),
   ],
   [
     "POST",
@@ -2295,15 +2322,35 @@ export const routes: Route[] = [
     ),
   ],
   ["GET", /^\/api\/settings\/operator$/, ({ actor }) => (requireAdmin(actor), operatorView())],
-  ["GET", /^\/api\/settings\/agents$/, ({ actor }) => (requireAdmin(actor), agentConfigurationView())],
-  ["POST", /^\/api\/settings\/agents\/provider$/, ({ actor, body }) => (requireAdmin(actor), patchAgentProvider(body))],
-  ["PATCH", /^\/api\/settings\/agents\/provider$/, ({ actor, body }) => (requireAdmin(actor), patchAgentProvider(body))],
-  ["POST", /^\/api\/settings\/agents\/default$/, async ({ actor, body }) => {
-    requireAdmin(actor);
-    await saveDefaultProvider(body);
-    return agentConfigurationView();
-  }],
-  ["POST", /^\/api\/settings\/agents\/preview$/, ({ actor, body }) => (requireAdmin(actor), previewAgentConfiguration(body))],
+  [
+    "GET",
+    /^\/api\/settings\/agents$/,
+    ({ actor }) => (requireAdmin(actor), agentConfigurationView()),
+  ],
+  [
+    "POST",
+    /^\/api\/settings\/agents\/provider$/,
+    ({ actor, body }) => (requireAdmin(actor), patchAgentProvider(body)),
+  ],
+  [
+    "PATCH",
+    /^\/api\/settings\/agents\/provider$/,
+    ({ actor, body }) => (requireAdmin(actor), patchAgentProvider(body)),
+  ],
+  [
+    "POST",
+    /^\/api\/settings\/agents\/default$/,
+    async ({ actor, body }) => {
+      requireAdmin(actor);
+      await saveDefaultProvider(body);
+      return agentConfigurationView();
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/settings\/agents\/preview$/,
+    ({ actor, body }) => (requireAdmin(actor), previewAgentConfiguration(body)),
+  ],
   [
     "POST",
     /^\/api\/settings\/operator$/,

@@ -1058,6 +1058,22 @@ export function WorkItemDetail({ id }: { id: number }) {
               source={w.description_source}
               onSaved={reload}
             />
+            {w.attachments?.length > 0 && (
+              <div className="wi-attachments">
+                <div className="wi-attachments-head">{t("wi.attachments")}</div>
+                <div className="wi-attachments-grid">
+                  {w.attachments.map((a: { name: string; url: string }) => (
+                    <a key={a.url} href={a.url} target="_blank" rel="noreferrer" title={a.name}>
+                      {/\.(png|jpe?g|gif|webp)$/i.test(a.name) ? (
+                        <img src={a.url} alt={a.name} loading="lazy" />
+                      ) : (
+                        <span className="mono">{a.name}</span>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
             {w.payload && Object.keys(w.payload).length > 0 && (
               <details className="wi-raw">
                 <summary>{t("wi.raw")}</summary>
