@@ -31,6 +31,29 @@ export interface CodeIntelligenceConfig {
   };
 }
 
+export type SlopSeverity = "low" | "medium" | "high";
+/** Slop detection policy (src/slop). Stored settings override these per global/repository layer. */
+export interface SlopSettings {
+  /** disabled: no scan; advisory: report only; enforcement: new/worsened findings at blockSeverity fail verification. */
+  mode: "disabled" | "advisory" | "enforcement";
+  /** micro: deterministic rules only; auto: micro for MICRO runs and small FAST diffs, otherwise standard. */
+  level: "auto" | "micro" | "standard";
+  languages: Record<string, boolean>;
+  /** Rule id → false disables the rule. */
+  rules: Record<string, boolean>;
+  thresholds: { cyclomatic: number; cyclomaticHigh: number; cognitive: number; duplicateLines: number };
+  /** Findings below this severity are not reported. */
+  minSeverity: SlopSeverity;
+  /** Enforcement blocks only findings at or above this confidence (0..1). */
+  minConfidence: number;
+  blockSeverity: SlopSeverity;
+  /** Repository-relative path prefixes never scanned (in addition to generated/vendor exclusions). */
+  excludePaths: string[];
+  suppressions: Array<{ fingerprint: string; reason: string }>;
+  maxFiles: number;
+  timeoutMs: number;
+}
+
 export interface GitlabInstance {
   /** Lower-case host name, e.g. "gitlab.com" or "gitlab.hasaki.work". No scheme, path or port. */
   host: string;
@@ -53,6 +76,7 @@ export interface Config {
   knowledge: { ponytail: { enabled: boolean; mapChars: number } };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
+  slop: SlopSettings;
   evaluation: {
     enabled: boolean;
     maxCases: number;
@@ -376,6 +400,20 @@ const defaults: Config = {
       cap: 3,
     },
   },
+  slop: {
+    mode: "advisory",
+    level: "auto",
+    languages: { typescript: true, tsx: true, javascript: true, go: true },
+    rules: {},
+    thresholds: { cyclomatic: 15, cyclomaticHigh: 25, cognitive: 20, duplicateLines: 12 },
+    minSeverity: "low",
+    minConfidence: 0.8,
+    blockSeverity: "high",
+    excludePaths: [],
+    suppressions: [],
+    maxFiles: 200,
+    timeoutMs: 20000,
+  },
   evaluation: {
     enabled: false,
     maxCases: 20,
@@ -542,6 +580,12 @@ function load(): Config {
         ...(fromFile.codeIntelligence?.weights ?? {}),
       },
     },
+    slop: {
+      ...defaults.slop,
+      ...(fromFile.slop ?? {}),
+      languages: { ...defaults.slop.languages, ...(fromFile.slop?.languages ?? {}) },
+      thresholds: { ...defaults.slop.thresholds, ...(fromFile.slop?.thresholds ?? {}) },
+    },
     bitbucket: { ...defaults.bitbucket, ...(fromFile.bitbucket ?? {}) },
     github: { ...defaults.github, ...(fromFile.github ?? {}) },
     gitlab: gitlabConfig({ ...defaults.gitlab, ...(fromFile.gitlab ?? {}) }),
@@ -594,6 +638,12 @@ function load(): Config {
     cfg.codeIntelligence[k] = positiveInt(`codeIntelligence.${k}`, cfg.codeIntelligence[k]);
   for (const v of Object.values(cfg.codeIntelligence.weights))
     if (!Number.isFinite(v) || v < 0) throw new Error("Invalid code intelligence weight");
+  for (const k of ["maxFiles", "timeoutMs"] as const)
+    cfg.slop[k] = positiveInt(`slop.${k}`, cfg.slop[k]);
+  for (const [k, v] of Object.entries(cfg.slop.thresholds))
+    cfg.slop.thresholds[k as keyof SlopSettings["thresholds"]] = positiveInt(`slop.thresholds.${k}`, v);
+  if (!["disabled", "advisory", "enforcement"].includes(cfg.slop.mode))
+    throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;

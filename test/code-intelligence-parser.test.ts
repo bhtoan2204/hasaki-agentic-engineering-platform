@@ -124,3 +124,25 @@ test("Generated RPC wire paths link client calls as candidates, never resolved c
     ),
   );
 });
+
+test("JavaScript/JSX functions, classes, methods and arrow functions", async () => {
+  for (const path of ["a.js", "a.jsx", "a.mjs", "a.cjs"]) {
+    const e = (await extract(
+      path,
+      'import x from "./x.js";\nexport function pay() { return x(); }\nclass Cart { total() { return 1; } }\nconst refund = () => <Button onClick={pay} />;\n',
+    ))!;
+    assert.equal(e.language, "javascript", path);
+    for (const [name, kind] of [
+      ["pay", "function"],
+      ["Cart", "class"],
+      ["total", "method"],
+      ["refund", "function"],
+    ])
+      assert.ok(
+        e.symbols.some((s) => s.symbol_name === name && s.symbol_kind === kind),
+        `${path} ${name}: ${JSON.stringify(e.symbols)}`,
+      );
+    assert.ok(e.symbols.some((s) => s.qualified_name === "Cart.total"));
+    assert.ok(e.relations.some((r) => r.relation_type === "IMPORTS" && r.target_name === "./x.js"));
+  }
+});

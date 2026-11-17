@@ -20,7 +20,17 @@ export async function git(root: string, args: string[], signal?: AbortSignal) {
   ).stdout;
 }
 export const languageOf = (p: string) =>
-  ({ go: "go", ts: "typescript", tsx: "tsx", proto: "proto", sql: "sql" })[
+  ({
+    go: "go",
+    ts: "typescript",
+    tsx: "tsx",
+    js: "javascript",
+    jsx: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    proto: "proto",
+    sql: "sql",
+  })[
     p.split(".").pop() ?? ""
   ];
 export function eligible(p: string) {

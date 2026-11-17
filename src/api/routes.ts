@@ -160,6 +160,7 @@ import {
   workspaceStatus,
   testRepositoryConnection,
 } from "../repos/workspaces.ts";
+import { loadStoredSlopSettings, saveSlopSettings } from "../slop/policy.ts";
 import {
   repositories,
   isAmbiguous,
@@ -2001,6 +2002,15 @@ export const routes: Route[] = [
         from: body.from ? String(body.from) : undefined,
         to: body.to ? String(body.to) : undefined,
       })
+    ),
+  ],
+  ["GET", /^\/api\/slop\/settings$/, async () => ({ defaults: config.slop, stored: await loadStoredSlopSettings() })],
+  [
+    "POST",
+    /^\/api\/slop\/settings$/,
+    async ({ body, actor }) => (
+      requireAdmin(actor),
+      saveSlopSettings(body, (await repositories.list()).map((r) => r.name))
     ),
   ],
   [
