@@ -49,6 +49,113 @@ function Diff({ text }: { text: string }) {
   );
 }
 
+const SLOP_GROUPS = ["new", "worsened", "suppressed", "existing", "resolved"] as const;
+const SLOP_BADGE: Record<string, string> = {
+  new: "FAILED",
+  worsened: "FAILED",
+  suppressed: "SKIPPED",
+  existing: "SKIPPED",
+  resolved: "COMPLETED",
+};
+
+interface SlopFindingView {
+  rule: string;
+  category: string;
+  severity: string;
+  kind: string;
+  confidence?: number;
+  path: string;
+  line: number;
+  symbol?: string;
+  snippet: string;
+  message: string;
+  status: string;
+  fingerprint: string;
+}
+interface SlopView {
+  mode?: string;
+  level?: string;
+  status?: string;
+  files_scanned?: number;
+  detector_ms?: number;
+  findings?: SlopFindingView[];
+  blocking?: Array<{ fingerprint: string }>;
+  counts?: Record<string, number>;
+  errors?: Array<{ path?: string; error: string }>;
+  skipped?: Array<{ path: string; reason: string }>;
+  unsupported_rules?: Array<{ rule: string; status: string; detail: string }>;
+}
+
+/** Slop findings of the last verification, grouped by baseline status, with evidence and detector diagnostics. */
+function SlopPanel({ s }: { s: SlopView }) {
+  const { t } = useI18n();
+  const findings = Array.isArray(s.findings) ? s.findings : [];
+  const blocking = new Set((Array.isArray(s.blocking) ? s.blocking : []).map((f) => f.fingerprint));
+  return (
+    <>
+      <div className="rv-sec-title" style={{ marginTop: 16, flexWrap: "wrap" }}>
+        <ShieldCheck size={14} /> {t("chg.slop")}
+        <span className="muted small" style={{ textTransform: "none", letterSpacing: 0 }}>
+          {s.mode} · {s.level} · {s.status} · {s.files_scanned} file · {s.detector_ms} ms
+        </span>
+      </div>
+      {findings.length === 0 && <div className="muted small">{t("chg.slopNone")}</div>}
+      {SLOP_GROUPS.map((g) => {
+        const rows = findings.filter((f) => f.status === g);
+        if (!rows.length) return null;
+        return (
+          <div key={g} style={{ marginBottom: 8 }}>
+            <Badge s={SLOP_BADGE[g]}>
+              {g} · {s.counts?.[g] ?? rows.length}
+            </Badge>
+            <ul className="vf-list">
+              {rows.map((f) => (
+                <li key={`${f.fingerprint}-${f.status}`} style={{ flexDirection: "column", gap: 2 }}>
+                  <span>
+                    <b className="mono">{f.rule}</b>{" "}
+                    <span className="mono">
+                      {f.path}:{f.line}
+                    </span>
+                    {f.symbol ? <span className="mono muted"> {f.symbol}</span> : null} · {f.category} ·{" "}
+                    {f.severity} · {f.kind} · {Math.round((f.confidence ?? 0) * 100)}%
+                    {blocking.has(f.fingerprint) && (
+                      <>
+                        {" "}
+                        <Badge s="FAILED">{t("chg.slopBlocking")}</Badge>
+                      </>
+                    )}
+                  </span>
+                  <span className="muted small">{f.message}</span>
+                  <pre className="mono small" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                    {f.snippet}
+                  </pre>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+      {Array.isArray(s.errors) && s.errors.length > 0 && (
+        <div className="small" style={{ color: "var(--st-err)" }}>
+          <AlertTriangle size={12} /> {t("chg.slopErrors")}:{" "}
+          {s.errors.map((e) => (e.path ? `${e.path}: ${e.error}` : e.error)).join("; ")}
+        </div>
+      )}
+      {Array.isArray(s.skipped) && s.skipped.length > 0 && (
+        <div className="muted small">
+          {t("chg.slopSkipped")}: {s.skipped.map((x) => `${x.path} (${x.reason})`).join(", ")}
+        </div>
+      )}
+      {Array.isArray(s.unsupported_rules) && s.unsupported_rules.length > 0 && (
+        <div className="muted small">
+          {t("chg.slopUnsupported")}:{" "}
+          {s.unsupported_rules.map((x) => `${x.rule} (${x.status === "covered_by" ? `→ ${x.detail}` : x.detail})`).join(", ")}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Split a unified diff into per-file chunks so a file can be shown on its own. */
 function fileDiff(diff: string, path: string) {
   const parts = diff.split(/^(?=diff --git )/m);
@@ -246,6 +353,7 @@ export function Changes({
                 )}
               </div>
               <Diff text={file[r.repo] ? fileDiff(r.diff, file[r.repo]!) : r.diff} />
+              {r.slop && <SlopPanel s={r.slop} />}
               <div className="rv-sec-title" style={{ marginTop: 16, flexWrap: "wrap" }}>
                 <GitPullRequest size={14} /> PR preview
                 <span style={{ textTransform: "none", letterSpacing: 0 }}>

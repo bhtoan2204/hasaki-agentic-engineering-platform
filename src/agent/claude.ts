@@ -138,6 +138,8 @@ import {
   unavailableSources,
 } from "./evidence.ts";
 import { EvidenceCache, pgEvidenceStore } from "./verifyEvidence.ts";
+import { blocking as slopBlocking, resolveSlopSettings } from "../slop/policy.ts";
+import { scanWorkspace } from "../slop/scan.ts";
 import {
   diffTestsAgainstBase,
   repairPrompt,
@@ -1888,6 +1890,19 @@ ${validation.errors.join("; ")}`,
           ).report,
         diffTests: async (p) => diffTestsAgainstBase(p, await workspaceBaseBranch(p)),
         changedFiles: async (p) => (await changedFiles(p, `origin/${await workspaceBaseBranch(p)}`)).all,
+        // Deterministic slop scan of the changed files only; no model call. Settings: config ← global ← repository.
+        slop: async (repo) => {
+          const settings = await resolveSlopSettings(repo.repo);
+          if (settings.mode === "disabled") return null;
+          const report = await scanWorkspace({
+            path: repo.path,
+            baseRef: `origin/${await workspaceBaseBranch(repo.path)}`,
+            settings,
+            profile: ctx.run.profile,
+            signal: ctx.signal,
+          });
+          return { ...report, mode: settings.mode, blocking: slopBlocking(report, settings) };
+        },
         artifact: (name, content, data) =>
           ctx.artifact("log", name, content, { ...data, verification: true }),
         log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
@@ -2002,7 +2017,7 @@ ${validation.errors.join("; ")}`,
           .filter((x) => !x.passed && x.status !== "skipped")
           .map(
             (x) =>
-              `${x.repo}: ${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
+              `${x.repo}: ${x.slop?.blocking.length ? `slop: ${x.slop.blocking.slice(0, 8).map((f) => `${f.rule} ${f.path}:${f.line}${f.symbol ? ` ${f.symbol}` : ""}`).join(", ")}${x.slop.blocking.length > 8 ? ` (+${x.slop.blocking.length - 8} more)` : ""}; ` : ""}${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
           );
         const why =
           loop.outcome === "no_progress"
@@ -2014,7 +2029,14 @@ ${validation.errors.join("; ")}`,
           retryable: false,
           details: { verification: summary },
         };
-      } else if (summary.needs_review)
+      }
+      if (summary.passed && summary.slop && summary.slop.mode !== "enforcement" && summary.slop.counts.new + summary.slop.counts.worsened > 0)
+        await ctx.log(
+          "system",
+          `slop detection (${summary.slop.mode}): ${summary.slop.counts.new} new, ${summary.slop.counts.worsened} worsened finding(s) reported, not blocking`,
+          { slop: summary.slop.counts },
+        );
+      if (summary.passed && summary.needs_review)
         await ctx.log(
           "system",
           `verification passed but needs human review: ${summary.review_reasons.join("; ")}`,

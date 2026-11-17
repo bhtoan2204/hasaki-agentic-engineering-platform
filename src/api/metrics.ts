@@ -335,7 +335,7 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
  * many repairs it took, which failures keep recurring, and how often a human had to step in.
  */
 export async function harnessEvaluation(since: string, attemptOwn = "", own = "") {
-  const [verification, patterns, human] = await Promise.all([
+  const [verification, patterns, human, slop] = await Promise.all([
     one<any>(
       pool,
       `SELECT count(*)::int AS coding_attempts,
@@ -369,6 +369,25 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
               (SELECT count(*)::int FROM workflow_step_attempts ra JOIN workflow_runs r2 ON r2.id = ra.run_id WHERE r2.created_at > ${since} AND ra.input->'pending' ? 'reexecute' ${own.replaceAll("r.owner_id", "r2.owner_id")}) AS reexecutions
          FROM workflow_runs r WHERE r.created_at > ${since} ${own}`,
     ),
+    // Slop detection (deterministic, never a model call): what it found and what it cost, per verified attempt.
+    one<Record<string, number>>(
+      pool,
+      `SELECT count(*)::int AS scans,
+              COALESCE(sum((v->'counts'->>'new')::int), 0)::int AS new,
+              COALESCE(sum((v->'counts'->>'worsened')::int), 0)::int AS worsened,
+              COALESCE(sum((v->'counts'->>'existing')::int), 0)::int AS existing,
+              COALESCE(sum((v->'counts'->>'resolved')::int), 0)::int AS resolved,
+              COALESCE(sum((v->'counts'->>'suppressed')::int), 0)::int AS suppressed,
+              count(*) FILTER (WHERE jsonb_array_length(COALESCE(v->'blocking', '[]'::jsonb)) > 0)::int AS blocked,
+              count(*) FILTER (WHERE v->>'status' <> 'ok')::int AS detector_errors,
+              round(avg((v->>'detector_ms')::numeric)) AS avg_detector_ms,
+              round((percentile_cont(0.95) WITHIN GROUP (ORDER BY (v->>'detector_ms')::numeric))::numeric) AS p95_detector_ms,
+              COALESCE(sum((v->>'files_scanned')::int), 0)::int AS files_scanned,
+              COALESCE(sum((v->>'cache_hits')::int), 0)::int AS cache_hits,
+              COALESCE(sum((v->>'llm_tokens')::int), 0)::int AS llm_tokens
+         FROM (SELECT a.metrics->'verification'->'slop' AS v FROM workflow_step_attempts a
+                WHERE a.metrics->'verification' ? 'slop' AND a.started_at > ${since} ${attemptOwn}) x`,
+    ),
   ]);
   const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
   return {
@@ -379,6 +398,8 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
     },
     repeated_failures: patterns,
     human_intervention: { ...human, rate_pct: pct(human.with_human, human.runs) },
+    // Upper-bound denominator: every scanned file is analysed at most twice (base and head).
+    slop: { ...slop, cache_hit_rate_pct: pct(Number(slop?.cache_hits ?? 0), Number(slop?.files_scanned ?? 0) * 2) },
   };
 }
 

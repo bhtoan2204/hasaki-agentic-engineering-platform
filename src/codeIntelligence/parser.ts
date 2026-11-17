@@ -5,7 +5,7 @@ import { redactSecrets } from "../integrations/redact.ts";
 import { hash, languageOf } from "./git.ts";
 
 // Pinned package versions cover grammar provenance; changing extraction rules requires bumping extractor.
-export const INDEX_VERSION = `extractor-1/runtime-0.27.1/grammars-2.0.4`;
+export const INDEX_VERSION = `extractor-2/runtime-0.27.1/grammars-2.0.4`;
 export const parserVersion = () =>
   `${INDEX_VERSION}/${config.codeIntelligence.sqlDialect}/${config.codeIntelligence.maxSymbols}/${hash(JSON.stringify([config.codeIntelligence.maxFileBytes, config.codeIntelligence.excludes, config.codeIntelligence.includeGenerated, config.codeIntelligence.includeDependencies]))}`;
 export class ParserLoadError extends Error {
@@ -80,35 +80,7 @@ export async function extract(
     source.includes("\0")
   )
     return null;
-  try {
-    await (init ??= Parser.init().catch((error) => {
-      init = undefined;
-      throw error;
-    }));
-  } catch (error) {
-    throw new ParserLoadError(language, error);
-  }
-  signal?.throwIfAborted();
-  const grammar =
-    languages.get(language) ??
-    Language.load(getWasmPath(language as Parameters<typeof getWasmPath>[0]));
-  languages.set(language, grammar);
-  void grammar.catch(() => {
-    if (languages.get(language) === grammar) languages.delete(language);
-  });
-  const parser = new Parser();
-  let tree;
-  const deadline = Date.now() + Math.min(5000, config.codeIntelligence.timeoutMs);
-  try {
-    try {
-      parser.setLanguage(await grammar);
-    } catch (error) {
-      throw new ParserLoadError(language, error);
-    }
-    tree = parser.parse(source, null, {
-      progressCallback: () => signal?.aborted === true || Date.now() > deadline,
-    });
-    if (!tree) throw new Error("Parser deadline exceeded");
+  return withTree(language, source, signal, (root, deadline) => {
     const out: Extraction = {
       language,
       content_hash: hash(source),
@@ -117,7 +89,7 @@ export async function extract(
       relations: [],
       parse_errors: 0,
     };
-    const packageNode = tree.rootNode.namedChildren.find(
+    const packageNode = root.namedChildren.find(
       (n) => n.type === "package_clause" || n.type === "package",
     );
     const pkg = packageNode?.namedChildren[0]?.text ?? "";
@@ -138,7 +110,7 @@ export async function extract(
         });
     };
     // Iterative traversal prevents malformed/deep source exhausting the JS call stack.
-    const stack: Array<{ n: Node; parent: string | null }> = [{ n: tree.rootNode, parent: null }];
+    const stack: Array<{ n: Node; parent: string | null }> = [{ n: root, parent: null }];
     let visited = 0;
     while (stack.length) {
       if (++visited > 200000 || Date.now() > deadline) throw new Error("Extractor limit exceeded");
@@ -244,6 +216,49 @@ export async function extract(
       for (const c of [...n.namedChildren].reverse()) stack.push({ n: c, parent: scope });
     }
     return out;
+  });
+}
+
+/**
+ * Parse `source` with the bundled grammar for `language` and hand the root node to `fn`; the tree is freed afterwards,
+ * so `fn` must not keep nodes. `deadline` (epoch ms) bounds parsing and lets callers bound their own traversal.
+ */
+export async function withTree<T>(
+  language: string,
+  source: string,
+  signal: AbortSignal | undefined,
+  fn: (root: Node, deadline: number) => T,
+): Promise<T> {
+  try {
+    await (init ??= Parser.init().catch((error) => {
+      init = undefined;
+      throw error;
+    }));
+  } catch (error) {
+    throw new ParserLoadError(language, error);
+  }
+  signal?.throwIfAborted();
+  const grammar =
+    languages.get(language) ??
+    Language.load(getWasmPath(language as Parameters<typeof getWasmPath>[0]));
+  languages.set(language, grammar);
+  void grammar.catch(() => {
+    if (languages.get(language) === grammar) languages.delete(language);
+  });
+  const parser = new Parser();
+  let tree;
+  const deadline = Date.now() + Math.min(5000, config.codeIntelligence.timeoutMs);
+  try {
+    try {
+      parser.setLanguage(await grammar);
+    } catch (error) {
+      throw new ParserLoadError(language, error);
+    }
+    tree = parser.parse(source, null, {
+      progressCallback: () => signal?.aborted === true || Date.now() > deadline,
+    });
+    if (!tree) throw new Error("Parser deadline exceeded");
+    return fn(tree.rootNode, deadline);
   } finally {
     tree?.delete();
     parser.delete();

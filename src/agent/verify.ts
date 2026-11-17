@@ -14,6 +14,8 @@ import {
 } from "../workflow/executors/baseline.ts";
 import { languageReminder, type OutputLocale } from "./language.ts";
 import type { WorkspaceConflict } from "../git/provider.ts";
+import { failedReport, type Finding, type SlopReport } from "../slop/findings.ts";
+import { DETECTOR_VERSION } from "../slop/detectors.ts";
 import {
   ENVIRONMENT_UNAVAILABLE_EXIT,
   ENVIRONMENT_UNAVAILABLE_MARKER,
@@ -215,9 +217,12 @@ export interface RepoVerification {
   error?: string;
   artifact_id?: number;
   commit_sha?: string;
+  /** Slop detection for this worktree; `blocking` is non-empty only under enforcement. */
+  slop?: SlopVerification;
   /** Present when this result was served from verification evidence instead of running the command. */
   evidence?: { reused: true; key: string; source_attempt_id: number | null; original_duration_ms: number; saved_ms: number; joined?: boolean };
 }
+export type SlopVerification = SlopReport & { mode: string; blocking: Finding[] };
 export interface VerificationRound {
   round: number;
   passed: boolean;
@@ -269,7 +274,8 @@ export function failureSignature(repos: RepoVerification[]): string {
             .replace(/:\d+(:\d+)?/g, "")
             .replace(/\s+/g, " ")
             .slice(0, 400);
-      return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}}`;
+      const slop = r.slop?.blocking.length ? `|slop:${r.slop.blocking.map((f) => f.fingerprint).sort().join(",")}` : "";
+      return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}${slop}}`;
     })
     .sort();
   return parts.join(" ");
@@ -336,6 +342,11 @@ export interface VerifyDeps {
   changedFiles?(path: string): Promise<string[]>;
   artifact?(name: string, content: string, data: Record<string, unknown>): Promise<number>;
   log?(text: string, data?: Record<string, unknown>): Promise<void> | void;
+  /**
+   * Optional slop scan of the worktree (deterministic, no model). null = disabled. Its failures never change the
+   * verification status: they are recorded as slop.status "error" and flagged for review.
+   */
+  slop?(repo: { repo: string; path: string }): Promise<SlopVerification | null>;
   /** Optional evidence reuse + singleflight. Absent = always run (backward compatible). */
   evidence?: EvidenceCache;
 }
@@ -702,6 +713,20 @@ export async function verifyWorkspaces(
         }
       }
     }
+    if (deps.slop) {
+      try {
+        const report = await deps.slop({ repo: w.repo, path: p });
+        if (report) entry.slop = report;
+      } catch (e) {
+        if (signal.aborted) throw e;
+        entry.slop = { ...failedReport(`slop detection failed: ${(e as Error).message.split("\n")[0]}`, DETECTOR_VERSION), mode: "unknown", blocking: [] };
+      }
+      if (entry.slop?.status === "error") entry.needs_review = true;
+      if (entry.slop?.blocking.length && ["passed", "accepted_preexisting", "failed"].includes(entry.status)) {
+        entry.status = "failed";
+        entry.note = [entry.note, `${entry.slop.blocking.length} blocking slop finding(s)`].filter(Boolean).join("; ");
+      }
+    }
     {
       const afterState = await worktreeFingerprint(p).catch(() => null);
       if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
@@ -868,6 +893,18 @@ export function repairPrompt(
       parts.push(
         `Tests were removed or skipped (not allowed): ${x.weakened.join(", ")}. Restore them; fix the code or correct the assertion instead.`,
       );
+    if (x.slop?.blocking.length)
+      parts.push(
+        "Slop findings to fix (new or worsened by this branch; fix only these, inside the approved scope):",
+        untrusted(
+          `slop:${x.repo}`,
+          x.slop.blocking
+            .slice(0, 20)
+            .map((f) => `- ${f.rule} ${f.path}:${f.line}${f.symbol ? ` (${f.symbol})` : ""}: ${f.message}\n  ${f.snippet.replace(/\n/g, "\n  ")}`)
+            .join("\n"),
+        ),
+        "Never remove security checks, business invariants, idempotency, transaction or concurrency safeguards, or public contracts just to clear a slop finding. If a finding is a false positive, leave the code and explain why in submit_result.",
+      );
     if (x.excerpt) parts.push(untrusted(`verification:${x.repo}`, x.excerpt));
   }
   parts.push(
@@ -925,6 +962,7 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
     max_repairs: cfg.maxRepairs,
     duration_ms: res.rounds.reduce((s, r) => s + r.duration_ms, 0),
     failure_signatures: res.rounds.filter((r) => !r.passed).map((r) => r.signature),
+    ...slopSummary(last?.repos ?? []),
     // Cumulative evidence-cache counters (the cache lives for the whole step), from the last round that has them.
     ...(res.rounds.findLast((r) => r.evidence)?.evidence
       ? { evidence: res.rounds.findLast((r) => r.evidence)!.evidence }
@@ -951,6 +989,7 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
           tested_state,
           contract_revision,
           required_tests,
+          slop,
         }) => ({
           repo,
           status,
@@ -971,8 +1010,36 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
           tested_state,
           contract_revision,
           required_tests,
+          ...(slop ? { slop: { ...slop, findings: slop.findings.slice(0, 50) } } : {}),
         }),
       ) ?? [],
+  };
+}
+
+/** Run-level slop totals of the last round (absent when no repo was scanned). llm_tokens is always 0. */
+function slopSummary(repos: RepoVerification[]) {
+  const scanned = repos.filter((r) => r.slop).map((r) => r.slop!);
+  if (!scanned.length) return {};
+  const sum = (pick: (s: SlopVerification) => Record<string, number>) =>
+    scanned.reduce<Record<string, number>>((acc, s) => {
+      for (const [k, v] of Object.entries(pick(s))) acc[k] = (acc[k] ?? 0) + v;
+      return acc;
+    }, {});
+  return {
+    slop: {
+      mode: scanned[0].mode,
+      level: scanned[0].level,
+      status: scanned.some((s) => s.status === "error") ? "error" : scanned.some((s) => s.status === "partial") ? "partial" : "ok",
+      counts: sum((s) => s.counts),
+      by_category: sum((s) => s.by_category),
+      blocking: scanned.flatMap((s) => s.blocking.map(({ rule, path, line, symbol, fingerprint }) => ({ rule, path, line, symbol, fingerprint }))),
+      detector_ms: scanned.reduce((n, s) => n + s.detector_ms, 0),
+      files_scanned: scanned.reduce((n, s) => n + s.files_scanned, 0),
+      cache_hits: scanned.reduce((n, s) => n + s.cache_hits, 0),
+      llm_tokens: 0,
+      unsupported_rules: scanned[0].unsupported_rules,
+      errors: scanned.flatMap((s) => s.errors),
+    },
   };
 }
 

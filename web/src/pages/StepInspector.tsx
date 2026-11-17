@@ -1272,6 +1272,21 @@ function VerificationCard({ v }: { v: any }) {
                 <span>{t("si.weakened", { list: weakened.join(", ") })}</span>
               </div>
             )}
+            {r?.slop && (
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {t("si.slop")}:{" "}
+                {t("si.slopLine", {
+                  mode: String(r.slop.mode ?? "—"),
+                  status: String(r.slop.status ?? "—"),
+                  new: num(r.slop.counts?.new) ?? 0,
+                  worsened: num(r.slop.counts?.worsened) ?? 0,
+                  existing: num(r.slop.counts?.existing) ?? 0,
+                  resolved: num(r.slop.counts?.resolved) ?? 0,
+                  blocking: arr(r.slop.blocking).length,
+                  ms: num(r.slop.detector_ms) ?? 0,
+                })}
+              </div>
+            )}
             {pre != null && pre > 0 && (
               <div className="muted small" style={{ marginTop: 4 }}>
                 {t("si.preexisting", { n: pre })}

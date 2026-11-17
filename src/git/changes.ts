@@ -57,6 +57,15 @@ export async function runChanges(runId: number, viewerId?: number) {
     : {};
   const testExceptions = await testExceptionsOf(runId);
   const verificationNotes = await verificationNotesOf(runId);
+  // Slop findings of the latest verified coding attempt, per repository (evidence snippets: readable repos only).
+  const verified = await one(
+    pool,
+    "SELECT a.metrics->'verification'->'last' AS last FROM workflow_step_attempts a WHERE a.run_id = $1 AND jsonb_typeof(a.metrics->'verification'->'last') = 'array' ORDER BY a.id DESC LIMIT 1",
+    [runId],
+  );
+  const slopByRepo = new Map<string, unknown>(
+    ((verified?.last ?? []) as Array<{ repo: string; slop?: unknown }>).filter((x) => x?.slop).map((x) => [x.repo, x.slop]),
+  );
   const repos = [];
   const readable =
     viewerId == null
@@ -113,6 +122,7 @@ export async function runChanges(runId: number, viewerId?: number) {
       diff: capped(diff),
       status: status.trim(),
       uncommitted_diff: capped(uncommitted),
+      slop: slopByRepo.get(w.repo) ?? null,
       pr_preview: {
         title: f.title,
         target: destination,

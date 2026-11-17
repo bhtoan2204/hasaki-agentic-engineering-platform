@@ -973,7 +973,37 @@ function HarnessEvaluation({ e }: { e: any }) {
           </EmptyState>
         )}
       </Panel>
+      <SlopDetection s={e.slop ?? {}} />
     </>
+  );
+}
+
+/** Deterministic slop detection during verification: findings by baseline status and detector cost. */
+function SlopDetection({ s }: { s: Record<string, unknown> }) {
+  const { t } = useI18n();
+  return (
+    <Panel icon={Gauge} title={t("ins.slop")} sub={t("ins.slopSub")}>
+      {num(s.scans) ? (
+        <div className="ins-metrics">
+          <Metric label={t("ins.slopScans")} value={fmtInt(num(s.scans))} />
+          <Metric label={t("ins.slopNew")} value={fmtInt(num(s.new))} tone="err" />
+          <Metric label={t("ins.slopWorsened")} value={fmtInt(num(s.worsened))} tone="wait" />
+          <Metric label={t("ins.slopExisting")} value={fmtInt(num(s.existing))} />
+          <Metric label={t("ins.slopResolved")} value={fmtInt(num(s.resolved))} tone="run" />
+          <Metric label={t("ins.slopSuppressed")} value={fmtInt(num(s.suppressed))} />
+          <Metric label={t("ins.slopBlocked")} value={fmtInt(num(s.blocked))} tone="err" />
+          <Metric label={t("ins.slopErrors")} value={fmtInt(num(s.detector_errors))} tone="err" />
+          <Metric label={t("ins.slopAvgMs")} value={`${fmtInt(num(s.avg_detector_ms))} ms`} />
+          <Metric label={t("ins.slopP95Ms")} value={`${fmtInt(num(s.p95_detector_ms))} ms`} />
+          <Metric label={t("ins.slopCache")} value={`${fmtNum(num(s.cache_hit_rate_pct), 1)}%`} />
+          <Metric label={t("ins.slopTokens")} value={fmtInt(num(s.llm_tokens))} />
+        </div>
+      ) : (
+        <EmptyState icon={Gauge} title={t("ins.slopNone")}>
+          {t("ins.slopNoneBody")}
+        </EmptyState>
+      )}
+    </Panel>
   );
 }
 
