@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ancestors, downstream, topoOrder } from "./graph.ts";
-import type { StepSpec, WorkflowSpec } from "./types.ts";
+import type { Profile, StepSpec, WorkflowSpec } from "./types.ts";
 import { FEATURE_MICRO_TARGETED_COMMAND, FEATURE_TARGETED_COMMAND } from "./templates.ts";
 
 /**
@@ -13,7 +13,7 @@ import { FEATURE_MICRO_TARGETED_COMMAND, FEATURE_TARGETED_COMMAND } from "./temp
  *   DEEP     high-risk / multi-repository work: the full workflow, no auto-approvals, AI-assisted discovery.
  * Never mutates the published definition: the resolved graph is computed at run creation and stored on the run.
  */
-export type Profile = "MICRO" | "FAST" | "STANDARD" | "DEEP";
+export type { Profile } from "./types.ts";
 export type ProfileChoice = Profile | "AUTO";
 
 export interface ProfileSignals {

@@ -1150,7 +1150,7 @@ test("inbox approvals: the owner's waiting approval steps are listed; canceled r
   assert.equal(row.step_key, "gate");
   assert.equal(row.quick, true, "a plain approval can be decided from the inbox");
   assert.equal(row.requires_risk_acknowledgement, false);
-  assert.equal(row.outputs, undefined, "step outputs stay in the run, not in the inbox list");
+  assert.ok(!("outputs" in row), "step outputs stay in the run, not in the inbox list");
   assert.ok(
     !(await openApprovals(pool, { ownerId: other.id })).some((a: any) => a.run_id === run.id),
     "other owners never see it",

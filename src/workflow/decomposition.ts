@@ -1,8 +1,9 @@
+import { stepsOf } from "./runRepository.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { q, one, json, type Db } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
-import { cancelStepJobs, EngineError, lockRun, setStepStatus, stepsOf } from "./mutations.ts";
+import { cancelStepJobs, EngineError, lockRun, setStepStatus } from "./mutations.ts";
 import { topoOrder } from "./graph.ts";
 import { injectedCleanup, isCleanupStep } from "./templates.ts";
 

@@ -1683,7 +1683,7 @@ const agentExecutor: StepExecutor = {
     };
     if (ctx.run.profile === "MICRO" && (submitted?.profile_escalation || policy.micro?.exhausted)) {
       const request = submitted?.profile_escalation as
-        | import("../workflow/profileRuntime.ts").EscalationRequest
+        | import("../workflow/types.ts").EscalationRequest
         | undefined;
       return {
         kind: "profile_escalation",

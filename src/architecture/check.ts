@@ -1,16 +1,18 @@
 /**
  * Architecture fitness check: a small static import-graph analysis (no external dependency, no network).
- * It reports three kinds of violations and compares them to a committed baseline (architecture/baseline.json):
- *   - no-circular: strongly connected components of the src import graph with more than one file;
- *   - no-provider-from-core: src/workflow or src/eval importing the Claude module or a provider adapter;
- *   - no-provider-internals: a file outside src/agent/<provider>/ importing anything but that provider's entry files.
+ * See docs/architecture/architecture-governance.md for the checked boundaries.
  * The baseline is a ratchet: a violation that is not in it fails the check; entries that no longer occur are reported
  * as stale so the baseline only shrinks (`npm run arch:baseline` rewrites it).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
-export type Rule = "no-circular" | "no-provider-from-core" | "no-provider-internals";
+export type Rule =
+  | "no-circular"
+  | "no-provider-from-core"
+  | "no-provider-internals"
+  | "no-db-from-api"
+  | "repository-dependencies";
 export interface Violation {
   rule: Rule;
   key: string;
@@ -49,13 +51,16 @@ export function listSourceFiles(root: string, dir = "src"): string[] {
   return out;
 }
 
-export function parseImports(source: string): string[] {
-  const specs: string[] = [];
-  for (const m of source.matchAll(IMPORT_RE)) specs.push(m[1] ?? m[2]);
-  return specs.filter((s) => s.startsWith("."));
+function isPostgresDriver(spec: string) {
+  return spec === "pg" || spec.startsWith("pg/");
 }
 
-/** Builds the relative-import graph. `read` and `exists` are injectable so tests need no file system. */
+export function parseImports(source: string): string[] {
+  return Array.from(source.matchAll(IMPORT_RE), (m) => m[1] ?? m[2])
+    .filter((spec) => spec.startsWith(".") || isPostgresDriver(spec));
+}
+
+/** Builds the source import graph, including the PostgreSQL driver as an external leaf. */
 export function buildGraph(
   files: string[],
   read: (file: string) => string,
@@ -66,6 +71,10 @@ export function buildGraph(
   for (const file of files) {
     const deps = new Set<string>();
     for (const spec of parseImports(read(file))) {
+      if (isPostgresDriver(spec)) {
+        deps.add(spec);
+        continue;
+      }
       const target = join(dirname(file), spec).split(sep).join("/");
       const hit = [target, `${target}.ts`, `${target}/index.ts`].find((c) => fileSet.has(c) && exists(c));
       if (hit && hit !== file) deps.add(hit);
@@ -115,6 +124,20 @@ function providerOf(file: string): string | undefined {
   return m && (PROVIDERS as readonly string[]).includes(m[1]) ? m[1] : undefined;
 }
 
+// The streaming listener owns a dedicated PostgreSQL connection. Analytics files are SQL read models,
+// with an incident override writer in health.ts. Route handlers call their exported operations.
+const API_DB_BOUNDARIES = new Set([
+  "src/api/stream.ts",
+  "src/api/metrics.ts",
+  "src/api/analytics/index.ts",
+  "src/api/analytics/health.ts",
+  "src/api/analytics/execution.ts",
+]);
+
+function isRepository(file: string) {
+  return /(?:^|\/)repository\.ts$|Repository\.ts$/.test(file);
+}
+
 export function findViolations(graph: Graph): Violation[] {
   const out: Violation[] = [];
   for (const comp of findCycles(graph)) {
@@ -126,6 +149,27 @@ export function findViolations(graph: Graph): Violation[] {
   }
   for (const [from, deps] of graph) {
     for (const to of deps) {
+      if (
+        from.startsWith("src/api/") && !API_DB_BOUNDARIES.has(from) &&
+        (to.startsWith("src/db/") || isPostgresDriver(to))
+      ) {
+        out.push({
+          rule: "no-db-from-api",
+          key: `no-db-from-api:${from}->${to}`,
+          detail: `${from} imports database infrastructure ${to}`,
+        });
+      }
+      if (
+        isRepository(from) &&
+        to !== "src/db/pool.ts" && to !== "src/db.ts" &&
+        !isRepository(to) && !to.endsWith("/types.ts")
+      ) {
+        out.push({
+          rule: "repository-dependencies",
+          key: `repository-dependencies:${from}->${to}`,
+          detail: `${from} imports ${to}; repositories depend on persistence and shared types`,
+        });
+      }
       const toProvider = providerOf(to);
       const isClaudeModule = to === "src/agent/claude.ts";
       if (CORE_PREFIXES.some((p) => from.startsWith(p)) && (isClaudeModule || toProvider)) {
@@ -187,8 +231,4 @@ export function runCheck(root: string, baseline: Baseline): CheckResult {
       violations: violations.length,
     },
   };
-}
-
-export function relativeTo(root: string, p: string): string {
-  return relative(root, p).split(sep).join("/");
 }

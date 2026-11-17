@@ -1,3 +1,4 @@
+import { insertSnapshot } from "../context/repository.ts";
 import {
   buildExecutionContract,
   type MandatoryExecutionContract,
@@ -6,7 +7,7 @@ import { detectNativeKnowledgeSources } from "../knowledge/nativeSources.ts";
 import { visibleKnowledge } from "../knowledge/visibility.ts";
 import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
-import { q, one, json, type Db } from "../db/pool.ts";
+import { q, one, type Db } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { resolveKnowledge, type Resolution } from "../knowledge/resolve.ts";
 import {
@@ -470,11 +471,7 @@ export async function resolveContext(
   const hash = hashOf(content);
   // The resolution instant decides which versions were in effect; it is recorded but not part of the content hash.
   Object.assign(content, { resolved_at: at.toISOString() });
-  const row = await one(
-    c,
-    "INSERT INTO context_snapshots (run_id, step_id, hash, content) VALUES ($1, $2, $3, $4) RETURNING id",
-    [run.id, step.id, hash, json(content)],
-  );
+  const snapshotId = await insertSnapshot(c, run.id, step.id, hash, content);
   const names = repositories.length ? repositories : run.allowed_repositories;
   const repoPaths = names.length
     ? (
@@ -486,7 +483,7 @@ export async function resolveContext(
       ).map((r) => ({ name: r.name, path: repoPath(r) }))
     : [];
   return {
-    snapshot_id: row.id,
+    snapshot_id: snapshotId,
     hash,
     project,
     repositories,

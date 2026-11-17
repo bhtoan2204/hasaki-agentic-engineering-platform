@@ -146,12 +146,11 @@ export function RepositoriesPage({
   name,
   query,
   me,
-}: { name?: string; query?: string; me?: { role?: string } | null } = {}) {
+}: { name?: string; query: string; me?: { role?: string } | null }) {
   const { t } = useI18n();
   const isAdmin = me?.role === "admin";
-  const view = new URLSearchParams(
-    query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
-  ).get("view");
+  const params = new URLSearchParams(query);
+  const view = params.get("view");
   // Members only ever see "My repositories". Admins also manage the registry and grants (view=manage); managing
   // access is not reading: the workspace and index panels need the admin's own grant like anyone else's.
   const manage = isAdmin && view === "manage";
@@ -191,17 +190,10 @@ export function RepositoriesPage({
   const [rank, setRank] = useState({ text: "", project: "" });
   const [ranked, setRanked] = useState<any>(null);
   const [creating, setCreating] = useState(false);
-  const initParams = useMemo(
-    () =>
-      new URLSearchParams(
-        query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
-      ),
-    [query],
-  );
-  const [q, setQState] = useState(() => initParams.get("q") || "");
-  const [filter, setFilterState] = useState<"all" | "on" | "off">(
-    () => (initParams.get("filter") as "all" | "on" | "off") || "all",
-  );
+  const [{ q, filter }, setFilters] = useState(() => ({
+    q: params.get("q") || "",
+    filter: params.get("filter") || "all",
+  }));
 
   const syncUrl = (newFilter: string, newQ: string) => {
     if (name) return;
@@ -216,12 +208,12 @@ export function RepositoriesPage({
     }
   };
 
-  const setFilter = (f: "all" | "on" | "off") => {
-    setFilterState(f);
+  const setFilter = (f: string) => {
+    setFilters({ q, filter: f });
     syncUrl(f, q);
   };
   const setQ = (queryText: string) => {
-    setQState(queryText);
+    setFilters({ q: queryText, filter });
     syncUrl(filter, queryText);
   };
   useEffect(() => {

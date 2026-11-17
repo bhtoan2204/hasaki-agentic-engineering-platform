@@ -1,3 +1,4 @@
+import { definitionRepository } from "../workflow/definitionRepository.ts";
 import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
 import { CATEGORIES, SCOPES, type KnowledgeCandidate } from "./resolve.ts";
@@ -348,24 +349,23 @@ export const knowledge = {
   async assignments(
     key: string,
     db: Db = pool,
+    scope?: { ownerId: number; all: boolean },
   ): Promise<Array<{ workflow: string; version: number | string; step: string | null }>> {
     const out: Array<{ workflow: string; version: number | string; step: string | null }> = [];
-    const defs = await q(
-      db,
-      `SELECT d.key, d.draft_spec, v.version, v.spec FROM workflow_definitions d
-         LEFT JOIN workflow_definition_versions v ON v.definition_id = d.id AND v.version = d.latest_version WHERE NOT d.archived`,
-    );
+    const defs = await definitionRepository.referenceSpecs(db, scope);
     for (const d of defs)
       for (const [spec, ver] of [
         [d.spec, d.version],
         [d.draft_spec, "draft"],
       ] as const) {
-        if (!spec) continue;
+        if (!spec || ver == null) continue;
         if ([...(spec.knowledge ?? []), ...(spec.skills ?? [])].includes(key))
           out.push({ workflow: d.key, version: ver, step: null });
-        for (const st of spec.steps ?? [])
-          if ([...(st.config?.knowledge ?? []), ...(st.config?.skills ?? [])].includes(key))
+        for (const st of spec.steps ?? []) {
+          const { knowledge, skills } = st.config ?? {};
+          if ([knowledge, skills].some((keys) => Array.isArray(keys) && keys.includes(key)))
             out.push({ workflow: d.key, version: ver, step: st.key });
+        }
       }
     return out;
   },

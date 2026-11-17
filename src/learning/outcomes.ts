@@ -556,3 +556,8 @@ export async function recordRunOutcome(runId: number, db: Db = pool) {
   ]);
   return outcome;
 }
+
+export async function savedRunOutcome(runId: number, db: Db = pool) {
+  const row = await one<{ outcome: RunOutcome | null }>(db, "SELECT outcome FROM workflow_runs WHERE id = $1", [runId]);
+  return row?.outcome;
+}

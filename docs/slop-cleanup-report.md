@@ -1,5 +1,8 @@
 # Slop cleanup report (REQ-109)
 
+This report records the measurements from REQ-109. The platform now runs `npm run arch:check`.
+See [Architecture governance](architecture/architecture-governance.md) for the current rules.
+
 Measurement: `tsc -p . --noUnusedLocals --noUnusedParameters` and `eslint src web/src test` (existing `eslint.config.mjs`). No dedicated Slop Detector or architecture-check command exists in the repo.
 
 | Finding type | Before | After |

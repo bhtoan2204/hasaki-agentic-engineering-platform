@@ -21,13 +21,14 @@ try {
 const result = runCheck(root, baseline);
 console.log(`architecture metrics: ${JSON.stringify(result.metrics)}`);
 
+for (const v of result.newViolations) console.error(`NEW ${v.rule}: ${v.detail}`);
+if (result.newViolations.length) process.exit(1);
+
 if (write) {
   writeFileSync(baselinePath, `${JSON.stringify({ violations: result.violations.map((v) => v.key) }, null, 2)}\n`);
   console.log(`baseline written with ${result.violations.length} entries`);
   process.exit(0);
 }
-for (const v of result.newViolations) console.error(`NEW ${v.rule}: ${v.detail}`);
 if (result.staleBaseline.length) {
   console.warn(`${result.staleBaseline.length} baseline entries no longer occur; run \`npm run arch:baseline\` to shrink it`);
 }
-process.exit(result.newViolations.length ? 1 : 0);

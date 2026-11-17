@@ -26,9 +26,6 @@ export async function lockRun(c: Db, runId: number): Promise<RunRow> {
   return run;
 }
 
-export const stepsOf = (c: Db, runId: number) =>
-  q<StepRow>(c, "SELECT * FROM workflow_steps WHERE run_id = $1 ORDER BY position", [runId]);
-
 const JSON_COLS = new Set(["output", "pending_input", "approval", "config"]);
 
 async function updateStep(

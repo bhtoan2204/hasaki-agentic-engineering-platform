@@ -439,3 +439,7 @@ export function telemetryGroups(attempts: any[]) {
     by_step: group(attempts, (r) => String(r.step_id)),
   };
 }
+
+export function poolGauges() {
+  return { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+}

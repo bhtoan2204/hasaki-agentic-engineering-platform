@@ -17,7 +17,7 @@ import {
 const graphOf = (src: Record<string, string>): Graph =>
   buildGraph(Object.keys(src), (f) => src[f], () => true);
 
-test("parseImports finds static, re-export, type and dynamic relative imports only", () => {
+test("parseImports finds static, re-export, type and dynamic relative imports and excludes unrelated packages", () => {
   const specs = parseImports(
     [
       'import { a } from "./a.ts";',
@@ -59,6 +59,39 @@ test("importing a provider internal file from outside is flagged, its entry file
   });
   const v = findViolations(g);
   assert.deepEqual(v.map((x) => x.key), ["no-provider-internals:src/agent/other.ts->src/agent/codex/policy.ts"]);
+});
+
+test("API handlers use repositories while the stream and analytics retain direct database access", () => {
+  const graph = graphOf({
+    "src/api/routes.ts": `import "../db/pool.ts"; import "../workitems/repository.ts"; import("pg");`,
+    "src/api/stream.ts": `import "pg";`,
+    "src/api/analytics/execution.ts": `import "../../db/pool.ts";`,
+    "src/db/pool.ts": "",
+    "src/workitems/repository.ts": "",
+  });
+  assert.deepEqual(findViolations(graph).map((v) => v.key), [
+    "no-db-from-api:src/api/routes.ts->pg",
+    "no-db-from-api:src/api/routes.ts->src/db/pool.ts",
+  ]);
+});
+
+test("repositories can use infrastructure and shared types, while service and route imports are rejected", () => {
+  const graph = graphOf({
+    "src/workitems/repository.ts": `
+      import "../db/pool.ts";
+      import type { StepRow } from "../workflow/types.ts";
+      import "../workflow/engine.ts";
+      import "../api/routes.ts";
+    `,
+    "src/workflow/types.ts": "",
+    "src/workflow/engine.ts": "",
+    "src/api/routes.ts": "",
+    "src/db/pool.ts": "",
+  });
+  assert.deepEqual(findViolations(graph).map((v) => v.key), [
+    "repository-dependencies:src/workitems/repository.ts->src/api/routes.ts",
+    "repository-dependencies:src/workitems/repository.ts->src/workflow/engine.ts",
+  ]);
 });
 
 test("baseline ratchet rejects new violations and tolerates a shrunken baselined cycle", () => {

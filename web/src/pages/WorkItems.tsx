@@ -309,18 +309,16 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
   );
 }
 
-export function WorkItemsPage({ query }: { query?: string } = {}) {
+export function WorkItemsPage({ query }: { query: string }) {
   const { t } = useI18n();
-  const initParams = useMemo(
-    () =>
-      new URLSearchParams(
-        query || (location.hash.includes("?") ? location.hash.split("?")[1] : ""),
-      ),
-    [query],
-  );
-  const [source, setSourceState] = useState(() => initParams.get("source") || "");
-  const [q, setQState] = useState(() => initParams.get("q") || "");
-  const [statusF, setStatusFState] = useState(() => initParams.get("status") || "");
+  const [{ source, q, statusF }, setFilters] = useState(() => {
+    const params = new URLSearchParams(query);
+    return {
+      source: params.get("source") || "",
+      q: params.get("q") || "",
+      statusF: params.get("status") || "",
+    };
+  });
 
   const syncUrl = useCallback((newSource: string, newStatus: string, newQ: string) => {
     const p = new URLSearchParams();
@@ -335,15 +333,15 @@ export function WorkItemsPage({ query }: { query?: string } = {}) {
   }, []);
 
   const setSource = (s: string) => {
-    setSourceState(s);
+    setFilters({ source: s, statusF, q });
     syncUrl(s, statusF, q);
   };
   const setStatusF = (st: string) => {
-    setStatusFState(st);
+    setFilters({ source, statusF: st, q });
     syncUrl(source, st, q);
   };
   const setQ = (queryText: string) => {
-    setQState(queryText);
+    setFilters({ source, statusF, q: queryText });
     syncUrl(source, statusF, queryText);
   };
 

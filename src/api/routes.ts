@@ -11,7 +11,7 @@ import {
   savePreferences,
 } from "../telegram/store.ts";
 import { evaluationAnalytics } from "../eval/analytics.ts";
-import { createRecommendation } from "../eval/recommendations.ts";
+import { createRecommendation, findRecommendation, listRecommendations } from "../eval/recommendations.ts";
 import { saveOptimizationPolicy, optimizationPolicies } from "../eval/optimization.ts";
 import {
   setRunBranches,
@@ -20,7 +20,7 @@ import {
   providerHandoffOptions,
 } from "../workflow/engine.ts";
 import { setStepAgent } from "../workflow/engine.ts";
-import { attemptContext } from "./agentContext.ts";
+import { attemptContext, findSnapshot } from "../context/repository.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
 import { updateIncidentLifecycle } from "./analytics/health.ts";
 import {
@@ -36,6 +36,7 @@ import {
 import {
   status as codeIndexStatus,
   enqueue as enqueueCodeIndex,
+  cancelLocalIndexRun,
 } from "../codeIntelligence/indexer.ts";
 import { hybridRank } from "../codeIntelligence/search.ts";
 import { config } from "../config.ts";
@@ -43,7 +44,18 @@ import { instanceHealth } from "../instances.ts";
 import { resolveOutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider } from "../agent/provider.ts";
 import { agentProviderStatus } from "../agent/providerStatus.ts";
-import { pool, q, one } from "../db/pool.ts";
+import {
+  cancelableRunsForLegacyTask,
+  findArtifact,
+  handoffMetrics,
+  latestRunForWorkItem,
+  legacyRunQuestions,
+  runAssignment,
+  setRunBudget,
+} from "../workflow/runRepository.ts";
+import { workItemRepository } from "../workitems/repository.ts";
+import { knowledgeUsage } from "../knowledge/usageRepository.ts";
+import { listEvalResults } from "../eval/resultsRepository.ts";
 import {
   events as legacyEvents,
   inbox,
@@ -198,6 +210,7 @@ import {
   closePullRequestAction,
   mergePullRequestAction,
   pullRequestStatus,
+  listPullRequests,
 } from "../git/pullRequests.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { runEvents } from "../workflow/events.ts";
@@ -234,7 +247,7 @@ import { RUN_STATUSES, STEP_STATUSES, STEP_TYPES } from "../workflow/types.ts";
 import { workItems } from "../workitems/service.ts";
 import { getRunSummary } from "../report/runSummary.ts";
 import { parseBudget, runCost, withCosts, workItemCost } from "../report/cost.ts";
-import { recordRunOutcome, syncPullRequestStates } from "../learning/outcomes.ts";
+import { recordRunOutcome, savedRunOutcome, syncPullRequestStates } from "../learning/outcomes.ts";
 import { providerPerformance } from "../learning/providerPerformance.ts";
 import {
   proposeImprovements,
@@ -246,7 +259,7 @@ import {
 import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
-import { metricsSummary, runMetrics } from "./metrics.ts";
+import { metricsSummary, poolGauges, runMetrics } from "./metrics.ts";
 import { dependencyMetrics } from "../git/nodeDependencies.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
 import type { FeedbackMode } from "../workflow/replan.ts";
@@ -278,7 +291,9 @@ const must = <T>(v: T | undefined | null, what: string): T => {
 
 async function workItemWithAttachments(id: number) {
   const w = must(await workItems.detail(id), "work item");
-  const files: unknown = w.payload?.note_files;
+  const files = w.payload && typeof w.payload === "object" && "note_files" in w.payload
+    ? w.payload.note_files
+    : undefined;
   const base = config.fileBaseUrl.replace(/\/$/, "");
   const attachments =
     base && Array.isArray(files)
@@ -299,10 +314,10 @@ async function readableWorkflow(c: Ctx, key: string) {
     const ownerId = Number(requested);
     if (!Number.isInteger(ownerId)) throw new HttpError(404, "not found");
     await requireOwner(c.actor, ownerId, support(c), "workflow", key);
-    return must(await definitions.get(key, pool, ownerId), "workflow");
+    return must(await definitions.get(key, undefined, ownerId), "workflow");
   }
   return must(
-    (await definitions.get(key, pool, c.actor.id)) ?? (await definitions.get(key, pool, null)),
+    (await definitions.get(key, undefined, c.actor.id)) ?? (await definitions.get(key, undefined, null)),
     "workflow",
   );
 }
@@ -311,8 +326,8 @@ async function workflowOwner(c: Ctx, key: string): Promise<number | null> {
   const requested = c.url.searchParams.get("owner");
   const ownerId = requested ? Number(requested) : c.actor.id;
   const row =
-    (await definitions.get(key, pool, ownerId)) ??
-    (requested ? undefined : await definitions.get(key, pool, null));
+    (await definitions.get(key, undefined, ownerId)) ??
+    (requested ? undefined : await definitions.get(key, undefined, null));
   if (!row) throw new HttpError(404, "not found");
   if (row.owner_id == null) {
     requireAdmin(c.actor);
@@ -354,12 +369,12 @@ async function readableKnowledge(c: Ctx, key: string) {
     const ownerId = Number(requested);
     if (!Number.isInteger(ownerId)) throw new HttpError(404, "not found");
     await requireOwner(c.actor, ownerId, support(c), "knowledge", key);
-    return must(await knowledge.get(key, pool, ownerId), "knowledge item");
+    return must(await knowledge.get(key, undefined, ownerId), "knowledge item");
   }
   return hideRestrictedKnowledge(
     c.actor.id,
     must(
-      (await knowledge.get(key, pool, c.actor.id)) ?? (await knowledge.get(key, pool, null)),
+      (await knowledge.get(key, undefined, c.actor.id)) ?? (await knowledge.get(key, undefined, null)),
       "knowledge item",
     ),
   );
@@ -391,13 +406,6 @@ function redactGroup(group: any, actor: Actor, showAll: boolean) {
   } = group;
   return { ...rest, work_item_id: null, run_id: null, pull_requests: [] };
 }
-const latestRun = (workItemId: number) =>
-  one<{ id: number; status: string }>(
-    pool,
-    "SELECT id, status FROM workflow_runs WHERE work_item_id = $1 ORDER BY id DESC LIMIT 1",
-    [workItemId],
-  );
-
 export const routes: Route[] = [
   [
     "GET",
@@ -532,10 +540,7 @@ export const routes: Route[] = [
     /^\/api\/work-items\/(\d+)\/budget$/,
     async (c) => {
       await requireWorkItem(c.actor, num(c.p[0]), support(c));
-      await q(pool, "UPDATE work_items SET budget_usd = $2, updated_at = now() WHERE id = $1", [
-        num(c.p[0]),
-        budgetOf(c.body),
-      ]);
+      await workItemRepository.setBudget(num(c.p[0]), budgetOf(c.body));
       return must(await workItemCost(num(c.p[0])), "work item");
     },
   ],
@@ -555,7 +560,7 @@ export const routes: Route[] = [
   ],
 
   // ------------------------------------------------------------ workflow definitions
-  ["GET", /^\/api\/workflows$/, (c) => definitions.list(pool, mine(c))],
+  ["GET", /^\/api\/workflows$/, (c) => definitions.list(undefined, mine(c))],
   [
     "POST",
     /^\/api\/workflows$/,
@@ -576,7 +581,7 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/workflows\/([a-z0-9_-]+)\/clone$/,
     async ({ p, actor }) => {
-      const src = await definitions.get(p[0], pool, null);
+      const src = await definitions.get(p[0], undefined, null);
       if (!src) throw new HttpError(404, "not found");
       const spec = src.versions?.[0]?.spec ?? src.draft_spec;
       if (!spec) throw new HttpError(400, "workflow has no spec to clone");
@@ -595,9 +600,9 @@ export const routes: Route[] = [
     async ({ p, actor, url }) => {
       requireAdmin(actor);
       const ownerId = Number(url.searchParams.get("owner") ?? actor.id);
-      const src = await definitions.get(p[0], pool, ownerId);
+      const src = await definitions.get(p[0], undefined, ownerId);
       if (!src || src.owner_id == null) throw new HttpError(404, "not found");
-      if (await definitions.get(p[0], pool, null))
+      if (await definitions.get(p[0], undefined, null))
         throw new HttpError(409, "a shared workflow with this key already exists");
       const spec = src.versions?.[0]?.spec ?? src.draft_spec;
       await audit(actor.id, "promote", "workflow", p[0], { from: ownerId });
@@ -625,7 +630,7 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/workflows\/route$/,
-    async (c) => routeWorkflow(String(c.body.text ?? ""), await definitions.list(pool, mine(c))),
+    async (c) => routeWorkflow(String(c.body.text ?? ""), await definitions.list(undefined, mine(c))),
   ],
   ["GET", /^\/api\/workflows\/([a-z0-9_-]+)$/, (c) => readableWorkflow(c, c.p[0])],
   [
@@ -677,7 +682,7 @@ export const routes: Route[] = [
       return {
         caches: cacheSnapshot(),
         singleflightInflight: singleflightInflight(),
-        pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+        pool: poolGauges(),
       };
     },
   ],
@@ -846,7 +851,7 @@ export const routes: Route[] = [
           (await recordRunOutcome(id)) ?? { pending: true, reason: "the run has not finished" }
         );
       return (
-        (await one(pool, "SELECT outcome FROM workflow_runs WHERE id = $1", [id]))?.outcome ??
+        (await savedRunOutcome(id)) ??
         (await recordRunOutcome(id)) ?? { pending: true, reason: "the run has not finished" }
       );
     },
@@ -905,10 +910,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/budget$/,
     async (c) => {
       await requireRun(c.actor, num(c.p[0]), support(c));
-      await q(pool, "UPDATE workflow_runs SET budget_usd = $2, updated_at = now() WHERE id = $1", [
-        num(c.p[0]),
-        budgetOf(c.body),
-      ]);
+      await setRunBudget(num(c.p[0]), budgetOf(c.body));
       return runCost(num(c.p[0]));
     },
   ],
@@ -1031,7 +1033,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/handoffs$/,
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
-      q(pool, "SELECT * FROM provider_handoff_metrics WHERE run_id=$1 ORDER BY id", [num(c.p[0])])
+      handoffMetrics(num(c.p[0]))
     ),
   ],
   [
@@ -1141,7 +1143,7 @@ export const routes: Route[] = [
     async (c) => (
       await requireArtifact(c.actor, num(c.p[0]), support(c)),
       must(
-        await one(pool, "SELECT * FROM workflow_artifacts WHERE id = $1", [num(c.p[0])]),
+        await findArtifact(num(c.p[0])),
         "artifact",
       )
     ),
@@ -1152,7 +1154,7 @@ export const routes: Route[] = [
     async (c) => (
       await requireSnapshot(c.actor, num(c.p[0]), support(c)),
       must(
-        await one(pool, "SELECT * FROM context_snapshots WHERE id = $1", [num(c.p[0])]),
+        await findSnapshot(num(c.p[0])),
         "snapshot",
       )
     ),
@@ -1160,12 +1162,7 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/pull-requests$/,
-    (c) =>
-      q(
-        pool,
-        `SELECT p.*, w.code AS work_item_code FROM pull_requests p LEFT JOIN work_items w ON w.id = p.work_item_id LEFT JOIN workflow_runs r ON r.id = p.run_id WHERE ($1::bool OR COALESCE(r.owner_id, w.owner_id) = $2) AND COALESCE(r.owner_id, w.owner_id) IS NOT NULL ORDER BY p.updated_at DESC LIMIT 200`,
-        [support(c), c.actor.id],
-      ),
+    (c) => listPullRequests(c.actor.id, support(c)),
   ],
   // Merge readiness and CI of one PR/MR (read-only; run owner only).
   [
@@ -1199,10 +1196,10 @@ export const routes: Route[] = [
   ],
 
   // ------------------------------------------------------------ questions inbox
-  ["GET", /^\/api\/questions$/, (c) => openQuestions(pool, mine(c))],
+  ["GET", /^\/api\/questions$/, (c) => openQuestions(undefined, mine(c))],
   // Approval steps waiting for a decision (the inbox lists them next to open questions).
-  ["GET", /^\/api\/approvals$/, (c) => openApprovals(pool, mine(c))],
-  ["GET", /^\/api\/questions\/history$/, (c) => answeredQuestions(100, pool, mine(c))],
+  ["GET", /^\/api\/approvals$/, (c) => openApprovals(undefined, mine(c))],
+  ["GET", /^\/api\/questions\/history$/, (c) => answeredQuestions(100, undefined, mine(c))],
   [
     "POST",
     /^\/api\/questions\/answers$/,
@@ -1379,7 +1376,7 @@ export const routes: Route[] = [
         .map(String)
         .filter((r: string) => visible.has(r.toLowerCase()));
       return resolveKnowledge(
-        (await knowledge.candidates(pool, actor.id)).filter(
+        (await knowledge.candidates(undefined, actor.id)).filter(
           (k) => !knowledgeRestricted(k, visible),
         ),
         {
@@ -1401,37 +1398,10 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/knowledge\/([a-z0-9_.-]+)\/usage$/,
     async (c) => {
-      const item = await readableKnowledge(c, c.p[0]);
-      const used = await q(
-        pool,
-        `SELECT cs.run_id, s.key AS step_key, s.name AS step_name, r.title AS run_title, r.definition_key, cs.created_at,
-                (SELECT (k->>'version')::int FROM jsonb_array_elements(cs.content->'knowledge') k WHERE k->>'key' = $1 LIMIT 1) AS version
-           FROM context_snapshots cs JOIN workflow_steps s ON s.id = cs.step_id JOIN workflow_runs r ON r.id = cs.run_id
-          WHERE cs.content->'knowledge' @> jsonb_build_array(jsonb_build_object('key', $1::text))
-            AND ($2::bool OR r.owner_id = $3)
-          ORDER BY cs.id DESC LIMIT 100`,
-        [c.p[0], support(c), c.actor.id],
-      );
-      void item;
-      const assigned: Array<{ workflow: string; version: number | string; step: string | null }> =
-        [];
-      for (const d of await q(
-        pool,
-        `SELECT d.key, d.draft_spec, v.version, v.spec FROM workflow_definitions d LEFT JOIN workflow_definition_versions v ON v.definition_id = d.id AND v.version = d.latest_version WHERE NOT d.archived AND (d.owner_id IS NULL OR $1::bool OR d.owner_id = $2)`,
-        [support(c), c.actor.id],
-      )) {
-        for (const [spec, ver] of [
-          [d.spec, d.version],
-          [d.draft_spec, "draft"],
-        ] as const) {
-          if (!spec) continue;
-          if ([...(spec.knowledge ?? []), ...(spec.skills ?? [])].includes(c.p[0]))
-            assigned.push({ workflow: d.key, version: ver, step: null });
-          for (const st of spec.steps ?? [])
-            if ([...(st.config?.knowledge ?? []), ...(st.config?.skills ?? [])].includes(c.p[0]))
-              assigned.push({ workflow: d.key, version: ver, step: st.key });
-        }
-      }
+      await readableKnowledge(c, c.p[0]);
+      const scope = { ownerId: c.actor.id, all: support(c) };
+      const used = await knowledgeUsage(c.p[0], scope.ownerId, scope.all);
+      const assigned = await knowledge.assignments(c.p[0], undefined, scope);
       return { used, assigned };
     },
   ],
@@ -1475,7 +1445,7 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/agent-recommendations\/(\d+)$/,
     async (c) => {
-      const row = await one(pool, "SELECT * FROM agent_recommendations WHERE id=$1", [num(c.p[0])]);
+      const row = await findRecommendation(num(c.p[0]));
       if (!row) throw new HttpError(404, "Recommendation not found");
       await requireOwner(c.actor, row.owner_id, support(c), "agent_recommendation", String(row.id));
       return row;
@@ -1484,10 +1454,7 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/agent-recommendations$/,
-    (c) =>
-      q(pool, "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50", [
-        c.actor.id,
-      ]),
+    (c) => listRecommendations(c.actor.id),
   ],
   ["POST", /^\/api\/agent-optimization$/, (c) => saveOptimizationPolicy(c.actor.id, c.body)],
   ["GET", /^\/api\/agent-optimization$/, (c) => optimizationPolicies(c.actor.id)],
@@ -1544,12 +1511,8 @@ export const routes: Route[] = [
     /^\/api\/evals$/,
     async ({ url, actor }) => {
       const suite = url.searchParams.get("suite");
-      const rows = await q(
-        pool,
-        `SELECT * FROM eval_results WHERE ($1::text IS NULL OR suite = $1) AND (owner_id IS NULL OR owner_id=$2) ORDER BY id DESC LIMIT 500`,
-        [suite, actor.id],
-      );
-      return { rows, summary: summarizeEval(rows as any) };
+      const rows = await listEvalResults(actor.id, suite);
+      return { rows, summary: summarizeEval(rows) };
     },
   ],
   // Delete for good (with the skill's supporting files). Shared items: admins only, and refused while a workflow still
@@ -1610,7 +1573,7 @@ export const routes: Route[] = [
     async (c) => {
       const id = num(c.p[0]);
       await requireRun(c.actor, id, support(c));
-      const run = await one(pool, "SELECT worker_instance FROM workflow_runs WHERE id = $1", [id]);
+      const run = await runAssignment(id);
       const health = await instanceHealth(run?.worker_instance ?? null);
       return {
         ...health,
@@ -1669,11 +1632,7 @@ export const routes: Route[] = [
     /^\/api\/repositories\/index-runs\/(\d+)\/cancel$/,
     async ({ p, actor }) => {
       requireAdmin(actor);
-      await q(
-        pool,
-        "UPDATE code_intelligence.runs SET status='canceled', fencing_token=fencing_token+1,updated_at=now() WHERE id=$1 AND instance_id=$2 AND status IN ('queued','running')",
-        [num(p[0]), config.instanceId],
-      );
+      await cancelLocalIndexRun(num(p[0]));
       return { ok: true };
     },
   ],
@@ -2265,7 +2224,7 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/tasks$/,
     async (c) =>
-      (await workItems.list(mine(c))).map((w: any) => ({
+      (await workItems.list(mine(c))).map((w) => ({
         code: w.code,
         name: w.title,
         project: w.project,
@@ -2281,14 +2240,8 @@ export const routes: Route[] = [
     async ({ p, url, actor }) => {
       const wi = await workItemByCode(p[0], actor);
       const legacy = wi.legacy_task_code ? await legacyTasks.get(wi.legacy_task_code) : null;
-      const run = await latestRun(wi.id);
-      const wq = run
-        ? await q(
-            pool,
-            "SELECT id, question, context, options, answer FROM workflow_questions WHERE run_id = $1 AND status <> 'dismissed' ORDER BY id",
-            [run.id],
-          )
-        : [];
+      const run = await latestRunForWorkItem(wi.id);
+      const wq = run ? await legacyRunQuestions(run.id) : [];
       return {
         code: wi.code,
         name: wi.title,
@@ -2301,11 +2254,7 @@ export const routes: Route[] = [
         questions: [...(legacy ? await legacyQuestions.list(legacy.code) : []), ...wq],
         prs: [
           ...(legacy ? await legacyPrs.list(legacy.code) : []),
-          ...(await q(
-            pool,
-            "SELECT * FROM pull_requests WHERE work_item_id = $1 AND run_id IS NOT NULL",
-            [wi.id],
-          )),
+          ...(await workItemRepository.legacyPullRequests(wi.id)),
         ],
         events: legacy
           ? await legacyEvents.list(legacy.code, Number(url.searchParams.get("after") ?? 0))
@@ -2329,7 +2278,7 @@ export const routes: Route[] = [
     /^\/api\/tasks\/([^/]+)\/messages$/,
     async ({ p, body, actor }) => {
       const wi = await workItemByCode(p[0], actor);
-      const run = must(await latestRun(wi.id), "run for this task");
+      const run = must(await latestRunForWorkItem(wi.id), "run for this task");
       await sendFeedback(run.id, String(body.message ?? "").trim() || fail("empty message"));
       return { ok: true, run_id: run.id };
     },
@@ -2339,11 +2288,7 @@ export const routes: Route[] = [
     /^\/api\/tasks\/([^/]+)\/cancel$/,
     async ({ p, actor }) => {
       const wi = await workItemByCode(p[0], actor);
-      const active = await q<{ id: number }>(
-        pool,
-        "SELECT id FROM workflow_runs WHERE work_item_id = $1 AND status NOT IN ('COMPLETED', 'CANCELED')",
-        [wi.id],
-      );
+      const active = await cancelableRunsForLegacyTask(wi.id);
       for (const r of active) await cancelRun(r.id);
       return { ok: true, canceled: active.map((r) => r.id) };
     },

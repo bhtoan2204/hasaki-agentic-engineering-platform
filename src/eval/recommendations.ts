@@ -181,3 +181,15 @@ export async function recommendationDetail(id: number, owner: number) {
   if (!row) throw new HttpError(404, "Recommendation not found");
   return row;
 }
+
+export function findRecommendation(id: number) {
+  return one<{ id: number; owner_id: number }>(
+    pool, "SELECT * FROM agent_recommendations WHERE id=$1", [id],
+  );
+}
+
+export function listRecommendations(ownerId: number) {
+  return q<{ id: number; owner_id: number }>(
+    pool, "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50", [ownerId],
+  );
+}

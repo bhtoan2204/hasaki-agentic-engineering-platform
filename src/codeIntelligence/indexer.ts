@@ -5,7 +5,7 @@ import { validateCheckout } from "../repos/paths.ts";
 import { prepareRepository, checkoutForRun } from "../repos/workspaces.ts";
 import { workspacesOf } from "../git/provider.ts";
 import { ownsInstance } from "../instances.ts";
-import { pool, one, q } from "../db/pool.ts";
+import { pool, one, q, type Db } from "../db/pool.ts";
 import { realpath } from "node:fs/promises";
 import { git, baseCommit, treeFiles, changes, readBlobs, hash, languageOf } from "./git.ts";
 import { snapshot, filesOf, extractionBatch, publish, type FileRecord } from "./store.ts";
@@ -338,5 +338,13 @@ export async function status() {
     LEFT JOIN LATERAL(SELECT * FROM code_intelligence.snapshots WHERE repository_id=r.id AND base_snapshot_id IS NULL AND index_version=$2 ORDER BY id DESC LIMIT 1)s ON true
     LEFT JOIN LATERAL(SELECT * FROM code_intelligence.runs WHERE repository_id=r.id AND instance_id=$1 AND run_id IS NULL ORDER BY id DESC LIMIT 1)j ON true ORDER BY r.name`,
     [config.instanceId, parserVersion()],
+  );
+}
+
+export async function cancelLocalIndexRun(id: number, db: Db = pool) {
+  await q(
+    db,
+    "UPDATE code_intelligence.runs SET status='canceled', fencing_token=fencing_token+1,updated_at=now() WHERE id=$1 AND instance_id=$2 AND status IN ('queued','running')",
+    [id, config.instanceId],
   );
 }

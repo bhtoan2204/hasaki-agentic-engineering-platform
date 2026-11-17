@@ -1,3 +1,6 @@
+import type { EvalRow } from "./resultsRepository.ts";
+export type { EvalRow } from "./resultsRepository.ts";
+
 /**
  * Evaluation summary over eval_results rows (pure). Correctness comes from hidden acceptance tests; the independent
  * verifier's verdict is scored against it:
@@ -6,20 +9,6 @@
  *   FAIL  & correct   → false alarm (blocked/repaired good work)
  * Verdict-level only: finding-level precision would need labelled findings, which the fixtures do not provide.
  */
-export interface EvalRow {
-  candidate: string;
-  profile: string | null;
-  status: string;
-  correct: boolean | null;
-  regression: boolean | null;
-  verdict: string | null;
-  repairs: number;
-  human_gates: number;
-  wall_s: number | null;
-  cost_usd: number | string | null;
-  tokens: number | string | null;
-}
-
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
 const avg = (xs: number[]) =>
   xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length) * 100) / 100 : null;
@@ -28,7 +17,9 @@ export function summarizeEval(rows: EvalRow[]) {
   const groups = new Map<string, EvalRow[]>();
   for (const r of rows) {
     const k = `${r.candidate}${r.profile ? `/${r.profile}` : ""}`;
-    groups.set(k, [...(groups.get(k) ?? []), r]);
+    const group = groups.get(k);
+    if (group) group.push(r);
+    else groups.set(k, [r]);
   }
   return [...groups.entries()].map(([group, rs]) => {
     const graded = rs.filter((r) => r.correct !== null);

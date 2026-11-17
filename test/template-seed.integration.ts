@@ -54,5 +54,20 @@ test("an unpublished draft blocks the template update instead of being overwritt
   await seedTemplates();
   const after = (await definitions.get(key))!;
   assert.equal(after.versions[0].version, d.versions[0].version);
-  assert.equal(after.draft_spec.description, "draft in progress");
+  assert.equal(after.draft_spec?.description, "draft in progress");
+});
+
+test("private versions shadow shared versions and a missing explicit version falls back to shared", async () => {
+  const key = "version-scope-test";
+  const spec = { name: "Shared v1", steps: [{ key: "first", type: "human_input" }] };
+  const { ensureTestOwner } = await import("../src/auth/testOwner.ts");
+  const owner = await ensureTestOwner();
+  await definitions.create({ key, spec });
+  await definitions.saveDraft(key, { ...spec, name: "Shared v2" });
+  assert.deepEqual(await definitions.publish(key), { version: 2, unchanged: false });
+  await definitions.create({ key, spec: { ...spec, name: "Private v1" }, ownerId: owner });
+
+  assert.equal((await definitions.version(key, undefined, pool, owner))?.spec.name, "Private v1");
+  assert.equal((await definitions.version(key, 2, pool, owner))?.spec.name, "Shared v2");
+  assert.equal((await definitions.version(key))?.spec.name, "Shared v2");
 });

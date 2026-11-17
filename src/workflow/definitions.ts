@@ -1,19 +1,22 @@
 import { createHash } from "node:crypto";
-import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
+import { pool, withTx, inTx, txWrote, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
 import { validateSpec } from "./graph.ts";
 import { TEMPLATES } from "./templates.ts";
 import type { WorkflowSpec } from "./types.ts";
+import { definitionRepository, type DefinitionVersion } from "./definitionRepository.ts";
+
+export type { DefinitionVersion } from "./definitionRepository.ts";
 
 /** Stable JSON (sorted keys) so identical specs hash identically. */
 function canonical(v: unknown): string {
   if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
-  if (v && typeof v === "object")
+  if (isObject(v))
     return (
       "{" +
       Object.keys(v)
         .sort()
-        .map((k) => JSON.stringify(k) + ":" + canonical((v as any)[k]))
+        .map((k) => JSON.stringify(k) + ":" + canonical(v[k]))
         .join(",") +
       "}"
     );
@@ -21,48 +24,10 @@ function canonical(v: unknown): string {
 }
 export const hashOf = (v: unknown) => createHash("sha256").update(canonical(v)).digest("hex");
 
-export interface DefinitionVersion {
-  id: number;
-  definition_id: number;
-  key: string;
-  version: number;
-  spec: WorkflowSpec;
-  spec_hash: string;
-}
-
 export const definitions = {
-  list(db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {
-    const owner = scope?.all ? null : (scope?.ownerId ?? null);
-    const all = !!scope?.all;
-    return q(
-      db,
-      `SELECT d.id, d.key, d.name, d.description, d.latest_version, d.is_template, d.archived, d.updated_at, d.owner_id,
-              d.draft_spec IS NOT NULL AS has_draft,
-              lv.spec->>'category' AS category, lv.spec->>'execution_mode' AS execution_mode, lv.spec->'triggers' AS triggers,
-              (SELECT count(*) FROM workflow_runs r WHERE r.definition_key = d.key AND ($1::bigint IS NULL OR r.owner_id = $1)) AS run_count
-         FROM workflow_definitions d
-         LEFT JOIN workflow_definition_versions lv ON lv.definition_id = d.id AND lv.version = d.latest_version
-        WHERE NOT d.archived AND (d.owner_id IS NULL OR $3::bool OR d.owner_id = $2)
-        ORDER BY d.is_template DESC, d.owner_id NULLS FIRST, d.name`,
-      [all ? null : owner, owner, all],
-    );
-  },
-
-  /** Shared definition when ownerId is null. Private definitions are looked up by their owner. */
-  async get(key: string, db: Db = pool, ownerId: number | null = null) {
-    const d = await one(
-      db,
-      "SELECT * FROM workflow_definitions WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2",
-      [key, ownerId],
-    );
-    if (!d) return undefined;
-    const versions = await q(
-      db,
-      "SELECT id, version, spec, spec_hash, change_note, published_at FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC",
-      [d.id],
-    );
-    return { ...d, versions };
-  },
+  list: definitionRepository.list,
+  get: definitionRepository.get,
+  archive: definitionRepository.archive,
 
   /** A published version; latest when `version` is omitted. */
   /** The owner's private copy when it exists, otherwise the shared definition. */
@@ -75,7 +40,7 @@ export const definitions = {
     const wrote =
       inTx(db) &&
       (txWrote(db, "workflow_definitions") || txWrote(db, "workflow_definition_versions"));
-    const load = () => loadDefinitionVersion(key, version, db, ownerId);
+    const load = () => definitionRepository.version(key, version, db, ownerId);
     return wrote
       ? load()
       : versionCache.get(`${key}|${version ?? "latest"}|${ownerId ?? ""}`, load);
@@ -93,33 +58,18 @@ export const definitions = {
   }) {
     const spec = validateSpec(input.spec);
     return withTx(async (c) => {
-      const d = await one(
-        c,
-        `INSERT INTO workflow_definitions (key, name, description, draft_spec, is_template, owner_id, template_base) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [
-          input.key,
-          spec.name,
-          spec.description,
-          json(spec),
-          input.isTemplate ?? false,
-          input.ownerId ?? null,
-          input.templateBase === undefined ? null : json(input.templateBase),
-        ],
-      );
-      if (input.publish !== false) await publishTx(c, d.id, input.changeNote ?? "initial version");
-      return definitions.get(input.key, c, input.ownerId ?? null);
+      const id = await definitionRepository.insert(c, input.key, spec, input);
+      if (input.publish !== false) await publishTx(c, id, input.changeNote ?? "initial version");
+      const definition = await definitions.get(input.key, c, input.ownerId ?? null);
+      if (!definition) throw new Error(`created workflow "${input.key}" could not be read`);
+      return definition;
     });
   },
 
   /** Save a draft; validated, but nothing running is affected until it is published. */
   async saveDraft(key: string, rawSpec: unknown, ownerId: number | null = null) {
     const spec = validateSpec(rawSpec);
-    const d = await one(
-      pool,
-      `UPDATE workflow_definitions SET draft_spec = $2, name = $3, description = $4, updated_at = now()
-        WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $5 RETURNING id`,
-      [key, json(spec), spec.name, spec.description, ownerId],
-    );
+    const d = await definitionRepository.saveDraft(key, spec, ownerId);
     if (!d) throw new Error(`workflow "${key}" not found`);
     return definitions.get(key, pool, ownerId);
   },
@@ -127,47 +77,23 @@ export const definitions = {
   /** Freeze the draft into a new immutable version. No-op if identical to the latest version. */
   async publish(key: string, changeNote = "", ownerId: number | null = null) {
     return withTx(async (c) => {
-      const d = await one(
-        c,
-        "SELECT id FROM workflow_definitions WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2 FOR UPDATE",
-        [key, ownerId],
-      );
+      const d = await definitionRepository.lockByKey(c, key, ownerId);
       if (!d) throw new Error(`workflow "${key}" not found`);
       return publishTx(c, d.id, changeNote);
     });
   },
-
-  async archive(key: string, ownerId: number | null = null) {
-    await q(
-      pool,
-      "UPDATE workflow_definitions SET archived = true, updated_at = now() WHERE key = $1 AND owner_id IS NOT DISTINCT FROM $2",
-      [key, ownerId],
-    );
-  },
 };
 
 async function publishTx(c: Db, definitionId: number, changeNote: string) {
-  const d = await one(c, "SELECT * FROM workflow_definitions WHERE id = $1", [definitionId]);
-  if (!d.draft_spec) throw new Error("nothing to publish: no draft");
+  const d = await definitionRepository.definition(c, definitionId);
+  if (!d?.draft_spec) throw new Error("nothing to publish: no draft");
   const spec = validateSpec(d.draft_spec);
   const hash = hashOf(spec);
-  const latest = await one(
-    c,
-    "SELECT spec_hash, version FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
-    [definitionId],
-  );
+  const latest = await definitionRepository.latest(c, definitionId);
   if (latest?.spec_hash === hash) return { version: latest.version, unchanged: true };
   const version = d.latest_version + 1;
-  await q(
-    c,
-    `INSERT INTO workflow_definition_versions (definition_id, version, spec, spec_hash, change_note) VALUES ($1, $2, $3, $4, $5)`,
-    [definitionId, version, json(spec), hash, changeNote],
-  );
-  await q(
-    c,
-    "UPDATE workflow_definitions SET latest_version = $2, draft_spec = NULL, updated_at = now() WHERE id = $1",
-    [definitionId, version],
-  );
+  await definitionRepository.insertVersion(c, definitionId, version, spec, hash, changeNote);
+  await definitionRepository.setPublishedVersion(c, definitionId, version);
   return { version, unchanged: false };
 }
 
@@ -216,11 +142,7 @@ export function mergeTemplateSpec(base: unknown, ours: unknown, theirs: unknown)
 export async function seedTemplates() {
   for (const t of TEMPLATES) {
     const spec = validateSpec(t.spec);
-    const existing = await one(
-      pool,
-      "SELECT id, is_template, template_base FROM workflow_definitions WHERE key = $1 AND owner_id IS NULL",
-      [t.key],
-    );
+    const existing = await definitionRepository.sharedTemplate(t.key);
     if (!existing) {
       await definitions.create({
         key: t.key,
@@ -234,16 +156,11 @@ export async function seedTemplates() {
     if (!existing.is_template || !existing.template_base || same(existing.template_base, spec))
       continue;
     await withTx(async (c) => {
-      const d = await one(c, "SELECT * FROM workflow_definitions WHERE id = $1 FOR UPDATE", [
-        existing.id,
-      ]);
+      const d = await definitionRepository.lockDefinition(c, existing.id);
       // An unpublished draft would be overwritten by the publish below; retry on the next start.
-      if (d.draft_spec || same(d.template_base, spec)) return;
-      const latest = await one(
-        c,
-        "SELECT spec, spec_hash FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
-        [d.id],
-      );
+      if (!d || d.draft_spec || same(d.template_base, spec)) return;
+      const latest = await definitionRepository.latest(c, d.id);
+      if (!latest) return;
       let next: WorkflowSpec;
       try {
         next = validateSpec(mergeTemplateSpec(d.template_base, latest.spec, spec));
@@ -255,10 +172,7 @@ export async function seedTemplates() {
         return;
       }
       if (hashOf(next) !== latest.spec_hash) {
-        await q(c, "UPDATE workflow_definitions SET draft_spec = $2 WHERE id = $1", [
-          d.id,
-          json(next),
-        ]);
+        await definitionRepository.setTemplateDraft(c, d.id, next);
         await publishTx(
           c,
           d.id,
@@ -267,10 +181,7 @@ export async function seedTemplates() {
             : "built-in template update (local edits kept)",
         );
       }
-      await q(c, "UPDATE workflow_definitions SET template_base = $2 WHERE id = $1", [
-        d.id,
-        json(spec),
-      ]);
+      await definitionRepository.setTemplateBase(c, d.id, spec);
     });
   }
 }
@@ -282,28 +193,3 @@ const versionCache = new CacheAside<DefinitionVersion | undefined>(
   300_000,
   500,
 );
-
-async function loadDefinitionVersion(
-  key: string,
-  version: number | undefined,
-  db: Db,
-  ownerId: number | null | undefined,
-): Promise<DefinitionVersion | undefined> {
-  if (ownerId) {
-    const priv = await one<DefinitionVersion>(
-      db,
-      `SELECT v.id, v.definition_id, d.key, v.version, v.spec, v.spec_hash
-         FROM workflow_definition_versions v JOIN workflow_definitions d ON d.id = v.definition_id
-        WHERE d.key = $1 AND d.owner_id = $3 AND v.version = COALESCE($2, d.latest_version)`,
-      [key, version ?? null, ownerId],
-    );
-    if (priv) return priv;
-  }
-  return one<DefinitionVersion>(
-    db,
-    `SELECT v.id, v.definition_id, d.key, v.version, v.spec, v.spec_hash
-       FROM workflow_definition_versions v JOIN workflow_definitions d ON d.id = v.definition_id
-      WHERE d.key = $1 AND d.owner_id IS NULL AND v.version = COALESCE($2, d.latest_version)`,
-    [key, version ?? null],
-  );
-}

@@ -2455,7 +2455,9 @@ test("test failure 4/4: waiting state survives a restart (all in PostgreSQL); du
   const detail = await stepDetail(run.id, "test");
   assert.equal(detail.step.status, "WAITING_INPUT");
   assert.equal(detail.questions.filter((x: any) => x.status === "open").length, 1);
-  assert.equal(detail.checkpoints.at(-1).data.test_failure.counts.pre_existing, 1);
+  assert.partialDeepStrictEqual(detail.checkpoints.at(-1), {
+    data: { test_failure: { counts: { pre_existing: 1 } } },
+  });
   assert.equal(await liveJobs(run.id), 0);
   await answerQuestions({ [qq.id]: OPTIONS.rerun });
   assert.equal(await liveJobs(run.id), 1, "exactly one job for the answer");

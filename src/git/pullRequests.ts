@@ -85,3 +85,15 @@ export async function closePullRequestAction(actorId: number, id: number, db: Db
     );
   return { state: result.state, url: pr.url };
 }
+
+export function listPullRequests(ownerId: number, all: boolean, db: Db = pool) {
+  return q<Record<string, unknown>>(
+    db,
+    `SELECT p.*, w.code AS work_item_code
+       FROM pull_requests p LEFT JOIN work_items w ON w.id = p.work_item_id
+       LEFT JOIN workflow_runs r ON r.id = p.run_id
+      WHERE ($1::bool OR COALESCE(r.owner_id, w.owner_id) = $2)
+        AND COALESCE(r.owner_id, w.owner_id) IS NOT NULL ORDER BY p.updated_at DESC LIMIT 200`,
+    [all, ownerId],
+  );
+}

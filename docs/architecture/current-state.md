@@ -1,5 +1,8 @@
 # Current State (audit of commit `8c23002`)
 
+This file describes the original pre-workflow implementation. See [Architecture governance](architecture-governance.md)
+for the current module boundaries and fitness checks.
+
 ~1,300 lines of TypeScript run directly by Node ≥ 22.18 (type stripping, no build step), a single
 static `public/index.html`, and PostgreSQL 17 via `docker-compose.yml`.
 

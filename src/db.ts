@@ -1,6 +1,4 @@
 import { pool } from "./db/pool.ts";
-export { migrate } from "./db/migrate.ts";
-export { pool };
 
 /**
  * Legacy (pre-workflow) tables: tasks, events, questions, prs, inbox, settings.
@@ -29,46 +27,9 @@ export const tasks = {
   async get(code: string) {
     return (await q<TaskRow>("SELECT * FROM tasks WHERE code = $1", [code]))[0];
   },
-  list() {
-    return q(
-      "SELECT code, name, project, status, error, created_at, updated_at FROM tasks ORDER BY updated_at DESC",
-    );
-  },
-  async upsert(
-    code: string,
-    workId: number | null,
-    name: string,
-    project: string,
-    payload: unknown,
-  ) {
-    await q(
-      `INSERT INTO tasks (code, work_id, name, project, payload, status) VALUES ($1, $2, $3, $4, $5, 'queued')
-       ON CONFLICT (code) DO UPDATE SET work_id = excluded.work_id, name = excluded.name, project = excluded.project,
-         payload = excluded.payload, updated_at = now()`,
-      [code, workId, name, project, JSON.stringify(payload)],
-    );
-  },
-  async setStatus(code: string, status: TaskStatus, error: string | null = null) {
-    await q("UPDATE tasks SET status = $1, error = $2, updated_at = now() WHERE code = $3", [
-      status,
-      error,
-      code,
-    ]);
-    await events.add(code, "status", error ? `${status}: ${error}` : status);
-  },
-  async setSession(code: string, sessionId: string) {
-    await q("UPDATE tasks SET session_id = $1 WHERE code = $2", [sessionId, code]);
-  },
 };
 
 export const events = {
-  async add(code: string, kind: string, content: string) {
-    await q("INSERT INTO events (task_code, kind, content) VALUES ($1, $2, $3)", [
-      code,
-      kind,
-      content,
-    ]);
-  },
   list(code: string, afterId = 0) {
     return q("SELECT * FROM events WHERE task_code = $1 AND id > $2 ORDER BY id", [code, afterId]);
   },
@@ -84,46 +45,12 @@ export interface QuestionRow {
 }
 
 export const questions = {
-  async add(code: string, x: { question: string; context?: string; options?: string[] }) {
-    await q(
-      "INSERT INTO questions (task_code, question, context, options) VALUES ($1, $2, $3, $4)",
-      [code, x.question, x.context ?? "", JSON.stringify(x.options ?? [])],
-    );
-  },
   list(code: string) {
     return q<QuestionRow>("SELECT * FROM questions WHERE task_code = $1 ORDER BY id", [code]);
-  },
-  open(code: string) {
-    return q<QuestionRow>(
-      "SELECT * FROM questions WHERE task_code = $1 AND answer IS NULL ORDER BY id",
-      [code],
-    );
-  },
-  async answer(id: string, code: string, answer: string) {
-    await q(
-      "UPDATE questions SET answer = $1, answered_at = now() WHERE id = $2 AND task_code = $3",
-      [answer, id, code],
-    );
   },
 };
 
 export const prs = {
-  async upsert(p: {
-    code: string;
-    repo: string;
-    branch: string;
-    url: string;
-    title: string;
-    summary: string;
-    decisions: unknown;
-  }) {
-    await q(
-      `INSERT INTO prs (task_code, repo, branch, url, title, summary, decisions) VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (task_code, repo) DO UPDATE SET url = excluded.url, title = excluded.title,
-         summary = excluded.summary, decisions = excluded.decisions, created_at = now()`,
-      [p.code, p.repo, p.branch, p.url, p.title, p.summary, JSON.stringify(p.decisions)],
-    );
-  },
   list(code: string) {
     return q("SELECT * FROM prs WHERE task_code = $1 ORDER BY id", [code]);
   },

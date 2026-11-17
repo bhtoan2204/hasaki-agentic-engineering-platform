@@ -1,17 +1,12 @@
+import { stepsOf } from "./runRepository.ts";
 import { q, json, type Db } from "../db/pool.ts";
-import { planProfileTransition, type BusinessRisk } from "./profileTransitions.ts";
-import { setStepStatus, stepsOf } from "./mutations.ts";
+import { planProfileTransition } from "./profileTransitions.ts";
+import { setStepStatus } from "./mutations.ts";
 import { traceLog } from "./trace.ts";
 import { runEvents } from "./events.ts";
 import { topoOrder } from "./graph.ts";
-import type { RunRow, StepRow, AttemptRow, WorkflowSpec } from "./types.ts";
-import { classifyProfile, type Profile } from "./profiles.ts";
-export interface EscalationRequest {
-  reason: string;
-  risk: BusinessRisk;
-  target: Profile;
-  expectedRevision: number;
-}
+import type { RunRow, StepRow, AttemptRow, WorkflowSpec, EscalationRequest } from "./types.ts";
+import { classifyProfile } from "./profiles.ts";
 /** Caller holds the run lock and owns the current fenced attempt. All graph/job/checkpoint writes commit together. */
 export async function applyProfileEscalation(
   c: Db,

@@ -1,3 +1,5 @@
+import { findRun, stepsOf, loadRunDetail, loadStepDetail, loadOpenApprovals, type OwnerScope } from "./runRepository.ts";
+export { listRuns, openQuestions, answeredQuestions } from "./runRepository.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import type { AgentConfiguration } from "../agent/configuration.ts";
 const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) => snapshot ? Object.fromEntries(Object.entries(snapshot.providers).map(([key, entry]) => [key, entry.enabled])) : undefined;
@@ -10,7 +12,6 @@ import { budgetPreflight, enforceBudget } from "./budgets.ts";
 import {
   EngineError,
   lockRun,
-  stepsOf,
   setStepStatus,
   setRunStatus,
   ensureJob,
@@ -1880,7 +1881,7 @@ async function applyResult(
     );
 
   if (run.profile === "MICRO" && result.kind === "failed") {
-    const pending = await one<{ data: import("./profileRuntime.ts").EscalationRequest }>(
+    const pending = await one<{ data: import("./types.ts").EscalationRequest }>(
       c,
       "SELECT data FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='profile_escalation_requested' ORDER BY id DESC LIMIT 1",
       [attempt.id],
@@ -2280,9 +2281,9 @@ async function adoptRun(c: Db, runId: number) {
 // ---------------------------------------------------------------- queries
 
 export async function getRun(runId: number, db: Db = pool) {
-  // Both reads go out together on the pool (one round trip); inside a transaction the client queues them anyway.
+  // The pool can issue these reads concurrently; a transaction client queues them.
   const [run, steps] = await Promise.all([
-    one<RunRow>(db, "SELECT * FROM workflow_runs WHERE id = $1", [runId]),
+    findRun(runId, db),
     stepsOf(db, runId),
   ]);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
@@ -2301,87 +2302,9 @@ async function txThenRun(
   return getRun(runId);
 }
 
-export function listRuns(
-  filter: {
-    workItemId?: number;
-    status?: string;
-    limit?: number;
-    ownerId?: number;
-    all?: boolean;
-  } = {},
-  db: Db = pool,
-) {
-  const scope = filter.all
-    ? "AND r.owner_id IS NOT NULL"
-    : filter.ownerId
-      ? "AND r.owner_id = " + Number(filter.ownerId)
-      : "";
-  return q(
-    db,
-    `SELECT r.id, r.definition_key, r.work_item_id, r.title, r.status, r.branch, r.selected_repositories, r.output_locale, r.agent_provider, r.owner_id, r.created_at, r.updated_at, r.finished_at,
-            v.version AS definition_version, w.code AS work_item_code,
-            (SELECT count(*)::int FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'open') AS open_questions,
-            (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps
-       FROM workflow_runs r JOIN workflow_definition_versions v ON v.id = r.definition_version_id
-       LEFT JOIN work_items w ON w.id = r.work_item_id
-      WHERE ($1::bigint IS NULL OR r.work_item_id = $1) AND ($2::text IS NULL OR r.status = $2) ${scope}
-      ORDER BY r.id DESC LIMIT $3`,
-    [filter.workItemId ?? null, filter.status ?? null, filter.limit ?? 100],
-  );
-}
-
-/** Run page payload. All reads go out together (one round-trip of latency, not one per query). */
+/** Run page view with worker state derived from the stored run and steps. */
 export async function runDetail(runId: number) {
-  const [run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints] =
-    await Promise.all([
-      one<
-        RunRow & {
-          definition_version: number;
-          wi_id: number | null;
-          wi_code: string;
-          wi_title: string;
-          wi_source: string;
-          wi_project: string;
-        }
-      >(
-        pool,
-        `SELECT r.*, v.version AS definition_version, w.id AS wi_id, w.code AS wi_code, w.title AS wi_title, w.source AS wi_source, w.project AS wi_project
-         FROM workflow_runs r LEFT JOIN workflow_definition_versions v ON v.id = r.definition_version_id LEFT JOIN work_items w ON w.id = r.work_item_id
-        WHERE r.id = $1`,
-        [runId],
-      ),
-      stepsOf(pool, runId),
-      q(
-        pool,
-        `SELECT a.id, a.step_id, a.run_id, a.number, a.generation, a.status,
-                a.agent_provider, a.agent_model, a.metrics, a.error,
-                a.invalidated_at, a.resolved_at, a.started_at, a.finished_at,
-                a.executor_stopped_at, a.context_snapshot_id, a.agent_session_id,
-                CASE WHEN a.output ? 'verification'
-                     THEN jsonb_build_object('verification', a.output->'verification') END AS output,
-                s.key AS step_key
-           FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
-          WHERE a.run_id = $1 ORDER BY a.id`,
-        [runId],
-      ),
-      q(
-        pool,
-        "SELECT q.*, s.key AS step_key FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id WHERE q.run_id = $1 ORDER BY q.id",
-        [runId],
-      ),
-      q(
-        pool,
-        "SELECT id, step_id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE run_id = $1 ORDER BY id",
-        [runId],
-      ),
-      q(pool, "SELECT * FROM pull_requests WHERE run_id = $1 ORDER BY id", [runId]),
-      q(pool, "SELECT * FROM execution_workspaces WHERE run_id = $1 ORDER BY id", [runId]),
-      q(
-        pool,
-        "SELECT id, step_id, attempt_id, reason, data, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id",
-        [runId],
-      ),
-    ]);
+  const { run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints } = await loadRunDetail(runId);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
   const { wi_id, wi_code, wi_title, wi_source, wi_project, ...row } = run;
   const work_item =
@@ -2415,60 +2338,10 @@ export async function runDetail(runId: number) {
   };
 }
 
-/** Everything the step inspector shows for one step. */
 export async function stepDetail(runId: number, stepKey: string) {
-  // Every query addresses the step by (run, key) so all of them go out together.
-  const sid = "(SELECT id FROM workflow_steps WHERE run_id = $1 AND key = $2)";
-  const args = [runId, stepKey];
-  const [step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs, handoffs] =
-    await Promise.all([
-      one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
-      q(pool, `SELECT * FROM workflow_step_attempts WHERE step_id = ${sid} ORDER BY number`, args),
-      q(pool, `SELECT * FROM workflow_questions WHERE step_id = ${sid} ORDER BY id`, args),
-      q(pool, `SELECT * FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`, args),
-      q(
-        pool,
-        `SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = ${sid} ORDER BY id`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT s.* FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id WHERE a.step_id = ${sid} ORDER BY s.id`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT id, status, generation, available_at, lease_owner, lease_expires_at, claims, force, last_error FROM workflow_jobs WHERE step_id = ${sid} ORDER BY id DESC LIMIT 10`,
-        args,
-      ),
-      q(
-        pool,
-        `SELECT h.*,m.previous_attempt_duration_ms,m.handoff_duration_ms,m.new_attempt_duration_ms,m.retry_count,m.reported_cost_usd,m.final_verification_result FROM provider_handoffs h LEFT JOIN provider_handoff_metrics m ON m.id=h.id WHERE h.step_id=${sid} ORDER BY h.id`,
-        args,
-      ),
-    ]);
-  if (!step) throw new EngineError(`step "${stepKey}" not found`, 404);
-  return { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs, handoffs };
-}
-
-export function openQuestions(db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {
-  const extra = !scope
-    ? ""
-    : scope.all
-      ? "AND r.owner_id IS NOT NULL"
-      : "AND r.owner_id = " + Number(scope.ownerId);
-  return q(
-    db,
-    `SELECT q.*, s.key AS step_key, s.name AS step_name, s.type AS step_type, r.title AS run_title, r.status AS run_status, w.code AS work_item_code
-       FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id JOIN workflow_runs r ON r.id = q.run_id
-       LEFT JOIN work_items w ON w.id = r.work_item_id
-      WHERE q.status = 'open' ${extra} ORDER BY q.created_at`,
-  );
+  const detail = await loadStepDetail(runId, stepKey);
+  if (!detail.step) throw new EngineError(`step "${stepKey}" not found`, 404);
+  return { ...detail, step: detail.step };
 }
 
 /**
@@ -2476,23 +2349,8 @@ export function openQuestions(db: Db = pool, scope?: { ownerId?: number; all?: b
  * `quick` = can be decided from the inbox (and Telegram) with approve/reject + comment; repository selection, branch
  * input and fenced provider handoffs need the full step UI. Step outputs are not copied here (they stay in the run).
  */
-export async function openApprovals(db: Db = pool, scope?: { ownerId?: number; all?: boolean }) {
-  const extra = !scope
-    ? ""
-    : scope.all
-      ? "AND r.owner_id IS NOT NULL"
-      : "AND r.owner_id = " + Number(scope.ownerId);
-  const rows = await q<any>(
-    db,
-    `SELECT s.id AS step_id, s.run_id, s.key AS step_key, s.name AS step_name, s.type AS step_type, s.updated_at,
-            s.approval->'request' AS request, s.config->'on_reject'->>'reexecute' AS reexecute,
-            (s.pending_input ? 'provider_handoff') AS provider_handoff,
-            r.title AS run_title, r.status AS run_status, w.code AS work_item_code
-       FROM workflow_steps s JOIN workflow_runs r ON r.id = s.run_id
-       LEFT JOIN work_items w ON w.id = r.work_item_id
-      WHERE s.status = 'WAITING_APPROVAL' AND r.status NOT IN ('CANCELED', 'COMPLETED', 'FAILED') ${extra}
-      ORDER BY s.updated_at`,
-  );
+export async function openApprovals(db: Db = pool, scope?: OwnerScope) {
+  const rows = await loadOpenApprovals(db, scope);
   return rows.map(({ request, ...r }) => {
     const req = request ?? {};
     return {
@@ -2510,25 +2368,6 @@ export async function openApprovals(db: Db = pool, scope?: { ownerId?: number; a
         r.step_type !== "git_pull_request",
     };
   });
-}
-
-export function answeredQuestions(
-  limit = 100,
-  db: Db = pool,
-  scope?: { ownerId?: number; all?: boolean },
-) {
-  const extra = !scope
-    ? ""
-    : scope.all
-      ? "AND r.owner_id IS NOT NULL"
-      : "AND r.owner_id = " + Number(scope.ownerId);
-  return q(
-    db,
-    `SELECT q.*, s.key AS step_key, s.name AS step_name, s.status AS step_status, r.title AS run_title
-       FROM workflow_questions q JOIN workflow_steps s ON s.id = q.step_id JOIN workflow_runs r ON r.id = q.run_id
-      WHERE q.status = 'answered' ${extra} ORDER BY q.answered_at DESC LIMIT $1`,
-    [limit],
-  );
 }
 
 /** Caller must pass through requireRun; config is server-owned, never read from pending input. */

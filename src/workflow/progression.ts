@@ -1,3 +1,4 @@
+import { stepsOf } from "./runRepository.ts";
 import { outputLocale } from "../agent/language.ts";
 import { notifyStepWaiting } from "../notify.ts";
 import type { Db } from "../db/pool.ts";
@@ -6,7 +7,6 @@ import { budgetPreflight } from "./budgets.ts";
 import { getPath } from "./graph.ts";
 import {
   lockRun,
-  stepsOf,
   setStepStatus,
   setRunStatus,
   ensureJob,

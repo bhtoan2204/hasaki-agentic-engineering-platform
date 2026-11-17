@@ -2,8 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import { StepSpec } from "./types.ts";
 import { applyProfile, type Profile } from "./profiles.ts";
 import { validateSpec } from "./graph.ts";
-import type { WorkflowSpec } from "./types.ts";
-export type BusinessRisk = "low" | "medium" | "high" | "unknown";
+import type { BusinessRisk, WorkflowSpec } from "./types.ts";
+export type { BusinessRisk } from "./types.ts";
 const order: Profile[] = ["MICRO", "FAST", "STANDARD", "DEEP"];
 export interface ProfileTransitionInput {
   original: WorkflowSpec;

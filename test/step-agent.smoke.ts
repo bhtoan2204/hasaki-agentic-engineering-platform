@@ -94,7 +94,7 @@ try {
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   assert.equal((await saved).status(), 200);
   const d = await definitions.get("mixed-provider-smoke");
-  assert.equal(d.draft_spec.steps[1].config.agent.model, "gpt-test");
+  assert.partialDeepStrictEqual(d?.draft_spec?.steps[1].config.agent, { model: "gpt-test" });
   evidence.push(
     "PASS Studio: Claude, Codex and Cursor DAG labels; provider/model controls persist to a validated draft.",
   );
