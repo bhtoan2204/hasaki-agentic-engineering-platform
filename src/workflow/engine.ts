@@ -1,3 +1,4 @@
+import { needsReplayReconciliation, planContinuation, planReplay } from "./replay.ts";
 import { continuationEvidence, latestWaitCheckpoint, readExecutionCheckpoint, saveExecutionPause, validateContinuation } from "./checkpoints.ts";
 import { reapExpiredLeases as reapExpiredJobs } from "./recovery.ts";
 import { findRun, stepsOf, loadRunDetail, loadStepDetail, loadOpenApprovals, type OwnerScope } from "./runRepository.ts";
@@ -742,6 +743,7 @@ async function reexecuteTx(
   why: string,
   /** Pending input for specific invalidated dependants (e.g. "rediscover" for the discovery step). */
   dependantInput?: Record<string, Record<string, unknown>>,
+  force = false,
 ) {
   if (run.status === "CANCELED") throw new EngineError("run is canceled");
   const steps = await stepsOf(c, run.id);
@@ -750,6 +752,8 @@ async function reexecuteTx(
   if (!target) throw new EngineError(`step "${stepKey}" not found`, 404);
   if (target.pending_input?.provider_handoff?.source_attempt_id === target.current_attempt_id)
     throw new EngineError("Review and confirm the pending provider handoff", 409);
+  if (needsReplayReconciliation(target))
+    throw new EngineError("Resolve the current execution reconciliation before re-executing", 409);
   if (!RETRYABLE.includes(target.status))
     throw new EngineError(
       `step "${stepKey}" is ${target.status}; only ${RETRYABLE.join("/")} steps can be re-executed`,
@@ -757,8 +761,11 @@ async function reexecuteTx(
   const blocked = target.depends_on.filter((d) => !DONE.includes(byKey.get(d)!.status));
   if (blocked.length) throw new EngineError(`upstream steps not complete: ${blocked.join(", ")}`);
 
+  const plan = await planReplay(c, steps, target, force);
+  const blockedReplay = plan.find((item) => item.action === "RECONCILE");
+  if (blockedReplay) throw new EngineError(`Reconcile step "${blockedReplay.key}" before replaying its dependencies`, 409);
   const aborted: number[] = [];
-  const invalidate = async (s: StepRow, to: "PENDING" | "READY") => {
+  const invalidate = async (s: StepRow, to: "PENDING" | "READY", forced: boolean, candidate?: number) => {
     aborted.push(...(await cancelStepJobs(c, s.id, `invalidated by re-execution of ${stepKey}`)));
     await q(
       c,
@@ -783,6 +790,8 @@ async function reexecuteTx(
         generation: s.generation + 1,
         attempt_count: 0,
         current_attempt_id: null,
+        replay_source_attempt_id: candidate ?? null,
+        replay_forced: forced,
         output: null,
         error: null,
         approval: null,
@@ -790,16 +799,34 @@ async function reexecuteTx(
         ready_at: to === "READY" ? new Date() : null,
         finished_at: null,
       },
-      s === target ? why : `invalidated by ${stepKey}`,
+      s === target ? why : `invalidated by ${stepKey}${candidate ? "; compare result at dispatch" : ""}`,
     );
   };
-  for (const key of downstream(steps, stepKey)) {
-    await invalidate(byKey.get(key)!, "PENDING");
+  for (const item of plan) {
+    if (item.invalidated && item.key !== stepKey)
+      await invalidate(byKey.get(item.key)!, "PENDING", item.action === "FORCE_REEXECUTE", item.source_attempt_id);
   }
-  await invalidate(target, "READY");
+  await invalidate(target, target.requires_approval ? "PENDING" : "READY", true);
   if (run.status !== "PAUSED") await setRunStatus(c, run, "RUNNING");
   afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
   await advance(c, run.id, afterCommit);
+}
+
+export async function previewReplay(runId: number, stepKey: string, force = false) {
+  const run = await findRun(runId);
+  if (!run) throw new EngineError(`run ${runId} not found`, 404);
+  const steps = await stepsOf(pool, runId);
+  const target = steps.find((s) => s.key === stepKey);
+  if (!target) throw new EngineError(`step "${stepKey}" not found`, 404);
+  const stepsByKey = new Map(steps.map((s) => [s.key, s]));
+  const plan = await planReplay(pool, steps, target, force);
+  return {
+    can_reexecute: run.status !== "CANCELED" && RETRYABLE.includes(target.status) &&
+      !plan.some((item) => item.action === "RECONCILE") &&
+      target.depends_on.every((key) => DONE.includes(stepsByKey.get(key)!.status)),
+    continuation: await planContinuation(pool, target),
+    steps: plan,
+  };
 }
 
 /**
@@ -819,6 +846,8 @@ export async function reexecuteStep(
     persist?: boolean;
     /** Internal retry continuation; authorization and observed evidence remain bound to the source attempt. */
     retry?: boolean;
+    /** Disable result reuse throughout this replay dependency closure. */
+    force?: boolean;
   } = {},
 ) {
   return txThenRun(runId, async (c, afterCommit) => {
@@ -890,7 +919,7 @@ export async function reexecuteStep(
     const why = reexecute
       ? `re-executed with ${[feedback && (opts.persist !== false ? "instructions (kept for the rest of the run)" : "instructions"), pinned.length && `skills ${pinned.map((p) => `${p.key}@v${p.version}`).join(", ")}`].filter(Boolean).join(" + ")}`
       : "re-executed by user";
-    await reexecuteTx(c, run, stepKey, pending, afterCommit, why);
+    await reexecuteTx(c, run, stepKey, pending, afterCommit, why, undefined, opts.force === true);
     if (feedback) await runEvents.add(c, runId, "user", feedback);
     return;
   });
@@ -1281,7 +1310,7 @@ export async function answerQuestions(
           } else {
             const pending = {
               ...(s.pending_input ?? {}),
-              ...(cp?.data?.workspace_recovery ? { provider_handoff: undefined } : {}),
+              ...(cp?.data?.workspace_recovery ? { provider_handoff: undefined, replay_workspace_recovery: undefined } : {}),
               resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} },
               ...(release && {
                 workspace_release: {
@@ -1978,7 +2007,11 @@ async function applyResult(
       await saveExecutionPause(c, attempt.id, "waiting_input", sealed
         ? { ...result.checkpoint, execution: continuationEvidence(sealed) }
         : result.checkpoint ?? {});
-      await setStepStatus(c, step, "WAITING_INPUT", {}, `${open} question(s)`);
+      await setStepStatus(c, step, "WAITING_INPUT",
+        result.checkpoint?.workspace_recovery
+          ? { pending_input: { ...step.pending_input, replay_workspace_recovery: true } }
+          : {},
+        `${open} question(s)`);
       await closeJob("done");
       afterCommit(() =>
         background(`notify run ${run.id}`, () => {

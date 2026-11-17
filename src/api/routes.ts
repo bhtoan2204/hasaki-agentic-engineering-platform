@@ -228,6 +228,7 @@ import {
   openApprovals,
   pauseRun,
   previewRun,
+  previewReplay,
   rejectStep,
   reexecuteStep,
   resumeRun,
@@ -1053,6 +1054,14 @@ export const routes: Route[] = [
     ),
   ],
   [
+    "GET",
+    /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/replay-preview$/,
+    async (c) => (
+      await requireRun(c.actor, num(c.p[0]), support(c)),
+      previewReplay(num(c.p[0]), c.p[1], c.url.searchParams.get("force") === "1")
+    ),
+  ],
+  [
     "POST",
     /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/reexecute$/,
     async (c) => (
@@ -1063,6 +1072,7 @@ export const routes: Route[] = [
         skills: c.body.skills,
         by: c.actor.username,
         persist: c.body.persist !== false,
+        force: c.body.force === true,
       })
     ),
   ],

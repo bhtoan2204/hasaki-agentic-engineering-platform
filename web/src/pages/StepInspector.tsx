@@ -1029,6 +1029,9 @@ export function StepInspector({
                         {a.invalidated_at && (
                           <div className="muted small">{t("si.invalidated")}</div>
                         )}
+                        {a.reused_from_attempt_id && (
+                          <div className="muted small">{t("si.replaySource", { id: a.reused_from_attempt_id })}</div>
+                        )}
                         {a.input?.pending?.reexecute && (
                           <div className="small" style={{ marginTop: 2 }}>
                             <RotateCcw size={11} style={{ verticalAlign: -1 }} />{" "}
@@ -1839,16 +1842,12 @@ function ReexecuteDialog({
   const { data: catalog } = useApi<any[]>(open ? "/api/knowledge?category=agent_skill" : null, [
     open,
   ]);
-  const graph: any[] = run.graph?.steps ?? [];
-  const affected: string[] = [];
-  const stack = [step.key];
-  while (stack.length) {
-    const k = stack.pop()!;
-    for (const s of graph)
-      if ((s.depends_on ?? []).includes(k) && !affected.includes(s.key))
-        (affected.push(s.key), stack.push(s.key));
-  }
-  const byKey = new Map(run.steps.map((s: any) => [s.key, s]));
+  const [force, setForce] = useState(false);
+  const { data: preview, error: previewError, reload: reloadPreview } = useApi<{
+    can_reexecute: boolean;
+    continuation: { action: string; reason: string } | null;
+    steps: Array<{ key: string; action: string; reason: string; conditional?: boolean }>;
+  }>(open ? `/api/runs/${run.id}/steps/${step.key}/replay-preview${force ? "?force=1" : ""}` : null, [open, force]);
   if (!open)
     return (
       <div
@@ -1947,57 +1946,37 @@ function ReexecuteDialog({
             ))}
         </select>
       </div>
+      <label className="small" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+        {t("si.forceReplay")}
+      </label>
       <div className="rv-card soft" style={{ margin: "10px 0 0", padding: "10px 12px" }}>
-        <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>
-          {t("si.willRerun")}
-        </div>
-        <div className="rv-chipline small">
-          <span className="pill chip-brand mono">{step.key}</span>
-          {affected.length ? (
-            affected.map((k) => {
-              const s: any = byKey.get(k);
-              const gate =
-                s?.requires_approval ||
-                s?.type === "human_approval" ||
-                s?.type === "task_result_report" ||
-                (s?.type === "git_pull_request" && s?.config?.mode === "approval");
-              return (
-                <span
-                  key={k}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  <ChevronRight size={12} color="var(--muted)" />
-                  <span className="pill" style={{ margin: 0 }}>
-                    {s?.name ?? k}
-                    {gate && (
-                      <>
-                        <Hand size={11} color="var(--st-wait)" /> {t("si.reapprove")}
-                      </>
-                    )}
-                  </span>
-                </span>
-              );
-            })
-          ) : (
-            <span className="muted">{t("si.noDependents")}</span>
-          )}
-        </div>
-        <div className="muted small" style={{ marginTop: 6 }}>
-          {t("si.rerunNote")}
-        </div>
+        <strong className="small">{t("si.replayPreview")}</strong>
+        {previewError ? <ErrorBox error={previewError} onRetry={reloadPreview} /> : !preview ? <Loading /> : (
+          <>
+            {preview.continuation && (
+              <p className="small"><b>{preview.continuation.action}</b> · {preview.continuation.reason}</p>
+            )}
+            <ul className="small">
+              {preview.steps.map((item) => (
+                <li key={item.key}>
+                  <code>{item.key}</code> · <b>{item.action}</b>
+                  {item.conditional && ` (${t("si.replayConditional")})`} · {item.reason}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
       <div className="row" style={{ marginTop: 12 }}>
         <button
-          disabled={busy}
+          disabled={busy || preview?.can_reexecute === false}
           onClick={async () => {
             setBusy(true);
             const r = await onSubmit({
               ...(text.trim() ? { feedback: text.trim(), persist } : {}),
               ...(skills.length ? { skills } : {}),
+              ...(force ? { force } : {}),
             });
             setBusy(false);
             if (r !== undefined) (setOpen(false), setText(""), setSkills([]));

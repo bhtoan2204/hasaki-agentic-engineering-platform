@@ -1,3 +1,4 @@
+import { commandProcessEnv } from "../platform/selfDevelopment.ts";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -107,6 +108,14 @@ export async function envFingerprint(path: string): Promise<string> {
   return h.digest("hex");
 }
 
+/** Hash the effective child process configuration. Environment values never enter persisted evidence. */
+export async function commandEnvironmentFingerprint(path: string, extra: Record<string, string>, verification = true) {
+  const plan = await commandProcessEnv(path, extra, verification);
+  const env = { ...plan.env };
+  delete env.NODE_TEST_CONTEXT;
+  return evidenceKey({ env: canonicalJson(env), isolation: canonicalJson(plan.isolation ?? null) });
+}
+
 export async function baseTip(path: string, baseBranch: string | undefined): Promise<string> {
   if (!baseBranch) return "";
   return exec("git", ["-C", path, "rev-parse", `origin/${baseBranch}`]).then((r) => r.stdout.trim(), () => "unknown");
@@ -190,7 +199,7 @@ export function pgEvidenceStore(db: Db): EvidenceStore {
   });
   return {
     async find(s, repo, key) {
-      const r = await one(db, "SELECT * FROM verification_evidence WHERE run_id=$1 AND repo=$2 AND key=$3 ORDER BY id DESC LIMIT 1", [s.runId, repo, key]);
+      const r = await one(db, "SELECT * FROM verification_evidence WHERE run_id=$1 AND repo=$2 AND key=$3 AND step_key=$4 ORDER BY id DESC LIMIT 1", [s.runId, repo, key, s.stepKey]);
       return r ? toRec(r) : null;
     },
     async latest(s, repo) {
@@ -209,7 +218,7 @@ export function memoryEvidenceStore(): EvidenceStore & { rows: Array<{ scope: Ev
   const rows: Array<{ scope: EvidenceScope; repo: string; rec: EvidenceRecord }> = [];
   return {
     rows,
-    async find(s, repo, key) { return rows.findLast((r) => r.scope.runId === s.runId && r.repo === repo && r.rec.key === key)?.rec ?? null; },
+    async find(s, repo, key) { return rows.findLast((r) => r.scope.runId === s.runId && r.scope.stepKey === s.stepKey && r.repo === repo && r.rec.key === key)?.rec ?? null; },
     async latest(s, repo) { return rows.findLast((r) => r.scope.runId === s.runId && r.scope.stepKey === s.stepKey && r.repo === repo)?.rec ?? null; },
     async save(s, repo, rec) { rows.push({ scope: s, repo, rec: structuredClone(rec) }); },
   };

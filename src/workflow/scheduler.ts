@@ -1,3 +1,4 @@
+import { attachWorkspace, findReplayResult, fingerprintExecution, replayOutputHash, safeReplayOutput } from "./replay.ts";
 import { executionWorkspace, inspectHandoffWorkspace } from "../git/workspaceCheckpoint.ts";
 import type { WorkspaceCheckpoint } from "./checkpoints.ts";
 import { recordExecutorReturn } from "./checkpoints.ts";
@@ -26,7 +27,7 @@ import { repositories, repoPath } from "../repos/service.ts";
 import { localJobs } from "./local.ts";
 import { deferIfBranchBusy } from "./branchLeases.ts";
 import { settleBackground } from "./background.ts";
-import type { ExecResult, JobRow } from "./types.ts";
+import type { ExecResult, ExecutionFingerprint, JobRow } from "./types.ts";
 
 /**
  * WorkflowScheduler: PostgreSQL-backed job claiming. No in-memory queue: any number of processes can run
@@ -200,6 +201,8 @@ export async function processJob(
     : null;
   let result: ExecResult;
   let executorEntered = false;
+  let fingerprint: ExecutionFingerprint | undefined;
+  let reusedFrom: number | undefined;
   try {
     const ownerId = Number(begun.run.owner_id);
     // Revalidate the owner's repository access before any protected content is touched (revocation, retries,
@@ -258,6 +261,17 @@ export async function processJob(
               };
             }
           }
+          fingerprint = await fingerprintExecution(pool, begun.run, begun.step, begun.attempt,
+            begun.input, begun.context);
+          if (scope.changed) fingerprint = { ...fingerprint, reusable: false };
+          const previous = await findReplayResult(pool, begun.step, fingerprint);
+          if (previous) {
+            reusedFrom = previous.id;
+            return { kind: "completed" as const, output: previous.output };
+          }
+          if (begun.step.replay_source_attempt_id != null)
+            await ctx.log("system", "Replay candidate did not match current execution inputs",
+              { action: "REEXECUTE", source_attempt_id: begun.step.replay_source_attempt_id });
           executorEntered = true;
           return getExecutor(begun.step.type).execute(ctx);
         },
@@ -301,8 +315,18 @@ export async function processJob(
         });
       }
     }
+    if (fingerprint) {
+      fingerprint = attachWorkspace(fingerprint, workspace?.fingerprint);
+      const output = result.kind === "completed" ? result.output : undefined;
+      fingerprint = {
+        ...fingerprint,
+        reusable: fingerprint.reusable && result.kind === "completed" && safeReplayOutput(output),
+        ...(result.kind === "completed" && { output_hash: replayOutputHash(output) }),
+      };
+    }
+    const replay = fingerprint ? { fingerprint, reusedFrom } : undefined;
     const recorded = await retryTransient(
-      () => recordExecutorReturn(job, begun.attempt.id, result, workspace),
+      () => recordExecutorReturn(job, begun.attempt.id, result, workspace, replay),
       `record executor checkpoint ${job.id}`,
     );
     if (!recorded) {

@@ -1,3 +1,4 @@
+import { pgEvidenceStore } from "../src/agent/verifyEvidence.ts";
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
@@ -775,7 +776,7 @@ test("a repair round sent back with feedback may make no new changes; a plain re
   assert.equal((await step(run.id))!.status, "FAILED");
 });
 
-test("final publication does not rerun a step on the exact revision it already passed on", async () => {
+test("final publication reuses only fully bound verification evidence on the integrated revision", async () => {
   process.env.FAKE_LIFECYCLE_ACTION = "edit";
   const run = await start("STANDARD", true, true);
   await reachCoding(run.id);
@@ -805,15 +806,22 @@ test("final publication does not rerun a step on the exact revision it already p
     commands.push(command),
     runCommand(command, ...rest)
   );
-  const result = await verifyPublication(ctx, steps, await workspacesOf(run.id), counting);
+  const sideEffect = "echo publish-side-effect";
+  const withSideEffect = [...steps, {
+    ...second, key: "external-effect", type: "command" as const,
+    config: { command: sideEffect }, status: "COMPLETED" as const,
+    output: { tested_heads: { [integrated.repo]: git(integrated.path, "rev-parse", "HEAD") } },
+  }];
+  const result = await verifyPublication(ctx, withSideEffect, await workspacesOf(run.id), counting, pgEvidenceStore(pool));
+  assert.ok(!commands.includes(sideEffect), "publication never invokes unrelated command steps");
   assert.deepEqual(result.problems, []);
   assert.ok(
-    logs.some((l) => /final regression: implement-second skipped/.test(l)),
+    logs.some((l) => /reused evidence/.test(l)),
     logs.join("\n"),
   );
   assert.ok(result.tested.some((t) => t.step === "publication:implement-second"));
   // The first implementation step passed on an older commit, so it alone is re-verified on the integrated revision.
-  assert.ok(!logs.some((l) => /final regression: implement skipped/.test(l)));
+  assert.ok(commands.length > 0, "an older revision still requires verification");
   writeFileSync(join(integrated.path, "uncommitted.txt"), "changed after verification\n");
   const logsAfter: string[] = [];
   const dirty = await verifyPublication(
@@ -824,7 +832,8 @@ test("final publication does not rerun a step on the exact revision it already p
     steps,
     await workspacesOf(run.id),
     runCommand,
+    pgEvidenceStore(pool),
   );
-  assert.ok(!logsAfter.some((l) => /skipped/.test(l)), "an uncommitted change forces a rerun");
+  assert.ok(!logsAfter.some((l) => /reused evidence/.test(l)), "an uncommitted change forces a rerun");
   void dirty;
 });

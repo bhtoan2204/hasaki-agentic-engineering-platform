@@ -174,6 +174,7 @@ export interface RunRow {
   finished_at: string | null;
   profile?: "MICRO" | "FAST" | "STANDARD" | "DEEP";
   profile_decision?: unknown;
+  policy_versions?: Record<string, string>;
   /** User-facing prose language for this run. NULL on rows created before the column existed. */
   output_locale?: "vi" | "en" | null;
   /** claude (default, including rows from before the column), cursor, codex or antigravity. Run default; effective agent settings are pinned per attempt. */
@@ -206,6 +207,8 @@ export interface StepRow {
   generation: number;
   attempt_count: number;
   current_attempt_id: number | null;
+  replay_source_attempt_id?: number | null;
+  replay_forced?: boolean;
   agent_override?: unknown;
   parent_step_key?: string | null;
   subtask_id?: string | null;
@@ -214,6 +217,14 @@ export interface StepRow {
   pending_input: any;
   approval: any;
   error: string | null;
+}
+
+export interface ExecutionFingerprint {
+  version: 1;
+  parts: Record<string, string>;
+  digest: string;
+  reusable: boolean;
+  output_hash?: string;
 }
 
 export interface AttemptRow {

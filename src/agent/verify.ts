@@ -1,8 +1,12 @@
+import { verificationReplay } from "../workflow/replay.ts";
 import { fileURLToPath } from "node:url";
 import { normalizeScopePath } from "./scopeGuard.ts";
 import { worktreeFingerprint } from "./scopeGuard.ts";
 import {
   baseTip,
+  commandEnvironmentFingerprint,
+  evidenceKey,
+  canonicalJson,
   envFingerprint,
   type EvidenceCache,
   type EvidenceParts,
@@ -406,6 +410,8 @@ export interface VerifyDeps {
    * verification status: they are recorded as slop.status "error" and flagged for review.
    */
   slop?(repo: { repo: string; path: string }): Promise<SlopVerification | null>;
+  /** Resolve the actual environment passed to the command runner. */
+  replayEnvironment?(cwd: string, env: Record<string, string>): Promise<Record<string, string>>;
   /** Optional evidence reuse + singleflight. Absent = always run (backward compatible). */
   evidence?: EvidenceCache;
 }
@@ -648,6 +654,35 @@ export async function verifyWorkspaces(
     const started = Date.now();
     const beforeState = await worktreeFingerprint(p).catch(() => null);
     const baseEnv = { ...env, REPO: w.repo, ...(w.branch ? { BRANCH: w.branch } : {}) };
+    const applySlop = async (entry: RepoVerification) => {
+      delete entry.slop;
+      if (deps.slop) {
+        try {
+          const report = await deps.slop({ repo: w.repo, path: p });
+          if (report) entry.slop = report;
+        } catch (e) {
+          if (signal.aborted) throw e;
+          entry.slop = {
+            ...failedReport(
+              `slop detection failed: ${(e as Error).message.split("\n")[0]}`,
+              DETECTOR_VERSION,
+            ),
+            mode: "unknown",
+            blocking: [],
+          };
+        }
+        if (entry.slop?.status === "error") entry.needs_review = true;
+        if (
+          entry.slop?.blocking.length &&
+          ["passed", "accepted_preexisting", "failed"].includes(entry.status)
+        ) {
+          entry.status = "failed";
+          entry.note = [entry.note, `${entry.slop.blocking.length} blocking slop finding(s)`]
+            .filter(Boolean)
+            .join("; ");
+        }
+      }
+    };
     // Evidence reuse: any failure to establish the full key means a real run (fail closed).
     let flight: Extract<Awaited<ReturnType<EvidenceCache["begin"]>>, { kind: "lead" }> | null =
       null;
@@ -659,9 +694,10 @@ export async function verifyWorkspaces(
         beforeState,
         baseEnv,
         known?.skipRegex ?? null,
+        deps.replayEnvironment,
       ).catch(() => null);
       const d = parts ? await deps.evidence.begin(w.repo, parts) : null;
-      const reuse = (
+      const reuse = async (
         e: RepoVerification,
         extra: Partial<NonNullable<RepoVerification["evidence"]>>,
         key: string,
@@ -679,36 +715,29 @@ export async function verifyWorkspaces(
           },
           duration_ms: Date.now() - started,
         };
-        return (
-          deps.log?.(
-            `■ verify ${w.repo}: ${entry.status.toUpperCase()} (reused evidence ${key.slice(0, 12)}: ${why})`,
-            {
-              repo: w.repo,
-              verification: round,
-              status: entry.status,
-              evidence: { reused: true, key },
-            },
-          ),
-          entry
+        await applySlop(entry);
+        const current = await worktreeFingerprint(p).catch(() => null);
+        if (signal.aborted || JSON.stringify(current) !== JSON.stringify(beforeState)) return null;
+        entry.passed = ["passed", "accepted_preexisting"].includes(entry.status) && !entry.needs_review;
+        await deps.log?.(
+          `■ verify ${w.repo}: ${entry.status.toUpperCase()} (reused evidence ${key.slice(0, 12)}: ${why})`,
+          { repo: w.repo, verification: round, evidence: { reused: true, key }, replay: verificationReplay(true).action },
         );
+        return entry;
       };
       if (d?.kind === "hit") {
-        repos.push(
-          reuse(
-            d.record.result,
-            { source_attempt_id: d.record.attempt_id },
-            d.key,
-            `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`,
-          ),
-        );
-        continue;
+        const entry = await reuse(d.record.result, { source_attempt_id: d.record.attempt_id },
+          d.key, `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`);
+        if (entry) {
+          repos.push(entry);
+          continue;
+        }
       }
       if (d?.kind === "joined") {
         const shared = await d.promise;
-        if (shared && !signal.aborted) {
-          repos.push(
-            reuse(shared, { joined: true }, d.key, "joined identical in-flight verification"),
-          );
+        const entry = shared && await reuse(shared, { joined: true }, d.key, "joined identical in-flight verification");
+        if (entry) {
+          repos.push(entry);
           continue;
         }
       }
@@ -716,7 +745,7 @@ export async function verifyWorkspaces(
         flight = d;
         await deps.log?.(
           `◆ verify ${w.repo}: evidence miss (${d.reason}) key ${d.key.slice(0, 12)}`,
-          { repo: w.repo, verification: round, evidence: { key: d.key, reason: d.reason } },
+          { repo: w.repo, verification: round, evidence: { key: d.key, reason: d.reason }, replay: verificationReplay(false).action },
         );
       }
     }
@@ -915,32 +944,7 @@ export async function verifyWorkspaces(
           }
         }
       }
-      if (deps.slop) {
-        try {
-          const report = await deps.slop({ repo: w.repo, path: p });
-          if (report) entry.slop = report;
-        } catch (e) {
-          if (signal.aborted) throw e;
-          entry.slop = {
-            ...failedReport(
-              `slop detection failed: ${(e as Error).message.split("\n")[0]}`,
-              DETECTOR_VERSION,
-            ),
-            mode: "unknown",
-            blocking: [],
-          };
-        }
-        if (entry.slop?.status === "error") entry.needs_review = true;
-        if (
-          entry.slop?.blocking.length &&
-          ["passed", "accepted_preexisting", "failed"].includes(entry.status)
-        ) {
-          entry.status = "failed";
-          entry.note = [entry.note, `${entry.slop.blocking.length} blocking slop finding(s)`]
-            .filter(Boolean)
-            .join("; ");
-        }
-      }
+      await applySlop(entry);
       {
         const afterState = await worktreeFingerprint(p).catch(() => null);
         if (
@@ -1011,20 +1015,24 @@ async function evidenceParts(
   state: { head: string; fingerprint: string },
   env: Record<string, string>,
   skip: string | null,
+  resolveEnvironment?: VerifyDeps["replayEnvironment"],
 ): Promise<EvidenceParts> {
-  const vars = ["BASE_BRANCH", "RUN_ID", "REPO", "BRANCH"]
-    .map((k) => `${k}=${env[k] ?? ""}`)
-    .join("\n");
+  const requested: Record<string, string> = { ...env, ...(skip ? { GO_TEST_SKIP: skip } : {}) };
+  const actual = resolveEnvironment ? await resolveEnvironment(path, requested) : requested;
+  const tip = await baseTip(path, actual.BASE_BRANCH);
+  if (tip === "unknown" && cfg.baseline) throw new Error("Unknown verification baseline");
+  const vars = resolveEnvironment ? await commandEnvironmentFingerprint(path, actual)
+    : evidenceKey({ env: canonicalJson(actual) });
   return {
     repo_name: w.repo,
     workspace: path,
     head: state.head,
     workspace_fingerprint: state.fingerprint,
-    base_tip: await baseTip(path, env.BASE_BRANCH),
+    base_tip: tip,
     contract_revision: cfg.contractRevision ?? "",
     command: cfg.command,
     selectors: [...(cfg.requiredTests ?? [])].sort().join("\n"),
-    policy: `allowTestWeakening=${cfg.allowTestWeakening}`,
+    policy: canonicalJson({ allowTestWeakening: cfg.allowTestWeakening, notApplicable: cfg.notApplicable }),
     baseline: String(cfg.baseline),
     timeout: String(cfg.timeoutMs),
     env_fingerprint: await envFingerprint(path),

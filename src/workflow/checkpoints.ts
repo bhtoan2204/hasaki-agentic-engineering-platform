@@ -1,9 +1,10 @@
+import { runEvents } from "./events.ts";
 import { HttpError } from "../http/error.ts";
 import { createHash } from "node:crypto";
 import { config } from "../config.ts";
 import { ownsInstance } from "../instances.ts";
 import { json, one, q, withTx, type Db } from "../db/pool.ts";
-import type { AttemptRow, ExecResult, JobRow } from "./types.ts";
+import type { AttemptRow, ExecResult, ExecutionFingerprint, JobRow } from "./types.ts";
 
 export const EXECUTION_WORKSPACE_ARTIFACT = "execution_checkpoint_workspace";
 const RESULT_BYTES = 128 * 1024;
@@ -198,6 +199,7 @@ export async function recordExecutorReturn(
   attemptId: number,
   result: ExecResult,
   workspace?: WorkspaceCheckpoint,
+  replay?: { fingerprint: ExecutionFingerprint; reusedFrom?: number },
 ) {
   return withTx(async (db) => {
     const run = await one(
@@ -248,9 +250,15 @@ export async function recordExecutorReturn(
     await insertCheckpoint(db, source, "executor_returned", {}, result, workspace, artifact?.id);
     await q(
       db,
-      "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1",
-      [attemptId],
+      `UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()),
+         execution_fingerprint=$2, reused_from_attempt_id=$3 WHERE id=$1`,
+      [attemptId, json(replay?.fingerprint ?? null), replay?.reusedFrom ?? null],
     );
+    if (replay?.reusedFrom != null)
+      await runEvents.add(db, source.run_id, "system", "Reused compatible execution result",
+        source.step_id, attemptId, {
+          action: "REUSE", source_attempt_id: replay.reusedFrom, fingerprint: replay.fingerprint.digest,
+        });
     await q(
       db,
       `WITH retired AS (

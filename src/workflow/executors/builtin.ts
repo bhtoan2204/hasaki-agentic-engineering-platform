@@ -1,9 +1,9 @@
+import { isVerificationCommand, verificationReplay } from "../replay.ts";
 import { fileURLToPath } from "node:url";
 import { verifyPublication } from "../../agent/publicationVerification.ts";
-import { pgEvidenceStore } from "../../agent/verifyEvidence.ts";
+import { baseTip, canonicalJson, commandEnvironmentFingerprint, envFingerprint, evidenceKey, pgEvidenceStore } from "../../agent/verifyEvidence.ts";
 import type { StepRow } from "../types.ts";
 import { requireRunRepositoryAccess } from "../../repos/access.ts";
-import { createHash } from "node:crypto";
 import {
   investigationCorrelate,
   investigationLatency,
@@ -13,7 +13,7 @@ import {
 import { approvedScopeFrom } from "../../agent/evidence.ts";
 import { requiredTestTargets } from "../../agent/verify.ts";
 import { repoPath } from "../../repos/service.ts";
-import { environmentUnavailable } from "../../agent/verify.ts";
+import { environmentUnavailable, testEvidence } from "../../agent/verify.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
@@ -481,68 +481,55 @@ export const commandExecutor: StepExecutor = {
         },
       };
     }
-    // Reusable test evidence: the exact same command + config on exactly the same, clean commits already PASSED in an
-    // earlier attempt of this step → do not rerun the suite. Never reused: dirty worktrees (tests saw uncommitted content),
-    // any failure or human-accepted exception (baseline handling cannot hide a regression), a resume/decision flow, or
-    // an explicit human re-run.
-    const commandHash = createHash("sha256")
-      .update(
-        JSON.stringify([
-          cfg.command,
-          cfg.cwd ?? null,
-          cfg.baseline_compare ?? null,
-          cfg.timeout_seconds ?? null,
-          cfg.env ?? null,
-        ]),
-      )
-      .digest("hex")
-      .slice(0, 16);
-    const nowHeads: Record<string, string> = {};
-    let clean = !cfg.cwd;
-    for (const t of targets)
-      if (t.repo !== "(cwd)") {
-        nowHeads[t.repo] = await headOf(t.path).catch(() => "");
-        if (!nowHeads[t.repo] || (await dirtyOf(t.path))) clean = false;
+    const commandHash = evidenceKey({ version: "1", config: canonicalJson(cfg) }).slice(0, 16);
+    const verification = isVerificationCommand(ctx.step.config) && cfg.command === ctx.step.config.command;
+    const compare = verification && cfg.reuse_test_evidence !== false && !cfg.cwd && !ctx.step.replay_forced &&
+      !ctx.input.pending?.reexecute && !ctx.input.pending?.feedback && !resumed && !decision;
+    const fingerprint = async () => {
+      if (!compare) return null;
+      try {
+        const parts = await Promise.all(targets.map(async (target) => {
+          if (await dirtyOf(target.path)) throw new Error("Dirty workspace");
+          const base = await repositoryBaseBranch(target.repo);
+          const tip = await baseTip(target.path, base);
+          if (tip === "unknown" && cfg.baseline_compare) throw new Error("Unknown baseline");
+          const env = {
+            BASE_BRANCH: base, REPO: target.repo, BRANCH: target.branch, RUN_ID: String(ctx.run.id),
+            ...((cfg.env as Record<string, string>) ?? {}),
+          };
+          return [target.repo, {
+            branch: target.branch, path: target.path, state: await worktreeFingerprint(target.path), tip,
+            dependencies: await envFingerprint(target.path),
+            environment: await commandEnvironmentFingerprint(target.path, env, false),
+          }];
+        }));
+        return evidenceKey({
+          version: "1", config: canonicalJson(cfg), workspaces: canonicalJson(Object.fromEntries(parts)),
+          policy: canonicalJson(ctx.run.policy_versions ?? {}),
+          authority: canonicalJson(ctx.input.execution_contract ?? null),
+        });
+      } catch {
+        return null;
       }
-    const humanRerun = !!(
-      ctx.input.pending?.reexecute ||
-      ctx.input.pending?.feedback ||
-      resumed ||
-      decision
-    );
-    if (clean && !humanRerun && cfg.reuse_test_evidence !== false) {
-      const prior = await q<{ id: number; output: any }>(
-        pool,
-        "SELECT id, output FROM workflow_step_attempts WHERE step_id = $1 AND status = 'COMPLETED' AND output->>'command_hash' = $2 ORDER BY id DESC LIMIT 5",
-        [ctx.step.id, commandHash],
-      );
-      const same = prior.find(
-        (p) =>
-          p.output?.passed === true &&
-          !p.output?.decision &&
-          p.output?.tested_clean === true &&
-          JSON.stringify(Object.entries(p.output?.tested_heads ?? {}).sort()) ===
-            JSON.stringify(Object.entries(nowHeads).sort()),
-      );
-      if (same) {
-        await ctx.log(
-          "system",
-          `tests not re-run: attempt #${same.id} already passed "${String(cfg.command).slice(0, 120)}" on exactly these clean commits (${Object.entries(
-            nowHeads,
-          )
-            .map(([r, h]) => `${r}@${h.slice(0, 12)}`)
-            .join(", ")})`,
-        );
-        return {
-          kind: "completed",
-          output: {
-            ...same.output,
-            reused_from_attempt: same.id,
-            reused_at: new Date().toISOString(),
-          },
-        };
-      }
+    };
+    const beforeEvidence = await fingerprint();
+    const same = beforeEvidence ? (await q<{ id: number; output: Record<string, unknown> }>(pool,
+      `SELECT id,output FROM workflow_step_attempts WHERE step_id=$1 AND status='COMPLETED'
+        AND output->>'verification_fingerprint'=$2 AND NOT output ? 'reused_from_attempt'
+        ORDER BY id DESC LIMIT 1`,
+      [ctx.step.id, beforeEvidence]))[0] : undefined;
+    if (verification) {
+      const choice = verificationReplay(!!same);
+      await ctx.log("system", choice.reason, { replay: choice.action, source_attempt_id: same?.id });
     }
+    if (same) return {
+      kind: "completed",
+      output: {
+        ...same.output,
+        reused_from_attempt: same.id,
+        reused_at: new Date().toISOString(),
+      },
+    };
     const results: Array<{
       repo: string;
       exit_code: number | null;
@@ -551,6 +538,7 @@ export const commandExecutor: StepExecutor = {
       baseline?: any;
       passed?: boolean;
       environment_unavailable?: string;
+      skipped_known_failures?: string[];
     }> = [];
     const outputs: Record<string, string> = {};
     for (const t of targets) {
@@ -644,11 +632,18 @@ export const commandExecutor: StepExecutor = {
     const tested_heads: Record<string, string> = {};
     for (const t of targets)
       if (t.repo !== "(cwd)") tested_heads[t.repo] = await headOf(t.path).catch(() => "");
+    const clean = !cfg.cwd && Object.values(tested_heads).every(Boolean) &&
+      !(await Promise.all(targets.map((t) => dirtyOf(t.path)))).some(Boolean);
+    const compatible = beforeEvidence && clean && results.every((r) =>
+      r.exit_code === 0 && r.passed && !r.timed_out && !r.environment_unavailable &&
+      !r.baseline && !r.skipped_known_failures?.length &&
+      (testEvidence(outputs[r.repo]).executed ?? 0) > 0) && beforeEvidence === await fingerprint();
     const output = {
       results,
       passed: failed.length === 0,
       command_hash: commandHash,
       tested_clean: clean,
+      ...(compatible && { verification_fingerprint: beforeEvidence }),
       ...(Object.keys(tested_heads).length ? { tested_heads } : {}),
       ...(decision ? { decision } : {}),
     };

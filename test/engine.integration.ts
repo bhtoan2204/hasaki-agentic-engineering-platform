@@ -1,7 +1,7 @@
 import { test, before, after, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { pool, q, one } from "../src/db/pool.ts";
@@ -4391,7 +4391,7 @@ test("smart verification: an identical passing test on the same clean commit is 
       key: "test",
       type: "command",
       depends_on: ["implement"],
-      config: { command: 'echo ran >> "$TMPDIR_RUNS"; true' },
+      config: { command: 'echo ran >> "$TMPDIR_RUNS"; node --test replay.test.cjs', reuse_test_evidence: true },
     },
   ]);
   const counter = join(mkdtempSync(join(process.env.TEST_ROOT!, "runs-")), "count");
@@ -4403,6 +4403,9 @@ test("smart verification: an identical passing test on the same clean commit is 
     if (!path) {
       path = scopedWorktree("oms-api", ctx.run.branch);
       commitFile(path, "a.go", "package a\n", "first");
+      commitFile(path, "replay.test.cjs",
+        "require('node:test')('verification ran', () => require('node:assert/strict').ok(true));\n",
+        "add verification test");
       await recordWorkspace(ctx.run.id, {
         repo: "oms-api",
         branch: ctx.run.branch,
@@ -4425,6 +4428,14 @@ test("smart verification: an identical passing test on the same clean commit is 
   await drain();
   assert.equal(runs(), 1, "unchanged commit: the passing suite is not rerun");
   assert.ok((await stepOf(run.id, "test")).output.reused_from_attempt);
+  const changedEnvironment = join(counter, "..", "other-count");
+  writeFileSync(changedEnvironment, "");
+  process.env.TMPDIR_RUNS = changedEnvironment;
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  assert.equal(readFileSync(changedEnvironment, "utf8"), "ran\n", "a changed process environment reruns verification");
+  assert.equal((await stepOf(run.id, "test")).output.reused_from_attempt, undefined);
+  process.env.TMPDIR_RUNS = counter;
   change = true;
   await reexecuteStep(run.id, "implement");
   await drain();

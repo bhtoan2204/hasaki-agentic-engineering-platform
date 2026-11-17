@@ -2072,6 +2072,7 @@ ${validation.errors.join("; ")}`,
       const deps: VerifyDeps = {
         run: async (cmd, cwd, vars, ...args) =>
           runCommand(cmd, cwd, { ...vars, BASE_BRANCH: await workspaceBaseBranch(cwd) }, ...args),
+        replayEnvironment: async (cwd, vars) => ({ ...vars, BASE_BRANCH: await workspaceBaseBranch(cwd) }),
         knownFailures: (p) => knownBaseFailures(p),
         baseline: async (repo, failing) =>
           (
@@ -2110,11 +2111,11 @@ ${validation.errors.join("; ")}`,
           ctx.artifact("log", name, content, { ...data, verification: true }),
         log: (text, data) => void ctx.log(data?.stream ? "log" : "system", text, data ?? null),
         // Rebuilt from the live worktree on every verification, so resume, retry and handoff trust no in-memory state.
-        evidence: new EvidenceCache(pgEvidenceStore(pool), {
+        ...(ctx.step.replay_forced ? {} : { evidence: new EvidenceCache(pgEvidenceStore(pool), {
           runId: ctx.run.id,
           stepKey: ctx.step.key,
           attemptId: ctx.attempt?.id ?? null,
-        }),
+        }) }),
       };
       let accepted = output;
       const loop = await verificationLoop<ExecResult>({
