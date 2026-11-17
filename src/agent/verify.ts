@@ -1,7 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { normalizeScopePath } from "./scopeGuard.ts";
 import { worktreeFingerprint } from "./scopeGuard.ts";
-import { baseTip, envFingerprint, type EvidenceCache, type EvidenceParts, type EvidenceStats } from "./verifyEvidence.ts";
+import {
+  baseTip,
+  envFingerprint,
+  type EvidenceCache,
+  type EvidenceParts,
+  type EvidenceStats,
+} from "./verifyEvidence.ts";
 import { execFile } from "node:child_process";
 import { realpath, stat, readFile } from "node:fs/promises";
 import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
@@ -76,10 +82,14 @@ export function verifyConfig(
   };
 }
 
-function notApplicablePolicy(v: unknown): { notApplicable?: NonNullable<VerifyConfig["notApplicable"]> } {
+function notApplicablePolicy(v: unknown): {
+  notApplicable?: NonNullable<VerifyConfig["notApplicable"]>;
+} {
   const o = v as { allowed_paths?: unknown; reason?: unknown } | null;
   if (!o || typeof o !== "object" || !Array.isArray(o.allowed_paths)) return {};
-  const allowedPaths = o.allowed_paths.filter((x): x is string => typeof x === "string" && !!x.trim());
+  const allowedPaths = o.allowed_paths.filter(
+    (x): x is string => typeof x === "string" && !!x.trim(),
+  );
   const reason = typeof o.reason === "string" ? o.reason.trim() : "";
   return allowedPaths.length && reason ? { notApplicable: { allowedPaths, reason } } : {};
 }
@@ -99,8 +109,24 @@ const globRe = (glob: string) =>
   );
 const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$/;
 
+/** Changes no test can exercise on their own: generated protobuf code, .proto schemas and swag-generated API docs. */
+export const GENERATED_ONLY: NonNullable<VerifyConfig["notApplicable"]> = {
+  allowedPaths: [
+    "**/*.pb.go",
+    "**/*.pb.*.go",
+    "**/*.proto",
+    "**/docs/docs.go",
+    "**/docs/swagger.json",
+    "**/docs/swagger.yaml",
+  ],
+  reason: "only generated protobuf code, .proto schemas or generated swagger docs changed",
+};
+
 /** True only when there is at least one changed file and every one is covered by the policy and is not a test file. */
-export function notApplicableCovers(policy: VerifyConfig["notApplicable"], files: string[]): boolean {
+export function notApplicableCovers(
+  policy: VerifyConfig["notApplicable"],
+  files: string[],
+): boolean {
   if (!policy || !files.length) return false;
   const res = policy.allowedPaths.map(globRe);
   return files.every((f) => !TEST_FILE.test(f) && res.some((re) => re.test(f)));
@@ -111,7 +137,11 @@ export function notApplicableCovers(policy: VerifyConfig["notApplicable"], files
  * summary), `skipped` = tests the runner skipped, `marker` = the command itself said nothing was run. Exit code 0 is
  * never evidence on its own.
  */
-export function testEvidence(output: string): { executed: number | null; skipped: number; marker: boolean } {
+export function testEvidence(output: string): {
+  executed: number | null;
+  skipped: number;
+  marker: boolean;
+} {
   const marker =
     /VERIFY_NOT_EXECUTED|no test runner detected|no matching test files|no Go packages changed|no platform test harness/.test(
       output,
@@ -129,7 +159,8 @@ export function testEvidence(output: string): { executed: number | null; skipped
     executed += pass;
     skipped += (node("skipped") ?? 0) + (node("todo") ?? 0);
   }
-  const jest = output.match(/^Tests:.*?(\d+) passed/m) ?? output.match(/^\s*Tests\s+.*?(\d+) passed/m);
+  const jest =
+    output.match(/^Tests:.*?(\d+) passed/m) ?? output.match(/^\s*Tests\s+.*?(\d+) passed/m);
   if (jest) {
     recognised = true;
     executed += Number(jest[1]);
@@ -220,7 +251,14 @@ export interface RepoVerification {
   /** Slop detection for this worktree; `blocking` is non-empty only under enforcement. */
   slop?: SlopVerification;
   /** Present when this result was served from verification evidence instead of running the command. */
-  evidence?: { reused: true; key: string; source_attempt_id: number | null; original_duration_ms: number; saved_ms: number; joined?: boolean };
+  evidence?: {
+    reused: true;
+    key: string;
+    source_attempt_id: number | null;
+    original_duration_ms: number;
+    saved_ms: number;
+    joined?: boolean;
+  };
 }
 export type SlopVerification = SlopReport & { mode: string; blocking: Finding[] };
 export interface VerificationRound {
@@ -274,7 +312,12 @@ export function failureSignature(repos: RepoVerification[]): string {
             .replace(/:\d+(:\d+)?/g, "")
             .replace(/\s+/g, " ")
             .slice(0, 400);
-      const slop = r.slop?.blocking.length ? `|slop:${r.slop.blocking.map((f) => f.fingerprint).sort().join(",")}` : "";
+      const slop = r.slop?.blocking.length
+        ? `|slop:${r.slop.blocking
+            .map((f) => f.fingerprint)
+            .sort()
+            .join(",")}`
+        : "";
       return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}${slop}}`;
     })
     .sort();
@@ -378,11 +421,13 @@ const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 type RequiredTestTarget = { id: string; selector: string; format: "go" | "node"; command: string };
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-const directGoJson = (command: string) => /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
+const directGoJson = (command: string) =>
+  /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
 
 async function plannedPath(path: string, allowMissing: boolean): Promise<string | null> {
-  try { return await realpath(path); }
-  catch {
+  try {
+    return await realpath(path);
+  } catch {
     if (!allowMissing || dirname(path) === path) return null;
     const parent = await plannedPath(dirname(path), true);
     return parent ? resolve(parent, basename(path)) : null;
@@ -390,45 +435,102 @@ async function plannedPath(path: string, allowMissing: boolean): Promise<string 
 }
 
 /** Resolve ownership before execution. Ambiguous IDs need an explicit repository:: selector. */
-export async function requiredTestTargets(workspaces: Array<{ repo: string; path: string }>, ids: string[], beforeApproval = false) {
+export async function requiredTestTargets(
+  workspaces: Array<{ repo: string; path: string }>,
+  ids: string[],
+  beforeApproval = false,
+) {
   const targets = new Map<string, RequiredTestTarget[]>();
   const problems: string[] = [];
   for (const id of ids) {
-    if (typeof id !== "string" || !id.trim() || id !== id.trim()) { problems.push("Invalid required test selector"); continue; }
+    if (typeof id !== "string" || !id.trim() || id !== id.trim()) {
+      problems.push("Invalid required test selector");
+      continue;
+    }
     const separator = id.indexOf("::");
     const repository = separator < 0 ? null : id.slice(0, separator);
     const selector = separator < 0 ? id : id.slice(separator + 2);
-    if ("invalid" in normalizeScopePath(selector) || /[\s;$`|&<>]/.test(selector)) { problems.push(`${id}: invalid executable test selector`); continue; }
+    if ("invalid" in normalizeScopePath(selector) || /[\s;$`|&<>]/.test(selector)) {
+      problems.push(`${id}: invalid executable test selector`);
+      continue;
+    }
     const matches: Array<{ repo: string; target: RequiredTestTarget }> = [];
-    for (const workspace of workspaces.filter(w => !repository || w.repo === repository)) {
+    for (const workspace of workspaces.filter((w) => !repository || w.repo === repository)) {
       if (/\.(?:[cm]?[jt]s)$/.test(selector) && !isAbsolute(selector)) {
         const root = await realpath(workspace.path).catch(() => null);
         const file = await plannedPath(resolve(workspace.path, selector), beforeApproval);
-        const manifest = JSON.parse(await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"));
-        if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) { problems.push(`${id}: repository runner is incompatible with the Node structured test runner`); continue; }
-        if (!root || !file || relative(root, file).startsWith("..") || isAbsolute(relative(root, file))) continue;
+        const manifest = JSON.parse(
+          await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"),
+        );
+        if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) {
+          problems.push(
+            `${id}: repository runner is incompatible with the Node structured test runner`,
+          );
+          continue;
+        }
+        if (
+          !root ||
+          !file ||
+          relative(root, file).startsWith("..") ||
+          isAbsolute(relative(root, file))
+        )
+          continue;
         const preload = /\.integration\./.test(selector) ? "test/setup.ts" : "test/env.ts";
-        const hasPreload = await stat(resolve(root, preload)).then(s => s.isFile()).catch(() => false);
-        const args = [process.execPath, ...(hasPreload ? ["--import", `./${preload}`] : []), "--test",
-          `--test-reporter=${fileURLToPath(new URL("./testReporter.mjs", import.meta.url))}`, file];
-        matches.push({ repo: workspace.repo, target: { id, selector: file, format: "node", command: args.map(shellQuote).join(" ") } });
+        const hasPreload = await stat(resolve(root, preload))
+          .then((s) => s.isFile())
+          .catch(() => false);
+        const args = [
+          process.execPath,
+          ...(hasPreload ? ["--import", `./${preload}`] : []),
+          "--test",
+          `--test-reporter=${fileURLToPath(new URL("./testReporter.mjs", import.meta.url))}`,
+          file,
+        ];
+        matches.push({
+          repo: workspace.repo,
+          target: { id, selector: file, format: "node", command: args.map(shellQuote).join(" ") },
+        });
       } else {
-        const module = /^module\s+["']?([^\s"']+)/m.exec(await readFile(resolve(workspace.path, "go.mod"), "utf8").catch(() => ""))?.[1];
+        const module = /^module\s+["']?([^\s"']+)/m.exec(
+          await readFile(resolve(workspace.path, "go.mod"), "utf8").catch(() => ""),
+        )?.[1];
         const testAt = selector.search(/\/Test[A-Za-z0-9_]/);
-        if (!module || testAt < 0 || !/^Test[A-Za-z0-9_]+(?:\/[A-Za-z0-9_-]+)*$/.test(selector.slice(testAt + 1))) continue;
-        const pkg = selector.slice(0, testAt), test = selector.slice(testAt + 1);
+        if (
+          !module ||
+          testAt < 0 ||
+          !/^Test[A-Za-z0-9_]+(?:\/[A-Za-z0-9_-]+)*$/.test(selector.slice(testAt + 1))
+        )
+          continue;
+        const pkg = selector.slice(0, testAt),
+          test = selector.slice(testAt + 1);
         if (pkg !== module && !pkg.startsWith(`${module}/`)) continue;
         const packagePath = pkg === module ? "." : `.${pkg.slice(module.length)}`;
         if (packagePath.split("/").includes("..")) continue;
         const root = await realpath(workspace.path).catch(() => null);
         const directory = await plannedPath(resolve(workspace.path, packagePath), beforeApproval);
-        if (!root || !directory || relative(root, directory).startsWith("..") || isAbsolute(relative(root, directory))) continue;
+        if (
+          !root ||
+          !directory ||
+          relative(root, directory).startsWith("..") ||
+          isAbsolute(relative(root, directory))
+        )
+          continue;
         const pattern = test.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        matches.push({ repo: workspace.repo, target: { id, selector, format: "go",
-          command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}` } });
+        matches.push({
+          repo: workspace.repo,
+          target: {
+            id,
+            selector,
+            format: "go",
+            command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}`,
+          },
+        });
       }
     }
-    if (matches.length !== 1) problems.push(`${id}: ${matches.length ? "ambiguous repository; use repository::test ID" : "test has no authorized repository owner"}`);
+    if (matches.length !== 1)
+      problems.push(
+        `${id}: ${matches.length ? "ambiguous repository; use repository::test ID" : "test has no authorized repository owner"}`,
+      );
     else {
       const match = matches[0];
       targets.set(match.repo, [...(targets.get(match.repo) ?? []), match.target]);
@@ -437,7 +539,10 @@ export async function requiredTestTargets(workspaces: Array<{ repo: string; path
   return { targets, problems };
 }
 
-function requiredTestStatus(output: string, target: RequiredTestTarget): NonNullable<RepoVerification["required_tests"]>[string] {
+function requiredTestStatus(
+  output: string,
+  target: RequiredTestTarget,
+): NonNullable<RepoVerification["required_tests"]>[string] {
   if (output.endsWith("\n[output truncated]")) return "not_executed";
   let status: NonNullable<RepoVerification["required_tests"]>[string] = "not_executed";
   for (const line of output.split("\n")) {
@@ -445,12 +550,35 @@ function requiredTestStatus(output: string, target: RequiredTestTarget): NonNull
       const event = JSON.parse(line);
       let next: NonNullable<RepoVerification["required_tests"]>[string] | null = null;
       if (target.format === "go" && `${event.Package}/${event.Test}` === target.selector)
-        next = event.Action === "pass" ? "passed" : event.Action === "fail" ? "failed" : event.Action === "skip" ? "skipped" : null;
-      if (target.format === "node" && event.type === "platform:test-summary" && event.complete === true && event.file === target.selector &&
-        [event.passed, event.failed, event.skipped].every(count => Number.isInteger(count) && count >= 0))
-        next = event.failed > 0 ? "failed" : event.skipped > 0 ? "skipped" : event.passed > 0 ? "passed" : null;
+        next =
+          event.Action === "pass"
+            ? "passed"
+            : event.Action === "fail"
+              ? "failed"
+              : event.Action === "skip"
+                ? "skipped"
+                : null;
+      if (
+        target.format === "node" &&
+        event.type === "platform:test-summary" &&
+        event.complete === true &&
+        event.file === target.selector &&
+        [event.passed, event.failed, event.skipped].every(
+          (count) => Number.isInteger(count) && count >= 0,
+        )
+      )
+        next =
+          event.failed > 0
+            ? "failed"
+            : event.skipped > 0
+              ? "skipped"
+              : event.passed > 0
+                ? "passed"
+                : null;
       if (next && status !== "failed" && status !== "skipped") status = next;
-    } catch { /* Logs, including test stdout, are never passing evidence. */ }
+    } catch {
+      /* Logs, including test stdout, are never passing evidence. */
+    }
   }
   return status;
 }
@@ -505,258 +633,334 @@ export async function verifyWorkspaces(
     const beforeState = await worktreeFingerprint(p).catch(() => null);
     const baseEnv = { ...env, REPO: w.repo, ...(w.branch ? { BRANCH: w.branch } : {}) };
     // Evidence reuse: any failure to establish the full key means a real run (fail closed).
-    let flight: Extract<Awaited<ReturnType<EvidenceCache["begin"]>>, { kind: "lead" }> | null = null;
+    let flight: Extract<Awaited<ReturnType<EvidenceCache["begin"]>>, { kind: "lead" }> | null =
+      null;
     if (deps.evidence && beforeState) {
-      const parts = await evidenceParts(p, w, cfg, beforeState, baseEnv, known?.skipRegex ?? null).catch(() => null);
+      const parts = await evidenceParts(
+        p,
+        w,
+        cfg,
+        beforeState,
+        baseEnv,
+        known?.skipRegex ?? null,
+      ).catch(() => null);
       const d = parts ? await deps.evidence.begin(w.repo, parts) : null;
-      const reuse = (e: RepoVerification, extra: Partial<NonNullable<RepoVerification["evidence"]>>, key: string, why: string) => {
+      const reuse = (
+        e: RepoVerification,
+        extra: Partial<NonNullable<RepoVerification["evidence"]>>,
+        key: string,
+        why: string,
+      ) => {
         const entry: RepoVerification = {
           ...e,
-          evidence: { reused: true, key, source_attempt_id: null, original_duration_ms: e.duration_ms, saved_ms: e.duration_ms, ...extra },
+          evidence: {
+            reused: true,
+            key,
+            source_attempt_id: null,
+            original_duration_ms: e.duration_ms,
+            saved_ms: e.duration_ms,
+            ...extra,
+          },
           duration_ms: Date.now() - started,
         };
-        return deps.log?.(`■ verify ${w.repo}: ${entry.status.toUpperCase()} (reused evidence ${key.slice(0, 12)}: ${why})`,
-          { repo: w.repo, verification: round, status: entry.status, evidence: { reused: true, key } }), entry;
+        return (
+          deps.log?.(
+            `■ verify ${w.repo}: ${entry.status.toUpperCase()} (reused evidence ${key.slice(0, 12)}: ${why})`,
+            {
+              repo: w.repo,
+              verification: round,
+              status: entry.status,
+              evidence: { reused: true, key },
+            },
+          ),
+          entry
+        );
       };
       if (d?.kind === "hit") {
-        repos.push(reuse(d.record.result, { source_attempt_id: d.record.attempt_id }, d.key, `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`));
+        repos.push(
+          reuse(
+            d.record.result,
+            { source_attempt_id: d.record.attempt_id },
+            d.key,
+            `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`,
+          ),
+        );
         continue;
       }
       if (d?.kind === "joined") {
         const shared = await d.promise;
         if (shared && !signal.aborted) {
-          repos.push(reuse(shared, { joined: true }, d.key, "joined identical in-flight verification"));
+          repos.push(
+            reuse(shared, { joined: true }, d.key, "joined identical in-flight verification"),
+          );
           continue;
         }
       }
       if (d?.kind === "lead") {
         flight = d;
-        await deps.log?.(`◆ verify ${w.repo}: evidence miss (${d.reason}) key ${d.key.slice(0, 12)}`, { repo: w.repo, verification: round, evidence: { key: d.key, reason: d.reason } });
+        await deps.log?.(
+          `◆ verify ${w.repo}: evidence miss (${d.reason}) key ${d.key.slice(0, 12)}`,
+          { repo: w.repo, verification: round, evidence: { key: d.key, reason: d.reason } },
+        );
       }
     }
     try {
-    const runWith = (skip: string | null) =>
-      deps.run(
-        cfg.command,
-        p,
-        { ...baseEnv, ...(skip ? { GO_TEST_SKIP: skip } : {}) },
-        cfg.timeoutMs,
-        signal,
-        (s) => void deps.log?.(s, { repo: w.repo, verification: round, stream: true }),
-      );
-    let r = await runWith(known?.skipRegex ?? null);
-    if (signal.aborted) throw new Error("verification canceled");
-    const headCommit = await exec("git", ["-C", p, "rev-parse", "HEAD"])
-      .then(({ stdout }) => stdout.trim())
-      .catch(() => "");
-    const entry: RepoVerification = {
-      repo: w.repo,
-      status: r.code === 0 && !r.timedOut ? "passed" : "failed",
-      passed: false,
-      exit_code: r.code,
-      timed_out: r.timedOut,
-      duration_ms: 0,
-      regressions: [],
-      pre_existing: 0,
-      pre_existing_tests: [],
-      weakened: [],
-      suspected: [],
-      needs_review: false,
-      excerpt: "",
-      commit_sha: headCommit,
-    };
-    const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
-    if (unavailable)
-      Object.assign(entry, {
-        status: "skipped",
-        needs_review: true,
-        note: `environment unavailable: ${unavailable}`,
-        excerpt: failureExcerpt(r.output),
-      });
-    if (entry.status === "failed") {
-      entry.excerpt = failureExcerpt(r.output);
-      const report = parseGoTest(r.output);
-      const failing = Object.entries(report)
-        .filter(([, x]) => x.status === "fail")
-        .map(([k]) => k);
-      let c: Classification | null = null;
-      if (failing.length && cfg.baseline === "go" && deps.baseline) {
-        const base = await deps
-          .baseline({ repo: w.repo, path: p }, failing)
-          .catch(
-            (e) => (
-              (entry.note = `baseline unavailable: ${(e as Error).message.split("\n")[0]}`),
-              null
-            ),
-          );
-        if (base) c = classify(report, base);
-      }
-      if (!failing.length)
-        entry.note = `exit ${r.timedOut ? "timeout" : r.code} without a parseable test failure (build/script error) — counted as a failure`;
-      if (c) {
-        entry.regressions = c.regressions.map(({ package: pkg, tests, build_errors }) => ({
-          package: pkg,
-          tests,
-          build_errors,
-        }));
-        entry.pre_existing = c.pre_existing.length;
-        entry.pre_existing_tests = [
-          ...new Set(c.pre_existing.flatMap((x) => x.tests.map((t) => t.split("/")[0]))),
-        ];
-        const preBuild = c.pre_existing.some((x) => x.build_errors.length || !x.tests.length);
-        if (!r.timedOut && !entry.regressions.length) {
-          if (preBuild) {
-            // Base packages that do not even compile cannot be isolated with -skip: accept explicitly, flag for a human.
-            Object.assign(entry, {
-              status: "accepted_preexisting",
-              needs_review: true,
-              note: `${entry.pre_existing} package(s) fail on the base branch too, incl. build errors that cannot be isolated — needs human review`,
-            });
-          } else {
-            // Confirm: re-run with the pre-existing tests excluded; anything still failing is not explained by the base.
-            const skip = [
-              known?.skipRegex,
-              `^(${entry.pre_existing_tests.map(escapeRe).join("|")})$`,
-            ]
-              .filter(Boolean)
-              .join("|");
-            await deps.log?.(
-              `◆ verify ${w.repo}: confirming that only pre-existing failures remain (re-run excluding ${entry.pre_existing_tests.length} test(s))`,
+      const runWith = (skip: string | null) =>
+        deps.run(
+          cfg.command,
+          p,
+          { ...baseEnv, ...(skip ? { GO_TEST_SKIP: skip } : {}) },
+          cfg.timeoutMs,
+          signal,
+          (s) => void deps.log?.(s, { repo: w.repo, verification: round, stream: true }),
+        );
+      let r = await runWith(known?.skipRegex ?? null);
+      if (signal.aborted) throw new Error("verification canceled");
+      const headCommit = await exec("git", ["-C", p, "rev-parse", "HEAD"])
+        .then(({ stdout }) => stdout.trim())
+        .catch(() => "");
+      const entry: RepoVerification = {
+        repo: w.repo,
+        status: r.code === 0 && !r.timedOut ? "passed" : "failed",
+        passed: false,
+        exit_code: r.code,
+        timed_out: r.timedOut,
+        duration_ms: 0,
+        regressions: [],
+        pre_existing: 0,
+        pre_existing_tests: [],
+        weakened: [],
+        suspected: [],
+        needs_review: false,
+        excerpt: "",
+        commit_sha: headCommit,
+      };
+      const unavailable = r.timedOut ? null : environmentUnavailable(r.code, r.output);
+      if (unavailable)
+        Object.assign(entry, {
+          status: "skipped",
+          needs_review: true,
+          note: `environment unavailable: ${unavailable}`,
+          excerpt: failureExcerpt(r.output),
+        });
+      if (entry.status === "failed") {
+        entry.excerpt = failureExcerpt(r.output);
+        const report = parseGoTest(r.output);
+        const failing = Object.entries(report)
+          .filter(([, x]) => x.status === "fail")
+          .map(([k]) => k);
+        let c: Classification | null = null;
+        if (failing.length && cfg.baseline === "go" && deps.baseline) {
+          const base = await deps
+            .baseline({ repo: w.repo, path: p }, failing)
+            .catch(
+              (e) => (
+                (entry.note = `baseline unavailable: ${(e as Error).message.split("\n")[0]}`),
+                null
+              ),
             );
-            const again = await runWith(skip);
-            if (signal.aborted) throw new Error("verification canceled");
-            if (again.code === 0 && !again.timedOut)
+          if (base) c = classify(report, base);
+        }
+        if (!failing.length)
+          entry.note = `exit ${r.timedOut ? "timeout" : r.code} without a parseable test failure (build/script error) — counted as a failure`;
+        if (c) {
+          entry.regressions = c.regressions.map(({ package: pkg, tests, build_errors }) => ({
+            package: pkg,
+            tests,
+            build_errors,
+          }));
+          entry.pre_existing = c.pre_existing.length;
+          entry.pre_existing_tests = [
+            ...new Set(c.pre_existing.flatMap((x) => x.tests.map((t) => t.split("/")[0]))),
+          ];
+          const preBuild = c.pre_existing.some((x) => x.build_errors.length || !x.tests.length);
+          if (!r.timedOut && !entry.regressions.length) {
+            if (preBuild) {
+              // Base packages that do not even compile cannot be isolated with -skip: accept explicitly, flag for a human.
               Object.assign(entry, {
                 status: "accepted_preexisting",
-                note: `only failures that also fail on the base branch (${entry.pre_existing_tests.join(", ")}); re-run without them passed`,
+                needs_review: true,
+                note: `${entry.pre_existing} package(s) fail on the base branch too, incl. build errors that cannot be isolated — needs human review`,
               });
-            else {
-              r = again;
-              Object.assign(entry, {
-                status: "failed",
-                exit_code: again.code,
-                timed_out: again.timedOut,
-                excerpt: failureExcerpt(again.output),
-                note: "failures remain after excluding the pre-existing tests (unclassified) — counted as a failure",
-              });
+            } else {
+              // Confirm: re-run with the pre-existing tests excluded; anything still failing is not explained by the base.
+              const skip = [
+                known?.skipRegex,
+                `^(${entry.pre_existing_tests.map(escapeRe).join("|")})$`,
+              ]
+                .filter(Boolean)
+                .join("|");
+              await deps.log?.(
+                `◆ verify ${w.repo}: confirming that only pre-existing failures remain (re-run excluding ${entry.pre_existing_tests.length} test(s))`,
+              );
+              const again = await runWith(skip);
+              if (signal.aborted) throw new Error("verification canceled");
+              if (again.code === 0 && !again.timedOut)
+                Object.assign(entry, {
+                  status: "accepted_preexisting",
+                  note: `only failures that also fail on the base branch (${entry.pre_existing_tests.join(", ")}); re-run without them passed`,
+                });
+              else {
+                r = again;
+                Object.assign(entry, {
+                  status: "failed",
+                  exit_code: again.code,
+                  timed_out: again.timedOut,
+                  excerpt: failureExcerpt(again.output),
+                  note: "failures remain after excluding the pre-existing tests (unclassified) — counted as a failure",
+                });
+              }
             }
           }
-        }
-      } else if (failing.length)
-        entry.regressions = failing.map((pkg) => ({
-          package: pkg,
-          tests: report[pkg].tests,
-          build_errors: report[pkg].buildErrors,
-        }));
-    }
-    if (!cfg.allowTestWeakening && deps.diffTests) {
-      try {
-        const sig = testWeakeningSignals(await deps.diffTests(p));
-        entry.weakened = sig.hard;
-        entry.suspected = sig.soft;
-        if (sig.hard.length && entry.status !== "error") entry.status = "failed";
-        if (sig.soft.length) entry.needs_review = true;
-      } catch (e) {
-        // An integrity check that cannot run must never look like a clean result.
-        Object.assign(entry, {
-          status: "error",
-          error: `could not inspect test changes: ${(e as Error).message.split("\n")[0]}`,
-        });
+        } else if (failing.length)
+          entry.regressions = failing.map((pkg) => ({
+            package: pkg,
+            tests: report[pkg].tests,
+            build_errors: report[pkg].buildErrors,
+          }));
       }
-    }
-    if (cfg.requiredTests?.length) {
-      const results: NonNullable<RepoVerification["required_tests"]> = {};
-      for (const target of required.targets.get(w.repo) ?? []) {
-        let status = target.format === "go" && directGoJson(cfg.command) ? requiredTestStatus(r.output, target) : "not_executed";
-        if (status === "not_executed" && ["passed", "accepted_preexisting"].includes(entry.status)) {
-          const remaining = cfg.timeoutMs - (Date.now() - started);
-          if (remaining > 0) {
-            await deps.log?.(`◆ required test ${target.id} (${w.repo})`);
-            const evidence = await deps.run(target.command, p, baseEnv, remaining, signal);
-            if (signal.aborted) throw new Error("verification canceled");
-            status = requiredTestStatus(evidence.output, target);
-            r = { ...r, output: `${r.output}\n== required ${target.id}\n${evidence.output}` };
-            if (evidence.code !== 0 || evidence.timedOut) {
-              entry.status = "failed";
-              entry.exit_code = evidence.code;
-              entry.timed_out = evidence.timedOut;
-              status = "failed";
+      if (!cfg.allowTestWeakening && deps.diffTests) {
+        try {
+          const sig = testWeakeningSignals(await deps.diffTests(p));
+          entry.weakened = sig.hard;
+          entry.suspected = sig.soft;
+          if (sig.hard.length && entry.status !== "error") entry.status = "failed";
+          if (sig.soft.length) entry.needs_review = true;
+        } catch (e) {
+          // An integrity check that cannot run must never look like a clean result.
+          Object.assign(entry, {
+            status: "error",
+            error: `could not inspect test changes: ${(e as Error).message.split("\n")[0]}`,
+          });
+        }
+      }
+      if (cfg.requiredTests?.length) {
+        const results: NonNullable<RepoVerification["required_tests"]> = {};
+        for (const target of required.targets.get(w.repo) ?? []) {
+          let status =
+            target.format === "go" && directGoJson(cfg.command)
+              ? requiredTestStatus(r.output, target)
+              : "not_executed";
+          if (
+            status === "not_executed" &&
+            ["passed", "accepted_preexisting"].includes(entry.status)
+          ) {
+            const remaining = cfg.timeoutMs - (Date.now() - started);
+            if (remaining > 0) {
+              await deps.log?.(`◆ required test ${target.id} (${w.repo})`);
+              const evidence = await deps.run(target.command, p, baseEnv, remaining, signal);
+              if (signal.aborted) throw new Error("verification canceled");
+              status = requiredTestStatus(evidence.output, target);
+              r = { ...r, output: `${r.output}\n== required ${target.id}\n${evidence.output}` };
+              if (evidence.code !== 0 || evidence.timedOut) {
+                entry.status = "failed";
+                entry.exit_code = evidence.code;
+                entry.timed_out = evidence.timedOut;
+                status = "failed";
+              }
             }
           }
+          results[target.id] = status;
         }
-        results[target.id] = status;
-      }
-      entry.required_tests = results;
-      if (Object.values(results).some(status => status !== "passed")) {
-        entry.status = "failed";
-        entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
-      }
-    }
-    if (
-      entry.status === "passed" &&
-      !(cfg.requiredTests?.length && Object.values(entry.required_tests ?? {}).every((x) => x === "passed"))
-    ) {
-      const ev = testEvidence(r.output);
-      entry.test_evidence = ev;
-      if (!ev.executed || ev.executed <= 0) {
-        entry.status = "not_executed";
-        entry.needs_review = true;
-        entry.note = ev.marker
-          ? "exit 0, but the command reported that no tests were run"
-          : ev.skipped
-            ? `exit 0, but every test was skipped (${ev.skipped})`
-            : "exit 0, but the output contains no evidence that any test ran";
-        const files = deps.changedFiles ? await deps.changedFiles(p).catch(() => []) : [];
-        if (notApplicableCovers(cfg.notApplicable, files)) {
-          entry.status = "not_applicable";
-          entry.note = `no executable tests apply: ${cfg.notApplicable!.reason}`;
-        }
-      }
-    }
-    if (deps.slop) {
-      try {
-        const report = await deps.slop({ repo: w.repo, path: p });
-        if (report) entry.slop = report;
-      } catch (e) {
-        if (signal.aborted) throw e;
-        entry.slop = { ...failedReport(`slop detection failed: ${(e as Error).message.split("\n")[0]}`, DETECTOR_VERSION), mode: "unknown", blocking: [] };
-      }
-      if (entry.slop?.status === "error") entry.needs_review = true;
-      if (entry.slop?.blocking.length && ["passed", "accepted_preexisting", "failed"].includes(entry.status)) {
-        entry.status = "failed";
-        entry.note = [entry.note, `${entry.slop.blocking.length} blocking slop finding(s)`].filter(Boolean).join("; ");
-      }
-    }
-    {
-      const afterState = await worktreeFingerprint(p).catch(() => null);
-      if (!beforeState || !afterState || JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
-        if (entry.status !== "error" && entry.status !== "skipped") {
+        entry.required_tests = results;
+        if (Object.values(results).some((status) => status !== "passed")) {
           entry.status = "failed";
-          entry.note = "Workspace changed during verification or its state could not be established";
+          entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
         }
-      } else entry.tested_state = afterState;
-      entry.contract_revision = cfg.contractRevision;
-    }
-    entry.passed =
-      entry.status === "passed" ||
-      entry.status === "accepted_preexisting" ||
-      entry.status === "not_applicable";
-    entry.outcome = outcomeOf(entry.status);
-    entry.duration_ms = Date.now() - started;
-    if (deps.artifact)
-      entry.artifact_id = await deps.artifact(`verify-${round}-${w.repo}.log`, r.output, {
-        exit_code: entry.exit_code,
-        timed_out: entry.timed_out,
-        round,
-        status: entry.status,
-      });
-    await deps.log?.(
-      `■ verify ${w.repo}: ${entry.status.toUpperCase()}${entry.note ? ` (${entry.note})` : ""}${entry.error ? ` — ${entry.error}` : ""}${entry.weakened.length ? ` — tests weakened: ${entry.weakened.join(", ")}` : ""}${entry.suspected.length ? ` — review: ${entry.suspected.join(", ")}` : ""}`,
-      { repo: w.repo, verification: round, status: entry.status },
-    );
-    const why = flight ? await flight.settle(entry) : null;
-    if (flight && why) await deps.log?.(`◆ verify ${w.repo}: evidence not stored (${why})`, { repo: w.repo, verification: round, evidence: { key: flight.key, not_stored: why } });
-    repos.push(entry);
+      }
+      if (
+        entry.status === "passed" &&
+        !(
+          cfg.requiredTests?.length &&
+          Object.values(entry.required_tests ?? {}).every((x) => x === "passed")
+        )
+      ) {
+        const ev = testEvidence(r.output);
+        entry.test_evidence = ev;
+        if (!ev.executed || ev.executed <= 0) {
+          entry.status = "not_executed";
+          entry.needs_review = true;
+          entry.note = ev.marker
+            ? "exit 0, but the command reported that no tests were run"
+            : ev.skipped
+              ? `exit 0, but every test was skipped (${ev.skipped})`
+              : "exit 0, but the output contains no evidence that any test ran";
+          const files = deps.changedFiles ? await deps.changedFiles(p).catch(() => []) : [];
+          const policy = [cfg.notApplicable, GENERATED_ONLY].find((x) =>
+            notApplicableCovers(x, files),
+          );
+          if (policy) {
+            entry.status = "not_applicable";
+            entry.note = `no executable tests apply: ${policy.reason}`;
+          }
+        }
+      }
+      if (deps.slop) {
+        try {
+          const report = await deps.slop({ repo: w.repo, path: p });
+          if (report) entry.slop = report;
+        } catch (e) {
+          if (signal.aborted) throw e;
+          entry.slop = {
+            ...failedReport(
+              `slop detection failed: ${(e as Error).message.split("\n")[0]}`,
+              DETECTOR_VERSION,
+            ),
+            mode: "unknown",
+            blocking: [],
+          };
+        }
+        if (entry.slop?.status === "error") entry.needs_review = true;
+        if (
+          entry.slop?.blocking.length &&
+          ["passed", "accepted_preexisting", "failed"].includes(entry.status)
+        ) {
+          entry.status = "failed";
+          entry.note = [entry.note, `${entry.slop.blocking.length} blocking slop finding(s)`]
+            .filter(Boolean)
+            .join("; ");
+        }
+      }
+      {
+        const afterState = await worktreeFingerprint(p).catch(() => null);
+        if (
+          !beforeState ||
+          !afterState ||
+          JSON.stringify(beforeState) !== JSON.stringify(afterState)
+        ) {
+          if (entry.status !== "error" && entry.status !== "skipped") {
+            entry.status = "failed";
+            entry.note =
+              "Workspace changed during verification or its state could not be established";
+          }
+        } else entry.tested_state = afterState;
+        entry.contract_revision = cfg.contractRevision;
+      }
+      entry.passed =
+        entry.status === "passed" ||
+        entry.status === "accepted_preexisting" ||
+        entry.status === "not_applicable";
+      entry.outcome = outcomeOf(entry.status);
+      entry.duration_ms = Date.now() - started;
+      if (deps.artifact)
+        entry.artifact_id = await deps.artifact(`verify-${round}-${w.repo}.log`, r.output, {
+          exit_code: entry.exit_code,
+          timed_out: entry.timed_out,
+          round,
+          status: entry.status,
+        });
+      await deps.log?.(
+        `■ verify ${w.repo}: ${entry.status.toUpperCase()}${entry.note ? ` (${entry.note})` : ""}${entry.error ? ` — ${entry.error}` : ""}${entry.weakened.length ? ` — tests weakened: ${entry.weakened.join(", ")}` : ""}${entry.suspected.length ? ` — review: ${entry.suspected.join(", ")}` : ""}`,
+        { repo: w.repo, verification: round, status: entry.status },
+      );
+      const why = flight ? await flight.settle(entry) : null;
+      if (flight && why)
+        await deps.log?.(`◆ verify ${w.repo}: evidence not stored (${why})`, {
+          repo: w.repo,
+          verification: round,
+          evidence: { key: flight.key, not_stored: why },
+        });
+      repos.push(entry);
     } catch (e) {
       flight?.fail();
       throw e;
@@ -788,7 +992,9 @@ async function evidenceParts(
   env: Record<string, string>,
   skip: string | null,
 ): Promise<EvidenceParts> {
-  const vars = ["BASE_BRANCH", "RUN_ID", "REPO", "BRANCH"].map((k) => `${k}=${env[k] ?? ""}`).join("\n");
+  const vars = ["BASE_BRANCH", "RUN_ID", "REPO", "BRANCH"]
+    .map((k) => `${k}=${env[k] ?? ""}`)
+    .join("\n");
   return {
     repo_name: w.repo,
     workspace: path,
@@ -808,7 +1014,13 @@ async function evidenceParts(
 }
 
 export type LoopOutcome =
-  "passed" | "failed" | "no_progress" | "error" | "skipped" | "canceled" | "stopped";
+  | "passed"
+  | "failed"
+  | "no_progress"
+  | "error"
+  | "skipped"
+  | "canceled"
+  | "stopped";
 export interface LoopResult<S> {
   outcome: LoopOutcome;
   rounds: VerificationRound[];
@@ -900,7 +1112,10 @@ export function repairPrompt(
           `slop:${x.repo}`,
           x.slop.blocking
             .slice(0, 20)
-            .map((f) => `- ${f.rule} ${f.path}:${f.line}${f.symbol ? ` (${f.symbol})` : ""}: ${f.message}\n  ${f.snippet.replace(/\n/g, "\n  ")}`)
+            .map(
+              (f) =>
+                `- ${f.rule} ${f.path}:${f.line}${f.symbol ? ` (${f.symbol})` : ""}: ${f.message}\n  ${f.snippet.replace(/\n/g, "\n  ")}`,
+            )
             .join("\n"),
         ),
         "Never remove security checks, business invariants, idempotency, transaction or concurrency safeguards, or public contracts just to clear a slop finding. If a finding is a false positive, leave the code and explain why in submit_result.",
@@ -956,7 +1171,9 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
     errors: (last?.repos ?? [])
       .filter((r) => r.status === "error" || r.status === "not_executed")
       .map((r) => `${r.repo}: ${r.error ?? r.note}`),
-    outcome_by_repo: Object.fromEntries((last?.repos ?? []).map((r) => [r.repo, r.outcome ?? outcomeOf(r.status)])),
+    outcome_by_repo: Object.fromEntries(
+      (last?.repos ?? []).map((r) => [r.repo, r.outcome ?? outcomeOf(r.status)]),
+    ),
     rounds: res.rounds.length,
     repairs: res.repairs,
     max_repairs: cfg.maxRepairs,
@@ -1029,10 +1246,22 @@ function slopSummary(repos: RepoVerification[]) {
     slop: {
       mode: scanned[0].mode,
       level: scanned[0].level,
-      status: scanned.some((s) => s.status === "error") ? "error" : scanned.some((s) => s.status === "partial") ? "partial" : "ok",
+      status: scanned.some((s) => s.status === "error")
+        ? "error"
+        : scanned.some((s) => s.status === "partial")
+          ? "partial"
+          : "ok",
       counts: sum((s) => s.counts),
       by_category: sum((s) => s.by_category),
-      blocking: scanned.flatMap((s) => s.blocking.map(({ rule, path, line, symbol, fingerprint }) => ({ rule, path, line, symbol, fingerprint }))),
+      blocking: scanned.flatMap((s) =>
+        s.blocking.map(({ rule, path, line, symbol, fingerprint }) => ({
+          rule,
+          path,
+          line,
+          symbol,
+          fingerprint,
+        })),
+      ),
       detector_ms: scanned.reduce((n, s) => n + s.detector_ms, 0),
       files_scanned: scanned.reduce((n, s) => n + s.files_scanned, 0),
       cache_hits: scanned.reduce((n, s) => n + s.cache_hits, 0),

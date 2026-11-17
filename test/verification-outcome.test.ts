@@ -90,6 +90,13 @@ test("NOT_APPLICABLE only comes from the workflow policy and only for covered, n
     const none = await verify(r.path, "NOT_APPLICABLE: docs only", 0, cfg(), ["README.md"]);
     assert.equal(none.repos[0].outcome, "NOT_EXECUTED");
     assert.equal(notApplicableCovers(undefined, ["README.md"]), false);
+    // Generated protobuf code, .proto schemas and swag docs need no policy: no test can exercise them alone.
+    const generated = ["proto/oms/oms.pb.go", "proto/oms/oms.proto", "docs/docs.go", "docs/swagger.json", "docs/swagger.yaml"];
+    const gen = await verify(r.path, "", 0, cfg(), generated);
+    assert.equal(gen.repos[0].outcome, "NOT_APPLICABLE");
+    assert.equal(gen.passed, true);
+    const mixed = await verify(r.path, "", 0, cfg(), [...generated, "app/dto/mapper.go"]);
+    assert.equal(mixed.repos[0].outcome, "NOT_EXECUTED", "hand-written code still needs test evidence");
   } finally {
     r.done();
   }

@@ -109,7 +109,9 @@ before(async () => {
           acceptance_criteria: ["Preserve positive values"],
           tests: ["Exercise the value behavior"],
           required_tests:
-            fixSelectorsOnFeedback && ctx.input.pending?.feedback ? ["business/TestValue"] : testSelectors,
+            fixSelectorsOnFeedback && ctx.input.pending?.feedback
+              ? ["business/TestValue"]
+              : testSelectors,
           risks: [],
           alternatives: [],
         },
@@ -755,6 +757,19 @@ test("a repair round sent back with feedback may make no new changes; a plain re
   coding = (await step(run.id))!;
   assert.equal(coding.status, "COMPLETED", JSON.stringify(coding.error));
   assert.equal(coding.output.no_new_changes, true);
+  process.env.FAKE_LIFECYCLE_ACTION = "fail-after-edit";
+  await reexecuteStep(run.id, "implement", { feedback: "Tests failed again: investigate" });
+  await drain();
+  assert.equal((await step(run.id))!.status, "FAILED");
+  process.env.FAKE_LIFECYCLE_ACTION = "noop";
+  await retryStep(run.id, "implement");
+  await drain();
+  coding = (await step(run.id))!;
+  assert.equal(
+    coding.status,
+    "COMPLETED",
+    "a retry of a failed repair round is still a repair round",
+  );
   await reexecuteStep(run.id, "implement");
   await drain();
   assert.equal((await step(run.id))!.status, "FAILED");
@@ -773,7 +788,11 @@ test("final publication does not rerun a step on the exact revision it already p
     second.output.verification.last[0].tested_state.head,
   );
   const live = (await one(pool, "SELECT * FROM workflow_runs WHERE id=$1", [run.id]))!;
-  const steps = await q<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position", [run.id]);
+  const steps = await q<StepRow>(
+    pool,
+    "SELECT * FROM workflow_steps WHERE run_id=$1 ORDER BY position",
+    [run.id],
+  );
   const logs: string[] = [];
   const commands: string[] = [];
   const ctx = {
@@ -782,17 +801,26 @@ test("final publication does not rerun a step on the exact revision it already p
     artifact: async () => 1,
     log: async (_kind: string, text: string) => void logs.push(text),
   } as unknown as ExecutionContext;
-  const counting: typeof runCommand = (command, ...rest) => (commands.push(command), runCommand(command, ...rest));
+  const counting: typeof runCommand = (command, ...rest) => (
+    commands.push(command),
+    runCommand(command, ...rest)
+  );
   const result = await verifyPublication(ctx, steps, await workspacesOf(run.id), counting);
   assert.deepEqual(result.problems, []);
-  assert.ok(logs.some((l) => /final regression: implement-second skipped/.test(l)), logs.join("\n"));
+  assert.ok(
+    logs.some((l) => /final regression: implement-second skipped/.test(l)),
+    logs.join("\n"),
+  );
   assert.ok(result.tested.some((t) => t.step === "publication:implement-second"));
   // The first implementation step passed on an older commit, so it alone is re-verified on the integrated revision.
   assert.ok(!logs.some((l) => /final regression: implement skipped/.test(l)));
   writeFileSync(join(integrated.path, "uncommitted.txt"), "changed after verification\n");
   const logsAfter: string[] = [];
   const dirty = await verifyPublication(
-    { ...ctx, log: async (_k: string, text: string) => void logsAfter.push(text) } as unknown as ExecutionContext,
+    {
+      ...ctx,
+      log: async (_k: string, text: string) => void logsAfter.push(text),
+    } as unknown as ExecutionContext,
     steps,
     await workspacesOf(run.id),
     runCommand,
