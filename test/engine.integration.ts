@@ -2229,14 +2229,19 @@ async function goRepo(opts: { baseFailing: boolean; branchBug: boolean }) {
   g("commit", "-qam", "change");
   return dir;
 }
-async function tfRun(dir: string) {
+async function tfRun(dir: string, autoFixRounds = 0) {
   const key = await customWorkflow([
     { key: "implement", type: "coding_agent" },
     {
       key: "test",
       type: "command",
       depends_on: ["implement"],
-      config: { command: "go test ./...", baseline_compare: "go", timeout_seconds: 300 },
+      config: {
+        command: "go test ./...",
+        baseline_compare: "go",
+        timeout_seconds: 300,
+        auto_fix_rounds: autoFixRounds,
+      },
     },
     { key: "pr", type: "git_pull_request", depends_on: ["test"] },
   ]);
@@ -2368,6 +2373,38 @@ test("test failure 2/4: new failure → accept refused; 'Sửa rồi test lại'
     hist.length >= 3 && hist.some((a) => a.invalidated_at),
     "old attempts kept (invalidated)",
   );
+});
+
+test("test failure: a new failure goes back to the coding step automatically and passes once fixed — no question", async () => {
+  setTestFailureAdvisor(null);
+  const dir = await goRepo({ baseFailing: false, branchBug: true });
+  const { writeFileSync } = await import("node:fs");
+  const feedback: string[] = [];
+  const key = await customWorkflow([
+    { key: "implement", type: "coding_agent" },
+    {
+      key: "test",
+      type: "command",
+      depends_on: ["implement"],
+      config: { command: "go test ./...", baseline_compare: "go", timeout_seconds: 300 },
+    },
+  ]);
+  scripts.implement = async (ctx) => {
+    if (ctx.input.pending?.feedback) {
+      feedback.push(ctx.input.pending.feedback);
+      writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a + b }\n");
+    }
+    await recordWorkspace(ctx.run.id, { repo: "calc", branch: "TASK-TF", path: dir, created_from: "test" });
+    return { kind: "completed", output: { summary: "calc", pull_requests: {} } };
+  };
+  const run = await startRun({ definitionKey: key, repositories: ["oms-api"], inputs: { project: "OMS" } });
+  await drain();
+  const st = await stepOf(run.id, "test");
+  assert.equal(st.status, "COMPLETED");
+  assert.equal(st.output.passed, true);
+  assert.equal(feedback.length, 1);
+  assert.match(feedback[0], /Investigate each failing test[\s\S]*TestAdd/);
+  assert.equal((await openQ(run.id)).length, 0, "no question asked");
 });
 
 test("test failure 3/4: old + new failures shown separately; rerun creates a new attempt keeping old logs; stop fails the step", async () => {

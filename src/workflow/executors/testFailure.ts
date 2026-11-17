@@ -1,4 +1,5 @@
 import { config } from "../../config.ts";
+import { pool, q } from "../../db/pool.ts";
 import { ancestors } from "../graph.ts";
 import { parseGoTest } from "./baseline.ts";
 import type { ExecutionContext } from "./registry.ts";
@@ -82,6 +83,30 @@ export function extractLog(
   return s.length > max ? s.slice(0, max) + "\n…" : s;
 }
 
+/** Leaf `not ok` results of `node --test` TAP output, with the file each failing test lives in and its YAML block. */
+export function parseNodeTest(output: string): Array<{ file: string; test: string; log: string }> {
+  const lines = output.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  const out: Array<{ file: string; test: string; log: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(\s*)not ok \d+ - (.+?)\s*$/);
+    if (!m) continue;
+    const block = [lines[i]];
+    for (let j = i + 1; j < lines.length && j < i + 80; j++) {
+      block.push(lines[j]);
+      if (lines[j].trim() === "...") break;
+    }
+    const yaml = block.join("\n");
+    if (/failureType: 'subtestsFailed'/.test(yaml)) continue;
+    const loc = yaml.match(/location: '(?:file:\/\/)?([^':]+)/)?.[1] ?? "";
+    out.push({
+      file: loc.includes("/test/") ? `test/${loc.split("/test/").pop()}` : loc.split("/").pop() || "(node test)",
+      test: m[2].replace(/^'(.*)'$/, "$1"),
+      log: yaml.slice(0, 2000),
+    });
+  }
+  return out;
+}
+
 /**
  * Classify every failure. A failure is `pre_existing` ONLY when the baseline run of the same packages shows the same
  * failure; `new` when the baseline ran and did not fail that way; without baseline evidence it is `environment` (network /
@@ -113,6 +138,23 @@ export function diagnose(input: {
     }
     const parsed = parseGoTest(out);
     const failing = Object.entries(parsed).filter(([, p]) => p.status === "fail");
+    const nodeFailing = failing.length || r.timed_out ? [] : parseNodeTest(out);
+    for (const f of nodeFailing) {
+      const env = ENV.test(f.log);
+      failures.push({
+        repo: r.repo,
+        package: f.file,
+        test: f.test,
+        build_error: null,
+        category: env ? "environment" : "insufficient",
+        reason: env
+          ? "network/infrastructure error in the log; no baseline evidence"
+          : "node test failure; baseline comparison covers Go packages only",
+        env_signal: env,
+        log: f.log,
+      });
+    }
+    if (nodeFailing.length) continue;
     if (!failing.length || r.timed_out) {
       const log = extractLog(out, null, null);
       const env = !!r.environment_unavailable || ENV.test(log);
@@ -322,8 +364,13 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
         languagePolicy(locale),
         "Explain this test failure to a developer briefly (max 5 sentences): what failed, based on which evidence",
         "(cite test names / log lines), and the suggested next action. Respect the given categories: never call a failure",
-        "pre-existing unless its category is pre_existing. When a failure comes from a test reaching a real DB, Elasticsearch or other",
-        "remote infrastructure, suggest “Fix then retest” so the test is rewritten with mocks or deleted, not a plain rerun.",
+        "pre-existing unless its category is pre_existing.",
+        ...(d.failures.some((f) => f.env_signal)
+          ? [
+              "Some logs show network/infrastructure errors: when a test reaches remote infrastructure it did not start itself,",
+              "suggest “Fix then retest” so the test is rewritten with mocks or deleted, not a plain rerun.",
+            ]
+          : ["Do not speculate about databases, Elasticsearch or other infrastructure: no log shows such an error."]),
         'Reply JSON only: {"text": "...", "suggestion": "..."}.',
         '<untrusted_input source="test_output">',
         compact(d),
@@ -398,7 +445,30 @@ export function buildQuestion(
   return { question: replace && prefix ? prefix.trim() : prefix + head, context: ctx, options };
 }
 
-/** First failure of an attempt: diagnose, explain, ask. */
+const DEFAULT_FIX_INSTRUCTIONS =
+  "Investigate each failing test below from its log, find the cause in the change (or in the test when the test itself is wrong), fix it, and rerun those tests before submitting.";
+
+function codingTarget(ctx: ExecutionContext) {
+  const anc = ancestors(ctx.run.graph.steps, ctx.step.key);
+  return ctx.run.graph.steps.filter((s) => anc.has(s.key) && s.type === "coding_agent").at(-1)?.key;
+}
+
+function fixFeedback(stepName: string, d: Diagnosis, instructions: string) {
+  return [
+    `Tests failed in "${stepName}". Instructions: ${instructions}`,
+    `Failure diagnosis: ${d.summary}`,
+    ...d.failures
+      .filter((f) => f.category !== "pre_existing")
+      .slice(0, 10)
+      .map(
+        (f) =>
+          `- [${f.category}] ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}: ${f.log.split("\n").slice(-12).join(" | ").slice(0, 800)}`,
+      ),
+    TEST_POLICY,
+  ].join("\n");
+}
+
+/** First failure of an attempt: diagnose, then send code-fixable failures back to the coding step (bounded) or ask. */
 export async function askAboutFailure(
   ctx: ExecutionContext,
   input: Parameters<typeof diagnose>[0],
@@ -406,6 +476,35 @@ export async function askAboutFailure(
 ): Promise<ExecResult> {
   const locale = outputLocale(ctx.run);
   const d = diagnose(input);
+  const target = codingTarget(ctx);
+  const fixable = d.failures.some((f) => f.category === "new" || f.category === "insufficient");
+  const maxRounds = Math.max(0, Math.min(5, Number(ctx.step.config.auto_fix_rounds ?? 2)));
+  if (target && fixable && !d.all_pre_existing && maxRounds > 0) {
+    const [{ n: rounds }] = await q<{ n: number }>(
+      pool,
+      "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE step_id = $1 AND output ? 'auto_fix'",
+      [ctx.step.id],
+    );
+    if (rounds < maxRounds) {
+      await ctx.log(
+        "system",
+        `${d.summary} — automatic fix round ${rounds + 1} of ${maxRounds} via "${target}"`,
+        { diagnosis: d.counts },
+      );
+      return {
+        kind: "reexecute",
+        target,
+        feedback: fixFeedback(ctx.step.name, d, DEFAULT_FIX_INSTRUCTIONS),
+        output: {
+          test_status: "FAILED",
+          passed: false,
+          diagnosis: d,
+          results: input.results,
+          auto_fix: { round: rounds + 1, max: maxRounds, target },
+        },
+      };
+    }
+  }
   try {
     // Every failure also fails on the baseline: the deterministic diagnosis is conclusive — no model call to restate it.
     const conclusive = d.all_pre_existing === true && d.failures.length > 0;
@@ -429,12 +528,16 @@ export async function askAboutFailure(
             ? "Read the logs of the new failures, then choose “Fix then retest” with specific instructions."
             : d.all_pre_existing
               ? "Every failure exists on the baseline; you can continue with an exception if you confirm it."
-              : "These tests reach real DB/ES/network. Choose “Fix then retest” so the coding step rewrites them with mocks or deletes them — unit tests must not depend on remote infrastructure."
+              : d.failures.some((f) => f.env_signal)
+                ? "Some logs show network/infrastructure errors. Choose “Fix then retest” so the coding step rewrites those tests with mocks or deletes them."
+                : "Read the failing test logs, then choose “Fix then retest” or rerun."
           : d.counts.new
             ? "Xem log các lỗi mới, rồi chọn “Sửa rồi test lại” với chỉ dẫn cụ thể."
             : d.all_pre_existing
               ? "Các lỗi đều có trên baseline; có thể tiếp tục với ngoại lệ nếu bạn xác nhận."
-              : "Các test này gọi thẳng DB/ES/network thật. Chọn “Sửa rồi test lại” để bước code viết lại bằng mock hoặc xóa chúng — unit test không được phụ thuộc infra từ xa.",
+              : d.failures.some((f) => f.env_signal)
+                ? "Có log lỗi mạng/hạ tầng. Chọn “Sửa rồi test lại” để bước code viết lại các test đó bằng mock hoặc xóa chúng."
+                : "Xem log các test lỗi, rồi chọn “Sửa rồi test lại” hoặc chạy lại.",
     };
   await ctx.log("system", d.summary, { diagnosis: d.counts });
   return {
@@ -547,31 +650,13 @@ export async function handleDecision(
         decision,
       };
     case "fix": {
-      const run = ctx.run;
-      const anc = ancestors(run.graph.steps, ctx.step.key);
-      const coding = run.graph.steps
-        .filter((s) => anc.has(s.key) && s.type === "coding_agent")
-        .map((s) => s.key);
-      const target = coding.at(-1);
+      const target = codingTarget(ctx);
       if (!target) return reask("Workflow này không có bước code phía trước để sửa. ");
-      if (!p.instructions) return reask("Bạn muốn sửa gì? Mô tả ngắn chỉ dẫn cho bước code. ");
-      const feedback = [
-        `Tests failed in "${ctx.step.name}". Developer instructions: ${p.instructions}`,
-        `Failure diagnosis: ${d.summary}`,
-        ...d.failures
-          .filter((f) => f.category !== "pre_existing")
-          .slice(0, 10)
-          .map(
-            (f) =>
-              `- [${f.category}] ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}: ${f.log.split("\n").slice(-6).join(" | ").slice(0, 400)}`,
-          ),
-        TEST_POLICY,
-      ].join("\n");
       return {
         result: {
           kind: "reexecute",
           target,
-          feedback,
+          feedback: fixFeedback(ctx.step.name, d, p.instructions || DEFAULT_FIX_INSTRUCTIONS),
           output: {
             test_status: "FAILED",
             passed: false,

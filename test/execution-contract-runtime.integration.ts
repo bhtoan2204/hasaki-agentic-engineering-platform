@@ -744,6 +744,22 @@ test("a re-execution or retry keeps implementation observed in an earlier genera
   );
 });
 
+test("a repair round sent back with feedback may make no new changes; a plain re-execution still may not", async () => {
+  process.env.FAKE_LIFECYCLE_ACTION = "edit";
+  const run = await start("STANDARD", true, false, false);
+  let coding = await reachCoding(run.id);
+  assert.equal(coding.status, "COMPLETED", JSON.stringify(coding.error));
+  process.env.FAKE_LIFECYCLE_ACTION = "noop";
+  await reexecuteStep(run.id, "implement", { feedback: "Tests failed: investigate" });
+  await drain();
+  coding = (await step(run.id))!;
+  assert.equal(coding.status, "COMPLETED", JSON.stringify(coding.error));
+  assert.equal(coding.output.no_new_changes, true);
+  await reexecuteStep(run.id, "implement");
+  await drain();
+  assert.equal((await step(run.id))!.status, "FAILED");
+});
+
 test("final publication does not rerun a step on the exact revision it already passed on", async () => {
   process.env.FAKE_LIFECYCLE_ACTION = "edit";
   const run = await start("STANDARD", true, true);

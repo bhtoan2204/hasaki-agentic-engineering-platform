@@ -2119,16 +2119,21 @@ ${validation.errors.join("; ")}`,
       if (authorizationProblems.length) return { kind: "failed", retryable: false, error: authorizationProblems.join("; ") };
       const implementationEnd = await observeImplementation(ctx);
       implementationStart = await loadImplementationBaseline(ctx.step.id, ctx.step.generation);
-      if (
-        !implementationStart ||
-        !implementationChanged(implementationStart, implementationEnd) ||
-        !Object.values(state.files).some((files) => files.length)
-      )
+      const branchChanged = Object.values(state.files).some((files) => files.length);
+      const attemptChanged =
+        !!implementationStart && implementationChanged(implementationStart, implementationEnd);
+      // A repair round sent back with feedback may find nothing to change; the branch keeps the earlier observed implementation.
+      const repairRound = !!ctx.input.pending?.feedback;
+      if (!branchChanged || (!attemptChanged && !repairRound))
         return {
           kind: "failed",
           retryable: false,
           error: "IMPLEMENTED requires worker-observed implementation changes",
         };
+      if (!attemptChanged) {
+        output.no_new_changes = true;
+        await ctx.log("system", "repair round made no new changes; the branch keeps the earlier implementation");
+      }
       const verified = output.verification as
         | {
             passed?: boolean;
