@@ -2,6 +2,7 @@ import { loadArgoToken } from "./argocd.ts";
 import { loadSplunkCookie } from "./splunk.ts";
 import { loadKafkaCookie } from "./kafka.ts";
 import { loadVaultToken } from "./vault.ts";
+import { loadSignoz } from "./signoz.ts";
 import { currentUserId } from "../auth/execution.ts";
 
 const loaded = new Map<number, number>();
@@ -12,7 +13,7 @@ export async function loadPersonalIntegrations() {
   if (!id || Date.now() - (loaded.get(id) ?? 0) < 15_000) return;
   let p = pending.get(id);
   if (!p) {
-    p = Promise.all([loadArgoToken(), loadSplunkCookie(), loadKafkaCookie(), loadVaultToken()])
+    p = Promise.all([loadArgoToken(), loadSplunkCookie(), loadKafkaCookie(), loadVaultToken(), loadSignoz()])
       .then(() => {
         loaded.set(id, Date.now());
       })

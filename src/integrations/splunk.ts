@@ -890,7 +890,7 @@ function view(row: SearchRow, extra: Record<string, unknown> = {}, pageSize = 50
     duration_ms: row.duration_ms,
     ...(row.error ? { error: row.error } : {}),
     ...(row.messages?.length ? { messages: row.messages } : {}),
-    ...(row.mode === "argocd" ? {} : { splunk_url: buildSearchUrl(row.query, e, l) }),
+    ...(row.mode === "argocd" || row.mode === "signoz" ? {} : { splunk_url: buildSearchUrl(row.query, e, l) }),
     events,
     ...((row.events?.length ?? 0) > pageSize || row.truncated
       ? {
@@ -1051,17 +1051,19 @@ export async function investigationSearch(args: InvestigationSearchArgs, scope: 
 }
 
 /**
- * Store log lines read from another source (QC: Argo CD pod logs) as a search of the run, normalized like Splunk events,
- * so they get evidence refs and flow through correlation, timeline and report. Same dedup and per-run budget.
+ * Store log lines read from another source (QC: Argo CD pod logs, SigNoz) as a search of the run, normalized like Splunk
+ * events, so they get evidence refs and flow through correlation, timeline and report. Same dedup and per-run budget.
  */
 export async function storeExternalSearch(
   input: {
-    source: "argocd";
+    source: "argocd" | "signoz";
     query: string;
     earliest: number;
     latest: number;
     rows: Array<Record<string, unknown>>;
     error?: string;
+    /** Shown instead of the default note when no row matched. */
+    note?: string;
   },
   scope: SearchScope = {},
   pageSize = 50,
@@ -1114,7 +1116,9 @@ export async function storeExternalSearch(
     events.length
       ? {}
       : {
-          note: "no log lines matched — check the app/workload, widen since_minutes or try another identifier",
+          note:
+            input.note ??
+            "no log lines matched — check the app/workload, widen since_minutes or try another identifier",
         },
     pageSize,
   );

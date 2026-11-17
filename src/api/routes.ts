@@ -112,6 +112,13 @@ import {
 } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
 import {
+  disconnectSignoz,
+  saveSignoz,
+  SignozError,
+  signozStatus,
+  testSignoz,
+} from "../integrations/signoz.ts";
+import {
   clearOperatorSettings,
   operatorView,
   addGitlabInstance,
@@ -1986,6 +1993,49 @@ export const routes: Route[] = [
       requireAdmin(actor);
       await audit(actor.id, "integration.splunk.shared_token_clear", "integration", "splunk");
       return clearSharedSplunkToken();
+    },
+  ],
+  // SigNoz: each user's own domain and API key (encrypted); the key is never returned.
+  ["GET", /^\/api\/integrations\/signoz$/, () => signozStatus()],
+  [
+    "POST",
+    /^\/api\/integrations\/signoz$/,
+    async ({ body, actor }) => {
+      try {
+        const status = await saveSignoz(body);
+        await audit(actor.id, "integration.signoz.save", "integration", "signoz", {
+          base_url: status.base_url,
+          enabled: status.enabled,
+          token_changed: typeof body.token === "string" && !!body.token.trim(),
+        });
+        return status;
+      } catch (e) {
+        if (e instanceof SignozError) {
+          await audit(actor.id, "integration.signoz.save_failed", "integration", "signoz", { kind: e.kind });
+          throw new HttpError(400, e.message);
+        }
+        throw e;
+      }
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/integrations\/signoz\/test$/,
+    async ({ actor }) => {
+      const result = await testSignoz();
+      await audit(actor.id, "integration.signoz.test", "integration", "signoz", {
+        ok: result.ok,
+        ...(result.ok ? {} : { kind: result.kind }),
+      });
+      return result;
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/integrations\/signoz\/disconnect$/,
+    async ({ actor }) => {
+      await audit(actor.id, "integration.signoz.disconnect", "integration", "signoz");
+      return disconnectSignoz();
     },
   ],
   [

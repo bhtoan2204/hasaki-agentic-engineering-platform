@@ -90,6 +90,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "set.nav.routing": "Việc nhạy cảm",
     "set.nav.work": "Hasaki Work",
     "set.nav.integration": "Dự án & tích hợp",
+    "set.signozHosts": "Host SigNoz nội bộ được duyệt",
+    "set.signozHostsHint": "Mỗi dòng một host. Người dùng được trỏ SigNoz tới các host mạng riêng này (cho phép http); mọi địa chỉ nội bộ khác đều bị chặn, metadata cloud luôn bị chặn.",
     "set.fileBaseUrl": "URL tải file đính kèm",
     "set.fileBaseUrlHint":
       "Agent tải file đính kèm của work item từ địa chỉ này. Để trống thì không tải.",
@@ -384,6 +386,8 @@ const baseMessages: Record<UiLocale, Record<string, string>> = {
     "set.nav.routing": "Sensitive work",
     "set.nav.work": "Hasaki Work",
     "set.nav.integration": "Projects & integrations",
+    "set.signozHosts": "Approved internal SigNoz hosts",
+    "set.signozHostsHint": "One host per line. Users may point SigNoz at these private-network hosts (http allowed); every other private address is blocked, cloud metadata always.",
     "set.fileBaseUrl": "Attachment download URL",
     "set.fileBaseUrlHint":
       "Agents download work item attachments from this address. Empty disables downloads.",

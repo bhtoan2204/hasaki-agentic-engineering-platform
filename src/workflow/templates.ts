@@ -385,7 +385,7 @@ const ROOT_CAUSE_CONTRACT =
 
 const INVESTIGATION_HANDOFF =
   "If run inputs contain `investigation` (handed over from a read-only production investigation), start from it: its findings, timeline and latencies cite evidence_refs (S<search>:<n>). " +
-  "Re-read the events you rely on with call_tool splunk_get_event before classifying them as OBSERVED_FACT (source_type production_log, source_ref = the evidence_ref); its hypotheses and missing_evidence are open questions, not facts. ";
+  "Its evidence may come from Splunk or SigNoz (both use S<search>:<n> refs). Re-read the events you rely on with call_tool splunk_get_event before classifying them as OBSERVED_FACT (source_type production_log, source_ref = the evidence_ref); its hypotheses and missing_evidence are open questions, not facts. ";
 
 const BUG_ANALYZE = {
   evidence: "analysis",
@@ -479,7 +479,12 @@ const INVESTIGATION_RULES =
   "and its workloads/pods with argocd.app_pods (check restarts / CrashLoopBackOff), then search its logs with call_tool name=qc_log_search, filtering by a concrete identifier over since_minutes " +
   "covering parse_request.time; its lines are stored as events with event_refs exactly like Splunk events. Kafka UI (kafka.*: topics, consumer lag, messages) and the QC databases " +
   "(read-only queries) may confirm what the logs show. " +
-  "Production: search logs only with call_tool name=splunk_search. Always pass earliest/latest (start from parse_request.time) and name the index from parse_request.indexes. " +
+  "Production sources are parse_request.observability (splunk, signoz or both); use only those. " +
+  "SigNoz (call_tool signoz_*): start with signoz_aggregate_logs (errors grouped by service.name, time_series=true for spikes) or parse_request.signoz_queries, " +
+  "then narrow with signoz_search_logs / signoz_search_traces on a concrete identifier, service or trace_id, follow failing or slow requests with signoz_get_trace, and check latency/throughput/error rate with signoz_query_metrics; " +
+  "always pass earliest/latest from parse_request.time and keep windows small. SigNoz rows are stored as events with event_refs exactly like Splunk events. " +
+  "No telemetry for a service or window is NOT evidence that it is healthy: report it as missing evidence. Keep confirmed findings (an event you saw) apart from hypotheses. " +
+  "Splunk: search logs only with call_tool name=splunk_search. Always pass earliest/latest (start from parse_request.time) and name the index from parse_request.indexes. " +
   "Filter by a concrete identifier first; search broader identifiers (shipment id, tracking number, request id, Kafka key) only after the first results reveal them; " +
   "widen the time window at most twice and only after an empty result; never search every index or use leading wildcards. " +
   "Label only events you actually saw in a search result, by event_ref. The platform reads timestamps, services and identifiers from the stored log itself — do not restate times as your own facts and never invent an event_ref, URL, payload or time. " +
@@ -493,7 +498,7 @@ const INVESTIGATION_SEARCH_CONTRACT = `{ searches: number[], ${INVESTIGATION_EVE
 const PRODUCTION_INVESTIGATION = {
   name: "Production Incident Investigation",
   description:
-    "Read-only: parse the request → discover services & code paths → search logs (production: Splunk, QC: Argo CD) → correlate events → refine (bounded) → timeline → latency → findings → evidence-backed report",
+    "Read-only: parse the request → discover services & code paths → search logs (production: Splunk and/or SigNoz, QC: Argo CD) → correlate events → refine (bounded) → timeline → latency → findings → evidence-backed report",
   category: "Operations / Debugging",
   execution_mode: "read_only",
   triggers: {
@@ -504,6 +509,8 @@ const PRODUCTION_INVESTIGATION = {
       "prod issue",
       "incident",
       "check splunk",
+      "check signoz",
+      "signoz",
       "splunk",
       "production log",
       "prod log",
@@ -585,6 +592,11 @@ const PRODUCTION_INVESTIGATION = {
         "production (Splunk logs) or qc (no Splunk: Argo CD pod logs, Kafka UI, QC databases); default production",
       required: false,
     },
+    observability: {
+      description:
+        "production telemetry source: auto (every source you connected; default), splunk, signoz or both",
+      required: false,
+    },
     indexes: {
       description: "Splunk indexes to search (default: splunk.defaultIndexes)",
       required: false,
@@ -639,7 +651,8 @@ const PRODUCTION_INVESTIGATION = {
       max_attempts: 2,
       config: {
         instructions:
-          "Run the initial log searches for inputs.environment (production: splunk_search starting with parse_request.initial_queries or an equivalent bounded query on the identifier; " +
+          "Run the initial log searches for inputs.environment (production: for each source in parse_request.observability — splunk_search starting with parse_request.initial_queries, " +
+          "signoz_* starting with parse_request.signoz_queries — or an equivalent bounded query on the identifier; " +
           "qc: qc_log_search on the services' Argo CD apps filtered by the identifier) over parse_request.time, then read the results: " +
           "identify which service logged what, which identifiers appear (shipment id, tracking number, request/trace/correlation id, Kafka message id) and label every relevant event. " +
           "Run at most 6 searches in this step. " +

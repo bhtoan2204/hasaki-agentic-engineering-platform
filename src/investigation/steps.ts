@@ -14,6 +14,7 @@ import type { LogEvent } from "./events.ts";
 import { buildReport, type SearchSummary } from "./report.ts";
 import { parseRequest, type ParsedRequest } from "./request.ts";
 import { formatInZone } from "./time.ts";
+import { selectProviders } from "./observability.ts";
 
 /**
  * Deterministic steps of the Production Incident Investigation workflow (integration actions):
@@ -126,8 +127,27 @@ export function planInvestigation(
         `only the "${config.splunk.environment}" Splunk environment is configured; searches use it`,
       ),
     );
+  const { providers, missing } = qc ? { providers: [], missing: [] } : selectProviders(inputs.observability);
+  if (missing.includes("signoz"))
+    notes.push(
+      say(
+        locale,
+        "đã chọn SigNoz nhưng người chạy chưa kết nối hoặc đã tắt SigNoz (Integrations): không truy vấn được SigNoz",
+        "SigNoz was selected but the run owner has not connected or has disabled it (Integrations): SigNoz cannot be queried",
+      ),
+    );
   const ids = parsed.anchors.slice(0, 3);
-  const initial_queries = (qc ? [] : indexes.slice(0, 3)).flatMap((idx) =>
+  const window = { earliest: parsed.time.earliest, latest: parsed.time.latest };
+  const signoz_queries = providers.includes("signoz")
+    ? [
+        { tool: "signoz_aggregate_logs", args: { ...window, severity: "ERROR", group_by: ["service.name"] } },
+        ...ids.slice(0, 2).map((id) => ({
+          tool: "signoz_search_logs",
+          args: { ...window, expression: `body CONTAINS '${id.replace(/['\\]/g, "")}'`, limit: 200 },
+        })),
+      ]
+    : [];
+  const initial_queries = (providers.includes("splunk") ? indexes.slice(0, 3) : []).flatMap((idx) =>
     ids.length
       ? ids.slice(0, 2).map((id) => ({
           query: `index=${idx} "${id.replace(/"/g, "")}" | table _time index source sourcetype host kubernetes.container_name message _raw | sort 0 _time | head 500`,
@@ -149,7 +169,16 @@ export function planInvestigation(
         "no identifier found in the request: search by service/error terms within the window, never the whole index",
       ),
     );
-  return { ...parsed, indexes, environment, notes, initial_queries, read_only: true };
+  return {
+    ...parsed,
+    indexes,
+    environment,
+    observability: providers,
+    notes,
+    initial_queries,
+    signoz_queries,
+    read_only: true,
+  };
 }
 
 export async function investigationParse(ctx: ExecutionContext): Promise<ExecResult> {
@@ -167,7 +196,7 @@ export async function investigationParse(ctx: ExecutionContext): Promise<ExecRes
     Date.now(),
     locale,
   );
-  if (!out.indexes.length)
+  if (!out.indexes.length && out.observability.includes("splunk"))
     return {
       kind: "failed",
       error: `no searchable index: ${out.notes.join("; ") || "configure splunk.defaultIndexes"}`,

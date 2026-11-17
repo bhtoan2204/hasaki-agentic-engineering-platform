@@ -143,3 +143,25 @@ test("testEvidence reads go test -json events and ignores package-level events",
   const skipped = '{"Action":"skip","Package":"p","Test":"TestB","Elapsed":0}\n';
   assert.deepEqual(testEvidence(skipped), { executed: 0, skipped: 1, marker: false });
 });
+
+test("a Node repository without any test runner is NOT_APPLICABLE only after its typecheck really ran", async () => {
+  const r = repo();
+  try {
+    const out = "== typecheck\n== eslint (changed files, new errors only)\nno platform test harness; the regression step runs npm test";
+    writeFileSync(join(r.path, "package.json"), JSON.stringify({ scripts: { build: "tsc && vite build", lint: "eslint src" } }));
+    execFileSync("git", ["-C", r.path, "add", "."]);
+    const ok = await verify(r.path, out, 0, cfg(), ["src/a.tsx"]);
+    assert.equal(ok.repos[0].outcome, "NOT_APPLICABLE");
+    assert.equal(ok.passed, true);
+    const skipped = await verify(r.path, "== typecheck\ntsc not installed; typecheck skipped\nno platform test harness", 0, cfg(), ["src/a.tsx"]);
+    assert.equal(skipped.repos[0].outcome, "NOT_EXECUTED", "no static check ran");
+    writeFileSync(join(r.path, "src.test.ts"), "");
+    execFileSync("git", ["-C", r.path, "add", "."]);
+    assert.equal((await verify(r.path, out, 0, cfg(), ["src/a.tsx"])).repos[0].outcome, "NOT_EXECUTED", "tests exist but none ran");
+    writeFileSync(join(r.path, "package.json"), JSON.stringify({ scripts: { test: "vitest" } }));
+    execFileSync("git", ["-C", r.path, "rm", "-q", "--cached", "src.test.ts"]);
+    assert.equal((await verify(r.path, out, 0, cfg(), ["src/a.tsx"])).repos[0].outcome, "NOT_EXECUTED", "a test script exists but did not run");
+  } finally {
+    r.done();
+  }
+});

@@ -34,6 +34,17 @@ const Patch = z
       .record(z.string().trim().min(1).max(80), z.array(z.string().trim().min(1).max(80)).max(50))
       .optional(),
     bitbucketAccess: z.enum(["strict", "personal", "trusted"]).optional(),
+    /** Self-hosted SigNoz hosts on private networks that users may point at (cloud metadata stays blocked). */
+    signozAllowedHosts: z
+      .array(
+        z
+          .string()
+          .trim()
+          .toLowerCase()
+          .regex(/^[a-z0-9.:[\]-]{1,253}$/, "must be a bare host name or IP address"),
+      )
+      .max(50)
+      .optional(),
     gitlabInstances: z
       .array(
         z
@@ -162,6 +173,7 @@ export function captureOperatorFallback(): OperatorPatch {
     fileBaseUrl: config.fileBaseUrl ?? "",
     relatedProjects: structuredClone(config.relatedProjects ?? {}),
     bitbucketAccess: config.bitbucket.accessVerification ?? "strict",
+    signozAllowedHosts: [...config.signoz.allowedInternalHosts],
     gitlabInstances: structuredClone(config.gitlab.instances),
     maxTurns: config.maxTurns,
     defaultProvider: config.agent.defaultProvider ?? "claude",
@@ -252,6 +264,7 @@ function write(next: OperatorPatch) {
   config.fileBaseUrl = pick(next, "fileBaseUrl", "") || fb.fileBaseUrl || "";
   config.relatedProjects = structuredClone(pick(next, "relatedProjects", fb.relatedProjects ?? {}));
   config.bitbucket.accessVerification = pick(next, "bitbucketAccess", fb.bitbucketAccess ?? "strict");
+  config.signoz.allowedInternalHosts = [...pick(next, "signozAllowedHosts", fb.signozAllowedHosts ?? [])];
   config.gitlab = gitlabConfig({
     ...config.gitlab,
     instances: structuredClone(pick(next, "gitlabInstances", fb.gitlabInstances ?? [])),
@@ -373,6 +386,7 @@ export function operatorView() {
       fileBaseUrl: config.fileBaseUrl ?? "",
       relatedProjects: config.relatedProjects ?? {},
       bitbucketAccess: config.bitbucket.accessVerification ?? "strict",
+      signozAllowedHosts: config.signoz.allowedInternalHosts,
       gitlabInstances: config.gitlab.instances,
       maxTurns: config.maxTurns,
       defaultProvider: config.agent.defaultProvider ?? "claude",

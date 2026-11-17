@@ -4,6 +4,9 @@ Read-only workflow that answers operational questions about real production inci
 code and cross-service event correlation. It runs on demand (never continuously) and never changes code, data,
 configuration or Splunk objects.
 
+SigNoz (logs, traces, metrics) can be used instead of or alongside Splunk through `inputs.observability`
+(`auto` | `splunk` | `signoz` | `both`); see [signoz.md](signoz.md).
+
 - Workflow id `production-incident-investigation`, category **Operations / Debugging**, `execution_mode: read_only`
   (validated: a read-only workflow cannot contain `coding_agent`, `command` or `git_pull_request` steps).
 - UI: sidebar **Điều tra Production / Investigations** (`#/investigations`), the run view (DAG) shows an investigation

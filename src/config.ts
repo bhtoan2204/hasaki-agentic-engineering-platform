@@ -41,7 +41,12 @@ export interface SlopSettings {
   languages: Record<string, boolean>;
   /** Rule id → false disables the rule. */
   rules: Record<string, boolean>;
-  thresholds: { cyclomatic: number; cyclomaticHigh: number; cognitive: number; duplicateLines: number };
+  thresholds: {
+    cyclomatic: number;
+    cyclomaticHigh: number;
+    cognitive: number;
+    duplicateLines: number;
+  };
   /** Findings below this severity are not reported. */
   minSeverity: SlopSeverity;
   /** Enforcement blocks only findings at or above this confidence (0..1). */
@@ -355,6 +360,20 @@ export interface Config {
     /** Let members use the administrator-managed shared service token when they have no personal session. */
     allowSharedToken: boolean;
   };
+  /** SigNoz (logs, traces, metrics) read through the v5 query_range API with each user's own API key. */
+  signoz: {
+    defaultMinutes: number;
+    maxMinutes: number;
+    defaultLimit: number;
+    maxLimit: number;
+    timeoutMs: number;
+    maxRetries: number;
+    maxResponseBytes: number;
+    /** SigNoz calls one workflow step may make (cache hits included: every call is recorded). */
+    maxCallsPerStep: number;
+    /** Self-hosted hosts on private networks an administrator approved; cloud metadata stays blocked regardless. */
+    allowedInternalHosts: string[];
+  };
   /** Daily production error scan over Splunk (page "Lỗi production"). */
   prodErrors: {
     /** LOCAL explicit actor for the existing scheduled scan. Unset = manual scans only. */
@@ -525,6 +544,17 @@ const defaults: Config = {
     queryBudget: 25,
     allowSharedToken: false,
   },
+  signoz: {
+    defaultMinutes: 15,
+    maxMinutes: 7 * 24 * 60,
+    defaultLimit: 100,
+    maxLimit: 1000,
+    timeoutMs: 15_000,
+    maxRetries: 2,
+    maxResponseBytes: 2 * 1024 * 1024,
+    maxCallsPerStep: 20,
+    allowedInternalHosts: [],
+  },
   telegram: {
     botToken: "",
     chatId: "",
@@ -596,6 +626,7 @@ function load(): Config {
     jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
+    signoz: { ...defaults.signoz, ...(fromFile.signoz ?? {}) },
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },
     prodErrors: { ...defaults.prodErrors, ...(fromFile.prodErrors ?? {}) },
@@ -641,7 +672,10 @@ function load(): Config {
   for (const k of ["maxFiles", "timeoutMs"] as const)
     cfg.slop[k] = positiveInt(`slop.${k}`, cfg.slop[k]);
   for (const [k, v] of Object.entries(cfg.slop.thresholds))
-    cfg.slop.thresholds[k as keyof SlopSettings["thresholds"]] = positiveInt(`slop.thresholds.${k}`, v);
+    cfg.slop.thresholds[k as keyof SlopSettings["thresholds"]] = positiveInt(
+      `slop.thresholds.${k}`,
+      v,
+    );
   if (!["disabled", "advisory", "enforcement"].includes(cfg.slop.mode))
     throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))

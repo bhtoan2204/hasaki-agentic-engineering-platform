@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  Activity,
   ChevronRight,
   Database,
   ExternalLink,
@@ -372,6 +373,112 @@ function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
       <SplunkToken onSaved={reload} connected={!!st?.connected} />
       <SplunkTest connected={!!st?.connected} />
       <SplunkShared st={st} onSaved={reload} />
+    </Row>
+  );
+}
+
+/** SigNoz: the user's own domain and API key (never sent back), enable switch, test and disconnect. */
+function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
+  const { t } = useI18n();
+  const { data: st, reload } = useApi<any>("/api/integrations/signoz");
+  const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [token, setToken] = useState("");
+  const [res, setRes] = useState<any>(null);
+  const health: Health = !st ? "loading" : st.connected ? "ok" : st.configured && st.last_error ? "error" : "off";
+  const save = async (enabled: boolean) => {
+    const out = await act(
+      () => api("/api/integrations/signoz", { baseUrl: baseUrl ?? st?.base_url ?? "", token, enabled }),
+      enabled ? t("ig.signoz.saved") : t("ig.signoz.disabled"),
+    );
+    if (out) {
+      setToken("");
+      setRes(null);
+      reload();
+    }
+  };
+  return (
+    <Row
+      id="signoz"
+      icon={Activity}
+      title="SigNoz"
+      env="Production"
+      health={health}
+      {...p}
+      summary={st?.base_url ? `${st.base_url.replace(/^https?:\/\//, "")}${st.enabled ? "" : ` · ${t("ig.off")}`}` : t("ig.signoz.summaryOff")}
+    >
+      <p className="muted small">{t("ig.signoz.body")}</p>
+      <Steps>
+        <li>{t("ig.signoz.s1")}</li>
+        <li>{t("ig.signoz.s2")}</li>
+        <li>{t("ig.signoz.s3")}</li>
+      </Steps>
+      <Field label={t("ig.signoz.domain")} hint={t("ig.signoz.domainHint")}>
+        <input
+          type="url"
+          placeholder="https://signoz.example.com"
+          value={baseUrl ?? st?.base_url ?? ""}
+          onChange={(e) => setBaseUrl(e.target.value)}
+        />
+      </Field>
+      <Field label={t("ig.signoz.token")} hint={st?.token_set ? t("ig.signoz.tokenKeep") : undefined}>
+        <input
+          type="password"
+          autoComplete="off"
+          placeholder={st?.token_set ? "••••••••••••" : "SIGNOZ-API-KEY"}
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+        />
+      </Field>
+      {st?.last_ok_at && (
+        <p className="muted small">{t("ig.signoz.lastOk", { time: time(st.last_ok_at) })}</p>
+      )}
+      {st?.last_error && <p className="ig-err-text small">{st.last_error}</p>}
+      <div className="ig-actions">
+        <button className="sm" onClick={() => save(true)} disabled={!(baseUrl ?? st?.base_url) || (!token && !st?.token_set)}>
+          <KeyRound size={14} strokeWidth={2} />
+          {st?.enabled ? t("ig.signoz.update") : t("ig.signoz.enable")}
+        </button>
+        {st?.configured && (
+          <>
+            <button
+              className="sm ghost"
+              onClick={async () => {
+                setRes(await act(() => api("/api/integrations/signoz/test", {})));
+                reload();
+              }}
+            >
+              <PlugZap size={14} strokeWidth={2} />
+              {t("ig.signoz.test")}
+            </button>
+            {st.enabled && (
+              <button className="sm ghost" onClick={() => save(false)}>
+                {t("ig.signoz.disable")}
+              </button>
+            )}
+            <button
+              className="sm ghost"
+              onClick={async () =>
+                (await act(() => api("/api/integrations/signoz/disconnect", {}), t("ig.signoz.removed"))) &&
+                (setBaseUrl(null), setRes(null), reload())
+              }
+            >
+              <LogOut size={14} strokeWidth={2} />
+              {t("ig.disconnect")}
+            </button>
+          </>
+        )}
+      </div>
+      {res && (
+        <div className="ig-test-result small" role="status">
+          {res.ok ? (
+            <span className="ig-ok-text">{t("ig.signoz.testOk", { ms: res.latency_ms })}</span>
+          ) : (
+            <span className="ig-err-text">
+              {t(`ig.signoz.err.${res.kind}`)} — {res.message}
+            </span>
+          )}
+        </div>
+      )}
     </Row>
   );
 }
@@ -1639,6 +1746,7 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
           <Kafka {...row("kafka")} />
           <Vault {...row("vault")} />
           <Splunk {...row("splunk")} />
+          <SigNoz {...row("signoz")} />
           <ProjectDatabases {...row("databases")} isAdmin={me?.role === "admin"} />
         </div>
       </section>

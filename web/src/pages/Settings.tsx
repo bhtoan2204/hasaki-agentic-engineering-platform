@@ -27,6 +27,7 @@ type Form = {
   fileBaseUrl: string;
   relatedProjects: Record<string, string[]>;
   bitbucketAccess: "strict" | "personal" | "trusted";
+  signozAllowedHosts: string[];
   maxTurns: number;
   defaultProvider: string;
   enabledProviders: Record<ProviderId, boolean>;
@@ -53,7 +54,7 @@ const SECTIONS: Array<{ id: SectionId; icon: LucideIcon; keys: Array<keyof Form>
   { id: "budget", icon: Wallet, keys: ["costBudget"] },
   { id: "scheduler", icon: Server, keys: ["scheduler"] },
   { id: "routing", icon: ShieldCheck, keys: ["routing"] },
-  { id: "integration", icon: Link2, keys: ["fileBaseUrl", "relatedProjects", "bitbucketAccess"] },
+  { id: "integration", icon: Link2, keys: ["fileBaseUrl", "relatedProjects", "bitbucketAccess", "signozAllowedHosts"] },
   { id: "work", icon: Inbox, keys: ["hasakiWork"] },
 ];
 
@@ -66,6 +67,7 @@ function fromEffective(e: Form): Form {
       Object.entries(e.relatedProjects ?? {}).map(([k, v]) => [k, [...v]]),
     ),
     bitbucketAccess: e.bitbucketAccess ?? "strict",
+    signozAllowedHosts: [...(e.signozAllowedHosts ?? [])],
     codex: { ...e.codex },
     antigravity: { ...e.antigravity },
     copilot: { ...e.copilot },
@@ -90,7 +92,11 @@ function pruneModels(models: Form["models"]) {
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const normalize = (f: Form): Form => ({ ...f, models: pruneModels(f.models) });
+const normalize = (f: Form): Form => ({
+  ...f,
+  models: pruneModels(f.models),
+  signozAllowedHosts: f.signozAllowedHosts.map((h) => h.trim()).filter(Boolean),
+});
 
 export function SettingsPage() {
   const { t } = useI18n();
@@ -503,6 +509,14 @@ export function SettingsPage() {
                   </select>
                 </Field>
               </div>
+              <Field label={t("set.signozHosts")} hint={t("set.signozHostsHint")}>
+                <textarea
+                  rows={2}
+                  placeholder="signoz.internal.example"
+                  value={form.signozAllowedHosts.join("\n")}
+                  onChange={(e) => set({ signozAllowedHosts: e.target.value.split("\n") })}
+                />
+              </Field>
               <div className="field">
                 <span>{t("set.related")}</span>
                 <small className="muted">{t("set.relatedHint")}</small>

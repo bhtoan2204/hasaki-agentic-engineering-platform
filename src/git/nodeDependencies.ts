@@ -2,7 +2,20 @@ import { homedir, tmpdir } from "node:os";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants, createReadStream, lstatSync, readdirSync } from "node:fs";
-import { access, lstat, mkdir, mkdtemp, open, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { join, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,13 +78,24 @@ export function dependencyMetrics() {
   return {
     ...dependencyStats,
     cacheHitRate: total ? dependencyStats.hits / total : null,
-    avgValidationMs: dependencyStats.validations ? dependencyStats.validationMs / dependencyStats.validations : 0,
-    avgInstallMs: dependencyStats.installs ? dependencyStats.installMs / dependencyStats.installs : 0,
-    eventLoopLagMs: loopDelayStarted ? { p50: ms(loopDelay.percentile(50)), p99: ms(loopDelay.percentile(99)), max: ms(loopDelay.max) } : null,
+    avgValidationMs: dependencyStats.validations
+      ? dependencyStats.validationMs / dependencyStats.validations
+      : 0,
+    avgInstallMs: dependencyStats.installs
+      ? dependencyStats.installMs / dependencyStats.installs
+      : 0,
+    eventLoopLagMs: loopDelayStarted
+      ? {
+          p50: ms(loopDelay.percentile(50)),
+          p99: ms(loopDelay.percentile(99)),
+          max: ms(loopDelay.max),
+        }
+      : null,
   };
 }
 export function resetDependencyMetrics() {
-  for (const key of Object.keys(dependencyStats) as (keyof typeof dependencyStats)[]) dependencyStats[key] = 0;
+  for (const key of Object.keys(dependencyStats) as (keyof typeof dependencyStats)[])
+    dependencyStats[key] = 0;
   loopDelay.reset();
 }
 function startLoopMonitor() {
@@ -81,7 +105,11 @@ function startLoopMonitor() {
 }
 
 function evidenceDirectory(opts: DependencyOptions) {
-  return resolve(opts.evidenceDir ?? process.env.PLATFORM_DEPENDENCY_EVIDENCE_DIR ?? join(homedir(), ".claude-task-platform", "dependency-evidence"));
+  return resolve(
+    opts.evidenceDir ??
+      process.env.PLATFORM_DEPENDENCY_EVIDENCE_DIR ??
+      join(homedir(), ".claude-task-platform", "dependency-evidence"),
+  );
 }
 
 class Gate {
@@ -109,7 +137,9 @@ function npmVersion() {
   const key = process.env.PATH ?? "";
   let version = npmVersions.get(key);
   if (!version) {
-    version = exec("npm", ["--version"], { timeout: 5000, encoding: "utf8" }).then((r) => r.stdout.trim());
+    version = exec("npm", ["--version"], { timeout: 5000, encoding: "utf8" }).then((r) =>
+      r.stdout.trim(),
+    );
     version.catch(() => npmVersions.delete(key));
     npmVersions.set(key, version);
   }
@@ -117,28 +147,72 @@ function npmVersion() {
 }
 
 /** Digest of everything that decides which dependencies would be installed. Null: never ready (credentials in the repo). */
-export async function dependencyFingerprint(workspace: string, opts: DependencyOptions = {}): Promise<string | null> {
+export async function dependencyFingerprint(
+  workspace: string,
+  opts: DependencyOptions = {},
+): Promise<string | null> {
   try {
-    const FILES = ["package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", ".nvmrc", ".node-version"];
+    const FILES = [
+      "package.json",
+      "package-lock.json",
+      "npm-shrinkwrap.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      ".nvmrc",
+      ".node-version",
+    ];
     // These may contain credentials. Do not read them or guess their effect on installation.
     const credentialed = [".npmrc", ".yarnrc.yml"];
     const [version, contents, risky] = await Promise.all([
       npmVersion(),
       Promise.all(FILES.map((file) => readFile(join(workspace, file)).catch(() => null))),
-      Promise.all(credentialed.map((file) => access(join(workspace, file)).then(() => true, () => false))),
+      Promise.all(
+        credentialed.map((file) =>
+          access(join(workspace, file)).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ),
     ]);
     if (contents[0] === null || risky.some(Boolean)) return null;
-    const hash = createHash("sha256").update(JSON.stringify({ node: opts.nodeVersion ?? process.version, npm: version,
-      platform: process.platform, arch: process.arch, ignoreScripts: true,
-      nodeEnv: process.env.NODE_ENV ?? "", omit: process.env.npm_config_omit ?? "",
-      include: process.env.npm_config_include ?? "", legacyPeerDeps: process.env.npm_config_legacy_peer_deps ?? "",
-      registry: process.env.npm_config_registry ?? "" }));
-    FILES.forEach((file, i) => hash.update(file).update("\0").update(contents[i] ?? "absent").update("\0"));
+    const hash = createHash("sha256").update(
+      JSON.stringify({
+        node: opts.nodeVersion ?? process.version,
+        npm: version,
+        platform: process.platform,
+        arch: process.arch,
+        ignoreScripts: true,
+        nodeEnv: process.env.NODE_ENV ?? "",
+        omit: process.env.npm_config_omit ?? "",
+        include: process.env.npm_config_include ?? "",
+        legacyPeerDeps: process.env.npm_config_legacy_peer_deps ?? "",
+        registry: process.env.npm_config_registry ?? "",
+      }),
+    );
+    FILES.forEach((file, i) =>
+      hash
+        .update(file)
+        .update("\0")
+        .update(contents[i] ?? "absent")
+        .update("\0"),
+    );
     return hash.digest("hex");
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
-interface Entry { rel: string; path: string; kind: "f" | "d" | "l"; mode: bigint; size: bigint; mtime: bigint; ctime: bigint; ino: bigint }
+interface Entry {
+  rel: string;
+  path: string;
+  kind: "f" | "d" | "l";
+  mode: bigint;
+  size: bigint;
+  mtime: bigint;
+  ctime: bigint;
+  ino: bigint;
+}
 
 const SLICE_MS = 4;
 const yieldLoop = () => new Promise<void>((done) => setImmediate(done));
@@ -155,27 +229,43 @@ async function walkTree(root: string): Promise<Entry[]> {
   while (pending.length) {
     const [dir, prefix] = pending.pop()!;
     let names: string[];
-    try { names = readdirSync(dir); } catch (e) {
+    try {
+      names = readdirSync(dir);
+    } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT" && dir === root) return out;
       throw e;
     }
     for (const name of names) {
-      const path = join(dir, name), rel = `${prefix}/${name}`;
+      const path = join(dir, name),
+        rel = `${prefix}/${name}`;
       const st = lstatSync(path, { bigint: true });
       dependencyStats.filesStatted++;
       const kind = st.isSymbolicLink() ? "l" : st.isDirectory() ? "d" : st.isFile() ? "f" : null;
       if (!kind) throw new Error("Unsupported dependency entry");
-      out.push({ rel, path, kind, mode: st.mode, size: st.size, mtime: st.mtimeNs, ctime: st.ctimeNs, ino: st.ino });
+      out.push({
+        rel,
+        path,
+        kind,
+        mode: st.mode,
+        size: st.size,
+        mtime: st.mtimeNs,
+        ctime: st.ctimeNs,
+        ino: st.ino,
+      });
       if (kind === "d") pending.push([path, rel]);
     }
-    if (performance.now() - sliceStart > SLICE_MS) { await yieldLoop(); sliceStart = performance.now(); }
+    if (performance.now() - sliceStart > SLICE_MS) {
+      await yieldLoop();
+      sliceStart = performance.now();
+    }
   }
   return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 }
 
 function snapshotDigest(entries: Entry[]) {
   const hash = createHash("sha256");
-  for (const e of entries) hash.update(`${e.rel}|${e.kind}|${e.mode}|${e.size}|${e.mtime}|${e.ctime}|${e.ino}\n`);
+  for (const e of entries)
+    hash.update(`${e.rel}|${e.kind}|${e.mode}|${e.size}|${e.mtime}|${e.ctime}|${e.ino}\n`);
   return hash.digest("hex");
 }
 
@@ -195,31 +285,75 @@ async function hashFile(path: string, gate: Gate) {
 /** Content digest of the installed tree, including package code and links. Symlinks must stay inside the workspace. */
 async function contentDigest(workspace: string, entries: Entry[], gate: Gate) {
   const realWorkspace = await realpath(workspace);
-  const parts = await Promise.all(entries.map(async (e) => {
-    const head = `${e.rel}|${e.kind}|${e.mode}|${e.size}`;
-    if (e.kind === "d") return head;
-    if (e.kind === "f") return `${head}|${await hashFile(e.path, gate)}`;
-    const target = await realpath(e.path);
-    if (relative(realWorkspace, target).startsWith("..")) throw new Error("Dependency link leaves repository");
-    const targetStat = await stat(target);
-    return `${head}|${await gate.run(() => readlink(e.path))}|${targetStat.isFile() ? await hashFile(target, gate) : "-"}`;
-  }));
+  const parts = await Promise.all(
+    entries.map(async (e) => {
+      const head = `${e.rel}|${e.kind}|${e.mode}|${e.size}`;
+      if (e.kind === "d") return head;
+      if (e.kind === "f") return `${head}|${await hashFile(e.path, gate)}`;
+      const target = await realpath(e.path);
+      if (relative(realWorkspace, target).startsWith(".."))
+        throw new Error("Dependency link leaves repository");
+      const targetStat = await stat(target);
+      return `${head}|${await gate.run(() => readlink(e.path))}|${targetStat.isFile() ? await hashFile(target, gate) : "-"}`;
+    }),
+  );
   return createHash("sha256").update(parts.join("\n")).digest("hex");
 }
 
 async function hasDependencies(workspace: string) {
   const manifest = JSON.parse(await readFile(join(workspace, "package.json"), "utf8"));
-  return ["dependencies", "devDependencies", "optionalDependencies"].some((key) => Object.keys(manifest[key] ?? {}).length);
+  return ["dependencies", "devDependencies", "optionalDependencies"].some(
+    (key) => Object.keys(manifest[key] ?? {}).length,
+  );
+}
+
+/**
+ * A classic-yarn repository whose yarn.lock is the real lock: no package-lock.json, or one that has drifted from
+ * package.json (npm would then resolve the newest versions in each range instead of the locked ones).
+ */
+async function yarnLocked(workspace: string) {
+  if (!(await access(join(workspace, "yarn.lock")).then(() => true, () => false))) return false;
+  const version = await exec("yarn", ["--version"], { timeout: 5000, encoding: "utf8" }).then((r) => r.stdout.trim(), () => "");
+  if (!version.startsWith("1.")) return false;
+  const manifest = JSON.parse(await readFile(join(workspace, "package.json"), "utf8"));
+  const npmLock = await readFile(join(workspace, "package-lock.json"), "utf8").then((t) => JSON.parse(t), () => null);
+  return !lockMatchesManifest(npmLock, manifest);
+}
+
+function lockMatchesManifest(lock: any, manifest: any) {
+  const root = lock?.packages?.[""];
+  if (!root) return false;
+  const same = (a: Record<string, string> = {}, b: Record<string, string> = {}) =>
+    Object.keys(a).length === Object.keys(b).length &&
+    Object.entries(a).every(([k, v]) => b[k] === v);
+  return ["dependencies", "devDependencies", "optionalDependencies"].every((key) =>
+    same(manifest[key], root[key]),
+  );
 }
 
 /** Every declared and locked package must be present at the locked version. An empty or partial install fails. */
 async function completeInstall(workspace: string) {
   try {
     const manifest = JSON.parse(await readFile(join(workspace, "package.json"), "utf8"));
-    const lock = await readFile(join(workspace, "package-lock.json"), "utf8").then((text) => JSON.parse(text), () => null);
-    const omit = new Set((process.env.npm_config_omit ?? (process.env.NODE_ENV === "production" ? "dev" : "")).split(/[,\s]+/));
-    const required = { ...manifest.dependencies, ...(!omit.has("dev") ? manifest.devDependencies : {}) };
-    const installedVersion = async (dir: string) => JSON.parse(await readFile(join(workspace, dir, "package.json"), "utf8")).version as string | undefined;
+    const parsed = await readFile(join(workspace, "package-lock.json"), "utf8").then(
+      (text) => JSON.parse(text),
+      () => null,
+    );
+    // An out-of-sync lock was bypassed by install() (npm install --no-package-lock): package.json is then the authority.
+    const lock = lockMatchesManifest(parsed, manifest) ? parsed : null;
+    const omit = new Set(
+      (process.env.npm_config_omit ?? (process.env.NODE_ENV === "production" ? "dev" : "")).split(
+        /[,\s]+/,
+      ),
+    );
+    const required = {
+      ...manifest.dependencies,
+      ...(!omit.has("dev") ? manifest.devDependencies : {}),
+    };
+    const installedVersion = async (dir: string) =>
+      JSON.parse(await readFile(join(workspace, dir, "package.json"), "utf8")).version as
+        | string
+        | undefined;
     for (const name of Object.keys(required)) {
       if (!/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(name)) return false;
       const installed = await installedVersion(join("node_modules", name));
@@ -233,12 +367,21 @@ async function completeInstall(workspace: string) {
       if (entry.version && (await installedVersion(path)) !== entry.version) return false;
     }
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 interface Evidence {
-  v: number; workspace: string; dev: string; ino: string; fingerprint: string;
-  digest: string; snapshot: string; files: number; checkedAt: number;
+  v: number;
+  workspace: string;
+  dev: string;
+  ino: string;
+  fingerprint: string;
+  digest: string;
+  snapshot: string;
+  files: number;
+  checkedAt: number;
 }
 
 const keyCache = new Map<string, string>();
@@ -249,13 +392,17 @@ async function signingKey(dir: string) {
   await mkdir(dir, { recursive: true, mode: 0o700 });
   try {
     await writeFile(file, randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 });
-  } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
   const key = await readFile(file, "utf8");
   if (key.length >= 32) keyCache.set(dir, key);
   return key;
 }
-const sign = (key: string, payload: string) => createHmac("sha256", key).update(payload).digest("hex");
-const evidenceFile = (dir: string, realWorkspace: string) => join(dir, `${createHash("sha256").update(realWorkspace).digest("hex")}.json`);
+const sign = (key: string, payload: string) =>
+  createHmac("sha256", key).update(payload).digest("hex");
+const evidenceFile = (dir: string, realWorkspace: string) =>
+  join(dir, `${createHash("sha256").update(realWorkspace).digest("hex")}.json`);
 
 async function identity(workspace: string) {
   const real = await realpath(workspace);
@@ -266,26 +413,34 @@ async function identity(workspace: string) {
 /** Reads and authenticates the record. Anything missing, corrupted, wrong-schema or tampered is null. */
 async function readEvidence(dir: string, real: string): Promise<Evidence | null> {
   try {
-    const wrapper = JSON.parse(await readFile(evidenceFile(dir, real), "utf8")) as { payload?: unknown; sig?: unknown };
+    const wrapper = JSON.parse(await readFile(evidenceFile(dir, real), "utf8")) as {
+      payload?: unknown;
+      sig?: unknown;
+    };
     if (typeof wrapper.payload !== "string" || typeof wrapper.sig !== "string") return null;
     const expected = Buffer.from(sign(await signingKey(dir), wrapper.payload), "hex");
     const given = Buffer.from(wrapper.sig, "hex");
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
     const evidence = JSON.parse(wrapper.payload) as Evidence;
     return evidence.v === EVIDENCE_SCHEMA && evidence.workspace === real ? evidence : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** Atomic: temp file in the same directory, fsync, rename. */
 async function writeEvidence(dir: string, evidence: Evidence) {
   const key = await signingKey(dir);
   const payload = JSON.stringify(evidence);
-  const file = evidenceFile(dir, evidence.workspace), tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const file = evidenceFile(dir, evidence.workspace),
+    tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   const handle = await open(tmp, "w", 0o600);
   try {
     await handle.writeFile(JSON.stringify({ payload, sig: sign(key, payload) }));
     await handle.sync();
-  } finally { await handle.close(); }
+  } finally {
+    await handle.close();
+  }
   await rename(tmp, file);
 }
 
@@ -295,46 +450,81 @@ async function nodeModulesIsDirectory(workspace: string, emptyIsFine: boolean) {
   return st.isDirectory(); // a symlinked node_modules could write through to another checkout
 }
 
-export interface Validation { ready: boolean; mode: "incremental" | "full" | "none"; reason?: string }
+export interface Validation {
+  ready: boolean;
+  mode: "incremental" | "full" | "none";
+  reason?: string;
+}
 
 /** Is the installed state exactly the one the worker installed and signed? */
-export async function validateDependencies(workspace: string, opts: DependencyOptions = {}): Promise<Validation> {
+export async function validateDependencies(
+  workspace: string,
+  opts: DependencyOptions = {},
+): Promise<Validation> {
   startLoopMonitor();
   const began = performance.now();
   try {
     const result = await validate(workspace, opts);
     dependencyStats.validations++;
-    if (result.ready) dependencyStats.hits++; else dependencyStats.misses++;
+    if (result.ready) dependencyStats.hits++;
+    else dependencyStats.misses++;
     if (result.mode === "full") dependencyStats.fullValidations++;
     if (result.mode === "incremental") dependencyStats.incrementalValidations++;
     return result;
-  } finally { dependencyStats.validationMs += performance.now() - began; }
+  } finally {
+    dependencyStats.validationMs += performance.now() - began;
+  }
 }
 
 async function validate(workspace: string, opts: DependencyOptions): Promise<Validation> {
-  const no = (reason: string, mode: Validation["mode"] = "none"): Validation => ({ ready: false, mode, reason });
+  const no = (reason: string, mode: Validation["mode"] = "none"): Validation => ({
+    ready: false,
+    mode,
+    reason,
+  });
   const fingerprint = await dependencyFingerprint(workspace, opts);
   if (!fingerprint) return no("no fingerprint");
   const deps = await hasDependencies(workspace).catch(() => null);
   if (deps === null) return no("unreadable manifest");
-  if (!(await nodeModulesIsDirectory(workspace, !deps))) return no("node_modules is missing or a link");
+  if (!(await nodeModulesIsDirectory(workspace, !deps)))
+    return no("node_modules is missing or a link");
   const id = await identity(workspace);
   const dir = evidenceDirectory(opts);
   const evidence = await readEvidence(dir, id.real);
   if (!evidence) return no("no valid evidence");
-  if (evidence.fingerprint !== fingerprint || evidence.dev !== id.dev || evidence.ino !== id.ino) return no("evidence is stale");
+  if (evidence.fingerprint !== fingerprint || evidence.dev !== id.dev || evidence.ino !== id.ino)
+    return no("evidence is stale");
   const now = (opts.now ?? Date.now)();
   const gate = new Gate(FS_CONCURRENCY);
   let entries: Entry[];
-  try { entries = await walkTree(join(workspace, "node_modules")); } catch { return no("unreadable installed tree"); }
-  if (!opts.strict && now - evidence.checkedAt < FAST_PATH_MAX_AGE_MS && snapshotDigest(entries) === evidence.snapshot) return { ready: true, mode: "incremental" };
+  try {
+    entries = await walkTree(join(workspace, "node_modules"));
+  } catch {
+    return no("unreadable installed tree");
+  }
+  if (
+    !opts.strict &&
+    now - evidence.checkedAt < FAST_PATH_MAX_AGE_MS &&
+    snapshotDigest(entries) === evidence.snapshot
+  )
+    return { ready: true, mode: "incremental" };
   // Full verification: the signed content digest is the authority; metadata only decides how often we pay for it.
   let digest: string;
-  try { digest = await contentDigest(workspace, entries, gate); } catch { return no("unreadable installed tree", "full"); }
-  if (digest !== evidence.digest) return no("installed content differs from signed evidence", "full");
+  try {
+    digest = await contentDigest(workspace, entries, gate);
+  } catch {
+    return no("unreadable installed tree", "full");
+  }
+  if (digest !== evidence.digest)
+    return no("installed content differs from signed evidence", "full");
   if (deps && !(await completeInstall(workspace))) return no("incomplete install", "full");
   // Contents are proven identical: refresh metadata so later checks take the fast path again.
-  await writeEvidence(dir, { ...evidence, snapshot: snapshotDigest(entries), files: entries.length, checkedAt: now }).catch(() => {});
+  await writeEvidence(dir, {
+    ...evidence,
+    snapshot: snapshotDigest(entries),
+    files: entries.length,
+    checkedAt: now,
+  }).catch(() => {});
   return { ready: true, mode: "full" };
 }
 
@@ -354,17 +544,42 @@ export async function recordDependencies(workspace: string, opts: DependencyOpti
   const gate = new Gate(FS_CONCURRENCY);
   const entries = await walkTree(join(workspace, "node_modules"));
   const digest = await contentDigest(workspace, entries, gate);
-  await writeEvidence(evidenceDirectory(opts), { v: EVIDENCE_SCHEMA, workspace: id.real, dev: id.dev, ino: id.ino, fingerprint,
-    digest, snapshot: snapshotDigest(entries), files: entries.length, checkedAt: (opts.now ?? Date.now)() });
+  await writeEvidence(evidenceDirectory(opts), {
+    v: EVIDENCE_SCHEMA,
+    workspace: id.real,
+    dev: id.dev,
+    ino: id.ino,
+    fingerprint,
+    digest,
+    snapshot: snapshotDigest(entries),
+    files: entries.length,
+    checkedAt: (opts.now ?? Date.now)(),
+  });
   return true;
 }
 
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } };
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-interface LockOwner { pid: number; token: string; at: number }
-const readOwner = (lock: string) => readFile(join(lock, "owner"), "utf8").then((text) => JSON.parse(text) as LockOwner, () => null);
-const sameOwner = (a: LockOwner | null, b: LockOwner | null) => a?.pid === b?.pid && a?.token === b?.token;
+interface LockOwner {
+  pid: number;
+  token: string;
+  at: number;
+}
+const readOwner = (lock: string) =>
+  readFile(join(lock, "owner"), "utf8").then(
+    (text) => JSON.parse(text) as LockOwner,
+    () => null,
+  );
+const sameOwner = (a: LockOwner | null, b: LockOwner | null) =>
+  a?.pid === b?.pid && a?.token === b?.token;
 
 /**
  * A lock directory that was judged stale is moved aside with one atomic rename (only one waiter can win it), the moved
@@ -373,7 +588,11 @@ const sameOwner = (a: LockOwner | null, b: LockOwner | null) => a?.pid === b?.pi
  */
 async function takeOver(lock: string, judged: LockOwner | null, token: string) {
   const grave = `${lock}.${token}.stale`;
-  try { await rename(lock, grave); } catch { return false; }
+  try {
+    await rename(lock, grave);
+  } catch {
+    return false;
+  }
   if (!sameOwner(await readOwner(grave), judged)) {
     await rename(grave, lock).catch(() => rm(grave, { recursive: true, force: true }));
     return false;
@@ -387,7 +606,11 @@ async function takeOver(lock: string, judged: LockOwner | null, token: string) {
  * name and published by rename, which fails while another lock exists, so a lock is never visible without an owner.
  * A dead owner or an old lock is taken over by takeOver().
  */
-export async function withInstallLock<T>(dir: string, real: string, fn: () => Promise<T>): Promise<T> {
+export async function withInstallLock<T>(
+  dir: string,
+  real: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   const locks = join(dir, "locks");
   const lock = join(locks, createHash("sha256").update(real).digest("hex"));
   await mkdir(locks, { recursive: true, mode: 0o700 });
@@ -397,7 +620,10 @@ export async function withInstallLock<T>(dir: string, real: string, fn: () => Pr
     const candidate = `${lock}.${token}.tmp`;
     await rm(candidate, { recursive: true, force: true });
     await mkdir(candidate);
-    await writeFile(join(candidate, "owner"), JSON.stringify({ pid: process.pid, token, at: Date.now() } satisfies LockOwner));
+    await writeFile(
+      join(candidate, "owner"),
+      JSON.stringify({ pid: process.pid, token, at: Date.now() } satisfies LockOwner),
+    );
     try {
       await rename(candidate, lock);
       break;
@@ -408,14 +634,19 @@ export async function withInstallLock<T>(dir: string, real: string, fn: () => Pr
     const owner = await readOwner(lock);
     const born = owner ? owner.at : ((await stat(lock).catch(() => null))?.mtimeMs ?? null);
     if (born === null) continue; // released while we looked
-    const stale = Date.now() - born > (owner ? LOCK_STALE_MS : 30_000) || (owner !== null && !alive(owner.pid));
+    const stale =
+      Date.now() - born > (owner ? LOCK_STALE_MS : 30_000) || (owner !== null && !alive(owner.pid));
     if (stale && (await takeOver(lock, owner, token))) continue;
-    if (Date.now() > deadline) throw new Error("Timed out waiting for another dependency installation");
+    if (Date.now() > deadline)
+      throw new Error("Timed out waiting for another dependency installation");
     await sleep(50);
   }
-  try { return await fn(); } finally {
+  try {
+    return await fn();
+  } finally {
     // Release only a lock that is still ours (it may have been taken over after a very long install).
-    if ((await readOwner(lock))?.token === token) await takeOver(lock, { pid: process.pid, token, at: 0 } as LockOwner, token).catch(() => {});
+    if ((await readOwner(lock))?.token === token)
+      await takeOver(lock, { pid: process.pid, token, at: 0 } as LockOwner, token).catch(() => {});
   }
 }
 
@@ -426,8 +657,18 @@ const flights = new Map<string, Promise<boolean>>();
  * Lifecycle scripts are not run: this executes for whatever repository the run was allowed to prepare.
  * Returns true when it actually installed. Concurrent callers for one workspace share one flight (and one install).
  */
-export async function installNodeDependencies(workspace: string, cache?: string, opts: DependencyOptions = {}): Promise<boolean> {
-  if (!(await access(join(workspace, "package.json")).then(() => true, () => false))) return false;
+export async function installNodeDependencies(
+  workspace: string,
+  cache?: string,
+  opts: DependencyOptions = {},
+): Promise<boolean> {
+  if (
+    !(await access(join(workspace, "package.json")).then(
+      () => true,
+      () => false,
+    ))
+  )
+    return false;
   const real = await realpath(workspace);
   const key = `${real}\0${opts.strict ? "strict" : "fast"}`;
   const running = flights.get(key);
@@ -438,14 +679,20 @@ export async function installNodeDependencies(workspace: string, cache?: string,
   }
   const flight = ensure(workspace, real, cache, opts);
   flights.set(key, flight);
-  try { return await flight; } finally { flights.delete(key); }
+  try {
+    return await flight;
+  } finally {
+    flights.delete(key);
+  }
 }
 
 /** Thrown instead of installing when the worker-owned evidence directory cannot be written (a sandboxed caller). */
 export class DependenciesNotPreparedError extends Error {
   constructor(workspace: string) {
-    super(`Dependencies in ${workspace} are not installed and signed by the worker, and this process cannot write worker-owned evidence `
-      + "(read-only sandbox). The worker prepare step must install dependencies before verification runs.");
+    super(
+      `Dependencies in ${workspace} are not installed and signed by the worker, and this process cannot write worker-owned evidence ` +
+        "(read-only sandbox). The worker prepare step must install dependencies before verification runs.",
+    );
     this.name = "DependenciesNotPreparedError";
   }
 }
@@ -456,17 +703,27 @@ async function evidenceWritable(dir: string) {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await access(dir, constants.W_OK | constants.X_OK);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
-async function ensure(workspace: string, real: string, cache: string | undefined, opts: DependencyOptions) {
+async function ensure(
+  workspace: string,
+  real: string,
+  cache: string | undefined,
+  opts: DependencyOptions,
+) {
   if ((await validateDependencies(workspace, opts)).ready) return false;
-  if (!(await evidenceWritable(evidenceDirectory(opts)))) throw new DependenciesNotPreparedError(workspace);
+  if (!(await evidenceWritable(evidenceDirectory(opts))))
+    throw new DependenciesNotPreparedError(workspace);
   return withInstallLock(evidenceDirectory(opts), real, async () => {
     // Another caller or process may have finished while we waited for the lock.
     if ((await validateDependencies(workspace, opts)).ready) return false;
     const began = performance.now();
-    try { await install(workspace, real, cache, opts); } finally {
+    try {
+      await install(workspace, real, cache, opts);
+    } finally {
       dependencyStats.installs++;
       dependencyStats.installMs += performance.now() - began;
     }
@@ -474,8 +731,17 @@ async function ensure(workspace: string, real: string, cache: string | undefined
   });
 }
 
-async function install(workspace: string, real: string, cache: string | undefined, opts: DependencyOptions) {
-  let npmCache = cache || process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || join(homedir(), ".npm");
+async function install(
+  workspace: string,
+  real: string,
+  cache: string | undefined,
+  opts: DependencyOptions,
+) {
+  let npmCache =
+    cache ||
+    process.env.npm_config_cache ||
+    process.env.NPM_CONFIG_CACHE ||
+    join(homedir(), ".npm");
   let temporaryCache: string | null = null;
   try {
     await mkdir(npmCache, { recursive: true });
@@ -491,7 +757,10 @@ async function install(workspace: string, real: string, cache: string | undefine
     await rm(evidenceFile(evidenceDirectory(opts), real), { force: true });
     await rm(join(workspace, "node_modules", ".platform-ready"), { force: true });
     const before = await dependencyFingerprint(workspace, opts);
-    const ci = await access(join(workspace, "package-lock.json")).then(() => true, () => false);
+    const ci = await access(join(workspace, "package-lock.json")).then(
+      () => true,
+      () => false,
+    );
     const runOpts = {
       cwd: workspace,
       timeout: 10 * 60_000,
@@ -499,16 +768,35 @@ async function install(workspace: string, real: string, cache: string | undefine
       env: { ...process.env, npm_config_cache: npmCache },
     };
     const flags = ["--ignore-scripts", "--no-audit", "--no-fund"];
-    try {
-      await exec("npm", [ci ? "ci" : "install", ...(!ci ? ["--no-package-lock"] : []), ...flags], runOpts);
+    if (await yarnLocked(workspace)) {
+      // yarn.lock is the authoritative lock: install exactly those versions, never rewriting it.
+      const yarnFlags = ["--ignore-scripts", "--non-interactive", "--cache-folder", join(npmCache, "yarn")];
+      try {
+        await exec("yarn", ["install", "--frozen-lockfile", ...yarnFlags], runOpts);
+      } catch (e) {
+        if (!/lockfile needs to be updated/i.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message)))
+          throw e;
+        await exec("yarn", ["install", "--pure-lockfile", ...yarnFlags], runOpts);
+      }
+    } else try {
+      await exec(
+        "npm",
+        [ci ? "ci" : "install", ...(!ci ? ["--no-package-lock"] : []), ...flags],
+        runOpts,
+      );
     } catch (e) {
       // The repository's own lock file is out of sync with package.json (npm ci EUSAGE): install from package.json
       // without reading or rewriting the lock, so the worktree stays clean.
-      if (!ci || !/EUSAGE|in sync/.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message))) throw e;
+      if (
+        !ci ||
+        !/EUSAGE|in sync/.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message))
+      )
+        throw e;
       await exec("npm", ["install", "--no-package-lock", ...flags], runOpts);
     }
     // Evidence only for the exact state that was requested, and only after a complete installation.
-    if (before && before === (await dependencyFingerprint(workspace, opts))) await recordDependencies(workspace, opts);
+    if (before && before === (await dependencyFingerprint(workspace, opts)))
+      await recordDependencies(workspace, opts);
   } finally {
     if (temporaryCache) await rm(temporaryCache, { recursive: true, force: true });
   }
@@ -524,5 +812,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.error(e.message);
     process.exit(1);
   }
-  if (process.env.PLATFORM_DEPENDENCY_METRICS === "1") console.log(`dependencies: ${JSON.stringify(dependencyMetrics())}`);
+  if (process.env.PLATFORM_DEPENDENCY_METRICS === "1")
+    console.log(`dependencies: ${JSON.stringify(dependencyMetrics())}`);
 }

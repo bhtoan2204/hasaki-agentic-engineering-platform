@@ -63,6 +63,42 @@ test("an empty or incomplete install is not ready, a complete signed one is", as
   assert.equal(await nodeModulesReady(dir, opts), true);
 });
 
+test("a lock out of sync with package.json is bypassed: the package.json install is signed and ready", async (t) => {
+  const { dir, opts } = await fixture(t);
+  // The lock pins another version and misses nothing the manifest declares; install() then uses package.json only.
+  await writeFile(
+    join(dir, "package-lock.json"),
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        "": { dependencies: { "left-pad": "0.9.0", "old-sass": "^9.0.0" } },
+        "node_modules/left-pad": { version: "0.9.0" },
+        "node_modules/old-sass": { version: "9.0.0" },
+      },
+    }),
+  );
+  assert.equal(await installNodeDependencies(dir, join(dir, "cache"), opts), true);
+  assert.equal(await nodeModulesReady(dir, { ...opts, strict: true }), true);
+});
+
+test("an authoritative yarn.lock installs with yarn at the locked versions, never npm ranges", async (t) => {
+  const { dir, bin, opts } = await fixture(t);
+  await writeFile(join(bin, "yarn"), `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '1.22.22'; exit 0; fi
+echo "yarn $*" >> "$CALLS"
+mkdir -p node_modules/left-pad
+printf '{"name":"left-pad","version":"1.0.0"}' > node_modules/left-pad/package.json
+`, { mode: 0o755 });
+  await writeFile(join(dir, "yarn.lock"), 'left-pad@1.0.0:\n  version "1.0.0"\n');
+  // package-lock.json has drifted from package.json: npm would resolve ranges, yarn.lock is the real lock.
+  await writeFile(join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: { "": { dependencies: {} } } }));
+  assert.equal(await installNodeDependencies(dir, join(dir, "cache"), opts), true);
+  const calls = (await readFile(join(dir, "calls"), "utf8")).trim().split("\n");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /^yarn install --frozen-lockfile --ignore-scripts/);
+  assert.equal(await nodeModulesReady(dir, { ...opts, strict: true }), true);
+});
+
 test("modified, deleted, added and corrupted packages are detected", async (t) => {
   const { dir, opts } = await fixture(t);
   await installNodeDependencies(dir, join(dir, "cache"), opts);

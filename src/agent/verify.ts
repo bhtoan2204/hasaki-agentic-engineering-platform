@@ -109,6 +109,22 @@ const globRe = (glob: string) =>
   );
 const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$/;
 
+/**
+ * A Node repository with no test runner at all (no `test` script, no tracked test file) whose typecheck actually ran:
+ * that typecheck and lint are all the verification it has, so the missing test run is not a gap the agent can close.
+ */
+export async function staticChecksOnly(path: string, output: string) {
+  if (!/^== typecheck$/m.test(output) || /typecheck skipped/.test(output)) return false;
+  const manifest = await readFile(resolve(path, "package.json"), "utf8").then((t) => JSON.parse(t), () => null);
+  const script = String(manifest?.scripts?.test ?? "");
+  if (!manifest || (script && !/no test specified/.test(script))) return false;
+  const tracked = await exec("git", ["-C", path, "ls-files"], { maxBuffer: 64 << 20 }).then(
+    (r) => r.stdout.split("\n"),
+    () => null,
+  );
+  return !!tracked && !tracked.some((f) => TEST_FILE.test(f));
+}
+
 /** Changes no test can exercise on their own: generated protobuf code, .proto schemas and swag-generated API docs. */
 export const GENERATED_ONLY: NonNullable<VerifyConfig["notApplicable"]> = {
   allowedPaths: [
@@ -892,6 +908,10 @@ export async function verifyWorkspaces(
           if (policy) {
             entry.status = "not_applicable";
             entry.note = `no executable tests apply: ${policy.reason}`;
+          } else if (await staticChecksOnly(p, r.output)) {
+            entry.status = "not_applicable";
+            entry.note =
+              "no executable tests apply: the repository has no test runner or test files; its typecheck and lint passed";
           }
         }
       }
