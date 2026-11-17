@@ -563,7 +563,7 @@ export function normalizeInvestigationOutput(
     out.fix_assessment = fix;
     out.evidence_gate = evidenceGate(out.root_cause_assessment.status, fix);
     out.prohibited_assumptions = list(output.prohibited_assumptions, 15);
-    out.required_tests = list(output.required_tests ?? output.regression_tests, 15);
+    out.required_tests = list(output.required_tests, 15);
   }
   out.evidence_validation = {
     notes: notes.slice(0, 40),
@@ -631,7 +631,7 @@ export function approvedScopeFrom(stepKey: string, proposal: any): ApprovedScope
       .map((c) => c.claim)
       .slice(0, 12),
     prohibited_assumptions: list(proposal.prohibited_assumptions, 15),
-    required_tests: list(proposal.required_tests ?? proposal.regression_tests, 15),
+    required_tests: list(proposal.required_tests, 15),
   };
 }
 
@@ -789,7 +789,7 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
     }
     for (const m of list(o.missing_evidence, 30)) push(missing, m);
     for (const p of list(o.prohibited_assumptions, 15)) push(prohibited, p);
-    for (const t of list(o.required_tests ?? o.regression_tests, 15)) push(tests, t);
+    for (const t of list(o.required_tests, 15)) push(tests, t);
     const a = o.root_cause_assessment;
     if (
       a &&

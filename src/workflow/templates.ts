@@ -376,6 +376,10 @@ const EVIDENCE_RULES =
   "CODE_FACT needs repository, file_path, line_range and the commit you read. Earlier agent outputs are opinions, not evidence: repeating a hypothesis never makes it a fact. " +
   "If a source (logs/Splunk, database, external API docs) was not available to you, list it under missing_evidence and do not claim it was inspected. " +
   "Never copy secrets or raw customer payloads into claims; cite a reference instead. Use low/medium/high, never numeric confidence.";
+const REQUIRED_TESTS_RULE =
+  "required_tests holds only executable test IDs the platform runs after implementation: Go `<module path>/<package path>/TestName`, or a Node --test file such as `<repo>::test/foo.test.ts`. " +
+  "Prefix `<repo>::` when the ID could match more than one repository. Never put shell commands (go build, npm run lint/build), prose or test descriptions there; " +
+  "list those under regression_tests. Leave required_tests empty when no such test exists yet in a form you can name exactly. ";
 const ROOT_CAUSE_CONTRACT =
   "root_cause_assessment: { status: 'CONFIRMED'|'PROBABLE'|'UNCONFIRMED'|'INSUFFICIENT_EVIDENCE', confidence: 'low'|'medium'|'high', explanation, supporting_claims: string[] }";
 
@@ -425,6 +429,7 @@ const BUG_FIX_PROPOSAL = {
     "needs every business_invariants field answered from the authoritative source of truth — 'unknown' is not an answer — and must not rest on a hypothesis. " +
     "Never infer that an external operation succeeded from the mere presence of an identifier. Prefer a LOW-risk change when the root cause is not confirmed. " +
     "Keep the root_cause_assessment of the root-cause step unless you have new verified evidence. List assumptions the implementation must NOT treat as fact under prohibited_assumptions. " +
+    REQUIRED_TESTS_RULE +
     EVIDENCE_RULES,
   output_contract:
     "{ summary, changes: [{ repo, files, description }], regression_tests: string[], required_tests?: string[], risks: string[], missing_evidence?: string[], prohibited_assumptions?: string[], " +

@@ -86,6 +86,24 @@ export const humanInputExecutor: StepExecutor = {
 
 // ---------------------------------------------------------------- human_approval
 
+const MAX_TEST_SELECTOR_REPAIRS = 2;
+
+/** The shown agent output whose own required_tests do not resolve; definition-level tests have no agent to fix them. */
+async function invalidTestSource(
+  targets: Array<{ repo: string; path: string }>,
+  shown: Record<string, unknown>,
+) {
+  for (const [key, output] of Object.entries(shown)) {
+    const o = output as { required_tests?: unknown; subtasks?: Array<{ required_tests?: unknown }> } | null;
+    const ids = [
+      ...(Array.isArray(o?.required_tests) ? o.required_tests : []),
+      ...(o?.subtasks ?? []).flatMap((t) => (Array.isArray(t.required_tests) ? t.required_tests : [])),
+    ];
+    if (ids.length && (await requiredTestTargets(targets, ids, true)).problems.length) return key;
+  }
+  return null;
+}
+
 export const humanApprovalExecutor: StepExecutor = {
   async execute(ctx) {
     const cfg = ctx.step.config;
@@ -159,12 +177,26 @@ export const humanApprovalExecutor: StepExecutor = {
         })),
       );
       const checked = await requiredTestTargets(targets, executableTests, true);
-      if (checked.problems.length)
+      if (checked.problems.length) {
+        const error = `Invalid required tests before approval: ${checked.problems.join("; ")}`;
+        const source = await invalidTestSource(targets, shown);
+        if (!source) return { kind: "failed", retryable: false, error };
+        const [{ n: rounds }] = await q<{ n: number }>(
+          pool,
+          "SELECT count(*)::int AS n FROM workflow_step_attempts WHERE step_id = $1 AND output ? 'invalid_required_tests'",
+          [ctx.step.id],
+        );
+        if (rounds >= MAX_TEST_SELECTOR_REPAIRS) return { kind: "failed", retryable: false, error };
         return {
-          kind: "failed",
-          retryable: false,
-          error: `Invalid required tests before approval: ${checked.problems.join("; ")}`,
+          kind: "reexecute",
+          target: source,
+          feedback:
+            `${error}. required_tests must hold only executable test IDs: Go \`<module path>/<package path>/TestName\` ` +
+            "or a Node --test file such as `<repo>::test/foo.test.ts`. Move shell commands (go build, go test ./..., npm run lint/build) " +
+            "and test descriptions to regression_tests, and leave required_tests empty when no exact test ID exists.",
+          output: { invalid_required_tests: checked.problems },
         };
+      }
       request.required_tests = executableTests;
     }
     if (cfg.select_repositories) {

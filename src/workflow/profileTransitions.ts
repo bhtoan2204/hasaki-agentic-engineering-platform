@@ -54,7 +54,7 @@ export function planProfileTransition(input: ProfileTransitionInput) {
     name: "Reassess Scope",
     depends_on: [...active.depends_on],
     config: {
-      instructions: `Reassess scope and business risk before resuming code. Reason: ${input.reason}. Return canonical changes: [{repo, files: string[]}], risk (LOW|MEDIUM|HIGH), assumptions and required_tests. Reuse valid existing analysis and evidence; do not edit files.`,
+      instructions: `Reassess scope and business risk before resuming code. Reason: ${input.reason}. Return canonical changes: [{repo, files: string[]}], risk (LOW|MEDIUM|HIGH), assumptions and required_tests (executable test IDs only: Go '<module>/<pkg>/TestName' or '<repo>::path/to/file.test.ts', never shell commands). Reuse valid existing analysis and evidence; do not edit files.`,
       output_contract: "{changes: [{repo, files: string[]}], risk, assumptions, required_tests}",
     },
   });

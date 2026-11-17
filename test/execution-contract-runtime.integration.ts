@@ -53,6 +53,8 @@ let ownerId: number;
 let sequence = 0;
 let decompositionOutput: unknown;
 let testSelectors = ["business/TestValue"];
+let producerFeedback: string[] = [];
+let fixSelectorsOnFeedback = false;
 const runs: number[] = [];
 const git = (path: string, ...args: string[]) =>
   execFileSync("git", ["-C", path, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -98,6 +100,7 @@ before(async () => {
     async execute(ctx) {
       if (ctx.step.key === "propose-work")
         return { kind: "completed", output: decompositionOutput };
+      producerFeedback.push(String(ctx.input.pending?.feedback ?? ""));
       return {
         kind: "completed",
         output: {
@@ -105,7 +108,8 @@ before(async () => {
           changes: [{ repo, files: ["value.go"], description: "Update value" }],
           acceptance_criteria: ["Preserve positive values"],
           tests: ["Exercise the value behavior"],
-          required_tests: testSelectors,
+          required_tests:
+            fixSelectorsOnFeedback && ctx.input.pending?.feedback ? ["business/TestValue"] : testSelectors,
           risks: [],
           alternatives: [],
         },
@@ -582,14 +586,17 @@ test('label vocabulary', () => {
   }
 });
 
-test("invalid required test specifications fail before the human approval decision", async () => {
+test("invalid required test specifications go back to the producer, then fail before the human approval decision", async () => {
   testSelectors = ["describe the regression strategy"];
+  producerFeedback = [];
   try {
     const run = await start("STANDARD", true);
     await drain();
     const gate = (await step(run.id, "authorize-change"))!;
     assert.equal(gate.status, "FAILED");
     assert.match(JSON.stringify(gate.error), /Invalid required tests before approval/);
+    assert.equal(producerFeedback.length, 3, "two repair rounds, then stop");
+    assert.match(producerFeedback[1], /invalid executable test selector[\s\S]*regression_tests/);
     assert.equal(
       (
         await q(
@@ -601,6 +608,21 @@ test("invalid required test specifications fail before the human approval decisi
       0,
     );
   } finally {
+    testSelectors = ["business/TestValue"];
+  }
+});
+
+test("a producer that fixes its required tests after feedback reaches the human approval decision", async () => {
+  testSelectors = ["describe the regression strategy"];
+  producerFeedback = [];
+  fixSelectorsOnFeedback = true;
+  try {
+    const run = await start("STANDARD", true);
+    await drain();
+    assert.equal((await step(run.id, "authorize-change"))!.status, "WAITING_APPROVAL");
+    assert.equal(producerFeedback.length, 2);
+  } finally {
+    fixSelectorsOnFeedback = false;
     testSelectors = ["business/TestValue"];
   }
 });
