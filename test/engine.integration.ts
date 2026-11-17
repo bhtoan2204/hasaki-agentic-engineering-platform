@@ -402,9 +402,10 @@ test("Scenario B: agent asks about a business rule, pauses, resumes from checkpo
   assert.equal(qs.length, 1);
   const firstAttempt = (await attemptsOf(run.id, "plan"))[0];
   assert.equal(qs[0].attempt_id, firstAttempt.id);
-  const cp = await one(pool, "SELECT * FROM workflow_checkpoints WHERE attempt_id = $1", [
-    firstAttempt.id,
-  ]);
+  const cp = await one(pool,
+    "SELECT * FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='waiting_input'",
+    [firstAttempt.id]);
+  assert.equal(cp.execution.version, 1);
   assert.equal(cp.data.session_id, "sess-1");
 
   const res = await answerQuestions({ [qs[0].id]: "Không" }, "dev");

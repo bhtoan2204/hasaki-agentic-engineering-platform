@@ -3,7 +3,7 @@ import type pg from "pg";
 import { sha256 } from "./dataset.ts";
 import type { claimJob } from "../workflow/scheduler.ts";
 import type { heartbeat } from "../workflow/engine.ts";
-import type { reapExpiredLeases } from "../workflow/recovery.ts";
+import type { reapExpiredLeases } from "../workflow/engine.ts";
 import type { resolveContext, buildStepInput } from "../workflow/context.ts";
 import type { config } from "../config.ts";
 import type { withTx, q } from "../db/pool.ts";

@@ -75,9 +75,6 @@ async function subject(root: string, revision?: string) {
   const packs = (await load("src/context/pack.ts")) as typeof import("../context/pack.ts");
   const metrics = (await load("src/agent/metrics.ts")) as typeof import("../agent/metrics.ts");
   const engine = (await load("src/workflow/engine.ts")) as typeof import("../workflow/engine.ts");
-  const recovery = (await load(
-    "src/workflow/recovery.ts",
-  )) as typeof import("../workflow/recovery.ts");
   const retrieval = (await load(
     "src/workflow/context.ts",
   )) as typeof import("../workflow/context.ts");
@@ -99,7 +96,7 @@ async function subject(root: string, revision?: string) {
     withTx: db.withTx,
     q: db.q,
     heartbeat: engine.heartbeat,
-    reapExpiredLeases: recovery.reapExpiredLeases,
+    reapExpiredLeases: engine.reapExpiredLeases,
     resolveContext: retrieval.resolveContext,
     buildStepInput: retrieval.buildStepInput,
     config,

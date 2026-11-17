@@ -1,10 +1,12 @@
+import { continuationEvidence, latestWaitCheckpoint, readExecutionCheckpoint, saveExecutionPause, validateContinuation } from "./checkpoints.ts";
+import { reapExpiredLeases as reapExpiredJobs } from "./recovery.ts";
 import { findRun, stepsOf, loadRunDetail, loadStepDetail, loadOpenApprovals, type OwnerScope } from "./runRepository.ts";
 export { listRuns, openQuestions, answeredQuestions } from "./runRepository.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import type { AgentConfiguration } from "../agent/configuration.ts";
 const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) => snapshot ? Object.fromEntries(Object.entries(snapshot.providers).map(([key, entry]) => [key, entry.enabled])) : undefined;
 import { completeForRun } from "../agent/complete.ts";
-export { releaseAttempt, reapExpiredLeases, safeRecovery } from "./recovery.ts";
+export { releaseAttempt, safeRecovery } from "./recovery.ts";
 import { existsSync } from "node:fs";
 import { advance } from "./progression.ts";
 export { advance } from "./progression.ts";
@@ -1193,7 +1195,7 @@ export async function answerQuestions(
       }
       for (const stepId of new Set(qs.map((x) => x.step_id as number))) {
         const s = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1", [stepId]))!;
-        if (s.pending_input?.provider_handoff) continue; // Record answers without scheduling a continuation.
+        if (s.pending_input?.provider_handoff?.status) continue; // Unconfirmed handoffs own the continuation.
         if (s.status !== "WAITING_INPUT") continue;
         // Answers to questions of an older attempt are recorded but never resume anything (no extra job).
         if (!qs.some((x) => x.step_id === stepId && x.attempt_id === s.current_attempt_id))
@@ -1221,11 +1223,7 @@ export async function answerQuestions(
           );
           await setStepStatus(c, s, "COMPLETED", { output, finished_at: new Date() }, "answered");
         } else {
-          const cp = await one(
-            c,
-            "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1",
-            [s.current_attempt_id],
-          );
+          const cp = await latestWaitCheckpoint(c, s.current_attempt_id);
           if (cp?.data?.recovery?.kind === "REQUIRES_RECONCILIATION") {
             const reply = await one<{ answer: string }>(
               c,
@@ -1248,6 +1246,9 @@ export async function answerQuestions(
             "SELECT id, answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'",
             [s.current_attempt_id],
           );
+          if (cp?.data?.workspace_recovery &&
+              !replies.some((reply) => reply.answer.trim() === "Workspace reconciled — continue"))
+            throw new EngineError("Confirm workspace reconciliation before continuing", 409);
           if (cp?.data?.agent_configuration_recovery) {
             if (!replies.some((reply) => reply.answer.trim() === "Use current configuration for remaining steps"))
               throw new EngineError("Choose the explicit configuration recovery option to continue", 409);
@@ -1280,10 +1281,11 @@ export async function answerQuestions(
           } else {
             const pending = {
               ...(s.pending_input ?? {}),
+              ...(cp?.data?.workspace_recovery ? { provider_handoff: undefined } : {}),
               resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} },
               ...(release && {
                 workspace_release: {
-                  holders: (cp.data.workspace_conflict as WorkspaceConflict[])
+                  holders: (cp?.data.workspace_conflict as WorkspaceConflict[])
                     .filter((x) => x.release === "approval")
                     .map((x) => x.holder_path),
                   question_id: release.id,
@@ -1748,6 +1750,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     ))!;
     const contextPreparationStarted = performance.now();
     const input = await buildStepInput(c, run, step);
+    await validateContinuation(c, input, step.id, step.generation);
     const context = await resolveContext(c, run, step, input, effective?.provider ?? null);
     const contextPreparationMs = performance.now() - contextPreparationStarted;
     const attempt = (await one<AttemptRow>(
@@ -1840,6 +1843,13 @@ export async function insertQuestions(
         x.suggested_answer ?? x.options?.[0] ?? null,
       ],
     );
+}
+
+export function reapExpiredLeases() {
+  return reapExpiredJobs(async (c, run, step, attempt, jobId, result, afterCommit) => {
+    await applyResult(c, run, step, attempt, jobId, result, afterCommit);
+    await enforceBudget(c, run, step.id, attempt.id);
+  });
 }
 
 async function applyResult(
@@ -1964,11 +1974,10 @@ async function applyResult(
           afterCommit,
         );
       await closeAttempt("WAITING_INPUT", result.output ?? null);
-      await q(
-        c,
-        "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)",
-        [run.id, step.id, attempt.id, json(result.checkpoint ?? {})],
-      );
+      const sealed = await readExecutionCheckpoint(c, attempt.id);
+      await saveExecutionPause(c, attempt.id, "waiting_input", sealed
+        ? { ...result.checkpoint, execution: continuationEvidence(sealed) }
+        : result.checkpoint ?? {});
       await setStepStatus(c, step, "WAITING_INPUT", {}, `${open} question(s)`);
       await closeJob("done");
       afterCommit(() =>
@@ -2002,11 +2011,7 @@ async function applyResult(
     }
     case "waiting_approval": {
       await closeAttempt("WAITING_APPROVAL", result.request);
-      await q(
-        c,
-        "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_approval', $4)",
-        [run.id, step.id, attempt.id, json(result.checkpoint ?? {})],
-      );
+      await saveExecutionPause(c, attempt.id, "waiting_approval", result.checkpoint ?? {});
       await setStepStatus(c, step, "WAITING_APPROVAL", {
         approval: { request: result.request, generation: step.generation, requested_at: now },
       });
@@ -2092,11 +2097,7 @@ async function applyResult(
               : ["Đã xử lý xong — chạy lại bước", "Dừng ở đây"],
           },
         ]);
-        await q(
-          c,
-          "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)",
-          [run.id, step.id, attempt.id, json({ failure: decision })],
-        );
+        await saveExecutionPause(c, attempt.id, "waiting_input", { failure: decision });
         await setStepStatus(c, step, "WAITING_INPUT", {}, `paused: ${decision.class}`);
         await closeJob("done", result.error);
         afterCommit(() =>
@@ -2124,11 +2125,22 @@ async function applyResult(
         break;
       }
       if (decision.action === "retry") {
+        const sealed = ["agent", "coding_agent"].includes(step.type)
+          ? await readExecutionCheckpoint(c, attempt.id) : undefined;
         await setStepStatus(
           c,
           step,
           "RETRYING",
-          { error: result.error },
+          {
+            error: result.error,
+            ...(sealed && {
+              pending_input: { ...step.pending_input, resume: {
+                from_attempt_id: attempt.id, checkpoint: {
+                  execution: { ...continuationEvidence(sealed), workspace_reconciliation_required: true },
+                },
+              } },
+            }),
+          },
           `attempt ${step.attempt_count}/${step.max_attempts} failed (${decision.class}); retry in ${decision.delay_s}s`,
         );
         await closeJob("done", result.error);
@@ -2573,11 +2585,8 @@ async function persistProviderPause(
     package_reference: `provider_handoffs:${handoff.id}`,
     workspace_fingerprint: p.fingerprint ?? null,
   };
-  await q(
-    c,
-    "INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data) VALUES($1,$2,$3,'provider_handoff',$4)",
-    [run.id, step.id, attempt.id, json(checkpoint)],
-  );
+  await saveExecutionPause(c, attempt.id, "provider_handoff", checkpoint,
+    p.fingerprint ? { fingerprint: p.fingerprint } : undefined);
   await setStepStatus(
     c,
     step,
@@ -2806,16 +2815,9 @@ export async function requestProviderHandoff(
         },
         error: input.reason,
       });
-      await q(
-        c,
-        "INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data) VALUES($1,$2,$3,'provider_handoff',$4)",
-        [
-          runId,
-          step.id,
-          input.expected_attempt_id,
-          json({ provider_handoff: { id: requested.handoff.id } }),
-        ],
-      );
+      await saveExecutionPause(c, input.expected_attempt_id, "provider_handoff",
+        { provider_handoff: { id: requested.handoff.id } },
+        prepared.fingerprint ? { fingerprint: prepared.fingerprint } : undefined);
       await advance(c, runId, afterCommit);
     });
   }
@@ -3034,6 +3036,7 @@ export async function resumeProviderHandoff(
       [h.id, input.provider, actorId, automatic],
     );
     await q(c, "UPDATE workflow_steps SET agent_override=$2 WHERE id=$1", [s.id, json(override)]);
+    const sealed = await readExecutionCheckpoint(c, h.source_attempt_id);
     await setStepStatus(
       c,
       s,
@@ -3043,7 +3046,10 @@ export async function resumeProviderHandoff(
           provider_handoff: {
             id: h.id,
             source_attempt_id: h.source_attempt_id,
-            package: h.package,
+            workspace_fingerprint: h.workspace_fingerprint,
+            package: sealed ? {
+              ...h.package, execution_checkpoint: continuationEvidence(sealed),
+            } : h.package,
           },
         },
         error: null,

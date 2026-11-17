@@ -36,6 +36,8 @@ import { integrationExecutor } from "../src/workflow/executors/builtin.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { clearProviderHealthForTests } from "../src/agent/health.ts";
 import { repositories } from "../src/repos/service.ts";
+import { decryptSecret } from "../src/auth/crypto.ts";
+import { readExecutionCheckpoint } from "../src/workflow/checkpoints.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
 import { ensureContextPack } from "../src/context/pack.ts";
 import { newMetrics } from "../src/agent/metrics.ts";
@@ -198,7 +200,10 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   const path = await workspace(r);
   execute = async (ctx) => {
     await ensureContextPack(ctx, newMetrics(""), { ...policy, workspaces: [path] });
+    writeFileSync(join(path, "task.txt"), "staged implementation\n");
+    git(path, "add", "task.txt");
     writeFileSync(join(path, "task.txt"), "Claude partially implemented\n");
+    writeFileSync(join(path, "pending.bin"), Buffer.from([0, 1, 255]), { mode: 0o700 });
     await q(
       pool,
       "INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data) VALUES($1,$2,$3,'progress',$4)",
@@ -217,6 +222,28 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.equal(h.failure_category, "QUOTA_EXHAUSTED");
   assert.equal((await getRun(r.id)).status, "WAITING");
   assert.ok(h.package.repository_state[0].diff_hash);
+  const sealed = await readExecutionCheckpoint(pool, h.source_attempt_id);
+  assert.ok(sealed?.workspace_artifact_id);
+  const milestone = await one(pool,
+    "SELECT execution FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='provider_handoff'",
+    [h.source_attempt_id]);
+  assert.equal(milestone.execution.version, 1);
+  assert.equal(milestone.execution.workspace_fingerprint, h.workspace_fingerprint);
+  assert.equal(milestone.execution.binding.generation, h.generation);
+  const archive = await one<{ content: string }>(pool, "SELECT content FROM workflow_artifacts WHERE id=$1",
+    [sealed.workspace_artifact_id]);
+  assert.ok(archive);
+  assert.doesNotMatch(archive.content, /Claude partially implemented|pending.bin/);
+  const backup = JSON.parse(decryptSecret(archive.content)).workspaces[0];
+  const clean = mkdtempSync(join(process.env.TEST_ROOT!, "handoff-restore-"));
+  execFileSync("git", ["clone", "-q", path, clean]);
+  assert.equal(git(clean, "rev-parse", "HEAD"), backup.head);
+  execFileSync("git", ["-C", clean, "apply", "--cached", "-"], { input: backup.index_patch });
+  execFileSync("git", ["-C", clean, "apply", "-"], { input: backup.tracked_patch });
+  assert.equal(git(clean, "show", ":task.txt"), "staged implementation");
+  assert.equal(readFileSync(join(clean, "task.txt"), "utf8"), "Claude partially implemented\n");
+  assert.deepEqual(backup.untracked, [{ path: "pending.bin", mode: 0o700, base64: "AAH/" }]);
+
   // Verified context travels with the handoff so the next provider does not re-investigate from scratch.
   assert.ok(Array.isArray(h.package.tests_already_executed));
   assert.ok(
@@ -240,6 +267,8 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.equal(duplicate.filter((x) => !x.duplicate).length, 1);
   execute = async (ctx) => {
     assert.equal(ctx.attempt.agent_provider, "codex");
+    assert.equal(ctx.input.pending.provider_handoff.package.execution_checkpoint.workspace_artifact_id,
+      sealed.workspace_artifact_id);
     assert.match(readFileSync(join(path, "task.txt"), "utf8"), /Claude partially/);
     assert.equal(await resumableSession(ctx, path, "codex"), null);
     const pack = await ensureContextPack(ctx, newMetrics(""), { ...policy, workspaces: [path] });
@@ -886,4 +915,32 @@ test("quota exhaustion continues on the next healthy provider without waiting fo
   assert.partialDeepStrictEqual((await getRun(r.id)).steps[0].agent_override, {
     provider: "codex",
   });
+});
+
+test("handoff rechecks its accepted workspace at dispatch and requires reconciliation on drift", async () => {
+  const r = await run();
+  const path = await workspace(r);
+  await quota();
+  await once();
+  const h = await checkpoint(r.id);
+  await resume(r.id, h, "codex");
+  writeFileSync(join(path, "task.txt"), "changed after confirmation\n");
+
+  let calls = 0;
+  execute = async (ctx) => {
+    calls++;
+    assert.equal(ctx.attempt.agent_provider, "codex");
+    return { kind: "completed", output: { summary: "reconciled" } };
+  };
+  await once();
+  assert.equal(calls, 0);
+  const { step, questions } = await stepDetail(r.id, "implement");
+  assert.equal(step.status, "WAITING_INPUT");
+  const question = questions.find((q) => q.status === "open");
+  assert.ok(question);
+  const id = String(question.id);
+  await assert.rejects(() => answerQuestions({ [id]: "skip" }), /Confirm workspace reconciliation/);
+  await answerQuestions({ [id]: "Workspace reconciled — continue" });
+  await once();
+  assert.equal(calls, 1);
 });

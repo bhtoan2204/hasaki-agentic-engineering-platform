@@ -440,13 +440,16 @@ export async function resumableSession(
   provider: AgentProvider,
 ): Promise<{ sessionId: string; fromAttempt?: number } | null> {
   const resume = ctx.input.pending?.resume;
+  if (resume?.checkpoint?.execution?.workspace_reconciliation_required &&
+      resume.checkpoint.execution.workspace_unavailable) return null;
   const candidates = await q<{
     session_id: string;
     attempt_id: number;
+    generation: number;
     snapshot: any;
   }>(
     pool,
-    `SELECT s.session_id, s.attempt_id, cs.content AS snapshot
+    `SELECT s.session_id, s.attempt_id, a.generation, cs.content AS snapshot
        FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id LEFT JOIN context_snapshots cs ON cs.id = a.context_snapshot_id
       WHERE a.step_id = $1 AND s.resumable AND s.cwd = $2 AND s.provider = $3 AND (a.effective_agent IS NOT DISTINCT FROM $4::jsonb) ORDER BY s.id DESC LIMIT 5`,
     [
@@ -464,8 +467,9 @@ export async function resumableSession(
     JSON.stringify(snap?.upstream ?? {}) === JSON.stringify(current?.content?.upstream ?? {});
   // 1. resume after answers: the paused attempt's own session.
   if (resume?.from_attempt_id) {
-    const c = candidates.find((x) => x.attempt_id === resume.from_attempt_id);
-    if (c && sameUpstream(c.snapshot))
+    const c = candidates.find((x) => x.attempt_id === resume.from_attempt_id && x.generation === ctx.step.generation);
+    if (c && sameUpstream(c.snapshot) &&
+        JSON.stringify(c.snapshot?.knowledge ?? []) === JSON.stringify(current?.content?.knowledge ?? []))
       return { sessionId: c.session_id, fromAttempt: c.attempt_id };
   }
   // 2. reviewer feedback: continue the step's last session if nothing upstream changed since.

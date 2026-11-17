@@ -36,6 +36,10 @@ before(async () => {
     },
   });
   await definitions.create({
+    key: "reliability-execution-checkpoint",
+    spec: { name: "checkpoint", steps: [{ key: "a", type: "condition", config: { path: "inputs.go" } }] },
+  });
+  await definitions.create({
     key: "reliability-agent",
     spec: { name: "agent", steps: [{ key: "a", type: "agent", max_attempts: 1 }] },
   });
@@ -400,5 +404,93 @@ test("persisted run without optional policy metadata resumes its pinned graph an
   assert.equal(resumed.input.pending.resume.checkpoint.note, "old checkpoint shape");
   assert.equal(resumed.input.answers[0].answer, "retained answer");
   assert.equal(resumed.attempt.number, 2);
+  await cancelRun(run.id);
+});
+
+test("expired lease applies a sealed control result once, without rerunning the executor", async () => {
+  const { recordExecutorReturn, readExecutionCheckpoint } = await import("../src/workflow/checkpoints.ts");
+  const { run, job, begun } = await claimed("reliability-execution-checkpoint");
+  const result = { kind: "completed", output: { result: "computed once" } } as const;
+  const written = await Promise.all([
+    recordExecutorReturn(job, begun.attempt.id, result),
+    recordExecutorReturn(job, begun.attempt.id, result),
+  ]);
+  assert.ok(written.every(Boolean));
+  const before = await rows(run.id);
+  assert.equal(before.checkpoints.filter((c) => c.reason === "executor_returned").length, 1);
+  assert.deepEqual((await readExecutionCheckpoint(pool, begun.attempt.id))?.result, result);
+  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [job.id]);
+  await Promise.all([reapExpiredLeases(), reapExpiredLeases()]);
+  const state = await rows(run.id);
+  assert.equal(state.attempts.length, 1);
+  assert.equal(state.attempts[0].status, "COMPLETED");
+  assert.deepEqual(state.steps[0].output, result.output);
+  assert.equal(await recordExecutorReturn(job, begun.attempt.id, result), false);
+  assert.equal((await finishAttempt(job.id, job.fencing_token, begun.attempt.id, result)).applied, false);
+  assert.equal(state.run.status, "COMPLETED");
+});
+
+test("a corrupt checkpoint or a late result after cancellation cannot advance the run", async () => {
+  const { recordExecutorReturn } = await import("../src/workflow/checkpoints.ts");
+  const result = { kind: "completed", output: { result: "original" } } as const;
+  const first = await claimed("reliability-execution-checkpoint");
+  assert.equal(await recordExecutorReturn(first.job, first.begun.attempt.id, result), true);
+  await q(pool, "UPDATE workflow_checkpoints SET execution = execution || '{\"result\":{\"kind\":\"completed\",\"output\":\"corrupt\"}}'::jsonb WHERE attempt_id=$1", [first.begun.attempt.id]);
+  await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [first.job.id]);
+  assert.equal(await reapExpiredLeases(), 1);
+  assert.equal((await rows(first.run.id)).steps[0].status, "READY");
+  await cancelRun(first.run.id);
+
+  const second = await claimed("reliability-execution-checkpoint");
+  await cancelRun(second.run.id);
+  assert.equal(await recordExecutorReturn(second.job, second.begun.attempt.id, result), false);
+  assert.equal((await rows(second.run.id)).checkpoints.length, 0);
+});
+
+test("the latest eight returned checkpoints retain their artifacts after repeated interruption", async () => {
+  const { recordExecutorReturn, readExecutionCheckpoint } = await import("../src/workflow/checkpoints.ts");
+  const first = await claimed("reliability-execution-checkpoint");
+  let { job, begun } = first;
+  for (let n = 0; n < 10; n++) {
+    assert.equal(await recordExecutorReturn(job, begun.attempt.id, { kind: "failed", error: "interrupted" },
+      { fingerprint: String(n), encryptedContent: `fixture-${n}` }), true);
+    await q(pool, "UPDATE workflow_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [job.id]);
+    assert.equal(await reapExpiredLeases(), 1);
+    if (n < 9) {
+      const next = await claimJob("replacement", 300);
+      assert.ok(next);
+      job = next;
+      const attempt = await beginAttempt(job, "replacement");
+      assert.ok(attempt);
+      begun = attempt;
+    }
+  }
+  const state = await rows(first.run.id);
+  assert.equal(state.checkpoints.filter((c) => c.reason === "executor_returned").length, 8);
+  assert.equal((await q(pool,
+    "SELECT id FROM workflow_artifacts WHERE run_id=$1 AND kind='execution_checkpoint_workspace'",
+    [first.run.id])).length, 8);
+  assert.equal(await readExecutionCheckpoint(pool, first.begun.attempt.id), undefined);
+  assert.ok(await readExecutionCheckpoint(pool, begun.attempt.id));
+  await cancelRun(first.run.id);
+});
+
+test("a checkpoint from an invalidated generation cannot supply a continuation", async () => {
+  const { retryStep, stopStep } = await import("../src/workflow/engine.ts");
+  const { recordExecutorReturn } = await import("../src/workflow/checkpoints.ts");
+  const { run, job, begun } = await claimed("reliability-execution-checkpoint");
+  assert.equal(await recordExecutorReturn(job, begun.attempt.id, { kind: "completed", output: { obsolete: true } }), true);
+  await stopStep(run.id, begun.step.key);
+  await retryStep(run.id, begun.step.key);
+  assert.equal(await recordExecutorReturn(job, begun.attempt.id, { kind: "completed", output: { stale: true } }), false);
+  await q(pool, "UPDATE workflow_steps SET pending_input=$2 WHERE id=$1", [
+    begun.step.id, { resume: { from_attempt_id: begun.attempt.id, checkpoint: { note: "old generation" } } },
+  ]);
+  const next = await claimJob("new-generation", 300);
+  assert.ok(next);
+  const fresh = await beginAttempt(next, "new-generation");
+  assert.ok(fresh);
+  assert.ok(fresh.attempt.generation > begun.attempt.generation);
+  assert.equal(fresh.input.pending?.resume, undefined);
   await cancelRun(run.id);
 });

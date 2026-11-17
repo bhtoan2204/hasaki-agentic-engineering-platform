@@ -1,5 +1,8 @@
+import { executionWorkspace, inspectHandoffWorkspace } from "../git/workspaceCheckpoint.ts";
+import type { WorkspaceCheckpoint } from "./checkpoints.ts";
+import { recordExecutorReturn } from "./checkpoints.ts";
 import { purgeDebugEvents, TRACE_LIMITS, traceLog } from "./trace.ts";
-import { reapExpiredLeases, releaseAttempt } from "./recovery.ts";
+import { releaseAttempt } from "./recovery.ts";
 import { runIndexOnce } from "../codeIntelligence/indexer.ts";
 import { randomUUID } from "node:crypto";
 import { instanceSession } from "../instances.ts";
@@ -13,6 +16,7 @@ import {
   finishAttempt,
   heartbeat,
   prepareProviderPause,
+  reapExpiredLeases,
   processAutomaticHandoff,
 } from "./engine.ts";
 import { dispatchRunEffects } from "./effects.ts";
@@ -195,6 +199,7 @@ export async function processJob(
       }, timeoutMs)
     : null;
   let result: ExecResult;
+  let executorEntered = false;
   try {
     const ownerId = Number(begun.run.owner_id);
     // Revalidate the owner's repository access before any protected content is touched (revocation, retries,
@@ -225,6 +230,35 @@ export async function processJob(
         { userId: ownerId, runId: begun.run.id, kind: "run" },
         async () => {
           await loadPersonalIntegrations();
+          const prior = begun.input.pending?.resume?.checkpoint?.execution;
+          const handoff = begun.input.pending?.provider_handoff;
+          const expected = handoff?.workspace_fingerprint ??
+            (prior?.workspace_reconciliation_required ? prior.workspace_fingerprint : undefined);
+          if (expected) {
+            let fingerprint: string | undefined;
+            try {
+              fingerprint = handoff?.workspace_fingerprint
+                ? (await inspectHandoffWorkspace(begun.run.id)).fingerprint
+                : (await executionWorkspace(begun.run, begun.step))?.fingerprint;
+            } catch {
+              // A missing, moved or unreadable checkout requires the same reconciliation as changed bytes.
+            }
+            if (fingerprint !== expected) {
+              const artifactId = prior?.workspace_artifact_id ??
+                handoff?.package?.execution_checkpoint?.workspace_artifact_id ??
+                handoff?.package?.workspace_artifact_id;
+              return {
+                kind: "waiting_input" as const,
+                checkpoint: { workspace_recovery: { artifact_id: artifactId ?? null } },
+                questions: [{
+                  question: "The workspace differs from the execution checkpoint. Reconcile it before continuing.",
+                  context: "Inspect the preserved changes before authorizing a fresh continuation.",
+                  options: ["Workspace reconciled — continue"],
+                }],
+              };
+            }
+          }
+          executorEntered = true;
           return getExecutor(begun.step.type).execute(ctx);
         },
       );
@@ -253,16 +287,34 @@ export async function processJob(
           },
         },
       };
-    await retryTransient(
-      () =>
-        q(
-          pool,
-          "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2",
-          [begun.attempt.id, job.fencing_token],
-        ),
-      `record executor termination ${job.id}`,
+    let workspace: WorkspaceCheckpoint | undefined;
+    if (executorEntered && !ac.signal.aborted &&
+        ["agent", "coding_agent", "command", "git_pull_request"].includes(begun.step.type)) {
+      try {
+        workspace = await executionWorkspace(begun.run, begun.step,
+          ["coding_agent", "command"].includes(begun.step.type));
+      } catch {
+        workspace = { fingerprint: "", unavailable: true };
+        await traceLog({
+          ...attemptTrace, level: "WARN", event: "checkpoint.workspace_unavailable",
+          message: "Workspace evidence could not be captured within safety and storage limits",
+        });
+      }
+    }
+    const recorded = await retryTransient(
+      () => recordExecutorReturn(job, begun.attempt.id, result, workspace),
+      `record executor checkpoint ${job.id}`,
     );
-    const handoff = await prepareProviderPause(begun, result);
+    if (!recorded) {
+      // Cancellation fences mutations to the step; the original executor can still confirm its own exit.
+      await retryTransient(
+        () => q(pool,
+          "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2 AND job_id=$3",
+          [begun.attempt.id, job.fencing_token, job.id]),
+        `record canceled executor termination ${job.id}`,
+      );
+    }
+    const handoff = recorded ? await prepareProviderPause(begun, result) : undefined;
     if (
       !handoff &&
       (draining || ac.signal.aborted) &&

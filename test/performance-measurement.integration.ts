@@ -6,7 +6,7 @@ import { pool, withTx, q } from "../src/db/pool.ts";
 import { config } from "../src/config.ts";
 import * as scheduler from "../src/workflow/scheduler.ts";
 import { heartbeat } from "../src/workflow/engine.ts";
-import { reapExpiredLeases } from "../src/workflow/recovery.ts";
+import { reapExpiredLeases } from "../src/workflow/engine.ts";
 import { resolveContext, buildStepInput } from "../src/workflow/context.ts";
 
 test("scheduler and context probe claims, heartbeats, recovers and retrieves context", async () => {

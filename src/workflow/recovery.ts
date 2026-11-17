@@ -1,3 +1,4 @@
+import { continuationEvidence, latestWaitCheckpoint, readExecutionCheckpoint, saveExecutionPause } from "./checkpoints.ts";
 import { traceLog } from "./trace.ts";
 import type pg from "pg";
 import { config } from "../config.ts";
@@ -5,9 +6,9 @@ import { ownsInstance } from "../instances.ts";
 import { outputLocale } from "../agent/language.ts";
 import { pool, q, one, withTx, json } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
-import { lockRun, setStepStatus } from "./mutations.ts";
+import { lockRun, setStepStatus, type AfterCommit } from "./mutations.ts";
 import { advance } from "./progression.ts";
-import type { AttemptRow, JobRow, RunRow, StepRow } from "./types.ts";
+import type { AttemptRow, ExecResult, JobRow, RunRow, StepRow } from "./types.ts";
 
 // Interruption policy is shared by graceful shutdown and lease expiry. Preserve their transaction/lock order.
 /**
@@ -35,8 +36,9 @@ export async function releaseAttempt(
       "SELECT * FROM workflow_step_attempts WHERE id = $1 FOR UPDATE",
       [attemptId],
     ))!;
-    if (attempt.status !== "RUNNING" || !j || j.status !== "running" || j.fencing_token !== token)
-      return false;
+    if (attempt.status !== "RUNNING" || !j || j.status !== "running" || j.fencing_token !== token ||
+        attempt.fencing_token !== token || attempt.job_id !== j.id || attempt.run_id !== j.run_id ||
+        attempt.step_id !== j.step_id || attempt.generation !== j.generation) return false;
     const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [
       attempt.step_id,
     ]))!;
@@ -73,9 +75,11 @@ async function recoverInterrupted(
   )
     return;
   const safe = safeRecovery(step);
-  const cp = await one(
+  const cp = await latestWaitCheckpoint(c, attempt.id);
+  const execution = await readExecutionCheckpoint(c, attempt.id);
+  const progress = await one<{ note: string | null }>(
     c,
-    "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 ORDER BY id DESC LIMIT 1",
+    "SELECT left(data->>'note', 2000) AS note FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='progress' ORDER BY id DESC LIMIT 1",
     [attempt.id],
   );
   const session = await one(
@@ -84,6 +88,7 @@ async function recoverInterrupted(
     [attempt.id, attempt.agent_provider ?? run.agent_provider],
   );
   const checkpoint = {
+    ...(progress?.note ? { note: progress.note } : {}),
     ...(cp?.data ?? {}),
     ...(session ?? {}),
     recovery: {
@@ -100,7 +105,7 @@ async function recoverInterrupted(
   );
   const pending = {
     ...(step.pending_input ?? {}),
-    resume: { from_attempt_id: attempt.id, checkpoint },
+    resume: { from_attempt_id: attempt.id, checkpoint: checkpoint as Record<string, unknown> },
     recovery: checkpoint.recovery,
   };
   const handoff = await one(
@@ -135,11 +140,14 @@ async function recoverInterrupted(
     );
     checkpoint.recovery.question_id = row!.id;
   }
-  await q(
-    c,
-    "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'waiting_input', $4)",
-    [run.id, step.id, attempt.id, json(checkpoint)],
-  );
+  const sealed = execution ? {
+    ...checkpoint,
+    execution: { ...continuationEvidence(execution), workspace_reconciliation_required: true },
+  } : checkpoint;
+  const pause = await saveExecutionPause(c, attempt.id, "waiting_input", sealed);
+  pending.resume.checkpoint = !execution && pause
+    ? { ...sealed, execution: continuationEvidence(pause) }
+    : sealed;
   await setStepStatus(
     c,
     step,
@@ -167,7 +175,12 @@ async function recoverInterrupted(
  * Reconcile expired leases without treating worker availability as a permanent executor failure.
  * A reaper can run anywhere; only the owning instance can execute the resulting work.
  */
-export async function reapExpiredLeases() {
+type ApplyCompleted = (
+  db: pg.PoolClient, run: RunRow, step: StepRow, attempt: AttemptRow,
+  jobId: number, result: Extract<ExecResult, { kind: "completed" }>, afterCommit: AfterCommit,
+) => Promise<void>;
+
+export async function reapExpiredLeases(applyCompleted: ApplyCompleted) {
   const expired = await q<JobRow>(
     pool,
     "SELECT * FROM workflow_jobs WHERE status = 'running' AND lease_expires_at < now() ORDER BY id LIMIT 50",
@@ -216,6 +229,20 @@ export async function reapExpiredLeases() {
         message: `worker lease expired (${j.lease_owner}); recovering attempt ${attempt.id}`,
         data: { job_id: j.id, fencing_token: j.fencing_token, lease_expires_at: j.lease_expires_at },
       });
+      // Only pure control results can commit without operator reconciliation or local workspace access.
+      if ((step.type === "condition" || (step.type === "integration" && step.config?.action === "noop")) &&
+          step.status === "RUNNING" && step.generation === attempt.generation &&
+          j.generation === attempt.generation && j.fencing_token === attempt.fencing_token &&
+          attempt.executor_stopped_at && run.status !== "CANCELED") {
+        const checkpoint = await readExecutionCheckpoint(c, attempt.id);
+        if (checkpoint?.result?.kind === "completed" && !checkpoint.workspace_fingerprint &&
+            !checkpoint.workspace_unavailable &&
+            !(await one(c, "SELECT 1 FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'", [attempt.id]))) {
+          await applyCompleted(c, run, step, attempt, j.id, checkpoint.result, afterCommit);
+          await runEvents.add(c, run.id, "system", "Recovered sealed executor result", step.id, attempt.id);
+          return;
+        }
+      }
       await recoverInterrupted(c, run, step, attempt, j, `worker lease expired (${j.lease_owner})`);
       await advance(c, run.id, afterCommit);
     });

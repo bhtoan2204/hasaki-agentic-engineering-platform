@@ -233,7 +233,9 @@ export async function loadStepDetail(runId: number, stepKey: string) {
       ),
       q<Record<string, unknown>>(
         pool,
-        `SELECT * FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`,
+        `SELECT id, run_id, step_id, attempt_id, reason, data, created_at,
+                execution - 'result' AS execution
+           FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`,
         args,
       ),
       q<Record<string, unknown>>(

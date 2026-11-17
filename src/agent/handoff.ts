@@ -1,10 +1,8 @@
+import { pool, q, one } from "../db/pool.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createHash } from "node:crypto";
-import { realpath, readFile, lstat } from "node:fs/promises";
-import { resolve, relative, isAbsolute } from "node:path";
-import { pool, q, one } from "../db/pool.ts";
-import { workspacesOf } from "../git/provider.ts";
+import { inspectHandoffWorkspace } from "../git/workspaceCheckpoint.ts";
+export { inspectHandoffWorkspace, classifyHandoffUntracked, isHandoffScratch } from "../git/workspaceCheckpoint.ts";
 import { safeDiagnostics, normalizeProviderFailure, type FailureCategory } from "./telemetry.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { summarizeValue } from "../context/plan.ts";
@@ -50,35 +48,6 @@ export async function providerFailure(
     )?.normalized_failure_category;
   return normalized !== "UNKNOWN" ? normalized : (reported ?? normalized);
 }
-const hash = (v: string | Buffer) => createHash("sha256").update(v).digest("hex");
-
-/** Agent repair caches are left in the worktree. They are not the change the next agent must preserve. */
-export function isHandoffScratch(name: string) {
-  return name === ".repair-tmp" || name.startsWith(".repair-tmp/");
-}
-
-/** Source untracked files stay inside the checkpoint bound. Scratch cache does not block the next agent. */
-export function classifyHandoffUntracked(repo: string, names: string[]) {
-  const scratch = names.filter(isHandoffScratch);
-  const source = names.filter((name) => !isHandoffScratch(name));
-  if (source.length > 100) {
-    const groups = new Map<string, number>();
-    for (const name of source) {
-      const top = name.split("/")[0] || name;
-      groups.set(top, (groups.get(top) ?? 0) + 1);
-    }
-    const largest = [...groups.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, 5)
-      .map(([dir, count]) => `${dir} (${count})`)
-      .join(", ");
-    throw new Error(
-      `${repo} has ${source.length} untracked files, above the 100-file checkpoint limit, so the next agent cannot start. Largest groups: ${largest}. Commit, gitignore, or remove them, then reinspect. ${scratch.length} .repair-tmp cache files were ignored and stay on disk.`,
-    );
-  }
-  return { source, scratchOmitted: scratch.length };
-}
-
 export function handoffBlockReason(error: unknown) {
   const message = error instanceof Error ? error.message : safeDiagnostics(error);
   return message.startsWith("Workspace inspection failed:")
@@ -86,75 +55,6 @@ export function handoffBlockReason(error: unknown) {
     : `Workspace inspection failed: ${message}`;
 }
 
-export async function inspectHandoffWorkspace(runId: number) {
-  const deadline = AbortSignal.timeout(30000);
-  const workspaces = await workspacesOf(runId);
-  if (workspaces.length > 30) throw new Error("Workspace count exceeds bounded handoff inspection");
-  const state = [];
-  let scratchOmitted = 0;
-  for (const w of workspaces) {
-    const root = await realpath(w.path);
-    const git = async (...args: string[]) =>
-      (
-        await exec(
-          "git",
-          ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", root, ...args],
-          {
-            signal: deadline,
-            timeout: 10000,
-            maxBuffer: 5 * 1024 * 1024,
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
-          },
-        )
-      ).stdout;
-    if ((await realpath((await git("rev-parse", "--show-toplevel")).trim())) !== root)
-      throw new Error("Worktree root changed");
-    const branch = (await git("symbolic-ref", "--short", "HEAD")).trim();
-    if (branch !== w.branch) throw new Error(`Worktree branch changed: ${w.repo}`);
-    if (
-      (await git("diff", "--no-ext-diff", "--no-textconv", "--name-only", "--diff-filter=U")).trim()
-    )
-      throw new Error(`Unresolved Git conflicts: ${w.repo}`);
-    const head = (await git("rev-parse", "HEAD")).trim();
-    const diff = await git("diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD");
-    const status = await git("status", "--porcelain=v1");
-    const names = (await git("ls-files", "--others", "--exclude-standard", "-z"))
-      .split("\0")
-      .filter(Boolean);
-    const plan = classifyHandoffUntracked(w.repo, names);
-    scratchOmitted += plan.scratchOmitted;
-    let bytes = 0;
-    const untracked = [];
-    for (const name of plan.source) {
-      const path = resolve(root, name);
-      const rel = relative(root, await realpath(path));
-      if (rel.startsWith("..") || isAbsolute(rel))
-        throw new Error("Untracked path escapes worktree");
-      const stat = await lstat(path);
-      bytes += stat.size;
-      if (!stat.isFile() || bytes > 5 * 1024 * 1024)
-        throw new Error("Untracked state cannot be inspected safely within handoff bounds");
-      untracked.push({ path: name, hash: hash(await readFile(path)) });
-    }
-    state.push({
-      repository: w.repo,
-      branch,
-      path: root,
-      head,
-      status: status.slice(0, 12000),
-      diff_summary: (await git("diff", "--no-ext-diff", "--no-textconv", "--stat", "HEAD")).slice(
-        0,
-        12000,
-      ),
-      diff_hash: hash(diff),
-      index_hash: hash(
-        await git("diff", "--no-ext-diff", "--no-textconv", "--cached", "--binary", "HEAD"),
-      ),
-      untracked,
-    });
-  }
-  return { fingerprint: hash(JSON.stringify(state)), workspaces: state, scratchOmitted };
-}
 export async function buildHandoffPackage(
   run: RunRow,
   step: StepRow,
