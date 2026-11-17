@@ -72,7 +72,7 @@ export const idFieldOf = (key: string): IdField | undefined =>
 
 /** Values that are not identifiers even when a field is named like one. */
 const JUNK = /^(null|nil|none|undefined|true|false|0|-|n\/a|""|\[\]|\{\})$/i;
-const ID_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:\/-]{2,99}$/;
+const ID_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,99}$/;
 
 function addId(ids: Ids, field: IdField, value: unknown) {
   if (value === null || value === undefined || typeof value === "object") return;
@@ -117,7 +117,7 @@ export function tryJson(s: unknown): unknown {
 }
 
 /** key=value / "key":"value" pairs in free text, for identifiers logged without structure. */
-const KV = /["']?([A-Za-z][\w.-]{1,40})["']?\s*[:=]\s*["']?([A-Za-z0-9][A-Za-z0-9._:\/-]{2,99})/g;
+const KV = /["']?([A-Za-z][\w.-]{1,40})["']?\s*[:=]\s*["']?([A-Za-z0-9][A-Za-z0-9._:/-]{2,99})/g;
 
 export function extractIds(row: Record<string, unknown>, text: string): Ids {
   const ids: Ids = {};

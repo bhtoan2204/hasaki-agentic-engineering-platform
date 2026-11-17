@@ -37,7 +37,7 @@ const baseUrl = () => config.vault.baseUrl.replace(/\/$/, "");
 /** `hvs.…`, `X-Vault-Token: hvs.…`, or a Copy-as-cURL of a Vault UI request. */
 export function parseVaultToken(raw: string): string {
   const curl = parseCurl(raw);
-  let t = (curl ? (curl.headers["x-vault-token"] ?? "") : raw)
+  const t = (curl ? (curl.headers["x-vault-token"] ?? "") : raw)
     .trim()
     .replace(/^x-vault-token:\s*/i, "")
     .replace(/^["']|["']$/g, "");

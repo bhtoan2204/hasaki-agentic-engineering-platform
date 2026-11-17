@@ -16,7 +16,7 @@ const KEYWORD = /\b(?:branch|nhánh)\b/gi;
 /** Words that follow "branch" in prose but are never the branch itself. */
 const FILLER =
   /^(task|cha|con|của|gốc|mẹ|parent|child|base|the|this|that|current|hiện|tại|này|đó|từ|from|of|là|tên|name|named|existing|có|sẵn)$/i;
-const BRANCH_LIKE = /[\/_-]|\d/;
+const BRANCH_LIKE = /[/_-]|\d/;
 
 export type BranchMap = Record<string, string>;
 
@@ -41,7 +41,7 @@ export function detectBranchDirectives(
           const quoted = /^[`'"“]/.test(raw);
           const w = raw.replace(/^[`'"“]+|[`'"”,:;.)]+$/g, "");
           if (!w || FILLER.test(w)) continue;
-          if (/^[A-Za-z0-9][A-Za-z0-9._\/-]{2,80}$/.test(w) && (quoted || BRANCH_LIKE.test(w)))
+          if (/^[A-Za-z0-9][A-Za-z0-9._/-]{2,80}$/.test(w) && (quoted || BRANCH_LIKE.test(w)))
             return [w];
         }
         return [];
@@ -65,7 +65,7 @@ export function normalizeBranchMap(v: unknown, baseBranch: string): BranchMap | 
   for (const [repo, b] of Object.entries(v as Record<string, unknown>)) {
     const name = String(b ?? "").trim();
     if (!name) continue;
-    if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,200}$/.test(name) || name.includes(".."))
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$/.test(name) || name.includes(".."))
       throw new Error(`invalid branch name for ${repo}: ${name}`);
     if (name === baseBranch)
       throw new Error(`${repo}: cannot work directly on the base branch ${baseBranch}`);

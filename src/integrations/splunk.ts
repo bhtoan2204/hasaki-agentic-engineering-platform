@@ -432,7 +432,7 @@ export function checkSpl(raw: string): string {
   let spl = raw.trim().replace(/\s+/g, " ");
   if (!spl) throw new Error("query rỗng");
   // every command after a pipe (top level and inside [subsearches]) must be a read-only one
-  for (const m of spl.matchAll(/(?:^|[|\[])\s*([A-Za-z_]\w*)/g))
+  for (const m of spl.matchAll(/(?:^|[|[])\s*([A-Za-z_]\w*)/g))
     if (FORBIDDEN.has(m[1].toLowerCase()))
       throw new Error(`lệnh SPL "${m[1]}" không được phép (chỉ search đọc dữ liệu)`);
   if (!/^(search\b|\|)/i.test(spl)) spl = `search ${spl}`;

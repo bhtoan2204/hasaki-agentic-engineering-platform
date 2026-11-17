@@ -90,7 +90,7 @@ export interface ResolvedContext {
 }
 
 const CODE_REF =
-  /(?:^|[\s`'"(\[])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
+  /(?:^|[\s`'"([])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
 
 /**
  * Deterministic handoff of source locations: files read/edited/grepped by the CURRENT attempt of each ancestor step
