@@ -271,7 +271,7 @@ test("enforcement: PASS completes with the judged commits; FAIL repairs within b
   ) as any;
   assert.equal(blocked.kind, "waiting_input");
   assert.match(blocked.questions[0].question, /need spec/);
-  assert.match(findingsFeedback(fail, 1, 2), /a\.go:1 — wrong\n   evidence: x/);
+  assert.match(findingsFeedback(fail, 1, 2), /a\.go:1 — wrong\n {3}evidence: x/);
 });
 
 test("stale verification: any commit after the PASS, or a repo the PASS never judged, is stale", () => {

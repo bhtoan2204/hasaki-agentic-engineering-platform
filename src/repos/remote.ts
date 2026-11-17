@@ -81,7 +81,7 @@ export function repositoryBranch(value: unknown): string {
     typeof value !== "string" ||
     !value ||
     value.startsWith("-") ||
-    /[\s~^:?*\[\\\x00-\x1f]/.test(value) ||
+    /[\s~^:?*[\\\x00-\x1f]/.test(value) ||
     value.includes("..") ||
     value.includes("@{") ||
     value.split("/").some((p) => !p || p.startsWith(".") || p.endsWith(".") || p.endsWith(".lock"))

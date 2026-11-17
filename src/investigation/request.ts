@@ -165,7 +165,7 @@ function parseDate(
     /\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:,?\s*(\d{4}))?/,
   );
   if (m) return { y: m[3] ? +m[3] : undefined, mo: MONTHS[m[2]], d: +m[1] };
-  m = f.match(/\b(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{4}))?\b/);
+  m = f.match(/\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{4}))?\b/);
   if (m) {
     const a = +m[1],
       b = +m[2];

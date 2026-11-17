@@ -249,7 +249,7 @@ export function ApprovalPanel({
     ];
     const found: Record<string, string> = {};
     for (const m of v.matchAll(
-      /([A-Za-z0-9._-]+)\s*:\s*(?:nhánh|branch)?\s*([A-Za-z0-9][A-Za-z0-9._\/-]*)/gi,
+      /([A-Za-z0-9._-]+)\s*:\s*(?:nhánh|branch)?\s*([A-Za-z0-9][A-Za-z0-9._/-]*)/gi,
     ))
       if (names.includes(m[1])) found[m[1]] = m[2];
     if (Object.keys(found).length) {

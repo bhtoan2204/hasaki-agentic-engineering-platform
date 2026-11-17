@@ -448,7 +448,7 @@ test("Scenario C: failed implementation is retried without repeating analysis; h
     repositories: ["oms-api"],
   });
   await drain();
-  let st = await stepOf(run.id, "implement");
+  const st = await stepOf(run.id, "implement");
   assert.equal(st.status, "FAILED");
   assert.equal(calls.implement, 2, "automatic retry up to max_attempts");
   assert.equal((await getRun(run.id)).status, "FAILED");
@@ -3149,7 +3149,7 @@ const refundWorkflow = (prMode: string, maxRepairs = 2) =>
 test("e2e: the verifier catches the defect, FAIL blocks the PR and triggers a bounded repair, the genuine PASS publishes exactly the verified commit", async () => {
   const key = await refundWorkflow("auto");
   scripts.implement = refundCoder(() => REFUND_GOOD);
-  let prSawReviewStatus: string[] = [];
+  const prSawReviewStatus: string[] = [];
   scripts.review = async (ctx, n) => {
     const r = await refundVerifier(ctx, n);
     prSawReviewStatus.push(`${r.kind}`);
