@@ -447,7 +447,7 @@ const defaults: Config = {
     ],
   },
   relatedProjects: {},
-  fileBaseUrl: "",
+  fileBaseUrl: "https://hr-media.hasaki.vn/production/hr",
   bitbucket: { workspace: "hasaki-tech", user: "", token: "", reviewers: [] },
   github: { allowSharedCredentials: false, accessVerification: "strict", token: "" },
   gitlab: {

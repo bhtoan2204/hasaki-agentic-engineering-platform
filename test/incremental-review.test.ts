@@ -59,7 +59,7 @@ test("repairDiff shows only commits after the checkpoint and refuses rewritten h
     assert.ok(diff);
     assert.match(diff, /-original\n\+repaired/);
 
-    git("reset", "-q", "--hard", `${checkpoint}~0`);
+    git("reset", "-q", "--hard", checkpoint);
     git("commit", "-q", "--amend", "-m", "rewritten");
     assert.equal(await repairDiff([{ repo: "svc", path: dir }], { svc: checkpoint }), null);
   } finally {

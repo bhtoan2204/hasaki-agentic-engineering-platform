@@ -19,7 +19,7 @@ import { languagePolicy, languageReminder, outputLocale } from "./language.ts";
 
 const MAX_UPSTREAM_CHARS = 20_000;
 
-const untrusted = (label: string, body: string) =>
+export const untrusted = (label: string, body: string) =>
   `<untrusted_input source="${label}">\n${body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`;
 
 /** What this run can use (toolRegistry.integrationCatalog); without it the section stays generic. */

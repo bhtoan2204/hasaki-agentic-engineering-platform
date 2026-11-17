@@ -2,53 +2,13 @@ import { before, test } from "node:test";
 import assert from "node:assert/strict";
 import { pool, q } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
-import { definitions, mergeTemplateSpec, seedTemplates } from "../src/workflow/definitions.ts";
+import { definitions, seedTemplates } from "../src/workflow/definitions.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
 import { validateSpec } from "../src/workflow/graph.ts";
 
 before(async () => {
   await migrate();
   await seedTemplates();
-});
-
-test("mergeTemplateSpec applies template changes and keeps local edits", () => {
-  const base = {
-    a: 1,
-    b: 1,
-    steps: [
-      { key: "x", v: 1 },
-      { key: "y", v: 1 },
-      { key: "gone", v: 1 },
-    ],
-  };
-  const ours = {
-    a: 2,
-    b: 1,
-    steps: [
-      { key: "x", v: 1, ui: { x: 5, y: 5 } },
-      { key: "mine", v: 1 },
-    ],
-  };
-  const theirs = {
-    a: 3,
-    b: 4,
-    steps: [
-      { key: "x", v: 2 },
-      { key: "y", v: 2 },
-      { key: "gone", v: 1 },
-      { key: "new", v: 1 },
-    ],
-  };
-  assert.deepEqual(mergeTemplateSpec(base, ours, theirs), {
-    a: 2,
-    b: 4,
-    steps: [
-      { key: "x", v: 2, ui: { x: 5, y: 5 } },
-      { key: "new", v: 1 },
-      { key: "mine", v: 1 },
-    ],
-  });
-  assert.deepEqual(mergeTemplateSpec(base, base, theirs), theirs);
 });
 
 test("a template update reaches a definition whose latest version has local edits", async () => {

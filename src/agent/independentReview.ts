@@ -267,13 +267,16 @@ export function enforceScopeReview(
   return out;
 }
 
-export function findingsFeedback(v: VerdictOutput, round: number, max: number) {
-  // Low findings are listed only when the FAIL rests on them alone (the verifier's explicit call).
-  const serious = v.findings.filter((f) => f.severity !== "low");
-  const lines = (serious.length ? serious : v.findings).map(
+const formatFindings = (findings: Finding[]) =>
+  findings.map(
     (f, i) =>
       `${i + 1}. [${f.severity}] ${f.file}${f.line ? `:${f.line}` : ""} — ${f.explanation}${f.evidence ? `\n   evidence: ${f.evidence}` : ""}`,
   );
+
+export function findingsFeedback(v: VerdictOutput, round: number, max: number) {
+  // Low findings are listed only when the FAIL rests on them alone (the verifier's explicit call).
+  const serious = v.findings.filter((f) => f.severity !== "low");
+  const lines = formatFindings(serious.length ? serious : v.findings);
   return [
     `Independent verification FAILED (repair ${round} of ${max}). Fix every finding below, keep the change minimal, run the relevant tests, commit, then submit_result again.`,
     ...lines,
@@ -294,11 +297,15 @@ export function enforceVerdict(
     maxRepairs: number;
     repairTarget: string | null;
     heads: Record<string, string>;
+    baseTips?: Record<string, string>;
+    incrementalFrom?: number;
   },
 ): ExecResult {
   const output = {
     ...v,
     verified_heads: opts.heads,
+    ...(opts.baseTips ? { verified_base_tips: opts.baseTips } : {}),
+    ...(opts.incrementalFrom ? { incremental_from_attempt: opts.incrementalFrom } : {}),
     verified_at: new Date().toISOString(),
     approved: v.verdict === "PASS",
     independent: true,
@@ -471,28 +478,27 @@ export async function collectEvidence(
       problems.push(
         `${w.repo}: uncommitted changes in ${w.path} — the coding step must commit before verification:\n${dirty.slice(0, 2000)}`,
       );
-    const stat = (
-      await exec(
-        "git",
-        ["-C", w.path, "diff", "--stat", `origin/${w.baseBranch || baseBranch}...HEAD`],
-        { maxBuffer: 8 << 20 },
-      ).catch(() => ({ stdout: "(diff unavailable)" }))
-    ).stdout.trim();
-    let diff = (
-      await exec(
-        "git",
-        ["-C", w.path, "diff", "--no-color", `origin/${w.baseBranch || baseBranch}...HEAD`],
-        { maxBuffer: 64 << 20 },
-      ).catch(() => ({ stdout: "" }))
-    ).stdout;
-    if (diff.length > budget)
-      diff =
-        diff.slice(0, Math.max(0, budget)) +
-        `\n… diff truncated — run git diff origin/${w.baseBranch || baseBranch}...HEAD in ${w.path} for the rest`;
+    const { stat, diff } = await boundedDiff(w.path, `origin/${w.baseBranch || baseBranch}...HEAD`, budget);
     budget -= diff.length;
     parts.push(`### ${w.repo} @ ${head.slice(0, 12)} (worktree ${w.path})\n${stat}\n\n${diff}`);
   }
   return { heads, problems, text: parts.join("\n\n") };
+}
+
+async function boundedDiff(path: string, range: string, budget: number) {
+  const [stat, full] = await Promise.all([
+    exec("git", ["-C", path, "diff", "--stat", range], { maxBuffer: 8 << 20 })
+      .then((r) => r.stdout.trim())
+      .catch(() => "(diff unavailable)"),
+    exec("git", ["-C", path, "diff", "--no-color", range], { maxBuffer: 64 << 20 })
+      .then((r) => r.stdout)
+      .catch(() => ""),
+  ]);
+  const diff =
+    full.length > budget
+      ? full.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff ${range} in ${path} for the rest`
+      : full;
+  return { stat, diff };
 }
 
 /** `git status --porcelain` of a worktree; an unreadable status counts as dirty (fail closed). */
@@ -630,19 +636,19 @@ export async function repairDiff(
   since: Record<string, string>,
   maxChars = 60_000,
 ) {
+  const ancestors = await Promise.all(
+    workspaces.map((w) =>
+      exec("git", ["-C", w.path, "merge-base", "--is-ancestor", since[w.repo], "HEAD"])
+        .then(() => true)
+        .catch(() => false),
+    ),
+  );
+  if (ancestors.includes(false)) return null;
   const parts: string[] = [];
   let budget = maxChars;
   for (const w of workspaces) {
     const from = since[w.repo];
-    const ancestor = await exec("git", ["-C", w.path, "merge-base", "--is-ancestor", from, "HEAD"])
-      .then(() => true)
-      .catch(() => false);
-    if (!ancestor) return null;
-    const range = `${from}..HEAD`;
-    const stat = (await exec("git", ["-C", w.path, "diff", "--stat", range], { maxBuffer: 8 << 20 })).stdout.trim();
-    let diff = (await exec("git", ["-C", w.path, "diff", "--no-color", range], { maxBuffer: 64 << 20 })).stdout;
-    if (diff.length > budget)
-      diff = diff.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff ${range} in ${w.path} for the rest`;
+    const { stat, diff } = await boundedDiff(w.path, `${from}..HEAD`, budget);
     budget -= diff.length;
     parts.push(`### ${w.repo} ${from.slice(0, 12)}..HEAD (worktree ${w.path})\n${stat || "(no changes)"}\n\n${diff}`);
   }
@@ -650,17 +656,13 @@ export async function repairDiff(
 }
 
 export function incrementalReviewBrief(checkpoint: { attemptId: number; findings: Finding[]; summary: string }) {
-  const findings = checkpoint.findings.map(
-    (f, i) =>
-      `${i + 1}. [${f.severity}] ${f.file}${f.line ? `:${f.line}` : ""} — ${f.explanation}${f.evidence ? `\n   evidence: ${f.evidence}` : ""}`,
-  );
   return [
     `INCREMENTAL RE-REVIEW. The full diff was already reviewed (attempt #${checkpoint.attemptId}) and FAILED only on the findings below; everything else in it was accepted.`,
     "Review ONLY: (1) whether each finding below is resolved, and (2) the repair diff for new defects or regressions.",
     "Do not re-review unchanged code. Read surrounding code or run git diff against the base branch only where the repair diff needs that context.",
     "Report unresolved findings again; PASS when all are resolved and the repair introduced no new defect.",
     "Previous findings:",
-    ...findings,
+    ...formatFindings(checkpoint.findings),
     checkpoint.summary ? `Previous verifier summary: ${checkpoint.summary}` : "",
   ]
     .filter(Boolean)

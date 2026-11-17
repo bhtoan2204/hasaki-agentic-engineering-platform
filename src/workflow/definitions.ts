@@ -89,12 +89,13 @@ export const definitions = {
     isTemplate?: boolean;
     changeNote?: string;
     ownerId?: number | null;
+    templateBase?: unknown;
   }) {
     const spec = validateSpec(input.spec);
     return withTx(async (c) => {
       const d = await one(
         c,
-        `INSERT INTO workflow_definitions (key, name, description, draft_spec, is_template, owner_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        `INSERT INTO workflow_definitions (key, name, description, draft_spec, is_template, owner_id, template_base) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
         [
           input.key,
           spec.name,
@@ -102,6 +103,7 @@ export const definitions = {
           json(spec),
           input.isTemplate ?? false,
           input.ownerId ?? null,
+          input.templateBase === undefined ? null : json(input.templateBase),
         ],
       );
       if (input.publish !== false) await publishTx(c, d.id, input.changeNote ?? "initial version");
@@ -214,46 +216,37 @@ export function mergeTemplateSpec(base: unknown, ours: unknown, theirs: unknown)
 export async function seedTemplates() {
   for (const t of TEMPLATES) {
     const spec = validateSpec(t.spec);
-    const existing = await definitions.get(t.key);
+    const existing = await one(
+      pool,
+      "SELECT id, is_template, template_base FROM workflow_definitions WHERE key = $1 AND owner_id IS NULL",
+      [t.key],
+    );
     if (!existing) {
-      const created = await definitions.create({
+      await definitions.create({
         key: t.key,
         spec,
         isTemplate: true,
         changeNote: "built-in template",
+        templateBase: spec,
       });
-      await q(pool, "UPDATE workflow_definitions SET template_base = $2 WHERE id = $1", [
-        created.id,
-        json(spec),
-      ]);
       continue;
     }
-    if (!existing.is_template) continue;
+    if (!existing.is_template || !existing.template_base || same(existing.template_base, spec))
+      continue;
     await withTx(async (c) => {
       const d = await one(c, "SELECT * FROM workflow_definitions WHERE id = $1 FOR UPDATE", [
         existing.id,
       ]);
       // An unpublished draft would be overwritten by the publish below; retry on the next start.
-      if (d.draft_spec) return;
+      if (d.draft_spec || same(d.template_base, spec)) return;
       const latest = await one(
         c,
         "SELECT spec, spec_hash FROM workflow_definition_versions WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
         [d.id],
       );
-      const base =
-        d.template_base ??
-        (
-          await one(
-            c,
-            `SELECT spec FROM workflow_definition_versions
-              WHERE definition_id = $1 AND change_note LIKE 'built-in template%' ORDER BY version DESC LIMIT 1`,
-            [d.id],
-          )
-        )?.spec;
-      if (!latest || !base || same(base, spec)) return;
       let next: WorkflowSpec;
       try {
-        next = validateSpec(mergeTemplateSpec(base, latest.spec, spec));
+        next = validateSpec(mergeTemplateSpec(d.template_base, latest.spec, spec));
       } catch (err) {
         console.warn(
           `Template "${t.key}" update not applied: merge with local edits is invalid`,
@@ -269,7 +262,7 @@ export async function seedTemplates() {
         await publishTx(
           c,
           d.id,
-          same(latest.spec, base)
+          same(latest.spec, d.template_base)
             ? "built-in template update"
             : "built-in template update (local edits kept)",
         );
