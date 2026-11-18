@@ -25,6 +25,9 @@ export function normalizeProviderFailure(error: unknown): FailureCategory {
       e?.type ??
       "",
   ).toLowerCase();
+  const exact = code.toUpperCase();
+  if (exact !== "UNKNOWN" && (FAILURE_CATEGORIES as readonly string[]).includes(exact))
+    return exact as FailureCategory;
   const text = String(
     e?.message ?? e?.error?.message ?? e?.errors?.join?.(" ") ?? e?.result ?? error ?? "",
   ).toLowerCase();

@@ -74,6 +74,7 @@ import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap, WORK_ITEM_BRANCH_SOURCE } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
+import { failurePolicy } from "../agent/harness/failure.ts";
 import { background } from "./background.ts";
 import { downstream, topoOrder } from "./graph.ts";
 import {
@@ -2106,6 +2107,8 @@ async function applyResult(
         [step.id, step.generation],
       );
       const decision = classifyFailure(result.error, {
+        failureClass: failurePolicy((result.details as { failure_code?: string } | undefined)?.failure_code)
+          ?.failureClass,
         executorRetryable: result.retryable,
         attempt: step.attempt_count - (pauses?.n ?? 0),
         maxAttempts: attempt.effective_agent?.retry?.max_attempts ?? step.max_attempts,

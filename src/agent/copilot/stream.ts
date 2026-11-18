@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import { normalizeProviderFailure, type FailureCategory } from "../telemetry.ts";
+import { classifyCliError } from "../harness/failure.ts";
 
 export interface CopilotTokens {
   input?: number | null;
@@ -266,20 +266,4 @@ function parseCopilotLine(
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 
-export function classifyCopilotError(err: unknown): FailureCategory {
-  const obj = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
-  const errObj =
-    typeof obj?.error === "object" && obj?.error !== null
-      ? (obj.error as Record<string, unknown>)
-      : null;
-  const errMsg = typeof errObj?.message === "string" ? errObj.message : undefined;
-  const text = String(obj?.message ?? errMsg ?? obj?.error ?? err ?? "").toLowerCase();
-  if (/quota|resource has been exhausted|rate_limit|too many requests|429/.test(text)) {
-    if (/quota|credit|billing|exhausted/.test(text)) return "QUOTA_EXHAUSTED";
-    return "RATE_LIMIT";
-  }
-  if (/login|auth|unauthorized|credential|token/.test(text)) return "AUTHENTICATION";
-  if (/timeout|timed out/.test(text)) return "EXECUTION_TIMEOUT";
-  if (/cancel|abort/.test(text)) return "CANCELED";
-  return normalizeProviderFailure(err);
-}
+export const classifyCopilotError = classifyCliError;

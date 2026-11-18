@@ -54,10 +54,19 @@ export const backoff = (base: number, attempt: number, cap = 900) =>
 
 export function classifyFailure(
   error: string,
-  ctx: { executorRetryable?: boolean; attempt: number; maxAttempts: number; baseBackoff: number },
+  ctx: {
+    executorRetryable?: boolean;
+    attempt: number;
+    maxAttempts: number;
+    baseBackoff: number;
+    /** Structured failure class from the harness failure table; wins over the error-text rules. */
+    failureClass?: FailureClass;
+  },
 ): FailureDecision {
   const text = String(error ?? "");
-  const cls = (RULES.find(([, re]) => re.test(text))?.[0] ?? "unknown") as FailureClass;
+  const cls = (ctx.failureClass ??
+    RULES.find(([, re]) => re.test(text))?.[0] ??
+    "unknown") as FailureClass;
   const canRetry = ctx.attempt < ctx.maxAttempts;
   switch (cls) {
     case "auth":

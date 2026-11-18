@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import { normalizeProviderFailure, type FailureCategory } from "../telemetry.ts";
+import { classifyCliError } from "../harness/failure.ts";
 
 export interface AntigravityTokens {
   input?: number | null;
@@ -250,16 +250,4 @@ function parseAntigravityLine(
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 
-export function classifyAntigravityError(err: unknown): FailureCategory {
-  const text = String(
-    (err as any)?.message ?? (err as any)?.error?.message ?? (err as any)?.error ?? err ?? "",
-  ).toLowerCase();
-  if (/quota|resource has been exhausted|rate_limit|too many requests|429/.test(text)) {
-    if (/quota|credit|billing|exhausted/.test(text)) return "QUOTA_EXHAUSTED";
-    return "RATE_LIMIT";
-  }
-  if (/login|auth|unauthorized|credential|token/.test(text)) return "AUTHENTICATION";
-  if (/timeout|timed out/.test(text)) return "EXECUTION_TIMEOUT";
-  if (/cancel|abort/.test(text)) return "CANCELED";
-  return normalizeProviderFailure(err);
-}
+export const classifyAntigravityError = classifyCliError;

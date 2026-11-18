@@ -32,6 +32,7 @@ import { captureContextContinuity } from "../context/continuity.ts";
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { randomUUID } from "node:crypto";
 import { normalizeProviderFailure, safeDiagnostics } from "./telemetry.ts";
+import { blocksRebuild, failurePolicy, isTerminalFailure, toFailureCode } from "./harness/failure.ts";
 import { buildCodeContext } from "../codeIntelligence/search.ts";
 import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import {
@@ -489,21 +490,6 @@ async function progressNotes(fromAttempt?: number) {
   );
   return rows.map((r) => String(r.data?.note ?? "")).filter(Boolean);
 }
-
-/** Provider failures that a rebuilt prompt or an automatic retry cannot fix (and must not hide). */
-const TERMINAL_FAILURES = new Set([
-  "QUOTA_EXHAUSTED",
-  "AUTHENTICATION",
-  "CONTEXT_LIMIT",
-  "CANCELED",
-  "AGENT_ERROR",
-  "quota",
-  "auth",
-  "model",
-  "policy",
-  "canceled",
-  "timeout",
-]);
 
 /**
  * The agent step executor for every provider (name kept for existing imports). Provider-specific parts are the turn
@@ -1606,7 +1592,7 @@ const agentExecutor: StepExecutor = {
         if (
           result.isError &&
           result.assistantTurns === 0 &&
-          !TERMINAL_FAILURES.has(result.failure ?? "")
+          !blocksRebuild(result.failure)
         ) {
           // Session missing or not resumable: rebuild from durable artifacts instead (answers and progress notes included).
           await q(
@@ -1708,23 +1694,11 @@ const agentExecutor: StepExecutor = {
       return {
         kind: "failed",
         error: result.text || "agent run failed",
-        retryable: !TERMINAL_FAILURES.has(result.failure ?? ""),
+        retryable: !isTerminalFailure(result.failure),
         details: {
+          ...(toFailureCode(result.failure) ? { failure_code: toFailureCode(result.failure) } : {}),
           provider_error: {
-            code:
-              (
-                {
-                  quota: "quota_exhausted",
-                  auth: "authentication",
-                  rate_limit: "rate_limit",
-                  timeout: "timeout",
-                  canceled: "canceled",
-                  model: "agent_error",
-                  policy: "agent_error",
-                } as Record<string, string>
-              )[result.failure ?? ""] ??
-              result.failure ??
-              "",
+            code: failurePolicy(result.failure)?.providerErrorCode ?? result.failure ?? "",
             message: result.text,
           },
         },
@@ -2168,7 +2142,7 @@ ${validation.errors.join("; ")}`,
           // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
           if (
             !r ||
-            (r.isError && r.assistantTurns === 0 && !TERMINAL_FAILURES.has(r.failure ?? ""))
+            (r.isError && r.assistantTurns === 0 && !blocksRebuild(r.failure))
           ) {
             if (sid)
               await ctx.log(
@@ -2182,7 +2156,7 @@ ${validation.errors.join("; ")}`,
             return {
               kind: "failed",
               error: `repair ${n} failed: ${r.text || "agent run failed"}`,
-              retryable: !TERMINAL_FAILURES.has(r.failure ?? ""),
+              retryable: !isTerminalFailure(r.failure),
             };
           if (await openQuestions()) return pause(r.text);
           const terminalRepair = terminalCodingFailure(submitted);

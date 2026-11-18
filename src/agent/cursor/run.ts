@@ -2,6 +2,8 @@ import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
 import { cursorUsage } from "./stream.ts";
 import { startBroker } from "../codex/broker.ts";
 import { agentEnvironment } from "../environment.ts";
+import { normalizeProviderFailure } from "../telemetry.ts";
+import type { HarnessFailureCode } from "../harness/failure.ts";
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
 import { newMetrics } from "../metrics.ts";
 import type { AgentMetrics } from "../metrics.ts";
@@ -34,6 +36,7 @@ export interface CursorTurnResult {
   text: string;
   assistantTurns: number;
   submitted?: Record<string, unknown>;
+  failure?: HarnessFailureCode;
 }
 
 export interface CursorCapability {
@@ -217,7 +220,11 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     input.ctx.signal.addEventListener("abort", onAbort, { once: true });
     if (input.ctx.signal.aborted) kill();
     const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000);
-    const timer = setTimeout(kill, timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
+    }, timeoutMs);
 
     const parser = new NdjsonStream();
     let stderr = "";
@@ -420,12 +427,22 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       input.metrics.denied.push(...denied);
     }
 
-    if (input.ctx.signal.aborted) return { isError: true, text: "canceled", assistantTurns };
+    if (input.ctx.signal.aborted)
+      return { isError: true, text: "canceled", assistantTurns, failure: "CANCELED" };
     if (violation)
       return {
         isError: true,
         text: `Cursor tool blocked by platform policy: ${violation}`,
         assistantTurns: Math.max(assistantTurns, 1),
+        failure: "POLICY_VIOLATION",
+      };
+    if (timedOut)
+      return {
+        isError: true,
+        text: `Cursor execution timeout: turn exceeded the ${Math.round(timeoutMs / 60000)} minute limit and was stopped`,
+        assistantTurns,
+        submitted,
+        failure: "EXECUTION_TIMEOUT",
       };
 
     const ws = (await workspacesOf(input.ctx.run.id)).map((w) => w.path);
@@ -447,6 +464,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         text: `${why}${stderr.trim() ? `: ${stderr.trim().slice(0, 500)}` : ""}`,
         assistantTurns,
         submitted,
+        failure: "INCOMPLETE_OUTPUT",
       };
     }
     if (exitCode !== 0 || isError)
@@ -455,6 +473,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         text: text || stderr.trim().slice(0, 500) || `Cursor exited ${exitCode}`,
         assistantTurns,
         submitted,
+        failure: normalizeProviderFailure(text || stderr),
       };
     return { isError: false, text, assistantTurns, submitted };
   } finally {
