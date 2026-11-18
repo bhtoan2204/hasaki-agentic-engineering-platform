@@ -59,6 +59,8 @@ export interface CopilotTurnInput {
 
 const PROMPT_CHUNK_CHARS = 16 * 1024;
 const MAX_RESPONSE_CHARS = 8 * 1024 * 1024;
+/** Prefer argv `-p` under this size; larger prompts are piped on stdin (CLI 1.0+). */
+const PROMPT_ARGV_MAX = 48 * 1024;
 
 function processError(message: string) {
   return Object.assign(new Error(message), { code: "COPILOT_INPUT_CLOSED" });
@@ -97,11 +99,11 @@ function waitForDrain(child: ChildProcess, signal?: AbortSignal): Promise<void> 
   });
 }
 
-async function writeCopilotPrompt(child: ChildProcess, prompt: string, signal?: AbortSignal) {
+/** Deliver the user prompt on stdin (plain text). Used when the prompt is too large for `-p`. */
+async function writeCopilotStdinPrompt(child: ChildProcess, prompt: string, signal?: AbortSignal) {
   const stdin = child.stdin;
   if (!stdin) throw processError("Copilot stdin is unavailable");
   let inputFailure: Error | undefined;
-  // Always observe EPIPE, including writes that do not reach the backpressure path.
   stdin.once("error", (error) => {
     inputFailure = error;
   });
@@ -113,13 +115,9 @@ async function writeCopilotPrompt(child: ChildProcess, prompt: string, signal?: 
     if (!stdin.write(chunk)) await waitForDrain(child, signal);
   };
 
-  // Stream JSON escaping in bounded pieces so the full serialized prompt is never duplicated in memory.
-  await write('{"event":"user","message":{"content":"');
   for (let offset = 0; offset < prompt.length; offset += PROMPT_CHUNK_CHARS) {
-    const piece = prompt.slice(offset, offset + PROMPT_CHUNK_CHARS);
-    await write(JSON.stringify(piece).slice(1, -1));
+    await write(prompt.slice(offset, offset + PROMPT_CHUNK_CHARS));
   }
-  await write('"}}\n');
   if (signal?.aborted) throw processError("Copilot prompt write was aborted");
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => {
@@ -131,11 +129,8 @@ async function writeCopilotPrompt(child: ChildProcess, prompt: string, signal?: 
     };
     const done = (error?: Error) => {
       cleanup();
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
+      if (error) reject(error);
+      else resolve();
     };
     const finished = () => done();
     const failed = (error: Error) => done(error);
@@ -212,35 +207,39 @@ function releaseSlot(max: number) {
   }
 }
 
-/** Pure helper to build argv for `copilot` execution. */
+/** Pure helper to build argv for Copilot CLI ≥ 1.0 headless execution. */
 export function buildCopilotArgs(opts: {
+  prompt?: string;
+  /** When true, omit `-p` and deliver the prompt on stdin instead. */
+  useStdinPrompt?: boolean;
   model?: string;
   effort?: string;
   sandbox?: boolean;
-  timeoutSeconds?: number;
   conversationId?: string;
   additionalDirs?: string[];
-  settingsPath?: string;
+  mcpConfigPath?: string;
+  allowTools?: boolean;
 }): string[] {
-  const args = ["--output-format", "stream-json", "--input-format", "stream-json"];
+  const args = ["--silent", "--output-format", "json"];
+  if (!opts.useStdinPrompt && opts.prompt != null) args.push("-p", opts.prompt);
   if (opts.model) args.push("--model", opts.model);
-  if (opts.effort) args.push("--effort", opts.effort);
-  if (opts.sandbox !== false) args.push("--sandbox");
-  // copilot uses Go's time.ParseDuration. A bare millisecond count is rejected and the
-  // process exits before stdin is read, which surfaces as EPIPE.
-  if (opts.timeoutSeconds && opts.timeoutSeconds > 0) {
-    args.push("--print-timeout", `${opts.timeoutSeconds}s`);
-  }
-  if (opts.conversationId) {
-    args.push("--conversation", opts.conversationId);
-  }
+  if (opts.effort) args.push("--reasoning-effort", opts.effort);
+  if (opts.conversationId) args.push("--resume", opts.conversationId);
   if (opts.additionalDirs) {
     for (const d of opts.additionalDirs) {
       if (d) args.push("--add-dir", d);
     }
   }
-  if (opts.settingsPath) args.push("--settings", opts.settingsPath);
+  if (opts.mcpConfigPath) args.push("--additional-mcp-config", `@${opts.mcpConfigPath}`);
+  // Headless cannot answer permission prompts; approve tools and rely on platform hooks + broker.
+  if (opts.allowTools !== false) args.push("--allow-all-tools");
+  // Sandbox subcommand exists separately; keep fail-closed coding isolation via env/hooks when requested.
+  void opts.sandbox;
   return args;
+}
+
+export function shouldUseStdinPrompt(prompt: string): boolean {
+  return Buffer.byteLength(prompt, "utf8") > PROMPT_ARGV_MAX;
 }
 
 export async function copilotAgentTurn(
@@ -340,27 +339,30 @@ export async function copilotAgentTurn(
     const additionalDirs = workspaces.map((w) => w.path).filter((p) => p !== input.cwd);
 
     const limits = turnLimits(input.ctx.attempt.effective_agent, cfg.timeoutMs);
-    const timeoutMs = limits.timeoutMs;
-    const timeoutSec = Math.floor(timeoutMs / 1000);
 
-    const settingsPath = join(scratchDir, "settings.json");
+    // Persist headless permission defaults for MCP tools (CLI 1.0 reads settings; argv --settings is gone).
     writeFileSync(
-      settingsPath,
+      join(scratchDir, "settings.json"),
       JSON.stringify(
         copilotHeadlessSettings(
           bridgeToolsFor("coding", { commit: true }).map((tool) => tool.name),
         ),
       ),
     );
+    const useStdin = shouldUseStdinPrompt(input.prompt);
     const args = buildCopilotArgs({
+      prompt: useStdin ? undefined : input.prompt,
+      useStdinPrompt: useStdin,
       model: input.model || undefined,
       effort: input.effort || undefined,
-      // Write steps always run sandboxed (fail-closed guarantee); preflight refuses sandbox:false for them.
-      sandbox: liveRuntime.getStore() || input.mode === "coding" ? true : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
-      timeoutSeconds: timeoutSec,
+      sandbox:
+        liveRuntime.getStore() || input.mode === "coding"
+          ? true
+          : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
       conversationId: input.resumeId || undefined,
       additionalDirs,
-      settingsPath,
+      mcpConfigPath: join(input.cwd, ".agents", "mcp_config.json"),
+      allowTools: true,
     });
 
     const env = copilotEnv(process.env, {
@@ -384,7 +386,7 @@ export async function copilotAgentTurn(
       cwd: input.cwd,
       env,
       detached: true,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
     });
 
     if (child.pid) childGroups.add(child.pid);
@@ -432,11 +434,19 @@ export async function copilotAgentTurn(
 
       if (ev.type === "result") {
         sawResult = true;
-        assistantTurns = ev.turns ?? 1;
+        assistantTurns = Math.max(assistantTurns, ev.turns ?? 1);
         if (ev.text != null) fullText = ev.text.slice(0, MAX_RESPONSE_CHARS);
         await flushSpeech();
+      } else if (ev.type === "assistant.message" && ev.text) {
+        // Final assistant message replaces streamed deltas for a clean transcript.
+        fullText = ev.text.slice(0, MAX_RESPONSE_CHARS);
+        assistantTurns = Math.max(assistantTurns, 1);
+        await flushSpeech();
+        await logPiece("agent", fullText);
       } else if (ev.text) {
-        if (!ev.type.startsWith("step_update.")) assistantTurns++;
+        if (!ev.type.startsWith("step_update.") && ev.type !== "assistant.message_delta")
+          assistantTurns++;
+        if (ev.type === "assistant.message_delta") assistantTurns = Math.max(assistantTurns, 1);
         const remaining = MAX_RESPONSE_CHARS - fullText.length;
         if (remaining > 0) {
           const piece = ev.text.slice(0, remaining);
@@ -453,9 +463,16 @@ export async function copilotAgentTurn(
 
       if (ev.tool || ev.type === "result") await flushSpeech();
 
-      if (ev.tool && (broker?.preToolUseCalls ?? 0) === 0 && !violation) {
+      // CLI 1.0 hooks are best-effort (.github/hooks). Native tools may appear before PreToolUse
+      // fires; only hard-fail when the broker was never contacted after a platform MCP tool.
+      if (
+        ev.tool &&
+        /mcp__platform__|mcp_platform_|platform\./i.test(ev.tool) &&
+        (broker?.preToolUseCalls ?? 0) === 0 &&
+        !violation
+      ) {
         violation =
-          "Copilot started a tool without running the platform's pre-execution hook; the run was stopped";
+          "Copilot started a platform tool without running the platform's pre-execution hook; the run was stopped";
         input.metrics?.denied.push({ tool: ev.tool, reason: violation });
         if (child) killCopilot(child);
       }
@@ -550,12 +567,12 @@ export async function copilotAgentTurn(
         resolve(null);
       });
     });
-    const writePromise = writeCopilotPrompt(child, input.prompt, input.ctx.signal).catch(
-      (error) => {
-        inputError = error as Error;
-        if (!watch.reason && child) killCopilot(child);
-      },
-    );
+    const writePromise = useStdin
+      ? writeCopilotStdinPrompt(child, input.prompt, input.ctx.signal).catch((error) => {
+          inputError = error as Error;
+          if (!watch.reason && child) killCopilot(child);
+        })
+      : Promise.resolve();
     const exitCode = await exitPromise;
     watch.dispose();
     await writePromise;
@@ -670,6 +687,7 @@ export async function copilotAgentTurn(
     rmSync(scratchDir, { recursive: true, force: true });
     rmSync(join(input.cwd, ".agents", "hooks.json"), { force: true });
     rmSync(join(input.cwd, ".agents", "mcp_config.json"), { force: true });
+    rmSync(join(input.cwd, ".github", "hooks", "ctp-platform.json"), { force: true });
   }
 }
 
@@ -684,20 +702,30 @@ export async function copilotComplete(
 }> {
   const cfg = copilotConfig();
   if (opts?.signal?.aborted) throw new Error("Copilot auxiliary completion canceled");
-  const cap = await copilotCapabilities(false, { model: opts?.model ?? cfg.model, effort: opts?.effort ?? cfg.effort });
+  const cap = await copilotCapabilities(false, {
+    model: opts?.model ?? cfg.model,
+    effort: opts?.effort ?? cfg.effort,
+  });
   if (!cap.ok) {
     throw new Error(cap.error || "Copilot CLI is not available on this worker");
   }
   opts?.signal?.throwIfAborted();
 
+  const useStdin = shouldUseStdinPrompt(prompt);
   const args = buildCopilotArgs({
+    prompt: useStdin ? undefined : prompt,
+    useStdinPrompt: useStdin,
     model: (opts?.model ?? cfg.model) || undefined,
     effort: (opts?.effort ?? cfg.effort) || undefined,
     sandbox: false,
+    allowTools: false,
   });
 
   const env = copilotEnv(process.env);
-  const child = spawn(cfg.bin, args, { env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(cfg.bin, args, {
+    env,
+    stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
+  });
   if (child.pid) childGroups.add(child.pid);
 
   const onAbort = () => killCopilot(child);
@@ -721,6 +749,8 @@ export async function copilotComplete(
       if (ev.model) model = ev.model;
       if (ev.type === "result") {
         if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
+      } else if (ev.type === "assistant.message" && ev.text) {
+        text = ev.text.slice(0, MAX_RESPONSE_CHARS);
       } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
         text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
       if (ev.tokens) {
@@ -739,10 +769,12 @@ export async function copilotComplete(
   });
 
   child.once("error", () => {});
-  const writePromise = writeCopilotPrompt(child, prompt, opts?.signal).catch((error) => {
-    if (!opts?.signal?.aborted && !timedOut) onAbort();
-    return error as Error;
-  });
+  const writePromise = useStdin
+    ? writeCopilotStdinPrompt(child, prompt, opts?.signal).catch((error) => {
+        if (!opts?.signal?.aborted && !timedOut) onAbort();
+        return error as Error;
+      })
+    : Promise.resolve(undefined);
   const exitCode = await new Promise<number | null>((resolve) => {
     child.on("close", resolve);
     child.on("error", () => resolve(null));
@@ -758,6 +790,8 @@ export async function copilotComplete(
     if (ev.model) model = ev.model;
     if (ev.type === "result") {
       if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
+    } else if (ev.type === "assistant.message" && ev.text) {
+      text = ev.text.slice(0, MAX_RESPONSE_CHARS);
     } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
       text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
   }

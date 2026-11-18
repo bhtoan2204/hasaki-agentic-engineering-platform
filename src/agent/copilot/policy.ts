@@ -119,7 +119,7 @@ export function writeCopilotWorkspaceConfig(
     brokerToken: string;
     mode: string;
   },
-): { hookConfigPath: string; mcpConfigPath: string } {
+): { hookConfigPath: string; mcpConfigPath: string; githubHookPath: string } {
   const agentsDir = join(workspace, ".agents");
   mkdirSync(agentsDir, { recursive: true });
 
@@ -128,8 +128,7 @@ export function writeCopilotWorkspaceConfig(
   const node = process.execPath;
 
   const hookCommand = `${JSON.stringify(node)} --disable-warning=ExperimentalWarning ${JSON.stringify(hookScript)}`;
-  // Named hooks only. A top-level PreToolUse array is not a hook spec, and agy
-  // then refuses the whole file, so the platform policy never loads.
+  // Legacy named hooks (kept for the fake CLI / older agy-compatible probes).
   const hooksConfig = {
     "platform-model": {
       enabled: true,
@@ -154,6 +153,21 @@ export function writeCopilotWorkspaceConfig(
   const hookConfigPath = join(agentsDir, "hooks.json");
   writeFileSync(hookConfigPath, JSON.stringify(hooksConfig, null, 2));
 
+  // Copilot CLI 1.0+ loads Claude-compatible hooks from .github/hooks/*.json.
+  const githubHooksDir = join(workspace, ".github", "hooks");
+  mkdirSync(githubHooksDir, { recursive: true });
+  const githubHooks = {
+    PreToolUse: [
+      {
+        matcher: "*",
+        hooks: [{ type: "command", command: hookCommand, timeout: 60 }],
+      },
+    ],
+    SessionStart: [{ type: "command", command: `${hookCommand} --telemetry`, timeout: 10 }],
+  };
+  const githubHookPath = join(githubHooksDir, "ctp-platform.json");
+  writeFileSync(githubHookPath, JSON.stringify(githubHooks, null, 2));
+
   const mcpConfig = {
     mcpServers: {
       platform: {
@@ -170,7 +184,7 @@ export function writeCopilotWorkspaceConfig(
   const mcpConfigPath = join(agentsDir, "mcp_config.json");
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
-  return { hookConfigPath, mcpConfigPath };
+  return { hookConfigPath, mcpConfigPath, githubHookPath };
 }
 
 /** Session-only settings for headless print mode.
@@ -196,7 +210,11 @@ export function excludeFromGit(gitDir: string) {
   } catch {
     /* ignore */
   }
-  const lines = [".agents/hooks.json", ".agents/mcp_config.json"];
+  const lines = [
+    ".agents/hooks.json",
+    ".agents/mcp_config.json",
+    ".github/hooks/ctp-platform.json",
+  ];
   let added = false;
   for (const line of lines) {
     if (!cur.includes(line)) {

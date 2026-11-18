@@ -122,11 +122,11 @@ writeFileSync(
 import { spawnSync } from "node:child_process";
 const args = process.argv.slice(2);
 if (args.includes("--version")) {
-  console.log("GitHub Copilot CLI 0.1.0-fake");
+  console.log("GitHub Copilot CLI 1.0.0-fake");
   process.exit(0);
 }
-if (args.includes("--help") && !args.includes("-p") && !args.includes("--print")) {
-  console.log("GitHub Copilot CLI 0.1.0-fake\\nOptions:\\n  -p, --print\\n  --output-format <format>\\n  --input-format <format>\\n  --model <model>\\n  --effort <effort>\\n  --sandbox\\n  --conversation <id>\\n  --print-timeout <duration>\\n  --add-dir <path>\\n");
+if (args.includes("--help") && !args.includes("-p") && !args.includes("--prompt")) {
+  console.log("GitHub Copilot CLI 1.0.0-fake\\nOptions:\\n  -p, --prompt <text>\\n  --output-format <format>\\n  --model <model>\\n  --silent\\n  --reasoning-effort <level>\\n  --resume <id>\\n  --additional-mcp-config <json>\\n  --allow-all-tools\\n  --add-dir <path>\\n");
   process.exit(0);
 }
 if (args[0] === "models") {

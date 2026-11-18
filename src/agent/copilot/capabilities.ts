@@ -26,12 +26,36 @@ export interface CopilotCapability {
   models?: CopilotModel[];
 }
 
-const REQUIRED_FLAGS = [
-  "--output-format",
-  "--input-format",
-  "--model",
-];
+/** Flags required by Copilot CLI ≥ 1.0 (stream-json / --input-format were removed). */
+const REQUIRED_HELP = ["--output-format", "--prompt", "--model", "--silent", "--reasoning-effort"];
 const NO_FALLBACK = "The platform will not fall back to Claude or another provider.";
+const DEFAULT_EFFORTS = ["low", "medium", "high", "xhigh"];
+
+const FALLBACK_MODELS: CopilotModel[] = [
+  { slug: "auto", name: "Auto", efforts: DEFAULT_EFFORTS, default_effort: "medium" },
+  {
+    slug: "gpt-5.6-luna",
+    name: "GPT-5.6 Luna",
+    efforts: DEFAULT_EFFORTS,
+    default_effort: "medium",
+  },
+  { slug: "gpt-4o", name: "GPT-4o", efforts: DEFAULT_EFFORTS, default_effort: "medium" },
+  { slug: "gpt-4.1", name: "GPT-4.1", efforts: DEFAULT_EFFORTS, default_effort: "medium" },
+  { slug: "o3", name: "o3", efforts: DEFAULT_EFFORTS, default_effort: "medium" },
+  { slug: "o4-mini", name: "o4-mini", efforts: DEFAULT_EFFORTS, default_effort: "medium" },
+  {
+    slug: "claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    efforts: DEFAULT_EFFORTS,
+    default_effort: "medium",
+  },
+  {
+    slug: "claude-3.5-sonnet",
+    name: "Claude 3.5 Sonnet",
+    efforts: DEFAULT_EFFORTS,
+    default_effort: "medium",
+  },
+];
 
 let capCache: { key: string; at: number; value: CopilotCapability } | null = null;
 
@@ -75,6 +99,35 @@ export async function copilotCapabilities(
   return value;
 }
 
+/** Credential presence without spending a premium request. */
+export function detectCopilotAuth(env: NodeJS.ProcessEnv = process.env): {
+  ok: boolean;
+  auth?: string;
+} {
+  // Fake CLI modes used by tests — do not inherit the developer's real Copilot login.
+  if (env.FAKE_COPILOT_MODE === "logged-out") return { ok: false };
+  if (env.COPILOT_GITHUB_TOKEN || env.GH_TOKEN || env.GITHUB_TOKEN)
+    return { ok: true, auth: "Environment token" };
+  const home = env.COPILOT_HOME || join(homedir(), ".copilot");
+  for (const name of ["session-store.db", "config.json", "open-sessions-state.json"]) {
+    try {
+      const p = join(home, name);
+      if (existsSync(p) && statSync(p).size > 0)
+        return { ok: true, auth: "GitHub Account (Worker)" };
+    } catch {
+      /* ignore */
+    }
+  }
+  const legacy = join(homedir(), ".config", "github-copilot", "hosts.json");
+  try {
+    if (existsSync(legacy) && statSync(legacy).size > 0)
+      return { ok: true, auth: "GitHub Account (Worker)" };
+  } catch {
+    /* ignore */
+  }
+  return { ok: false };
+}
+
 async function probe(bin: string, model: string, effort: string): Promise<CopilotCapability> {
   let version = "";
   try {
@@ -87,7 +140,7 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
         ok: false,
         bin,
         kind: "missing",
-        error: `GitHub Copilot CLI was not found (${bin}). Install it on the worker or set agent.copilot.bin / COPILOT_BIN, then run \`copilot auth login\`. ${NO_FALLBACK}`,
+        error: `GitHub Copilot CLI was not found (${bin}). Install it on the worker or set agent.copilot.bin / COPILOT_BIN, then run \`copilot login\`. ${NO_FALLBACK}`,
       };
     return {
       ok: false,
@@ -100,14 +153,14 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
   try {
     const help = await run(bin, ["--help"]);
     const text = `${help.stdout}\n${help.stderr}`;
-    for (const f of REQUIRED_FLAGS) {
+    for (const f of REQUIRED_HELP) {
       if (!text.includes(f)) {
         return {
           ok: false,
           bin,
           version,
           kind: "unsupported",
-          error: `${version || bin}: \`copilot\` does not support ${f}, which the platform needs to enforce its execution policy. Upgrade the GitHub Copilot CLI. ${NO_FALLBACK}`,
+          error: `${version || bin}: \`copilot\` does not support ${f}, which the platform needs for headless execution. Upgrade the GitHub Copilot CLI. ${NO_FALLBACK}`,
         };
       }
     }
@@ -122,33 +175,27 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
     };
   }
 
-  // Detect worker authentication status: config token file presence or model listing success
-  const tokenFile = join(homedir(), ".config", "github-copilot", "hosts.json");
-  let hasToken = false;
-  try {
-    hasToken = existsSync(tokenFile) && statSync(tokenFile).size > 0;
-  } catch { /* ignore */ }
-
+  const authState = detectCopilotAuth(process.env);
   const models = await modelCatalog(bin);
-  if (!models && !execution.getStore()?.evaluation?.fixtureAgent) {
+  if (!authState.ok && !models && !execution.getStore()?.evaluation?.fixtureAgent) {
     return {
       ok: false,
       bin,
       version,
       kind: "auth",
-      error: `GitHub Copilot CLI on this worker is not logged in. Run \`copilot auth login\` on the worker machine to authenticate. ${NO_FALLBACK}`,
+      error: `GitHub Copilot CLI on this worker is not logged in. Run \`copilot login\` (or set COPILOT_GITHUB_TOKEN / GH_TOKEN). ${NO_FALLBACK}`,
     };
   }
 
-  const auth = hasToken ? "GitHub Account (Worker)" : "Logged In";
+  const catalog = models?.length ? models : FALLBACK_MODELS;
   const cap: CopilotCapability = {
     ok: true,
     bin,
     version,
-    auth,
-    models: models ?? undefined,
+    auth: authState.auth ?? (models ? "Logged In" : "GitHub Account (Worker)"),
+    models: catalog,
   };
-  const problem = models ? checkModel(models, model, effort) : null;
+  const problem = checkModel(catalog, model, effort);
   if (problem)
     return {
       ...cap,
@@ -159,13 +206,16 @@ async function probe(bin: string, model: string, effort: string): Promise<Copilo
   return cap;
 }
 
+/**
+ * Prefer the legacy `copilot models` subcommand when present (fake CLI / older builds).
+ * CLI 1.0.114 removed it — callers fall back to FALLBACK_MODELS after auth detection.
+ */
 export async function modelCatalog(bin: string): Promise<CopilotModel[] | null> {
   try {
-    const r = await run(bin, ["models"], 30_000);
+    const r = await run(bin, ["models"], 15_000);
     const stdout = r.stdout;
     const lines = stdout.split("\n");
     const models: CopilotModel[] = [];
-    const supportedEfforts = ["low", "medium", "high", "xhigh"];
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
@@ -174,10 +224,11 @@ export async function modelCatalog(bin: string): Promise<CopilotModel[] | null> 
         line.startsWith("Usage") ||
         line.startsWith("List available") ||
         line.startsWith("Flags:") ||
-        line.includes("Fetching available models")
+        line.includes("Fetching available models") ||
+        line.startsWith("error:") ||
+        line.startsWith("Did you mean")
       )
         continue;
-      // Format is: `<slug>    <Human Readable Name>` or simply `<slug>`
       const match = line.match(/^([a-zA-Z0-9_.-]+)(?:\s+(.+))?$/);
       if (match) {
         const slug = match[1];
@@ -185,28 +236,36 @@ export async function modelCatalog(bin: string): Promise<CopilotModel[] | null> 
         models.push({
           slug,
           name,
-          efforts: supportedEfforts,
+          efforts: DEFAULT_EFFORTS,
           default_effort: "medium",
         });
       }
     }
+    if (!models.some((m) => m.slug === "auto"))
+      models.unshift({
+        slug: "auto",
+        name: "Auto",
+        efforts: DEFAULT_EFFORTS,
+        default_effort: "medium",
+      });
     return models.length > 0 ? models : null;
   } catch {
     return null;
   }
 }
 
-export function checkModel(
-  models: CopilotModel[],
-  model: string,
-  effort: string,
-): string | null {
+export function checkModel(models: CopilotModel[], model: string, effort: string): string | null {
   if (!models.length) return null;
-  const m = model ? models.find((x) => x.slug === model || x.name === model) : null;
-  if (model && !m) {
-    return `Copilot model "${model}" is not available to the worker's account (available: ${models.map((x) => x.slug).join(", ")}).`;
+  if (!model || model === "auto") {
+    /* auto is always acceptable when present or when using Fusion routing */
+  } else {
+    const m = models.find((x) => x.slug === model || x.name === model);
+    // Unknown slugs are allowed through — the CLI rejects them at runtime. Catalogs lag Fusion.
+    if (!m && !models.some((x) => x.slug === "auto")) {
+      return `Copilot model "${model}" is not available to the worker's account (available: ${models.map((x) => x.slug).join(", ")}).`;
+    }
   }
-  const supportedEfforts = ["low", "medium", "high", "xhigh"];
+  const supportedEfforts = ["low", "medium", "high", "xhigh", "none", "minimal", "max"];
   if (effort && !supportedEfforts.includes(effort)) {
     return `Copilot does not support reasoning effort "${effort}" (supported: ${supportedEfforts.join(", ")}).`;
   }

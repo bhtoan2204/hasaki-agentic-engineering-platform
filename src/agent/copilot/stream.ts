@@ -137,6 +137,116 @@ function parseCopilotLine(
   }
   const rawObj = raw as RawRecord;
 
+  // Copilot CLI 1.0+ JSONL: { type, data, ... }
+  if (typeof rawObj.type === "string" && rawObj.data && typeof rawObj.data === "object") {
+    return { event: parseModernEvent(rawObj) };
+  }
+  // Terminal result line often has type:result without nested data wrapper fields we need.
+  if (rawObj.type === "result") {
+    return { event: parseModernResult(rawObj) };
+  }
+
+  // Legacy stream-json protocol (fake CLI / older builds): { event, ... }
+  return { event: parseLegacyEvent(rawObj) };
+}
+
+function parseModernEvent(rawObj: RawRecord): CopilotEvent {
+  const type = String(rawObj.type);
+  const data = (rawObj.data ?? {}) as RawRecord;
+
+  let text: string | undefined;
+  let thinking: string | undefined;
+  let model: string | undefined;
+  let conversationId: string | undefined;
+  let tool: string | undefined;
+  let toolArgs: unknown;
+  let tokens: CopilotTokens | undefined;
+  let turns: number | undefined;
+  let error: string | undefined;
+  let status: string | undefined;
+  let cumulativeUsage = false;
+
+  if (type === "session.start") {
+    conversationId = str(data.sessionId);
+  } else if (type === "session.model_change") {
+    model = str(data.newModel);
+  } else if (type === "session.auto_mode_resolved") {
+    model = str(data.chosenModel);
+  } else if (type === "model.call_start" || type === "session.tools_updated") {
+    model = str(data.model);
+  } else if (type === "assistant.message_delta") {
+    // Preserve whitespace — deltas are often a single trailing space between tokens.
+    text = textRaw(data.deltaContent);
+  } else if (type === "assistant.message") {
+    text = textRaw(data.content);
+    model = str(data.model) ?? model;
+  } else if (type === "assistant.reasoning_delta") {
+    thinking = textRaw(data.deltaContent);
+  } else if (type === "tool.execution_start" || type === "tool_call" || type === "tool.started") {
+    tool = str(data.toolName ?? data.name ?? data.tool);
+    toolArgs = data.arguments ?? data.args ?? data.toolArgs;
+  } else if (type === "session.error" || type === "error") {
+    error = str(data.message ?? data.error) ?? JSON.stringify(data);
+    status = "ERROR";
+  } else if (type === "session.usage_checkpoint") {
+    tokens = tokensFromUsage(data);
+    cumulativeUsage = true;
+    const snap = data.accountingSnapshot as RawRecord | undefined;
+    if (snap) {
+      const td = snap.tokenDetails as RawRecord | undefined;
+      if (td) {
+        tokens = {
+          input: num((td.input as RawRecord | undefined)?.tokenCount),
+          output: num((td.output as RawRecord | undefined)?.tokenCount),
+          cache_read: num((td.cache_read as RawRecord | undefined)?.tokenCount),
+          cache_creation: num((td.cache_write as RawRecord | undefined)?.tokenCount),
+          reasoning: null,
+        };
+      }
+      model = str(snap.currentModel) ?? model;
+    }
+  }
+
+  return {
+    type,
+    text,
+    thinking,
+    conversationId,
+    model,
+    tokens,
+    cumulativeUsage,
+    status,
+    turns,
+    tool,
+    toolArgs,
+    error,
+    raw: rawObj,
+  };
+}
+
+function parseModernResult(rawObj: RawRecord): CopilotEvent {
+  const usage = rawObj.usage as RawRecord | undefined;
+  return {
+    type: "result",
+    conversationId: str(rawObj.sessionId),
+    status: rawObj.exitCode === 0 ? "SUCCESS" : "ERROR",
+    turns: 1,
+    cumulativeUsage: true,
+    tokens: usage
+      ? {
+          input: null,
+          output: null,
+          reasoning: null,
+          cache_read: null,
+          cache_creation: null,
+        }
+      : undefined,
+    error: rawObj.exitCode === 0 ? undefined : `copilot exited with code ${rawObj.exitCode}`,
+    raw: rawObj,
+  };
+}
+
+function parseLegacyEvent(rawObj: RawRecord): CopilotEvent {
   const protocolEvent = typeof rawObj.event === "string" ? rawObj.event : "";
   const payload = (
     protocolEvent === "step_update"
@@ -151,8 +261,9 @@ function parseCopilotLine(
     protocolEvent === "step_update"
       ? `step_update.${String(payload.step_type ?? "unknown")}`
       : protocolEvent || String(rawObj.type ?? rawObj.event_type ?? rawObj.kind ?? "message");
-  let text: string | undefined = undefined;
-  let thinking: string | undefined = undefined;
+
+  let text: string | undefined;
+  let thinking: string | undefined;
 
   const rawDelta = rawObj.delta as RawRecord | undefined;
   const rawMsg = rawObj.message as RawRecord | undefined;
@@ -177,6 +288,8 @@ function parseCopilotLine(
   if (typeof payload.thinking === "string") thinking = payload.thinking;
   else if (typeof rawObj.thinking === "string") thinking = rawObj.thinking;
   else if (typeof rawDelta?.thinking === "string") thinking = rawDelta.thinking;
+  else if (typeof (rawObj as { thought?: unknown }).thought === "string")
+    thinking = String((rawObj as { thought: string }).thought);
 
   const conversationId =
     payload.conversationId ??
@@ -186,8 +299,7 @@ function parseCopilotLine(
     rawObj.sessionId ??
     rawObj.session_id;
 
-  // Extract usage / tokens
-  let tokens: CopilotTokens | undefined = undefined;
+  let tokens: CopilotTokens | undefined;
   const rawMetrics = rawObj.metrics as RawRecord | undefined;
   const usage = (
     payload.usage ??
@@ -212,7 +324,10 @@ function parseCopilotLine(
   }
 
   const rawError = (payload.error ?? rawObj.error) as RawRecord | string | undefined;
-  const rawErrorMsg = typeof rawError === "object" && rawError !== null && typeof rawError.message === "string" ? rawError.message : undefined;
+  const rawErrorMsg =
+    typeof rawError === "object" && rawError !== null && typeof rawError.message === "string"
+      ? rawError.message
+      : undefined;
   const error =
     protocolEvent === "result" && payload.status === "ERROR"
       ? typeof rawError === "string"
@@ -230,40 +345,61 @@ function parseCopilotLine(
   const rawToolCall = (rawObj.toolCall ?? rawObj.tool_call) as RawRecord | undefined;
 
   return {
-    event: {
-      type,
-      text,
-      thinking,
-      conversationId: typeof conversationId === "string" ? conversationId : undefined,
-      model:
-        typeof payload.model === "string" && payload.model.trim()
-          ? payload.model.trim()
+    type,
+    text,
+    thinking,
+    conversationId: typeof conversationId === "string" ? conversationId : undefined,
+    model:
+      typeof payload.model === "string" && payload.model.trim()
+        ? payload.model.trim()
+        : typeof rawObj.model === "string" && rawObj.model.trim()
+          ? rawObj.model.trim()
           : undefined,
-      tokens,
-      cumulativeUsage: protocolEvent === "result",
-      status: typeof payload.status === "string" ? payload.status : undefined,
-      turns: num(payload.num_turns) ?? undefined,
-      tool: (
-        payloadToolInfo?.name ??
-        payloadToolInfo?.tool_name ??
-        rawToolCall?.name ??
-        rawObj.tool ??
-        undefined
-      ) as string | undefined,
-      toolArgs: (
-        payloadToolInfo?.parameters ??
-        rawToolCall?.args ??
-        rawObj.args ??
-        undefined
-      ) as Record<string, unknown> | undefined,
-      toolResult: payload.tool_info ?? rawObj.result ?? rawObj.toolResult ?? undefined,
-      error,
-      raw: rawObj,
-    },
+    tokens,
+    cumulativeUsage: protocolEvent === "result",
+    status: typeof payload.status === "string" ? payload.status : undefined,
+    turns: num(payload.num_turns) ?? undefined,
+    tool: (
+      payloadToolInfo?.name ??
+      payloadToolInfo?.tool_name ??
+      rawToolCall?.name ??
+      rawObj.tool ??
+      rawObj.name ??
+      undefined
+    ) as string | undefined,
+    toolArgs: (
+      payloadToolInfo?.parameters ??
+      rawToolCall?.args ??
+      rawObj.args ??
+      rawObj.arguments ??
+      undefined
+    ) as Record<string, unknown> | undefined,
+    toolResult: payload.tool_info ?? rawObj.result ?? rawObj.toolResult ?? undefined,
+    error,
+    raw: rawObj,
+  };
+}
+
+function tokensFromUsage(data: RawRecord): CopilotTokens | undefined {
+  const usage = data.usage as RawRecord | undefined;
+  if (!usage) return undefined;
+  return {
+    input: num(usage.input_tokens ?? usage.input),
+    output: num(usage.output_tokens ?? usage.output),
+    reasoning: num(usage.reasoning_tokens ?? usage.reasoning),
+    cache_read: num(usage.cache_read_tokens ?? usage.cache_read),
+    cache_creation: num(usage.cache_write_tokens ?? usage.cache_creation),
   };
 }
 
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+
+const str = (v: unknown): string | undefined =>
+  typeof v === "string" && v.trim() ? v.trim() : undefined;
+
+/** Like str(), but keeps leading/trailing whitespace used by streaming deltas. */
+const textRaw = (v: unknown): string | undefined =>
+  typeof v === "string" && v.length > 0 ? v : undefined;
 
 export const classifyCopilotError = classifyCliError;

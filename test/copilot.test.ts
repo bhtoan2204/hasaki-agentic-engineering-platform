@@ -188,7 +188,7 @@ test("copilotCapabilities discovers version, auth status, and model catalog via 
 
   const cap = await copilotCapabilities(true);
   assert.equal(cap.ok, true);
-  assert.match(cap.version ?? "", /0\.1\.0-fake/);
+  assert.match(cap.version ?? "", /1\.0\.0-fake/);
   assert.ok(cap.models && cap.models.length > 0);
   assert.ok(cap.models.some((m) => m.slug === "gpt-4o"));
   assert.ok(cap.models.some((m) => m.slug === "claude-3.5-sonnet"));
@@ -330,38 +330,44 @@ test("copilotHookDecision enforces read-only in analysis and worktree sandbox in
 
 // ------------------------------------------------------------------ Workspace Config & Args
 
-test("buildCopilotArgs builds correct argument vector", () => {
+test("buildCopilotArgs builds correct argument vector for CLI ≥ 1.0", () => {
   const args = buildCopilotArgs({
+    prompt: "fix the bug",
     model: "gpt-4o",
     effort: "high",
-    timeoutSeconds: 300,
     conversationId: "sess-123",
     additionalDirs: ["/repo2"],
-    settingsPath: "/scratch/settings.json",
+    mcpConfigPath: "/ws/.agents/mcp_config.json",
+    allowTools: true,
   });
   assert.deepEqual(args, [
+    "--silent",
     "--output-format",
-    "stream-json",
-    "--input-format",
-    "stream-json",
+    "json",
+    "-p",
+    "fix the bug",
     "--model",
     "gpt-4o",
-    "--effort",
+    "--reasoning-effort",
     "high",
-    "--sandbox",
-    "--print-timeout",
-    "300s",
-    "--conversation",
+    "--resume",
     "sess-123",
     "--add-dir",
     "/repo2",
-    "--settings",
-    "/scratch/settings.json",
+    "--additional-mcp-config",
+    "@/ws/.agents/mcp_config.json",
+    "--allow-all-tools",
   ]);
+
+  const stdinArgs = buildCopilotArgs({
+    useStdinPrompt: true,
+    allowTools: false,
+  });
+  assert.deepEqual(stdinArgs, ["--silent", "--output-format", "json"]);
 });
 
-test("writeCopilotWorkspaceConfig generates valid .agents hooks and mcp config", () => {
-  const { hookConfigPath, mcpConfigPath } = writeCopilotWorkspaceConfig(tempDir, {
+test("writeCopilotWorkspaceConfig generates .agents mcp + .github hooks", () => {
+  const { hookConfigPath, mcpConfigPath, githubHookPath } = writeCopilotWorkspaceConfig(tempDir, {
     brokerSocket: "/tmp/mock.sock",
     brokerToken: "mock-token",
     mode: "coding",
@@ -369,9 +375,13 @@ test("writeCopilotWorkspaceConfig generates valid .agents hooks and mcp config",
 
   assert.ok(existsSync(hookConfigPath));
   assert.ok(existsSync(mcpConfigPath));
+  assert.ok(existsSync(githubHookPath));
 
   const hooks = JSON.parse(readFileSync(hookConfigPath, "utf8"));
   assert.ok(hooks["platform-security"]?.PreToolUse);
+
+  const github = JSON.parse(readFileSync(githubHookPath, "utf8"));
+  assert.ok(github.PreToolUse?.[0]?.hooks?.[0]?.command);
 
   const mcp = JSON.parse(readFileSync(mcpConfigPath, "utf8"));
   assert.ok(mcp.mcpServers?.platform);
@@ -390,9 +400,45 @@ test("copilotHeadlessSettings and excludeFromGit configure repository and tool p
   const excludeContent = readFileSync(join(gitDir, "info", "exclude"), "utf8");
   assert.ok(excludeContent.includes(".agents/hooks.json"));
   assert.ok(excludeContent.includes(".agents/mcp_config.json"));
+  assert.ok(excludeContent.includes(".github/hooks/ctp-platform.json"));
 
   const env = copilotEnv({ PATH: "/bin" });
   assert.equal(env.PATH, "/bin");
+});
+
+test("CopilotStream parses CLI 1.0 modern JSONL events", () => {
+  const stream = new CopilotStream();
+  const raw =
+    [
+      JSON.stringify({
+        type: "session.start",
+        data: { sessionId: "modern-sess" },
+      }),
+      JSON.stringify({
+        type: "assistant.message_delta",
+        data: { deltaContent: "Hello " },
+      }),
+      JSON.stringify({
+        type: "assistant.message",
+        data: { content: "Hello world", model: "gpt-5.6-luna" },
+      }),
+      JSON.stringify({
+        type: "result",
+        sessionId: "modern-sess",
+        exitCode: 0,
+        usage: { premiumRequests: 1 },
+      }),
+    ].join("\n") + "\n";
+  const { events, errors } = stream.push(raw);
+  assert.equal(errors.length, 0);
+  assert.equal(events[0].conversationId, "modern-sess");
+  assert.equal(events[1].type, "assistant.message_delta");
+  assert.equal(events[1].text, "Hello ");
+  assert.equal(events[2].type, "assistant.message");
+  assert.equal(events[2].text, "Hello world");
+  assert.equal(events[2].model, "gpt-5.6-luna");
+  assert.equal(events[3].type, "result");
+  assert.equal(events[3].status, "SUCCESS");
 });
 
 // ------------------------------------------------------------------ Database Migration 058

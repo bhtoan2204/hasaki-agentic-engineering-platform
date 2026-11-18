@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// Fake `agy` CLI for deterministic unit and integration tests.
-// Behaves like GitHub Copilot CLI for capabilities discovery (--version, --help, models)
-// and headless execution through the documented stream-json stdin protocol.
+// Fake GitHub Copilot CLI ≥ 1.0 for deterministic unit and integration tests.
+// Mirrors headless `-p` / stdin + `--output-format json` (JSONL) used by the platform adapter.
 import { implementTransportFixture } from "./transport-implementation.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,25 +13,30 @@ const log = (o) =>
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-if (argv.includes("--version")) {
-  console.log("GitHub Copilot CLI 0.1.0-fake");
+function flagValue(name) {
+  const i = argv.indexOf(name);
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
+}
+
+if (argv.includes("--version") || argv[0] === "version") {
+  console.log("GitHub Copilot CLI 1.0.0-fake");
   process.exit(0);
 }
 
-if (argv.includes("--help") && !argv.includes("-p") && !argv.includes("--print")) {
+if (argv.includes("--help") && !argv.includes("-p") && !argv.includes("--prompt")) {
   if (mode === "old-cli") {
     console.log("Usage: copilot [options]\nOptions:\n  --version\n  --help");
   } else {
-    console.log(`GitHub Copilot CLI 0.1.0-fake
+    console.log(`GitHub Copilot CLI 1.0.0-fake
 Options:
-  -p, --print                    Run in non-interactive print mode
-  --output-format <format>       Output format: text, json, stream-json
-  --input-format <format>        Input format: text, stream-json
+  -p, --prompt <text>            Execute a prompt in non-interactive mode
+  --output-format <format>       Output format: text, json
   --model <model>                Model identifier to use
-  --effort <effort>              Reasoning effort: low, medium, high, xhigh, max
-  --sandbox                      Run inside sandbox isolation
-  --conversation <id>            Resume existing conversation session
-  --print-timeout <duration>     Maximum print execution timeout, for example 2700s
+  --silent, -s                   Output only the agent response
+  --reasoning-effort <level>     Reasoning effort: none, minimal, low, medium, high, xhigh, max
+  --resume <id>                  Resume existing session
+  --additional-mcp-config <json> Extra MCP servers (@path or JSON)
+  --allow-all-tools              Allow tools without confirmation
   --add-dir <path>               Add workspace directory
 `);
   }
@@ -41,7 +45,7 @@ Options:
 
 if (argv[0] === "models") {
   if (mode === "logged-out") {
-    console.error("Please run copilot auth login to authenticate with your GitHub account.");
+    console.error("Please run copilot login to authenticate with your GitHub account.");
     process.exit(1);
   }
   console.log(`gpt-4o
@@ -53,38 +57,35 @@ gpt-4o-mini`);
   process.exit(0);
 }
 
-if (
-  !argv.includes("--input-format") ||
-  argv[argv.indexOf("--input-format") + 1] !== "stream-json" ||
-  !argv.includes("--output-format") ||
-  argv[argv.indexOf("--output-format") + 1] !== "stream-json"
-) {
-  console.error("Expected --input-format stream-json and --output-format stream-json");
-  process.exit(2);
-}
 if (mode === "epipe") process.exit(0);
-let stdinText = "";
-for await (const chunk of process.stdin) stdinText += chunk.toString("utf8");
-let prompt = "";
-try {
-  const rows = stdinText.trimEnd().split("\n");
-  if (rows.length !== 1) throw new Error("expected exactly one NDJSON input event");
-  const input = JSON.parse(rows[0]);
-  if (input.event !== "user" || typeof input.message?.content !== "string")
-    throw new Error("invalid user event");
-  prompt = input.message.content;
-} catch (e) {
-  console.error(`invalid stream-json stdin: ${e.message}`);
+
+const outFmt = flagValue("--output-format");
+if (outFmt !== "json") {
+  console.error("Expected --output-format json");
   process.exit(2);
 }
 
-let resumeId = null;
-const convIdx = argv.indexOf("--conversation");
-if (convIdx >= 0 && convIdx + 1 < argv.length) {
-  resumeId = argv[convIdx + 1];
+const promptIdx = argv.includes("-p") ? argv.indexOf("-p") : argv.indexOf("--prompt");
+let prompt = "";
+if (promptIdx >= 0) {
+  prompt = argv[promptIdx + 1] ?? "";
+} else {
+  for await (const chunk of process.stdin) prompt += chunk.toString("utf8");
+}
+if (!prompt.trim()) {
+  console.error("Expected -p/--prompt or a prompt on stdin");
+  process.exit(2);
 }
 
+const resumeId = flagValue("--resume");
 const sessionId = resumeId || process.env.FAKE_COPILOT_SESSION || "copilot-sess-1";
+
+function mcpConfigPathFromArgv() {
+  const raw = flagValue("--additional-mcp-config");
+  if (!raw) return join(process.cwd(), ".agents", "mcp_config.json");
+  if (raw.startsWith("@")) return raw.slice(1);
+  return join(process.cwd(), ".agents", "mcp_config.json");
+}
 
 log({
   argv,
@@ -112,32 +113,55 @@ if (mode === "hang") {
 }
 
 if (mode === "quota") {
-  out({ type: "init", session_id: sessionId, model: "gpt-4o" });
-  out({ type: "error", error: "Google Gemini quota exhausted: quota limit reached" });
+  out({
+    type: "session.start",
+    data: { sessionId },
+  });
+  out({
+    type: "session.error",
+    data: { message: "Google Gemini quota exhausted: quota limit reached" },
+  });
+  out({ type: "result", sessionId, exitCode: 1, usage: {} });
   process.exit(1);
 }
 
 if (mode === "aux_complete") {
-  out({ type: "init", session_id: sessionId, model: "gpt-4o" });
+  out({ type: "session.start", data: { sessionId } });
   out({
-    type: "message",
-    role: "assistant",
-    content: process.env.FAKE_COPILOT_TEXT || "Auxiliary response",
+    type: "assistant.message",
+    data: {
+      content: process.env.FAKE_COPILOT_TEXT || "Auxiliary response",
+      model: "gpt-4o",
+    },
   });
-  out({ type: "tokens", input: 25, output: 10, reasoning: 0, cache_read: 0 });
+  out({
+    type: "result",
+    sessionId,
+    exitCode: 0,
+    usage: { premiumRequests: 1 },
+  });
   process.exit(0);
 }
 
-// Read workspace .agents/hooks.json and .agents/mcp_config.json if present
-const hooksFile = join(process.cwd(), ".agents", "hooks.json");
-const mcpFile = join(process.cwd(), ".agents", "mcp_config.json");
+const hooksLegacy = join(process.cwd(), ".agents", "hooks.json");
+const hooksGithub = join(process.cwd(), ".github", "hooks", "ctp-platform.json");
+const mcpFile = mcpConfigPathFromArgv();
 
 let hookCommand = null;
 let telemetryCommand = null;
-if (existsSync(hooksFile)) {
+if (existsSync(hooksGithub)) {
   try {
-    const hooksCfg = JSON.parse(readFileSync(hooksFile, "utf8"));
-    telemetryCommand = hooksCfg["platform-model"]?.PreInvocation?.[0]?.command ?? null;
+    const hooksCfg = JSON.parse(readFileSync(hooksGithub, "utf8"));
+    telemetryCommand = hooksCfg.SessionStart?.[0]?.command ?? null;
+    hookCommand = hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ?? null;
+  } catch {
+    /* ignore */
+  }
+}
+if (!hookCommand && existsSync(hooksLegacy)) {
+  try {
+    const hooksCfg = JSON.parse(readFileSync(hooksLegacy, "utf8"));
+    telemetryCommand = telemetryCommand || hooksCfg["platform-model"]?.PreInvocation?.[0]?.command || null;
     hookCommand =
       hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ||
       hooksCfg["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command ||
@@ -213,17 +237,30 @@ async function tool(mcp, name, args) {
     tool_input: args,
   });
   if (pre.status === 2) {
-    out({ type: "tool_denied", name, reason: pre.stdout || "policy denial" });
+    out({
+      type: "tool.execution_start",
+      data: { toolName: `mcp__platform__${name}`, arguments: args },
+    });
+    out({
+      type: "session.error",
+      data: { message: pre.stdout || "policy denial" },
+    });
     return { denied: true };
   }
-  out({ type: "tool_call", name, arguments: args });
+  out({
+    type: "tool.execution_start",
+    data: { toolName: `mcp__platform__${name}`, arguments: args },
+  });
   const r = mcp ? await mcp.rpc("tools/call", { name, arguments: args }) : { result: {} };
-  out({ type: "tool_result", name, result: r.result });
+  out({
+    type: "tool.execution_end",
+    data: { toolName: `mcp__platform__${name}`, result: r.result },
+  });
   return r.result;
 }
 
 if (mode === "native-model") {
-  out({ event: "init", conversation_id: sessionId, init: { cwd: process.cwd() } });
+  out({ type: "session.start", data: { sessionId } });
   if (telemetryCommand) {
     const r = spawnSync("sh", ["-c", telemetryCommand], {
       input: JSON.stringify({
@@ -237,23 +274,32 @@ if (mode === "native-model") {
     log({ modelHook: r.status, response: r.stdout });
   }
   out({
-    event: "result",
-    result: { status: "SUCCESS", response: "no tools needed", num_turns: 1 },
+    type: "assistant.message",
+    data: { content: "no tools needed", model: "copilot-native-reported" },
   });
+  out({ type: "result", sessionId, exitCode: 0, usage: {} });
   process.exit(0);
 }
-out({ type: "init", session_id: sessionId, model: "gpt-4o" });
-out({ type: "thinking", thought: "Initializing Copilot session..." });
+
+out({ type: "session.start", data: { sessionId } });
+out({ type: "session.model_change", data: { newModel: "gpt-4o" } });
+out({
+  type: "assistant.reasoning_delta",
+  data: { deltaContent: "Initializing Copilot session..." },
+});
 
 if (mode === "nohook") {
-  // A telemetry hook runs, the native tool does not pass PreToolUse.
+  // Platform MCP tool without PreToolUse — adapter must stop the turn.
   if (telemetryCommand)
     spawnSync("sh", ["-c", telemetryCommand], {
       input: JSON.stringify({ conversationId: sessionId, modelName: "gpt-4o", invocationNum: 0 }),
       env: process.env,
       encoding: "utf8",
     });
-  out({ type: "tool_call", tool: "bash", args: { command: "touch escaped" } });
+  out({
+    type: "tool.execution_start",
+    data: { toolName: "mcp__platform__ask_user", arguments: { questions: [] } },
+  });
   await new Promise((r) => setTimeout(r, 30_000));
   process.exit(0);
 }
@@ -289,17 +335,10 @@ if (mode === "ask") {
     questions: [{ question: "Deploy to production?", options: ["No", "Yes"] }],
   });
   out({
-    type: "message",
-    role: "assistant",
-    content: "Waiting for user input before proceeding.",
+    type: "assistant.message",
+    data: { content: "Waiting for user input before proceeding.", model: "gpt-4o" },
   });
-  out({
-    type: "tokens",
-    input: 120,
-    output: 15,
-    reasoning: 5,
-    cache_read: 40,
-  });
+  out({ type: "result", sessionId, exitCode: 0, usage: {} });
   if (mcp) mcp.close();
   process.exit(0);
 }
@@ -319,8 +358,11 @@ if (mode === "commit") {
 }
 
 if (mode === "no-submit") {
-  out({ type: "message", role: "assistant", content: "Done without submitting result." });
-  out({ type: "tokens", input: 80, output: 10, reasoning: 0, cache_read: 0 });
+  out({
+    type: "assistant.message",
+    data: { content: "Done without submitting result.", model: "gpt-4o" },
+  });
+  out({ type: "result", sessionId, exitCode: 0, usage: {} });
   if (mcp) mcp.close();
   process.exit(0);
 }
@@ -338,19 +380,11 @@ const output =
 
 await tool(mcp, "submit_result", { output });
 
-// Emit final message and tokens
 out({
-  type: "message",
-  role: "assistant",
-  content: "Copilot task completed successfully ✓",
+  type: "assistant.message",
+  data: { content: "Copilot task completed successfully ✓", model: "gpt-4o" },
 });
-out({
-  type: "tokens",
-  input: 180,
-  output: 35,
-  reasoning: 12,
-  cache_read: 60,
-});
+out({ type: "result", sessionId, exitCode: mode === "fail-after-submit" ? 1 : 0, usage: {} });
 
 if (mcp) mcp.close();
 process.exit(mode === "fail-after-submit" ? 1 : 0);
