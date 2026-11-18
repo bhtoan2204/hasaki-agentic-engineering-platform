@@ -1,37 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   MessageSquarePlus,
   MessagesSquare,
+  PanelLeft,
   RefreshCw,
   Send,
+  Settings2,
   Square,
   Trash2,
   Workflow,
+  AlertTriangle,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { AGENT_PROVIDERS, agentKey, asProvider } from "../agentProvider.tsx";
-import {
-  EmptyState,
-  ErrorBox,
-  Loading,
-  Markdown,
-  SearchInput,
-  act,
-  ago,
-  toast,
-} from "../ui.tsx";
+import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Chat.css";
 
-type Mode = "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
+type Mode = "AUTO" | "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
 
 type Conversation = {
   id: number;
   title: string;
   mode: Mode;
   provider: string | null;
+  preferred_provider?: string | null;
+  provider_strategy?: "auto" | "manual";
+  fallback_enabled?: boolean;
   model: string | null;
   reasoning_effort: string | null;
   repositories: string[];
@@ -49,7 +48,6 @@ type Message = {
   turn_id: number | null;
   role: "user" | "assistant" | "system";
   content: string;
-  mentions?: unknown[];
   citations?: Array<{ label: string; tool?: string; ref: string; repository?: string }>;
   withheld?: boolean;
   created_at: string;
@@ -62,33 +60,49 @@ type ToolCall = {
   tool: string;
   status: string;
   duration_ms: number | null;
-  label?: string;
 };
 
-type ActiveTurn = {
+type Turn = {
   id: number;
   status: string;
+  mode?: string;
+  effective_mode?: string | null;
   route?: string | null;
   provider?: string | null;
   model?: string | null;
-  error?: string | null;
+  phase?: string | null;
+  failure?: {
+    code?: string;
+    message?: string;
+    provider?: string;
+    actions?: string[];
+    fallback_attempted?: boolean;
+  } | null;
   metrics?: Record<string, unknown>;
-} | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
+};
 
 type Detail = {
   conversation: Conversation;
   messages: Message[];
   tool_calls: ToolCall[];
-  active_turn: ActiveTurn;
-  delegations: Array<{
-    id: number;
-    work_item_id: number | null;
-    run_id: number | null;
-    work_item_code?: string;
-  }>;
+  turns: Turn[];
+  active_turn: Turn | null;
+  delegations: Array<{ id: number; work_item_id: number | null; run_id: number | null; work_item_code?: string }>;
 };
 
-const MODES: Mode[] = ["ASK", "INVESTIGATE", "PLAN", "DELEGATE"];
+type ProviderRow = {
+  id: string;
+  enabled?: boolean;
+  ok?: boolean;
+  error?: string;
+  quota?: string;
+  controls?: { models?: Array<{ slug: string; name?: string; efforts?: string[] }> };
+};
+
+const MODES: Mode[] = ["AUTO", "ASK", "INVESTIGATE", "PLAN", "DELEGATE"];
 
 function clientMessageId() {
   const b = new Uint8Array(16);
@@ -96,29 +110,22 @@ function clientMessageId() {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-function systemLabel(content: string, t: (k: string, p?: Record<string, string | number>) => string) {
-  try {
-    const j = JSON.parse(content);
-    if (j?.type === "delegation")
-      return t("chat.system.delegated", {
-        wi: j.work_item_id ?? "—",
-        run: j.run_id ?? "—",
-      });
-  } catch {
-    /* plain text */
-  }
-  return content;
+function phaseLabel(phase: string | null | undefined, t: (k: string, p?: Record<string, string | number>) => string) {
+  if (!phase) return t("chat.live.thinking");
+  const key = `chat.phase.${phase}`;
+  const label = t(key);
+  return label === key ? phase.replace(/_/g, " ") : label;
 }
 
 export function ChatPage({ conversationId }: { conversationId?: number }) {
   const { t } = useI18n();
   const [q, setQ] = useState("");
+  const [sideOpen, setSideOpen] = useState(true);
+  const [advanced, setAdvanced] = useState(false);
   const list = useApi<Conversation[]>(
     `/api/chat/conversations${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`,
   );
-  const providers = useApi<Array<{ id: string; enabled?: boolean; ok?: boolean }>>(
-    "/api/agent-providers",
-  );
+  const providers = useApi<ProviderRow[]>("/api/agent-providers");
   const repos = useApi<Array<{ name: string }>>("/api/repositories");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailErr, setDetailErr] = useState("");
@@ -130,35 +137,42 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     hash: string;
     title: string;
     source_message_id?: number;
-    kind?: string;
     workflow?: { key: string; name: string } | null;
     repositories?: string[];
     risk?: { level?: string; reasons?: string[] };
     acceptance_criteria?: string[];
     warnings?: string[];
   } | null>(null);
-  const [mode, setMode] = useState<Mode>("ASK");
-  const [provider, setProvider] = useState<string>("claude");
+  const [mode, setMode] = useState<Mode>("AUTO");
+  const [provider, setProvider] = useState<string>("auto");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [repoScope, setRepoScope] = useState<string[]>([]);
+  const [fallback, setFallback] = useState(true);
   const threadRef = useRef<HTMLDivElement>(null);
   const stickBottom = useRef(true);
-  const esRef = useRef<EventSource | null>(null);
+  const composing = useRef(false);
+  const detailIdRef = useRef<number | null>(null);
 
-  const activeId = conversationId ?? detail?.conversation.id;
+  const activeId = conversationId ?? detail?.conversation.id ?? null;
 
   const loadDetail = useCallback(async (id: number) => {
     setLoadingDetail(true);
     setDetailErr("");
     try {
       const d = await api<Detail>(`/api/chat/conversations/${id}`);
+      if (detailIdRef.current !== null && detailIdRef.current !== id) return null;
       setDetail(d);
       setMode(d.conversation.mode);
-      setProvider(asProvider(d.conversation.provider));
+      setProvider(
+        d.conversation.provider_strategy === "auto" || d.conversation.provider === "auto"
+          ? "auto"
+          : asProvider(d.conversation.preferred_provider ?? d.conversation.provider),
+      );
       setModel(d.conversation.model ?? "");
       setEffort(d.conversation.reasoning_effort ?? "");
       setRepoScope(d.conversation.repositories ?? []);
+      setFallback(d.conversation.fallback_enabled !== false);
       return d;
     } catch (e) {
       setDetail(null);
@@ -170,27 +184,28 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   }, []);
 
   useEffect(() => {
+    detailIdRef.current = conversationId ?? null;
     if (conversationId) void loadDetail(conversationId);
     else setDetail(null);
   }, [conversationId, loadDetail]);
 
-  // SSE for the open conversation: reconnect with Last-Event-ID via the browser; also poll as fallback.
+  // One stable EventSource per open conversation — do not recreate on detail object identity.
   useEffect(() => {
     if (!activeId) return;
-    esRef.current?.close();
-    const es = new EventSource(`/api/chat/conversations/${activeId}/stream`, {
-      withCredentials: true,
-    });
-    esRef.current = es;
+    const id = activeId;
+    const es = new EventSource(`/api/chat/conversations/${id}/stream`, { withCredentials: true });
     const onChat = (ev: MessageEvent) => {
       try {
         const p = JSON.parse(ev.data);
         const kind = String(p.kind ?? "");
-        if (kind === "tool.started") setLiveNote(t("chat.live.tool", { tool: p.data?.tool ?? "" }));
-        else if (kind === "tool.completed" || kind === "tool.failed")
-          setLiveNote(t("chat.live.toolDone", { tool: p.data?.tool ?? "", status: p.data?.status }));
-        else if (kind === "turn.started")
-          setLiveNote(t("chat.live.started", { route: p.data?.route ?? "" }));
+        if (kind === "phase.updated") setLiveNote(phaseLabel(p.data?.phase, t));
+        else if (kind === "provider.selected")
+          setLiveNote(t("chat.live.provider", { provider: p.data?.provider ?? "" }));
+        else if (kind === "provider.fallback")
+          setLiveNote(t("chat.live.fallback"));
+        else if (kind === "tool.started") setLiveNote(t("chat.live.tool", { tool: p.data?.tool ?? "" }));
+        else if (kind === "routing.completed")
+          setLiveNote(t("chat.live.route", { route: p.data?.route ?? "" }));
         else if (
           kind === "turn.completed" ||
           kind === "turn.failed" ||
@@ -198,7 +213,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
           kind === "conversation.updated"
         ) {
           setLiveNote("");
-          void loadDetail(activeId);
+          if (detailIdRef.current === id) void loadDetail(id);
           void list.reloadFresh();
         }
       } catch {
@@ -206,33 +221,27 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       }
     };
     es.addEventListener("chat", onChat as EventListener);
-    es.onerror = () => {
-      /* EventSource reconnects; polling below covers gaps */
-    };
     const poll = setInterval(() => {
-      if (detail?.active_turn) void loadDetail(activeId);
-    }, 4000);
+      if (detailIdRef.current === id) void loadDetail(id);
+    }, 8000);
     return () => {
       es.removeEventListener("chat", onChat as EventListener);
       es.close();
       clearInterval(poll);
     };
-  }, [activeId, detail?.active_turn, loadDetail, list, t]);
+  }, [activeId, loadDetail, list, t]);
 
   useEffect(() => {
     const el = threadRef.current;
     if (!el || !stickBottom.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [detail?.messages, liveNote, detail?.active_turn]);
+  }, [detail?.messages, liveNote, detail?.active_turn, detail?.turns]);
 
-  const enabledProviders = useMemo(
-    () =>
-      AGENT_PROVIDERS.filter((id) => {
-        const row = providers.data?.find((p) => p.id === id);
-        return row?.enabled !== false;
-      }),
-    [providers.data],
-  );
+  const turnsById = useMemo(() => {
+    const m = new Map<number, Turn>();
+    for (const turn of detail?.turns ?? []) m.set(turn.id, turn);
+    return m;
+  }, [detail?.turns]);
 
   const toolsByTurn = useMemo(() => {
     const m = new Map<number, ToolCall[]>();
@@ -244,11 +253,37 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     return m;
   }, [detail?.tool_calls]);
 
+  const providerOptions = useMemo(() => {
+    const rows = providers.data ?? [];
+    return [
+      { id: "auto", label: t("chat.provider.auto"), ok: true, enabled: true },
+      ...AGENT_PROVIDERS.map((id) => {
+        const row = rows.find((p) => p.id === id);
+        return {
+          id,
+          label: t(agentKey(id, true)),
+          ok: row?.ok === true,
+          enabled: row?.enabled !== false,
+          error: row?.error,
+          quota: row?.quota,
+        };
+      }),
+    ];
+  }, [providers.data, t]);
+
+  const modelOptions = useMemo(() => {
+    if (provider === "auto") return [] as Array<{ slug: string; name?: string }>;
+    const row = providers.data?.find((p) => p.id === provider);
+    return row?.controls?.models ?? [];
+  }, [provider, providers.data]);
+
   const createChat = async () => {
     const c = await act(() =>
       api<Conversation>("/api/chat/conversations", {
         mode,
-        provider,
+        provider: provider === "auto" ? "auto" : provider,
+        provider_strategy: provider === "auto" ? "auto" : "manual",
+        fallback_enabled: fallback,
         model: model || null,
         reasoning_effort: effort || null,
         repositories: repoScope,
@@ -259,28 +294,38 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     location.hash = `/chat/${c.id}`;
   };
 
+  const selectionBody = () => ({
+    mode,
+    provider: provider === "auto" ? "auto" : provider,
+    provider_strategy: provider === "auto" ? "auto" : "manual",
+    fallback_enabled: fallback,
+    model: model || null,
+    reasoning_effort: effort || null,
+    repositories: repoScope,
+  });
+
   const send = async () => {
-    if (!activeId || !draft.trim() || busy) return;
+    if (!activeId || !draft.trim() || busy || detail?.active_turn) return;
     setBusy(true);
     const content = draft.trim();
     setDraft("");
+    stickBottom.current = true;
+    setLiveNote(t("chat.live.thinking"));
     const r = await act(() =>
       api(`/api/chat/conversations/${activeId}/messages`, {
         content,
         client_message_id: clientMessageId(),
-        mode,
-        provider,
-        model: model || null,
-        reasoning_effort: effort || null,
-        repositories: repoScope,
+        ...selectionBody(),
       }),
     );
     setBusy(false);
     if (r) {
-      stickBottom.current = true;
       await loadDetail(activeId);
       void list.reloadFresh();
-    } else setDraft(content);
+    } else {
+      setDraft(content);
+      setLiveNote("");
+    }
   };
 
   const cancel = async () => {
@@ -298,6 +343,13 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     }
   };
 
+  const retryTurn = async (turn: Turn) => {
+    if (!activeId) return;
+    const user = detail?.messages.find((m) => m.turn_id === turn.id && m.role === "user");
+    if (!user) return;
+    setDraft(user.content);
+  };
+
   const copyText = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -309,9 +361,10 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
 
   const patchConversation = async (body: Record<string, unknown>) => {
     if (!activeId) return;
-    const r = await act(() => api(`/api/chat/conversations/${activeId}`, body));
-    if (r && activeId) await loadDetail(activeId);
-    void list.reloadFresh();
+    if (await act(() => api(`/api/chat/conversations/${activeId}`, body))) {
+      await loadDetail(activeId);
+      void list.reloadFresh();
+    }
   };
 
   const removeConversation = async (id: number) => {
@@ -335,9 +388,6 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     const r = await act(() =>
       api(`/api/chat/conversations/${activeId}/delegation/execute`, {
         request: {
-          kind: preview.workflow?.key?.includes("investig")
-            ? "investigation"
-            : preview.kind ?? "delegate",
           workflow: preview.workflow?.key,
           title: preview.title,
           repositories: preview.repositories,
@@ -350,14 +400,10 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     if (r) {
       setPreview(null);
       toast(
-        t("chat.delegated", {
-          code: r.work_item_code ?? r.work_item_id,
-          run: r.run_id ?? "—",
-        }),
+        t("chat.delegated", { code: r.work_item_code ?? r.work_item_id, run: r.run_id ?? "—" }),
         "ok",
       );
       await loadDetail(activeId);
-      void list.reloadFresh();
     }
   };
 
@@ -366,8 +412,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     | undefined;
 
   return (
-    <div className="chat-page">
-      <aside className="chat-side" aria-label={t("chat.list")}>
+    <div className={`chat-page${sideOpen ? "" : " is-side-collapsed"}`}>
+      <aside className="chat-side" aria-label={t("chat.list")} hidden={!sideOpen}>
         <div className="chat-side-head">
           <div className="row">
             <h2>{t("nav.chat")}</h2>
@@ -405,80 +451,17 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       </aside>
 
       <section className="chat-main" aria-label={t("chat.thread")}>
-        {!activeId && (
-          <div className="chat-empty">
-            <MessagesSquare size={36} strokeWidth={1.6} />
-            <h3>{t("chat.welcome")}</h3>
-            <p className="muted">{t("chat.welcomeHint")}</p>
-            <button onClick={() => void createChat()}>{t("chat.new")}</button>
-          </div>
-        )}
-        {activeId && loadingDetail && !detail && <Loading label={t("chat.loading")} />}
-        {detailErr && <ErrorBox error={detailErr} />}
-        {detail && (
-          <>
-            <div className="chat-toolbar">
-              <div className="chat-title">{detail.conversation.title || t("chat.untitled")}</div>
-              <select
-                aria-label={t("chat.mode")}
-                value={mode}
-                onChange={(e) => {
-                  const m = e.target.value as Mode;
-                  setMode(m);
-                  void patchConversation({ mode: m });
-                }}
-              >
-                {MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {t(`chat.mode.${m}`)}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label={t("chat.provider")}
-                value={provider}
-                onChange={(e) => {
-                  const p = e.target.value;
-                  setProvider(p);
-                  void patchConversation({ provider: p });
-                }}
-              >
-                {enabledProviders.map((id) => (
-                  <option key={id} value={id}>
-                    {t(agentKey(id, true))}
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label={t("chat.model")}
-                placeholder={t("chat.modelInherit")}
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                onBlur={() => void patchConversation({ model: model || null })}
-              />
-              <input
-                aria-label={t("chat.effort")}
-                placeholder={t("chat.effortInherit")}
-                value={effort}
-                onChange={(e) => setEffort(e.target.value)}
-                onBlur={() => void patchConversation({ reasoning_effort: effort || null })}
-              />
-              <select
-                aria-label={t("chat.repos")}
-                value={repoScope[0] ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value ? [e.target.value] : [];
-                  setRepoScope(v);
-                  void patchConversation({ repositories: v });
-                }}
-              >
-                <option value="">{t("chat.reposAll")}</option>
-                {(repos.data ?? []).map((r) => (
-                  <option key={r.name} value={r.name}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
+        <div className="chat-toolbar">
+          <button
+            className="ghost icon sm"
+            onClick={() => setSideOpen((v) => !v)}
+            aria-label={sideOpen ? t("chat.hideList") : t("chat.showList")}
+          >
+            {sideOpen ? <ChevronLeft size={16} /> : <PanelLeft size={16} />}
+          </button>
+          <div className="chat-title">{detail?.conversation.title || t("chat.untitled")}</div>
+          {detail && (
+            <>
               <button
                 className="ghost sm"
                 onClick={() => void patchConversation({ archived: true })}
@@ -493,8 +476,23 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
               >
                 <Trash2 size={15} />
               </button>
-            </div>
+            </>
+          )}
+        </div>
 
+        {!activeId && (
+          <div className="chat-empty">
+            <MessagesSquare size={36} strokeWidth={1.6} />
+            <h3>{t("chat.welcome")}</h3>
+            <p className="muted">{t("chat.welcomeHint")}</p>
+            <button onClick={() => void createChat()}>{t("chat.new")}</button>
+          </div>
+        )}
+        {activeId && loadingDetail && !detail && <Loading label={t("chat.loading")} />}
+        {detailErr && <ErrorBox error={detailErr} />}
+
+        {detail && (
+          <>
             <div
               className="chat-thread"
               ref={threadRef}
@@ -503,125 +501,253 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                 stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
               }}
             >
-              {detail.messages.length === 0 && (
-                <div className="chat-empty">
-                  <p className="muted">{t("chat.startHint")}</p>
-                </div>
-              )}
-              {detail.messages.map((m) => {
-                const tools = m.turn_id ? toolsByTurn.get(m.turn_id) : undefined;
-                return (
-                  <article
-                    key={m.id}
-                    className={`chat-bubble is-${m.role}${m.withheld ? " is-withheld" : ""}`}
-                  >
-                    <div className="chat-bubble-meta">
-                      <span>
-                        {m.role === "user"
-                          ? t("chat.role.user")
-                          : m.role === "assistant"
-                            ? t("chat.role.assistant")
-                            : t("chat.role.system")}
-                      </span>
-                      <span>{ago(m.created_at)}</span>
-                    </div>
-                    {m.role === "assistant" ? (
-                      <Markdown text={m.content} />
-                    ) : m.role === "system" ? (
-                      <div>{systemLabel(m.content, t)}</div>
-                    ) : (
-                      <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-                    )}
-                    {!!tools?.length && (
-                      <details className="chat-tools">
-                        <summary>
-                          {t("chat.tools", { n: tools.length })}
-                        </summary>
-                        {tools.map((tc) => (
-                          <div
-                            key={tc.id}
-                            className={`chat-tool${tc.status === "ok" ? "" : " is-err"}`}
-                          >
-                            #{tc.seq} {tc.tool} — {tc.status}
-                            {tc.duration_ms != null ? ` (${Math.round(tc.duration_ms)} ms)` : ""}
-                          </div>
-                        ))}
-                      </details>
-                    )}
-                    {!!m.citations?.length && (
-                      <div className="chat-citations">
-                        {m.citations.map((c, i) => (
-                          <span key={i} className="chat-cite" title={c.ref}>
-                            {c.label}
+              <div className="chat-thread-inner">
+                {detail.messages.length === 0 && (
+                  <div className="chat-empty">
+                    <p className="muted">{t("chat.startHint")}</p>
+                  </div>
+                )}
+                {detail.messages.map((m) => {
+                  const turn = m.turn_id ? turnsById.get(m.turn_id) : undefined;
+                  const tools = m.turn_id ? toolsByTurn.get(m.turn_id) : undefined;
+                  return (
+                    <div key={m.id} className="chat-block">
+                      <article className={`chat-bubble is-${m.role}`}>
+                        <div className="chat-bubble-meta">
+                          <span>
+                            {m.role === "user"
+                              ? t("chat.role.user")
+                              : m.role === "assistant"
+                                ? t("chat.role.assistant")
+                                : t("chat.role.system")}
                           </span>
-                        ))}
-                      </div>
-                    )}
-                    {m.role === "assistant" && (
-                      <div className="chat-bubble-actions">
-                        <button
-                          className="ghost xs"
-                          onClick={() => void copyText(m.content)}
-                          aria-label={t("chat.copy")}
-                        >
-                          <Copy size={14} />
-                        </button>
-                        {m.turn_id && !detail.active_turn && (
-                          <button
-                            className="ghost xs"
-                            onClick={() => void regenerate(m.turn_id!)}
-                            aria-label={t("chat.regenerate")}
-                          >
-                            <RefreshCw size={14} />
-                          </button>
+                          {m.role === "assistant" && turn?.provider && (
+                            <span className="chat-meta-pill">
+                              {turn.provider}
+                              {turn.model ? ` · ${turn.model}` : ""}
+                              {turn.route ? ` · ${turn.route}` : ""}
+                            </span>
+                          )}
+                          <span>{ago(m.created_at)}</span>
+                        </div>
+                        {m.role === "assistant" ? (
+                          <Markdown text={m.content} />
+                        ) : (
+                          <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
                         )}
-                        <button
-                          className="ghost xs"
-                          onClick={() => void openDelegation("task")}
-                          aria-label={t("chat.createTask")}
-                        >
-                          <Workflow size={14} /> {t("chat.createTask")}
-                        </button>
-                        <button
-                          className="ghost xs"
-                          onClick={() => void openDelegation("investigation")}
-                        >
-                          {t("chat.runInvestigation")}
-                        </button>
-                        <button className="ghost xs" onClick={() => void openDelegation("plan")}>
-                          {t("chat.generatePlan")}
-                        </button>
-                        <button
-                          className="ghost xs"
-                          onClick={() => void openDelegation("delegate")}
-                        >
-                          {t("chat.delegate")}
-                        </button>
+                        {!!tools?.length && (
+                          <details className="chat-tools">
+                            <summary>{t("chat.tools", { n: tools.length })}</summary>
+                            {tools.map((tc) => (
+                              <div
+                                key={tc.id}
+                                className={`chat-tool${tc.status === "ok" ? "" : " is-err"}`}
+                              >
+                                #{tc.seq} {tc.tool} — {tc.status}
+                                {tc.duration_ms != null ? ` (${Math.round(tc.duration_ms)} ms)` : ""}
+                              </div>
+                            ))}
+                          </details>
+                        )}
+                        {!!m.citations?.length && (
+                          <div className="chat-citations">
+                            {m.citations.map((c, i) => (
+                              <span key={i} className="chat-cite" title={c.ref}>
+                                {c.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {m.role === "assistant" && (
+                          <div className="chat-bubble-actions">
+                            <button className="ghost xs" onClick={() => void copyText(m.content)}>
+                              <Copy size={14} />
+                            </button>
+                            {m.turn_id && !detail.active_turn && (
+                              <button className="ghost xs" onClick={() => void regenerate(m.turn_id!)}>
+                                <RefreshCw size={14} />
+                              </button>
+                            )}
+                            <button className="ghost xs" onClick={() => void openDelegation("task")}>
+                              <Workflow size={14} /> {t("chat.createTask")}
+                            </button>
+                            <button className="ghost xs" onClick={() => void openDelegation("delegate")}>
+                              {t("chat.delegate")}
+                            </button>
+                          </div>
+                        )}
+                      </article>
+                      {m.role === "user" && turn?.status === "failed" && turn.failure && (
+                        <div className="chat-failure" role="alert">
+                          <AlertTriangle size={16} />
+                          <div>
+                            <div className="chat-failure-title">
+                              {turn.failure.code ?? "ERROR"}
+                              {turn.failure.provider ? ` · ${turn.failure.provider}` : ""}
+                            </div>
+                            <div>{turn.failure.message}</div>
+                            {turn.failure.fallback_attempted && (
+                              <div className="muted">{t("chat.failure.fallbackTried")}</div>
+                            )}
+                            <div className="chat-failure-actions">
+                              <button className="sm" onClick={() => void retryTurn(turn)}>
+                                {t("chat.retry")}
+                              </button>
+                              <button
+                                className="ghost sm"
+                                onClick={() => {
+                                  setProvider("auto");
+                                  void retryTurn(turn);
+                                }}
+                              >
+                                {t("chat.retryOther")}
+                              </button>
+                              <a className="btn ghost sm" href="#/settings">
+                                {t("chat.openSettings")}
+                              </a>
+                              <button
+                                className="ghost sm"
+                                onClick={() => void providers.reloadFresh()}
+                              >
+                                {t("chat.refreshHealth")}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {(detail.active_turn || liveNote) && (
+                  <div className="chat-status" role="status">
+                    <span className="dot" />
+                    <div>
+                      <div>{liveNote || phaseLabel(detail.active_turn?.phase, t)}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {[detail.active_turn?.provider, detail.active_turn?.model, detail.active_turn?.route]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </div>
-                    )}
-                  </article>
-                );
-              })}
-              {(detail.active_turn || liveNote) && (
-                <div className="chat-status" role="status">
-                  <span className="dot" />
-                  {liveNote || t("chat.live.thinking")}
-                  {detail.active_turn?.route ? ` · ${detail.active_turn.route}` : ""}
-                  {detail.active_turn?.model ? ` · ${detail.active_turn.model}` : ""}
-                </div>
-              )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="chat-composer">
+              <div className="chat-composer-controls">
+                <select
+                  aria-label={t("chat.mode")}
+                  value={mode}
+                  onChange={(e) => {
+                    const m = e.target.value as Mode;
+                    setMode(m);
+                    void patchConversation({ mode: m });
+                  }}
+                >
+                  {MODES.map((m) => (
+                    <option key={m} value={m}>
+                      {t(`chat.mode.${m}`)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label={t("chat.provider")}
+                  value={provider}
+                  onChange={(e) => {
+                    const p = e.target.value;
+                    setProvider(p);
+                    void patchConversation({
+                      provider: p,
+                      provider_strategy: p === "auto" ? "auto" : "manual",
+                      fallback_enabled: p === "auto" ? true : fallback,
+                    });
+                  }}
+                >
+                  {providerOptions.map((p) => (
+                    <option key={p.id} value={p.id} disabled={p.id !== "auto" && !p.enabled}>
+                      {p.label}
+                      {p.id !== "auto" && !p.ok ? ` — ${t("chat.provider.unhealthy")}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label={t("chat.repos")}
+                  value={repoScope[0] ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value ? [e.target.value] : [];
+                    setRepoScope(v);
+                    void patchConversation({ repositories: v });
+                  }}
+                >
+                  <option value="">{t("chat.reposAll")}</option>
+                  {(repos.data ?? []).map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className={`ghost sm${advanced ? " on" : ""}`}
+                  onClick={() => setAdvanced((v) => !v)}
+                  aria-expanded={advanced}
+                >
+                  <Settings2 size={15} />
+                  <ChevronRight size={14} style={{ transform: advanced ? "rotate(90deg)" : undefined }} />
+                </button>
+              </div>
+              {advanced && (
+                <div className="chat-advanced">
+                  {provider !== "auto" && (
+                    <>
+                      <select
+                        aria-label={t("chat.model")}
+                        value={model}
+                        onChange={(e) => {
+                          setModel(e.target.value);
+                          void patchConversation({ model: e.target.value || null });
+                        }}
+                      >
+                        <option value="">{t("chat.modelInherit")}</option>
+                        {modelOptions.map((m) => (
+                          <option key={m.slug} value={m.slug}>
+                            {m.name ?? m.slug}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        aria-label={t("chat.effort")}
+                        placeholder={t("chat.effortInherit")}
+                        value={effort}
+                        onChange={(e) => setEffort(e.target.value)}
+                        onBlur={() => void patchConversation({ reasoning_effort: effort || null })}
+                      />
+                      <label className="chat-check">
+                        <input
+                          type="checkbox"
+                          checked={fallback}
+                          onChange={(e) => {
+                            setFallback(e.target.checked);
+                            void patchConversation({ fallback_enabled: e.target.checked });
+                          }}
+                        />
+                        {t("chat.fallback")}
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder={t("chat.placeholder")}
+                onCompositionStart={() => (composing.current = true)}
+                onCompositionEnd={() => (composing.current = false)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    void send();
-                  }
+                  if (e.key !== "Enter" || e.shiftKey || composing.current) return;
+                  e.preventDefault();
+                  void send();
                 }}
                 disabled={!!detail.active_turn}
               />
@@ -632,8 +758,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     <>
                       {" · "}
                       {t("chat.usage", {
-                        cost:
-                          usage.cost_usd == null ? "—" : `$${Number(usage.cost_usd).toFixed(4)}`,
+                        cost: usage.cost_usd == null ? "—" : `$${Number(usage.cost_usd).toFixed(4)}`,
                         tokens:
                           usage.input_tokens == null && usage.output_tokens == null
                             ? "—"
@@ -641,37 +766,16 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                       })}
                     </>
                   )}
-                  {detail.conversation.work_item_id != null && (
-                    <>
-                      {" · "}
-                      <a href={`#/work-items/${detail.conversation.work_item_id}`}>
-                        WI #{detail.conversation.work_item_id}
-                      </a>
-                    </>
-                  )}
-                  {detail.conversation.run_id != null && (
-                    <>
-                      {" · "}
-                      <a href={`#/runs/${detail.conversation.run_id}`}>
-                        Run #{detail.conversation.run_id}
-                      </a>
-                    </>
-                  )}
                 </span>
-                <div className="row" style={{ gap: 8 }}>
-                  {detail.active_turn ? (
-                    <button className="warn" onClick={() => void cancel()}>
-                      <Square size={15} /> {t("chat.stop")}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => void send()}
-                      disabled={!draft.trim() || busy}
-                    >
-                      <Send size={15} /> {t("chat.send")}
-                    </button>
-                  )}
-                </div>
+                {detail.active_turn ? (
+                  <button className="warn" onClick={() => void cancel()}>
+                    <Square size={15} /> {t("chat.stop")}
+                  </button>
+                ) : (
+                  <button onClick={() => void send()} disabled={!draft.trim() || busy}>
+                    <Send size={15} /> {t("chat.send")}
+                  </button>
+                )}
               </div>
             </div>
           </>
@@ -679,7 +783,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       </section>
 
       {preview && (
-        <div className="chat-modal" role="dialog" aria-modal="true" aria-label={t("chat.preview")}>
+        <div className="chat-modal" role="dialog" aria-modal="true">
           <div className="chat-modal-card">
             <h3>{t("chat.preview")}</h3>
             <dl className="chat-preview-grid">
@@ -691,39 +795,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   ? `${preview.workflow.name} (${preview.workflow.key})`
                   : t("chat.preview.noWorkflow")}
               </dd>
-              <dt>{t("chat.preview.repos")}</dt>
-              <dd>{(preview.repositories ?? []).join(", ") || "—"}</dd>
               <dt>{t("chat.preview.risk")}</dt>
-              <dd>
-                {preview.risk?.level}
-                {preview.risk?.reasons?.length
-                  ? ` — ${preview.risk.reasons.join("; ")}`
-                  : ""}
-              </dd>
-              <dt>{t("chat.preview.criteria")}</dt>
-              <dd>
-                {(preview.acceptance_criteria ?? []).length ? (
-                  <ul>
-                    {(preview.acceptance_criteria as string[]).map((c, i) => (
-                      <li key={i}>{c}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  "—"
-                )}
-              </dd>
-              <dt>{t("chat.preview.warnings")}</dt>
-              <dd>
-                {(preview.warnings ?? []).length ? (
-                  <ul>
-                    {(preview.warnings as string[]).map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  t("chat.preview.noWarnings")
-                )}
-              </dd>
+              <dd>{preview.risk?.level ?? "—"}</dd>
             </dl>
             <div className="chat-modal-actions">
               <button className="ghost" onClick={() => setPreview(null)}>

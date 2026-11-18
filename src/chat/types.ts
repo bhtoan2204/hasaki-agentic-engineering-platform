@@ -1,16 +1,31 @@
-export const CHAT_MODES = ["ASK", "INVESTIGATE", "PLAN", "DELEGATE"] as const;
+export const CHAT_MODES = ["AUTO", "ASK", "INVESTIGATE", "PLAN", "DELEGATE"] as const;
 export type ChatMode = (typeof CHAT_MODES)[number];
+export type ManualChatMode = Exclude<ChatMode, "AUTO">;
+
+export type ProviderStrategy = "auto" | "manual";
+export type ModelStrategy = "auto" | "provider_default" | "manual";
+export type EffortStrategy = "auto" | "provider_default" | "manual";
 
 export type TurnStatus = "queued" | "running" | "completed" | "failed" | "canceled";
 export const ACTIVE_TURN: TurnStatus[] = ["queued", "running"];
 
 export type ChatEventKind =
   | "turn.started"
+  | "routing.started"
+  | "routing.completed"
+  | "provider.health"
+  | "provider.selected"
+  | "provider.skipped"
+  | "provider.attempt_started"
+  | "provider.attempt_failed"
+  | "provider.fallback"
+  | "phase.updated"
   | "context.updated"
   | "tool.started"
   | "tool.completed"
   | "tool.failed"
   | "evidence.added"
+  | "response.delta"
   | "usage.updated"
   | "turn.completed"
   | "turn.failed"
@@ -26,6 +41,10 @@ export interface ConversationRow {
   provider: string | null;
   model: string | null;
   reasoning_effort: string | null;
+  provider_strategy: ProviderStrategy;
+  fallback_enabled: boolean;
+  model_strategy: ModelStrategy;
+  effort_strategy: EffortStrategy;
   repositories: string[];
   work_item_id: number | null;
   run_id: number | null;
@@ -45,10 +64,24 @@ export interface TurnRow {
   client_message_id: string;
   status: TurnStatus;
   mode: ChatMode;
+  requested_mode: ChatMode | null;
+  effective_mode: string | null;
   route: string | null;
   provider: string | null;
   model: string | null;
   reasoning_effort: string | null;
+  provider_strategy: string | null;
+  requested_provider: string | null;
+  effective_provider: string | null;
+  requested_model: string | null;
+  effective_model: string | null;
+  requested_effort: string | null;
+  effective_effort: string | null;
+  routing: Record<string, unknown>;
+  phase: string | null;
+  failure: Record<string, unknown> | null;
+  attempts: unknown[];
+  progress: Record<string, unknown>;
   worker_instance: string | null;
   regenerates: number | null;
   error: string | null;
@@ -105,7 +138,6 @@ export interface Mention {
   reason?: string;
 }
 
-/** Where a statement in an answer came from: a tool call of this conversation, or a resolved mention. */
 export interface Citation {
   tool_call_id?: number;
   tool?: string;
@@ -118,7 +150,6 @@ export interface ChatUsage {
   completions: number;
   tool_calls: number;
   provider_ms: number;
-  /** null = at least one provider did not report it: unknown, never zero. */
   input_tokens: number | null;
   output_tokens: number | null;
   cost_usd: number | null;

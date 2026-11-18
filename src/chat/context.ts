@@ -4,7 +4,7 @@ import { redactContextText } from "../context/redact.ts";
 import { chatRepository } from "./repository.ts";
 import { LIMITS, systemPolicy, untrusted } from "./policy.ts";
 import { readRepositoryFile, readableRepositories } from "./tools.ts";
-import type { ChatMode, ConversationRow, Mention, MentionKind, MessageRow } from "./types.ts";
+import type { ManualChatMode, ConversationRow, Mention, MentionKind, MessageRow } from "./types.ts";
 
 const MENTION = /@(repo|file|task|run|knowledge):([^\s,;()]+)/g;
 
@@ -166,7 +166,7 @@ export async function compactIfNeeded(conversation: ConversationRow, history: Me
 
 export interface PromptSections {
   conversation: ConversationRow;
-  mode: ChatMode;
+  mode: ManualChatMode;
   locale: "vi" | "en";
   user: { id: number; name: string };
   summary: string;

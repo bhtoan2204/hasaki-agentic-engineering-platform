@@ -20,6 +20,10 @@ export const chatRepository = {
       provider: string | null;
       model: string | null;
       reasoningEffort: string | null;
+      providerStrategy: "auto" | "manual";
+      fallbackEnabled: boolean;
+      modelStrategy: "auto" | "provider_default" | "manual";
+      effortStrategy: "auto" | "provider_default" | "manual";
       repositories: string[];
       workItemId: number | null;
       runId: number | null;
@@ -28,8 +32,11 @@ export const chatRepository = {
   ) {
     return one<ConversationRow>(
       db,
-      `INSERT INTO chat_conversations (owner_id, title, description, mode, provider, model, reasoning_effort, repositories, work_item_id, run_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      `INSERT INTO chat_conversations (
+         owner_id, title, description, mode, provider, model, reasoning_effort,
+         provider_strategy, fallback_enabled, model_strategy, effort_strategy,
+         repositories, work_item_id, run_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
       [
         input.ownerId,
         input.title,
@@ -38,6 +45,10 @@ export const chatRepository = {
         input.provider,
         input.model,
         input.reasoningEffort,
+        input.providerStrategy,
+        input.fallbackEnabled,
+        input.modelStrategy,
+        input.effortStrategy,
         input.repositories,
         input.workItemId,
         input.runId,
@@ -98,6 +109,10 @@ export const chatRepository = {
         | "provider"
         | "model"
         | "reasoning_effort"
+        | "provider_strategy"
+        | "fallback_enabled"
+        | "model_strategy"
+        | "effort_strategy"
         | "repositories"
         | "archived"
         | "work_item_id"
@@ -172,14 +187,17 @@ export const chatRepository = {
       provider: string | null;
       model: string | null;
       reasoningEffort: string | null;
+      providerStrategy: string | null;
       regenerates: number | null;
     },
     db: Db,
   ) {
     return one<TurnRow>(
       db,
-      `INSERT INTO chat_turns (conversation_id, owner_id, client_message_id, mode, provider, model, reasoning_effort, regenerates)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO chat_turns (
+         conversation_id, owner_id, client_message_id, mode, requested_mode, provider, model, reasoning_effort,
+         provider_strategy, requested_provider, requested_model, requested_effort, regenerates, phase
+       ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $5, $6, $7, $9, 'queued') RETURNING *`,
       [
         input.conversationId,
         input.ownerId,
@@ -188,9 +206,22 @@ export const chatRepository = {
         input.provider,
         input.model,
         input.reasoningEffort,
+        input.providerStrategy,
         input.regenerates,
       ],
     ) as Promise<TurnRow>;
+  },
+
+  listTurns(conversationId: number, limit = 50, db: Db = pool) {
+    return q<TurnRow>(
+      db,
+      `SELECT id, conversation_id, owner_id, client_message_id, status, mode, requested_mode, effective_mode, route,
+              provider, model, reasoning_effort, provider_strategy, requested_provider, effective_provider,
+              requested_model, effective_model, requested_effort, effective_effort, routing, phase, failure,
+              attempts, progress, worker_instance, regenerates, error, metrics, started_at, finished_at, created_at
+         FROM chat_turns WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2`,
+      [conversationId, Math.min(Math.max(limit, 1), 100)],
+    );
   },
 
   getTurn(id: number, db: Db = pool) {
@@ -224,23 +255,86 @@ export const chatRepository = {
   ) {
     return q(
       db,
-      "UPDATE chat_turns SET route = $2, provider = $3, model = $4, reasoning_effort = $5 WHERE id = $1",
+      `UPDATE chat_turns SET route = $2, provider = $3, model = $4, reasoning_effort = $5,
+        effective_provider = $3, effective_model = $4, effective_effort = $5 WHERE id = $1`,
       [id, route, provider, model, effort],
     );
+  },
+
+  setTurnPlan(
+    id: number,
+    fields: {
+      effectiveMode: string;
+      route: string;
+      routing: Record<string, unknown>;
+      provider: string;
+      model: string | null;
+      effort: string | null;
+      providerStrategy: string;
+      phase: string;
+    },
+    db: Db = pool,
+  ) {
+    return q(
+      db,
+      `UPDATE chat_turns SET
+         effective_mode = $2, route = $3, routing = $4, provider = $5, model = $6, reasoning_effort = $7,
+         effective_provider = $5, effective_model = $6, effective_effort = $7, provider_strategy = $8, phase = $9
+       WHERE id = $1`,
+      [
+        id,
+        fields.effectiveMode,
+        fields.route,
+        json(fields.routing),
+        fields.provider,
+        fields.model,
+        fields.effort,
+        fields.providerStrategy,
+        fields.phase,
+      ],
+    );
+  },
+
+  setPhase(id: number, phase: string, progress: Record<string, unknown> = {}, db: Db = pool) {
+    return q(db, "UPDATE chat_turns SET phase = $2, progress = $3 WHERE id = $1", [
+      id,
+      phase,
+      json(progress),
+    ]);
+  },
+
+  setAttempts(id: number, attempts: unknown[], db: Db = pool) {
+    return q(db, "UPDATE chat_turns SET attempts = $2 WHERE id = $1", [id, json(attempts)]);
   },
 
   /** Terminal transition only from an active state: a canceled turn never becomes completed afterwards. */
   finishTurn(
     id: number,
     status: "completed" | "failed" | "canceled",
-    fields: { error?: string | null; metrics?: Record<string, unknown> },
+    fields: {
+      error?: string | null;
+      metrics?: Record<string, unknown>;
+      failure?: Record<string, unknown> | null;
+      phase?: string;
+      attempts?: unknown[];
+    },
     db: Db = pool,
   ) {
     return one<TurnRow>(
       db,
-      `UPDATE chat_turns SET status = $2, error = $3, metrics = COALESCE($4::jsonb, metrics), finished_at = now()
+      `UPDATE chat_turns SET status = $2, error = $3, metrics = COALESCE($4::jsonb, metrics),
+        failure = COALESCE($5::jsonb, failure), phase = COALESCE($6, phase),
+        attempts = COALESCE($7::jsonb, attempts), finished_at = now()
         WHERE id = $1 AND status IN ('queued', 'running') RETURNING *`,
-      [id, status, fields.error ?? null, json(fields.metrics)],
+      [
+        id,
+        status,
+        fields.error ?? null,
+        json(fields.metrics),
+        json(fields.failure ?? null),
+        fields.phase ?? (status === "completed" ? "completed" : status === "canceled" ? "canceled" : "failed"),
+        fields.attempts != null ? json(fields.attempts) : null,
+      ],
     );
   },
 

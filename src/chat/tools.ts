@@ -15,8 +15,9 @@ import { investigationSearch } from "../integrations/splunk.ts";
 import { searchLogs } from "../integrations/signoz.ts";
 import { databaseForRun, databasesForRun, runQuery } from "../integrations/database.ts";
 import { chatRepository } from "./repository.ts";
-import { LIMITS, MODE_GROUPS, type ToolGroup } from "./policy.ts";
-import type { ChatMode } from "./types.ts";
+import { LIMITS } from "./policy.ts";
+import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
+import type { ManualChatMode } from "./types.ts";
 
 /**
  * Chat tool binding. Unlike workflow tools (bound to an attempt lease and fencing token), a chat tool call is bound
@@ -28,7 +29,8 @@ export interface ChatBinding {
   userId: number;
   conversationId: number;
   turnId: number;
-  mode: ChatMode;
+  /** Effective manual mode (AUTO is resolved before tools run). */
+  mode: ManualChatMode;
   /** Repositories the conversation is scoped to (plus repositories explicitly mentioned in this turn). */
   repositories: string[];
 }
@@ -328,13 +330,13 @@ const TOOLS: ToolDef[] = [
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
-export function toolsForMode(mode: ChatMode) {
+export function toolsForMode(mode: ManualChatMode) {
   const groups = MODE_GROUPS[mode];
   return TOOLS.filter((t) => groups.includes(t.group));
 }
 
 /** The catalog text placed in the prompt (no schema internals, just names, purpose and argument examples). */
-export function toolCatalog(mode: ChatMode) {
+export function toolCatalog(mode: ManualChatMode) {
   return toolsForMode(mode)
     .map((t) => `- ${t.name}: ${t.description} Arguments: ${t.usage}`)
     .join("\n");
@@ -389,7 +391,12 @@ export async function assertBinding(b: ChatBinding) {
   if (!turn || turn.conversation_id !== b.conversationId || turn.owner_id !== b.userId)
     throw new ChatToolDenied("turn does not belong to this conversation");
   if (turn.status !== "running") throw new ChatToolDenied(`turn is ${turn.status}`);
-  if (conversation.mode !== b.mode) throw new ChatToolDenied("conversation mode changed during the turn");
+  // Effective mode is frozen on the turn (AUTO resolves once); conversation.mode may stay AUTO.
+  const effective = (turn.effective_mode || turn.mode) as ManualChatMode;
+  if (effective !== b.mode && conversation.mode !== "AUTO")
+    throw new ChatToolDenied("conversation mode changed during the turn");
+  if (effective !== b.mode && conversation.mode === "AUTO" && turn.effective_mode && turn.effective_mode !== b.mode)
+    throw new ChatToolDenied("effective mode changed during the turn");
 }
 
 export interface ToolOutcome {

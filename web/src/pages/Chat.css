@@ -2,10 +2,9 @@
 
 .chat-page {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
   gap: 0;
-  /* Fill the shell's .page.full (already beside the app sidebar + under the topbar).
-     Do not use 100dvh / negative margin — that bleeds under the nav sidebar. */
+  /* Fill the shell's .page.full (already beside the app sidebar + under the topbar). */
   flex: 1;
   width: 100%;
   min-width: 0;
@@ -15,6 +14,10 @@
   box-sizing: border-box;
   border-left: 1px solid var(--line);
   background: var(--bg);
+}
+
+.chat-page.is-side-collapsed {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .chat-side {
@@ -138,16 +141,27 @@
 .chat-thread {
   flex: 1;
   overflow: auto;
-  padding: var(--sp-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-3);
   scroll-behavior: smooth;
 }
 
+.chat-thread-inner {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.chat-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
 .chat-bubble {
-  max-width: min(760px, 100%);
-  align-self: flex-start;
+  max-width: 100%;
+  align-self: stretch;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
@@ -157,8 +171,70 @@
 
 .chat-bubble.is-user {
   align-self: flex-end;
+  max-width: min(640px, 92%);
   background: linear-gradient(135deg, var(--brand-50), var(--blush));
   border-color: color-mix(in srgb, var(--brand) 25%, var(--line));
+}
+
+.chat-bubble.is-assistant {
+  max-width: 100%;
+}
+
+.chat-meta-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.chat-failure {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--st-err) 35%, var(--line));
+  background: var(--st-err-bg, color-mix(in srgb, var(--st-err) 10%, var(--surface)));
+  color: var(--ink);
+  font-size: var(--fs-sm);
+}
+
+.chat-failure-title {
+  font-weight: 650;
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.chat-failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--sp-2);
+}
+
+.chat-composer-controls,
+.chat-advanced {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.chat-composer-controls select,
+.chat-advanced select,
+.chat-advanced input {
+  max-width: 180px;
+}
+
+.chat-check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--muted);
 }
 
 .chat-bubble.is-system {
@@ -266,6 +342,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  width: min(820px, 100%);
+  margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .chat-composer textarea {

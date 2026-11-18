@@ -4,6 +4,7 @@ import { pool, q } from "../src/db/pool.ts";
 import { createUser } from "../src/auth/users.ts";
 import { chat } from "../src/chat/service.ts";
 import { setChatProviders, runTurn, activeTurnCount } from "../src/chat/runtime.ts";
+import { setChatHealthProbe } from "../src/chat/admission.ts";
 import type { Actor } from "../src/authz/access.ts";
 import type { AgentProvider } from "../src/agent/provider.ts";
 import type { CompletionRunner } from "../src/agent/complete.ts";
@@ -11,6 +12,7 @@ import { settleBackground } from "../src/workflow/background.ts";
 
 after(async () => {
   setChatProviders(undefined);
+  setChatHealthProbe(undefined);
   await settleBackground();
   await pool.end();
 });
@@ -188,6 +190,97 @@ test("chat: unknown usage stays unknown across turns", async () => {
   const detail = await waitForTurn(c.id, owner.id);
   assert.equal(detail.conversation.usage.cost_usd, null);
   assert.equal(detail.conversation.usage.input_tokens, null);
+});
+
+test("chat: AUTO skips unhealthy Claude and uses Codex; failed turns stay visible", async () => {
+  setChatHealthProbe(async () => [
+    { provider: "claude", connected: false, quota: "unknown", reason: "not connected" },
+    { provider: "codex", connected: true, quota: "unknown" },
+    { provider: "cursor", connected: false, quota: "unknown" },
+    { provider: "antigravity", connected: false, quota: "unknown" },
+    { provider: "copilot", connected: false, quota: "unknown" },
+  ]);
+  const runner: CompletionRunner = async () => ({
+    text: "ok từ codex",
+    model: "codex-test",
+    tokens: { input: 1, output: 1 },
+    cost_usd: 0.0001,
+  });
+  setChatProviders({
+    claude: async () => {
+      throw new Error("claude should not be called");
+    },
+    codex: runner,
+    cursor: runner,
+    antigravity: runner,
+    copilot: runner,
+  });
+  const owner = await createUser({
+    username: `chat-auto-${Date.now()}`,
+    password: "local-test-password",
+    role: "member",
+  });
+  const a = actorOf(owner);
+  const c = await chat.create(a, { mode: "AUTO", provider: "auto" });
+  assert.equal(c.provider_strategy, "auto");
+  const m = await chat.postMessage(a, c.id, {
+    content: "What is a fencing token?",
+    client_message_id: "auto-health-1",
+  });
+  await runTurn(m.turn.id);
+  const detail = await waitForTurn(c.id, owner.id);
+  const assistant = detail.messages.find((x) => x.role === "assistant");
+  assert.match(assistant?.content ?? "", /ok từ codex/);
+  const turn = detail.turns.find((t) => t.id === m.turn.id);
+  assert.equal(turn?.provider, "codex");
+  assert.equal(turn?.status, "completed");
+  setChatHealthProbe(undefined);
+});
+
+test("chat: manual unhealthy provider fails visibly without inference wait", async () => {
+  setChatHealthProbe(async () => [
+    { provider: "claude", connected: false, quota: "unknown", reason: "auth required" },
+    { provider: "codex", connected: true, quota: "ok" },
+    { provider: "cursor", connected: true, quota: "ok" },
+    { provider: "antigravity", connected: true, quota: "ok" },
+    { provider: "copilot", connected: true, quota: "ok" },
+  ]);
+  setChatProviders({
+    claude: async () => ({ text: "should not run", tokens: null }),
+    codex: async () => ({ text: "x", tokens: null }),
+    cursor: async () => ({ text: "x", tokens: null }),
+    antigravity: async () => ({ text: "x", tokens: null }),
+    copilot: async () => ({ text: "x", tokens: null }),
+  });
+  const owner = await createUser({
+    username: `chat-pin-${Date.now()}`,
+    password: "local-test-password",
+    role: "member",
+  });
+  const a = actorOf(owner);
+  const c = await chat.create(a, {
+    mode: "ASK",
+    provider: "claude",
+    provider_strategy: "manual",
+    fallback_enabled: false,
+  });
+  const m = await chat.postMessage(a, c.id, {
+    content: "hello",
+    client_message_id: "pin-fail-1",
+  });
+  await runTurn(m.turn.id);
+  const detail = await waitForTurn(c.id, owner.id);
+  const turn = detail.turns.find((t) => t.id === m.turn.id);
+  assert.equal(turn?.status, "failed");
+  assert.ok(turn?.failure);
+  assert.ok(
+    ["PROVIDER_UNAVAILABLE", "AUTHENTICATION_REQUIRED"].includes(
+      String((turn?.failure as { code?: string })?.code),
+    ),
+  );
+  // No assistant hallucination for platform failures.
+  assert.equal(detail.messages.filter((x) => x.role === "assistant" && x.turn_id === m.turn.id).length, 0);
+  setChatHealthProbe(undefined);
 });
 
 test("chat: cleanup leaves no orphan active turns", async () => {

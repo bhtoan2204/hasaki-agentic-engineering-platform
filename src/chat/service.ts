@@ -1,6 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { HttpError } from "../http/error.ts";
+import { withTx } from "../db/pool.ts";
+import { audit, type Actor } from "../authz/access.ts";
+import { loadAgentConfiguration } from "../agent/configurationStore.ts";
+import { parseAgentProvider, AGENT_PROVIDERS } from "../agent/provider.ts";
+import { chatRepository } from "./repository.ts";
+import {
+  CHAT_MODES,
+  type ChatMode,
+  type ConversationRow,
+  type ProviderStrategy,
+} from "./types.ts";
+import { LIMITS } from "./policy.ts";
+import { emitChatEvent } from "./events.ts";
+import { abortLocal, recoverStaleTurns, scheduleTurn, withholdRevoked } from "./runtime.ts";
+import { readableRepositories } from "./tools.ts";
+import { buildDelegationPreview, DelegationRequest, executeDelegation } from "./delegation.ts";
+import { chatFailure } from "./failures.ts";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body ?? {});
@@ -11,35 +28,20 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
     );
   return r.data;
 }
-import { withTx } from "../db/pool.ts";
-import { audit, type Actor } from "../authz/access.ts";
-import { loadAgentConfiguration } from "../agent/configurationStore.ts";
-import { parseAgentProvider, AGENT_PROVIDERS } from "../agent/provider.ts";
-import { chatRepository } from "./repository.ts";
-import { CHAT_MODES, type ChatMode, type ConversationRow } from "./types.ts";
-import { LIMITS } from "./policy.ts";
-import { emitChatEvent } from "./events.ts";
-import {
-  abortLocal,
-  recoverStaleTurns,
-  scheduleTurn,
-  withholdRevoked,
-} from "./runtime.ts";
-import { readableRepositories } from "./tools.ts";
-import {
-  buildDelegationPreview,
-  DelegationRequest,
-  executeDelegation,
-} from "./delegation.ts";
 
 const ConversationCreate = z
   .object({
     title: z.string().max(200).optional(),
     description: z.string().max(2000).optional(),
     mode: z.enum(CHAT_MODES).optional(),
+    /** `"auto"` or a real provider id. Independent from conversation mode. */
     provider: z.string().max(40).nullable().optional(),
+    provider_strategy: z.enum(["auto", "manual"]).optional(),
+    fallback_enabled: z.boolean().optional(),
     model: z.string().max(120).nullable().optional(),
+    model_strategy: z.enum(["auto", "provider_default", "manual"]).optional(),
     reasoning_effort: z.string().max(40).nullable().optional(),
+    effort_strategy: z.enum(["auto", "provider_default", "manual"]).optional(),
     repositories: z.array(z.string().min(1).max(200)).max(20).optional(),
   })
   .strict();
@@ -51,9 +53,16 @@ const ConversationPatch = ConversationCreate.extend({
 const MessagePost = z
   .object({
     content: z.string().min(1).max(LIMITS.messageChars),
-    client_message_id: z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+    client_message_id: z
+      .string()
+      .min(8)
+      .max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/)
+      .optional(),
     mode: z.enum(CHAT_MODES).optional(),
     provider: z.string().max(40).nullable().optional(),
+    provider_strategy: z.enum(["auto", "manual"]).optional(),
+    fallback_enabled: z.boolean().optional(),
     model: z.string().max(120).nullable().optional(),
     reasoning_effort: z.string().max(40).nullable().optional(),
     repositories: z.array(z.string().min(1).max(200)).max(20).optional(),
@@ -69,19 +78,60 @@ async function assertRepos(userId: number, names: string[] | undefined) {
   return names;
 }
 
-async function assertProvider(provider: string | null | undefined) {
-  if (provider == null || provider === "") return null;
+/** Resolve provider field: "auto" → strategy auto + null preferred; else validate enabled provider. */
+async function resolveProviderSelection(
+  provider: string | null | undefined,
+  strategyHint?: ProviderStrategy,
+): Promise<{ provider: string | null; strategy: ProviderStrategy }> {
+  if (provider === "auto" || strategyHint === "auto" || (provider == null && strategyHint !== "manual")) {
+    if (provider && provider !== "auto") {
+      const p = parseAgentProvider(provider);
+      if (!p) throw new HttpError(400, `provider must be one of ${AGENT_PROVIDERS.join(", ")} or auto`);
+      const cfg = await loadAgentConfiguration();
+      if (!cfg.providers[p]?.enabled)
+        throw new HttpError(400, `provider ${p} is disabled in Settings`);
+      return { provider: p, strategy: "auto" };
+    }
+    return { provider: null, strategy: "auto" };
+  }
+  if (provider == null || provider === "") return { provider: null, strategy: strategyHint ?? "manual" };
   const p = parseAgentProvider(provider);
-  if (!p) throw new HttpError(400, `provider must be one of ${AGENT_PROVIDERS.join(", ")}`);
+  if (!p) throw new HttpError(400, `provider must be one of ${AGENT_PROVIDERS.join(", ")} or auto`);
   const cfg = await loadAgentConfiguration();
   if (!cfg.providers[p]?.enabled) throw new HttpError(400, `provider ${p} is disabled in Settings`);
-  return p;
+  return { provider: p, strategy: "manual" };
 }
 
 async function requireConversation(id: number, actor: Actor): Promise<ConversationRow> {
   const row = await chatRepository.getConversation(id, actor.id);
   if (!row) throw new HttpError(404, "not found");
   return row;
+}
+
+function publicTurn(t: Awaited<ReturnType<typeof chatRepository.listTurns>>[number]) {
+  return {
+    id: t.id,
+    status: t.status,
+    mode: t.mode,
+    requested_mode: t.requested_mode,
+    effective_mode: t.effective_mode,
+    route: t.route,
+    provider: t.effective_provider ?? t.provider,
+    model: t.effective_model ?? t.model,
+    reasoning_effort: t.effective_effort ?? t.reasoning_effort,
+    provider_strategy: t.provider_strategy,
+    routing: t.routing,
+    phase: t.phase,
+    failure: t.failure,
+    attempts: t.attempts,
+    progress: t.progress,
+    error: t.error,
+    metrics: t.metrics,
+    started_at: t.started_at,
+    finished_at: t.finished_at,
+    created_at: t.created_at,
+    regenerates: t.regenerates,
+  };
 }
 
 function publicConversation(
@@ -92,9 +142,14 @@ function publicConversation(
     title: c.title,
     description: c.description,
     mode: c.mode,
-    provider: c.provider,
+    provider: c.provider_strategy === "auto" ? "auto" : c.provider,
+    preferred_provider: c.provider,
+    provider_strategy: c.provider_strategy ?? "manual",
+    fallback_enabled: c.fallback_enabled === true,
     model: c.model,
+    model_strategy: c.model_strategy ?? "manual",
     reasoning_effort: c.reasoning_effort,
+    effort_strategy: c.effort_strategy ?? "manual",
     repositories: c.repositories,
     work_item_id: c.work_item_id,
     run_id: c.run_id,
@@ -115,24 +170,30 @@ export const chat = {
 
   async create(actor: Actor, body: unknown) {
     const input = parse(ConversationCreate, body);
-    const provider = await assertProvider(input.provider);
+    const sel = await resolveProviderSelection(
+      input.provider,
+      input.provider_strategy ?? (input.provider == null || input.provider === "auto" ? "auto" : "manual"),
+    );
     const repositories = await assertRepos(actor.id, input.repositories);
-    const cfg = await loadAgentConfiguration();
     const row = await chatRepository.createConversation({
       ownerId: actor.id,
       title: (input.title ?? "").trim(),
       description: (input.description ?? "").trim(),
-      mode: input.mode ?? "ASK",
-      provider: provider ?? cfg.default_provider,
+      mode: input.mode ?? "AUTO",
+      provider: sel.provider,
       model: input.model ?? null,
       reasoningEffort: input.reasoning_effort ?? null,
+      providerStrategy: sel.strategy,
+      fallbackEnabled: input.fallback_enabled ?? sel.strategy === "auto",
+      modelStrategy: input.model_strategy ?? (input.model ? "manual" : "auto"),
+      effortStrategy: input.effort_strategy ?? (input.reasoning_effort ? "manual" : "auto"),
       repositories,
       workItemId: null,
       runId: null,
     });
     await audit(actor.id, "chat.create", "chat_conversation", String(row.id), {
       mode: row.mode,
-      provider: row.provider,
+      provider_strategy: row.provider_strategy,
     });
     return publicConversation(row);
   },
@@ -141,7 +202,10 @@ export const chat = {
     await recoverStaleTurns(id);
     const c = await requireConversation(id, actor);
     const readable = await readableRepositories(actor.id);
-    const messages = withholdRevoked(await chatRepository.listMessages(id, { limit: 200 }), readable);
+    const messages = withholdRevoked(
+      await chatRepository.listMessages(id, { limit: 200 }),
+      readable,
+    );
     const tools = (await chatRepository.toolCallsOf(id)).map((t) => ({
       id: t.id,
       turn_id: t.turn_id,
@@ -149,37 +213,23 @@ export const chat = {
       tool: t.tool,
       arguments: t.arguments,
       status: t.status,
-      // Revoked repositories: do not re-distribute the tool result content.
-      result:
-        t.repositories.some((r) => !readable.includes(r))
-          ? { withheld: true, error: "repository access was revoked" }
-          : t.result,
+      result: t.repositories.some((r) => !readable.includes(r))
+        ? { withheld: true, error: "repository access was revoked" }
+        : t.result,
       repositories: t.repositories,
       evidence_ref: t.evidence_ref,
       duration_ms: t.duration_ms,
       created_at: t.created_at,
     }));
+    const turns = (await chatRepository.listTurns(id, 50)).map(publicTurn);
     const active = await chatRepository.activeTurn(id);
     const delegations = await chatRepository.delegationsOf(id);
     return {
       conversation: publicConversation(c),
       messages,
       tool_calls: tools,
-      active_turn: active
-        ? {
-            id: active.id,
-            status: active.status,
-            mode: active.mode,
-            route: active.route,
-            provider: active.provider,
-            model: active.model,
-            reasoning_effort: active.reasoning_effort,
-            error: active.error,
-            metrics: active.metrics,
-            started_at: active.started_at,
-            created_at: active.created_at,
-          }
-        : null,
+      turns,
+      active_turn: active ? publicTurn(active) : null,
       delegations,
     };
   },
@@ -187,18 +237,28 @@ export const chat = {
   async update(actor: Actor, id: number, body: unknown) {
     await requireConversation(id, actor);
     const input = parse(ConversationPatch, body);
-    if (input.provider !== undefined) await assertProvider(input.provider);
-    if (input.repositories) await assertRepos(actor.id, input.repositories);
-    const row = await chatRepository.updateConversation(id, actor.id, {
+    const patch: Parameters<typeof chatRepository.updateConversation>[2] = {
       title: input.title?.trim(),
       description: input.description?.trim(),
       mode: input.mode,
-      provider: input.provider === undefined ? undefined : await assertProvider(input.provider),
       model: input.model,
       reasoning_effort: input.reasoning_effort,
-      repositories: input.repositories,
+      repositories: input.repositories
+        ? await assertRepos(actor.id, input.repositories)
+        : undefined,
       archived: input.archived,
-    });
+      fallback_enabled: input.fallback_enabled,
+      model_strategy: input.model_strategy,
+      effort_strategy: input.effort_strategy,
+    };
+    if (input.provider !== undefined || input.provider_strategy !== undefined) {
+      const sel = await resolveProviderSelection(input.provider, input.provider_strategy);
+      patch.provider = sel.provider;
+      patch.provider_strategy = sel.strategy;
+      if (input.fallback_enabled === undefined && sel.strategy === "auto")
+        patch.fallback_enabled = true;
+    }
+    const row = await chatRepository.updateConversation(id, actor.id, patch);
     if (!row) throw new HttpError(404, "not found");
     await emitChatEvent({
       conversationId: id,
@@ -222,17 +282,12 @@ export const chat = {
     await recoverStaleTurns(conversationId);
     const clientMessageId = input.client_message_id ?? randomUUID();
 
-    // Idempotent replay: the same client_message_id returns the existing turn without starting another.
     const prior = await chatRepository.turnByClientId(conversationId, clientMessageId);
     if (prior) {
       if (prior.owner_id !== actor.id) throw new HttpError(404, "not found");
       const message = await chatRepository.messageOfTurn(prior.id, "user");
       return {
-        turn: {
-          id: prior.id,
-          status: prior.status,
-          client_message_id: prior.client_message_id,
-        },
+        turn: { id: prior.id, status: prior.status, client_message_id: prior.client_message_id },
         message,
         replayed: true,
       };
@@ -245,10 +300,13 @@ export const chat = {
       if (active) throw new HttpError(409, "a turn is already in progress");
 
       const mode = (input.mode ?? conversation.mode) as ChatMode;
-      const provider =
-        input.provider !== undefined
-          ? await assertProvider(input.provider)
-          : conversation.provider;
+      let provider = conversation.provider;
+      let providerStrategy = (conversation.provider_strategy ?? "manual") as ProviderStrategy;
+      if (input.provider !== undefined || input.provider_strategy !== undefined) {
+        const sel = await resolveProviderSelection(input.provider, input.provider_strategy);
+        provider = sel.provider;
+        providerStrategy = sel.strategy;
+      }
       const model = input.model !== undefined ? input.model : conversation.model;
       const effort =
         input.reasoning_effort !== undefined
@@ -258,14 +316,19 @@ export const chat = {
         input.repositories !== undefined
           ? await assertRepos(actor.id, input.repositories)
           : conversation.repositories;
+      const fallback =
+        input.fallback_enabled !== undefined
+          ? input.fallback_enabled
+          : conversation.fallback_enabled;
 
-      // Persist any selector change with the message so the conversation continues with them.
       if (
         input.mode ||
         input.provider !== undefined ||
+        input.provider_strategy !== undefined ||
         input.model !== undefined ||
         input.reasoning_effort !== undefined ||
-        input.repositories
+        input.repositories ||
+        input.fallback_enabled !== undefined
       ) {
         await chatRepository.updateConversation(
           conversationId,
@@ -273,9 +336,11 @@ export const chat = {
           {
             mode,
             provider,
+            provider_strategy: providerStrategy,
             model,
             reasoning_effort: effort,
             repositories,
+            fallback_enabled: fallback,
           },
           c,
         );
@@ -290,6 +355,7 @@ export const chat = {
           provider,
           model,
           reasoningEffort: effort,
+          providerStrategy,
           regenerates: null,
         },
         c,
@@ -304,7 +370,6 @@ export const chat = {
         c,
       );
       await chatRepository.touch(conversationId, c);
-      // Auto-title from the first user message when the conversation still has the default empty title.
       if (!conversation.title.trim()) {
         await chatRepository.updateConversation(
           conversationId,
@@ -333,7 +398,12 @@ export const chat = {
     if (!turn) throw new HttpError(404, "not found");
     if (!["queued", "running"].includes(turn.status))
       return { ok: true, status: turn.status, already: true };
-    const done = await chatRepository.finishTurn(turnId, "canceled", { error: "canceled by user" });
+    const failure = chatFailure("CANCELED", "canceled by user");
+    const done = await chatRepository.finishTurn(turnId, "canceled", {
+      error: "canceled by user",
+      failure: { ...failure },
+      phase: "canceled",
+    });
     abortLocal(turnId);
     if (done)
       await emitChatEvent({
@@ -341,6 +411,7 @@ export const chat = {
         ownerId: actor.id,
         turnId,
         kind: "turn.canceled",
+        data: { failure: done.failure },
       });
     await audit(actor.id, "chat.cancel", "chat_turn", String(turnId));
     return { ok: true, status: "canceled", already: false };
@@ -368,6 +439,7 @@ export const chat = {
           provider: previous.provider,
           model: previous.model,
           reasoningEffort: previous.reasoning_effort,
+          providerStrategy: previous.provider_strategy,
           regenerates: turnId,
         },
         c,
