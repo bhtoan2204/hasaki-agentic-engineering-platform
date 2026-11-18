@@ -2,7 +2,7 @@
  * Platform MCP server spawned by Antigravity over stdio for one attempt.
  * Relays all tool calls to the worker's per-attempt broker.
  */
-import { brokerRequest } from "../codex/client.ts";
+import { brokerRequest } from "../broker/client.ts";
 import { bridgeToolsFor, serveStdio } from "../mcpBridge.ts";
 
 const socket = process.env.PLATFORM_BROKER_SOCKET;

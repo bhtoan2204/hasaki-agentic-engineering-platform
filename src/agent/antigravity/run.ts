@@ -11,7 +11,7 @@ import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { newMetrics, type AgentMetrics } from "../metrics.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
-import { startBroker, type Broker } from "../codex/broker.ts";
+import { startBroker, type Broker } from "../broker/server.ts";
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
 import { antigravityCapabilities, antigravityEnv } from "./capabilities.ts";
 import {

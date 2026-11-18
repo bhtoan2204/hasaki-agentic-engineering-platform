@@ -39,8 +39,9 @@ import {
 } from "../src/context/pack.ts";
 import { captureContextContinuity } from "../src/context/continuity.ts";
 import { buildUserPrompt, buildSystemAppend } from "../src/agent/stepPrompt.ts";
-import { startBroker } from "../src/agent/codex/broker.ts";
-import { brokerRequest } from "../src/agent/codex/client.ts";
+import { startBroker } from "../src/agent/broker/server.ts";
+import { codexHookDecision } from "../src/agent/codex/policy.ts";
+import { brokerRequest } from "../src/agent/broker/client.ts";
 import { handle } from "../src/http/app.ts";
 import { estimateTokens } from "../src/context/plan.ts";
 import { source } from "../src/agent/contextTools.ts";
@@ -459,6 +460,7 @@ async function stdioCall(bridge: "codex" | "cursor", env: ReturnType<typeof envF
     policy,
     cwd: process.cwd(),
     requireHooks: bridge === "codex",
+    decideHook: codexHookDecision,
     dispatch: (name, args) => dispatchPlatformTool(name, args, env),
   });
   if (bridge === "codex")

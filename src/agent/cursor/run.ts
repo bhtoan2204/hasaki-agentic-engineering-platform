@@ -1,6 +1,6 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
 import { cursorUsage } from "./stream.ts";
-import { startBroker } from "../codex/broker.ts";
+import { startBroker } from "../broker/server.ts";
 import { agentEnvironment } from "../environment.ts";
 import { normalizeProviderFailure } from "../telemetry.ts";
 import type { HarnessFailureCode } from "../harness/failure.ts";
@@ -160,6 +160,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     policy: input.policy,
     cwd: input.cwd,
     requireHooks: false,
+    decideHook: () => ({ allow: false, reason: "Cursor has no platform hook path" }),
     dispatch: (name, args) => dispatchPlatformTool(name, args, toolEnv),
   });
   try {

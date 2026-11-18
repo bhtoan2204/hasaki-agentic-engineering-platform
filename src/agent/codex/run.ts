@@ -13,7 +13,7 @@ import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
 import { CONTEXT_TOOLS } from "../contextToolSchemas.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
-import { startBroker, type Broker } from "./broker.ts";
+import { startBroker, type Broker } from "../broker/server.ts";
 import {
   classifyCodexError,
   failureMessage,
@@ -22,6 +22,7 @@ import {
   type CodexFailureKind,
   type CodexItem,
 } from "./stream.ts";
+import { codexHookDecision } from "./policy.ts";
 
 const exec = promisify(execFile);
 
@@ -469,6 +470,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     broker = await startBroker({
       policy: livePolicy,
       cwd: input.cwd,
+      decideHook: codexHookDecision,
       async dispatch(name, args) {
         const text = await dispatchPlatformTool(name, args, toolEnv);
         if (

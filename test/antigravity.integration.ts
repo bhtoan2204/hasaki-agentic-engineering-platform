@@ -34,7 +34,7 @@ import {
   antigravityComplete,
   buildAntigravityArgs,
 } from "../src/agent/antigravity/run.ts";
-import { startBroker } from "../src/agent/codex/broker.ts";
+import { startBroker } from "../src/agent/broker/server.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { antigravityModelFor } from "../src/agent/stepAgent.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";

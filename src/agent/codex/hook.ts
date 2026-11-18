@@ -6,7 +6,7 @@
  * Fail closed: if the broker is unreachable, the token is missing, or anything throws, a PreToolUse or PermissionRequest
  * is DENIED (stdout JSON + exit code 2 with the reason on stderr — both documented deny forms).
  */
-import { brokerRequest } from "./client.ts";
+import { brokerRequest } from "../broker/client.ts";
 
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {

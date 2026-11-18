@@ -1,5 +1,5 @@
 /** Cursor's stdio helper holds only an attempt-scoped broker capability, never database credentials. */
-import { brokerRequest } from "../codex/client.ts";
+import { brokerRequest } from "../broker/client.ts";
 import { bridgeToolsFor, serveStdio } from "../mcpBridge.ts";
 export function startBridge() {
   const socket = process.env.PLATFORM_BROKER_SOCKET,

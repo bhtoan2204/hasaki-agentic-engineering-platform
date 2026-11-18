@@ -3,7 +3,7 @@
  * Invoked before tools execute. Relays tool decision to the worker's per-attempt broker.
  * Fails closed (deny) if broker is unreachable or denies the call.
  */
-import { brokerRequest } from "../codex/client.ts";
+import { brokerRequest } from "../broker/client.ts";
 
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {

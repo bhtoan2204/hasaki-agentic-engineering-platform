@@ -3,8 +3,14 @@ import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Decision, PolicyContext } from "../toolPolicy.ts";
-import { codexHookDecision, type CodexHookPayload } from "./policy.ts";
+// Structural types keep the transport out of the tool-policy import cycle.
+interface Decision {
+  allow: boolean;
+  reason?: string;
+}
+interface BrokerPolicy {
+  mode: string;
+}
 
 /**
  * Per-attempt broker between the Codex process tree and the worker.
@@ -19,13 +25,13 @@ import { codexHookDecision, type CodexHookPayload } from "./policy.ts";
  *   → {token, kind: "tool", name, args}       ← {ok: true, text}
  */
 
-export interface BrokerDeps {
-  policy: PolicyContext;
+export interface BrokerDeps<P extends BrokerPolicy = BrokerPolicy> {
+  policy: P;
   cwd: string;
   /** Cursor shares the authenticated worker transport without Codex-specific hook requirements. */
   requireHooks?: boolean;
-  /** Custom hook decision logic (defaults to codexHookDecision). */
-  decideHook?: (payload: any, policy: PolicyContext, cwd: string) => Decision;
+  /** Maps the provider's hook payload onto the platform policy decision. */
+  decideHook: (payload: any, policy: P, cwd: string) => Decision;
   /** Platform tool dispatch, bound to the attempt (envFromExecution). */
   dispatch(name: string, args: unknown): Promise<string>;
   onDenied?(tool: string, reason: string): void | Promise<void>;
@@ -45,7 +51,7 @@ export interface Broker {
 
 const CODING_ONLY = new Set(["prepare_branch", "commit_changes"]);
 
-export async function startBroker(deps: BrokerDeps): Promise<Broker> {
+export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): Promise<Broker> {
   const dir = mkdtempSync(join(tmpdir(), "ctp-codex-"));
   chmodSync(dir, 0o700);
   const socketPath = join(dir, "b.sock");
@@ -65,13 +71,15 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
     if (!msg || !authorized(msg.token)) return { ok: false, error: "unauthorized" };
     if (msg.kind === "hook") {
       hookCalls++;
-      const payload = (msg.payload ?? {}) as CodexHookPayload;
+      const payload = (msg.payload ?? {}) as {
+        model?: unknown;
+        tool_name?: unknown;
+        hook_event_name?: unknown;
+      };
       if (typeof payload.model === "string" && payload.model) await deps.onModel?.(payload.model);
       let decision: Decision;
       try {
-        decision = deps.decideHook
-          ? deps.decideHook(payload, deps.policy, deps.cwd)
-          : codexHookDecision(payload, deps.policy, deps.cwd);
+        decision = deps.decideHook(payload, deps.policy, deps.cwd);
       } catch (e) {
         decision = {
           allow: false,
@@ -81,7 +89,7 @@ export async function startBroker(deps: BrokerDeps): Promise<Broker> {
       const tool = String(payload.tool_name ?? payload.hook_event_name ?? "");
       if (decision.allow) {
         if (payload.hook_event_name === "PreToolUse") allowedTools.push(tool);
-      } else await deps.onDenied?.(tool, decision.reason);
+      } else await deps.onDenied?.(tool, decision.reason ?? "");
       return { ok: true, decision };
     }
     if (msg.kind === "tool") {

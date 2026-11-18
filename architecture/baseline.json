@@ -1,20 +1,12 @@
 {
   "violations": [
-    "no-circular:src/agent/antigravity/policy.ts,src/agent/antigravity/run.ts,src/agent/claude.ts,src/agent/codex/broker.ts,src/agent/codex/policy.ts,src/agent/codex/run.ts,src/agent/complete.ts,src/agent/contextTools.ts,src/agent/contract.ts,src/agent/copilot/policy.ts,src/agent/copilot/run.ts,src/agent/cursor/policyWatch.ts,src/agent/cursor/run.ts,src/agent/executionContract.ts,src/agent/handoff.ts,src/agent/health.ts,src/agent/implementationEvidence.ts,src/agent/metrics.ts,src/agent/platformTools.ts,src/agent/providerStatus.ts,src/agent/publicationVerification.ts,src/agent/skillTracing.ts,src/agent/stepPrompt.ts,src/agent/toolPolicy.ts,src/agent/toolRegistry.ts,src/agent/toolRuntime.ts,src/context/continuity.ts,src/context/pack.ts,src/eval/liveCase.ts,src/eval/liveProvider.ts,src/eval/optimization.ts,src/eval/providerPhase.ts,src/eval/recommendations.ts,src/eval/runner.ts,src/git/changes.ts,src/integrations/jira.ts,src/investigation/steps.ts,src/workflow/context.ts,src/workflow/engine.ts,src/workflow/executors/builtin.ts,src/workflow/executors/registry.ts,src/workflow/executors/testFailure.ts,src/workflow/microEvidence.ts,src/workitems/service.ts",
+    "no-circular:src/agent/antigravity/policy.ts,src/agent/antigravity/run.ts,src/agent/claude.ts,src/agent/codex/policy.ts,src/agent/codex/run.ts,src/agent/complete.ts,src/agent/contextTools.ts,src/agent/contract.ts,src/agent/copilot/policy.ts,src/agent/copilot/run.ts,src/agent/cursor/policyWatch.ts,src/agent/cursor/run.ts,src/agent/executionContract.ts,src/agent/handoff.ts,src/agent/health.ts,src/agent/implementationEvidence.ts,src/agent/metrics.ts,src/agent/platformTools.ts,src/agent/providerStatus.ts,src/agent/publicationVerification.ts,src/agent/skillTracing.ts,src/agent/stepPrompt.ts,src/agent/toolPolicy.ts,src/agent/toolRegistry.ts,src/agent/toolRuntime.ts,src/context/continuity.ts,src/context/pack.ts,src/eval/liveCase.ts,src/eval/liveProvider.ts,src/eval/optimization.ts,src/eval/providerPhase.ts,src/eval/recommendations.ts,src/eval/runner.ts,src/git/changes.ts,src/integrations/jira.ts,src/investigation/steps.ts,src/workflow/context.ts,src/workflow/engine.ts,src/workflow/executors/builtin.ts,src/workflow/executors/registry.ts,src/workflow/executors/testFailure.ts,src/workflow/microEvidence.ts,src/workitems/service.ts",
     "no-circular:src/agent/evidence.ts,src/agent/scopeGuard.ts",
     "no-circular:src/agent/verify.ts,src/agent/verifyEvidence.ts",
     "no-circular:src/codeIntelligence/indexer.ts,src/git/provider.ts",
     "no-circular:src/telegram.ts,src/telegram/workflow.ts",
     "no-provider-from-core:src/eval/liveProvider.ts->src/agent/claude.ts",
     "no-provider-from-core:src/eval/runner.ts->src/agent/claude.ts",
-    "no-provider-from-core:src/workflow/executors/index.ts->src/agent/claude.ts",
-    "no-provider-internals:src/agent/antigravity/bridge.ts->src/agent/codex/client.ts",
-    "no-provider-internals:src/agent/antigravity/hook.ts->src/agent/codex/client.ts",
-    "no-provider-internals:src/agent/antigravity/run.ts->src/agent/codex/broker.ts",
-    "no-provider-internals:src/agent/copilot/bridge.ts->src/agent/codex/client.ts",
-    "no-provider-internals:src/agent/copilot/hook.ts->src/agent/codex/client.ts",
-    "no-provider-internals:src/agent/copilot/run.ts->src/agent/codex/broker.ts",
-    "no-provider-internals:src/agent/cursor/bridge.ts->src/agent/codex/client.ts",
-    "no-provider-internals:src/agent/cursor/run.ts->src/agent/codex/broker.ts"
+    "no-provider-from-core:src/workflow/executors/index.ts->src/agent/claude.ts"
   ]
 }

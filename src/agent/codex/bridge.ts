@@ -5,7 +5,7 @@
  * The broker socket and token are forwarded by Codex from its own environment (mcp_servers.platform.env_vars) and are
  * excluded from the agent's shell environment.
  */
-import { brokerRequest } from "./client.ts";
+import { brokerRequest } from "../broker/client.ts";
 import { bridgeToolsFor, serveStdio } from "../mcpBridge.ts";
 
 const socket = process.env.PLATFORM_BROKER_SOCKET;

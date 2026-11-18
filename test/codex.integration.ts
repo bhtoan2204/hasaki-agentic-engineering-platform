@@ -29,7 +29,7 @@ import {
 import { resolveAgentProvider } from "../src/agent/provider.ts";
 import { classifyCodexError, JsonlStream } from "../src/agent/codex/stream.ts";
 import { codexHookDecision, patchPaths, shellCommandText } from "../src/agent/codex/policy.ts";
-import { startBroker } from "../src/agent/codex/broker.ts";
+import { startBroker } from "../src/agent/broker/server.ts";
 import {
   codexAgentTurn,
   codexArgs,
@@ -250,6 +250,7 @@ test("hook process denies before execution, and fails closed when the broker is 
   const broker = await startBroker({
     policy: coding,
     cwd: "/data/worktrees/u1-REQ-1",
+    decideHook: codexHookDecision,
     dispatch: async () => "ok",
   });
   try {
@@ -310,13 +311,14 @@ test("broker: tools are refused until hooks ran; after ask_user, edits and mutat
   const broker = await startBroker({
     policy,
     cwd: "/data/worktrees/u1-REQ-1",
+    decideHook: codexHookDecision,
     async dispatch(name) {
       calls.push(name);
       if (name === "ask_user") paused = true;
       return "ok";
     },
   });
-  const { brokerRequest } = await import("../src/agent/codex/client.ts");
+  const { brokerRequest } = await import("../src/agent/broker/client.ts");
   try {
     const early = await brokerRequest(broker.socketPath, {
       token: broker.token,
@@ -376,10 +378,11 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
   const broker = await startBroker({
     policy: analysis,
     cwd: "/tmp",
+    decideHook: codexHookDecision,
     dispatch: async (n) => (seen.push(n), `did ${n}`),
   });
   await (
-    await import("../src/agent/codex/client.ts")
+    await import("../src/agent/broker/client.ts")
   ).brokerRequest(broker.socketPath, {
     token: broker.token,
     kind: "hook",
