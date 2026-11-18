@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import {
   act,
   Badge,
@@ -91,7 +92,15 @@ export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () =
   const allSelected = pendingIds.length > 0 && pendingIds.every((pid) => selected.has(pid));
   const bulk = async (what: "approve" | "reject") => {
     const ids = pendingIds.filter((pid) => selected.has(pid));
-    if (!ids.length || !confirm(t(`kp.bulk.confirm.${what}`, { n: ids.length }))) return;
+    if (!ids.length) return;
+    const ok = await dialog.confirm({
+      title: t(`kp.bulk.${what}.title`),
+      description: t(`kp.bulk.confirm.${what}`, { n: ids.length }),
+      confirmLabel: t(`kp.bulk.${what}.action`),
+      cancelLabel: t("common.cancel"),
+      variant: what === "reject" ? "destructive" : "warning",
+    });
+    if (!ok) return;
     setBulkBusy(true);
     // One request per proposal, sequentially: each keeps its own reviewer check, validation and audit trail, and one
     // failure (e.g. validation) does not block the others.
@@ -746,7 +755,16 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             />
             <button
               className="ghost"
-              onClick={() => confirm(t("kp.rollbackConfirm")) && decide("rollback")}
+              onClick={async () => {
+                const ok = await dialog.confirm({
+                  title: t("kp.rollback.title"),
+                  description: t("kp.rollbackConfirm"),
+                  confirmLabel: t("kp.rollback.action"),
+                  cancelLabel: t("common.cancel"),
+                  variant: "warning",
+                });
+                if (ok) void decide("rollback");
+              }}
             >
               <RotateCcw size={15} />
               {t("kp.rollback")}

@@ -1149,6 +1149,24 @@ tr.click:hover td {
   background: var(--st-ok);
 }
 
+.toast.warn {
+  background: var(--st-warn, #d97706);
+}
+
+.toast.info {
+  background: var(--brand, #16a34a);
+}
+
+.toast.loading {
+  background: color-mix(in srgb, var(--ink) 78%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 @keyframes toastin {
   from {
     transform: translateY(8px);

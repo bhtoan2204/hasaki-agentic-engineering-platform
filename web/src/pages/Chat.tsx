@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { AGENT_PROVIDERS, agentKey, asProvider } from "../agentProvider.tsx";
+import { dialog } from "../dialog/index.ts";
 import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Chat.css";
@@ -368,7 +369,14 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   };
 
   const removeConversation = async (id: number) => {
-    if (!confirm(t("chat.deleteConfirm"))) return;
+    const confirmed = await dialog.confirm({
+      title: t("chat.delete.title"),
+      description: t("chat.deleteConfirm"),
+      confirmLabel: t("chat.delete.confirm"),
+      cancelLabel: t("common.cancel"),
+      variant: "destructive",
+    });
+    if (!confirmed) return;
     if (await act(() => api(`/api/chat/conversations/${id}/delete`, {}))) {
       await list.reloadFresh();
       if (activeId === id) location.hash = "/chat";

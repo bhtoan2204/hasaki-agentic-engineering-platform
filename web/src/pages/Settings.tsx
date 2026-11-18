@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import { AgentSettings } from "./AgentSettings.tsx";
 import { ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
@@ -185,7 +186,15 @@ export function SettingsPage() {
   }, [form, busy, dirty, setData, t]);
 
   async function restore() {
-    if (busy || !window.confirm(t("set.confirmRestore"))) return;
+    if (busy) return;
+    const ok = await dialog.confirm({
+      title: t("set.restore.title"),
+      description: t("set.confirmRestore"),
+      confirmLabel: t("set.restore.action"),
+      cancelLabel: t("common.cancel"),
+      variant: "destructive",
+    });
+    if (!ok) return;
     setBusy(true);
     setNote(null);
     try {

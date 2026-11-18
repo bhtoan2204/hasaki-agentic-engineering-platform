@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import { act, ago, Field, PageHeader, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Integrations.css";
@@ -941,7 +942,14 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
                 })
               }
               onDelete={async () => {
-                if (!confirm(t("ig.db.deleteConfirm", { key: d.key }))) return;
+                const ok = await dialog.confirm({
+                  title: t("ig.db.delete.title"),
+                  description: t("ig.db.deleteConfirm", { key: d.key }),
+                  confirmLabel: t("ig.db.delete.action"),
+                  cancelLabel: t("common.cancel"),
+                  variant: "destructive",
+                });
+                if (!ok) return;
                 if (
                   await act(
                     () => api(`/api/integrations/databases/${d.key}/delete`, {}),
@@ -1339,7 +1347,15 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
     }
   };
   const removeInstance = async () => {
-    if (!selected || !confirm(t("ig.gl.instanceRemoveConfirm", { host: selected }))) return;
+    if (!selected) return;
+    const ok = await dialog.confirm({
+      title: t("ig.gl.instanceRemove.title"),
+      description: t("ig.gl.instanceRemoveConfirm", { host: selected }),
+      confirmLabel: t("ig.gl.instanceRemove.action"),
+      cancelLabel: t("common.cancel"),
+      variant: "destructive",
+    });
+    if (!ok) return;
     setBusy(true);
     const r = await act(
       () => api("/api/integrations/gitlab/instances/remove", { host: selected }),

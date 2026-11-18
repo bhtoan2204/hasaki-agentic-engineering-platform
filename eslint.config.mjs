@@ -30,4 +30,62 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["web/src/**/*.{ts,tsx}", "public/**/*.{js,mjs}"],
+    ignores: [
+      "web/src/dialog/service.ts",
+      "web/src/dialog/types.ts",
+      "web/src/dialog/index.ts",
+    ],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        {
+          name: "alert",
+          message: "Dùng dialog.alert / toast — không dùng alert() gốc của trình duyệt.",
+        },
+        {
+          name: "confirm",
+          message: "Dùng dialog.confirm — không dùng confirm() gốc của trình duyệt.",
+        },
+        {
+          name: "prompt",
+          message: "Dùng dialog.prompt — không dùng prompt() gốc của trình duyệt.",
+        },
+      ],
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "window",
+          property: "alert",
+          message: "Dùng dialog.alert / toast — không dùng window.alert.",
+        },
+        {
+          object: "window",
+          property: "confirm",
+          message: "Dùng dialog.confirm — không dùng window.confirm.",
+        },
+        {
+          object: "window",
+          property: "prompt",
+          message: "Dùng dialog.prompt — không dùng window.prompt.",
+        },
+        {
+          object: "globalThis",
+          property: "alert",
+          message: "Dùng dialog.alert / toast — không dùng globalThis.alert.",
+        },
+        {
+          object: "globalThis",
+          property: "confirm",
+          message: "Dùng dialog.confirm — không dùng globalThis.confirm.",
+        },
+        {
+          object: "globalThis",
+          property: "prompt",
+          message: "Dùng dialog.prompt — không dùng globalThis.prompt.",
+        },
+      ],
+    },
+  },
 );

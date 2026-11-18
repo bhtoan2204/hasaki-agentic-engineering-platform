@@ -15,6 +15,7 @@ import {
   Timer,
 } from "lucide-react";
 import { api, isStateChange, useApi, useLive } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import {
   act,
   Badge,
@@ -844,7 +845,14 @@ function FixButton({
       className="sm"
       title={t("inv.fixHint")}
       onClick={async () => {
-        if (!window.confirm(t("inv.fixConfirm"))) return;
+        const ok = await dialog.confirm({
+          title: t("inv.fix.title"),
+          description: t("inv.fixConfirm"),
+          confirmLabel: t("inv.fix.action"),
+          cancelLabel: t("common.cancel"),
+          variant: "warning",
+        });
+        if (!ok) return;
         const r = await act(
           () => api<any>(`/api/runs/${run.id}/investigation/fix`, {}),
           t("inv.fixStarted"),

@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { api, isStateChange, useApi, useLive } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import {
   act,
   Badge,
@@ -139,7 +140,16 @@ function ApprovalCard({ a, onDone }: { a: any; onDone: () => void }) {
   const open = () => navigate(`/runs/${a.run_id}/${a.step_key}`);
   const blocked = a.requires_risk_acknowledgement && (!ack || !comment.trim());
   const send = async (approve: boolean) => {
-    if (!approve && !confirm(t("qx.ap.rejectConfirm", { step: a.step_name }))) return;
+    if (!approve) {
+      const ok = await dialog.confirm({
+        title: t("qx.ap.reject.title"),
+        description: t("qx.ap.rejectConfirm", { step: a.step_name }),
+        confirmLabel: t("qx.ap.reject.action"),
+        cancelLabel: t("common.cancel"),
+        variant: "destructive",
+      });
+      if (!ok) return;
+    }
     setBusy(true);
     const body: Record<string, unknown> = { comment };
     if (approve && a.requires_risk_acknowledgement) body.data = { acknowledge_risk: ack };

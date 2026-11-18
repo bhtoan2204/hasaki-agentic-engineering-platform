@@ -36,6 +36,7 @@ import {
   PenLine,
 } from "lucide-react";
 import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
@@ -289,7 +290,16 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     );
 
   const runAction = async (a: string, body: any = {}) => {
-    if (a === "cancel" && !confirm(t("rv.cancelConfirm"))) return;
+    if (a === "cancel") {
+      const ok = await dialog.confirm({
+        title: t("rv.cancel.title"),
+        description: t("rv.cancelConfirm"),
+        confirmLabel: t("rv.cancel.action"),
+        cancelLabel: t("common.cancel"),
+        variant: "destructive",
+      });
+      if (!ok) return;
+    }
     await act(async () => {
       await api(`/api/runs/${id}/${a}`, body);
       await reloadFresh();
@@ -414,13 +424,18 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                           type="button"
                           className="quiet"
                           title={t("rv.editBranch")}
-                          onClick={() => {
-                            const next = prompt(
-                              t("rv.editBranchPrompt", {
+                          onClick={async () => {
+                            const next = await dialog.prompt({
+                              title: t("rv.editBranch.title"),
+                              description: t("rv.editBranchPrompt", {
                                 repo: repo === "*" ? t("rv.allRepos") : repo,
                               }),
-                              b,
-                            );
+                              label: t("rv.editBranch.label"),
+                              defaultValue: b,
+                              required: false,
+                              confirmLabel: t("rv.editBranch.action"),
+                              cancelLabel: t("common.cancel"),
+                            });
                             if (next !== null && next.trim() !== b)
                               void runAction("branches", {
                                 branches: { ...(run.inputs?.branches ?? {}), [repo]: next.trim() },
@@ -1334,7 +1349,14 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
         <button
           className="sm"
           onClick={async () => {
-            if (!confirm(t("rv.pr.mergeConfirm"))) return;
+            const ok = await dialog.confirm({
+              title: t("rv.pr.merge.title"),
+              description: t("rv.pr.mergeConfirm"),
+              confirmLabel: t("rv.pr.merge.action"),
+              cancelLabel: t("common.cancel"),
+              variant: "warning",
+            });
+            if (!ok) return;
             if (await act(() => api(`/api/pull-requests/${id}/merge`, {}), t("rv.pr.merged"))) onDone();
           }}
         >
@@ -1345,7 +1367,14 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
         <button
           className="sm ghost"
           onClick={async () => {
-            if (!confirm(t("rv.pr.closeConfirm"))) return;
+            const ok = await dialog.confirm({
+              title: t("rv.pr.close.title"),
+              description: t("rv.pr.closeConfirm"),
+              confirmLabel: t("rv.pr.close.action"),
+              cancelLabel: t("common.cancel"),
+              variant: "destructive",
+            });
+            if (!ok) return;
             if (await act(() => api(`/api/pull-requests/${id}/close`, {}), t("rv.pr.closed"))) onDone();
           }}
         >

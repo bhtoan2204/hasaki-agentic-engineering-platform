@@ -10,28 +10,50 @@ export function Dialog({
   children,
   onClose,
   busy = false,
+  className,
+  role = "dialog",
+  labelledBy,
+  describedBy,
+  initialFocusSelector,
+  hideHeader = false,
 }: {
-  title: string;
+  title?: string;
   children: ReactNode;
   onClose: () => void;
   busy?: boolean;
+  className?: string;
+  role?: "dialog" | "alertdialog";
+  labelledBy?: string;
+  describedBy?: string;
+  /** CSS selector for the element that should receive initial focus. */
+  initialFocusSelector?: string;
+  /** When true, skip the built-in title bar (caller provides its own chrome). */
+  hideHeader?: boolean;
 }) {
   const { t } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
-  const id = useId();
+  const generatedId = useId();
+  const titleId = labelledBy ?? generatedId;
+
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const dialog = ref.current!;
     dialog.showModal();
+    const focusTarget = initialFocusSelector
+      ? dialog.querySelector<HTMLElement>(initialFocusSelector)
+      : null;
+    (focusTarget ?? dialog).focus();
     return () => {
       dialog.close();
       if (previous?.isConnected) previous.focus();
     };
-  }, []);
+  }, [initialFocusSelector]);
+
   return createPortal(
     <dialog
       ref={ref}
       tabIndex={-1}
+      role={role}
       onKeyDown={(e) => {
         if (e.key !== "Tab") return;
         const items = [
@@ -55,8 +77,9 @@ export function Dialog({
           first.focus();
         }
       }}
-      className="dialog ui-dialog"
-      aria-labelledby={id}
+      className={`dialog ui-dialog${className ? ` ${className}` : ""}`}
+      aria-labelledby={titleId}
+      aria-describedby={describedBy}
       aria-busy={busy}
       onCancel={(e) => {
         e.preventDefault();
@@ -75,18 +98,20 @@ export function Dialog({
         }
       }}
     >
-      <div className="card-head">
-        <h2 id={id}>{title}</h2>
-        <button
-          type="button"
-          className="quiet icon"
-          onClick={onClose}
-          disabled={busy}
-          aria-label={t("common.close")}
-        >
-          <X size={18} />
-        </button>
-      </div>
+      {!hideHeader && title ? (
+        <div className="card-head">
+          <h2 id={titleId}>{title}</h2>
+          <button
+            type="button"
+            className="quiet icon"
+            onClick={onClose}
+            disabled={busy}
+            aria-label={t("common.close")}
+          >
+            <X size={18} />
+          </button>
+        </div>
+      ) : null}
       {children}
     </dialog>,
     document.body,

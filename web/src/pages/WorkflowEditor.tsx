@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
+import { dialog } from "../dialog/index.ts";
 import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
 import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
@@ -385,8 +386,17 @@ function Editor({ wfKey }: { wfKey: string }) {
     }
   };
   publishRef.current = publish;
-  const loadVersion = (v: string) => {
-    if (dirty && !confirm(t("wfe.discard"))) return;
+  const loadVersion = async (v: string) => {
+    if (dirty) {
+      const ok = await dialog.confirm({
+        title: t("wfe.discard.title"),
+        description: t("wfe.discard"),
+        confirmLabel: t("wfe.discard.action"),
+        cancelLabel: t("common.cancel"),
+        variant: "warning",
+      });
+      if (!ok) return;
+    }
     if (v === "draft") load(def.draft_spec);
     else load(def.versions.find((x: any) => String(x.version) === v).spec);
     setBaseVersion(v === "draft" ? "draft" : Number(v));
@@ -426,7 +436,7 @@ function Editor({ wfKey }: { wfKey: string }) {
             <History size={15} aria-hidden />
             <select
               value={String(baseVersion ?? "")}
-              onChange={(e) => loadVersion(e.target.value)}
+              onChange={(e) => void loadVersion(e.target.value)}
               aria-label={t("wfe.openVersion")}
             >
               {def.draft_spec && <option value="draft">draft</option>}

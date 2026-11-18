@@ -38,6 +38,7 @@ import {
   Segmented,
   StatCard,
 } from "../ui.tsx";
+import { dialog } from "../dialog/index.ts";
 import { useI18n } from "../i18n/index.tsx";
 import "./Repositories.css";
 import { BitbucketState, RepositoryAccessAdmin } from "./RepositoryAccess.tsx";
@@ -291,7 +292,14 @@ export function RepositoriesPage({
     setCreating(true);
   };
   const remove = async (repo: string) => {
-    if (!confirm(t("repo.deleteConfirm", { name: repo }))) return;
+    const ok = await dialog.confirm({
+      title: t("repo.delete.title"),
+      description: t("repo.deleteConfirm", { name: repo }),
+      confirmLabel: t("repo.delete.action"),
+      cancelLabel: t("common.cancel"),
+      variant: "destructive",
+    });
+    if (!ok) return;
     if (
       await act(
         () => api(`/api/repositories/${encodeURIComponent(repo)}/delete`, {}),

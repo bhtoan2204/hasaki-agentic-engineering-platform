@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import {
   act,
   Badge,
@@ -574,7 +575,15 @@ function KnowledgeEditor({
   // blocks it (409) until the reviewer confirms a forced delete.
   const remove = async () => {
     const companions: string[] = cur?.metadata?.companions ?? [];
-    const reason = prompt(t("kn.delete.confirm", { key: item.key, n: companions.length }), "");
+    const reason = await dialog.prompt({
+      title: t("kn.delete.promptTitle"),
+      description: t("kn.delete.confirm", { key: item.key, n: companions.length }),
+      label: t("kn.delete.reasonLabel"),
+      defaultValue: "",
+      required: false,
+      confirmLabel: t("kn.delete.action"),
+      cancelLabel: t("common.cancel"),
+    });
     if (reason === null) return;
     const call = (force: boolean) =>
       api<{ deleted: string[] }>(`/api/knowledge/${itemKey}/delete`, { reason, force });
@@ -587,11 +596,18 @@ function KnowledgeEditor({
         return act(async () => {
           throw e;
         });
-      if (!confirm(t("kn.delete.force", { detail: msg }))) return;
+      const forceOk = await dialog.confirm({
+        title: t("kn.delete.forceTitle"),
+        description: t("kn.delete.force", { detail: msg }),
+        confirmLabel: t("kn.delete.forceAction"),
+        cancelLabel: t("common.cancel"),
+        variant: "destructive",
+      });
+      if (!forceOk) return;
       r = await act(() => call(true));
     }
     if (!r) return;
-    toast(t("kn.delete.done", { n: r.deleted.length }), "ok");
+    toast.success(t("kn.delete.done", { n: r.deleted.length }));
     onSaved();
     navigate("/knowledge");
   };

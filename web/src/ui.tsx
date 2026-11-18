@@ -605,37 +605,173 @@ export function Field({
 
 // ---------------------------------------------------------------- toasts
 
+type ToastKind = "ok" | "err" | "warn" | "info" | "loading";
+
+interface ToastOptions {
+  description?: string;
+  /** Suppress identical toasts within this window (ms). Default 2500. */
+  dedupeMs?: number;
+  durationMs?: number;
+  id?: string;
+}
+
+interface ToastHandle {
+  id: string;
+  update: (msg: string, kind?: ToastKind, opts?: ToastOptions) => void;
+  dismiss: () => void;
+}
+
 let toastHost: HTMLDivElement | null = null;
-export function toast(msg: string, kind: "ok" | "err" = "err") {
+const toastRoots = new Map<
+  string,
+  { el: HTMLDivElement; root: ReturnType<typeof createRoot>; timer?: number }
+>();
+const recentKeys = new Map<string, number>();
+const MAX_VISIBLE = 5;
+
+function ensureToastHost() {
   if (!toastHost) {
     toastHost = document.createElement("div");
     toastHost.className = "toasts";
+    toastHost.setAttribute("aria-live", "polite");
+    toastHost.setAttribute("aria-relevant", "additions text");
     document.body.appendChild(toastHost);
   }
-  const el = document.createElement("div");
-  el.className = `toast ${kind}`;
-  toastHost.appendChild(el);
-  createRoot(el).render(<span style={{ whiteSpace: "pre-wrap" }}>{msg}</span>);
-  setTimeout(() => el.remove(), kind === "ok" ? 2500 : 7000);
+  return toastHost;
 }
 
+function toastKey(msg: string, kind: ToastKind, description?: string) {
+  return `${kind}:${msg}:${description ?? ""}`;
+}
+
+function pruneStack() {
+  const host = toastHost;
+  if (!host) return;
+  while (host.children.length > MAX_VISIBLE) {
+    const first = host.firstElementChild as HTMLDivElement | null;
+    if (!first) break;
+    const id = first.dataset.toastId;
+    if (id) {
+      const entry = toastRoots.get(id);
+      entry?.root.unmount();
+      toastRoots.delete(id);
+    }
+    first.remove();
+  }
+}
+
+function renderToast(
+  id: string,
+  msg: string,
+  kind: ToastKind,
+  opts: ToastOptions | undefined,
+  existing?: { el: HTMLDivElement; root: ReturnType<typeof createRoot> },
+) {
+  const host = ensureToastHost();
+  const el = existing?.el ?? document.createElement("div");
+  el.dataset.toastId = id;
+  el.className = `toast ${kind === "ok" ? "ok" : kind === "err" ? "err" : kind}`;
+  el.setAttribute("role", kind === "err" ? "alert" : "status");
+  if (!existing) host.appendChild(el);
+  const root = existing?.root ?? createRoot(el);
+  const body = opts?.description ? `${msg}\n${opts.description}` : msg;
+  root.render(<span style={{ whiteSpace: "pre-wrap" }}>{body}</span>);
+  const prev = toastRoots.get(id);
+  if (prev?.timer) window.clearTimeout(prev.timer);
+  const duration =
+    opts?.durationMs ??
+    (kind === "loading" ? 0 : kind === "ok" || kind === "info" ? 2500 : kind === "warn" ? 5000 : 7000);
+  let timer: number | undefined;
+  if (duration > 0) {
+    timer = window.setTimeout(() => {
+      root.unmount();
+      el.remove();
+      toastRoots.delete(id);
+    }, duration);
+  }
+  toastRoots.set(id, { el, root, timer });
+  pruneStack();
+  return { el, root };
+}
+
+function showToast(msg: string, kind: ToastKind = "err", opts?: ToastOptions): ToastHandle {
+  const key = toastKey(msg, kind, opts?.description);
+  const dedupeMs = opts?.dedupeMs ?? 2500;
+  const now = Date.now();
+  const last = recentKeys.get(key);
+  if (last && now - last < dedupeMs && !opts?.id) {
+    const noop = {
+      id: "deduped",
+      update() {},
+      dismiss() {},
+    };
+    return noop;
+  }
+  recentKeys.set(key, now);
+  const id = opts?.id ?? `t-${now}-${Math.random().toString(36).slice(2, 8)}`;
+  const existing = opts?.id ? toastRoots.get(id) : undefined;
+  renderToast(id, msg, kind, opts, existing);
+  return {
+    id,
+    update(nextMsg, nextKind = kind, nextOpts) {
+      const entry = toastRoots.get(id);
+      if (!entry) {
+        renderToast(id, nextMsg, nextKind, nextOpts);
+        return;
+      }
+      renderToast(id, nextMsg, nextKind, nextOpts, entry);
+    },
+    dismiss() {
+      const entry = toastRoots.get(id);
+      if (!entry) return;
+      if (entry.timer) window.clearTimeout(entry.timer);
+      entry.root.unmount();
+      entry.el.remove();
+      toastRoots.delete(id);
+    },
+  };
+}
+
+/** Imperative toast. Callable as `toast(msg, kind)` or `toast.success(...)`. */
+export function toast(msg: string, kind: "ok" | "err" = "err"): ToastHandle {
+  return showToast(msg, kind);
+}
+
+toast.success = (msg: string, opts?: ToastOptions) => showToast(msg, "ok", opts);
+toast.error = (msg: string, opts?: ToastOptions) => showToast(msg, "err", opts);
+toast.warning = (msg: string, opts?: ToastOptions) => showToast(msg, "warn", opts);
+toast.info = (msg: string, opts?: ToastOptions) => showToast(msg, "info", opts);
+toast.loading = (msg: string, opts?: ToastOptions) =>
+  showToast(msg, "loading", { durationMs: 0, ...opts });
+
 /**
- * The button the user just activated (mouse, touch or keyboard all dispatch `click`). Remembered for the rest of the
- * current task only, so `act()` called from that click handler — also after a synchronous confirm() — knows its trigger.
+ * The button the user just activated (mouse, touch or keyboard all dispatch `click`). Remembered so `act()` called
+ * from that click handler — including after an async `dialog.confirm` / `dialog.prompt` — knows its trigger. Clicks
+ * inside an open application dialog do not overwrite the original trigger.
  */
 let trigger: HTMLElement | null = null;
+let dialogBlocksTrigger = false;
+
+/** Called by the dialog service while a modal request is active. */
+export function setActDialogOpen(open: boolean) {
+  dialogBlocksTrigger = open;
+}
+
 if (typeof document !== "undefined")
   document.addEventListener(
     "click",
     (e) => {
+      if (dialogBlocksTrigger) return;
       const el = (e.target as Element | null)?.closest?.(
         "button, [role='button']",
       ) as HTMLElement | null;
       if (!el) return;
       trigger = el;
+      const held = el;
+      // Keep long enough for an async confirm; cleared when act() consumes it or after idle timeout.
       setTimeout(() => {
-        if (trigger === el) trigger = null;
-      }, 0);
+        if (trigger === held && !dialogBlocksTrigger) trigger = null;
+      }, 60_000);
     },
     true,
   );

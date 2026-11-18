@@ -264,7 +264,13 @@ async function render(force = false) {
     $$("[data-reset]").forEach(
       (b) =>
         (b.onclick = async () => {
-          const password = prompt(tr("auth.newPassword"));
+          const password = await appDialog.prompt({
+            title: tr("auth.newPassword"),
+            label: tr("auth.newPassword"),
+            required: true,
+            confirmLabel: tr("auth.reset"),
+            cancelLabel: tr("common.cancel") !== "common.cancel" ? tr("common.cancel") : "Cancel",
+          });
           if (password) {
             await api(`/api/users/${b.dataset.reset}/password`, { password });
             toast(tr("auth.reset"), true);
@@ -1162,8 +1168,17 @@ window.A = {
       });
       location.hash = "/runs/" + r.id;
     }),
-  runAction: (id, action) => {
-    if (action === "cancel" && !confirm(tr("rv.cancelConfirm"))) return;
+  runAction: async (id, action) => {
+    if (action === "cancel") {
+      const ok = await appDialog.confirm({
+        title: tr("rv.cancelConfirm"),
+        description: tr("rv.cancelConfirm"),
+        confirmLabel: tr("rv.cancel") || "Cancel run",
+        cancelLabel: "Cancel",
+        variant: "destructive",
+      });
+      if (!ok) return;
+    }
     return act(() => api(`/api/runs/${id}/${action}`, {}));
   },
   setRepos: (id) =>
@@ -1171,14 +1186,29 @@ window.A = {
       () => api(`/api/runs/${id}/repositories`, { repositories: list(val("sel-repos")) }),
       tr("cl.reposUpdated"),
     ),
-  stepAction: (id, key, action) => {
+  stepAction: async (id, key, action) => {
     let body = {};
     if (action === "reexecute") {
-      const fb = prompt(tr("cl.reexecPrompt"));
+      const fb = await appDialog.prompt({
+        title: tr("cl.reexecPrompt"),
+        description: tr("cl.reexecPrompt"),
+        required: false,
+        confirmLabel: "OK",
+        cancelLabel: "Cancel",
+      });
       if (fb === null) return;
       body = fb ? { feedback: fb } : {};
     }
-    if (action === "skip" && !confirm(tr("si.skipAsk"))) return;
+    if (action === "skip") {
+      const ok = await appDialog.confirm({
+        title: tr("si.skipAsk"),
+        description: tr("si.skipAsk"),
+        confirmLabel: tr("si.skip") || "Skip",
+        cancelLabel: "Cancel",
+        variant: "warning",
+      });
+      if (!ok) return;
+    }
     return act(() => api(`/api/runs/${id}/steps/${key}/${action}`, body));
   },
   convAttempt: (key, id) => {
@@ -1374,7 +1404,14 @@ window.A = {
     <button id="logout" data-key="auth.logout" type="button">${esc(tr("auth.logout"))}</button></nav>`;
   $("#lang").before(account);
   $("#logout").onclick = async () => {
-    if (!confirm(tr("auth.logoutConfirm", { name: ME.username }))) return;
+    const ok = await appDialog.confirm({
+      title: tr("auth.logoutConfirm", { name: ME.username }),
+      description: tr("auth.logoutConfirm", { name: ME.username }),
+      confirmLabel: tr("auth.logout") || "Log out",
+      cancelLabel: "Cancel",
+      variant: "destructive",
+    });
+    if (!ok) return;
     try {
       await api("/api/auth/logout", {});
     } catch {

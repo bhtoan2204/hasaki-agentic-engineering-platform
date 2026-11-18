@@ -1,0 +1,110 @@
+.app-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border-radius: var(--r-lg, 12px);
+  box-shadow: var(--shadow-3);
+}
+
+.app-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 20px 16px;
+}
+
+.app-dialog-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.app-dialog-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand, #16a34a) 14%, transparent);
+  color: var(--brand, #16a34a);
+}
+
+.app-dialog-icon-destructive {
+  background: color-mix(in srgb, var(--st-err, #dc2626) 14%, transparent);
+  color: var(--st-err, #dc2626);
+}
+
+.app-dialog-icon-warning {
+  background: color-mix(in srgb, var(--st-warn, #d97706) 16%, transparent);
+  color: var(--st-warn, #d97706);
+}
+
+.app-dialog-icon-info {
+  background: color-mix(in srgb, var(--brand, #16a34a) 12%, transparent);
+  color: var(--brand, #16a34a);
+}
+
+.app-dialog-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.app-dialog-title {
+  margin: 0;
+  font-size: var(--fs-lg, 1.05rem);
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.app-dialog-desc {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm, 0.92rem);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.app-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-sm, 0.92rem);
+  color: var(--ink);
+}
+
+.app-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.app-dialog-error {
+  color: var(--st-err, #dc2626);
+  font-size: 0.85rem;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.app-dialog-confirm.danger {
+  background: var(--st-err, #dc2626);
+  border-color: var(--st-err, #dc2626);
+  color: #fff;
+}
+
+.app-dialog-confirm.danger:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog {
+    transition: none;
+  }
+}

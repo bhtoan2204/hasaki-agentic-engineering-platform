@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { History, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import { act, ErrorBox, Loading, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
@@ -170,15 +171,17 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
       reload();
   };
   const bulk = async (user: { id: number; username: string }, level: Level) => {
-    if (
-      !confirm(
-        t(level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm", {
-          user: user.username,
-          n: m.repositories.length,
-        }),
-      )
-    )
-      return;
+    const ok = await dialog.confirm({
+      title: t("repo.access.bulk.title"),
+      description: t(level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm", {
+        user: user.username,
+        n: m.repositories.length,
+      }),
+      confirmLabel: t("repo.access.bulk.action"),
+      cancelLabel: t("common.cancel"),
+      variant: level === "none" ? "destructive" : "warning",
+    });
+    if (!ok) return;
     if (
       await act(
         () => api("/api/repository-access/bulk", { user_id: user.id, level }),

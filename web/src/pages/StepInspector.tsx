@@ -42,6 +42,7 @@ import {
   Bot,
 } from "lucide-react";
 import { api, STATUS_COLORS, useApi } from "../api.ts";
+import { dialog } from "../dialog/index.ts";
 import {
   act,
   Badge,
@@ -671,7 +672,16 @@ export function StepInspector({
             {canSkip && (
               <button
                 className="sm ghost"
-                onClick={() => confirm(t("si.skipAsk")) && action("skip")}
+                onClick={async () => {
+                  const ok = await dialog.confirm({
+                    title: t("si.skip.title"),
+                    description: t("si.skipAsk"),
+                    confirmLabel: t("si.skip.confirm"),
+                    cancelLabel: t("common.cancel"),
+                    variant: "warning",
+                  });
+                  if (ok) void action("skip");
+                }}
               >
                 <SkipForward size={13} /> {t("si.skip")}
               </button>
@@ -679,7 +689,16 @@ export function StepInspector({
             {["RUNNING", "RETRYING"].includes(step.status) && (
               <button
                 className="sm danger"
-                onClick={() => confirm(t("si.stopAsk")) && action("stop", {}, t("si.stopped"))}
+                onClick={async () => {
+                  const ok = await dialog.confirm({
+                    title: t("si.stop.title"),
+                    description: t("si.stopAsk"),
+                    confirmLabel: t("si.stop.confirm"),
+                    cancelLabel: t("common.cancel"),
+                    variant: "destructive",
+                  });
+                  if (ok) void action("stop", {}, t("si.stopped"));
+                }}
               >
                 <Square size={12} /> {t("si.stop")}
               </button>
