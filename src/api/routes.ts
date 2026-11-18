@@ -2424,6 +2424,11 @@ export const routes: Route[] = [
     (c) => chat.postMessage(c.actor, num(c.p[0]), c.body),
   ],
   [
+    "POST",
+    /^\/api\/chat\/conversations\/(\d+)\/title\/regenerate$/,
+    (c) => chat.regenerateTitle(c.actor, num(c.p[0])),
+  ],
+  [
     "GET",
     /^\/api\/chat\/conversations\/(\d+)\/events$/,
     async (c) => {

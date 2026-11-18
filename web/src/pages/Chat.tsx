@@ -6,10 +6,13 @@ import {
   Copy,
   MessageSquarePlus,
   MessagesSquare,
+  MoreHorizontal,
   PanelLeft,
+  Pencil,
   RefreshCw,
   Send,
   Settings2,
+  Sparkles,
   Square,
   Trash2,
   Workflow,
@@ -27,6 +30,7 @@ type Mode = "AUTO" | "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
 type Conversation = {
   id: number;
   title: string;
+  title_source?: "none" | "fallback" | "generated" | "manual";
   mode: Mode;
   provider: string | null;
   preferred_provider?: string | null;
@@ -43,6 +47,32 @@ type Conversation = {
   last_message?: string;
   active_turn?: number | null;
 };
+
+type DateGroupKey = "today" | "yesterday" | "week" | "older";
+
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function dateGroupKey(iso: string, now = new Date()): DateGroupKey {
+  const t = startOfDay(new Date(iso));
+  const today = startOfDay(now);
+  const day = 86_400_000;
+  if (t === today) return "today";
+  if (t === today - day) return "yesterday";
+  if (t > today - 7 * day) return "week";
+  return "older";
+}
+
+function groupConversations(rows: Conversation[]) {
+  const order: DateGroupKey[] = ["today", "yesterday", "week", "older"];
+  const map = new Map<DateGroupKey, Conversation[]>();
+  for (const key of order) map.set(key, []);
+  for (const row of rows) map.get(dateGroupKey(row.updated_at))!.push(row);
+  return order
+    .map((key) => ({ key, items: map.get(key)! }))
+    .filter((g) => g.items.length > 0);
+}
 
 type Message = {
   id: number;
@@ -150,10 +180,12 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const [effort, setEffort] = useState("");
   const [repoScope, setRepoScope] = useState<string[]>([]);
   const [fallback, setFallback] = useState(true);
+  const [menuId, setMenuId] = useState<number | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const stickBottom = useRef(true);
   const composing = useRef(false);
   const detailIdRef = useRef<number | null>(null);
+  const grouped = useMemo(() => groupConversations(list.data ?? []), [list.data]);
 
   const activeId = conversationId ?? detail?.conversation.id ?? null;
 
@@ -369,6 +401,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   };
 
   const removeConversation = async (id: number) => {
+    setMenuId(null);
     const confirmed = await dialog.confirm({
       title: t("chat.delete.title"),
       description: t("chat.deleteConfirm"),
@@ -382,6 +415,66 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       if (activeId === id) location.hash = "/chat";
     }
   };
+
+  const renameConversation = async (c: Conversation) => {
+    setMenuId(null);
+    const next = await dialog.prompt({
+      title: t("chat.renameTitle"),
+      label: t("chat.renameLabel"),
+      defaultValue: c.title || "",
+      required: true,
+      confirmLabel: t("chat.renameSave"),
+      cancelLabel: t("common.cancel"),
+      validate: (v) => (v.trim().length > 200 ? t("chat.renameTitle") : null),
+    });
+    if (next === null) return;
+    const title = next.trim();
+    if (!title || title === c.title) return;
+    if (await act(() => api(`/api/chat/conversations/${c.id}`, { title }))) {
+      if (activeId === c.id) await loadDetail(c.id);
+      void list.reloadFresh();
+    }
+  };
+
+  const archiveConversation = async (id: number) => {
+    setMenuId(null);
+    if (await act(() => api(`/api/chat/conversations/${id}`, { archived: true }))) {
+      await list.reloadFresh();
+      if (activeId === id) location.hash = "/chat";
+    }
+  };
+
+  const regenerateTitle = async (c: Conversation) => {
+    setMenuId(null);
+    if (c.title_source === "manual") {
+      toast(t("chat.titleManualLocked"), "err");
+      return;
+    }
+    if (await act(() => api(`/api/chat/conversations/${c.id}/title/regenerate`, {}))) {
+      void list.reloadFresh();
+      // Generation is async; refresh again after the completion usually settles.
+      window.setTimeout(() => void list.reloadFresh(), 3000);
+      window.setTimeout(() => void list.reloadFresh(), 10000);
+    }
+  };
+
+  useEffect(() => {
+    if (menuId == null) return;
+    const onDown = (e: MouseEvent) => {
+      const el = e.target as Element | null;
+      if (el?.closest?.(`[data-chat-menu="${menuId}"]`)) return;
+      setMenuId(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuId(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuId]);
 
   const openDelegation = async (kind: "task" | "investigation" | "plan" | "delegate") => {
     if (!activeId) return;
@@ -439,21 +532,94 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
               {t("chat.emptyListHint")}
             </EmptyState>
           )}
-          {list.data?.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`chat-item${activeId === c.id ? " is-active" : ""}`}
-              onClick={() => (location.hash = `/chat/${c.id}`)}
-            >
-              <span className="chat-item-title">{c.title || t("chat.untitled")}</span>
-              <span className="chat-item-preview">{c.last_message || t("chat.noMessages")}</span>
-              <span className="chat-item-meta">
-                <span>{c.mode}</span>
-                <span>{ago(c.updated_at)}</span>
-                {c.active_turn ? <span className="pill">{t("chat.live.badge")}</span> : null}
-              </span>
-            </button>
+          {grouped.map((group) => (
+            <div key={group.key} className="chat-group">
+              <h3 className="chat-group-label">{t(`chat.group.${group.key}`)}</h3>
+              {group.items.map((c) => (
+                <div
+                  key={c.id}
+                  className={`chat-item${activeId === c.id ? " is-active" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => (location.hash = `/chat/${c.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      location.hash = `/chat/${c.id}`;
+                    }
+                  }}
+                >
+                  <span className="chat-item-title" title={c.title || t("chat.untitled")}>
+                    {c.title || t("chat.untitled")}
+                  </span>
+                  {c.active_turn ? (
+                    <span className="chat-item-live">{t("chat.live.badge")}</span>
+                  ) : null}
+                  <div className="chat-item-menu-wrap" data-chat-menu={c.id}>
+                    <button
+                      type="button"
+                      className={`ghost icon sm chat-item-menu-btn${menuId === c.id ? " is-open" : ""}`}
+                      aria-label={t("chat.menu")}
+                      aria-haspopup="menu"
+                      aria-expanded={menuId === c.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuId((id) => (id === c.id ? null : c.id));
+                      }}
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+                    {menuId === c.id ? (
+                      <div className="chat-item-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void renameConversation(c);
+                          }}
+                        >
+                          <Pencil size={14} /> {t("chat.rename")}
+                        </button>
+                        {c.title_source !== "manual" ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void regenerateTitle(c);
+                            }}
+                          >
+                            <Sparkles size={14} /> {t("chat.regenerateTitle")}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void archiveConversation(c.id);
+                          }}
+                        >
+                          <Archive size={14} /> {t("chat.archive")}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="is-danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void removeConversation(c.id);
+                          }}
+                        >
+                          <Trash2 size={14} /> {t("chat.delete")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
           ))}
         </div>
       </aside>

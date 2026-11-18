@@ -115,10 +115,11 @@ export async function completeForRun(
   run: CompletionRun | null | undefined,
   prompt: string,
   signal?: AbortSignal,
-  providers: Record<AgentProvider, CompletionRunner> = runners,
+  providers?: Record<AgentProvider, CompletionRunner> | null,
   agent: CompletionAgentOverride = {},
 ): Promise<Completion> {
   signal?.throwIfAborted();
+  const runnerMap = providers ?? runners;
   const configured =
     run?.agent_configuration === undefined
       ? { ...run, agent_configuration: await loadAgentConfiguration() }
@@ -127,7 +128,7 @@ export async function completeForRun(
   const timeoutMs = Math.min(resolved.timeout_ms ?? 600_000, 600_000);
   const deadline = AbortSignal.timeout(timeoutMs);
   const started = Date.now();
-  const result = await providers[resolved.provider](prompt, {
+  const result = await runnerMap[resolved.provider](prompt, {
     model: resolved.model ?? "",
     effort: resolved.reasoning_effort ?? "",
     timeoutMs,

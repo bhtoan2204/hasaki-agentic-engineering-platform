@@ -5,6 +5,7 @@ import type {
   ConversationRow,
   EventRow,
   MessageRow,
+  TitleSource,
   ToolCallRow,
   TurnRow,
 } from "./types.ts";
@@ -15,6 +16,7 @@ export const chatRepository = {
     input: {
       ownerId: number;
       title: string;
+      titleSource?: TitleSource;
       description: string;
       mode: ChatMode;
       provider: string | null;
@@ -30,16 +32,19 @@ export const chatRepository = {
     },
     db: Db = pool,
   ) {
+    const titleSource: TitleSource =
+      input.titleSource ?? (input.title.trim() ? "manual" : "none");
     return one<ConversationRow>(
       db,
       `INSERT INTO chat_conversations (
-         owner_id, title, description, mode, provider, model, reasoning_effort,
+         owner_id, title, title_source, description, mode, provider, model, reasoning_effort,
          provider_strategy, fallback_enabled, model_strategy, effort_strategy,
          repositories, work_item_id, run_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *`,
       [
         input.ownerId,
         input.title,
+        titleSource,
         input.description,
         input.mode,
         input.provider,
@@ -104,6 +109,7 @@ export const chatRepository = {
       Pick<
         ConversationRow,
         | "title"
+        | "title_source"
         | "description"
         | "mode"
         | "provider"
@@ -130,6 +136,35 @@ export const chatRepository = {
       db,
       `UPDATE chat_conversations SET ${set}, updated_at = now() WHERE id = $1 AND owner_id = $2 RETURNING *`,
       [id, ownerId, ...keys.map((k) => patch[k])],
+    );
+  },
+
+  /** Conditional title write — never clobber a manual rename (or a finished generated title unless allowed). */
+  updateTitleIfSource(
+    id: number,
+    ownerId: number,
+    title: string,
+    nextSource: TitleSource,
+    allowed: TitleSource[],
+    db: Db = pool,
+  ) {
+    return one<ConversationRow>(
+      db,
+      `UPDATE chat_conversations
+          SET title = $3, title_source = $4, updated_at = now()
+        WHERE id = $1 AND owner_id = $2 AND title_source = ANY($5::text[])
+        RETURNING *`,
+      [id, ownerId, title, nextSource, allowed],
+    );
+  },
+
+  firstUserMessage(conversationId: number, db: Db = pool) {
+    return one<MessageRow>(
+      db,
+      `SELECT * FROM chat_messages
+        WHERE conversation_id = $1 AND role = 'user' AND NOT superseded
+        ORDER BY id ASC LIMIT 1`,
+      [conversationId],
     );
   },
 

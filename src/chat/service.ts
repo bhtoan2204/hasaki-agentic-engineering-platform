@@ -18,6 +18,7 @@ import { abortLocal, recoverStaleTurns, scheduleTurn, withholdRevoked } from "./
 import { readableRepositories } from "./tools.ts";
 import { buildDelegationPreview, DelegationRequest, executeDelegation } from "./delegation.ts";
 import { chatFailure } from "./failures.ts";
+import { fallbackTitle, scheduleTitleGeneration } from "./title.ts";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body ?? {});
@@ -140,6 +141,7 @@ function publicConversation(
   return {
     id: c.id,
     title: c.title,
+    title_source: c.title_source ?? "none",
     description: c.description,
     mode: c.mode,
     provider: c.provider_strategy === "auto" ? "auto" : c.provider,
@@ -175,9 +177,11 @@ export const chat = {
       input.provider_strategy ?? (input.provider == null || input.provider === "auto" ? "auto" : "manual"),
     );
     const repositories = await assertRepos(actor.id, input.repositories);
+    const title = (input.title ?? "").trim();
     const row = await chatRepository.createConversation({
       ownerId: actor.id,
-      title: (input.title ?? "").trim(),
+      title,
+      titleSource: title ? "manual" : "none",
       description: (input.description ?? "").trim(),
       mode: input.mode ?? "AUTO",
       provider: sel.provider,
@@ -251,6 +255,8 @@ export const chat = {
       model_strategy: input.model_strategy,
       effort_strategy: input.effort_strategy,
     };
+    // A client-supplied title is always a manual rename — never regenerate over it.
+    if (input.title !== undefined) patch.title_source = "manual";
     if (input.provider !== undefined || input.provider_strategy !== undefined) {
       const sel = await resolveProviderSelection(input.provider, input.provider_strategy);
       patch.provider = sel.provider;
@@ -370,18 +376,25 @@ export const chat = {
         c,
       );
       await chatRepository.touch(conversationId, c);
-      if (!conversation.title.trim()) {
+      let shouldGenerateTitle = false;
+      if (
+        conversation.title_source === "none" ||
+        (!conversation.title.trim() && conversation.title_source !== "manual")
+      ) {
+        const fb = fallbackTitle(input.content);
         await chatRepository.updateConversation(
           conversationId,
           actor.id,
-          { title: input.content.trim().replace(/\s+/g, " ").slice(0, 80) },
+          { title: fb, title_source: "fallback" },
           c,
         );
+        shouldGenerateTitle = true;
       }
-      return { turn, message };
+      return { turn, message, shouldGenerateTitle };
     });
 
     scheduleTurn(created.turn.id);
+    if (created.shouldGenerateTitle) scheduleTitleGeneration(conversationId, actor.id);
     return {
       turn: {
         id: created.turn.id,
@@ -473,6 +486,15 @@ export const chat = {
     await requireConversation(conversationId, actor);
     const { chatEventsSince } = await import("./events.ts");
     return chatEventsSince(conversationId, actor.id, after);
+  },
+
+  /** Explicit title refresh (context menu). Never overwrites a manual rename. */
+  async regenerateTitle(actor: Actor, conversationId: number) {
+    const conversation = await requireConversation(conversationId, actor);
+    if (conversation.title_source === "manual")
+      throw new HttpError(409, "conversation title was renamed manually");
+    scheduleTitleGeneration(conversationId, actor.id, { force: true });
+    return { ok: true, scheduled: true };
   },
 
   async delegationPreview(actor: Actor, conversationId: number, body: unknown) {

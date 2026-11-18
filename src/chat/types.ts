@@ -5,6 +5,7 @@ export type ManualChatMode = Exclude<ChatMode, "AUTO">;
 export type ProviderStrategy = "auto" | "manual";
 export type ModelStrategy = "auto" | "provider_default" | "manual";
 export type EffortStrategy = "auto" | "provider_default" | "manual";
+export type TitleSource = "none" | "fallback" | "generated" | "manual";
 
 export type TurnStatus = "queued" | "running" | "completed" | "failed" | "canceled";
 export const ACTIVE_TURN: TurnStatus[] = ["queued", "running"];
@@ -36,6 +37,7 @@ export interface ConversationRow {
   id: number;
   owner_id: number;
   title: string;
+  title_source: TitleSource;
   description: string;
   mode: ChatMode;
   provider: string | null;

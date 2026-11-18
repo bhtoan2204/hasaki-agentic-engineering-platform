@@ -92,6 +92,7 @@ describe("chat context", () => {
         id: 9,
         owner_id: 1,
         title: "t",
+        title_source: "none",
         description: "",
         mode: "ASK",
         provider: "claude",
