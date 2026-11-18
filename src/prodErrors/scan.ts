@@ -432,8 +432,9 @@ export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: So
     string,
     SourceRow & { sources: ScanSource[]; analytics_hourly: string[] }
   >();
+  // Each source keeps its own 300 largest groups: a busy log source must not push every trace group out.
   for (const { source, rows } of sources)
-    for (const r of rows) {
+    for (const r of [...rows].sort((a, b) => num(b.today) - num(a.today)).slice(0, 300)) {
       const key = [r.ns, r.svc, String(r.lv ?? "").toUpperCase() || "ERROR", r.sig].join("\u0000");
       const prev = merged.get(key);
       const hourly = (h: unknown) => (Array.isArray(h) ? h : h ? [h] : []).map(String);
@@ -459,7 +460,7 @@ export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: So
         analytics_hourly: [...hours].map(([h, n]) => `${h}:${n}`),
       });
     }
-  return [...merged.values()].sort((a, b) => num(b.today) - num(a.today)).slice(0, 300);
+  return [...merged.values()].sort((a, b) => num(b.today) - num(a.today));
 }
 
 // ---------------------------------------------------------------- scan
@@ -1042,6 +1043,7 @@ export function describeGroup(g: GroupRow) {
         })
       : "?";
   const spl = `index=${config.prodErrors.index} kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
+  const traceOnly = !!d.sources?.length && !d.sources.includes("splunk");
   return [
     `Lỗi production phát hiện từ ${(d.sources ?? ["splunk"]).map((s) => (s === "signoz" ? "SigNoz" : "Splunk")).join(" và ")} (quét ngày ${g.day}).`,
     "",
@@ -1050,11 +1052,11 @@ export function describeGroup(g: GroupRow) {
       ? `- Image đang chạy: \`${d.image}\`${img.commit ? ` (repo \`${img.repo}\`, commit \`${img.commit}\`)` : ""}`
       : "",
     g.caller ? `- ${d.sources?.includes("splunk") ? "Vị trí log" : "Span"}: \`${g.caller}\`` : "",
-    `- Mức log: ${g.level}`,
+    traceOnly ? "" : `- Mức log: ${g.level}`,
     `- Hôm nay: ${g.today_count} lần (lần đầu ${t(g.first_at)}, gần nhất ${t(g.last_at)}); hôm qua cùng khung giờ: ${d.no_baseline ? "chưa có dữ liệu" : `${g.yesterday_count} lần`}`,
     `- Đánh giá: **${g.severity}**${g.reasons.length ? ` — ${g.reasons.join("; ")}` : ""}`,
     "",
-    "Log mẫu (đã che PII):",
+    traceOnly ? "Span lỗi mẫu (tên span [mã trạng thái]: status message, đã che PII):" : "Log mẫu (đã che PII):",
     fence(g.sample),
     d.err ? `Error: \`${d.err.replace(/`/g, "'")}\`` : "",
     d.stack ? `\nStacktrace:\n${fence(d.stack)}` : "",
@@ -1080,7 +1082,7 @@ export function describeGroup(g: GroupRow) {
   ]
     .filter((l) => l !== "")
     .join("\n")
-    .replace(/\n(Log mẫu|Xem thêm|Yêu cầu)/g, "\n\n$1");
+    .replace(/\n(Log mẫu|Span lỗi mẫu|Xem thêm|Xem trace|Yêu cầu)/g, "\n\n$1");
 }
 
 /** Create a Bug Investigation work item for a group and start its workflow (stops for approval before any fix). */

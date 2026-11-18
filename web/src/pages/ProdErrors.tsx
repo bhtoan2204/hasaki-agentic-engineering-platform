@@ -51,6 +51,7 @@ interface Group {
     stack?: string;
     no_baseline?: boolean;
     pod?: string;
+    sources?: Array<"splunk" | "signoz">;
   };
   today_count: number;
   yesterday_count: number;
@@ -287,7 +288,12 @@ function Trend({
   noBaseline?: boolean;
 }) {
   const { t } = useI18n();
-  if (noBaseline) return <span className="muted">{t("pe.noBaseline")}</span>;
+  if (noBaseline)
+    return (
+      <span className="muted" title={t("pe.noBaselineLong")}>
+        –
+      </span>
+    );
   if (yesterday === 0) return <span className="pe-new">{t("pe.new")}</span>;
   const r = count / yesterday;
   const tip = t("pe.sameHour", { n: yesterday });
@@ -403,6 +409,13 @@ function FixRef({
   );
 }
 
+type Source = "logs" | "traces";
+/** Trace groups come from SigNoz error spans; log groups from Splunk (groups saved before sources existed are logs). */
+const inSource = (g: Group, source: Source) =>
+  source === "traces"
+    ? !!g.detail.sources?.includes("signoz")
+    : !g.detail.sources?.length || g.detail.sources.includes("splunk");
+
 function GroupRow({
   g,
   open,
@@ -417,6 +430,7 @@ function GroupRow({
   const { t, status } = useI18n();
   const [busy, setBusy] = useState(false);
   const spl = `index=k8s_prod kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
+  const traceOnly = inSource(g, "traces") && !inSource(g, "logs");
   const investigate = async () => {
     setBusy(true);
     const r = await act(() => api<any>(`/api/prod-errors/${g.fingerprint}/investigate`, {}));
@@ -510,7 +524,7 @@ function GroupRow({
             </dd>
             {g.caller && (
               <>
-                <dt>{t("pe.logSite")}</dt>
+                <dt>{traceOnly ? t("pe.spanSite") : t("pe.logSite")}</dt>
                 <dd className="mono">{g.caller}</dd>
               </>
             )}
@@ -520,7 +534,7 @@ function GroupRow({
                 count: g.today_count,
                 first: hm(g.first_at),
                 last: hm(g.last_at),
-                yesterday: g.yesterday_count,
+                yesterday: g.detail.no_baseline ? t("pe.noBaselineLong") : g.yesterday_count,
               })}
             </dd>
             {g.detail.image && (
@@ -551,7 +565,7 @@ function GroupRow({
             )}
           </dl>
           <div>
-            <div className="muted small">{t("pe.sample")}</div>
+            <div className="muted small">{traceOnly ? t("pe.traceSample") : t("pe.sample")}</div>
             <pre className="pe-pre">
               {g.sample}
               {g.detail.err ? `\n\nerror: ${g.detail.err}` : ""}
@@ -575,7 +589,7 @@ function GroupRow({
                 {t("pe.ignore")}
               </button>
             )}
-            <Copy text={spl} label={t("pe.copySpl")} />
+            {!traceOnly && <Copy text={spl} label={t("pe.copySpl")} />}
           </div>
         </div>
       )}
@@ -647,6 +661,11 @@ export function ProdErrorsPage({
     const p = new URLSearchParams(appliedQuery);
     value ? p.set(key, value) : p.delete(key);
     if (key === "list_namespace") p.delete("list_service");
+    // Severity and service lists differ per tab: a new tab starts from its own defaults.
+    if (key === "list_source") {
+      p.delete("list_service");
+      p.delete("list_severity");
+    }
     navigate(`/prod-errors/incidents?${p}`);
   };
   const all = url.get("list_ignored") === "1";
@@ -654,7 +673,9 @@ export function ProdErrorsPage({
   const { data, error, loading, reload } = useApi<Data>(`/api/prod-errors${all ? "?all=1" : ""}`);
   const ns = url.get("list_namespace") || "all";
   const setNs = (v: string) => setFilter("list_namespace", v);
-  const sev = url.get("list_severity") || "attention";
+  const source: Source = url.get("list_source") === "traces" ? "traces" : "logs";
+  // Trace groups are rarely critical/high (no day-over-day baseline yet), so that tab lists every severity.
+  const sev = url.get("list_severity") || (source === "traces" ? "all" : "attention");
   const setSev = (v: string) => setFilter("list_severity", v);
   const service = url.get("list_service") || "";
   const incidentStatus = url.get("list_status") || "";
@@ -667,6 +688,8 @@ export function ProdErrorsPage({
     if (!focus || !data || focused.current) return;
     const g = data.groups.find((x) => x.fingerprint === focus);
     if (!g && !all) return setAll(true);
+    if (g && !inSource(g, source))
+      return setFilter("list_source", source === "logs" ? "traces" : "");
     focused.current = true;
     if (g && !(g.severity === "critical" || g.severity === "high" || g.work_item_id)) setSev("all");
     setOpen(focus);
@@ -677,7 +700,7 @@ export function ProdErrorsPage({
           ?.scrollIntoView({ block: "center", behavior: "smooth" }),
       50,
     );
-  }, [focus, data, all]);
+  }, [focus, data, all, source]);
 
   useEffect(() => {
     if (!data?.scanning) return;
@@ -706,9 +729,13 @@ export function ProdErrorsPage({
     wasScanning.current = data.scanning;
   }, [data]);
 
+  const tabGroups = useMemo(
+    () => (data?.groups ?? []).filter((g) => inSource(g, source)),
+    [data, source],
+  );
   const groups = useMemo(() => {
     const qq = query.trim().toLowerCase();
-    return (data?.groups ?? []).filter(
+    return tabGroups.filter(
       (g) =>
         (ns === "all" || g.namespace === ns) &&
         (sev === "all" ||
@@ -719,7 +746,7 @@ export function ProdErrorsPage({
         (!incidentStatus || g.lifecycle_status === incidentStatus) &&
         (!qq || `${g.service} ${g.signature} ${g.caller} ${g.sample}`.toLowerCase().includes(qq)),
     );
-  }, [data, ns, sev, query, service, incidentStatus]);
+  }, [tabGroups, ns, sev, query, service, incidentStatus]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {
@@ -728,9 +755,9 @@ export function ProdErrorsPage({
       medium: 0,
       low: 0,
     };
-    for (const g of data?.groups ?? []) if (ns === "all" || g.namespace === ns) c[g.severity]++;
+    for (const g of tabGroups) if (ns === "all" || g.namespace === ns) c[g.severity]++;
     return c;
-  }, [data, ns]);
+  }, [tabGroups, ns]);
 
   const [panel, setPanel] = useState(false);
   const last = data?.lastScan;
@@ -829,6 +856,27 @@ export function ProdErrorsPage({
 
           {!settings && (
             <>
+              <div className="pe-source">
+                <Segmented<Source>
+                  label={t("pe.sourceLabel")}
+                  options={[
+                    [
+                      "logs",
+                      t("pe.tab.logs", {
+                        n: data.groups.filter((g) => inSource(g, "logs")).length,
+                      }),
+                    ],
+                    [
+                      "traces",
+                      t("pe.tab.traces", {
+                        n: data.groups.filter((g) => inSource(g, "traces")).length,
+                      }),
+                    ],
+                  ]}
+                  value={source}
+                  onChange={(v) => setFilter("list_source", v === "logs" ? "" : v)}
+                />
+              </div>
               <FilterToolbar
                 className="pe-filters"
                 secondary={
@@ -890,7 +938,7 @@ export function ProdErrorsPage({
                     <option value="">{t("an.all")}</option>
                     {[
                       ...new Set(
-                        data.groups
+                        tabGroups
                           .filter((g) => ns === "all" || g.namespace === ns)
                           .map((g) => g.service),
                       ),
@@ -919,10 +967,20 @@ export function ProdErrorsPage({
                 <EmptyState
                   icon={Siren}
                   title={
-                    data.groups.length ? t("pe.noMatch") : last ? t("pe.none") : t("pe.noData")
+                    tabGroups.length
+                      ? t("pe.noMatch")
+                      : source === "traces"
+                        ? t("pe.noTraces")
+                        : last
+                          ? t("pe.none")
+                          : t("pe.noData")
                   }
                 >
-                  {sev === "attention" && data.groups.length ? t("pe.widen") : null}
+                  {sev === "attention" && tabGroups.length
+                    ? t("pe.widen")
+                    : source === "traces" && !tabGroups.length && !data.signoz?.connected
+                      ? t("pe.connectSignoz")
+                      : null}
                 </EmptyState>
               ) : (
                 <div className="pe-list">

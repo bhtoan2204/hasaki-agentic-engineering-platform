@@ -158,3 +158,27 @@ test("without SigNoz data for the comparison window a group is not judged new, a
   assert.equal(merged.no_baseline, undefined, "Splunk has yesterday's data for this group");
   assert.ok(toGroups([merged], "2026-11-18")[0].reasons.includes("new"));
 });
+
+test("each source keeps its own 300 largest groups, so busy logs cannot push trace groups out", () => {
+  const row = (svc: string, i: number, today: number) => ({
+    ns: "oms-prod",
+    svc,
+    lv: "ERROR",
+    sig: `error ${i}`,
+    today,
+    yesterday: 0,
+  });
+  const merged = mergeSourceRows(
+    { source: "splunk", rows: Array.from({ length: 350 }, (_, i) => row("oms-api", i, 1000 + i)) },
+    {
+      source: "signoz",
+      rows: Array.from({ length: 5 }, (_, i) => row("oms-background", i, 1 + i)),
+    },
+  );
+  assert.equal(merged.filter((r) => r.sources.includes("splunk")).length, 300);
+  assert.equal(merged.filter((r) => r.sources.includes("signoz")).length, 5);
+  assert.equal(
+    Math.min(...merged.filter((r) => r.svc === "oms-api").map((r) => Number(r.today))),
+    1050,
+  );
+});

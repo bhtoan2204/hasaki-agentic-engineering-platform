@@ -706,3 +706,7 @@
   min-width: 0;
   max-width: 100%;
 }
+
+.pe-source {
+  margin-bottom: 12px;
+}
