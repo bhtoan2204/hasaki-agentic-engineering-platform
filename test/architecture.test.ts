@@ -61,6 +61,37 @@ test("importing a provider internal file from outside is flagged, its entry file
   assert.deepEqual(v.map((x) => x.key), ["no-provider-internals:src/agent/other.ts->src/agent/codex/policy.ts"]);
 });
 
+test("a provider directory cannot import another provider, even its entry file", () => {
+  const g = graphOf({
+    "src/agent/cursor/run.ts": 'import "../codex/run.ts"; import "../broker/server.ts";',
+    "src/agent/codex/run.ts": "",
+    "src/agent/broker/server.ts": "",
+  });
+  assert.deepEqual(
+    findViolations(g).map((x) => x.key),
+    ["no-provider-cross-import:src/agent/cursor/run.ts->src/agent/codex/run.ts"],
+  );
+});
+
+test("the agent lifecycle is reached only through the executor registry and never imports the engine", () => {
+  const g = graphOf({
+    "src/workflow/executors/index.ts": 'import "../../agent/harness/executor.ts";',
+    "src/eval/runner.ts": 'import "../agent/harness/executor.ts";',
+    "src/agent/harness/executor.ts": 'import "./lifecycle.ts"; import "../../workflow/types.ts";',
+    "src/agent/harness/lifecycle.ts": "",
+    "src/agent/harness/stages/verify.ts": 'import "../../../workflow/engine.ts";',
+    "src/workflow/engine.ts": "",
+    "src/workflow/types.ts": "",
+  });
+  assert.deepEqual(
+    findViolations(g).map((x) => x.key),
+    [
+      "harness-no-workflow-core:src/agent/harness/stages/verify.ts->src/workflow/engine.ts",
+      "harness-single-entry:src/eval/runner.ts->src/agent/harness/executor.ts",
+    ],
+  );
+});
+
 test("API handlers use repositories while the stream and analytics retain direct database access", () => {
   const graph = graphOf({
     "src/api/routes.ts": `import "../db/pool.ts"; import "../workitems/repository.ts"; import("pg");`,

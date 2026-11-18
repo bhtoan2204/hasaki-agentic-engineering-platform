@@ -12,7 +12,10 @@ export type Rule =
   | "no-provider-from-core"
   | "no-provider-internals"
   | "no-db-from-api"
-  | "repository-dependencies";
+  | "repository-dependencies"
+  | "no-provider-cross-import"
+  | "harness-single-entry"
+  | "harness-no-workflow-core";
 export interface Violation {
   rule: Rule;
   key: string;
@@ -134,6 +137,15 @@ const API_DB_BOUNDARIES = new Set([
   "src/api/analytics/execution.ts",
 ]);
 
+// The agent lifecycle is reached only through the executor registry; it returns results and never drives the engine.
+const HARNESS_ENTRIES = new Set(["src/agent/harness/executor.ts", "src/agent/harness/lifecycle.ts"]);
+const HARNESS_CALLERS = new Set(["src/workflow/executors/index.ts"]);
+const WORKFLOW_CORE = new Set([
+  "src/workflow/engine.ts",
+  "src/workflow/scheduler.ts",
+  "src/workflow/mutations.ts",
+]);
+
 function isRepository(file: string) {
   return /(?:^|\/)repository\.ts$|Repository\.ts$/.test(file);
 }
@@ -179,7 +191,33 @@ export function findViolations(graph: Graph): Violation[] {
           detail: `${from} imports provider module ${to}`,
         });
       }
-      if (toProvider && providerOf(from) !== toProvider && !PROVIDER_ENTRY_FILES.includes(to.split("/").pop()!)) {
+      const fromProvider = providerOf(from);
+      if (fromProvider && toProvider && fromProvider !== toProvider) {
+        out.push({
+          rule: "no-provider-cross-import",
+          key: `no-provider-cross-import:${from}->${to}`,
+          detail: `provider ${fromProvider} imports provider ${toProvider} (${to}); shared code belongs outside provider directories`,
+        });
+      }
+      if (
+        HARNESS_ENTRIES.has(to) &&
+        !from.startsWith("src/agent/harness/") &&
+        !HARNESS_CALLERS.has(from)
+      ) {
+        out.push({
+          rule: "harness-single-entry",
+          key: `harness-single-entry:${from}->${to}`,
+          detail: `${from} imports the agent lifecycle ${to}; resolve the executor through the registry`,
+        });
+      }
+      if (from.startsWith("src/agent/harness/") && WORKFLOW_CORE.has(to)) {
+        out.push({
+          rule: "harness-no-workflow-core",
+          key: `harness-no-workflow-core:${from}->${to}`,
+          detail: `${from} imports workflow core ${to}; the harness returns a result and the engine applies it`,
+        });
+      }
+      if (toProvider && fromProvider !== toProvider && !PROVIDER_ENTRY_FILES.includes(to.split("/").pop()!)) {
         out.push({
           rule: "no-provider-internals",
           key: `no-provider-internals:${from}->${to}`,

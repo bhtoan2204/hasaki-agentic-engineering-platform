@@ -21,5 +21,8 @@ Other established persistence boundaries include the Git repository registry and
 | `no-provider-internals` | Other modules can import a provider's `run.ts`, `capabilities.ts` or `index.ts` entry point. |
 | `no-db-from-api` | API modules cannot import `pg` or raw database infrastructure. The stream listener owns its dedicated PostgreSQL connection and replay SQL. Metrics and the three existing analytics query modules own specialized read models and the incident override write. These exceptions are listed by file in `src/architecture/check.ts`. |
 | `repository-dependencies` | Files named `repository.ts` or ending in `Repository.ts` can depend on the pool, the legacy persistence module, other repositories, and shared `types.ts` modules. |
+| `no-provider-cross-import` | A provider directory (`src/agent/<provider>/`) cannot import another provider, including its entry file. Transport and helpers shared by providers live outside provider directories (`src/agent/broker`, `src/agent/harness`). |
+| `harness-single-entry` | Only `src/workflow/executors/index.ts` and the harness itself import the agent lifecycle (`harness/executor.ts`, `harness/lifecycle.ts`). Other callers resolve the `agent` executor through the registry. |
+| `harness-no-workflow-core` | `src/agent/harness` cannot import the engine, scheduler or mutation modules. The lifecycle returns an `ExecResult` and the engine applies it. See [agent execution lifecycle](execution-lifecycle.md). |
 
 The checks cover static, re-export and literal dynamic import edges. `architecture/baseline.json` records existing cycles and provider couplings. `npm run arch:baseline` can remove fixed violations or shrink an existing cycle. It fails when it finds any new violation.
