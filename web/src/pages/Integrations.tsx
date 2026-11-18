@@ -377,21 +377,35 @@ function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
   );
 }
 
-/** SigNoz: the user's own domain and API key (never sent back), enable switch, test and disconnect. */
+/** SigNoz: the user's own domain and API key or session tokens (never sent back), enable switch, test and disconnect. */
 function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<any>("/api/integrations/signoz");
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
+  const [auth, setAuth] = useState<"api_key" | "session" | null>(null);
   const [token, setToken] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [refreshToken, setRefreshToken] = useState("");
   const [res, setRes] = useState<any>(null);
+  const mode = auth ?? st?.auth ?? "api_key";
+  const keepStored = st?.token_set && st?.auth === mode;
   const health: Health = !st ? "loading" : st.connected ? "ok" : st.configured && st.last_error ? "error" : "off";
   const save = async (enabled: boolean) => {
     const out = await act(
-      () => api("/api/integrations/signoz", { baseUrl: baseUrl ?? st?.base_url ?? "", token, enabled }),
+      () =>
+        api("/api/integrations/signoz", {
+          baseUrl: baseUrl ?? st?.base_url ?? "",
+          auth: mode,
+          ...(mode === "session" ? { accessToken, refreshToken } : { token }),
+          enabled,
+        }),
       enabled ? t("ig.signoz.saved") : t("ig.signoz.disabled"),
     );
     if (out) {
       setToken("");
+      setAccessToken("");
+      setRefreshToken("");
+      setAuth(null);
       setRes(null);
       reload();
     }
@@ -420,15 +434,45 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
           onChange={(e) => setBaseUrl(e.target.value)}
         />
       </Field>
-      <Field label={t("ig.signoz.token")} hint={st?.token_set ? t("ig.signoz.tokenKeep") : undefined}>
-        <input
-          type="password"
-          autoComplete="off"
-          placeholder={st?.token_set ? "••••••••••••" : "SIGNOZ-API-KEY"}
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-        />
+      <Field label={t("ig.signoz.auth")}>
+        <select value={mode} onChange={(e) => setAuth(e.target.value as "api_key" | "session")}>
+          <option value="api_key">{t("ig.signoz.authKey")}</option>
+          <option value="session">{t("ig.signoz.authSession")}</option>
+        </select>
       </Field>
+      {mode === "session" ? (
+        <>
+          <p className="muted small">{t("ig.signoz.sessionHint")}</p>
+          <Field label={t("ig.signoz.access")} hint={keepStored ? t("ig.signoz.sessionKeep") : undefined}>
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder={keepStored ? "••••••••••••" : "eyJ…"}
+              value={accessToken}
+              onChange={(e) => setAccessToken(e.target.value)}
+            />
+          </Field>
+          <Field label={t("ig.signoz.refresh")} hint={keepStored ? t("ig.signoz.sessionKeep") : undefined}>
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder={keepStored ? "••••••••••••" : ""}
+              value={refreshToken}
+              onChange={(e) => setRefreshToken(e.target.value)}
+            />
+          </Field>
+        </>
+      ) : (
+        <Field label={t("ig.signoz.token")} hint={keepStored ? t("ig.signoz.tokenKeep") : undefined}>
+          <input
+            type="password"
+            autoComplete="off"
+            placeholder={keepStored ? "••••••••••••" : "SIGNOZ-API-KEY"}
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+          />
+        </Field>
+      )}
       {st?.last_ok_at && (
         <p className="muted small">{t("ig.signoz.lastOk", { time: time(st.last_ok_at) })}</p>
       )}

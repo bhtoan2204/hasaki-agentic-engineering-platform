@@ -27,7 +27,11 @@ let server: Server;
 let base = "";
 let mode: "normal" | "slow" | "flaky" | "redirect" | "big" | "empty" = "normal";
 let flakyLeft = 0;
-const seen: Array<{ method: string; path: string; key: string; body: any }> = [];
+const seen: Array<{ method: string; path: string; key: string; body: any; bearer?: string }> = [];
+// Session auth: valid access tokens, and the one refresh token that may rotate (each rotation issues a new pair).
+const validAccess = new Set<string>();
+let liveRefresh = "";
+let rotations = 0;
 
 const ROWS = {
   logs: [
@@ -59,10 +63,20 @@ before(async () => {
     let raw = "";
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
-      const key = String(req.headers["signoz-api-key"] ?? "");
+      const bearer = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
+      const key = String(req.headers["signoz-api-key"] ?? "") || (validAccess.has(bearer) ? GOOD : "");
       const body = raw ? JSON.parse(raw) : null;
-      seen.push({ method: req.method!, path: req.url!, key, body });
+      seen.push({ method: req.method!, path: req.url!, key, body, bearer });
       const json = (code: number, b: unknown) => (res.writeHead(code, { "content-type": "application/json" }), res.end(JSON.stringify(b)));
+      if (req.url === "/api/v2/sessions/rotate") {
+        if (!body?.refreshToken || body.refreshToken !== liveRefresh)
+          return json(401, { status: "error", error: { code: "unauthenticated", message: "invalid token pair" } });
+        rotations++;
+        const pair = { accessToken: `acc-rotated-${rotations}`, refreshToken: `ref-rotated-${rotations}` };
+        validAccess.add(pair.accessToken);
+        liveRefresh = pair.refreshToken;
+        return json(200, { status: "success", data: { ...pair, tokenType: "Bearer", expiresIn: 3600 } });
+      }
       if (mode === "slow") return; // never answers: the client times out
       if (mode === "redirect") return (res.writeHead(302, { location: "http://169.254.169.254/" }), res.end());
       if (mode === "flaky" && flakyLeft-- > 0) return json(503, { status: "error", error: { code: "unavailable", message: "busy" } });
@@ -107,6 +121,53 @@ test("save tests the key first, stores it encrypted and never returns it", async
     assert.ok(seen.some((s) => s.path === "/api/v5/query_range" && s.key === GOOD), "probed query_range");
     // an empty token keeps the stored key
     assert.equal((await saveSignoz({ baseUrl: base, token: "", enabled: true })).token_set, true);
+  });
+});
+
+test("session tokens: an expired access token is rotated once, the new pair is stored and reused", async () => {
+  await asOwner(async () => {
+    liveRefresh = "ref-initial";
+    const st = await saveSignoz({
+      baseUrl: base,
+      auth: "session",
+      accessToken: "acc-expired",
+      refreshToken: "ref-initial",
+      enabled: true,
+    });
+    assert.equal(st.connected, true);
+    assert.equal(st.auth, "session");
+    assert.equal(rotations, 1, "rotated during the save probe");
+    assert.ok(!seen.some((s) => s.path === "/api/v1/service_accounts/me" && s.bearer), "no service-account probe for sessions");
+    assert.doesNotMatch(JSON.stringify(st), /acc-|ref-/);
+    const owner = await ensureTestOwner();
+    const row = await one<{ v: string }>(pool, "SELECT ciphertext AS v FROM user_secrets WHERE user_id = $1 AND kind = 'signoz'", [owner]);
+    assert.doesNotMatch(row!.v, /ref-rotated/, "encrypted at rest");
+
+    // The stored pair is the rotated one: the next call needs no rotation.
+    const before = rotations;
+    assert.equal((await testSignoz()).ok, true);
+    assert.equal(rotations, before);
+    assert.equal(seen.at(-1)?.bearer, "acc-rotated-1");
+
+    // Access expires again: one rotation with the stored refresh token, and the newer pair is stored.
+    validAccess.clear();
+    assert.equal((await testSignoz()).ok, true);
+    assert.equal(rotations, before + 1);
+    validAccess.delete(`acc-rotated-${rotations}`);
+    assert.equal((await testSignoz()).ok, true, "rotated again with the refresh token saved by the previous rotation");
+
+    // A refresh token SigNoz no longer accepts asks for new tokens.
+    validAccess.clear();
+    liveRefresh = "revoked";
+    const failed = await testSignoz();
+    assert.equal(failed.ok, false);
+    assert.equal(failed.kind, "auth_failed");
+    assert.match(String(failed.message), /new access and refresh token/);
+
+    // Empty fields keep the stored session; switching back to an API key works.
+    liveRefresh = `ref-rotated-${rotations}`;
+    assert.equal((await saveSignoz({ baseUrl: base, auth: "session", enabled: false })).token_set, true);
+    assert.equal((await saveSignoz({ baseUrl: base, auth: "api_key", token: GOOD, enabled: true })).auth, "api_key");
   });
 });
 

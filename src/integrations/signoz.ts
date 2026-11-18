@@ -6,16 +6,25 @@ import { BlockedDestinationError, HttpError, rateLimit, safeRequest, validateBas
 import { storeExternalSearch, type SearchScope } from "./splunk.ts";
 
 /**
- * SigNoz (logs, traces, metrics) through the documented v5 Query Range API (`POST /api/v5/query_range`,
- * header `SIGNOZ-API-KEY`). Each user stores their own base URL and API key (encrypted in user_secrets); a run uses its
- * owner's. Only documented request/response shapes are used — services and single traces are query_range queries too.
+ * SigNoz (logs, traces, metrics) through the documented v5 Query Range API (`POST /api/v5/query_range`).
+ * Each user stores their own base URL and credentials (encrypted in user_secrets); a run uses its owner's. Credentials
+ * are either an API key (header `SIGNOZ-API-KEY`) or a user session: an access token sent as `Authorization: Bearer`,
+ * renewed with the refresh token through `POST /api/v2/sessions/rotate` when SigNoz answers 401. Rotation returns a new
+ * pair, which is stored at once. Only documented request/response shapes are used.
  */
 
 const KIND = "signoz";
 
+type SignozAuth = "api_key" | "session";
+
 interface SignozConfig {
   baseUrl: string;
+  /** API key (auth "api_key"). */
   token: string;
+  /** Absent in configs saved before sessions were supported: those hold an API key. */
+  auth?: SignozAuth;
+  accessToken?: string;
+  refreshToken?: string;
   enabled: boolean;
   lastOkAt?: string;
   lastError?: string;
@@ -52,10 +61,14 @@ export async function loadSignoz() {
   }
 }
 
-/** Usable for the current actor: configured, enabled and holding a key. */
+const authOf = (c: SignozConfig): SignozAuth => c.auth ?? "api_key";
+const hasCredentials = (c: SignozConfig | null | undefined) =>
+  !!c && (authOf(c) === "session" ? !!c.accessToken && !!c.refreshToken : !!c.token);
+
+/** Usable for the current actor: configured, enabled and holding credentials. */
 export function signozEnabled() {
   const c = session.current;
-  return !!c && c.enabled && !!c.token;
+  return !!c && c.enabled && hasCredentials(c);
 }
 
 export function signozStatus() {
@@ -65,7 +78,8 @@ export function signozStatus() {
     enabled: !!c?.enabled,
     connected: signozEnabled(),
     base_url: c?.baseUrl ?? null,
-    token_set: !!c?.token,
+    auth: c ? authOf(c) : null,
+    token_set: hasCredentials(c),
     last_ok_at: c?.lastOkAt ?? null,
     last_error: c?.lastError ?? null,
   };
@@ -86,16 +100,28 @@ function errorMessage(text: string) {
   }
 }
 
-async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal) {
-  let res: { status: number; text: string };
+function authHeaders(cfg: SignozConfig): Record<string, string> {
+  return authOf(cfg) === "session"
+    ? { authorization: `Bearer ${cfg.accessToken ?? ""}` }
+    : { "SIGNOZ-API-KEY": cfg.token };
+}
+
+async function send(
+  cfg: SignozConfig,
+  method: "GET" | "POST",
+  path: string,
+  headers: Record<string, string>,
+  body?: unknown,
+  signal?: AbortSignal,
+) {
   try {
     await rateLimit(`signoz:${currentUserId() ?? 0}`);
-    res = await safeRequest(
+    return await safeRequest(
       {
         url: new URL(cfg.baseUrl + path),
         method,
         headers: {
-          "SIGNOZ-API-KEY": cfg.token,
+          ...headers,
           accept: "application/json",
           ...(body ? { "content-type": "application/json" } : {}),
         },
@@ -114,12 +140,65 @@ async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, bod
       throw new SignozError("connection_failed", `SigNoz answered ${e.status} (redirect refused): check the base URL`);
     throw new SignozError("connection_failed", `cannot reach SigNoz: ${(e as Error).message}`);
   }
+}
+
+// One rotation per refresh token at a time: concurrent 401s share it instead of spending the token twice.
+const rotations = new Map<string, Promise<void>>();
+
+/** Exchange the refresh token for a new pair, update `cfg` in place and store it when it is the saved config. */
+async function rotateSession(cfg: SignozConfig, signal?: AbortSignal) {
+  const refreshToken = cfg.refreshToken ?? "";
+  let pending = rotations.get(refreshToken);
+  if (!pending) {
+    pending = (async () => {
+      const res = await send(
+        cfg,
+        "POST",
+        "/api/v2/sessions/rotate",
+        authHeaders(cfg),
+        { refreshToken },
+        signal,
+      );
+      let data: { accessToken?: unknown; refreshToken?: unknown } | undefined;
+      try {
+        const json = res.text ? JSON.parse(res.text) : {};
+        data = json?.data ?? json;
+      } catch {
+        data = undefined;
+      }
+      if (res.status < 200 || res.status >= 300 || typeof data?.accessToken !== "string" || !data.accessToken)
+        throw new SignozError(
+          "auth_failed",
+          `the SigNoz session expired and could not be renewed (${res.status}): sign in to SigNoz and save a new access and refresh token`,
+        );
+      cfg.accessToken = data.accessToken;
+      if (typeof data.refreshToken === "string" && data.refreshToken) cfg.refreshToken = data.refreshToken;
+      if (session.current === cfg) await persist(cfg);
+    })().finally(() => rotations.delete(refreshToken));
+    rotations.set(refreshToken, pending);
+  }
+  await pending;
+}
+
+async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal) {
+  const sessionAuth = authOf(cfg) === "session";
+  let res = await send(cfg, method, path, authHeaders(cfg), body, signal);
+  if (res.status === 401 && sessionAuth) {
+    await rotateSession(cfg, signal);
+    res = await send(cfg, method, path, authHeaders(cfg), body, signal);
+  }
   const detail = errorMessage(res.text);
-  if (res.status === 401) throw new SignozError("auth_failed", "the API key was rejected (401)");
+  if (res.status === 401)
+    throw new SignozError(
+      "auth_failed",
+      sessionAuth ? "the SigNoz session was rejected (401) after renewing it" : "the API key was rejected (401)",
+    );
   if (res.status === 403 || /authz_forbidden/.test(res.text))
     throw new SignozError(
       "forbidden",
-      `the API key's service account lacks permission (403)${detail ? `: ${detail}` : ""}; grant a read role such as signoz-viewer`,
+      sessionAuth
+        ? `your SigNoz user lacks permission (403)${detail ? `: ${detail}` : ""}; ask for a read role such as viewer`
+        : `the API key's service account lacks permission (403)${detail ? `: ${detail}` : ""}; grant a read role such as signoz-viewer`,
     );
   if (res.status === 404 || res.status === 405)
     throw new SignozError("unsupported_api", `${path} is not available on this SigNoz (${res.status}): v5 query_range is required`);
@@ -137,20 +216,22 @@ async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, bod
 
 function current(): SignozConfig {
   const c = session.current;
-  if (!c?.token) throw new SignozError("not_configured", "SigNoz is not configured: add your domain and API key in Integrations");
+  if (!c || !hasCredentials(c))
+    throw new SignozError("not_configured", "SigNoz is not configured: add your domain and credentials in Integrations");
   if (!c.enabled) throw new SignozError("not_configured", "SigNoz is disabled in your Integrations settings");
   return c;
 }
 
-/** Key check (`/api/v1/service_accounts/me`) then a one-minute v5 query_range probe. */
+/** Key check (`/api/v1/service_accounts/me`, API keys only) then a one-minute v5 query_range probe. */
 async function probe(cfg: SignozConfig, signal?: AbortSignal) {
   const began = Date.now();
-  try {
-    await call(cfg, "GET", "/api/v1/service_accounts/me", undefined, signal);
-  } catch (e) {
-    // Versions without the service-account endpoint still answer query_range; only auth failures stop here.
-    if (!(e instanceof SignozError) || !["unsupported_api", "server_error"].includes(e.kind)) throw e;
-  }
+  if (authOf(cfg) === "api_key")
+    try {
+      await call(cfg, "GET", "/api/v1/service_accounts/me", undefined, signal);
+    } catch (e) {
+      // Versions without the service-account endpoint still answer query_range; only auth failures stop here.
+      if (!(e instanceof SignozError) || !["unsupported_api", "server_error"].includes(e.kind)) throw e;
+    }
   const end = Date.now();
   await call(cfg, "POST", "/api/v5/query_range", logsAggregate({ start: end - 60_000, end }, {}, [], "count()", 1), signal);
   return { latency_ms: Date.now() - began };
@@ -158,7 +239,8 @@ async function probe(cfg: SignozConfig, signal?: AbortSignal) {
 
 export async function testSignoz(signal?: AbortSignal) {
   const c = session.current;
-  if (!c?.token) return { ok: false, kind: "not_configured" as const, message: "SigNoz is not configured" };
+  if (!c || !hasCredentials(c))
+    return { ok: false, kind: "not_configured" as const, message: "SigNoz is not configured" };
   try {
     const r = await probe(c, signal);
     await persist({ ...c, lastOkAt: new Date().toISOString(), lastError: undefined });
@@ -170,8 +252,24 @@ export async function testSignoz(signal?: AbortSignal) {
   }
 }
 
-/** Validate, test (when enabled) and store. An empty token keeps the stored key. */
-export async function saveSignoz(input: { baseUrl?: unknown; token?: unknown; enabled?: unknown }) {
+const secretInput = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+function checkSecret(value: string, what: string, max: number) {
+  if (/\s/.test(value) || value.length > max) throw new SignozError("auth_failed", `the ${what} format is invalid`);
+}
+
+/**
+ * Validate, test (when enabled) and store. An empty credential keeps the stored one for the same auth mode.
+ * `auth: "session"` takes an access and a refresh token copied from a signed-in SigNoz browser session.
+ */
+export async function saveSignoz(input: {
+  baseUrl?: unknown;
+  auth?: unknown;
+  token?: unknown;
+  accessToken?: unknown;
+  refreshToken?: unknown;
+  enabled?: unknown;
+}) {
   const prior = session.current;
   let url: URL;
   try {
@@ -180,18 +278,42 @@ export async function saveSignoz(input: { baseUrl?: unknown; token?: unknown; en
     if (e instanceof BlockedDestinationError) throw new SignozError("blocked_destination", e.message);
     throw e;
   }
-  const token = typeof input.token === "string" && input.token.trim() ? input.token.trim() : prior?.token;
-  if (!token) throw new SignozError("not_configured", "an API key is required");
-  if (/\s/.test(token) || token.length > 512) throw new SignozError("auth_failed", "the API key format is invalid");
-  const next: SignozConfig = {
-    baseUrl: (url.origin + url.pathname).replace(/\/+$/, ""),
-    token,
-    enabled: input.enabled === undefined ? (prior?.enabled ?? true) : input.enabled === true,
-  };
+  const auth: SignozAuth =
+    input.auth === "session" || input.auth === "api_key"
+      ? input.auth
+      : secretInput(input.accessToken) || secretInput(input.refreshToken)
+        ? "session"
+        : prior
+          ? authOf(prior)
+          : "api_key";
+  const keep = prior && authOf(prior) === auth ? prior : undefined;
+  const baseUrl = (url.origin + url.pathname).replace(/\/+$/, "");
+  const enabled = input.enabled === undefined ? (prior?.enabled ?? true) : input.enabled === true;
+  let next: SignozConfig;
+  if (auth === "session") {
+    const accessToken = secretInput(input.accessToken) ?? keep?.accessToken;
+    const refreshToken = secretInput(input.refreshToken) ?? keep?.refreshToken;
+    if (!accessToken || !refreshToken)
+      throw new SignozError("not_configured", "an access token and a refresh token are required");
+    checkSecret(accessToken, "access token", 8192);
+    checkSecret(refreshToken, "refresh token", 8192);
+    next = { baseUrl, auth, token: "", accessToken, refreshToken, enabled };
+  } else {
+    const token = secretInput(input.token) ?? keep?.token;
+    if (!token) throw new SignozError("not_configured", "an API key is required");
+    checkSecret(token, "API key", 512);
+    next = { baseUrl, auth, token, enabled };
+  }
+  const sameCredentials =
+    !!keep &&
+    keep.baseUrl === next.baseUrl &&
+    keep.token === next.token &&
+    keep.accessToken === next.accessToken &&
+    keep.refreshToken === next.refreshToken;
   if (next.enabled) {
     await probe(next);
     next.lastOkAt = new Date().toISOString();
-  } else if (prior?.baseUrl === next.baseUrl && prior.token === next.token) next.lastOkAt = prior.lastOkAt;
+  } else if (sameCredentials) next.lastOkAt = keep!.lastOkAt;
   await persist(next);
   return signozStatus();
 }

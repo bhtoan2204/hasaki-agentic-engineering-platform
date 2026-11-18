@@ -1964,7 +1964,7 @@ export const routes: Route[] = [
       return clearSharedSplunkToken();
     },
   ],
-  // SigNoz: each user's own domain and API key (encrypted); the key is never returned.
+  // SigNoz: each user's own domain and API key or session tokens (encrypted); credentials are never returned.
   ["GET", /^\/api\/integrations\/signoz$/, () => signozStatus()],
   [
     "POST",
@@ -1975,7 +1975,10 @@ export const routes: Route[] = [
         await audit(actor.id, "integration.signoz.save", "integration", "signoz", {
           base_url: status.base_url,
           enabled: status.enabled,
-          token_changed: typeof body.token === "string" && !!body.token.trim(),
+          auth: status.auth,
+          token_changed: ["token", "accessToken", "refreshToken"].some(
+            (k) => typeof body[k] === "string" && !!body[k].trim(),
+          ),
         });
         return status;
       } catch (e) {
