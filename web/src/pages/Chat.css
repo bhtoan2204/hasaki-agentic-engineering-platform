@@ -66,7 +66,7 @@
   min-width: 0;
 }
 
-.chat-group + .chat-group {
+.chat-group+.chat-group {
   margin-top: var(--sp-2);
 }
 
@@ -238,7 +238,7 @@
 .chat-toolbar .chat-title {
   flex: 1 1 160px;
   font-weight: 650;
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -248,16 +248,16 @@
 .chat-thread {
   flex: 1;
   overflow: auto;
-  padding: var(--sp-4) var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
   scroll-behavior: smooth;
 }
 
 .chat-thread-inner {
-  width: min(760px, 100%);
+  width: min(1480px, 100%);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
 }
 
 .chat-block {
@@ -272,13 +272,38 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
   box-shadow: var(--shadow-1);
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+}
+
+.chat-bubble .md {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.chat-bubble .md p,
+.chat-bubble .md li {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.chat-bubble .md h1,
+.chat-bubble .md h2,
+.chat-bubble .md h3 {
+  font-size: 1.12em;
+  margin: 0.7em 0 0.35em;
+}
+
+.chat-bubble .md pre,
+.chat-bubble .md code {
+  font-size: 0.92em;
 }
 
 .chat-bubble.is-user {
   align-self: flex-end;
-  max-width: min(640px, 92%);
+  max-width: min(1100px, 88%);
   background: linear-gradient(135deg, var(--brand-50), var(--blush));
   border-color: color-mix(in srgb, var(--brand) 25%, var(--line));
 }
@@ -431,11 +456,13 @@
 }
 
 @keyframes chat-pulse {
+
   0%,
   100% {
     opacity: 0.35;
     transform: scale(0.9);
   }
+
   50% {
     opacity: 1;
     transform: scale(1.05);
@@ -445,21 +472,23 @@
 .chat-composer {
   border-top: 1px solid var(--line);
   background: var(--surface);
-  padding: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  width: min(820px, 100%);
+  gap: var(--sp-3);
+  width: min(1480px, 100%);
   margin: 0 auto;
   box-sizing: border-box;
 }
 
 .chat-composer textarea {
   width: 100%;
-  min-height: 72px;
-  max-height: 200px;
+  min-height: 88px;
+  max-height: 280px;
   resize: vertical;
   font: inherit;
+  font-size: var(--fs-lg);
+  line-height: 1.55;
 }
 
 .chat-composer-bar {
@@ -540,11 +569,13 @@
     grid-template-columns: 1fr;
     border-left: 0;
   }
+
   .chat-side {
     max-height: 220px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+
   .chat-main {
     min-height: 0;
   }
