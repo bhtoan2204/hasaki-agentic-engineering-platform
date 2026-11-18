@@ -192,6 +192,30 @@ export function StepAgentFields({
             }
           />
         </Field>
+        <Field label={en ? "Idle timeout (ms)" : "Dừng khi không hoạt động (ms)"}>
+          <input
+            type="number"
+            min={10000}
+            max={86400000}
+            value={value.idle_timeout_ms ?? ""}
+            placeholder={en ? "Platform default" : "Mặc định nền tảng"}
+            onChange={(e) =>
+              set("idle_timeout_ms", e.target.value ? Number(e.target.value) : undefined)
+            }
+          />
+        </Field>
+        <Field label={en ? "Tool call budget" : "Ngân sách lượt gọi tool"}>
+          <input
+            type="number"
+            min={1}
+            max={10000}
+            value={value.max_tool_calls ?? ""}
+            placeholder={en ? "Platform default" : "Mặc định nền tảng"}
+            onChange={(e) =>
+              set("max_tool_calls", e.target.value ? Number(e.target.value) : undefined)
+            }
+          />
+        </Field>
         <Field label={en ? "Retry attempts" : "Số lần thử tối đa"}>
           <input
             type="number"

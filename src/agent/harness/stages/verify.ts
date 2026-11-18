@@ -38,6 +38,7 @@ import {
   verifyWorkspaces,
 } from "../../verify.ts";
 import { EvidenceCache, pgEvidenceStore } from "../../verifyEvidence.ts";
+import { budgetStop } from "./budget.ts";
 
 /** Deterministic verification: the independent verdict gates, or the bounded verify-and-repair loop for implementation steps. */
 export async function verifyStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -390,6 +391,8 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
             );
           r = await run(`${freshPrompt()}\n\n${msg}`);
         }
+        const budgetStopped = budgetStop(s, r);
+        if (budgetStopped) return budgetStopped;
         if (r.isError)
           return {
             kind: "failed",

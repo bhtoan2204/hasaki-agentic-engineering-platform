@@ -56,6 +56,8 @@ export const StepAgentConfig = z
     options: AgentValues.shape.options,
     max_turns: z.number().int().min(1).max(500).optional(),
     timeout_ms: z.number().int().min(1000).max(86_400_000).optional(),
+    idle_timeout_ms: z.number().int().min(10_000).max(86_400_000).optional(),
+    max_tool_calls: z.number().int().min(1).max(10_000).optional(),
     retry: z
       .object({
         max_attempts: z.number().int().min(1).max(10),

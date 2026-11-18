@@ -35,6 +35,7 @@ import { normalizeProviderFailure, safeDiagnostics } from "../../telemetry.ts";
 import { integrationCatalog } from "../../toolRegistry.ts";
 import type { VerificationRound } from "../../verify.ts";
 import { TURN_ADAPTERS, type TurnResult } from "../turn.ts";
+import { budgetStop } from "./budget.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 
@@ -289,6 +290,18 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     await writeTelemetry({ provider_sessions: providerSessions });
   };
   const run: typeof runTurn = async (prompt, resumeId) => {
+    // Cost is only known when a turn ends: a later turn of this attempt (repair, rebuilt resume) starts within budget.
+    const spent = Object.values(providerSessions).reduce(
+      (sum, session) => sum + (Number(session.reported_cost_usd) || 0),
+      0,
+    );
+    if (s.budget.remainingUsd != null && spent > 0 && spent >= s.budget.remainingUsd)
+      return {
+        isError: true,
+        text: `this attempt reported $${spent.toFixed(2)}, the remaining budget was $${s.budget.remainingUsd.toFixed(2)}`,
+        assistantTurns: 0,
+        failure: "BUDGET_EXHAUSTED",
+      };
     sessionKey = randomUUID();
     sessionStart = Date.now();
     metrics.model = routed.model || (provider === "claude" ? "default" : "");
@@ -488,6 +501,8 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
       },
     };
   }
+  const budgetStopped = budgetStop(s, result);
+  if (budgetStopped) return budgetStopped;
   if (result.isError)
     return {
       kind: "failed",

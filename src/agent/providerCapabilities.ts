@@ -50,7 +50,7 @@ export type Guarantee =
   | "hook_bypass_detection"
   | "write_sandbox"
   | "network_isolation"
-  | "live_cost"
+  | "reported_cost"
   | "incomplete_detection"
   | "resume";
 
@@ -59,7 +59,7 @@ export const GUARANTEES: Record<AgentProvider, readonly Guarantee[]> = {
   claude: [
     "pre_tool_policy",
     "hook_bypass_detection",
-    "live_cost",
+    "reported_cost",
     "incomplete_detection",
     "resume",
   ],

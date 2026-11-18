@@ -65,7 +65,7 @@ test("ToolLoopDetector does not flag progressive calls with varying arguments", 
   assert.equal(detector.check("Grep", { pattern: "four", path: "src" }).isLoop, false);
 });
 
-test("decide integrates ToolLoopDetector to block looping calls", () => {
+test("decide records each call and blocks a looping one", () => {
   const loopDetector = new ToolLoopDetector({ consecutiveThreshold: 2 });
   const policy: PolicyContext = {
     mode: "coding",
@@ -74,11 +74,9 @@ test("decide integrates ToolLoopDetector to block looping calls", () => {
     loopDetector,
   };
 
+  // decide() records every decided call itself, for every provider.
   assert.equal(decide("Read", { file_path: "/wt/repo/file.ts" }, policy).allow, true);
-  loopDetector.record("Read", { file_path: "/wt/repo/file.ts" });
-
   assert.equal(decide("Read", { file_path: "/wt/repo/file.ts" }, policy).allow, true);
-  loopDetector.record("Read", { file_path: "/wt/repo/file.ts" });
 
   // 3rd call exceeds threshold of 2
   const decision = decide("Read", { file_path: "/wt/repo/file.ts" }, policy);

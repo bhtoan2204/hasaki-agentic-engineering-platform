@@ -429,13 +429,10 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
       input.agent_id,
     );
     if (d.allow) {
-      if (!input.tool_name.startsWith("mcp__platform__"))
-        policy.loopDetector?.record(input.tool_name, input.tool_input, "ok");
       hookAllowed.add(callKey(input.tool_name, input.tool_input));
       if (hookAllowed.size > 200) hookAllowed.delete(hookAllowed.values().next().value!);
       return {};
     }
-    policy.loopDetector?.record(input.tool_name, input.tool_input, "denied", d.reason);
     metrics.denied.push({
       tool: input.tool_name,
       reason: d.reason,

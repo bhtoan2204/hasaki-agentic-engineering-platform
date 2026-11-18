@@ -162,6 +162,8 @@ export interface PolicyContext {
   loopDetector?: ToolLoopDetector;
   /** The step may use web tools while it can write (`config.network: true`). */
   network?: boolean;
+  /** Native tool calls the attempt may still make across all its turns; platform tools are not counted. */
+  toolBudget?: { calls: number; limit: number; exhausted: boolean };
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -996,7 +998,21 @@ export function toolAllowed(tool: string, allowed?: string[] | null): boolean {
   return allowed == null || allowed.includes(logical);
 }
 
+/** The one pre-execution decision for every provider; the loop detector sees each decided call. */
 export function decide(
+  tool: string,
+  input: Record<string, unknown>,
+  ctx: PolicyContext,
+  cwd?: string,
+  agentId?: string,
+): Decision {
+  const d = decideTool(tool, input, ctx, cwd, agentId);
+  if (!d.allow) ctx.loopDetector?.record(tool, input, "denied", d.reason);
+  else if (!tool.startsWith("mcp__platform__")) ctx.loopDetector?.record(tool, input, "ok");
+  return d;
+}
+
+function decideTool(
   tool: string,
   input: Record<string, unknown>,
   ctx: PolicyContext,
@@ -1006,6 +1022,15 @@ export function decide(
   if (ctx.loopDetector) {
     const loop = ctx.loopDetector.check(tool, input);
     if (loop.isLoop) return deny(loop.reason!);
+  }
+  if (ctx.toolBudget && !tool.startsWith("mcp__platform__")) {
+    if (ctx.toolBudget.calls >= ctx.toolBudget.limit) {
+      ctx.toolBudget.exhausted = true;
+      return deny(
+        `tool budget of ${ctx.toolBudget.limit} calls is used up; submit your result with mcp__platform__submit_result or ask the developer`,
+      );
+    }
+    ctx.toolBudget.calls++;
   }
   if (ctx.micro) {
     const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(

@@ -44,6 +44,8 @@ export interface LifecycleState {
   metrics: AgentMetrics;
   cwd: string;
   independent: boolean;
+  // budget
+  budget: { remainingUsd: number | null; enforcement: "between_turns" | "preflight_only" };
   // checkpoint
   implementationStart: Awaited<ReturnType<typeof implementationBaseline>> | null;
   resume: { sessionId: string; fromAttempt?: number } | null;
