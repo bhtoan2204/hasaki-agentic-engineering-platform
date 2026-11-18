@@ -136,8 +136,12 @@ export async function verifyPublication(
       problems.push(`${step.key}: repository selection requires renewed authorization`);
       continue;
     }
+    // A selected repository the step left untouched has no workspace and nothing to publish.
     const trees = workspaces.filter((w) => ctx.run.selected_repositories.includes(w.repo));
-    if (trees.length !== ctx.run.selected_repositories.length) {
+    if (
+      !trees.length ||
+      Object.keys(step.output?.tested_heads ?? {}).some((repo) => !trees.some((w) => w.repo === repo))
+    ) {
       problems.push(`${step.key}: missing integration workspace`);
       continue;
     }

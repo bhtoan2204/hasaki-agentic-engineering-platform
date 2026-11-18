@@ -77,3 +77,42 @@ test("a repository with a test script or a test file still needs evidence that t
     await rm(file, { recursive: true });
   }
 });
+
+test("Go packages without test files are not applicable once go build passed", async () => {
+  const dir = await nodeRepo({
+    "go.mod": "module x\n",
+    "application/a.go": "package application\n",
+  });
+  const run = (output: string) =>
+    verifyWorkspaces(
+      [{ repo: "gw", path: dir }],
+      [dir],
+      { ...verifyConfig({ verify: { command: "go test ./..." } }, "x")!, baseline: null as null },
+      0,
+      new AbortController().signal,
+      { run: async () => ({ code: 0, output, timedOut: false }) },
+    ).then((r) => r.repos[0]);
+  try {
+    const none = await run(
+      "== go build ./...\n== go test -short ./application\n?   \tx/application\t[no test files]\n",
+    );
+    assert.equal(none.status, "not_applicable");
+    assert.equal(none.passed, true);
+    assert.equal(
+      (await run("== go test ./application\n?   \tx/application\t[no test files]\n")).status,
+      "not_executed",
+      "no go build evidence",
+    );
+    assert.equal(
+      (
+        await run(
+          "== go build ./...\n?   \tx/application\t[no test files]\nok  \tx/b\t0.1s [no tests to run]\n",
+        )
+      ).status,
+      "not_executed",
+      "a package with tests that ran none",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

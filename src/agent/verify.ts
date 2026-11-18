@@ -127,6 +127,13 @@ export async function staticChecksOnly(path: string, output: string) {
   return noTestRunner(path);
 }
 
+/** `go build` passed and every package `go test` covered has no test files: there is nothing to execute. */
+export function goNoTestFiles(output: string) {
+  if (!/^== go build /m.test(output)) return false;
+  const lines = output.split("\n").filter((l) => /^(\?|ok|FAIL|---)\s/.test(l));
+  return lines.length > 0 && lines.every((l) => /^\?\s+\S+\s+\[no test files\]\s*$/.test(l));
+}
+
 /** A Node repository without a real `test` script and without any tracked test file: no test can run there. */
 export async function noTestRunner(path: string) {
   const manifest = await readFile(resolve(path, "package.json"), "utf8").then((t) => JSON.parse(t), () => null);
@@ -951,6 +958,10 @@ export async function verifyWorkspaces(
             entry.status = "not_applicable";
             entry.note =
               "no executable tests apply: the repository has no test runner or test files; its typecheck and lint passed";
+          } else if (goNoTestFiles(r.output)) {
+            entry.status = "not_applicable";
+            entry.note =
+              "no executable tests apply: the changed Go packages have no test files; go build passed";
           } else if (cfg.staticChecksPassed?.includes(w.repo) && (await noTestRunner(p))) {
             entry.status = "not_applicable";
             entry.note =
