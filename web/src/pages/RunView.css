@@ -121,6 +121,17 @@
   background: var(--st-wait-bg);
 }
 
+.gn-pill-decision {
+  background: color-mix(in srgb, currentColor 12%, var(--surface));
+}
+
+/* A planned decision while the replay preview is open: outlined, not yet applied. */
+.gn-pill-preview {
+  background: transparent;
+  outline: 1px dashed currentColor;
+  outline-offset: -1px;
+}
+
 .node.gn.selected {
   border-color: var(--brand);
   box-shadow:
@@ -1513,4 +1524,33 @@ body.rv-resizing .react-flow {
 
 .si-branch-row span {
   overflow-wrap: anywhere;
+}
+/* Execution cards (checkpoints, harness lifecycle, decisions, reuse). */
+.ec-latest {
+  padding: 6px 0 8px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.ec-evidence,
+.ec-milestones {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.ec-milestone {
+  padding: 2px 0;
+}
+
+.ec-notes {
+  margin-top: 6px;
+}
+
+.ec-note {
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.ec-decision-badge.is-planned {
+  opacity: 0.75;
+  font-style: italic;
 }

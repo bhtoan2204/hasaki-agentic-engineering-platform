@@ -14,6 +14,9 @@ import {
   Stethoscope,
   Terminal,
   X,
+  Flag,
+  GitCompare,
+  ListOrdered,
 } from "lucide-react";
 import "./TraceExplorer.css";
 import { api } from "../api.ts";
@@ -22,7 +25,7 @@ import { useI18n } from "../i18n/index.tsx";
 
 interface TraceNode {
   id: string;
-  type: "run" | "step" | "attempt" | "tool" | "handoff";
+  type: "run" | "step" | "attempt" | "tool" | "handoff" | "stage" | "checkpoint" | "decision";
   label: string;
   status: string | null;
   startedAt: string | null;
@@ -321,7 +324,13 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
         ? GitBranch
         : type === "attempt"
           ? Activity
-          : Layers;
+          : type === "stage"
+            ? ListOrdered
+            : type === "checkpoint"
+              ? Flag
+              : type === "decision"
+                ? GitCompare
+                : Layers;
   const errorText =
     node?.attrs.error == null
       ? ""

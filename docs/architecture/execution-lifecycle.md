@@ -37,6 +37,8 @@ After the lifecycle ends, with a result or an exception, the executor writes one
 trace and timings, outcome and failure code, guarantees, tool calls used, reported cost and how it was enforced, verify
 rounds, checkpoint source, context pack size and the execution contract revision.
 
+The step inspector shows this evidence as a "Harness lifecycle" card. Trace Explorer shows the stages as `stage` nodes under the attempt, with cumulative offsets from its start. Replay, recovery and reuse decisions are recorded separately in `execution_decisions` (see [DAG replay](dag-replay.md#decision-log)).
+
 ## Provider turns
 
 `TURN_ADAPTERS` (`src/agent/harness/turn.ts`) maps each provider to one function that returns a `TurnResult`. The CLI

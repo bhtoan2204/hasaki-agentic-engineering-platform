@@ -43,6 +43,7 @@
     "smoke:work-item": "node --disable-warning=ExperimentalWarning test/work-item-settings.smoke.ts",
     "smoke:trace": "node --disable-warning=ExperimentalWarning test/trace-explorer.smoke.ts",
     "smoke:run-view": "node --disable-warning=ExperimentalWarning test/run-view.smoke.ts",
+    "smoke:observability": "node --disable-warning=ExperimentalWarning test/execution-observability.smoke.ts",
     "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts",
     "arch:check": "node --disable-warning=ExperimentalWarning scripts/arch-check.ts",
     "arch:baseline": "node --disable-warning=ExperimentalWarning scripts/arch-check.ts --write-baseline",

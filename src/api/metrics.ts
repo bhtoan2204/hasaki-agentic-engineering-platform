@@ -335,7 +335,8 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
  * many repairs it took, which failures keep recurring, and how often a human had to step in.
  */
 export async function harnessEvaluation(since: string, attemptOwn = "", own = "") {
-  const [verification, patterns, human, slop] = await Promise.all([
+  const decisionOwn = attemptOwn.replace("a.run_id", "d.run_id");
+  const [verification, patterns, human, slop, decisions] = await Promise.all([
     one<any>(
       pool,
       `SELECT count(*)::int AS coding_attempts,
@@ -388,6 +389,30 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
          FROM (SELECT a.metrics->'verification'->'slop' AS v FROM workflow_step_attempts a
                 WHERE a.metrics->'verification' ? 'slop' AND a.started_at > ${since} ${attemptOwn}) x`,
     ),
+    // Replay, recovery and reuse decisions; savings are estimates from the reused source attempt.
+    one<Record<string, number | null>>(
+      pool,
+      `SELECT count(*) FILTER (WHERE kind = 'context_reuse' AND outcome = 'applied')::int AS context_reuse,
+              count(*) FILTER (WHERE kind = 'verification_reuse' AND outcome = 'applied')::int AS verification_reuse,
+              count(*) FILTER (WHERE kind = 'review_reuse' AND outcome = 'applied')::int AS review_reuse,
+              count(*) FILTER (WHERE kind = 'replay' AND outcome = 'applied' AND action = 'REUSE')::int AS replay_reused,
+              count(*) FILTER (WHERE kind = 'replay' AND outcome = 'applied')::int AS replay_dispatched,
+              count(*) FILTER (WHERE kind = 'resume' AND outcome = 'applied')::int AS resumed,
+              count(*) FILTER (WHERE kind = 'resume')::int AS resume_attempts,
+              count(*) FILTER (WHERE kind = 'restore' AND outcome = 'applied')::int AS restores,
+              count(*) FILTER (WHERE kind = 'recovery' AND outcome = 'applied')::int AS recoveries,
+              round((percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE kind = 'replay' AND outcome = 'applied'))::numeric) AS replay_p50_ms,
+              round((percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE kind = 'replay' AND outcome = 'applied'))::numeric) AS replay_p95_ms,
+              round((percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE kind = 'recovery' AND outcome = 'applied' AND COALESCE((details->>'human')::boolean, false) = false))::numeric) AS recovery_p50_ms,
+              round((percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE kind = 'recovery' AND outcome = 'applied' AND COALESCE((details->>'human')::boolean, false) = false))::numeric) AS recovery_p95_ms,
+              sum(saved_invocations) FILTER (WHERE outcome = 'applied') AS avoided_invocations,
+              sum(saved_tokens) FILTER (WHERE outcome = 'applied') AS avoided_tokens,
+              sum(saved_ms) FILTER (WHERE kind = 'verification_reuse') AS verification_saved_ms,
+              round((percentile_cont(0.5) WITHIN GROUP (ORDER BY checkpoint_bytes) FILTER (WHERE kind = 'checkpoint'))::numeric) AS checkpoint_p50_bytes,
+              round((percentile_cont(0.95) WITHIN GROUP (ORDER BY checkpoint_bytes) FILTER (WHERE kind = 'checkpoint'))::numeric) AS checkpoint_p95_bytes,
+              max(checkpoint_bytes) FILTER (WHERE kind = 'checkpoint') AS checkpoint_max_bytes
+         FROM execution_decisions d WHERE d.created_at > ${since} ${decisionOwn}`,
+    ),
   ]);
   const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
   return {
@@ -400,6 +425,11 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
     human_intervention: { ...human, rate_pct: pct(human.with_human, human.runs) },
     // Upper-bound denominator: every scanned file is analysed at most twice (base and head).
     slop: { ...slop, cache_hit_rate_pct: pct(Number(slop?.cache_hits ?? 0), Number(slop?.files_scanned ?? 0) * 2) },
+    decisions: {
+      ...((decisions ?? {}) as Record<string, number | null>),
+      replay_reuse_rate_pct: pct(Number(decisions?.replay_reused ?? 0), Number(decisions?.replay_dispatched ?? 0)),
+      resume_success_rate_pct: pct(Number(decisions?.resumed ?? 0), Number(decisions?.resume_attempts ?? 0)),
+    } as Record<string, number | null>,
   };
 }
 

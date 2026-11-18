@@ -62,6 +62,8 @@ import { Transcript } from "./Transcript.tsx";
 import { ReportPanel } from "./Report.tsx";
 import { InvestigationOutput } from "./Investigations.tsx";
 import "./RunView.css";
+import { CheckpointsCard, DecisionBadge, DecisionsCard, HarnessCard } from "./ExecutionCards";
+import type { DecisionAction } from "../decisions";
 
 const AGENT_TYPES = ["agent", "coding_agent"];
 type Tab =
@@ -470,6 +472,7 @@ export function StepInspector({
   tick,
   activity = tick,
   onChanged,
+  onReplayPreview,
 }: {
   run: any;
   stepKey: string;
@@ -478,6 +481,8 @@ export function StepInspector({
   /** Bumped on every event of the run (incremental transcript fetches). */
   activity?: number;
   onChanged: () => void;
+  /** Planned replay decision per step key while the re-execute dialog shows a preview; null when it closes. */
+  onReplayPreview?: (plan: Record<string, string> | null) => void;
 }) {
   const { t } = useI18n();
   const { data, error, loading, reload, reloadFresh } = useApi<any>(
@@ -875,26 +880,27 @@ export function StepInspector({
                 run={run}
                 step={step}
                 onSubmit={(body) => action("reexecute", body, t("si.reopened"))}
+                onPreview={onReplayPreview}
               />
             )}
+            <HarnessCard
+              evidence={
+                artifacts
+                  .filter(
+                    (a: { kind: string; attempt_id: number | null }) =>
+                      a.kind === "harness_evidence" && a.attempt_id === attempt?.id,
+                  )
+                  .at(-1)?.data ?? null
+              }
+            />
             {checkpoints.length > 0 && (
-              <details style={{ marginTop: 8 }}>
-                <summary>{t("si.checkpoints", { n: checkpoints.length })}</summary>
-                {checkpoints.map((c: any) => (
-                  <div
-                    key={c.id}
-                    className="small"
-                    style={{
-                      padding: "3px 0",
-                      borderBottom: "1px dashed var(--line)",
-                    }}
-                  >
-                    <span className="muted">{time(c.created_at)}</span> <b>{c.reason}</b>{" "}
-                    <span className="mono">{JSON.stringify(c.data).slice(0, 300)}</span>
-                  </div>
-                ))}
-              </details>
+              <CheckpointsCard
+                views={data.checkpoint_view ?? []}
+                latest={data.latest_recoverable ?? null}
+                recovery={data.recovery_action ?? null}
+              />
             )}
+            <DecisionsCard decisions={data.decisions ?? []} />
           </div>
         )}
         {tab === "execution" &&
@@ -1824,14 +1830,24 @@ function ReexecuteInfo({ rx, prev }: { rx: any; prev?: number }) {
 }
 
 /** Re-execute this step with optional instructions + skills; shows which dependants will rerun / re-ask approval. */
+type ReplayPreviewStep = {
+  key: string;
+  action: DecisionAction;
+  reason: string;
+  conditional?: boolean;
+  estimate?: { invocations: number | null; tokens: number | null } | null;
+};
+
 function ReexecuteDialog({
   run,
   step,
   onSubmit,
+  onPreview,
 }: {
   run: any;
   step: any;
   onSubmit: (body: any) => Promise<unknown>;
+  onPreview?: (plan: Record<string, string> | null) => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -1845,9 +1861,19 @@ function ReexecuteDialog({
   const [force, setForce] = useState(false);
   const { data: preview, error: previewError, reload: reloadPreview } = useApi<{
     can_reexecute: boolean;
-    continuation: { action: string; reason: string } | null;
-    steps: Array<{ key: string; action: string; reason: string; conditional?: boolean }>;
+    continuation: { action: DecisionAction; reason: string } | null;
+    steps: ReplayPreviewStep[];
+    summary?: {
+      actions: Record<string, number>;
+      estimated_avoided: { invocations: number | null; tokens: number | null };
+    };
   }>(open ? `/api/runs/${run.id}/steps/${step.key}/replay-preview${force ? "?force=1" : ""}` : null, [open, force]);
+  // The run's DAG shows the planned decision of every node while this preview is open.
+  useEffect(() => {
+    if (!onPreview) return;
+    onPreview(open && preview ? Object.fromEntries(preview.steps.map((s) => [s.key, s.action])) : null);
+  }, [open, preview]);
+  useEffect(() => () => onPreview?.(null), []);
   if (!open)
     return (
       <div
@@ -1955,15 +1981,35 @@ function ReexecuteDialog({
         {previewError ? <ErrorBox error={previewError} onRetry={reloadPreview} /> : !preview ? <Loading /> : (
           <>
             {preview.continuation && (
-              <p className="small"><b>{preview.continuation.action}</b> · {preview.continuation.reason}</p>
+              <p className="small">
+                <DecisionBadge action={preview.continuation.action} /> · {preview.continuation.reason}
+              </p>
             )}
-            <ul className="small">
-              {preview.steps.map((item) => (
-                <li key={item.key}>
-                  <code>{item.key}</code> · <b>{item.action}</b>
-                  {item.conditional && ` (${t("si.replayConditional")})`} · {item.reason}
-                </li>
-              ))}
+            {preview.summary && (
+              <p className="small muted ec-preview-summary">
+                {t("rx.summary", {
+                  summary: Object.entries(preview.summary.actions)
+                    .map(([a, n]) => `${n} ${t(`dec.action.${a}`)}`)
+                    .join(", "),
+                })}
+                {preview.summary.estimated_avoided.tokens != null &&
+                  ` · ${t("rx.avoided", {
+                    calls: Math.round(preview.summary.estimated_avoided.invocations ?? 0),
+                    tokens: Math.round(preview.summary.estimated_avoided.tokens).toLocaleString(),
+                  })}`}
+              </p>
+            )}
+            <ul className="small ec-preview">
+              {[...preview.steps]
+                .sort((a, b) => a.action.localeCompare(b.action))
+                .map((item) => (
+                  <li key={item.key} className="ec-preview-step">
+                    <code>{item.key}</code> · <DecisionBadge action={item.action} />
+                    {item.conditional && ` (${t("si.replayConditional")})`} · {item.reason}
+                    {item.estimate?.tokens != null &&
+                      ` · ${t("rx.estimate", { tokens: Math.round(item.estimate.tokens).toLocaleString() })}`}
+                  </li>
+                ))}
             </ul>
           </>
         )}

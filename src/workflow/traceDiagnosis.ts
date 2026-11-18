@@ -10,7 +10,9 @@ export type FindingKind =
   | "retry_loop"
   | "stuck"
   | "bottleneck"
-  | "token_heavy";
+  | "token_heavy"
+  | "recovery_loop"
+  | "checkpoint_incompatible";
 
 export type FailureSource = "provider" | "tool" | "scheduler" | "workflow_engine" | "unknown";
 
@@ -70,6 +72,32 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
   const findings: Finding[] = [];
   const nodes = flatten(root);
   const attempts = nodes.filter((n) => n.type === "attempt");
+
+  for (const step of nodes.filter((n) => n.type === "step")) {
+    const decisions = flatten(step).filter((n) => n.type === "decision");
+    const recoveries = decisions.filter((d) => d.attrs.kind === "recovery" && d.status === "applied");
+    if (recoveries.length >= loopAttempts)
+      findings.push({
+        kind: "recovery_loop",
+        source: "scheduler",
+        category: null,
+        summary: `Step ${step.label} was recovered ${recoveries.length} times after interruptions.`,
+        evidence: [step.id, ...recoveries.map((d) => d.id)],
+        suggestion:
+          "Check why the worker keeps losing the lease (crash, restart, slow heartbeat) before retrying again; each recovery repeats work.",
+      });
+    const lastReconcile = decisions.filter((d) => d.attrs.kind === "reconcile" && d.status === "applied").at(-1);
+    if (lastReconcile && step.status === "WAITING_INPUT")
+      findings.push({
+        kind: "checkpoint_incompatible",
+        source: "workflow_engine",
+        category: null,
+        summary: `Step ${step.label} waits because its workspace no longer matches the execution checkpoint.`,
+        evidence: [step.id, lastReconcile.id],
+        suggestion:
+          "Inspect the preserved workspace archive and the current worktree, then answer the reconciliation question to continue.",
+      });
+  }
 
   for (const step of nodes.filter((n) => n.type === "step")) {
     const list = step.children.filter((c) => c.type === "attempt");

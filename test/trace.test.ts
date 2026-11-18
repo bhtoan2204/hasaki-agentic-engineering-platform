@@ -725,3 +725,92 @@ describe("migration 056", () => {
     assert.match(sql, /ON workflow_events\(created_at\) WHERE level = 'DEBUG'/);
   });
 });
+
+describe("harness stages, checkpoints and decisions in the trace", () => {
+  const decision = (id: number, over: Record<string, unknown>) =>
+    ({
+      id,
+      step_id: 10,
+      attempt_id: 100,
+      kind: "recovery",
+      action: "SAFE_RETRY",
+      outcome: "applied",
+      reason: "worker lease expired",
+      source_attempt_id: null,
+      latency_ms: 1200,
+      checkpoint_bytes: null,
+      saved_tokens: null,
+      created_at: t(11),
+      ...over,
+    }) as NonNullable<TraceInput["decisions"]>[number];
+
+  test("stages get cumulative offsets; only recoverable checkpoints become nodes; decisions nest by attempt or step", () => {
+    const root = assembleTrace(
+      input({
+        stages: [
+          {
+            attempt_id: 100,
+            stages: [
+              { stage: "preflight", ms: 1000, outcome: "continue" },
+              { stage: "execute", ms: 3000, outcome: "failed" },
+            ],
+          },
+        ],
+        checkpoints: [
+          { id: 1, attempt_id: 100, reason: "progress", created_at: t(2) },
+          { id: 2, attempt_id: 100, reason: "executor_returned", created_at: t(10) },
+        ],
+        decisions: [
+          decision(1, { kind: "checkpoint", action: "RECORD", checkpoint_bytes: 4096 }),
+          decision(2, {}),
+          decision(3, { attempt_id: null, kind: "replay", action: "REUSE", outcome: "planned" }),
+        ],
+      }),
+    );
+    const step = root.children[0];
+    const attempt = step.children.find((c) => c.id === "attempt:100")!;
+    const stages = attempt.children.filter((c) => c.type === "stage");
+    assert.deepEqual(
+      stages.map((s) => [s.label, s.startedAt, s.durationMs]),
+      [
+        ["preflight", t(1), 1000],
+        ["execute", t(2), 3000],
+      ],
+    );
+    const checkpoints = attempt.children.filter((c) => c.type === "checkpoint");
+    assert.deepEqual(
+      checkpoints.map((c) => [c.label, c.attrs.bytes]),
+      [["executor_returned", 4096]],
+    );
+    assert.equal(attempt.attrs.progressNotes, 1);
+    assert.deepEqual(
+      attempt.children.filter((c) => c.type === "decision").map((d) => [d.label, d.durationMs]),
+      [["recovery: SAFE_RETRY", 1200]],
+    );
+    assert.deepEqual(
+      step.children.filter((c) => c.type === "decision").map((d) => d.label),
+      ["replay: REUSE"],
+    );
+  });
+
+  test("diagnosis reports recovery loops and a step waiting on an incompatible checkpoint", () => {
+    const findings = diagnoseTrace(
+      assembleTrace(
+        input({
+          steps: [{ id: 10, key: "implement", type: "coding_agent", status: "WAITING_INPUT" }],
+          decisions: [
+            decision(1, {}),
+            decision(2, {}),
+            decision(3, { attempt_id: 101 }),
+            decision(4, { attempt_id: 101, kind: "reconcile", action: "RECONCILE" }),
+          ],
+        }),
+      ),
+    );
+    const loop = findings.find((f) => f.kind === "recovery_loop");
+    assert.ok(loop);
+    assert.ok(loop.evidence.includes("decision:1"));
+    const incompatible = findings.find((f) => f.kind === "checkpoint_incompatible");
+    assert.deepEqual(incompatible?.evidence, ["step:10", "decision:4"]);
+  });
+});

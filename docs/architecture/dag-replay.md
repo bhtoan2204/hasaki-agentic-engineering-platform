@@ -32,3 +32,23 @@ Run `node --import ./test/setup.ts test/replay.bench.ts`. The fixture uses local
 | Agent invocations | 56 | 0 |
 | Synthetic token count | 28,000 | 0 |
 | Eligible downstream reuse | 0/56 | 56/56 |
+
+## Decision log
+
+`execution_decisions` (migration 067, `src/workflow/decisions.ts`) records every replay, recovery and reuse decision, `planned` or `applied`, with its reason, source attempt, latency and estimated savings:
+
+- Re-execute stores the `planReplay` decision of each step as `planned`. Dispatch stores the REUSE, or the REEXECUTE miss, as `applied`.
+- Recovery stores SAFE_RETRY / REQUIRES_RECONCILIATION, with latency measured from the expired lease.
+- The harness stores:
+  - session RESUME, `applied` or `rejected` with a rebuilt context;
+  - RESTORE of missing worktrees;
+  - verification, review and context reuse.
+- Provider handoffs and workspace reconciliation are stored too.
+
+Savings (avoided invocations, tokens, cost) are what the reused source attempt reported. They are labelled as estimates and stay unknown when the source reported nothing. Recording never changes the decision.
+
+Where the decisions appear:
+- **Run view:** each DAG node shows the latest applied decision of its current generation, and the overview has an "Execution reuse" card.
+- **Re-execute dialog:** groups the preview by action with estimates. While the dialog is open, it colours the DAG nodes by their planned decision.
+- **Trace Explorer:** decisions, harness stages and recoverable checkpoints are nodes. The `recovery_loop` and `checkpoint_incompatible` diagnosis rules use them.
+- **Insights:** the harness section shows context, verification and replay reuse rates, the resume success rate, restores, replay and recovery latency (p50/p95; recoveries that waited for a human are excluded), estimated avoided work and checkpoint size.

@@ -25,3 +25,12 @@ node --env-file-if-exists=.env src/cli/export-workspace-checkpoint.ts ATTEMPT_ID
 ```
 
 Restore in an isolated, clean checkout at the recorded HEAD. Extract the two patch strings for the repository, apply the index patch with `git apply --cached`, and apply the tracked patch to the worktree with `git apply`. Skip empty patches. Decode the untracked entries into new regular files inside the checkout and restore their recorded modes. Reconcile the reconstructed changes with the registered worktree and confirm the recovery question before execution continues.
+
+## Observability
+
+The step inspector separates recoverable checkpoints from notes. Recoverable checkpoints are `executor_returned` plus the `waiting_input`, `waiting_approval` and `provider_handoff` pauses; they are shown as milestones. `progress`, `submit_result`, `skill_read` and `profile_*` rows are progress notes and are grouped apart. `src/workflow/checkpointView.ts` derives the following from rows already loaded, read-only:
+
+- the compatibility of each milestone: `compatible`, `stale_generation`, `invalidated`, `workspace_changed`, `legacy` or `unknown`;
+- the latest recoverable checkpoint, with its workspace fingerprint and archive size, context snapshot and hash, and verification digest.
+
+"Compatible" means no incompatibility was found in those rows; dispatch still runs the full binding and workspace checks. The recovery action shown comes from `planContinuation`. Each executor return records its checkpoint size, envelope plus encrypted workspace, as a `checkpoint` decision.

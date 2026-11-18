@@ -32,6 +32,7 @@ import { autoLayout, edgeEnds, placeSteps } from "./dagLayout.ts";
 import { useI18n } from "./i18n/index.tsx";
 // Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
 import "./pages/RunView.css";
+import { DECISION_COLORS, type DecisionAction } from "./decisions";
 
 /** Lucide icon per step type (graph nodes, inspector headers). */
 export const STEP_TYPE_ICONS: Record<string, LucideIcon> = {
@@ -153,6 +154,10 @@ export type StepNodeData = {
   generation?: number;
   /** After feedback: this step was invalidated and runs again, or its earlier result is reused. */
   replan?: "rerun" | "reused";
+  /** Latest applied replay/recovery decision of the current generation. */
+  decision?: { action: string; outcome: string; reason: string };
+  /** Planned decision while a replay preview is open. */
+  preview?: string;
   /** Open this step on pointerdown. A click is often swallowed by node drag. */
   onPick?: (key: string) => void;
 };
@@ -284,6 +289,24 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
           {data.replan === "reused" && (
             <span className="gn-pill" title={t("graph.reused")}>
               {t("graph.reused")}
+            </span>
+          )}
+          {data.decision && (
+            <span
+              className="gn-pill gn-pill-decision"
+              style={{ color: DECISION_COLORS[data.decision.action as DecisionAction] }}
+              title={`${data.decision.reason} (${data.decision.outcome})`}
+            >
+              {t(`dec.action.${data.decision.action}`)}
+            </span>
+          )}
+          {data.preview && (
+            <span
+              className="gn-pill gn-pill-preview"
+              style={{ color: DECISION_COLORS[data.preview as DecisionAction] }}
+              title={t("graph.planned", { action: t(`dec.action.${data.preview}`) })}
+            >
+              {t("graph.planned", { action: t(`dec.action.${data.preview}`) })}
             </span>
           )}
           {(data.generation ?? 1) > 1 && (

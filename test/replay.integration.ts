@@ -14,6 +14,7 @@ import {
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { decisionsOf } from "../src/workflow/decisions.ts";
+import { harnessEvaluation } from "../src/api/metrics.ts";
 
 after(async () => {
   await settleBackground();
@@ -136,6 +137,11 @@ test("replay reuses semantic descendants, recomputes changes and fences earlier 
     decisions.some((d) => d.kind === "checkpoint" && Number(d.checkpoint_bytes) > 0),
     "executor returns record their checkpoint size",
   );
+  const insights = (await harnessEvaluation("now() - interval '1 day'")).decisions;
+  assert.ok(Number(insights.replay_reused) >= 2, "child and grandchild reuse at dispatch");
+  assert.ok(Number(insights.replay_reuse_rate_pct) > 0);
+  assert.ok(Number(insights.checkpoint_max_bytes) > 0);
+  assert.ok(insights.replay_p50_ms != null);
 
   value = 2;
   await reexecuteStep(run.id, "root");

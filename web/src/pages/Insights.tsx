@@ -21,6 +21,7 @@ import {
   Users,
   Workflow,
   Wrench,
+  Recycle,
   type LucideIcon,
 } from "lucide-react";
 import { useApi, useLive } from "../api.ts";
@@ -973,12 +974,53 @@ function HarnessEvaluation({ e }: { e: any }) {
           </EmptyState>
         )}
       </Panel>
+      <ReuseRecovery d={e.decisions ?? {}} />
       <SlopDetection s={e.slop ?? {}} />
     </>
   );
 }
 
 /** Deterministic slop detection during verification: findings by baseline status and detector cost. */
+/** Replay, recovery and reuse decisions (execution_decisions); avoided work is an estimate from the source attempt. */
+function ReuseRecovery({ d }: { d: Record<string, unknown> }) {
+  const { t } = useI18n();
+  const ms = (x: unknown) => (num(x) == null ? "—" : `${fmtInt(num(x))} ms`);
+  const kb = (x: unknown) => (num(x) == null ? "—" : `${fmtNum(num(x)! / 1024, 1)} KB`);
+  const pair = (a: string, b: string) => `${a} / ${b}`;
+  return (
+    <Panel icon={Recycle} title={t("ins.decisions")} sub={t("reuse.estimated")}>
+      <div className="ins-metrics ins-decisions">
+        <Metric label={t("ins.contextReuse")} value={fmtInt(num(d.context_reuse))} tone="ok" />
+        <Metric label={t("ins.verificationReuse")} value={fmtInt(num(d.verification_reuse))} tone="ok" />
+        <Metric
+          label={t("reuse.reused")}
+          value={`${fmtInt(num(d.replay_reused))}${num(d.replay_reuse_rate_pct) == null ? "" : ` (${fmtNum(num(d.replay_reuse_rate_pct), 1)}%)`}`}
+          tone="ok"
+        />
+        <Metric
+          label={t("ins.resumeRate")}
+          value={num(d.resume_success_rate_pct) == null ? "—" : `${fmtNum(num(d.resume_success_rate_pct), 1)}%`}
+          tone="run"
+        />
+        <Metric label={t("ins.restores")} value={fmtInt(num(d.restores))} />
+        <Metric label={t("reuse.recovered")} value={fmtInt(num(d.recoveries))} tone="wait" />
+        <Metric label={t("ins.replayLatency")} value={pair(ms(d.replay_p50_ms), ms(d.replay_p95_ms))} />
+        <Metric label={t("ins.recoveryLatency")} value={pair(ms(d.recovery_p50_ms), ms(d.recovery_p95_ms))} />
+        <Metric
+          label={t("ins.avoided")}
+          title={t("reuse.estimated")}
+          value={`~${fmtInt(num(d.avoided_invocations))} · ~${fmtInt(num(d.avoided_tokens))} tok`}
+          tone="ok"
+        />
+        <Metric
+          label={t("ins.checkpointSize")}
+          value={[kb(d.checkpoint_p50_bytes), kb(d.checkpoint_p95_bytes), kb(d.checkpoint_max_bytes)].join(" / ")}
+        />
+      </div>
+    </Panel>
+  );
+}
+
 function SlopDetection({ s }: { s: Record<string, unknown> }) {
   const { t } = useI18n();
   return (

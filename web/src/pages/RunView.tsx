@@ -45,6 +45,8 @@ import { ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
 import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
+import { latestStepDecisions } from "../decisions";
+import { ReuseCard } from "./ExecutionCards";
 
 /** Display order of statuses in the run summary strip. */
 const STATUS_ORDER = [
@@ -147,6 +149,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   // tick: state changed (run, steps, cost, totals, changes); activity: any event (incremental transcript/timeline).
   const [tick, setTick] = useState(0);
   const [activity, setActivity] = useState(0);
+  const [replayPreview, setReplayPreview] = useState<Record<string, string> | null>(null);
   const live = useLive(id, (p) => {
     if (isStateChange(p)) {
       reload();
@@ -195,6 +198,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     const attempts: Record<string, number> = {};
     for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
     const lastReplan = (run.inputs?.replans as any[] | undefined)?.at(-1);
+    const decided = latestStepDecisions(run.decisions, run.steps);
     const rerun = new Set<string>(lastReplan?.invalidated ?? []);
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
@@ -238,12 +242,16 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 ? "reused"
                 : undefined
             : undefined,
+          decision: decided[s.key]
+            ? { action: decided[s.key].action, outcome: decided[s.key].outcome, reason: decided[s.key].reason }
+            : undefined,
+          preview: replayPreview?.[s.key],
           onPick: pickStep,
         },
       };
     });
     return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
-  }, [run, stepKey, pickStep, arranged, hasSavedLayout]);
+  }, [run, stepKey, pickStep, arranged, hasSavedLayout, replayPreview]);
   const fitViewOptions = useMemo(
     () => ({
       padding: 0.25,
@@ -670,6 +678,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               tick={tick}
               activity={activity}
               onChanged={reloadFresh}
+              onReplayPreview={setReplayPreview}
             />
           ) : (
             <div className="rv-pane">
@@ -726,6 +735,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <InvestigationRunCard run={run} />
               <ProfileCard run={run} />
               <RunTotals runId={id} tick={tick} />
+              <ReuseCard decisions={run.decisions} />
               <CostPanel kind="run" id={id} tick={tick} />
               {run.status === "PENDING" && <RepoPicker run={run} onDone={reload} />}
               <div className="rv-note">
