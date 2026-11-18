@@ -20,19 +20,29 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
   const server = createServer(handle);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
-    headless: true,
-  });
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   try {
-    const page = await browser.newPage();
+    browser = await chromium.launch({
+      executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
+      headless: true,
+      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+    });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.route("**/api/agent-providers*", (route) =>
       route.fulfill({
         json: AGENT_PROVIDERS.map((id) => ({
           id,
           ok: true,
-          models: [],
-          discovery: "unavailable",
+          models:
+            id === "claude"
+              ? [
+                  { slug: "sonnet", name: "Claude Sonnet", efforts: ["low", "medium", "high"] },
+                  { slug: "opus", name: "Claude Opus", efforts: ["low", "medium", "high", "max"] },
+                ]
+              : id === "codex"
+                ? [{ slug: "gpt-5-codex", name: "GPT-5 Codex", efforts: ["low", "medium", "high"] }]
+                : [],
+          discovery: id === "claude" || id === "codex" ? "available" : "unavailable",
           controls: providerControlState(id, { available: true, supportsModel: id !== "cursor" }),
         })),
       }),
@@ -45,6 +55,12 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
     await page.getByRole("heading", { name: "Provider configuration", exact: true }).waitFor();
     for (const provider of ["claude", "codex", "cursor", "antigravity", "copilot"])
       assert.equal(await page.getByRole("tab", { name: provider, exact: true }).count(), 1);
+    for (const profile of ["ANY PROFILE", "MICRO", "FAST", "STANDARD", "DEEP"])
+      assert.equal(await page.getByRole("tab", { name: profile, exact: true }).count(), 1);
+    // Combobox lets user pick from discovered catalog or type a custom model ID
+    await page.getByLabel("Open Default model options", { exact: true }).click();
+    await page.getByRole("option", { name: /Claude Sonnet/ }).click();
+    assert.equal(await page.getByLabel("Default model", { exact: true }).inputValue(), "sonnet");
     await page.getByLabel("Default model", { exact: true }).fill("saved-draft");
     await page.getByRole("tab", { name: "cursor", exact: true }).click();
     assert.equal(await page.getByLabel("Default model", { exact: true }).count(), 0);
@@ -56,7 +72,12 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
       await page.getByLabel("Default model", { exact: true }).inputValue(),
       "saved-draft",
     );
-    assert.equal(await page.locator(".agent-profile-role").count(), 15);
+    // Only the 3 roles of the active profile tab are rendered at once
+    assert.equal(await page.locator(".agent-profile-role").count(), 3);
+    assert.equal(
+      await page.getByText("Empty inherits from the next configuration level").count(),
+      0,
+    );
     await page.getByRole("button", { name: "Save provider", exact: true }).click();
     await page.getByText("Provider saved", { exact: true }).waitFor();
     await page.reload();
@@ -66,7 +87,19 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
       "saved-draft",
     );
     await page.getByRole("tab", { name: "codex", exact: true }).click();
+    await page.getByRole("tab", { name: "FAST", exact: true }).click();
     await page.getByLabel("FAST/agent model", { exact: true }).fill("gpt-profile");
+    assert.equal(
+      await page
+        .getByRole("tab", { name: "FAST", exact: true })
+        .locator(".agent-tab-badge")
+        .textContent(),
+      "1",
+    );
+    assert.equal(
+      await page.locator(".agent-profile-role").first().locator(".agent-role-badge").textContent(),
+      "Overridden",
+    );
     const saving = page.waitForRequest(
       (request) =>
         request.url().endsWith("/api/settings/agents/provider") && request.method() === "POST",
@@ -85,7 +118,8 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
   } finally {
     if (previousModel === undefined) delete process.env.CODEX_MODEL;
     else process.env.CODEX_MODEL = previousModel;
-    await browser.close();
+    await browser?.close();
+    server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await pool.end();
   }

@@ -1,6 +1,10 @@
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ChevronDown, X } from "lucide-react";
 import { Field } from "./ui.tsx";
 import type { AgentValues } from "./agentConfiguration.ts";
 export type { AgentValues } from "./agentConfiguration.ts";
+
 export interface AgentControls {
   model?: boolean | null;
   max_turns: boolean;
@@ -13,7 +17,290 @@ export interface AgentCatalogModel {
   efforts?: string[];
 }
 
-/** Shared capability-driven controls for provider defaults, profile mappings and step overrides. */
+export function resolveSupportedEfforts(
+  controls?: AgentControls,
+  models: AgentCatalogModel[] = [],
+  modelSlug?: string | null,
+): string[] {
+  const allowed = controls?.efforts ?? [];
+  if (!allowed.length) return [];
+  const selected = modelSlug ? models.find((model) => model.slug === modelSlug) : undefined;
+  if (!selected?.efforts?.length) return allowed;
+  const filtered = selected.efforts.filter((effort) => allowed.includes(effort));
+  return filtered.length ? filtered : allowed;
+}
+
+/**
+ * Single Combobox / Autocomplete for model selection:
+ * - Supports typing any custom model ID directly
+ * - Supports selecting from discovered catalog models, "Inherit", or "Account/CLI default"
+ */
+export function ModelCombobox({
+  value,
+  onChange,
+  models = [],
+  discovery,
+  ariaLabel,
+  placeholder = "Inherit",
+  disabled = false,
+}: {
+  value?: string | null;
+  onChange: (next: string | null | undefined) => void;
+  models?: AgentCatalogModel[];
+  discovery?: string;
+  ariaLabel: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filtering, setFiltering] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(
+    null,
+  );
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  const textValue = value ?? "";
+  const query = filtering ? textValue.trim().toLowerCase() : "";
+  const filteredModels = query
+    ? models.filter(
+        (m) =>
+          m.slug.toLowerCase().includes(query) || (m.name && m.name.toLowerCase().includes(query)),
+      )
+    : models;
+
+  const selectedCatalogModel = value ? models.find((model) => model.slug === value) : undefined;
+
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const el = wrapRef.current;
+      if (!el || !el.isConnected) {
+        setOpen(false);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setMenuRect({
+        top: r.bottom + 4,
+        left: r.left,
+        width: Math.max(r.width, 220),
+      });
+    };
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && !wrapRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+        setFiltering(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [open]);
+
+  const selectValue = (next: string | null | undefined) => {
+    onChange(next);
+    setOpen(false);
+    setFiltering(false);
+    setActiveIndex(-1);
+  };
+
+  type ComboOption = {
+    key: string;
+    label: string;
+    sub?: string;
+    val: string | null | undefined;
+    active: boolean;
+  };
+  const options: ComboOption[] = [
+    {
+      key: "__inherit__",
+      label: "Inherit",
+      sub: "Next configuration level",
+      val: undefined,
+      active: value === undefined,
+    },
+    {
+      key: "__account__",
+      label: "Account/CLI default",
+      sub: "External CLI default",
+      val: null,
+      active: value === null,
+    },
+    ...filteredModels.map((m) => ({
+      key: m.slug,
+      label: m.name && m.name !== m.slug ? m.name : m.slug,
+      sub: m.name && m.name !== m.slug ? m.slug : undefined,
+      val: m.slug,
+      active: value === m.slug,
+    })),
+  ];
+
+  const isOverridden = value !== undefined;
+
+  return (
+    <div className="agent-combobox-wrap" ref={wrapRef}>
+      <div
+        className={`agent-combobox${isOverridden ? " is-overridden" : ""}${open ? " is-open" : ""}`}
+      >
+        <input
+          ref={inputRef}
+          aria-label={ariaLabel}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={open ? listId : undefined}
+          aria-autocomplete="list"
+          autoComplete="off"
+          spellCheck={false}
+          disabled={disabled}
+          value={textValue}
+          placeholder={value === null ? "Account/CLI default" : placeholder}
+          onChange={(event) => {
+            const raw = event.target.value;
+            onChange(raw ? raw : undefined);
+            setFiltering(true);
+            setActiveIndex(-1);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              if (!open) {
+                setOpen(true);
+                setFiltering(false);
+                setActiveIndex(0);
+              } else {
+                setActiveIndex((i) => Math.min(options.length - 1, i + 1));
+              }
+            } else if (event.key === "ArrowUp" && open) {
+              event.preventDefault();
+              setActiveIndex((i) => Math.max(0, i - 1));
+            } else if (event.key === "Enter" && open && activeIndex >= 0 && options[activeIndex]) {
+              event.preventDefault();
+              selectValue(options[activeIndex].val);
+            } else if (event.key === "Escape" && open) {
+              event.preventDefault();
+              setOpen(false);
+              setFiltering(false);
+            }
+          }}
+          onBlur={() => {
+            // Defer closing so option mousedown can fire first if clicked
+            setTimeout(() => {
+              if (
+                !wrapRef.current?.contains(document.activeElement) &&
+                !menuRef.current?.contains(document.activeElement)
+              ) {
+                setOpen(false);
+                setFiltering(false);
+              }
+            }, 120);
+          }}
+        />
+        {value === null && (
+          <span className="agent-combo-mode-tag" title="Explicit Account/CLI default">
+            CLI default
+          </span>
+        )}
+        {value !== undefined && !disabled && (
+          <button
+            type="button"
+            tabIndex={-1}
+            className="agent-combo-clear"
+            aria-label={`Reset ${ariaLabel} to inherit`}
+            title="Reset to Inherit"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              selectValue(undefined);
+            }}
+          >
+            <X size={13} aria-hidden />
+          </button>
+        )}
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={disabled}
+          className="agent-combo-toggle"
+          aria-label={`Open ${ariaLabel} options`}
+          title="Select model"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            if (disabled) return;
+            setOpen((prev) => !prev);
+            setFiltering(false);
+            inputRef.current?.focus();
+          }}
+        >
+          <ChevronDown size={14} aria-hidden />
+        </button>
+      </div>
+      {discovery === "available" && value && !selectedCatalogModel && (
+        <small className="set-warn agent-combo-warn">
+          Custom model (not in current catalog); validated at execution.
+        </small>
+      )}
+      {open &&
+        menuRect &&
+        createPortal(
+          <div
+            id={listId}
+            ref={menuRef}
+            role="listbox"
+            aria-label={`${ariaLabel} suggestions`}
+            className="agent-combo-menu"
+            style={{
+              top: menuRect.top,
+              left: menuRect.left,
+              width: menuRect.width,
+            }}
+          >
+            {options.map((opt, idx) => (
+              <div
+                key={opt.key}
+                role="option"
+                aria-selected={opt.active}
+                className={`agent-combo-option${opt.active ? " is-selected" : ""}${idx === activeIndex ? " is-focused" : ""}`}
+                onMouseEnter={() => setActiveIndex(idx)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  selectValue(opt.val);
+                }}
+              >
+                <span className="agent-combo-option-main">{opt.label}</span>
+                {opt.sub && <span className="agent-combo-option-sub">{opt.sub}</span>}
+              </div>
+            ))}
+            {value && !selectedCatalogModel && (
+              <div
+                role="option"
+                aria-selected={true}
+                className="agent-combo-option is-selected is-custom"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  selectValue(value);
+                }}
+              >
+                <span className="agent-combo-option-main">Custom: {value}</span>
+                <span className="agent-combo-option-sub">Saved / custom ID</span>
+              </div>
+            )}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/** Shared capability-driven controls for provider defaults and step overrides. */
 export function AgentValueFields({
   value,
   onChange,
@@ -35,53 +322,22 @@ export function AgentValueFields({
     else Object.assign(result, { [key]: next });
     onChange(result);
   };
-  const selected = models.find((model) => model.slug === value.model);
-  const efforts = selected?.efforts ?? controls?.efforts ?? [];
+  const efforts = resolveSupportedEfforts(controls, models, value.model);
   const name = (text: string) => `${label}${label ? " " : ""}${text}`;
   return (
     <div className="agent-value-fields">
       {controls?.model !== false && (
-        <Field
-          label={name("model")}
-          hint={
-            value.model === null
-              ? "Account/CLI default (external)"
-              : "Empty inherits from the next configuration level"
-          }
-        >
-          <input
-            aria-label={name("model")}
-            value={value.model ?? ""}
+        <div className="field">
+          <span>{name("model")}</span>
+          <ModelCombobox
+            ariaLabel={name("model")}
+            value={value.model}
+            models={models}
+            discovery={discovery}
             placeholder="Inherit"
-            onChange={(event) => set("model", event.target.value || undefined)}
+            onChange={(next) => set("model", next)}
           />
-          <select
-            aria-label={name("model selection")}
-            value={value.model === null ? "__account__" : (value.model ?? "")}
-            onChange={(event) =>
-              set(
-                "model",
-                event.target.value === "__account__" ? null : event.target.value || undefined,
-              )
-            }
-          >
-            <option value="">Inherit</option>
-            <option value="__account__">Account/CLI default</option>
-            {value.model && !selected && (
-              <option value={value.model}>{value.model} (saved selection)</option>
-            )}
-            {models.map((model) => (
-              <option key={model.slug} value={model.slug}>
-                {model.name ?? model.slug}
-              </option>
-            ))}
-          </select>
-          {discovery === "available" && value.model && !selected && (
-            <small className="set-warn">
-              Model is absent from the current catalog; execution will validate availability.
-            </small>
-          )}
-        </Field>
+        </div>
       )}
       {controls?.model === false && value.model && (
         <p className="small set-warn">
@@ -108,7 +364,9 @@ export function AgentValueFields({
               </option>
             )}
             {efforts.map((effort) => (
-              <option key={effort}>{effort}</option>
+              <option key={effort} value={effort}>
+                {effort}
+              </option>
             ))}
           </select>
         </Field>
@@ -134,6 +392,7 @@ export function AgentValueFields({
           type="number"
           min={1000}
           max={86400000}
+          step={1000}
           value={value.timeout_ms ?? ""}
           placeholder="Inherit"
           onChange={(event) =>
@@ -167,6 +426,7 @@ export function AgentValueFields({
             min={1}
             max={8}
             value={value.options?.max_concurrent ?? ""}
+            placeholder="Inherit"
             onChange={(event) =>
               set("options", {
                 ...value.options,
