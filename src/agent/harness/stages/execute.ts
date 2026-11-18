@@ -34,6 +34,7 @@ import { TURN_ADAPTERS, type TurnResult } from "../turn.ts";
 import { budgetStop } from "./budget.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { noteDecision } from "../../../workflow/decisions.ts";
 
 /** Prompt assembly and the provider turn (resumed session first, rebuilt prompt when the session is gone). */
 export async function executeStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -395,6 +396,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
         `${k.key}:${ctx.context.disclosure.find((d) => d.key === k.key)?.disclosure ?? "inline"}`,
     );
   let result;
+  let resumeFailure: string | null = null;
   try {
     s.checkpointSource =
       resume && existsSync(cwd)
@@ -440,6 +442,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
           },
         );
         s.checkpointSource = "rebuilt";
+        resumeFailure = result.text;
         result = await run(
           buildUserPrompt(
             ctx.input,
@@ -473,6 +476,29 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
         await enqueueIndex(w.repo, ctx.run.id).catch(() => {});
     await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
   }
+
+  if (resume || ctx.input.pending?.resume)
+    await noteDecision({
+      runId: ctx.run.id,
+      stepId: ctx.step.id,
+      attemptId: ctx.attempt.id,
+      generation: ctx.attempt.generation,
+      kind: "resume",
+      action: "RESUME",
+      outcome: s.checkpointSource === "session_resume" ? "applied" : "rejected",
+      reason:
+        s.checkpointSource === "session_resume"
+          ? `continued ${provider} session`
+          : resumeFailure
+            ? `session resume failed (${resumeFailure.slice(0, 300)}); context rebuilt from the checkpoint`
+            : "no resumable session; context rebuilt from the checkpoint",
+      sourceAttemptId: resume?.fromAttempt ?? ctx.input.pending?.resume?.from_attempt_id ?? null,
+      details: {
+        provider,
+        session_id: resume?.sessionId ?? null,
+        fallback: s.checkpointSource === "session_resume" ? null : "rebuilt",
+      },
+    });
 
   // Verification rounds from before a pause (questions asked during a repair) keep counting against the budget.
   const rounds: VerificationRound[] = [

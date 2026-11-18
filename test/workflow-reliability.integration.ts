@@ -17,9 +17,11 @@ import {
   releaseAttempt,
   resumeRun,
   startRun,
+  stepDetail,
 } from "../src/workflow/engine.ts";
 import { claimJob } from "../src/workflow/scheduler.ts";
 import { settleBackground } from "../src/workflow/background.ts";
+import { decisionsOf } from "../src/workflow/decisions.ts";
 
 before(async () => {
   // Recovery uses scripted executors; installed CLI authentication is outside this fixture's contract.
@@ -148,6 +150,10 @@ test("expired lease rejects completion before reaper; safe replay retains histor
   assert.equal(state.attempts[0].status, "STALE");
   assert.equal(state.steps[0].attempt_count, 0);
   assert.equal(state.checkpoints[0].data.recovery.from_attempt_id, begun.attempt.id);
+  const [recovery] = (await decisionsOf(run.id)).filter((d) => d.kind === "recovery");
+  assert.equal(recovery.action, "SAFE_RETRY");
+  assert.equal(Number(recovery.attempt_id), Number(begun.attempt.id));
+  assert.ok(Number(recovery.latency_ms) >= 900, "measured from the expired lease");
   const next = (await claimJob("replacement", 300))!;
   const nextAttempt = (await beginAttempt(next, "replacement"))!;
   assert.equal(nextAttempt.attempt.number, 2);
@@ -270,6 +276,19 @@ test("interruption rollback retains pending handoff; committed reconciliation pr
   assert.equal(cp.session_id, "session-preserved");
   assert.equal(cp.cwd, "/tmp/preserved");
   assert.equal(state.questions.length, 1);
+  const recoveries = (await decisionsOf(run.id)).filter((d) => d.kind === "recovery");
+  assert.deepEqual(
+    recoveries.map((d) => [d.action, d.latency_ms]),
+    [["REQUIRES_RECONCILIATION", null]],
+    "one decision for the committed release; a graceful release has no lease latency",
+  );
+  const detail = await stepDetail(run.id, begun.step.key);
+  const pause = detail.checkpoint_view.find((c) => c.reason === "waiting_input")!;
+  assert.equal(pause.kind, "recoverable");
+  assert.ok(detail.checkpoint_view.some((c) => c.reason === "progress" && c.kind === "note"));
+  assert.equal(detail.latest_recoverable?.id, pause.id);
+  assert.equal(detail.recovery_action?.action, "RECONCILE");
+  assert.doesNotMatch(JSON.stringify(detail.checkpoint_view), /"result"/);
   // A fresh API read after recovery sees durable state; answering cannot bypass the pending handoff.
   await answerQuestions({ [state.questions[0].id]: "Reconciled — continue" });
   assert.equal((await rows(run.id)).questions[0].status, "answered");

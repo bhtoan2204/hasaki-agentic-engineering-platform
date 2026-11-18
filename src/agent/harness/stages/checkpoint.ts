@@ -18,6 +18,7 @@ import {
   verificationKey,
 } from "../../independentReview.ts";
 import { outputLocale } from "../../language.ts";
+import { noteDecision, savingsFrom } from "../../../workflow/decisions.ts";
 
 /** Checkpoint selection: implementation baseline, resumable session, and for independent review the prior verdict to reuse or re-review incrementally. */
 export async function checkpointStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -105,6 +106,19 @@ export async function checkpointStage(s: LifecycleState): Promise<ExecResult | v
         "system",
         `independent verification: PASS reused from attempt #${prior!.id} — same commits, diff, tests, scope and review policy`,
       );
+      await noteDecision({
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        attemptId: ctx.attempt.id,
+        generation: ctx.attempt.generation,
+        kind: "review_reuse",
+        action: "REUSE",
+        outcome: "applied",
+        reason: "same commits, diff, tests, scope and review policy",
+        sourceAttemptId: prior!.id,
+        saved: await savingsFrom(pool, prior!.id),
+        details: { verification_key: reviewKey },
+      });
       return {
         kind: "completed",
         output: {

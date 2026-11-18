@@ -28,6 +28,7 @@ import { localJobs } from "./local.ts";
 import { deferIfBranchBusy } from "./branchLeases.ts";
 import { settleBackground } from "./background.ts";
 import type { ExecResult, ExecutionFingerprint, JobRow } from "./types.ts";
+import { noteDecision } from "./decisions.ts";
 
 /**
  * WorkflowScheduler: PostgreSQL-backed job claiming. No in-memory queue: any number of processes can run
@@ -203,6 +204,7 @@ export async function processJob(
   let executorEntered = false;
   let fingerprint: ExecutionFingerprint | undefined;
   let reusedFrom: number | undefined;
+  let replayLatencyMs: number | undefined;
   try {
     const ownerId = Number(begun.run.owner_id);
     // Revalidate the owner's repository access before any protected content is touched (revocation, retries,
@@ -250,6 +252,12 @@ export async function processJob(
               const artifactId = prior?.workspace_artifact_id ??
                 handoff?.package?.execution_checkpoint?.workspace_artifact_id ??
                 handoff?.package?.workspace_artifact_id;
+              await noteDecision({
+                runId: begun.run.id, stepId: begun.step.id, attemptId: begun.attempt.id,
+                generation: begun.attempt.generation, kind: "reconcile", action: "RECONCILE", outcome: "applied",
+                reason: fingerprint ? "workspace differs from the execution checkpoint" : "workspace could not be inspected",
+                details: { source: handoff ? "provider_handoff" : "execution_checkpoint", workspace_artifact_id: artifactId ?? null },
+              });
               return {
                 kind: "waiting_input" as const,
                 checkpoint: { workspace_recovery: { artifact_id: artifactId ?? null } },
@@ -261,17 +269,27 @@ export async function processJob(
               };
             }
           }
+          const replayStarted = Date.now();
           fingerprint = await fingerprintExecution(pool, begun.run, begun.step, begun.attempt,
             begun.input, begun.context);
           if (scope.changed) fingerprint = { ...fingerprint, reusable: false };
           const previous = await findReplayResult(pool, begun.step, fingerprint);
           if (previous) {
             reusedFrom = previous.id;
+            replayLatencyMs = Date.now() - replayStarted;
             return { kind: "completed" as const, output: previous.output };
           }
-          if (begun.step.replay_source_attempt_id != null)
+          if (begun.step.replay_source_attempt_id != null) {
             await ctx.log("system", "Replay candidate did not match current execution inputs",
               { action: "REEXECUTE", source_attempt_id: begun.step.replay_source_attempt_id });
+            await noteDecision({
+              runId: begun.run.id, stepId: begun.step.id, attemptId: begun.attempt.id,
+              generation: begun.attempt.generation, kind: "replay", action: "REEXECUTE", outcome: "applied",
+              reason: "replay candidate did not match current execution inputs",
+              sourceAttemptId: begun.step.replay_source_attempt_id,
+              latencyMs: Date.now() - replayStarted,
+            });
+          }
           executorEntered = true;
           return getExecutor(begun.step.type).execute(ctx);
         },
@@ -324,7 +342,7 @@ export async function processJob(
         ...(result.kind === "completed" && { output_hash: replayOutputHash(output) }),
       };
     }
-    const replay = fingerprint ? { fingerprint, reusedFrom } : undefined;
+    const replay = fingerprint ? { fingerprint, reusedFrom, latencyMs: replayLatencyMs } : undefined;
     const recorded = await retryTransient(
       () => recordExecutorReturn(job, begun.attempt.id, result, workspace, replay),
       `record executor checkpoint ${job.id}`,

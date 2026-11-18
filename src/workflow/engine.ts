@@ -107,6 +107,13 @@ import type {
   WorkflowSpec,
 } from "./types.ts";
 import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
+import { decisionsOf, recordDecision, savingsFrom } from "./decisions.ts";
+import {
+  checkpointView,
+  isRecoverable,
+  latestRecoverable,
+  type CheckpointRowInput,
+} from "./checkpointView.ts";
 import {
   resolveProfile,
   classifyComplexity,
@@ -765,6 +772,26 @@ async function reexecuteTx(
   const plan = await planReplay(c, steps, target, force);
   const blockedReplay = plan.find((item) => item.action === "RECONCILE");
   if (blockedReplay) throw new EngineError(`Reconcile step "${blockedReplay.key}" before replaying its dependencies`, 409);
+  for (const item of plan) {
+    const s = byKey.get(item.key)!;
+    await recordDecision(c, {
+      runId: run.id,
+      stepId: s.id,
+      attemptId: s.current_attempt_id,
+      generation: s.generation,
+      kind: "replay",
+      action: item.action,
+      outcome: "planned",
+      reason: item.reason,
+      sourceAttemptId: item.source_attempt_id ?? null,
+      details: {
+        target: stepKey,
+        conditional: !!item.conditional,
+        invalidated: item.invalidated,
+        force,
+      },
+    });
+  }
   const aborted: number[] = [];
   const invalidate = async (s: StepRow, to: "PENDING" | "READY", forced: boolean, candidate?: number) => {
     aborted.push(...(await cancelStepJobs(c, s.id, `invalidated by re-execution of ${stepKey}`)));
@@ -821,12 +848,32 @@ export async function previewReplay(runId: number, stepKey: string, force = fals
   if (!target) throw new EngineError(`step "${stepKey}" not found`, 404);
   const stepsByKey = new Map(steps.map((s) => [s.key, s]));
   const plan = await planReplay(pool, steps, target, force);
+  // Estimated work a reuse would avoid: what the reused attempt reported when it ran.
+  const withEstimates = await Promise.all(
+    plan.map(async (item) => ({
+      ...item,
+      estimate:
+        item.action === "REUSE" && item.source_attempt_id
+          ? await savingsFrom(pool, item.source_attempt_id)
+          : null,
+    })),
+  );
+  const summary: Record<string, number> = {};
+  for (const item of plan) summary[item.action] = (summary[item.action] ?? 0) + 1;
+  const sum = (field: "invocations" | "tokens" | "cost_usd") => {
+    const known = withEstimates.map((i) => i.estimate?.[field]).filter((v): v is number => v != null);
+    return known.length ? known.reduce((a, b) => a + b, 0) : null;
+  };
   return {
     can_reexecute: run.status !== "CANCELED" && RETRYABLE.includes(target.status) &&
       !plan.some((item) => item.action === "RECONCILE") &&
       target.depends_on.every((key) => DONE.includes(stepsByKey.get(key)!.status)),
     continuation: await planContinuation(pool, target),
-    steps: plan,
+    steps: withEstimates,
+    summary: {
+      actions: summary,
+      estimated_avoided: { invocations: sum("invocations"), tokens: sum("tokens"), cost_usd: sum("cost_usd") },
+    },
   };
 }
 
@@ -2382,14 +2429,37 @@ export async function runDetail(runId: number) {
     artifacts,
     pull_requests: prs,
     workspaces,
-    checkpoints,
+    checkpoints: checkpoints.map((c) => ({
+      ...c,
+      kind: isRecoverable(String(c.reason)) ? "recoverable" : "note",
+    })),
+    decisions: await decisionsOf(runId),
   };
 }
 
 export async function stepDetail(runId: number, stepKey: string) {
   const detail = await loadStepDetail(runId, stepKey);
   if (!detail.step) throw new EngineError(`step "${stepKey}" not found`, 404);
-  return { ...detail, step: detail.step };
+  const step = detail.step;
+  const decisions = await decisionsOf(runId, step.id);
+  const views = detail.checkpoints.map((row) =>
+    checkpointView(row as unknown as CheckpointRowInput, {
+      stepGeneration: step.generation,
+      attempts: detail.attempts as Parameters<typeof checkpointView>[1]["attempts"],
+      artifacts: detail.artifacts as Parameters<typeof checkpointView>[1]["artifacts"],
+      reconciledAt: decisions.filter((d) => d.kind === "reconcile" && d.outcome === "applied"),
+    }),
+  );
+  // An integrity failure of the wait checkpoint is shown as "no recovery action", never as a read error.
+  const continuation = await planContinuation(pool, step).catch(() => null);
+  return {
+    ...detail,
+    step,
+    checkpoint_view: views,
+    latest_recoverable: latestRecoverable(views),
+    recovery_action: continuation,
+    decisions,
+  };
 }
 
 /**
@@ -2634,6 +2704,17 @@ async function persistProviderPause(
     handoff_id: handoff.id,
     status: handoff.status,
     failure_category: p.failure,
+  });
+  await recordDecision(c, {
+    runId: run.id,
+    stepId: step.id,
+    attemptId: attempt.id,
+    generation: attempt.generation,
+    kind: "recovery",
+    action: "HANDOFF",
+    outcome: "planned",
+    reason,
+    details: { handoff_id: handoff.id, status: handoff.status, failure_category: p.failure ?? null },
   });
   await advance(c, run.id, afterCommit);
 }
@@ -3071,6 +3152,19 @@ export async function resumeProviderHandoff(
       "UPDATE provider_handoffs SET status='RESUMED',target_provider=$2,resumed_at=now(),resumed_by=$3,automatic=$4,blocked_reason=NULL WHERE id=$1",
       [h.id, input.provider, actorId, automatic],
     );
+    await recordDecision(c, {
+      runId,
+      stepId: s.id,
+      attemptId: h.source_attempt_id,
+      generation: s.generation,
+      kind: "recovery",
+      action: "HANDOFF",
+      outcome: "applied",
+      reason: `${h.original_provider} → ${input.provider}`,
+      sourceAttemptId: h.source_attempt_id,
+      latencyMs: h.created_at ? Date.now() - new Date(h.created_at).getTime() : null,
+      details: { handoff_id: h.id, automatic, human: !automatic },
+    });
     await q(c, "UPDATE workflow_steps SET agent_override=$2 WHERE id=$1", [s.id, json(override)]);
     const sealed = await readExecutionCheckpoint(c, h.source_attempt_id);
     await setStepStatus(

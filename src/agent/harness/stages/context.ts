@@ -20,6 +20,7 @@ import {
 import { integrationTools } from "../../toolRegistry.ts";
 import { verifyConfig } from "../../verify.ts";
 import { TEST_COMMAND } from "../../../workflow/templates.ts";
+import { noteDecision } from "../../../workflow/decisions.ts";
 
 /** Tool policy, routing, metrics and the context pack (reused when its inputs are unchanged). */
 export async function contextStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -120,4 +121,21 @@ export async function contextStage(s: LifecycleState): Promise<ExecResult | void
       return { kind: "failed", error: error.message, retryable: false };
     throw error;
   }
+  const reusedPack = ctx.context.contextPack?.retrieval_cache?.reused_from_pack;
+  if (reusedPack)
+    await noteDecision({
+      runId: ctx.run.id,
+      stepId: ctx.step.id,
+      attemptId: ctx.attempt.id,
+      generation: ctx.attempt.generation,
+      kind: "context_reuse",
+      action: "REUSE",
+      outcome: "applied",
+      reason: `code retrieval reused from context pack #${reusedPack}`,
+      details: {
+        reused_from_pack: reusedPack,
+        reread_count: ctx.context.contextPack?.retrieval_cache?.reread_count ?? 0,
+        tokens: ctx.context.contextPack?.estimated_tokens ?? null,
+      },
+    });
 }

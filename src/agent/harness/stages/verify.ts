@@ -39,6 +39,7 @@ import {
 } from "../../verify.ts";
 import { EvidenceCache, pgEvidenceStore } from "../../verifyEvidence.ts";
 import { budgetStop } from "./budget.ts";
+import { noteDecision } from "../../../workflow/decisions.ts";
 
 /** Deterministic verification: the independent verdict gates, or the bounded verify-and-repair loop for implementation steps. */
 export async function verifyStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -407,6 +408,21 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
     });
     const summary = verificationSummary(vcfg, loop);
     metrics.verification = summary;
+    const reused = (summary as { evidence?: { reused?: number; hits?: number; saved_ms?: number } })
+      .evidence;
+    if (reused?.reused || reused?.hits)
+      await noteDecision({
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        attemptId: ctx.attempt.id,
+        generation: ctx.attempt.generation,
+        kind: "verification_reuse",
+        action: "REUSE",
+        outcome: "applied",
+        reason: `verification evidence reused ${reused.reused ?? reused.hits} time(s)`,
+        savedMs: reused.saved_ms ?? null,
+        details: { evidence: reused },
+      });
     await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
     if (loop.outcome === "canceled") throw new Error("verification canceled");
     if (loop.stop) return loop.stop;

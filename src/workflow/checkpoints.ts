@@ -1,4 +1,5 @@
 import { runEvents } from "./events.ts";
+import { recordDecision, savingsFrom } from "./decisions.ts";
 import { HttpError } from "../http/error.ts";
 import { createHash } from "node:crypto";
 import { config } from "../config.ts";
@@ -199,7 +200,7 @@ export async function recordExecutorReturn(
   attemptId: number,
   result: ExecResult,
   workspace?: WorkspaceCheckpoint,
-  replay?: { fingerprint: ExecutionFingerprint; reusedFrom?: number },
+  replay?: { fingerprint: ExecutionFingerprint; reusedFrom?: number; latencyMs?: number },
 ) {
   return withTx(async (db) => {
     const run = await one(
@@ -248,17 +249,57 @@ export async function recordExecutorReturn(
         )
       : undefined;
     await insertCheckpoint(db, source, "executor_returned", {}, result, workspace, artifact?.id);
+    const size = await one<{ bytes: number | null }>(
+      db,
+      "SELECT octet_length(execution::text) AS bytes FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='executor_returned'",
+      [attemptId],
+    );
+    await recordDecision(db, {
+      runId: source.run_id,
+      stepId: source.step_id,
+      attemptId,
+      generation: source.generation,
+      kind: "checkpoint",
+      action: "RECORD",
+      outcome: "applied",
+      reason: workspace?.unavailable
+        ? "executor returned; workspace evidence unavailable"
+        : "executor returned",
+      checkpointBytes: Number(size?.bytes ?? 0) + (workspace?.encryptedContent?.length ?? 0),
+      details: {
+        milestone: "executor_returned",
+        workspace_artifact_id: artifact?.id ?? null,
+        workspace_unavailable: !!workspace?.unavailable,
+        envelope_bytes: Number(size?.bytes ?? 0),
+        workspace_bytes: workspace?.encryptedContent?.length ?? 0,
+      },
+    });
     await q(
       db,
       `UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()),
          execution_fingerprint=$2, reused_from_attempt_id=$3 WHERE id=$1`,
       [attemptId, json(replay?.fingerprint ?? null), replay?.reusedFrom ?? null],
     );
-    if (replay?.reusedFrom != null)
+    if (replay?.reusedFrom != null) {
       await runEvents.add(db, source.run_id, "system", "Reused compatible execution result",
         source.step_id, attemptId, {
           action: "REUSE", source_attempt_id: replay.reusedFrom, fingerprint: replay.fingerprint.digest,
         });
+      await recordDecision(db, {
+        runId: source.run_id,
+        stepId: source.step_id,
+        attemptId,
+        generation: source.generation,
+        kind: "replay",
+        action: "REUSE",
+        outcome: "applied",
+        reason: "compatible execution result reused",
+        sourceAttemptId: replay.reusedFrom,
+        latencyMs: replay.latencyMs ?? null,
+        saved: await savingsFrom(db, replay.reusedFrom),
+        details: { fingerprint: replay.fingerprint.digest },
+      });
+    }
     await q(
       db,
       `WITH retired AS (

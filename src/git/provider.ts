@@ -631,6 +631,7 @@ export async function restoreMissingWorkspaces(
     en: boolean;
     approvedReleases?: string[];
     checkLive?: () => Promise<void>;
+    onRestored?: (w: { repo: string; path: string; branch: string }, ms: number) => Promise<void>;
   },
 ): Promise<ExecResult | null> {
   const { log, checkLive, approvedReleases } = opts;
@@ -643,6 +644,7 @@ export async function restoreMissingWorkspaces(
   const conflicts: WorkspaceConflict[] = [];
   for (const w of await workspacesOf(run.id)) {
     if (existsSync(w.path) || (repos.length && !repos.includes(w.repo))) continue;
+    const started = Date.now();
     try {
       await prepareWorkspace(run, w.repo, live, { log, approvedReleases });
     } catch (e) {
@@ -660,6 +662,7 @@ export async function restoreMissingWorkspaces(
     await log(
       `restored missing worktree ${w.repo} at ${w.path} on ${w.branch} (committed work kept; uncommitted changes in the deleted directory are lost)`,
     );
+    await opts.onRestored?.(w, Date.now() - started);
   }
   return conflicts.length ? workspaceConflictQuestion(conflicts, opts.en) : null;
 }

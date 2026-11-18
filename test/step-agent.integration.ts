@@ -38,6 +38,7 @@ import { runWorkingDirectory } from "../src/repos/workspaces.ts";
 import { resumableSession } from "../src/agent/claude.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { copilotAgentTurn } from "../src/agent/copilot/run.ts";
+import { decisionsOf } from "../src/workflow/decisions.ts";
 import type { HarnessEvidence } from "../src/agent/harness/evidence.ts";
 import { handle } from "../src/http/app.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
@@ -798,6 +799,27 @@ test("a Copilot tool that skipped the PreToolUse hook stops the turn even after 
     assert.equal(result.isError, true, JSON.stringify(result));
     assert.equal(result.failure, "UNSAFE_SIDE_EFFECT");
     assert.ok(Date.now() - started < 25_000);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a continuation without a resumable session records a rejected RESUME and the rebuilt context", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex");
+  try {
+    ctx.input.pending = {
+      resume: {
+        from_attempt_id: ctx.attempt.id,
+        checkpoint: { session_id: "gone", cwd: "/tmp/gone", workspaces: [], mode: "analysis" },
+      },
+    };
+    await claudeExecutor.execute(ctx);
+    const [resume] = (await decisionsOf(ctx.run.id)).filter((d) => d.kind === "resume");
+    assert.equal(resume.action, "RESUME");
+    assert.equal(resume.outcome, "rejected");
+    assert.match(resume.reason, /rebuilt from the checkpoint/);
+    assert.equal(resume.details.fallback, "rebuilt");
   } finally {
     restore();
     await cancelRun(ctx.run.id);

@@ -23,6 +23,7 @@ import { attemptIsLive } from "../../platformTools.ts";
 import { selectedSkills } from "../../skillTracing.ts";
 import { resolveStepAgent } from "../../stepAgent.ts";
 import { normalizeProviderFailure } from "../../telemetry.ts";
+import { noteDecision } from "../../../workflow/decisions.ts";
 
 /** Readiness before any agent turn: configuration, repositories, provider capability, workspaces, MICRO admission. */
 export async function preflightStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -214,6 +215,19 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
     );
     return restoreMissingWorkspaces(ctx.run, ctx.run.selected_repositories, {
       log: (m) => ctx.log("system", m),
+      onRestored: (w, ms) =>
+        noteDecision({
+          runId: ctx.run.id,
+          stepId: ctx.step.id,
+          attemptId: ctx.attempt.id,
+          generation: ctx.attempt.generation,
+          kind: "restore",
+          action: "RESTORE",
+          outcome: "applied",
+          reason: `restored missing worktree ${w.repo} on ${w.branch}; committed work kept`,
+          latencyMs: ms,
+          details: { repo: w.repo, branch: w.branch },
+        }),
       en: outputLocale(ctx.run) === "en",
       approvedReleases: (ctx.input.pending?.workspace_release?.holders ?? []) as string[],
       checkLive: async () => {

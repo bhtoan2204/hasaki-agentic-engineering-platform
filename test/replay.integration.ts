@@ -13,6 +13,7 @@ import {
 } from "../src/workflow/engine.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { drain } from "../src/workflow/scheduler.ts";
+import { decisionsOf } from "../src/workflow/decisions.ts";
 
 after(async () => {
   await settleBackground();
@@ -77,6 +78,14 @@ test("replay reuses semantic descendants, recomputes changes and fences earlier 
     ],
   );
   assert.equal((await getRun(run.id)).steps[1].generation, before.steps[1].generation);
+  assert.deepEqual(preview.summary.actions, { FORCE_REEXECUTE: 1, REUSE: 3, REEXECUTE: 1 });
+  assert.ok("estimated_avoided" in preview.summary);
+  assert.equal(
+    (await q(pool, "SELECT 1 FROM execution_decisions WHERE run_id=$1 AND kind='replay'", [run.id]))
+      .length,
+    0,
+    "a preview records nothing",
+  );
   await reexecuteStep(run.id, "root");
   await drain();
   const replayed = await getRun(run.id);
@@ -103,6 +112,29 @@ test("replay reuses semantic descendants, recomputes changes and fences earlier 
   assert.equal(
     replayed.steps.find((s) => s.key === "outside")?.current_attempt_id,
     before.steps.find((s) => s.key === "outside")?.current_attempt_id,
+  );
+  const decisions = await decisionsOf(run.id);
+  assert.deepEqual(
+    decisions
+      .filter((d) => d.kind === "replay" && d.outcome === "planned")
+      .map((d) => [d.step_key, d.action]),
+    [
+      ["root", "FORCE_REEXECUTE"],
+      ["outside", "REUSE"],
+      ["child", "REUSE"],
+      ["unrestricted", "REEXECUTE"],
+      ["grandchild", "REUSE"],
+    ],
+  );
+  const applied = decisions.find(
+    (d) => d.kind === "replay" && d.outcome === "applied" && d.step_key === "child",
+  );
+  assert.equal(applied?.action, "REUSE");
+  assert.equal(Number(applied?.source_attempt_id), Number(original.current_attempt_id));
+  assert.ok(applied?.latency_ms != null && applied.latency_ms >= 0);
+  assert.ok(
+    decisions.some((d) => d.kind === "checkpoint" && Number(d.checkpoint_bytes) > 0),
+    "executor returns record their checkpoint size",
   );
 
   value = 2;

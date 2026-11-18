@@ -7,6 +7,7 @@ import { outputLocale } from "../agent/language.ts";
 import { pool, q, one, withTx, json } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
 import { lockRun, setStepStatus, type AfterCommit } from "./mutations.ts";
+import { recordDecision } from "./decisions.ts";
 import { advance } from "./progression.ts";
 import type { AttemptRow, ExecResult, JobRow, RunRow, StepRow } from "./types.ts";
 
@@ -169,6 +170,26 @@ async function recoverInterrupted(
     step.id,
     attempt.id,
   );
+  const expired = job.lease_expires_at ? new Date(job.lease_expires_at).getTime() : NaN;
+  await recordDecision(c, {
+    runId: run.id,
+    stepId: step.id,
+    attemptId: attempt.id,
+    generation: attempt.generation,
+    kind: "recovery",
+    action: safe ? "SAFE_RETRY" : "REQUIRES_RECONCILIATION",
+    outcome: "applied",
+    reason,
+    // Time from the lost lease to the recovery decision; a graceful release has no expiry to measure from.
+    latencyMs: Number.isFinite(expired) && expired <= Date.now() ? Date.now() - expired : null,
+    details: {
+      question_id: checkpoint.recovery.question_id,
+      execution_checkpoint: !!execution,
+      wait_checkpoint: !!cp,
+      session: !!session,
+      handoff_blocked: !!handoff,
+    },
+  });
 }
 
 /**
