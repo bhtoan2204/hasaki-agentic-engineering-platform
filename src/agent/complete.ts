@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
-import { agentEnvironment } from "./environment.ts";
+import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
 import { accumulateMetrics, newMetrics } from "./metrics.ts";
 import { codexComplete } from "./codex/run.ts";
 import { cursorComplete } from "./cursor/run.ts";
@@ -75,6 +75,8 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
         abortController: ac,
       },
     })) {
+      const paid = paidClaudeAuth(msg);
+      if (paid) throw new Error(paidClaudeAuthMessage(paid));
       accumulateMetrics(metrics, msg);
       if (msg.type === "result" && msg.subtype === "success") text = msg.result;
     }

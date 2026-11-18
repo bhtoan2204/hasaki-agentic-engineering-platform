@@ -465,7 +465,7 @@ test("runScan with options: only the chosen project, the chosen window; the page
   );
 });
 
-test("runScan: scans SigNoz when Splunk is not connected and marks the groups' source", async () => {
+test("runScan: scans SigNoz when Splunk is not connected, finds its namespace attribute and marks the groups' source", async () => {
   const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
   const nowMs = Date.now();
   const logs = [
@@ -485,6 +485,35 @@ test("runScan: scans SigNoz when Splunk is not connected and marks the groups' s
       const body = raw ? JSON.parse(raw) : {};
       queries.push(body);
       const spec = body.compositeQuery?.queries?.[0]?.spec ?? {};
+      // Like the real instance: namespaces live in deployment.environment; Kubernetes attribute names are unknown.
+      const unknownKey = /(k8s[._]namespace[._]name|kubernetes[._]namespace_name)/.exec(
+        spec.filter?.expression ?? "",
+      );
+      if (unknownKey) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(
+          JSON.stringify({
+            status: "error",
+            error: {
+              code: "invalid_input",
+              message: "Found 1 errors while parsing the search expression.",
+              errors: [{ message: `key \`${unknownKey[1]}\` not found` }],
+            },
+          }),
+        );
+      }
+      if (body.requestType === "scalar") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(
+          JSON.stringify({
+            status: "success",
+            data: {
+              type: "scalar",
+              data: { results: [{ queryName: "A", columns: [{ name: "value" }], data: [[logs.length]] }] },
+            },
+          }),
+        );
+      }
       const rows =
         body.requestType === "raw"
           ? logs
@@ -497,8 +526,8 @@ test("runScan: scans SigNoz when Splunk is not connected and marks the groups' s
                   body: l.body,
                   severity_text: "ERROR",
                   resources_string: {
-                    "k8s.namespace.name": "payment-prod",
-                    "k8s.container.name": "payment-vnpay",
+                    "deployment.environment": "payment-prod",
+                    "service.name": "payment-vnpay",
                   },
                 },
               }))
@@ -527,7 +556,10 @@ test("runScan: scans SigNoz when Splunk is not connected and marks the groups' s
     const raw = queries.filter((b) => b.requestType === "raw");
     assert.equal(raw.length, 2, "one query for the window, one for the baseline");
     assert.match(raw[0].compositeQuery.queries[0].spec.filter.expression, /severity_text = 'ERROR'/);
-    assert.match(raw[0].compositeQuery.queries[0].spec.filter.expression, /k8s\.namespace\.name = 'payment-prod'/);
+    assert.match(
+      raw[0].compositeQuery.queries[0].spec.filter.expression,
+      /deployment\.environment = 'payment-prod'/,
+    );
     const g = (await listGroups()).groups.find((x: GroupRow) => x.service === "payment-vnpay")!;
     assert.equal(g.today_count, 2);
     assert.deepEqual(g.detail.sources, ["signoz"]);

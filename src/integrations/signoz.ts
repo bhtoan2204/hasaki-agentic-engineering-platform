@@ -675,6 +675,64 @@ export const listServices = (a: { since_minutes?: number; earliest?: string; lat
 
 // ---------------------------------------------------------------- production error scan (platform-run, no agent budget)
 
+/** Kubernetes attribute names of the usual log pipelines: OpenTelemetry collector first, then fluentd / fluent-bit. */
+export const K8S_LOG_KEYS = {
+  namespace: [
+    "k8s.namespace.name",
+    "kubernetes.namespace_name",
+    "kubernetes_namespace_name",
+    "k8s_namespace_name",
+    "deployment.environment",
+    "namespace",
+  ],
+  container: ["k8s.container.name", "kubernetes.container_name", "kubernetes_container_name", "container_name"],
+  pod: ["k8s.pod.name", "kubernetes.pod_name", "kubernetes_pod_name", "pod_name"],
+  image: ["container.image.name", "k8s.container.image", "kubernetes.container_image", "kubernetes_container_image"],
+};
+
+const keyMissing = (e: unknown) =>
+  e instanceof SignozError && e.kind === "invalid_query" && /key `[^`]*` not found/i.test(e.message);
+const namespaceKeys = new Map<string, string>();
+const anyOf = (key: string, values: string[]) => `(${values.map((v) => `${key} = ${quote(v)}`).join(" OR ")})`;
+
+/**
+ * The attribute holding the Kubernetes namespace in this SigNoz: configured, remembered per instance, else the first
+ * candidate that has logs of these namespaces in the window (a key can exist and hold other values, such as
+ * deployment.environment = "prod"). Unknown keys are answered "key not found" and skipped.
+ */
+async function namespaceKey(cfg: SignozConfig, w: Window, namespaces: string[], signal?: AbortSignal) {
+  if (config.signoz.namespaceKey) return config.signoz.namespaceKey;
+  const known = namespaceKeys.get(cfg.baseUrl);
+  if (known) return known;
+  let accepted: string | null = null;
+  for (const key of K8S_LOG_KEYS.namespace) {
+    const probe = envelope(w, "scalar", {
+      signal: "logs",
+      aggregations: [{ expression: "count()", alias: "value" }],
+      filter: { expression: anyOf(key, namespaces) },
+      limit: 1,
+    });
+    let count = 0;
+    try {
+      const row = parseScalar(await call(cfg, "POST", "/api/v5/query_range", probe, signal)).rows[0];
+      count = Number(row?.at(-1) ?? 0) || 0;
+    } catch (e) {
+      if (keyMissing(e)) continue;
+      throw e;
+    }
+    accepted ??= key;
+    if (count > 0) {
+      namespaceKeys.set(cfg.baseUrl, key);
+      return key;
+    }
+  }
+  if (accepted) return accepted;
+  throw new SignozError(
+    "invalid_query",
+    `SigNoz logs have none of the namespace attributes ${K8S_LOG_KEYS.namespace.join(", ")}; set signoz.namespaceKey in config`,
+  );
+}
+
 /** Error-level logs of the given Kubernetes namespaces in one window (ms), newest first, at most `maxRows`. */
 export async function signozErrorLogs(
   w: Window,
@@ -684,10 +742,8 @@ export async function signozErrorLogs(
   signal?: AbortSignal,
 ) {
   const cfg = current();
-  const any = (key: string, values: string[]) => `(${values.map((v) => `${key} = ${quote(v)}`).join(" OR ")})`;
-  const expression = [any("severity_text", levels), ...(namespaces.length ? [any("k8s.namespace.name", namespaces)] : [])].join(
-    " AND ",
-  );
+  const nsKey = namespaces.length ? await namespaceKey(cfg, w, namespaces, signal) : null;
+  const expression = [anyOf("severity_text", levels), ...(nsKey ? [anyOf(nsKey, namespaces)] : [])].join(" AND ");
   const page = Math.min(200, config.signoz.maxLimit);
   const rows: Array<{ timestamp: string; data: Record<string, unknown> }> = [];
   for (let offset = 0; offset < maxRows; offset += page) {

@@ -593,7 +593,12 @@ test("provider environments keep only their own configured authentication and no
     DATABASE_URL: "database-private",
     AUTH_SECRET: "auth-private",
     AWS_SECRET_ACCESS_KEY: "aws-private",
-    ANTHROPIC_API_KEY: "claude-auth",
+    ANTHROPIC_API_KEY: "pay-per-token-key",
+    ANTHROPIC_AUTH_TOKEN: "gateway-token",
+    ANTHROPIC_BASE_URL: "https://gateway.example",
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    CLAUDE_CODE_OAUTH_TOKEN: "subscription-token",
+    ANTHROPIC_MODEL: "claude-opus-5-5",
     CURSOR_API_KEY: "cursor-auth",
     OPENAI_API_KEY: "do-not-switch-codex-billing",
     PLATFORM_CONFIG: "private-config.json",
@@ -606,7 +611,16 @@ test("provider environments keep only their own configured authentication and no
     assert.equal(env.PLATFORM_CONFIG, undefined);
     assert.equal(env.OPENAI_API_KEY, undefined);
     assert.equal(env.PATH, "/bin");
-    assert.equal(env.ANTHROPIC_API_KEY, provider === "claude" ? "claude-auth" : undefined);
+    // Claude runs on the subscription login only: nothing that switches it to per-token billing reaches it.
+    assert.equal(env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined);
+    assert.equal(env.ANTHROPIC_BASE_URL, undefined);
+    assert.equal(env.CLAUDE_CODE_USE_BEDROCK, undefined);
+    assert.equal(
+      env.CLAUDE_CODE_OAUTH_TOKEN,
+      provider === "claude" ? "subscription-token" : undefined,
+    );
+    assert.equal(env.ANTHROPIC_MODEL, provider === "claude" ? "claude-opus-5-5" : undefined);
     assert.equal(env.CURSOR_API_KEY, provider === "cursor" ? "cursor-auth" : undefined);
   }
 });

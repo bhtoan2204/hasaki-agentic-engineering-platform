@@ -5,7 +5,12 @@ import { config } from "../config.ts";
 import { pool, q, one, json, withTx } from "../db/pool.ts";
 import { settings } from "../db.ts";
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
-import { signozEnabled, signozErrorLogs, signozStatus } from "../integrations/signoz.ts";
+import {
+  K8S_LOG_KEYS,
+  signozEnabled,
+  signozErrorLogs,
+  signozStatus,
+} from "../integrations/signoz.ts";
 import { redactPii } from "../integrations/redact.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { workItems } from "../workitems/service.ts";
@@ -317,6 +322,8 @@ export function signatureOf(msg: string, err?: string) {
 }
 
 const text = (v: unknown) => (v == null || v === "" ? undefined : String(v));
+const first = (d: Record<string, unknown>, keys: string[]) =>
+  keys.map((k) => text(d[k])).find((v) => v !== undefined);
 const masked = (v: string | undefined) => (v === undefined ? v : redactPii(v));
 
 /** One SigNoz log row in the fields the SPL search extracts (JSON bodies are read like `spath input=log`). */
@@ -334,18 +341,18 @@ function signozLine(row: { timestamp: string; data: Record<string, unknown> }) {
   const err = text(j.error ?? j.err ?? d.error ?? d["exception.message"]);
   return {
     time: Math.floor(Date.parse(row.timestamp) / 1000),
-    ns: text(d["k8s.namespace.name"]) ?? "",
-    svc: text(d["k8s.container.name"] ?? d["service.name"]) ?? "",
+    ns: first(d, K8S_LOG_KEYS.namespace) ?? "",
+    svc: first(d, [...K8S_LOG_KEYS.container, "service.name"]) ?? "",
     lv: (text(d.severity_text ?? j.level ?? j.LEVEL) ?? "ERROR").toUpperCase(),
     // Masked like Splunk results; the signature is built first because it replaces numbers anyway.
     sig: redactPii(signatureOf(msg, err)),
     msg: redactPii(msg),
     err: masked(err),
     caller: masked(text(j.caller ?? d.caller ?? d["code.filepath"])),
-    image: text(d["container.image.name"] ?? d["k8s.container.image"]),
+    image: first(d, K8S_LOG_KEYS.image),
     request_id: masked(text(j.request_id ?? d.request_id)),
     stack: masked(text(j.stacktrace ?? d.stacktrace ?? d["exception.stacktrace"])),
-    pod: text(d["k8s.pod.name"]),
+    pod: first(d, K8S_LOG_KEYS.pod),
   };
 }
 
@@ -1071,7 +1078,7 @@ export function describeGroup(g: GroupRow) {
       : []),
     ...(d.sources?.includes("signoz")
       ? [
-          `Xem thêm log bằng tool \`signoz_search_logs\` (chỉ đọc), lọc \`k8s.namespace.name = '${g.namespace}'\` và service \`${g.service}\`.`,
+          `Xem thêm log bằng tool \`signoz_search_logs\` (chỉ đọc), lọc theo namespace \`${g.namespace}\` và service \`${g.service}\`.`,
         ]
       : []),
     "",
