@@ -153,7 +153,8 @@ export function validateOutputContract(
 
   for (const field of fields) {
     const val = outputObj[field.key];
-    const present = field.key in outputObj && val !== undefined && val !== null;
+    const present =
+      field.key in outputObj && val !== undefined && (val !== null || nullable(field.typeSpec));
 
     if (!present) {
       if (!field.optional) {
@@ -170,6 +171,8 @@ export function validateOutputContract(
     errors,
   };
 }
+
+const nullable = (typeSpec: string) => /(^|\|)\s*null\s*($|\|)/.test(typeSpec);
 
 function validateFieldValue(path: string, val: unknown, typeSpec: string, errors: string[]): void {
   if (!typeSpec) {
@@ -215,6 +218,30 @@ function validateFieldValue(path: string, val: unknown, typeSpec: string, errors
     return;
   }
 
+  // Array of primitives: number[]
+  if (typeSpec === "number[]") {
+    if (!Array.isArray(val)) {
+      errors.push(`${path}: expected number[], received ${typeof val}`);
+      return;
+    }
+    for (let i = 0; i < val.length; i++) {
+      if (typeof val[i] !== "number") {
+        errors.push(`${path}[${i}]: expected number, received ${typeof val[i]}`);
+      }
+    }
+    return;
+  }
+
+  // Union of primitives: boolean|null
+  if (/^(string|number|boolean|null)(\s*\|\s*(string|number|boolean|null))+$/.test(typeSpec)) {
+    const kinds = typeSpec.split("|").map((k) => k.trim());
+    const kind = val === null ? "null" : typeof val;
+    if (!kinds.includes(kind)) {
+      errors.push(`${path}: expected ${kinds.join(" | ")}, received ${kind}`);
+    }
+    return;
+  }
+
   // Array of objects: [{ ... }]
   if (typeSpec.startsWith("[{") && typeSpec.endsWith("}]")) {
     if (!Array.isArray(val)) {
@@ -233,7 +260,8 @@ function validateFieldValue(path: string, val: unknown, typeSpec: string, errors
       }
       for (const f of innerFields) {
         const itemVal = (item as Record<string, unknown>)[f.key];
-        const present = f.key in item && itemVal !== undefined && itemVal !== null;
+        const present =
+          f.key in item && itemVal !== undefined && (itemVal !== null || nullable(f.typeSpec));
         if (!present) {
           if (!f.optional) {
             errors.push(`${path}[${i}]: missing required field "${f.key}"`);
@@ -267,7 +295,8 @@ function validateFieldValue(path: string, val: unknown, typeSpec: string, errors
       }
       for (const f of innerFields) {
         const subVal = (mapVal as Record<string, unknown>)[f.key];
-        const present = f.key in mapVal && subVal !== undefined && subVal !== null;
+        const present =
+          f.key in mapVal && subVal !== undefined && (subVal !== null || nullable(f.typeSpec));
         if (!present) {
           if (!f.optional) {
             errors.push(`${path}["${mapKey}"]: missing required field "${f.key}"`);
@@ -292,7 +321,8 @@ function validateFieldValue(path: string, val: unknown, typeSpec: string, errors
     const innerFields = parseContractFields(innerBody);
     for (const f of innerFields) {
       const subVal = (val as Record<string, unknown>)[f.key];
-      const present = f.key in val && subVal !== undefined && subVal !== null;
+      const present =
+        f.key in val && subVal !== undefined && (subVal !== null || nullable(f.typeSpec));
       if (!present) {
         if (!f.optional) {
           errors.push(`${path}: missing required field "${f.key}"`);
@@ -300,6 +330,14 @@ function validateFieldValue(path: string, val: unknown, typeSpec: string, errors
         continue;
       }
       validateFieldValue(`${path}.${f.key}`, subVal, f.typeSpec, errors);
+    }
+    return;
+  }
+
+  // A single quoted pattern describes a string's shape, e.g. 'S<search id>:<n>'.
+  if (/^(["'])[^"']*\1$/.test(typeSpec)) {
+    if (typeof val !== "string") {
+      errors.push(`${path}: expected string, received ${typeof val}`);
     }
     return;
   }

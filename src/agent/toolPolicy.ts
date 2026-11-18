@@ -162,11 +162,53 @@ export interface PolicyContext {
   loopDetector?: ToolLoopDetector;
   /** The step may use web tools while it can write (`config.network: true`). */
   network?: boolean;
+  /** Repo-relative files (or `dir/` prefixes) the agent must not write: CI configuration and the verification scripts. */
+  protectedPaths?: string[];
   /** Native tool calls the attempt may still make across all its turns; platform tools are not counted. */
   toolBudget?: { calls: number; limit: number; exhausted: boolean };
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
+
+export const CI_PATHS = [
+  ".github/",
+  ".gitlab-ci.yml",
+  ".circleci/",
+  "bitbucket-pipelines.yml",
+  "azure-pipelines.yml",
+  "Jenkinsfile",
+];
+
+/** Repo-relative script paths a fixed verification command runs; the agent must not edit what judges it. */
+export function verifyPathTokens(command: string | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const raw of String(command ?? "").split(/[\s;&|()<>]+/)) {
+    const t = raw.replace(/^["']|["']$/g, "").replace(/^\.\//, "");
+    if (!/^[\w@][\w./@-]*$/.test(t) || t.endsWith(".") || t.includes("..")) continue;
+    if (t.includes("/") || /\.(sh|bash|py|mjs|cjs|js|ts|rb|pl)$/.test(t)) out.add(t);
+  }
+  return [...out];
+}
+
+/** The protected path a write target hits, if any: absolute targets are judged relative to their worktree. */
+function protectedTarget(target: string, ctx: PolicyContext, base?: string): string | null {
+  if (!ctx.protectedPaths?.length) return null;
+  const abs = target.startsWith("/") ? resolve(target) : base ? resolve(base, target) : null;
+  const rels: string[] = [];
+  if (abs)
+    for (const root of ctx.workspaces)
+      if (isInside(abs, [root])) rels.push(relative(resolve(root), abs).split(sep).join("/"));
+  if (!target.startsWith("/")) rels.push(target.replace(/^\.\//, ""));
+  for (const rel of rels)
+    for (const pattern of ctx.protectedPaths)
+      if (pattern.endsWith("/") ? (rel + "/").startsWith(pattern) : rel === pattern) return pattern;
+  return null;
+}
+
+const protectedDenial = (hit: string) =>
+  deny(
+    `${hit} is CI or verification configuration fixed by the workflow; change the code under test instead (a step meant to edit CI sets config.allow_ci_edits)`,
+  );
 const allow: Decision = { allow: true };
 const deny = (reason: string): Decision => ({ allow: false, reason });
 
@@ -221,6 +263,11 @@ const ALWAYS_DENIED: Array<[RegExp, string]> = [
   [
     /\bgit\s+(-C\s+\S+\s+)?branch\s+-[dD]\b/,
     "deleting branches is not allowed — branches belong to the platform; just keep committing on the run branch",
+  ],
+  [
+    // merge-base and merge-file only read; pull merges or rebases too.
+    /\bgit\s+(-C\s+\S+\s+)?(merge(?![-\w])|rebase\b|pull\b)/,
+    "merging, rebasing and pulling are done by the platform — keep committing on the run branch; to compare with the base use git diff origin/<base>...HEAD",
   ],
   [
     /\bsudo\b/,
@@ -915,6 +962,19 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     });
     const pkgWrite = packageInstallViolation(p, dirs, ctx.workspaces);
     if (pkgWrite) return deny(pkgWrite);
+    if (ctx.protectedPaths?.length) {
+      for (const [i, seg] of p.segments.entries()) {
+        if (readOnlyViolation(seg) === null) continue;
+        for (const word of seg.split(/\s+/).slice(1)) {
+          const hit = protectedTarget(word.replace(/^["']|["']$/g, ""), ctx, dirs[i] ?? cwd);
+          if (hit) return protectedDenial(hit);
+        }
+      }
+      for (const r of p.redirects) {
+        const hit = protectedTarget(r.target, ctx, dirs[r.seg] ?? cwd);
+        if (hit) return protectedDenial(hit);
+      }
+    }
     p.segments.forEach((seg) => {
       const c = seg.match(/^git\s+-C\s+(\S+)\s+worktree\s/);
       if (c && isScratchWorktreeOp(seg)) readSources.add(resolve(expandHome(c[1])));
@@ -1133,6 +1193,8 @@ function decideTool(
         return deny(
           `edits are only allowed inside the run's worktrees: ${ctx.workspaces.join(", ")}`,
         );
+      const hit = protectedTarget(path, ctx);
+      if (hit) return protectedDenial(hit);
       return allow;
     }
     case "Bash":

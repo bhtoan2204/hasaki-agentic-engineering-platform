@@ -14,8 +14,12 @@ import {
   SUBAGENT_PLATFORM_TOOLS,
   ToolLoopDetector,
   toolsFor,
+  CI_PATHS,
+  verifyPathTokens,
 } from "../../toolPolicy.ts";
 import { integrationTools } from "../../toolRegistry.ts";
+import { verifyConfig } from "../../verify.ts";
+import { TEST_COMMAND } from "../../../workflow/templates.ts";
 
 /** Tool policy, routing, metrics and the context pack (reused when its inputs are unchanged). */
 export async function contextStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -48,6 +52,16 @@ export async function contextStage(s: LifecycleState): Promise<ExecResult | void
       integrationTools().find((t) => t.name === name)?.readOnly === true,
     loopDetector: new ToolLoopDetector(),
     network: ctx.step.config.network === true,
+    protectedPaths:
+      ctx.step.config.allow_ci_edits === true
+        ? []
+        : [
+            ...CI_PATHS,
+            ...verifyPathTokens(
+              (ctx.input.execution_contract?.verification as { command?: string } | undefined)
+                ?.command ?? verifyConfig(ctx.step.config, TEST_COMMAND)?.command,
+            ),
+          ],
   };
   const settingSources = live ? [] : config.agent.settingSources;
   policy.allowedTools = effective.allowed_tools;

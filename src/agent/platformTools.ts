@@ -48,6 +48,8 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import { traceLog } from "../workflow/trace.ts";
 
 export interface PlatformToolEnv {
+  /** Set once submit_result recorded a valid output; each provider turn gets a fresh env, so a repair turn may submit again. */
+  submittedThisTurn?: boolean;
   contextPreparation?: boolean;
   attemptAllowedTools?: string[] | null;
   runId: number;
@@ -428,12 +430,15 @@ async function postUpdate(args: any, env: PlatformToolEnv): Promise<string> {
 }
 
 async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
+  if (env.submittedThisTurn)
+    return "ERROR: submit_result was already recorded in this turn; end your turn now";
   const output = (args?.output ?? {}) as Record<string, unknown>;
   if (!output || typeof output !== "object" || Array.isArray(output))
     return "ERROR: submit_result.output must be an object";
   const validation = validateOutputContract(env.outputContract, output);
   if (!validation.valid)
     return `ERROR: output contract validation failed: ${validation.errors.join("; ")}`;
+  env.submittedThisTurn = true;
   env.onSubmit?.(output);
   await q(
     pool,
