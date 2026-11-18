@@ -59,7 +59,12 @@ export function independentUpstream<T extends { output: any }>(
   for (const [key, u] of Object.entries(upstream)) {
     if (coding.has(key)) {
       // scope_check is platform-computed (files vs approved scope) plus deviations the author admitted: evidence, not claims of success.
-      const scope = u.output?.scope_check ? { scope_check: u.output.scope_check } : {};
+      // symptom_signals is platform-computed; remediation is the author's classification, kept to be checked, not trusted.
+      const scope = {
+        ...(u.output?.scope_check ? { scope_check: u.output.scope_check } : {}),
+        ...(u.output?.symptom_signals ? { symptom_signals: u.output.symptom_signals } : {}),
+        ...(u.output?.remediation ? { remediation: u.output.remediation } : {}),
+      };
       out[key] = {
         ...u,
         output: u.output?.verification
@@ -538,7 +543,7 @@ export function hasTestEvidence(upstream: Record<string, { output: any }>) {
  * Bump when the verification rules change (normalizeVerdict / gates / review prompt contract): a PASS recorded under an
  * older policy is never reused.
  */
-export const REVIEW_POLICY_VERSION = "2026-11-09.1";
+export const REVIEW_POLICY_VERSION = "2026-11-18.1";
 
 /** Test evidence among upstream outputs, reduced to what a verdict depends on (results + the commits they ran on). */
 export function testDigestOf(upstream: Record<string, { output: any }>) {

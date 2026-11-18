@@ -718,6 +718,7 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
   let scope:
     | (ApprovedScope & { approved_by?: string; approved_at?: string; comment?: string })
     | null = null;
+  let rca: Record<string, unknown> | null = null;
   let dropped = 0;
   const highRisk = new WeakMap<string[], number>(); // count of high-risk items kept at the front of each list
   const unresolvedScope: string[] = [];
@@ -803,6 +804,20 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
         supporting_claims: a.supporting_claims ?? [],
         from: key,
       };
+    if (o.rca && typeof o.rca === "object" && !Array.isArray(o.rca)) {
+      const r = o.rca;
+      rca = {
+        symptom: clip(r.symptom, 240),
+        expected: clip(r.expected, 240),
+        actual: clip(r.actual, 240),
+        triggering_conditions: clip(r.triggering_conditions, 240),
+        execution_path: list(r.execution_path, 12, 200),
+        contributing_factors: list(r.contributing_factors, 8, 200),
+        reproduction: clip(typeof r.reproduction === "object" ? JSON.stringify(r.reproduction) : r.reproduction, 240),
+        uncertainties: list(r.uncertainties, 8, 200),
+        from: key,
+      };
+    }
     if (o.fix_assessment?.risk)
       fix = {
         risk: o.fix_assessment.risk,
@@ -824,6 +839,7 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
     missing_evidence: missing,
     ...(unresolvedScope.length ? { unresolved_scope_violations: unresolvedScope } : {}),
     root_cause: root,
+    ...(rca ? { investigation: rca } : {}),
     fix,
     approved_scope: scope
       ? {

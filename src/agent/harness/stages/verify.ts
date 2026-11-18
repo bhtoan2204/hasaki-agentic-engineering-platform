@@ -29,6 +29,7 @@ import { changedFiles, collectScopeState } from "../../scopeGuard.ts";
 import { selectVerificationScope } from "../../verificationScope.ts";
 import {
   type VerifyDeps,
+  diffAgainstBase,
   diffTestsAgainstBase,
   repairPrompt,
   restoreConflictSkips,
@@ -40,6 +41,13 @@ import {
 import { EvidenceCache, pgEvidenceStore } from "../../verifyEvidence.ts";
 import { budgetStop } from "./budget.ts";
 import { noteDecision } from "../../../workflow/decisions.ts";
+import {
+  type SymptomSignal,
+  enforceRootCauseReview,
+  normalizeRemediation,
+  rootCauseDepth,
+  symptomFixSignals,
+} from "../../rootCause.ts";
 
 /** Deterministic verification: the independent verdict gates, or the bounded verify-and-repair loop for implementation steps. */
 export async function verifyStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -79,6 +87,12 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
     let v = normalizeVerdict(s.submitted ?? {});
     if (ctx.step.config.scope_review === true)
       v = enforceScopeReview(v, (s.submitted as any)?.scope_check, ctx.input.upstream);
+    v = enforceRootCauseReview(
+      v,
+      (s.submitted as any)?.root_cause_check,
+      ctx.input.upstream,
+      rootCauseDepth(ctx.run, ctx.step),
+    );
     // Deterministic scope violations without a renewed approval: a reviewer PASS never overrides them.
     const unresolved = unresolvedScope(
       await q<{ key: string; sc: any }>(
@@ -486,7 +500,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         `verification passed but needs human review: ${summary.review_reasons.join("; ")}`,
         { verification: "needs_review" },
       );
-    output = { ...accepted, verification: summary };
+    output = { ...accepted, verification: summary, ...(await rootCauseEvidence(s, accepted)) };
     const terminalVerifiedSubmission = terminalCodingFailure(output);
     if (terminalVerifiedSubmission) return terminalVerifiedSubmission;
     if (ctx.run.profile === "MICRO") {
@@ -495,4 +509,33 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
     }
   }
   Object.assign(s, { output, unrestored });
+}
+
+/**
+ * Root Cause First evidence of a verified implementation: symptom-fix signals in each worktree's diff (platform-computed)
+ * and the implementer's remediation, normalized. Both are recorded on the step output for the independent review gate.
+ */
+async function rootCauseEvidence(s: LifecycleState, accepted: unknown) {
+  const depth = rootCauseDepth(s.ctx.run, s.ctx.step);
+  const signals: Record<string, SymptomSignal[]> = {};
+  for (const w of s.ws) {
+    const diff = await diffAgainstBase(w.path, await workspaceBaseBranch(w.path)).catch(() => "");
+    const found = symptomFixSignals(diff);
+    if (found.length) signals[w.repo] = found;
+  }
+  const remediation = normalizeRemediation(
+    (accepted as { remediation?: unknown } | null)?.remediation,
+    depth,
+  );
+  const count = Object.values(signals).flat().length;
+  if (count || remediation?.problems.length)
+    await s.ctx.log(
+      "system",
+      `root cause first (${depth}): ${count} symptom-fix signal(s)${remediation ? `, remediation ${remediation.kind ?? "unclassified"}${remediation.problems.length ? ` (${remediation.problems.join("; ")})` : ""}` : ""} — judged by the independent review`,
+      { symptom_signals: signals, remediation },
+    );
+  return {
+    ...(count ? { symptom_signals: signals } : {}),
+    ...(remediation ? { remediation } : {}),
+  };
 }

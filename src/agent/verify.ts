@@ -1330,6 +1330,16 @@ function slopSummary(repos: RepoVerification[]) {
 }
 
 /** `git diff origin/<base> -- *_test.go` of the worktree (committed + uncommitted changes). */
+/** The committed change of a worktree vs the merge base with origin/<base> (all files). */
+export async function diffAgainstBase(path: string, baseBranch: string) {
+  const { stdout } = await exec(
+    "git",
+    ["-C", path, "diff", "--no-color", `origin/${baseBranch}...HEAD`],
+    { maxBuffer: 32 * 1024 * 1024 },
+  );
+  return stdout;
+}
+
 export async function diffTestsAgainstBase(path: string, baseBranch: string) {
   const { stdout } = await exec(
     "git",
