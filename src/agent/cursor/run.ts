@@ -4,6 +4,13 @@ import { startBroker } from "../broker/server.ts";
 import { agentEnvironment } from "../environment.ts";
 import { normalizeProviderFailure } from "../telemetry.ts";
 import type { HarnessFailureCode } from "../harness/failure.ts";
+import {
+  adoptRunWorkspaces,
+  readSubmitted,
+  stopFailure,
+  superviseTurn,
+  turnLimits,
+} from "../harness/cliTurn.ts";
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
 import { newMetrics } from "../metrics.ts";
 import type { AgentMetrics } from "../metrics.ts";
@@ -217,15 +224,11 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         if (child.pid) process.kill(-child.pid, "SIGKILL");
       } catch {}
     };
-    const onAbort = () => kill();
-    input.ctx.signal.addEventListener("abort", onAbort, { once: true });
-    if (input.ctx.signal.aborted) kill();
-    const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000);
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      kill();
-    }, timeoutMs);
+    const limits = turnLimits(
+      input.ctx.attempt.effective_agent,
+      Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000),
+    );
+    const watch = superviseTurn({ signal: input.ctx.signal, ...limits, stop: kill });
 
     const parser = new NdjsonStream();
     let stderr = "";
@@ -381,6 +384,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     let pending = Promise.resolve();
     const exitCode = await new Promise<number | null>((resolve) => {
       child.stdout?.on("data", (b: Buffer) => {
+        watch.touch();
         pending = pending.then(() => consume(b.toString("utf8")));
       });
       child.stderr?.on("data", (b: Buffer) => {
@@ -395,8 +399,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         pending.then(() => resolve(code));
       });
     });
-    clearTimeout(timer);
-    input.ctx.signal.removeEventListener("abort", onAbort);
+    watch.dispose();
     if (child.pid) childGroups.remove(child.pid);
     const tail = parser.flush();
     for (const ev of tail.events) await handle(ev);
@@ -410,12 +413,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     rmSync(promptFile, { force: true });
     rmSync(join(input.cwd, ".cursor", "cli.json"), { force: true });
 
-    const submittedRow = await one<{ data: { output?: Record<string, unknown> } }>(
-      pool,
-      "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'submit_result' ORDER BY id DESC LIMIT 1",
-      [input.ctx.attempt.id],
-    );
-    const submitted = submittedRow?.data?.output;
+    const submitted = await readSubmitted(input.ctx.attempt.id);
 
     if (input.metrics) {
       input.metrics.model = model || input.metrics.model;
@@ -428,8 +426,8 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       input.metrics.denied.push(...denied);
     }
 
-    if (input.ctx.signal.aborted)
-      return { isError: true, text: "canceled", assistantTurns, failure: "CANCELED" };
+    if (watch.reason === "canceled" || input.ctx.signal.aborted)
+      return { isError: true, ...stopFailure("canceled", "Cursor", limits), assistantTurns };
     if (violation)
       return {
         isError: true,
@@ -437,17 +435,10 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         assistantTurns: Math.max(assistantTurns, 1),
         failure: "POLICY_VIOLATION",
       };
-    if (timedOut)
-      return {
-        isError: true,
-        text: `Cursor execution timeout: turn exceeded the ${Math.round(timeoutMs / 60000)} minute limit and was stopped`,
-        assistantTurns,
-        submitted,
-        failure: "EXECUTION_TIMEOUT",
-      };
+    if (watch.reason)
+      return { isError: true, ...stopFailure(watch.reason, "Cursor", limits), assistantTurns, submitted };
 
-    const ws = (await workspacesOf(input.ctx.run.id)).map((w) => w.path);
-    for (const p of ws) if (!input.policy.workspaces.includes(p)) input.policy.workspaces.push(p);
+    await adoptRunWorkspaces(input.ctx.run.id, input.policy);
 
     if (stderr.trim())
       await input.ctx.log("log", stderr.trim().slice(0, 4000), {

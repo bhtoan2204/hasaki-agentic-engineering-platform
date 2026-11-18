@@ -648,7 +648,7 @@ test("cancellation and timeout kill the Codex process tree, including detached c
     if (how === "cancel") ac.abort();
     const r = await p;
     delete process.env.CODEX_TIMEOUT_MS;
-    assert.equal(r.failure, how === "cancel" ? "canceled" : "timeout");
+    assert.equal(r.failure, how === "cancel" ? "CANCELED" : "EXECUTION_TIMEOUT");
     assert.ok(Date.now() - started < 8000);
     const pid = Number(readFileSync(pidFile, "utf8"));
     let alive = true;

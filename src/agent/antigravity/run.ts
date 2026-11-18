@@ -5,13 +5,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactSecrets } from "../../integrations/redact.ts";
 import { antigravityConfig } from "../../config.ts";
-import { pool, one, q } from "../../db/pool.ts";
+import { pool, q } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { newMetrics, type AgentMetrics } from "../metrics.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "../broker/server.ts";
+import {
+  readSubmitted,
+  stopFailure,
+  superviseTurn,
+  turnLimits,
+} from "../harness/cliTurn.ts";
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
 import { antigravityCapabilities, antigravityEnv } from "./capabilities.ts";
 import {
@@ -249,7 +255,6 @@ export async function antigravityAgentTurn(
   let submitted: Record<string, unknown> | undefined;
 
   let child: ChildProcess | null = null;
-  let timer: NodeJS.Timeout | null = null;
 
   try {
     let assistantTurns = 0;
@@ -316,7 +321,8 @@ export async function antigravityAgentTurn(
 
     const additionalDirs = workspaces.map((w) => w.path).filter((p) => p !== input.cwd);
 
-    const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? cfg.timeoutMs;
+    const limits = turnLimits(input.ctx.attempt.effective_agent, cfg.timeoutMs);
+    const timeoutMs = limits.timeoutMs;
     const timeoutSec = Math.floor(timeoutMs / 1000);
 
     const settingsPath = join(scratchDir, "settings.json");
@@ -363,6 +369,13 @@ export async function antigravityAgentTurn(
     });
 
     if (child.pid) childGroups.add(child.pid);
+    const watch = superviseTurn({
+      signal: input.ctx.signal,
+      ...limits,
+      stop: () => {
+        if (child) killAntigravity(child);
+      },
+    });
 
     const parser = new AntigravityStream();
     const agentText = new TextBatch();
@@ -382,7 +395,8 @@ export async function antigravityAgentTurn(
     let stderr = "";
     let streamError: Error | undefined;
     let spawnError: Error | undefined;
-    let timedOut = false;
+    let sawResult = false;
+    let violation = "";
     let inputError: Error | undefined;
 
     const handleEvent = async (ev: AntigravityEvent) => {
@@ -397,6 +411,7 @@ export async function antigravityAgentTurn(
       }
 
       if (ev.type === "result") {
+        sawResult = true;
         assistantTurns = ev.turns ?? 1;
         if (ev.text != null) fullText = ev.text.slice(0, MAX_RESPONSE_CHARS);
         await flushSpeech();
@@ -417,6 +432,13 @@ export async function antigravityAgentTurn(
       }
 
       if (ev.tool || ev.type === "result") await flushSpeech();
+
+      if (ev.tool && broker?.hookCalls === 0 && !violation) {
+        violation =
+          "Antigravity started a tool without running the platform's pre-execution hook; the run was stopped";
+        input.metrics?.denied.push({ tool: ev.tool, reason: violation });
+        if (child) killAntigravity(child);
+      }
 
       if (ev.tool) {
         if (input.metrics) {
@@ -468,6 +490,7 @@ export async function antigravityAgentTurn(
     };
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      watch.touch();
       // Keep provider output bounded by the stream's high-water mark while async audit logs flush.
       child?.stdout?.pause();
       const { events, errors } = parser.push(chunk);
@@ -497,17 +520,6 @@ export async function antigravityAgentTurn(
       if (stderr.length > 16000) stderr = stderr.slice(-16000);
     });
 
-    const onAbort = () => {
-      if (child) killAntigravity(child);
-    };
-    input.ctx.signal.addEventListener("abort", onAbort, { once: true });
-    if (input.ctx.signal.aborted) onAbort();
-    timer = setTimeout(() => {
-      timedOut = true;
-      onAbort();
-    }, timeoutMs);
-    if (input.ctx.signal.aborted) onAbort();
-
     child.on("error", (error) => {
       spawnError = error;
     });
@@ -521,15 +533,14 @@ export async function antigravityAgentTurn(
     const writePromise = writeAntigravityPrompt(child, input.prompt, input.ctx.signal).catch(
       (error) => {
         inputError = error as Error;
-        if (!input.ctx.signal.aborted && !timedOut) onAbort();
+        if (!watch.reason && child) killAntigravity(child);
       },
     );
     const exitCode = await exitPromise;
     await writePromise;
     await pendingLogs;
 
-    if (timer) clearTimeout(timer);
-    input.ctx.signal.removeEventListener("abort", onAbort);
+    watch.dispose();
     if (child?.pid) childGroups.remove(child.pid);
 
     const tail = parser.flush();
@@ -553,32 +564,23 @@ export async function antigravityAgentTurn(
       if (input.onTelemetry) await input.onTelemetry();
     }
 
-    // Check if submit_result was stored
-    const submittedRow = await one<{
-      data: { output?: Record<string, unknown> };
-    }>(
-      pool,
-      "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'submit_result' ORDER BY id DESC LIMIT 1",
-      [input.ctx.attempt.id],
-    );
-    if (submittedRow?.data?.output) submitted = submittedRow.data.output;
+    submitted = (await readSubmitted(input.ctx.attempt.id)) ?? submitted;
 
-    if (input.ctx.signal.aborted) {
+    const stopped = watch.reason ?? (input.ctx.signal.aborted ? "canceled" : null);
+    if (stopped)
       return {
         isError: true,
-        text: "canceled",
+        ...stopFailure(stopped, "Antigravity", limits),
         assistantTurns,
-        failure: "CANCELED",
         submitted,
       };
-    }
 
-    if (timedOut)
+    if (violation)
       return {
         isError: true,
-        text: "Antigravity timed out",
-        assistantTurns,
-        failure: "EXECUTION_TIMEOUT",
+        text: violation,
+        assistantTurns: Math.max(assistantTurns, 1),
+        failure: "UNSAFE_SIDE_EFFECT",
         submitted,
       };
 
@@ -625,6 +627,15 @@ export async function antigravityAgentTurn(
         submitted,
       };
     }
+
+    if (!sawResult && !fullText && !submitted)
+      return {
+        isError: true,
+        text: "Antigravity exited without a result, a reply or a submitted output",
+        assistantTurns,
+        failure: "INCOMPLETE_OUTPUT",
+        submitted,
+      };
 
     return {
       isError: false,

@@ -6,9 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { codexConfig } from "../../config.ts";
-import { pool, one } from "../../db/pool.ts";
 import { childGroups } from "../../workflow/local.ts";
-import { npmCacheDir, workspacesOf } from "../../git/provider.ts";
+import { npmCacheDir } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
 import { CONTEXT_TOOLS } from "../contextToolSchemas.ts";
@@ -23,6 +22,15 @@ import {
   type CodexItem,
 } from "./stream.ts";
 import { codexHookDecision } from "./policy.ts";
+import {
+  adoptRunWorkspaces,
+  readSubmitted,
+  stopFailure,
+  superviseTurn,
+  turnLimits,
+  type StopReason,
+} from "../harness/cliTurn.ts";
+import type { HarnessFailureCode } from "../harness/failure.ts";
 
 const exec = promisify(execFile);
 
@@ -420,7 +428,7 @@ export interface CodexTurnResult {
   text: string;
   assistantTurns: number;
   submitted?: Record<string, unknown>;
-  failure?: CodexFailureKind | "canceled" | "timeout" | "policy" | "incomplete";
+  failure?: CodexFailureKind | "policy" | "incomplete" | HarnessFailureCode;
   threadId?: string;
 }
 
@@ -522,17 +530,14 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     stdio: ["pipe", "pipe", "pipe"],
   });
   if (child.pid) childGroups.add(child.pid);
-  let stopReason: "" | "canceled" | "timeout" | "policy" = "";
+  let stopReason: "" | StopReason | "policy" = "";
   let violation = "";
-  const stop = (why: "canceled" | "timeout" | "policy") => {
+  const stop = (why: StopReason | "policy") => {
     if (!stopReason) stopReason = why;
     killTree(child);
   };
-  const onAbort = () => stop("canceled");
-  ctx.signal.addEventListener("abort", onAbort, { once: true });
-  if (ctx.signal.aborted) stop("canceled");
-  const timeoutMs = input.ctx.attempt.effective_agent?.timeout_ms ?? codexConfig().timeoutMs;
-  const timer = setTimeout(() => stop("timeout"), timeoutMs);
+  const limits = turnLimits(input.ctx.attempt.effective_agent, codexConfig().timeoutMs);
+  const watch = superviseTurn({ signal: ctx.signal, ...limits, stop });
   child.stdin?.on("error", () => {});
   child.stdin?.end(input.prompt);
 
@@ -730,6 +735,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
 
   let pending = Promise.resolve();
   const consume = (chunk: Buffer) => {
+    watch.touch();
     const { events, errors: bad } = parser.push(chunk);
     pending = pending.then(async () => {
       for (const b of bad)
@@ -752,8 +758,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     });
     child.on("close", (code) => resolve(code));
   });
-  clearTimeout(timer);
-  ctx.signal.removeEventListener("abort", onAbort);
+  watch.dispose();
   killTree(child); // helpers (MCP bridge, hooks) that outlived Codex
   if (child.pid) childGroups.remove(child.pid);
   const tail = parser.flush();
@@ -770,32 +775,21 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   metrics.duration_ms += Date.now() - started;
   metrics.cost_usd = null; // ChatGPT plan usage has no per-call price; never invent one
   if (actualModel) metrics.model = actualModel;
-  const ws = (await workspacesOf(ctx.run.id)).map((w) => w.path);
-  for (const p of ws) if (!input.policy.workspaces.includes(p)) input.policy.workspaces.push(p);
+  await adoptRunWorkspaces(ctx.run.id, input.policy);
   if (stderr.trim())
     await ctx.log("log", redact(stderr.trim()).slice(-4000), {
       provider: "codex",
       stream: "stderr",
     });
 
-  const submittedRow = await one<{ data: { output?: Record<string, unknown> } }>(
-    pool,
-    "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'submit_result' ORDER BY id DESC LIMIT 1",
-    [ctx.attempt.id],
-  ).catch(() => null);
-  submitted = submitted ?? submittedRow?.data?.output;
+  submitted = submitted ?? (await readSubmitted(ctx.attempt.id));
   const base = { assistantTurns, submitted, threadId: threadId || undefined };
 
   const stopped = stopReason as string;
   if (stopped === "canceled" || ctx.signal.aborted)
-    return { ...base, isError: true, text: "canceled", failure: "canceled" };
-  if (stopped === "timeout")
-    return {
-      ...base,
-      isError: true,
-      text: `Codex execution timeout: turn exceeded the ${Math.round(timeoutMs / 60000)} minute limit and was stopped`,
-      failure: "timeout",
-    };
+    return { ...base, isError: true, ...stopFailure("canceled", "Codex", limits) };
+  if (stopped === "timeout" || stopped === "idle")
+    return { ...base, isError: true, ...stopFailure(stopped, "Codex", limits) };
   if (violation)
     return {
       ...base,

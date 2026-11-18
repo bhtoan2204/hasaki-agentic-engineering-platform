@@ -263,6 +263,12 @@ export interface Config {
      * otherwise holds the step RUNNING and a worker slot for as long as that task runs.
      */
     postSubmitGraceSeconds?: number;
+    /** Wall-clock limit of one agent turn when neither the step nor the provider config sets one. */
+    turnTimeoutMs?: number;
+    /** A turn with no provider stream event and no tool call for this long is stopped (IDLE_TIMEOUT). */
+    idleTimeoutMs?: number;
+    /** Tool calls one attempt may make across all its turns, repairs included (TOOL_BUDGET_EXHAUSTED). */
+    maxToolCalls?: number;
     /**
      * Claude Code settings layers loaded by agent steps. Default [] so skills come from ONE place, the platform
      * knowledge registry (imported from repos and ~/.claude/skills), instead of also being auto-loaded by Claude Code.
@@ -583,6 +589,9 @@ const defaults: Config = {
     contextTokens: 24000,
     contextToolTimeoutMs: 10000,
     postSubmitGraceSeconds: 30,
+    turnTimeoutMs: 45 * 60_000,
+    idleTimeoutMs: 10 * 60_000,
+    maxToolCalls: 400,
     settingSources: [],
     inlineKnowledgeTokens: 8000,
     knowledgeIndexSize: 12,

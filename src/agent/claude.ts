@@ -5,6 +5,7 @@ export { modelFor, codexModelFor } from "./stepAgent.ts";
 import { agentEnvironment } from "./environment.ts";
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { normalizeProviderFailure } from "./telemetry.ts";
+import { stopFailure, superviseTurn, turnLimits } from "./harness/cliTurn.ts";
 import {
   query,
   tool,
@@ -483,9 +484,9 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
   };
 
   const ac = new AbortController();
-  const onAbort = () => ac.abort();
-  ctx.signal.addEventListener("abort", onAbort);
-  if (ctx.signal.aborted) ac.abort();
+  const limits = turnLimits(ctx.attempt.effective_agent);
+  const watch = superviseTurn({ signal: ctx.signal, ...limits, stop: () => ac.abort() });
+  let sawResult = false;
   // Once the result is submitted and the turn ended, the CLI should exit. A background shell task (e.g. a command
   // that outlived its 120 s timeout) keeps it alive and re-invokes the agent later: stop it after a grace period.
   const graceSeconds = Math.max(0, Number(config.agent.postSubmitGraceSeconds ?? 30));
@@ -584,12 +585,14 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
             { startup_ms: ms, stderr_tail: stderrTail.slice() },
           );
       }
+      watch.touch();
       await recordTranscript(ctx, msg, cwd);
       accumulateMetrics(metrics, msg);
       if (msg.type === "result") await persistSession(msg.is_error ? msg : undefined);
       else if (msg.type === "system" && msg.subtype === "init") await persistSession();
       if (msg.type === "assistant") result.assistantTurns++;
       else if (msg.type === "result") {
+        sawResult = true;
         // After the submitted result, later turns are background-task wake-ups ("the find finished..."): they
         // must not replace the step's final answer.
         if (!reaper.armed) {
@@ -603,11 +606,24 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
     }
   } catch (error) {
     // Our own post-submit stop is a normal end of the session, not a provider failure.
-    if (!reaper.fired) throw error;
+    if (!reaper.fired && (!watch.reason || watch.reason === "canceled")) throw error;
   } finally {
     reaper.disarm();
-    ctx.signal.removeEventListener("abort", onAbort);
+    watch.dispose();
   }
+  if (watch.reason && !reaper.fired)
+    return {
+      isError: true,
+      ...stopFailure(watch.reason, "Claude", limits),
+      assistantTurns: result.assistantTurns,
+    };
+  if (!sawResult && !reaper.fired)
+    return {
+      isError: true,
+      text: "Claude session ended without a result message",
+      assistantTurns: result.assistantTurns,
+      failure: "INCOMPLETE_OUTPUT",
+    };
   if (reaper.fired)
     await ctx.log(
       "system",
