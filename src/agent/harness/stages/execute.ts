@@ -20,6 +20,7 @@ import {
   reviewedBranchTargets,
 } from "../../openCodeReview.ts";
 import { citedEvidenceLogs } from "../../platformTools.ts";
+import { slopReviewEvidence } from "../../../slop/review.ts";
 import { type SkillRead, deriveSkillActivation, injectSkills } from "../../skillTracing.ts";
 import {
   buildResumeMessage,
@@ -109,6 +110,13 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
       body: `<untrusted_input source="git_diff">\n${evidence.text.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`,
     });
   if (independent) {
+    const slop = slopReviewEvidence(ctx.input.upstream);
+    if (slop)
+      extras.push({
+        title:
+          "Platform slop scan of this change (deterministic, syntax-level; new or worsened findings only). Report the ones you confirm as findings prefixed [slop]; drop false positives silently. It cannot see semantic slop, so still check the diff yourself",
+        body: untrusted("slop_scan", slop),
+      });
     const logs = await citedEvidenceLogs(ctx.run.id, ctx.input.upstream).catch(() => "");
     if (logs)
       extras.push({

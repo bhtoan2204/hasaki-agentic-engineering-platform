@@ -356,7 +356,12 @@ const REVIEW = {
   instructions:
     "Review the diff of every workspace branch against origin/$BASE_BRANCH (git diff, read-only). Check correctness, the " +
     "approved plan or fix proposal, coding standards and security policies in your context. For every finding include a precise file/line, " +
-    "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. Report findings; do not modify code.",
+    "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. " +
+    "Also check the added lines for AI slop (load skill ai-slop if available): guards for states that cannot happen, re-validation of already validated input, " +
+    "swallowed or double-logged errors, comments that narrate the code, placeholder/TODO stubs, helpers that duplicate an existing one in the repo, " +
+    "unrequested backward-compat shims, single-use abstractions, tests that assert nothing, and edits outside the task. Prefix such findings with [slop], " +
+    "cite the evidence (the invariant, the existing helper, the lost error) and keep them low unless they hide a defect (a swallowed error is medium or high); " +
+    "low [slop] findings alone do not reject the change. Report findings; do not modify code.",
   output_contract:
     "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
   workspace_read: true,
