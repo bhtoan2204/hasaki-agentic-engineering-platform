@@ -28,6 +28,7 @@ import { useNow, useOfficeExecutionState } from "../office/useOfficeExecutionSta
 import { mapOffice } from "../office/workflowToAgentMapper.ts";
 import type { OfficeSnapshot } from "../office/types.ts";
 import "../office/office.css";
+import { TimesheetCard } from "./OverviewTimesheet.tsx";
 import "./Overview.css";
 
 const EMPTY: OfficeSnapshot = {
@@ -116,6 +117,7 @@ export function OverviewPage() {
       <div className="ov-main">
         <MiniOffice runId={officeRun} />
         <div className="stack">
+          <TimesheetCard />
           <ActionInbox questions={qList} />
           <HarnessHealth m={metrics} />
         </div>

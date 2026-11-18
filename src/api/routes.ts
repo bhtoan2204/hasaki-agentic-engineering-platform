@@ -64,6 +64,7 @@ import {
   tasks as legacyTasks,
 } from "../db.ts";
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
+import { myTimesheet } from "../timesheet.ts";
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
 import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
 import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd.ts";
@@ -1830,6 +1831,12 @@ export const routes: Route[] = [
 
   // ------------------------------------------------------------ Hasaki Work (unchanged endpoints; pick = import only)
   ["GET", /^\/api\/work\/status$/, ({ actor }) => authStatus(actor.id)],
+  [
+    "GET",
+    /^\/api\/timesheet$/,
+    ({ actor, url }) =>
+      myTimesheet(actor.id, Number(url.searchParams.get("year")), Number(url.searchParams.get("month"))),
+  ],
   [
     "POST",
     /^\/api\/work\/login-window$/,
