@@ -351,7 +351,8 @@ export async function copilotAgentTurn(
     const args = buildCopilotArgs({
       model: input.model || undefined,
       effort: input.effort || undefined,
-      sandbox: liveRuntime.getStore() ? true : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
+      // Write steps always run sandboxed (fail-closed guarantee); preflight refuses sandbox:false for them.
+      sandbox: liveRuntime.getStore() || input.mode === "coding" ? true : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
       timeoutSeconds: timeoutSec,
       conversationId: input.resumeId || undefined,
       additionalDirs,

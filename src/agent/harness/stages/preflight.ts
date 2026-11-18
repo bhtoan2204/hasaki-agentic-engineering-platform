@@ -1,5 +1,6 @@
 import type { ExecResult } from "../../../workflow/types.ts";
 import type { LifecycleState } from "../state.ts";
+import { guaranteeCheck } from "../../providerCapabilities.ts";
 import { one, pool } from "../../../db/pool.ts";
 import {
   type WorkspaceConflict,
@@ -171,6 +172,21 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
         },
       };
   }
+  const guarantees = guaranteeCheck(provider, mode, effective.options);
+  s.guarantees = guarantees;
+  if (guarantees.unmet.length)
+    return {
+      kind: "failed",
+      retryable: false,
+      error: `Provider ${provider} cannot enforce ${guarantees.unmet.join(", ")}, which ${mode === "coding" ? "implementation" : "this"} step requires. Run the step with a provider that enforces them; the platform does not fall back to another provider.`,
+      details: { failure_code: "GUARANTEE_UNMET", guarantees },
+    };
+  if (guarantees.degraded.length)
+    await ctx.log(
+      "system",
+      `${provider} runs this read-only step without ${guarantees.degraded.join(", ")}`,
+      { guarantees },
+    );
   if (mode === "coding") {
     for (const name of ctx.run.selected_repositories ?? []) {
       const row = await repositories.get(name);

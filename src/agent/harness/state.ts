@@ -7,6 +7,7 @@ import type { VerificationRound } from "../verify.ts";
 import type { executionWorkspaces, implementationBaseline } from "../implementationEvidence.ts";
 import type { liveRuntime } from "../../eval/liveRuntime.ts";
 import type { ClaudeTurnInput } from "../claude.ts";
+import type { GuaranteeCheck } from "../providerCapabilities.ts";
 import type { StageTrace } from "./lifecycle.ts";
 
 export type Workspace = Awaited<ReturnType<typeof executionWorkspaces>>[number];
@@ -32,6 +33,7 @@ export interface LifecycleState {
   provider: EffectiveAgent["provider"];
   ws: Workspace[];
   restoreWorkspaces: () => Promise<ExecResult | null>;
+  guarantees: GuaranteeCheck;
   // context
   policy: PolicyContext;
   delegation: boolean;

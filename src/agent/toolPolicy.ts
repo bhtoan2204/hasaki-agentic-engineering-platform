@@ -160,6 +160,8 @@ export interface PolicyContext {
   /** For call_tool from subagents: is the named integration tool read-only? */
   isReadOnlyIntegration?: (name: string) => boolean;
   loopDetector?: ToolLoopDetector;
+  /** The step may use web tools while it can write (`config.network: true`). */
+  network?: boolean;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -1080,9 +1082,14 @@ export function decide(
       if (leaked) return deny(leaked);
       return allow;
     }
-    case "TodoWrite":
     case "WebFetch":
     case "WebSearch":
+      if (ctx.mode === "coding" && !ctx.network)
+        return deny(
+          "web access is disabled while this step can write code; research in an analysis step, or set config.network on the step",
+        );
+      return allow;
+    case "TodoWrite":
     case "Skill":
       return allow;
     case "Edit":
