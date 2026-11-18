@@ -265,7 +265,10 @@ export interface Config {
     postSubmitGraceSeconds?: number;
     /** Wall-clock limit of one agent turn when neither the step nor the provider config sets one. */
     turnTimeoutMs?: number;
-    /** A turn with no provider stream event and no tool call for this long is stopped (IDLE_TIMEOUT). */
+    /**
+     * A turn with no provider stream event, hook call or platform tool request for this long is stopped (IDLE_TIMEOUT).
+     * A running shell command is silent, so this stays above the longest tool timeout (platform MCP tools: 30 min).
+     */
     idleTimeoutMs?: number;
     /** Tool calls one attempt may make across all its turns, repairs included (TOOL_BUDGET_EXHAUSTED). */
     maxToolCalls?: number;
@@ -590,7 +593,7 @@ const defaults: Config = {
     contextToolTimeoutMs: 10000,
     postSubmitGraceSeconds: 30,
     turnTimeoutMs: 45 * 60_000,
-    idleTimeoutMs: 10 * 60_000,
+    idleTimeoutMs: 30 * 60_000,
     maxToolCalls: 400,
     settingSources: [],
     inlineKnowledgeTokens: 8000,

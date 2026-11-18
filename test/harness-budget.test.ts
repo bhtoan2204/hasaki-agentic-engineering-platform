@@ -11,8 +11,10 @@ const policy = (limit: number): PolicyContext => ({
   toolBudget: { calls: 0, limit, exhausted: false },
 });
 
-test("the tool budget counts native calls across turns and never blocks platform tools", () => {
+test("the tool budget counts allowed native calls across turns and never blocks platform tools", () => {
   const p = policy(2);
+  assert.equal(decide("Edit", { file_path: "/a", old_string: "", new_string: "" }, p).allow, false);
+  assert.equal(p.toolBudget!.calls, 0);
   assert.equal(decide("Read", { file_path: "/a" }, p).allow, true);
   assert.equal(decide("mcp__platform__post_update", { message: "x" }, p).allow, true);
   assert.equal(decide("Grep", { pattern: "x" }, p).allow, true);

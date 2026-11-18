@@ -1,5 +1,8 @@
 import type { ExecResult } from "../../../workflow/types.ts";
 import type { LifecycleState } from "../state.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { protectedPathMatches } from "../../toolPolicy.ts";
 import { one, pool } from "../../../db/pool.ts";
 import { workspaceBase } from "../../../git/provider.ts";
 import { validateOutputContract } from "../../contract.ts";
@@ -54,6 +57,15 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
       return { kind: "failed", retryable: false, error: authorizationProblems.join("; ") };
     const implementationEnd = await observeImplementation(ctx);
     implementationStart = await loadImplementationBaseline(ctx.step.id, ctx.step.generation);
+    // Backstop for shell writes the pre-execution check cannot see (interpreters, patches, symlinks).
+    const touched = await protectedChanges(all, implementationStart, s.policy.protectedPaths ?? []);
+    if (touched.length)
+      return {
+        kind: "failed",
+        retryable: false,
+        error: `the agent changed CI or verification files fixed by the workflow: ${touched.join(", ")}`,
+        details: { failure_code: "POLICY_VIOLATION" },
+      };
     const branchChanged = Object.values(state.files).some((files) => files.length);
     const attemptChanged =
       !!implementationStart && implementationChanged(implementationStart, implementationEnd);
@@ -190,4 +202,31 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
   const terminalOutput = terminalCodingFailure(output);
   if (terminalOutput) return terminalOutput;
   return { kind: "completed", output };
+}
+
+const git = promisify(execFile);
+
+/** Protected files changed in each worktree since the step's implementation baseline (committed, staged or not). */
+async function protectedChanges(
+  workspaces: Array<{ repo: string; path: string }>,
+  baseline: Record<string, { head: string }> | null,
+  patterns: string[],
+): Promise<string[]> {
+  if (!patterns.length) return [];
+  const hits: string[] = [];
+  for (const w of workspaces) {
+    const head = baseline?.[w.repo]?.head;
+    if (!head) continue;
+    const out = await Promise.all([
+      git("git", ["-C", w.path, "diff", "--name-only", head], { maxBuffer: 16 << 20 }),
+      git("git", ["-C", w.path, "ls-files", "--others", "--exclude-standard"], {
+        maxBuffer: 16 << 20,
+      }),
+    ]).catch(() => null);
+    if (!out) continue;
+    for (const file of out.flatMap((r) => r.stdout.split("\n")).filter(Boolean))
+      if (patterns.some((pattern) => protectedPathMatches(file, pattern)))
+        hits.push(`${w.repo}/${file}`);
+  }
+  return hits;
 }

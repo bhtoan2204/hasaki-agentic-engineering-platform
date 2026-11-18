@@ -30,13 +30,11 @@ export function harnessEvidence(s: LifecycleState, result: ExecResult | undefine
       passed: r.passed,
       signature: r.signature,
     })),
-    checkpoint: s.resume
-      ? {
-          source: "session_resume",
-          session_id: s.resume.sessionId,
-          from_attempt: s.resume.fromAttempt ?? null,
-        }
-      : { source: ctx.input?.pending?.resume ? "rebuilt" : "fresh" },
+    checkpoint: {
+      source: s.checkpointSource ?? "fresh",
+      session_id: s.resume?.sessionId ?? null,
+      from_attempt: s.resume?.fromAttempt ?? null,
+    },
     context_pack: pack
       ? {
           tokens: pack.estimated_tokens,

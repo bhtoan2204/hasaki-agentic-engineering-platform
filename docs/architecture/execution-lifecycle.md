@@ -42,16 +42,18 @@ rounds, checkpoint source, context pack size and the execution contract revision
 `TURN_ADAPTERS` (`src/agent/harness/turn.ts`) maps each provider to one function that returns a `TurnResult`. The CLI
 providers share `src/agent/harness/cliTurn.ts`:
 
-- `superviseTurn` stops a turn once, for cancellation, the wall-clock limit or idle (no stream event for
-  `idle_timeout_ms`), and reports `CANCELED`, `EXECUTION_TIMEOUT` or `IDLE_TIMEOUT`. The Claude SDK turn uses the same
-  watchdog.
+- `superviseTurn` stops a turn once, for cancellation, the wall-clock limit or idle, and reports `CANCELED`,
+  `EXECUTION_TIMEOUT` or `IDLE_TIMEOUT`. Activity is a provider stream event, a hook call or a platform tool request;
+  a running shell command is silent, so the idle limit stays above the longest tool timeout. The Claude SDK turn uses
+  the same watchdog and its PreToolUse hook counts as activity.
 - `turnLimits`: step `timeout_ms` / `idle_timeout_ms`, then the provider config, then `agent.turnTimeoutMs` (45 min) and
-  `agent.idleTimeoutMs` (10 min; MICRO at most 3 min).
-- `readSubmitted` and `adoptRunWorkspaces` replace per-provider copies.
+  `agent.idleTimeoutMs` (30 min; MICRO at most 3 min).
+- `readSubmitted` (only what the current turn submitted) and `adoptRunWorkspaces` replace per-provider copies.
 
 Policy enforcement goes through `toolPolicy.ts` `decide()` for every provider: in process for Claude, through the
-broker (`src/agent/broker`) for the hook-based CLIs. `decide()` also counts the attempt's tool-call budget and feeds the
-loop detector.
+broker (`src/agent/broker`) for the hook-based CLIs. `decide()` also counts the attempt's allowed native tool calls
+against its budget and feeds the loop detector. The broker counts `PreToolUse` hook calls separately from telemetry
+hooks: a native tool that appears before any `PreToolUse` call stops the turn.
 
 ## Guarantees
 
@@ -85,7 +87,7 @@ engine recovery class and the `provider_error.code` read by provider handoff. Re
 | Wall-clock limit | `EXECUTION_TIMEOUT` | Retried within `max_attempts` for every provider |
 | No stream activity | `IDLE_TIMEOUT` | Retried within `max_attempts` |
 | Same failure twice in verification, or a tool loop | `NO_PROGRESS` / loop denial | Stops for a human |
-| Remaining spend reached before another turn | `BUDGET_EXHAUSTED` | Step waits for the developer to raise the budget |
+| Remaining spend reached before another turn (`costBudget.action: pause`) | `BUDGET_EXHAUSTED` | Step waits for the developer; a `budget` event marks the scope acknowledged |
 | Tool-call budget used up without a result | `TOOL_BUDGET_EXHAUSTED` | Fails, not retried |
 | Provider error | `RATE_LIMIT`, `QUOTA_EXHAUSTED`, `AUTHENTICATION`, … | Per the table |
 | No result, reply or submission | `INCOMPLETE_OUTPUT` | Retried with session resume |
@@ -99,8 +101,10 @@ the middle of one. The tool-call budget (`max_tool_calls`, default 400) is the i
 
 ## Rules enforced in code, not prompts
 
-- Edits and shell writes to CI configuration (`.github/`, `.gitlab-ci.yml`, …) and to scripts the fixed verification
-  command runs are denied unless the step sets `config.allow_ci_edits`.
+- Edits and shell writes to CI configuration (`.github/`, `.gitlab-ci.yml`, …) and to script paths named in the fixed
+  verification command are denied unless the step sets `config.allow_ci_edits`. Because a shell can write in ways no
+  command check sees, `finalize` also fails the step (`POLICY_VIOLATION`) when such a file changed since the step's
+  implementation baseline. Runner manifests (`package.json`, `Makefile`) are not protected.
 - `git merge`, `rebase` and `pull` are denied; `push`, history rewrites and branch changes already were.
 - `submit_result` records one output per turn; a repair turn opens a new one.
 - String output contracts are validated field by field, including enums, nested shapes, `number[]` and nullable unions.

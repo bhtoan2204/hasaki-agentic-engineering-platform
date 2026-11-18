@@ -6,6 +6,7 @@ import { normalizeProviderFailure } from "../telemetry.ts";
 import type { HarnessFailureCode } from "../harness/failure.ts";
 import {
   adoptRunWorkspaces,
+  checkpointMark,
   readSubmitted,
   stopFailure,
   superviseTurn,
@@ -144,6 +145,7 @@ export interface CursorTurnInput {
 }
 
 export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTurnResult> {
+  const turnMark = await checkpointMark(input.ctx.attempt.id);
   const usageBase = { ...input.metrics?.tokens };
   const usageCostBase = input.metrics?.cost_usd ?? 0;
   const cap = await cursorCapabilities();
@@ -163,7 +165,9 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     input.metrics ?? newMetrics(""),
     () => {},
   );
+  const activity = { touch: () => {} };
   const broker = await startBroker({
+    onActivity: () => activity.touch(),
     policy: input.policy,
     cwd: input.cwd,
     requireHooks: false,
@@ -229,6 +233,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000),
     );
     const watch = superviseTurn({ signal: input.ctx.signal, ...limits, stop: kill });
+    activity.touch = () => watch.touch();
 
     const parser = new NdjsonStream();
     let stderr = "";
@@ -396,6 +401,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         pending.then(() => resolve(null));
       });
       child.on("close", (code) => {
+        watch.dispose();
         pending.then(() => resolve(code));
       });
     });
@@ -413,7 +419,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     rmSync(promptFile, { force: true });
     rmSync(join(input.cwd, ".cursor", "cli.json"), { force: true });
 
-    const submitted = await readSubmitted(input.ctx.attempt.id);
+    const submitted = await readSubmitted(input.ctx.attempt.id, turnMark);
 
     if (input.metrics) {
       input.metrics.model = model || input.metrics.model;

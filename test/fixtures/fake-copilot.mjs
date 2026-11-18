@@ -245,6 +245,19 @@ if (mode === "native-model") {
 out({ type: "init", session_id: sessionId, model: "gpt-4o" });
 out({ type: "thinking", thought: "Initializing Copilot session..." });
 
+if (mode === "nohook") {
+  // A telemetry hook runs, the native tool does not pass PreToolUse.
+  if (telemetryCommand)
+    spawnSync("sh", ["-c", telemetryCommand], {
+      input: JSON.stringify({ conversationId: sessionId, modelName: "gpt-4o", invocationNum: 0 }),
+      env: process.env,
+      encoding: "utf8",
+    });
+  out({ type: "tool_call", tool: "bash", args: { command: "touch escaped" } });
+  await new Promise((r) => setTimeout(r, 30_000));
+  process.exit(0);
+}
+
 if (mode === "push") {
   const r = callHook({
     hook_event_name: "PreToolUse",

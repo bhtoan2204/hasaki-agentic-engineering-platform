@@ -28,16 +28,18 @@ export async function budgetStage(s: LifecycleState): Promise<ExecResult | void>
       ).catch(() => [])
     ).map((e) => e.scope),
   );
-  const remaining = (
+  const open = (
     [
       ["run", budgets?.run],
       ["work_item", budgets?.work_item],
     ] as const
-  )
-    .filter(([scope, line]) => line?.limit_usd != null && !acknowledged.has(scope))
-    .map(([, line]) => line!.limit_usd! - line!.used_usd);
+  ).filter(([scope, line]) => line?.limit_usd != null && !acknowledged.has(scope));
+  const remaining = open.map(([, line]) => line!.limit_usd! - line!.used_usd);
+  const least = remaining.length ? Math.min(...remaining) : null;
   s.budget = {
-    remainingUsd: remaining.length ? Math.min(...remaining) : null,
+    // An overrun at attempt start is the engine's (pre-queue and post-attempt) to report; only "pause" stops a turn.
+    remainingUsd: config.costBudget.action === "pause" && least != null && least > 0 ? least : null,
+    scopes: open.map(([scope]) => scope),
     enforcement: GUARANTEES[provider].includes("reported_cost")
       ? "between_turns"
       : "preflight_only",
@@ -55,7 +57,12 @@ export function budgetStop(s: LifecycleState, result: TurnResult): ExecResult | 
           options: ["Continue with a raised budget"],
         },
       ],
-      checkpoint: { workspaces: s.policy.workspaces, mode: s.mode, budget: s.budget },
+      checkpoint: {
+        workspaces: s.policy.workspaces,
+        mode: s.mode,
+        budget: s.budget,
+        ...(s.rounds?.length ? { verification: { rounds: s.rounds } } : {}),
+      },
     };
   if (s.policy.toolBudget?.exhausted && !s.submitted)
     return {

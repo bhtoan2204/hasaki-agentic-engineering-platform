@@ -17,7 +17,7 @@ export function turnLimits(
 ): { timeoutMs: number; idleMs: number } {
   const timeoutMs =
     agent?.timeout_ms ?? providerTimeoutMs ?? config.agent.turnTimeoutMs ?? 45 * 60_000;
-  let idleMs = agent?.idle_timeout_ms ?? config.agent.idleTimeoutMs ?? 10 * 60_000;
+  let idleMs = agent?.idle_timeout_ms ?? config.agent.idleTimeoutMs ?? 30 * 60_000;
   if (agent?.execution_profile === "MICRO") idleMs = Math.min(idleMs, MICRO_IDLE_CAP_MS);
   return { timeoutMs, idleMs: Math.min(idleMs, timeoutMs) };
 }
@@ -45,7 +45,11 @@ export function superviseTurn(opts: {
   const end = (why: StopReason) => {
     if (reason) return;
     reason = why;
-    opts.stop(why);
+    try {
+      opts.stop(why);
+    } catch (error) {
+      console.error(`stopping the provider turn failed: ${(error as Error).message}`);
+    }
   };
   const onAbort = () => end("canceled");
   const wallTimer = setTimeout(() => end("timeout"), opts.timeoutMs);
@@ -93,14 +97,25 @@ export function stopFailure(
   }
 }
 
-/** The last result the agent recorded with submit_result in this attempt. */
+/** The newest checkpoint of the attempt when a turn starts; read-backs only see what that turn recorded. */
+export async function checkpointMark(attemptId: number): Promise<number> {
+  const row = await one<{ id: number | null }>(
+    pool,
+    "SELECT max(id) AS id FROM workflow_checkpoints WHERE attempt_id = $1",
+    [attemptId],
+  ).catch(() => null);
+  return Number(row?.id ?? 0);
+}
+
+/** The last result the agent recorded with submit_result in this turn (after `since`). */
 export async function readSubmitted(
   attemptId: number,
+  since: number,
 ): Promise<Record<string, unknown> | undefined> {
   const row = await one<{ data: { output?: Record<string, unknown> } }>(
     pool,
-    "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'submit_result' ORDER BY id DESC LIMIT 1",
-    [attemptId],
+    "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'submit_result' AND id > $2 ORDER BY id DESC LIMIT 1",
+    [attemptId, since],
   ).catch(() => null);
   return row?.data?.output;
 }

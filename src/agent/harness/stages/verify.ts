@@ -12,7 +12,7 @@ import { runVerificationCommand as runCommand } from "../../../workflow/executor
 import { collectMicroEvidence } from "../../../workflow/microEvidence.ts";
 import { TEST_COMMAND } from "../../../workflow/templates.ts";
 import { SINCE_HUMAN_REEXECUTE } from "../../claude.ts";
-import { blocksRebuild, isTerminalFailure } from "../../harness/failure.ts";
+import { blocksRebuild, failedTurn } from "../failure.ts";
 import { executionWorkspaces } from "../../implementationEvidence.ts";
 import {
   REVIEW_POLICY_VERSION,
@@ -393,12 +393,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         }
         const budgetStopped = budgetStop(s, r);
         if (budgetStopped) return budgetStopped;
-        if (r.isError)
-          return {
-            kind: "failed",
-            error: `repair ${n} failed: ${r.text || "agent run failed"}`,
-            retryable: !isTerminalFailure(r.failure),
-          };
+        if (r.isError) return failedTurn(r, `repair ${n} failed: ${r.text || "agent run failed"}`);
         if (await openQuestions()) return pause(r.text);
         const terminalRepair = terminalCodingFailure(s.submitted);
         if (terminalRepair) return terminalRepair;

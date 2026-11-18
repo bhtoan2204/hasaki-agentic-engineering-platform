@@ -51,7 +51,7 @@ export async function contextStage(s: LifecycleState): Promise<ExecResult | void
     isReadOnlyIntegration: (name) =>
       integrationTools().find((t) => t.name === name)?.readOnly === true,
     loopDetector: new ToolLoopDetector(),
-    network: ctx.step.config.network === true,
+    network: mode !== "coding" || ctx.step.config.network === true,
     protectedPaths:
       ctx.step.config.allow_ci_edits === true
         ? []

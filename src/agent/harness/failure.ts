@@ -4,6 +4,7 @@ import {
   type FailureCategory,
 } from "../telemetry.ts";
 import type { FailureClass } from "../../workflow/failures.ts";
+import type { ExecResult } from "../../workflow/types.ts";
 
 export const HARNESS_FAILURE_CODES = [
   ...FAILURE_CATEGORIES,
@@ -98,6 +99,23 @@ export const isTerminalFailure = (raw: string | undefined | null) =>
 /** A failed resume that a rebuilt prompt cannot fix within the same attempt. */
 export const blocksRebuild = (raw: string | undefined | null) =>
   failurePolicy(raw)?.rebuildable === false;
+
+/** The step result of a failed provider turn, identical for the first turn and every repair turn. */
+export function failedTurn(result: { text: string; failure?: string }, error: string): ExecResult {
+  const code = toFailureCode(result.failure);
+  return {
+    kind: "failed",
+    error,
+    retryable: !isTerminalFailure(result.failure),
+    details: {
+      ...(code ? { failure_code: code } : {}),
+      provider_error: {
+        code: failurePolicy(result.failure)?.providerErrorCode ?? result.failure ?? "",
+        message: result.text,
+      },
+    },
+  };
+}
 
 /** Shared error-text classifier for the hook-based CLIs (Copilot, Antigravity). */
 export function classifyCliError(err: unknown): FailureCategory {

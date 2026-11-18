@@ -37,6 +37,8 @@ export interface BrokerDeps<P extends BrokerPolicy = BrokerPolicy> {
   onDenied?(tool: string, reason: string): void | Promise<void>;
   /** Hook payloads carry the active model slug; JSONL events do not. */
   onModel?(model: string): void | Promise<void>;
+  /** Any hook or platform tool request: the provider is working even when its stream is silent. */
+  onActivity?(): void;
 }
 
 export interface Broker {
@@ -44,6 +46,8 @@ export interface Broker {
   token: string;
   /** Hook invocations seen (any event). Zero means Codex is not running the platform hooks. */
   readonly hookCalls: number;
+  /** PreToolUse hook invocations only; telemetry hooks (PreInvocation) do not prove tools are checked. */
+  readonly preToolUseCalls: number;
   /** Tool names the hook allowed, in order. Used to detect a tool item that never went through the hook. */
   readonly allowedTools: string[];
   close(): Promise<void>;
@@ -58,6 +62,7 @@ export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): 
   const token = randomBytes(32).toString("hex");
   const tokenBuf = Buffer.from(token);
   let hookCalls = 0;
+  let preToolUseCalls = 0;
   const allowedTools: string[] = [];
   const sockets = new Set<Socket>();
 
@@ -69,6 +74,7 @@ export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): 
 
   const handle = async (msg: any): Promise<unknown> => {
     if (!msg || !authorized(msg.token)) return { ok: false, error: "unauthorized" };
+    if (msg.kind === "hook" || msg.kind === "tool") deps.onActivity?.();
     if (msg.kind === "hook") {
       hookCalls++;
       const payload = (msg.payload ?? {}) as {
@@ -76,6 +82,7 @@ export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): 
         tool_name?: unknown;
         hook_event_name?: unknown;
       };
+      if (payload.hook_event_name === "PreToolUse") preToolUseCalls++;
       if (typeof payload.model === "string" && payload.model) await deps.onModel?.(payload.model);
       let decision: Decision;
       try {
@@ -149,6 +156,9 @@ export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): 
     token,
     get hookCalls() {
       return hookCalls;
+    },
+    get preToolUseCalls() {
+      return preToolUseCalls;
     },
     allowedTools,
     async close() {

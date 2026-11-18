@@ -45,7 +45,13 @@ export interface LifecycleState {
   cwd: string;
   independent: boolean;
   // budget
-  budget: { remainingUsd: number | null; enforcement: "between_turns" | "preflight_only" };
+  budget: {
+    remainingUsd: number | null;
+    scopes: Array<"run" | "work_item">;
+    enforcement: "between_turns" | "preflight_only";
+  };
+  /** Where the turn's context came from; set by execute. */
+  checkpointSource: "fresh" | "session_resume" | "rebuilt";
   // checkpoint
   implementationStart: Awaited<ReturnType<typeof implementationBaseline>> | null;
   resume: { sessionId: string; fromAttempt?: number } | null;

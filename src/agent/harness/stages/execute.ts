@@ -10,12 +10,8 @@ import { repositoryBaseBranch } from "../../../repos/service.ts";
 import { branchFor } from "../../../workflow/branches.ts";
 import { downloadAttachments } from "../../attachments.ts";
 import { progressNotes, worktreeState } from "../../claude.ts";
-import {
-  blocksRebuild,
-  failurePolicy,
-  isTerminalFailure,
-  toFailureCode,
-} from "../../harness/failure.ts";
+import { blocksRebuild, failedTurn } from "../failure.ts";
+import { runEvents } from "../../../workflow/events.ts";
 import { outputLocale } from "../../language.ts";
 import { addUsage } from "../../metrics.ts";
 import {
@@ -295,13 +291,30 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
       (sum, session) => sum + (Number(session.reported_cost_usd) || 0),
       0,
     );
-    if (s.budget.remainingUsd != null && spent > 0 && spent >= s.budget.remainingUsd)
-      return {
-        isError: true,
-        text: `this attempt reported $${spent.toFixed(2)}, the remaining budget was $${s.budget.remainingUsd.toFixed(2)}`,
-        assistantTurns: 0,
-        failure: "BUDGET_EXHAUSTED",
-      };
+    if (s.budget.remainingUsd != null && spent > 0 && spent >= s.budget.remainingUsd) {
+      const text = `this attempt reported $${spent.toFixed(2)}, the remaining budget was $${s.budget.remainingUsd.toFixed(2)}`;
+      // Continuing is the developer's acknowledgement: later attempts are not stopped again for these scopes.
+      for (const scope of s.budget.scopes)
+        await runEvents
+          .add(
+            pool,
+            ctx.run.id,
+            "budget",
+            `cost budget reached during "${ctx.step.key}": ${text}`,
+            ctx.step.id,
+            ctx.attempt.id,
+            {
+              key: `${scope}:exceeded:attempt:${ctx.attempt.id}`,
+              scope,
+              level: "exceeded",
+              step: ctx.step.key,
+              used_usd: spent,
+              enforcement: "between_turns",
+            },
+          )
+          .catch(() => {});
+      return { isError: true, text, assistantTurns: 0, failure: "BUDGET_EXHAUSTED" };
+    }
     sessionKey = randomUUID();
     sessionStart = Date.now();
     metrics.model = routed.model || (provider === "claude" ? "default" : "");
@@ -383,6 +396,12 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     );
   let result;
   try {
+    s.checkpointSource =
+      resume && existsSync(cwd)
+        ? "session_resume"
+        : resume || ctx.input.pending?.resume
+          ? "rebuilt"
+          : "fresh";
     if (resume && existsSync(cwd)) {
       await ctx.log("system", `resuming ${provider} session ${resume.sessionId}`, { provider });
       try {
@@ -420,6 +439,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
             recovery: "rebuild_from_checkpoint",
           },
         );
+        s.checkpointSource = "rebuilt";
         result = await run(
           buildUserPrompt(
             ctx.input,
@@ -503,18 +523,6 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
   }
   const budgetStopped = budgetStop(s, result);
   if (budgetStopped) return budgetStopped;
-  if (result.isError)
-    return {
-      kind: "failed",
-      error: result.text || "agent run failed",
-      retryable: !isTerminalFailure(result.failure),
-      details: {
-        ...(toFailureCode(result.failure) ? { failure_code: toFailureCode(result.failure) } : {}),
-        provider_error: {
-          code: failurePolicy(result.failure)?.providerErrorCode ?? result.failure ?? "",
-          message: result.text,
-        },
-      },
-    };
+  if (result.isError) return failedTurn(result, result.text || "agent run failed");
   if (await openQuestions()) return pause(result.text);
 }

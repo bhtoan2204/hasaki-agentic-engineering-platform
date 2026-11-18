@@ -589,7 +589,7 @@ test("a tool that bypassed the hook stops the run", async () => {
   process.env.FAKE_CODEX_MODE = "nohook";
   const t = turn("coding");
   const r = await t.run();
-  assert.equal(r.failure, "policy");
+  assert.equal(r.failure, "UNSAFE_SIDE_EFFECT");
   assert.match(r.text, /pre-execution hook/);
 });
 

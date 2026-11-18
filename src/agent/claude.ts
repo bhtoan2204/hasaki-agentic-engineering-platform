@@ -415,6 +415,7 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
   const hookAllowed = new Set<string>();
   const callKey = (name: string, input: unknown) => `${name}\u0000${JSON.stringify(input ?? {})}`;
   const preToolUse: HookCallback = async (input: any) => {
+    watch.touch();
     const waiting = await one<{ n: number }>(
       pool,
       "SELECT count(*)::int AS n FROM workflow_questions WHERE attempt_id=$1 AND status='open'",
@@ -608,6 +609,8 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
     reaper.disarm();
     watch.dispose();
   }
+  if (watch.reason && watch.reason !== "canceled" && reaper.armed && isSubmitted())
+    return result;
   if (watch.reason && !reaper.fired)
     return {
       isError: true,

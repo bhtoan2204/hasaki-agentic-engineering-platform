@@ -13,6 +13,7 @@ import { newMetrics, type AgentMetrics } from "../metrics.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "../broker/server.ts";
 import {
+  checkpointMark,
   readSubmitted,
   stopFailure,
   superviseTurn,
@@ -233,6 +234,7 @@ export function buildAntigravityArgs(opts: {
 export async function antigravityAgentTurn(
   input: AntigravityTurnInput,
 ): Promise<AntigravityTurnResult> {
+  const turnMark = await checkpointMark(input.ctx.attempt.id);
   const usageBase = { ...input.metrics?.tokens };
   const cap = await antigravityCapabilities(false, {
     model: input.model ?? "",
@@ -290,7 +292,9 @@ export async function antigravityAgentTurn(
       },
     );
 
+    const activity = { touch: () => {} };
     broker = await startBroker({
+      onActivity: () => activity.touch(),
       policy: input.policy,
       cwd: input.cwd,
       decideHook: antigravityHookDecision,
@@ -377,6 +381,7 @@ export async function antigravityAgentTurn(
         if (child) killAntigravity(child);
       },
     });
+    activity.touch = () => watch.touch();
 
     const parser = new AntigravityStream();
     const agentText = new TextBatch();
@@ -434,7 +439,7 @@ export async function antigravityAgentTurn(
 
       if (ev.tool || ev.type === "result") await flushSpeech();
 
-      if (ev.tool && broker?.hookCalls === 0 && !violation) {
+      if (ev.tool && (broker?.preToolUseCalls ?? 0) === 0 && !violation) {
         violation =
           "Antigravity started a tool without running the platform's pre-execution hook; the run was stopped";
         input.metrics?.denied.push({ tool: ev.tool, reason: violation });
@@ -538,6 +543,7 @@ export async function antigravityAgentTurn(
       },
     );
     const exitCode = await exitPromise;
+    watch.dispose();
     await writePromise;
     await pendingLogs;
 
@@ -565,7 +571,7 @@ export async function antigravityAgentTurn(
       if (input.onTelemetry) await input.onTelemetry();
     }
 
-    submitted = (await readSubmitted(input.ctx.attempt.id)) ?? submitted;
+    submitted = submitted ?? (await readSubmitted(input.ctx.attempt.id, turnMark));
 
     const stopped = watch.reason ?? (input.ctx.signal.aborted ? "canceled" : null);
     if (stopped)

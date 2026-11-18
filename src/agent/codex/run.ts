@@ -24,6 +24,7 @@ import {
 import { codexHookDecision } from "./policy.ts";
 import {
   adoptRunWorkspaces,
+  checkpointMark,
   readSubmitted,
   stopFailure,
   superviseTurn,
@@ -434,6 +435,7 @@ export interface CodexTurnResult {
 
 export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnResult> {
   const { ctx, metrics } = input;
+  const turnMark = await checkpointMark(ctx.attempt.id);
   const cap = await codexCapabilities(false, {
     model: input.model ?? "",
     effort: input.effort ?? "",
@@ -473,9 +475,11 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   const livePolicy = new Proxy(input.policy, {
     get: (t, k) => (k === "mode" && paused ? "analysis" : (t as any)[k]),
   });
+  const activity = { touch: () => {} };
   let broker: Broker;
   try {
     broker = await startBroker({
+      onActivity: () => activity.touch(),
       policy: livePolicy,
       cwd: input.cwd,
       decideHook: codexHookDecision,
@@ -538,6 +542,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   };
   const limits = turnLimits(input.ctx.attempt.effective_agent, codexConfig().timeoutMs);
   const watch = superviseTurn({ signal: ctx.signal, ...limits, stop });
+  activity.touch = () => watch.touch();
   child.stdin?.on("error", () => {});
   child.stdin?.end(input.prompt);
 
@@ -782,7 +787,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       stream: "stderr",
     });
 
-  submitted = submitted ?? (await readSubmitted(ctx.attempt.id));
+  submitted = submitted ?? (await readSubmitted(ctx.attempt.id, turnMark));
   const base = { assistantTurns, submitted, threadId: threadId || undefined };
 
   const stopped = stopReason as string;
@@ -796,7 +801,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       isError: true,
       assistantTurns: Math.max(assistantTurns, 1),
       text: `Codex blocked by platform policy: ${violation}`,
-      failure: "policy",
+      failure: "UNSAFE_SIDE_EFFECT",
     };
   const detail = failedMsg || errors.at(-1) || "";
   if (failedMsg || (!completed && (errors.length || exitCode !== 0))) {

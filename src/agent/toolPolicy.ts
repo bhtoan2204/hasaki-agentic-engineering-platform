@@ -190,6 +190,9 @@ export function verifyPathTokens(command: string | null | undefined): string[] {
   return [...out];
 }
 
+export const protectedPathMatches = (rel: string, pattern: string) =>
+  pattern.endsWith("/") ? (rel + "/").startsWith(pattern) : rel === pattern;
+
 /** The protected path a write target hits, if any: absolute targets are judged relative to their worktree. */
 function protectedTarget(target: string, ctx: PolicyContext, base?: string): string | null {
   if (!ctx.protectedPaths?.length) return null;
@@ -201,7 +204,7 @@ function protectedTarget(target: string, ctx: PolicyContext, base?: string): str
   if (!target.startsWith("/")) rels.push(target.replace(/^\.\//, ""));
   for (const rel of rels)
     for (const pattern of ctx.protectedPaths)
-      if (pattern.endsWith("/") ? (rel + "/").startsWith(pattern) : rel === pattern) return pattern;
+      if (protectedPathMatches(rel, pattern)) return pattern;
   return null;
 }
 
@@ -266,7 +269,7 @@ const ALWAYS_DENIED: Array<[RegExp, string]> = [
   ],
   [
     // merge-base and merge-file only read; pull merges or rebases too.
-    /\bgit\s+(-C\s+\S+\s+)?(merge(?![-\w])|rebase\b|pull\b)/,
+    /\bgit(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?))*\s+(merge(?![-\w])|rebase\b|pull\b)/,
     "merging, rebasing and pulling are done by the platform — keep committing on the run branch; to compare with the base use git diff origin/<base>...HEAD",
   ],
   [
@@ -965,7 +968,7 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     if (ctx.protectedPaths?.length) {
       for (const [i, seg] of p.segments.entries()) {
         if (readOnlyViolation(seg) === null) continue;
-        for (const word of seg.split(/\s+/).slice(1)) {
+        for (const word of seg.split(/[\s=]+/).slice(1)) {
           const hit = protectedTarget(word.replace(/^["']|["']$/g, ""), ctx, dirs[i] ?? cwd);
           if (hit) return protectedDenial(hit);
         }
@@ -1067,8 +1070,10 @@ export function decide(
   agentId?: string,
 ): Decision {
   const d = decideTool(tool, input, ctx, cwd, agentId);
-  if (!d.allow) ctx.loopDetector?.record(tool, input, "denied", d.reason);
-  else if (!tool.startsWith("mcp__platform__")) ctx.loopDetector?.record(tool, input, "ok");
+  // Platform tools are journaled by the tool runtime itself.
+  if (tool.startsWith("mcp__platform__")) return d;
+  ctx.loopDetector?.record(tool, input, d.allow ? "ok" : "denied", d.allow ? undefined : d.reason);
+  if (d.allow && ctx.toolBudget) ctx.toolBudget.calls++;
   return d;
 }
 
@@ -1090,7 +1095,6 @@ function decideTool(
         `tool budget of ${ctx.toolBudget.limit} calls is used up; submit your result with mcp__platform__submit_result or ask the developer`,
       );
     }
-    ctx.toolBudget.calls++;
   }
   if (ctx.micro) {
     const control = /mcp__platform__(submit_result|escalate_profile|post_update|ask_user)$/.test(
@@ -1141,7 +1145,19 @@ function decideTool(
       return allow;
     }
     if (tool === "Task" || tool === "Agent") return deny("subagents cannot delegate further");
-    return decide(tool, input, { ...ctx, mode: "analysis", delegation: false }, cwd);
+    // Same rules as a read-only step, but web access still follows the parent step's network setting.
+    return decideTool(
+      tool,
+      input,
+      {
+        ...ctx,
+        mode: "analysis",
+        delegation: false,
+        network: ctx.network ?? ctx.mode !== "coding",
+        toolBudget: undefined,
+      },
+      cwd,
+    );
   }
   if (tool.startsWith("mcp__platform__")) return allow;
   switch (tool) {
@@ -1169,7 +1185,7 @@ function decideTool(
     }
     case "WebFetch":
     case "WebSearch":
-      if (ctx.mode === "coding" && !ctx.network)
+      if (ctx.network === false || (ctx.mode === "coding" && !ctx.network))
         return deny(
           "web access is disabled while this step can write code; research in an analysis step, or set config.network on the step",
         );

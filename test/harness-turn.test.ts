@@ -11,7 +11,7 @@ test("turn limits: step settings win, then provider config, then platform defaul
   });
   assert.equal(turnLimits({}, 99_000).timeoutMs, 99_000);
   assert.equal(turnLimits(null).timeoutMs, 45 * 60_000);
-  assert.equal(turnLimits(null).idleMs, 10 * 60_000);
+  assert.equal(turnLimits(null).idleMs, 30 * 60_000);
   assert.equal(turnLimits({ execution_profile: "MICRO" }).idleMs, 3 * 60_000);
   assert.equal(turnLimits({ timeout_ms: 5_000 }).idleMs, 5_000);
 });

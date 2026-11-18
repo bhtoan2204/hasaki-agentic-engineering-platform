@@ -37,6 +37,7 @@ import { decide } from "../src/agent/toolPolicy.ts";
 import { runWorkingDirectory } from "../src/repos/workspaces.ts";
 import { resumableSession } from "../src/agent/claude.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
+import { copilotAgentTurn } from "../src/agent/copilot/run.ts";
 import type { HarnessEvidence } from "../src/agent/harness/evidence.ts";
 import { handle } from "../src/http/app.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
@@ -663,9 +664,18 @@ async function lifecycleAttempt(
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];
   };
-  await run([{ ...agent("lifecycle", provider, [], type), config: { agent: { provider } } }]);
+  // Claim this run's job, not one an earlier test left queued.
+  for (const { id } of await q<{ id: number }>(
+    pool,
+    "SELECT id FROM workflow_runs WHERE status NOT IN ('COMPLETED','FAILED','CANCELED')",
+  ))
+    await cancelRun(id);
+  const r = await run([
+    { ...agent("lifecycle", provider, [], type), config: { agent: { provider } } },
+  ]);
   const current = await begin();
   assert.ok(current.b);
+  assert.equal(current.b.run.id, r.id);
   const ctx = makeContext({ ...current.b, signal: new AbortController().signal });
   const artifacts: Array<{ kind: string; data: HarnessEvidence }> = [];
   const original = ctx.artifact.bind(ctx);
@@ -764,6 +774,30 @@ test("submit_result records one output per turn", async () => {
       await dispatchPlatformTool("submit_result", { output: { summary: "c" } }, next),
       /^ERROR/,
     );
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a Copilot tool that skipped the PreToolUse hook stops the turn even after a telemetry hook", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    COPILOT_BIN: join(import.meta.dirname, "fixtures/fake-copilot.mjs"),
+    FAKE_COPILOT_MODE: "nohook",
+  });
+  try {
+    const started = Date.now();
+    const result = await copilotAgentTurn({
+      ctx,
+      mode: "analysis",
+      policy: { ...policy, workspaces: [] },
+      cwd: await runWorkingDirectory(ctx.run.id, ctx.step.id),
+      prompt: "Investigate safely",
+      metrics: newMetrics(""),
+    });
+    assert.equal(result.isError, true, JSON.stringify(result));
+    assert.equal(result.failure, "UNSAFE_SIDE_EFFECT");
+    assert.ok(Date.now() - started < 25_000);
   } finally {
     restore();
     await cancelRun(ctx.run.id);
