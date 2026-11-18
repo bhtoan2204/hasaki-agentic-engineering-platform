@@ -1,6 +1,6 @@
 import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { migrate } from "../src/db/migrate.ts";
@@ -556,4 +556,74 @@ test("FAST run optimization preserves explicit provider boundaries", async () =>
     [...steps.map((s) => s.key), "cleanup"],
   );
   assert.match(JSON.stringify(r.profile_decision), /execution boundary/);
+});
+
+test("lifecycle characterization: executor outputs, artifacts and events before extraction", async () => {
+  const { characterize } = await import("./fixtures/lifecycle-characterization.ts");
+  const keys = ["CODEX_BIN", "FAKE_CODEX_MODE", "FAKE_CODEX_THREAD"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const snapshots: Record<string, unknown> = {};
+  try {
+    process.env.CODEX_BIN = join(import.meta.dirname, "fixtures/fake-codex.mjs");
+    process.env.FAKE_CODEX_THREAD = "characterization-session";
+    for (const scenario of [
+      "read-only",
+      "coding",
+      "MICRO",
+      "independent-review",
+      "investigation",
+      "resume",
+      "waiting_input",
+      "reexecute",
+    ]) {
+      process.env.FAKE_CODEX_MODE = scenario === "waiting_input" ? "ask" : "ok";
+      await run([
+        {
+          ...agent(
+            "characterization",
+            "codex",
+            [],
+            scenario === "coding" ? "coding_agent" : "agent",
+          ),
+          config: {
+            agent: { provider: "codex", model: "gpt-test" },
+            ...(scenario === "independent-review" ? { independent: true, strict: true } : {}),
+            ...(scenario === "investigation" ? { evidence_role: "investigation" } : {}),
+          },
+        },
+      ]);
+      const current = await begin();
+      assert.ok(current.b);
+      const ctx = makeContext({ ...current.b, signal: new AbortController().signal });
+      if (scenario === "MICRO") ctx.run.profile = "MICRO";
+      if (scenario === "resume")
+        ctx.input.pending = {
+          resume: {
+            from_attempt_id: current.b.attempt.id,
+            checkpoint: {
+              session_id: "old-session",
+              cwd: "/tmp/old-agent",
+              workspaces: [],
+              mode: "analysis",
+              last_message: "Waiting for an answer",
+            },
+          },
+        };
+      if (scenario === "reexecute")
+        ctx.input.pending = {
+          reexecute: { feedback: "Keep the earlier findings", skills: [] },
+        };
+      snapshots[scenario] = await characterize(claudeExecutor, ctx);
+      await cancelRun(ctx.run.id);
+    }
+    const file = join(import.meta.dirname, "fixtures/lifecycle-characterization.json");
+    if (process.env.UPDATE_CHARACTERIZATION === "1")
+      writeFileSync(file, `${JSON.stringify(snapshots, null, 2)}\n`);
+    assert.deepEqual(snapshots, JSON.parse(readFileSync(file, "utf8")));
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
 });

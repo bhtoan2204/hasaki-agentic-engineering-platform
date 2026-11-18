@@ -1,0 +1,157 @@
+{
+  "read-only": {
+    "result": {
+      "kind": "completed",
+      "output": {
+        "goal": "from codex",
+        "requirements": [
+          "r1"
+        ]
+      }
+    },
+    "artifacts": [],
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
+  },
+  "coding": {
+    "result": {
+      "kind": "failed",
+      "retryable": false,
+      "error": "Mandatory execution contract is incomplete: Repository scope is missing or unauthorized"
+    },
+    "artifacts": [],
+    "eventKinds": []
+  },
+  "MICRO": {
+    "result": {
+      "kind": "completed",
+      "output": {
+        "goal": "from codex",
+        "requirements": [
+          "r1"
+        ]
+      }
+    },
+    "artifacts": [],
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
+  },
+  "independent-review": {
+    "result": {
+      "kind": "waiting_input",
+      "output": {
+        "verdict": "BLOCKED",
+        "findings": [],
+        "summary": "",
+        "blocked_reason": "Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy.",
+        "verified_heads": {},
+        "verified_at": "<timestamp>",
+        "approved": false,
+        "independent": true
+      },
+      "questions": [
+        {
+          "question": "Independent verification is BLOCKED: Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy.. How should it proceed?",
+          "options": [
+            "Provide the missing information in your answer and re-verify (the PR still requires a PASS)"
+          ]
+        }
+      ]
+    },
+    "artifacts": [],
+    "eventKinds": []
+  },
+  "investigation": {
+    "result": {
+      "kind": "completed",
+      "output": {
+        "goal": "from codex",
+        "requirements": [
+          "r1"
+        ]
+      }
+    },
+    "artifacts": [],
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
+  },
+  "resume": {
+    "result": {
+      "kind": "completed",
+      "output": {
+        "goal": "from codex",
+        "requirements": [
+          "r1"
+        ]
+      }
+    },
+    "artifacts": [],
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
+  },
+  "waiting_input": {
+    "result": {
+      "kind": "waiting_input",
+      "checkpoint": {
+        "session_id": "characterization-session",
+        "cwd": "<test-root>/data/worktrees/<run>/<step>/agent-<attempt>",
+        "workspaces": [],
+        "mode": "analysis",
+        "last_message": "Waiting for the developer."
+      }
+    },
+    "artifacts": [],
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
+  },
+  "reexecute": {
+    "result": {
+      "kind": "completed",
+      "output": {
+        "goal": "from codex",
+        "requirements": [
+          "r1"
+        ]
+      }
+    },
+    "artifacts": [],
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
+  }
+}
