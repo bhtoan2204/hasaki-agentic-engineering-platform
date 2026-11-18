@@ -13,6 +13,7 @@ import {
   linkWorkItem,
   dayWindow,
   describeGroup,
+  type GroupRow,
   imageInfo,
   investigate,
   listGroups,
@@ -462,4 +463,82 @@ test("runScan with options: only the chosen project, the chosen window; the page
     ["payment-vnpay"],
     "groups of other scans are not mixed in",
   );
+});
+
+test("runScan: scans SigNoz when Splunk is not connected and marks the groups' source", async () => {
+  const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
+  const nowMs = Date.now();
+  const logs = [
+    { ms: nowMs - 5 * 60_000, body: JSON.stringify({ message: "ipn order 100230056 rejected", error: "invalid sign" }) },
+    { ms: nowMs - 9 * 60_000, body: JSON.stringify({ message: "ipn order 100230057 rejected", error: "invalid sign" }) },
+  ];
+  const queries: Array<{
+    requestType?: string;
+    start: number;
+    end: number;
+    compositeQuery: { queries: Array<{ spec: { filter: { expression: string } } }> };
+  }> = [];
+  const sz = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const body = raw ? JSON.parse(raw) : {};
+      queries.push(body);
+      const spec = body.compositeQuery?.queries?.[0]?.spec ?? {};
+      const rows =
+        body.requestType === "raw"
+          ? logs
+              .filter((l) => l.ms >= body.start && l.ms <= body.end)
+              .slice(spec.offset ?? 0, (spec.offset ?? 0) + (spec.limit ?? 100))
+              .map((l, i) => ({
+                timestamp: new Date(l.ms).toISOString(),
+                data: {
+                  id: `log-${l.ms}-${i}`,
+                  body: l.body,
+                  severity_text: "ERROR",
+                  resources_string: {
+                    "k8s.namespace.name": "payment-prod",
+                    "k8s.container.name": "payment-vnpay",
+                  },
+                },
+              }))
+          : [];
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          status: "success",
+          data: { type: body.requestType, data: { results: [{ queryName: "A", rows }] } },
+        }),
+      );
+    });
+  });
+  await new Promise<void>((r) => sz.listen(0, "127.0.0.1", r));
+  const hosts = config.signoz.allowedInternalHosts;
+  config.signoz.allowedInternalHosts = ["127.0.0.1"];
+  try {
+    await clearSplunkCookie();
+    await saveSignoz({
+      baseUrl: `http://127.0.0.1:${(sz.address() as { port: number }).port}`,
+      token: "sz-scan-key-0123456789",
+      enabled: true,
+    });
+    const r = await runScan("manual", new Date(nowMs), { preset: "1h" });
+    assert.deepEqual(r, { ok: true, groups: 1 });
+    const raw = queries.filter((b) => b.requestType === "raw");
+    assert.equal(raw.length, 2, "one query for the window, one for the baseline");
+    assert.match(raw[0].compositeQuery.queries[0].spec.filter.expression, /severity_text = 'ERROR'/);
+    assert.match(raw[0].compositeQuery.queries[0].spec.filter.expression, /k8s\.namespace\.name = 'payment-prod'/);
+    const g = (await listGroups()).groups.find((x: GroupRow) => x.service === "payment-vnpay")!;
+    assert.equal(g.today_count, 2);
+    assert.deepEqual(g.detail.sources, ["signoz"]);
+    assert.match(describeGroup(g), /phát hiện từ SigNoz/);
+    assert.match(describeGroup(g), /signoz_search_logs/);
+    const s = await one(pool, "SELECT * FROM prod_error_scans ORDER BY id DESC LIMIT 1");
+    assert.equal(s.ok, true);
+    assert.match(String(s.error), /Splunk: chưa kết nối, chỉ quét SigNoz/);
+  } finally {
+    await disconnectSignoz();
+    config.signoz.allowedInternalHosts = hosts;
+    sz.close();
+  }
 });

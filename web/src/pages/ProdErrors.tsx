@@ -76,6 +76,7 @@ interface Data {
   ignored: number;
   settings: { schedule: string[]; notify: boolean };
   splunk: { connected: boolean; expired: boolean };
+  signoz?: { connected: boolean };
   namespaces: Array<{ namespace: string; project: string }>;
   /** The scan whose groups are listed (null for scans from before scan options). */
   shown: {
@@ -717,7 +718,7 @@ export function ProdErrorsPage({
       {settings && (
         <div className="pe-scan-actions">
           <button
-            disabled={!data || data.scanning || !data.splunk.connected}
+            disabled={!data || data.scanning || !(data.splunk.connected || data.signoz?.connected)}
             onClick={() => setPanel((v) => !v)}
             aria-expanded={panel}
           >
@@ -741,12 +742,21 @@ export function ProdErrorsPage({
             />
           )}
           <div className="pe-status small">
-            {!data.splunk.connected && (
+            {!data.splunk.connected && !data.signoz?.connected ? (
               <span className="pe-warn">
-                {data.splunk.expired ? t("pe.sessionExpired") : t("pe.notConnected")} —{" "}
-                <a href="#/integrations">{t("pe.pasteCookie")}</a>
+                {data.splunk.expired ? t("pe.sessionExpired") : t("pe.noSource")} —{" "}
+                <a href="#/integrations">
+                  {data.splunk.expired ? t("pe.pasteCookie") : t("pe.connectSource")}
+                </a>
               </span>
-            )}
+            ) : !data.splunk.connected ? (
+              <span className="pe-warn">
+                {data.splunk.expired ? t("pe.sessionExpired") : t("pe.notConnected")} (
+                {t("pe.signozOnly")}) — <a href="#/integrations">{t("pe.pasteCookie")}</a>
+              </span>
+            ) : data.signoz?.connected ? (
+              <span>{t("pe.sources", { sources: "Splunk · SigNoz" })}</span>
+            ) : null}
             {data.scanning ? null : last ? (
               last.ok ? (
                 <span>

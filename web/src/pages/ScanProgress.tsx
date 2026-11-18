@@ -153,7 +153,9 @@ export function ScanProgressCard({
         <div>
           <div className="sp-title">{t("scan.title")}</div>
           <div className="muted small">
-            {p.phase === "search" ? (
+            {p.phase === "search" && !p.splunkState ? (
+              t("scan.signoz")
+            ) : p.phase === "search" ? (
               <>
                 Splunk {t(SPLUNK_KEY[p.splunkState ?? ""] ?? "scan.running")} ·{" "}
                 {t("scan.read", { n: compact(p.scanned) })}

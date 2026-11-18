@@ -672,3 +672,35 @@ export const listServices = (a: { since_minutes?: number; earliest?: string; lat
       empty: !s.rows.length,
     };
   });
+
+// ---------------------------------------------------------------- production error scan (platform-run, no agent budget)
+
+/** Error-level logs of the given Kubernetes namespaces in one window (ms), newest first, at most `maxRows`. */
+export async function signozErrorLogs(
+  w: Window,
+  namespaces: string[],
+  levels: string[],
+  maxRows = 2000,
+  signal?: AbortSignal,
+) {
+  const cfg = current();
+  const any = (key: string, values: string[]) => `(${values.map((v) => `${key} = ${quote(v)}`).join(" OR ")})`;
+  const expression = [any("severity_text", levels), ...(namespaces.length ? [any("k8s.namespace.name", namespaces)] : [])].join(
+    " AND ",
+  );
+  const page = Math.min(200, config.signoz.maxLimit);
+  const rows: Array<{ timestamp: string; data: Record<string, unknown> }> = [];
+  for (let offset = 0; offset < maxRows; offset += page) {
+    const body = envelope(w, "raw", {
+      signal: "logs",
+      filter: { expression },
+      order: [{ key: { name: "timestamp" }, direction: "desc" }],
+      limit: Math.min(page, maxRows - offset),
+      offset,
+    });
+    const batch = parseRaw(await call(cfg, "POST", "/api/v5/query_range", body, signal)).rows;
+    rows.push(...batch);
+    if (batch.length < Math.min(page, maxRows - offset)) return { rows, truncated: false };
+  }
+  return { rows, truncated: true };
+}

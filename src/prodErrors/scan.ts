@@ -5,6 +5,8 @@ import { config } from "../config.ts";
 import { pool, q, one, json, withTx } from "../db/pool.ts";
 import { settings } from "../db.ts";
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
+import { signozEnabled, signozErrorLogs, signozStatus } from "../integrations/signoz.ts";
+import { redactPii } from "../integrations/redact.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { workItems } from "../workitems/service.ts";
 import { startRun } from "../workflow/engine.ts";
@@ -14,13 +16,16 @@ import { escapeHtml as esc, linkFooter, RULE, sendTelegramHtml } from "../telegr
  * Daily production error scan (page "Lỗi production").
  *
  * One fixed, read-only SPL search (no LLM) over today's logs of the configured namespaces, compared with yesterday over
- * the same time-of-day window. Error lines are grouped by a signature (message with ids/numbers/hashes replaced), scored
+ * the same time-of-day window. When the scanning user also connected SigNoz, its error logs of the same namespaces and
+ * windows are grouped the same way and merged: a group seen by both sources keeps the larger counts (both usually
+ * receive the same cluster logs, so adding them would count every line twice). Error lines are grouped by a signature (message with ids/numbers/hashes replaced), scored
  * (panic, new since yesterday, spike, money-related) and stored. "Điều tra" turns a group into a Bug Investigation work
  * item; the workflow still stops for the developer's approval before any fix. Scheduled scans notify Telegram about new
  * critical/high groups once per day.
  */
 
 export type Severity = "critical" | "high" | "medium" | "low";
+export type ScanSource = "splunk" | "signoz";
 const SEV: Severity[] = ["low", "low", "medium", "high", "critical"];
 
 export interface GroupRow {
@@ -31,7 +36,14 @@ export interface GroupRow {
   caller: string;
   signature: string;
   sample: string;
-  detail: { err?: string; image?: string; request_id?: string; stack?: string; pod?: string };
+  detail: {
+    err?: string;
+    image?: string;
+    request_id?: string;
+    stack?: string;
+    pod?: string;
+    sources?: ScanSource[];
+  };
   day: string;
   today_count: number;
   yesterday_count: number;
@@ -265,6 +277,8 @@ export function toGroups(rows: any[], day: string) {
         request_id: str(r.request_id, 100) || undefined,
         stack: str(r.stack, 2500) || undefined,
         pod: str(r.pod, 100) || undefined,
+        sources:
+          Array.isArray(r.sources) && r.sources.length ? (r.sources as ScanSource[]) : undefined,
       },
       hourly: (Array.isArray(r.analytics_hourly)
         ? r.analytics_hourly
@@ -287,6 +301,175 @@ export function toGroups(rows: any[], day: string) {
       ...assess({ level, signature, sample, today, yesterday }),
     };
   });
+}
+
+// ---------------------------------------------------------------- SigNoz rows and merging
+
+/** The SPL signature, computed in TypeScript: ids, hashes and numbers replaced so one error is one group. */
+export function signatureOf(msg: string, err?: string) {
+  return (msg + (err ? ` :: ${err}` : ""))
+    .slice(0, 400)
+    .replace(/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/g, "<uuid>")
+    .replace(/\b[0-9a-fA-F]{16,}\b/g, "<hex>")
+    .replace(/\b[A-Za-z0-9_-]*[0-9][A-Za-z0-9_-]*\b/g, "<n>")
+    .replace(/\s+/g, " ")
+    .slice(0, 200);
+}
+
+const text = (v: unknown) => (v == null || v === "" ? undefined : String(v));
+const masked = (v: string | undefined) => (v === undefined ? v : redactPii(v));
+
+/** One SigNoz log row in the fields the SPL search extracts (JSON bodies are read like `spath input=log`). */
+function signozLine(row: { timestamp: string; data: Record<string, unknown> }) {
+  const d = row.data;
+  const body = text(d.body) ?? "";
+  let j: Record<string, unknown> = {};
+  if (body.trimStart().startsWith("{"))
+    try {
+      j = JSON.parse(body) ?? {};
+    } catch {
+      j = {};
+    }
+  const msg = text(j.message ?? j.MESSAGE ?? j.msg ?? j.log) ?? body;
+  const err = text(j.error ?? j.err ?? d.error ?? d["exception.message"]);
+  return {
+    time: Math.floor(Date.parse(row.timestamp) / 1000),
+    ns: text(d["k8s.namespace.name"]) ?? "",
+    svc: text(d["k8s.container.name"] ?? d["service.name"]) ?? "",
+    lv: (text(d.severity_text ?? j.level ?? j.LEVEL) ?? "ERROR").toUpperCase(),
+    // Masked like Splunk results; the signature is built first because it replaces numbers anyway.
+    sig: redactPii(signatureOf(msg, err)),
+    msg: redactPii(msg),
+    err: masked(err),
+    caller: masked(text(j.caller ?? d.caller ?? d["code.filepath"])),
+    image: text(d["container.image.name"] ?? d["k8s.container.image"]),
+    request_id: masked(text(j.request_id ?? d.request_id)),
+    stack: masked(text(j.stacktrace ?? d.stacktrace ?? d["exception.stacktrace"])),
+    pod: text(d["k8s.pod.name"]),
+  };
+}
+
+/** One group as a result row of the SPL `stats` stage; SigNoz rows are built in the same shape. */
+export interface SourceRow {
+  ns: string;
+  svc: string;
+  lv: string;
+  sig: string;
+  today: number | string;
+  yesterday: number | string;
+  first?: number | string;
+  last?: number | string;
+  sample?: string;
+  err?: string;
+  caller?: string;
+  image?: string;
+  request_id?: string;
+  stack?: string;
+  pod?: string;
+  analytics_hourly?: string | string[];
+  sources?: ScanSource[];
+}
+
+/** SigNoz window and baseline rows → result rows shaped like the SPL `stats` output (exported for tests). */
+export function signozRows(
+  todayRows: Array<{ timestamp: string; data: Record<string, unknown> }>,
+  baselineRows: Array<{ timestamp: string; data: Record<string, unknown> }>,
+) {
+  type G = SourceRow & {
+    today: number;
+    yesterday: number;
+    first?: number;
+    last?: number;
+    hourly: Map<number, number>;
+  };
+  const groups = new Map<string, G>();
+  const add = (row: (typeof todayRows)[number], day: "t" | "y") => {
+    const l = signozLine(row);
+    if (!Number.isFinite(l.time)) return;
+    const key = [l.ns, l.svc, l.lv, l.sig].join("\u0000");
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        ns: l.ns,
+        svc: l.svc,
+        lv: l.lv,
+        sig: l.sig,
+        today: 0,
+        yesterday: 0,
+        hourly: new Map(),
+        sources: ["signoz"],
+      };
+      groups.set(key, g);
+    }
+    g.last = Math.max(g.last ?? 0, l.time);
+    if (day === "y") {
+      g.yesterday++;
+      return;
+    }
+    g.today++;
+    g.first = Math.min(g.first ?? Infinity, l.time);
+    const hour = Math.floor(l.time / 3600) * 3600;
+    g.hourly.set(hour, (g.hourly.get(hour) ?? 0) + 1);
+    // rows come newest first: the first one of a group is its latest sample
+    if (g.sample == null)
+      Object.assign(g, {
+        sample: l.msg,
+        err: l.err,
+        caller: l.caller,
+        image: l.image,
+        request_id: l.request_id,
+        stack: l.stack,
+        pod: l.pod,
+      });
+  };
+  for (const r of todayRows) add(r, "t");
+  for (const r of baselineRows) add(r, "y");
+  return [...groups.values()]
+    .filter((g) => g.today > 0)
+    .sort((a, b) => b.today - a.today)
+    .slice(0, 300)
+    .map(({ hourly, ...g }): SourceRow => ({
+      ...g,
+      analytics_hourly: [...hourly].map(([hour, n]) => `${hour}:${n}`),
+    }));
+}
+
+/**
+ * Splunk and SigNoz result rows → one row per group. Both sources usually hold the same cluster logs, so a group
+ * seen by both keeps the larger count instead of the sum (exported for tests).
+ */
+export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: SourceRow[] }>) {
+  const merged = new Map<
+    string,
+    SourceRow & { sources: ScanSource[]; analytics_hourly: string[] }
+  >();
+  for (const { source, rows } of sources)
+    for (const r of rows) {
+      const key = [r.ns, r.svc, String(r.lv ?? "").toUpperCase() || "ERROR", r.sig].join("\u0000");
+      const prev = merged.get(key);
+      const hourly = (h: unknown) => (Array.isArray(h) ? h : h ? [h] : []).map(String);
+      if (!prev) {
+        merged.set(key, { ...r, sources: [source], analytics_hourly: hourly(r.analytics_hourly) });
+        continue;
+      }
+      const hours = new Map<string, number>();
+      for (const point of [...prev.analytics_hourly, ...hourly(r.analytics_hourly)]) {
+        const [h, n] = point.split(":");
+        hours.set(h, Math.max(hours.get(h) ?? 0, Number(n) || 0));
+      }
+      const finite = (...v: unknown[]) => v.map(Number).filter((x) => Number.isFinite(x) && x > 0);
+      merged.set(key, {
+        ...r,
+        ...prev,
+        today: Math.max(num(prev.today), num(r.today)),
+        yesterday: Math.max(num(prev.yesterday), num(r.yesterday)),
+        first: Math.min(...finite(prev.first, r.first)) || prev.first || r.first,
+        last: Math.max(...finite(prev.last, r.last), 0) || prev.last || r.last,
+        sources: [...new Set([...prev.sources, source])],
+        analytics_hourly: [...hours].map(([h, n]) => `${h}:${n}`),
+      });
+    }
+  return [...merged.values()].sort((a, b) => num(b.today) - num(a.today)).slice(0, 300);
 }
 
 // ---------------------------------------------------------------- scan
@@ -352,35 +535,76 @@ export async function runScan(
     startedAt: new Date().toISOString(),
   };
   try {
-    if (!splunkConnected())
+    const useSplunk = splunkConnected();
+    const useSignoz = signozEnabled();
+    if (!useSplunk && !useSignoz)
       throw new Error(
         splunkExpired()
-          ? "phiên Splunk hết hạn — dán cookie mới ở trang Integrations"
-          : "chưa kết nối Splunk — dán cookie ở trang Integrations",
+          ? "phiên Splunk hết hạn và chưa kết nối SigNoz — dán cookie Splunk mới hoặc kết nối SigNoz ở trang Integrations"
+          : "chưa kết nối Splunk hay SigNoz — kết nối ít nhất một nguồn ở trang Integrations",
       );
-    const r = await splunkSearch(
-      {
-        query: buildScanSpl(w, namespaces),
-        since_minutes: w.minutes,
-        until_minutes: w.untilMinutes,
-        max_results: 300,
-        timeout_seconds: config.prodErrors.timeoutSeconds,
-      },
-      (p) => {
-        if (!progress) return;
-        // the Splunk search is most of the wall time: 5% → 90%
-        Object.assign(progress, {
-          phase: "search",
-          searchPct: p.pct,
-          splunkState: p.state,
-          scanned: p.scanned,
-          matched: p.matched,
-          pct: Math.max(progress.pct, 5 + Math.round(p.pct * 0.85)),
-        });
-      },
-    );
+    const notes: string[] = [];
+    if (!useSplunk)
+      notes.push(
+        splunkExpired()
+          ? "Splunk: phiên hết hạn, chỉ quét SigNoz"
+          : "Splunk: chưa kết nối, chỉ quét SigNoz",
+      );
+    const signoz = useSignoz
+      ? (async () => {
+          const ns = namespaces.map((n) => n.namespace);
+          const [today, base] = await Promise.all([
+            signozErrorLogs({ start: w.start * 1000, end: w.end * 1000 }, ns, LEVELS),
+            signozErrorLogs({ start: w.baseStart * 1000, end: w.baseEnd * 1000 }, ns, LEVELS),
+          ]);
+          if (today.truncated || base.truncated)
+            notes.push(
+              `SigNoz: chỉ đọc ${today.rows.length} dòng lỗi của khung quét và ${base.rows.length} dòng của kỳ so sánh, số đếm có thể thấp hơn thực tế`,
+            );
+          return signozRows(today.rows, base.rows);
+        })().catch((e) => {
+          notes.push(`SigNoz: ${(e as Error).message}`);
+          return null;
+        })
+      : Promise.resolve(null);
+    const splunk = useSplunk
+      ? splunkSearch(
+          {
+            query: buildScanSpl(w, namespaces),
+            since_minutes: w.minutes,
+            until_minutes: w.untilMinutes,
+            max_results: 300,
+            timeout_seconds: config.prodErrors.timeoutSeconds,
+          },
+          (p) => {
+            if (!progress) return;
+            // the Splunk search is most of the wall time: 5% → 90%
+            Object.assign(progress, {
+              phase: "search",
+              searchPct: p.pct,
+              splunkState: p.state,
+              scanned: p.scanned,
+              matched: p.matched,
+              pct: Math.max(progress.pct, 5 + Math.round(p.pct * 0.85)),
+            });
+          },
+        ).catch((e) => {
+          if (!useSignoz) throw e;
+          notes.push(`Splunk: ${(e as Error).message}`);
+          return null;
+        })
+      : Promise.resolve(null);
+    if (!useSplunk) setPhase("search", 30);
+    const [r, signozResult] = await Promise.all([splunk, signoz]);
+    if (!r && !signozResult) throw new Error(notes.join("; ") || "không quét được nguồn log nào");
     setPhase("group", 92);
-    const groups = toGroups(r.results, w.day);
+    const groups = toGroups(
+      mergeSourceRows(
+        ...(r ? [{ source: "splunk" as const, rows: r.results as unknown as SourceRow[] }] : []),
+        ...(signozResult ? [{ source: "signoz" as const, rows: signozResult }] : []),
+      ),
+      w.day,
+    );
     setPhase("save", 95);
     await withTx(async (c) => {
       for (const g of groups) {
@@ -428,7 +652,8 @@ export async function runScan(
         );
       }
     });
-    const warnings = (r.messages ?? []).filter((m: string) => !/^INFO/.test(m)).join("; ") || null;
+    const warnings =
+      [...(r?.messages ?? []).filter((m: string) => !/^INFO/.test(m)), ...notes].join("; ") || null;
     setPhase("notify", 98);
     const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm) : 0;
     await q(
@@ -503,10 +728,11 @@ export function buildAlertMessage(rows: GroupRow[], hm: string) {
 }
 
 export function buildFailureMessage(hm: string, msg: string) {
-  const expired = /hết hạn|chưa kết nối/i.test(msg);
+  const expired = /hết hạn/i.test(msg);
+  const missing = !expired && /chưa kết nối/i.test(msg);
   const footer = linkFooter(
     `${config.publicUrl.replace(/\/$/, "")}/#/integrations`,
-    expired ? "Dán cookie Splunk mới" : "Mở Integrations",
+    expired ? "Dán cookie Splunk mới" : missing ? "Kết nối Splunk hoặc SigNoz" : "Mở Integrations",
   );
   const text = [
     `⚠️ <b>KHÔNG QUÉT ĐƯỢC LỖI PRODUCTION · ${esc(hm)}</b>`,
@@ -514,8 +740,10 @@ export function buildFailureMessage(hm: string, msg: string) {
     `<i>${esc(msg)}</i>`,
     "",
     expired
-      ? "Cách xử lý: đăng nhập Splunk, copy cookie và dán ở trang Integrations, rồi bấm <b>Quét ngay</b> ở trang Lỗi production."
-      : "Bấm <b>Quét ngay</b> ở trang Lỗi production để thử lại.",
+      ? "Cách xử lý: đăng nhập Splunk, copy cookie và dán ở trang Integrations (hoặc kết nối SigNoz), rồi bấm <b>Quét ngay</b> ở trang Lỗi production."
+      : missing
+        ? "Cách xử lý: kết nối Splunk hoặc SigNoz ở trang Integrations, rồi bấm <b>Quét ngay</b> ở trang Lỗi production."
+        : "Bấm <b>Quét ngay</b> ở trang Lỗi production để thử lại.",
     ...(footer.text ? ["", footer.text] : []),
   ].join("\n");
   return { text, replyMarkup: footer.reply_markup };
@@ -667,6 +895,7 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
     ignored,
     settings: settingsNow,
     splunk: { connected: splunkConnected(), expired: splunkExpired() },
+    signoz: { connected: signozEnabled(), base_url: signozStatus().base_url },
     namespaces: config.prodErrors.namespaces,
     /** The scan whose results are listed (window, baseline, projects), for the page header and column labels. */
     shown: byScan ? lastOk : null,
@@ -818,7 +1047,7 @@ export function describeGroup(g: GroupRow) {
       : "?";
   const spl = `index=${config.prodErrors.index} kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
   return [
-    `Lỗi production phát hiện từ Splunk (quét ngày ${g.day}).`,
+    `Lỗi production phát hiện từ ${(d.sources ?? ["splunk"]).map((s) => (s === "signoz" ? "SigNoz" : "Splunk")).join(" và ")} (quét ngày ${g.day}).`,
     "",
     `- Namespace / service: \`${g.namespace}\` / \`${g.service}\``,
     d.image
@@ -837,8 +1066,14 @@ export function describeGroup(g: GroupRow) {
       ? `\nrequest_id gần nhất: \`${d.request_id}\` (log cùng request: \`index=${config.prodErrors.index} "${d.request_id}"\`)`
       : "",
     "",
-    "Xem thêm log bằng tool `splunk.search` (chỉ đọc), ví dụ:",
-    fence(spl),
+    ...((d.sources ?? ["splunk"]).includes("splunk")
+      ? ["Xem thêm log bằng tool `splunk.search` (chỉ đọc), ví dụ:", fence(spl)]
+      : []),
+    ...(d.sources?.includes("signoz")
+      ? [
+          `Xem thêm log bằng tool \`signoz_search_logs\` (chỉ đọc), lọc \`k8s.namespace.name = '${g.namespace}'\` và service \`${g.service}\`.`,
+        ]
+      : []),
     "",
     "Yêu cầu:",
     `1. Tìm nguyên nhân gốc trong code${img.repo ? ` repo \`${img.repo}\`` : ""}${img.commit ? ` (đối chiếu đúng commit \`${img.commit}\` đang chạy prod)` : ""}.`,
