@@ -11,6 +11,7 @@ import { config } from "../config.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, retryTransient } from "../db/pool.ts";
+import { purgeVerificationEvidence } from "../agent/verifyEvidence.ts";
 import {
   beginAttempt,
   continueHealthyHandoffForAttempt,
@@ -65,11 +66,19 @@ export const LIGHT_STEP_TYPES = [
 
 let lastTracePurge = 0;
 
-/** DEBUG trace logs expire after `TRACE_DEBUG_RETENTION_DAYS` (default 7); checked at most once an hour. */
+/**
+ * DEBUG trace logs expire after `TRACE_DEBUG_RETENTION_DAYS` (default 7) and verification evidence after
+ * `VERIFICATION_EVIDENCE_RETENTION_DAYS` (default 30); checked at most once an hour.
+ */
 export async function purgeDebugEventsThrottled(now = Date.now()) {
   if (now - lastTracePurge < 3_600_000) return 0;
   lastTracePurge = now;
   const days = Number(process.env.TRACE_DEBUG_RETENTION_DAYS);
+  const evidenceDays = Number(process.env.VERIFICATION_EVIDENCE_RETENTION_DAYS);
+  await purgeVerificationEvidence(
+    Number.isFinite(evidenceDays) && evidenceDays > 0 ? evidenceDays : 30,
+    pool,
+  ).catch((e) => console.error("verification evidence retention:", e.message));
   return purgeDebugEvents(Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays);
 }
 

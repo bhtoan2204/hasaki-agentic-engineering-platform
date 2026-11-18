@@ -51,6 +51,7 @@ import { getPath, ancestors } from "../graph.ts";
 import { FEATURE_TARGETED_COMMAND, PLATFORM_TARGETED_COMMAND } from "../templates.ts";
 import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
 import { childGroups } from "../local.ts";
+import { acquireVerificationSlot, verificationSlotsInUse } from "./verificationSlots.ts";
 import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
 import {
   dirtyOf,
@@ -308,14 +309,27 @@ let verificationGoCache: string | undefined;
 type CommandResult = { code: number | null; output: string; timedOut: boolean };
 
 /** Worker verification always uses the existing isolation policy, including non-self repositories. */
-export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps["run"] = (
+export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps["run"] = async (
   command,
   cwd,
   env,
   timeoutMs,
   signal,
   onChunk,
-) => runCommand(command, cwd, env, timeoutMs, signal, onChunk, true);
+) => {
+  const started = Date.now();
+  const busy = verificationSlotsInUse();
+  const release = await acquireVerificationSlot(signal);
+  if (!release)
+    return { code: null, output: "[canceled while waiting for a verification slot]", timedOut: false };
+  if (Date.now() - started > 1000)
+    onChunk?.(`[waited ${Date.now() - started}ms for a verification slot; ${busy} running]\n`);
+  try {
+    return await runCommand(command, cwd, env, timeoutMs, signal, onChunk, true);
+  } finally {
+    release();
+  }
+};
 
 export async function runCommand(
   command: string,

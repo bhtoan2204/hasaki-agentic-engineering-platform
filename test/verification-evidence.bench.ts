@@ -14,13 +14,15 @@ const RUN_MS = Number(process.env.BENCH_RUN_MS ?? 150);
 // Workflow shapes as verification call sequences. verify = a verification of the current state; repair = the agent edits the
 // workspace (new fingerprint); integrate = subtask merge / rebase (new HEAD). publish = the final publication regression
 // for each completed coding step, which tests the same integrated workspace.
-type Op = "verify" | "repair" | "integrate" | "publish";
+type Op = "verify" | "repair" | "integrate" | "publish" | "next_step";
 const SCENARIOS: Record<string, Op[]> = {
   MICRO: ["verify", "publish"],
   FAST: ["verify", "repair", "verify", "publish"],
   STANDARD: ["verify", "repair", "verify", "verify", "publish"],
   DEEP: ["verify", "repair", "verify", "repair", "verify", "verify", "publish"],
   MULTI_SUBTASK: ["verify", "verify", "integrate", "verify", "publish", "publish", "publish"],
+  // next_step = a downstream step of the same run (review, verification) verifying the unchanged workspace.
+  IMPLEMENT_REVIEW: ["verify", "repair", "verify", "next_step", "verify", "next_step", "verify"],
 };
 
 const git = (d: string, ...a: string[]) => execFileSync("git", ["-C", d, ...a], { stdio: "pipe" });
@@ -31,20 +33,23 @@ async function scenario(ops: Op[], cached: boolean) {
   let executed = 0;
   const cfg = { ...verifyConfig({ verify: { command: "sim" } }, "sim")!, baseline: null as null, contractRevision: "c" };
   const mk = (): VerifyDeps => ({
-    run: async () => { executed++; await new Promise((r) => setTimeout(r, RUN_MS)); return { code: 0, output: "", timedOut: false }; },
+    run: async () => { executed++; await new Promise((r) => setTimeout(r, RUN_MS)); return { code: 0, output: "# pass 1\n# fail 0\n", timedOut: false }; },
     ...(cached ? { evidence: cache } : {}),
   });
-  const cache = new EvidenceCache(memoryEvidenceStore(), { runId: 1, stepKey: "implement" });
+  const store = memoryEvidenceStore();
+  let cache = new EvidenceCache(store, { runId: 1, stepKey: "step-0" });
+  let saved = 0;
   const t0 = Date.now();
   let n = 0;
   for (const op of ops) {
+    if (op === "next_step") { saved += cache.stats.saved_ms; cache = new EvidenceCache(store, { runId: 1, stepKey: `step-${++n}` }); continue; }
     if (op === "repair") { writeFileSync(join(dir, "a"), `repair-${++n}`); continue; }
     if (op === "integrate") { writeFileSync(join(dir, "b" + ++n), "x"); git(dir, "add", "-A"); git(dir, "commit", "-qm", "merge"); continue; }
     await verifyWorkspaces([{ repo: "r", path: dir }], [dir], cfg, n + 1, new AbortController().signal, mk());
   }
   const ms = Date.now() - t0;
   rmSync(dir, { recursive: true, force: true });
-  return { ms, executed, saved: cache.stats.saved_ms };
+  return { ms, executed, saved: saved + cache.stats.saved_ms };
 }
 
 console.log(`SIMULATED runner (${RUN_MS}ms per run): measures evidence-cache effect, not real test time.`);

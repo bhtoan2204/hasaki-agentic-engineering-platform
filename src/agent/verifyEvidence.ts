@@ -121,9 +121,12 @@ export async function baseTip(path: string, baseBranch: string | undefined): Pro
   return exec("git", ["-C", path, "rev-parse", `origin/${baseBranch}`]).then((r) => r.stdout.trim(), () => "unknown");
 }
 
-/** Process-local singleflight + persisted evidence. One instance per verification loop. */
+// Shared by every loop in this process: concurrent steps of one run that verify an identical state run it once.
+const inflight = new Map<string, { promise: Promise<RepoVerification | null>; resolve(r: RepoVerification | null): void }>();
+
+/** Process-wide singleflight + persisted evidence. One instance per verification loop. */
 export class EvidenceCache {
-  private inflight = new Map<string, { promise: Promise<RepoVerification | null>; resolve(r: RepoVerification | null): void }>();
+  private inflight = inflight;
   readonly stats = emptyStats();
   readonly store: EvidenceStore;
   readonly scope: EvidenceScope;
@@ -198,8 +201,9 @@ export function pgEvidenceStore(db: Db): EvidenceStore {
     key: r.key, parts: r.parts, result: r.result, attempt_id: r.attempt_id ?? null, duration_ms: r.duration_ms ?? 0,
   });
   return {
+    // Any step of the run may reuse: the key already covers workspace, command, contract, policy and environment.
     async find(s, repo, key) {
-      const r = await one(db, "SELECT * FROM verification_evidence WHERE run_id=$1 AND repo=$2 AND key=$3 AND step_key=$4 ORDER BY id DESC LIMIT 1", [s.runId, repo, key, s.stepKey]);
+      const r = await one(db, "SELECT * FROM verification_evidence WHERE run_id=$1 AND repo=$2 AND key=$3 ORDER BY id DESC LIMIT 1", [s.runId, repo, key]);
       return r ? toRec(r) : null;
     },
     async latest(s, repo) {
@@ -218,8 +222,14 @@ export function memoryEvidenceStore(): EvidenceStore & { rows: Array<{ scope: Ev
   const rows: Array<{ scope: EvidenceScope; repo: string; rec: EvidenceRecord }> = [];
   return {
     rows,
-    async find(s, repo, key) { return rows.findLast((r) => r.scope.runId === s.runId && r.scope.stepKey === s.stepKey && r.repo === repo && r.rec.key === key)?.rec ?? null; },
+    async find(s, repo, key) { return rows.findLast((r) => r.scope.runId === s.runId && r.repo === repo && r.rec.key === key)?.rec ?? null; },
     async latest(s, repo) { return rows.findLast((r) => r.scope.runId === s.runId && r.scope.stepKey === s.stepKey && r.repo === repo)?.rec ?? null; },
     async save(s, repo, rec) { rows.push({ scope: s, repo, rec: structuredClone(rec) }); },
   };
+}
+
+/** Drop evidence older than `days`; a purged entry only costs a rerun. Returns the number of rows removed. */
+export async function purgeVerificationEvidence(days: number, db: Db): Promise<number> {
+  const rows = await q(db, "DELETE FROM verification_evidence WHERE created_at < now() - make_interval(days => $1) RETURNING id", [days]);
+  return rows.length;
 }

@@ -274,3 +274,23 @@ test("evidenceKey is order independent", () => {
   assert.equal(evidenceKey({ a: "1", b: "2" }), evidenceKey({ b: "2", a: "1" }));
   assert.notEqual(evidenceKey({ a: "1" }), evidenceKey({ a: "2" }));
 });
+
+test("another step of the same run reuses the pass; concurrent steps run once", async () => {
+  const dir = await repo();
+  const t = setup(dir, undefined, { delay: 30 });
+  const steps = ["implement", "review", "verify"].map((stepKey, i) =>
+    t.mk({ runId: 1, stepKey, attemptId: 10 + i }),
+  );
+  const res = await Promise.all(steps.map((c) => t.go(t.cfg, c)));
+  assert.equal(t.calls(), 1, "separate caches share the process-wide flight");
+  assert.ok(res.every((r) => r.passed));
+  const later = t.mk({ runId: 1, stepKey: "finalize", attemptId: 20 });
+  const r = await t.go(t.cfg, later);
+  assert.equal(t.calls(), 1);
+  assert.equal(r.repos[0].evidence?.reused, true);
+  assert.equal(later.stats.hits, 1);
+  await writeFile(join(dir, "a.txt"), "2");
+  await t.go(t.cfg, t.mk({ runId: 1, stepKey: "review", attemptId: 21 }));
+  assert.equal(t.calls(), 2, "an uncommitted edit invalidates the shared entry");
+  await rm(dir, { recursive: true });
+});

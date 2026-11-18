@@ -32,6 +32,12 @@ jobs:
           key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
       - if: steps.modules.outputs.cache-hit != 'true'
         run: npm ci --no-audit --no-fund
+      # tsc --incremental state (package.json `typecheck`); tsbuildinfo hashes every input, so a stale entry only costs time.
+      - uses: actions/cache@v5
+        with:
+          path: node_modules/.cache/tsc
+          key: tsc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: tsc-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
       - run: npm run typecheck
 
   architecture:
