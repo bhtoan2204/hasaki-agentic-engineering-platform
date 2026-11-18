@@ -80,7 +80,7 @@ interface Data {
   settings: { schedule: string[]; notify: boolean };
   splunk: { connected: boolean; expired: boolean };
   signoz?: { connected: boolean };
-  namespaces: Array<{ namespace: string; project: string }>;
+  namespaces: Array<{ namespace: string; project: string; index: string }>;
   /** The scan whose groups are listed (null for scans from before scan options). */
   shown: {
     preset: string;
@@ -418,18 +418,20 @@ const inSource = (g: Group, source: Source) =>
 
 function GroupRow({
   g,
+  index,
   open,
   onToggle,
   reload,
 }: {
   g: Group;
+  index: string;
   open: boolean;
   onToggle: () => void;
   reload: () => void;
 }) {
   const { t, status } = useI18n();
   const [busy, setBusy] = useState(false);
-  const spl = `index=k8s_prod kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
+  const spl = `index=${index} kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
   const traceOnly = inSource(g, "traces") && !inSource(g, "logs");
   const investigate = async () => {
     setBusy(true);
@@ -549,7 +551,7 @@ function GroupRow({
                 <dd className="mono">
                   {g.detail.request_id}{" "}
                   <Copy
-                    text={`index=k8s_prod "${g.detail.request_id}"`}
+                    text={`index=${index} "${g.detail.request_id}"`}
                     label={t("pe.copyRequest")}
                   />
                 </dd>
@@ -1006,6 +1008,10 @@ export function ProdErrorsPage({
                     <GroupRow
                       key={g.fingerprint}
                       g={g}
+                      index={
+                        data.namespaces.find((n) => n.namespace === g.namespace)?.index ??
+                        "k8s_prod"
+                      }
                       open={open === g.fingerprint}
                       onToggle={() => setOpen(open === g.fingerprint ? null : g.fingerprint)}
                       reload={reload}

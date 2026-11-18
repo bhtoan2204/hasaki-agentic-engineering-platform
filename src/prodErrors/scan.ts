@@ -167,6 +167,14 @@ export function dayWindow(now: Date, tz = config.prodErrors.timezone) {
   return { ...w, yesterdayStart: w.baseStart, yesterdayEnd: w.baseEnd };
 }
 
+/** Splunk index holding a namespace's logs. */
+export function indexOf(namespace: string) {
+  return (
+    config.prodErrors.namespaces.find((n) => n.namespace === namespace)?.index ??
+    config.prodErrors.index
+  );
+}
+
 /** Configured namespaces, restricted to `wanted` when given (unknown names are rejected, not ignored). */
 export function scanNamespaces(wanted?: string[]) {
   const all = config.prodErrors.namespaces;
@@ -189,11 +197,17 @@ const LEVELS = ["ERROR", "FATAL", "PANIC", "DPANIC", "CRITICAL"];
  * are a Go panic / fatal error.
  */
 export function buildScanSpl(w: ScanWindow, namespaces = config.prodErrors.namespaces) {
-  const c = config.prodErrors;
-  const ns = namespaces.map((n) => `"${n.namespace}"`).join(",");
+  const byIndex = new Map<string, string[]>();
+  for (const n of namespaces) {
+    const index = indexOf(n.namespace);
+    byIndex.set(index, [...(byIndex.get(index) ?? []), `"${n.namespace}"`]);
+  }
+  const scope = [...byIndex]
+    .map(([index, ns]) => `(index=${index} kubernetes.namespace_name IN (${ns.join(",")}))`)
+    .join(" OR ");
   const inWindow = `(_time>=${w.start} AND _time<=${w.end})`;
   return [
-    `search index=${c.index} kubernetes.namespace_name IN (${ns}) (${LEVELS.join(" OR ")} OR "panic:" OR "fatal error")`,
+    `search ${byIndex.size > 1 ? `(${scope})` : scope} (${LEVELS.join(" OR ")} OR "panic:" OR "fatal error")`,
     `where ${inWindow} OR (_time>=${w.baseStart} AND _time<=${w.baseEnd})`,
     `spath input=log`,
     `eval lv=upper(coalesce(level,LEVEL)), msg=coalesce(message,MESSAGE,msg,log,_raw), err=coalesce(error,err), ns='kubernetes.namespace_name', svc='kubernetes.container_name'`,
@@ -893,7 +907,7 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
     settings: settingsNow,
     splunk: { connected: splunkConnected(), expired: splunkExpired() },
     signoz: { connected: signozEnabled(), base_url: signozStatus().base_url },
-    namespaces: config.prodErrors.namespaces,
+    namespaces: config.prodErrors.namespaces.map((n) => ({ ...n, index: indexOf(n.namespace) })),
     /** The scan whose results are listed (window, baseline, projects), for the page header and column labels. */
     shown: byScan ? lastOk : null,
     presets: SCAN_PRESETS,
@@ -1042,7 +1056,7 @@ export function describeGroup(g: GroupRow) {
           hour12: false,
         })
       : "?";
-  const spl = `index=${config.prodErrors.index} kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
+  const spl = `index=${indexOf(g.namespace)} kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
   const traceOnly = !!d.sources?.length && !d.sources.includes("splunk");
   return [
     `Lỗi production phát hiện từ ${(d.sources ?? ["splunk"]).map((s) => (s === "signoz" ? "SigNoz" : "Splunk")).join(" và ")} (quét ngày ${g.day}).`,
@@ -1061,7 +1075,7 @@ export function describeGroup(g: GroupRow) {
     d.err ? `Error: \`${d.err.replace(/`/g, "'")}\`` : "",
     d.stack ? `\nStacktrace:\n${fence(d.stack)}` : "",
     d.request_id
-      ? `\nrequest_id gần nhất: \`${d.request_id}\` (log cùng request: \`index=${config.prodErrors.index} "${d.request_id}"\`)`
+      ? `\nrequest_id gần nhất: \`${d.request_id}\` (log cùng request: \`index=${indexOf(g.namespace)} "${d.request_id}"\`)`
       : "",
     d.trace_id ? `\ntrace_id gần nhất: \`${d.trace_id}\`` : "",
     "",

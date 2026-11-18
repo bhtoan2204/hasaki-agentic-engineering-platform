@@ -390,8 +390,8 @@ export interface Config {
     /** LOCAL explicit actor for the existing scheduled scan. Unset = manual scans only. */
     userId?: number;
     index: string;
-    /** Kubernetes namespace → platform project (the project the "Điều tra" work item belongs to). */
-    namespaces: Array<{ namespace: string; project: string }>;
+    /** Kubernetes namespace → platform project (the project the "Điều tra" work item belongs to); `index` overrides the default index. */
+    namespaces: Array<{ namespace: string; project: string; index?: string }>;
     timezone: string;
     /** Default scan times (HH:MM, local); editable on the page. */
     schedule: string[];
@@ -550,7 +550,7 @@ const defaults: Config = {
     timeoutSeconds: 60,
     environment: "production",
     timezone: "Asia/Ho_Chi_Minh",
-    defaultIndexes: ["k8s_prod"],
+    defaultIndexes: ["k8s_prod", "k8s_payment"],
     concurrency: 3,
     queryBudget: 25,
     allowSharedToken: false,
@@ -578,7 +578,7 @@ const defaults: Config = {
     index: "k8s_prod",
     namespaces: [
       { namespace: "oms-prod", project: "OMS" },
-      { namespace: "payment-prod", project: "Payment" },
+      { namespace: "payment-prod", project: "Payment", index: "k8s_payment" },
     ],
     timezone: "Asia/Ho_Chi_Minh",
     schedule: ["09:00", "14:00", "17:00"],

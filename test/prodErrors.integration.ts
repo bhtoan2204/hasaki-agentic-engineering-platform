@@ -132,7 +132,14 @@ test("dayWindow: local midnight in Asia/Ho_Chi_Minh and yesterday's same time-of
 test("buildScanSpl: passes the read-only SPL guard and covers both log shapes", () => {
   const spl = buildScanSpl(dayWindow(new Date()));
   assert.equal(checkSpl(spl), spl);
-  assert.match(spl, /kubernetes\.namespace_name IN \("oms-prod","payment-prod"\)/);
+  assert.match(
+    spl,
+    /^search \(\(index=k8s_prod kubernetes\.namespace_name IN \("oms-prod"\)\) OR \(index=k8s_payment kubernetes\.namespace_name IN \("payment-prod"\)\)\) /,
+  );
+  assert.match(
+    buildScanSpl(dayWindow(new Date()), [{ namespace: "payment-prod", project: "Payment" }]),
+    /^search \(index=k8s_payment kubernetes\.namespace_name IN \("payment-prod"\)\) /,
+  );
   assert.match(spl, /spath input=log/);
   assert.match(spl, /count\(eval\(day="t"\)\) as today count\(eval\(day="y"\)\) as yesterday/);
 });
@@ -239,7 +246,7 @@ test("runScan: stores groups (PII masked), keeps ignore/work item across scans, 
   const r = await runScan("manual");
   assert.deepEqual(r, { ok: true, groups: 2 });
   const sent = searches.at(-1)!;
-  assert.match(sent.get("search")!, /^search index=k8s_prod/);
+  assert.match(sent.get("search")!, /^search \(\(index=k8s_prod /);
   assert.equal(
     sent.get("exec_mode"),
     "normal",
@@ -372,7 +379,7 @@ test("describeGroup: markdown with fenced log and the SPL to dig further", () =>
   assert.doesNotMatch(md, /a ``` b/);
   assert.match(
     md,
-    /index=k8s_prod kubernetes\.namespace_name="payment-prod" kubernetes\.container_name="payment-zalopay" "zalopay\/zalopay\.go:56"/,
+    /index=k8s_payment kubernetes\.namespace_name="payment-prod" kubernetes\.container_name="payment-zalopay" "zalopay\/zalopay\.go:56"/,
   );
 });
 
