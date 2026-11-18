@@ -1,6 +1,7 @@
 import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { migrate } from "../src/db/migrate.ts";
@@ -23,7 +24,12 @@ import {
 import { claimJob, processJob } from "../src/workflow/scheduler.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 import { registerExecutor, makeContext } from "../src/workflow/executors/registry.ts";
-import { resolveStepAgent, StepAgentConfig, validateAgentOptions } from "../src/agent/stepAgent.ts";
+import {
+  resolveStepAgent,
+  StepAgentConfig,
+  validateAgentOptions,
+  type EffectiveAgent,
+} from "../src/agent/stepAgent.ts";
 import { ensureContextPack } from "../src/context/pack.ts";
 import { newMetrics } from "../src/agent/metrics.ts";
 import { envFromExecution, dispatchPlatformTool } from "../src/agent/platformTools.ts";
@@ -31,6 +37,7 @@ import { decide } from "../src/agent/toolPolicy.ts";
 import { runWorkingDirectory } from "../src/repos/workspaces.ts";
 import { resumableSession } from "../src/agent/claude.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
+import type { HarnessEvidence } from "../src/agent/harness/evidence.ts";
 import { handle } from "../src/http/app.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
 
@@ -626,5 +633,139 @@ test("lifecycle characterization: executor outputs, artifacts and events before 
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];
     }
+  }
+});
+
+const failureOf = (result: ExecResult) =>
+  result as { retryable?: boolean; details?: { failure_code?: string } };
+
+async function lifecycleAttempt(
+  provider: string,
+  type = "agent",
+  env: Record<string, string> = {},
+) {
+  const keys = [
+    "CODEX_BIN",
+    "FAKE_CODEX_MODE",
+    "FAKE_CODEX_THREAD",
+    "FAKE_CODEX_PIDFILE",
+    ...Object.keys(env),
+  ];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, {
+    CODEX_BIN: join(import.meta.dirname, "fixtures/fake-codex.mjs"),
+    FAKE_CODEX_THREAD: "lifecycle-session",
+    FAKE_CODEX_MODE: "ok",
+    ...env,
+  });
+  const restore = () => {
+    for (const key of keys)
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+  };
+  await run([{ ...agent("lifecycle", provider, [], type), config: { agent: { provider } } }]);
+  const current = await begin();
+  assert.ok(current.b);
+  const ctx = makeContext({ ...current.b, signal: new AbortController().signal });
+  const artifacts: Array<{ kind: string; data: HarnessEvidence }> = [];
+  const original = ctx.artifact.bind(ctx);
+  ctx.artifact = async (kind, name, content, data) => {
+    artifacts.push({ kind, data: data as HarnessEvidence });
+    return original(kind, name, content, data);
+  };
+  return { ctx, artifacts, restore };
+}
+
+test("every attempt persists harness evidence with the stage trace and outcome", async () => {
+  const { ctx, artifacts, restore } = await lifecycleAttempt("codex");
+  try {
+    const result = await claudeExecutor.execute(ctx);
+    assert.equal(result.kind, "completed");
+    const evidence = artifacts.find((a) => a.kind === "harness_evidence")?.data;
+    assert.ok(evidence);
+    assert.deepEqual(
+      evidence.stages.map((s) => s.stage),
+      [
+        "preflight",
+        "context",
+        "authorize",
+        "budget",
+        "checkpoint",
+        "execute",
+        "output",
+        "verify",
+        "finalize",
+      ],
+    );
+    assert.equal(evidence.outcome, "completed");
+    assert.equal(evidence.provider, "codex");
+    assert.deepEqual(evidence.guarantees!.unmet, []);
+    assert.equal(evidence.cost.enforcement, "preflight_only");
+    assert.ok(evidence.tool_calls!.limit > 0);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a write step on a provider without pre-execution policy fails closed before any turn", async () => {
+  const { ctx, artifacts, restore } = await lifecycleAttempt("cursor", "coding_agent");
+  try {
+    const result = await claudeExecutor.execute(ctx);
+    assert.equal(result.kind, "failed");
+    assert.equal(failureOf(result).details?.failure_code, "GUARANTEE_UNMET");
+    assert.equal(failureOf(result).retryable, false);
+    const evidence = artifacts.find((a) => a.kind === "harness_evidence")?.data;
+    assert.ok(evidence);
+    assert.equal(evidence.failure_code, "GUARANTEE_UNMET");
+    assert.deepEqual(
+      evidence.stages.map((s) => s.stage),
+      ["preflight"],
+    );
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a silent provider turn is stopped as idle with a retryable structured failure", async () => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "lifecycle-idle-")), "pid");
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    FAKE_CODEX_MODE: "hang",
+    FAKE_CODEX_PIDFILE: pidFile,
+  });
+  try {
+    ctx.attempt.effective_agent = {
+      ...ctx.attempt.effective_agent!,
+      idle_timeout_ms: 400,
+    } as EffectiveAgent;
+    const started = Date.now();
+    const result = await claudeExecutor.execute(ctx);
+    assert.equal(result.kind, "failed");
+    assert.equal(failureOf(result).details?.failure_code, "IDLE_TIMEOUT");
+    assert.equal(failureOf(result).retryable, true);
+    assert.ok(Date.now() - started < 30_000);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("submit_result records one output per turn", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex");
+  try {
+    const env = envFromExecution(ctx, "analysis", policy, newMetrics(""), () => {});
+    const first = await dispatchPlatformTool("submit_result", { output: { summary: "a" } }, env);
+    assert.doesNotMatch(first, /^ERROR/);
+    const second = await dispatchPlatformTool("submit_result", { output: { summary: "b" } }, env);
+    assert.match(second, /already recorded in this turn/);
+    const next = envFromExecution(ctx, "analysis", policy, newMetrics(""), () => {});
+    assert.doesNotMatch(
+      await dispatchPlatformTool("submit_result", { output: { summary: "c" } }, next),
+      /^ERROR/,
+    );
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
   }
 });

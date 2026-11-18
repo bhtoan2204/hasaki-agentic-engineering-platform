@@ -27,6 +27,7 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
           kind: "failed",
           error: `${pName} finished the turn without calling submit_result; no step output was recorded.`,
           retryable: true,
+          details: { failure_code: "INCOMPLETE_OUTPUT" },
         };
       const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
       if (missing.length)
@@ -34,7 +35,7 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
           kind: "failed",
           error: `${pName} submitted an output that does not match the step's output contract (missing: ${missing.join(", ")}).`,
           retryable: true,
-          details: { submitted },
+          details: { failure_code: "CONTRACT_INVALID", submitted },
         };
       const validation = validateOutputContract(
         ctx.step.config.output_schema ?? ctx.step.config.output_contract,
@@ -46,7 +47,7 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
           error: `${pName} submitted an output that does not match the step's output contract:
   ${validation.errors.join("; ")}`,
           retryable: true,
-          details: { submitted, errors: validation.errors },
+          details: { failure_code: "CONTRACT_INVALID", submitted, errors: validation.errors },
         };
     }
   }

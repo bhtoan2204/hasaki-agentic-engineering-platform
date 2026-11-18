@@ -9,7 +9,12 @@
         ]
       }
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": [
       "system_prompt",
       "prompt",
@@ -25,7 +30,12 @@
       "retryable": false,
       "error": "Mandatory execution contract is incomplete: Repository scope is missing or unauthorized"
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": []
   },
   "MICRO": {
@@ -38,7 +48,12 @@
         ]
       }
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": [
       "system_prompt",
       "prompt",
@@ -70,7 +85,12 @@
         }
       ]
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": []
   },
   "investigation": {
@@ -83,7 +103,12 @@
         ]
       }
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": [
       "system_prompt",
       "prompt",
@@ -103,7 +128,12 @@
         ]
       }
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": [
       "system_prompt",
       "prompt",
@@ -124,7 +154,12 @@
         "last_message": "Waiting for the developer."
       }
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": [
       "system_prompt",
       "prompt",
@@ -144,7 +179,12 @@
         ]
       }
     },
-    "artifacts": [],
+    "artifacts": [
+      {
+        "kind": "harness_evidence",
+        "name": "agent lifecycle evidence"
+      }
+    ],
     "eventKinds": [
       "system_prompt",
       "prompt",

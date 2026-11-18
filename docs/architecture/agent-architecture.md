@@ -136,7 +136,7 @@ or assigned to analysis/coding steps in the workflow editor.
 
 ## Harness: verification-and-repair loop (coding steps)
 
-`src/agent/verify.ts`, wired at the end of `claudeExecutor` for `coding_agent` steps.
+`src/agent/verify.ts`, run by the `verify` stage of the [agent execution lifecycle](execution-lifecycle.md) for `coding_agent` steps.
 
 1. The agent works and calls `submit_result` as before.
 2. The platform runs the step's verification in every worktree of the run (`config.verify.command`, default: the

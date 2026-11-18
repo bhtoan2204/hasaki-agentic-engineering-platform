@@ -61,6 +61,8 @@ In the table, **T** means one `withTx` client, with events flushed before COMMIT
 8. Persisted JSON shapes, schema defaults, immutable definition versions, session provider affinity, checkpoint references, unique keys and explicit legacy worker-assignment refusal are compatibility contracts.
 9. Most Git/provider/network execution is outside lifecycle T. Existing exceptions must be retained and documented: graph resolution can verify repository permissions during creation; handoff resume inspects local Git under R; context preparation occurs during begin. Notifications lack durable replay; terminal effects have durable at-least-once delivery. This refactor does not redesign those contracts or claim exactly-once external effects.
 
+Inside `execute`, agent steps run the ordered stages described in [agent execution lifecycle](execution-lifecycle.md).
+
 ## Maintainability problems and target boundaries
 
 The engine mixes transaction primitives, graph progression, spending policy and crash reconciliation with public orchestration. Recovery's replay allowlist and checkpoint composition are hard to inspect independently. Budget queries distract from result application. The current state rules are already cohesive; splitting the entire engine by noun would create cycles (`applyResult` ↔ reexecute ↔ advance, and completion ↔ handoff persistence).

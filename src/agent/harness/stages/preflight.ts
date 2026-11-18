@@ -103,6 +103,8 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
         return workspaceConflictQuestion(blocking, outputLocale(ctx.run) === "en");
     }
   }
+  const guarantees = guaranteeCheck(provider, mode, effective.options);
+  s.guarantees = guarantees;
   if (provider !== "claude") {
     const label =
       provider === "codex"
@@ -139,6 +141,19 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
             )?.profile_revision ?? 0,
         },
       };
+    if (guarantees.unmet.length)
+      return {
+        kind: "failed",
+        retryable: false,
+        error: `Provider ${provider} cannot enforce ${guarantees.unmet.join(", ")}, which ${mode === "coding" ? "implementation" : "this"} step requires. Run the step with a provider that enforces them; the platform does not fall back to another provider.`,
+        details: { failure_code: "GUARANTEE_UNMET", guarantees },
+      };
+    if (guarantees.degraded.length)
+      await ctx.log(
+        "system",
+        `${provider} runs this read-only step without ${guarantees.degraded.join(", ")}`,
+        { guarantees },
+      );
     const cap =
       provider === "codex"
         ? await codexCapabilities(false, {
@@ -172,21 +187,6 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
         },
       };
   }
-  const guarantees = guaranteeCheck(provider, mode, effective.options);
-  s.guarantees = guarantees;
-  if (guarantees.unmet.length)
-    return {
-      kind: "failed",
-      retryable: false,
-      error: `Provider ${provider} cannot enforce ${guarantees.unmet.join(", ")}, which ${mode === "coding" ? "implementation" : "this"} step requires. Run the step with a provider that enforces them; the platform does not fall back to another provider.`,
-      details: { failure_code: "GUARANTEE_UNMET", guarantees },
-    };
-  if (guarantees.degraded.length)
-    await ctx.log(
-      "system",
-      `${provider} runs this read-only step without ${guarantees.degraded.join(", ")}`,
-      { guarantees },
-    );
   if (mode === "coding") {
     for (const name of ctx.run.selected_repositories ?? []) {
       const row = await repositories.get(name);

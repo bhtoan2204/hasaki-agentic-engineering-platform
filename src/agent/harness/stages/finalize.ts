@@ -47,6 +47,7 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
         retryable: false,
         error:
           "NO_CHANGE_REQUIRED needs independent requirement-satisfaction evidence; this executor cannot establish it",
+        details: { failure_code: "INVALID_EVIDENCE" },
       };
     const authorizationProblems = await validateExecutionAuthorization(ctx);
     if (authorizationProblems.length)
@@ -74,6 +75,7 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
         kind: "failed",
         retryable: false,
         error: "IMPLEMENTED requires worker-observed implementation changes",
+        details: { failure_code: "INVALID_EVIDENCE" },
       };
     if (!attemptChanged) {
       output.no_new_changes = true;
@@ -101,6 +103,7 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
           kind: "failed",
           retryable: false,
           error: `Verification is missing or stale for ${workspace.repo}`,
+          details: { failure_code: "INVALID_EVIDENCE" },
         };
     }
     output.implementation_evidence = {
@@ -181,6 +184,7 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
         kind: "failed",
         retryable: false,
         error: `Final output contract validation failed: ${validation.errors.join("; ")}`,
+        details: { failure_code: "CONTRACT_INVALID" },
       };
   }
   const terminalOutput = terminalCodingFailure(output);

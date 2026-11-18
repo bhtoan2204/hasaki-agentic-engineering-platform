@@ -4,6 +4,7 @@ import { liveRuntime } from "../../eval/liveRuntime.ts";
 import { captureContextContinuity } from "../../context/continuity.ts";
 import { contextPackFailure } from "../../context/pack.ts";
 import { runLifecycle, type Stages } from "./lifecycle.ts";
+import { harnessEvidence } from "./evidence.ts";
 import { newLifecycleState, type LifecycleState } from "./state.ts";
 import { preflightStage } from "./stages/preflight.ts";
 import { contextStage } from "./stages/context.ts";
@@ -39,8 +40,22 @@ export const agentExecutor: StepExecutor = {
         return result;
       }
       const state = newLifecycleState(ctx, live);
-      result = await runLifecycle(state, AGENT_STAGES, state.trace);
-      return result;
+      try {
+        result = await runLifecycle(state, AGENT_STAGES, state.trace);
+        return result;
+      } finally {
+        try {
+          const evidence = harnessEvidence(state, result);
+          await ctx.artifact(
+            "harness_evidence",
+            "agent lifecycle evidence",
+            JSON.stringify(evidence),
+            evidence,
+          );
+        } catch (error) {
+          console.error(`harness evidence persistence failed: ${(error as Error).message}`);
+        }
+      }
     } finally {
       await captureContextContinuity(ctx, result).catch((error) =>
         console.error(`context continuity persistence failed: ${contextPackFailure(error)}`),
