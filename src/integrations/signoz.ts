@@ -675,88 +675,100 @@ export const listServices = (a: { since_minutes?: number; earliest?: string; lat
 
 // ---------------------------------------------------------------- production error scan (platform-run, no agent budget)
 
-/** Kubernetes attribute names of the usual log pipelines: OpenTelemetry collector first, then fluentd / fluent-bit. */
-export const K8S_LOG_KEYS = {
-  namespace: [
-    "k8s.namespace.name",
-    "kubernetes.namespace_name",
-    "kubernetes_namespace_name",
-    "k8s_namespace_name",
-    "deployment.environment",
-    "namespace",
-  ],
-  container: ["k8s.container.name", "kubernetes.container_name", "kubernetes_container_name", "container_name"],
-  pod: ["k8s.pod.name", "kubernetes.pod_name", "kubernetes_pod_name", "pod_name"],
-  image: ["container.image.name", "k8s.container.image", "kubernetes.container_image", "kubernetes_container_image"],
-};
-
-const keyMissing = (e: unknown) =>
-  e instanceof SignozError && e.kind === "invalid_query" && /key `[^`]*` not found/i.test(e.message);
-const namespaceKeys = new Map<string, string>();
 const anyOf = (key: string, values: string[]) => `(${values.map((v) => `${key} = ${quote(v)}`).join(" OR ")})`;
 
-/**
- * The attribute holding the Kubernetes namespace in this SigNoz: configured, remembered per instance, else the first
- * candidate that has logs of these namespaces in the window (a key can exist and hold other values, such as
- * deployment.environment = "prod"). Unknown keys are answered "key not found" and skipped.
- */
-async function namespaceKey(cfg: SignozConfig, w: Window, namespaces: string[], signal?: AbortSignal) {
-  if (config.signoz.namespaceKey) return config.signoz.namespaceKey;
-  const known = namespaceKeys.get(cfg.baseUrl);
-  if (known) return known;
-  let accepted: string | null = null;
-  for (const key of K8S_LOG_KEYS.namespace) {
-    const probe = envelope(w, "scalar", {
-      signal: "logs",
-      aggregations: [{ expression: "count()", alias: "value" }],
-      filter: { expression: anyOf(key, namespaces) },
-      limit: 1,
-    });
-    let count = 0;
-    try {
-      const row = parseScalar(await call(cfg, "POST", "/api/v5/query_range", probe, signal)).rows[0];
-      count = Number(row?.at(-1) ?? 0) || 0;
-    } catch (e) {
-      if (keyMissing(e)) continue;
-      throw e;
-    }
-    accepted ??= key;
-    if (count > 0) {
-      namespaceKeys.set(cfg.baseUrl, key);
-      return key;
-    }
-  }
-  if (accepted) return accepted;
-  throw new SignozError(
-    "invalid_query",
-    `SigNoz logs have none of the namespace attributes ${K8S_LOG_KEYS.namespace.join(", ")}; set signoz.namespaceKey in config`,
-  );
+/** Span fields an error group is keyed by; the namespace field is `config.signoz.namespaceKey` (default below). */
+export const SPAN_GROUP_KEYS = ["service.name", "name", "status_message", "response_status_code"] as const;
+const SPAN_GROUP_LIMIT = 300;
+
+export interface SpanErrorGroup {
+  ns: string;
+  service: string;
+  name: string;
+  status: string;
+  code: string;
+  count: number;
+  /** [bucket start in seconds, error spans] for non-empty hours (window only). */
+  hourly: Array<[number, number]>;
 }
 
-/** Error-level logs of the given Kubernetes namespaces in one window (ms), newest first, at most `maxRows`. */
-export async function signozErrorLogs(
+const spanFilter = (namespaces: string[]) => {
+  const nsKey = config.signoz.namespaceKey || "deployment.environment";
+  return {
+    nsKey,
+    expression: ["has_error = true", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])].join(" AND "),
+  };
+};
+
+/**
+ * Error spans (`has_error = true`) of the given namespaces, counted by SigNoz per namespace, service, span name,
+ * status message and status code over the scan window and the baseline window (scalar: exact, empty labels included).
+ * Hourly points come from a time series and are best effort: SigNoz omits series with an empty label there. The
+ * baseline counts only when the baseline window holds any span of these namespaces; otherwise there is nothing to
+ * compare with (tracing started later, or a shorter retention). Also returns the newest error spans as trace samples.
+ */
+export async function signozErrorSpanGroups(
   w: Window,
+  baseline: Window,
   namespaces: string[],
-  levels: string[],
-  maxRows = 2000,
   signal?: AbortSignal,
 ) {
   const cfg = current();
-  const nsKey = namespaces.length ? await namespaceKey(cfg, w, namespaces, signal) : null;
-  const expression = [anyOf("severity_text", levels), ...(nsKey ? [anyOf(nsKey, namespaces)] : [])].join(" AND ");
-  const page = Math.min(200, config.signoz.maxLimit);
-  const rows: Array<{ timestamp: string; data: Record<string, unknown> }> = [];
-  for (let offset = 0; offset < maxRows; offset += page) {
-    const body = envelope(w, "raw", {
-      signal: "logs",
+  const { nsKey, expression } = spanFilter(namespaces);
+  const scope = namespaces.length ? anyOf(nsKey, namespaces) : "";
+  const spec = {
+    signal: "traces",
+    aggregations: [{ expression: "count()", alias: "value" }],
+    filter: { expression },
+    groupBy: [nsKey, ...SPAN_GROUP_KEYS].map((name) => ({ name })),
+    order: [{ key: { name: "value" }, direction: "desc" }],
+    limit: SPAN_GROUP_LIMIT,
+  };
+  const query = (body: unknown) => call(cfg, "POST", "/api/v5/query_range", body, signal);
+  const [counts, series, base, spans, recent] = await Promise.all([
+    query(envelope(w, "scalar", spec)),
+    query(envelope(w, "time_series", { ...spec, stepInterval: 3600 })),
+    query(envelope(baseline, "scalar", spec)),
+    query(envelope(baseline, "scalar", {
+      signal: "traces",
+      aggregations: [{ expression: "count()", alias: "value" }],
+      ...(scope ? { filter: { expression: scope } } : {}),
+      limit: 1,
+    })),
+    query(envelope(w, "raw", {
+      signal: "traces",
       filter: { expression },
       order: [{ key: { name: "timestamp" }, direction: "desc" }],
-      limit: Math.min(page, maxRows - offset),
-      offset,
+      limit: Math.min(200, config.signoz.maxLimit),
+    })),
+  ]);
+  const label = (get: (k: string) => unknown) => ({
+    ns: String(get(nsKey) ?? ""),
+    service: String(get("service.name") ?? ""),
+    name: String(get("name") ?? ""),
+    status: String(get("status_message") ?? ""),
+    code: String(get("response_status_code") ?? ""),
+  });
+  const id = (g: ReturnType<typeof label>) => [g.ns, g.service, g.name, g.status, g.code].join("\u0000");
+  const hourly = new Map<string, Array<[number, number]>>();
+  for (const s of parseTimeSeries(series, SPAN_GROUP_LIMIT, 10_000).series)
+    hourly.set(
+      id(label((k) => s.labels[k])),
+      s.points.filter(([, n]) => n > 0).map(([t, n]): [number, number] => [Math.floor(t / 1000 / 3600) * 3600, n]),
+    );
+  const groups = (json: unknown, withHourly: boolean): SpanErrorGroup[] => {
+    const sc = parseScalar(json, SPAN_GROUP_LIMIT);
+    return sc.rows.map((r) => {
+      const g = label((k) => r[sc.columns.indexOf(k)]);
+      return { ...g, count: Number(r.at(-1)) || 0, hourly: withHourly ? (hourly.get(id(g)) ?? []) : [] };
     });
-    const batch = parseRaw(await call(cfg, "POST", "/api/v5/query_range", body, signal)).rows;
-    rows.push(...batch);
-    if (batch.length < Math.min(page, maxRows - offset)) return { rows, truncated: false };
-  }
-  return { rows, truncated: true };
+  };
+  const today = groups(counts, true);
+  return {
+    today,
+    yesterday: groups(base, false),
+    hasBaseline: (Number(parseScalar(spans).rows[0]?.at(-1)) || 0) > 0,
+    samples: parseRaw(recent).rows,
+    truncated: today.length >= SPAN_GROUP_LIMIT,
+  };
 }

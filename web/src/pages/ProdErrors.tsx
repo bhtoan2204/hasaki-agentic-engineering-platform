@@ -47,7 +47,9 @@ interface Group {
     err?: string;
     image?: string;
     request_id?: string;
+    trace_id?: string;
     stack?: string;
+    no_baseline?: boolean;
     pod?: string;
   };
   today_count: number;
@@ -275,8 +277,17 @@ function reasonText(
 const secs = (a?: string, b?: string) =>
   a && b ? Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000) : null;
 
-function Trend({ count, yesterday }: { count: number; yesterday: number }) {
+function Trend({
+  count,
+  yesterday,
+  noBaseline,
+}: {
+  count: number;
+  yesterday: number;
+  noBaseline?: boolean;
+}) {
   const { t } = useI18n();
+  if (noBaseline) return <span className="muted">{t("pe.noBaseline")}</span>;
   if (yesterday === 0) return <span className="pe-new">{t("pe.new")}</span>;
   const r = count / yesterday;
   const tip = t("pe.sameHour", { n: yesterday });
@@ -440,7 +451,11 @@ function GroupRow({
           {g.today_count.toLocaleString(uiLocale() === "vi" ? "vi-VN" : "en-GB")}
         </span>
         <span className="pe-trend">
-          <Trend count={g.today_count} yesterday={g.yesterday_count} />
+          <Trend
+            count={g.today_count}
+            yesterday={g.yesterday_count}
+            noBaseline={g.detail.no_baseline}
+          />
         </span>
         <span className="pe-time muted small" title={t("pe.latestTip")}>
           {hm(g.last_at)}
@@ -523,6 +538,14 @@ function GroupRow({
                     text={`index=k8s_prod "${g.detail.request_id}"`}
                     label={t("pe.copyRequest")}
                   />
+                </dd>
+              </>
+            )}
+            {g.detail.trace_id && (
+              <>
+                <dt>trace_id</dt>
+                <dd className="mono">
+                  {g.detail.trace_id} <Copy text={g.detail.trace_id} label={t("pe.copyTrace")} />
                 </dd>
               </>
             )}

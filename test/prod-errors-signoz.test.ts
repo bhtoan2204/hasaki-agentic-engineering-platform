@@ -1,22 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeSourceRows, signatureOf, signozRows, toGroups } from "../src/prodErrors/scan.ts";
+import type { SpanErrorGroup } from "../src/integrations/signoz.ts";
 
 const at = (iso: string) => ({ iso, epoch: Math.floor(Date.parse(iso) / 1000) });
 const T1 = at("2026-11-18T03:10:00Z");
 const T2 = at("2026-11-18T04:20:00Z");
-const Y1 = at("2026-11-17T03:15:00Z");
 
-const log = (ts: string, body: string, extra: Record<string, unknown> = {}) => ({
-  timestamp: ts,
-  data: {
-    body,
-    severity_text: "ERROR",
-    "k8s.namespace.name": "payment-prod",
-    "k8s.container.name": "payment-zalopay",
-    "k8s.pod.name": "payment-zalopay-7d9",
-    ...extra,
-  },
+const H1 = T1.epoch - (T1.epoch % 3600);
+const H2 = T2.epoch - (T2.epoch % 3600);
+const span = (over: Partial<SpanErrorGroup> = {}): SpanErrorGroup => ({
+  ns: "payment-prod",
+  service: "payment-zalopay",
+  name: "POST /callback",
+  status: "callback order 100230056 failed: sign not match",
+  code: "500",
+  count: 1,
+  hourly: [],
+  ...over,
 });
 
 test("signatures replace ids and numbers the same way as the SPL search", () => {
@@ -29,46 +30,64 @@ test("signatures replace ids and numbers the same way as the SPL search", () => 
   );
 });
 
-test("SigNoz rows group by namespace, service, level and signature, with baseline counts, hourly points and masked samples", () => {
+test("SigNoz error span groups merge by namespace, service and signature, with baseline counts, hourly points, a trace sample and masked text", () => {
   const rows = signozRows(
     [
-      log(
-        T2.iso,
-        JSON.stringify({
-          message: "callback order 100230057 failed",
-          error: "sign not match",
-          caller: "zalopay/callback.go:88",
-        }),
-      ),
-      log(
-        T1.iso,
-        JSON.stringify({
-          message: "callback order 100230056 failed",
-          error: "sign not match",
-        }),
-      ),
-      log(T1.iso, "unrelated", {
-        "k8s.namespace.name": "oms-prod",
-        "k8s.container.name": "oms-api",
+      span({
+        count: 3,
+        hourly: [
+          [H1, 1],
+          [H2, 2],
+        ],
+      }),
+      span({
+        status: "callback order 100230057 failed: sign not match",
+        count: 1,
+        hourly: [[H2, 1]],
+      }),
+      span({
+        ns: "oms-prod",
+        service: "oms-api",
+        name: "GET /order",
+        status: "Forbidden",
+        code: "403",
+        count: 4,
+        hourly: [[H1, 4]],
       }),
     ],
-    [log(Y1.iso, JSON.stringify({ message: "callback order 99 failed", error: "sign not match" }))],
+    [
+      span({ status: "callback order 99 failed: sign not match", count: 2 }),
+      span({ service: "gone", count: 9 }),
+    ],
+    [
+      {
+        timestamp: T2.iso,
+        data: { "service.name": "payment-zalopay", name: "POST /callback", trace_id: "trace-new" },
+      },
+      {
+        timestamp: T1.iso,
+        data: { "service.name": "payment-zalopay", name: "POST /callback", trace_id: "trace-old" },
+      },
+    ],
   );
+  assert.equal(rows.length, 2, "baseline-only groups are not listed");
   const zalo = rows.find((r) => r.svc === "payment-zalopay")!;
-  assert.equal(zalo.sig, "callback order <n> failed :: sign not match");
-  assert.equal(zalo.today, 2);
-  assert.equal(zalo.yesterday, 1);
-  assert.equal(zalo.first, T1.epoch);
-  assert.equal(zalo.last, T2.epoch);
-  assert.equal(zalo.caller, "zalopay/callback.go:88", "the newest row is the sample");
+  assert.equal(zalo.sig, "POST /callback [<n>] :: callback order <n> failed: sign not match");
+  assert.equal(zalo.today, 4);
+  assert.equal(zalo.yesterday, 2);
+  assert.equal(zalo.first, H1);
+  assert.equal(zalo.last, T2.epoch, "the newest trace sample refines the last time");
+  assert.equal(zalo.trace_id, "trace-new");
+  assert.equal(zalo.lv, "ERROR");
   assert.deepEqual(zalo.sources, ["signoz"]);
-  assert.equal(zalo.analytics_hourly?.length, 2);
+  assert.deepEqual(zalo.analytics_hourly, [`${H1}:1`, `${H2}:3`]);
   const [group] = toGroups([zalo], "2026-11-18");
-  assert.equal(group.today_count, 2);
+  assert.equal(group.today_count, 4);
   assert.ok(group.reasons.includes("money"));
+  assert.equal(rows[0].svc, "payment-zalopay", "sorted by today's count");
 
   const masked = signozRows(
-    [log(T1.iso, JSON.stringify({ message: "lookup failed for 0912345678" }))],
+    [span({ status: "lookup failed for 0912345678", hourly: [[H1, 1]] })],
     [],
   );
   assert.doesNotMatch(JSON.stringify(masked), /0912345678/);
@@ -120,4 +139,22 @@ test("a group seen by Splunk and SigNoz keeps the larger counts and both sources
   const [g] = toGroups([both], "2026-11-18");
   assert.deepEqual(g.detail.sources, ["splunk", "signoz"]);
   assert.deepEqual(merged.find((r) => r.svc === "oms-api")?.sources, ["signoz"]);
+});
+
+test("without SigNoz data for the comparison window a group is not judged new, and a Splunk baseline still counts", () => {
+  const [row] = signozRows([span({ count: 30, hourly: [[H1, 30]] })], [], [], false);
+  assert.equal(row.no_baseline, true);
+  const [group] = toGroups([row], "2026-11-18");
+  assert.equal(group.detail.no_baseline, true);
+  assert.ok(!group.reasons.includes("new"));
+  assert.ok(group.reasons.includes("money"));
+  const [merged] = mergeSourceRows(
+    {
+      source: "splunk",
+      rows: [{ ...row, no_baseline: undefined, today: 30, yesterday: 0, sources: undefined }],
+    },
+    { source: "signoz", rows: [row] },
+  );
+  assert.equal(merged.no_baseline, undefined, "Splunk has yesterday's data for this group");
+  assert.ok(toGroups([merged], "2026-11-18")[0].reasons.includes("new"));
 });

@@ -465,18 +465,20 @@ test("runScan with options: only the chosen project, the chosen window; the page
   );
 });
 
-test("runScan: scans SigNoz when Splunk is not connected, finds its namespace attribute and marks the groups' source", async () => {
+test("runScan: scans SigNoz error traces when Splunk is not connected and marks the groups' source", async () => {
   const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
   const nowMs = Date.now();
-  const logs = [
-    { ms: nowMs - 5 * 60_000, body: JSON.stringify({ message: "ipn order 100230056 rejected", error: "invalid sign" }) },
-    { ms: nowMs - 9 * 60_000, body: JSON.stringify({ message: "ipn order 100230057 rejected", error: "invalid sign" }) },
+  const hour = nowMs - (nowMs % 3_600_000);
+  // [deployment.environment, service.name, name, status_message, response_status_code] and today's hourly counts.
+  const groups: Array<[string[], number[]]> = [
+    [["payment-prod", "payment-vnpay", "POST /ipn", "ipn order 100230056 rejected: invalid sign", "500"], [1]],
+    [["payment-prod", "payment-vnpay", "POST /ipn", "ipn order 100230057 rejected: invalid sign", "500"], [1]],
   ];
   const queries: Array<{
     requestType?: string;
     start: number;
     end: number;
-    compositeQuery: { queries: Array<{ spec: { filter: { expression: string } } }> };
+    compositeQuery: { queries: Array<{ spec: { signal: string; filter: { expression: string } } }> };
   }> = [];
   const sz = createServer((req, res) => {
     let raw = "";
@@ -485,60 +487,30 @@ test("runScan: scans SigNoz when Splunk is not connected, finds its namespace at
       const body = raw ? JSON.parse(raw) : {};
       queries.push(body);
       const spec = body.compositeQuery?.queries?.[0]?.spec ?? {};
-      // Like the real instance: namespaces live in deployment.environment; Kubernetes attribute names are unknown.
-      const unknownKey = /(k8s[._]namespace[._]name|kubernetes[._]namespace_name)/.exec(
-        spec.filter?.expression ?? "",
-      );
-      if (unknownKey) {
-        res.writeHead(400, { "content-type": "application/json" });
-        return res.end(
-          JSON.stringify({
-            status: "error",
-            error: {
-              code: "invalid_input",
-              message: "Found 1 errors while parsing the search expression.",
-              errors: [{ message: `key \`${unknownKey[1]}\` not found` }],
-            },
-          }),
-        );
-      }
-      if (body.requestType === "scalar") {
-        res.writeHead(200, { "content-type": "application/json" });
-        return res.end(
-          JSON.stringify({
-            status: "success",
-            data: {
-              type: "scalar",
-              data: { results: [{ queryName: "A", columns: [{ name: "value" }], data: [[logs.length]] }] },
-            },
-          }),
-        );
-      }
-      const rows =
-        body.requestType === "raw"
-          ? logs
-              .filter((l) => l.ms >= body.start && l.ms <= body.end)
-              .slice(spec.offset ?? 0, (spec.offset ?? 0) + (spec.limit ?? 100))
-              .map((l, i) => ({
-                timestamp: new Date(l.ms).toISOString(),
-                data: {
-                  id: `log-${l.ms}-${i}`,
-                  body: l.body,
-                  severity_text: "ERROR",
-                  resources_string: {
-                    "deployment.environment": "payment-prod",
-                    "service.name": "payment-vnpay",
-                  },
-                },
-              }))
-          : [];
+      const keys: string[] = (spec.groupBy ?? []).map((g: { name: string }) => g.name);
+      const series = groups.map(([labels, counts]) => ({
+        labels: keys.map((name, i) => ({ key: { name }, value: labels[i] })),
+        values: counts.map((value) => ({ timestamp: hour, value })),
+      }));
+      const sample = {
+        timestamp: new Date(nowMs - 60_000).toISOString(),
+        data: { name: "POST /ipn", trace_id: "trace-abc", resources_string: { "service.name": "payment-vnpay" } },
+      };
+      // The scan window holds the groups; the baseline window holds other spans but no errors.
+      const inWindow = body.start >= nowMs - 2 * 3_600_000;
+      const scalar = keys.length
+        ? inWindow
+          ? groups.map(([labels, counts]) => [...labels, counts.reduce((a, b) => a + b, 0)])
+          : []
+        : [[12]];
+      const data =
+        body.requestType === "time_series"
+          ? { results: [{ queryName: "A", aggregations: [{ index: 0, series }] }] }
+          : body.requestType === "scalar"
+            ? { results: [{ queryName: "A", columns: [...keys, "value"].map((name) => ({ name })), data: scalar }] }
+            : { results: [{ queryName: "A", rows: [sample] }] };
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "success",
-          data: { type: body.requestType, data: { results: [{ queryName: "A", rows }] } },
-        }),
-      );
+      res.end(JSON.stringify({ status: "success", data: { type: body.requestType, data } }));
     });
   });
   await new Promise<void>((r) => sz.listen(0, "127.0.0.1", r));
@@ -551,20 +523,27 @@ test("runScan: scans SigNoz when Splunk is not connected, finds its namespace at
       token: "sz-scan-key-0123456789",
       enabled: true,
     });
+    queries.length = 0; // drop the connection test of saveSignoz
     const r = await runScan("manual", new Date(nowMs), { preset: "1h" });
     assert.deepEqual(r, { ok: true, groups: 1 });
-    const raw = queries.filter((b) => b.requestType === "raw");
-    assert.equal(raw.length, 2, "one query for the window, one for the baseline");
-    assert.match(raw[0].compositeQuery.queries[0].spec.filter.expression, /severity_text = 'ERROR'/);
-    assert.match(
-      raw[0].compositeQuery.queries[0].spec.filter.expression,
-      /deployment\.environment = 'payment-prod'/,
+    assert.deepEqual(
+      queries.map((b) => b.requestType),
+      ["scalar", "time_series", "scalar", "scalar", "raw"],
+      "window counts, hourly points, baseline counts, baseline span check, newest trace samples",
     );
+    for (const b of queries) {
+      assert.equal(b.compositeQuery.queries[0].spec.signal, "traces");
+      assert.match(b.compositeQuery.queries[0].spec.filter.expression, /deployment\.environment = 'payment-prod'/);
+    }
     const g = (await listGroups()).groups.find((x: GroupRow) => x.service === "payment-vnpay")!;
-    assert.equal(g.today_count, 2);
+    assert.equal(g.today_count, 2, "span groups differing only in ids share one signature");
     assert.deepEqual(g.detail.sources, ["signoz"]);
+    assert.equal(g.detail.trace_id, "trace-abc");
+    assert.equal(g.detail.no_baseline, undefined, "the baseline window has spans: a real comparison");
+    assert.ok(g.reasons.some((r: string) => /^new\b|mới/.test(r)), "no errors in the baseline: new today");
     assert.match(describeGroup(g), /phát hiện từ SigNoz/);
-    assert.match(describeGroup(g), /signoz_search_logs/);
+    assert.match(describeGroup(g), /signoz_search_traces/);
+    assert.match(describeGroup(g), /trace-abc/);
     const s = await one(pool, "SELECT * FROM prod_error_scans ORDER BY id DESC LIMIT 1");
     assert.equal(s.ok, true);
     assert.match(String(s.error), /Splunk: chưa kết nối, chỉ quét SigNoz/);

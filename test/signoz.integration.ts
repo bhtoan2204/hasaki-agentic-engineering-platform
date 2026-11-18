@@ -12,6 +12,7 @@ import {
   disconnectSignoz,
   saveSignoz,
   SignozError,
+  signozErrorSpanGroups,
   signozStatus,
   testSignoz,
 } from "../src/integrations/signoz.ts";
@@ -43,9 +44,23 @@ const ROWS = {
   ],
 };
 
+// Two error span groups: [deployment.environment, service.name, name, status_message, response_status_code].
+const SPAN_GROUPS = [
+  ["oms-prod", "oms-api", "GET /order", "Forbidden", "403"],
+  ["payment-prod", "payment", "POST /callback", "sign not match", "500"],
+];
+
 function respond(body: any) {
   if (mode === "empty") return { status: "success", data: { type: body.requestType, data: { results: [] } } };
   const spec = body.compositeQuery.queries[0].spec;
+  const keys: string[] = (spec.groupBy ?? []).map((g: { name: string }) => g.name);
+  if (keys.length === 5 && body.requestType === "scalar")
+    return { status: "success", data: { type: "scalar", data: { results: [{ queryName: "A", columns: [...keys, "value"].map((name) => ({ name })), data: SPAN_GROUPS.map((g) => [...g, 7]) }] } } };
+  if (keys.length === 5)
+    return {
+      status: "success",
+      data: { type: "time_series", data: { results: [{ queryName: "A", aggregations: [{ index: 0, series: SPAN_GROUPS.map((g) => ({ labels: keys.map((name, i) => ({ key: { name }, value: g[i] })), values: [{ timestamp: Date.UTC(2026, 10, 18, 3), value: 2 }, { timestamp: Date.UTC(2026, 10, 18, 4), value: 0 }, { timestamp: Date.UTC(2026, 10, 18, 5), value: 3 }] })) }] }] } },
+    };
   if (body.requestType === "raw")
     return { status: "success", data: { type: "raw", data: { results: [{ queryName: "A", rows: ROWS[spec.signal as "logs" | "traces"].slice(0, spec.limit) }] } } };
   if (body.requestType === "scalar")
@@ -278,6 +293,41 @@ test("agent tools: evidence refs, untrusted telemetry, pagination, budgets, hidd
     const r = await callTool("signoz_search_logs", {}, { runId: runB, allowedRepositories: [], mode: "analysis" });
     assert.match(r.error!, /unknown tool/);
   }, Number(other!.id));
+});
+
+test("production scan: error spans are counted by SigNoz per environment, service, span and status", async () => {
+  seen.length = 0;
+  await asOwner(async () => {
+    const end = Date.UTC(2026, 10, 18, 6);
+    const r = await signozErrorSpanGroups(
+      { start: end - 3 * 3_600_000, end },
+      { start: end - 27 * 3_600_000, end: end - 24 * 3_600_000 },
+      ["oms-prod", "payment-prod"],
+    );
+    assert.equal(r.truncated, false);
+    assert.equal(r.hasBaseline, true);
+    assert.deepEqual(
+      r.today.map((g) => [g.ns, g.service, g.name, g.status, g.code, g.count]),
+      [
+        ["oms-prod", "oms-api", "GET /order", "Forbidden", "403", 7],
+        ["payment-prod", "payment", "POST /callback", "sign not match", "500", 7],
+      ],
+      "counts come from the scalar query, not from the hourly series",
+    );
+    assert.deepEqual(r.today[0].hourly, [
+      [Date.UTC(2026, 10, 18, 3) / 1000, 2],
+      [Date.UTC(2026, 10, 18, 5) / 1000, 3],
+    ]);
+    assert.deepEqual(r.yesterday.map((g) => [g.service, g.count]), [["oms-api", 7], ["payment", 7]]);
+    assert.equal(r.samples.length, 1, "newest error spans come back as trace samples");
+  });
+  const sent = seen.filter((s) => s.path === "/api/v5/query_range").map((s) => s.body.compositeQuery.queries[0].spec);
+  assert.equal(sent.length, 5);
+  const scope = "(deployment.environment = 'oms-prod' OR deployment.environment = 'payment-prod')";
+  for (const spec of sent) {
+    assert.equal(spec.signal, "traces");
+    assert.ok([`has_error = true AND ${scope}`, scope].includes(spec.filter.expression), spec.filter.expression);
+  }
 });
 
 test("disconnect removes the stored key", async () => {

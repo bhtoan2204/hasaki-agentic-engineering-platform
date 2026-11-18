@@ -6,10 +6,10 @@ import { pool, q, one, json, withTx } from "../db/pool.ts";
 import { settings } from "../db.ts";
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
 import {
-  K8S_LOG_KEYS,
   signozEnabled,
-  signozErrorLogs,
+  signozErrorSpanGroups,
   signozStatus,
+  type SpanErrorGroup,
 } from "../integrations/signoz.ts";
 import { redactPii } from "../integrations/redact.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
@@ -21,9 +21,9 @@ import { escapeHtml as esc, linkFooter, RULE, sendTelegramHtml } from "../telegr
  * Daily production error scan (page "Lỗi production").
  *
  * One fixed, read-only SPL search (no LLM) over today's logs of the configured namespaces, compared with yesterday over
- * the same time-of-day window. When the scanning user also connected SigNoz, its error logs of the same namespaces and
- * windows are grouped the same way and merged: a group seen by both sources keeps the larger counts (both usually
- * receive the same cluster logs, so adding them would count every line twice). Error lines are grouped by a signature (message with ids/numbers/hashes replaced), scored
+ * the same time-of-day window. When the scanning user also connected SigNoz, its error traces (`has_error = true`) of the
+ * same namespaces and windows are counted per service, span and status and merged as their own groups (a group with the
+ * same key in both sources keeps the larger counts). Errors are grouped by a signature (message with ids/numbers/hashes replaced), scored
  * (panic, new since yesterday, spike, money-related) and stored. "Điều tra" turns a group into a Bug Investigation work
  * item; the workflow still stops for the developer's approval before any fix. Scheduled scans notify Telegram about new
  * critical/high groups once per day.
@@ -45,9 +45,12 @@ export interface GroupRow {
     err?: string;
     image?: string;
     request_id?: string;
+    trace_id?: string;
     stack?: string;
     pod?: string;
     sources?: ScanSource[];
+    /** The only source of this group had no data for the comparison window. */
+    no_baseline?: boolean;
   };
   day: string;
   today_count: number;
@@ -219,6 +222,8 @@ export function assess(g: {
   sample: string;
   today: number;
   yesterday: number;
+  /** false = the source has no data for the comparison window: no new / up / down judgement. */
+  baseline?: boolean;
 }) {
   const reasons: string[] = [];
   const text = `${g.signature}\n${g.sample}`;
@@ -229,7 +234,9 @@ export function assess(g: {
     reasons.push("panic");
   }
   let changed = false;
-  if (g.yesterday === 0) {
+  if (g.baseline === false) {
+    // nothing to compare with
+  } else if (g.yesterday === 0) {
     reasons.push("new");
     s = Math.max(s, g.today >= 5 ? 3 : 2);
     changed = true;
@@ -280,10 +287,12 @@ export function toGroups(rows: any[], day: string) {
         err: str(r.err, 1000) || undefined,
         image: str(r.image, 300) || undefined,
         request_id: str(r.request_id, 100) || undefined,
+        trace_id: str(r.trace_id, 100) || undefined,
         stack: str(r.stack, 2500) || undefined,
         pod: str(r.pod, 100) || undefined,
         sources:
           Array.isArray(r.sources) && r.sources.length ? (r.sources as ScanSource[]) : undefined,
+        no_baseline: r.no_baseline || undefined,
       },
       hourly: (Array.isArray(r.analytics_hourly)
         ? r.analytics_hourly
@@ -303,7 +312,7 @@ export function toGroups(rows: any[], day: string) {
       yesterday_count: yesterday,
       first_at: iso(r.first),
       last_at: iso(r.last),
-      ...assess({ level, signature, sample, today, yesterday }),
+      ...assess({ level, signature, sample, today, yesterday, baseline: !r.no_baseline }),
     };
   });
 }
@@ -322,39 +331,11 @@ export function signatureOf(msg: string, err?: string) {
 }
 
 const text = (v: unknown) => (v == null || v === "" ? undefined : String(v));
-const first = (d: Record<string, unknown>, keys: string[]) =>
-  keys.map((k) => text(d[k])).find((v) => v !== undefined);
 const masked = (v: string | undefined) => (v === undefined ? v : redactPii(v));
 
-/** One SigNoz log row in the fields the SPL search extracts (JSON bodies are read like `spath input=log`). */
-function signozLine(row: { timestamp: string; data: Record<string, unknown> }) {
-  const d = row.data;
-  const body = text(d.body) ?? "";
-  let j: Record<string, unknown> = {};
-  if (body.trimStart().startsWith("{"))
-    try {
-      j = JSON.parse(body) ?? {};
-    } catch {
-      j = {};
-    }
-  const msg = text(j.message ?? j.MESSAGE ?? j.msg ?? j.log) ?? body;
-  const err = text(j.error ?? j.err ?? d.error ?? d["exception.message"]);
-  return {
-    time: Math.floor(Date.parse(row.timestamp) / 1000),
-    ns: first(d, K8S_LOG_KEYS.namespace) ?? "",
-    svc: first(d, [...K8S_LOG_KEYS.container, "service.name"]) ?? "",
-    lv: (text(d.severity_text ?? j.level ?? j.LEVEL) ?? "ERROR").toUpperCase(),
-    // Masked like Splunk results; the signature is built first because it replaces numbers anyway.
-    sig: redactPii(signatureOf(msg, err)),
-    msg: redactPii(msg),
-    err: masked(err),
-    caller: masked(text(j.caller ?? d.caller ?? d["code.filepath"])),
-    image: first(d, K8S_LOG_KEYS.image),
-    request_id: masked(text(j.request_id ?? d.request_id)),
-    stack: masked(text(j.stacktrace ?? d.stacktrace ?? d["exception.stacktrace"])),
-    pod: first(d, K8S_LOG_KEYS.pod),
-  };
-}
+/** How an error span reads in the list: span name, status code and status message. */
+const spanMessage = (g: { name: string; code: string; status: string }) =>
+  `${g.name}${g.code ? ` [${g.code}]` : ""}${g.status ? `: ${g.status}` : ""}`;
 
 /** One group as a result row of the SPL `stats` stage; SigNoz rows are built in the same shape. */
 export interface SourceRow {
@@ -371,73 +352,74 @@ export interface SourceRow {
   caller?: string;
   image?: string;
   request_id?: string;
+  trace_id?: string;
   stack?: string;
   pod?: string;
+  no_baseline?: boolean;
   analytics_hourly?: string | string[];
   sources?: ScanSource[];
 }
 
-/** SigNoz window and baseline rows → result rows shaped like the SPL `stats` output (exported for tests). */
+/**
+ * SigNoz error span groups (window hourly, baseline totals) → result rows shaped like the SPL `stats` output. Span
+ * groups whose messages differ only in ids or numbers share one signature and are added up (exported for tests).
+ */
 export function signozRows(
-  todayRows: Array<{ timestamp: string; data: Record<string, unknown> }>,
-  baselineRows: Array<{ timestamp: string; data: Record<string, unknown> }>,
+  today: SpanErrorGroup[],
+  baseline: SpanErrorGroup[],
+  samples: Array<{ timestamp: string; data: Record<string, unknown> }> = [],
+  hasBaseline = true,
 ) {
-  type G = SourceRow & {
-    today: number;
-    yesterday: number;
-    first?: number;
-    last?: number;
-    hourly: Map<number, number>;
-  };
+  type G = SourceRow & { today: number; yesterday: number; hourly: Map<number, number> };
   const groups = new Map<string, G>();
-  const add = (row: (typeof todayRows)[number], day: "t" | "y") => {
-    const l = signozLine(row);
-    if (!Number.isFinite(l.time)) return;
-    const key = [l.ns, l.svc, l.lv, l.sig].join("\u0000");
-    let g = groups.get(key);
-    if (!g) {
-      g = {
-        ns: l.ns,
-        svc: l.svc,
-        lv: l.lv,
-        sig: l.sig,
-        today: 0,
-        yesterday: 0,
-        hourly: new Map(),
-        sources: ["signoz"],
-      };
-      groups.set(key, g);
-    }
-    g.last = Math.max(g.last ?? 0, l.time);
-    if (day === "y") {
-      g.yesterday++;
-      return;
-    }
-    g.today++;
-    g.first = Math.min(g.first ?? Infinity, l.time);
-    const hour = Math.floor(l.time / 3600) * 3600;
-    g.hourly.set(hour, (g.hourly.get(hour) ?? 0) + 1);
-    // rows come newest first: the first one of a group is its latest sample
-    if (g.sample == null)
-      Object.assign(g, {
-        sample: l.msg,
-        err: l.err,
-        caller: l.caller,
-        image: l.image,
-        request_id: l.request_id,
-        stack: l.stack,
-        pod: l.pod,
-      });
+  const keyOf = (g: SpanErrorGroup) => {
+    const sig = redactPii(signatureOf(`${g.name}${g.code ? ` [${g.code}]` : ""}`, g.status || undefined));
+    return { key: [g.ns, g.service, "ERROR", sig].join("\u0000"), sig };
   };
-  for (const r of todayRows) add(r, "t");
-  for (const r of baselineRows) add(r, "y");
+  const at = (g: SpanErrorGroup) => {
+    const { key, sig } = keyOf(g);
+    let row = groups.get(key);
+    if (!row) {
+      row = { ns: g.ns, svc: g.service, lv: "ERROR", sig, today: 0, yesterday: 0, hourly: new Map(), sources: ["signoz"] };
+      if (!hasBaseline) row.no_baseline = true;
+      groups.set(key, row);
+    }
+    return row;
+  };
+  for (const g of today) {
+    const row = at(g);
+    row.today += g.count;
+    row.sample ??= redactPii(spanMessage(g));
+    row.err ??= masked(text(g.status));
+    row.caller ??= masked(text(g.name));
+    for (const [hour, n] of g.hourly) {
+      row.hourly.set(hour, (row.hourly.get(hour) ?? 0) + n);
+      row.first = Math.min(Number(row.first ?? Infinity), hour);
+      row.last = Math.max(Number(row.last ?? 0), hour);
+    }
+  }
+  for (const g of baseline) {
+    const row = groups.get(keyOf(g).key);
+    if (row) row.yesterday += g.count;
+  }
+  // Newest spans first: the first span matching a group gives its trace id and a more precise last time.
+  for (const s of samples) {
+    const d = s.data;
+    const time = Math.floor(Date.parse(s.timestamp) / 1000);
+    for (const row of groups.values()) {
+      if (row.trace_id || row.svc !== text(d["service.name"]) || row.caller !== masked(text(d.name))) continue;
+      row.trace_id = text(d.trace_id);
+      if (Number.isFinite(time)) row.last = Math.max(Number(row.last ?? 0), time);
+      break;
+    }
+  }
   return [...groups.values()]
     .filter((g) => g.today > 0)
     .sort((a, b) => b.today - a.today)
     .slice(0, 300)
     .map(({ hourly, ...g }): SourceRow => ({
       ...g,
-      analytics_hourly: [...hourly].map(([hour, n]) => `${hour}:${n}`),
+      analytics_hourly: [...hourly].sort(([a], [b]) => a - b).map(([hour, n]) => `${hour}:${n}`),
     }));
 }
 
@@ -473,6 +455,7 @@ export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: So
         first: Math.min(...finite(prev.first, r.first)) || prev.first || r.first,
         last: Math.max(...finite(prev.last, r.last), 0) || prev.last || r.last,
         sources: [...new Set([...prev.sources, source])],
+        no_baseline: (prev.no_baseline && r.no_baseline) || undefined,
         analytics_hourly: [...hours].map(([h, n]) => `${h}:${n}`),
       });
     }
@@ -560,15 +543,20 @@ export async function runScan(
     const signoz = useSignoz
       ? (async () => {
           const ns = namespaces.map((n) => n.namespace);
-          const [today, base] = await Promise.all([
-            signozErrorLogs({ start: w.start * 1000, end: w.end * 1000 }, ns, LEVELS),
-            signozErrorLogs({ start: w.baseStart * 1000, end: w.baseEnd * 1000 }, ns, LEVELS),
-          ]);
-          if (today.truncated || base.truncated)
+          const spans = await signozErrorSpanGroups(
+            { start: w.start * 1000, end: w.end * 1000 },
+            { start: w.baseStart * 1000, end: w.baseEnd * 1000 },
+            ns,
+          );
+          if (spans.truncated)
             notes.push(
-              `SigNoz: chỉ đọc ${today.rows.length} dòng lỗi của khung quét và ${base.rows.length} dòng của kỳ so sánh, số đếm có thể thấp hơn thực tế`,
+              "SigNoz: quá nhiều nhóm trace lỗi, chỉ lấy các nhóm nhiều nhất; các nhóm nhỏ có thể bị bỏ sót",
             );
-          return signozRows(today.rows, base.rows);
+          if (!spans.hasBaseline)
+            notes.push(
+              "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng",
+            );
+          return signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline);
         })().catch((e) => {
           notes.push(`SigNoz: ${(e as Error).message}`);
           return null;
@@ -690,7 +678,8 @@ const SEV_ICON: Record<Severity, string> = { critical: "🔴", high: "🟠", med
 const MAX_IN_MESSAGE = 6;
 const count = (n: number) => n.toLocaleString("vi-VN");
 
-function trendText(g: Pick<GroupRow, "today_count" | "yesterday_count">) {
+function trendText(g: Pick<GroupRow, "today_count" | "yesterday_count" | "detail">) {
+  if (g.detail?.no_baseline) return "chưa có dữ liệu hôm qua";
   if (g.yesterday_count === 0) return "🆕 mới xuất hiện hôm nay";
   const r = g.today_count / g.yesterday_count;
   if (r >= 1.5)
@@ -1060,9 +1049,9 @@ export function describeGroup(g: GroupRow) {
     d.image
       ? `- Image đang chạy: \`${d.image}\`${img.commit ? ` (repo \`${img.repo}\`, commit \`${img.commit}\`)` : ""}`
       : "",
-    g.caller ? `- Vị trí log: \`${g.caller}\`` : "",
+    g.caller ? `- ${d.sources?.includes("splunk") ? "Vị trí log" : "Span"}: \`${g.caller}\`` : "",
     `- Mức log: ${g.level}`,
-    `- Hôm nay: ${g.today_count} lần (lần đầu ${t(g.first_at)}, gần nhất ${t(g.last_at)}); hôm qua cùng khung giờ: ${g.yesterday_count} lần`,
+    `- Hôm nay: ${g.today_count} lần (lần đầu ${t(g.first_at)}, gần nhất ${t(g.last_at)}); hôm qua cùng khung giờ: ${d.no_baseline ? "chưa có dữ liệu" : `${g.yesterday_count} lần`}`,
     `- Đánh giá: **${g.severity}**${g.reasons.length ? ` — ${g.reasons.join("; ")}` : ""}`,
     "",
     "Log mẫu (đã che PII):",
@@ -1072,13 +1061,14 @@ export function describeGroup(g: GroupRow) {
     d.request_id
       ? `\nrequest_id gần nhất: \`${d.request_id}\` (log cùng request: \`index=${config.prodErrors.index} "${d.request_id}"\`)`
       : "",
+    d.trace_id ? `\ntrace_id gần nhất: \`${d.trace_id}\`` : "",
     "",
     ...((d.sources ?? ["splunk"]).includes("splunk")
       ? ["Xem thêm log bằng tool `splunk.search` (chỉ đọc), ví dụ:", fence(spl)]
       : []),
     ...(d.sources?.includes("signoz")
       ? [
-          `Xem thêm log bằng tool \`signoz_search_logs\` (chỉ đọc), lọc theo namespace \`${g.namespace}\` và service \`${g.service}\`.`,
+          `Xem trace lỗi bằng tool \`signoz_search_traces\` (chỉ đọc, \`has_error = true\`), lọc theo môi trường \`${g.namespace}\` và service \`${g.service}\`${d.trace_id ? `; xem cả trace bằng \`signoz_get_trace\` với trace_id \`${d.trace_id}\`` : ""}.`,
         ]
       : []),
     "",

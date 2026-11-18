@@ -382,7 +382,7 @@ export interface Config {
     maxCallsPerStep: number;
     /** Self-hosted hosts on private networks an administrator approved; cloud metadata stays blocked regardless. */
     allowedInternalHosts: string[];
-    /** Log attribute holding the Kubernetes namespace; unset = detected from common names on first use. */
+    /** Span attribute holding the namespace for the production error scan; unset = `deployment.environment`. */
     namespaceKey?: string;
   };
   /** Daily production error scan over Splunk (page "Lỗi production"). */

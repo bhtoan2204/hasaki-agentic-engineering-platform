@@ -59,6 +59,11 @@ export interface VerifyConfig {
    * instead of NOT_EXECUTED. Honoured only when every changed file matches `allowedPaths`; never read from agent output.
    */
   notApplicable?: { allowedPaths: string[]; reason: string };
+  /**
+   * Repositories whose typecheck and lint already passed as NOT_APPLICABLE (no test runner) in the same publication
+   * gate. A workflow regression command that finds no test runner there is NOT_APPLICABLE too. Platform-set only.
+   */
+  staticChecksPassed?: string[];
 }
 
 /**
@@ -119,6 +124,11 @@ const TEST_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|_
  */
 export async function staticChecksOnly(path: string, output: string) {
   if (!/^== typecheck$/m.test(output) || /typecheck skipped/.test(output)) return false;
+  return noTestRunner(path);
+}
+
+/** A Node repository without a real `test` script and without any tracked test file: no test can run there. */
+export async function noTestRunner(path: string) {
   const manifest = await readFile(resolve(path, "package.json"), "utf8").then((t) => JSON.parse(t), () => null);
   const script = String(manifest?.scripts?.test ?? "");
   if (!manifest || (script && !/no test specified/.test(script))) return false;
@@ -941,6 +951,10 @@ export async function verifyWorkspaces(
             entry.status = "not_applicable";
             entry.note =
               "no executable tests apply: the repository has no test runner or test files; its typecheck and lint passed";
+          } else if (cfg.staticChecksPassed?.includes(w.repo) && (await noTestRunner(p))) {
+            entry.status = "not_applicable";
+            entry.note =
+              "no executable tests apply: the repository has no test runner or test files; its typecheck and lint passed in this publication gate";
           }
         }
       }
@@ -1032,7 +1046,11 @@ async function evidenceParts(
     contract_revision: cfg.contractRevision ?? "",
     command: cfg.command,
     selectors: [...(cfg.requiredTests ?? [])].sort().join("\n"),
-    policy: canonicalJson({ allowTestWeakening: cfg.allowTestWeakening, notApplicable: cfg.notApplicable }),
+    policy: canonicalJson({
+      allowTestWeakening: cfg.allowTestWeakening,
+      notApplicable: cfg.notApplicable,
+      ...(cfg.staticChecksPassed?.length ? { staticChecksPassed: [...cfg.staticChecksPassed].sort() } : {}),
+    }),
     baseline: String(cfg.baseline),
     timeout: String(cfg.timeoutMs),
     env_fingerprint: await envFingerprint(path),

@@ -24,6 +24,8 @@ export async function verifyPublication(
 ) {
   const problems: string[] = [];
   const tested: Array<{ step: string; heads: Record<string, string> }> = [];
+  // Repositories the coding contracts verified as having no test runner (typecheck and lint passed) in this gate.
+  const staticChecksPassed = new Set<string>();
   const verify = async (
     key: string,
     cfg: VerifyConfig,
@@ -95,6 +97,7 @@ export async function verifyPublication(
         step: `publication:${key}`,
         heads: Object.fromEntries(round.repos.map((r) => [r.repo, r.tested_state!.head])),
       });
+    return round;
   };
   for (const step of steps.filter((s) => s.type === "coding_agent" && s.status === "COMPLETED")) {
     const contract = step.output?.execution_contract as MandatoryExecutionContract | undefined;
@@ -139,7 +142,11 @@ export async function verifyPublication(
       continue;
     }
     if (problems.length) continue;
-    await verify(step.key, cfg, trees);
+    const round = await verify(step.key, cfg, trees);
+    if (round.passed)
+      for (const r of round.repos)
+        if (r.status === "not_applicable" && /no test runner or test files/.test(r.note ?? ""))
+          staticChecksPassed.add(r.repo);
   }
   // Workflow command steps may carry broader mandatory regressions than the coding contract.
   // Re-run them on the integrated revision; patch equivalence does not prove compatibility with a new base.
@@ -170,6 +177,7 @@ export async function verifyPublication(
         problems.push(`${step.key}: missing workflow regression command`);
         continue;
       }
+      if (staticChecksPassed.size) cfg.staticChecksPassed = [...staticChecksPassed];
       await verify(step.key, cfg, trees, step.config.env as Record<string, string> | undefined,
         step.config.reuse_test_evidence !== false);
     }
