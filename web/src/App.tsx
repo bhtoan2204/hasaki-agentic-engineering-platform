@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   LineChart,
   Menu,
+  MessagesSquare,
   Moon,
   PlayCircle,
   PlugZap,
@@ -55,6 +56,7 @@ import { OverviewPage } from "./pages/Overview.tsx";
 import { InvestigationsPage } from "./pages/Investigations.tsx";
 import { IntegrationsPage } from "./pages/Integrations.tsx";
 import { SettingsPage } from "./pages/Settings.tsx";
+import { ChatPage } from "./pages/Chat.tsx";
 import { ProductionErrorsPage } from "./pages/prodErrors/ProductionErrorsPage.tsx";
 import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
 import { useI18n } from "./i18n/index.tsx";
@@ -97,6 +99,7 @@ const NAV: Array<{
     group: "workspace",
     items: [
       { key: "overview", labelKey: "nav.overview", icon: LayoutDashboard },
+      { key: "chat", labelKey: "nav.chat", icon: MessagesSquare },
       { key: "office", labelKey: "nav.office", icon: Building2 },
     ],
   },
@@ -316,6 +319,10 @@ export function App() {
       break;
     case "office":
       page = <AgentOfficePage param={parts[1]} />;
+      full = true;
+      break;
+    case "chat":
+      page = <ChatPage conversationId={parts[1] ? Number(parts[1]) : undefined} />;
       full = true;
       break;
     default:

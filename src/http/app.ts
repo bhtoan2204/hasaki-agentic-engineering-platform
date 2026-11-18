@@ -11,6 +11,7 @@ import { singleflight } from "../cache/index.ts";
 import { HttpError } from "./error.ts";
 import { messages as uiMessages } from "../../web/src/i18n/messages.ts";
 import { handleEventsSince, handleStream } from "../api/stream.ts";
+import { handleChatStream } from "../chat/events.ts";
 import {
   clearSessionCookie,
   csrfOk,
@@ -179,6 +180,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
 
     if (method === "GET" && url.pathname === "/api/stream") {
       return handleStream(req, res, url, actor, wantsSupport(actor, url.searchParams.get("scope")));
+    }
+    const chatStream = method === "GET" && url.pathname.match(/^\/api\/chat\/conversations\/(\d+)\/stream$/);
+    if (chatStream) {
+      return handleChatStream(req, res, url, actor, Number(chatStream[1]));
     }
     if (key === "GET /api/events") {
       const slice = await handleEventsSince(

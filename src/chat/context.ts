@@ -1,0 +1,281 @@
+import { knowledge } from "../knowledge/service.ts";
+import { visibleKnowledge } from "../knowledge/visibility.ts";
+import { redactContextText } from "../context/redact.ts";
+import { chatRepository } from "./repository.ts";
+import { LIMITS, systemPolicy, untrusted } from "./policy.ts";
+import { readRepositoryFile, readableRepositories } from "./tools.ts";
+import type { ChatMode, ConversationRow, Mention, MentionKind, MessageRow } from "./types.ts";
+
+const MENTION = /@(repo|file|task|run|knowledge):([^\s,;()]+)/g;
+
+export function parseMentions(text: string): Array<{ kind: MentionKind; ref: string }> {
+  const out = new Map<string, { kind: MentionKind; ref: string }>();
+  for (const m of text.matchAll(MENTION)) {
+    const ref = m[2].replace(/[.,:;!?]+$/, "");
+    out.set(`${m[1]}:${ref}`, { kind: m[1] as MentionKind, ref });
+    if (out.size >= 10) break;
+  }
+  return [...out.values()];
+}
+
+export interface ResolvedMention extends Mention {
+  /** Content for the prompt; never sent to the client. */
+  body?: string;
+  repository?: string;
+}
+
+/**
+ * Resolve every mention against a real resource the owner may read now. Unresolved mentions carry a reason and no
+ * content, so a typo or a foreign id never leaks data and the model is told what is missing.
+ */
+export async function resolveMentions(userId: number, text: string): Promise<ResolvedMention[]> {
+  const parsed = parseMentions(text);
+  if (!parsed.length) return [];
+  const readable = await readableRepositories(userId);
+  const out: ResolvedMention[] = [];
+  for (const { kind, ref } of parsed) {
+    try {
+      if (kind === "repo") {
+        if (!readable.includes(ref)) throw new Error("repository not found or not accessible");
+        out.push({
+          kind,
+          ref,
+          resolved: true,
+          label: ref,
+          repository: ref,
+          body: `Repository ${ref} is in scope for this turn.`,
+        });
+      } else if (kind === "file") {
+        const slash = ref.indexOf("/");
+        const repo = slash > 0 ? ref.slice(0, slash) : "";
+        const path = ref.slice(slash + 1);
+        if (!repo || !readable.includes(repo))
+          throw new Error("repository not found or not accessible");
+        const file = await readRepositoryFile(repo, path, 1, 160);
+        out.push({
+          kind,
+          ref,
+          resolved: true,
+          label: `${repo}/${file.path}`,
+          repository: repo,
+          body: `File ${repo}/${file.path} (lines ${file.lines[0]}-${file.lines[1]} of ${file.total_lines}):\n${file.content}`,
+        });
+      } else if (kind === "task") {
+        const wi = await chatRepository.ownedWorkItem(ref, userId);
+        if (!wi) throw new Error("work item not found");
+        out.push({
+          kind,
+          ref,
+          resolved: true,
+          label: `${wi.code} — ${wi.title}`,
+          body: `Work item ${wi.code} (id ${wi.id}, status ${wi.status}, project ${wi.project || "-"}): ${wi.title}\n${wi.description}`,
+        });
+      } else if (kind === "run") {
+        const id = Number(ref.replace(/^#/, ""));
+        const run = Number.isSafeInteger(id) ? await chatRepository.ownedRun(id, userId) : null;
+        if (!run) throw new Error("run not found");
+        const steps = await chatRepository.runSteps(run.id);
+        out.push({
+          kind,
+          ref,
+          resolved: true,
+          label: `Run #${run.id} — ${run.title}`,
+          body: `Run #${run.id} ${run.definition_key} (${run.status}): ${run.title}\nRepositories: ${run.selected_repositories.join(", ") || "-"}\nSteps: ${steps
+            .map((s) => `${s.key}=${s.status}${s.error ? ` (${s.error})` : ""}`)
+            .join("; ")}`,
+        });
+      } else if (kind === "knowledge") {
+        const items = await visibleKnowledge(userId, await knowledge.list({ ownerId: userId }));
+        const item = items.find((k) => k.key === ref);
+        if (!item) throw new Error("knowledge item not found");
+        out.push({
+          kind,
+          ref,
+          resolved: true,
+          label: item.title || item.key,
+          body: `Knowledge ${item.key} — ${item.title}:\n${String((item as { content?: string }).content ?? "").slice(0, 4000)}`,
+        });
+      }
+    } catch (e) {
+      out.push({
+        kind,
+        ref,
+        resolved: false,
+        reason: String((e as Error).message ?? e).slice(0, 200),
+      });
+    }
+  }
+  return out;
+}
+
+export const publicMention = ({ body: _b, repository: _r, ...m }: ResolvedMention): Mention => m;
+
+// ---------------------------------------------------------------- compaction
+
+const KEEP =
+  /\b(decid|decision|agreed|must|must not|never|constraint|require|acceptance|evidence|confirmed|root cause|repo|repository|scope|risk|todo|next step)|quyết định|thống nhất|bắt buộc|không được|ràng buộc|yêu cầu|tiêu chí|bằng chứng|xác nhận|nguyên nhân|phạm vi|rủi ro|bước tiếp/i;
+
+/**
+ * Deterministic, model-free compaction: older messages are folded into the conversation summary, keeping the
+ * lines that carry decisions, constraints, evidence, scopes and open steps, plus the first line of each user ask.
+ * Costs no model quota and is reproducible in tests.
+ */
+export function compactMessages(previous: string, messages: MessageRow[]) {
+  const lines: string[] = previous ? previous.split("\n") : [];
+  for (const m of messages) {
+    const body = m.content
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (!body.length) continue;
+    const kept = body.filter((l) => KEEP.test(l)).slice(0, 6);
+    if (m.role === "user") lines.push(`- [user #${m.id}] ${body[0].slice(0, 240)}`);
+    for (const l of kept)
+      if (m.role !== "user" || l !== body[0])
+        lines.push(`- [${m.role} #${m.id}] ${l.slice(0, 240)}`);
+  }
+  let out = [...new Set(lines)];
+  while (out.join("\n").length > LIMITS.summaryChars && out.length > 1) out = out.slice(1);
+  return out.join("\n");
+}
+
+/**
+ * Keep the recent window verbatim. When the rest exceeds the history budget, fold it into the summary and move
+ * the summary cursor; the summary is persisted so the next turn starts from it.
+ */
+export async function compactIfNeeded(conversation: ConversationRow, history: MessageRow[]) {
+  const recent = history.slice(-LIMITS.recentMessages);
+  const older = history.slice(0, -LIMITS.recentMessages);
+  const size = (ms: MessageRow[]) => ms.reduce((n, m) => n + m.content.length, 0);
+  let summary = conversation.summary;
+  let compacted = false;
+  let window = history;
+  if (older.length && size(history) > LIMITS.historyChars) {
+    summary = compactMessages(summary, older);
+    const through = older[older.length - 1].id;
+    await chatRepository.saveSummary(conversation.id, summary, through);
+    compacted = true;
+    window = recent;
+  }
+  // A single huge recent message is clipped rather than dropped, newest kept whole.
+  while (size(window) > LIMITS.historyChars && window.length > 1) window = window.slice(1);
+  return { summary, window, compacted };
+}
+
+// ---------------------------------------------------------------- prompt
+
+export interface PromptSections {
+  conversation: ConversationRow;
+  mode: ChatMode;
+  locale: "vi" | "en";
+  user: { id: number; name: string };
+  summary: string;
+  history: MessageRow[];
+  mentions: ResolvedMention[];
+  catalog: string | null;
+  message: string;
+  toolResults: Array<{ seq: number; tool: string; status: string; body: string }>;
+  repositories: string[];
+}
+
+export interface ContextStats {
+  sections: Array<{ name: string; chars: number }>;
+  total_chars: number;
+  estimated_tokens: number;
+  truncated: string[];
+}
+
+/**
+ * Priority order: platform policy, mode, user context, recent history, summary, mentions, tool results (repository,
+ * knowledge, observability evidence), then the current message. Sections are clipped from the lowest priority
+ * when the prompt exceeds its budget; the policy and the current message are never dropped.
+ */
+export function buildPrompt(p: PromptSections): { prompt: string; stats: ContextStats } {
+  const sections: Array<{ name: string; text: string; floor: number }> = [];
+  const add = (name: string, text: string, floor = 0) =>
+    text && sections.push({ name, text, floor });
+  add("policy", systemPolicy(p.mode, p.locale), Infinity);
+  add(
+    "user",
+    `Developer: ${p.user.name} (id ${p.user.id}). Conversation #${p.conversation.id}${p.conversation.title ? ` "${p.conversation.title}"` : ""}. Repository scope: ${p.repositories.join(", ") || "none selected"}.`,
+    Infinity,
+  );
+  if (p.catalog)
+    add(
+      "tools",
+      [
+        "Read-only tools you can request. To call tools, reply with ONLY a fenced block:",
+        "```chat-tool",
+        '{"calls": [{"tool": "<name>", "arguments": {...}}]}',
+        "```",
+        `At most ${LIMITS.maxToolCallsPerStep} calls per reply. The platform runs them and sends the results back. When you have enough, reply with the final answer (no chat-tool block). Cite evidence as [tool #<seq>].`,
+        p.catalog,
+      ].join("\n"),
+      Infinity,
+    );
+  add(
+    "history",
+    p.history
+      .map((m) =>
+        m.role === "user" ? `User: ${m.content}` : untrusted(`assistant #${m.id}`, m.content),
+      )
+      .join("\n\n"),
+  );
+  add("summary", p.summary ? untrusted("conversation summary", p.summary) : "");
+  add(
+    "mentions",
+    p.mentions
+      .map((m) =>
+        m.resolved
+          ? untrusted(
+              `@${m.kind}:${m.ref}`,
+              redactContextText(m.body ?? "").slice(0, LIMITS.mentionChars),
+            )
+          : `Unresolved mention @${m.kind}:${m.ref}: ${m.reason}`,
+      )
+      .join("\n"),
+  );
+  add(
+    "tool_results",
+    p.toolResults
+      .map((r) => untrusted(`tool #${r.seq} ${r.tool} (${r.status})`, r.body))
+      .join("\n"),
+  );
+  add("message", `Current user message:\n${p.message}`, Infinity);
+
+  const truncated: string[] = [];
+  const total = () => sections.reduce((n, s) => n + s.text.length, 0);
+  // Clip order: summary, mentions, history (oldest first), tool results — the newest evidence is kept longest.
+  for (const name of ["summary", "mentions", "history", "tool_results"]) {
+    const over = total() - LIMITS.promptChars;
+    if (over <= 0) break;
+    const s = sections.find((x) => x.name === name);
+    if (!s) continue;
+    const keep = Math.max(0, s.text.length - over - 40);
+    s.text = keep
+      ? `[…clipped ${s.text.length - keep} chars]\n${s.text.slice(-keep)}`
+      : "[clipped]";
+    truncated.push(name);
+  }
+  const order = [
+    "policy",
+    "user",
+    "tools",
+    "history",
+    "summary",
+    "mentions",
+    "tool_results",
+    "message",
+  ];
+  sections.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+  const prompt = sections.map((s) => s.text).join("\n\n");
+  return {
+    prompt,
+    stats: {
+      sections: sections.map((s) => ({ name: s.name, chars: s.text.length })),
+      total_chars: prompt.length,
+      estimated_tokens: Math.ceil(prompt.length / 4),
+      truncated,
+    },
+  };
+}

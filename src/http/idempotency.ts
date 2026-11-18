@@ -22,6 +22,10 @@ export const IDEMPOTENT_ROUTES: RegExp[] = [
   /^\/api\/runs\/\d+\/steps\/[a-z0-9_-]+\/evidence$/,
   /^\/api\/work\/pick\/\d+$/,
   /^\/api\/prod-errors\/(scan|[0-9a-f]{20}\/investigate)$/,
+  /^\/api\/chat\/conversations$/,
+  /^\/api\/chat\/conversations\/\d+\/messages$/,
+  /^\/api\/chat\/conversations\/\d+\/delegation\/execute$/,
+  /^\/api\/chat\/turns\/\d+\/regenerate$/,
 ];
 
 export const needsIdempotency = (method: string, path: string) =>

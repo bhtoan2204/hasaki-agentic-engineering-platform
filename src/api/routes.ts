@@ -124,6 +124,7 @@ import {
   testTelegram,
 } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
+import { chat } from "../chat/service.ts";
 import {
   disconnectSignoz,
   saveSignoz,
@@ -2396,6 +2397,56 @@ export const routes: Route[] = [
       await setActive(num(p[0]), body.active !== false);
       return { ok: true };
     },
+  ],
+
+  // ------------------------------------------------------------------ Interactive Agent Chat
+  [
+    "GET",
+    /^\/api\/chat\/conversations$/,
+    (c) =>
+      chat.list(c.actor, {
+        search: c.url.searchParams.get("q") ?? undefined,
+        archived: c.url.searchParams.get("archived") === "1",
+        limit: Number(c.url.searchParams.get("limit") || 100) || 100,
+      }),
+  ],
+  ["POST", /^\/api\/chat\/conversations$/, (c) => chat.create(c.actor, c.body)],
+  ["GET", /^\/api\/chat\/conversations\/(\d+)$/, (c) => chat.get(c.actor, num(c.p[0]))],
+  ["POST", /^\/api\/chat\/conversations\/(\d+)$/, (c) => chat.update(c.actor, num(c.p[0]), c.body)],
+  [
+    "POST",
+    /^\/api\/chat\/conversations\/(\d+)\/delete$/,
+    (c) => chat.remove(c.actor, num(c.p[0])),
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/conversations\/(\d+)\/messages$/,
+    (c) => chat.postMessage(c.actor, num(c.p[0]), c.body),
+  ],
+  [
+    "GET",
+    /^\/api\/chat\/conversations\/(\d+)\/events$/,
+    async (c) => {
+      const after = Number(c.url.searchParams.get("after") ?? "0");
+      if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, "invalid after");
+      return chat.events(c.actor, num(c.p[0]), after);
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/conversations\/(\d+)\/delegation\/preview$/,
+    (c) => chat.delegationPreview(c.actor, num(c.p[0]), c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/conversations\/(\d+)\/delegation\/execute$/,
+    (c) => chat.delegationExecute(c.actor, num(c.p[0]), c.body),
+  ],
+  ["POST", /^\/api\/chat\/turns\/(\d+)\/cancel$/, (c) => chat.cancelTurn(c.actor, num(c.p[0]))],
+  [
+    "POST",
+    /^\/api\/chat\/turns\/(\d+)\/regenerate$/,
+    (c) => chat.regenerate(c.actor, num(c.p[0])),
   ],
 ];
 

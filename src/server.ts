@@ -26,6 +26,8 @@ import { startCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
 import { startEventStream, stopEventStream } from "./api/stream.ts";
+import { stopChatStream } from "./chat/events.ts";
+import { recoverInstanceTurns } from "./chat/runtime.ts";
 import { childGroups } from "./workflow/local.ts";
 
 // The Claude Agent SDK (and detect-libc) call process.report.getReport() to tell glibc from musl. By default a report
@@ -100,6 +102,7 @@ if (config.codeIntelligence.enabled)
   });
 startPolling();
 startProdErrorSchedule();
+void recoverInstanceTurns().catch((e) => console.error("chat turn recovery:", (e as Error).message));
 
 // Graceful shutdown reconciles interrupted steps without consuming retries. A second Ctrl+C exits immediately.
 let shuttingDown = false;
@@ -114,6 +117,7 @@ async function shutdown(reason: string, code: number) {
   );
   server.close();
   void stopEventStream(); // open SSE responses would otherwise keep server.close() waiting
+  void stopChatStream();
   childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
   // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.
   setTimeout(() => process.exit(code), 30_000).unref();

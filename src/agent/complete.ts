@@ -13,10 +13,23 @@ export type { CompletionRun } from "./configuration.ts";
 import { resolveStepAgent } from "./stepAgent.ts";
 import { loadAgentConfiguration } from "./configurationStore.ts";
 
-export function completionAgent(run: CompletionRun | null | undefined) {
+/** Explicit per-request agent values (e.g. a chat conversation's selection), validated like a step's `config.agent`. */
+export interface CompletionAgentOverride {
+  provider?: AgentProvider;
+  model?: string | null;
+  reasoning_effort?: string | null;
+}
+export function completionAgent(
+  run: CompletionRun | null | undefined,
+  agent: CompletionAgentOverride = {},
+) {
   if (run?.agent_configuration === null)
     throw new Error("Historical run requires configuration recovery before completion");
-  return resolveStepAgent(run ?? {}, { type: "agent", config: {} })!;
+  const explicit = Object.fromEntries(Object.entries(agent).filter(([, v]) => v != null));
+  return resolveStepAgent(run ?? {}, {
+    type: "agent",
+    config: Object.keys(explicit).length ? { agent: explicit } : {},
+  })!;
 }
 export interface Completion {
   text: string;
@@ -103,13 +116,14 @@ export async function completeForRun(
   prompt: string,
   signal?: AbortSignal,
   providers: Record<AgentProvider, CompletionRunner> = runners,
+  agent: CompletionAgentOverride = {},
 ): Promise<Completion> {
   signal?.throwIfAborted();
   const configured =
     run?.agent_configuration === undefined
       ? { ...run, agent_configuration: await loadAgentConfiguration() }
       : run;
-  const resolved = completionAgent(configured);
+  const resolved = completionAgent(configured, agent);
   const timeoutMs = Math.min(resolved.timeout_ms ?? 600_000, 600_000);
   const deadline = AbortSignal.timeout(timeoutMs);
   const started = Date.now();
