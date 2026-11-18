@@ -15,8 +15,7 @@ import { rankRepositories, repositories } from "../repos/service.ts";
 import { hybridRank, buildCodeContext, searchCodeExact } from "../codeIntelligence/search.ts";
 import { indexRepository } from "../codeIntelligence/indexer.ts";
 import { recordWorkspace } from "../git/provider.ts";
-import { claudeExecutor } from "../agent/claude.ts";
-import type { ExecutionContext } from "../workflow/executors/registry.ts";
+import { getExecutor, type ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 
 function emptyEvidence(seconds: number): Evidence {
@@ -327,7 +326,7 @@ async function executeIsolated(
           ? task.description
           : `${task.description}\nAcceptance behavior:\n${task.expected_behavior.map((b) => "- " + b).join("\n")}`;
       // The bundled provider fixture exercises the actual shared provider executor; its synthetic token counters are discarded.
-      const result = await claudeExecutor.execute({
+      const result = await getExecutor("agent").execute({
         ...ctx,
         signal,
         context: { ...ctx.context, requestText: task.description },

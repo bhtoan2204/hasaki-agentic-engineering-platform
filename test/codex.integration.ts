@@ -20,8 +20,8 @@ import {
 import { workspacesOf, recordWorkspace } from "../src/git/provider.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import {
-  claudeExecutor,
   codexModelFor,
   rankRepositoriesWithClaude,
   resumableSession,

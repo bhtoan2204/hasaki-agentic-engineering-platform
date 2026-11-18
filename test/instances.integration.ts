@@ -40,7 +40,7 @@ import { execution } from "../src/auth/execution.ts";
 import { PersonalSession, personalSettings } from "../src/integrations/personal.ts";
 import { attemptIsLive } from "../src/agent/platformTools.ts";
 import { buildUserPrompt } from "../src/agent/stepPrompt.ts";
-import { claudeExecutor } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { ensureTestOwner } from "../src/auth/testOwner.ts";
 
 const exec = promisify(execFile);

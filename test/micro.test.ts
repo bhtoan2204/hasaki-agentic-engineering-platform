@@ -201,7 +201,7 @@ test("MICRO budget decisions deny further execution and stricter provider limits
 import { TEMPLATES, FEATURE_MICRO_TARGETED_COMMAND } from "../src/workflow/templates.ts";
 import { applyProfile, ProfileNotApplicable } from "../src/workflow/profiles.ts";
 import { validateAgentOptions } from "../src/agent/stepAgent.ts";
-import { claudeExecutor } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 
 test("micro-change template runs unit tests for ordinary Node repositories", () => {
   const tmpl = TEMPLATES.find((t) => t.key === "micro-change")!;

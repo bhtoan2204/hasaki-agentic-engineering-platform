@@ -29,7 +29,8 @@ import { newMetrics } from "../src/agent/metrics.ts";
 import { envFromExecution, dispatchPlatformTool } from "../src/agent/platformTools.ts";
 import { decide } from "../src/agent/toolPolicy.ts";
 import { runWorkingDirectory } from "../src/repos/workspaces.ts";
-import { claudeExecutor, resumableSession } from "../src/agent/claude.ts";
+import { resumableSession } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { handle } from "../src/http/app.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
 

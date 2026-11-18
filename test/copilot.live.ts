@@ -22,7 +22,7 @@ import { definitions, seedTemplates } from "../src/workflow/definitions.ts";
 import { answerQuestions, getRun, startRun } from "../src/workflow/engine.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
-import { claudeExecutor } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { copilotCapabilities } from "../src/agent/copilot/capabilities.ts";
 import { config } from "../src/config.ts";
 

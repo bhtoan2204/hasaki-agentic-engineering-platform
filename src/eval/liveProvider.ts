@@ -12,7 +12,6 @@ import { repositories } from "../repos/service.ts";
 import { effectivePermissions } from "../repos/access.ts";
 import { resolveRepoPath } from "../repos/paths.ts";
 import { recordWorkspace } from "../git/provider.ts";
-import { claudeExecutor } from "../agent/claude.ts";
 import { isSecretPath } from "../agent/toolPolicy.ts";
 import { CaseSchema } from "./dataset.ts";
 import { fixtureGit, fixtureName, fixtureRoot } from "./fixtures.ts";
@@ -20,7 +19,7 @@ import { livePrerequisites } from "./livePrerequisites.ts";
 import { cleanupLiveWork, liveWorkRoot, stopPostmaster } from "./liveCase.ts";
 import { LiveBudget, liveRuntime, remainingLiveBudgets } from "./liveRuntime.ts";
 import type { ConfigurationSchema } from "./configuration.ts";
-import type { ExecutionContext } from "../workflow/executors/registry.ts";
+import { getExecutor, type ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 const exec = promisify(execFile);
 const LIVE_ALLOWED_TOOLS = [
@@ -323,7 +322,7 @@ async function executeLiveProviderPhaseLocked(
       },
       () =>
         liveRuntime.run(runtime, () =>
-          claudeExecutor.execute({
+          getExecutor("agent").execute({
             ...ctx,
             signal,
             attempt: {

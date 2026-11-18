@@ -21,7 +21,7 @@ import {
   readManifest,
 } from "../src/knowledge/externalImport.ts";
 import { buildSystemAppend } from "../src/agent/stepPrompt.ts";
-import { claudeExecutor } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 

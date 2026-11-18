@@ -10,7 +10,8 @@ import { definitions, seedTemplates } from "../src/workflow/definitions.ts";
 import { getRun, startRun } from "../src/workflow/engine.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
-import { claudeExecutor, newMetrics } from "../src/agent/claude.ts";
+import { newMetrics } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { resolveAgentProvider } from "../src/agent/provider.ts";
 import {
   antigravityCapabilities,

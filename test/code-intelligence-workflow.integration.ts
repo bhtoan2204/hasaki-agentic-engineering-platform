@@ -13,7 +13,7 @@ import { startRun, answerQuestions, getRun } from "../src/workflow/engine.ts";
 import { runOnce, drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { integrationExecutor } from "../src/workflow/executors/builtin.ts";
-import { claudeExecutor } from "../src/agent/claude.ts";
+import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
 import { indexRepository, runIndexOnce, enqueue } from "../src/codeIntelligence/indexer.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";

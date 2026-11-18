@@ -1,4 +1,5 @@
-import { claudeExecutor, rankRepositoriesWithClaude } from "../../agent/claude.ts";
+import { rankRepositoriesWithClaude } from "../../agent/claude.ts";
+import { agentExecutor } from "../../agent/harness/executor.ts";
 import {
   commandExecutor,
   conditionExecutor,
@@ -23,8 +24,8 @@ import { setFeedbackModel } from "../engine.ts";
 
 /** StepExecutorRegistry defaults. Tests replace individual entries with registerExecutor(). */
 export function registerDefaultExecutors() {
-  registerExecutor("agent", claudeExecutor);
-  registerExecutor("coding_agent", claudeExecutor);
+  registerExecutor("agent", agentExecutor);
+  registerExecutor("coding_agent", agentExecutor);
   registerExecutor("human_input", humanInputExecutor);
   registerExecutor("human_approval", humanApprovalExecutor);
   registerExecutor("condition", conditionExecutor);
