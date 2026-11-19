@@ -1,3 +1,4 @@
+import { AutonomyInsights } from "./AutonomyInsights.tsx";
 import { LearningInsights } from "./LearningInsights.tsx";
 import { AgentEvaluation } from "./insights/AgentEvaluation.tsx";
 import { AnalyticsInsights, ANALYTICS_TABS } from "./insights/AnalyticsInsights.tsx";
@@ -295,6 +296,7 @@ const TAB_KEYS: InsightsTab[] = ["overview", "quality", "tools", "failures", "re
 export function InsightsPage({ tab }: { tab?: string }) {
   if (tab?.split("?")[0] === "evaluation") return <AgentEvaluation />;
   if (tab?.split("?")[0] === "learning") return <LearningInsights />;
+  if (tab?.split("?")[0] === "autonomy") return <AutonomyInsights />;
   if (!tab || ANALYTICS_TABS.includes(tab.split("?")[0] as (typeof ANALYTICS_TABS)[number]))
     return <AnalyticsInsights tabParam={tab} />;
   return <LegacyInsightsPage tab={tab} />;

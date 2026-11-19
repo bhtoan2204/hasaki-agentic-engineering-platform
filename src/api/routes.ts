@@ -221,6 +221,7 @@ import { runDelivery } from "../workflow/prLifecycle.ts";
 import { observeManual } from "../learning/observations.ts";
 import { extractLessons, learningOverview } from "../learning/lessons.ts";
 import { outcomeRecommendations } from "../learning/providerPerformance.ts";
+import { computeAutonomyMetrics, episodesFromTelemetry } from "../eval/autonomy.ts";
 import {
   INTAKE_MODES,
   INTAKE_SOURCES,
@@ -1116,6 +1117,17 @@ export const routes: Route[] = [
         subject: typeof c.body.subject === "string" ? c.body.subject : undefined,
       })
     ),
+  ],
+  // Autonomy evaluation from canonical production records (read-only, owner-scoped; admins may see all).
+  [
+    "GET",
+    /^\/api\/eval\/autonomy$/,
+    async (c) => {
+      const owner = c.actor.role === "admin" && c.url.searchParams.get("all") === "1" ? null : c.actor.id;
+      const days = Number(c.url.searchParams.get("days") ?? 30);
+      const episodes = await episodesFromTelemetry({ ownerId: owner, days });
+      return { days, metrics: computeAutonomyMetrics(episodes), episodes: episodes.slice(-200).map(({ usage, ...e }) => ({ ...e, usage })) };
+    },
   ],
   // Outcome learning: overview (own lessons/observations; admins may see all) and human outcome reports per run.
   [
