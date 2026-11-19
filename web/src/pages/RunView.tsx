@@ -23,6 +23,7 @@ import {
   Pause,
   Play,
   Send,
+  ShieldCheck,
   Square,
   StepForward,
   Ticket,
@@ -42,7 +43,7 @@ import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
 import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
-import { ProfileBadge } from "./ProfilePreview.tsx";
+import { AutonomySummary, ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
 import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
@@ -749,6 +750,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <ReportCard run={run} />
               <InvestigationRunCard run={run} />
               <ProfileCard run={run} />
+              <AutonomyCard run={run} onDone={reload} />
               <RunTotals runId={id} tick={tick} />
               <ReuseCard decisions={run.decisions} />
               <CostPanel kind="run" id={id} tick={tick} />
@@ -954,6 +956,41 @@ function ReportCard({ run }: { run: any }) {
         </button>
         {md && <Copy text={md} label={t("rv.copyMd")} />}
       </div>
+    </div>
+  );
+}
+
+function AutonomyCard({ run, onDone }: { run: any; onDone: () => void }) {
+  const { t } = useI18n();
+  if (!run.autonomy) return null;
+  const decided = (run.decisions ?? []).filter((d: any) => d.kind === "autonomy");
+  const paused = !!run.autonomy.paused;
+  return (
+    <div className="rv-card">
+      <div className="rv-card-head">
+        <h4>
+          <ShieldCheck size={16} /> {t("au.title")}
+        </h4>
+        <button
+          className="ghost sm"
+          onClick={async () =>
+            (await act(() => api(`/api/runs/${run.id}/autonomy`, { paused: !paused }))) && onDone()
+          }
+        >
+          {paused ? t("au.resume") : t("au.pause")}
+        </button>
+      </div>
+      <AutonomySummary a={run.autonomy} />
+      <div className="small muted" style={{ marginTop: 6 }}>{t("au.decisions")}</div>
+      {decided.length === 0 && <div className="small muted">{t("au.none")}</div>}
+      {decided.slice(-20).map((d: any) => (
+        <div key={d.id} className="small">
+          <span className="mono">{d.step_key}</span> · <b>{d.action}</b>
+          {d.outcome === "planned" && <span className="muted"> · {t("au.planned")}</span>} ·{" "}
+          {d.details?.actor_type === "human" ? t("au.human") : t("au.machine")}
+          {d.reason && <span className="muted"> — {d.reason}</span>}
+        </div>
+      ))}
     </div>
   );
 }

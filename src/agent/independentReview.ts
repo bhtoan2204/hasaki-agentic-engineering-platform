@@ -483,7 +483,11 @@ export async function collectEvidence(
       problems.push(
         `${w.repo}: uncommitted changes in ${w.path} — the coding step must commit before verification:\n${dirty.slice(0, 2000)}`,
       );
-    const { stat, diff } = await boundedDiff(w.path, `origin/${w.baseBranch || baseBranch}...HEAD`, budget);
+    const { stat, diff } = await boundedDiff(
+      w.path,
+      `origin/${w.baseBranch || baseBranch}...HEAD`,
+      budget,
+    );
     budget -= diff.length;
     parts.push(`### ${w.repo} @ ${head.slice(0, 12)} (worktree ${w.path})\n${stat}\n\n${diff}`);
   }
@@ -501,7 +505,8 @@ async function boundedDiff(path: string, range: string, budget: number) {
   ]);
   const diff =
     full.length > budget
-      ? full.slice(0, Math.max(0, budget)) + `\n… diff truncated — run git diff ${range} in ${path} for the rest`
+      ? full.slice(0, Math.max(0, budget)) +
+        `\n… diff truncated — run git diff ${range} in ${path} for the rest`
       : full;
   return { stat, diff };
 }
@@ -626,13 +631,19 @@ export function incrementalCheckpoint(
   baseTips: Record<string, string>,
 ) {
   const o = prior?.output;
-  if (!o || o.verdict !== "FAIL" || o.independent !== true || !Array.isArray(o.findings)) return null;
+  if (!o || o.verdict !== "FAIL" || o.independent !== true || !Array.isArray(o.findings))
+    return null;
   const was: Record<string, string> = o.verified_heads ?? {};
   const tips: Record<string, string> | undefined = o.verified_base_tips;
   const repos = Object.keys(heads).sort();
   if (!tips || repos.join("\0") !== Object.keys(was).sort().join("\0")) return null;
   if (repos.some((r) => !was[r] || !baseTips[r] || tips[r] !== baseTips[r])) return null;
-  return { attemptId: prior!.id, heads: was, findings: o.findings as Finding[], summary: String(o.summary ?? "") };
+  return {
+    attemptId: prior!.id,
+    heads: was,
+    findings: o.findings as Finding[],
+    summary: String(o.summary ?? ""),
+  };
 }
 
 /** Diff of the repair commits since the FAIL checkpoint; null when any checkpoint commit is not an ancestor of HEAD. */
@@ -655,12 +666,18 @@ export async function repairDiff(
     const from = since[w.repo];
     const { stat, diff } = await boundedDiff(w.path, `${from}..HEAD`, budget);
     budget -= diff.length;
-    parts.push(`### ${w.repo} ${from.slice(0, 12)}..HEAD (worktree ${w.path})\n${stat || "(no changes)"}\n\n${diff}`);
+    parts.push(
+      `### ${w.repo} ${from.slice(0, 12)}..HEAD (worktree ${w.path})\n${stat || "(no changes)"}\n\n${diff}`,
+    );
   }
   return parts.join("\n\n");
 }
 
-export function incrementalReviewBrief(checkpoint: { attemptId: number; findings: Finding[]; summary: string }) {
+export function incrementalReviewBrief(checkpoint: {
+  attemptId: number;
+  findings: Finding[];
+  summary: string;
+}) {
   return [
     `INCREMENTAL RE-REVIEW. The full diff was already reviewed (attempt #${checkpoint.attemptId}) and FAILED only on the findings below; everything else in it was accepted.`,
     "Review ONLY: (1) whether each finding below is resolved, and (2) the repair diff for new defects or regressions.",

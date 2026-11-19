@@ -8,11 +8,19 @@ const sql = readFileSync(
   join(import.meta.dirname, "..", "migrations", "067_execution_decisions.sql"),
   "utf8",
 );
+// 071 replaced the kind/action constraints (autonomy decisions); the newest definition is the one in force.
+const widened = readFileSync(
+  join(import.meta.dirname, "..", "migrations", "071_autonomy.sql"),
+  "utf8",
+);
 const listIn = (column: string) =>
   [
-    ...new RegExp(`${column} TEXT NOT NULL CHECK \\(${column} IN \\(([^)]*)\\)`)
-      .exec(sql)![1]
-      .matchAll(/'([^']+)'/g),
+    ...(new RegExp(`execution_decisions_${column}_check CHECK \\(${column} IN \\(([^)]*)\\)`).exec(
+      widened,
+    ) ??
+      new RegExp(`${column} TEXT NOT NULL CHECK \\(${column} IN \\(([^)]*)\\)`).exec(
+        sql,
+      )!)[1].matchAll(/'([^']+)'/g),
   ].map((m) => m[1]);
 
 test("the decision vocabulary in code matches the table constraints", () => {

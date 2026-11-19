@@ -1429,6 +1429,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   const [wi, setWi] = useState("");
   const [inputs, setInputs] = useState("{}");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
+  const [autonomy, setAutonomy] = useState("");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
   const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
   const start = async (mode: "start" | "step" | "pending") => {
@@ -1446,6 +1447,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
         inputs: { ...parsed, ...(sel.length ? { repositories: sel } : {}) },
         start: mode === "start",
         profile,
+        autonomy: autonomy || undefined,
         output_locale: outputLocale,
         agent_provider: agentProvider,
       }),
@@ -1550,6 +1552,8 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
             })()}
             value={profile}
             onChange={setProfile}
+            autonomy={autonomy}
+            onAutonomy={setAutonomy}
           />
         </Section>
         <div className="wfe-run-actions">

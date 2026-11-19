@@ -827,7 +827,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
               "Design the change for the confirmed repositories: components touched, data/contract changes, migration needs, " +
               "test strategy, rollout risks, alternatives rejected. Reference concrete files (path:line).",
             output_contract:
-              "{ summary, changes: [{ repo, files: string[], description }], tests: string[], risks: string[], alternatives: string[] }",
+              "{ summary, acceptance_criteria: string[], changes: [{ repo, files: string[], description }], non_goals: string[], tests: string[], risks: string[], rollback: string, alternatives: string[] }",
           },
         },
         {
@@ -1194,7 +1194,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
               "(targeted checks first, full npm test before the pull request), and rollout risks. Do not plan a restart, deploy, " +
               "merge, or migration of the running application's database. Reference concrete files (path:line).",
             output_contract:
-              "{ summary, changes: [{ repo, files: string[], description }], tests: string[], risks: string[], alternatives: string[] }",
+              "{ summary, acceptance_criteria: string[], changes: [{ repo, files: string[], description }], non_goals: string[], tests: string[], risks: string[], rollback: string, alternatives: string[] }",
           },
         },
         {

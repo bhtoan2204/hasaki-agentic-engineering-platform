@@ -61,6 +61,7 @@ import {
 } from "../../agent/independentReview.ts";
 import { collectScopeState, finalPublishProblems, prePublishProblems, samePatch, worktreeFingerprint } from "../../agent/scopeGuard.ts";
 import { feedbackSignals } from "../replan.ts";
+import { recheckBeforePublish } from "../autonomy.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -1291,6 +1292,21 @@ export const pullRequestExecutor: StepExecutor = {
         equivalent,
       };
     }
+    const handBack = await recheckBeforePublish(
+      ctx.run.id,
+      ctx.step,
+      steps,
+      workspaces
+        .filter((w) => publish[w.repo])
+        .map((w) => ({
+          repo: w.repo,
+          path: w.path,
+          base: bases[w.repo].ref,
+          head: publish[w.repo].head,
+          equivalent: publish[w.repo].equivalent ?? [],
+        })),
+    );
+    if (handBack) return { kind: "waiting_approval", request: handBack };
     const scope =
       [...steps]
         .reverse()

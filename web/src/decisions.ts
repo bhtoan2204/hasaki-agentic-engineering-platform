@@ -11,7 +11,12 @@ export type DecisionAction =
   | "SAFE_RETRY"
   | "REQUIRES_RECONCILIATION"
   | "HANDOFF"
-  | "RECORD";
+  | "RECORD"
+  | "ALLOW"
+  | "DENY"
+  | "REQUIRE_HUMAN"
+  | "COLLECT_EVIDENCE"
+  | "REPLAN";
 
 export interface Decision {
   id: number;
@@ -46,6 +51,11 @@ export const DECISION_COLORS: Record<DecisionAction, string> = {
   RECONCILE: "var(--st-err)",
   REQUIRES_RECONCILIATION: "var(--st-err)",
   RECORD: "var(--muted)",
+  ALLOW: "var(--st-ok)",
+  DENY: "var(--st-err)",
+  REQUIRE_HUMAN: "var(--st-wait)",
+  COLLECT_EVIDENCE: "var(--st-wait)",
+  REPLAN: "var(--st-wait)",
 };
 
 export const COMPATIBILITY_COLORS: Record<string, string> = {

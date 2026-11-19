@@ -981,6 +981,7 @@ export function WorkItemDetail({ id }: { id: number }) {
   const { t, locale } = useI18n();
   const [wf, setWf] = useState("feature-implementation");
   const [profile, setProfile] = useState<ProfileChoice>("AUTO");
+  const [autonomy, setAutonomy] = useState("");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
   const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
   // Intent routing: preselect a workflow whose triggers match the item (e.g. a production log investigation).
@@ -1003,6 +1004,7 @@ export function WorkItemDetail({ id }: { id: number }) {
         workflow: wf,
         start: mode === "start",
         profile,
+        autonomy: autonomy || undefined,
         output_locale: outputLocale,
         agent_provider: agentProvider,
       }),
@@ -1167,7 +1169,14 @@ export function WorkItemDetail({ id }: { id: number }) {
               </select>
             </Field>
             {selectedWf?.description && <div className="wi-wfdesc">{selectedWf.description}</div>}
-            <ProfilePreview workflow={wf} workItemId={id} value={profile} onChange={setProfile} />
+            <ProfilePreview
+              workflow={wf}
+              workItemId={id}
+              value={profile}
+              onChange={setProfile}
+              autonomy={autonomy}
+              onAutonomy={setAutonomy}
+            />
             <Field label={t("run.outputLanguage")} hint={t("run.outputHint")}>
               <select
                 value={outputLocale}

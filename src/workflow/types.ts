@@ -183,6 +183,23 @@ export interface RunRow {
   owner_id?: number | null;
   /** Platform instance (machine) whose workers execute this run; null = any instance (legacy rows). */
   worker_instance?: string | null;
+  /** Effective autonomy policy frozen at creation; null = MANUAL (legacy rows and runs without a policy). */
+  autonomy?: EffectiveAutonomy | null;
+}
+
+export const AUTONOMY_MODES = ["MANUAL", "SUPERVISED", "AUTONOMOUS", "AUTOPILOT"] as const;
+export type AutonomyMode = (typeof AUTONOMY_MODES)[number];
+
+export interface EffectiveAutonomy {
+  version: string;
+  requested: AutonomyMode;
+  mode: AutonomyMode;
+  shadow: boolean;
+  gates: string[];
+  max_diff_lines: number;
+  sources: Array<{ id: number; scope: string; mode: AutonomyMode; revision: number }>;
+  downgraded: string[];
+  paused?: boolean;
 }
 
 export interface StepRow {

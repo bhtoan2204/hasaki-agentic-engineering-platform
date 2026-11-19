@@ -215,6 +215,14 @@ import {
   listPullRequests,
 } from "../git/pullRequests.ts";
 import { validateSpec } from "../workflow/graph.ts";
+import {
+  AUTO_GATES,
+  AUTONOMY_MODES,
+  loadPolicies,
+  revokePolicy,
+  savePolicy,
+  setAutonomyPaused,
+} from "../workflow/autonomy.ts";
 import { runEvents } from "../workflow/events.ts";
 import { buildTrace, isTraceLevel, searchLogs } from "../workflow/trace.ts";
 import { diagnoseTrace } from "../workflow/traceDiagnosis.ts";
@@ -527,6 +535,7 @@ export const routes: Route[] = [
         outputLocale: localeOf(c.body),
         agentProvider: providerOf(c.body),
         ownerId: c.actor.id,
+        autonomy: c.body.autonomy,
       })
     ),
   ],
@@ -746,6 +755,7 @@ export const routes: Route[] = [
         outputLocale: localeOf(body),
         agentProvider: providerOf(body),
         ownerId: actor.id,
+        autonomy: body.autonomy,
       });
     },
   ],
@@ -763,6 +773,7 @@ export const routes: Route[] = [
         repositories: body.repositories?.length ? body.repositories : undefined,
         profile: body.profile,
         ownerId: actor.id,
+        autonomy: body.autonomy,
       });
     },
   ],
@@ -1088,8 +1099,58 @@ export const routes: Route[] = [
         by: c.actor.username,
         repositories: c.body.repositories,
         data: c.body.data,
+        subject: typeof c.body.subject === "string" ? c.body.subject : undefined,
       })
     ),
+  ],
+  // Autonomy: admins manage the policies; whoever may act on a run can pause or resume its autonomy.
+  [
+    "GET",
+    /^\/api\/autonomy\/policies$/,
+    async (c) => (
+      requireAdmin(c.actor),
+      { policies: await loadPolicies(), modes: AUTONOMY_MODES, gates: AUTO_GATES }
+    ),
+  ],
+  [
+    "POST",
+    /^\/api\/autonomy\/policies$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const saved = await savePolicy(c.body, c.actor.username);
+      await audit(c.actor.id, "autonomy.policy.save", "autonomy_policy", String(saved.id), {
+        scope: `${saved.scope_kind}:${saved.scope_ref}`,
+        mode: saved.mode,
+        shadow: saved.shadow,
+        gates: saved.gates,
+        revision: saved.revision,
+      });
+      return saved;
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/autonomy\/policies\/(\d+)\/revoke$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const revoked = await revokePolicy(num(c.p[0]), c.actor.username);
+      if (!revoked) throw new EngineError("policy not found or already revoked", 404);
+      await audit(c.actor.id, "autonomy.policy.revoke", "autonomy_policy", String(revoked.id), {
+        revision: revoked.revision,
+      });
+      return revoked;
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/autonomy$/,
+    async (c) => {
+      await requireRun(c.actor, num(c.p[0]), support(c));
+      const autonomy = await setAutonomyPaused(num(c.p[0]), c.body.paused === true);
+      if (!autonomy) throw new EngineError("this run has no autonomy policy", 404);
+      await audit(c.actor.id, c.body.paused === true ? "autonomy.pause" : "autonomy.resume", "run", c.p[0]);
+      return { autonomy };
+    },
   ],
   // Expand the run DAG with a decomposition plan (subtasks become durable steps; idempotent, bounded, approval-gated).
   [

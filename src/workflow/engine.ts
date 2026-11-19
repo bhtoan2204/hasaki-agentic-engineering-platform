@@ -109,6 +109,14 @@ import type {
 import { parseAiSuggest, type ReportSpec } from "../report/aiSuggest.ts";
 import { decisionsOf, recordDecision, savingsFrom } from "./decisions.ts";
 import {
+  evaluateGate,
+  freezeAutonomy,
+  machineApproval,
+  machineApprovalOutput,
+  recordClarification,
+  recordHumanApproval,
+} from "./autonomy.ts";
+import {
   checkpointView,
   isRecoverable,
   latestRecoverable,
@@ -191,6 +199,8 @@ export interface StartRunInput {
   agentProvider?: AgentProvider | string;
   /** Authenticated creator. A run started from a work item always uses that item's owner. */
   ownerId?: number;
+  /** Requested autonomy mode; only ever narrowed by the admin policies (see autonomy.ts). */
+  autonomy?: unknown;
 }
 
 export interface ResolvedRunGraph {
@@ -394,6 +404,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
 export async function previewRun(input: StartRunInput) {
   const r = await resolveRunGraph(pool, input);
   return {
+    autonomy: await freezeAutonomy(pool, input.autonomy, r.ownerId),
     definition: { key: r.dv.key, version: r.dv.version },
     profile: r.decision,
     changes: r.changes,
@@ -420,6 +431,7 @@ export async function startRun(input: StartRunInput) {
     if (!agent_configuration.providers[agent_provider].enabled) throw new EngineError("Requested agent provider is disabled", 400);
     const r = await resolveRunGraph(c, input);
     const { dv, wi, inputs, allowed, selected, graph } = r;
+    const autonomy = await freezeAutonomy(c, input.autonomy, r.ownerId);
     const { id } = (await one<{ id: number }>(
       c,
       "SELECT nextval('workflow_runs_id_seq')::bigint AS id",
@@ -471,8 +483,8 @@ export async function startRun(input: StartRunInput) {
     await q(
       c,
       `INSERT INTO workflow_runs (id, definition_version_id, definition_key, work_item_id, title, status, inputs, graph,
-                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance, policy_versions, agent_configuration)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+                                  allowed_repositories, selected_repositories, branch, profile, profile_decision, output_locale, agent_provider, owner_id, worker_instance, policy_versions, agent_configuration, autonomy)
+       VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
       [
         id,
         dv.id,
@@ -492,6 +504,7 @@ export async function startRun(input: StartRunInput) {
         config.instanceId,
         json(executionPolicyVersions()),
         json(agent_configuration),
+        autonomy.sources.length ? json(autonomy) : null,
       ],
     );
     for (const decision of optimized.decisions)
@@ -530,7 +543,10 @@ export async function startRun(input: StartRunInput) {
       `run created from ${dv.key} v${dv.version}${wi ? ` for ${wi.code}` : ""} · agent ${agent_provider} · profile ${r.decision.profile} (${r.decision.reasons.join("; ")})` +
         (r.changes.length ? ` · ${r.changes.length} graph change(s)` : "") +
         (r.reportAdded ? " · Task Result Report step added (ai_suggest.report)" : "") +
-        (r.reusedRepositories ? ` · reused repositories ${selected.join(", ")}` : ""),
+        (r.reusedRepositories ? ` · reused repositories ${selected.join(", ")}` : "") +
+        (autonomy.sources.length
+          ? ` · autonomy ${autonomy.mode}${autonomy.shadow ? " (shadow)" : ""}${autonomy.downgraded.length ? ` — ${autonomy.downgraded.join("; ")}` : ""}`
+          : ""),
     );
     if (wi)
       await q(
@@ -1401,6 +1417,8 @@ export async function approveStep(
     repositories?: string[];
     data?: unknown;
     guard?: WorkflowActionGuard;
+    /** Hash of the autonomy subject the approver was shown; a mismatch means the request changed (stale approval). */
+    subject?: string;
   } = {},
 ) {
   return txThenRun(runId, async (c, afterCommit) => {
@@ -1413,14 +1431,19 @@ export async function approveStep(
     if (!s) throw new EngineError(`step "${stepKey}" not found`, 404);
     if (s.status !== "WAITING_APPROVAL")
       throw new EngineError(`step "${stepKey}" is ${s.status}, not WAITING_APPROVAL`);
+    const shown = s.approval?.request?.autonomy?.subject?.hash ?? null;
+    if (opts.subject && shown && opts.subject !== shown)
+      throw new EngineError(`step "${stepKey}" changed since it was shown; review it again`, 409);
     const decision = {
       granted: true,
       generation: s.generation,
+      actor_type: "human" as const,
       comment: opts.comment ?? "",
       by: opts.by ?? "",
       at: new Date(),
       ...(opts.data !== undefined ? { data: opts.data } : {}),
     };
+    await recordHumanApproval(c, run, s, decision.by, shown);
     if (s.approval?.gate || s.type !== "human_approval") {
       // Gate before execution (requires_approval) or an executor asking for a go-ahead: run the step now.
       await setStepStatus(
@@ -2050,6 +2073,12 @@ async function applyResult(
           { kind: "failed", error: "step requested input but asked no question", retryable: false },
           afterCommit,
         );
+      await recordClarification(
+        c,
+        run,
+        step,
+        await q(c, "SELECT question, options FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'", [attempt.id]),
+      );
       await closeAttempt("WAITING_INPUT", result.output ?? null);
       const sealed = await readExecutionCheckpoint(c, attempt.id);
       await saveExecutionPause(c, attempt.id, "waiting_input", sealed
@@ -2091,10 +2120,18 @@ async function applyResult(
       break;
     }
     case "waiting_approval": {
-      await closeAttempt("WAITING_APPROVAL", result.request);
+      const gate = await evaluateGate(c, run, step, await stepsOf(c, run.id), result.request as any);
+      if (gate?.enforced) {
+        step.approval = machineApproval(gate);
+        await q(c, "UPDATE workflow_steps SET approval = $2 WHERE id = $1", [step.id, json(step.approval)]);
+        await runEvents.add(c, run.id, "system", `${step.key} auto-approved (${gate.mode}): ${gate.reasons.join("; ")}`, step.id);
+        return applyResult(c, run, step, attempt, jobId, { kind: "completed", output: machineApprovalOutput(gate, result.request as any) }, afterCommit);
+      }
+      const request = gate ? { ...(result.request as object), autonomy: gate } : result.request;
+      await closeAttempt("WAITING_APPROVAL", request);
       await saveExecutionPause(c, attempt.id, "waiting_approval", result.checkpoint ?? {});
       await setStepStatus(c, step, "WAITING_APPROVAL", {
-        approval: { request: result.request, generation: step.generation, requested_at: now },
+        approval: { request, generation: step.generation, requested_at: now },
       });
       await closeJob("done");
       afterCommit(() =>
@@ -3040,6 +3077,11 @@ export async function resumeProviderHandoff(
       throw new EngineError("Workspace changed after checkpoint; reconcile before continuing", 409);
     if (s.requires_approval && !(s.approval?.granted && s.approval.generation === s.generation))
       throw new EngineError("Existing approval gate is not granted", 409);
+    if (
+      s.approval?.actor_type === "machine" &&
+      !(await evaluateGate(c, locked, s, await stepsOf(c, locked.id), null))?.enforced
+    )
+      throw new EngineError("The machine approval no longer holds under the current autonomy policy", 409);
     const repos = [
       ...new Set([
         ...locked.selected_repositories,

@@ -13,6 +13,7 @@ import {
   type AfterCommit,
 } from "./mutations.ts";
 import { deriveRunStatus, DONE } from "./stateMachine.ts";
+import { evaluateGate, machineApproval } from "./autonomy.ts";
 import type { RunRow, StepRow } from "./types.ts";
 
 // Graph progression shares the caller's transaction; it does not execute providers or acquire another client.
@@ -52,11 +53,30 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
         s.requires_approval &&
         !(s.approval?.granted && s.approval.generation === s.generation)
       ) {
+        const gate = await evaluateGate(c, run, s, steps, null);
+        if (gate?.enforced) {
+          await setStepStatus(
+            c,
+            s,
+            "READY",
+            { approval: { gate: true, ...machineApproval(gate) }, ready_at: new Date() },
+            `auto-approved (${gate.mode}): ${gate.reasons.join("; ")}`,
+          );
+          changed = true;
+          continue;
+        }
         await setStepStatus(
           c,
           s,
           "WAITING_APPROVAL",
-          { approval: { gate: true, generation: s.generation, requested_at: new Date() } },
+          {
+            approval: {
+              gate: true,
+              generation: s.generation,
+              requested_at: new Date(),
+              ...(gate ? { request: { autonomy: gate } } : {}),
+            },
+          },
           "approval gate",
         );
         afterCommit?.(() =>

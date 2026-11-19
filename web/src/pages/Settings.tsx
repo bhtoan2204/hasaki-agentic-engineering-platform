@@ -1,3 +1,4 @@
+import { AutonomyPolicies } from "./AutonomyPolicies.tsx";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bot,
@@ -341,6 +342,7 @@ export function SettingsPage() {
 
         <div className="set-content">
           <AgentSettings />
+          <AutonomyPolicies />
 
           {section(
             "budget",

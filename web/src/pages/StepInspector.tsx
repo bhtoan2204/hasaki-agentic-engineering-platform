@@ -271,6 +271,7 @@ export function ApprovalPanel({
       };
     if (approve && req?.requires_risk_acknowledgement)
       body.data = { ...(body.data ?? {}), acknowledge_risk: ackRisk };
+    if (approve && req?.autonomy?.subject?.hash) body.subject = req.autonomy.subject.hash;
     await act(
       async () => {
         const result = await api(
@@ -295,6 +296,16 @@ export function ApprovalPanel({
           <div className="rv-attn-sub">{t("si.stoppedAt", { step: step.name })}</div>
         </div>
       </div>
+      {req?.autonomy && (
+        <div className="small" style={{ margin: "6px 0" }}>
+          <span className="muted">{t("au.why")}</span>{" "}
+          {[...(req.autonomy.reasons ?? []), ...(req.recheck_reasons ?? [])].join("; ")}
+          {req.autonomy.shadow && req.autonomy.result === "ALLOW" && <span className="muted"> · {t("au.shadow")}</span>}
+          {(req.autonomy.required_evidence ?? []).length > 0 && (
+            <div className="muted">{t("au.required", { list: req.autonomy.required_evidence.join(", ") })}</div>
+          )}
+        </div>
+      )}
       {step.type === "git_pull_request" && (
         <div className="row">
           <button className="ghost sm" onClick={() => navigate(`/runs/${run.id}/~changes`)}>

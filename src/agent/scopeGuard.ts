@@ -156,6 +156,17 @@ export async function changedFiles(path: string, base: string) {
   return { committed, staged, unstaged, untracked, all };
 }
 
+/** Added + removed lines of the committed change against `base`; a binary file counts as one line. */
+export async function diffLineCount(path: string, base: string) {
+  return (await git(path, ["diff", "--numstat", "--no-renames", `${base}...HEAD`]))
+    .split("\n")
+    .filter(Boolean)
+    .reduce((n, line) => {
+      const [added, removed] = line.split("\t");
+      return n + (added === "-" ? 1 : Number(added) + Number(removed));
+    }, 0);
+}
+
 /** HEAD plus a fingerprint of uncommitted content: any edit, staged or not, changes it. */
 export async function worktreeFingerprint(path: string) {
   const head = (await git(path, ["rev-parse", "HEAD"])).trim();

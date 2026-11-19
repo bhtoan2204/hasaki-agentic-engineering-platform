@@ -56,6 +56,8 @@ export function ProfilePreview({
   inputs,
   value,
   onChange,
+  autonomy = "",
+  onAutonomy,
 }: {
   workflow: string;
   workItemId?: number | null;
@@ -63,11 +65,14 @@ export function ProfilePreview({
   inputs?: Record<string, unknown>;
   value: ProfileChoice;
   onChange: (p: ProfileChoice) => void;
+  /** Requested autonomy ("" = the policy default); the server only ever narrows it. */
+  autonomy?: string;
+  onAutonomy?: (a: string) => void;
 }) {
   const { t } = useI18n();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const key = JSON.stringify([workflow, workItemId, repositories, inputs, value]);
+  const key = JSON.stringify([workflow, workItemId, repositories, inputs, value, autonomy]);
   useEffect(() => {
     if (!workflow) return;
     let stop = false;
@@ -77,6 +82,7 @@ export function ProfilePreview({
       repositories,
       inputs,
       profile: value,
+      autonomy: autonomy || undefined,
     })
       .then((d) => !stop && (setData(d), setError(null)))
       .catch((e) => !stop && setError(e.message));
@@ -139,6 +145,23 @@ export function ProfilePreview({
           ]}
         />
       </div>
+      {onAutonomy && (
+        <div className="pp-profiles" style={{ marginTop: 8 }}>
+          <b className="small">{t("au.request")}</b>
+          <Segmented<string>
+            label={t("au.request")}
+            value={autonomy}
+            onChange={onAutonomy}
+            options={[
+              ["", <span>{t("au.default")}</span>],
+              ["MANUAL", <span>MANUAL</span>],
+              ["SUPERVISED", <span>SUPERVISED</span>],
+              ["AUTONOMOUS", <span>AUTONOMOUS</span>],
+            ]}
+          />
+        </div>
+      )}
+      {data?.autonomy && <AutonomySummary a={data.autonomy} />}
       {error && (
         <div className="err small" style={{ marginTop: 6 }}>
           {error}
@@ -218,6 +241,33 @@ export function ProfilePreview({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Requested vs effective autonomy and why it was narrowed (run form and run view). */
+export function AutonomySummary({ a }: { a: any }) {
+  const { t } = useI18n();
+  if (!a?.sources?.length)
+    return (
+      <div className="small muted" style={{ marginTop: 6 }}>
+        {t("au.off")}
+      </div>
+    );
+  return (
+    <div className="small" style={{ marginTop: 6 }}>
+      <b>{t("au.effective", { mode: a.mode })}</b>
+      {a.requested !== a.mode && (
+        <span className="muted"> · {t("au.requested", { mode: a.requested })}</span>
+      )}
+      {a.shadow && <span className="muted"> · {t("au.shadow")}</span>}
+      {a.paused && <span className="muted"> · {t("au.paused")}</span>}
+      {(a.downgraded ?? []).map((d: string) => (
+        <div key={d} className="rv-note" style={{ color: "var(--st-wait)", margin: "2px 0" }}>
+          <AlertTriangle size={13} />
+          {d}
+        </div>
+      ))}
     </div>
   );
 }

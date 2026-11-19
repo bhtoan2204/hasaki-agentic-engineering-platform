@@ -27,7 +27,7 @@ export const REMEDIATION_KINDS = [
 export type RemediationKind = (typeof REMEDIATION_KINDS)[number];
 
 // Payment, concurrency, security and data-integrity work gets the strict depth.
-const STRICT_DOMAIN =
+export const STRICT_DOMAIN =
   /\b(payment|refund|payout|settle|reconcil|balance|wallet|invoice|amount|price|inventory|stock|concurren|race|deadlock|lock|idempoten|duplicate|double|security|auth[nz]?|permission|token|secret|encrypt|data[\s-]?integrity|migration|consistency)\w*|thanh toán|hoàn tiền|tồn kho|hóa đơn|trùng/i;
 
 /**

@@ -16,6 +16,7 @@ export const DECISION_KINDS = [
   "context_reuse",
   "review_reuse",
   "checkpoint",
+  "autonomy",
 ] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
@@ -32,6 +33,11 @@ export const DECISION_ACTIONS = [
   "REQUIRES_RECONCILIATION",
   "HANDOFF",
   "RECORD",
+  "ALLOW",
+  "DENY",
+  "REQUIRE_HUMAN",
+  "COLLECT_EVIDENCE",
+  "REPLAN",
 ] as const;
 export type DecisionAction = (typeof DECISION_ACTIONS)[number];
 
