@@ -18,7 +18,11 @@ import {
   savePreferences,
 } from "../telegram/store.ts";
 import { evaluationAnalytics } from "../eval/analytics.ts";
-import { createRecommendation, findRecommendation, listRecommendations } from "../eval/recommendations.ts";
+import {
+  createRecommendation,
+  findRecommendation,
+  listRecommendations,
+} from "../eval/recommendations.ts";
 import { saveOptimizationPolicy, optimizationPolicies } from "../eval/optimization.ts";
 import {
   setRunBranches,
@@ -224,6 +228,7 @@ import {
 } from "../git/pullRequests.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { isolationDiagnostics } from "../agent/isolation.ts";
+import { agentSessionStorageDiagnostics } from "../agent/sessionDiagnostics.ts";
 import { runDelivery } from "../workflow/prLifecycle.ts";
 import { observeManual } from "../learning/observations.ts";
 import { extractLessons, learningOverview } from "../learning/lessons.ts";
@@ -324,9 +329,10 @@ const must = <T>(v: T | undefined | null, what: string): T => {
 
 async function workItemWithAttachments(id: number) {
   const w = must(await workItems.detail(id), "work item");
-  const files = w.payload && typeof w.payload === "object" && "note_files" in w.payload
-    ? w.payload.note_files
-    : undefined;
+  const files =
+    w.payload && typeof w.payload === "object" && "note_files" in w.payload
+      ? w.payload.note_files
+      : undefined;
   const base = config.fileBaseUrl.replace(/\/$/, "");
   const attachments =
     base && Array.isArray(files)
@@ -350,7 +356,8 @@ async function readableWorkflow(c: Ctx, key: string) {
     return must(await definitions.get(key, undefined, ownerId), "workflow");
   }
   return must(
-    (await definitions.get(key, undefined, c.actor.id)) ?? (await definitions.get(key, undefined, null)),
+    (await definitions.get(key, undefined, c.actor.id)) ??
+      (await definitions.get(key, undefined, null)),
     "workflow",
   );
 }
@@ -407,7 +414,8 @@ async function readableKnowledge(c: Ctx, key: string) {
   return hideRestrictedKnowledge(
     c.actor.id,
     must(
-      (await knowledge.get(key, undefined, c.actor.id)) ?? (await knowledge.get(key, undefined, null)),
+      (await knowledge.get(key, undefined, c.actor.id)) ??
+        (await knowledge.get(key, undefined, null)),
       "knowledge item",
     ),
   );
@@ -664,7 +672,8 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/workflows\/route$/,
-    async (c) => routeWorkflow(String(c.body.text ?? ""), await definitions.list(undefined, mine(c))),
+    async (c) =>
+      routeWorkflow(String(c.body.text ?? ""), await definitions.list(undefined, mine(c))),
   ],
   ["GET", /^\/api\/workflows\/([a-z0-9_-]+)$/, (c) => readableWorkflow(c, c.p[0])],
   [
@@ -1067,10 +1076,7 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/runs\/(\d+)\/handoffs$/,
-    async (c) => (
-      await requireRun(c.actor, num(c.p[0]), support(c)),
-      handoffMetrics(num(c.p[0]))
-    ),
+    async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), handoffMetrics(num(c.p[0]))),
   ],
   [
     "POST",
@@ -1130,10 +1136,15 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/eval\/autonomy$/,
     async (c) => {
-      const owner = c.actor.role === "admin" && c.url.searchParams.get("all") === "1" ? null : c.actor.id;
+      const owner =
+        c.actor.role === "admin" && c.url.searchParams.get("all") === "1" ? null : c.actor.id;
       const days = Number(c.url.searchParams.get("days") ?? 30);
       const episodes = await episodesFromTelemetry({ ownerId: owner, days });
-      return { days, metrics: computeAutonomyMetrics(episodes), episodes: episodes.slice(-200).map(({ usage, ...e }) => ({ ...e, usage })) };
+      return {
+        days,
+        metrics: computeAutonomyMetrics(episodes),
+        episodes: episodes.slice(-200).map(({ usage, ...e }) => ({ ...e, usage })),
+      };
     },
   ],
   // Outcome learning: overview (own lessons/observations; admins may see all) and human outcome reports per run.
@@ -1141,8 +1152,12 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/learning\/overview$/,
     async (c) => {
-      const owner = c.actor.role === "admin" && c.url.searchParams.get("all") === "1" ? null : c.actor.id;
-      return { ...(await learningOverview(owner)), routing: await outcomeRecommendations({ ownerId: owner }) };
+      const owner =
+        c.actor.role === "admin" && c.url.searchParams.get("all") === "1" ? null : c.actor.id;
+      return {
+        ...(await learningOverview(owner)),
+        routing: await outcomeRecommendations({ ownerId: owner }),
+      };
     },
   ],
   [
@@ -1153,11 +1168,27 @@ export const routes: Route[] = [
       await requireRun(c.actor, runId, false);
       const kind = String(c.body.kind);
       if (!["regression_reported", "rollback_reported", "human_feedback"].includes(kind))
-        throw new EngineError("kind must be regression_reported, rollback_reported or human_feedback", 400);
-      const id = await observeManual({ runId, kind: kind as "human_feedback", note: String(c.body.note ?? ""), by: c.actor.username, ref: c.body.ref });
-      await audit(c.actor.id, "learning.observation", "run", String(runId), { kind, observation_id: id });
+        throw new EngineError(
+          "kind must be regression_reported, rollback_reported or human_feedback",
+          400,
+        );
+      const id = await observeManual({
+        runId,
+        kind: kind as "human_feedback",
+        note: String(c.body.note ?? ""),
+        by: c.actor.username,
+        ref: c.body.ref,
+      });
+      await audit(c.actor.id, "learning.observation", "run", String(runId), {
+        kind,
+        observation_id: id,
+      });
       const learned = await extractLessons(runId);
-      return { observation_id: id, duplicate: id == null, learned: { stored: learned.stored, quarantined: learned.quarantined.length } };
+      return {
+        observation_id: id,
+        duplicate: id == null,
+        learned: { stored: learned.stored, quarantined: learned.quarantined.length },
+      };
     },
   ],
   // PR delivery lifecycle: per-run view (run access) and owner pause/resume (owner + repository permission).
@@ -1171,7 +1202,12 @@ export const routes: Route[] = [
     /^\/api\/pull-requests\/(\d+)\/lifecycle$/,
     async (c) => {
       const r = await setLifecyclePausedAction(c.actor.id, num(c.p[0]), c.body.paused === true);
-      await audit(c.actor.id, r.paused ? "pr.lifecycle.pause" : "pr.lifecycle.resume", "pull_request", c.p[0]);
+      await audit(
+        c.actor.id,
+        r.paused ? "pr.lifecycle.pause" : "pr.lifecycle.resume",
+        "pull_request",
+        c.p[0],
+      );
       return r;
     },
   ],
@@ -1179,7 +1215,10 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/intake\/policies$/,
-    async (c) => (requireAdmin(c.actor), { policies: await loadIntakePolicies(), modes: INTAKE_MODES, sources: INTAKE_SOURCES }),
+    async (c) => (
+      requireAdmin(c.actor),
+      { policies: await loadIntakePolicies(), modes: INTAKE_MODES, sources: INTAKE_SOURCES }
+    ),
   ],
   [
     "POST",
@@ -1222,7 +1261,16 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/admin\/isolation$/,
-    async (c) => (requireAdmin(c.actor), isolationDiagnostics(c.url.searchParams.get("refresh") === "1")),
+    async (c) => (
+      requireAdmin(c.actor),
+      isolationDiagnostics(c.url.searchParams.get("refresh") === "1")
+    ),
+  ],
+  // Agent session storage: disk usage, file age distribution and provider breakdown (read-only admin diagnostics, no contents or credentials).
+  [
+    "GET",
+    /^\/api\/(admin\/)?(agent-session-storage|session-storage)(\/diagnostics)?$/,
+    async (c) => (requireAdmin(c.actor), agentSessionStorageDiagnostics()),
   ],
   // Autonomy: admins manage the policies; whoever may act on a run can pause or resume its autonomy.
   [
@@ -1269,7 +1317,12 @@ export const routes: Route[] = [
       await requireRun(c.actor, num(c.p[0]), support(c));
       const autonomy = await setAutonomyPaused(num(c.p[0]), c.body.paused === true);
       if (!autonomy) throw new EngineError("this run has no autonomy policy", 404);
-      await audit(c.actor.id, c.body.paused === true ? "autonomy.pause" : "autonomy.resume", "run", c.p[0]);
+      await audit(
+        c.actor.id,
+        c.body.paused === true ? "autonomy.pause" : "autonomy.resume",
+        "run",
+        c.p[0],
+      );
       return { autonomy };
     },
   ],
@@ -1336,10 +1389,7 @@ export const routes: Route[] = [
     /^\/api\/artifacts\/(\d+)$/,
     async (c) => (
       await requireArtifact(c.actor, num(c.p[0]), support(c)),
-      must(
-        await findArtifact(num(c.p[0])),
-        "artifact",
-      )
+      must(await findArtifact(num(c.p[0])), "artifact")
     ),
   ],
   [
@@ -1347,17 +1397,10 @@ export const routes: Route[] = [
     /^\/api\/snapshots\/(\d+)$/,
     async (c) => (
       await requireSnapshot(c.actor, num(c.p[0]), support(c)),
-      must(
-        await findSnapshot(num(c.p[0])),
-        "snapshot",
-      )
+      must(await findSnapshot(num(c.p[0])), "snapshot")
     ),
   ],
-  [
-    "GET",
-    /^\/api\/pull-requests$/,
-    (c) => listPullRequests(c.actor.id, support(c)),
-  ],
+  ["GET", /^\/api\/pull-requests$/, (c) => listPullRequests(c.actor.id, support(c))],
   // Merge readiness and CI of one PR/MR (read-only; run owner only).
   [
     "GET",
@@ -1645,11 +1688,7 @@ export const routes: Route[] = [
       return row;
     },
   ],
-  [
-    "GET",
-    /^\/api\/agent-recommendations$/,
-    (c) => listRecommendations(c.actor.id),
-  ],
+  ["GET", /^\/api\/agent-recommendations$/, (c) => listRecommendations(c.actor.id)],
   ["POST", /^\/api\/agent-optimization$/, (c) => saveOptimizationPolicy(c.actor.id, c.body)],
   ["GET", /^\/api\/agent-optimization$/, (c) => optimizationPolicies(c.actor.id)],
   [
@@ -2046,7 +2085,11 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/timesheet$/,
     ({ actor, url }) =>
-      myTimesheet(actor.id, Number(url.searchParams.get("year")), Number(url.searchParams.get("month"))),
+      myTimesheet(
+        actor.id,
+        Number(url.searchParams.get("year")),
+        Number(url.searchParams.get("month")),
+      ),
   ],
   [
     "POST",
@@ -2201,7 +2244,9 @@ export const routes: Route[] = [
         return status;
       } catch (e) {
         if (e instanceof SignozError) {
-          await audit(actor.id, "integration.signoz.save_failed", "integration", "signoz", { kind: e.kind });
+          await audit(actor.id, "integration.signoz.save_failed", "integration", "signoz", {
+            kind: e.kind,
+          });
           throw new HttpError(400, e.message);
         }
         throw e;
@@ -2623,11 +2668,7 @@ export const routes: Route[] = [
   ["POST", /^\/api\/chat\/conversations$/, (c) => chat.create(c.actor, c.body)],
   ["GET", /^\/api\/chat\/conversations\/(\d+)$/, (c) => chat.get(c.actor, num(c.p[0]))],
   ["POST", /^\/api\/chat\/conversations\/(\d+)$/, (c) => chat.update(c.actor, num(c.p[0]), c.body)],
-  [
-    "POST",
-    /^\/api\/chat\/conversations\/(\d+)\/delete$/,
-    (c) => chat.remove(c.actor, num(c.p[0])),
-  ],
+  ["POST", /^\/api\/chat\/conversations\/(\d+)\/delete$/, (c) => chat.remove(c.actor, num(c.p[0]))],
   [
     "POST",
     /^\/api\/chat\/conversations\/(\d+)\/messages$/,
@@ -2664,11 +2705,7 @@ export const routes: Route[] = [
     (c) => chat.decideOperation(c.actor, num(c.p[0]), c.p[1] as "confirm" | "reject"),
   ],
   ["GET", /^\/api\/chat\/memory$/, (c) => chat.memories(c.actor)],
-  [
-    "POST",
-    /^\/api\/chat\/turns\/(\d+)\/regenerate$/,
-    (c) => chat.regenerate(c.actor, num(c.p[0])),
-  ],
+  ["POST", /^\/api\/chat\/turns\/(\d+)\/regenerate$/, (c) => chat.regenerate(c.actor, num(c.p[0]))],
 ];
 
 function fail(msg: string): never {

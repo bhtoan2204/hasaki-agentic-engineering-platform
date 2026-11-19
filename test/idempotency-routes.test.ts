@@ -59,6 +59,8 @@ describe("needsIdempotency", () => {
       "/health",
       "/api/runs/",
       "/api/runs?param=1",
+      "/api/admin/idempotency",
+      "/api/admin/idempotency/stale",
     ];
 
     for (const path of nonMatching) {

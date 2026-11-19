@@ -37,6 +37,8 @@
     "bench:cache": "node --disable-warning=ExperimentalWarning --expose-gc src/cli/benchCache.ts",
     "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
     "validate:code-intelligence": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/validate-code-intelligence.ts",
+    "db:diagnostics": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/storage-diagnostics.ts",
+    "db:storage": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/storage-diagnostics.ts",
     "repositories:migrate": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/migrate-repositories.ts",
     "smoke:analytics": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/analytics.smoke.ts",
     "smoke:provider-evaluation": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/provider-evaluation.smoke.ts",

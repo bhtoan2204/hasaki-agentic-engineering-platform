@@ -18,15 +18,14 @@ export function StepAgentFields({
   onChange: (v: Record<string, any>) => void;
 }) {
   const { t } = useI18n();
-  const { data: providers } =
-    useApi<
-      Array<{
-        id: string;
-        models?: AgentCatalogModel[];
-        controls?: AgentControls;
-        discovery?: string;
-      }>
-    >("/api/agent-providers");
+  const { data: providers } = useApi<
+    Array<{
+      id: string;
+      models?: AgentCatalogModel[];
+      controls?: AgentControls;
+      discovery?: string;
+    }>
+  >("/api/agent-providers");
   const set = (key: string, val: unknown) => {
     const next = { ...value };
     if (val === undefined) delete next[key];
@@ -242,10 +241,7 @@ export function StepAgentFields({
         </Field>
       </div>
       {allowVerification && (
-        <Field
-          label={t("saf.verifyCommand")}
-          hint={t("saf.verifyCommandHint")}
-        >
+        <Field label={t("saf.verifyCommand")} hint={t("saf.verifyCommandHint")}>
           <input
             value={value.verification?.command ?? ""}
             onChange={(e) =>
@@ -259,28 +255,8 @@ export function StepAgentFields({
       )}
       <Field
         label={t("saf.allowedTools")}
-        hint={
-          provider === "cursor"
-            ? t("saf.toolsCursorHint")
-            : t("saf.toolsDefaultHint")
-        }
+        hint={provider === "cursor" ? t("saf.toolsCursorHint") : t("saf.toolsDefaultHint")}
       >
-        <input
-          disabled={provider === "cursor"}
-          value={value.allowed_tools?.join(", ") ?? ""}
-          onChange={(e) =>
-            set(
-              "allowed_tools",
-              e.target.value.trim()
-                ? e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean)
-                : null,
-            )
-          }
-        />
-      </Field>
         <input
           disabled={provider === "cursor"}
           value={value.allowed_tools?.join(", ") ?? ""}
