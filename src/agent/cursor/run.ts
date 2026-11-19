@@ -443,7 +443,12 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
         failure: "POLICY_VIOLATION",
       };
     if (watch.reason)
-      return { isError: true, ...stopFailure(watch.reason, "Cursor", limits), assistantTurns, submitted };
+      return {
+        isError: true,
+        ...stopFailure(watch.reason, "Cursor", limits),
+        assistantTurns,
+        submitted,
+      };
 
     await adoptRunWorkspaces(input.ctx.run.id, input.policy);
 
@@ -557,7 +562,10 @@ export async function cursorComplete(
         else if (ev.type === "assistant" && ev.text && !isDuplicateAssistant(ev, true))
           stream({ type: "text", text: (answer += ev.text) });
         else if (ev.type === "tool_call" && ev.subtype === "started")
-          stream({ type: "activity", label: activityLabel("tool", toolCallShape(ev.tool_call)?.name) });
+          stream({
+            type: "activity",
+            label: activityLabel("tool", toolCallShape(ev.tool_call)?.name),
+          });
       }
     });
     child.stderr?.on("data", (b: Buffer) => (stderr += b.toString("utf8")));
