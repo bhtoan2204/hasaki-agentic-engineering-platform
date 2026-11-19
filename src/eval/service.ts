@@ -319,11 +319,12 @@ export async function createEvaluation(
     return { ...evaluation, workflow_run_id: run.id };
   });
 }
-export async function evaluationDetail(id: number, ownerId: number) {
+/** Readable by its owner, or by any member when shared with the team; `write` (cancel) stays owner-only. */
+export async function evaluationDetail(id: number, ownerId: number, o: { write?: boolean } = {}) {
   const row = await one(
     pool,
-    `SELECT e.*,r.status,r.created_at AS workflow_created_at,r.started_at,r.finished_at,r.definition_version_id FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id WHERE e.id=$1 AND e.owner_id=$2`,
-    [id, ownerId],
+    `SELECT e.*,r.status,r.created_at AS workflow_created_at,r.started_at,r.finished_at,r.definition_version_id,(e.owner_id=$2) AS mine FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id WHERE e.id=$1 AND (e.owner_id=$2 OR (NOT $3::boolean AND e.visibility='team'))`,
+    [id, ownerId, !!o.write],
   );
   if (!row) throw new HttpError(404, "Evaluation not found");
   const cases = await q(
@@ -350,12 +351,12 @@ export async function evaluationDetail(id: number, ownerId: number) {
 export async function evaluationList(ownerId: number) {
   return q(
     pool,
-    `SELECT e.id,e.suite_id,e.configuration,e.created_at,e.workflow_run_id,r.status,count(cr.id)::int AS tasks,count(er.id)::int AS finished,count(er.id) FILTER(WHERE er.correct)::int AS successes,round(avg(er.quality_score),2) AS average_score FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id JOIN evaluation_case_runs cr ON cr.evaluation_id=e.id LEFT JOIN eval_results er ON er.case_run_id=cr.id WHERE e.owner_id=$1 GROUP BY e.id,r.status ORDER BY e.id DESC LIMIT 100`,
+    `SELECT e.id,e.suite_id,e.configuration,e.created_at,e.workflow_run_id,r.status,count(cr.id)::int AS tasks,count(er.id)::int AS finished,count(er.id) FILTER(WHERE er.correct)::int AS successes,round(avg(er.quality_score),2) AS average_score,e.visibility,(e.owner_id=$1) AS mine FROM evaluation_runs e JOIN workflow_runs r ON r.id=e.workflow_run_id JOIN evaluation_case_runs cr ON cr.evaluation_id=e.id LEFT JOIN eval_results er ON er.case_run_id=cr.id WHERE e.owner_id=$1 OR e.visibility='team' GROUP BY e.id,r.status ORDER BY e.id DESC LIMIT 100`,
     [ownerId],
   );
 }
 export async function cancelEvaluation(id: number, ownerId: number) {
-  const row = await evaluationDetail(id, ownerId);
+  const row = await evaluationDetail(id, ownerId, { write: true });
   return cancelRun(row.workflow_run_id, "Evaluation canceled by owner");
 }
 export async function createComparison(

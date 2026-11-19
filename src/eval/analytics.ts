@@ -57,7 +57,7 @@ function params(f: EvaluationFilters) {
 }
 const base = `WITH p AS (SELECT $1::text AS lo,$2::text AS hi,$3::text AS tz,$4::bigint AS owner,$5::boolean AS team,$6::text AS provider,$7::text AS model,$8::text AS category,$9::text AS difficulty,$10::text AS variant,$11::text AS cohort,$12::bigint AS usr,$13::text AS workflow,$14::text AS repository,$15::text AS project,$16::text AS service),
 samples AS MATERIALIZED (SELECT s.* FROM evaluation_analytics_samples s CROSS JOIN p
- WHERE (p.team OR s.owner_id=p.owner) AND (p.usr IS NULL OR s.owner_id=p.usr)
+ WHERE (p.team OR s.owner_id=p.owner OR EXISTS(SELECT 1 FROM evaluation_runs shared WHERE shared.id=s.evaluation_id AND shared.visibility='team')) AND (p.usr IS NULL OR s.owner_id=p.usr)
  AND s.created_at>=CASE WHEN length(p.lo)=10 THEN p.lo::timestamp AT TIME ZONE p.tz ELSE p.lo::timestamptz END
  AND s.created_at<CASE WHEN length(p.hi)=10 THEN p.hi::timestamp AT TIME ZONE p.tz ELSE p.hi::timestamptz END
  AND(p.provider IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(s.configuration->'provider_sequence') v WHERE v->>'provider'=p.provider) OR s.configuration->>'provider'=p.provider)

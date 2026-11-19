@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Gauge } from "lucide-react";
-import { useApi } from "../api.ts";
+import { api, useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { ErrorBox, Loading } from "../ui.tsx";
+import { act, ErrorBox, Loading } from "../ui.tsx";
 
 type Rate = { numerator: number; denominator: number; value: number | null };
 type View = {
@@ -112,6 +112,81 @@ export function AutonomyInsights() {
           <p className="muted">{t("ae.small")}</p>
         </section>
       )}
+      <StoredReports />
     </div>
+  );
+}
+
+type StoredReport = {
+  id: number;
+  suite: string;
+  commit_sha: string | null;
+  manifest_hash: string | null;
+  visibility: "private" | "team";
+  owner: string;
+  mine: boolean;
+  source: string;
+  results: number;
+  gate: { passed?: boolean } | null;
+  created_at: string;
+};
+
+/** Autonomy reports stored centrally (CLI or import): own and team-shared, from any device. */
+function StoredReports() {
+  const { t } = useI18n();
+  const reports = useApi<StoredReport[]>("/api/evaluation-reports?kind=autonomy");
+  const share = async (r: StoredReport) => {
+    if (
+      await act(() =>
+        api(`/api/evaluation-reports/${r.id}/visibility`, {
+          visibility: r.visibility === "team" ? "private" : "team",
+        }),
+      )
+    )
+      void reports.reloadFresh();
+  };
+  return (
+    <section className="card">
+      <h3>{t("ae.stored")}</h3>
+      <p className="muted">{t("ae.storedHint")}</p>
+      {reports.error && <ErrorBox error={reports.error} />}
+      {!reports.data && !reports.error && <Loading />}
+      {reports.data?.length === 0 && <p className="muted">{t("ae.storedEmpty")}</p>}
+      {!!reports.data?.length && (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>{t("ae.suite")}</th>
+              <th>commit</th>
+              <th>{t("ae.gate")}</th>
+              <th>{t("ae.owner")}</th>
+              <th>{t("ae.visibility")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reports.data.map((r) => (
+              <tr key={r.id}>
+                <td>{r.id}</td>
+                <td title={r.manifest_hash ?? ""}>{r.suite}</td>
+                <td>{r.commit_sha ?? "—"}</td>
+                <td>{r.gate?.passed == null ? "—" : r.gate.passed ? "PASS" : "FAIL"}</td>
+                <td>
+                  {r.owner} · {r.source}
+                </td>
+                <td>
+                  {t(r.visibility === "team" ? "ae.team" : "ae.private")}
+                  {r.mine && (
+                    <button className="ghost xs" onClick={() => void share(r)}>
+                      {t(r.visibility === "team" ? "ae.unshare" : "ae.share")}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

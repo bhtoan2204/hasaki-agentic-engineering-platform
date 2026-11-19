@@ -1,13 +1,15 @@
 /**
- * Deterministic autonomy evaluation (control-plane): `npm run eval:autonomy -- [--out DIR] [--baseline FILE] [--variant NAME]`.
- * Writes autonomy-<commit>.json (machine-readable) and .md (human-readable) and exits 1 when a safety gate fails in any
- * variant. `--live` (real provider) refuses unless a budget and the enforced sandbox are configured, and is not
+ * Deterministic autonomy evaluation (control-plane): `npm run eval:autonomy -- --owner USER [--share] [--out DIR]
+ * [--baseline FILE] [--variant NAME] [--no-db]`. Saves the report in PostgreSQL (evaluation_reports + eval_results,
+ * private, or team-shared with --share; a repeat is not duplicated), writes autonomy-<commit>.json/.md as optional
+ * exports, and exits 1 when a safety gate fails in any variant (3 when the report could not be saved). `--live` (real provider) refuses unless a budget and the enforced sandbox are configured, and is not
  * implemented by this command: it prints the procedure and exits 2 — no live model call ever happens here.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  AUTONOMY_EVAL_VERSION,
   autonomyGate,
   computeAutonomyMetrics,
   type AutonomyMetrics,
@@ -51,6 +53,7 @@ const results = variants.map((v) => {
 });
 const report = {
   suite: manifest.version,
+  metrics_version: AUTONOMY_EVAL_VERSION,
   manifest_hash: manifest.hash,
   commit,
   generated_at: new Date().toISOString(),
@@ -135,4 +138,28 @@ writeFileSync(join(out, `autonomy-${commit}.json`), JSON.stringify(report, null,
 writeFileSync(join(out, `autonomy-${commit}.md`), md + comparison + "\n");
 console.log(md + comparison);
 console.log(`\nwritten: ${join(out, `autonomy-${commit}.json`)} and .md`);
-process.exit(results.every((r) => r.gate.passed) ? 0 : 1);
+const gateCode = results.every((r) => r.gate.passed) ? 0 : 1;
+if (args.includes("--no-db")) process.exit(gateCode);
+const { pool } = await import("../db/pool.ts");
+const { ownerByUsername, saveReport } = await import("../eval/reports.ts");
+try {
+  const username = opt("owner") ?? process.env.EVAL_OWNER;
+  if (!username)
+    throw new Error("pass --owner <username> (or EVAL_OWNER), or --no-db to keep only the exports");
+  const saved = await saveReport(report, {
+    ownerId: await ownerByUsername(username),
+    visibility: args.includes("--share") ? "team" : "private",
+    source: "cli",
+  });
+  console.log(
+    saved.created
+      ? `saved as evaluation report #${saved.id} (${saved.rows} results, ${args.includes("--share") ? "team" : "private"})`
+      : `already stored as evaluation report #${saved.id}`,
+  );
+} catch (e) {
+  console.error(`not saved centrally: ${(e as Error).message}`);
+  await pool.end();
+  process.exit(3);
+}
+await pool.end();
+process.exit(gateCode);

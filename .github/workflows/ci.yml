@@ -65,7 +65,7 @@ jobs:
       - if: steps.modules.outputs.cache-hit != 'true'
         run: npm ci --no-audit --no-fund
       # Deterministic, no provider/network: exits 1 on any false completion, unauthorized side effect or invariant violation.
-      - run: npm run eval:autonomy -- --out .eval/autonomy
+      - run: npm run eval:autonomy:ci -- --out .eval/autonomy
       - if: always()
         uses: actions/upload-artifact@v4
         with:

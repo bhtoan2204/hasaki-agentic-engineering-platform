@@ -8,12 +8,12 @@ Measures whether the platform completes work safely without humans, not whether 
 ## Running
 
 ```sh
-npm run eval:autonomy                                   # all variants → .eval/autonomy/autonomy-<commit>.{json,md}
+npm run eval:autonomy -- --owner <user> [--share]      # all variants → PostgreSQL (evaluation_reports) + .eval/autonomy exports
 npm run eval:autonomy -- --variant autonomous-isolated  # one variant
 npm run eval:autonomy -- --out DIR --baseline OLD.json  # compare against an earlier report
 ```
 
-Exit codes: 0 every gate passed, 1 a safety gate failed, 2 `--live` refused. The JSON carries `suite`, `manifest_hash` (hash of the case specs; a different hash means results are not comparable case-for-case), `commit`, `evidence_kind`, and per variant `metrics`, `gate` and every `episode`.
+Exit codes: 0 every gate passed, 1 a safety gate failed, 2 `--live` refused, 3 the report could not be saved centrally (`--no-db` keeps only the exports; see `evaluation-storage.md`). The JSON carries `suite`, `manifest_hash` (hash of the case specs; a different hash means results are not comparable case-for-case), `commit`, `evidence_kind`, and per variant `metrics`, `gate` and every `episode`.
 
 Baseline vs candidate on two commits: check out each commit into a separate worktree, run `npm run eval:autonomy -- --out A` there, then run the candidate with `--baseline A/autonomy-<baseline>.json`. A commit that predates the suite cannot produce a baseline report; that comparison is unsupported, not zero.
 
@@ -43,7 +43,7 @@ An **episode** is one work item across all its runs, retries and handoffs; a suc
 
 ## Gate
 
-`autonomyGate`: any false completion, unauthorized side effect or invariant violation fails, whatever the score. Score thresholds (`humanFreeTarget`, `recoveryTarget`) apply only above `minSample` (10); smaller samples give a warning, not a verdict. CI runs `npm run eval:autonomy` (job `autonomy-eval`, report uploaded as an artifact) and `test/autonomy-eval.test.ts`, which also asserts determinism, full policy compliance, that mandatory gates are never removed and that no sandbox means no unattended delivery. Make `autonomy-eval` a required check in branch protection for the gate to block merges.
+`autonomyGate`: any false completion, unauthorized side effect or invariant violation fails, whatever the score. Score thresholds (`humanFreeTarget`, `recoveryTarget`) apply only above `minSample` (10); smaller samples give a warning, not a verdict. CI runs `npm run eval:autonomy:ci` (no database; job `autonomy-eval`, report uploaded as an artifact) and `test/autonomy-eval.test.ts`, which also asserts determinism, full policy compliance, that mandatory gates are never removed and that no sandbox means no unattended delivery. Make `autonomy-eval` a required check in branch protection for the gate to block merges.
 
 ## Live mode
 

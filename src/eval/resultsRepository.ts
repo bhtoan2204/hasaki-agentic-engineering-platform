@@ -18,7 +18,7 @@ export function listEvalResults(ownerId: number, suite: string | null, db: Db = 
   return q<EvalRow>(
     db,
     `SELECT * FROM eval_results WHERE ($1::text IS NULL OR suite = $1)
-       AND (owner_id IS NULL OR owner_id=$2) ORDER BY id DESC LIMIT 500`,
+       AND (owner_id IS NULL OR owner_id=$2 OR visibility='team') ORDER BY id DESC LIMIT 500`,
     [suite, ownerId],
   );
 }
