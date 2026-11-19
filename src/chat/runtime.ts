@@ -21,6 +21,8 @@ import {
 import { ChatTurnError, chatFailure, type ChatFailure, type ExecutionPhase } from "./failures.ts";
 import {
   buildPrompt,
+  compactToolResults,
+  deltaPrompt,
   compactIfNeeded,
   publicMention,
   resolveMentions,
@@ -28,6 +30,7 @@ import {
 } from "./context.ts";
 import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } from "./tools.ts";
 import { stallGuard, TurnStream } from "./streaming.ts";
+import { estimateTokens } from "../context/plan.ts";
 import { learnFromTurn, recallMemories } from "./memory.ts";
 import { knowledgeForTurn, refOf } from "./knowledge.ts";
 import {
@@ -95,7 +98,16 @@ export function stripToolBlocks(text: string) {
 }
 
 function emptyUsage(): ChatUsage {
-  return { completions: 0, tool_calls: 0, provider_ms: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 };
+  return {
+    completions: 0,
+    tool_calls: 0,
+    provider_ms: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    cost_usd: 0,
+  };
 }
 
 export function addUsage(
@@ -112,6 +124,11 @@ export function addUsage(
   const output = m.tokens?.output ?? m.tokens?.output_tokens;
   u.input_tokens = u.input_tokens == null || input == null ? null : u.input_tokens + input;
   u.output_tokens = u.output_tokens == null || output == null ? null : u.output_tokens + output;
+  const cacheRead = m.tokens?.cache_read ?? m.tokens?.cache_read_input_tokens;
+  const cacheWrite = m.tokens?.cache_creation ?? m.tokens?.cache_creation_input_tokens;
+  u.cache_read_tokens = u.cache_read_tokens == null || cacheRead == null ? null : u.cache_read_tokens + cacheRead;
+  u.cache_creation_tokens =
+    u.cache_creation_tokens == null || cacheWrite == null ? null : u.cache_creation_tokens + cacheWrite;
   u.cost_usd = u.cost_usd == null || m.cost_usd == null ? null : u.cost_usd + m.cost_usd;
   return u;
 }
@@ -126,6 +143,8 @@ export function mergeUsage(total: Record<string, unknown>, turn: ChatUsage) {
     provider_ms: (t.provider_ms ?? 0) + turn.provider_ms,
     input_tokens: sum(t.input_tokens, turn.input_tokens),
     output_tokens: sum(t.output_tokens, turn.output_tokens),
+    cache_read_tokens: sum(t.cache_read_tokens, turn.cache_read_tokens ?? null),
+    cache_creation_tokens: sum(t.cache_creation_tokens, turn.cache_creation_tokens ?? null),
     cost_usd: sum(t.cost_usd, turn.cost_usd),
   };
 }
@@ -235,6 +254,7 @@ export async function runTurn(turnId: number, providers: Providers | undefined =
 }
 
 const ESCALATION = /```chat-escalate/;
+const deltaContext = () => config.agent.deltaContext !== false;
 
 /**
  * Resuming an unfinished request: refresh the owner's integration sessions, re-check the tools that blocked it and
@@ -484,10 +504,15 @@ async function executeTurn(
     repositories,
   };
   const usage = emptyUsage();
+  const steps: Array<Record<string, unknown>> = [];
   const citations: Citation[] = [];
   const toolResults: Array<{ seq: number; tool: string; status: string; body: string }> = [];
   const seen = new Set<string>();
-  let catalog = routing.path === "tools" ? toolCatalog(effectiveMode) : null;
+  // Intent-focused catalog for the first step; a resumed or escalated request gets the mode's full catalog.
+  let catalog =
+    routing.path === "tools"
+      ? toolCatalog(effectiveMode, follow.continues || !deltaContext() ? null : routing.route)
+      : null;
   let escalated = false;
   const resume =
     follow.continues && unfinished ? await resumeBrief(turn.owner_id, unfinished, readable) : null;
@@ -568,7 +593,14 @@ async function executeTurn(
       },
     });
 
-    let stall: ReturnType<typeof stallGuard> | null = null;
+    // Assigned inside the send closure; a holder keeps the type visible to the catch below.
+    const stallRef: { current: ReturnType<typeof stallGuard> | null } = { current: null };
+    // Provider session of this attempt: it already holds everything sent so far, so later steps send only what is new.
+    let session: string | null = null;
+    let delivered = 0;
+    let catalogDelivered = false;
+    // Tool results of earlier steps are compacted for stateless providers; this marks where the latest batch starts.
+    let latestFrom = Number.MAX_SAFE_INTEGER;
     try {
       await phase(turn, "preparing_context");
       for (let step = 0; step < LIMITS.maxSteps && final == null; step++) {
@@ -597,7 +629,7 @@ async function executeTurn(
           mentions,
           catalog,
           message: userMessage.content,
-          toolResults,
+          toolResults: deltaContext() ? compactToolResults(toolResults, latestFrom) : toolResults,
           repositories,
           memories,
           knowledge: promptKnowledge,
@@ -613,22 +645,58 @@ async function executeTurn(
 
         await phase(turn, "calling_provider", { provider: admission.provider, step });
         await stream.begin(attempt, step, catalog != null);
-        stall = stallGuard(LIMITS.firstActivityMs, LIMITS.streamIdleMs);
-        const guard = stall;
-        const completion = await completeForRun(
-          run,
-          prompt,
-          AbortSignal.any([signal, guard.signal]),
-          providers,
-          agent,
-          (ev) => {
-            guard.touch();
-            stream.onEvent(ev);
-          },
-        ).finally(() => guard.dispose());
+        const send = async (text: string, resume: string | null) => {
+          const guard = stallGuard(LIMITS.firstActivityMs, LIMITS.streamIdleMs);
+          stallRef.current = guard;
+          return completeForRun(
+            run,
+            text,
+            AbortSignal.any([signal, guard.signal]),
+            providers,
+            agent,
+            (ev) => {
+              guard.touch();
+              stream.onEvent(ev);
+            },
+            { keep: deltaContext(), resume },
+          ).finally(() => guard.dispose());
+        };
+        const delta = session
+          ? deltaPrompt({
+              results: toolResults.slice(delivered),
+              catalog,
+              catalogNewlyOpened: !!catalog && !catalogDelivered,
+              toolsWithdrawn: !catalog && catalogDelivered,
+            })
+          : null;
+        let completion: Awaited<ReturnType<typeof send>>;
+        let sent: "delta" | "full" = delta ? "delta" : "full";
+        try {
+          completion = await send(delta ?? prompt, delta ? session : null);
+        } catch (e) {
+          if (!delta || signal.aborted || stallRef.current?.failure) throw e;
+          // The provider lost the session: rebuild statelessly instead of failing the turn.
+          session = null;
+          sent = "full";
+          completion = await send(prompt, null);
+        }
+        session = completion.session_id ?? null;
+        delivered = toolResults.length;
+        catalogDelivered = !!catalog;
         signal.throwIfAborted();
         await stream.flush();
         addUsage(usage, completion.metrics);
+        steps.push({
+          attempt,
+          step,
+          sent,
+          estimated_tokens: estimateTokens(sent === "delta" ? delta! : prompt),
+          full_estimated_tokens: stats.estimated_tokens,
+          input: completion.metrics.tokens?.input ?? null,
+          output: completion.metrics.tokens?.output ?? null,
+          cache_read: completion.metrics.tokens?.cache_read ?? null,
+          cache_creation: completion.metrics.tokens?.cache_creation ?? null,
+        });
         await emitChatEvent({ ...ids, kind: "usage.updated", data: { ...usage } });
         await phase(turn, "receiving_response");
 
@@ -649,6 +717,7 @@ async function executeTurn(
           break;
         }
         await phase(turn, "executing_tools");
+        latestFrom = seq + 1;
         let progressed = false;
         for (const call of calls.slice(0, LIMITS.maxToolCallsPerStep)) {
           if (seq >= LIMITS.maxToolCalls) break;
@@ -750,8 +819,8 @@ async function executeTurn(
       break;
     } catch (e) {
       if (e instanceof TurnCanceled || signal.aborted) throw e;
-      const failure = stall?.failure
-        ? { ...stall.failure, provider: admission.provider }
+      const failure = stallRef.current?.failure
+        ? { ...stallRef.current.failure, provider: admission.provider }
         : asChatFailure(e, admission.provider);
       if (failure.code === "QUOTA_EXHAUSTED") rememberProviderQuota(admission.provider);
       attemptRec.ok = false;
@@ -800,6 +869,8 @@ async function executeTurn(
     continued: follow.continues,
     routing_reason: routing.reason,
     stop_reason: stopReason,
+    // Per provider call: what was sent (full prompt or delta to a kept session), its estimate and the provider's usage.
+    steps,
     compacted,
     attempts: attempts.length,
     provider: admission.provider,

@@ -258,6 +258,16 @@ export interface Config {
   agent: {
     /** Models no path may use (case-insensitive substrings of the model id). Default: ["fable"]. */
     blockedModels?: string[];
+    /**
+     * A provider session whose last turn already carried more context than this (provider-reported input + cache
+     * reads) is not resumed: a fresh session is rebuilt from the durable checkpoint instead. Default 150000.
+     */
+    resumeMaxContextTokens?: number;
+    /**
+     * Send only what is new: delta context to resumed sessions, kept chat completion sessions, compacted earlier tool
+     * results and intent-focused catalogs. false restores full resends (baseline for A/B benchmarks). Default true.
+     */
+    deltaContext?: boolean;
     /** Bound retrieved context, using a documented character-based token estimate; provider usage remains separate. */
     contextTokens?: number;
     contextToolTimeoutMs?: number;

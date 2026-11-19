@@ -341,3 +341,64 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
     },
   };
 }
+
+type ToolResultBody = { seq: number; tool: string; status: string; body: string };
+
+/**
+ * Stateless providers get the whole prompt each step. Results of earlier steps are compacted deterministically
+ * (errors kept verbatim, bodies summarized); the raw result stays retrievable with evidence.get. The latest batch
+ * stays complete. Pure.
+ */
+export function compactToolResults(
+  results: ToolResultBody[],
+  latestFrom: number,
+  keep = 800,
+): ToolResultBody[] {
+  return results.map((r) =>
+    r.seq > 0 && r.seq < latestFrom && r.status === "ok" && r.body.length > keep
+      ? {
+          ...r,
+          body: `${r.body.slice(0, keep)}… [compacted: ${r.body.length} chars; full result via evidence.get {"seq": ${r.seq}}]`,
+        }
+      : r,
+  );
+}
+
+/**
+ * What a resumed provider session receives for the next tool-loop step: only what it has not seen — the new tool
+ * results, the tool catalog when it was just opened, and a notice when tools were withdrawn. Policy, history,
+ * knowledge and earlier results are already in that session.
+ */
+export function deltaPrompt(p: {
+  results: ToolResultBody[];
+  catalog: string | null;
+  catalogNewlyOpened: boolean;
+  toolsWithdrawn: boolean;
+}) {
+  const parts = [
+    "Continue the same request; every earlier instruction and the platform policy still apply.",
+  ];
+  if (p.catalogNewlyOpened && p.catalog)
+    parts.push(
+      [
+        "Tools are now available. To call tools, reply with ONLY a fenced block:",
+        "```chat-tool",
+        '{"calls": [{"tool": "<name>", "arguments": {...}}]}',
+        "```",
+        p.catalog,
+      ].join("\n"),
+    );
+  if (p.results.length)
+    parts.push(
+      "Results of your tool calls:\n" +
+        p.results
+          .map((r) => untrusted(`tool #${r.seq} ${r.tool} (${r.status})`, r.body))
+          .join("\n"),
+    );
+  parts.push(
+    p.toolsWithdrawn
+      ? "No more tool calls are allowed: answer now with the evidence you have and list what is missing."
+      : "Reply with a chat-tool block for more tools, or with the final answer.",
+  );
+  return parts.join("\n\n");
+}

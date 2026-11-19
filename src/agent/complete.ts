@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { assertModelAllowed } from "./modelPolicy.ts";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
@@ -37,6 +39,8 @@ export function completionAgent(
 export interface Completion {
   text: string;
   provider: AgentProvider;
+  /** Set when the provider kept a session the caller can resume with only the new content. */
+  session_id?: string | null;
   metrics: {
     telemetry_id: string;
     provider_execution_ms: number;
@@ -48,12 +52,22 @@ export interface Completion {
   };
 }
 
+/**
+ * A provider-side conversation the caller wants to continue (send only what is new). Providers without one ignore it
+ * and return no `session_id`, so the caller keeps sending complete prompts.
+ */
+export interface CompletionSession {
+  keep: boolean;
+  resume?: string | null;
+}
+
 export interface CompletionOptions {
   signal?: AbortSignal;
   model: string;
   effort: string;
   timeoutMs: number;
   onStream?: CompletionStreamListener;
+  session?: CompletionSession;
 }
 export type CompletionRunner = (
   prompt: string,
@@ -63,6 +77,7 @@ export type CompletionRunner = (
   model?: string;
   cost_usd?: number | null;
   tokens: Completion["metrics"]["tokens"];
+  session_id?: string | null;
 }>;
 const claudeComplete: CompletionRunner = async (prompt, options) => {
   const metrics = newMetrics(options.model || "default");
@@ -72,7 +87,9 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
   if (options.signal?.aborted) ac.abort();
   let text = "";
   let partial = "";
+  let sessionId: string | null = null;
   const stream = options.onStream;
+  const session = options.session?.keep ? options.session : null;
   try {
     for await (const msg of query({
       prompt,
@@ -91,7 +108,11 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
           ? { effort: options.effort as "low" | "medium" | "high" | "xhigh" | "max" }
           : {}),
         settingSources: [],
-        persistSession: false,
+        // A kept session lives in a platform-owned directory, never among the developer's own Claude Code sessions.
+        persistSession: !!session,
+        ...(session
+          ? { cwd: chatSessionDir(), ...(session.resume ? { resume: session.resume } : {}) }
+          : {}),
         abortController: ac,
         ...(stream ? { includePartialMessages: true } : {}),
       },
@@ -99,8 +120,10 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
       const paid = paidClaudeAuth(msg);
       if (paid) throw new Error(paidClaudeAuthMessage(paid));
       accumulateMetrics(metrics, msg);
-      if (msg.type === "system" && msg.subtype === "init")
+      if (msg.type === "system" && msg.subtype === "init") {
         assertModelAllowed(msg.model ?? options.model, "Claude completion");
+        sessionId = msg.session_id ?? null;
+      }
       if (stream) {
         if (msg.type === "system" && msg.subtype === "init") stream({ type: "started" });
         else if (msg.type === "stream_event" && msg.event.type === "content_block_delta") {
@@ -114,8 +137,23 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
   }
-  return { text, model: metrics.model, tokens: metrics.tokens, cost_usd: metrics.cost_usd };
+  return {
+    text,
+    model: metrics.model,
+    tokens: metrics.tokens,
+    cost_usd: metrics.cost_usd,
+    session_id: session ? sessionId : null,
+  };
 };
+
+let sessionDir: string | null = null;
+function chatSessionDir() {
+  if (!sessionDir) {
+    sessionDir = join(config.dataDir, "completion-sessions");
+    mkdirSync(sessionDir, { recursive: true });
+  }
+  return sessionDir;
+}
 const runners: Record<AgentProvider, CompletionRunner> = {
   claude: claudeComplete,
   codex: codexComplete,
@@ -136,6 +174,7 @@ export async function completeForRun(
   providers?: Record<AgentProvider, CompletionRunner> | null,
   agent: CompletionAgentOverride = {},
   onStream?: CompletionStreamListener,
+  session?: CompletionSession,
 ): Promise<Completion> {
   signal?.throwIfAborted();
   const runnerMap = providers ?? runners;
@@ -153,12 +192,14 @@ export async function completeForRun(
     timeoutMs,
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     ...(onStream ? { onStream } : {}),
+    ...(session ? { session } : {}),
   });
   // Whatever model the provider reports (an account default included) is checked, not only what was requested.
   assertModelAllowed(result.model || resolved.model, `${resolved.provider} completion`);
   return {
     text: result.text,
     provider: resolved.provider,
+    session_id: result.session_id ?? null,
     metrics: {
       telemetry_id: randomUUID(),
       provider_execution_ms: Date.now() - started,

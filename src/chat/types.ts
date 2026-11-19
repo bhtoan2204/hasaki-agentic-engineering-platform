@@ -177,6 +177,9 @@ export interface ChatUsage {
   provider_ms: number;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** Provider-reported prompt-cache reads/writes; null when a provider does not report them. */
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
   cost_usd: number | null;
 }
 

@@ -26,8 +26,16 @@ import {
   buildResumeMessage,
   buildSystemAppend,
   buildUserPrompt,
+  developerDecisions,
   untrusted,
 } from "../../stepPrompt.ts";
+import {
+  latestDelivery,
+  planContextDelivery,
+  recordDelivery,
+  sessionContextTokens,
+} from "../../../context/delivery.ts";
+import { hashOf } from "../../../workflow/definitions.ts";
 import { normalizeProviderFailure, safeDiagnostics } from "../../telemetry.ts";
 import { integrationCatalog } from "../../toolRegistry.ts";
 import type { VerificationRound } from "../../verify.ts";
@@ -405,26 +413,80 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     );
   let result;
   let resumeFailure: string | null = null;
+  // Context Delivery Manifest: a resumed session gets only the context it has not seen (or a fresh session when what it
+  // saw is no longer authorized). Unknown sessions keep the full resend.
+  const systemHash = hashOf(systemAppend);
+  const decisionsHash = hashOf(developerDecisions(ctx.input) ?? "");
+  const previousDelivery = resume
+    ? ((await latestDelivery(provider, resume.sessionId).catch(() => null)) ?? null)
+    : null;
+  const history = resume ? await sessionContextTokens(resume.fromAttempt).catch(() => null) : null;
+  const historyLimit = config.agent.resumeMaxContextTokens ?? 150_000;
+  const delivery = !resume
+    ? null
+    : history != null && history > historyLimit
+      ? {
+          mode: "fresh_session" as const,
+          reason: `session history is too large (${history} provider-reported context tokens > ${historyLimit})`,
+          removed: [] as string[],
+        }
+      : config.agent.deltaContext === false
+        ? { mode: "full" as const, reason: "delta context disabled" }
+        : planContextDelivery(previousDelivery, {
+            pack: ctx.context.contextPack,
+            systemHash,
+            decisionsHash,
+          });
+  if (resume && delivery?.mode === "fresh_session")
+    await ctx.log(
+      "system",
+      `not resuming ${provider} session ${resume.sessionId}: ${delivery.reason}${delivery.removed.length ? ` (${delivery.removed.join(", ")})` : ""}; rebuilding a fresh session from the checkpoint`,
+      { provider, context_delivery: delivery },
+    );
+  const resumable = !!resume && existsSync(cwd) && delivery?.mode !== "fresh_session";
+  let deliveryMode: "full" | "delta" = "full";
   try {
-    s.checkpointSource =
-      resume && existsSync(cwd)
-        ? "session_resume"
-        : resume || ctx.input.pending?.resume
-          ? "rebuilt"
-          : "fresh";
-    if (resume && existsSync(cwd)) {
+    s.checkpointSource = resumable
+      ? "session_resume"
+      : resume || ctx.input.pending?.resume
+        ? "rebuilt"
+        : "fresh";
+    if (resume && resumable) {
       await ctx.log("system", `resuming ${provider} session ${resume.sessionId}`, { provider });
-      try {
-        result = await run(
-          buildResumeMessage(
-            ctx.input,
-            resume.fromAttempt,
-            extras,
-            outputLocale(ctx.run),
-            ctx.context.contextPack,
-          ),
-          resume.sessionId,
+      const delta = delivery?.mode === "delta" ? delivery : undefined;
+      const message = buildResumeMessage(
+        ctx.input,
+        resume.fromAttempt,
+        extras,
+        outputLocale(ctx.run),
+        ctx.context.contextPack,
+        delta,
+      );
+      if (delta) {
+        deliveryMode = "delta";
+        const full = buildResumeMessage(
+          ctx.input,
+          resume.fromAttempt,
+          extras,
+          outputLocale(ctx.run),
+          ctx.context.contextPack,
         );
+        await ctx
+          .recordMetrics({
+            context_delivery: {
+              mode: "delta",
+              sent_entries: delta.send,
+              unchanged_entries: delta.unchanged.length,
+              decisions_resent: delta.decisionsChanged,
+              measurement: "character_estimate_not_provider_usage",
+              message_tokens: Math.ceil(message.length / 4),
+              full_message_tokens: Math.ceil(full.length / 4),
+            },
+          })
+          .catch(() => {});
+      }
+      try {
+        result = await run(message, resume.sessionId);
       } catch (e) {
         if (ctx.signal.aborted) throw e;
         result = {
@@ -451,6 +513,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
         );
         s.checkpointSource = "rebuilt";
         resumeFailure = result.text;
+        deliveryMode = "full";
         result = await run(
           buildUserPrompt(
             ctx.input,
@@ -483,6 +546,30 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
       for (const w of await workspacesOf(ctx.run.id).catch(() => []))
         await enqueueIndex(w.repo, ctx.run.id).catch(() => {});
     await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+  }
+  // The session now holds this context: record it so the next resume of that session sends only what changes.
+  if (result && result.assistantTurns > 0) {
+    const sessionId =
+      deliveryMode === "delta"
+        ? resume!.sessionId
+        : (
+            await one<{ session_id: string }>(
+              pool,
+              "SELECT session_id FROM agent_sessions WHERE attempt_id = $1 AND provider = $2 ORDER BY id DESC LIMIT 1",
+              [ctx.attempt.id, provider],
+            ).catch(() => null)
+          )?.session_id;
+    if (sessionId)
+      await recordDelivery({
+        provider,
+        sessionId,
+        attemptId: ctx.attempt.id,
+        systemHash,
+        decisionsHash,
+        pack: ctx.context.contextPack,
+        mode: deliveryMode,
+        previous: previousDelivery,
+      }).catch((e) => console.error("context delivery record:", (e as Error).message));
   }
 
   if (resume || ctx.input.pending?.resume)

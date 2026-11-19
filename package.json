@@ -18,6 +18,7 @@
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",
     "eval:autonomy": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalAutonomy.ts",
     "eval:autonomy:ci": "node --disable-warning=ExperimentalWarning --import ./test/env.ts src/cli/evalAutonomy.ts --no-db",
+    "bench:tokens": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/benchTokens.ts",
     "eval:import": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalImport.ts",
     "eval:cleanup": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalCleanup.ts",
     "smoke:codex": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/codex.live.ts",

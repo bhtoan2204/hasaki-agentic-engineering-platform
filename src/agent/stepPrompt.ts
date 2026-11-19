@@ -365,6 +365,8 @@ export function buildResumeMessage(
   extras: { title: string; body: string }[] = [],
   locale = outputLocale({ output_locale: input.run?.output_locale }),
   contextPack?: ContextPack,
+  /** Delta resume (Context Delivery Manifest): only these entries are new or changed for the resumed session. */
+  delivery?: { send: string[]; unchanged: string[]; decisionsChanged: boolean },
 ): string {
   const fresh = input.answers.filter(
     (a) => newAnswerAttemptId === undefined || a.attempt_id === newAnswerAttemptId,
@@ -373,8 +375,22 @@ export function buildResumeMessage(
   // A resumed session may predate some of the run's developer decisions (added while re-executing other steps): repeat
   // the full current list so the continued conversation follows them too.
   const decided = developerDecisions(input);
-  if (decided) lines.push("", decided, "");
-  if (contextPack) {
+  if (decided && (!delivery || delivery.decisionsChanged)) lines.push("", decided, "");
+  if (contextPack && delivery) {
+    // This session already holds the rest of the pack, unchanged since it was delivered.
+    const changed = { ...contextPack, entries: contextPack.entries.filter((e) => delivery.send.includes(e.id)) };
+    if (changed.entries.length)
+      lines.push(
+        "Context that is new or changed since this conversation last received it:",
+        untrusted("platform_context_pack", renderContextPack(changed, false)),
+      );
+    if (delivery.unchanged.length)
+      lines.push(
+        `Unchanged and already in this conversation (not repeated): ${delivery.unchanged.join(", ")}. Re-read them with platform tools if needed.`,
+      );
+    const code = delivery.send.includes("search_code") ? packCodeBody(contextPack) : "";
+    if (code) lines.push(untrusted("code_intelligence", code));
+  } else if (contextPack) {
     lines.push(
       "Current bound context pack (retained across provider changes):",
       untrusted("platform_context_pack", renderContextPack(contextPack, false)),

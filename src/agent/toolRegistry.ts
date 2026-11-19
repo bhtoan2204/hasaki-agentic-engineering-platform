@@ -293,6 +293,53 @@ export async function callTool(
   }
 }
 
+const CRITICAL_LINE =
+  /\b(error|exception|fatal|panic|fail(ed|ure)?|denied|timeout|traceback)\b|\b[\w./-]+\.(go|ts|tsx|js|java|py|rb|php|cs|kt|sql|proto):\d+/i;
+
+/**
+ * Deterministic compression of an oversized tool result: the head and tail stay verbatim and every line in between
+ * that carries an error or a source location is kept, so failures and file:line evidence survive. The complete output
+ * is stored separately (`rawRef` says where). No model call. Pure.
+ */
+export function compressToolOutput(v: unknown, max = MAX_RESULT, rawRef?: string) {
+  const s = JSON.stringify(v, null, 2) ?? "null";
+  if (s.length <= max) return s;
+  const lines = s.split("\n");
+  const head: string[] = [];
+  const tail: string[] = [];
+  let used = 0;
+  const headBudget = Math.floor(max * 0.35);
+  const tailBudget = Math.floor(max * 0.2);
+  let i = 0;
+  for (; i < lines.length && used + lines[i].length < headBudget; i++) {
+    head.push(lines[i]);
+    used += lines[i].length + 1;
+  }
+  let j = lines.length - 1;
+  let tailUsed = 0;
+  for (; j > i && tailUsed + lines[j].length < tailBudget; j--) {
+    tail.unshift(lines[j]);
+    tailUsed += lines[j].length + 1;
+  }
+  const critical: string[] = [];
+  let criticalUsed = 0;
+  const criticalBudget = max - used - tailUsed - 400;
+  let skipped = 0;
+  for (let k = i; k <= j; k++) {
+    if (CRITICAL_LINE.test(lines[k]) && criticalUsed + lines[k].length < criticalBudget) {
+      critical.push(lines[k]);
+      criticalUsed += lines[k].length + 1;
+    } else skipped++;
+  }
+  return [
+    ...head,
+    `… [compressed: ${skipped} line(s) of ${s.length} chars omitted; lines with errors or source locations kept${rawRef ? `; full output: ${rawRef}` : ""}]`,
+    ...critical,
+    "…",
+    ...tail,
+  ].join("\n");
+}
+
 export function capResult(v: unknown) {
   const s = JSON.stringify(v, null, 2) ?? "null";
   return s.length > MAX_RESULT

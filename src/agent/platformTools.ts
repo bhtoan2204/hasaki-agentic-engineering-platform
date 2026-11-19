@@ -36,7 +36,15 @@ import { citedArtifactIds, evidenceExcerpt } from "./independentReview.ts";
 import { prepareWorkspace, WorkspaceConflictError, workspacesOf } from "../git/provider.ts";
 import { scoreKnowledge } from "../context/plan.ts";
 import { externalNotice, isExternal } from "../knowledge/external.ts";
-import { callTool, capResult, describeTool, listTools } from "./toolRegistry.ts";
+import {
+  callTool,
+  capResult,
+  compressToolOutput,
+  describeTool,
+  listTools,
+} from "./toolRegistry.ts";
+
+const MAX_TOOL_RESULT = 40_000;
 import { isInside, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 
@@ -802,7 +810,27 @@ async function callIntegration(args: any, env: PlatformToolEnv): Promise<string>
     `integration ${toolName} ${r.ok ? "ok" : "failed"} (${r.ms}ms)${r.error ? `: ${r.error}` : ""}`,
     { integration: toolName, ok: r.ok, ms: r.ms },
   );
-  return r.ok ? capResult(r.result) : `ERROR: ${r.error}`;
+  if (!r.ok) return `ERROR: ${r.error}`;
+  const full = JSON.stringify(r.result, null, 2) ?? "null";
+  if (full.length <= MAX_TOOL_RESULT) return full;
+  // Oversized: keep the complete (redacted) output as a log artifact so nothing the model did not see is lost.
+  const artifact = await one<{ id: number }>(
+    pool,
+    "INSERT INTO workflow_artifacts (run_id, step_id, attempt_id, kind, name, content, data) VALUES ($1, $2, $3, 'log', $4, $5, $6) RETURNING id",
+    [
+      env.runId,
+      env.stepId,
+      env.attemptId,
+      `tool-output-${toolName}`.slice(0, 120),
+      redactContextText(full).slice(0, 2_000_000),
+      JSON.stringify({ tool: toolName, chars: full.length }),
+    ],
+  ).catch(() => null);
+  return compressToolOutput(
+    r.result,
+    MAX_TOOL_RESULT,
+    artifact ? `read_artifact {"artifact_id": ${artifact.id}}` : undefined,
+  );
 }
 
 function describeToolSafe(name: string): { read_only?: boolean } | null {

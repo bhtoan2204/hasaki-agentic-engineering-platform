@@ -1,7 +1,7 @@
 import type { ManualChatMode } from "./types.ts";
 
 export type ToolGroup =
-  "repo" | "knowledge" | "observability" | "platform" | "database" | "integrations";
+  "repo" | "knowledge" | "observability" | "platform" | "database" | "integrations" | "evidence";
 
 /**
  * Tool groups a mode may use. Chat cannot run a mutation on its own: shell, source edits, git push, merge, deploy
@@ -9,8 +9,16 @@ export type ToolGroup =
  * AUTO resolves to a manual mode before tools are selected.
  */
 export const MODE_GROUPS: Record<ManualChatMode, ToolGroup[]> = {
-  ASK: ["repo", "knowledge", "platform", "integrations"],
-  INVESTIGATE: ["repo", "knowledge", "platform", "observability", "database", "integrations"],
-  PLAN: ["repo", "knowledge", "platform"],
-  DELEGATE: ["repo", "knowledge", "platform"],
+  ASK: ["repo", "knowledge", "platform", "integrations", "evidence"],
+  INVESTIGATE: [
+    "repo",
+    "knowledge",
+    "platform",
+    "observability",
+    "database",
+    "integrations",
+    "evidence",
+  ],
+  PLAN: ["repo", "knowledge", "platform", "evidence"],
+  DELEGATE: ["repo", "knowledge", "platform", "evidence"],
 };

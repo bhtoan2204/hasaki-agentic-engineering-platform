@@ -86,6 +86,8 @@ const knowledgeScope = (ctx: ToolContext, text: string) => ({
   text,
 });
 
+const EVIDENCE_PAGE = 5000;
+
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… (${s.length - n} more chars)` : s);
 
 /** Run-bound registry tools (this run's changes, step history) have no meaning in a conversation. */
@@ -120,6 +122,38 @@ const TOOLS: ToolDef[] = [
       if (!chatVisible(a.name)) throw new ChatToolDenied(`${a.name} is only available inside a workflow run`);
       await loadPersonalIntegrations();
       return { label: `tool ${a.name}`, data: describeTool(a.name) };
+    },
+  },
+  {
+    name: "evidence.get",
+    group: "evidence",
+    description:
+      "Full raw result of an earlier tool call of this turn (results of earlier steps are shown compacted), paged by offset.",
+    usage: '{"seq": 2, "offset?": 0}',
+    args: z.object({ seq: z.number().int().positive(), offset: z.number().int().min(0).optional() }).strict(),
+    async run(a, ctx) {
+      const row = (await chatRepository.toolCallsOf(ctx.binding.conversationId)).find(
+        (r) => r.turn_id === ctx.binding.turnId && r.seq === a.seq,
+      );
+      if (!row) throw new ChatToolDenied(`no tool call #${a.seq} in this turn`);
+      if (row.repositories.some((r) => !ctx.readable.includes(r)))
+        throw new ChatToolDenied("repository access was revoked for this result");
+      const raw = JSON.stringify(row.result ?? null);
+      const offset = a.offset ?? 0;
+      const page = raw.slice(offset, offset + EVIDENCE_PAGE);
+      return {
+        label: `evidence #${a.seq}`,
+        repositories: row.repositories,
+        data: {
+          seq: a.seq,
+          tool: row.tool,
+          status: row.status,
+          offset,
+          total_chars: raw.length,
+          content: page,
+          ...(offset + EVIDENCE_PAGE < raw.length ? { next_offset: offset + EVIDENCE_PAGE } : {}),
+        },
+      };
     },
   },
   {
@@ -420,8 +454,21 @@ export function toolsForMode(mode: ManualChatMode) {
 }
 
 /** The catalog text placed in the prompt (no schema internals, just names, purpose and argument examples). */
-export function toolCatalog(mode: ManualChatMode) {
+/**
+ * Tool groups worth describing for an intent. Only the catalog text narrows: authorization stays MODE_GROUPS, so an
+ * authorized tool outside this list still runs, and tools.search still finds every integration.
+ */
+const ROUTE_GROUPS: Partial<Record<string, ToolGroup[]>> = {
+  KNOWLEDGE_LOOKUP: ["knowledge", "repo", "evidence"],
+  REPOSITORY_QUERY: ["repo", "knowledge", "evidence"],
+  DATABASE_INVESTIGATION: ["database", "repo", "knowledge", "evidence"],
+  ENGINEERING_PLAN: ["repo", "knowledge", "platform", "evidence"],
+};
+
+export function toolCatalog(mode: ManualChatMode, route?: string | null) {
+  const focus = route ? ROUTE_GROUPS[route] : undefined;
   return toolsForMode(mode)
+    .filter((t) => !focus || focus.includes(t.group))
     .map((t) => `- ${t.name}: ${t.description} Arguments: ${t.usage}`)
     .join("\n");
 }
