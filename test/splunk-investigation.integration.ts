@@ -877,3 +877,236 @@ test("QC (no Splunk): Argo CD log lines are stored as run evidence with refs, re
   assert.equal(s.splunk_url, null);
   assert.equal(s.mode, "argocd");
 });
+
+test("iterative rounds: bounded evidence loop on the DAG — planned next actions, accumulated labels, no repeated search, honest outcome, limits survive a replay", async () => {
+  const previous = config.investigation.maxRounds;
+  config.investigation.maxRounds = 3;
+  try {
+    const owner = await ensureTestOwner();
+    await execution.run({ userId: owner, kind: "user" }, () => setSplunkToken(GOOD));
+    const calls: Record<string, number> = {};
+    const tool = async (ctx: ExecutionContext, name: string, args: unknown) => {
+      const r = await callTool(name, args, {
+        runId: ctx.run.id,
+        allowedRepositories: ctx.run.allowed_repositories,
+        mode: "analysis",
+        stepKey: ctx.step.key,
+      });
+      if (!r.ok) throw new Error(r.error);
+      return r.result as any;
+    };
+    const label = (res: any) =>
+      res.events
+        .map((e: any) => ({
+          evidence_ref: e.event_ref,
+          event_type: /hasakinow request/.test(e.excerpt)
+            ? "PARTNER_REQUEST_SENT"
+            : /hasakinow response/.test(e.excerpt)
+              ? "PARTNER_RESPONSE_RECEIVED"
+              : /callback received/.test(e.excerpt)
+                ? "PARTNER_CALLBACK_RECEIVED"
+                : /outbound shipment created/.test(e.excerpt)
+                  ? "OUTBOUND_MESSAGE_CREATED"
+                  : /label url generated/.test(e.excerpt)
+                    ? "SHIPPING_LABEL_URL_GENERATED"
+                    : null,
+        }))
+        .filter((x: any) => x.event_type);
+    registerExecutor("agent", {
+      async execute(ctx: ExecutionContext): Promise<ExecResult> {
+        calls[ctx.step.key] = (calls[ctx.step.key] ?? 0) + 1;
+        const parsed = ctx.input.upstream.parse_request.output;
+        if (ctx.step.key === "analyze_code")
+          return {
+            kind: "completed",
+            output: {
+              services: [
+                { name: "hasakinow-connector", repo: "oms-background", role: "partner client" },
+              ],
+              code_locations: [
+                { repo: "oms-background", file: "app/hasakinow/client.go", line: 88 },
+              ],
+              log_patterns: [],
+              identifier_fields: [],
+              flow: [],
+              notes: [],
+            },
+          };
+        if (ctx.step.key === "search_logs") {
+          const q0 = parsed.initial_queries[0];
+          const r = await tool(ctx, "splunk_search", {
+            query: q0.query,
+            earliest: q0.earliest,
+            latest: q0.latest,
+          });
+          return {
+            kind: "completed",
+            output: {
+              searches: [r.search_id],
+              events: label(r).filter((e: any) => e.event_type !== "SHIPPING_LABEL_URL_GENERATED"),
+              missing: [],
+            },
+          };
+        }
+        if (ctx.step.key === "refine_search") {
+          const feedback = JSON.stringify(ctx.input.pending ?? {});
+          const planned = [...feedback.matchAll(/search_identifier: (\w+)=([\w.-]+)/g)];
+          if (!planned.length) {
+            const shipment = ctx.input.upstream.correlate.output.identifiers.shipment_id[0];
+            const r = await tool(ctx, "splunk_search", {
+              query: `index=k8s_prod "${shipment}"`,
+              earliest: parsed.time.earliest,
+              latest: parsed.time.latest,
+            });
+            return {
+              kind: "completed",
+              output: { searches: [r.search_id], events: label(r), missing: [] },
+            };
+          }
+          const ids: number[] = [];
+          for (const [, , value] of planned.slice(0, 2)) {
+            const r = await tool(ctx, "splunk_search", {
+              query: `index=k8s_prod "${value}"`,
+              earliest: parsed.time.earliest,
+              latest: parsed.time.latest,
+            });
+            ids.push(r.search_id);
+          }
+          return {
+            kind: "completed",
+            output: { searches: ids, events: [], missing: ["no rows for the planned identifiers"] },
+          };
+        }
+        if (ctx.step.key === "analyze_findings") {
+          const tl = ctx.input.upstream.timeline.output.timeline;
+          const cb = tl.find((t: any) => t.event_type === "PARTNER_CALLBACK_RECEIVED");
+          return {
+            kind: "completed",
+            output: {
+              answers: [],
+              findings: [],
+              hypotheses: [
+                {
+                  id: "H1",
+                  kind: "causal_origin",
+                  status: "SUPPORTED",
+                  service: "hasakinow-connector",
+                  statement: "partner dispatch delay",
+                  supporting_refs: [cb.evidence_ref],
+                  contradicting_refs: [],
+                  predicted_observations: ["driver assignment log after the callback"],
+                  code_location: "oms-background:app/hasakinow/client.go:88",
+                },
+                {
+                  id: "H2",
+                  kind: "contributing_factor",
+                  status: "SUPPORTED",
+                  statement: "fabricated",
+                  supporting_refs: ["S999999:1"],
+                  contradicting_refs: [],
+                  predicted_observations: [],
+                },
+              ],
+              deployed: [
+                { service: "hasakinow-connector", commit: "abc1234", evidence_ref: "S999999:9" },
+              ],
+              missing_evidence: [],
+              next_steps: [],
+            },
+          };
+        }
+        return { kind: "completed", output: {} };
+      },
+    });
+    registerExecutor("integration", integrationExecutor);
+    const run = await startRun({
+      definitionKey: "production-incident-investigation",
+      inputs: { request: F.REQUEST_VI },
+      title: "Điều tra lặp",
+      outputLocale: "vi",
+      ownerId: owner,
+    });
+    const settle = async () => {
+      for (let i = 0; i < 12; i++) {
+        await q(
+          pool,
+          "UPDATE workflow_jobs SET available_at = now() WHERE run_id = $1 AND status = 'queued'",
+          [run.id],
+        );
+        await drain();
+      }
+    };
+    await settle();
+    assert.equal((await getRun(run.id)).status, "COMPLETED");
+    const rounds = await q<{ data: any }>(
+      pool,
+      "SELECT data FROM workflow_artifacts WHERE run_id = $1 AND kind = 'investigation_round' ORDER BY id",
+      [run.id],
+    );
+    assert.ok(rounds.length >= 2 && rounds.length <= 3, `rounds: ${rounds.length}`);
+    assert.deepEqual(
+      rounds.map((r) => r.data.round),
+      rounds.map((_, i) => i + 1),
+    );
+    assert.equal(calls.refine_search, rounds.length, "one refine search per round, bounded");
+    const last = rounds.at(-1)!.data;
+    assert.ok(
+      ["no_progress", "max_rounds", "no_remaining_actions"].includes(last.stop_reason),
+      last.stop_reason,
+    );
+    assert.equal(
+      last.outcome,
+      "PROBABLE",
+      "deployed commit not backed by a stored record: never CONFIRMED",
+    );
+    const h = Object.fromEntries(last.hypotheses.map((x: any) => [x.id, x]));
+    assert.equal(h.H1.status, "SUPPORTED");
+    assert.equal(
+      h.H2.status,
+      "OPEN",
+      "fabricated reference dropped; claimed SUPPORTED not trusted",
+    );
+    assert.equal(last.deployed[0].verified, false);
+    assert.equal(last.impact.state_money, "UNKNOWN");
+    const tl = (await getRun(run.id)).steps.find((s) => s.key === "timeline")!.output;
+    assert.ok(
+      tl.timeline.some((t: any) => t.event_type === "PARTNER_CALLBACK_RECEIVED"),
+      "labels of round 1 survive later rounds",
+    );
+    const hashes = await q(
+      pool,
+      "SELECT query_hash, count(*)::int AS n FROM splunk_searches WHERE run_id = $1 GROUP BY 1 HAVING count(*) > 1",
+      [run.id],
+    );
+    assert.equal(hashes.length, 0, "no equivalent search repeated");
+    const decisions = await q(
+      pool,
+      "SELECT action FROM execution_decisions WHERE run_id = $1 AND kind = 'investigation' ORDER BY id",
+      [run.id],
+    );
+    assert.deepEqual(
+      decisions.map((d) => d.action),
+      [...Array(rounds.length - 1).fill("REPLAN"), "STOP"],
+    );
+    const rep = (await getRun(run.id)).steps.find((s) => s.key === "report")!.output;
+    assert.match(rep.report_markdown, /Đánh giá nguyên nhân gốc/);
+    assert.match(rep.report_markdown, /CHƯA BIẾT/);
+    assert.doesNotMatch(rep.report_markdown, /0912345678/);
+
+    // operator replay of the report: the round counter continues and the unchanged state stops at once (no search)
+    const jobs = sidSeq;
+    await reexecuteStep(run.id, "report", {});
+    await settle();
+    const after = await q<{ data: any }>(
+      pool,
+      "SELECT data FROM workflow_artifacts WHERE run_id = $1 AND kind = 'investigation_round' ORDER BY id",
+      [run.id],
+    );
+    assert.equal(after.length, rounds.length + 1);
+    assert.equal(after.at(-1)!.data.round, rounds.length + 1);
+    assert.notEqual(after.at(-1)!.data.stop_reason, null);
+    assert.equal(sidSeq, jobs, "no new Splunk job after the replay");
+  } finally {
+    config.investigation.maxRounds = previous;
+  }
+});

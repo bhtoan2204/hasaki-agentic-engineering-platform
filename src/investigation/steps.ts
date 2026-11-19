@@ -15,6 +15,22 @@ import { buildReport, type SearchSummary } from "./report.ts";
 import { parseRequest, type ParsedRequest } from "./request.ts";
 import { formatInZone } from "./time.ts";
 import { selectProviders } from "./observability.ts";
+import { pool, q } from "../db/pool.ts";
+import { noteDecision } from "../workflow/decisions.ts";
+import { sanitizeText } from "./events.ts";
+import {
+  coverageGaps,
+  deployedVersions,
+  evaluateHypotheses,
+  impactCounts,
+  planNextActions,
+  progressSignature,
+  rootCauseOutcome,
+  searchCoverage,
+  stopReason,
+  type NextAction,
+  type RoundState,
+} from "./rounds.ts";
 
 /**
  * Deterministic steps of the Production Incident Investigation workflow (integration actions):
@@ -228,6 +244,24 @@ function labelsFrom(ctx: ExecutionContext): EventLabel[] {
   return labels;
 }
 
+/** Iterative rounds: labels of earlier rounds' search attempts stay evidence (each is re-validated by correlate). */
+async function roundLabels(ctx: ExecutionContext): Promise<EventLabel[]> {
+  const current = labelsFrom(ctx);
+  if (config.investigation.maxRounds <= 0) return current;
+  const rows = await q<{ key: string; events: unknown[] }>(
+    pool,
+    `SELECT s.key, a.output->'events' AS events FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
+      WHERE a.run_id = $1 AND a.status = 'COMPLETED' AND jsonb_typeof(a.output->'events') = 'array' ORDER BY a.id`,
+    [ctx.run.id],
+  );
+  const byRef = new Map<string, EventLabel>();
+  for (const r of rows)
+    for (const e of r.events as EventLabel[])
+      if (e && typeof e === "object" && e.evidence_ref) byRef.set(e.evidence_ref, { ...e, labeled_by: r.key });
+  for (const l of current) byRef.set(l.evidence_ref, l);
+  return [...byRef.values()];
+}
+
 export function searchSummaries(rows: Awaited<ReturnType<typeof runSearches>>): SearchSummary[] {
   const tz = config.splunk.timezone;
   return rows.map((r) => ({
@@ -255,7 +289,7 @@ async function correlation(ctx: ExecutionContext) {
   for (const r of rows) for (const e of r.events ?? []) events.set(e.ref, e);
   const result = correlate({
     events,
-    labels: labelsFrom(ctx),
+    labels: await roundLabels(ctx),
     anchors: parsed?.anchors ?? [],
     locale: outputLocale(ctx.run),
   });
@@ -331,7 +365,15 @@ export async function investigationReport(ctx: ExecutionContext): Promise<ExecRe
   const timelineOut = up("timeline", "timeline") ?? {};
   const rows = await runSearches(ctx.run.id);
   const locale = outputLocale(ctx.run);
+  const refine = String(ctx.step.config.refine_step ?? "refine_search");
+  const refineStatus = (
+    await q<{ status: string }>(pool, "SELECT status FROM workflow_steps WHERE run_id = $1 AND key = $2", [ctx.run.id, refine])
+  )[0]?.status;
+  // A refine step skipped by its run_if would be skipped again: no further round can search.
+  const canRefine = !!refineStatus && refineStatus !== "SKIPPED";
+  const round = await investigationRound(ctx, parsed, timelineOut, rows, up("findings", "analyze_findings"), up("code", "analyze_code"), canRefine);
   const report = buildReport({
+    round,
     locale,
     parsed,
     timeline: timelineOut.timeline ?? [],
@@ -353,8 +395,135 @@ export async function investigationReport(ctx: ExecutionContext): Promise<ExecRe
     report.markdown,
     { summary: report.summary, status: report.status },
   );
-  return {
-    kind: "completed",
-    output: { ...report, report_artifact_id: artifactId, report_markdown: report.markdown },
+  const output = { ...report, report_artifact_id: artifactId, report_markdown: report.markdown, round };
+  if (round.stop_reason === null)
+    return { kind: "reexecute", target: refine, feedback: roundFeedback(round), output };
+  return { kind: "completed", output };
+}
+
+/**
+ * One investigation round: hypotheses, deployed versions, impact and query coverage evaluated from stored evidence, the
+ * stop rule applied, the next actions planned. Persisted as an immutable artifact per report generation (a restart of the
+ * same generation reuses it: no extra round) and logged as a decision with the round telemetry.
+ */
+async function investigationRound(
+  ctx: ExecutionContext,
+  parsed: ParsedRequest,
+  timelineOut: { timeline?: TimelineEvent[]; uncorrelated?: TimelineEvent[]; missing?: Array<{ objective: string; needed: string }>; identifiers?: Record<string, string[]> },
+  rows: Awaited<ReturnType<typeof runSearches>>,
+  findings: unknown,
+  code: { code_locations?: Array<{ repo?: string }>; services?: Array<{ repo?: string }> } | undefined,
+  canRefine: boolean,
+): Promise<RoundState> {
+  const prior = await q<{ data: RoundState }>(
+    pool,
+    "SELECT data FROM workflow_artifacts WHERE run_id = $1 AND kind = 'investigation_round' ORDER BY id",
+    [ctx.run.id],
+  );
+  const last = prior.at(-1)?.data;
+  if (last && last.generation === ctx.step.generation && last.step_id === ctx.step.id) return last;
+  const timeline = timelineOut.timeline ?? [];
+  const refsOf = (t: TimelineEvent) => [t.evidence_ref, ...(t.duplicates ?? [])];
+  const knownRefs = new Set([...timeline, ...(timelineOut.uncorrelated ?? [])].flatMap(refsOf));
+  const runtimeRefs = new Set(timeline.filter((t) => t.confidence !== "unknown").flatMap(refsOf));
+  const repositories = new Set(
+    [...(code?.code_locations ?? []), ...(code?.services ?? [])].map((c) => String(c?.repo ?? "")).filter(Boolean),
+  );
+  const coverage = searchCoverage(rows);
+  const anchorMs = parsed.time.anchor ? Date.parse(parsed.time.anchor) : null;
+  const gaps = coverageGaps(coverage, anchorMs);
+  const hypotheses = evaluateHypotheses(findings, { knownRefs, runtimeRefs, repositories });
+  const deployed = deployedVersions(findings, knownRefs);
+  const impact = impactCounts(timeline, coverage);
+  const blocked = gaps.includes("no_answered_search") || (!coverage.length && !splunkConnected());
+  const verdict = rootCauseOutcome({ hypotheses, impact, deployed, blocked });
+  const missing = timelineOut.missing ?? [];
+  const done = new Set<string>(prior.flatMap((p) => (p.data.actions ?? []).map((a: NextAction) => a.fingerprint)));
+  const actions = planNextActions({
+    gaps,
+    anchor: parsed.time.anchor,
+    identifiers: timelineOut.identifiers ?? {},
+    searchedText: rows.map((r) => r.query).join("\n"),
+    missing,
+    hypotheses,
+    deployed,
+    done,
+  });
+  const signature = progressSignature({ refs: [...runtimeRefs], hypotheses, missing: missing.map((m) => m.objective) });
+  const queriesUsed = rows.filter((r) => r.mode !== "manual" && ["done", "failed", "running"].includes(r.status)).length;
+  const round = prior.length + 1;
+  const rule = stopReason({
+    enabled: config.investigation.maxRounds > 0,
+    round,
+    maxRounds: config.investigation.maxRounds,
+    queriesUsed,
+    queryBudget: config.splunk.queryBudget,
+    outcome: verdict.outcome,
+    signature,
+    previousSignature: last?.signature ?? null,
+    actions,
+  });
+  const stop = rule ?? (canRefine ? null : "no_remaining_actions");
+  const previousRefs = new Set<string>(last?.refs ?? []);
+  const state: RoundState = {
+    round,
+    max_rounds: config.investigation.maxRounds,
+    step_id: ctx.step.id,
+    generation: ctx.step.generation,
+    time: { earliest: parsed.time.earliest, latest: parsed.time.latest, timezone: parsed.time.timezone, anchor: parsed.time.anchor },
+    services: parsed.services.map((x) => x.name),
+    outcome: verdict.outcome,
+    outcome_reasons: verdict.reasons,
+    hypotheses: hypotheses.map((h) => ({
+      ...h,
+      statement: sanitizeText(h.statement),
+      predicted_observations: h.predicted_observations.map(sanitizeText),
+    })),
+    deployed,
+    impact,
+    coverage: coverage.map(({ id, reason, rows: n }) => ({ id, reason, rows: n })),
+    gaps,
+    missing,
+    actions: actions.map((a) => ({ ...a, detail: sanitizeText(a.detail) })),
+    refs: [...runtimeRefs],
+    new_evidence: [...runtimeRefs].filter((r) => !previousRefs.has(r)).length,
+    queries_used: queriesUsed,
+    query_budget: config.splunk.queryBudget,
+    signature,
+    stop_reason: stop,
   };
+  await ctx.artifact("investigation_round", `round-${round}.json`, JSON.stringify(state), state);
+  void noteDecision({
+    runId: ctx.run.id,
+    stepId: ctx.step.id,
+    attemptId: ctx.attempt.id,
+    generation: ctx.step.generation,
+    kind: "investigation",
+    action: stop === null ? "REPLAN" : "STOP",
+    outcome: "applied",
+    reason: stop === null ? `round ${round}: ${actions.length} next action(s)` : `round ${round}: stopped (${stop})`,
+    details: {
+      round,
+      outcome: verdict.outcome,
+      queries_used: queriesUsed,
+      new_evidence: state.new_evidence,
+      planned_actions: actions.length,
+      skipped_duplicate_actions: done.size,
+      hypotheses: hypotheses.map((h) => `${h.id}:${h.status}`),
+    },
+  });
+  return state;
+}
+
+function roundFeedback(r: RoundState) {
+  return [
+    `Investigation round ${r.round + 1} of at most ${r.max_rounds}. Current root-cause outcome: ${r.outcome}${r.outcome_reasons.length ? ` (${r.outcome_reasons.join("; ")})` : ""}.`,
+    `Hypotheses: ${r.hypotheses.map((h) => `${h.id} [${h.kind}] ${h.status}`).join("; ") || "none yet"}.`,
+    r.gaps.length ? `Query coverage gaps: ${r.gaps.join(", ")}.` : "",
+    "Do these next, in order, and nothing equivalent to an earlier search (stored searches are reused, not repeated):",
+    ...r.actions.map((a, i) => `${i + 1}. ${a.kind}: ${a.detail}`),
+    `Queries used ${r.queries_used}/${r.query_budget}. Label only events you saw; if an action cannot be done, say exactly why (no rows, permission, window, retention).`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

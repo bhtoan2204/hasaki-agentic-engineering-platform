@@ -370,6 +370,11 @@ export interface Config {
     allowSharedToken: boolean;
   };
   /** SigNoz (logs, traces, metrics) read through the v5 query_range API with each user's own API key. */
+  /**
+   * Iterative production investigation: rounds of evidence seeking after the first findings (each round re-runs the
+   * refine search, timeline and findings steps). 0 = off: every round's state is still evaluated and recorded (shadow).
+   */
+  investigation: { maxRounds: number };
   signoz: {
     defaultMinutes: number;
     maxMinutes: number;
@@ -555,6 +560,7 @@ const defaults: Config = {
     queryBudget: 25,
     allowSharedToken: false,
   },
+  investigation: { maxRounds: 0 },
   signoz: {
     defaultMinutes: 15,
     maxMinutes: 7 * 24 * 60,
@@ -640,6 +646,7 @@ function load(): Config {
     jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
+    investigation: { ...defaults.investigation, ...(fromFile.investigation ?? {}) },
     signoz: { ...defaults.signoz, ...(fromFile.signoz ?? {}) },
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },

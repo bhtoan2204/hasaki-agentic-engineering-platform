@@ -16,7 +16,11 @@ export type DecisionAction =
   | "DENY"
   | "REQUIRE_HUMAN"
   | "COLLECT_EVIDENCE"
-  | "REPLAN";
+  | "REPLAN"
+  | "RETRY_BACKOFF"
+  | "REPAIR"
+  | "WAIT"
+  | "STOP";
 
 export interface Decision {
   id: number;
@@ -56,6 +60,10 @@ export const DECISION_COLORS: Record<DecisionAction, string> = {
   REQUIRE_HUMAN: "var(--st-wait)",
   COLLECT_EVIDENCE: "var(--st-wait)",
   REPLAN: "var(--st-wait)",
+  RETRY_BACKOFF: "var(--st-run)",
+  REPAIR: "var(--st-run)",
+  WAIT: "var(--st-wait)",
+  STOP: "var(--muted)",
 };
 
 export const COMPATIBILITY_COLORS: Record<string, string> = {

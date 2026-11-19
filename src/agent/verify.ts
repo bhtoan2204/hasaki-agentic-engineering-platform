@@ -13,7 +13,8 @@ import {
   type EvidenceStats,
 } from "./verifyEvidence.ts";
 import { execFile } from "node:child_process";
-import { realpath, stat, readFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, stat, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -620,6 +621,66 @@ function requiredTestStatus(
     }
   }
   return status;
+}
+
+/**
+ * Before/after regression proof. The fix's non-test files are reverted to the merge base in a throw-away detached worktree
+ * (tests kept), the named test runs there and then on the fixed worktree. Verified only when it fails at test level
+ * before (an assertion, not a build or infrastructure failure: "not_executed") and passes after. Never touches the run's
+ * worktree; the temporary one is removed.
+ */
+export async function beforeAfterProof(
+  w: { repo: string; path: string; baseBranch: string },
+  testId: string,
+  run: (command: string, cwd: string) => Promise<{ code: number | null; output: string }>,
+): Promise<import("./rootCause.ts").RegressionProof> {
+  const git = async (cwd: string, ...args: string[]) =>
+    (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout.trim();
+  const id = testId.includes("::") ? testId : `${w.repo}::${testId}`;
+  const unmeasured = (reason: string) => ({ status: "unmeasured" as const, reason, repo: w.repo, test_id: id });
+  const after = await requiredTestTargets([w], [id]);
+  const target = after.targets.get(w.repo)?.[0];
+  if (!target) return unmeasured(after.problems.join("; ") || "not an executable test id");
+  let head: string, base: string, changed: string[];
+  try {
+    head = await git(w.path, "rev-parse", "HEAD");
+    base = await git(w.path, "merge-base", `origin/${w.baseBranch}`, "HEAD");
+    changed = (await git(w.path, "diff", "--name-only", "--no-renames", `${base}...HEAD`)).split("\n").filter(Boolean);
+  } catch (e) {
+    return unmeasured(`git: ${(e as Error).message.slice(0, 200)}`);
+  }
+  const reverted = changed.filter((f) => !TEST_FILE.test(f));
+  if (!reverted.length) return unmeasured("the change has no non-test file to revert");
+  const dir = await mkdtemp(resolve(tmpdir(), "regression-proof-"));
+  const tmp = resolve(dir, "wt");
+  try {
+    await git(w.path, "worktree", "add", "--detach", "-q", tmp, head);
+    const atBase = new Set((await git(tmp, "ls-tree", "-r", "--name-only", base, "--", ...reverted)).split("\n").filter(Boolean));
+    if (atBase.size) await git(tmp, "checkout", base, "--", ...atBase);
+    const added = reverted.filter((f) => !atBase.has(f));
+    if (added.length) await git(tmp, "rm", "-q", "--", ...added);
+    const before = (await requiredTestTargets([{ repo: w.repo, path: tmp }], [id])).targets.get(w.repo)?.[0];
+    if (!before) return unmeasured("the test cannot be resolved on the pre-fix source");
+    const b = requiredTestStatus((await run(before.command, tmp)).output, before);
+    const a = requiredTestStatus((await run(target.command, w.path)).output, target);
+    const proof = { repo: w.repo, test_id: id, base_sha: base, head_sha: head, reverted_files: reverted, command: target.command, before: b, after: a };
+    if (b === "failed" && a === "passed") return { ...proof, status: "verified", reason: "fails before the fix, passes after" };
+    return {
+      ...proof,
+      status: "invalid",
+      reason:
+        b === "passed"
+          ? "the test already passes without the fix: it does not reproduce the defect"
+          : b !== "failed"
+            ? `the test did not run to an assertion before the fix (${b}): a build or infrastructure failure is not a reproduction`
+            : `the test does not pass with the fix (${a})`,
+    };
+  } catch (e) {
+    return unmeasured(`proof workspace: ${(e as Error).message.slice(0, 200)}`);
+  } finally {
+    await exec("git", ["-C", w.path, "worktree", "remove", "--force", tmp]).catch(() => {});
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Run verification once in every worktree. Refuses to run anywhere else. */

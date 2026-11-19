@@ -684,6 +684,8 @@ const PRODUCTION_INVESTIGATION = {
           "Evidence is incomplete (correlate.missing). Close the gaps with targeted searches: use correlate.identifiers and analyze_code.log_patterns/services to search for the missing event types " +
           "(e.g. the partner callback by shipment id or tracking number in the callback service, the label URL by tracking number), label events in correlate.unlabeled_refs that matter, " +
           "and label nothing you did not see. Run at most 8 searches. If an event cannot be found, list exactly what evidence is missing and why. " +
+          "In a later investigation round the feedback lists the next actions chosen by the platform: do them in order, never repeat an equivalent search, " +
+          "count affected objects by distinct identifier (stats dc(<id field>) by the identifier, not dc(_raw)) and keep windows bounded. " +
           INVESTIGATION_RULES,
         output_contract: INVESTIGATION_SEARCH_CONTRACT,
       },
@@ -715,10 +717,17 @@ const PRODUCTION_INVESTIGATION = {
           "from correlated evidence, 'unknown' otherwise — the platform lowers any classification the evidence does not support and drops unknown references. " +
           "Do not recompute or restate latencies differently; explain which events were compared. Keep a synchronous HTTP response and an asynchronous callback separate, and never present broker or end-to-end time " +
           "as the partner's pure processing time. When the exact label generation time is not logged, say the URL was first observed at that time. Put root-cause ideas under hypotheses, missing data under missing_evidence " +
-          "(say which log or field would settle it) and concrete next investigation steps under next_steps. Do not search further. READ-ONLY.",
+          "(say which log or field would settle it) and concrete next investigation steps under next_steps. Do not search further. READ-ONLY. " +
+          "Hypotheses: give each an id, a kind (direct_trigger = what immediately raised the error, contributing_factor, causal_origin = where the defect or bad input " +
+          "really comes from, systemic_recurrence = why it keeps happening, e.g. retries amplifying it), the observations it predicts, supporting_refs AND contradicting_refs " +
+          "(evidence that argues against it), and the code_location (repo:path:line) of the mechanism. Keep alternatives apart (malformed input at its source vs provider contract " +
+          "vs retry amplification vs a deploy regression) and never present a mitigation (retry, timeout, log level, validation bypass) as the cause. The platform sets each " +
+          "status from the evidence. deployed: the commit each failing service actually ran, only when read from a stored record (evidence_ref), else omit it. " +
+          "Never copy personal data (phone numbers, names, addresses) — describe its shape (length, prefix class) instead.",
         output_contract:
           "{ answers: [{ question, answer, evidence_refs: string[] }], findings: [{ statement, classification: 'confirmed'|'inferred'|'unknown', evidence_refs: string[], code_location? }], " +
-          "hypotheses: [{ hypothesis, supporting_refs: string[] }], missing_evidence: string[], next_steps: string[] }",
+          "hypotheses: [{ id, statement, kind: 'direct_trigger'|'contributing_factor'|'causal_origin'|'systemic_recurrence', service?, supporting_refs: string[], contradicting_refs: string[], " +
+          "predicted_observations: string[], code_location? }], deployed?: [{ service, commit, evidence_ref }], missing_evidence: string[], next_steps: string[] }",
       },
     },
     {

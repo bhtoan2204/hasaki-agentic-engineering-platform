@@ -64,6 +64,7 @@ export function independentUpstream<T extends { output: any }>(
         ...(u.output?.scope_check ? { scope_check: u.output.scope_check } : {}),
         ...(u.output?.symptom_signals ? { symptom_signals: u.output.symptom_signals } : {}),
         ...(u.output?.remediation ? { remediation: u.output.remediation } : {}),
+        ...(u.output?.regression_proof ? { regression_proof: u.output.regression_proof } : {}),
       };
       out[key] = {
         ...u,

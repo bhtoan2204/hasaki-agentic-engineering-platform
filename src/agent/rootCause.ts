@@ -68,7 +68,7 @@ const GUARDRAILS =
 
 const REMEDIATION_CONTRACT =
   "remediation: { kind: 'ROOT_CAUSE_FIX'|'PARTIAL_FIX'|'MITIGATION'|'OBSERVABILITY_CORRECTION'|'UNRESOLVED', root_cause, causal_link (how the change removes the cause), " +
-  "regression_test?: { name, fails_before: boolean|null, passes_after: boolean|null }, verification_limitations?, unresolved_cause?, risks?: string[], follow_ups?: string[], " +
+  "regression_test?: { name (an executable test id: Go <module>/<package>/TestName or <repo>::test/file.test.ts — the platform runs it on the pre-fix source and on your commit; your booleans are not evidence), fails_before: boolean|null, passes_after: boolean|null }, verification_limitations?, unresolved_cause?, risks?: string[], follow_ups?: string[], " +
   "justifications?: [{ signal, reason, evidence }] }";
 
 const RCA_CONTRACT =
@@ -420,16 +420,47 @@ export function codingEvidence(upstream: Upstream) {
   const signals: Array<SymptomSignal & { repo: string }> = [];
   let remediation: Remediation | null = null;
   let coded = false;
+  let proof: RegressionProof | null = null;
+  const tested: Record<string, string> = {};
   for (const u of Object.values(upstream)) {
     const o = loose(u?.output);
     if (!o) continue;
     if (o.verification) coded = true;
+    if (loose(o.regression_proof)) proof = o.regression_proof as RegressionProof;
+    Object.assign(tested, loose(o.tested_heads) ?? {});
     for (const [repo, list] of Object.entries(loose(o.symptom_signals) ?? {}))
       for (const s of Array.isArray(list) ? list : [])
         signals.push({ ...(s as SymptomSignal), repo });
     if (loose(o.remediation)) remediation = o.remediation as Remediation;
   }
-  return { signals, remediation, coded };
+  return { signals, remediation, coded, proof, tested };
+}
+
+/**
+ * Platform-run before/after regression evidence (verify.ts beforeAfterProof): the same test executed on the pre-fix
+ * source (the fix's non-test files reverted in a throw-away worktree) and on the fixed commit. Author booleans are not it.
+ */
+export interface RegressionProof {
+  status: "verified" | "invalid" | "unmeasured";
+  reason: string;
+  repo?: string;
+  test_id?: string;
+  base_sha?: string;
+  head_sha?: string;
+  reverted_files?: string[];
+  command?: string;
+  before?: string;
+  after?: string;
+}
+
+/** Why a proof does not count, or null when it does: wrong result, or measured on another commit than the one tested. */
+export function proofProblem(proof: RegressionProof | null, tested: Record<string, string>) {
+  if (!proof) return "no platform-run regression proof";
+  if (proof.status !== "verified") return `regression proof ${proof.status}: ${proof.reason}`;
+  const head = proof.repo ? tested[proof.repo] : undefined;
+  if (head && proof.head_sha !== head)
+    return `regression proof is stale: measured on ${String(proof.head_sha).slice(0, 12)}, tested commit is ${head.slice(0, 12)}`;
+  return null;
 }
 
 /** A signal is justified when the reviewer accepted it (or the author justified it and the reviewer did not reject). */
@@ -468,7 +499,7 @@ export function enforceRootCauseReview(
   depth: RcaDepth,
 ): VerdictOutput & { root_cause_check?: unknown; remediation_kind?: RemediationKind | null } {
   const c = loose(raw);
-  const { signals, remediation, coded } = codingEvidence(upstream);
+  const { signals, remediation, coded, proof, tested } = codingEvidence(upstream);
   const declared = remediation?.kind ?? null;
   const reviewed = (REMEDIATION_KINDS as readonly string[]).includes(c?.remediation_kind as string)
     ? (c!.remediation_kind as RemediationKind)
@@ -586,8 +617,26 @@ export function enforceRootCauseReview(
     return blocked(
       `Root Cause First: presented as a root-cause fix but the investigation assessed the root cause as ${root}; provide the missing evidence or reclassify the change as PARTIAL_FIX / MITIGATION`,
     );
+  const fix = kind === "ROOT_CAUSE_FIX" || kind === "PARTIAL_FIX";
+  const problem = proofProblem(proof, tested);
+  if (fix && proof?.status === "invalid")
+    return fail(
+      [
+        finding(
+          "(regression proof)",
+          null,
+          `the platform-run regression test does not demonstrate the fix: ${proof.reason}`,
+          `${proof.test_id ?? "?"}: before=${proof.before ?? "?"}, after=${proof.after ?? "?"} (base ${String(proof.base_sha ?? "").slice(0, 12)})`,
+        ),
+      ],
+      "regression proof contradicts the fix",
+    );
+  if (depth === "strict" && kind === "ROOT_CAUSE_FIX" && problem)
+    return blocked(
+      `Root Cause First (strict): a root-cause fix needs the same regression test to fail on the pre-fix source and pass on the fixed commit, run by the platform — ${problem}. A documented exception needs a human decision; it is not approved automatically`,
+    );
   if (
-    (kind === "ROOT_CAUSE_FIX" || kind === "PARTIAL_FIX") &&
+    fix &&
     c.regression_test_demonstrates_fix !== true &&
     !String(c.limitations ?? remediation?.verification_limitations ?? "").trim()
   )

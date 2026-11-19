@@ -1,6 +1,7 @@
 import type { LatencyResult, TimelineEvent, Rejection, Confidence } from "./correlate.ts";
 import type { ParsedRequest } from "./request.ts";
 import { analyzeCausality } from "./causal.ts";
+import type { RoundState } from "./rounds.ts";
 
 /**
  * Investigation report: a business summary and a developer report, Vietnamese or English. Pure.
@@ -46,6 +47,8 @@ export interface ReportInput {
   findings?: any;
   code?: any;
   access: { connected: boolean; manual_pending: number };
+  /** Iterative round state (hypotheses, impact, coverage, stop reason); absent for callers that do not evaluate it. */
+  round?: RoundState;
 }
 
 const T = {
@@ -222,7 +225,7 @@ export function validateFindings(
     });
   }
   const hypotheses = (Array.isArray(raw?.hypotheses) ? raw.hypotheses : []).map((h: any) => ({
-    hypothesis: String(h?.hypothesis ?? h ?? "").slice(0, 800),
+    hypothesis: String(h?.statement ?? h?.hypothesis ?? h ?? "").slice(0, 800),
     supporting_refs: (Array.isArray(h?.supporting_refs) ? h.supporting_refs : [])
       .map(String)
       .filter((r: string) => knownRefs.has(r)),
@@ -489,6 +492,7 @@ export function buildReport(i: ReportInput) {
     );
   const next = Array.isArray(i.findings?.next_steps) ? i.findings.next_steps.map(String) : [];
   if (next.length) md.push(`## ${L.next}`, "", ...next.map((x: string) => `- ${esc(x)}`), "");
+  if (i.round) md.push(...roundSection(i.round, i.locale));
 
   md.push(`## ${L.queries}`, "");
   for (const s of i.searches)
@@ -534,4 +538,58 @@ export function buildReport(i: ReportInput) {
     findings: v.findings,
     hypotheses: v.hypotheses,
   };
+}
+
+/** Root-cause assessment of the current round: what is proven, what is counted, what is still missing and why it stopped. */
+function roundSection(r: RoundState, locale: "vi" | "en") {
+  const vi = locale === "vi";
+  const out = [
+    `## ${vi ? "Đánh giá nguyên nhân gốc" : "Root-cause assessment"} (${vi ? "vòng" : "round"} ${r.round}${r.max_rounds ? `/${r.max_rounds}` : ""})`,
+    "",
+    `- ${vi ? "Kết luận" : "Outcome"}: **${r.outcome}**${r.outcome_reasons.length ? ` — ${esc(r.outcome_reasons.join("; "))}` : ""}`,
+    `- ${vi ? "Lý do dừng" : "Stopped because"}: ${r.stop_reason ?? (vi ? "đang tiếp tục" : "continuing")}`,
+    `- ${vi ? "Truy vấn đã dùng" : "Queries used"}: ${r.queries_used}/${r.query_budget}; ${vi ? "bằng chứng mới vòng này" : "new evidence this round"}: ${r.new_evidence}`,
+  ];
+  const impact = r.impact.objects.map(
+    (o) => `${o.field}: ${o.lower_bound ? "≥ " : ""}${o.distinct}`,
+  );
+  out.push(
+    `- ${vi ? "Đối tượng bị ảnh hưởng (đếm theo mã, không theo dòng log)" : "Affected objects (distinct ids, not log lines)"}: ${impact.join(", ") || (vi ? "chưa đếm được" : "not counted")}; ${vi ? "dòng log lỗi" : "failure log lines"}: ${r.impact.failure_events}${r.impact.repeats != null ? `, ${vi ? "lặp/retry" : "repeats/retries"}: ${r.impact.repeats}` : ""}`,
+    `- ${vi ? "Ảnh hưởng trạng thái/tiền" : "State/money impact"}: ${r.impact.state_money === "UNKNOWN" ? (vi ? "CHƯA BIẾT — chưa có bằng chứng trạng thái có thẩm quyền" : "UNKNOWN — no authoritative state evidence") : "EVIDENCED"}`,
+  );
+  const deployed = r.deployed.map((d) => `${esc(d.service)}: ${d.commit ?? "?"} (${esc(d.note)})`);
+  out.push(
+    `- ${vi ? "Phiên bản đang chạy" : "Deployed version"}: ${deployed.join("; ") || (vi ? "chưa xác định" : "not resolved")}`,
+  );
+  const reasons = r.coverage.reduce<Record<string, number>>(
+    (a, c) => ((a[c.reason] = (a[c.reason] ?? 0) + 1), a),
+    {},
+  );
+  out.push(
+    `- ${vi ? "Độ phủ truy vấn" : "Query coverage"}: ${
+      Object.entries(reasons)
+        .map(([k, n]) => `${k} ${n}`)
+        .join(", ") || "—"
+    }${r.gaps.length ? ` — ${vi ? "khoảng trống" : "gaps"}: ${r.gaps.join(", ")}` : ""}`,
+    "",
+  );
+  if (r.hypotheses.length) {
+    out.push(
+      `| ID | ${vi ? "Loại" : "Kind"} | ${vi ? "Trạng thái" : "Status"} | ${vi ? "Giả thuyết" : "Hypothesis"} | ${vi ? "Bằng chứng" : "Evidence"} | Code |`,
+      "|---|---|---|---|---|---|",
+    );
+    for (const h of r.hypotheses)
+      out.push(
+        `| ${esc(h.id)} | ${h.kind} | ${h.status} | ${esc(h.statement)}${h.notes.length ? ` _(${esc(h.notes.join("; "))})_` : ""} | ${esc([...h.supporting_refs, ...h.contradicting_refs.map((x) => `¬${x}`)].join(", ")) || "—"} | ${esc(h.code_location ?? "—")} |`,
+      );
+    out.push("");
+  }
+  if (r.actions.length)
+    out.push(
+      `### ${vi ? "Bằng chứng cần tiếp" : "Next required evidence"}`,
+      "",
+      ...r.actions.map((a) => `- ${a.kind}: ${esc(a.detail)}`),
+      "",
+    );
+  return out;
 }

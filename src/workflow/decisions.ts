@@ -17,6 +17,7 @@ export const DECISION_KINDS = [
   "review_reuse",
   "checkpoint",
   "autonomy",
+  "investigation",
 ] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

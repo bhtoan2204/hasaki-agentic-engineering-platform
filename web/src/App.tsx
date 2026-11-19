@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -41,26 +41,59 @@ import "./shell-account.css";
 import { Login, UsersPage, type SessionUser } from "./pages/Login.tsx";
 import { BRAND } from "./brand/brand.ts";
 import { BrandLogo } from "./brand/BrandLogo.tsx";
-import { WorkItemsPage, WorkItemDetail } from "./pages/WorkItems.tsx";
-import { RunsPage } from "./pages/Runs.tsx";
-import { RunView } from "./pages/RunView.tsx";
-import { QuestionsPage } from "./pages/Questions.tsx";
-import { WorkflowsPage } from "./pages/Workflows.tsx";
-import { WorkflowEditor } from "./pages/WorkflowEditor.tsx";
-import { KnowledgePage } from "./pages/Knowledge.tsx";
-import { RepositoriesPage } from "./pages/Repositories.tsx";
-import { InsightsPage } from "./pages/Insights.tsx";
-import { AgentOfficePage } from "./office/AgentOfficePage.tsx";
 import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
-import { OverviewPage } from "./pages/Overview.tsx";
-import { InvestigationsPage } from "./pages/Investigations.tsx";
-import { IntegrationsPage } from "./pages/Integrations.tsx";
-import { SettingsPage } from "./pages/Settings.tsx";
-import { ChatPage } from "./pages/Chat.tsx";
-import { ProductionErrorsPage } from "./pages/prodErrors/ProductionErrorsPage.tsx";
 import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
 import { useI18n } from "./i18n/index.tsx";
 import type { UiLocale } from "./i18n/messages.ts";
+
+// Pages load on first visit: the shell stays small and each route is its own chunk.
+const WorkItemsPage = lazy(() =>
+  import("./pages/WorkItems.tsx").then((m) => ({ default: m.WorkItemsPage })),
+);
+const WorkItemDetail = lazy(() =>
+  import("./pages/WorkItems.tsx").then((m) => ({ default: m.WorkItemDetail })),
+);
+const RunsPage = lazy(() => import("./pages/Runs.tsx").then((m) => ({ default: m.RunsPage })));
+const RunView = lazy(() => import("./pages/RunView.tsx").then((m) => ({ default: m.RunView })));
+const QuestionsPage = lazy(() =>
+  import("./pages/Questions.tsx").then((m) => ({ default: m.QuestionsPage })),
+);
+const WorkflowsPage = lazy(() =>
+  import("./pages/Workflows.tsx").then((m) => ({ default: m.WorkflowsPage })),
+);
+const WorkflowEditor = lazy(() =>
+  import("./pages/WorkflowEditor.tsx").then((m) => ({ default: m.WorkflowEditor })),
+);
+const KnowledgePage = lazy(() =>
+  import("./pages/Knowledge.tsx").then((m) => ({ default: m.KnowledgePage })),
+);
+const RepositoriesPage = lazy(() =>
+  import("./pages/Repositories.tsx").then((m) => ({ default: m.RepositoriesPage })),
+);
+const InsightsPage = lazy(() =>
+  import("./pages/Insights.tsx").then((m) => ({ default: m.InsightsPage })),
+);
+const AgentOfficePage = lazy(() =>
+  import("./office/AgentOfficePage.tsx").then((m) => ({ default: m.AgentOfficePage })),
+);
+const OverviewPage = lazy(() =>
+  import("./pages/Overview.tsx").then((m) => ({ default: m.OverviewPage })),
+);
+const InvestigationsPage = lazy(() =>
+  import("./pages/Investigations.tsx").then((m) => ({ default: m.InvestigationsPage })),
+);
+const IntegrationsPage = lazy(() =>
+  import("./pages/Integrations.tsx").then((m) => ({ default: m.IntegrationsPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/Settings.tsx").then((m) => ({ default: m.SettingsPage })),
+);
+const ChatPage = lazy(() => import("./pages/Chat.tsx").then((m) => ({ default: m.ChatPage })));
+const ProductionErrorsPage = lazy(() =>
+  import("./pages/prodErrors/ProductionErrorsPage.tsx").then((m) => ({
+    default: m.ProductionErrorsPage,
+  })),
+);
 
 function useHash() {
   const [hash, setHash] = useState(location.hash.slice(1) || "/overview");
@@ -543,7 +576,7 @@ export function App() {
           className={full ? "page full" : "page"}
           key={`${me.id}:${support}`}
         >
-          {page}
+          <Suspense fallback={<Loading />}>{page}</Suspense>
         </main>
       </div>
     </div>

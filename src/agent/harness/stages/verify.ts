@@ -29,6 +29,7 @@ import { changedFiles, collectScopeState } from "../../scopeGuard.ts";
 import { selectVerificationScope } from "../../verificationScope.ts";
 import {
   type VerifyDeps,
+  beforeAfterProof,
   diffAgainstBase,
   diffTestsAgainstBase,
   repairPrompt,
@@ -527,6 +528,36 @@ async function rootCauseEvidence(s: LifecycleState, accepted: unknown) {
     (accepted as { remediation?: unknown } | null)?.remediation,
     depth,
   );
+  // Platform-run before/after proof for a claimed fix (standard/strict); one targeted test, bounded by the verify timeout.
+  let regression_proof: Awaited<ReturnType<typeof beforeAfterProof>> | undefined;
+  const testName = remediation?.regression_test?.name;
+  if (
+    depth !== "light" &&
+    testName &&
+    (remediation?.kind === "ROOT_CAUSE_FIX" || remediation?.kind === "PARTIAL_FIX")
+  ) {
+    const scoped = testName.includes("::") ? testName.slice(0, testName.indexOf("::")) : null;
+    for (const w of s.ws.filter((x) => !scoped || x.repo === scoped)) {
+      regression_proof = await beforeAfterProof(
+        { repo: w.repo, path: w.path, baseBranch: await workspaceBaseBranch(w.path) },
+        testName,
+        async (cmd, cwd) =>
+          runCommand(
+            cmd,
+            cwd,
+            { BASE_BRANCH: await workspaceBaseBranch(w.path), RUN_ID: String(s.ctx.run.id) },
+            verifyConfig(s.ctx.step.config, TEST_COMMAND)?.timeoutMs ?? 600_000,
+            s.ctx.signal,
+          ),
+      );
+      if (regression_proof.status !== "unmeasured" || scoped) break;
+    }
+    await s.ctx.log(
+      "system",
+      `regression proof (${testName}): ${regression_proof?.status ?? "unmeasured"} — ${regression_proof?.reason ?? "no worktree"}`,
+      { regression_proof },
+    );
+  }
   const count = Object.values(signals).flat().length;
   if (count || remediation?.problems.length)
     await s.ctx.log(
@@ -537,5 +568,6 @@ async function rootCauseEvidence(s: LifecycleState, accepted: unknown) {
   return {
     ...(count ? { symptom_signals: signals } : {}),
     ...(remediation ? { remediation } : {}),
+    ...(regression_proof ? { regression_proof } : {}),
   };
 }
