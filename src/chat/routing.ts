@@ -70,6 +70,9 @@ const DELEGATE =
 const GENERIC_TECH =
   /^(what is|what's|explain|define|why (?:do|does|is)|how does)\b|^[^.?]{0,80}\?$/i;
 
+const OPS =
+  /\b(kafka|topic|publish|produce|consumer group|argo ?cd|vault|jira|pod)\b|bắn event|đẩy event|gửi event|tạo đơn|bảo hành|tạo order|warranty/i;
+
 function score(re: RegExp, text: string, weight: number) {
   return re.test(text) ? weight : 0;
 }
@@ -145,6 +148,14 @@ export function routeChatIntent(input: {
     );
   }
 
+  if (score(OPS, text, 4) >= 4)
+    return decide(
+      input.mode === "AUTO" ? "INVESTIGATE" : "ASK",
+      "PLATFORM_QUERY",
+      "integration/operation signals",
+      "deterministic",
+      0.8,
+    );
   if (s.delegate >= 3 && input.mode === "AUTO")
     return decide("DELEGATE", "WORKFLOW_DELEGATION", "implementation request", "deterministic", 0.8);
   if (s.plan >= 3 && (input.mode === "AUTO" || input.mode === "ASK"))

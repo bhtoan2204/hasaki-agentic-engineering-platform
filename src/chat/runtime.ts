@@ -28,6 +28,7 @@ import {
 } from "./context.ts";
 import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } from "./tools.ts";
 import { stallGuard, TurnStream } from "./streaming.ts";
+import { learnFromTurn, recallMemories } from "./memory.ts";
 import type {
   ChatUsage,
   Citation,
@@ -353,6 +354,7 @@ async function executeTurn(
     readable,
   ).filter((m) => !m.withheld);
   const { summary, window, compacted } = await compactIfNeeded(conversation, history);
+  const memories = await recallMemories(turn.owner_id, userMessage.content).catch(() => []);
 
   const binding: ChatBinding = {
     userId: turn.owner_id,
@@ -474,6 +476,7 @@ async function executeTurn(
           message: userMessage.content,
           toolResults,
           repositories,
+          memories,
         });
         if (step === 0 && attempt === 0)
           await emitChatEvent({
@@ -686,6 +689,7 @@ async function executeTurn(
     kind: "turn.completed",
     data: { message_id: outcome.id, metrics, attempts },
   });
+  background(`chat learning ${turn.id}`, () => learnFromTurn(turn.id));
 }
 
 export function abortLocal(turnId: number) {

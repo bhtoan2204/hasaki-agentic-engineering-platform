@@ -45,7 +45,9 @@ import {
   consumerGroups,
   kafkaConnected,
   kafkaExpired,
+  kafkaPublishTarget,
   listTopics,
+  publishMessage,
   readMessages,
 } from "../integrations/kafka.ts";
 import { repositoryReference, repositories, tokens } from "../repos/service.ts";
@@ -65,12 +67,15 @@ import {
  */
 
 export interface ToolCallContext {
-  runId: number;
+  /** null outside a workflow run (chat): run-bound tools refuse. */
+  runId: number | null;
   allowedRepositories: string[];
   /** analysis = read-only step (or a subagent); coding = may use tools that change external state. */
   mode: "analysis" | "coding";
   /** Step that made the call (audit records). */
   stepKey?: string;
+  /** Set only by the chat operation flow after the owner confirmed this exact call; `confirm` tools need it. */
+  confirmedOperation?: { id: number; idempotencyKey: string };
 }
 
 export interface IntegrationTool<S extends z.ZodObject<any> = z.ZodObject<any>> {
@@ -79,6 +84,10 @@ export interface IntegrationTool<S extends z.ZodObject<any> = z.ZodObject<any>> 
   description: string;
   input: S;
   readOnly: boolean;
+  /** Sensitive mutation: callable only through a human-confirmed chat operation, never directly by an agent. */
+  confirm?: boolean;
+  /** Deterministic authorization of the target before a confirmation is requested (allowlists, environment). */
+  preflight?: (args: z.infer<S>) => Promise<unknown> | unknown;
   /** true when usable; otherwise the reason (e.g. missing credentials). */
   available: () => true | string;
   /** false = not advertised or callable at all for this actor (e.g. an integration they disabled). Default: shown. */
@@ -111,9 +120,11 @@ export function listTools(query: string | undefined, ctx: Pick<ToolCallContext, 
         read_only: t.readOnly,
         available: avail === true,
         ...(avail === true ? {} : { unavailable_reason: avail }),
-        ...(ctx.mode === "analysis" && !t.readOnly
-          ? { note: "not callable in this read-only step" }
-          : {}),
+        ...(t.confirm
+          ? { note: "runs only as an operation the user confirms in chat" }
+          : ctx.mode === "analysis" && !t.readOnly
+            ? { note: "not callable in this read-only step" }
+            : {}),
         score,
       };
     })
@@ -191,6 +202,7 @@ export async function integrationCatalog(
     if (avail !== true) g.reasons.add(avail);
     else if (ctx.mode === "analysis" && !t.readOnly)
       g.reasons.add("changes external state: not callable in this read-only step");
+    else if (t.confirm) continue;
     else g.tools.push(t.name);
   }
   const databases = groups.has("database") ? await databasesForRun(ctx.allowedRepositories) : [];
@@ -241,6 +253,12 @@ export async function callTool(
       error: `${name} changes external state and is not allowed in a read-only step`,
       ms: 0,
     };
+  if (t.confirm && !ctx.confirmedOperation)
+    return {
+      ok: false,
+      error: `${name} needs a confirmed operation (the user confirms it in chat); agents cannot call it directly`,
+      ms: 0,
+    };
   const avail = t.available();
   if (avail !== true) return { ok: false, error: `${name} is unavailable: ${avail}`, ms: 0 };
   const parsed = t.input.safeParse(args ?? {});
@@ -265,6 +283,11 @@ export function capResult(v: unknown) {
     : s;
 }
 
+const runBound = (ctx: ToolCallContext) => {
+  if (ctx.runId == null) throw new Error("only available inside a workflow run");
+  return ctx.runId;
+};
+
 const allowedRepo = (repo: string, ctx: ToolCallContext) => {
   if (!ctx.allowedRepositories.includes(repo))
     throw new Error(
@@ -272,7 +295,7 @@ const allowedRepo = (repo: string, ctx: ToolCallContext) => {
     );
 };
 
-// ---------------------------------------------------------------- built-in integrations (all read-only)
+// ---------------------------------------------------------------- built-in integrations (read-only, except kafka.publish: confirm-only)
 
 export function registerBuiltinTools() {
   registerIntegrationTool({
@@ -295,7 +318,7 @@ export function registerBuiltinTools() {
       const scope = {
         repositories: args.repositories,
         allowed: ctx.allowedRepositories,
-        runId: ctx.runId,
+        runId: ctx.runId ?? undefined,
       };
       switch (args.operation) {
         case "definitions":
@@ -573,6 +596,34 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: kafkaAvailable,
     handler: (args) => readMessages(args),
+  });
+  const publishInput = z.object({
+    topic: z.string().min(1).max(249),
+    value: z.union([z.string().max(100_000), z.record(z.string(), z.unknown())]),
+    key: z.string().max(1000).optional(),
+    headers: z.record(z.string().max(200), z.string().max(2000)).optional(),
+    partition: z.number().int().min(0).max(10_000).optional(),
+    cluster,
+  });
+  registerIntegrationTool({
+    name: "kafka.publish",
+    summary:
+      "QC Kafka: publish ONE event to an allowlisted QC topic (e.g. to create a test order). Needs the user's confirmation in chat.",
+    description:
+      "Mutating (QC only). Produces one message to `topic` (JSON object values are serialized). Only topics in the QC publish allowlist; " +
+      "production is always refused. Before calling, find the payload shape: kafka.read_messages on the topic (recent real messages), knowledge and the consumer code. " +
+      "The call never runs directly: it becomes an operation the user confirms. Success means Kafka accepted the event, NOT that the consumer processed it — verify downstream separately.",
+    input: publishInput,
+    readOnly: false,
+    confirm: true,
+    available: kafkaAvailable,
+    preflight: ({ topic, cluster }) => kafkaPublishTarget(topic, cluster),
+    handler: ({ value, ...m }, ctx) =>
+      publishMessage({
+        ...m,
+        value: typeof value === "string" ? value : JSON.stringify(value),
+        idempotencyKey: ctx.confirmedOperation!.idempotencyKey,
+      }),
   });
   const vaultAvailable = () =>
     vaultConnected()
@@ -907,7 +958,7 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: () => true,
     handler: async ({ include_diff }, ctx) => {
-      const c = await runChanges(ctx.runId);
+      const c = await runChanges(runBound(ctx));
       return c.repos.map((r: any) => ({
         repo: r.repo,
         branch: r.branch,
@@ -932,7 +983,7 @@ export function registerBuiltinTools() {
         pool,
         `SELECT a.number, a.generation, a.status, a.output, a.error, a.started_at, a.finished_at, a.invalidated_at
            FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.key = $2 ORDER BY a.number`,
-        [ctx.runId, step_key],
+        [runBound(ctx), step_key],
       ),
   });
 

@@ -2625,6 +2625,12 @@ export const routes: Route[] = [
   ["POST", /^\/api\/chat\/turns\/(\d+)\/cancel$/, (c) => chat.cancelTurn(c.actor, num(c.p[0]))],
   [
     "POST",
+    /^\/api\/chat\/operations\/(\d+)\/(confirm|reject)$/,
+    (c) => chat.decideOperation(c.actor, num(c.p[0]), c.p[1] as "confirm" | "reject"),
+  ],
+  ["GET", /^\/api\/chat\/memory$/, (c) => chat.memories(c.actor)],
+  [
+    "POST",
     /^\/api\/chat\/turns\/(\d+)\/regenerate$/,
     (c) => chat.regenerate(c.actor, num(c.p[0])),
   ],

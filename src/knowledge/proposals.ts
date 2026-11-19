@@ -107,7 +107,8 @@ export interface ProposalInput {
     passed: boolean;
     checks: Array<{ name: string; passed: boolean; detail: string }>;
   } | null;
-  sourceKind?: "workflow" | "skill_evolution" | "repository_import" | "manual" | "failure_pattern";
+  sourceKind?:
+    "workflow" | "skill_evolution" | "repository_import" | "manual" | "failure_pattern" | "chat";
   sourceRunId?: number | null;
   createdBy?: string;
 }

@@ -30,6 +30,8 @@ export type ChatEventKind =
   | "response.partial"
   | "reasoning.delta"
   | "provider.activity"
+  | "operation.updated"
+  | "memory.learned"
   | "usage.updated"
   | "turn.completed"
   | "turn.failed"

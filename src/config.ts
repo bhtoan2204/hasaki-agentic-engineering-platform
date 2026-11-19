@@ -345,6 +345,11 @@ export interface Config {
     cluster: string;
     maxMessages: number;
     timeoutSeconds: number;
+    /**
+     * Producing (chat operations only, after the owner confirms). Empty = disabled. Each entry allows topics of one QC
+     * cluster; a topic ending in `*` is a prefix. A production-looking base URL, cluster or topic is always refused.
+     */
+    publishAllow: Array<{ cluster: string; topics: string[] }>;
   };
   splunk: {
     baseUrl: string;
@@ -585,6 +590,7 @@ const defaults: Config = {
     cluster: "",
     maxMessages: 200,
     timeoutSeconds: 60,
+    publishAllow: [],
   },
   splunk: {
     baseUrl: "https://siem.hasaki.work",

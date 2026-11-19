@@ -14,7 +14,10 @@ import { isSecretPath } from "../agent/toolPolicy.ts";
 import { investigationSearch } from "../integrations/splunk.ts";
 import { searchLogs } from "../integrations/signoz.ts";
 import { databaseForRun, databasesForRun, runQuery } from "../integrations/database.ts";
+import { callTool, describeTool, integrationTools, listTools } from "../agent/toolRegistry.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { chatRepository } from "./repository.ts";
+import { proposeOperation } from "./operations.ts";
 import { LIMITS } from "./policy.ts";
 import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
 import type { ManualChatMode } from "./types.ts";
@@ -23,7 +26,8 @@ import type { ManualChatMode } from "./types.ts";
  * Chat tool binding. Unlike workflow tools (bound to an attempt lease and fencing token), a chat tool call is bound
  * to the authenticated owner, the conversation, its single active turn and the conversation mode. Every call
  * re-reads all of them plus the owner's current repository permissions, so a revoked grant or a canceled turn
- * stops the next call. Nothing here can write: the catalog has no mutating tool.
+ * stops the next call. Integration tools come from the shared registry (src/agent/toolRegistry.ts) through
+ * tools.search/describe/call; a mutating one is never executed here — it becomes an operation the owner confirms.
  */
 export interface ChatBinding {
   userId: number;
@@ -77,7 +81,71 @@ function pickRepositories(ctx: ToolContext, requested: string[] | undefined) {
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… (${s.length - n} more chars)` : s);
 
+/** Run-bound registry tools (this run's changes, step history) have no meaning in a conversation. */
+const chatVisible = (name: string) => !name.startsWith("run.");
+
 const TOOLS: ToolDef[] = [
+  {
+    name: "tools.search",
+    group: "integrations",
+    description:
+      "Find platform integration tools (Kafka QC, Argo CD, Vault, Jira, SigNoz, Splunk, QC databases, Git hosting…) by keywords; shows availability and whether a tool changes state.",
+    usage: '{"query": "kafka publish topic"}',
+    args: z.object({ query: z.string().max(200).optional() }).strict(),
+    async run(a) {
+      await loadPersonalIntegrations();
+      return {
+        label: `tools "${cut(a.query ?? "", 40)}"`,
+        data: listTools(a.query, { mode: "coding" })
+          .filter((t) => chatVisible(t.name))
+          .slice(0, 20)
+          .map(({ score: _s, ...t }) => t),
+      };
+    },
+  },
+  {
+    name: "tools.describe",
+    group: "integrations",
+    description: "Full description and JSON input schema of one integration tool (read it before tools.call).",
+    usage: '{"name": "kafka.read_messages"}',
+    args: z.object({ name: z.string().min(1).max(100) }).strict(),
+    async run(a) {
+      if (!chatVisible(a.name)) throw new ChatToolDenied(`${a.name} is only available inside a workflow run`);
+      await loadPersonalIntegrations();
+      return { label: `tool ${a.name}`, data: describeTool(a.name) };
+    },
+  },
+  {
+    name: "tools.call",
+    group: "integrations",
+    description:
+      "Call one integration tool. Read-only tools run now. A tool that changes state (e.g. kafka.publish) does NOT run: it becomes an operation the user must confirm in the UI.",
+    usage: '{"name": "kafka.read_messages", "arguments": {"topic": "orders", "limit": 5}}',
+    args: z.object({ name: z.string().min(1).max(100), arguments: z.record(z.string(), z.unknown()).optional() }).strict(),
+    async run(a, ctx) {
+      if (!chatVisible(a.name)) throw new ChatToolDenied(`${a.name} is only available inside a workflow run`);
+      const tool = integrationTools().find((t) => t.name === a.name);
+      if (!tool) throw new ChatToolDenied(`unknown tool ${a.name} — use tools.search`);
+      await loadPersonalIntegrations();
+      if (!tool.readOnly)
+        return {
+          label: `operation ${a.name}`,
+          data: await proposeOperation(ctx.binding, a.name, a.arguments ?? {}),
+        };
+      await audit(ctx.binding.userId, "chat.integration.call", "chat_conversation", String(ctx.binding.conversationId), {
+        turn_id: ctx.binding.turnId,
+        tool: a.name,
+      });
+      const r = await callTool(a.name, a.arguments ?? {}, {
+        runId: null,
+        allowedRepositories: ctx.scoped.length ? ctx.scoped : ctx.readable,
+        mode: "analysis",
+        stepKey: `chat:${ctx.binding.conversationId}`,
+      });
+      if (!r.ok) throw new Error(r.error ?? `${a.name} failed`);
+      return { label: a.name, data: r.result };
+    },
+  },
   {
     name: "repo.list",
     group: "repo",

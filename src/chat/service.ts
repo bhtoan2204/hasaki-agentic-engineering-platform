@@ -19,6 +19,9 @@ import { readableRepositories } from "./tools.ts";
 import { buildDelegationPreview, DelegationRequest, executeDelegation } from "./delegation.ts";
 import { chatFailure } from "./failures.ts";
 import { fallbackTitle, scheduleTitleGeneration } from "./title.ts";
+import { decideOperation, operationsOf } from "./operations.ts";
+import { chatMemories, learnProcedure } from "./memory.ts";
+import { background } from "../workflow/background.ts";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body ?? {});
@@ -132,6 +135,7 @@ function publicTurn(t: Awaited<ReturnType<typeof chatRepository.listTurns>>[numb
     finished_at: t.finished_at,
     created_at: t.created_at,
     regenerates: t.regenerates,
+    client_message_id: t.client_message_id,
     draft: t.draft,
     trace: t.trace,
   };
@@ -230,6 +234,18 @@ export const chat = {
     const turns = (await chatRepository.listTurns(id, 50)).map(publicTurn);
     const active = await chatRepository.activeTurn(id);
     const delegations = await chatRepository.delegationsOf(id);
+    const operations = (await operationsOf(id, actor.id)).map((o) => ({
+      id: o.id,
+      turn_id: o.turn_id,
+      tool: o.tool,
+      arguments: o.arguments,
+      target: o.target,
+      status: o.status,
+      result: o.result,
+      error: o.error,
+      expires_at: o.expires_at,
+      created_at: o.created_at,
+    }));
     return {
       conversation: publicConversation(c),
       messages,
@@ -237,7 +253,18 @@ export const chat = {
       turns,
       active_turn: active ? publicTurn(active) : null,
       delegations,
+      operations,
     };
+  },
+
+  decideOperation(actor: Actor, id: number, decision: "confirm" | "reject") {
+    return decideOperation(actor, id, decision, (op) =>
+      background(`chat procedure ${op.id}`, () => learnProcedure(op)),
+    );
+  },
+
+  memories(actor: Actor) {
+    return chatMemories(actor.id);
   },
 
   async update(actor: Actor, id: number, body: unknown) {

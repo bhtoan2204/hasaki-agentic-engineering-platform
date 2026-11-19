@@ -4,11 +4,12 @@ import { redactSecrets } from "./redact.ts";
 import { cookiePairs } from "./curl.ts";
 
 /**
- * Kafka (QC) through kafbat Kafka UI — read-only: topics, consumer groups (lag), and message search.
+ * Kafka (QC) through kafbat Kafka UI: topics, consumer groups (lag), message search, and producing one message.
  *
  * Kafka UI logs in with Google OAuth2 and keeps a Spring session cookie (`SESSION`); the developer pastes the Cookie
  * header from their browser. Kafka UI runs with RBAC disabled, so that session could produce messages, delete topics
- * or reset offsets: this client therefore only ever sends GET requests (enforced in `get`), whatever the caller asks.
+ * or reset offsets: this client therefore only sends GET requests (enforced in `get`), plus the single produce
+ * request in `publishMessage`, which is limited to the configured QC allowlist (`kafka.publishAllow`).
  */
 
 const SETTING = "kafka_ui_cookie";
@@ -165,6 +166,80 @@ async function clusterName(cluster?: string): Promise<string> {
   return online[0].name;
 }
 const enc = encodeURIComponent;
+
+const PRODUCTION = /(^|[^a-z])(prod|production|live|prd)([^a-z]|$)/i;
+
+/** The cluster and topic a publish would target, or an error: QC allowlist only, production never. */
+export async function kafkaPublishTarget(topic: string, cluster?: string) {
+  const host = new URL(baseUrl()).hostname;
+  if (!/(^|[.-])qc([.-]|\d|$)/i.test(host) || PRODUCTION.test(host))
+    throw new Error(`publishing is refused: Kafka UI ${host} is not a QC environment`);
+  const allow = config.kafka.publishAllow ?? [];
+  if (!allow.length)
+    throw new Error("publishing is disabled: no QC topic is allowlisted (kafka.publishAllow)");
+  const c = cluster || config.kafka.cluster || (allow.length === 1 ? allow[0].cluster : "");
+  if (!c) throw new Error(`pass cluster: one of ${allow.map((a) => a.cluster).join(", ")}`);
+  if (PRODUCTION.test(c) || PRODUCTION.test(topic))
+    throw new Error(`publishing to production (${c}/${topic}) is never allowed from chat`);
+  const entry = allow.find((a) => a.cluster === c);
+  const ok = entry?.topics.some((t) =>
+    t.endsWith("*") ? topic.startsWith(t.slice(0, -1)) : t === topic,
+  );
+  if (!ok) throw new Error(`topic ${c}/${topic} is not in the QC publish allowlist`);
+  return { cluster: c, topic };
+}
+
+/**
+ * Produce one message (Kafka UI `sendTopicMessages`). Success means the broker accepted the event — not that any
+ * consumer processed it. The idempotency key travels as a header so consumers and audits can correlate retries.
+ */
+export async function publishMessage(m: {
+  topic: string;
+  cluster?: string;
+  key?: string | null;
+  value: string;
+  headers?: Record<string, string>;
+  partition?: number;
+  idempotencyKey: string;
+}) {
+  const target = await kafkaPublishTarget(m.topic, m.cluster);
+  const cookie = requireCookie();
+  const res = await fetch(
+    `${baseUrl()}/api/clusters/${enc(target.cluster)}/topics/${enc(target.topic)}/messages`,
+    {
+      method: "POST",
+      redirect: "manual",
+      headers: { Cookie: cookie, Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        partition: m.partition ?? 0,
+        key: m.key ?? null,
+        value: m.value,
+        headers: { ...m.headers, "x-idempotency-key": m.idempotencyKey },
+        keySerde: "String",
+        valueSerde: "String",
+      }),
+      signal: AbortSignal.timeout(config.kafka.timeoutSeconds * 1000),
+    },
+  );
+  if (res.status === 401 || (res.status >= 300 && res.status < 400)) {
+    if (login.current && cookie === login.current.cookie) login.current.valid = false;
+    throw new Error(
+      "phiên Kafka UI hết hạn hoặc không hợp lệ — dán cookie mới ở trang Integrations",
+    );
+  }
+  if (!res.ok)
+    throw new Error(`Kafka UI ${res.status}: ${redactSecrets((await res.text()).slice(0, 300))}`);
+  return {
+    published: true,
+    cluster: target.cluster,
+    topic: target.topic,
+    partition: m.partition ?? 0,
+    key: m.key ?? null,
+    idempotency_key: m.idempotencyKey,
+    downstream_verified: false,
+    note: "Kafka accepted the event. Whether the consumer processed it (e.g. the order exists) is not verified: check consumer lag, the database or logs.",
+  };
+}
 
 export async function listTopics(query?: string, cluster?: string) {
   const c = await clusterName(cluster);

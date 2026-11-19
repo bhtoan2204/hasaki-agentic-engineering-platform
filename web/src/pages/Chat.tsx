@@ -24,6 +24,7 @@ import { dialog } from "../dialog/index.ts";
 import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { applyChatEvent, seedFromTurn, type LiveStatus, type LiveTurn, type TraceItem } from "./chatStream.ts";
+import { markPending, reconcilePending, type PendingMessage } from "./chatOptimistic.ts";
 import "./Chat.css";
 
 type Mode = "AUTO" | "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
@@ -116,7 +117,22 @@ type Turn = {
   created_at: string;
   draft?: string;
   trace?: TraceItem[];
+  client_message_id?: string;
 };
+
+type Operation = {
+  id: number;
+  turn_id: number | null;
+  tool: string;
+  arguments: Record<string, unknown>;
+  target: Record<string, unknown>;
+  status: string;
+  result?: unknown;
+  error?: string | null;
+  expires_at: string;
+};
+
+type Memory = { key: string; title: string; enabled: boolean; content: string; metadata?: { memory?: { kind?: string; count?: number } } };
 
 type Detail = {
   conversation: Conversation;
@@ -125,6 +141,7 @@ type Detail = {
   turns: Turn[];
   active_turn: Turn | null;
   delegations: Array<{ id: number; work_item_id: number | null; run_id: number | null; work_item_code?: string }>;
+  operations?: Operation[];
 };
 
 type ProviderRow = {
@@ -177,6 +194,37 @@ function Reasoning({ trace, summary, live }: { trace: TraceItem[]; summary: stri
   );
 }
 
+function OperationCard({ op, onDecide }: { op: Operation; onDecide: (id: number, d: "confirm" | "reject") => void }) {
+  const { t } = useI18n();
+  const target = Object.values(op.target ?? {}).filter(Boolean).join(" / ");
+  return (
+    <div className={`chat-operation is-${op.status}`} role={op.status === "pending" ? "alert" : undefined}>
+      <div className="chat-operation-head">
+        <strong>{t("chat.op.title", { id: op.id, tool: op.tool })}</strong>
+        <span className="chat-meta-pill">{t(`chat.op.status.${op.status}`)}</span>
+      </div>
+      {target && <div className="muted">{target}</div>}
+      <details>
+        <summary>{t("chat.op.payload")}</summary>
+        <pre className="chat-operation-json">{JSON.stringify(op.arguments, null, 2)}</pre>
+      </details>
+      {op.status === "succeeded" && <div className="muted">{t("chat.op.notVerified")}</div>}
+      {op.error && <div className="chat-operation-error">{op.error}</div>}
+      {op.status === "pending" && (
+        <div className="chat-failure-actions">
+          <button className="sm" onClick={() => onDecide(op.id, "confirm")}>
+            {t("chat.op.confirm")}
+          </button>
+          <button className="ghost sm" onClick={() => onDecide(op.id, "reject")}>
+            {t("chat.op.reject")}
+          </button>
+          <span className="muted">{t("chat.op.expires", { at: new Date(op.expires_at).toLocaleTimeString() })}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function liveLabel(status: LiveStatus, t: T) {
   return status ? t(`chat.status.${status}`) : "";
 }
@@ -212,6 +260,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const [busy, setBusy] = useState(false);
   const [liveNote, setLiveNote] = useState("");
   const [live, setLive] = useState<LiveTurn | null>(null);
+  const [pending, setPending] = useState<PendingMessage[]>([]);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const memories = useApi<Memory[]>(memoryOpen ? "/api/chat/memory" : null);
   const [preview, setPreview] = useState<{
     hash: string;
     title: string;
@@ -294,6 +345,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
           kind === "turn.failed" ||
           kind === "turn.canceled" ||
           kind === "response.partial" ||
+          kind === "operation.updated" ||
           kind === "conversation.updated"
         ) {
           setLiveNote("");
@@ -336,6 +388,32 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     }
     return m;
   }, [detail?.tool_calls]);
+
+  const visiblePending = useMemo(
+    () => reconcilePending(pending, activeId, detail?.turns),
+    [pending, activeId, detail?.turns],
+  );
+  useEffect(() => {
+    if (!detail) return;
+    const id = detail.conversation.id;
+    setPending((p) => {
+      const keep = reconcilePending(p, id, detail.turns);
+      const next = p.filter((x) => x.conversationId !== id || keep.includes(x));
+      return next.length === p.length ? p : next;
+    });
+  }, [detail]);
+  const waiting = !!detail?.active_turn || visiblePending.some((p) => p.status === "sending");
+  const opsByTurn = useMemo(() => {
+    const m = new Map<number | null, Operation[]>();
+    const answered = new Set(
+      (detail?.messages ?? []).filter((x) => x.role === "assistant" && x.turn_id).map((x) => x.turn_id),
+    );
+    for (const op of detail?.operations ?? []) {
+      const k = op.turn_id != null && answered.has(op.turn_id) ? op.turn_id : null;
+      m.set(k, [...(m.get(k) ?? []), op]);
+    }
+    return m;
+  }, [detail?.operations, detail?.messages]);
 
   const providerOptions = useMemo(() => {
     const rows = providers.data ?? [];
@@ -388,28 +466,56 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     repositories: repoScope,
   });
 
-  const send = async () => {
-    if (!activeId || !draft.trim() || busy || detail?.active_turn) return;
+  const deliver = async (conversationId: number, cid: string, content: string) => {
     setBusy(true);
+    setLiveNote(t("chat.live.thinking"));
+    try {
+      await api(`/api/chat/conversations/${conversationId}/messages`, {
+        content,
+        client_message_id: cid,
+        ...selectionBody(),
+      });
+      await loadDetail(conversationId);
+      void list.reloadFresh();
+    } catch (e) {
+      setPending((p) => markPending(p, cid, { status: "failed", error: (e as Error).message }));
+      setLiveNote("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const send = () => {
+    if (!activeId || !draft.trim() || busy || detail?.active_turn) return;
     const content = draft.trim();
+    const cid = clientMessageId();
+    // Rendered before the request: the server reconciles by this same client_message_id.
+    setPending((p) => [
+      ...p,
+      { cid, conversationId: activeId, content, status: "sending", at: new Date().toISOString() },
+    ]);
     setDraft("");
     stickBottom.current = true;
-    setLiveNote(t("chat.live.thinking"));
-    const r = await act(() =>
-      api(`/api/chat/conversations/${activeId}/messages`, {
-        content,
-        client_message_id: clientMessageId(),
-        ...selectionBody(),
-      }),
-    );
-    setBusy(false);
-    if (r) {
-      await loadDetail(activeId);
-      void list.reloadFresh();
-    } else {
-      setDraft(content);
-      setLiveNote("");
+    void deliver(activeId, cid, content);
+  };
+
+  const retrySend = (m: PendingMessage) => {
+    setPending((p) => markPending(p, m.cid, { status: "sending", error: undefined }));
+    void deliver(m.conversationId, m.cid, m.content);
+  };
+
+  const decideOperation = async (id: number, decision: "confirm" | "reject") => {
+    if (await act(() => api(`/api/chat/operations/${id}/${decision}`, {}))) {
+      if (activeId) await loadDetail(activeId);
     }
+  };
+
+  const updateMemory = async (key: string, body: Record<string, unknown>) => {
+    if (await act(() => api(`/api/knowledge/${key}`, body))) void memories.reloadFresh();
+  };
+  const deleteMemory = async (key: string) => {
+    if (await act(() => api(`/api/knowledge/${key}/delete`, { reason: "removed from chat memory" })))
+      void memories.reloadFresh();
   };
 
   const cancel = async () => {
@@ -685,6 +791,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
             {sideOpen ? <ChevronLeft size={16} /> : <PanelLeft size={16} />}
           </button>
           <div className="chat-title">{detail?.conversation.title || t("chat.untitled")}</div>
+          <button className="ghost sm" onClick={() => setMemoryOpen(true)}>
+            {t("chat.memory")}
+          </button>
           {detail && (
             <>
               <button
@@ -810,6 +919,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                           </div>
                         )}
                       </article>
+                      {m.role === "assistant" &&
+                        m.turn_id != null &&
+                        (opsByTurn.get(m.turn_id) ?? []).map((op) => (
+                          <OperationCard key={op.id} op={op} onDecide={(id, d) => void decideOperation(id, d)} />
+                        ))}
                       {m.role === "user" && turn?.status === "failed" && turn.failure && (
                         <div className="chat-failure" role="alert">
                           <AlertTriangle size={16} />
@@ -852,13 +966,48 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   );
                 })}
 
-                {detail.active_turn && (
+                {(opsByTurn.get(null) ?? []).map((op) => (
+                  <OperationCard key={op.id} op={op} onDecide={(id, d) => void decideOperation(id, d)} />
+                ))}
+
+                {visiblePending.map((p) => (
+                  <div key={p.cid} className="chat-block">
+                    <article className={`chat-bubble is-user is-pending${p.status === "failed" ? " is-failed" : ""}`}>
+                      <div className="chat-bubble-meta">
+                        <span>{t("chat.role.user")}</span>
+                        <span>{p.status === "sending" ? t("chat.sending") : t("chat.sendFailed")}</span>
+                      </div>
+                      <div style={{ whiteSpace: "pre-wrap" }}>{p.content}</div>
+                    </article>
+                    {p.status === "failed" && (
+                      <div className="chat-failure" role="alert">
+                        <AlertTriangle size={16} />
+                        <div>
+                          <div>{p.error}</div>
+                          <div className="chat-failure-actions">
+                            <button className="sm" onClick={() => retrySend(p)} disabled={busy || !!detail.active_turn}>
+                              {t("chat.retry")}
+                            </button>
+                            <button
+                              className="ghost sm"
+                              onClick={() => setPending((all) => all.filter((x) => x.cid !== p.cid))}
+                            >
+                              {t("chat.discard")}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {waiting && (
                   <div className="chat-block">
                     <article className="chat-bubble is-assistant is-streaming" aria-busy="true">
                       <div className="chat-bubble-meta">
                         <span>{t("chat.role.assistant")}</span>
                         <span className="chat-meta-pill">
-                          {[detail.active_turn.provider, detail.active_turn.model, detail.active_turn.route]
+                          {[detail.active_turn?.provider, detail.active_turn?.model, detail.active_turn?.route]
                             .filter(Boolean)
                             .join(" · ") || "…"}
                         </span>
@@ -870,7 +1019,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                           summary={
                             liveLabel(live?.status ?? null, t) ||
                             liveNote ||
-                            phaseLabel(detail.active_turn.phase, t)
+                            phaseLabel(detail.active_turn?.phase, t)
                           }
                         />
                       </div>
@@ -878,7 +1027,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     </article>
                   </div>
                 )}
-                {!detail.active_turn && liveNote && (
+                {!waiting && liveNote && (
                   <div className="chat-status" role="status">
                     <span className="dot" />
                     <div>{liveNote}</div>
@@ -1033,6 +1182,56 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
           </>
         )}
       </section>
+
+      {memoryOpen && (
+        <div className="chat-modal" role="dialog" aria-modal="true" aria-label={t("chat.memory")}>
+          <div className="chat-modal-card">
+            <h3>{t("chat.memory")}</h3>
+            <p className="muted">{t("chat.memory.hint")}</p>
+            {memories.error && <ErrorBox error={memories.error} />}
+            {!memories.data && !memories.error && <Loading />}
+            {memories.data?.length === 0 && <p className="muted">{t("chat.memory.empty")}</p>}
+            <div className="chat-memory-list">
+              {(memories.data ?? []).map((m) => (
+                <div key={m.key} className={`chat-memory${m.enabled ? "" : " is-disabled"}`}>
+                  <div className="chat-memory-head">
+                    <span className="chat-meta-pill">{m.metadata?.memory?.kind ?? "memory"}</span>
+                    {(m.metadata?.memory?.count ?? 1) > 1 && (
+                      <span className="muted">×{m.metadata?.memory?.count}</span>
+                    )}
+                  </div>
+                  <div>{m.content}</div>
+                  <div className="chat-failure-actions">
+                    <button className="ghost xs" onClick={() => void updateMemory(m.key, { enabled: !m.enabled })}>
+                      {m.enabled ? t("chat.memory.disable") : t("chat.memory.enable")}
+                    </button>
+                    <button
+                      className="ghost xs"
+                      onClick={async () => {
+                        const content = await dialog.prompt({
+                          title: t("chat.memory.edit"),
+                          defaultValue: m.content,
+                        });
+                        if (content && content.trim() !== m.content) void updateMemory(m.key, { content: content.trim() });
+                      }}
+                    >
+                      {t("chat.memory.edit")}
+                    </button>
+                    <button className="ghost xs danger" onClick={() => void deleteMemory(m.key)}>
+                      {t("chat.memory.delete")}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="chat-failure-actions">
+              <button className="ghost sm" onClick={() => setMemoryOpen(false)}>
+                {t("common.close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {preview && (
         <div className="chat-modal" role="dialog" aria-modal="true">
