@@ -28,6 +28,14 @@ test("a git failure inside the verification environment is a platform error, not
     platformEnvironmentError(128, out)!,
     /could not read the worktree's git metadata.*not a code failure/,
   );
+  assert.match(
+    platformEnvironmentError(
+      128,
+      "fatal: gitfile does not point to a valid repository: /data/repositories/x/worktrees/8/.git\n",
+    )!,
+    /could not read the worktree's git metadata.*not a code failure/,
+    "Git ≥2.56 rewords the same broken-gitfile case",
+  );
   assert.equal(platformEnvironmentError(1, out), null, "only git's own exit code");
   assert.equal(
     platformEnvironmentError(128, "fatal: bad revision 'origin/main...HEAD'\n"),
@@ -69,7 +77,11 @@ test(
       128,
       "reproduces the reported failure without the metadata mounts",
     );
-    assert.match(without.stderr, /not a git repository/);
+    // Git ≤2.55: "not a git repository"; Git ≥2.56: "gitfile does not point to a valid repository".
+    assert.match(
+      without.stderr,
+      /not a git repository|gitfile does not point to a valid repository/,
+    );
 
     const mounts = await gitMounts([worktree]);
     assert.equal(mounts.length, 1);

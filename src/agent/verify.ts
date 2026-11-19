@@ -261,12 +261,17 @@ export function environmentUnavailable(code: number | null, output: string): str
 }
 
 /**
- * The verification process could not use the worktree's git metadata (exit 128, "not a git repository"): the sandbox or
- * workspace is broken, not the change. Reported as an error — the agent is never asked to repair it.
+ * The verification process could not use the worktree's git metadata (exit 128): the sandbox or workspace is broken,
+ * not the change. Reported as an error — the agent is never asked to repair it.
+ *
+ * Git ≤2.55 prints `fatal: not a git repository: …` when a worktree `.git` gitfile points at a missing/masked
+ * directory; Git ≥2.56 prints `fatal: gitfile does not point to a valid repository: …` for the same case.
  */
 export function platformEnvironmentError(code: number | null, output: string): string | null {
   if (code !== 128) return null;
-  const line = output.split("\n").find((l) => /^fatal: not a git repository/.test(l.trim()));
+  const line = output.split("\n").find((l) =>
+    /^fatal: (?:not a git repository|gitfile does not point to a valid repository)/.test(l.trim()),
+  );
   return line
     ? `the verification environment could not read the worktree's git metadata (${line.trim().slice(0, 300)}) — a platform/workspace problem, not a code failure`
     : null;
