@@ -15,6 +15,19 @@ export interface AgentMetrics {
     cache_creation: number | null;
     reasoning_output?: number | null;
   } | null;
+  /**
+   * Context occupancy of the main session as the provider reported it on its latest / largest API call (uncached
+   * input + cache reads + cache writes of that one call). Absent when the provider does not report per-call usage.
+   */
+  context_window?: { last_tokens: number; peak_tokens: number };
+  /** Sessions the platform compacted at a safe boundary during this attempt (provider-neutral reconstruction). */
+  compactions?: Array<{
+    boundary: string;
+    round?: number;
+    pressure: number | null;
+    occupancy: number | null;
+    window: number;
+  }>;
   tool_calls: Record<string, number>;
   tool_errors: number;
   denied: Array<{ tool: string; reason: string; subagent?: string }>;
@@ -139,11 +152,39 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
     seen.add(msg.uuid);
     seenMessages.set(m, seen);
   }
-  if (msg.type === "system" && msg.subtype === "init") {
+  if (msg.type === "system" && msg.subtype === "compact_boundary") {
+    // The provider compacted its own session (auto or native mode): measured, not assumed.
+    m.compactions = [
+      ...(m.compactions ?? []),
+      {
+        boundary: `native:${msg.compact_metadata?.trigger ?? "auto"}`,
+        pressure: null,
+        occupancy: validMetric(msg.compact_metadata?.pre_tokens)
+          ? msg.compact_metadata.pre_tokens
+          : null,
+        window: 0,
+      },
+    ];
+  } else if (msg.type === "system" && msg.subtype === "init") {
     m.sessions++;
     if (typeof msg.model === "string" && msg.model) m.model = msg.model;
   } else if (msg.type === "assistant") {
     const usage = msg.message?.usage;
+    // Subagents have their own context; only the main session's calls measure its occupancy.
+    if (usage && !msg.parent_tool_use_id) {
+      const occupied = [
+        usage.input_tokens,
+        usage.cache_read_input_tokens,
+        usage.cache_creation_input_tokens,
+      ]
+        .filter(validMetric)
+        .reduce((n: number, v: number) => n + v, 0);
+      if (occupied > 0)
+        m.context_window = {
+          last_tokens: occupied,
+          peak_tokens: Math.max(occupied, m.context_window?.peak_tokens ?? 0),
+        };
+    }
     if (usage && liveRuntime.getStore()) {
       const sum = Object.values(usage)
         .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0)

@@ -7,7 +7,8 @@ import { knowledge } from "../src/knowledge/service.ts";
 import { chat } from "../src/chat/service.ts";
 import { setChatProviders } from "../src/chat/runtime.ts";
 import { setChatHealthProbe } from "../src/chat/admission.ts";
-import { latestDelivery, recordDelivery, sessionContextTokens } from "../src/context/delivery.ts";
+import { latestDelivery, recordDelivery } from "../src/context/delivery.ts";
+import { attemptOccupancy } from "../src/context/compaction.ts";
 import type { Actor } from "../src/authz/access.ts";
 import type { AgentProvider } from "../src/agent/provider.ts";
 import type { CompletionRunner } from "../src/agent/complete.ts";
@@ -197,5 +198,5 @@ test("the delivery manifest is durable per provider session and a delta extends 
     undefined,
     "sessions are per provider",
   );
-  assert.equal(await sessionContextTokens(null), null);
+  assert.equal(await attemptOccupancy(null), null);
 });

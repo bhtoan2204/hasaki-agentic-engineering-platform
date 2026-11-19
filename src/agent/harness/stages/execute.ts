@@ -29,12 +29,14 @@ import {
   developerDecisions,
   untrusted,
 } from "../../stepPrompt.ts";
+import { latestDelivery, planContextDelivery, recordDelivery } from "../../../context/delivery.ts";
 import {
-  latestDelivery,
-  planContextDelivery,
-  recordDelivery,
-  sessionContextTokens,
-} from "../../../context/delivery.ts";
+  attemptArtifacts,
+  attemptContinuity,
+  attemptOccupancy,
+  compactionDecision,
+  sessionStateBlock,
+} from "../../../context/compaction.ts";
 import { hashOf } from "../../../workflow/definitions.ts";
 import { normalizeProviderFailure, safeDiagnostics } from "../../telemetry.ts";
 import { integrationCatalog } from "../../toolRegistry.ts";
@@ -420,23 +422,51 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
   const previousDelivery = resume
     ? ((await latestDelivery(provider, resume.sessionId).catch(() => null)) ?? null)
     : null;
-  const history = resume ? await sessionContextTokens(resume.fromAttempt).catch(() => null) : null;
-  const historyLimit = config.agent.resumeMaxContextTokens ?? 150_000;
+  // Adaptive compaction at this safe boundary: a session already under context pressure is reconstructed, not resumed.
+  const pressure = resume
+    ? compactionDecision({
+        provider,
+        model: routed.model,
+        occupancy: await attemptOccupancy(resume.fromAttempt).catch(() => null),
+      })
+    : null;
+  const workspaceHash = ws.length ? hashOf(await worktreeState(ws)) : undefined;
   const delivery = !resume
     ? null
-    : history != null && history > historyLimit
-      ? {
-          mode: "fresh_session" as const,
-          reason: `session history is too large (${history} provider-reported context tokens > ${historyLimit})`,
-          removed: [] as string[],
-        }
+    : pressure?.compact
+      ? { mode: "fresh_session" as const, reason: pressure.reason, removed: [] as string[] }
       : config.agent.deltaContext === false
         ? { mode: "full" as const, reason: "delta context disabled" }
         : planContextDelivery(previousDelivery, {
             pack: ctx.context.contextPack,
             systemHash,
             decisionsHash,
+            workspaceHash,
           });
+  const compactedState =
+    resume && pressure?.compact
+      ? sessionStateBlock({
+          reason: pressure.reason,
+          worktree: ws.length ? await worktreeState(ws) : "",
+          continuity: await attemptContinuity(resume.fromAttempt).catch(() => null),
+          artifacts: resume.fromAttempt
+            ? await attemptArtifacts(resume.fromAttempt).catch(() => [])
+            : [],
+          previousAttemptId: resume.fromAttempt ?? null,
+        })
+      : null;
+  if (pressure?.compact)
+    await ctx
+      .recordMetrics({
+        compaction: {
+          boundary: "resume",
+          mode: "reconstruct",
+          pressure: pressure.pressure,
+          occupancy: pressure.occupancy,
+          window: pressure.window,
+        },
+      })
+      .catch(() => {});
   if (resume && delivery?.mode === "fresh_session")
     await ctx.log(
       "system",
@@ -537,7 +567,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
               ctx.context.fileRefs,
               extras,
               ctx.context.contextPack,
-            )
+            ) + (compactedState ? `\n\n${compactedState}` : "")
           : freshPrompt(),
       );
     }
@@ -569,6 +599,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
         pack: ctx.context.contextPack,
         mode: deliveryMode,
         previous: previousDelivery,
+        workspaceHash,
       }).catch((e) => console.error("context delivery record:", (e as Error).message));
   }
 

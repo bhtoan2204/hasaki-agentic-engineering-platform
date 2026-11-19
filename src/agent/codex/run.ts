@@ -1,4 +1,5 @@
 import { agentEnvironment } from "../environment.ts";
+import { nativeCompactionThreshold } from "../../context/compaction.ts";
 import { execution } from "../../auth/execution.ts";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -361,6 +362,8 @@ export function codexArgs(inv: CodexInvocation): string[] {
   );
   if (inv.model) cfg.push(["model", inv.model]);
   if (inv.effort) cfg.push(["model_reasoning_effort", inv.effort]);
+  const native = nativeCompactionThreshold("codex", inv.model);
+  if (native) cfg.push(["model_auto_compact_token_limit", native.tokens]);
   const flags = [
     "--json",
     "--strict-config",

@@ -40,9 +40,14 @@ async function telemetry(days: number) {
     retries: number | null;
     wall_duration_ms: number | null;
     ok: boolean;
+    peak_occupancy: number | null;
+    compactions: number;
   }>(
     pool,
-    `SELECT r.profile, t.provider, (a.metrics ? 'context_delivery') AS delta, t.input_tokens, t.cache_read_tokens,
+    `SELECT r.profile, t.provider, (a.metrics ? 'context_delivery') AS delta,
+            (a.metrics->'context_window'->>'peak_tokens')::bigint AS peak_occupancy,
+            COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(a.metrics->'compactions') = 'array' THEN a.metrics->'compactions' END), 0) AS compactions,
+            t.input_tokens, t.cache_read_tokens,
             t.cache_creation_tokens, t.output_tokens,
             (SELECT sum(v::numeric) FROM jsonb_each_text(CASE WHEN jsonb_typeof(t.tool_calls) = 'object' THEN t.tool_calls ELSE '{}'::jsonb END) x(k, v))::int AS tool_calls,
             t.retries, t.wall_duration_ms,
@@ -84,6 +89,13 @@ async function telemetry(days: number) {
       median_tool_calls: median(rows.map((r) => Number(r.tool_calls ?? NaN))),
       median_wall_ms: median(rows.map((r) => Number(r.wall_duration_ms ?? NaN))),
       retries: rows.reduce((n, r) => n + Number(r.retries ?? 0), 0),
+      // Context pressure and compaction outcome (retention/recovery: success with vs without a compaction).
+      median_peak_occupancy: median(rows.map((r) => Number(r.peak_occupancy ?? NaN))),
+      compacted_attempts: rows.filter((r) => r.compactions > 0).length,
+      success_rate_compacted: (() => {
+        const c = rows.filter((r) => r.compactions > 0);
+        return c.length ? c.filter((r) => r.ok).length / c.length : null;
+      })(),
       success_rate: rows.length ? rows.filter((r) => r.ok).length / rows.length : null,
     };
   });

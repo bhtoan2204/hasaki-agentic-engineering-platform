@@ -258,11 +258,15 @@ export interface Config {
   agent: {
     /** Models no path may use (case-insensitive substrings of the model id). Default: ["fable"]. */
     blockedModels?: string[];
+    /** Model context window (tokens) for compaction pressure; per-provider overrides. Default 200000. */
+    contextWindowTokens?: number;
+    contextWindows?: Record<string, number>;
     /**
-     * A provider session whose last turn already carried more context than this (provider-reported input + cache
-     * reads) is not resumed: a fresh session is rebuilt from the durable checkpoint instead. Default 150000.
+     * Adaptive session compaction at safe boundaries (resume, repair rounds): above `pressure` (share of the context
+     * window, provider-reported occupancy) a session is reconstructed from durable state ("reconstruct", default),
+     * compacted by the provider when it supports it ("native"), or left alone ("off"). Default 0.6.
      */
-    resumeMaxContextTokens?: number;
+    compaction?: { mode?: "reconstruct" | "native" | "off"; pressure?: number };
     /**
      * Send only what is new: delta context to resumed sessions, kept chat completion sessions, compacted earlier tool
      * results and intent-focused catalogs. false restores full resends (baseline for A/B benchmarks). Default true.

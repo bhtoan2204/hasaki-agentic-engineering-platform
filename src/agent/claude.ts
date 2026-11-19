@@ -1,4 +1,5 @@
 import { refreshToolProgress } from "./toolRuntime.ts";
+import { nativeCompactionThreshold } from "../context/compaction.ts";
 import { isModelBlocked } from "./modelPolicy.ts";
 import { liveRuntime } from "../eval/liveRuntime.ts";
 import { liveClaudeSandbox } from "../eval/liveSandbox.ts";
@@ -522,12 +523,17 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
         readOnly: (ctx.context.repoPaths ?? []).map((r) => r.path),
       })
     : null;
+  const nativeCompaction = nativeCompactionThreshold("claude", routed.model);
   try {
     for await (const msg of query({
       prompt: input(),
       options: {
         cwd,
-        env: agentEnvironment(process.env, "claude"),
+        env: {
+          ...agentEnvironment(process.env, "claude"),
+          // Native compaction mode: Claude Code's own auto-compaction triggers at the platform's pressure threshold.
+          ...(nativeCompaction ? { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(nativeCompaction.percent) } : {}),
+        },
         ...(sandbox
           ? {
               spawnClaudeCodeProcess: (o: { command: string; args: string[]; env: Record<string, string | undefined>; signal?: AbortSignal }) =>

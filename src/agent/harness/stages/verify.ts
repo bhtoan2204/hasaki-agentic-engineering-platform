@@ -11,7 +11,12 @@ import { goBaseline, knownBaseFailures } from "../../../workflow/executors/basel
 import { runVerificationCommand as runCommand } from "../../../workflow/executors/builtin.ts";
 import { collectMicroEvidence } from "../../../workflow/microEvidence.ts";
 import { TEST_COMMAND } from "../../../workflow/templates.ts";
-import { SINCE_HUMAN_REEXECUTE } from "../../claude.ts";
+import { SINCE_HUMAN_REEXECUTE, worktreeState } from "../../claude.ts";
+import {
+  attemptArtifacts,
+  compactionDecision,
+  sessionStateBlock,
+} from "../../../context/compaction.ts";
 import { blocksRebuild, failedTurn } from "../failure.ts";
 import { executionWorkspaces } from "../../implementationEvidence.ts";
 import {
@@ -387,16 +392,62 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         )?.session_id;
         const msg = repairPrompt(failed, n, vcfg, outputLocale(ctx.run));
         s.submitted = undefined;
-        let r: Awaited<ReturnType<typeof run>> | null = sid
-          ? await run(msg, sid).catch((e) => {
-              if (ctx.signal.aborted) throw e;
-              return {
-                isError: true,
-                text: (e as Error).message,
-                assistantTurns: 0,
-              };
-            })
-          : null;
+        // Every repair round re-reads the whole session; under context pressure, continue in a fresh session
+        // reconstructed from platform state (pack + workspace + this verification) instead of growing it further.
+        const pressure = compactionDecision({
+          provider,
+          model: s.routed.model,
+          occupancy: metrics.context_window?.last_tokens,
+        });
+        let compacted: Awaited<ReturnType<typeof run>> | null = null;
+        if (sid && pressure.compact) {
+          await q(
+            pool,
+            "UPDATE agent_sessions SET resumable = false WHERE session_id = $1 AND provider = $2",
+            [sid, provider],
+          );
+          await ctx.log(
+            "system",
+            `repair ${n}: compacting the ${provider} session (${pressure.reason}); continuing in a fresh session reconstructed from platform state`,
+            { provider, compaction: pressure },
+          );
+          metrics.compactions = [
+            ...(metrics.compactions ?? []),
+            {
+              boundary: "repair",
+              round: n,
+              pressure: pressure.pressure,
+              occupancy: pressure.occupancy,
+              window: pressure.window,
+            },
+          ];
+          const state = sessionStateBlock({
+            reason: pressure.reason,
+            worktree: await worktreeState(ws),
+            verification: failed.repos.map((x) => ({
+              repo: x.repo,
+              status: x.status,
+              note: x.note,
+              regressions: x.regressions,
+              excerpt: x.excerpt,
+            })),
+            artifacts: await attemptArtifacts(ctx.attempt.id).catch(() => []),
+            previousAttemptId: ctx.attempt.id,
+          });
+          compacted = await run(`${freshPrompt()}\n\n${state}\n\n${msg}`);
+        }
+        let r: Awaited<ReturnType<typeof run>> | null = compacted
+          ? compacted
+          : sid
+            ? await run(msg, sid).catch((e) => {
+                if (ctx.signal.aborted) throw e;
+                return {
+                  isError: true,
+                  text: (e as Error).message,
+                  assistantTurns: 0,
+                };
+              })
+            : null;
         // Session gone: rebuild the context from durable inputs (same prompt as a fresh attempt) plus the diagnostics.
         if (!r || (r.isError && r.assistantTurns === 0 && !blocksRebuild(r.failure))) {
           if (sid)

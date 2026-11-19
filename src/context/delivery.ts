@@ -41,16 +41,26 @@ export const entryHashes = (pack: ContextPack | undefined) =>
 /** A knowledge entry id carries its version (knowledge:12:v3); a new version is a change, not a removal. */
 const baseId = (id: string) => id.replace(/:v\d+$/, "");
 
+/** Pseudo-entry recording the workspace revision the session's code context was taken from. */
+export const WORKSPACE_KEY = "$workspace";
+
 export function planContextDelivery(
   manifest: DeliveryManifest | null,
-  current: { pack: ContextPack | undefined; systemHash: string; decisionsHash: string },
+  current: {
+    pack: ContextPack | undefined;
+    systemHash: string;
+    decisionsHash: string;
+    workspaceHash?: string;
+  },
 ): DeliveryPlan {
   if (!manifest) return { mode: "full", reason: "no delivery record for this session" };
   if (manifest.system_hash !== current.systemHash)
     return { mode: "full", reason: "system prompt changed (policy, tools or skills)" };
   const now = entryHashes(current.pack);
   const present = new Set(Object.keys(now).map(baseId));
-  const removed = Object.keys(manifest.entries).filter((id) => !present.has(baseId(id)));
+  const removed = Object.keys(manifest.entries).filter(
+    (id) => id !== WORKSPACE_KEY && !present.has(baseId(id)),
+  );
   const sensitive = removed.filter((id) => SENSITIVE_SECTIONS.includes(sectionOf(id)));
   if (sensitive.length)
     return {
@@ -58,8 +68,15 @@ export function planContextDelivery(
       reason: "delivered context is no longer authorized or in scope",
       removed: sensitive,
     };
-  const send = Object.keys(now).filter((id) => manifest.entries[id] !== now[id]);
-  const unchanged = Object.keys(now).filter((id) => manifest.entries[id] === now[id]);
+  // The workspace moved on since the session saw the code context: code entries are stale and are resent.
+  const workspaceMoved =
+    !!current.workspaceHash &&
+    !!manifest.entries[WORKSPACE_KEY] &&
+    manifest.entries[WORKSPACE_KEY] !== current.workspaceHash;
+  const send = Object.keys(now).filter(
+    (id) => manifest.entries[id] !== now[id] || (workspaceMoved && sectionOf(id) === "code"),
+  );
+  const unchanged = Object.keys(now).filter((id) => !send.includes(id));
   return {
     mode: "delta",
     send,
@@ -99,13 +116,15 @@ export async function recordDelivery(
     pack: ContextPack | undefined;
     mode: "full" | "delta";
     previous: DeliveryManifest | null;
+    workspaceHash?: string;
   },
   db: Db = pool,
 ) {
-  const entries =
-    x.mode === "delta" && x.previous
-      ? { ...x.previous.entries, ...entryHashes(x.pack) }
-      : entryHashes(x.pack);
+  const entries = {
+    ...(x.mode === "delta" && x.previous ? x.previous.entries : {}),
+    ...entryHashes(x.pack),
+    ...(x.workspaceHash ? { [WORKSPACE_KEY]: x.workspaceHash } : {}),
+  };
   await q(
     db,
     `INSERT INTO agent_context_deliveries (provider, session_id, attempt_id, system_hash, decisions_hash, entries, mode)
@@ -120,20 +139,4 @@ export async function recordDelivery(
       x.mode,
     ],
   );
-}
-
-/**
- * Semantic compaction point: the provider-reported context of the session's last turn (uncached input + cache reads).
- * Above the limit the session is rebuilt from the checkpoint (notes, answers, pack) instead of growing further.
- * Unknown usage is not treated as large.
- */
-export async function sessionContextTokens(attemptId: number | null | undefined, db: Db = pool) {
-  if (!attemptId) return null;
-  const row = await one<{ input: string | null; cache_read: string | null }>(
-    db,
-    "SELECT metrics->'tokens'->>'input' AS input, metrics->'tokens'->>'cache_read' AS cache_read FROM workflow_step_attempts WHERE id = $1",
-    [attemptId],
-  );
-  if (row?.input == null) return null;
-  return Number(row.input) + Number(row.cache_read ?? 0);
 }
