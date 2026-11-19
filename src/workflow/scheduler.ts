@@ -82,6 +82,20 @@ export async function purgeDebugEventsThrottled(now = Date.now()) {
   return purgeDebugEvents(Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays);
 }
 
+const reconcileTasks: Array<() => Promise<unknown>> = [];
+/**
+ * Extra periodic work run on the scheduler's existing reconcile tick (no new timer). Each task is single-flight: a tick
+ * that finds the previous call still running skips it.
+ */
+export function registerReconcileTask(task: () => Promise<unknown>) {
+  let running: Promise<unknown> | null = null;
+  reconcileTasks.push(() => {
+    if (running) return Promise.resolve();
+    running = task().finally(() => (running = null));
+    return running;
+  });
+}
+
 let automaticHandoff: Promise<void> | null = null;
 
 /**
@@ -489,6 +503,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     );
   }
   const reconcile = () => {
+    for (const task of reconcileTasks) task().catch((e) => console.error("reconcile task:", e.message));
     reapExpiredLeases().catch((e) => console.error("reaper:", e.message));
     dispatchRunEffects().catch((e) => console.error("run effects:", e.message));
     reconcileAutomaticHandoff().catch((e) => console.error("automatic handoff:", e.message));

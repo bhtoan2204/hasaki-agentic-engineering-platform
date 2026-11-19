@@ -4,6 +4,7 @@ import { workApi } from "./hasakiAuth.ts";
 import { usersWithSecret } from "./auth/secrets.ts";
 import { execution } from "./auth/execution.ts";
 import { normalizeTask } from "./prompt.ts";
+import { ingestWorkItem } from "./workitems/intake.ts";
 import { notify } from "./notify.ts";
 import { applyAutomationPolicy, workItems, type WorkItemRow } from "./workitems/service.ts";
 
@@ -67,6 +68,8 @@ export async function importHasakiTask(
     automationPolicy,
     ownerId,
   });
+  // Policy-controlled intake (no-op without a policy): triage happens in the scheduler's dispatch, never here.
+  await ingestWorkItem(item).catch((e) => console.error("intake:", (e as Error).message));
   return { item, created };
 }
 

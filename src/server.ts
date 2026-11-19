@@ -21,7 +21,8 @@ import { loadVaultToken } from "./integrations/vault.ts";
 import { startProdErrorSchedule } from "./prodErrors/scan.ts";
 import { seedTemplates } from "./workflow/definitions.ts";
 import { registerDefaultExecutors } from "./workflow/executors/index.ts";
-import { startScheduler } from "./workflow/scheduler.ts";
+import { registerReconcileTask, startScheduler } from "./workflow/scheduler.ts";
+import { dispatchIntake } from "./workitems/intake.ts";
 import { startCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
@@ -92,6 +93,8 @@ await new Promise<void>((resolve, reject) => {
 console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
 
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
+// Policy-controlled intake rides the scheduler's reconcile tick: re-triage and start eligible items (no-op without a policy).
+registerReconcileTask(() => dispatchIntake());
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 if (config.codeIntelligence.enabled)

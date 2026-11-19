@@ -1,3 +1,4 @@
+import { IntakeQueue } from "./Intake.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronRight,
@@ -624,6 +625,7 @@ export function WorkItemsPage({ query }: { query: string }) {
           )}
         </Drawer>
       )}
+      <IntakeQueue />
     </div>
   );
 }

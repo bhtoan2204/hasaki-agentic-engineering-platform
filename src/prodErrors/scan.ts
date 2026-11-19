@@ -15,6 +15,7 @@ import { redactPii } from "../integrations/redact.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { workItems } from "../workitems/service.ts";
 import { startRun } from "../workflow/engine.ts";
+import { ingestProdErrorGroups } from "../workitems/intake.ts";
 import { escapeHtml as esc, linkFooter, RULE, sendTelegramHtml } from "../telegram.ts";
 
 /**
@@ -666,6 +667,8 @@ export async function runScan(
       [...(r?.messages ?? []).filter((m: string) => !/^INFO/.test(m)), ...notes].join("; ") || null;
     setPhase("notify", 98);
     const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm) : 0;
+    // Policy-controlled intake (no-op without a policy): one envelope per group, never per log row.
+    await ingestProdErrorGroups().catch((e) => console.error("intake:", (e as Error).message));
     await q(
       pool,
       "UPDATE prod_error_scans SET finished_at = now(), ok = true, groups = $2, events = $3, error = $4, notified = $5 WHERE id = $1",

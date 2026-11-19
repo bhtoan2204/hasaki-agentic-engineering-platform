@@ -1,3 +1,4 @@
+import { IntakePolicies, IntakeQueue } from "./Intake.tsx";
 import { AgentIsolation } from "./AgentIsolation.tsx";
 import { AutonomyPolicies } from "./AutonomyPolicies.tsx";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -349,6 +350,8 @@ export function SettingsPage() {
           <AgentSettings />
           <AutonomyPolicies />
           <AgentIsolation />
+          <IntakePolicies />
+          <IntakeQueue all />
 
           {section(
             "budget",
