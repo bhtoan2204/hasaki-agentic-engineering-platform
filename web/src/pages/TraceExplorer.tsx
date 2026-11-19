@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import "./TraceExplorer.css";
 import { api } from "../api.ts";
-import { Badge, dur, time } from "../ui.tsx";
+import { Badge, dur, EmptyState, ErrorBox, Loading, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
 interface TraceNode {
@@ -384,18 +384,13 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
           </button>
         </div>
       </header>
-      {error && (
-        <div className="tx-error" role="alert">
-          <AlertCircle size={16} />
-          {error}
-        </div>
-      )}
-      {!root && (
-        <div className="tx-empty" role="status">
-          {loading ? <LoaderCircle size={24} className="tx-spin" /> : <Activity size={24} />}
-          <b>{loading ? t("trace.loading") : t("trace.unavailable")}</b>
-        </div>
-      )}
+      {error && <ErrorBox error={error} onRetry={loadTrace} />}
+      {!root &&
+        (loading ? (
+          <Loading label={t("trace.loading")} />
+        ) : (
+          <EmptyState icon={Activity} title={t("trace.unavailable")} />
+        ))}
       {root && (
         <>
           <div className="tx-overview">
@@ -530,13 +525,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
               <span>{t("trace.treeHint")}</span>
             </div>
             {logError && (
-              <div className="tx-error" role="alert">
-                <AlertCircle size={15} />
-                <span>{logError}</span>
-                <button className="ghost xs" onClick={() => void loadLogs()}>
-                  {t("trace.retry")}
-                </button>
-              </div>
+              <ErrorBox error={logError} onRetry={() => void loadLogs()} />
             )}
             <div className="tx-timeline-scroll">
               <div className="tx-nodes" aria-label={t("trace.execution")}>

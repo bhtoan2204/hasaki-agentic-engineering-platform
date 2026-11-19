@@ -148,7 +148,7 @@ export function RepositoriesPage({
   query,
   me,
 }: { name?: string; query: string; me?: { role?: string } | null }) {
-  const { t } = useI18n();
+  const { t, status: statusText } = useI18n();
   const isAdmin = me?.role === "admin";
   const params = new URLSearchParams(query);
   const view = params.get("view");
@@ -469,12 +469,12 @@ export function RepositoriesPage({
                   <section className="card">
                     <div className="card-head">
                       <Network size={16} color="var(--brand)" />
-                      <h4>Code intelligence</h4>
+                      <h4>{t("repo.ci.title")}</h4>
                     </div>
                     {index.error ? (
                       <ErrorBox error={index.error} onRetry={index.reload} />
                     ) : !index.data?.enabled ? (
-                      <span className="muted small">Disabled on this instance</span>
+                      <span className="muted small">{t("repo.ci.disabled")}</span>
                     ) : (
                       (() => {
                         const state = index.data.repositories.find((x: any) => x.name === r.name);
@@ -482,11 +482,11 @@ export function RepositoriesPage({
                           <>
                             <dl className="repo-kv">
                               <div>
-                                <dt>Status</dt>
-                                <dd>{state?.status ?? "Not indexed"}</dd>
+                                <dt>{t("repo.ci.status")}</dt>
+                                <dd>{state?.status ? (statusText(state.status) || state.status) : t("repo.ci.notIndexed")}</dd>
                               </div>
                               <div>
-                                <dt>Progress</dt>
+                                <dt>{t("repo.ci.progress")}</dt>
                                 <dd>
                                   {state?.status === "running"
                                     ? `${state?.metrics?.processed_files ?? 0} / ${state?.metrics?.total_files ?? "…"}`
@@ -494,18 +494,18 @@ export function RepositoriesPage({
                                 </dd>
                               </div>
                               <div>
-                                <dt>Commit</dt>
+                                <dt>{t("repo.ci.commit")}</dt>
                                 <dd className="mono">{state?.commit_sha?.slice(0, 12) ?? "—"}</dd>
                               </div>
                               <div>
-                                <dt>Files / symbols / relations</dt>
+                                <dt>{t("repo.ci.stats")}</dt>
                                 <dd>
                                   {state?.indexed_files ?? 0} / {state?.symbol_count ?? 0} /{" "}
                                   {state?.relation_count ?? 0}
                                 </dd>
                               </div>
                               <div>
-                                <dt>Last indexed</dt>
+                                <dt>{t("repo.ci.lastIndexed")}</dt>
                                 <dd>
                                   {state?.last_indexed_at
                                     ? new Date(state.last_indexed_at).toLocaleString()
@@ -527,17 +527,17 @@ export function RepositoriesPage({
                                           `/api/repositories/${encodeURIComponent(r.name)}/reindex`,
                                           {},
                                         ),
-                                      "Indexing queued",
+                                      t("repo.ci.queued"),
                                     )
                                   )
                                     index.reload();
                                 }}
                               >
-                                Reindex (admin)
+                                {t("repo.ci.reindex")}
                               </button>
                             )}
                             <button className="ghost sm" onClick={index.reload}>
-                              Refresh
+                              {t("repo.ci.refresh")}
                             </button>
                             {isAdmin &&
                               state?.indexing_run_id &&
@@ -552,13 +552,13 @@ export function RepositoriesPage({
                                             `/api/repositories/index-runs/${state.indexing_run_id}/cancel`,
                                             {},
                                           ),
-                                        "Indexing canceled",
+                                        t("repo.ci.canceled"),
                                       )
                                     )
                                       index.reload();
                                   }}
                                 >
-                                  Cancel (admin)
+                                  {t("repo.ci.cancel")}
                                 </button>
                               )}
                           </>

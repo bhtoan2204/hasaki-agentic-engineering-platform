@@ -12,8 +12,7 @@ import { ProviderExperimentForm } from "./ProviderExperimentForm.tsx";
 import { EvaluationRecommendations } from "./EvaluationRecommendations.tsx";
 import "../analytics/analytics.css";
 export function AgentEvaluation() {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   const p = new URLSearchParams(location.hash.split("?")[1] ?? "");
   for (const [k, v] of Object.entries(defaultFilters())) if (v && !p.has(k)) p.set(k, v);
   const query = p.toString(),
@@ -28,20 +27,20 @@ export function AgentEvaluation() {
     change(next);
   };
   const data = response.data;
-  const title = en ? "Agent Evaluation" : "Đánh giá agent";
+  const title = t("an.eval.title");
   const common = [
     {
-      label: en ? "Provider route" : "Chuỗi agent",
+      label: t("an.eval.providerRoute"),
       value: (r: any) => r.provider_path,
     },
     {
-      label: en ? "Configured models" : "Mô hình cấu hình",
+      label: t("an.eval.configuredModels"),
       value: (r: any) => (
         <>
           {r.model_path}
           <br />
           <span className="muted small">
-            {en ? "Reported: " : "Báo cáo: "}
+            {t("an.eval.reported")}
             {r.reported_model_sets
               ?.flat()
               .map((m: any) => `${m.provider}/${m.model}`)
@@ -51,11 +50,11 @@ export function AgentEvaluation() {
       ),
     },
     {
-      label: en ? "Evidence" : "Bằng chứng",
+      label: t("an.eval.evidence"),
       value: (r: any) => r.evidence_kind,
     },
     {
-      label: en ? "Category / cohort" : "Loại / nhóm",
+      label: t("an.eval.categoryCohort"),
       value: (r: any) => (
         <>
           <span>
@@ -69,12 +68,12 @@ export function AgentEvaluation() {
       ),
     },
     {
-      label: en ? "Verified / graded" : "Xác minh / chấm",
+      label: t("an.eval.verifiedGraded"),
       value: (r: any) =>
-        `${r.successes} / ${r.graded} (${r.distinct_tasks} ${en ? "tasks" : "nhiệm vụ"})`,
+        `${r.successes} / ${r.graded} (${r.distinct_tasks} ${t("an.eval.tasks")})`,
     },
     {
-      label: en ? "Verified success" : "Thành công đã xác minh",
+      label: t("an.eval.verifiedSuccess"),
       value: (r: any) => fmt(r.verified_success_rate, "pct"),
     },
     {
@@ -82,14 +81,14 @@ export function AgentEvaluation() {
       value: (r: any) => `${fmt(r.median_ms, "ms")} / ${fmt(r.p95_ms, "ms")}`,
     },
     {
-      label: en ? "Reported cost / coverage" : "Chi phí báo cáo / độ đầy đủ",
+      label: t("an.eval.reportedCostCoverage"),
       value: (r: any) =>
-        `${fmt(r.reported_cost_usd, "usd")} · ${r.cost_samples}/${r.samples} ${en ? "cases" : "nhiệm vụ"}; ${r.cost_attempts_known ?? 0}/${r.phase_attempts ?? 0} ${en ? "complete attempts" : "lần thử đầy đủ"}`,
+        `${fmt(r.reported_cost_usd, "usd")} · ${r.cost_samples}/${r.samples} ${t("an.eval.cases")}; ${r.cost_attempts_known ?? 0}/${r.phase_attempts ?? 0} ${t("an.eval.completeAttempts")}`,
     },
     {
-      label: en ? "Tokens in / out / coverage" : "Token vào / ra / độ đầy đủ",
+      label: t("an.eval.tokensCoverage"),
       value: (r: any) =>
-        `${fmt(r.input_tokens)} / ${fmt(r.output_tokens)} · ${en ? "in" : "vào"} ${r.token_samples}/${r.samples}; ${en ? "out" : "ra"} ${r.output_token_samples}/${r.samples}`,
+        `${fmt(r.input_tokens)} / ${fmt(r.output_tokens)} · ${t("an.in")} ${r.token_samples}/${r.samples}; ${t("an.eval.tokensOut")} ${r.output_token_samples}/${r.samples}`,
     },
   ];
   return (
@@ -97,15 +96,11 @@ export function AgentEvaluation() {
       <PageHeader
         icon={FlaskConical}
         title={title}
-        subtitle={
-          en
-            ? "Controlled benchmarks and clearly separated production observations"
-            : "Benchmark có kiểm soát và quan sát sản xuất được tách biệt"
-        }
+        subtitle={t("an.eval.subtitle")}
         actions={
           <button className="sm ghost" onClick={response.reload}>
             <RefreshCw size={14} />
-            {en ? "Refresh" : "Làm mới"}
+            {t("an.refresh")}
           </button>
         }
       />
@@ -114,10 +109,10 @@ export function AgentEvaluation() {
           <a key={tab} className="tab" href={`#/insights/${tab}?${query}`}>
             {
               {
-                health: en ? "Production health" : "Sức khỏe sản xuất",
-                usage: en ? "AI usage" : "Sử dụng AI",
-                performance: en ? "Performance" : "Hiệu năng",
-                workflows: en ? "Workflows" : "Workflow",
+                health: t("an.eval.tab.health"),
+                usage: t("an.eval.tab.usage"),
+                performance: t("an.eval.tab.performance"),
+                workflows: t("an.eval.tab.workflows"),
               }[tab]
             }
           </a>
@@ -127,46 +122,44 @@ export function AgentEvaluation() {
       <AnalyticsFilters query={query} options={options.data} onApply={change} />
       <div className="an-filter-grid" style={{ marginBottom: 16 }}>
         <label>
-          {en ? "Task category" : "Loại nhiệm vụ"}
+          {t("an.eval.taskCategory")}
           <input
-            aria-label={en ? "Task category" : "Loại nhiệm vụ"}
+            aria-label={t("an.eval.taskCategory")}
             value={p.get("category") ?? ""}
             onChange={(e) => filter("category", e.target.value)}
           />
         </label>
         <label>
-          {en ? "Difficulty" : "Độ khó"}
+          {t("an.eval.difficulty")}
           <select
             value={p.get("difficulty") ?? ""}
             onChange={(e) => filter("difficulty", e.target.value)}
           >
-            <option value="">{en ? "All" : "Tất cả"}</option>
+            <option value="">{t("an.eval.all")}</option>
             {["easy", "medium", "hard"].map((d) => (
               <option key={d}>{d}</option>
             ))}
           </select>
         </label>
         <label>
-          {en ? "Context" : "Ngữ cảnh"}
+          {t("an.eval.context")}
           <select
             value={p.get("context_variant") ?? ""}
             onChange={(e) => filter("context_variant", e.target.value)}
           >
-            <option value="">{en ? "All" : "Tất cả"}</option>
+            <option value="">{t("an.eval.all")}</option>
             {["minimal", "pack", "tools", "legacy"].map((d) => (
               <option key={d}>{d}</option>
             ))}
           </select>
         </label>
         <label>
-          {en ? "Control cohort" : "Nhóm kiểm soát"}
+          {t("an.eval.controlCohort")}
           <input value={p.get("cohort") ?? ""} onChange={(e) => filter("cohort", e.target.value)} />
         </label>
       </div>
       <Notice>
-        {en
-          ? "Fixture controls are not model rankings. Compare only the same cohort, category and context policy. Unknown usage/cost stays unknown; estimates are not API bills. Production observations are not causal benchmark conclusions."
-          : "Fixture không xếp hạng mô hình. Chỉ so sánh cùng nhóm, loại nhiệm vụ và chính sách ngữ cảnh. Chi phí/token chưa báo cáo vẫn chưa rõ; ước tính không phải hóa đơn API. Quan sát sản xuất không phải kết luận nhân quả."}
+        {t("an.eval.fixtureControlsRankingNotice")}
       </Notice>
       {response.error && <ErrorBox error={response.error} onRetry={response.reload} />}
       {!data && !response.error && <AnalyticsSkeleton />}

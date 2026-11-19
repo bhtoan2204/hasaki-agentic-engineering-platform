@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { act, Badge, Copy, Empty, ErrorBox, Loading, Markdown, navigate } from "../ui.tsx";
+import { act, Badge, Copy, Empty, EmptyState, ErrorBox, Loading, Markdown, navigate } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { OutputView } from "./StepInspector.tsx";
 import "./RunView.css";
@@ -191,6 +191,7 @@ export function Changes({
   }, [activity]); // eslint-disable-line react-hooks/exhaustive-deps
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!data) return <EmptyState title={t("ch.empty")} />;
   const prWaiting = data.pr_step?.status === "WAITING_APPROVAL";
   return (
     <div>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Bot } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { act, ErrorBox } from "../ui.tsx";
+import { act, Empty, ErrorBox, SkeletonRows } from "../ui.tsx";
 
 type Policy = {
   id: number;
@@ -20,7 +20,7 @@ type View = { policies: Policy[]; modes: string[]; gates: string[] };
 /** Admin-only: autonomy policies per scope. New policies start in shadow; revocation applies to running runs too. */
 export function AutonomyPolicies() {
   const { t } = useI18n();
-  const { data, error, reload } = useApi<View>("/api/autonomy/policies");
+  const { data, error, loading, reload } = useApi<View>("/api/autonomy/policies");
   const [draft, setDraft] = useState({
     scope_kind: "global" as Policy["scope_kind"],
     scope_ref: "",
@@ -39,8 +39,9 @@ export function AutonomyPolicies() {
         <h3>{t("au.policies")}</h3>
       </header>
       <p className="muted small">{t("au.policiesHint")}</p>
+      {loading && !data && <SkeletonRows rows={4} />}
       {error && <ErrorBox error={error} onRetry={reload} />}
-      {data && data.policies.length === 0 && <p className="small muted">{t("au.empty")}</p>}
+      {data && data.policies.length === 0 && <Empty>{t("au.empty")}</Empty>}
       {data?.policies.map((p) => (
         <div
           key={p.id}

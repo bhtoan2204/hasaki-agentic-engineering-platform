@@ -2,38 +2,29 @@ import { useI18n } from "./i18n/index.tsx";
 import { time } from "./ui.tsx";
 
 export function HandoffPreview({ handoff }: { handoff: any }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   const pack = handoff.package;
   return (
     <details>
-      <summary>
-        {en ? "Review handoff package and checkpoint" : "Xem gói bàn giao và checkpoint"}
-      </summary>
+      <summary>{t("hop.reviewTitle")}</summary>
       {!pack ? (
-        <p className="muted">
-          {en ? "A stable checkpoint is not available yet." : "Chưa có checkpoint ổn định."}
-        </p>
+        <p className="muted">{t("hop.noCheckpoint")}</p>
       ) : (
         <>
           <p>
-            <b>{en ? "Reason" : "Lý do"}:</b> {handoff.reason}
+            <b>{t("hop.reason")}:</b> {handoff.reason}
           </p>
           <p className="small muted">
-            {en ? "Preserved at" : "Được giữ lại lúc"}: {time(handoff.ready_at)}
+            {t("hop.preservedAt")}: {time(handoff.ready_at)}
           </p>
           {pack.scratch_omitted?.count > 0 && (
-            <p>
-              {en
-                ? `${pack.scratch_omitted.count} untracked .repair-tmp cache files were left on disk and left out of this checkpoint. The next agent still sees them. They are not the change being handed off.`
-                : `${pack.scratch_omitted.count} file cache .repair-tmp chưa theo dõi vẫn nằm trên đĩa và không được đưa vào checkpoint. Agent tiếp theo vẫn thấy chúng. Đó không phải phần thay đổi được bàn giao.`}
-            </p>
+            <p>{t("hop.scratchOmitted", { count: pack.scratch_omitted.count })}</p>
           )}
-          <b>{en ? "Original task" : "Nhiệm vụ ban đầu"}</b>
+          <b>{t("hop.originalTask")}</b>
           <pre style={{ maxHeight: 140, overflow: "auto", whiteSpace: "pre-wrap" }}>
             {pack.original_task}
           </pre>
-          <b>{en ? "Preserved repository changes" : "Thay đổi repository được giữ lại"}</b>
+          <b>{t("hop.preservedChanges")}</b>
           {pack.repository_state?.length ? (
             pack.repository_state.map((repo: any) => (
               <div key={repo.repository} className="small">
@@ -47,32 +38,20 @@ export function HandoffPreview({ handoff }: { handoff: any }) {
                     whiteSpace: "pre-wrap",
                   }}
                 >
-                  {repo.diff_summary ||
-                    repo.status ||
-                    (en ? "No tracked changes" : "Không có thay đổi được theo dõi")}
+                  {repo.diff_summary || repo.status || t("hop.noTrackedChanges")}
                 </pre>
               </div>
             ))
           ) : (
-            <p className="muted small">
-              {en
-                ? "No worktree had been registered. Context and task references are preserved."
-                : "Chưa có worktree được ghi nhận. Ngữ cảnh và tham chiếu nhiệm vụ được giữ lại."}
-            </p>
+            <p className="muted small">{t("hop.noWorktree")}</p>
           )}
-          <b>{en ? "Decisions and unfinished work" : "Quyết định và công việc chưa hoàn tất"}</b>
+          <b>{t("hop.decisionsAndPending")}</b>
           <pre style={{ maxHeight: 160, overflow: "auto", whiteSpace: "pre-wrap" }}>
             {pack.previous_decisions_and_pending_work}
           </pre>
-          <p className="muted small">
-            {en
-              ? "Progress is historical evidence. Agent completion does not establish verification; the next attempt must check the remaining acceptance criteria."
-              : "Tiến độ là bằng chứng lịch sử. Agent báo hoàn tất không đồng nghĩa đã xác minh; lần thử tiếp theo phải kiểm tra tiêu chí chấp nhận còn lại."}
-          </p>
+          <p className="muted small">{t("hop.progressHistorical")}</p>
           <details>
-            <summary>
-              {en ? "Detailed checkpoint references" : "Tham chiếu checkpoint chi tiết"}
-            </summary>
+            <summary>{t("hop.detailedReferences")}</summary>
             <pre
               style={{
                 maxHeight: 280,

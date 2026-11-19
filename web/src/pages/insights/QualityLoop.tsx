@@ -1,7 +1,7 @@
 import { Repeat } from "lucide-react";
 import { api, useApi } from "../../api.ts";
 import { useI18n } from "../../i18n/index.tsx";
-import { act } from "../../ui.tsx";
+import { act, ErrorBox, SkeletonRows } from "../../ui.tsx";
 import "../../components/Cost.css";
 
 /**
@@ -11,8 +11,20 @@ import "../../components/Cost.css";
  */
 export function QualityLoop() {
   const { t } = useI18n();
-  const { data, reload } = useApi<any>("/api/quality/patterns?days=30");
+  const { data, error, loading, reload } = useApi<any>("/api/quality/patterns?days=30");
   const { data: perf } = useApi<any>("/api/quality/providers?days=30");
+  if (loading && !data)
+    return (
+      <div className="cost-card">
+        <SkeletonRows rows={4} />
+      </div>
+    );
+  if (error && !data)
+    return (
+      <div className="cost-card">
+        <ErrorBox error={error} onRetry={reload} />
+      </div>
+    );
   if (!data) return null;
   const levels = Object.entries<number>(data.verified_levels ?? {}).filter(([, n]) => n > 0);
   return (

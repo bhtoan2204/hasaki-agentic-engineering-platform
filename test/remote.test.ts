@@ -1,7 +1,11 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { config, gitlabConfig } from "../src/config.ts";
-import { canonicalizeDetectedUrl, repositoryRemote } from "../src/repos/remote.ts";
+import {
+  canonicalizeDetectedUrl,
+  repositoryBranch,
+  repositoryRemote,
+} from "../src/repos/remote.ts";
 import { redactSecrets } from "../src/integrations/redact.ts";
 
 const saved = structuredClone(config.gitlab);
@@ -101,4 +105,64 @@ test("GitLab tokens, PRIVATE-TOKEN headers and URL credentials are redacted; ord
   assert.ok(!out.includes(t), out);
   assert.match(out, /https:\/\/oauth2:\*\*\*@gitlab\.com/);
   assert.equal(redactSecrets("global-configuration-value-here"), "global-configuration-value-here");
+});
+
+test("repositoryBranch accepts valid Git branch names", () => {
+  const valid = [
+    "main",
+    "master",
+    "develop",
+    "feature/ABC-123",
+    "bugfix/issue_42-v2",
+    "release/v1.0.0-rc1",
+    "sub/group/feat",
+    "foo.bar",
+    "branch-name",
+    "TASK_123",
+  ];
+  for (const b of valid) {
+    assert.equal(repositoryBranch(b), b);
+  }
+});
+
+test("repositoryBranch rejects non-string and empty branch names", () => {
+  for (const bad of [null, undefined, "", 123, true, false, {}, []]) {
+    assert.throws(() => repositoryBranch(bad), /Invalid Git branch name/);
+  }
+});
+
+test("repositoryBranch rejects branch names violating Git reference rules", () => {
+  const invalid = [
+    "-main", // starts with dash
+    "--branch",
+    "feat/new branch", // whitespace (space)
+    "main\t1", // tab
+    "main\n2", // newline
+    "main\x00", // control char
+    "feat~1", // contains ~
+    "feat^2", // contains ^
+    "feat:foo", // contains :
+    "feat?bar", // contains ?
+    "feat*glob", // contains *
+    "feat[bracket", // contains [
+    "feat\\backslash", // contains \
+    "feature..name", // contains ..
+    "branch@{1}", // contains @{
+    "/main", // leading slash (empty segment)
+    "main/", // trailing slash (empty segment)
+    "feat//bar", // consecutive slashes (empty segment)
+    ".hidden", // segment starts with dot
+    "feature/.sub",
+    "main.", // segment ends with dot
+    "feature/sub.",
+    "main.lock", // segment ends with .lock
+    "feature/issue.lock",
+  ];
+  for (const bad of invalid) {
+    assert.throws(
+      () => repositoryBranch(bad),
+      /Invalid Git branch name/,
+      `expected reject for: ${bad}`,
+    );
+  }
 });

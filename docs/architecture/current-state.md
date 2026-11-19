@@ -1,5 +1,9 @@
 # Current State (audit of commit `8c23002`)
 
+> [!NOTE] Historical Document
+> This document records the original pre-workflow implementation as audited at commit `8c23002` (the initial v1 baseline).
+> It does **not** describe current platform behavior. For current architecture, see [Architecture governance](architecture-governance.md), [Workflow engine modularization](workflow-engine-modularization.md), [Execution lifecycle](execution-lifecycle.md), and [Agent architecture](agent-architecture.md).
+
 This file describes the original pre-workflow implementation. See [Architecture governance](architecture-governance.md)
 for the current module boundaries and fitness checks.
 

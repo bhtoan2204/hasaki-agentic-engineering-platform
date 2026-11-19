@@ -18,7 +18,7 @@ import {
 import { api, useApi } from "../api.ts";
 import { dialog } from "../dialog/index.ts";
 import { AgentSettings } from "./AgentSettings.tsx";
-import { ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
+import { EmptyState, ErrorBox, Field, Loading, PageHeader } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Settings.css";
 
@@ -108,7 +108,7 @@ const normalize = (f: Form): Form => ({
 
 export function SettingsPage() {
   const { t } = useI18n();
-  const { data, error, loading, setData } = useApi<View>("/api/settings/operator");
+  const { data, error, loading, reload, setData } = useApi<View>("/api/settings/operator");
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
@@ -257,7 +257,11 @@ export function SettingsPage() {
     return (
       <>
         <PageHeader icon={Settings2} title={t("set.title")} subtitle={t("set.subtitle")} />
-        {error && <ErrorBox error={error} />}
+        {error ? (
+          <ErrorBox error={error} onRetry={reload} />
+        ) : (
+          <EmptyState title={t("common.noData")} />
+        )}
       </>
     );
 

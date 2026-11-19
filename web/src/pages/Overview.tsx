@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
 import { BRAND } from "../brand/brand.ts";
-import { ago, Badge, EmptyState, navigate, StatCard } from "../ui.tsx";
+import { ago, Badge, EmptyState, ErrorBox, navigate, StatCard } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ChibiAgent } from "../office/ChibiAgent.tsx";
 import { OfficeScene } from "../office/OfficeScene.tsx";
@@ -50,9 +50,9 @@ const fmt = (n: number | null | undefined, d = 0) =>
 /** Landing dashboard: real workflow activity, a live mini office, recent work and harness health. */
 export function OverviewPage() {
   const { t } = useI18n();
-  const { data: runs, reload: reloadRuns } = useApi<any[]>("/api/runs");
-  const { data: questions, reload: reloadQ } = useApi<any[]>("/api/questions");
-  const { data: metrics, reload: reloadM } = useApi<any>("/api/metrics/summary?days=30");
+  const { data: runs, error: runsError, reload: reloadRuns } = useApi<any[]>("/api/runs");
+  const { data: questions, error: qError, reload: reloadQ } = useApi<any[]>("/api/questions");
+  const { data: metrics, error: mError, reload: reloadM } = useApi<any>("/api/metrics/summary?days=30");
   useLive(null, (p) => {
     if (!p || p.kind === "status") void (reloadRuns(), reloadQ());
   });
@@ -78,6 +78,17 @@ export function OverviewPage() {
   return (
     <div className="ov">
       <Hero active={active.length} waiting={qList.length} />
+
+      {(runsError || qError || mError) && (
+        <ErrorBox
+          error={runsError || qError || mError || ""}
+          onRetry={() => {
+            if (runsError) reloadRuns();
+            if (qError) reloadQ();
+            if (mError) reloadM();
+          }}
+        />
+      )}
 
       <section aria-label={t("ov.activity")} className="grid4 ov-stats">
         <StatCard

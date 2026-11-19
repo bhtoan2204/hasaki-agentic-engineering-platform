@@ -1,5 +1,14 @@
 # Target State
 
+> [!NOTE] Historical Architecture Specification
+> This document records the initial v2 target architecture formulated during the Phase 1 redesign.
+> While the core concepts (modular monolith, PostgreSQL state machine, durable jobs, step attempts, immutable context snapshots, and workspaces) remain foundational, subsequent milestones have expanded the platform:
+> - **Agent Providers:** Expanded from Claude-only to 5 supported providers (Claude Code, Cursor CLI, OpenAI Codex CLI, Google Antigravity CLI, and GitHub Copilot CLI) orchestrated through a unified harness lifecycle (`src/agent/harness/`).
+> - **Git Providers:** Expanded from Bitbucket-only to Bitbucket, GitHub, and GitLab (cloud and self-hosted with internal CA and SSH support).
+> - **Execution Profiles:** Expanded to `MICRO`, `FAST`, `STANDARD`, and `DEEP`.
+> - **Interactive Capabilities:** Added real-time streaming chat, operations verification, production error scanning, and Telegram interactions.
+> For current architecture governance, see [Architecture governance](architecture-governance.md) and [Workflow engine modularization](workflow-engine-modularization.md).
+
 A modular monolith (one Node process, one PostgreSQL database) that manages **reusable engineering
 workflows** with durable step-level state. Claude Code is one kind of step executor, not the product.
 

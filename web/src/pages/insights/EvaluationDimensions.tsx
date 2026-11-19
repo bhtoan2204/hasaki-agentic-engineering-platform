@@ -2,81 +2,72 @@ import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
 import { EvaluationTable } from "./EvaluationTable.tsx";
 export function EvaluationDimensions({ data, common }: { data: any; common: any[] }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   return (
     <>
       {" "}
       <Panel
-        title={en ? "Context effectiveness (A/B/C)" : "Hiệu quả ngữ cảnh (A/B/C)"}
-        hint={
-          en
-            ? "Descriptive measured cohorts only. Use the paired comparison runner before concluding measurable benefit. Retrieval accuracy is unknown without labeled retrieved evidence."
-            : "Chỉ mô tả nhóm được đo. Dùng so sánh cặp trước khi kết luận lợi ích. Độ chính xác truy xuất chưa rõ nếu thiếu nhãn bằng chứng."
-        }
+        title={t("an.eval.contextEffectiveness")}
+        hint={t("an.eval.contextEffectivenessHint")}
       >
         <EvaluationTable
           rows={data.context}
           columns={[
             ...common.slice(0, 6),
             {
-              label: en ? "Requirement coverage" : "Độ phủ yêu cầu",
+              label: t("an.eval.reqCoverage"),
               value: (r) => fmt(r.requirement_coverage, "pct"),
             },
             {
-              label: en ? "Retrieval accuracy" : "Độ chính xác truy xuất",
+              label: t("an.eval.retrievalAccuracy"),
               value: (r) => fmt(r.retrieval_accuracy, "pct"),
             },
             {
-              label: en ? "Tools / retries" : "Công cụ / thử lại",
+              label: t("an.eval.toolsRetries"),
               value: (r) => `${fmt(r.tool_calls)} / ${fmt(r.retries)}`,
             },
           ]}
         />
       </Panel>
       <Panel
-        title={
-          en ? "Task difficulty and objective quality" : "Độ khó nhiệm vụ và chất lượng khách quan"
-        }
+        title={t("an.eval.taskDifficultyTitle")}
       >
         <EvaluationTable
           rows={data.difficulty}
           columns={[
-            { label: en ? "Difficulty" : "Độ khó", value: (r) => r.difficulty },
+            { label: t("an.eval.difficulty"), value: (r) => r.difficulty },
             {
-              label: en ? "Evidence" : "Bằng chứng",
+              label: t("an.eval.evidence"),
               value: (r) => r.evidence_kind,
             },
             {
-              label: en ? "Acceptance tests" : "Kiểm thử chấp nhận",
+              label: t("an.eval.acceptanceTests"),
               value: (r) => fmt(r.acceptance_pass_rate, "pct"),
             },
             {
-              label: en ? "Build checks" : "Kiểm tra build",
+              label: t("an.eval.buildChecks"),
               value: (r) => fmt(r.build_success_rate, "pct"),
             },
             {
-              label: en ? "Regression failures" : "Lỗi hồi quy",
+              label: t("an.eval.regressionFailures"),
               value: (r) => fmt(r.regression_failures),
             },
             {
-              label: en ? "Invalid changes / security" : "Thay đổi sai / bảo mật",
+              label: t("an.eval.invalidChangesSecurity"),
               value: (r) => `${fmt(r.invalid_modifications)} / ${fmt(r.security_violations)}`,
             },
             {
-              label: en ? "Human interventions" : "Can thiệp con người",
+              label: t("an.eval.humanInterventions"),
               value: (r) => fmt(r.human_interventions),
             },
           ]}
         />
         <p className="muted small">
-          {en
-            ? "Unnecessary modifications remain unknown without a labeled necessity oracle. Structural SQL/proto checks are not semantic compilation."
-            : "Thay đổi không cần thiết chưa rõ nếu thiếu bộ xác minh có nhãn. Kiểm tra cấu trúc SQL/proto không phải biên dịch ngữ nghĩa."}
+          {t("an.eval.unnecessaryModHint")}
         </p>
       </Panel>
       <Panel
-        title={en ? "Handoff and runtime effectiveness" : "Hiệu quả bàn giao và thời gian thực thi"}
+        title={t("an.eval.handoffRuntimeTitle")}
       >
         <EvaluationTable
           rows={data.comparisons}
@@ -84,24 +75,24 @@ export function EvaluationDimensions({ data, common }: { data: any; common: any[
             common[0],
             common[2],
             {
-              label: en ? "Planned switches" : "Chuyển theo kế hoạch",
+              label: t("an.eval.plannedSwitches"),
               value: (r) => fmt(r.planned_switches),
             },
             {
-              label: en ? "Recovery handoffs" : "Bàn giao phục hồi",
+              label: t("an.eval.recoveryHandoffs"),
               value: (r) => fmt(r.recovery_handoffs),
             },
             {
-              label: en ? "Provider execution" : "Thực thi nhà cung cấp",
+              label: t("an.eval.providerExecution"),
               value: (r) => fmt(r.active_execution_ms, "ms"),
             },
             {
-              label: en ? "Queue / human / tool" : "Hàng đợi / con người / công cụ",
+              label: t("an.eval.queueHumanTool"),
               value: (r) =>
                 `${fmt(r.queue_ms, "ms")} / ${fmt(r.human_ms, "ms")} / ${fmt(r.tool_ms, "ms")}`,
             },
             {
-              label: en ? "Cache read / write / reasoning" : "Cache đọc / ghi / suy luận",
+              label: t("an.eval.cacheReasoning"),
               value: (r) =>
                 `${fmt(r.cache_read_tokens)} / ${fmt(r.cache_creation_tokens)} / ${fmt(r.reasoning_tokens)}`,
             },

@@ -75,7 +75,8 @@
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.className = "quiet app-dialog-cancel";
-      cancel.textContent = req.cancelLabel || "Cancel";
+      cancel.textContent =
+        req.cancelLabel || (global.tr ? global.tr("common.cancel") : "Cancel");
       cancel.onclick = () => settle(req.kind === "prompt" ? null : false);
       actions.appendChild(cancel);
     }
@@ -83,7 +84,11 @@
     confirmBtn.type = "submit";
     confirmBtn.className =
       "app-dialog-confirm" + (req.variant === "destructive" ? " danger" : "");
-    confirmBtn.textContent = req.confirmLabel || (req.kind === "alert" ? "OK" : "Confirm");
+    confirmBtn.textContent =
+      req.confirmLabel ||
+      (req.kind === "alert"
+        ? (global.tr ? global.tr("common.ok") : "OK")
+        : (global.tr ? global.tr("common.confirm") : "Confirm"));
     actions.appendChild(confirmBtn);
     body.appendChild(actions);
 

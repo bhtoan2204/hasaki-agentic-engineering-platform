@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, X } from "lucide-react";
 import { Field } from "./ui.tsx";
+import { useI18n } from "./i18n/index.tsx";
 import type { AgentValues } from "./agentConfiguration.ts";
 export type { AgentValues } from "./agentConfiguration.ts";
 
@@ -41,7 +42,7 @@ export function ModelCombobox({
   models = [],
   discovery,
   ariaLabel,
-  placeholder = "Inherit",
+  placeholder,
   disabled = false,
 }: {
   value?: string | null;
@@ -52,6 +53,8 @@ export function ModelCombobox({
   placeholder?: string;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
+  const effectivePlaceholder = placeholder ?? t("set.routingInherit");
   const [open, setOpen] = useState(false);
   const [filtering, setFiltering] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -124,15 +127,15 @@ export function ModelCombobox({
   const options: ComboOption[] = [
     {
       key: "__inherit__",
-      label: "Inherit",
-      sub: "Next configuration level",
+      label: t("set.routingInherit"),
+      sub: t("set.comboNextLevel"),
       val: undefined,
       active: value === undefined,
     },
     {
       key: "__account__",
-      label: "Account/CLI default",
-      sub: "External CLI default",
+      label: t("set.modelAccount"),
+      sub: t("set.comboExternalDefault"),
       val: null,
       active: value === null,
     },
@@ -163,7 +166,7 @@ export function ModelCombobox({
           spellCheck={false}
           disabled={disabled}
           value={textValue}
-          placeholder={value === null ? "Account/CLI default" : placeholder}
+          placeholder={value === null ? t("set.modelAccount") : effectivePlaceholder}
           onChange={(event) => {
             const raw = event.target.value;
             onChange(raw ? raw : undefined);
@@ -206,8 +209,8 @@ export function ModelCombobox({
           }}
         />
         {value === null && (
-          <span className="agent-combo-mode-tag" title="Explicit Account/CLI default">
-            CLI default
+          <span className="agent-combo-mode-tag" title={t("set.modelAccount")}>
+            {t("set.cliDefaultOnly")}
           </span>
         )}
         {value !== undefined && !disabled && (
@@ -215,8 +218,8 @@ export function ModelCombobox({
             type="button"
             tabIndex={-1}
             className="agent-combo-clear"
-            aria-label={`Reset ${ariaLabel} to inherit`}
-            title="Reset to Inherit"
+            aria-label={`${t("set.reset")} ${ariaLabel}`}
+            title={t("set.resetInherit")}
             onMouseDown={(e) => {
               e.preventDefault();
               selectValue(undefined);
@@ -230,8 +233,8 @@ export function ModelCombobox({
           tabIndex={-1}
           disabled={disabled}
           className="agent-combo-toggle"
-          aria-label={`Open ${ariaLabel} options`}
-          title="Select model"
+          aria-label={t("set.selectModel")}
+          title={t("set.selectModel")}
           onMouseDown={(e) => {
             e.preventDefault();
             if (disabled) return;
@@ -245,7 +248,7 @@ export function ModelCombobox({
       </div>
       {discovery === "available" && value && !selectedCatalogModel && (
         <small className="set-warn agent-combo-warn">
-          Custom model (not in current catalog); validated at execution.
+          {t("set.comboCustomWarn")}
         </small>
       )}
       {open &&
@@ -289,8 +292,8 @@ export function ModelCombobox({
                   selectValue(value);
                 }}
               >
-                <span className="agent-combo-option-main">Custom: {value}</span>
-                <span className="agent-combo-option-sub">Saved / custom ID</span>
+                <span className="agent-combo-option-main">{t("set.customLabel", { value })}</span>
+                <span className="agent-combo-option-sub">{t("set.savedCustomId")}</span>
               </div>
             )}
           </div>,
@@ -316,6 +319,7 @@ export function AgentValueFields({
   label?: string;
   discovery?: string;
 }) {
+  const { t } = useI18n();
   const set = (key: keyof AgentValues, next: unknown) => {
     const result = { ...value };
     if (next === undefined) delete result[key];
@@ -328,26 +332,26 @@ export function AgentValueFields({
     <div className="agent-value-fields">
       {controls?.model !== false && (
         <div className="field">
-          <span>{name("model")}</span>
+          <span>{name(t("set.field.model"))}</span>
           <ModelCombobox
-            ariaLabel={name("model")}
+            ariaLabel={name(t("set.field.model"))}
             value={value.model}
             models={models}
             discovery={discovery}
-            placeholder="Inherit"
+            placeholder={t("set.routingInherit")}
             onChange={(next) => set("model", next)}
           />
         </div>
       )}
       {controls?.model === false && value.model && (
         <p className="small set-warn">
-          Model selection is unsupported by this CLI. Saved model {value.model} is retained.
+          {t("set.modelUnsupported", { model: value.model })}
         </p>
       )}
       {!!efforts.length && (
-        <Field label={name("reasoning effort")}>
+        <Field label={name(t("set.field.reasoningEffort"))}>
           <select
-            aria-label={name("reasoning effort")}
+            aria-label={name(t("set.field.reasoningEffort"))}
             value={value.reasoning_effort === null ? "__account__" : (value.reasoning_effort ?? "")}
             onChange={(event) =>
               set(
@@ -356,11 +360,11 @@ export function AgentValueFields({
               )
             }
           >
-            <option value="">Inherit</option>
-            <option value="__account__">Account/CLI default</option>
+            <option value="">{t("set.routingInherit")}</option>
+            <option value="__account__">{t("set.modelAccount")}</option>
             {value.reasoning_effort && !efforts.includes(value.reasoning_effort) && (
               <option value={value.reasoning_effort}>
-                {value.reasoning_effort} (saved; unavailable for this model)
+                {t("set.effortUnavailable", { effort: value.reasoning_effort })}
               </option>
             )}
             {efforts.map((effort) => (
@@ -372,38 +376,38 @@ export function AgentValueFields({
         </Field>
       )}
       {controls?.max_turns && (
-        <Field label={name("maximum turns")}>
+        <Field label={name(t("set.field.maxTurns"))}>
           <input
-            aria-label={name("maximum turns")}
+            aria-label={name(t("set.field.maxTurns"))}
             type="number"
             min={1}
             max={500}
             value={value.max_turns ?? ""}
-            placeholder="Inherit"
+            placeholder={t("set.routingInherit")}
             onChange={(event) =>
               set("max_turns", event.target.value ? Number(event.target.value) : undefined)
             }
           />
         </Field>
       )}
-      <Field label={name("timeout (ms)")}>
+      <Field label={name(t("set.field.timeoutMs"))}>
         <input
-          aria-label={name("timeout (ms)")}
+          aria-label={name(t("set.field.timeoutMs"))}
           type="number"
           min={1000}
           max={86400000}
           step={1000}
           value={value.timeout_ms ?? ""}
-          placeholder="Inherit"
+          placeholder={t("set.routingInherit")}
           onChange={(event) =>
             set("timeout_ms", event.target.value ? Number(event.target.value) : undefined)
           }
         />
       </Field>
       {controls?.options.includes("sandbox") && (
-        <Field label={name("sandbox")}>
+        <Field label={name(t("set.field.sandbox"))}>
           <select
-            aria-label={name("sandbox")}
+            aria-label={name(t("set.field.sandbox"))}
             value={value.options?.sandbox === undefined ? "" : String(value.options.sandbox)}
             onChange={(event) =>
               set("options", {
@@ -412,21 +416,21 @@ export function AgentValueFields({
               })
             }
           >
-            <option value="">Inherit</option>
-            <option value="true">Enabled</option>
-            <option value="false">Disabled (existing isolation gates still apply)</option>
+            <option value="">{t("set.routingInherit")}</option>
+            <option value="true">{t("set.sandboxEnabled")}</option>
+            <option value="false">{t("set.sandboxDisabled")}</option>
           </select>
         </Field>
       )}
       {controls?.options.includes("max_concurrent") && (
-        <Field label={name("maximum concurrent executions")}>
+        <Field label={name(t("set.field.maxConcurrent"))}>
           <input
-            aria-label={name("maximum concurrent executions")}
+            aria-label={name(t("set.field.maxConcurrent"))}
             type="number"
             min={1}
             max={8}
             value={value.options?.max_concurrent ?? ""}
-            placeholder="Inherit"
+            placeholder={t("set.routingInherit")}
             onChange={(event) =>
               set("options", {
                 ...value.options,

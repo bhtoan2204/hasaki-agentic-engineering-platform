@@ -19,6 +19,7 @@ import {
   act,
   Badge,
   Copy,
+  Empty,
   EmptyState,
   ErrorBox,
   Loading,
@@ -272,6 +273,8 @@ export function QuestionsPage() {
         crumbs={[[t("nav.overview"), "#/overview"], [t("qx.title")]]}
       />
 
+      {approvals.error && <ErrorBox error={approvals.error} onRetry={approvals.reload} />}
+
       <div className="grid3 qx-stats">
         <StatCard
           icon={MessageCircleQuestion}
@@ -335,7 +338,7 @@ export function QuestionsPage() {
         <History size={14} strokeWidth={2} /> {t("qx.history")}
       </h3>
       {!history?.length ? (
-        <div className="card flat muted small">{t("qx.noneYet")}</div>
+        <Empty>{t("qx.noneYet")}</Empty>
       ) : (
         <div className="table-wrap">
           <table className="qx-history">

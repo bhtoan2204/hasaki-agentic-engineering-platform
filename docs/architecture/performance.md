@@ -26,14 +26,16 @@ normalize…), bug terms, declared risk (`inputs.risk` / payload `risk`), multi-
 high-risk vocabulary (payment, refund, COD, settlement, invoice, migration, schema, transaction, outbox, auth, token,
 PII, encryption, … in English and Vietnamese).
 
+* MICRO only when: verified bounded single-repository leaf changes with confirmed low risk and no multi-repo or high-risk business terms.
 * FAST only when: one known repository **and** a narrow-change signal **and** a bug fix (or declared low risk) **and**
   no high-risk term. A short description is never enough.
 * High-risk areas → STANDARD (never FAST automatically). Multi-repository, epics/refactors or declared high risk → DEEP.
 * Anything uncertain → STANDARD ("safe default"), recorded with the reasons.
-* Manual override (AUTO / FAST / STANDARD / DEEP) always wins; forcing FAST on a risky task records a warning.
+* Manual override (AUTO / MICRO / FAST / STANDARD / DEEP) always wins; forcing FAST on a risky task records a warning.
 
 `applyProfile` transforms the published spec into the run's graph (the definition is never mutated):
 
+* **MICRO**: single session for verified, bounded low-risk work. Analysis and planning are folded into the coding session; plan approval is removed; separate post-coding review is folded into self-review within the session; context tokens are clamped to at most 12,000, wall-clock timeout to at most 10 minutes (600 s), and idle timeout to at most 3 minutes. Targeted checks, regression tests, human diff approval and the PR gate remain. Scope growth checkpoints and escalates the run.
 * **FAST**: analysis `agent` steps before the first `coding_agent` are folded into it (instructions merged in order,
   `merged_from` recorded); plan approvals are removed; `agent` review steps after coding are removed; dependants are
   rewired; discovery becomes deterministic; repository confirmation auto-approves when unambiguous. Tests, the PR

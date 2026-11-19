@@ -778,7 +778,7 @@ export function RunSummaryCard({ runs }: { runs: any[] }) {
         </button>
       </div>
       {error ? (
-        <ErrorBox error={error} />
+        <ErrorBox error={error} onRetry={() => setRefresh((n) => n + 1)} />
       ) : !s || (loading && !s) ? (
         <SkeletonRows rows={4} />
       ) : (
@@ -916,7 +916,7 @@ export function RunSummaryView({ s }: { s: any }) {
 
       {s.pull_requests.length > 0 && (
         <>
-          <div className="wi-sum-h">Pull requests</div>
+          <div className="wi-sum-h">{t("common.pullRequests")}</div>
           <ul className="wi-sum-plain">
             {s.pull_requests.map((p: any) => (
               <li key={p.url}>
@@ -1000,6 +1000,12 @@ export function WorkItemDetail({ id }: { id: number }) {
   }, [w?.id]);
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!w)
+    return (
+      <div className="wi-page">
+        <EmptyState title={t("wi.noMatch")} />
+      </div>
+    );
   const start = async (mode: "start" | "step" | "pending") => {
     const r = await act(() =>
       api<any>(`/api/work-items/${id}/runs`, {

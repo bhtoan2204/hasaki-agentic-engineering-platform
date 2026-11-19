@@ -16,6 +16,9 @@ function tr(key, params) {
     params[name] == null ? `{${name}}` : String(params[name]),
   );
 }
+try {
+  if (typeof window !== "undefined") window.tr = tr;
+} catch {}
 function setUiLocale(next) {
   locale = next === "en" ? "en" : "vi";
   try {
@@ -1174,7 +1177,7 @@ window.A = {
         title: tr("rv.cancelConfirm"),
         description: tr("rv.cancelConfirm"),
         confirmLabel: tr("rv.cancel") || "Cancel run",
-        cancelLabel: "Cancel",
+        cancelLabel: tr("common.cancel"),
         variant: "destructive",
       });
       if (!ok) return;
@@ -1193,8 +1196,8 @@ window.A = {
         title: tr("cl.reexecPrompt"),
         description: tr("cl.reexecPrompt"),
         required: false,
-        confirmLabel: "OK",
-        cancelLabel: "Cancel",
+        confirmLabel: tr("common.ok"),
+        cancelLabel: tr("common.cancel"),
       });
       if (fb === null) return;
       body = fb ? { feedback: fb } : {};
@@ -1204,7 +1207,7 @@ window.A = {
         title: tr("si.skipAsk"),
         description: tr("si.skipAsk"),
         confirmLabel: tr("si.skip") || "Skip",
-        cancelLabel: "Cancel",
+        cancelLabel: tr("common.cancel"),
         variant: "warning",
       });
       if (!ok) return;
@@ -1408,7 +1411,7 @@ window.A = {
       title: tr("auth.logoutConfirm", { name: ME.username }),
       description: tr("auth.logoutConfirm", { name: ME.username }),
       confirmLabel: tr("auth.logout") || "Log out",
-      cancelLabel: "Cancel",
+      cancelLabel: tr("common.cancel"),
       variant: "destructive",
     });
     if (!ok) return;

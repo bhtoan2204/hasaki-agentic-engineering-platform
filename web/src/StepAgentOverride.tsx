@@ -9,8 +9,7 @@ export function StepAgentOverride({
   value?: Record<string, any> | null;
   save: (value: Record<string, any> | null) => Promise<unknown>;
 }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   const [draft, setDraft] = useState(value ?? {});
   const [busy, setBusy] = useState(false);
   const submit = async (v: Record<string, any> | null) => {
@@ -23,21 +22,15 @@ export function StepAgentOverride({
   };
   return (
     <details className="card" style={{ margin: 12, padding: 12 }}>
-      <summary>
-        {en ? "Agent settings for the next attempt" : "Cấu hình agent cho lần thử tiếp theo"}
-      </summary>
-      <p className="muted small">
-        {en
-          ? "Saved changes apply to the next attempt. Previous attempts retain their original provider and model. Retry or continue the step separately."
-          : "Thay đổi áp dụng cho lần thử tiếp theo. Các lần thử trước giữ nguyên nhà cung cấp và mô hình. Thử lại hoặc tiếp tục bước bằng thao tác riêng."}
-      </p>
+      <summary>{t("sao.title")}</summary>
+      <p className="muted small">{t("sao.desc")}</p>
       <StepAgentFields allowVerification={false} value={draft} onChange={setDraft} />
       <div className="actions">
         <button disabled={busy} onClick={() => submit(draft)}>
-          {en ? "Save override" : "Lưu ghi đè"}
+          {t("sao.save")}
         </button>
         <button className="ghost" disabled={busy} onClick={() => submit(null)}>
-          {en ? "Restore step defaults" : "Khôi phục mặc định của bước"}
+          {t("sao.restore")}
         </button>
       </div>
     </details>

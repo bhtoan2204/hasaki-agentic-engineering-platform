@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { api, useApi } from "../../api.ts";
-import { act, ErrorBox, Field } from "../../ui.tsx";
+import { act, Empty, ErrorBox, Field, SkeletonRows } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
 export function EvaluationRecommendations() {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   const rows = useApi<any[]>("/api/agent-recommendations"),
     policies = useApi<any[]>("/api/agent-optimization");
   const [category, setCategory] = useState(""),
@@ -30,59 +29,51 @@ export function EvaluationRecommendations() {
     d = show?.decision;
   return (
     <Panel
-      title={en ? "Evidence-backed recommendations" : "Khuyến nghị dựa trên bằng chứng"}
-      hint={
-        en
-          ? "Controlled, completed live benchmarks only; fixture controls and production observations never establish model superiority."
-          : "Chỉ dùng benchmark thật hoàn tất có kiểm soát; fixture và quan sát sản xuất không chứng minh mô hình vượt trội."
-      }
+      title={t("an.eval.recommendations")}
+      hint={t("an.eval.recommendationsHint")}
     >
       <div className="grid2">
-        <Field label={en ? "Task category" : "Loại nhiệm vụ"}>
+        <Field label={t("an.eval.taskCategory")}>
           <input
-            aria-label={en ? "Recommendation task category" : "Loại nhiệm vụ khuyến nghị"}
+            aria-label={t("an.eval.recCategoryAria")}
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            placeholder={en ? "Exact labeled category" : "Nhãn loại nhiệm vụ chính xác"}
+            placeholder={t("an.eval.exactCategory")}
           />
         </Field>
-        <Field label={en ? "Control cohort (optional)" : "Nhóm kiểm soát (tùy chọn)"}>
+        <Field label={t("an.eval.controlCohortOpt")}>
           <input value={cohort} onChange={(e) => setCohort(e.target.value)} />
         </Field>
       </div>
       <button className="sm" disabled={!category.trim()} onClick={generate}>
-        {en ? "Generate recommendation" : "Tạo khuyến nghị"}
+        {t("an.eval.generate")}
       </button>
       {rows.error && <ErrorBox error={rows.error} onRetry={rows.reload} />}
-      {!show && (
-        <p className="muted">
-          {en
-            ? "Insufficient evidence. Create a snapshot to inspect the supporting samples."
-            : "Chưa đủ bằng chứng. Tạo bản chụp để xem mẫu hỗ trợ."}
-        </p>
+      {policies.error && <ErrorBox error={policies.error} onRetry={policies.reload} />}
+      {rows.loading && !rows.data && <SkeletonRows rows={2} />}
+      {!rows.loading && !show && (
+        <Empty>
+          {t("an.eval.insufficientEvidence")}
+        </Empty>
       )}
       {show && (
         <>
           <h4>
             {d.status === "RECOMMENDED"
-              ? `${en ? "Recommended" : "Khuyến nghị"}: ${d.plan.map((p: any) => p.provider).join(" → ")}`
-              : en
-                ? "Insufficient evidence / unavailable"
-                : "Chưa đủ bằng chứng / chưa khả dụng"}
+              ? `${t("an.eval.recommended")}: ${d.plan.map((p: any) => p.provider).join(" → ")}`
+              : t("an.eval.insufficientOrUnavailable")}
           </h4>
           <p className="small">
-            {en ? "Confidence" : "Độ tin cậy"}: {d.confidence} · {en ? "Samples" : "Số mẫu"}:{" "}
-            {d.samples ?? 0} · {en ? "Distinct tasks" : "Nhiệm vụ khác nhau"}:{" "}
-            {d.distinct_tasks ?? 0} · {en ? "Verified success" : "Thành công đã xác minh"}:{" "}
-            {fmt(d.success_rate, "pct")} · {en ? "Median" : "Trung vị"}: {fmt(d.median_ms, "ms")} ·{" "}
-            {en ? "Cost availability" : "Độ đầy đủ chi phí"}: {d.cost_availability ?? "Unknown"}
+            {t("an.eval.confidence")}: {d.confidence} · {t("an.eval.samples")}:{" "}
+            {d.samples ?? 0} · {t("an.eval.distinctTasks")}:{" "}
+            {d.distinct_tasks ?? 0} · {t("an.eval.verifiedSuccess")}:{" "}
+            {fmt(d.success_rate, "pct")} · {t("an.eval.median")}: {fmt(d.median_ms, "ms")} ·{" "}
+            {t("an.eval.costAvailability")}: {d.cost_availability ?? "Unknown"}
           </p>
           <p className="muted small">{d.reason}</p>
           <details>
             <summary>
-              {en
-                ? "Supporting evidence and recommendation version"
-                : "Bằng chứng và phiên bản khuyến nghị"}
+              {t("an.eval.supportingEvidenceVer")}
             </summary>
             <p className="mono small">
               {show.version} · {show.evidence_hash}
@@ -104,7 +95,7 @@ export function EvaluationRecommendations() {
               </p>
             ))}
             <a href={`/api/agent-recommendations/${show.id}`} target="_blank" rel="noreferrer">
-              {en ? "Immutable evidence snapshot" : "Bản chụp bằng chứng bất biến"}
+              {t("an.eval.immutableSnapshot")}
             </a>
           </details>
           {d.status === "RECOMMENDED" && d.plan?.length === 1 && (
@@ -115,15 +106,11 @@ export function EvaluationRecommendations() {
                   checked={consent}
                   onChange={(e) => setConsent(e.target.checked)}
                 />
-                {en
-                  ? "Opt in for future unconfigured coding steps only. Running workflows are unchanged."
-                  : "Áp dụng cho bước lập trình chưa cấu hình trong tương lai. Không đổi workflow đang chạy."}
+                {t("an.eval.optInFutureCoding")}
               </label>
               <label>
                 <input type="checkbox" checked={cost} onChange={(e) => setCost(e.target.checked)} />
-                {en
-                  ? "Allow a default when provider cost is unknown"
-                  : "Cho phép mặc định khi chưa rõ chi phí"}
+                {t("an.eval.allowDefaultUnknownCost")}
               </label>
               <button
                 className="sm"
@@ -140,7 +127,7 @@ export function EvaluationRecommendations() {
                   })
                 }
               >
-                {en ? "Save future-default policy" : "Lưu chính sách mặc định tương lai"}
+                {t("an.eval.saveFuturePolicy")}
               </button>
             </div>
           )}
@@ -148,7 +135,7 @@ export function EvaluationRecommendations() {
       )}
       {policies.data?.map((p) => (
         <p key={p.id} className="small">
-          {p.category} · {p.enabled ? (en ? "Enabled" : "Đã bật") : en ? "Disabled" : "Đã tắt"}{" "}
+          {p.category} · {p.enabled ? t("an.eval.enabled") : t("an.eval.disabled")}{" "}
           <button
             className="quiet xs"
             onClick={() =>
@@ -163,7 +150,7 @@ export function EvaluationRecommendations() {
               })
             }
           >
-            {en ? "Disable" : "Tắt"}
+            {t("an.eval.disable")}
           </button>
         </p>
       ))}

@@ -261,7 +261,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
             </span>
           )}
           {step.subtask_id && (
-            <span className="gn-pill" title={`subtask of ${step.parent_step_key ?? ""}`}>
+            <span className="gn-pill" title={t("graph.subtaskOf", { parent: step.parent_step_key ?? "" })}>
               <Split size={10} strokeWidth={2.4} />
               {step.subtask_id}
               {Array.isArray(step.config?.subtask?.target_repos)
@@ -270,12 +270,12 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
             </span>
           )}
           {step.config?.subtask?.execution_strategy === "parallel" && (
-            <span className="gn-pill gn-pill-run" title="parallel subtask">
+            <span className="gn-pill gn-pill-run" title={t("graph.parallelSubtask")}>
               parallel
             </span>
           )}
           {step.config?.isolated_workspace && (
-            <span className="gn-pill" title="isolated worktree">
+            <span className="gn-pill" title={t("graph.isolatedWorktree")}>
               isolated
             </span>
           )}

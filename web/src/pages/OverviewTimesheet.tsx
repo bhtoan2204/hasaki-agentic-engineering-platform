@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import { useApi } from "../api.ts";
+import { ErrorBox, Skeleton } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 
 type Kind = "full" | "half_leave" | "missing_punch";
@@ -70,7 +71,7 @@ export function TimesheetCard() {
   const { t } = useI18n();
   const [at, setAt] = useState(thisMonth);
   const [open, setOpen] = useState(false);
-  const { data, error, loading } = useApi<Sheet>(
+  const { data, error, loading, reload } = useApi<Sheet>(
     `/api/timesheet?year=${at.year}&month=${at.month}`,
   );
   const shift = (delta: number) =>
@@ -119,9 +120,12 @@ export function TimesheetCard() {
         </div>
       </div>
       {error ? (
-        <div className="ov-inbox-empty pe-warn">{error}</div>
+        <ErrorBox error={error} onRetry={reload} />
       ) : !data && loading ? (
-        <div className="ov-inbox-empty muted">{t("ts.loading")}</div>
+        <div className="stack" style={{ gap: 8 }}>
+          <Skeleton h={48} r={12} />
+          <Skeleton h={32} r={12} />
+        </div>
       ) : data && !data.connected ? (
         <div className="ov-inbox-empty">
           {t("ts.connect")} <a href="#/work-items">{t("ts.connectLink")}</a>

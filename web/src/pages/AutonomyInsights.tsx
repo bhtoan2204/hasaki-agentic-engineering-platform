@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Gauge } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { act, ErrorBox, Loading } from "../ui.tsx";
+import { act, EmptyState, ErrorBox, Loading } from "../ui.tsx";
 
 type Rate = { numerator: number; denominator: number; value: number | null };
 type View = {
@@ -65,7 +65,8 @@ export function AutonomyInsights() {
       </select>
       {loading && !data && <Loading />}
       {error && <ErrorBox error={error} onRetry={reload} />}
-      {m && m.sample.episodes === 0 && <p className="small muted">{t("ae.empty")}</p>}
+      {m && m.sample.episodes === 0 && <EmptyState icon={Gauge} title={t("ae.empty")} />}
+      {!data && !loading && !error && <EmptyState icon={Gauge} title={t("ae.empty")} />}
       {m && m.sample.episodes > 0 && (
         <section className="card small">
           <div>

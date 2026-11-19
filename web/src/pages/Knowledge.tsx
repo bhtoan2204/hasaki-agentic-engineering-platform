@@ -34,6 +34,7 @@ import {
   act,
   Badge,
   Drawer,
+  Empty,
   EmptyState,
   ErrorBox,
   Field,
@@ -533,7 +534,7 @@ function KnowledgeEditor({
     return (
       <div>
         {back}
-        <ErrorBox error={error} />
+        <ErrorBox error={error} onRetry={reload} />
       </div>
     );
   if (!isNew && !item)
@@ -1236,27 +1237,32 @@ interface KnowledgeAuditView {
   findings: Array<{ kind: string; classification: string; keys: string[]; action: string }>;
 }
 function KnowledgeAuditPanel() {
+  const { t } = useI18n();
   const { data, error, loading, reload } = useApi<KnowledgeAuditView>("/api/knowledge/audit");
   return (
     <div className="card">
-      <h2>Knowledge audit</h2>
-      <p>Read-only checks. Private findings appear only as aggregate counts.</p>
-      <button onClick={reload}>Refresh audit</button>
+      <h2>{t("kn.audit.title")}</h2>
+      <p>{t("kn.audit.lead")}</p>
+      <button onClick={reload}>{t("kn.audit.refresh")}</button>
       {error && <ErrorBox error={error} onRetry={reload} />}
-      {loading && <p>Loading…</p>}
+      {loading && !data && <SkeletonRows rows={3} />}
       {data && (
         <>
           <p>
-            {data.itemCount} items · {data.windowDays} day window
+            {t("kn.audit.summary", { count: data.itemCount, days: data.windowDays })}
           </p>
           <JsonBlock value={data.counts} />
-          {data.findings.map((f, i) => (
-            <div key={i}>
-              <b>{f.kind}</b> · {f.classification}
-              <p>{f.keys.join(", ")}</p>
-              <p>{f.action}</p>
-            </div>
-          ))}
+          {data.findings.length === 0 ? (
+            <Empty>{t("kn.audit.noFindings")}</Empty>
+          ) : (
+            data.findings.map((f, i) => (
+              <div key={i}>
+                <b>{f.kind}</b> · {f.classification}
+                <p>{f.keys.join(", ")}</p>
+                <p>{f.action}</p>
+              </div>
+            ))
+          )}
         </>
       )}
     </div>

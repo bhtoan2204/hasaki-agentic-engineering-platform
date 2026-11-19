@@ -346,6 +346,13 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
         <ErrorBox error={error} onRetry={reload} />
       </div>
     );
+  if (!data)
+    return (
+      <div className="ins">
+        {header}
+        <EmptyState title={t("common.noData")} />
+      </div>
+    );
 
   const wf: any[] = data.by_workflow ?? [];
   const runs = sum(wf, "runs");
@@ -676,8 +683,8 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
             </Panel>
             <Panel
               icon={Sparkles}
-              title="Skill activation"
-              sub="Evidence from structured results and body reads"
+              title={t("si.skillActivation")}
+              sub={t("si.skillActivationSub")}
             >
               {(data.skill_activation ?? []).map(
                 (s: {

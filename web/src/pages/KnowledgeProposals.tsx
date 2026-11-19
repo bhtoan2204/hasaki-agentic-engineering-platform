@@ -287,7 +287,7 @@ function Diff({ lines }: { lines: Array<{ op: string; line: string }> }) {
 
 function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
   const { t } = useI18n();
-  const { data: p, error, reload } = useApi<any>(`/api/knowledge-proposals/${id}`, [id]);
+  const { data: p, error, loading, reload } = useApi<any>(`/api/knowledge-proposals/${id}`, [id]);
   const [comment, setComment] = useState("");
   const [edit, setEdit] = useState<{
     content: string;
@@ -318,13 +318,13 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
     return (
       <div>
         {back}
-        <ErrorBox error={error} />
+        <ErrorBox error={error} onRetry={reload} />
       </div>
     );
   if (!p || !edit)
     return (
       <div className="card">
-        <SkeletonRows rows={5} />
+        {loading ? <SkeletonRows rows={5} /> : <EmptyState title={t("common.notFound")} />}
       </div>
     );
   const pending = p.status === "pending";

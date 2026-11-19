@@ -2,37 +2,51 @@
 
 Workflow-driven AI engineering platform. Engineering requests (**work items**: manual, Hasaki Work, Jira) are executed
 by reusable, versioned **workflows** made of typed steps (AI agent, coding agent, human input, approval, command,
-condition, integration, pull request). Every step has durable state, attempt history, questions, checkpoints and
-context snapshots in PostgreSQL. Claude Code (Agent SDK) is the executor for agent steps. Bitbucket and GitHub are the Git providers.
+condition, integration, pull request, task result report). Every step has durable state, attempt history, questions, checkpoints and
+context snapshots in PostgreSQL. Five AI agent providers (Claude Code, Cursor CLI, OpenAI Codex CLI, Google Antigravity CLI, and GitHub Copilot CLI)
+are orchestrated via a unified execution lifecycle. Bitbucket, GitHub, and GitLab (cloud and self-hosted) are the Git providers.
 
 Importing a task **never** executes anything. You pick a workflow and start a run (or set an explicit automation policy).
 
-Architecture: [`docs/architecture/agent-architecture.md`](docs/architecture/agent-architecture.md) (single agent + skills + tools) ·
-[`docs/architecture/performance.md`](docs/architecture/performance.md) (FAST / STANDARD / DEEP profiles, reuse, latency) ·
-[`live-updates.md`](docs/architecture/live-updates.md) (SSE, replay, fallback polling) ·
-[`repository-access.md`](docs/architecture/repository-access.md) (user-scoped repository permissions) ·
-[`docs/architecture/current-state.md`](docs/architecture/current-state.md) ·
-[`target-state.md`](docs/architecture/target-state.md) · [`migration-plan.md`](docs/architecture/migration-plan.md)
+### Architecture Documentation
+
+**Current Architecture:**
+- [`docs/architecture/architecture-governance.md`](docs/architecture/architecture-governance.md) — Module boundaries, responsibilities, and transactions
+- [`docs/architecture/execution-lifecycle.md`](docs/architecture/execution-lifecycle.md) — Unified 9-stage agent harness lifecycle across all providers
+- [`docs/architecture/workflow-engine-modularization.md`](docs/architecture/workflow-engine-modularization.md) — Modular engine, state machine, and scheduler
+- [`docs/architecture/agent-architecture.md`](docs/architecture/agent-architecture.md) — Single agent + skills + tools model across providers
+- [`docs/architecture/performance.md`](docs/architecture/performance.md) — Adaptive execution profiles (MICRO / FAST / STANDARD / DEEP), reuse, and latency
+- [`docs/architecture/token-optimization.md`](docs/architecture/token-optimization.md) — Context delivery manifests, compaction, and delta updates
+- [`docs/architecture/agent-isolation.md`](docs/architecture/agent-isolation.md) — Bubblewrap OS sandbox isolation and egress allowlists
+- [`docs/architecture/repository-access.md`](docs/architecture/repository-access.md) — User-scoped repository permissions and remote identity
+- [`docs/architecture/live-updates.md`](docs/architecture/live-updates.md) — PostgreSQL SSE live updates, replay, and fallback polling
+- [`docs/architecture/interactive-agent-chat.md`](docs/architecture/interactive-agent-chat.md) — Interactive streaming agent chat and verified operations
+
+**Historical Architecture Documents (distinguished from current behavior):**
+- [`docs/architecture/current-state.md`](docs/architecture/current-state.md) — *Historical*: Audit of commit `8c23002` (pre-workflow v1 baseline)
+- [`docs/architecture/target-state.md`](docs/architecture/target-state.md) — *Historical*: Initial Phase 1 target specification before multi-provider and GitLab additions
+- [`docs/architecture/migration-plan.md`](docs/architecture/migration-plan.md) — *Historical*: Original v1-to-v2 migration roadmap and backfill strategy
 
 ## Run
 
-Run one instance per developer, or one centrally hosted backend and worker. Instances can share PostgreSQL repository metadata; each worker provisions its own checkouts from registered Bitbucket URLs. Local worktrees and agent sessions stay on the assigned instance.
+Run one instance per developer, or one centrally hosted backend and worker. Instances can share PostgreSQL repository metadata; each worker provisions its own checkouts from registered Bitbucket, GitHub, or GitLab URLs. Local worktrees and agent sessions stay on the assigned instance.
 `HOST=0.0.0.0` exposes that one installation. The default listen address stays loopback.
 
 ```bash
 docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
 npm install
-cp config.example.json config.json    # database, dataDir; register remote URLs in Repositories
-export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...   # optional shared service account, not a personal token
+cp .env.example .env                  # Set AUTH_SECRET (random string); configure optional secrets
+# Edit config.json (or specify PLATFORM_CONFIG): databaseUrl, dataDir, reposRoot, projects
+# Optional Git shared service accounts (not personal tokens):
+export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...
 # For a permitted shared account, also set bitbucket.allowSharedCredentials=true in config.json.
 # Keep the existing AUTH_SECRET in the git-ignored .env; never regenerate it on restart.
-# For a NEW install only, generate a cryptographically random secret and save it privately in .env.
 # Localhost HTTP works automatically. Set COOKIE_SECURE=1 behind HTTPS.
 npm run admin:bootstrap -- --username alice --claim-legacy
 # Migrations run before bootstrap, even on an empty database.
 # Enter the password twice at the hidden terminal prompt (10–200 characters).
 # ADMIN_PASSWORD is also supported; no default password.
-npm start                             # builds the UI, then http://localhost:4545 (migrations + seeds run on boot)
+npm start                             # runs ensure-bwrap.sh, builds UI (vite build), runs migrations + seeds, then http://localhost:4545
 ```
 
 The login screens at `/` and `/classic` show CLI setup instructions when no active admin exists.
@@ -47,7 +61,7 @@ templates stay shared (`owner_id` NULL). Unassigned private rows stay invisible 
 | Resource | Member | Admin |
 | --- | --- | --- |
 | Seeded skills, rules, conventions, workflow templates, shared integration settings | Read and use | Modify, publish, archive |
-| Repositories (list, workspace, ranking, runs, agents, PRs, repository knowledge) | Only repositories granted to them (or explicitly shared), further limited by their own Bitbucket permission | Register, grant, share, revalidate, delete; source access only through their own grant |
+| Repositories (list, workspace, ranking, runs, agents, PRs, repository knowledge) | Only repositories granted to them (or explicitly shared), further limited by their own Bitbucket/GitHub/GitLab permission | Register, grant, share, revalidate, delete; source access only through their own grant |
 | Work items, inbox imports, private workflows, runs and everything under a run, private knowledge, task memory | Own rows only | Own rows by default. "View the whole team's resources" is explicit and audited |
 | Clone a shared template | Yes, into a private workflow | Yes |
 | Promote a private workflow or knowledge item to shared | No | Yes, after review |
@@ -57,21 +71,22 @@ Applicability scopes such as GLOBAL and REPOSITORY are not visibility. Task memo
 stays private; approving it does not publish it. Child rows (questions, attempts, artifacts, snapshots, events)
 are authorized through their run. Guessing another user's id returns 404.
 
-Personal Hasaki Work, Bitbucket and Jira credentials belong to the user and are encrypted with `AUTH_SECRET`.
-A missing personal account does not fall back to someone else's token. `BITBUCKET_*` / `JIRA_*` in the
-environment are the explicit shared service account. The server does not open a Hasaki login window; paste a
+Personal Hasaki Work, Bitbucket, GitHub, GitLab and Jira credentials belong to the user and are encrypted with `AUTH_SECRET`.
+A missing personal account does not fall back to someone else's token. `BITBUCKET_*` / `GITHUB_*` / `GITLAB_*` / `JIRA_*` in the
+environment are explicit shared service accounts. The server does not open a Hasaki login window; paste a
 token. Telegram's bot is admin-managed; private step notifications go only to that user's chat. Production-error
 monitors stay shared, and a member who investigates gets their own work item. The shared error list does not
 link to another member's task.
 
-Claude, Cursor, Codex and Antigravity credentials are the worker machine's admin-managed logins in this version. Personal agent
-accounts per user are not included. Agents share one OS user, so this is application isolation for a trusted
-team, not a sandbox: tools are checked against the run owner, but a process on the host can still read the disk.
+Claude, Cursor, Codex, Antigravity and Copilot credentials are the worker machine's admin-managed logins in this version. Personal agent
+accounts per user are not included. Agents share one OS user. When Bubblewrap is installed and `isolation.mode: enforce` is set,
+all agent steps execute inside a secure sandbox (private HOME/tmp, hidden credentials and other runs, network restricted to provider egress allowlist).
+When `isolation.mode: off`, agents run with application tool policy only on a trusted workstation.
 
 Development: `npm run dev` (backend with --watch) + `npm run dev:web` (Vite hot reload on http://localhost:5173,
-proxying /api to :4545). `npm run typecheck` checks backend and UI. `npm test` runs the unit tests (`test/*.test.ts`) in seconds: no PostgreSQL, no real CLIs or agents. `npm run test:integration` runs `test/*.integration.ts` (PostgreSQL, real git/go/CLI processes) on one private PostgreSQL cluster (initdb, from `PATH`) started for the run, with a fresh `platform_test_<uuid>` database per test file; `npm run test:all` runs both, as CI does. A single integration file runs alone with `node --import ./test/setup.ts --test test/<name>.integration.ts`.
+proxying /api to :4545). `npm run typecheck` checks backend and UI (`tsc -p .` and `tsc -p web`). `npm test` runs the unit tests (`test/*.test.ts`) in seconds: no PostgreSQL, no real CLIs or agents. `npm run test:integration` runs `test/*.integration.ts` (PostgreSQL, real git/go/CLI processes) on one private PostgreSQL cluster (initdb, from `PATH`) started for the run, with a fresh `platform_test_<uuid>` database per test file; `npm run test:all` runs both, as CI does. A single integration file runs alone with `node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test test/<name>.integration.ts`.
 
-The PostgreSQL pool defaults to 10 connections and waits at most 5 seconds for a free client
+The PostgreSQL pool defaults to 10 connections and waits at most 15 seconds for a free client
 (`database.poolMax` / `database.connectionTimeoutMillis` in config.json, or `DATABASE_POOL_MAX` / `DATABASE_CONNECTION_TIMEOUT_MS`).
 
 ## Self-development
@@ -96,14 +111,23 @@ Runs created before the column existed have `output_locale` NULL: the UI shows �
 rewrite saved text; new generation for those runs falls back to Vietnamese. `/classic` uses the same
 dictionary. Historical translation of stored agent output is not in this version.
 
-## Agents (Claude Code, Cursor, OpenAI Codex and Google Antigravity)
+## Agents (Claude Code, Cursor, OpenAI Codex, Google Antigravity, and GitHub Copilot)
 
-A run stores `agent_provider`: `claude` (default), `cursor`, `codex` or `antigravity`. It is chosen on the start form in the React app and
-`/classic`, and on `POST /api/runs` as `agent_provider`. Omitted means Claude. Any other value is rejected. Retries,
-resume, repair, re-execution and every auxiliary AI call of the run (repository ranking, test-failure explanation and
-answer interpretation, report reasoning) stay on that provider. Claude model ids are not sent to Cursor, Codex or Antigravity.
-AI calls that do not belong to a run keep the global default (Claude, `model`). Switching provider inside a run or
-per step is not supported.
+A run stores default `agent_provider`: `claude` (default), `cursor`, `codex`, `antigravity` or `copilot`. It is chosen on the start form in the React app and
+`/classic`, and on `POST /api/runs` as `agent_provider`. Omitted means the platform default (`agent.defaultProvider`, or `claude`). Retries,
+resume, repair, and auxiliary AI calls (repository ranking, test-failure explanation, report reasoning) default to that provider.
+Claude model ids are never sent to Cursor, Codex, Antigravity or Copilot.
+
+### Step-Level Orchestration and Fallback
+
+- **Step-level agent configuration:** While each run specifies a default provider, individual `agent` and `coding_agent` steps can configure their own provider, model, reasoning effort, execution profile, timeout, and tool allowlists via `step.config.agent` (see `src/agent/stepAgent.ts`).
+- **Manual step overrides:** Operators can apply an `agent_override` on a step to change provider or model before execution or on re-execution.
+- **Fallback policy:** Steps can declare `config.agent.fallback` (`mode: disabled | manual | automatic`, `providers: [...]`, `max_switches: 2`, `auto_health: true`). When a provider encounters rate limits (`RATE_LIMIT`), quota exhaustion (`QUOTA_EXHAUSTED`), or outage (`PROVIDER_UNAVAILABLE`), the system safely transitions to the next available healthy provider.
+- **Provider handoff:** `src/agent/handoff.ts` snapshots workspace modifications, baseline evidence, and execution notes into an immutable checkpoint, allowing the next provider to resume work without losing progress.
+- **Unified harness lifecycle:** Every agent attempt executes through a deterministic 9-stage lifecycle (`src/agent/harness/executor.ts`): `preflight` → `context` → `authorize` → `budget` → `checkpoint` → `execute` → `output` → `verify` → `finalize` (see [`docs/architecture/execution-lifecycle.md`](docs/architecture/execution-lifecycle.md)).
+- **Provider probe:** `GET /api/agent-providers` checks CLI availability, required flags, logins, and model catalogs across all configured providers without calling a model or consuming quota.
+
+### Cursor
 
 Cursor uses the installed CLI (`agent`, or `agent.cursorBin` / `CURSOR_AGENT_BIN`), version **2026.11.05** or a build
 that advertises `--print`, `--output-format stream-json`, `--resume`, `--mode`, `--sandbox`, `--trust`, `--approve-mcps`
@@ -113,13 +137,14 @@ What this CLI can and cannot do:
 
 - Headless `--print` plus `stream-json` is how progress is recorded. Exit code 0 without a `result` event does not complete the step.
 - Analysis steps use `--mode ask` and `--sandbox enabled` (read-only). Coding steps need `--force` or the CLI only proposes edits; the platform still writes `<workspace>/.cursor/cli.json` deny rules (no `git push`, no writes to the primary checkout) and kills the process if a streamed tool call violates the same policy as Claude. `--force` is not the policy.
+- Implementation steps require `pre_tool_policy` and `hook_bypass_detection`; because Cursor cannot decide native tools before they execute, Cursor is restricted to analysis, verification, and read-only steps.
 - Platform tools (`ask_user`, `submit_result`, `prepare_branch`, knowledge, integrations) are a per-run stdio MCP server. There is no open HTTP endpoint. The bridge file is deleted when the process exits.
 - `--resume <session_id>` is used only for a Cursor session saved for that step. If resume fails, the step is rebuilt from the database and the current worktree. The worktree is not reset.
 - Delegation (subagents) is refused: this CLI has no equivalent of the platform's read-only subagent hook.
 - Cost and token totals are left null. The CLI's documented result event has duration, not usage.
 - Other MCP servers in the operator's global Cursor config can still be approved because `--approve-mcps` is required for unattended runs.
 
-If `agent` is missing or not logged in, the step fails with that reason. It does not switch to Claude.
+If `agent` is missing or not logged in, the step fails with that reason. It does not switch to Claude unless a fallback policy is configured.
 
 ### OpenAI Codex
 
@@ -141,10 +166,9 @@ calls a model and never reads `~/.codex/auth.json`.
 
 **Whose account runs the work.** Every Codex step runs as the Codex login of the worker's OS user (for example the
 operator's ChatGPT account). Run ownership on the platform does not create a Codex account per user, and all users
-share that account's usage limits. When the limit is reached the step fails with a "usage limit" error and is not
-retried automatically. The platform never switches to an API key, another provider or another billing method:
-`OPENAI_API_KEY` / `CODEX_API_KEY` are removed from the Codex environment. Wait for the reset, or start a new run with
-another provider.
+share that account's usage limits. When the limit is reached the step fails with a "usage limit" error and can fail over
+if a fallback policy is configured. The platform never switches to an API key, another provider or another billing method:
+`OPENAI_API_KEY` / `CODEX_API_KEY` are removed from the Codex environment.
 
 **Configuration** (`config.json` → `agent.codex`, env overrides in brackets):
 
@@ -156,7 +180,7 @@ another provider.
 | `reasoningEffort` (`CODEX_REASONING_EFFORT`) | empty = model default | `model_reasoning_effort` |
 | `models` | `{}` | routing like `agent.models` (`profile`/`*` → step type or `verifier`), Codex slugs only |
 
-A step can override with `codex_model` / `codex_reasoning_effort` (the Claude-only `model` key is ignored for Codex).
+A step can override with `codex_model` / `codex_reasoning_effort` (or `step.config.agent.model`).
 
 **How the platform policy is enforced** — per invocation, never by editing `~/.codex`:
 
@@ -203,25 +227,64 @@ Invocation analytics capture the reported model from Antigravity's `modelName` h
 Unknown historical models remain unknown unless a matching session log supplies evidence.
 
 Every Antigravity step runs as the Google account logged in on the worker. Run ownership does not create an account per
-user, and the platform does not fall back to another provider. Configuration lives in `agent.antigravity`: `bin`,
-`timeoutMs` (`AGY_TIMEOUT_MS`), `model` (`AGY_MODEL`), `effort` (`AGY_EFFORT`) and `models` (Antigravity slugs only,
-same shape as `agent.models`). Streaming and the review repair loop are in
+user. Configuration lives in `config.json` → `agent.antigravity` (env overrides in brackets):
+
+| key | default | |
+|---|---|---|
+| `bin` (`AGY_BIN` / `ANTIGRAVITY_BIN`) | `agy` | executable |
+| `timeoutMs` (`AGY_TIMEOUT_MS` / `ANTIGRAVITY_TIMEOUT_MS`) | 45 min | hard limit per Antigravity turn |
+| `model` (`AGY_MODEL` / `ANTIGRAVITY_MODEL`) | empty = `agy` default | Antigravity model slug |
+| `effort` (`AGY_EFFORT` / `ANTIGRAVITY_EFFORT`) | empty = model default | reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`) |
+| `maxConcurrent` (`AGY_MAX_CONCURRENT` / `ANTIGRAVITY_MAX_CONCURRENT`) | 1 | max concurrent turns on worker |
+| `allowSubagents` (`AGY_ALLOW_SUBAGENTS` / `ANTIGRAVITY_ALLOW_SUBAGENTS`) | false | allow subagents |
+| `sandbox` (`AGY_SANDBOX` / `ANTIGRAVITY_SANDBOX`) | true | terminal restrictions / sandbox |
+| `models` | `{}` | routing like `agent.models`, Antigravity slugs only |
+
+Streaming and the review repair loop are in
 [`docs/reliability/antigravity-streaming-and-review-repair.md`](docs/reliability/antigravity-streaming-and-review-repair.md).
+
+### GitHub Copilot
+
+Copilot runs through the official GitHub Copilot CLI in headless non-interactive mode (`copilot`, or `agent.copilot.bin` / `COPILOT_BIN`). Log in on the worker with `copilot login`, or provide an environment token (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`). The probe (`GET /api/agent-providers`, also shown when Copilot is selected) checks binary presence, required flags (`--output-format`, `--prompt`, `--model`, `--silent`, `--reasoning-effort`), authentication, and model availability.
+
+Every Copilot step runs as the authenticated GitHub account on the worker. Run ownership does not create an account per user. Configuration lives in `config.json` → `agent.copilot` (env overrides in brackets):
+
+| key | default | |
+|---|---|---|
+| `bin` (`COPILOT_BIN`) | `copilot` | executable |
+| `timeoutMs` (`COPILOT_TIMEOUT_MS`) | 45 min | hard limit per Copilot turn |
+| `model` (`COPILOT_MODEL`) | empty = `copilot` default | Copilot model slug (`auto`, `gpt-4o`, `gpt-4.1`, `o3`, `o4-mini`, `claude-sonnet-4`, `claude-3.5-sonnet`, `gpt-5.6-luna`) |
+| `effort` (`COPILOT_EFFORT`) | empty = model default | reasoning effort (`low`, `medium`, `high`, `xhigh`) |
+| `maxConcurrent` (`COPILOT_MAX_CONCURRENT`) | 1 | max concurrent turns on worker |
+| `allowSubagents` (`COPILOT_ALLOW_SUBAGENTS`) | false | allow subagents |
+| `sandbox` (`COPILOT_SANDBOX`) | true | terminal and execution restrictions |
+| `models` | `{}` | routing like `agent.models`, Copilot slugs only |
+
+Platform tools reach Copilot through a per-attempt stdio MCP bridge. PreToolUse hooks enforce tool policies (`decide()` rules: worktree-only edits, read-only shell in analysis, no reading credentials or `.env`, no unauthorized Git branches).
+
+**Live smoke test (opt-in, uses quota):** `docker compose up -d postgres`, then
+`COPILOT_LIVE=1 COPILOT_BIN=$(which copilot) COPILOT_EFFORT=low npm run smoke:copilot`. `npm test` never calls a model.
 
 ## UI (React + XYFlow, `web/`)
 
 | Screen | What you can do |
 |---|---|
-| **Runs → run** | Live execution graph (SSE from PostgreSQL LISTEN/NOTIFY, polling fallback). Start / step mode / pause / resume / cancel. Click a node → inspector: config, resolved input, output (Markdown + JSON tree, copy), applied knowledge from the context snapshot, Claude session, Q&A, checkpoints, artifacts, attempt history; retry, re-execute from here, skip, run this step (step mode). Questions and approvals are answered in the inspector; blocked nodes pulse. |
-| **Claude tab** | Execution viewer streamed while the step runs: prompts, Claude messages, tool calls with full input/result, files read / modified, commands, errors, reasoning summaries, turn cost — filterable by type. |
-| **🔍 Changes** | Per workspace: commits ahead of `release/prod`, changed files, colored diff, uncommitted work, the exact PR title/description the PR step will send, test/review results. Approve the PR step from there. |
-| **Workflows → editor** | Node canvas: add steps from the palette, drag, connect (dependencies), delete; per-type forms (prompts, output contract, skills, business rules, repository discovery, approval/reject routing, commands, conditions, PR mode); validate, save draft, publish version, load older versions, run (normal or step mode). |
-| **Knowledge** | Business rules, architecture, conventions, repo instructions, skills; scope + applicability, version history, audit, where it is assigned and which executions actually received it. |
-| **Work Items / Questions / Repositories** | Import (Hasaki list or task id, Jira, JSON), manual requests, start runs; cross-run questions inbox; repository registry and ranking preview. |
+| **Runs → run** | Live execution graph (SSE from PostgreSQL LISTEN/NOTIFY, polling fallback). Start / step mode / pause / resume / cancel. Click a node → inspector: config, resolved input, output (Markdown + JSON tree, copy), applied knowledge from context snapshot, agent session, Q&A, checkpoints, artifacts, attempt history, harness lifecycle evidence; retry, re-execute with instructions, skip, run this step (step mode). Blocked nodes pulse. |
+| **Agent tab** | Execution viewer streamed while the step runs: prompts, agent messages, tool calls with full input/result, files read/modified, commands, errors, reasoning summaries, turn cost — filterable by type. |
+| **🔍 Changes** | Per workspace: commits ahead of `release/prod`, changed files, colored diff, uncommitted work, exact PR title/description the PR step will send, test/review results. Approve the PR step from there. |
+| **Trace Explorer** | Granular attempt execution trace with stage transitions, span tree, tool call timings, and diagnostic details. |
+| **Workflows → editor** | Node canvas: add steps from palette, drag, connect (dependencies), delete; per-type forms (prompts, output contract, skills, rules, repo discovery, approval/reject routing, commands, conditions, PR mode, agent configuration); validate, save draft, publish version, load older versions, run (normal or step mode). |
+| **Knowledge** | Business rules, architecture, conventions, repo instructions, skills; scope + applicability, version history, audit, where it is assigned and which executions received it. Review and approve rule change proposals. |
+| **Work Items & Questions** | Import (Hasaki task or list, Jira, JSON), manual requests, start runs; cross-run questions inbox; intake policies. |
+| **Repositories** | Repository registry (Bitbucket, GitHub, GitLab), per-user access grants, remote URLs, code intelligence status/indexing, and ranking preview. |
+| **Integrations** | Connection testing and credentials for Bitbucket, GitHub, GitLab, Hasaki Work (Chrome relay / token paste), Jira, Splunk, SigNoz, ArgoCD, Kafka UI, Vault, Telegram, and QC HTTP. |
+| **Production Errors & Investigations** | Scheduled daily Splunk/SigNoz error scans across Kubernetes namespaces; triage into investigation runs with timeline correlation and latency analysis. |
+| **Insights & Quality** | Execution metrics, health, usage, quality benchmark comparison (P1/P2 evaluation suites), autonomy insights, and continuous learning review. |
+| **Interactive Chat** | Real-time multi-turn conversational agent with SSE streaming, tool execution, operations verification, and task continuation. |
 
 The previous vanilla UI is still served at `/classic`.
 
-Node ≥ 22.18 (runs `.ts` directly), the selected agent CLI logged in, Git, and personal Bitbucket credentials saved in Integrations.
+Node ≥ 22.18 (runs `.ts` directly), the selected agent CLI logged in, Git, and personal Bitbucket, GitHub, or GitLab credentials saved in Integrations.
 
 ## Telegram notifications and interactive workflows (optional)
 
@@ -236,17 +299,32 @@ See [Interactive Telegram setup, security and recovery](docs/integrations/intera
 | | |
 |---|---|
 | Work item | The request. `REQ-n` (manual), Hasaki task code, Jira key. The code is the branch name. Many runs per item. |
-| Workflow | Key + immutable published versions. Built-ins: Feature Implementation, Bug Investigation, Code Review, Refactoring, Work Item Analysis. Edit in the UI → draft → publish. |
-| Run | One execution, pinned to a definition version, with its own resolved graph, allowed/selected repositories and branch. Can exist without a work item. |
-| Step / attempt | Status `PENDING READY RUNNING WAITING_INPUT WAITING_APPROVAL COMPLETED FAILED RETRYING CANCELED SKIPPED`; every execution is an attempt with input, output, context snapshot, Claude session, error. |
+| Workflow | Key + immutable published versions. Built-ins: `feature-implementation`, `bug-investigation`, `code-review`, `refactoring`, `work-item-analysis`, `platform-self-development`, `intelligent-feature-engineering`, `production-incident-investigation`, `micro-change`, and pilot `ponytail-nonproduction-pilot`. Edit in UI → draft → publish. |
+| Run | One execution, pinned to a definition version, with its own resolved graph, allowed/selected repositories, execution profile and branch. Can exist without a work item. |
+| Step / attempt | Status `PENDING READY RUNNING WAITING_INPUT WAITING_APPROVAL COMPLETED FAILED RETRYING CANCELED SKIPPED`; step types: `agent`, `coding_agent`, `human_input`, `human_approval`, `integration`, `command`, `condition`, `git_pull_request`, `task_result_report`. Every execution is an attempt with immutable input, output, context snapshot, agent session, metrics, and harness evidence. |
 
 Human-in-the-loop: agents call `ask_user` → step `WAITING_INPUT` (no worker held) → answer in the run page or the
-Questions inbox → the step resumes its Claude session if safe, otherwise rebuilds context from persisted history.
+Questions inbox → the step resumes its provider session if safe, otherwise rebuilds context from persisted history.
 Approvals: `human_approval` steps, or `requires_approval: true` on any step (PR mode `approval`).
 Retry / re-execute from any step: downstream steps are invalidated (generation bump); upstream results are reused.
 
 Scheduling is PostgreSQL-only: `workflow_jobs` claimed with `FOR UPDATE SKIP LOCKED`, leases + heartbeats + fencing
 tokens; crashed workers' jobs are reaped and retried. Several processes may share the database.
+
+**Adaptive Execution Profiles:**
+- `MICRO`: Bounded, single-repository changes with 12k context token cap, 10-minute timeout cap, and folded analysis/planning/coding session.
+- `FAST`: Small, well-scoped changes in one known repo: folds analysis into coding, drops plan approvals and post-coding AI review, uses deterministic discovery.
+- `STANDARD`: Published workflow as defined.
+- `DEEP`: High-risk or cross-repository changes: full workflow, AI-assisted discovery, strict independent verification, no auto-approvals.
+
+**Context Optimization and Delta Delivery:**
+`config.agent.deltaContext` (default `true`) tracks delivery manifests in `agent_context_deliveries` so resumed sessions receive only changed entries. When session context pressure exceeds thresholds, adaptive compaction (`config.agent.compaction`: `reconstruct` | `native` | `off`) reconstructs state cleanly without blowing the context window.
+
+**Slop Detection:**
+`config.slop.mode` (`disabled` | `advisory` | `enforcement`) runs deterministic checks against cyclomatic complexity, cognitive complexity, duplicate lines, and language-specific anti-patterns.
+
+**PR Lifecycle Monitoring:**
+`config.prLifecycle.mode` (`off` | `monitor` | `repair`) polls pull request CI checks and trusted reviewer feedback, triggering bounded automated repair loops for fixable issues.
 
 **Continuous learning**: when a run completes, the human decisions in it are analysed: answers, approval comments,
 re-run instructions and the BA ticket. Agent output is never analysed. Each detected rule change is stored as a
@@ -259,41 +337,42 @@ update proposals, and every approved change can be rolled back. Later runs resol
 context snapshot records which version a run received. See
 [docs/architecture/knowledge-evolution.md](docs/architecture/knowledge-evolution.md).
 
-## Production incident investigation (Splunk, read-only)
+## Production incident investigation (Splunk & SigNoz, read-only)
 
 Workflow `production-incident-investigation` (sidebar *Điều tra Production*): a Vietnamese or English request
-("Kiểm tra log đơn hàng … lúc khoảng 08:48 …") → Splunk searches with guard rails → events correlated by identifiers
+("Kiểm tra log đơn hàng … lúc khoảng 08:48 …") → Splunk/SigNoz searches with guard rails → events correlated by identifiers
 across services → timeline with the logged precision → latency between explicitly named event pairs → evidence-backed
 summary and developer report. Agents only label stored, sanitized log events; timestamps and relationships come from
-the evidence itself. Connect Splunk (cookie, personal token, or an admin-managed shared read-only token) and press
-*Test connection* on the Integrations page; without a connection the workflow hands out the SPL and accepts pasted
+the evidence itself. Connect Splunk or SigNoz in Integrations; without a connection the workflow hands out the query SPL and accepts pasted
 results. See [docs/integrations/production-investigation.md](docs/integrations/production-investigation.md).
 
-## Safety
+## Safety & Isolation
 
-- No `bypassPermissions`. Each agent step gets an explicit tool list and a PreToolUse/`canUseTool` policy
-  (`src/agent/toolPolicy.ts`): analysis steps are read-only (shell allowlist); coding steps may edit only inside the
-  run's worktrees; `git push`, `reset --hard`, `clean`, `rm -rf`, checking out `release/prod` are always denied.
-- Code is edited only in worktrees under `~/.claude-task-platform/worktrees/<branch>/<repo>`; the primary checkout is never used.
-- Repositories outside a run's allowed set (project mapping in the registry) are rejected at selection, at `prepare_branch` and at PR time.
-  The allowed set is the work item's project plus the projects linked with it in `config.relatedProjects`
-  (both directions, one hop): `{ "OMS": ["Payment"] }` lets an OMS run use Payment repos and vice versa.
-- Task text and earlier agent output are passed as `<untrusted_input>`; platform rules and curated knowledge go in the system prompt.
-- PRs are opened by the `git_pull_request` step (`auto | approval | draft | none`), idempotent per repo/branch. Nothing is merged or deployed.
-- The API has no auth — it listens on loopback only.
+- **Authentication & RBAC:** Session cookie-based authentication with Argon2id password hashing, CSRF token validation (`csrfOk`), user roles (`admin` and `member`), and encrypted user credentials using `AUTH_SECRET`. Binds to loopback (`127.0.0.1`) by default (`HOST=0.0.0.0` for shared instances).
+- **Bubblewrap OS Isolation (`isolation.mode: enforce`):** Each agent step executes inside a sandboxed container (private HOME and `/tmp`, hidden credentials, tokens, and host secrets, network restricted to provider egress allowlist, and rlimit/cgroup boundaries). When `off`, agents run with application tool policy on trusted single-operator machines.
+- **Worktree Isolation:** Code is edited strictly in dedicated worktrees under `dataDir/worktrees/<instance>/<run>/<repo>`; primary checkouts and `reposRoot` are never modified.
+- **Tool Policies:** Strict pre-tool decisions (`src/agent/toolPolicy.ts`): analysis steps are read-only (shell allowlist); coding steps may edit only inside the run's worktrees; `git push`, `reset --hard`, `clean`, `rm -rf`, and checkout of `release/prod` are denied.
+- **Repository Authorization:** Repositories outside a run's allowed set are rejected at selection, branch preparation, and PR time.
+- **Untrusted Input Wrapping:** Task text and earlier agent output are wrapped as `<untrusted_input>`; platform rules and curated knowledge remain in the trusted system prompt.
+- **PR Safety:** Pull requests are opened idempotently by `git_pull_request` (`auto | approval | draft | none`). Nothing is merged or deployed automatically.
 
 ## Main API
 
-| | |
+| Endpoint | Responsibility |
 |---|---|
-| `GET/POST /api/work-items`, `POST /api/work-items/import`, `GET/POST /api/work-items/:id` | work items (POST creates a manual request; import = Hasaki/Jira, no execution) |
-| `POST /api/work-items/:id/runs` `{workflow, repositories?, inputs?, start?}` · `POST /api/work-items/:id/analyze` | start a run / read-only analysis |
-| `GET/POST /api/workflows`, `POST /api/workflows/:key/draft`, `/publish`, `/validate` | workflow library |
-| `GET/POST /api/runs`, `GET /api/runs/:id`, `POST /api/runs/:id/{start,pause,resume,cancel,repositories,feedback}` | runs |
-| `POST /api/runs/:id/steps/:key/{retry,reexecute,approve,reject,skip}` | step controls |
-| `GET /api/questions`, `POST /api/questions/answers` `{answers:{id:text}}` | questions inbox |
-| `GET/POST /api/knowledge`, `POST /api/knowledge/preview`, `GET/POST /api/repositories`, `POST /api/repositories/rank` | knowledge, repository registry |
-| `/api/tasks*`, `/api/work/*` | legacy endpoints, kept compatible (`POST /api/tasks?workflow=<key>` imports and starts) |
+| `GET/POST /api/work-items`, `POST /api/work-items/import`, `GET/POST /api/work-items/:id` | Work items (POST creates manual request; import = Hasaki Work / Jira, no execution) |
+| `POST /api/work-items/:id/runs` `{workflow, repositories?, inputs?, start?}` · `POST /api/work-items/:id/analyze` | Start a run / read-only analysis |
+| `GET/POST /api/workflows`, `POST /api/workflows/:key/draft`, `/publish`, `/validate` | Workflow library & visual definition lifecycle |
+| `GET/POST /api/runs`, `GET /api/runs/:id`, `POST /api/runs/:id/{start,pause,resume,cancel,repositories,feedback}` | Run lifecycle controls |
+| `POST /api/runs/:id/steps/:key/{retry,reexecute,approve,reject,skip}` | Step-level controls & re-execution with instructions |
+| `GET /api/questions`, `POST /api/questions/answers` `{answers:{id:text}}` | Cross-run questions inbox |
+| `GET/POST /api/knowledge`, `POST /api/knowledge/preview` | Knowledge registry, versioning & change proposals |
+| `GET/POST /api/repositories`, `POST /api/repositories/rank`, `GET /api/repositories/:id/workspace` | Repository registry, access grants & workspace status |
+| `GET /api/agent-providers`, `GET/POST /api/settings/agent` | Agent provider status probes & configuration |
+| `GET/POST /api/chat/conversations`, `GET /api/chat/conversations/:id/stream`, `POST /api/chat/conversations/:id/messages` | Real-time interactive agent chat & streaming SSE |
+| `POST /api/code-intelligence/search` | Symbol search, definitions, references, and dependencies |
+| `GET /api/runs/:id/changes`, `POST /api/runs/:id/pr/sync` | Workspace diffs, PR preview and PR state synchronization |
+| `/api/tasks*`, `/api/work/*` | Legacy endpoints, kept compatible (`POST /api/tasks?workflow=<key>` imports and starts) |
 
 ### Connect Hasaki Work using Google Chrome (local worker)
 
@@ -342,9 +421,9 @@ Reference: https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-brow
 
 ### Optional cross-repository code intelligence (P1)
 
-Set `codeIntelligence.enabled` to `true` in the **local** `PLATFORM_CONFIG` (defaults and limits are in `config.example.json`). The existing PostgreSQL migrations create the additive `code_intelligence` schema. No extra service or database extension is required. `git` and `rg` must be installed on the worker; Tree-sitter runtime/grammars are pinned npm dependencies.
+Set `codeIntelligence.enabled` to `true` in the **local** `PLATFORM_CONFIG` (defaults and limits are in `config.json` / `src/config.ts`). The existing PostgreSQL migrations create the additive `code_intelligence` schema. No extra service or database extension is required. `git` and `rg` must be installed on the worker; Tree-sitter runtime/grammars are pinned npm dependencies.
 
-Existing scheduler workers index registered repositories while idle. The repository detail page shows status, commit, counts, progress and sanitized errors; administrators can queue reindexing or cancel it. Discovery and Claude/Cursor/Codex prompts use validated snapshots with metadata/direct-search fallback. The read-only `code_intelligence.search` integration tool exposes symbols, definitions, references, bounded dependencies and exact search within the run's allowed repositories.
+Existing scheduler workers index registered repositories while idle. The repository detail page shows status, commit, counts, progress and sanitized errors; administrators can queue reindexing or cancel it. Discovery and agent prompts (Claude, Cursor, Codex, Antigravity, Copilot) use validated snapshots with metadata/direct-search fallback. The read-only `code_intelligence.search` integration tool exposes symbols, definitions, references, bounded dependencies and exact search within the run's allowed repositories.
 
 See [architecture, extraction coverage and operational limits](docs/architecture/code-intelligence.md) and [measured fixture benchmark](docs/architecture/code-intelligence-benchmark.json). To reproduce on an isolated **local test database**, run `npm run bench:code-intelligence`; it uses the existing test database setup, which creates a unique `platform_test_<uuid>` database without resetting an existing one. Use `TEST_DATABASE_ADMIN_URL` for a different local test PostgreSQL. The benchmark never accepts a remote database.
 
@@ -366,7 +445,7 @@ See the [P2 validation report](docs/validation/p2-finalization.md), [measured pa
 
 ## URL-based repository registry
 
-Administrators add `https://bitbucket.org/<workspace>/<repository>.git` and a default branch on **Repositories**, preserving project mappings and repository permissions. Members use that shared registration with their own Bitbucket credentials. Each assigned instance automatically clones into its dataDir, then creates an isolated run worktree for Claude/Codex/Cursor. No source-path mapping is needed for new repositories. Connection testing, preparation, refresh and workspace status are available on the repository detail page.
+Administrators add `https://bitbucket.org/<workspace>/<repository>.git`, `https://github.com/<owner>/<repository>.git`, or `https://<gitlab-host>/<group>/<project>.git` and a default branch on **Repositories**, preserving project mappings and repository permissions. Members use that shared registration with their own provider credentials. Each assigned instance automatically clones into its dataDir, then creates an isolated run worktree for Claude, Cursor, Codex, Antigravity, or Copilot. No source-path mapping is needed for new repositories. Connection testing, preparation, refresh and workspace status are available on the repository detail page.
 
 Existing paths remain deprecated legacy hints; IDs, knowledge, dependencies and historical runs are preserved by migration 028. Review legacy evidence with `npm run repositories:migrate`; use `-- --apply` only after reviewing the report. Missing or ambiguous remotes remain unresolved rather than being guessed from repository names.
 
@@ -374,5 +453,29 @@ GitHub (`https://github.com/<owner>/<repository>.git`) and GitLab (`https://<ins
 
 Read the [repository architecture](docs/architecture/repositories.md), [migration guide](docs/architecture/repository-migration.md), [multi-instance development guide](docs/architecture/multi-instance-development.md) and [Bitbucket credential guide](docs/architecture/bitbucket-credentials.md). Separate directories preserve application ownership; workers sharing an OS account do not provide OS security isolation.
 
+## CLI Commands and Scripts
+
+| Command | Purpose |
+|---|---|
+| `npm start` | Builds UI (`npm run build`), ensures `bwrap`, runs database migrations and seeds, and starts the server on port 4545 |
+| `npm run dev` | Runs backend in watch mode (`--watch`) with `.env` loaded |
+| `npm run dev:web` | Runs Vite dev server with hot reload on `http://localhost:5173` proxying `/api` to `:4545` |
+| `npm run build` | Builds the frontend web UI using Vite (`vite build`) |
+| `npm run typecheck` | Typechecks backend (`tsconfig.json`) and frontend (`web/tsconfig.json`) |
+| `npm test` | Runs fast in-memory unit tests (`test/*.test.ts`) |
+| `npm run test:integration` | Runs integration tests with PostgreSQL against ephemeral test databases |
+| `npm run test:all` | Runs unit tests followed by integration tests |
+| `npm run admin:bootstrap -- --username <user> --claim-legacy` | Bootstraps initial administrator and claims ownerless legacy records |
+| `npm run smoke:codex` | Opt-in live smoke test for OpenAI Codex CLI |
+| `npm run smoke:copilot` | Opt-in live smoke test for GitHub Copilot CLI |
+| `npm run eval:autonomy` | Evaluates autonomous recovery and execution policies |
+| `npm run bench:tokens` | Benchmarks prompt and token optimization across providers |
+| `npm run bench:code-intelligence` | Runs code intelligence benchmark on local test database |
+| `npm run validate:code-intelligence` | Validates code intelligence indexing on a specified database |
+| `npm run repositories:migrate` | Generates report for migrating legacy path repositories to canonical URLs |
+| `npm run knowledge:import` | Imports skills and conventions from repositories and `~/.claude/skills` |
+| `npm run knowledge:audit` | Audits knowledge items against active rules and scope conflicts |
+| `npm run lint` / `npm run lint:fix` | Runs ESLint / applies automatic fixes |
+| `npm run format` / `npm run format:check` | Runs Prettier / checks formatting |
 
 Cleanup and compatibility decisions, baseline/final validation and query-count evidence are recorded in the [production cleanup report](docs/validation/production-cleanup.md). Typechecking now rejects unused local declarations and parameters in the backend, frontend and tests. All historical SQL migrations and validation reports remain unchanged.

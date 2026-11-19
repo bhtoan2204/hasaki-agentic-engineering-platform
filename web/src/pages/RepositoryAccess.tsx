@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { History, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { dialog } from "../dialog/index.ts";
-import { act, ErrorBox, Loading, time } from "../ui.tsx";
+import { act, Empty, ErrorBox, Loading, SkeletonRows, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
 /** Platform access levels, cumulative: read ⊂ write ⊂ pull request (src/repos/access.ts). */
@@ -365,10 +365,12 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
           <History size={16} color="var(--brand)" />
           <h4>{t("repo.access.audit")}</h4>
         </div>
-        {audit.error ? (
+        {audit.loading && !audit.data ? (
+          <SkeletonRows rows={3} />
+        ) : audit.error ? (
           <ErrorBox error={audit.error} onRetry={audit.reload} />
         ) : !audit.data?.length ? (
-          <span className="muted small">{t("repo.access.noAudit")}</span>
+          <Empty>{t("repo.access.noAudit")}</Empty>
         ) : (
           <ul className="repo-audit">
             {audit.data.slice(0, 50).map((a) => {

@@ -60,7 +60,7 @@ export function InvestigationsPage({ id }: { id?: number }) {
 
 function InvestigationHome() {
   const { t } = useI18n();
-  const { data: runs, reload } = useApi<any[]>("/api/runs");
+  const { data: runs, error, loading, reload } = useApi<any[]>("/api/runs");
   const { data: splunk } = useApi<any>("/api/integrations/splunk");
   const mine = useMemo(
     () => (runs ?? []).filter((r) => r.definition_key === INVESTIGATION_WORKFLOW),
@@ -89,8 +89,10 @@ function InvestigationHome() {
               <RefreshCw size={14} />
             </button>
           </div>
-          {!runs ? (
+          {loading && !runs ? (
             <Loading />
+          ) : error ? (
+            <ErrorBox error={error} onRetry={reload} />
           ) : !mine.length ? (
             <EmptyState icon={History} title={t("inv.noHistory")} />
           ) : (
@@ -273,9 +275,9 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 function InvestigationDetail({ id }: { id: number }) {
-  const { data: run, reload: reloadRun, error } = useApi<any>(`/api/runs/${id}`);
+  const { data: run, loading: runLoading, reload: reloadRun, error } = useApi<any>(`/api/runs/${id}`);
   const t = useRunT(run?.output_locale);
-  const { data: inv, reload } = useApi<any>(`/api/runs/${id}/investigation`);
+  const { data: inv, loading: invLoading, reload } = useApi<any>(`/api/runs/${id}/investigation`);
   useLive(id, (p) => {
     if (isStateChange(p)) reloadRun();
     reload(); // searches and evidence arrive with transcript events
@@ -287,7 +289,8 @@ function InvestigationDetail({ id }: { id: number }) {
     return m;
   }, [inv]);
   if (error) return <ErrorBox error={error} onRetry={reloadRun} />;
-  if (!run || !inv) return <Loading />;
+  if ((runLoading || invLoading) && (!run || !inv)) return <Loading />;
+  if (!run || !inv) return <EmptyState title={t("common.notFound")} />;
   const report = inv.report;
   const timeline: any[] = inv.correlation?.timeline ?? [];
   const latencies: any[] = inv.latency?.latencies ?? [];

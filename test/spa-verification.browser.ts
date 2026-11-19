@@ -41,7 +41,6 @@ try {
   page.on("console", (msg) => console.log("CONSOLE:", msg.type(), msg.text()));
 
   // Mock API routes for deterministic browser testing
-  let workItemFetchCount = 0;
   const mockWorkItems = [
     {
       id: 101,
@@ -160,7 +159,6 @@ try {
     }
 
     if (path === "/api/work-items") {
-      workItemFetchCount++;
       const source = url.searchParams.get("source");
       let items = mockWorkItems;
       if (source) items = items.filter((w) => w.source === source);

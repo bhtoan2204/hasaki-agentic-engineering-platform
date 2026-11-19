@@ -1,9 +1,19 @@
 # Agent Architecture: Single Agent + Skills + Tools
 
+> [!NOTE] Current Implementation vs Historical Baseline
+> Originally authored for Claude Code via the Agent SDK, the platform retains the foundational principle of **single agent + skills + tools** but generalizes step execution across **5 supported agent providers**:
+> - **Anthropic Claude Code** (Agent SDK & CLI)
+> - **Cursor CLI** (`agent`)
+> - **OpenAI Codex CLI** (`codex`)
+> - **Google Antigravity CLI** (`agy`)
+> - **GitHub Copilot CLI** (`copilot`)
+>
+> Execution is orchestrated by the unified agent harness (`src/agent/harness/executor.ts`, see [Execution lifecycle](execution-lifecycle.md)). Steps can configure individual providers and models (`StepAgentConfig`), override settings at runtime (`agent_override`), configure automatic or manual fallback policies (`FallbackPolicy`), and perform portable continuation via provider handoffs (`src/agent/handoff.ts`).
+
 Deterministic orchestration (PostgreSQL workflow engine: DAG, durable steps, checkpoints, retries, approvals) stays
-separate from LLM reasoning. Each AI step is **one** Claude Agent SDK session (`ClaudeAgentExecutor`); there are no
-domain agents (OMS, Payment, ...). Capability comes from **skills** (knowledge registry) and **tools** (native Claude
-Code tools + platform tools + a discoverable integration registry), disclosed progressively.
+separate from LLM reasoning. Each AI step is **one** agent session executed through the unified harness (`agentExecutor`); there are no
+domain agents (OMS, Payment, ...). Capability comes from **skills** (knowledge registry) and **tools** (native provider
+tools + platform tools + a discoverable integration registry), disclosed progressively.
 
 ```
  engine (deterministic) ──► beginAttempt ──► ContextResolver ──► immutable context snapshot (incl. prompt_plan)
@@ -12,14 +22,14 @@ Code tools + platform tools + a discoverable integration registry), disclosed pr
                        planKnowledge   (relevance → inline | index | search)
                        planUpstream    (token budget → full | structural summary)
                                                    │
-                         ClaudeAgentExecutor (one session; resume when safe)
+                         agentExecutor / Harness (one session; resume when safe)
    system prompt: platform rules · step instructions · INLINE knowledge · INDEX lines · tool-discovery hint
    user prompt:   <untrusted_input> work item · upstream outputs (full or summarized) · answers · feedback
    native tools:  Read Grep Glob Bash TodoWrite Web* (+ Edit/Write for coding) (+ Task/Agent only if delegation)
    platform MCP:  ask_user post_update submit_result prepare_branch
                   read_knowledge search_knowledge read_step_output(attempt?)
                   list_tools describe_tool call_tool  ──► IntegrationTool registry (validated, permission-checked)
-   policy:        PreToolUse hook + canUseTool (worktree-only edits, read-only primary checkouts, subagents read-only)
+   policy:        PreToolUse hook / Broker + canUseTool (worktree-only edits, read-only checkouts, subagents read-only)
    metrics:       tokens, cost, turns, tool calls/errors, skills loaded, searches, integration calls, subagents, denials
 ```
 
@@ -270,6 +280,16 @@ Measured over all recorded attempts: Grep 242 calls / 0.04 s avg / 0.2 min total
 Bash (builds/tests) 50.5 min. Retrieval is not a measurable bottleneck, so no symbol index or embeddings were added;
 the existing file-reference handoff between steps stays.
 
+
+## Step-level orchestration, fallback and provider handoff
+
+While each run specifies a default `agent_provider` (`claude`, `cursor`, `codex`, `antigravity`, or `copilot`), steps can define their own agent configuration via `config.agent` (`src/agent/stepAgent.ts`):
+- **Provider & Model:** Select a specific provider, model, and reasoning effort per step, or supply a manual override at runtime (`agent_override`).
+- **Execution Profile:** Assign a step-level profile (`MICRO`, `FAST`, `STANDARD`, `DEEP`).
+- **Fallback Policy:** Configure `config.agent.fallback` (`mode: disabled | manual | automatic`, `providers: [...]`, `max_switches: 2`, `auto_health: true`).
+- **Provider Handoff:** On unrecoverable provider failures (rate limits, quota exhaustion, provider downtime), `src/agent/handoff.ts` snapshots workspace modifications, baseline evidence, and execution notes into an immutable checkpoint, allowing the next healthy provider to resume without losing work.
+
+See [Step-level agent orchestration](../orchestration/phase4/README.md), [Provider failover](../orchestration/phase5/README.md), and [Agent execution lifecycle](execution-lifecycle.md).
 
 ## Shared metrics and execution boundaries
 

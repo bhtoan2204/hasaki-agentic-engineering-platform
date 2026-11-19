@@ -8,20 +8,15 @@ export function EvaluationEvidence({
   data: any;
   onPage: (page: number) => void;
 }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   return (
     <>
       {" "}
-      <Panel title={en ? "Failure distribution" : "Phân bố lỗi"}>
+      <Panel title={t("an.eval.failureDist")}>
         <BreakdownBars rows={data.failures} field="samples" labelKey="category" />
       </Panel>
       <Panel
-        title={
-          en
-            ? "Production observations — separate, non-causal"
-            : "Quan sát sản xuất — tách biệt, không nhân quả"
-        }
+        title={t("an.eval.prodObservations")}
       >
         <EvaluationTable
           rows={data.production}
@@ -30,46 +25,44 @@ export function EvaluationEvidence({
               label: "Provider",
               value: (r) => `${r.provider} / ${r.model ?? "—"}`,
             },
-            { label: en ? "Category" : "Loại", value: (r) => r.category },
+            { label: t("an.eval.category"), value: (r) => r.category },
             {
-              label: en ? "Attempts" : "Lần thử",
+              label: t("an.eval.attempts"),
               value: (r) => fmt(r.attempts),
             },
             {
-              label: en ? "Verified coverage" : "Độ phủ xác minh",
+              label: t("an.eval.verifiedCoverage"),
               value: (r) => `${r.verified_coverage}/${r.attempts}`,
             },
             {
-              label: en
-                ? "Success among verified attempts"
-                : "Thành công trong lần thử đã xác minh",
+              label: t("an.eval.successAmongVerified"),
               value: (r) => fmt(r.verified_success_rate, "pct"),
             },
             {
-              label: en ? "Cost / coverage" : "Chi phí / độ đầy đủ",
+              label: t("an.eval.costCoverage"),
               value: (r) => `${fmt(r.reported_cost_usd, "usd")} · ${r.cost_known}/${r.attempts}`,
             },
           ]}
         />
       </Panel>
-      <Panel title={en ? "Evidence and verification artifacts" : "Bằng chứng và tài liệu xác minh"}>
+      <Panel title={t("an.eval.evidenceArtifactsTitle")}>
         <EvaluationTable
           rows={data.details}
           columns={[
             {
-              label: en ? "Task / repetition" : "Nhiệm vụ / lần lặp",
+              label: t("an.eval.taskRepetition"),
               value: (r) => `${r.task_id} · ${r.repetition}`,
             },
             {
-              label: en ? "Provider route" : "Chuỗi agent",
+              label: t("an.eval.providerRoute"),
               value: (r) => r.provider_path,
             },
             {
-              label: en ? "Evidence / result" : "Bằng chứng / kết quả",
+              label: t("an.eval.evidenceResult"),
               value: (r) => `${r.evidence_kind} · ${r.result_status ?? "pending"}`,
             },
             {
-              label: en ? "Inspect" : "Xem",
+              label: t("an.eval.inspect"),
               value: (r) => (
                 <>
                   <a href={`#/runs/${r.workflow_run_id}`}>
@@ -80,7 +73,7 @@ export function EvaluationEvidence({
                       {" "}
                       ·{" "}
                       <a href={`/api/artifacts/${r.artifact_id}`} target="_blank" rel="noreferrer">
-                        {en ? "Verification artifact" : "Tài liệu xác minh"}
+                        {t("an.eval.verificationArtifact")}
                       </a>
                     </>
                   )}
@@ -95,7 +88,7 @@ export function EvaluationEvidence({
             disabled={data.pagination.page <= 1}
             onClick={() => onPage(data.pagination.page - 1)}
           >
-            {en ? "Previous" : "Trước"}
+            {t("an.previous")}
           </button>
           <span className="small">
             {data.pagination.page} · {data.pagination.total}
@@ -105,7 +98,7 @@ export function EvaluationEvidence({
             disabled={data.pagination.page * data.pagination.page_size >= data.pagination.total}
             onClick={() => onPage(data.pagination.page + 1)}
           >
-            {en ? "Next" : "Sau"}
+            {t("an.next")}
           </button>
         </div>
       </Panel>

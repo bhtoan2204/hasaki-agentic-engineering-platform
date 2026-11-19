@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Inbox } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { act, ErrorBox, Loading, time } from "../ui.tsx";
+import { act, Empty, ErrorBox, SkeletonRows, time } from "../ui.tsx";
 
 type Item = {
   id: number;
@@ -45,9 +45,9 @@ export function IntakeQueue({ all = false }: { all?: boolean }) {
           ))}
         </select>
       </header>
-      {loading && !data && <Loading />}
+      {loading && !data && <SkeletonRows rows={4} />}
       {error && <ErrorBox error={error} onRetry={reload} />}
-      {data && data.length === 0 && <p className="small muted">{t("in.empty")}</p>}
+      {data && data.length === 0 && <Empty>{t("in.empty")}</Empty>}
       {data?.map((i) => (
         <div key={i.id} className="small" style={{ margin: "4px 0" }}>
           <b>#{i.id}</b> {i.source} · <b>{i.state}</b>
@@ -94,7 +94,7 @@ type Policy = {
 /** Admin: per-source intake policies (OFF / SHADOW / AUTOPILOT), with a global pause per policy. */
 export function IntakePolicies() {
   const { t } = useI18n();
-  const { data, error, reload } = useApi<{
+  const { data, error, loading, reload } = useApi<{
     policies: Policy[];
     modes: string[];
     sources: string[];
@@ -134,8 +134,9 @@ export function IntakePolicies() {
         <h3>{t("in.policies")}</h3>
       </header>
       <p className="small muted">{t("in.hint")}</p>
+      {loading && !data && <SkeletonRows rows={3} />}
       {error && <ErrorBox error={error} onRetry={reload} />}
-      {data && data.policies.length === 0 && <p className="small muted">{t("in.noPolicy")}</p>}
+      {data && data.policies.length === 0 && <Empty>{t("in.noPolicy")}</Empty>}
       {data?.policies.map((p) => (
         <div key={p.id} className="small" style={{ margin: "4px 0" }}>
           <span className="mono">

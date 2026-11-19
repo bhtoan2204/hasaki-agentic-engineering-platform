@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bot, RotateCcw } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { useI18n } from "../i18n/index.tsx";
 import { changedDefaultFields, providerDraftPatch } from "../agentConfiguration.ts";
 import {
   AgentValueFields,
@@ -10,7 +11,7 @@ import {
   type AgentControls,
   type AgentCatalogModel,
 } from "../AgentValueFields.tsx";
-import { Button, ErrorBox, Field } from "../ui.tsx";
+import { Button, EmptyState, ErrorBox, Field, SkeletonRows } from "../ui.tsx";
 
 interface ProviderConfiguration {
   revision: number;
@@ -37,12 +38,6 @@ interface Catalog {
   discovered_at?: string;
   ok: boolean;
 }
-
-const ROLE_LABELS: Record<string, string> = {
-  agent: "Analysis / Architecture",
-  coding_agent: "Coding",
-  verifier: "Independent Verification",
-};
 
 function cleanRoleValues(values?: AgentValues): AgentValues {
   if (!values) return {};
@@ -133,7 +128,8 @@ function sanitizeDraftForPreview(draft: ProviderConfiguration): ProviderConfigur
 }
 
 export function AgentSettings() {
-  const { data, error, setData } = useApi<View>("/api/settings/agents");
+  const { t } = useI18n();
+  const { data, error, loading, reload, setData } = useApi<View>("/api/settings/agents");
   const catalog = useApi<Catalog[]>("/api/agent-providers");
   const [provider, setProvider] = useState("claude");
   const [activeScope, setActiveScope] = useState("*");
@@ -249,11 +245,17 @@ export function AgentSettings() {
     return () => window.removeEventListener("keydown", onKey);
   }, [dirty, save]);
 
-  if (error) return <ErrorBox error={error} />;
+  if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (loading && (!data || !draft))
+    return (
+      <section className="card set-section" id="set-agents">
+        <SkeletonRows rows={5} />
+      </section>
+    );
   if (!data || !draft)
     return (
       <section className="card set-section" id="set-agents">
-        <p className="muted small">Loading configuration…</p>
+        <EmptyState title={t("set.noConfigFound")} />
       </section>
     );
 
@@ -302,39 +304,49 @@ export function AgentSettings() {
 
   const currentCatalog = catalog.data?.find((entry) => entry.id === provider);
   const controls = currentCatalog?.controls ?? data.controls[provider];
-  const scopeLabel = (s: string) => (s === "*" ? "ANY PROFILE" : s);
+  const scopeLabel = (s: string) => (s === "*" ? t("set.routingAny") : s);
 
   return (
     <section className="card set-section agent-settings-card" id="set-agents">
       <header className="set-section-head agent-section-head">
         <Bot size={18} aria-hidden />
-        <h3>Provider configuration</h3>
+        <h3>{t("set.agentConfiguration")}</h3>
         <div className="agent-head-actions">
           {dirty ? (
-            <span className="set-flag is-dirty">Unsaved</span>
+            <span className="set-flag is-dirty">{t("set.flagUnsaved")}</span>
           ) : (
-            <span className="set-flag is-saved">Saved</span>
+            <span className="set-flag is-saved">{t("set.flagSaved")}</span>
           )}
           {dirty && (
             <Button variant="secondary" size="sm" disabled={busy} onClick={discard}>
-              <RotateCcw size={13} aria-hidden /> Discard
+              <RotateCcw size={13} aria-hidden /> {t("set.discard")}
             </Button>
           )}
           <Button size="sm" loading={busy} onClick={() => void save()}>
-            Save provider
+            {t("set.saveProvider")}
           </Button>
         </div>
       </header>
 
       <div className="agent-top-row">
         <p className="muted small set-lead">
-          Saved values apply to new runs. Active runs retain their configuration snapshot. Manage
-          account authentication in <a href="#/integrations">Integrations</a>.
+          {t("set.agentSubtitle")
+            .split(/\{link\}/)
+            .map((part, i) =>
+              i === 0 ? (
+                part
+              ) : (
+                <span key={i}>
+                  <a href="#/integrations">{t("nav.integrations")}</a>
+                  {part}
+                </span>
+              ),
+            )}
         </p>
         <div className="agent-default-provider-field">
-          <Field label="Default provider">
+          <Field label={t("set.provider")}>
             <select
-              aria-label="Default provider"
+              aria-label={t("set.provider")}
               value={data.document.default_provider}
               disabled={busy}
               onChange={async (event) => {
@@ -347,7 +359,7 @@ export function AgentSettings() {
                       revision: data.document.default_revision ?? 0,
                     }),
                   );
-                  setNote({ text: "Default provider updated", ok: true });
+                  setNote({ text: t("set.defaultProviderUpdated"), ok: true });
                 } catch (err) {
                   setNote({ text: (err as Error).message, ok: false });
                 } finally {
@@ -367,7 +379,7 @@ export function AgentSettings() {
         </div>
       </div>
 
-      <div role="tablist" aria-label="Agent providers" className="agent-provider-tabs">
+      <div role="tablist" aria-label={t("set.providers")} className="agent-provider-tabs">
         {Object.keys(data.document.providers).map((key) => {
           const providerDirty = isProviderDirty(key);
           const isEnabled = (drafts[key] ?? data.document.providers[key])?.enabled;
@@ -400,10 +412,10 @@ export function AgentSettings() {
               checked={draft.enabled}
               onChange={(event) => update({ ...draft, enabled: event.target.checked })}
             />
-            <span>Enable {provider}</span>
+            <span>{t("set.enableProvider", { provider })}</span>
           </label>
           <p className="small muted agent-discovery-meta">
-            Model discovery: <b>{currentCatalog?.discovery ?? "loading"}</b> ·{" "}
+            {t("set.modelDiscovery")} <b>{currentCatalog?.discovery ?? "loading"}</b> ·{" "}
             {currentCatalog?.cache ?? "no cache"}
             {currentCatalog?.discovered_at ? ` · ${currentCatalog.discovered_at}` : ""}. Saved
             selections remain available when discovery fails.
@@ -412,13 +424,13 @@ export function AgentSettings() {
 
         <div className="agent-defaults-card">
           <div className="agent-subhead">
-            <h4>Provider defaults</h4>
+            <h4>{t("set.providerDefaults")}</h4>
             <span className="muted small">
-              Base configuration when a profile or step does not specify an override.
+              {t("set.providerDefaultsHint")}
             </span>
           </div>
           <AgentValueFields
-            label="Default"
+            label={t("set.defaultLabel")}
             value={draft.defaults}
             controls={controls}
             models={currentCatalog?.models}
@@ -436,15 +448,13 @@ export function AgentSettings() {
 
         <div className="agent-profiles-card">
           <div className="agent-subhead">
-            <h4>Models and execution options by profile and role</h4>
+            <h4>{t("set.modelRouting")}</h4>
             <p className="muted small agent-profiles-guide">
-              Empty fields inherit from the next configuration level (Profile → Any Profile →
-              Provider Default → Account/CLI Default). Hover any row or pill to inspect resolved
-              sources.
+              {t("set.modelRoutingLead")}
             </p>
           </div>
 
-          <div role="tablist" aria-label="Execution profiles" className="agent-profile-tabs">
+          <div role="tablist" aria-label={t("set.routingProfile")} className="agent-profile-tabs">
             {data.scopes.map((scope) => {
               const label = scopeLabel(scope);
               const overrideCount = countScopeOverrides(draft.profiles[scope], data.roles);
@@ -460,8 +470,8 @@ export function AgentSettings() {
                   onClick={() => setActiveScope(scope)}
                   data-tip={
                     overrideCount > 0
-                      ? `${label}: ${overrideCount} override${overrideCount > 1 ? "s" : ""} configured`
-                      : `${label}: inheriting all settings`
+                      ? `${label}: ${t("set.overridesCount", { n: overrideCount })}`
+                      : `${label}: ${t("set.inheritingAll")}`
                   }
                 >
                   <span>{label}</span>
@@ -484,16 +494,16 @@ export function AgentSettings() {
               <thead>
                 <tr>
                   <th scope="col" className="col-role">
-                    Role
+                    {t("set.role")}
                   </th>
                   <th scope="col" className="col-model">
-                    Model
+                    {t("set.model")}
                   </th>
                   <th scope="col" className="col-effort">
-                    Reasoning Effort
+                    {t("set.effort")}
                   </th>
                   <th scope="col" className="col-timeout">
-                    Timeout (ms)
+                    {t("set.timeoutMs")}
                   </th>
                 </tr>
               </thead>
@@ -530,20 +540,20 @@ export function AgentSettings() {
                     >
                       <td className="agent-role-cell">
                         <div className="agent-role-title-row">
-                          <span className="agent-role-name">{ROLE_LABELS[role] ?? role}</span>
+                          <span className="agent-role-name">{t(`set.role.${role}`) || role}</span>
                           <span
                             className={`agent-role-badge${isOverridden ? " is-overridden" : ""}`}
                           >
-                            {isOverridden ? "Overridden" : "Inheriting"}
+                            {isOverridden ? t("set.roleOverridden") : t("set.roleInheriting")}
                           </span>
                           {isOverridden && (
                             <button
                               type="button"
                               className="ghost xs agent-role-reset"
                               onClick={() => resetRole(activeScope, role)}
-                              title="Reset role to Inherit"
+                              title={t("set.resetRoleInherit")}
                             >
-                              Reset
+                              {t("set.reset")}
                             </button>
                           )}
                         </div>
@@ -553,14 +563,14 @@ export function AgentSettings() {
                               className="agent-eff-pill"
                               data-tip={`model: ${String(effective.values.model ?? "account/CLI default")} (${effective.sources.model})`}
                             >
-                              model: <b>{effective.values.model ?? "CLI default"}</b>
+                              model: <b>{effective.values.model ?? t("set.cliDefaultOnly")}</b>
                             </span>
                             {!!efforts.length && (
                               <span
                                 className="agent-eff-pill"
                                 data-tip={`reasoning_effort: ${String(effective.values.reasoning_effort ?? "account/CLI default")} (${effective.sources.reasoning_effort})`}
                               >
-                                effort: <b>{effective.values.reasoning_effort ?? "CLI default"}</b>
+                                effort: <b>{effective.values.reasoning_effort ?? t("set.cliDefaultOnly")}</b>
                               </span>
                             )}
                             <span
@@ -571,7 +581,7 @@ export function AgentSettings() {
                               <b>
                                 {effective.values.timeout_ms
                                   ? `${effective.values.timeout_ms}ms`
-                                  : "CLI default"}
+                                  : t("set.cliDefaultOnly")}
                               </b>
                             </span>
                           </div>
@@ -585,15 +595,15 @@ export function AgentSettings() {
                             value={roleValues.model}
                             models={currentCatalog?.models}
                             discovery={currentCatalog?.discovery}
-                            placeholder="Inherit"
+                            placeholder={t("set.routingInherit")}
                             onChange={(model) => setRoleField(activeScope, role, "model", model)}
                           />
                         ) : roleValues.model ? (
                           <small className="set-warn">
-                            Unsupported by CLI (saved: {roleValues.model})
+                            {t("set.unsupportedByCli", { model: roleValues.model })}
                           </small>
                         ) : (
-                          <span className="muted small">CLI default only</span>
+                          <span className="muted small">{t("set.cliDefaultOnly")}</span>
                         )}
                       </td>
 
@@ -620,8 +630,8 @@ export function AgentSettings() {
                               )
                             }
                           >
-                            <option value="">Inherit</option>
-                            <option value="__account__">Account/CLI default</option>
+                            <option value="">{t("set.routingInherit")}</option>
+                            <option value="__account__">{t("set.modelAccount")}</option>
                             {roleValues.reasoning_effort &&
                               !efforts.includes(roleValues.reasoning_effort) && (
                                 <option value={roleValues.reasoning_effort}>
@@ -640,7 +650,7 @@ export function AgentSettings() {
                             disabled
                             value=""
                           >
-                            <option value="">Inherit (unsupported)</option>
+                            <option value="">{t("set.inheritUnsupported")}</option>
                           </select>
                         )}
                       </td>
@@ -657,7 +667,7 @@ export function AgentSettings() {
                           placeholder={
                             effective?.values.timeout_ms !== undefined
                               ? String(effective.values.timeout_ms)
-                              : "Inherit"
+                              : t("set.routingInherit")
                           }
                           onChange={(event) =>
                             setRoleField(
@@ -684,15 +694,15 @@ export function AgentSettings() {
           aria-live="polite"
           className={`agent-savebar-status${note ? (note.ok ? " is-ok" : " is-error") : ""}`}
         >
-          {note ? note.text : dirty ? `Unsaved changes in ${provider} configuration` : ""}
+          {note ? note.text : dirty ? t("set.unsavedProvider", { provider }) : ""}
         </p>
         {dirty && (
           <div className="agent-head-actions">
             <Button variant="secondary" size="sm" disabled={busy} onClick={discard}>
-              Discard
+              {t("set.discard")}
             </Button>
             <Button size="sm" loading={busy} onClick={() => void save()}>
-              Save changes
+              {t("common.save")}
             </Button>
           </div>
         )}

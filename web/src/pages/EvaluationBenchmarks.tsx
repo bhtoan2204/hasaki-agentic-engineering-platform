@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { api, useApi } from "../api.ts";
-import { act, ErrorBox, Loading, navigate } from "../ui.tsx";
+import { act, EmptyState, ErrorBox, Loading, navigate } from "../ui.tsx";
+import { useI18n } from "../i18n/index.tsx";
 
-const number = (v: any, digits = 1) => (v == null ? "Unknown" : Number(v).toFixed(digits));
+const number = (v: any, digits = 1) => (v == null ? "—" : Number(v).toFixed(digits));
 export function EvaluationBenchmarks() {
+  const { t, status: statusText } = useI18n();
   const suites = useApi<any[]>("/api/benchmark-suites");
   const runs = useApi<any>("/api/evaluation-runs");
   const [adapter, setAdapter] = useState("reference"),
@@ -32,7 +34,7 @@ export function EvaluationBenchmarks() {
       runs.reload();
       setSelected(run.id);
       setDetail(await api(`/api/evaluation-runs/${run.id}`));
-    }, "Fixture evaluation queued");
+    }, t("bench.toast.queued"));
   };
   const inspect = async (id: number) => {
     setSelected(id);
@@ -41,7 +43,7 @@ export function EvaluationBenchmarks() {
   if (suites.error || runs.error)
     return (
       <ErrorBox
-        error={suites.error ?? runs.error ?? "Unknown error"}
+        error={suites.error ?? runs.error ?? t("common.none")}
         onRetry={() => {
           suites.reload();
           runs.reload();
@@ -52,13 +54,10 @@ export function EvaluationBenchmarks() {
   return (
     <section className="card ins-bench">
       <div className="card-head">
-        <h4>Versioned benchmark evaluations</h4>
-        <span className="sub">Synthetic fixtures · no live model execution</span>
+        <h4>{t("bench.title")}</h4>
+        <span className="sub">{t("bench.subtitle")}</span>
       </div>
-      <p className="muted small">
-        Hard gates precede quality scores. Token usage is unknown unless a real provider reports it.
-        Fixture controls do not measure model quality.
-      </p>
+      <p className="muted small">{t("bench.lead")}</p>
       <div className="toolbar">
         <button
           className="ghost sm"
@@ -67,10 +66,10 @@ export function EvaluationBenchmarks() {
             act(async () => {
               await api("/api/benchmark-suites/publish", {});
               suites.reload();
-            }, "Suite published")
+            }, t("bench.toast.published"))
           }
         >
-          Publish bundled suite (admin)
+          {t("bench.publishBundled")}
         </button>
         <button
           className="ghost sm"
@@ -79,20 +78,20 @@ export function EvaluationBenchmarks() {
             if (selected) void inspect(selected);
           }}
         >
-          Refresh
+          {t("repo.ci.refresh")}
         </button>
         {!runs.data.enabled && (
-          <span className="muted small">Disabled locally: evaluation.enabled</span>
+          <span className="muted small">{t("bench.disabledLocally")}</span>
         )}
       </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Suite</th>
-              <th>Version</th>
-              <th>Cases</th>
-              <th>Categories</th>
+              <th>{t("bench.col.suite")}</th>
+              <th>{t("bench.col.version")}</th>
+              <th>{t("bench.col.cases")}</th>
+              <th>{t("bench.col.categories")}</th>
             </tr>
           </thead>
           <tbody>
@@ -109,19 +108,19 @@ export function EvaluationBenchmarks() {
       </div>
       <div className="ins-bench-form">
         <label>
-          Adapter{" "}
+          {t("bench.adapter")}{" "}
           <select value={adapter} onChange={(e) => setAdapter(e.target.value)}>
-            <option value="reference">Reference fixture control</option>
-            <option value="baseline">Unchanged fixture control</option>
-            <option value="agent_fixture">Actual executor / CLI fixture</option>
+            <option value="reference">{t("bench.adapter.reference")}</option>
+            <option value="baseline">{t("bench.adapter.baseline")}</option>
+            <option value="agent_fixture">{t("bench.adapter.agent_fixture")}</option>
           </select>
         </label>
         <label className="ins-bench-toggle">
-          <input type="checkbox" checked={ci} onChange={(e) => setCi(e.target.checked)} /> P1 code
-          intelligence
+          <input type="checkbox" checked={ci} onChange={(e) => setCi(e.target.checked)} />{" "}
+          {t("bench.codeIntelligence")}
         </label>
         <label>
-          Repetitions{" "}
+          {t("bench.repetitions")}{" "}
           <input
             type="number"
             min={1}
@@ -131,51 +130,59 @@ export function EvaluationBenchmarks() {
           />
         </label>
         <button disabled={!runs.data.enabled || !suites.data.length} onClick={create}>
-          Run safe fixtures
+          {t("bench.runSafe")}
         </button>
       </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Run</th>
-              <th>Status</th>
-              <th>Configuration</th>
-              <th>Progress</th>
-              <th>Success</th>
-              <th>Score</th>
+              <th>{t("bench.col.run")}</th>
+              <th>{t("bench.col.status")}</th>
+              <th>{t("bench.col.configuration")}</th>
+              <th>{t("bench.col.progress")}</th>
+              <th>{t("bench.col.success")}</th>
+              <th>{t("bench.col.score")}</th>
             </tr>
           </thead>
           <tbody>
-            {runs.data.runs.map((r: any) => (
-              <tr key={r.id}>
-                <td>
-                  <button className="ghost sm" onClick={() => inspect(r.id)}>
-                    #{r.id}
-                  </button>
+            {!runs.data.runs?.length ? (
+              <tr>
+                <td colSpan={6}>
+                  <EmptyState title="No benchmark evaluations yet" />
                 </td>
-                <td>{r.status}</td>
-                <td>
-                  {r.configuration.adapter} · P1 {r.configuration.code_intelligence ? "ON" : "OFF"}{" "}
-                  · {r.configuration.prompt_version}
-                </td>
-                <td>
-                  {r.finished}/{r.tasks}
-                </td>
-                <td>
-                  {r.successes}/{r.finished}
-                </td>
-                <td>{number(r.average_score)}</td>
               </tr>
-            ))}
+            ) : (
+              runs.data.runs.map((r: any) => (
+                <tr key={r.id}>
+                  <td>
+                    <button className="ghost sm" onClick={() => inspect(r.id)}>
+                      #{r.id}
+                    </button>
+                  </td>
+                  <td>{statusText(r.status) || r.status}</td>
+                  <td>
+                    {r.configuration.adapter} · P1 {r.configuration.code_intelligence ? "ON" : "OFF"}{" "}
+                    · {r.configuration.prompt_version}
+                  </td>
+                  <td>
+                    {r.finished}/{r.tasks}
+                  </td>
+                  <td>
+                    {r.successes}/{r.finished}
+                  </td>
+                  <td>{number(r.average_score)}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
       <div className="ins-bench-form ins-bench-compare">
         <label>
-          Baseline{" "}
+          {t("bench.baseline")}{" "}
           <select value={baseline} onChange={(e) => setBaseline(e.target.value)}>
-            <option value="">Choose run</option>
+            <option value="">{t("bench.chooseRun")}</option>
             {runs.data.runs.map((r: any) => (
               <option key={r.id} value={r.id}>
                 #{r.id}
@@ -184,9 +191,9 @@ export function EvaluationBenchmarks() {
           </select>
         </label>
         <label>
-          Candidate{" "}
+          {t("bench.candidate")}{" "}
           <select value={candidate} onChange={(e) => setCandidate(e.target.value)}>
-            <option value="">Choose run</option>
+            <option value="">{t("bench.chooseRun")}</option>
             {runs.data.runs.map((r: any) => (
               <option key={r.id} value={r.id}>
                 #{r.id}
@@ -203,10 +210,10 @@ export function EvaluationBenchmarks() {
                 candidate_id: Number(candidate),
               });
               setComparison(await api(`/api/evaluation-comparisons/${c.id}`));
-            }, "Comparison loaded")
+            }, t("bench.toast.compared"))
           }
         >
-          Compare paired results
+          {t("bench.compareResults")}
         </button>
       </div>
       {comparison && (
@@ -220,11 +227,11 @@ export function EvaluationBenchmarks() {
             <table>
               <thead>
                 <tr>
-                  <th>Task / repetition</th>
-                  <th>Baseline</th>
-                  <th>Candidate</th>
-                  <th>Score Δ</th>
-                  <th>Duration Δ</th>
+                  <th>{t("bench.col.taskRepetition")}</th>
+                  <th>{t("bench.baseline")}</th>
+                  <th>{t("bench.candidate")}</th>
+                  <th>{t("bench.col.scoreDelta")}</th>
+                  <th>{t("bench.col.durationDelta")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -233,19 +240,19 @@ export function EvaluationBenchmarks() {
                     <td>
                       {p.task} / {p.repetition}
                     </td>
-                    <td>{p.baseline?.status ?? "Missing"}</td>
-                    <td>{p.candidate.status}</td>
+                    <td>{p.baseline?.status ? (statusText(p.baseline.status) || p.baseline.status) : t("common.none")}</td>
+                    <td>{statusText(p.candidate.status) || p.candidate.status}</td>
                     <td>
                       {p.baseline
                         ? number(
                             Number(p.candidate.quality_score) - Number(p.baseline.quality_score),
                           )
-                        : "Unknown"}
+                        : "—"}
                     </td>
                     <td>
                       {p.baseline
                         ? `${number(p.candidate.data.evidence.duration_ms - p.baseline.data.evidence.duration_ms)} ms`
-                        : "Unknown"}
+                        : "—"}
                     </td>
                   </tr>
                 ))}
@@ -253,7 +260,7 @@ export function EvaluationBenchmarks() {
             </table>
           </div>
           <details>
-            <summary>Aggregate evidence, costs and variability</summary>
+            <summary>{t("bench.aggregateEvidence")}</summary>
             <pre>
               {JSON.stringify(
                 {
@@ -271,13 +278,13 @@ export function EvaluationBenchmarks() {
         <>
           <div className="toolbar">
             <h4>
-              Evaluation #{detail.id} · {detail.status}
+              {t("bench.evalDetail", { id: detail.id, status: statusText(detail.status) || detail.status })}
             </h4>
             <button
               className="ghost sm"
               onClick={() => navigate(`/runs/${detail.workflow_run_id}`)}
             >
-              Open existing workflow / questions / artifacts
+              {t("bench.openWorkflow")}
             </button>
             <button
               className="ghost sm"
@@ -286,26 +293,28 @@ export function EvaluationBenchmarks() {
                   await api(`/api/evaluation-runs/${detail.id}/cancel`, {});
                   await inspect(detail.id);
                   runs.reload();
-                }, "Evaluation canceled")
+                }, t("bench.toast.canceled"))
               }
             >
-              Cancel
+              {t("bench.cancel")}
             </button>
           </div>
           <p className="muted small">
-            Success {detail.summary.successes}/{detail.summary.graded} · Median{" "}
-            {number(detail.summary.median_duration_ms)} ms · p95{" "}
-            {number(detail.summary.p95_duration_ms)} ms · Cost per success{" "}
-            {number(detail.summary.cost_per_success, 4)}
+            {t("bench.summaryLine", {
+              successes: detail.summary.successes,
+              graded: detail.summary.graded,
+              median: number(detail.summary.median_duration_ms),
+              p95: number(detail.summary.p95_duration_ms),
+              cost: number(detail.summary.cost_per_success, 4),
+            })}
           </p>
           {detail.cases.map((c: any) => (
             <details key={`${c.task_id}-${c.repetition}`}>
               <summary>
-                {c.task_id} / {c.repetition} · {c.status ?? c.step_status} · score{" "}
-                {number(c.quality_score)}
+                {c.task_id} / {c.repetition} · {c.status ? (statusText(c.status) || c.status) : c.step_status} · {t("cl.score", { n: number(c.quality_score) })}
               </summary>
               <p>{c.definition.description}</p>
-              <p className="mono">Pinned commit: {c.base_commit}</p>
+              <p className="mono">{t("bench.pinnedCommit", { commit: c.base_commit })}</p>
               <pre>
                 {JSON.stringify(
                   {

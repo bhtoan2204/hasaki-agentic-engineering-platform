@@ -13,7 +13,7 @@ import {
   Ban,
   Zap,
 } from "lucide-react";
-import { Badge, Segmented } from "../ui.tsx";
+import { Badge, ErrorBox, Segmented } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
@@ -162,11 +162,7 @@ export function ProfilePreview({
         </div>
       )}
       {data?.autonomy && <AutonomySummary a={data.autonomy} />}
-      {error && (
-        <div className="err small" style={{ marginTop: 6 }}>
-          {error}
-        </div>
-      )}
+      {error && <ErrorBox error={error} />}
       {data && (
         <div style={{ marginTop: 10 }}>
           <div className="small rv-chipline">

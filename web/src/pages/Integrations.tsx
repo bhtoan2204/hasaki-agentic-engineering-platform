@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { dialog } from "../dialog/index.ts";
-import { act, ago, Field, PageHeader, time } from "../ui.tsx";
+import { act, ago, Empty, ErrorBox, Field, PageHeader, SkeletonRows, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./Integrations.css";
 
@@ -390,7 +390,13 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
   const [res, setRes] = useState<any>(null);
   const mode = auth ?? st?.auth ?? "api_key";
   const keepStored = st?.token_set && st?.auth === mode;
-  const health: Health = !st ? "loading" : st.connected ? "ok" : st.configured && st.last_error ? "error" : "off";
+  const health: Health = !st
+    ? "loading"
+    : st.connected
+      ? "ok"
+      : st.configured && st.last_error
+        ? "error"
+        : "off";
   const save = async (enabled: boolean) => {
     const out = await act(
       () =>
@@ -419,7 +425,11 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
       env="Production"
       health={health}
       {...p}
-      summary={st?.base_url ? `${st.base_url.replace(/^https?:\/\//, "")}${st.enabled ? "" : ` · ${t("ig.off")}`}` : t("ig.signoz.summaryOff")}
+      summary={
+        st?.base_url
+          ? `${st.base_url.replace(/^https?:\/\//, "")}${st.enabled ? "" : ` · ${t("ig.off")}`}`
+          : t("ig.signoz.summaryOff")
+      }
     >
       <p className="muted small">{t("ig.signoz.body")}</p>
       <Steps>
@@ -444,7 +454,10 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
       {mode === "session" ? (
         <>
           <p className="muted small">{t("ig.signoz.sessionHint")}</p>
-          <Field label={t("ig.signoz.access")} hint={keepStored ? t("ig.signoz.sessionKeep") : undefined}>
+          <Field
+            label={t("ig.signoz.access")}
+            hint={keepStored ? t("ig.signoz.sessionKeep") : undefined}
+          >
             <input
               type="password"
               autoComplete="off"
@@ -453,7 +466,10 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
               onChange={(e) => setAccessToken(e.target.value)}
             />
           </Field>
-          <Field label={t("ig.signoz.refresh")} hint={keepStored ? t("ig.signoz.sessionKeep") : undefined}>
+          <Field
+            label={t("ig.signoz.refresh")}
+            hint={keepStored ? t("ig.signoz.sessionKeep") : undefined}
+          >
             <input
               type="password"
               autoComplete="off"
@@ -464,7 +480,10 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
           </Field>
         </>
       ) : (
-        <Field label={t("ig.signoz.token")} hint={keepStored ? t("ig.signoz.tokenKeep") : undefined}>
+        <Field
+          label={t("ig.signoz.token")}
+          hint={keepStored ? t("ig.signoz.tokenKeep") : undefined}
+        >
           <input
             type="password"
             autoComplete="off"
@@ -479,7 +498,11 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
       )}
       {st?.last_error && <p className="ig-err-text small">{st.last_error}</p>}
       <div className="ig-actions">
-        <button className="sm" onClick={() => save(true)} disabled={!(baseUrl ?? st?.base_url) || (!token && !st?.token_set)}>
+        <button
+          className="sm"
+          onClick={() => save(true)}
+          disabled={!(baseUrl ?? st?.base_url) || (!token && !st?.token_set)}
+        >
           <KeyRound size={14} strokeWidth={2} />
           {st?.enabled ? t("ig.signoz.update") : t("ig.signoz.enable")}
         </button>
@@ -503,8 +526,10 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
             <button
               className="sm ghost"
               onClick={async () =>
-                (await act(() => api("/api/integrations/signoz/disconnect", {}), t("ig.signoz.removed"))) &&
-                (setBaseUrl(null), setRes(null), reload())
+                (await act(
+                  () => api("/api/integrations/signoz/disconnect", {}),
+                  t("ig.signoz.removed"),
+                )) && (setBaseUrl(null), setRes(null), reload())
               }
             >
               <LogOut size={14} strokeWidth={2} />
@@ -1334,7 +1359,10 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
   const addInstance = async () => {
     setBusy(true);
     const r = await act(
-      () => api<{ instances: Array<{ host: string }> }>("/api/integrations/gitlab/instances", { host: newHost }),
+      () =>
+        api<{ instances: Array<{ host: string }> }>("/api/integrations/gitlab/instances", {
+          host: newHost,
+        }),
       t("ig.gl.instanceAdded"),
     );
     setBusy(false);
@@ -1422,7 +1450,12 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
               onChange={(e) => setNewHost(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && newHost.trim() && addInstance()}
             />
-            <button type="button" className="sm ghost" disabled={busy || !newHost.trim()} onClick={addInstance}>
+            <button
+              type="button"
+              className="sm ghost"
+              disabled={busy || !newHost.trim()}
+              onClick={addInstance}
+            >
               <Plus size={14} strokeWidth={2} />
               {t("ig.gl.instanceAddButton")}
             </button>
@@ -1776,14 +1809,30 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
 }
 
 function AgentAccounts() {
+  const { t } = useI18n();
   const status = useApi<Array<{ id: string; ok: boolean; error?: string }>>("/api/agent-providers");
-  return <section className="ig-group"><h3 className="ig-group-title">Agent CLI accounts</h3>
-    <p className="small muted">Agent CLIs use the account authenticated on the assigned worker. Credentials stay with the CLI; configuration in Settings never changes the account. Authenticate on that worker, then refresh status.</p>
-    {status.error && <p role="alert">{String(status.error)}</p>}
-    {status.data?.map((provider) => <div key={provider.id} className="card"><strong>{provider.id}</strong> · {provider.ok ? "Available on this worker" : "Unavailable on this worker"}
-      {provider.id === "copilot" && <p className="small">Authenticate with <code>copilot auth login</code> on the assigned worker. The platform does not fall back to another account.</p>}
-    </div>)}
-  </section>;
+  return (
+    <section className="ig-group">
+      <h3 className="ig-group-title">{t("ig.cli.title")}</h3>
+      <p className="small muted">
+        {t("ig.cli.lead")}
+      </p>
+      {status.loading && !status.data && <SkeletonRows rows={2} />}
+      {status.error && <ErrorBox error={status.error} onRetry={status.reload} />}
+      {status.data && !status.data.length && <Empty>{t("ig.cli.none")}</Empty>}
+      {status.data?.map((provider) => (
+        <div key={provider.id} className="card">
+          <strong>{provider.id}</strong> ·{" "}
+          {provider.ok ? t("ig.cli.available") : t("ig.cli.unavailable")}
+          {provider.id === "copilot" && (
+            <p className="small">
+              {slot(t("ig.cli.copilotHint"), { cmd: <code>copilot auth login</code> })}
+            </p>
+          )}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {}) {

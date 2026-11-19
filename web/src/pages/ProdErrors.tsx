@@ -520,7 +520,7 @@ function GroupRow({
           </a>
           <FixRef g={g} busy={busy} onInvestigate={investigate} reload={reload} />
           <dl className="pe-meta small">
-            <dt>Service</dt>
+            <dt>{t("pe.col.service")}</dt>
             <dd className="mono">
               {g.namespace} / {g.service}
             </dd>
@@ -575,7 +575,7 @@ function GroupRow({
           </div>
           {g.detail.stack && (
             <details>
-              <summary className="small">Stacktrace</summary>
+              <summary className="small">{t("an.stackTrace")}</summary>
               <pre className="pe-pre">{g.detail.stack}</pre>
             </details>
           )}
@@ -781,6 +781,7 @@ export function ProdErrorsPage({
       )}
       {error && <ErrorBox error={error} onRetry={reload} />}
       {!data && loading && <Loading />}
+      {!data && !loading && !error && <EmptyState icon={Siren} title={t("pe.noData")} />}
       {data && (
         <>
           {settings && panel && !data.scanning && (

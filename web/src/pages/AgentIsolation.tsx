@@ -1,7 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 import { useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { ErrorBox, Loading } from "../ui.tsx";
+import { Empty, ErrorBox, SkeletonRows } from "../ui.tsx";
 
 type Check = { required: string[]; provided: string[]; unmet: string[] };
 type View = {
@@ -23,7 +23,7 @@ export function AgentIsolation() {
         <ShieldCheck size={18} aria-hidden />
         <h3>{t("iso.title")}</h3>
       </header>
-      {loading && !data && <Loading />}
+      {loading && !data && <SkeletonRows rows={4} />}
       {error && <ErrorBox error={error} onRetry={reload} />}
       {data && (
         <>
@@ -54,13 +54,21 @@ export function AgentIsolation() {
               </tr>
             </thead>
             <tbody>
-              {data.providers.map((p) => (
-                <tr key={p.provider}>
-                  <td className="mono">{p.provider}</td>
-                  <td>{verdict(p.coding)}</td>
-                  <td>{verdict(p.analysis)}</td>
+              {data.providers.length === 0 ? (
+                <tr>
+                  <td colSpan={3}>
+                    <Empty>{t("common.none")}</Empty>
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                data.providers.map((p) => (
+                  <tr key={p.provider}>
+                    <td className="mono">{p.provider}</td>
+                    <td>{verdict(p.coding)}</td>
+                    <td>{verdict(p.analysis)}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
           <p className="small muted">

@@ -49,10 +49,12 @@ import {
   Copy,
   dur,
   Empty,
+  EmptyState,
   ErrorBox,
   JsonBlock,
   Loading,
   Markdown,
+  SkeletonRows,
   Tabs,
   time,
   navigate,
@@ -514,6 +516,12 @@ export function StepInspector({
     return (
       <div className="rv-pane">
         <ErrorBox error={error} onRetry={reload} />
+      </div>
+    );
+  if (!data)
+    return (
+      <div className="rv-pane">
+        <EmptyState title={t("common.notFound")} />
       </div>
     );
   const { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs } = data;
@@ -1777,7 +1785,7 @@ function AttemptMetrics({ m }: { m: any }) {
         </span>
         {m.skills?.length > 0 && (
           <>
-            <span>Skill activation</span>
+            <span>{t("si.skillActivation")}</span>
             <span className="small">
               {m.skills.map(
                 (s: {
@@ -2008,7 +2016,11 @@ function ReexecuteDialog({
       </label>
       <div className="rv-card soft" style={{ margin: "10px 0 0", padding: "10px 12px" }}>
         <strong className="small">{t("si.replayPreview")}</strong>
-        {previewError ? <ErrorBox error={previewError} onRetry={reloadPreview} /> : !preview ? <Loading /> : (
+        {previewError ? (
+          <ErrorBox error={previewError} onRetry={reloadPreview} />
+        ) : !preview ? (
+          <SkeletonRows rows={2} />
+        ) : (
           <>
             {preview.continuation && (
               <p className="small">

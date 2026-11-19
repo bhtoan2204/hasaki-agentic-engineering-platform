@@ -75,7 +75,7 @@ function target(it: any): ScopeSpec | null {
     const spec = scopeForRepositories(app.repos, all);
     if (spec.scope.scope_type === "GLOBAL") return null; // genuinely cross-project
     // Manual items keep their other restrictions (step_keys, step_types, ...); REPOSITORY drops the redundant list.
-    const { repos, ...rest } = app;
+    const { repos: _repos, ...rest } = app;
     return { scope: spec.scope, applicability: { ...rest, ...spec.applicability } };
   }
   return null;

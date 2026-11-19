@@ -221,8 +221,9 @@ export function Loading({ label }: { label?: string }) {
   );
 }
 export function UpdatingBar({ active }: { active?: boolean }) {
+  const { t } = useI18n();
   if (!active) return null;
-  return <div className="updating-bar" role="progressbar" aria-label="Updating" />;
+  return <div className="updating-bar" role="progressbar" aria-label={t("common.updating")} />;
 }
 export function Skeleton({
   h = 14,
@@ -261,11 +262,12 @@ export function PageHeader({
   actions?: ReactNode;
   children?: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <header className="page-header">
       <div className="ph-main">
         {crumbs && crumbs.length > 0 && (
-          <nav className="crumbs" aria-label="Breadcrumb">
+          <nav className="crumbs" aria-label={t("common.breadcrumb")}>
             {crumbs.map(([label, href], i) => (
               <span key={i} className="row tight" style={{ gap: 6 }}>
                 {i > 0 && <span aria-hidden>/</span>}

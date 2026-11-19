@@ -5,13 +5,13 @@ export function EvaluationTable({
   rows,
   columns,
 }: {
-  rows: any[];
+  rows?: any[];
   columns: Array<{ label: string; value: (row: any) => ReactNode }>;
 }) {
-  const { locale } = useI18n();
-  if (!rows.length)
+  const { t } = useI18n();
+  if (!rows?.length)
     return (
-      <EmptyState title={locale === "en" ? "No matching evidence" : "Chưa có bằng chứng phù hợp"} />
+      <EmptyState title={t("an.eval.noEvidence")} />
     );
   return (
     <div className="table-wrap">

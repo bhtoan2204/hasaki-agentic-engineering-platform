@@ -40,7 +40,7 @@ import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { dialog } from "../dialog/index.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
-import { act, Badge, Copy, ErrorBox, Loading, navigate, time } from "../ui.tsx";
+import { act, Badge, Copy, EmptyState, ErrorBox, Loading, navigate, time } from "../ui.tsx";
 import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { StepInspector } from "./StepInspector.tsx";
 import { AutonomySummary, ProfileBadge } from "./ProfilePreview.tsx";
@@ -287,6 +287,12 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     return (
       <div className="page">
         <ErrorBox error={error} onRetry={reload} />
+      </div>
+    );
+  if (!run)
+    return (
+      <div className="page">
+        <EmptyState title={t("common.notFound")} />
       </div>
     );
 

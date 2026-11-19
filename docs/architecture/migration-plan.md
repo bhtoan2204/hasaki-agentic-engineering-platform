@@ -1,5 +1,9 @@
 # Migration Plan
 
+> [!NOTE] Historical Roadmap
+> This document records the original v1-to-v2 migration roadmap and backfill strategy for the platform baseline.
+> Items that were marked as "not implemented" in this initial milestone (such as the GitHub provider in Phase 7) have since been fully implemented, along with GitLab support and additional agent providers.
+
 ## Principles
 
 * Additive schema changes; legacy tables (`tasks`, `events`, `questions`, `prs`, `inbox`, `settings`) are

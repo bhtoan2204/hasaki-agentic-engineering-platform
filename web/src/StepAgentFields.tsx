@@ -17,7 +17,7 @@ export function StepAgentFields({
   value?: Record<string, any>;
   onChange: (v: Record<string, any>) => void;
 }) {
-  const { locale } = useI18n();
+  const { t } = useI18n();
   const { data: providers } =
     useApi<
       Array<{
@@ -27,7 +27,6 @@ export function StepAgentFields({
         discovery?: string;
       }>
     >("/api/agent-providers");
-  const en = locale === "en";
   const set = (key: string, val: unknown) => {
     const next = { ...value };
     if (val === undefined) delete next[key];
@@ -39,8 +38,8 @@ export function StepAgentFields({
     <>
       {allowVerification && (
         <details>
-          <summary>{en ? "Provider fallback policy" : "Chính sách agent dự phòng"}</summary>
-          <Field label={en ? "Fallback mode" : "Chế độ dự phòng"}>
+          <summary>{t("saf.fallbackPolicy")}</summary>
+          <Field label={t("saf.fallbackMode")}>
             <select
               value={value.fallback?.mode ?? "manual"}
               onChange={(e) => set("fallback", { ...value.fallback, mode: e.target.value })}
@@ -50,7 +49,7 @@ export function StepAgentFields({
               ))}
             </select>
           </Field>
-          <Field label={en ? "Fallback provider order" : "Thứ tự agent dự phòng"}>
+          <Field label={t("saf.fallbackOrder")}>
             <input
               value={(
                 value.fallback?.providers ?? ["claude", "codex", "cursor", "antigravity", "copilot"]
@@ -66,7 +65,7 @@ export function StepAgentFields({
               }
             />
           </Field>
-          <Field label={en ? "Maximum switches" : "Số lần chuyển tối đa"}>
+          <Field label={t("saf.maxSwitches")}>
             <input
               type="number"
               min={0}
@@ -91,9 +90,7 @@ export function StepAgentFields({
                 })
               }
             />
-            {en
-              ? "Skip an agent that is disconnected or out of quota and use the next healthy one"
-              : "Bỏ agent mất kết nối hoặc hết hạn mức và dùng agent khỏe kế tiếp"}
+            {t("saf.skipUnhealthy")}
           </label>
           <label>
             <input
@@ -106,9 +103,7 @@ export function StepAgentFields({
                 })
               }
             />
-            {en
-              ? "Allow automatic continuation when cost is unknown"
-              : "Cho phép tự động tiếp tục khi chưa rõ chi phí"}
+            {t("saf.allowUnknownCost")}
           </label>
           <label>
             <input
@@ -121,17 +116,15 @@ export function StepAgentFields({
                 })
               }
             />
-            {en
-              ? "Allow automatic continuation after a budget/billing failure"
-              : "Cho phép tự động tiếp tục sau lỗi ngân sách/thanh toán"}
+            {t("saf.allowBudgetFailure")}
           </label>
         </details>
       )}
 
       <div className="grid2">
-        <Field label={en ? "Agent provider" : "Nhà cung cấp agent"}>
+        <Field label={t("saf.agentProvider")}>
           <select
-            aria-label={en ? "Agent provider" : "Nhà cung cấp agent"}
+            aria-label={t("saf.agentProvider")}
             value={provider ?? ""}
             onChange={(e) =>
               onChange({
@@ -144,7 +137,7 @@ export function StepAgentFields({
               })
             }
           >
-            <option value="">{en ? "Inherit run default" : "Theo mặc định lượt chạy"}</option>
+            <option value="">{t("saf.inheritRun")}</option>
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
             <option value="cursor">Cursor</option>
@@ -170,18 +163,18 @@ export function StepAgentFields({
           models={providers?.find((entry) => entry.id === provider)?.models}
           discovery={providers?.find((entry) => entry.id === provider)?.discovery}
         />
-        <Field label={en ? "Execution profile" : "Hồ sơ thực thi"}>
+        <Field label={t("saf.executionProfile")}>
           <select
             value={value.execution_profile ?? ""}
             onChange={(e) => set("execution_profile", e.target.value || undefined)}
           >
-            <option value="">{en ? "Run default" : "Mặc định lượt chạy"}</option>
+            <option value="">{t("saf.runDefault")}</option>
             {["MICRO", "FAST", "STANDARD", "DEEP"].map((v) => (
               <option key={v}>{v}</option>
             ))}
           </select>
         </Field>
-        <Field label={en ? "Context token budget" : "Ngân sách token ngữ cảnh"}>
+        <Field label={t("saf.tokenBudget")}>
           <input
             type="number"
             min={2000}
@@ -192,31 +185,31 @@ export function StepAgentFields({
             }
           />
         </Field>
-        <Field label={en ? "Idle timeout (ms)" : "Dừng khi không hoạt động (ms)"}>
+        <Field label={t("saf.idleTimeout")}>
           <input
             type="number"
             min={10000}
             max={86400000}
             value={value.idle_timeout_ms ?? ""}
-            placeholder={en ? "Platform default" : "Mặc định nền tảng"}
+            placeholder={t("saf.platformDefault")}
             onChange={(e) =>
               set("idle_timeout_ms", e.target.value ? Number(e.target.value) : undefined)
             }
           />
         </Field>
-        <Field label={en ? "Tool call budget" : "Ngân sách lượt gọi tool"}>
+        <Field label={t("saf.toolBudget")}>
           <input
             type="number"
             min={1}
             max={10000}
             value={value.max_tool_calls ?? ""}
-            placeholder={en ? "Platform default" : "Mặc định nền tảng"}
+            placeholder={t("saf.platformDefault")}
             onChange={(e) =>
               set("max_tool_calls", e.target.value ? Number(e.target.value) : undefined)
             }
           />
         </Field>
-        <Field label={en ? "Retry attempts" : "Số lần thử tối đa"}>
+        <Field label={t("saf.retryAttempts")}>
           <input
             type="number"
             min={1}
@@ -232,7 +225,7 @@ export function StepAgentFields({
             }
           />
         </Field>
-        <Field label={en ? "Retry backoff (s)" : "Thời gian chờ thử lại (giây)"}>
+        <Field label={t("saf.retryBackoff")}>
           <input
             type="number"
             min={0}
@@ -250,12 +243,8 @@ export function StepAgentFields({
       </div>
       {allowVerification && (
         <Field
-          label={en ? "Verification command" : "Lệnh xác minh"}
-          hint={
-            en
-              ? "Trusted workflow command; empty uses the existing verification policy."
-              : "Lệnh của workflow đáng tin cậy; để trống dùng chính sách xác minh hiện có."
-          }
+          label={t("saf.verifyCommand")}
+          hint={t("saf.verifyCommandHint")}
         >
           <input
             value={value.verification?.command ?? ""}
@@ -269,17 +258,29 @@ export function StepAgentFields({
         </Field>
       )}
       <Field
-        label={en ? "Allowed tools" : "Công cụ được phép"}
+        label={t("saf.allowedTools")}
         hint={
           provider === "cursor"
-            ? en
-              ? "Cursor cannot enforce custom native allowlists; platform baseline applies."
-              : "Cursor chưa hỗ trợ danh sách công cụ tùy chỉnh; áp dụng quyền nền tảng hiện có."
-            : en
-              ? "Comma separated: Read, Bash, platform.search_code, integration:name. Empty inherits baseline. Completion and clarification controls remain available."
-              : "Phân cách dấu phẩy: Read, Bash, platform.search_code, integration:name. Để trống dùng quyền cơ sở. Luôn có công cụ hoàn tất và yêu cầu làm rõ."
+            ? t("saf.toolsCursorHint")
+            : t("saf.toolsDefaultHint")
         }
       >
+        <input
+          disabled={provider === "cursor"}
+          value={value.allowed_tools?.join(", ") ?? ""}
+          onChange={(e) =>
+            set(
+              "allowed_tools",
+              e.target.value.trim()
+                ? e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : null,
+            )
+          }
+        />
+      </Field>
         <input
           disabled={provider === "cursor"}
           value={value.allowed_tools?.join(", ") ?? ""}

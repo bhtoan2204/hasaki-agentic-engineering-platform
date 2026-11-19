@@ -1,7 +1,7 @@
 import { Brain } from "lucide-react";
 import { useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { ErrorBox, Loading } from "../ui.tsx";
+import { Empty, EmptyState, ErrorBox, Loading } from "../ui.tsx";
 
 type Overview = {
   lessons: Array<{ purpose: string; status: string; n: number; corroborated: number }>;
@@ -30,11 +30,12 @@ export function LearningInsights() {
       <p className="small muted">{t("ln.hint")}</p>
       {loading && !data && <Loading />}
       {error && <ErrorBox error={error} onRetry={reload} />}
+      {!data && !loading && !error && <EmptyState icon={Brain} title={t("ln.none")} />}
       {data && (
         <>
           <section className="card">
             <h3>{t("ln.observations")}</h3>
-            {data.observations.length === 0 && <p className="small muted">{t("ln.none")}</p>}
+            {data.observations.length === 0 && <Empty>{t("ln.none")}</Empty>}
             {data.observations.map((o) => (
               <div key={o.kind} className="small">
                 <span className="mono">{o.kind}</span> · {o.n} (
@@ -44,7 +45,7 @@ export function LearningInsights() {
           </section>
           <section className="card">
             <h3>{t("ln.lessons")}</h3>
-            {data.lessons.length === 0 && <p className="small muted">{t("ln.none")}</p>}
+            {data.lessons.length === 0 && <Empty>{t("ln.none")}</Empty>}
             {data.lessons.map((l) => (
               <div key={`${l.purpose}:${l.status}`} className="small">
                 {l.purpose} · {l.status} · {l.n} ({t("ln.corroborated", { n: l.corroborated })})
@@ -53,7 +54,7 @@ export function LearningInsights() {
           </section>
           <section className="card">
             <h3>{t("ln.topNegative")}</h3>
-            {data.top_negative.length === 0 && <p className="small muted">{t("ln.none")}</p>}
+            {data.top_negative.length === 0 && <Empty>{t("ln.none")}</Empty>}
             {data.top_negative.map((l) => (
               <div key={l.key} className="small" style={{ margin: "4px 0" }}>
                 <span className="mono">{l.repo}</span> ×{l.corroborated} — {l.claim}
@@ -63,7 +64,7 @@ export function LearningInsights() {
           <section className="card">
             <h3>{t("ln.routing")}</h3>
             {data.routing.recommendations.length === 0 && (
-              <p className="small muted">{t("ln.none")}</p>
+              <Empty>{t("ln.none")}</Empty>
             )}
             {data.routing.recommendations.map((r) => (
               <div key={`${r.definition_key}:${r.risk}`} className="small">

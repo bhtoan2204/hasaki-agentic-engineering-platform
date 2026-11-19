@@ -239,7 +239,7 @@ function VerificationCard({ v }: { v: any }) {
         : "PENDING";
   return (
     <>
-      <h3>Verification</h3>
+      <h3>{t("an.verification")}</h3>
       <div className="office-verify">
         <div className="row tight">
           <Badge s={tone}>{String(v.status ?? v.outcome ?? "—")}</Badge>

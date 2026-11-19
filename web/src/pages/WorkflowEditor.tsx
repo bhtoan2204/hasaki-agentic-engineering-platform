@@ -44,7 +44,7 @@ import {
 import { api, useApi } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
 import { dialog } from "../dialog/index.ts";
-import { act, Badge, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
+import { act, Badge, EmptyState, ErrorBox, Field, Loading, navigate, time, toast } from "../ui.tsx";
 import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
 import { ProfilePreview, type ProfileChoice } from "./ProfilePreview.tsx";
 import { WF_TYPE_ICON, WF_TYPE_TONE } from "./Workflows.tsx";
@@ -254,6 +254,12 @@ function Editor({ wfKey }: { wfKey: string }) {
     return (
       <div className="page">
         <ErrorBox error={error} onRetry={reload} />
+      </div>
+    );
+  if (!def)
+    return (
+      <div className="page">
+        <EmptyState title={t("common.notFound")} />
       </div>
     );
   if (!spec) return <Loading />;

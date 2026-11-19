@@ -427,14 +427,14 @@ function redactGroup(group: any, actor: Actor, showAll: boolean) {
   const ownerId = group.work_item_owner_id == null ? null : Number(group.work_item_owner_id);
   if (ownerId === actor.id || (showAll && actor.role === "admin" && ownerId != null)) return group;
   const {
-    work_item_id,
-    work_item_code,
-    work_item_title,
-    work_item_status,
-    work_item_owner_id,
-    run_id,
-    run_status,
-    pull_requests,
+    work_item_id: _work_item_id,
+    work_item_code: _work_item_code,
+    work_item_title: _work_item_title,
+    work_item_status: _work_item_status,
+    work_item_owner_id: _work_item_owner_id,
+    run_id: _run_id,
+    run_status: _run_status,
+    pull_requests: _pull_requests,
     ...rest
   } = group;
   return { ...rest, work_item_id: null, run_id: null, pull_requests: [] };

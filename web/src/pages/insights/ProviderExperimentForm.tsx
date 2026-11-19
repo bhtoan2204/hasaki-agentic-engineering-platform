@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, useApi } from "../../api.ts";
-import { act, Field, navigate } from "../../ui.tsx";
+import { act, ErrorBox, Field, SkeletonRows, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, Notice } from "../analytics/shared.tsx";
 const plans = [
@@ -22,8 +22,7 @@ export function ProviderExperimentForm({
   admin: boolean;
   onCreated: () => void;
 }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   const suites = useApi<any[]>("/api/benchmark-suites");
   const [plan, setPlan] = useState("claude,codex"),
     [models, setModels] = useState<string[]>([]),
@@ -62,24 +61,22 @@ export function ProviderExperimentForm({
           }
           onCreated();
         },
-        en ? "Evaluation queued" : "Đã xếp hàng đánh giá",
+        t("an.eval.queued"),
       );
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Panel title={en ? "Controlled provider experiments" : "Thử nghiệm agent có kiểm soát"}>
+    <Panel title={t("an.eval.experiments")}>
       <Notice>
-        {en
-          ? "Fixture controls exercise the workflow and validators, not model quality. Live calls remain blocked on workers without verified budget/isolation support."
-          : "Fixture kiểm tra workflow và bộ xác minh, không đo chất lượng mô hình. Lượt gọi thật bị chặn trên worker chưa xác minh giới hạn chi phí và cô lập."}
+        {t("an.eval.fixtureControlsNotice")}
       </Notice>
-      {!suites.data?.length && (
+      {suites.loading && !suites.data && <SkeletonRows rows={2} />}
+      {suites.error && <ErrorBox error={suites.error} onRetry={suites.reload} />}
+      {!suites.loading && !suites.data?.length && (
         <p>
-          {en
-            ? "Publish the existing benchmark suite first."
-            : "Hãy công bố bộ benchmark hiện có trước."}
+          {t("an.eval.publishSuiteFirst")}
           {admin && (
             <button
               className="sm"
@@ -90,15 +87,15 @@ export function ProviderExperimentForm({
                 })
               }
             >
-              {en ? "Publish builtin suite" : "Công bố bộ chuẩn"}
+              {t("an.eval.publishSuite")}
             </button>
           )}
         </p>
       )}
       <div className="an-filter-grid">
-        <Field label={en ? "Provider sequence" : "Chuỗi agent"}>
+        <Field label={t("an.eval.providerSequence")}>
           <select
-            aria-label={en ? "Provider sequence" : "Chuỗi agent"}
+            aria-label={t("an.eval.providerSequence")}
             value={plan}
             onChange={(e) => {
               setPlan(e.target.value);
@@ -112,20 +109,20 @@ export function ProviderExperimentForm({
             ))}
           </select>
         </Field>
-        <Field label={en ? "Context variant" : "Biến thể ngữ cảnh"}>
+        <Field label={t("an.eval.contextVariant")}>
           <select
-            aria-label={en ? "Context variant" : "Biến thể ngữ cảnh"}
+            aria-label={t("an.eval.contextVariant")}
             value={variant}
             onChange={(e) => setVariant(e.target.value)}
           >
-            <option value="minimal">A · {en ? "Minimal task" : "Nhiệm vụ tối thiểu"}</option>
-            <option value="pack">B · {en ? "Context pack" : "Gói ngữ cảnh"}</option>
-            <option value="tools">C · {en ? "Pack + tools" : "Gói + công cụ"}</option>
+            <option value="minimal">A · {t("an.eval.minimalTask")}</option>
+            <option value="pack">B · {t("an.eval.contextPack")}</option>
+            <option value="tools">C · {t("an.eval.packTools")}</option>
           </select>
         </Field>
-        <Field label={en ? "Repetitions" : "Số lần lặp"}>
+        <Field label={t("an.eval.repetitions")}>
           <input
-            aria-label={en ? "Repetitions" : "Số lần lặp"}
+            aria-label={t("an.eval.repetitions")}
             type="number"
             min={1}
             max={3}
@@ -133,9 +130,9 @@ export function ProviderExperimentForm({
             onChange={(e) => setReps(Number(e.target.value))}
           />
         </Field>
-        <Field label={en ? "Cases" : "Số nhiệm vụ"}>
+        <Field label={t("an.eval.casesCount")}>
           <input
-            aria-label={en ? "Cases" : "Số nhiệm vụ"}
+            aria-label={t("an.eval.casesCount")}
             type="number"
             min={1}
             max={20}
@@ -144,10 +141,10 @@ export function ProviderExperimentForm({
           />
         </Field>
         {plan.split(",").map((provider, i) => (
-          <Field key={i} label={`${provider} · ${en ? "configured model" : "mô hình cấu hình"}`}>
+          <Field key={i} label={`${provider} · ${t("an.eval.configuredModelLabel")}`}>
             <input
               value={models[i] ?? ""}
-              placeholder={en ? "Default/unreported" : "Mặc định/chưa báo cáo"}
+              placeholder={t("an.eval.defaultUnreported")}
               onChange={(e) =>
                 setModels((old) => {
                   const next = [...old];
@@ -158,7 +155,7 @@ export function ProviderExperimentForm({
             />
           </Field>
         ))}
-        <Field label={en ? "Execution" : "Thực thi"}>
+        <Field label={t("an.eval.execution")}>
           <select
             value={mode}
             onChange={(e) => {
@@ -166,13 +163,11 @@ export function ProviderExperimentForm({
               setPaid(false);
             }}
           >
-            <option value="fixture">{en ? "Fixture controls" : "Điều khiển fixture"}</option>
-            <option value="dry_run">{en ? "Dry run" : "Chạy thử cấu hình"}</option>
+            <option value="fixture">{t("an.eval.fixtureControls")}</option>
+            <option value="dry_run">{t("an.eval.dryRun")}</option>
             {admin && (
               <option value="live">
-                {en
-                  ? "Live capability check (may be blocked)"
-                  : "Kiểm tra chạy thật (có thể bị chặn)"}
+                {t("an.eval.liveCapabilityCheck")}
               </option>
             )}
           </select>
@@ -181,9 +176,7 @@ export function ProviderExperimentForm({
       {mode === "live" && (
         <label>
           <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} />
-          {en
-            ? "Record administrator approval; this does not bypass sandbox or budget requirements."
-            : "Ghi nhận phê duyệt quản trị; không bỏ qua yêu cầu sandbox hoặc ngân sách."}
+          {t("an.eval.recordAdminApproval")}
         </label>
       )}
       <div className="row" style={{ marginTop: 12 }}>
@@ -192,19 +185,17 @@ export function ProviderExperimentForm({
           disabled={busy || !suites.data?.length || (mode === "live" && !paid)}
           onClick={() => queue()}
         >
-          {en ? "Queue evaluation" : "Xếp hàng đánh giá"}
+          {t("an.eval.queueEval")}
         </button>
         <button
           className="sm ghost"
           disabled={busy || !suites.data?.length || mode !== "fixture"}
           onClick={() => queue(true)}
         >
-          {en ? "Queue A/B/C context study" : "Xếp hàng nghiên cứu A/B/C"}
+          {t("an.eval.queueStudy")}
         </button>
         <button className="quiet sm" onClick={() => navigate("/insights/quality")}>
-          {en
-            ? "Existing benchmark runner & paired comparisons"
-            : "Benchmark và so sánh cặp hiện có"}
+          {t("an.eval.existingRunnerBtn")}
         </button>
       </div>
     </Panel>

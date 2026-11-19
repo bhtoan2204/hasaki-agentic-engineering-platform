@@ -1,19 +1,19 @@
 import { useI18n } from "../../i18n/index.tsx";
+import { Empty } from "../../ui.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
 import { EvaluationTable } from "./EvaluationTable.tsx";
-function EvaluationQualityPlot({ rows, cost = false }: { rows: any[]; cost?: boolean }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
-  const points = rows.filter(
+function EvaluationQualityPlot({ rows, cost = false }: { rows?: any[]; cost?: boolean }) {
+  const { t } = useI18n();
+  const points = (rows ?? []).filter(
     (r) =>
       r.verified_success_rate != null &&
       (cost ? r.cost_per_verified_success != null : r.median_ms != null),
   );
   if (!points.length)
     return (
-      <p className="muted small">
-        {en ? "No measured coordinates with sufficient coverage" : "Chưa có số đo đủ độ đầy đủ"}
-      </p>
+      <Empty>
+        {t("an.eval.noMeasuredCoords")}
+      </Empty>
     );
   const max = Math.max(
     ...points.map((r) => Number(cost ? r.cost_per_verified_success : r.median_ms)),
@@ -25,12 +25,8 @@ function EvaluationQualityPlot({ rows, cost = false }: { rows: any[]; cost?: boo
       role="img"
       aria-label={
         cost
-          ? en
-            ? "Verified quality versus reported cost"
-            : "Chất lượng đã xác minh theo chi phí báo cáo"
-          : en
-            ? "Verified quality versus latency"
-            : "Chất lượng đã xác minh theo độ trễ"
+          ? t("an.eval.qualityVsCostAria")
+          : t("an.eval.qualityVsLatencyAria")
       }
       style={{ width: "100%", maxHeight: 260 }}
     >
@@ -59,37 +55,28 @@ function EvaluationQualityPlot({ rows, cost = false }: { rows: any[]; cost?: boo
       ))}
       <text x={45} y={223} fontSize={12} fill="var(--ink-2)">
         {cost
-          ? en
-            ? "Reported cost per verified success"
-            : "Chi phí báo cáo mỗi thành công đã xác minh"
-          : en
-            ? "Median completion time"
-            : "Thời gian hoàn tất trung vị"}
+          ? t("an.eval.reportedCostPerSuccess")
+          : t("an.eval.medianCompletionTime")}
       </text>
     </svg>
   );
 }
 export function EvaluationScorecards({ data, common }: { data: any; common: any[] }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   return (
     <>
       {" "}
       <Panel
-        title={
-          en
-            ? "Provider and model benchmark scorecards"
-            : "Bảng điểm benchmark theo agent và mô hình"
-        }
+        title={t("an.eval.scorecardsTitle")}
       >
         <EvaluationTable rows={data.comparisons} columns={common} />
       </Panel>
       <div className="ins-grid">
-        <Panel title={en ? "Quality vs latency" : "Chất lượng và độ trễ"}>
+        <Panel title={t("an.eval.qualityVsLatency")}>
           <EvaluationQualityPlot rows={data.comparisons} />
         </Panel>
         <Panel
-          title={en ? "Quality vs known reported cost" : "Chất lượng và chi phí báo cáo đã biết"}
+          title={t("an.eval.qualityVsCost")}
         >
           <EvaluationQualityPlot rows={data.comparisons} cost />
         </Panel>

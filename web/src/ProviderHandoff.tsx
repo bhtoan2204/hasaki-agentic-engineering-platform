@@ -21,8 +21,7 @@ export function ProviderHandoff({
   handoffs?: any[];
   action: (path: string, body?: any) => Promise<any>;
 }) {
-  const { locale } = useI18n();
-  const en = locale === "en";
+  const { t } = useI18n();
   const [provider, setProvider] = useState("codex"),
     [model, setModel] = useState(""),
     [confirmed, setConfirmed] = useState(false),
@@ -63,22 +62,13 @@ export function ProviderHandoff({
     !current || !pending
       ? null
       : current.status !== "READY"
-        ? en
-          ? "The button stays off until the checkpoint status is READY."
-          : "Nút tắt cho đến khi checkpoint ở trạng thái READY."
+        ? t("handoff.holdNotReady")
         : !options
-          ? en
-            ? "The button stays off while agent availability is still loading."
-            : "Nút tắt trong lúc đang kiểm tra agent nào chạy được."
+          ? t("handoff.holdLoading")
           : !target?.ok
-            ? (target?.error ??
-              (en
-                ? "The button stays off because this agent is not ready."
-                : "Nút tắt vì agent này chưa sẵn sàng."))
+            ? (target?.error ?? t("handoff.holdNotReadyAgent"))
             : !confirmed
-              ? en
-                ? "Tick the checkpoint review box to enable Confirm resume."
-                : "Tick ô đã xem checkpoint để bật nút Xác nhận tiếp tục."
+              ? t("handoff.reviewCheckpointHint")
               : null;
   const hasBody =
     pending ||
@@ -89,7 +79,7 @@ export function ProviderHandoff({
   return (
     <section className="card tight" style={{ margin: 12 }}>
       <div className="card-head" style={hasBody ? undefined : { marginBottom: 0 }}>
-        <h4>{en ? "Agent handoff" : "Bàn giao agent"}</h4>
+        <h4>{t("handoff.title")}</h4>
         {!pending &&
           active &&
           ["RUNNING", "FAILED", "WAITING_INPUT", "RETRYING", "CANCELED"].includes(step.status) && (
@@ -100,29 +90,27 @@ export function ProviderHandoff({
                 setShow(true);
                 void send("handoff", {
                   expected_attempt_id: step.current_attempt_id,
-                  reason: en ? "User requested provider switch" : "Người dùng yêu cầu chuyển agent",
+                  reason: t("handoff.userSwitchReason"),
                 });
               }}
             >
-              {en ? "Switch Agent" : "Chuyển agent"}
+              {t("handoff.switchBtn")}
             </button>
           )}
       </div>
       {pending && (
         <p role="status">
-          <strong>{current.failure_category ?? (en ? "Manual switch" : "Chuyển thủ công")}</strong>{" "}
+          <strong>{current.failure_category ?? t("handoff.manualSwitch")}</strong>{" "}
           · {current.original_provider} · {current.status}
         </p>
       )}
       {current?.status === "BLOCKED" && (
         <div role="alert" className="error">
           <strong>
-            {en ? "The next agent has not started" : "Agent tiếp theo chưa được chạy"}
+            {t("handoff.nextNotStarted")}
           </strong>
           <p>
-            {en
-              ? "Cursor and the other agents stay unavailable until this checkpoint is ready. Reinspect after the workspace issue below is resolved, then choose the agent and confirm."
-              : "Cursor và các agent khác vẫn không chạy được cho đến khi checkpoint sẵn sàng. Xử lý vấn đề workspace bên dưới, bấm Kiểm tra lại, rồi chọn agent và xác nhận."}
+            {t("handoff.blockedDetail")}
           </p>
           {current.blocked_reason && <p>{current.blocked_reason}</p>}
         </div>
@@ -132,9 +120,7 @@ export function ProviderHandoff({
       )}
       {current?.status === "STOPPING" && (
         <p className="muted small">
-          {en
-            ? "Cancellation requested. Waiting for executor termination and stable Git inspection. No continuation can start yet."
-            : "Đã yêu cầu hủy. Đang chờ tiến trình kết thúc và kiểm tra Git ổn định. Chưa thể chạy agent tiếp theo."}
+          {t("handoff.stopping")}
         </p>
       )}
       {pending && (
@@ -147,13 +133,11 @@ export function ProviderHandoff({
               onClick={() =>
                 send("handoff", {
                   expected_attempt_id: current.source_attempt_id,
-                  reason: en
-                    ? "User requested checkpoint reinspection"
-                    : "Người dùng yêu cầu kiểm tra lại checkpoint",
+                  reason: t("handoff.reinspectReason"),
                 })
               }
             >
-              {en ? "Reinspect preserved state" : "Kiểm tra lại trạng thái được giữ lại"}
+              {t("handoff.reinspect")}
             </button>
           )}
           <HandoffPreview handoff={current} />
@@ -161,14 +145,14 @@ export function ProviderHandoff({
             <p role="alert">
               {String(error)}{" "}
               <button className="quiet" onClick={reload}>
-                {en ? "Retry availability check" : "Kiểm tra lại khả dụng"}
+                {t("handoff.retryCheck")}
               </button>
             </p>
           )}
           <div className="grid2">
-            <Field label={en ? "Target provider" : "Agent tiếp theo"}>
+            <Field label={t("handoff.targetProvider")}>
               <select
-                aria-label={en ? "Target provider" : "Agent tiếp theo"}
+                aria-label={t("handoff.targetProvider")}
                 value={provider}
                 onChange={(e) => {
                   setProviderTouched(true);
@@ -179,12 +163,12 @@ export function ProviderHandoff({
               >
                 {!options && (
                   <option value={provider} disabled>
-                    {en ? "Checking agents…" : "Đang kiểm tra agent…"}
+                    {t("handoff.checkingAgents")}
                   </option>
                 )}
                 {options && !healthy.length && (
                   <option value={provider} disabled>
-                    {en ? "No agent is ready" : "Không có agent nào sẵn sàng"}
+                    {t("handoff.noneReady")}
                   </option>
                 )}
                 {healthy.map((p) => (
@@ -194,12 +178,12 @@ export function ProviderHandoff({
                 ))}
               </select>
             </Field>
-            <Field label={en ? "Target model" : "Mô hình tiếp theo"}>
+            <Field label={t("handoff.targetModel")}>
               <ModelSelect
-                ariaLabel={en ? "Target model" : "Mô hình tiếp theo"}
+                ariaLabel={t("handoff.targetModel")}
                 value={model}
                 models={(target?.models ?? []) as CatalogModel[]}
-                emptyLabel={en ? "Account default" : "Mặc định tài khoản"}
+                emptyLabel={t("handoff.accountDefault")}
                 onChange={(next) => {
                   setModel(next);
                   setConfirmed(false);
@@ -209,11 +193,8 @@ export function ProviderHandoff({
           </div>
           <p className="muted small">
             {target?.ok
-              ? en
-                ? "CLI readiness confirmed. Remaining quota and billing are unknown; readiness does not guarantee a successful request."
-                : "CLI đã sẵn sàng. Chưa biết hạn mức còn lại và chi phí; trạng thái sẵn sàng không bảo đảm yêu cầu sẽ thành công."
-              : (target?.error ??
-                (en ? "Checking provider availability…" : "Đang kiểm tra khả dụng…"))}
+              ? t("handoff.cliReady")
+              : (target?.error ?? t("handoff.checkingProvider"))}
           </p>
           <label className={`handoff-confirm${confirmed ? " is-on" : ""}`}>
             <input
@@ -222,9 +203,7 @@ export function ProviderHandoff({
               onChange={(e) => setConfirmed(e.target.checked)}
             />
             <span>
-              {en
-                ? "I reviewed the checkpoint and preserved changes, and authorize continuation with this provider, including unreported usage/cost."
-                : "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo."}
+              {t("handoff.confirmCheckbox")}
             </span>
           </label>
           {resumeHold && (
@@ -247,7 +226,7 @@ export function ProviderHandoff({
                 })
               }
             >
-              {en ? "Confirm resume" : "Xác nhận tiếp tục"}
+              {t("handoff.confirmResume")}
             </button>
           </div>
         </>
@@ -255,9 +234,7 @@ export function ProviderHandoff({
       {(handoffs.length > 0 || attempts.length > 1) && (
         <details className="handoff-history">
           <summary>
-            {en
-              ? "Handoff history & provider timeline"
-              : "Lịch sử bàn giao và dòng thời gian agent"}
+            {t("handoff.historyTimeline")}
           </summary>
           {handoffs.map((h) => (
             <p key={h.id} className="small">
