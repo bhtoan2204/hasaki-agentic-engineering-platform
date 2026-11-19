@@ -74,6 +74,7 @@ import { ensureTestOwner } from "../auth/testOwner.ts";
 import { definitions } from "./definitions.ts";
 import { detectBranchDirectives, normalizeBranchMap, WORK_ITEM_BRANCH_SOURCE } from "./branches.ts";
 import { classifyFailure } from "./failures.ts";
+import { markEscalationNotified, recoveryEpisodesOf, recoveryForFailure } from "./recovery.ts";
 import { failurePolicy } from "../agent/harness/failure.ts";
 import { background } from "./background.ts";
 import { downstream, topoOrder } from "./graph.ts";
@@ -2190,14 +2191,15 @@ async function applyResult(
           WHERE a.step_id = $1 AND a.generation = $2 AND k.data ? 'workspace_conflict'`,
         [step.id, step.generation],
       );
-      const decision = classifyFailure(result.error, {
+      const shaped = await recoveryForFailure(c, run, step, attempt, result, classifyFailure(result.error, {
         failureClass: failurePolicy((result.details as { failure_code?: string } | undefined)?.failure_code)
           ?.failureClass,
         executorRetryable: result.retryable,
         attempt: step.attempt_count - (pauses?.n ?? 0),
         maxAttempts: attempt.effective_agent?.retry?.max_attempts ?? step.max_attempts,
         baseBackoff: attempt.effective_agent?.retry?.backoff_seconds ?? step.retry_backoff_s,
-      });
+      }));
+      const decision = shaped.decision;
       await closeAttempt("FAILED", null, {
         message: result.error,
         details: result.details ?? null,
@@ -2211,7 +2213,11 @@ async function applyResult(
             question: en
               ? `Step "${step.name}" needs you (${decision.class}): ${result.error.slice(0, 600)}`
               : `Bước "${step.name}" cần bạn xử lý (${decision.class}): ${result.error.slice(0, 600)}`,
-            context: decision.reason,
+            context:
+              decision.reason +
+              (en
+                ? `\nDiagnosis: ${shaped.diagnosis.category}. Work so far is kept (worktree and checkpoint); "Rerun this step" continues from it.`
+                : `\nChẩn đoán: ${shaped.diagnosis.category}. Kết quả đã làm được giữ nguyên (worktree và checkpoint); "chạy lại bước" sẽ tiếp tục từ đó.`),
             options: en
               ? ["Rerun this step", "Stop here"]
               : ["Đã xử lý xong — chạy lại bước", "Dừng ở đây"],
@@ -2220,7 +2226,9 @@ async function applyResult(
         await saveExecutionPause(c, attempt.id, "waiting_input", { failure: decision });
         await setStepStatus(c, step, "WAITING_INPUT", {}, `paused: ${decision.class}`);
         await closeJob("done", result.error);
-        afterCommit(() =>
+        if (shaped.notify) await markEscalationNotified(c, run.id, step.id);
+        if (shaped.notify)
+          afterCommit(() =>
           background(`notify run ${run.id}`, () =>
             notifyStepWaiting(
               en
@@ -2471,6 +2479,7 @@ export async function runDetail(runId: number) {
       kind: isRecoverable(String(c.reason)) ? "recoverable" : "note",
     })),
     decisions: await decisionsOf(runId),
+    recovery_episodes: await recoveryEpisodesOf(runId),
   };
 }
 

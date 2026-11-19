@@ -38,6 +38,10 @@ export const DECISION_ACTIONS = [
   "REQUIRE_HUMAN",
   "COLLECT_EVIDENCE",
   "REPLAN",
+  "RETRY_BACKOFF",
+  "REPAIR",
+  "WAIT",
+  "STOP",
 ] as const;
 export type DecisionAction = (typeof DECISION_ACTIONS)[number];
 

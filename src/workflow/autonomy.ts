@@ -24,8 +24,11 @@ export const AUTONOMY_POLICY_VERSION = "2026-11-19.1";
 export { AUTONOMY_MODES, type AutonomyMode, type EffectiveAutonomy };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- step outputs and approval requests are untyped JSON
 type Json = Record<string, any>;
-/** Gates a policy may allowlist. Every other gate (optional steps, reports, releases, DEEP) always waits for a human. */
-export const AUTO_GATES = ["repository_selection", "plan", "diff"] as const;
+/**
+ * Gates a policy may allowlist. Every other gate (optional steps, reports, releases, DEEP) always waits for a human.
+ * `recovery` lets the platform resume an interrupted step on its own once the recovery proof holds (recovery.ts).
+ */
+export const AUTO_GATES = ["repository_selection", "plan", "diff", "recovery"] as const;
 export type GateKind = (typeof AUTO_GATES)[number] | "step_gate" | "report" | "other";
 export const DECISION_RESULTS = [
   "ALLOW",
@@ -465,6 +468,22 @@ export async function loadPolicies(db: Db = pool, lock = false) {
 /** Run-level ceiling frozen at creation (global + owner + request); repositories are checked live at each gate. */
 export async function freezeAutonomy(db: Db, requested: unknown, ownerId: number) {
   return resolveAutonomy(requested, await loadPolicies(db), { ownerId, repositories: [] });
+}
+
+/** The run's policy narrowed by the live one (revocation, pause); null for legacy runs without autonomy. */
+export async function livePolicy(
+  c: Db,
+  run: RunRow,
+  repositories: string[] = run.selected_repositories,
+) {
+  if (!run.autonomy) return null;
+  return narrow(
+    run.autonomy,
+    resolveAutonomy(run.autonomy.requested, await loadPolicies(c, true), {
+      ownerId: run.owner_id ?? null,
+      repositories,
+    }),
+  );
 }
 
 export interface GateDecision extends GateOutcome {

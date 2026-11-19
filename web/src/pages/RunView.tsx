@@ -751,6 +751,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               <InvestigationRunCard run={run} />
               <ProfileCard run={run} />
               <AutonomyCard run={run} onDone={reload} />
+              <RecoveryCard run={run} />
               <RunTotals runId={id} tick={tick} />
               <ReuseCard decisions={run.decisions} />
               <CostPanel kind="run" id={id} tick={tick} />
@@ -956,6 +957,32 @@ function ReportCard({ run }: { run: any }) {
         </button>
         {md && <Copy text={md} label={t("rv.copyMd")} />}
       </div>
+    </div>
+  );
+}
+
+function RecoveryCard({ run }: { run: any }) {
+  const { t } = useI18n();
+  const episodes: any[] = run.recovery_episodes ?? [];
+  if (!episodes.length) return null;
+  return (
+    <div className="rv-card">
+      <div className="rv-card-head">
+        <h4>
+          <Hourglass size={16} /> {t("rc.title")}
+        </h4>
+      </div>
+      {episodes.slice(0, 10).map((e) => (
+        <div key={e.id} className="small" style={{ margin: "4px 0" }}>
+          <span className="mono">{e.step_key}</span> · <b>{e.category}</b> · {t(`rc.status.${e.status}`)} ·{" "}
+          {t("rc.counts", { n: e.occurrences, auto: e.auto_recoveries })}
+          {e.last_strategy?.strategy && <> · {e.last_strategy.strategy}</>}
+          {e.status === "open" && e.next_eligible_at && (
+            <span className="muted"> · {t("rc.next", { at: time(e.next_eligible_at) })}</span>
+          )}
+          {e.reason && <div className="muted">{e.reason}</div>}
+        </div>
+      ))}
     </div>
   );
 }

@@ -155,3 +155,152 @@ export function classifyFailure(
           };
   }
 }
+
+// ---------------------------------------------------------------- recovery diagnosis
+
+/** Canonical recovery categories. Explicit machine codes win; error-text rules are only a fallback. */
+export const RECOVERY_CATEGORIES = [
+  "transient_network",
+  "rate_limit",
+  "quota",
+  "session_expired",
+  "worker_lost",
+  "incomplete_result",
+  "dependency_env",
+  "code_test",
+  "infra_test",
+  "flaky_candidate",
+  "workspace_conflict",
+  "auth",
+  "scope_security",
+  "invalid_evidence",
+  "contract_invalid",
+  "no_progress",
+  "budget_exhausted",
+  "unknown_side_effect",
+  "unknown",
+] as const;
+export type RecoveryCategory = (typeof RECOVERY_CATEGORIES)[number];
+
+export const RECOVERY_STRATEGIES = [
+  "RESUME",
+  "RESTORE",
+  "RETRY_BACKOFF",
+  "HANDOFF",
+  "REPAIR",
+  "VERIFY_ONLY",
+  "REPLAN",
+  "RECONCILE",
+  "WAIT",
+  "STOP",
+] as const;
+export type RecoveryStrategy = (typeof RECOVERY_STRATEGIES)[number];
+
+const BY_CODE: Record<string, [RecoveryCategory, RecoveryStrategy]> = {
+  RATE_LIMIT: ["rate_limit", "RETRY_BACKOFF"],
+  PROVIDER_UNAVAILABLE: ["transient_network", "RETRY_BACKOFF"],
+  EXECUTION_TIMEOUT: ["transient_network", "RETRY_BACKOFF"],
+  IDLE_TIMEOUT: ["transient_network", "RETRY_BACKOFF"],
+  QUOTA_EXHAUSTED: ["quota", "HANDOFF"],
+  AUTHENTICATION: ["auth", "STOP"],
+  CONTEXT_LIMIT: ["session_expired", "RESUME"],
+  INCOMPLETE_OUTPUT: ["incomplete_result", "RESUME"],
+  CONTRACT_INVALID: ["contract_invalid", "RESUME"],
+  INVALID_EVIDENCE: ["invalid_evidence", "WAIT"],
+  POLICY_VIOLATION: ["scope_security", "STOP"],
+  GUARANTEE_UNMET: ["scope_security", "STOP"],
+  UNSAFE_SIDE_EFFECT: ["unknown_side_effect", "WAIT"],
+  NO_PROGRESS: ["no_progress", "WAIT"],
+  BUDGET_EXHAUSTED: ["budget_exhausted", "STOP"],
+  TOOL_BUDGET_EXHAUSTED: ["budget_exhausted", "STOP"],
+  WORKSPACE: ["workspace_conflict", "WAIT"],
+  CANCELED: ["unknown", "STOP"],
+};
+
+const TEXT_RULES: Array<[RecoveryCategory, RecoveryStrategy, RegExp]> = [
+  ["no_progress", "WAIT", /no progress|same failures twice|made no progress/i],
+  ["auth", "STOP", RULES.find(([c]) => c === "auth")![1]],
+  ["quota", "HANDOFF", /quota (exceeded|exhausted)|insufficient[_ ]quota|billing/i],
+  ["rate_limit", "RETRY_BACKOFF", RULES.find(([c]) => c === "rate_limit")![1]],
+  ["workspace_conflict", "WAIT", RULES.find(([c]) => c === "workspace")![1]],
+  [
+    "dependency_env",
+    "WAIT",
+    /environment (is )?unavailable|command not found|ENOENT|no such file or directory.*(bin|node_modules)|cannot find module|missing (test )?prerequisite|test postgresql|docker (daemon|is not running)/i,
+  ],
+  [
+    "infra_test",
+    "WAIT",
+    /could not complete|verification infrastructure|test (runner|infrastructure) (failed|crashed)/i,
+  ],
+  ["code_test", "REPAIR", RULES.find(([c]) => c === "code")![1]],
+  ["transient_network", "RETRY_BACKOFF", RULES.find(([c]) => c === "transient")![1]],
+];
+
+export interface RecoveryDiagnosis {
+  category: RecoveryCategory;
+  strategy: RecoveryStrategy;
+  /** "code" when a machine code decided, "text" for the regex fallback, "none" when nothing matched. */
+  source: "code" | "text" | "none";
+  /** Seconds the provider asked to wait (Retry-After), when it said so. */
+  retry_after_s: number | null;
+}
+
+/** Retry-After from structured details first, then the message ("retry after 30s", "Retry-After: 30"). */
+export function retryAfterSeconds(details: unknown, message: string): number | null {
+  const d = details as {
+    retry_after_s?: unknown;
+    provider_error?: { retry_after_s?: unknown };
+  } | null;
+  const raw = d?.retry_after_s ?? d?.provider_error?.retry_after_s;
+  const n = Number(raw ?? /retry[- ]after[:\s]+(\d+)/i.exec(message)?.[1]);
+  return Number.isFinite(n) && n > 0 ? Math.min(3600, Math.round(n)) : null;
+}
+
+export function diagnoseFailure(input: {
+  error: string;
+  failureCode?: string | null;
+  details?: unknown;
+}): RecoveryDiagnosis {
+  const retry_after_s = retryAfterSeconds(input.details, input.error);
+  const byCode = input.failureCode ? BY_CODE[input.failureCode] : undefined;
+  if (byCode) return { category: byCode[0], strategy: byCode[1], source: "code", retry_after_s };
+  const rule = TEXT_RULES.find(([, , re]) => re.test(input.error ?? ""));
+  if (rule) return { category: rule[0], strategy: rule[1], source: "text", retry_after_s };
+  // Unknown is never treated as transient: it keeps the bounded step retry and nothing more.
+  return { category: "unknown", strategy: "WAIT", source: "none", retry_after_s };
+}
+
+/** Stable identity of a failure: volatile tokens (numbers, hashes, paths, timestamps) are masked. */
+export function failureSignature(category: RecoveryCategory, error: string) {
+  const norm = String(error ?? "")
+    .toLowerCase()
+    .replace(/\b[0-9a-f]{7,64}\b/g, "#")
+    .replace(/\d+/g, "0")
+    .replace(/(\/[\w.-]+)+/g, "/p")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+  return `${category}:${norm}`;
+}
+
+/** Up to +20% jitter so recovering runs do not retry in lockstep. */
+export const jittered = (seconds: number, random = Math.random) =>
+  Math.round(seconds * (1 + 0.2 * Math.min(1, Math.max(0, random()))));
+
+/** Categories where a repeat with unchanged evidence means the work itself is stuck (not the infrastructure). */
+export const WORK_CATEGORIES: readonly RecoveryCategory[] = [
+  "code_test",
+  "incomplete_result",
+  "contract_invalid",
+  "unknown",
+];
+
+export const RECOVERY_LIMITS = {
+  /** Identical failure (same signature, same workspace) tolerated before escalating as no-progress. */
+  sameSignature: 2,
+  /** Automatic recoveries per run, across steps, attempts and generations. */
+  perRun: 12,
+  /** Automatic resumes of one interrupted step. */
+  interruptedResumes: 2,
+};
