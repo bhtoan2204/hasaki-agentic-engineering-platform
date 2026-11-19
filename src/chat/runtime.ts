@@ -30,6 +30,16 @@ import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } 
 import { stallGuard, TurnStream } from "./streaming.ts";
 import { learnFromTurn, recallMemories } from "./memory.ts";
 import { knowledgeForTurn, refOf } from "./knowledge.ts";
+import {
+  continuationBrief,
+  continuesGoal,
+  nextContinuation,
+  type Continuation,
+} from "./continuation.ts";
+import { operationsOf } from "./operations.ts";
+import { integrationTools } from "../agent/toolRegistry.ts";
+import { execution } from "../auth/execution.ts";
+import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import type {
   ChatUsage,
   Citation,
@@ -215,11 +225,91 @@ export async function runTurn(turnId: number, providers: Providers | undefined =
         deadline.aborted
           ? chatFailure("TURN_TIMEOUT", `Turn exceeded ${LIMITS.turnTimeoutMs / 1000}s`)
           : asChatFailure(e);
+      await recordContinuation(turn.id, { status: "failed", failure });
       await finishFailed(turn, failure);
     }
   } finally {
     clearInterval(poll);
     active.delete(turnId);
+  }
+}
+
+const ESCALATION = /```chat-escalate/;
+
+/**
+ * Resuming an unfinished request: refresh the owner's integration sessions, re-check the tools that blocked it and
+ * hand the model the evidence already gathered (bounded, still-readable repositories only).
+ */
+async function resumeBrief(ownerId: number, cont: Continuation, readable: string[]) {
+  const refreshed = await execution.run({ userId: ownerId, kind: "user" }, async () => {
+    await loadPersonalIntegrations(true).catch(() => {});
+    const tools = integrationTools();
+    return [...new Set(cont.blockers.map((b) => b.tool).filter((t): t is string => !!t))]
+      .map((tool) => ({ tool, def: tools.find((t) => t.name === tool) }))
+      .filter((x) => x.def)
+      .map((x) => ({ tool: x.tool, available: x.def!.available() }));
+  });
+  const refs = cont.completed.map((c) => c.evidence_ref).filter((r): r is string => !!r);
+  const rows = refs.length
+    ? (await chatRepository.toolCallsOf(cont.conversation_id ?? 0)).filter((r) => r.evidence_ref && refs.includes(r.evidence_ref))
+    : [];
+  const evidence = rows
+    .filter((r) => r.repositories.every((repo) => readable.includes(repo)))
+    .slice(-6)
+    .map((r) => ({ ref: r.evidence_ref!, tool: r.tool, body: boundedContextJson(r.result).slice(0, 1500) }));
+  return continuationBrief(cont, refreshed, evidence);
+}
+
+/**
+ * At the end of every turn (before it becomes terminal): derive the unfinished-request state from what the platform
+ * recorded — tool calls, operations, failure, budget — never from the model.
+ */
+async function recordContinuation(
+  turnId: number,
+  outcome: {
+    status: "completed" | "failed";
+    failure?: ChatFailure;
+    stopReason?: string | null;
+    escalated?: boolean;
+  },
+) {
+  try {
+    const turn = await chatRepository.getTurn(turnId);
+    if (!turn) return;
+    const conversation = await chatRepository.getConversation(turn.conversation_id, turn.owner_id);
+    const message = await chatRepository.messageOfTurn(turn.id, "user");
+    if (!conversation || !message) return;
+    const prev = conversation.continuation ?? null;
+    const calls = (await chatRepository.toolCallsOf(turn.conversation_id)).filter((c) => c.turn_id === turn.id);
+    const ops = await operationsOf(turn.conversation_id, turn.owner_id);
+    const tracked = new Set(prev?.operations.map((o) => o.id) ?? []);
+    const routing = turn.routing as { path?: string; continued?: boolean };
+    const next = nextContinuation(
+      prev,
+      {
+        turnId: turn.id,
+        message: message.content,
+        route: turn.route,
+        effectiveMode: turn.effective_mode,
+        path: routing.path === "tools" || outcome.escalated ? "tools" : "direct",
+        status: outcome.status,
+        failure: outcome.failure ?? null,
+        stopReason: outcome.stopReason ?? null,
+        toolCalls: calls.map((c) => ({
+          tool: c.tool,
+          arguments: c.arguments,
+          status: c.status,
+          label: c.tool,
+          error: (c.result as { error?: string } | null)?.error ?? null,
+          evidence_ref: c.evidence_ref,
+        })),
+        operations: ops.filter((o) => o.turn_id === turn.id || tracked.has(o.id)),
+      },
+      routing.continued === true,
+    );
+    await chatRepository.setContinuation(turn.conversation_id, next ? { ...next, conversation_id: turn.conversation_id } : null);
+  } catch (e) {
+    console.error("chat continuation:", (e as Error).message);
   }
 }
 
@@ -265,13 +355,21 @@ async function executeTurn(
   const mentions: ResolvedMention[] = await resolveMentions(turn.owner_id, userMessage.content);
   if (mentions.length) await chatRepository.setMentions(userMessage.id, mentions.map(publicMention));
 
-  const prior = await chatRepository.latestTurnWithUser(conversation.id);
-  const routing = routeTurnIntelligent(
-    turn.mode,
-    userMessage.content,
-    mentions,
-    prior && prior.id !== turn.id ? prior.route : null,
-  );
+  const prior = await chatRepository.latestTurnWithUser(conversation.id, turn.id);
+  let routing = routeTurnIntelligent(turn.mode, userMessage.content, mentions, prior?.route ?? null);
+  // An unfinished request (blocked tool, pending operation…) is resumed by a follow-up instead of starting over.
+  const unfinished = conversation.continuation ?? null;
+  const follow = continuesGoal(userMessage.content, unfinished, routing);
+  if (follow.continues && unfinished)
+    routing = {
+      ...routing,
+      route: unfinished.route as typeof routing.route,
+      effective_mode:
+        turn.mode === "AUTO" ? (unfinished.effective_mode as typeof routing.effective_mode) : routing.effective_mode,
+      path: "tools",
+      reason: `continues the unfinished request of turn #${unfinished.goal_turn_id} (${follow.reason})`,
+      source: "context",
+    };
   const effectiveMode = routing.effective_mode as ManualChatMode;
 
   await emitChatEvent({
@@ -331,7 +429,7 @@ async function executeTurn(
   await chatRepository.setTurnPlan(turn.id, {
     effectiveMode,
     route: routing.route,
-    routing: { ...routing },
+    routing: { ...routing, continued: follow.continues },
     provider: admission.provider,
     model: admission.model,
     effort: admission.effort,
@@ -390,6 +488,9 @@ async function executeTurn(
   const toolResults: Array<{ seq: number; tool: string; status: string; body: string }> = [];
   const seen = new Set<string>();
   let catalog = routing.path === "tools" ? toolCatalog(effectiveMode) : null;
+  let escalated = false;
+  const resume =
+    follow.continues && unfinished ? await resumeBrief(turn.owner_id, unfinished, readable) : null;
   let seq = 0;
   let final: string | null = null;
   let stopReason: string | null = null;
@@ -500,6 +601,8 @@ async function executeTurn(
           repositories,
           memories,
           knowledge: promptKnowledge,
+          continuation: resume,
+          canEscalate: routing.path === "direct" && !escalated && step < LIMITS.maxSteps - 1,
         });
         if (step === 0 && attempt === 0)
           await emitChatEvent({
@@ -529,6 +632,17 @@ async function executeTurn(
         await emitChatEvent({ ...ids, kind: "usage.updated", data: { ...usage } });
         await phase(turn, "receiving_response");
 
+        if (routing.path === "direct" && !escalated && ESCALATION.test(completion.text)) {
+          // The direct path asked for tools: open the catalog for the rest of this turn (one extra call, only when needed).
+          escalated = true;
+          catalog = toolCatalog(effectiveMode);
+          await emitChatEvent({
+            ...ids,
+            kind: "routing.completed",
+            data: { ...routing, path: "tools", escalated: true, reason: "the direct answer needed platform tools" },
+          });
+          continue;
+        }
         const calls = catalog ? parseToolCalls(completion.text) : null;
         if (!calls) {
           final = stripToolBlocks(completion.text);
@@ -681,7 +795,9 @@ async function executeTurn(
     ...usage,
     latency_ms: Date.now() - started,
     route: routing.route,
-    path: routing.path,
+    path: escalated ? "tools" : routing.path,
+    escalated,
+    continued: follow.continues,
     routing_reason: routing.reason,
     stop_reason: stopReason,
     compacted,
@@ -689,6 +805,8 @@ async function executeTurn(
     provider: admission.provider,
     model: attempts.find((a) => a.ok)?.model ?? admission.model,
   };
+  // Recorded before the turn becomes terminal, so an immediate follow-up already sees it.
+  await recordContinuation(turn.id, { status: "completed", stopReason, escalated });
   await closeStream(stream);
   const outcome = await withTx(async (c) => {
     const done = await chatRepository.finishTurn(

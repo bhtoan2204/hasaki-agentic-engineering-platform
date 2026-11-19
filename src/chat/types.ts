@@ -60,6 +60,7 @@ export interface ConversationRow {
   summary_through: number;
   budget: Record<string, unknown>;
   usage: Record<string, unknown>;
+  continuation?: Continuation | null;
   archived: boolean;
   created_at: string;
   updated_at: string;
@@ -177,4 +178,24 @@ export interface ChatUsage {
   input_tokens: number | null;
   output_tokens: number | null;
   cost_usd: number | null;
+}
+
+/** Unfinished request of a conversation (see continuation.ts). */
+export interface Continuation {
+  conversation_id?: number;
+  goal: string;
+  goal_turn_id: number;
+  route: string;
+  effective_mode: string;
+  status: "blocked" | "incomplete";
+  completed: Array<{ tool: string; label: string; evidence_ref: string | null; turn_id: number }>;
+  blockers: Array<{
+    kind: "tool" | "turn" | "budget" | "operation";
+    tool?: string;
+    reason: string;
+    turn_id: number;
+  }>;
+  operations: Array<{ id: number; tool: string; status: string; verified: boolean | null }>;
+  turns: number[];
+  updated_at: string;
 }

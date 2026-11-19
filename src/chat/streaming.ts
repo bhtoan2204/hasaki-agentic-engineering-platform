@@ -5,6 +5,7 @@ import { ChatTurnError, chatFailure, type ChatFailure } from "./failures.ts";
 import type { TraceItem } from "./types.ts";
 
 const FENCE = "```chat-tool";
+const ESCALATE = "```chat-escalate";
 const CALLS = '{"calls"';
 const MAX_DRAFT = 100_000;
 const MAX_REASONING = 32_000;
@@ -15,7 +16,14 @@ const MAX_TRACE = 200;
  * platform, not answer text, and a trailing prefix of the fence is held back until it is known not to open one.
  */
 export function visibleAnswer(text: string, toolsEnabled: boolean) {
-  if (!toolsEnabled) return text;
+  // A direct answer may ask to escalate to tools instead of answering: that marker is never answer text.
+  const esc = text.indexOf(ESCALATE);
+  if (esc >= 0) return text.slice(0, esc).trimEnd();
+  if (!toolsEnabled) {
+    for (let k = Math.min(ESCALATE.length - 1, text.length); k > 0; k--)
+      if (ESCALATE.startsWith(text.slice(-k))) return text.slice(0, -k);
+    return text;
+  }
   const head = text.trimStart().replace(/\s+/g, "");
   if (head && (head.startsWith(CALLS) || CALLS.startsWith(head))) return "";
   const at = text.indexOf(FENCE);

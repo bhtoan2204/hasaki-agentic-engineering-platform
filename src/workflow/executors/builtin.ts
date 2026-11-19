@@ -1,7 +1,14 @@
 import { isVerificationCommand, verificationReplay } from "../replay.ts";
 import { fileURLToPath } from "node:url";
 import { verifyPublication } from "../../agent/publicationVerification.ts";
-import { baseTip, canonicalJson, commandEnvironmentFingerprint, envFingerprint, evidenceKey, pgEvidenceStore } from "../../agent/verifyEvidence.ts";
+import {
+  baseTip,
+  canonicalJson,
+  commandEnvironmentFingerprint,
+  envFingerprint,
+  evidenceKey,
+  pgEvidenceStore,
+} from "../../agent/verifyEvidence.ts";
 import type { StepRow } from "../types.ts";
 import { requireRunRepositoryAccess } from "../../repos/access.ts";
 import {
@@ -59,10 +66,16 @@ import {
   verificationGate,
   type PublishState,
 } from "../../agent/independentReview.ts";
-import { collectScopeState, finalPublishProblems, prePublishProblems, samePatch, worktreeFingerprint } from "../../agent/scopeGuard.ts";
+import {
+  collectScopeState,
+  finalPublishProblems,
+  prePublishProblems,
+  samePatch,
+  worktreeFingerprint,
+} from "../../agent/scopeGuard.ts";
 import { feedbackSignals } from "../replan.ts";
 import { recheckBeforePublish } from "../autonomy.ts";
-import { removeSandboxState } from "../../agent/isolation.ts";
+import { gitMounts, removeSandboxState } from "../../agent/isolation.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -97,10 +110,15 @@ async function invalidTestSource(
   shown: Record<string, unknown>,
 ) {
   for (const [key, output] of Object.entries(shown)) {
-    const o = output as { required_tests?: unknown; subtasks?: Array<{ required_tests?: unknown }> } | null;
+    const o = output as {
+      required_tests?: unknown;
+      subtasks?: Array<{ required_tests?: unknown }>;
+    } | null;
     const ids = [
       ...(Array.isArray(o?.required_tests) ? o.required_tests : []),
-      ...(o?.subtasks ?? []).flatMap((t) => (Array.isArray(t.required_tests) ? t.required_tests : [])),
+      ...(o?.subtasks ?? []).flatMap((t) =>
+        Array.isArray(t.required_tests) ? t.required_tests : [],
+      ),
     ];
     if (ids.length && (await requiredTestTargets(targets, ids, true)).problems.length) return key;
   }
@@ -323,7 +341,11 @@ export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps[
   const busy = verificationSlotsInUse();
   const release = await acquireVerificationSlot(signal);
   if (!release)
-    return { code: null, output: "[canceled while waiting for a verification slot]", timedOut: false };
+    return {
+      code: null,
+      output: "[canceled while waiting for a verification slot]",
+      timedOut: false,
+    };
   if (Date.now() - started > 1000)
     onChunk?.(`[waited ${Date.now() - started}ms for a verification slot; ${busy} running]\n`);
   try {
@@ -390,11 +412,12 @@ unset PLATFORM_COMMAND_PATH platform_command_dirs platform_command_dir`;
   const helperScope = `platform_evidence_dir='${evidenceDir}'
 node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DEPENDENCY_EVIDENCE_DIR="$platform_evidence_dir" command node "$@"; else command node "$@"; fi; }`;
   const script = `${restorePath}\n${helperScope}\n${pg[TEST_POSTGRES_BIN_ENV] ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n` : ""}${command}`;
+  const git = useBwrap ? await gitMounts([cwd]) : [];
   const r = await new Promise<CommandResult>((resolve) => {
     const child = spawn(
       useBwrap ? "bwrap" : "bash",
       useBwrap
-        ? [...bwrapArguments(cwd, proc.isolation?.liveRoot ?? null), "bash", "-lc", script]
+        ? [...bwrapArguments(cwd, proc.isolation?.liveRoot ?? null, git), "bash", "-lc", script]
         : ["-lc", script],
       {
         cwd,
@@ -498,29 +521,50 @@ export const commandExecutor: StepExecutor = {
       };
     }
     const commandHash = evidenceKey({ version: "1", config: canonicalJson(cfg) }).slice(0, 16);
-    const verification = isVerificationCommand(ctx.step.config) && cfg.command === ctx.step.config.command;
-    const compare = verification && cfg.reuse_test_evidence !== false && !cfg.cwd && !ctx.step.replay_forced &&
-      !ctx.input.pending?.reexecute && !ctx.input.pending?.feedback && !resumed && !decision;
+    const verification =
+      isVerificationCommand(ctx.step.config) && cfg.command === ctx.step.config.command;
+    const compare =
+      verification &&
+      cfg.reuse_test_evidence !== false &&
+      !cfg.cwd &&
+      !ctx.step.replay_forced &&
+      !ctx.input.pending?.reexecute &&
+      !ctx.input.pending?.feedback &&
+      !resumed &&
+      !decision;
     const fingerprint = async () => {
       if (!compare) return null;
       try {
-        const parts = await Promise.all(targets.map(async (target) => {
-          if (await dirtyOf(target.path)) throw new Error("Dirty workspace");
-          const base = await repositoryBaseBranch(target.repo);
-          const tip = await baseTip(target.path, base);
-          if (tip === "unknown" && cfg.baseline_compare) throw new Error("Unknown baseline");
-          const env = {
-            BASE_BRANCH: base, REPO: target.repo, BRANCH: target.branch, RUN_ID: String(ctx.run.id),
-            ...((cfg.env as Record<string, string>) ?? {}),
-          };
-          return [target.repo, {
-            branch: target.branch, path: target.path, state: await worktreeFingerprint(target.path), tip,
-            dependencies: await envFingerprint(target.path),
-            environment: await commandEnvironmentFingerprint(target.path, env, false),
-          }];
-        }));
+        const parts = await Promise.all(
+          targets.map(async (target) => {
+            if (await dirtyOf(target.path)) throw new Error("Dirty workspace");
+            const base = await repositoryBaseBranch(target.repo);
+            const tip = await baseTip(target.path, base);
+            if (tip === "unknown" && cfg.baseline_compare) throw new Error("Unknown baseline");
+            const env = {
+              BASE_BRANCH: base,
+              REPO: target.repo,
+              BRANCH: target.branch,
+              RUN_ID: String(ctx.run.id),
+              ...((cfg.env as Record<string, string>) ?? {}),
+            };
+            return [
+              target.repo,
+              {
+                branch: target.branch,
+                path: target.path,
+                state: await worktreeFingerprint(target.path),
+                tip,
+                dependencies: await envFingerprint(target.path),
+                environment: await commandEnvironmentFingerprint(target.path, env, false),
+              },
+            ];
+          }),
+        );
         return evidenceKey({
-          version: "1", config: canonicalJson(cfg), workspaces: canonicalJson(Object.fromEntries(parts)),
+          version: "1",
+          config: canonicalJson(cfg),
+          workspaces: canonicalJson(Object.fromEntries(parts)),
           policy: canonicalJson(ctx.run.policy_versions ?? {}),
           authority: canonicalJson(ctx.input.execution_contract ?? null),
         });
@@ -529,23 +573,33 @@ export const commandExecutor: StepExecutor = {
       }
     };
     const beforeEvidence = await fingerprint();
-    const same = beforeEvidence ? (await q<{ id: number; output: Record<string, unknown> }>(pool,
-      `SELECT id,output FROM workflow_step_attempts WHERE step_id=$1 AND status='COMPLETED'
+    const same = beforeEvidence
+      ? (
+          await q<{ id: number; output: Record<string, unknown> }>(
+            pool,
+            `SELECT id,output FROM workflow_step_attempts WHERE step_id=$1 AND status='COMPLETED'
         AND output->>'verification_fingerprint'=$2 AND NOT output ? 'reused_from_attempt'
         ORDER BY id DESC LIMIT 1`,
-      [ctx.step.id, beforeEvidence]))[0] : undefined;
+            [ctx.step.id, beforeEvidence],
+          )
+        )[0]
+      : undefined;
     if (verification) {
       const choice = verificationReplay(!!same);
-      await ctx.log("system", choice.reason, { replay: choice.action, source_attempt_id: same?.id });
+      await ctx.log("system", choice.reason, {
+        replay: choice.action,
+        source_attempt_id: same?.id,
+      });
     }
-    if (same) return {
-      kind: "completed",
-      output: {
-        ...same.output,
-        reused_from_attempt: same.id,
-        reused_at: new Date().toISOString(),
-      },
-    };
+    if (same)
+      return {
+        kind: "completed",
+        output: {
+          ...same.output,
+          reused_from_attempt: same.id,
+          reused_at: new Date().toISOString(),
+        },
+      };
     const results: Array<{
       repo: string;
       exit_code: number | null;
@@ -648,12 +702,24 @@ export const commandExecutor: StepExecutor = {
     const tested_heads: Record<string, string> = {};
     for (const t of targets)
       if (t.repo !== "(cwd)") tested_heads[t.repo] = await headOf(t.path).catch(() => "");
-    const clean = !cfg.cwd && Object.values(tested_heads).every(Boolean) &&
+    const clean =
+      !cfg.cwd &&
+      Object.values(tested_heads).every(Boolean) &&
       !(await Promise.all(targets.map((t) => dirtyOf(t.path)))).some(Boolean);
-    const compatible = beforeEvidence && clean && results.every((r) =>
-      r.exit_code === 0 && r.passed && !r.timed_out && !r.environment_unavailable &&
-      !r.baseline && !r.skipped_known_failures?.length &&
-      (testEvidence(outputs[r.repo]).executed ?? 0) > 0) && beforeEvidence === await fingerprint();
+    const compatible =
+      beforeEvidence &&
+      clean &&
+      results.every(
+        (r) =>
+          r.exit_code === 0 &&
+          r.passed &&
+          !r.timed_out &&
+          !r.environment_unavailable &&
+          !r.baseline &&
+          !r.skipped_known_failures?.length &&
+          (testEvidence(outputs[r.repo]).executed ?? 0) > 0,
+      ) &&
+      beforeEvidence === (await fingerprint());
     const output = {
       results,
       passed: failed.length === 0,
@@ -1074,7 +1140,10 @@ async function cleanupWorkspaces(ctx: ExecutionContext): Promise<ExecResult> {
   }
   if (removed.length) await ctx.log("system", `removed worktrees: ${removed.join(", ")}`);
   const sandbox = removeSandboxState(ctx.run.id);
-  return { kind: "completed", output: { removed, kept, ...(sandbox ? { sandbox_state_removed: true } : {}) } };
+  return {
+    kind: "completed",
+    output: { removed, kept, ...(sandbox ? { sandbox_state_removed: true } : {}) },
+  };
 }
 
 export const integrationExecutor: StepExecutor = {
@@ -1398,13 +1467,22 @@ export const pullRequestExecutor: StepExecutor = {
       const nowState = await worktreeFingerprint(w.path).catch(() => null);
       const finalProblems = finalPublishProblems({
         repo: w.repo,
-        verified: { ...(gate ?? { head: "", fingerprint: "" }), branchTip: publish[w.repo].branchTip },
-        now: nowState && { ...nowState, branchTip: await revParse(w.path, `refs/heads/${w.branch}`) },
+        verified: {
+          ...(gate ?? { head: "", fingerprint: "" }),
+          branchTip: publish[w.repo].branchTip,
+        },
+        now: nowState && {
+          ...nowState,
+          branchTip: await revParse(w.path, `refs/heads/${w.branch}`),
+        },
         ownershipLost: ctx.signal.aborted,
       });
       if (!gate) finalProblems.push(`${w.repo}: no verified workspace state was captured`);
       if (finalProblems.length) {
-        await ctx.log("system", `PR blocked right before the push:\n- ${finalProblems.join("\n- ")}`);
+        await ctx.log(
+          "system",
+          `PR blocked right before the push:\n- ${finalProblems.join("\n- ")}`,
+        );
         return {
           kind: "failed",
           error: `workspace changed after verification: ${finalProblems.join("; ")} — re-run verification`,
@@ -1413,7 +1491,12 @@ export const pullRequestExecutor: StepExecutor = {
       }
       let commits: string;
       try {
-        const pushed = await provider.push(w.path, w.branch, bases[w.repo]?.target, publish[w.repo].branchTip);
+        const pushed = await provider.push(
+          w.path,
+          w.branch,
+          bases[w.repo]?.target,
+          publish[w.repo].branchTip,
+        );
         commits = pushed.commits;
         if (pushed.note) await ctx.log("system", `${w.repo}: ${pushed.note}`);
       } catch (e) {
@@ -1505,7 +1588,8 @@ export const pullRequestExecutor: StepExecutor = {
             ctx.run.id,
           )
         : null;
-      if (reviewComment) await ctx.log("system", `${w.repo}: review comment ${reviewComment.reason}`);
+      if (reviewComment)
+        await ctx.log("system", `${w.repo}: review comment ${reviewComment.reason}`);
       out.push({
         repo: w.repo,
         url: pr.url,

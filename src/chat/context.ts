@@ -187,6 +187,10 @@ export interface PromptSections {
     content?: string;
     description?: string;
   }>;
+  /** An unfinished earlier request this message may resume (platform-recorded goal, evidence, blockers, operations). */
+  continuation?: string | null;
+  /** Direct path: the model may ask for tools instead of answering. */
+  canEscalate?: boolean;
   /** Owner-private chat memory relevant to this message (preferences, corrections, verified procedures). */
   memories?: Array<{ key: string; kind: string; text: string }>;
 }
@@ -247,6 +251,17 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
         ].join("\n")
       : "",
   );
+  add(
+    "continuation",
+    p.continuation ? untrusted("unfinished request (platform record)", p.continuation) : "",
+  );
+  add(
+    "escalate",
+    p.canEscalate
+      ? "No tools are attached to this answer. If answering correctly needs platform data, an integration or an action (repositories, logs, databases, Kafka, QC services, runs…), reply with exactly ```chat-escalate``` and nothing else; the platform then gives you the tools."
+      : "",
+    Infinity,
+  );
   add("summary", p.summary ? untrusted("conversation summary", p.summary) : "");
   add(
     "memory",
@@ -281,7 +296,15 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
   const truncated: string[] = [];
   const total = () => sections.reduce((n, s) => n + s.text.length, 0);
   // Clip order: summary, mentions, history (oldest first), tool results — the newest evidence is kept longest.
-  for (const name of ["summary", "memory", "mentions", "history", "knowledge", "tool_results"]) {
+  for (const name of [
+    "summary",
+    "memory",
+    "mentions",
+    "history",
+    "knowledge",
+    "continuation",
+    "tool_results",
+  ]) {
     const over = total() - LIMITS.promptChars;
     if (over <= 0) break;
     const s = sections.find((x) => x.name === name);
@@ -296,6 +319,8 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
     "policy",
     "user",
     "tools",
+    "escalate",
+    "continuation",
     "knowledge",
     "memory",
     "history",

@@ -132,7 +132,13 @@ export function overlapsLiveApplication(path: string): boolean {
 export function protectedRootsFor(paths: string[]): string[] {
   const live = liveApplicationRoot();
   // Worker-owned dependency readiness evidence and its signing key: an agent must never be able to write them.
-  return [...new Set([...paths.filter(Boolean), ...(live ? [live] : []), join(config.dataDir, "dependency-evidence")])];
+  return [
+    ...new Set([
+      ...paths.filter(Boolean),
+      ...(live ? [live] : []),
+      join(config.dataDir, "dependency-evidence"),
+    ]),
+  ];
 }
 
 /**
@@ -146,7 +152,8 @@ export function assertSelfCodingIsolation(provider: string) {
     );
   if (provider === "codex") return;
   // Enforced OS isolation (isolation.ts) mounts the live checkout read-only and hides the worker's secrets.
-  if (isolationEnforcedNow() && (OS_ISOLATED_PROVIDERS as readonly string[]).includes(provider)) return;
+  if (isolationEnforcedNow() && (OS_ISOLATED_PROVIDERS as readonly string[]).includes(provider))
+    return;
   if (config.platform.trustedOperatorIsolation) return;
   throw new Error(
     "Self-development coding with this provider is refused. Codex coding uses its native workspace-write sandbox. " +
@@ -175,9 +182,14 @@ export async function bwrapAvailable(): Promise<string | null> {
   return bwrapCached;
 }
 
-export function bwrapArguments(cwd: string, live: string | null): string[] {
+export function bwrapArguments(
+  cwd: string,
+  live: string | null,
+  git: Array<{ commonDir: string; adminDir: string }> = [],
+): string[] {
   // Order matters: read-only root, shared /tmp, then the credential masks (shared with the agent sandbox), then the
-  // writable worktree (it lives under dataDir/worktrees, which is masked) and the read-only live checkout.
+  // worktree's git metadata (the checkout lives under the masked dataDir too: shared objects/refs read-only, this
+  // worktree's admin dir writable for its index), the writable worktree and the read-only live checkout.
   const args = [
     ...(liveRuntime.getStore() ? ["--unshare-net"] : []),
     "--die-with-parent",
@@ -189,6 +201,14 @@ export function bwrapArguments(cwd: string, live: string | null): string[] {
     "/tmp",
     "/tmp",
     ...credentialMaskArgs(),
+    ...git.flatMap((g) => [
+      "--ro-bind",
+      g.commonDir,
+      g.commonDir,
+      "--bind",
+      g.adminDir,
+      g.adminDir,
+    ]),
     "--bind",
     cwd,
     cwd,
@@ -327,10 +347,19 @@ export async function commandProcessEnv(
     if (!verification) return { env: { ...agentEnvironment(process.env, "codex"), ...extra } };
     const bwrap = await bwrapAvailable();
     if (!bwrap && !config.platform.trustedOperatorIsolation)
-      throw new Error("Worker commands need bubblewrap or explicit platform.trustedOperatorIsolation");
+      throw new Error(
+        "Worker commands need bubblewrap or explicit platform.trustedOperatorIsolation",
+      );
     const env = { ...agentEnvironment(process.env, "codex"), ...extra };
     for (const key of ["NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV"]) delete env[key];
-    return { env, isolation: { replaceEnv: true, mode: bwrap ? "bwrap" : "trusted", liveRoot: liveApplicationRoot() } };
+    return {
+      env,
+      isolation: {
+        replaceEnv: true,
+        mode: bwrap ? "bwrap" : "trusted",
+        liveRoot: liveApplicationRoot(),
+      },
+    };
   }
   const bwrap = await bwrapAvailable();
   if (!bwrap && !config.platform.trustedOperatorIsolation)

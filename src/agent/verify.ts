@@ -137,7 +137,10 @@ export function goNoTestFiles(output: string) {
 
 /** A Node repository without a real `test` script and without any tracked test file: no test can run there. */
 export async function noTestRunner(path: string) {
-  const manifest = await readFile(resolve(path, "package.json"), "utf8").then((t) => JSON.parse(t), () => null);
+  const manifest = await readFile(resolve(path, "package.json"), "utf8").then(
+    (t) => JSON.parse(t),
+    () => null,
+  );
   const script = String(manifest?.scripts?.test ?? "");
   if (!manifest || (script && !/no test specified/.test(script))) return false;
   const tracked = await exec("git", ["-C", path, "ls-files"], { maxBuffer: 64 << 20 }).then(
@@ -255,6 +258,18 @@ export function environmentUnavailable(code: number | null, output: string): str
   if (code !== ENVIRONMENT_UNAVAILABLE_EXIT) return null;
   const line = output.split("\n").find((l) => l.startsWith(ENVIRONMENT_UNAVAILABLE_MARKER));
   return line ? line.slice(ENVIRONMENT_UNAVAILABLE_MARKER.length).trim() : null;
+}
+
+/**
+ * The verification process could not use the worktree's git metadata (exit 128, "not a git repository"): the sandbox or
+ * workspace is broken, not the change. Reported as an error — the agent is never asked to repair it.
+ */
+export function platformEnvironmentError(code: number | null, output: string): string | null {
+  if (code !== 128) return null;
+  const line = output.split("\n").find((l) => /^fatal: not a git repository/.test(l.trim()));
+  return line
+    ? `the verification environment could not read the worktree's git metadata (${line.trim().slice(0, 300)}) — a platform/workspace problem, not a code failure`
+    : null;
 }
 
 export interface RepoVerification {
@@ -637,7 +652,12 @@ export async function beforeAfterProof(
   const git = async (cwd: string, ...args: string[]) =>
     (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout.trim();
   const id = testId.includes("::") ? testId : `${w.repo}::${testId}`;
-  const unmeasured = (reason: string) => ({ status: "unmeasured" as const, reason, repo: w.repo, test_id: id });
+  const unmeasured = (reason: string) => ({
+    status: "unmeasured" as const,
+    reason,
+    repo: w.repo,
+    test_id: id,
+  });
   const after = await requiredTestTargets([w], [id]);
   const target = after.targets.get(w.repo)?.[0];
   if (!target) return unmeasured(after.problems.join("; ") || "not an executable test id");
@@ -645,7 +665,9 @@ export async function beforeAfterProof(
   try {
     head = await git(w.path, "rev-parse", "HEAD");
     base = await git(w.path, "merge-base", `origin/${w.baseBranch}`, "HEAD");
-    changed = (await git(w.path, "diff", "--name-only", "--no-renames", `${base}...HEAD`)).split("\n").filter(Boolean);
+    changed = (await git(w.path, "diff", "--name-only", "--no-renames", `${base}...HEAD`))
+      .split("\n")
+      .filter(Boolean);
   } catch (e) {
     return unmeasured(`git: ${(e as Error).message.slice(0, 200)}`);
   }
@@ -655,16 +677,32 @@ export async function beforeAfterProof(
   const tmp = resolve(dir, "wt");
   try {
     await git(w.path, "worktree", "add", "--detach", "-q", tmp, head);
-    const atBase = new Set((await git(tmp, "ls-tree", "-r", "--name-only", base, "--", ...reverted)).split("\n").filter(Boolean));
+    const atBase = new Set(
+      (await git(tmp, "ls-tree", "-r", "--name-only", base, "--", ...reverted))
+        .split("\n")
+        .filter(Boolean),
+    );
     if (atBase.size) await git(tmp, "checkout", base, "--", ...atBase);
     const added = reverted.filter((f) => !atBase.has(f));
     if (added.length) await git(tmp, "rm", "-q", "--", ...added);
-    const before = (await requiredTestTargets([{ repo: w.repo, path: tmp }], [id])).targets.get(w.repo)?.[0];
+    const before = (await requiredTestTargets([{ repo: w.repo, path: tmp }], [id])).targets.get(
+      w.repo,
+    )?.[0];
     if (!before) return unmeasured("the test cannot be resolved on the pre-fix source");
     const b = requiredTestStatus((await run(before.command, tmp)).output, before);
     const a = requiredTestStatus((await run(target.command, w.path)).output, target);
-    const proof = { repo: w.repo, test_id: id, base_sha: base, head_sha: head, reverted_files: reverted, command: target.command, before: b, after: a };
-    if (b === "failed" && a === "passed") return { ...proof, status: "verified", reason: "fails before the fix, passes after" };
+    const proof = {
+      repo: w.repo,
+      test_id: id,
+      base_sha: base,
+      head_sha: head,
+      reverted_files: reverted,
+      command: target.command,
+      before: b,
+      after: a,
+    };
+    if (b === "failed" && a === "passed")
+      return { ...proof, status: "verified", reason: "fails before the fix, passes after" };
     return {
       ...proof,
       status: "invalid",
@@ -796,16 +834,26 @@ export async function verifyWorkspaces(
         await applySlop(entry);
         const current = await worktreeFingerprint(p).catch(() => null);
         if (signal.aborted || JSON.stringify(current) !== JSON.stringify(beforeState)) return null;
-        entry.passed = ["passed", "accepted_preexisting"].includes(entry.status) && !entry.needs_review;
+        entry.passed =
+          ["passed", "accepted_preexisting"].includes(entry.status) && !entry.needs_review;
         await deps.log?.(
           `■ verify ${w.repo}: ${entry.status.toUpperCase()} (reused evidence ${key.slice(0, 12)}: ${why})`,
-          { repo: w.repo, verification: round, evidence: { reused: true, key }, replay: verificationReplay(true).action },
+          {
+            repo: w.repo,
+            verification: round,
+            evidence: { reused: true, key },
+            replay: verificationReplay(true).action,
+          },
         );
         return entry;
       };
       if (d?.kind === "hit") {
-        const entry = await reuse(d.record.result, { source_attempt_id: d.record.attempt_id },
-          d.key, `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`);
+        const entry = await reuse(
+          d.record.result,
+          { source_attempt_id: d.record.attempt_id },
+          d.key,
+          `same state as attempt #${d.record.attempt_id ?? "?"}, saved ${d.record.duration_ms}ms`,
+        );
         if (entry) {
           repos.push(entry);
           continue;
@@ -813,7 +861,9 @@ export async function verifyWorkspaces(
       }
       if (d?.kind === "joined") {
         const shared = await d.promise;
-        const entry = shared && await reuse(shared, { joined: true }, d.key, "joined identical in-flight verification");
+        const entry =
+          shared &&
+          (await reuse(shared, { joined: true }, d.key, "joined identical in-flight verification"));
         if (entry) {
           repos.push(entry);
           continue;
@@ -823,7 +873,12 @@ export async function verifyWorkspaces(
         flight = d;
         await deps.log?.(
           `◆ verify ${w.repo}: evidence miss (${d.reason}) key ${d.key.slice(0, 12)}`,
-          { repo: w.repo, verification: round, evidence: { key: d.key, reason: d.reason }, replay: verificationReplay(false).action },
+          {
+            repo: w.repo,
+            verification: round,
+            evidence: { key: d.key, reason: d.reason },
+            replay: verificationReplay(false).action,
+          },
         );
       }
     }
@@ -866,6 +921,9 @@ export async function verifyWorkspaces(
           note: `environment unavailable: ${unavailable}`,
           excerpt: failureExcerpt(r.output),
         });
+      const broken = r.timedOut ? null : platformEnvironmentError(r.code, r.output);
+      if (broken)
+        Object.assign(entry, { status: "error", error: broken, excerpt: failureExcerpt(r.output) });
       if (entry.status === "failed") {
         entry.excerpt = failureExcerpt(r.output);
         const report = parseGoTest(r.output);
@@ -958,6 +1016,7 @@ export async function verifyWorkspaces(
         }
       }
       if (cfg.requiredTests?.length) {
+        const commandFailed = !["passed", "accepted_preexisting"].includes(entry.status);
         const results: NonNullable<RepoVerification["required_tests"]> = {};
         for (const target of required.targets.get(w.repo) ?? []) {
           let status =
@@ -987,8 +1046,11 @@ export async function verifyWorkspaces(
         }
         entry.required_tests = results;
         if (Object.values(results).some((status) => status !== "passed")) {
-          entry.status = "failed";
-          entry.note = `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
+          if (entry.status !== "error") entry.status = "failed";
+          // Keep the real cause visible: when the verification command itself failed, the required tests never ran.
+          entry.note = commandFailed
+            ? `Required tests not run: the verification command failed first (exit ${entry.exit_code ?? "?"}${entry.timed_out ? ", timed out" : ""})${entry.error ? `: ${entry.error}` : ""} — ${JSON.stringify(results)}`
+            : `Required tests lack passing structured evidence: ${JSON.stringify(results)}`;
         }
       }
       if (
@@ -1107,7 +1169,8 @@ async function evidenceParts(
   const actual = resolveEnvironment ? await resolveEnvironment(path, requested) : requested;
   const tip = await baseTip(path, actual.BASE_BRANCH);
   if (tip === "unknown" && cfg.baseline) throw new Error("Unknown verification baseline");
-  const vars = resolveEnvironment ? await commandEnvironmentFingerprint(path, actual)
+  const vars = resolveEnvironment
+    ? await commandEnvironmentFingerprint(path, actual)
     : evidenceKey({ env: canonicalJson(actual) });
   return {
     repo_name: w.repo,
@@ -1121,7 +1184,9 @@ async function evidenceParts(
     policy: canonicalJson({
       allowTestWeakening: cfg.allowTestWeakening,
       notApplicable: cfg.notApplicable,
-      ...(cfg.staticChecksPassed?.length ? { staticChecksPassed: [...cfg.staticChecksPassed].sort() } : {}),
+      ...(cfg.staticChecksPassed?.length
+        ? { staticChecksPassed: [...cfg.staticChecksPassed].sort() }
+        : {}),
     }),
     baseline: String(cfg.baseline),
     timeout: String(cfg.timeoutMs),
@@ -1132,13 +1197,7 @@ async function evidenceParts(
 }
 
 export type LoopOutcome =
-  | "passed"
-  | "failed"
-  | "no_progress"
-  | "error"
-  | "skipped"
-  | "canceled"
-  | "stopped";
+  "passed" | "failed" | "no_progress" | "error" | "skipped" | "canceled" | "stopped";
 export interface LoopResult<S> {
   outcome: LoopOutcome;
   rounds: VerificationRound[];

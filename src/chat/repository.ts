@@ -506,12 +506,23 @@ export const chatRepository = {
     return q(db, "UPDATE chat_messages SET superseded = true WHERE turn_id = $1", [turnId]);
   },
 
-  latestTurnWithUser(conversationId: number, db: Db = pool) {
+  setContinuation(conversationId: number, continuation: unknown, db: Db = pool) {
+    return q(db, "UPDATE chat_conversations SET continuation = $2 WHERE id = $1", [
+      conversationId,
+      continuation == null ? null : json(continuation),
+    ]);
+  },
+
+  /**
+   * The latest turn with a live user message strictly before `beforeTurnId` — the routing context of a follow-up.
+   * (Without the bound the current turn, which already has its user message, was returned.)
+   */
+  latestTurnWithUser(conversationId: number, beforeTurnId: number, db: Db = pool) {
     return one<TurnRow>(
       db,
       `SELECT t.* FROM chat_turns t JOIN chat_messages m ON m.turn_id = t.id AND m.role = 'user' AND NOT m.superseded
-        WHERE t.conversation_id = $1 ORDER BY t.id DESC LIMIT 1`,
-      [conversationId],
+        WHERE t.conversation_id = $1 AND t.id < $2 ORDER BY t.id DESC LIMIT 1`,
+      [conversationId, beforeTurnId],
     );
   },
 

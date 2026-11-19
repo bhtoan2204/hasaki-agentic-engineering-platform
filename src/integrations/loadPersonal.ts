@@ -8,9 +8,9 @@ import { currentUserId } from "../auth/execution.ts";
 const loaded = new Map<number, number>();
 const pending = new Map<number, Promise<void>>();
 /** Refresh encrypted personal credentials for the current actor; bounded cost, no background credential sharing. */
-export async function loadPersonalIntegrations() {
+export async function loadPersonalIntegrations(force = false) {
   const id = currentUserId();
-  if (!id || Date.now() - (loaded.get(id) ?? 0) < 15_000) return;
+  if (!id || (!force && Date.now() - (loaded.get(id) ?? 0) < 15_000)) return;
   let p = pending.get(id);
   if (!p) {
     p = Promise.all([loadArgoToken(), loadSplunkCookie(), loadKafkaCookie(), loadVaultToken(), loadSignoz()])
