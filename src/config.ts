@@ -105,6 +105,8 @@ export interface Config {
   instance: { heartbeatSeconds: number; offlineSeconds: number };
   /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
   repositories: Record<string, string>;
+  /** LOCAL: shared registry entries this machine never checks out (no startup checkout warning). */
+  ignoredRepositories?: string[];
   /** Where the real repo checkouts live (oms-api, oms-background, ...). */
   reposRoot: string;
   /** Platform data: worktrees, downloaded task files, Chromium profile. */

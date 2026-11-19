@@ -19,7 +19,8 @@ export async function validateLocalConfiguration(
       "Legacy global browser credentials have no verified owner and are no longer loaded. Each user must reconnect Argo/Splunk/Kafka/Vault in Integrations; old rows are preserved for administrator review.",
     );
   for (const repo of await repositories.list()) {
-    if (!repo.enabled || repo.repository_url) continue;
+    if (!repo.enabled || repo.repository_url || config.ignoredRepositories?.includes(repo.name))
+      continue;
     try {
       await validateCheckout(repo);
     } catch (e) {
