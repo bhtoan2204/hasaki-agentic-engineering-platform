@@ -2,7 +2,15 @@
 export type TraceItem =
   | { k: "reasoning"; text: string }
   | { k: "activity"; label: string }
-  | { k: "tool"; id: number; tool: string; status: string; ms?: number };
+  | { k: "tool"; id: number; tool: string; status: string; ms?: number }
+  | {
+      k: "knowledge";
+      key: string;
+      version: number;
+      title: string;
+      disclosure: string;
+      owner: string;
+    };
 
 export type LiveStatus = "thinking" | "reading" | "tools" | "generating" | null;
 
@@ -93,6 +101,23 @@ export function applyChatEvent(
             : t,
         ),
       };
+    case "knowledge.applied": {
+      const items = Array.isArray(d.items) ? (d.items as Array<Record<string, unknown>>) : [];
+      const known = new Set(
+        l.trace.filter((t) => t.k === "knowledge").map((t) => (t as { key: string }).key),
+      );
+      const added: TraceItem[] = items
+        .filter((i) => !known.has(String(i.key)))
+        .map((i) => ({
+          k: "knowledge",
+          key: String(i.key),
+          version: Number(i.version),
+          title: String(i.title ?? i.key),
+          disclosure: String(i.disclosure ?? "read"),
+          owner: String(i.owner ?? "shared"),
+        }));
+      return { ...l, trace: [...l.trace, ...added] };
+    }
     case "phase.updated":
       return d.phase === "calling_provider" ? { ...l, status: "thinking" } : live;
     case "provider.attempt_started":

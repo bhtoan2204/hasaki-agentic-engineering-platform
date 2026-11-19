@@ -29,6 +29,7 @@ import {
 import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } from "./tools.ts";
 import { stallGuard, TurnStream } from "./streaming.ts";
 import { learnFromTurn, recallMemories } from "./memory.ts";
+import { knowledgeForTurn, refOf } from "./knowledge.ts";
 import type {
   ChatUsage,
   Citation,
@@ -354,7 +355,28 @@ async function executeTurn(
     readable,
   ).filter((m) => !m.withheld);
   const { summary, window, compacted } = await compactIfNeeded(conversation, history);
-  const memories = await recallMemories(turn.owner_id, userMessage.content).catch(() => []);
+  const memories = await recallMemories(turn.owner_id, userMessage.content);
+  const selected = await knowledgeForTurn({
+    ownerId: turn.owner_id,
+    repositories,
+    text: userMessage.content,
+  });
+  const knowledgeRefs = selected.map((x) => refOf(x.item, x.disclosure));
+  if (knowledgeRefs.length) {
+    for (const r of knowledgeRefs) stream.knowledge(r);
+    await emitChatEvent({ ...ids, kind: "knowledge.applied", data: { items: knowledgeRefs } });
+  }
+  const promptKnowledge = selected.map(({ item, disclosure }) => ({
+    key: item.key,
+    version: item.version,
+    title: item.title,
+    category: item.category,
+    reason: item.reason,
+    disclosure: disclosure as "inline" | "index",
+    ...(disclosure === "inline"
+      ? { content: item.content }
+      : { description: String(item.metadata?.description ?? "").slice(0, 200) }),
+  }));
 
   const binding: ChatBinding = {
     userId: turn.owner_id,
@@ -477,6 +499,7 @@ async function executeTurn(
           toolResults,
           repositories,
           memories,
+          knowledge: promptKnowledge,
         });
         if (step === 0 && attempt === 0)
           await emitChatEvent({
@@ -555,6 +578,9 @@ async function executeTurn(
           });
           usage.tool_calls++;
           stream.tool(row.id, call.tool, outcome.status, durationMs);
+          const read = outcome.result as { key?: string; version?: number; title?: string; owner?: string } | null;
+          if (call.tool === "knowledge.get" && outcome.status === "ok" && read?.key && read.version != null)
+            stream.knowledge({ key: read.key, version: read.version, title: read.title ?? read.key, owner: read.owner ?? "shared" });
           await emitChatEvent({
             ...ids,
             kind: outcome.status === "ok" ? "tool.completed" : "tool.failed",
@@ -640,6 +666,9 @@ async function executeTurn(
     );
   }
 
+  for (const r of knowledgeRefs)
+    if (r.disclosure === "inline")
+      citations.push({ ref: `knowledge:${r.key}@v${r.version}`, label: `${r.title} v${r.version}` });
   for (const m of mentions)
     if (m.resolved && m.repository)
       citations.push({

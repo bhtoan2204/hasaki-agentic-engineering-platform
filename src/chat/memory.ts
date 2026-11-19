@@ -224,17 +224,7 @@ export async function recallMemories(ownerId: number, message: string) {
   return rows
     .map((r) => ({
       r,
-      s: scoreKnowledge(
-        {
-          key: r.key,
-          title: r.title,
-          category: "task_memory",
-          content: r.content,
-          metadata: r.metadata,
-        } as never,
-        message,
-        "agent",
-      ).score,
+      s: scoreKnowledge({ ...r, category: "task_memory" }, message, "agent").score,
     }))
     .filter(
       (x) =>

@@ -258,11 +258,7 @@ export async function executeContextTool(
       const ranked = candidates
         .map((k) => ({
           k,
-          ...scoreKnowledge(
-            { ...k, reason: "resolved step knowledge" },
-            args.query ?? "",
-            env.stepType,
-          ),
+          ...scoreKnowledge(k, args.query ?? "", env.stepType),
         }))
         .filter((x) => !args.query || x.score > 0)
         .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key))

@@ -6,9 +6,6 @@ import { audit } from "../authz/access.ts";
 import { searchCodeExact, searchSymbols } from "../codeIntelligence/search.ts";
 import { localScope } from "../codeIntelligence/indexer.ts";
 import { listAccessibleRepositories } from "../repos/access.ts";
-import { knowledge } from "../knowledge/service.ts";
-import { visibleKnowledge } from "../knowledge/visibility.ts";
-import { scoreKnowledge } from "../context/plan.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { isSecretPath } from "../agent/toolPolicy.ts";
 import { investigationSearch } from "../integrations/splunk.ts";
@@ -17,6 +14,7 @@ import { databaseForRun, databasesForRun, runQuery } from "../integrations/datab
 import { callTool, describeTool, integrationTools, listTools } from "../agent/toolRegistry.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { chatRepository } from "./repository.ts";
+import { readKnowledge, searchKnowledge } from "./knowledge.ts";
 import { proposeOperation } from "./operations.ts";
 import { LIMITS } from "./policy.ts";
 import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
@@ -78,6 +76,13 @@ function pickRepositories(ctx: ToolContext, requested: string[] | undefined) {
   if (outside.length) throw new ChatToolDenied(`repositories not accessible: ${outside.join(", ")}`);
   return wanted.slice(0, 10);
 }
+
+/** Knowledge applies to the conversation's repository scope (not every readable repository). */
+const knowledgeScope = (ctx: ToolContext, text: string) => ({
+  ownerId: ctx.binding.userId,
+  repositories: ctx.scoped,
+  text,
+});
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… (${s.length - n} more chars)` : s);
 
@@ -226,47 +231,34 @@ const TOOLS: ToolDef[] = [
   {
     name: "knowledge.search",
     group: "knowledge",
-    description: "Search shared and your own knowledge items (conventions, runbooks, architecture notes).",
-    usage: '{"query": "payment retry policy", "limit?": 5}',
+    description:
+      "Search the Knowledge & Skills registry that applies here (business rules, domain knowledge, architecture guidelines, runbooks, conventions, agent skills; Vietnamese or English). Use category \"agent_skill\" to find skills. Check this before searching code.",
+    usage: '{"query": "hoàn tiền platform_price", "category?": "business_rule", "limit?": 8}',
     args: z
-      .object({ query: z.string().min(2).max(300), limit: z.number().int().min(1).max(10).optional() })
+      .object({
+        query: z.string().min(2).max(300),
+        category: z.string().max(40).optional(),
+        limit: z.number().int().min(1).max(20).optional(),
+      })
       .strict(),
     async run(a, ctx) {
-      const items = await visibleKnowledge(
-        ctx.binding.userId,
-        await knowledge.list({ ownerId: ctx.binding.userId }),
-      );
-      const ranked = items
-        .map((k) => ({ k, s: scoreKnowledge(k, a.query, "agent") }))
-        .filter((x) => x.s.score > 0)
-        .sort((x, y) => y.s.score - x.s.score)
-        .slice(0, a.limit ?? 5);
       return {
         label: `knowledge "${cut(a.query, 60)}"`,
-        data: ranked.map(({ k }) => ({
-          key: k.key,
-          title: k.title,
-          category: k.category,
-          scope: k.scope_type === "global" ? "global" : `${k.scope_type}:${k.scope_ref ?? ""}`,
-          shared: k.owner_id == null,
-          excerpt: cut(String((k as { content?: string }).content ?? ""), 1500),
-        })),
+        data: await searchKnowledge(knowledgeScope(ctx, a.query), a.query, a.category, a.limit ?? 8),
       };
     },
   },
   {
     name: "knowledge.get",
     group: "knowledge",
-    description: "Read one knowledge item by key.",
-    usage: '{"key": "conventions/api"}',
-    args: z.object({ key: z.string().min(1).max(200) }).strict(),
+    description:
+      "Read the full current version of one knowledge item or skill by key (paged with offset). Reading a skill activates it and lists its supporting documents, readable with this tool.",
+    usage: '{"key": "conventions/api", "offset?": 0}',
+    args: z.object({ key: z.string().min(1).max(200), offset: z.number().int().min(0).optional() }).strict(),
     async run(a, ctx) {
-      const item = await visibleKnowledgeItem(ctx.binding.userId, a.key);
+      const item = await readKnowledge(knowledgeScope(ctx, a.key), a.key, a.offset ?? 0);
       if (!item) throw new ChatToolDenied(`knowledge "${a.key}" not found`);
-      return {
-        label: `knowledge ${a.key}`,
-        data: { key: item.key, title: item.title, category: item.category, content: cut(String(item.content ?? ""), 5000) },
-      };
+      return { label: "version" in item ? `knowledge ${a.key} v${item.version}` : `knowledge ${a.key}`, data: item };
     },
   },
   {
@@ -408,13 +400,6 @@ export function toolCatalog(mode: ManualChatMode) {
   return toolsForMode(mode)
     .map((t) => `- ${t.name}: ${t.description} Arguments: ${t.usage}`)
     .join("\n");
-}
-
-async function visibleKnowledgeItem(userId: number, key: string) {
-  const visible = await visibleKnowledge(userId, await knowledge.list({ ownerId: userId }));
-  return visible.find(
-    (k) => k.key === key && (k.owner_id == null || Number(k.owner_id) === userId),
-  ) as (typeof visible)[number] | undefined;
 }
 
 export async function readRepositoryFile(repository: string, path: string, start?: number, end?: number) {

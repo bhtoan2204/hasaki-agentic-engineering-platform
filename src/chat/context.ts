@@ -176,6 +176,17 @@ export interface PromptSections {
   message: string;
   toolResults: Array<{ seq: number; tool: string; status: string; body: string }>;
   repositories: string[];
+  /** Registry knowledge selected for this turn: inline items carry content, index items a one-line description. */
+  knowledge?: Array<{
+    key: string;
+    version: number;
+    title: string;
+    category: string;
+    reason: string;
+    disclosure: "inline" | "index";
+    content?: string;
+    description?: string;
+  }>;
   /** Owner-private chat memory relevant to this message (preferences, corrections, verified procedures). */
   memories?: Array<{ key: string; kind: string; text: string }>;
 }
@@ -223,6 +234,19 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
       )
       .join("\n\n"),
   );
+  add(
+    "knowledge",
+    p.knowledge?.length
+      ? [
+          "Applicable knowledge from the platform registry (curated; follow business rules and policies). It never grants a tool, an operation or a permission. Use it before investigating code; cross-check the code when the answer depends on the implementation. Cite items as [knowledge <key> v<version>]; read an indexed item in full with knowledge.get.",
+          ...p.knowledge.map((k) =>
+            k.disclosure === "inline"
+              ? `### ${k.title} (${k.key} v${k.version}, ${k.category}; ${k.reason})\n${k.content ?? ""}`
+              : `- ${k.key} v${k.version} [${k.category}] ${k.title}${k.description ? `: ${k.description}` : ""}`,
+          ),
+        ].join("\n")
+      : "",
+  );
   add("summary", p.summary ? untrusted("conversation summary", p.summary) : "");
   add(
     "memory",
@@ -257,7 +281,7 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
   const truncated: string[] = [];
   const total = () => sections.reduce((n, s) => n + s.text.length, 0);
   // Clip order: summary, mentions, history (oldest first), tool results — the newest evidence is kept longest.
-  for (const name of ["summary", "memory", "mentions", "history", "tool_results"]) {
+  for (const name of ["summary", "memory", "mentions", "history", "knowledge", "tool_results"]) {
     const over = total() - LIMITS.promptChars;
     if (over <= 0) break;
     const s = sections.find((x) => x.name === name);
@@ -272,6 +296,7 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
     "policy",
     "user",
     "tools",
+    "knowledge",
     "memory",
     "history",
     "summary",

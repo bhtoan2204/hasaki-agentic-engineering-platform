@@ -15,15 +15,75 @@ import { tokens as wordTokens } from "../repos/service.ts";
 
 export const estimateTokens = (s: string) => Math.ceil(s.length / 4);
 
-export interface KnowledgeLike {
+/**
+ * What relevance scoring reads: fields every knowledge row has at its served version (a registry candidate, a resolved
+ * item, a stored version). Resolution output (`reason`) is not part of it, so unresolved rows can be ranked too.
+ */
+export interface ScorableKnowledge {
   key: string;
   title: string;
   category: string;
   content: string;
-  reason: string;
-  enforced?: boolean;
   scope_type?: string;
   metadata?: any;
+}
+/** A resolved item (resolveKnowledge output): scorable plus why it applies. */
+export interface KnowledgeLike extends ScorableKnowledge {
+  reason: string;
+  enforced?: boolean;
+}
+
+/**
+ * Business vocabulary in both languages. Vietnamese phrases map to an English concept on both sides (request and
+ * knowledge text), and a concept brings its English synonyms, so "hoàn tiền" finds a "refund" rule and vice versa.
+ */
+const PHRASES: Array<[RegExp, string]> = [
+  [/\bhoan tien\b/, "refund"],
+  [/\bdon hang\b/, "order"],
+  [/\bbao hanh\b/, "warranty"],
+  [/\bthanh toan\b/, "payment"],
+  [/\b(?:van chuyen|giao hang)\b/, "shipping"],
+  [/\b(?:ton kho|kho hang)\b/, "inventory"],
+  [/\b(?:khuyen mai|giam gia|ma giam)\b/, "promotion"],
+  [/\bhoa don\b/, "invoice"],
+  [/\bkhach hang\b/, "customer"],
+  [/\bsan pham\b/, "product"],
+  [/\bdoi tra\b/, "return"],
+];
+const SYNONYMS: string[][] = [
+  ["refund", "refunds", "refunded"],
+  ["order", "orders"],
+  ["warranty", "warranties"],
+  ["payment", "payments"],
+  ["shipping", "shipment", "delivery"],
+  ["inventory", "stock", "warehouse"],
+  ["promotion", "voucher", "discount", "coupon"],
+  ["invoice", "invoices"],
+  ["customer", "customers"],
+  ["product", "products"],
+  ["return", "returns"],
+  ["cancel", "cancellation", "canceled", "cancelled"],
+];
+const fold = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d");
+
+/** Tokens of a text plus the business concepts its Vietnamese phrases name. */
+export function termsOf(text: string): string[] {
+  const folded = fold(text);
+  const out = wordTokens(folded);
+  for (const [re, concept] of PHRASES) if (re.test(folded)) out.push(concept);
+  return out;
+}
+
+/** Request terms with the synonyms of every business concept they mention (deterministic, no model call). */
+export function requestTerms(text: string): Set<string> {
+  const want = new Set(termsOf(text));
+  for (const g of SYNONYMS) if (g.some((t) => want.has(t))) for (const t of g) want.add(t);
+  return want;
 }
 export type Disclosure = "inline" | "index" | "search";
 export interface DisclosureEntry {
@@ -36,16 +96,16 @@ export interface DisclosureEntry {
 
 /** Relevance of a knowledge item to the request: word overlap with title/description/key, plus small priors. */
 export function scoreKnowledge(
-  k: KnowledgeLike,
+  k: ScorableKnowledge,
   requestText: string,
   stepType: string,
 ): { score: number; why: string } {
-  const want = new Set(wordTokens(requestText));
+  const want = requestTerms(requestText);
   const desc = String(k.metadata?.description ?? "");
   const fields: Array<[string, string[], number]> = [
-    ["title", wordTokens(k.title + " " + k.key.replace(/[._-]/g, " ")), 3],
-    ["description", wordTokens(desc), 2],
-    ["content", wordTokens(k.content.slice(0, 4000)), 0.25],
+    ["title", termsOf(k.title + " " + k.key.replace(/[._-]/g, " ")), 3],
+    ["description", termsOf(desc), 2],
+    ["content", termsOf(k.content.slice(0, 4000)), 0.25],
   ];
   let score = 0;
   const hits: string[] = [];
@@ -56,7 +116,7 @@ export function scoreKnowledge(
       hits.push(`${name}: ${h.slice(0, 5).join(", ")}`);
     }
   }
-  if (k.reason.startsWith("REPOSITORY") || k.scope_type === "REPOSITORY") score += 2;
+  if (k.scope_type === "REPOSITORY") score += 2;
   if (stepType === "coding_agent" && /coding_standard|repository_convention/.test(k.category))
     score += 1;
   if (k.category === "agent_skill" && k.metadata?.applicable_steps) {

@@ -96,12 +96,12 @@ test("streaming: provider text arrives as coalesced deltas, reasoning and activi
   );
   assert.ok(seen.some((e) => e.kind === "provider.activity" && e.data.label === "tool: search"));
 
+  const turn = d.turns.find((t) => t.id === msg.turn.id)!;
+  assert.equal(turn.status, "completed", JSON.stringify(turn.failure));
   assert.equal(
     d.messages.find((m) => m.role === "assistant")?.content,
     "Câu trả lời **từng** phần.",
   );
-  const turn = d.turns.find((t) => t.id === msg.turn.id)!;
-  assert.equal(turn.status, "completed");
   assert.equal(turn.draft, "", "the stored answer replaces the draft");
   assert.deepEqual(
     turn.trace.map((i) => i.k),

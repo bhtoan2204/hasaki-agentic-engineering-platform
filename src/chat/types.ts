@@ -32,6 +32,7 @@ export type ChatEventKind =
   | "provider.activity"
   | "operation.updated"
   | "memory.learned"
+  | "knowledge.applied"
   | "usage.updated"
   | "turn.completed"
   | "turn.failed"
@@ -104,7 +105,15 @@ export interface TurnRow {
 export type TraceItem =
   | { k: "reasoning"; text: string }
   | { k: "activity"; label: string }
-  | { k: "tool"; id: number; tool: string; status: string; ms?: number };
+  | { k: "tool"; id: number; tool: string; status: string; ms?: number }
+  | {
+      k: "knowledge";
+      key: string;
+      version: number;
+      title: string;
+      disclosure: string;
+      owner: string;
+    };
 
 export interface MessageRow {
   id: number;

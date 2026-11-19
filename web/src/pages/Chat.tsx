@@ -178,6 +178,15 @@ function Reasoning({ trace, summary, live }: { trace: TraceItem[]; summary: stri
             <div key={i} className="chat-reasoning-text">
               {item.text}
             </div>
+          ) : item.k === "knowledge" ? (
+            <div key={i} className="chat-tool" title={item.key}>
+              {t("chat.knowledge.item", {
+                title: item.title,
+                version: item.version,
+                how: t(`chat.knowledge.${item.disclosure}`),
+              })}
+              {item.owner === "own" ? ` · ${t("chat.knowledge.own")}` : ""}
+            </div>
           ) : item.k === "activity" ? (
             <div key={i} className="chat-tool">
               {item.label}

@@ -675,7 +675,7 @@ async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string>
   env.metrics?.knowledge_searches.push(query);
   const tier = new Map(env.disclosure.map((d) => [d.key, d.disclosure]));
   const hits = env.knowledge
-    .map((k) => ({ k, ...scoreKnowledge(k as any, query, env.stepType) }))
+    .map((k) => ({ k, ...scoreKnowledge(k, query, env.stepType) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.min(20, Math.max(1, limit)))

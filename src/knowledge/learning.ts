@@ -544,7 +544,7 @@ export async function detectKnowledgeChanges(
     items
       .map((k) => ({
         k,
-        s: scoreKnowledge({ ...k, reason: k.scope_type }, signalText, "agent").score,
+        s: scoreKnowledge(k, signalText, "agent").score,
       }))
       .sort((a, b) => b.s - a.s || a.k.key.localeCompare(b.k.key))
       .slice(0, n)

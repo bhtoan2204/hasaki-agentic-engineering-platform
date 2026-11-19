@@ -104,6 +104,27 @@ export class TurnStream {
     else this.push({ k: "tool", id, tool, status });
   }
 
+  knowledge(ref: {
+    key: string;
+    version: number;
+    title: string;
+    disclosure?: string;
+    owner: string;
+  }) {
+    if (
+      this.trace.some((t) => t.k === "knowledge" && t.key === ref.key && t.version === ref.version)
+    )
+      return;
+    this.push({
+      k: "knowledge",
+      key: ref.key,
+      version: ref.version,
+      title: ref.title,
+      disclosure: ref.disclosure ?? "read",
+      owner: ref.owner,
+    });
+  }
+
   private push(item: TraceItem) {
     if (this.trace.length < MAX_TRACE) this.trace.push(item);
   }
