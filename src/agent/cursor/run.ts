@@ -1,4 +1,5 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
+import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
 import { cursorUsage } from "./stream.ts";
 import { startBroker } from "../broker/server.ts";
 import { agentEnvironment } from "../environment.ts";
@@ -495,7 +496,11 @@ function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /** One-shot text completion for auxiliary calls (ranking, report, test explanation). No tools that mutate. */
-export async function cursorComplete(prompt: string, signal?: AbortSignal, options?: { model?: string }): Promise<string> {
+export async function cursorComplete(
+  prompt: string,
+  signal?: AbortSignal,
+  options?: { model?: string; onStream?: CompletionStreamListener },
+): Promise<string> {
   signal?.throwIfAborted();
   const cap = await cursorCapabilities();
   if (!cap.ok) throw new Error(cap.error);
@@ -508,7 +513,7 @@ export async function cursorComplete(prompt: string, signal?: AbortSignal, optio
   const args = [
     "--print",
     "--output-format",
-    "json",
+    ...(options?.onStream ? ["stream-json", "--stream-partial-output"] : ["json"]),
     "--mode",
     "ask",
     "--sandbox",
@@ -538,8 +543,23 @@ export async function cursorComplete(prompt: string, signal?: AbortSignal, optio
   signal?.addEventListener("abort", kill, { once: true });
   let stdout = "";
   let stderr = "";
+  const stream = options?.onStream;
+  const parser = stream && new NdjsonStream();
+  let answer = "";
   const code = await new Promise<number | null>((resolve) => {
-    child.stdout?.on("data", (b: Buffer) => (stdout += b.toString("utf8")));
+    child.stdout?.on("data", (b: Buffer) => {
+      stdout += b.toString("utf8");
+      if (!parser) return;
+      for (const ev of parser.push(b.toString("utf8")).events) {
+        if (ev.type === "system") stream({ type: "started" });
+        else if (ev.type === "thinking" && ev.text && ev.subtype !== "completed")
+          stream({ type: "reasoning", delta: ev.text });
+        else if (ev.type === "assistant" && ev.text && !isDuplicateAssistant(ev, true))
+          stream({ type: "text", text: (answer += ev.text) });
+        else if (ev.type === "tool_call" && ev.subtype === "started")
+          stream({ type: "activity", label: activityLabel("tool", toolCallShape(ev.tool_call)?.name) });
+      }
+    });
     child.stderr?.on("data", (b: Buffer) => (stderr += b.toString("utf8")));
     child.on("error", () => resolve(null));
     child.on("close", (c) => resolve(c));
@@ -555,6 +575,7 @@ export async function cursorComplete(prompt: string, signal?: AbortSignal, optio
   } catch {
     /* text fallback */
   }
+  if (parser && answer.trim()) return answer;
   if (!stdout.trim()) throw new Error("Cursor text completion returned no result");
   return stdout.trim();
 }

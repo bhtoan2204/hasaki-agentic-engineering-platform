@@ -1,4 +1,5 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
+import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,12 +29,7 @@ import {
   copilotHeadlessSettings,
 } from "./policy.ts";
 import { bridgeToolsFor } from "../mcpBridge.ts";
-import {
-  CopilotStream,
-  TextBatch,
-  classifyCopilotError,
-  type CopilotEvent,
-} from "./stream.ts";
+import { CopilotStream, TextBatch, classifyCopilotError, type CopilotEvent } from "./stream.ts";
 
 export interface CopilotTurnResult {
   isError: boolean;
@@ -134,8 +130,7 @@ async function writeCopilotStdinPrompt(child: ChildProcess, prompt: string, sign
     };
     const finished = () => done();
     const failed = (error: Error) => done(error);
-    const closed = () =>
-      done(processError("Copilot closed stdin before the prompt was flushed"));
+    const closed = () => done(processError("Copilot closed stdin before the prompt was flushed"));
     const exited = () => done(processError("Copilot exited before the prompt was flushed"));
     const aborted = () => done(processError("Copilot prompt write was aborted"));
     stdin.once("finish", finished);
@@ -242,9 +237,7 @@ export function shouldUseStdinPrompt(prompt: string): boolean {
   return Buffer.byteLength(prompt, "utf8") > PROMPT_ARGV_MAX;
 }
 
-export async function copilotAgentTurn(
-  input: CopilotTurnInput,
-): Promise<CopilotTurnResult> {
+export async function copilotAgentTurn(input: CopilotTurnInput): Promise<CopilotTurnResult> {
   const turnMark = await checkpointMark(input.ctx.attempt.id);
   const usageBase = { ...input.metrics?.tokens };
   const cap = await copilotCapabilities(false, {
@@ -261,7 +254,10 @@ export async function copilotAgentTurn(
   }
 
   const cfg = copilotConfig();
-  const release = await acquireSlot(input.ctx.attempt.effective_agent?.options?.max_concurrent ?? cfg.maxConcurrent, input.ctx.signal);
+  const release = await acquireSlot(
+    input.ctx.attempt.effective_agent?.options?.max_concurrent ?? cfg.maxConcurrent,
+    input.ctx.signal,
+  );
 
   let broker: Broker | null = null;
   const scratchDir = mkdtempSync(join(tmpdir(), "ctp-copilot-scratch-"));
@@ -694,7 +690,13 @@ export async function copilotAgentTurn(
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function copilotComplete(
   prompt: string,
-  opts?: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number },
+  opts?: {
+    signal?: AbortSignal;
+    model?: string;
+    effort?: string;
+    timeoutMs?: number;
+    onStream?: CompletionStreamListener;
+  },
 ): Promise<{
   text: string;
   model?: string;
@@ -738,6 +740,7 @@ export async function copilotComplete(
   }, timeoutMs);
 
   let text = "";
+  let started = false;
   let model = opts?.model ?? cfg.model;
   let stderr = "";
   let tokens: Record<string, number | null> | null = null;
@@ -746,6 +749,7 @@ export async function copilotComplete(
   child.stdout?.on("data", (chunk: Buffer) => {
     const { events } = parser.push(chunk);
     for (const ev of events) {
+      const before = text;
       if (ev.model) model = ev.model;
       if (ev.type === "result") {
         if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
@@ -761,6 +765,14 @@ export async function copilotComplete(
           cache_read: ev.tokens.cache_read ?? null,
         };
       }
+      const stream = opts?.onStream;
+      if (stream) {
+        if (!started) stream({ type: "started" });
+        if (ev.thinking) stream({ type: "reasoning", delta: ev.thinking });
+        if (ev.tool) stream({ type: "activity", label: activityLabel("tool", ev.tool) });
+        if (text !== before) stream({ type: "text", text });
+      }
+      started = true;
     }
   });
 

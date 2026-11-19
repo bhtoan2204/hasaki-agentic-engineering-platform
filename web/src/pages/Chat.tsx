@@ -23,6 +23,7 @@ import { AGENT_PROVIDERS, agentKey, asProvider } from "../agentProvider.tsx";
 import { dialog } from "../dialog/index.ts";
 import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
+import { applyChatEvent, seedFromTurn, type LiveStatus, type LiveTurn, type TraceItem } from "./chatStream.ts";
 import "./Chat.css";
 
 type Mode = "AUTO" | "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
@@ -113,6 +114,8 @@ type Turn = {
   started_at?: string | null;
   finished_at?: string | null;
   created_at: string;
+  draft?: string;
+  trace?: TraceItem[];
 };
 
 type Detail = {
@@ -141,7 +144,51 @@ function clientMessageId() {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-function phaseLabel(phase: string | null | undefined, t: (k: string, p?: Record<string, string | number>) => string) {
+type T = (k: string, p?: Record<string, string | number>) => string;
+
+function Reasoning({ trace, summary, live }: { trace: TraceItem[]; summary: string; live?: boolean }) {
+  const { t } = useI18n();
+  return (
+    <details className={`chat-reasoning${live ? " is-live" : ""}`}>
+      <summary>
+        {live && <span className="dot" />}
+        {summary}
+      </summary>
+      <div className="chat-reasoning-body">
+        {trace.length === 0 && <div className="muted">{t("chat.reasoning.none")}</div>}
+        {trace.map((item, i) =>
+          item.k === "reasoning" ? (
+            <div key={i} className="chat-reasoning-text">
+              {item.text}
+            </div>
+          ) : item.k === "activity" ? (
+            <div key={i} className="chat-tool">
+              {item.label}
+            </div>
+          ) : (
+            <div key={i} className={`chat-tool${["ok", "running"].includes(item.status) ? "" : " is-err"}`}>
+              {item.tool} — {item.status}
+              {item.ms != null ? ` (${Math.round(item.ms)} ms)` : ""}
+            </div>
+          ),
+        )}
+      </div>
+    </details>
+  );
+}
+
+function liveLabel(status: LiveStatus, t: T) {
+  return status ? t(`chat.status.${status}`) : "";
+}
+
+function traceSummary(turn: Turn | undefined, t: T) {
+  const steps = (turn?.trace ?? []).filter((i) => i.k !== "reasoning").length;
+  const ms =
+    turn?.started_at && turn.finished_at ? Date.parse(turn.finished_at) - Date.parse(turn.started_at) : null;
+  return t("chat.reasoning.done", { s: ms != null ? Math.max(1, Math.round(ms / 1000)) : "?", n: steps });
+}
+
+function phaseLabel(phase: string | null | undefined, t: T) {
   if (!phase) return t("chat.live.thinking");
   const key = `chat.phase.${phase}`;
   const label = t(key);
@@ -164,6 +211,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [liveNote, setLiveNote] = useState("");
+  const [live, setLive] = useState<LiveTurn | null>(null);
   const [preview, setPreview] = useState<{
     hash: string;
     title: string;
@@ -196,6 +244,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       const d = await api<Detail>(`/api/chat/conversations/${id}`);
       if (detailIdRef.current !== null && detailIdRef.current !== id) return null;
       setDetail(d);
+      setLive((l) => (d.active_turn ? seedFromTurn(l, d.active_turn) : null));
       setMode(d.conversation.mode);
       setProvider(
         d.conversation.provider_strategy === "auto" || d.conversation.provider === "auto"
@@ -231,6 +280,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       try {
         const p = JSON.parse(ev.data);
         const kind = String(p.kind ?? "");
+        setLive((l) => applyChatEvent(l, p));
         if (kind === "phase.updated") setLiveNote(phaseLabel(p.data?.phase, t));
         else if (kind === "provider.selected")
           setLiveNote(t("chat.live.provider", { provider: p.data?.provider ?? "" }));
@@ -243,6 +293,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
           kind === "turn.completed" ||
           kind === "turn.failed" ||
           kind === "turn.canceled" ||
+          kind === "response.partial" ||
           kind === "conversation.updated"
         ) {
           setLiveNote("");
@@ -268,7 +319,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     const el = threadRef.current;
     if (!el || !stickBottom.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [detail?.messages, liveNote, detail?.active_turn, detail?.turns]);
+  }, [detail?.messages, liveNote, detail?.active_turn, detail?.turns, live]);
 
   const turnsById = useMemo(() => {
     const m = new Map<number, Turn>();
@@ -702,14 +753,22 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                               {turn.route ? ` · ${turn.route}` : ""}
                             </span>
                           )}
+                          {m.role === "assistant" && turn && ["canceled", "failed"].includes(turn.status) && (
+                            <span className="chat-meta-pill is-partial">
+                              {t(turn.status === "canceled" ? "chat.partial.stopped" : "chat.partial.failed")}
+                            </span>
+                          )}
                           <span>{ago(m.created_at)}</span>
                         </div>
+                        {m.role === "assistant" && !!turn?.trace?.length && (
+                          <Reasoning trace={turn.trace} summary={traceSummary(turn, t)} />
+                        )}
                         {m.role === "assistant" ? (
                           <Markdown text={m.content} />
                         ) : (
                           <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
                         )}
-                        {!!tools?.length && (
+                        {!!tools?.length && !turn?.trace?.length && (
                           <details className="chat-tools">
                             <summary>{t("chat.tools", { n: tools.length })}</summary>
                             {tools.map((tc) => (
@@ -793,17 +852,36 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   );
                 })}
 
-                {(detail.active_turn || liveNote) && (
+                {detail.active_turn && (
+                  <div className="chat-block">
+                    <article className="chat-bubble is-assistant is-streaming" aria-busy="true">
+                      <div className="chat-bubble-meta">
+                        <span>{t("chat.role.assistant")}</span>
+                        <span className="chat-meta-pill">
+                          {[detail.active_turn.provider, detail.active_turn.model, detail.active_turn.route]
+                            .filter(Boolean)
+                            .join(" · ") || "…"}
+                        </span>
+                      </div>
+                      <div role="status" aria-live="polite">
+                        <Reasoning
+                          live
+                          trace={live?.trace ?? []}
+                          summary={
+                            liveLabel(live?.status ?? null, t) ||
+                            liveNote ||
+                            phaseLabel(detail.active_turn.phase, t)
+                          }
+                        />
+                      </div>
+                      {!!live?.text && <Markdown text={live.text} />}
+                    </article>
+                  </div>
+                )}
+                {!detail.active_turn && liveNote && (
                   <div className="chat-status" role="status">
                     <span className="dot" />
-                    <div>
-                      <div>{liveNote || phaseLabel(detail.active_turn?.phase, t)}</div>
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {[detail.active_turn?.provider, detail.active_turn?.model, detail.active_turn?.route]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </div>
-                    </div>
+                    <div>{liveNote}</div>
                   </div>
                 )}
               </div>

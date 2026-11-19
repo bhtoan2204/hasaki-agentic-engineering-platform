@@ -15,12 +15,14 @@ import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "../broker/server.ts";
 import {
   classifyCodexError,
+  codexProgress,
   failureMessage,
   JsonlStream,
   type CodexEvent,
   type CodexFailureKind,
   type CodexItem,
 } from "./stream.ts";
+import type { CompletionStreamListener } from "../completionStream.ts";
 import { codexHookDecision } from "./policy.ts";
 import {
   adoptRunWorkspaces,
@@ -853,7 +855,13 @@ export function redact(s: string): string {
  */
 export async function codexComplete(
   prompt: string,
-  opts: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number } = {},
+  opts: {
+    signal?: AbortSignal;
+    model?: string;
+    effort?: string;
+    timeoutMs?: number;
+    onStream?: CompletionStreamListener;
+  } = {},
 ): Promise<{ text: string; tokens: AgentMetrics["tokens"]; model: string }> {
   const cfg = codexConfig();
   const cap = await codexCapabilities(false, { model: opts.model ?? cfg.model, effort: opts.effort ?? cfg.reasoningEffort });
@@ -900,7 +908,14 @@ export async function codexComplete(
   const events: CodexEvent[] = [];
   let stderr = "";
   const code = await new Promise<number | null>((resolve) => {
-    child.stdout?.on("data", (b: Buffer) => events.push(...parser.push(b).events));
+    child.stdout?.on("data", (b: Buffer) => {
+      const fresh = parser.push(b).events;
+      events.push(...fresh);
+      for (const ev of fresh) {
+        const p = opts.onStream && codexProgress(ev);
+        if (p) opts.onStream!(p);
+      }
+    });
     child.stderr?.on("data", (b: Buffer) => (stderr = (stderr + b.toString("utf8")).slice(-8000)));
     child.on("error", () => resolve(null));
     child.on("close", (c) => resolve(c));

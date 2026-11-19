@@ -132,6 +132,8 @@ function publicTurn(t: Awaited<ReturnType<typeof chatRepository.listTurns>>[numb
     finished_at: t.finished_at,
     created_at: t.created_at,
     regenerates: t.regenerates,
+    draft: t.draft,
+    trace: t.trace,
   };
 }
 

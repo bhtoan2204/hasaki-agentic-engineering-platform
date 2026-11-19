@@ -55,5 +55,5 @@ Cột mới trên `chat_conversations` / `chat_turns`: strategies, effective_*, 
 
 ## Hạn chế
 
-- Chưa stream token từng chữ (completion adapters hiện tại); progress theo phase/tool là trung thực.
+- Streaming: xem `interactive-agent-chat-streaming.md`.
 - Screenshot dark/light: chạy thủ công `#/chat` sau build.

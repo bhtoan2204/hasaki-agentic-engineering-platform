@@ -12,6 +12,7 @@
  * corrupted. A partial trailing line is kept until the next chunk or flush().
  */
 import { StringDecoder } from "node:string_decoder";
+import { activityLabel, type CompletionStreamEvent } from "../completionStream.ts";
 
 export interface CodexUsage {
   input_tokens: number | null;
@@ -219,4 +220,26 @@ export function failureMessage(kind: CodexFailureKind, detail: string): string {
     default:
       return d;
   }
+}
+
+/** Live progress of a `codex exec --json` completion. Codex reports whole items, so text arrives per message. */
+export function codexProgress(ev: CodexEvent): CompletionStreamEvent | null {
+  if (ev.type === "thread.started" || ev.type === "turn.started") return { type: "started" };
+  if (ev.type !== "item.started" && ev.type !== "item.completed") return null;
+  const it = ev.item;
+  if (ev.type === "item.completed") {
+    if (it.type === "agent_message" && it.text) return { type: "text", text: it.text };
+    if (it.type === "reasoning" && it.text) return { type: "reasoning", delta: `${it.text}\n\n` };
+    return null;
+  }
+  if (it.type === "command_execution")
+    return { type: "activity", label: activityLabel("command", it.command) };
+  if (it.type === "mcp_tool_call")
+    return {
+      type: "activity",
+      label: activityLabel("tool", [it.server, it.tool].filter(Boolean).join(".")),
+    };
+  if (it.type === "web_search" || it.type === "file_change")
+    return { type: "activity", label: activityLabel(it.type) };
+  return null;
 }

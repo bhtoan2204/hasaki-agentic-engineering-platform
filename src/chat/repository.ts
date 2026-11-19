@@ -253,7 +253,8 @@ export const chatRepository = {
       `SELECT id, conversation_id, owner_id, client_message_id, status, mode, requested_mode, effective_mode, route,
               provider, model, reasoning_effort, provider_strategy, requested_provider, effective_provider,
               requested_model, effective_model, requested_effort, effective_effort, routing, phase, failure,
-              attempts, progress, worker_instance, regenerates, error, metrics, started_at, finished_at, created_at
+              attempts, progress, worker_instance, regenerates, error, metrics, started_at, finished_at, created_at,
+              draft, trace
          FROM chat_turns WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2`,
       [conversationId, Math.min(Math.max(limit, 1), 100)],
     );
@@ -336,6 +337,35 @@ export const chatRepository = {
       phase,
       json(progress),
     ]);
+  },
+
+  setStream(id: number, draft: string, trace: unknown[], db: Db = pool) {
+    return q(db, "UPDATE chat_turns SET draft = $2, trace = $3 WHERE id = $1", [
+      id,
+      draft,
+      json(trace),
+    ]);
+  },
+
+  /** Live deltas are superseded by the stored answer and trace once a turn ends. */
+  dropStreamEvents(turnId: number, db: Db = pool) {
+    return q(
+      db,
+      "DELETE FROM chat_events WHERE turn_id = $1 AND kind IN ('response.delta', 'reasoning.delta', 'provider.activity')",
+      [turnId],
+    );
+  },
+
+  /** The text streamed before a turn stopped or failed; never replaces an answer the turn already has. */
+  insertPartialAnswer(turnId: number, conversationId: number, content: string, db: Db = pool) {
+    return one<{ id: number }>(
+      db,
+      `INSERT INTO chat_messages (conversation_id, turn_id, role, content)
+       SELECT $2, $1, 'assistant', $3
+        WHERE NOT EXISTS (SELECT 1 FROM chat_messages WHERE turn_id = $1 AND role = 'assistant')
+       ON CONFLICT DO NOTHING RETURNING id`,
+      [turnId, conversationId, content],
+    );
   },
 
   setAttempts(id: number, attempts: unknown[], db: Db = pool) {

@@ -27,6 +27,7 @@ import {
   type ResolvedMention,
 } from "./context.ts";
 import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } from "./tools.ts";
+import { stallGuard, TurnStream } from "./streaming.ts";
 import type {
   ChatUsage,
   Citation,
@@ -196,9 +197,16 @@ export async function runTurn(turnId: number, providers: Providers | undefined =
   poll.unref?.();
   const deadline = AbortSignal.timeout(LIMITS.turnTimeoutMs);
   const signal = AbortSignal.any([ac.signal, deadline]);
+  const stream = new TurnStream({
+    conversationId: turn.conversation_id,
+    ownerId: turn.owner_id,
+    turnId: turn.id,
+  });
   try {
-    await executeTurn(turn, signal, providers);
+    await executeTurn(turn, signal, providers, stream);
   } catch (e) {
+    await savePartial(turn, stream).catch((err) => console.error("chat partial answer:", (err as Error).message));
+    await closeStream(stream);
     if (ac.signal.aborted || e instanceof TurnCanceled) await finishCanceled(turn);
     else {
       const failure =
@@ -213,7 +221,31 @@ export async function runTurn(turnId: number, providers: Providers | undefined =
   }
 }
 
-async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Providers | undefined) {
+const closeStream = (stream: TurnStream) =>
+  stream.close().catch((err) => console.error("chat stream close:", (err as Error).message));
+
+/** A stopped or failed turn keeps the answer text it had streamed; the turn status marks it as partial. */
+async function savePartial(turn: TurnRow, stream: TurnStream) {
+  await stream.flush();
+  const text = stripToolBlocks(stream.draft);
+  if (!text) return;
+  const saved = await chatRepository.insertPartialAnswer(turn.id, turn.conversation_id, text);
+  if (saved)
+    await emitChatEvent({
+      conversationId: turn.conversation_id,
+      ownerId: turn.owner_id,
+      turnId: turn.id,
+      kind: "response.partial",
+      data: { message_id: saved.id, chars: text.length },
+    });
+}
+
+async function executeTurn(
+  turn: TurnRow,
+  signal: AbortSignal,
+  providers: Providers | undefined,
+  stream: TurnStream,
+) {
   const ids = { conversationId: turn.conversation_id, ownerId: turn.owner_id, turnId: turn.id };
   const started = Date.now();
   const conversation = (await chatRepository.getConversation(
@@ -404,13 +436,14 @@ async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Provid
         provider: admission.provider,
         model: resolved.model ?? null,
         reasoning_effort: resolved.reasoning_effort ?? null,
-        streaming: false,
+        streaming: true,
         mentions: mentions.map(publicMention),
         routing_reason: routing.reason,
         attempt,
       },
     });
 
+    let stall: ReturnType<typeof stallGuard> | null = null;
     try {
       await phase(turn, "preparing_context");
       for (let step = 0; step < LIMITS.maxSteps && final == null; step++) {
@@ -450,8 +483,22 @@ async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Provid
           });
 
         await phase(turn, "calling_provider", { provider: admission.provider, step });
-        const completion = await completeForRun(run, prompt, signal, providers, agent);
+        await stream.begin(attempt, step, catalog != null);
+        stall = stallGuard(LIMITS.firstActivityMs, LIMITS.streamIdleMs);
+        const guard = stall;
+        const completion = await completeForRun(
+          run,
+          prompt,
+          AbortSignal.any([signal, guard.signal]),
+          providers,
+          agent,
+          (ev) => {
+            guard.touch();
+            stream.onEvent(ev);
+          },
+        ).finally(() => guard.dispose());
         signal.throwIfAborted();
+        await stream.flush();
         addUsage(usage, completion.metrics);
         await emitChatEvent({ ...ids, kind: "usage.updated", data: { ...usage } });
         await phase(turn, "receiving_response");
@@ -476,6 +523,7 @@ async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Provid
             tool: call.tool,
             arguments: (call.arguments ?? {}) as Record<string, unknown>,
           });
+          stream.tool(row.id, call.tool, "running");
           await emitChatEvent({
             ...ids,
             kind: "tool.started",
@@ -503,6 +551,7 @@ async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Provid
             durationMs,
           });
           usage.tool_calls++;
+          stream.tool(row.id, call.tool, outcome.status, durationMs);
           await emitChatEvent({
             ...ids,
             kind: outcome.status === "ok" ? "tool.completed" : "tool.failed",
@@ -558,7 +607,9 @@ async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Provid
       break;
     } catch (e) {
       if (e instanceof TurnCanceled || signal.aborted) throw e;
-      const failure = asChatFailure(e, admission.provider);
+      const failure = stall?.failure
+        ? { ...stall.failure, provider: admission.provider }
+        : asChatFailure(e, admission.provider);
       if (failure.code === "QUOTA_EXHAUSTED") rememberProviderQuota(admission.provider);
       attemptRec.ok = false;
       attemptRec.failure = failure;
@@ -606,6 +657,7 @@ async function executeTurn(turn: TurnRow, signal: AbortSignal, providers: Provid
     provider: admission.provider,
     model: attempts.find((a) => a.ok)?.model ?? admission.model,
   };
+  await closeStream(stream);
   const outcome = await withTx(async (c) => {
     const done = await chatRepository.finishTurn(
       turn.id,
@@ -643,6 +695,7 @@ export function abortLocal(turnId: number) {
 export async function recoverInstanceTurns() {
   for (const t of await chatRepository.runningTurnsOf(config.instanceId)) {
     if (active.has(t.id)) continue;
+    if (t.draft) await chatRepository.insertPartialAnswer(t.id, t.conversation_id, stripToolBlocks(t.draft));
     await finishFailed(
       t,
       chatFailure("INTERRUPTED", "interrupted: the platform restarted"),
@@ -653,6 +706,7 @@ export async function recoverInstanceTurns() {
 export async function recoverStaleTurns(conversationId: number) {
   for (const t of await chatRepository.staleTurns(conversationId)) {
     if (active.has(t.id)) continue;
+    if (t.draft) await chatRepository.insertPartialAnswer(t.id, t.conversation_id, stripToolBlocks(t.draft));
     await finishFailed(
       t,
       chatFailure("INTERRUPTED", "interrupted: the worker instance stopped"),

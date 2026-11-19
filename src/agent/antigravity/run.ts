@@ -1,4 +1,5 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
+import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -662,7 +663,7 @@ export async function antigravityAgentTurn(
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function antigravityComplete(
   prompt: string,
-  opts?: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number },
+  opts?: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number; onStream?: CompletionStreamListener },
 ): Promise<{
   text: string;
   model?: string;
@@ -696,6 +697,7 @@ export async function antigravityComplete(
   }, timeoutMs);
 
   let text = "";
+  let started = false;
   let model = opts?.model ?? cfg.model;
   let stderr = "";
   let tokens: Record<string, number | null> | null = null;
@@ -704,6 +706,7 @@ export async function antigravityComplete(
   child.stdout?.on("data", (chunk: Buffer) => {
     const { events } = parser.push(chunk);
     for (const ev of events) {
+      const before = text;
       if (ev.model) model = ev.model;
       if (ev.type === "result") {
         if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
@@ -717,6 +720,14 @@ export async function antigravityComplete(
           cache_read: ev.tokens.cache_read ?? null,
         };
       }
+      const stream = opts?.onStream;
+      if (stream) {
+        if (!started) stream({ type: "started" });
+        if (ev.thinking) stream({ type: "reasoning", delta: ev.thinking });
+        if (ev.tool) stream({ type: "activity", label: activityLabel("tool", ev.tool) });
+        if (text !== before) stream({ type: "text", text });
+      }
+      started = true;
     }
   });
 

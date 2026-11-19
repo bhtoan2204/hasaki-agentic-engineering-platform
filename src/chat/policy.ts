@@ -10,6 +10,7 @@ export const LIMITS = {
   turnTimeoutMs: 10 * 60_000,
   admissionTimeoutMs: 5_000,
   firstActivityMs: 60_000,
+  streamIdleMs: 180_000,
   promptChars: 60_000,
   historyChars: 24_000,
   recentMessages: 12,

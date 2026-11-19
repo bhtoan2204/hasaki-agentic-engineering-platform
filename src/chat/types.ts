@@ -27,6 +27,9 @@ export type ChatEventKind =
   | "tool.failed"
   | "evidence.added"
   | "response.delta"
+  | "response.partial"
+  | "reasoning.delta"
+  | "provider.activity"
   | "usage.updated"
   | "turn.completed"
   | "turn.failed"
@@ -91,7 +94,15 @@ export interface TurnRow {
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+  draft: string;
+  trace: TraceItem[];
 }
+
+/** One entry of a turn's reasoning panel, in the order it happened. */
+export type TraceItem =
+  | { k: "reasoning"; text: string }
+  | { k: "activity"; label: string }
+  | { k: "tool"; id: number; tool: string; status: string; ms?: number };
 
 export interface MessageRow {
   id: number;

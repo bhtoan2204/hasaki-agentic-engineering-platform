@@ -8,6 +8,8 @@ import { cursorComplete } from "./cursor/run.ts";
 import { antigravityComplete } from "./antigravity/run.ts";
 import { copilotComplete } from "./copilot/run.ts";
 import type { AgentProvider } from "./provider.ts";
+import type { CompletionStreamListener } from "./completionStream.ts";
+export type { CompletionStreamEvent, CompletionStreamListener } from "./completionStream.ts";
 import type { CompletionRun } from "./configuration.ts";
 export type { CompletionRun } from "./configuration.ts";
 import { resolveStepAgent } from "./stepAgent.ts";
@@ -44,11 +46,13 @@ export interface Completion {
     tokens: Record<string, number | null | undefined> | null;
   };
 }
+
 export interface CompletionOptions {
   signal?: AbortSignal;
   model: string;
   effort: string;
   timeoutMs: number;
+  onStream?: CompletionStreamListener;
 }
 export type CompletionRunner = (
   prompt: string,
@@ -66,6 +70,8 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
   options.signal?.addEventListener("abort", onAbort, { once: true });
   if (options.signal?.aborted) ac.abort();
   let text = "";
+  let partial = "";
+  const stream = options.onStream;
   try {
     for await (const msg of query({
       prompt,
@@ -86,11 +92,20 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
         settingSources: [],
         persistSession: false,
         abortController: ac,
+        ...(stream ? { includePartialMessages: true } : {}),
       },
     })) {
       const paid = paidClaudeAuth(msg);
       if (paid) throw new Error(paidClaudeAuthMessage(paid));
       accumulateMetrics(metrics, msg);
+      if (stream) {
+        if (msg.type === "system" && msg.subtype === "init") stream({ type: "started" });
+        else if (msg.type === "stream_event" && msg.event.type === "content_block_delta") {
+          const d = msg.event.delta;
+          if (d.type === "text_delta") stream({ type: "text", text: (partial += d.text) });
+          else if (d.type === "thinking_delta") stream({ type: "reasoning", delta: d.thinking });
+        }
+      }
       if (msg.type === "result" && msg.subtype === "success") text = msg.result;
     }
   } finally {
@@ -117,6 +132,7 @@ export async function completeForRun(
   signal?: AbortSignal,
   providers?: Record<AgentProvider, CompletionRunner> | null,
   agent: CompletionAgentOverride = {},
+  onStream?: CompletionStreamListener,
 ): Promise<Completion> {
   signal?.throwIfAborted();
   const runnerMap = providers ?? runners;
@@ -133,6 +149,7 @@ export async function completeForRun(
     effort: resolved.reasoning_effort ?? "",
     timeoutMs,
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+    ...(onStream ? { onStream } : {}),
   });
   return {
     text: result.text,

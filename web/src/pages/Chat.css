@@ -422,6 +422,47 @@
   color: var(--st-err);
 }
 
+.chat-reasoning {
+  margin-bottom: var(--sp-2);
+}
+
+.chat-reasoning summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.chat-reasoning .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-run);
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-reasoning-body {
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--line);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.chat-reasoning-text {
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  padding: 4px 0;
+}
+
+.chat-meta-pill.is-partial {
+  color: var(--st-err);
+}
+
 .chat-citations {
   display: flex;
   flex-wrap: wrap;

@@ -187,6 +187,8 @@ export function mayFallback(failure: ChatFailure, strategy: ProviderStrategy, fa
       "QUOTA_EXHAUSTED",
       "RATE_LIMITED",
       "PROVIDER_STARTUP_TIMEOUT",
+      "FIRST_RESPONSE_TIMEOUT",
+      "IDLE_TIMEOUT",
       "TURN_TIMEOUT",
       "INTERNAL_ERROR",
     ].includes(failure.code)

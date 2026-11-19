@@ -88,7 +88,7 @@ Regenerate → supersede turn cũ + turn mới cùng user text
 
 ## Hạn chế đã biết
 
-- Provider không stream token từng chữ: UI báo tiến trình tool + câu trả lời cuối (trung thực, không giả stream).
+- Streaming câu trả lời và phần suy luận: xem `interactive-agent-chat-streaming.md`.
 - Compaction lịch sử là deterministic (không gọi model) — đủ cho quyết định/ràng buộc/evidence, có thể thiếu sắc thái văn phong.
 - Chọn nhiều repo trên UI hiện là single-select; API/backend hỗ trợ mảng repositories.
 - Screenshot dark/light: chạy thủ công trên `#/chat` sau khi đăng nhập (browser test có thể bổ sung sau).
