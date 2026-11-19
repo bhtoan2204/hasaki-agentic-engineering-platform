@@ -90,3 +90,97 @@ export async function providerPerformance(
     note: "Attempt-level, observational. Route only through controlled recommendations; cost_per_successful_completion excludes unknown-cost attempts (see unknown_cost_rate).",
   };
 }
+
+/** 95% Wilson interval of a success proportion: robust for small samples, never more confident than the data. */
+export function wilson(successes: number, n: number, z = 1.96) {
+  if (!n) return { low: 0, high: 1 };
+  const p = successes / n;
+  const d = 1 + (z * z) / n;
+  const c = p + (z * z) / (2 * n);
+  const r = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+  return { low: Math.max(0, (c - r) / d), high: Math.min(1, (c + r) / d) };
+}
+
+export interface OutcomeGroup {
+  definition_key: string;
+  risk: "high" | "normal";
+  provider: string;
+  n: number;
+  successes: number;
+  unknown: number;
+}
+
+/**
+ * Pure recommendation rule: within one workflow and risk class, a provider is recommended only when every compared
+ * provider has ≥ minSamples known outcomes and its Wilson lower bound beats every other provider's upper bound.
+ * Otherwise the existing default stays. Always a shadow proposal for an operator, never applied here.
+ */
+export function recommendFromOutcomes(groups: OutcomeGroup[], minSamples = 10) {
+  const keys = [...new Set(groups.map((g) => `${g.definition_key}\u0000${g.risk}`))];
+  return keys.map((k) => {
+    const [definition_key, risk] = k.split("\u0000");
+    const g = groups.filter((x) => x.definition_key === definition_key && x.risk === risk);
+    const scored = g.map((x) => ({ ...x, ...wilson(x.successes, x.n) }));
+    const base = { definition_key, risk, status: "shadow" as const, groups: scored };
+    if (scored.length < 2)
+      return { ...base, provider: null, reason: "only one provider observed: keep the default" };
+    if (scored.some((x) => x.n < minSamples))
+      return {
+        ...base,
+        provider: null,
+        reason: `needs ≥${minSamples} verified outcomes per provider: keep the default`,
+      };
+    const [best, ...rest] = [...scored].sort((a, b) => b.low - a.low);
+    if (rest.some((x) => x.high >= best.low))
+      return {
+        ...base,
+        provider: null,
+        reason: "intervals overlap: no provider is clearly better",
+      };
+    return {
+      ...base,
+      provider: best.provider,
+      reason: `verified success lower bound ${(best.low * 100).toFixed(0)}% beats every other provider's upper bound`,
+    };
+  });
+}
+
+/**
+ * Verified outcomes per workflow, risk class and provider. One outcome per work item (its latest finished run), so
+ * repairs and re-runs are not counted as independent tasks. Success = run completed AND tests passed on the final
+ * heads AND no later regression/rollback report; a run without test evidence is unknown (censored), not a failure.
+ */
+export async function outcomeRecommendations(
+  o: { days?: number; minSamples?: number; ownerId?: number | null } = {},
+  db: Db = pool,
+) {
+  const days = Math.min(365, Math.max(1, Math.round(o.days ?? 90)));
+  const rows = await q<OutcomeGroup>(
+    db,
+    `WITH latest AS (
+       SELECT DISTINCT ON (coalesce(r.work_item_id::text, 'run' || r.id)) r.id, r.definition_key, coalesce(r.agent_provider, 'claude') AS provider,
+              CASE WHEN r.profile_decision->'complexity'->>'class' = 'HIGH_RISK' THEN 'high' ELSE 'normal' END AS risk
+         FROM workflow_runs r
+        WHERE r.status IN ('COMPLETED','FAILED','CANCELED') AND r.finished_at > now() - make_interval(days => $1)
+          AND ($2::bigint IS NULL OR r.owner_id = $2)
+          AND NOT EXISTS (SELECT 1 FROM evaluation_runs e WHERE e.workflow_run_id = r.id)
+        ORDER BY coalesce(r.work_item_id::text, 'run' || r.id), r.id DESC),
+     judged AS (
+       SELECT l.*,
+              EXISTS (SELECT 1 FROM outcome_observations o WHERE o.run_id = l.id AND o.kind IN ('tests_passed','tests_failed','run_failed','run_canceled')) AS known,
+              EXISTS (SELECT 1 FROM outcome_observations o WHERE o.run_id = l.id AND o.kind = 'run_completed')
+                AND EXISTS (SELECT 1 FROM outcome_observations o WHERE o.run_id = l.id AND o.kind = 'tests_passed'
+                              AND NOT EXISTS (SELECT 1 FROM outcome_observations n WHERE n.supersedes = o.id))
+                AND NOT EXISTS (SELECT 1 FROM outcome_observations o WHERE o.run_id = l.id AND o.kind IN ('regression_reported','rollback_reported')) AS success
+         FROM latest l)
+     SELECT definition_key, risk, provider, count(*) FILTER (WHERE known)::int AS n,
+            count(*) FILTER (WHERE known AND success)::int AS successes, count(*) FILTER (WHERE NOT known)::int AS unknown
+       FROM judged GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`,
+    [days, o.ownerId ?? null],
+  );
+  return {
+    window_days: days,
+    recommendations: recommendFromOutcomes(rows, Math.max(5, o.minSamples ?? 10)),
+    note: "Shadow only: an operator applies a change through the existing optimization policies; the default stays otherwise. Cost is not part of this ranking (unknown cost is never $0).",
+  };
+}

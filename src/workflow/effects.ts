@@ -2,6 +2,8 @@ import { pool, q, type Db } from "../db/pool.ts";
 import { detectKnowledgeChanges } from "../knowledge/learning.ts";
 import { extractRunMemory } from "../knowledge/memory.ts";
 import { recordRunOutcome } from "../learning/outcomes.ts";
+import { observeRun } from "../learning/observations.ts";
+import { extractLessons } from "../learning/lessons.ts";
 import { storeRunSummary } from "../report/runSummary.ts";
 import type { RunStatus } from "./types.ts";
 
@@ -35,10 +37,16 @@ async function perform(kind: EffectKind, runId: number) {
   }
   if (kind === "outcome") {
     await recordRunOutcome(runId);
+    // Observations and lessons are idempotent: a failure here leaves the effect queued and it is retried later; the
+    // run itself is already final and unaffected.
+    await observeRun(runId);
+    await extractLessons(runId);
     return;
   }
   if (kind === "memory") {
     await extractRunMemory(runId);
+    // The memory facts carry the task commit: lessons learned before them get their provenance completed.
+    await extractLessons(runId);
     return;
   }
   // No model call unless a change analyzer is already registered. Unchanged inputs are not re-analysed.

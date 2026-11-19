@@ -7,6 +7,8 @@ import { requireRunRepositoryAccess } from "../repos/access.ts";
 import { repositories, repositoryReference } from "../repos/service.ts";
 import { redactSecrets } from "../integrations/redact.ts";
 import { recordRunOutcome } from "../learning/outcomes.ts";
+import { observePullRequest } from "../learning/observations.ts";
+import { extractLessons } from "../learning/lessons.ts";
 import { isolationEnforced } from "../agent/isolation.ts";
 import { diagnoseFailure, jittered } from "./failures.ts";
 import { livePolicy } from "./autonomy.ts";
@@ -466,6 +468,10 @@ async function save(
     [row.id, s.state, json(s.reasons), json(observation), head, terminal, delay, processed],
   );
   if (terminal && row.run_id) await recordRunOutcome(Number(row.run_id)).catch(() => {});
+  // Outcome learning (task 07): one observation per state and head; a closed PR may become a negative lesson.
+  await observePullRequest(row, s.state, head, s.reasons)
+    .then((id) => (id && terminal && row.run_id ? extractLessons(Number(row.run_id)) : null))
+    .catch((e) => console.error(`learning (pr ${row.id}):`, (e as Error).message));
   await notifyTransition(row, s, head);
 }
 

@@ -348,6 +348,37 @@ export async function resolveContext(
       if (!trusted || fresh.state !== "FRESH") memoryStale.push(k.key);
     }
     res.applied = res.applied.filter((k) => !memoryStale.includes(k.key));
+    // Outcome lessons (learning/lessons.ts): only active ones of this kind of task, the best few — never prompt stuffing.
+    const lesson = (k: (typeof res.applied)[number]) => k.key.startsWith("memory.lesson.");
+    const meta = (k: (typeof res.applied)[number]) =>
+      ((k.metadata as any)?.memory ?? {}) as {
+        status?: string;
+        task_class?: string;
+        corroborated_by?: string[];
+        extracted_at?: string;
+      };
+    const relevant = res.applied
+      .filter(lesson)
+      .filter(
+        (k) =>
+          (meta(k).status ?? "active") === "active" &&
+          (!meta(k).task_class || meta(k).task_class === run.definition_key),
+      )
+      .sort(
+        (a, b) =>
+          (meta(b).corroborated_by?.length ?? 0) - (meta(a).corroborated_by?.length ?? 0) ||
+          String(meta(b).extracted_at ?? "").localeCompare(String(meta(a).extracted_at ?? "")),
+      )
+      .slice(0, config.learning.maxLessons);
+    for (const k of res.applied.filter(lesson))
+      if (!relevant.includes(k))
+        memoryStates.push({
+          key: k.key,
+          trust: (k.metadata as any)?.memory?.trust ?? null,
+          state: "EXCLUDED",
+          reason: "lesson not active, other task class, or over the lesson budget",
+        });
+    res.applied = res.applied.filter((k) => !lesson(k) || relevant.includes(k));
   }
   // Third-party skills the agent cannot use here never reach it; an explicitly assigned one fails the attempt.
   const unavailable = new Map<string, string>();

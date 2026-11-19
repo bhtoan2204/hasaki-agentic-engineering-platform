@@ -252,6 +252,8 @@ export interface Config {
     maxSourceChars: number;
     /** After a rule change is approved, draft updates for the skills it affects (each needs its own approval). */
     evolveSkills: boolean;
+    /** Outcome lessons loaded into one step's context at most (best corroborated, same task class, fresh). */
+    maxLessons: number;
   };
   agent: {
     /** Bound retrieved context, using a documented character-based token estimate; provider usage remains separate. */
@@ -649,6 +651,7 @@ const defaults: Config = {
     maxRulesInPrompt: 20,
     maxSourceChars: 6000,
     evolveSkills: true,
+    maxLessons: 3,
   },
   agent: {
     contextTokens: 24000,
