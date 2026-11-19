@@ -376,6 +376,23 @@ export interface Config {
    */
   investigation: { maxRounds: number };
   /**
+   * Pull request delivery lifecycle after publication. "off" (default) = nothing is polled; "monitor" = read-only status
+   * (CI, reviews, mergeability bound to the verified SHA) with ready/blocker notifications; "repair" = also re-executes
+   * the run's coding step for an eligible code CI failure or a trusted in-scope review, only when the autonomy policy
+   * and the enforced OS sandbox allow unattended work (otherwise a shadow repair plan is recorded). Never merges.
+   */
+  prLifecycle: {
+    mode: "off" | "monitor" | "repair";
+    pollSeconds: number;
+    maxRepairs: number;
+    /** Reviewers whose in-scope comments may drive a repair (everyone else's comments only block). */
+    trustedReviewers: string[];
+    /** Usernames whose comments are the platform's own echo (ignored). */
+    botUsernames: string[];
+    /** Explicit required checks per repository; absent = a successful pipeline for the head is required; [] = CI not required. */
+    requiredChecks: Record<string, string[]>;
+  };
+  /**
    * OS isolation of agent processes (bubblewrap). "off" = legacy trusted single-operator mode: agents run as the worker
    * user with the tool policy only; it is never reported as isolated and never authorizes unattended (AUTONOMOUS/AUTOPILOT)
    * work. "enforce" = every agent step runs in a sandbox (private HOME/tmp, hidden credentials and other runs, no network
@@ -583,6 +600,14 @@ const defaults: Config = {
     allowSharedToken: false,
   },
   investigation: { maxRounds: 0 },
+  prLifecycle: {
+    mode: "off",
+    pollSeconds: 300,
+    maxRepairs: 2,
+    trustedReviewers: [],
+    botUsernames: [],
+    requiredChecks: {},
+  },
   isolation: {
     mode: "off",
     egress: { claude: ["api.anthropic.com:443"] },
@@ -676,6 +701,7 @@ function load(): Config {
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
     investigation: { ...defaults.investigation, ...(fromFile.investigation ?? {}) },
+    prLifecycle: { ...defaults.prLifecycle, ...(fromFile.prLifecycle ?? {}) },
     isolation: {
       ...defaults.isolation,
       ...(fromFile.isolation ?? {}),

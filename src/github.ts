@@ -183,3 +183,126 @@ export async function githubPullRequestState(
   if (pr.state === "closed") return { state: "DECLINED", merged_at: null, merge_commit: null };
   return null;
 }
+
+const prNumber = (url: string) => /\/pull\/(\d+)\/?$/.exec(url)?.[1] ?? null;
+
+/** Read model of one pull request: head SHA, draft and the host's mergeability (null while GitHub is computing it). */
+export async function getGithubPullRequest(repo: string, url: string) {
+  const id = prNumber(url);
+  const creds = await resolveGithub();
+  if (!id || !creds)
+    throw new Error("GitHub pull request not readable (no credentials or not a PR URL)");
+  const { owner, name } = splitRepo(repo);
+  const pr = await gh(creds.token, `/repos/${owner}/${name}/pulls/${id}`);
+  return {
+    id: Number(pr.number),
+    url: String(pr.html_url),
+    title: String(pr.title ?? ""),
+    description: String(pr.body ?? ""),
+    state: (pr.merged ? "MERGED" : pr.state === "open" ? "OPEN" : "DECLINED") as
+      "MERGED" | "OPEN" | "DECLINED",
+    draft: pr.draft === true,
+    source: String(pr.head?.ref ?? ""),
+    target: String(pr.base?.ref ?? ""),
+    author: pr.user?.login ?? null,
+    head_sha: pr.head?.sha ?? null,
+    created_at: pr.created_at ?? null,
+    updated_at: pr.updated_at ?? null,
+    merged_at: pr.merged_at ?? null,
+    merge_commit: pr.merge_commit_sha ?? null,
+    mergeable: typeof pr.mergeable === "boolean" ? pr.mergeable : null,
+    conflicts:
+      pr.mergeable_state === "dirty"
+        ? true
+        : typeof pr.mergeable === "boolean"
+          ? !pr.mergeable
+          : null,
+  };
+}
+
+/**
+ * Check runs of the PR's current head commit as one pipeline: every job is bound to that SHA. Truncated pages are
+ * reported, so a partial list never reads as complete.
+ */
+export async function githubChecks(repo: string, url: string) {
+  const pr = await getGithubPullRequest(repo, url);
+  const creds = (await resolveGithub())!;
+  const { owner, name } = splitRepo(repo);
+  if (!pr.head_sha) return { pipelines: [], truncated: false };
+  const res = await gh(
+    creds.token,
+    `/repos/${owner}/${name}/commits/${pr.head_sha}/check-runs?per_page=100`,
+  );
+  const runs: any[] = Array.isArray(res.check_runs) ? res.check_runs : [];
+  const jobs = runs.map((r) => ({
+    id: Number(r.id),
+    name: String(r.name),
+    stage: String(r.app?.slug ?? ""),
+    status: r.status === "completed" ? String(r.conclusion ?? "unknown") : String(r.status),
+    allow_failure: false,
+    url: r.html_url ?? null,
+    failure_reason: r.output?.title ?? null,
+  }));
+  const status = !jobs.length
+    ? "none"
+    : jobs.some((j) =>
+          ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(
+            j.status,
+          ),
+        )
+      ? "failed"
+      : jobs.some((j) =>
+            ["queued", "in_progress", "pending", "waiting", "requested"].includes(j.status),
+          )
+        ? "running"
+        : jobs.every((j) => ["success", "neutral", "skipped"].includes(j.status))
+          ? "success"
+          : "unknown";
+  return {
+    pipelines: [
+      {
+        id: 0,
+        status,
+        ref: pr.source,
+        sha: pr.head_sha,
+        url,
+        created_at: null,
+        jobs,
+        jobs_truncated: Number(res.total_count ?? 0) > runs.length,
+      },
+    ],
+    truncated: false,
+  };
+}
+
+/** Reviews as discussions: the latest CHANGES_REQUESTED of a reviewer is an unresolved thread until they approve. */
+export async function githubReviewDiscussions(repo: string, url: string) {
+  const id = prNumber(url);
+  const creds = await resolveGithub();
+  if (!id || !creds) throw new Error("GitHub reviews not readable");
+  const { owner, name } = splitRepo(repo);
+  const reviews: any[] = await gh(
+    creds.token,
+    `/repos/${owner}/${name}/pulls/${id}/reviews?per_page=100`,
+  );
+  const latest = new Map<string, any>();
+  for (const r of Array.isArray(reviews) ? reviews : [])
+    if (r.user?.login && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r.state))
+      latest.set(r.user.login, r);
+  return {
+    discussions: [...latest.values()].map((r) => ({
+      id: String(r.id),
+      resolved: r.state !== "CHANGES_REQUESTED",
+      notes: [
+        {
+          id: Number(r.id),
+          author: r.user?.login ?? null,
+          body: String(r.body ?? ""),
+          created_at: r.submitted_at ?? null,
+          system: r.user?.type === "Bot",
+        },
+      ],
+    })),
+    truncated: Array.isArray(reviews) && reviews.length >= 100,
+  };
+}

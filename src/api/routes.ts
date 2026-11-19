@@ -212,10 +212,12 @@ import {
   closePullRequestAction,
   mergePullRequestAction,
   pullRequestStatus,
+  setLifecyclePausedAction,
   listPullRequests,
 } from "../git/pullRequests.ts";
 import { validateSpec } from "../workflow/graph.ts";
 import { isolationDiagnostics } from "../agent/isolation.ts";
+import { runDelivery } from "../workflow/prLifecycle.ts";
 import {
   INTAKE_MODES,
   INTAKE_SOURCES,
@@ -1111,6 +1113,21 @@ export const routes: Route[] = [
         subject: typeof c.body.subject === "string" ? c.body.subject : undefined,
       })
     ),
+  ],
+  // PR delivery lifecycle: per-run view (run access) and owner pause/resume (owner + repository permission).
+  [
+    "GET",
+    /^\/api\/runs\/(\d+)\/delivery$/,
+    async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runDelivery(num(c.p[0]))),
+  ],
+  [
+    "POST",
+    /^\/api\/pull-requests\/(\d+)\/lifecycle$/,
+    async (c) => {
+      const r = await setLifecyclePausedAction(c.actor.id, num(c.p[0]), c.body.paused === true);
+      await audit(c.actor.id, r.paused ? "pr.lifecycle.pause" : "pr.lifecycle.resume", "pull_request", c.p[0]);
+      return r;
+    },
   ],
   // Intake: admins own the per-source policies; owners see and re-triage their own queue items (admins: all).
   [

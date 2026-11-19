@@ -23,6 +23,7 @@ import { seedTemplates } from "./workflow/definitions.ts";
 import { registerDefaultExecutors } from "./workflow/executors/index.ts";
 import { registerReconcileTask, startScheduler } from "./workflow/scheduler.ts";
 import { dispatchIntake } from "./workitems/intake.ts";
+import { syncPullRequestLifecycles } from "./workflow/prLifecycle.ts";
 import { startCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
@@ -95,6 +96,8 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 // Policy-controlled intake rides the scheduler's reconcile tick: re-triage and start eligible items (no-op without a policy).
 registerReconcileTask(() => dispatchIntake());
+// PR delivery lifecycle (no-op while prLifecycle.mode is "off"): bounded polling with per-PR backoff.
+registerReconcileTask(() => syncPullRequestLifecycles());
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 if (config.codeIntelligence.enabled)

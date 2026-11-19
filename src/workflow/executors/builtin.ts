@@ -1462,11 +1462,16 @@ export const pullRequestExecutor: StepExecutor = {
           .catch(() => null);
       await q(
         pool,
-        `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO pull_requests (provider, repo, source_branch, target_branch, url, title, summary, decisions, draft, created, work_item_id, run_id, step_id, published_sha)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (provider, repo, source_branch, target_branch) DO UPDATE SET url = excluded.url, title = excluded.title, summary = excluded.summary,
            decisions = excluded.decisions, draft = excluded.draft, created = pull_requests.created OR excluded.created,
-           run_id = excluded.run_id, step_id = excluded.step_id, work_item_id = COALESCE(excluded.work_item_id, pull_requests.work_item_id), updated_at = now()`,
+           run_id = excluded.run_id, step_id = excluded.step_id, work_item_id = COALESCE(excluded.work_item_id, pull_requests.work_item_id),
+           -- A new verified publication restarts the delivery lifecycle: earlier readiness was bound to the old SHA.
+           lifecycle = CASE WHEN pull_requests.published_sha IS DISTINCT FROM excluded.published_sha AND pull_requests.lifecycle NOT IN ('UNTRACKED','MERGED','CLOSED') THEN 'OPEN' ELSE pull_requests.lifecycle END,
+           ready_at = CASE WHEN pull_requests.published_sha IS DISTINCT FROM excluded.published_sha THEN NULL ELSE pull_requests.ready_at END,
+           next_sync_at = CASE WHEN pull_requests.published_sha IS DISTINCT FROM excluded.published_sha THEN NULL ELSE pull_requests.next_sync_at END,
+           published_sha = excluded.published_sha, updated_at = now()`,
         [
           provider.name,
           w.repo,
@@ -1481,6 +1486,7 @@ export const pullRequestExecutor: StepExecutor = {
           ctx.run.work_item_id,
           ctx.run.id,
           ctx.step.id,
+          publish[w.repo]?.head || null,
         ],
       );
       await ctx.log(

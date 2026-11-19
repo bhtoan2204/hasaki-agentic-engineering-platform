@@ -86,6 +86,21 @@ export async function closePullRequestAction(actorId: number, id: number, db: Db
   return { state: result.state, url: pr.url };
 }
 
+/** Owner pause/resume of the delivery automation for one PR (status keeps being read; nothing remote changes). */
+export async function setLifecyclePausedAction(
+  actorId: number,
+  id: number,
+  paused: boolean,
+  db: Db = pool,
+) {
+  await load(actorId, id, db);
+  await q(db, "UPDATE pull_requests SET lifecycle_paused = $2, next_sync_at = NULL WHERE id = $1", [
+    id,
+    paused,
+  ]);
+  return { id, paused };
+}
+
 export function listPullRequests(ownerId: number, all: boolean, db: Db = pool) {
   return q<Record<string, unknown>>(
     db,

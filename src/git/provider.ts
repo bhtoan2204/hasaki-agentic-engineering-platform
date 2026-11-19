@@ -13,7 +13,7 @@ import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest, pullRequestState } from "../bitbucket.ts";
-import { openGithubPullRequest, githubPullRequestState } from "../github.ts";
+import { openGithubPullRequest, githubPullRequestState, getGithubPullRequest, githubChecks, githubReviewDiscussions } from "../github.ts";
 import {
   closeGitlabMergeRequest,
   commentOnGitlabMergeRequest,
@@ -204,6 +204,12 @@ export const githubProvider: GitProvider = {
       dest: pr.target,
     }),
   pullRequestState: (pr) => githubPullRequestState(pr.repo, pr.url),
+  getPullRequest: (pr) => getGithubPullRequest(pr.repo, pr.url),
+  pipelines: (q) => {
+    if (!q.url) throw new Error("GitHub checks are read for a pull request URL");
+    return githubChecks(q.repo, q.url);
+  },
+  pullRequestDiscussions: (pr) => githubReviewDiscussions(pr.repo, pr.url),
 };
 
 export const gitlabProvider: GitProvider = {

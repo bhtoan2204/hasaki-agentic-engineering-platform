@@ -30,6 +30,9 @@ export interface ChangeRequest {
   updated_at: string | null;
   merged_at: string | null;
   merge_commit: string | null;
+  /** Host mergeability when the adapter reads it (null: still computing / not reported). */
+  mergeable?: boolean | null;
+  conflicts?: boolean | null;
 }
 
 export interface ChangeRequestFile {
