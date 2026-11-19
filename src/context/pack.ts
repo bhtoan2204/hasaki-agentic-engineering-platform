@@ -30,19 +30,27 @@ import { localScope } from "../codeIntelligence/indexer.ts";
 import { worktreeFingerprint } from "../agent/scopeGuard.ts";
 import { INDEX_VERSION } from "../codeIntelligence/parser.ts";
 /** Every selected repository must have a complete, observed source and index identity. */
-export async function observeRetrievalState(names: string[], read: (name: string) => Promise<{
-  workspace: string; head: string; fingerprint: string; snapshot: string;
-} | null>): Promise<Record<string, string> | null> {
+export async function observeRetrievalState(
+  names: string[],
+  read: (name: string) => Promise<{
+    workspace: string;
+    head: string;
+    fingerprint: string;
+    snapshot: string;
+  } | null>,
+): Promise<Record<string, string> | null> {
   if (!names.length) return null;
   const state: Record<string, string> = {};
   try {
     for (const name of [...new Set(names)].sort()) {
       const observed = await read(name);
-      if (!observed || Object.values(observed).some(v => !v)) return null;
+      if (!observed || Object.values(observed).some((v) => !v)) return null;
       state[name] = JSON.stringify(observed);
     }
     return state;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export interface ContextEntry {
@@ -81,8 +89,13 @@ export interface ContextPack {
   retrieval_calls: number;
   retrieval_failures: number;
   preparation_ms: number;
-  /** Why this budget: explicit step config, the role default, or the global default (fallback). */
-  budget_source?: "step_config" | "role" | "global";
+  /**
+   * Why this budget: explicit step config, the role default, the global default (fallback), or "expanded" — raised
+   * just enough for the required context (up to MAX_CONTEXT_TOKENS) instead of refusing the step.
+   */
+  budget_source?: "step_config" | "role" | "global" | "expanded";
+  /** Supporting outputs of the approved contract shown as bounded summaries because the full text did not fit. */
+  compacted?: string[];
   /** Redacted raw code-retrieval results + their deterministic key (never rendered into the prompt). */
   retrieval_cache?: {
     key: string;
@@ -93,6 +106,49 @@ export interface ContextPack {
   };
 }
 export class ContextBudgetError extends Error {}
+/** Upper bound of any context budget (also the validated maximum of context_tokens). */
+export const MAX_CONTEXT_TOKENS = 64000;
+/** Room left for optional context when the budget is expanded to fit the required entries. */
+const EXPANSION_HEADROOM = 4000;
+
+/**
+ * Last resort before refusing: the approved plan, acceptance criteria, constraints, tests and authorization stay
+ * verbatim; the *supporting* upstream outputs bundled with the plan (analysis, architecture…) become bounded summaries
+ * with a pointer to their full text. Presentation only — the pinned contract and its revision are unchanged. Pure.
+ */
+export function compactContractEntry(
+  entry: ContextEntry,
+  maxChars = 1500,
+): { entry: ContextEntry; compacted: string[] } {
+  let contract: Record<string, unknown>;
+  try {
+    contract = JSON.parse(entry.body);
+  } catch {
+    return { entry, compacted: [] };
+  }
+  const plan = contract.approved_plan as Record<string, unknown> | null;
+  if (!plan || typeof plan !== "object" || !("plan" in plan)) return { entry, compacted: [] };
+  const compacted = Object.keys(plan).filter((k) => k !== "plan");
+  if (!compacted.length) return { entry, compacted: [] };
+  const approved = Object.fromEntries(
+    Object.entries(plan).map(([k, v]) =>
+      k === "plan"
+        ? [k, v]
+        : [
+            k,
+            { summary: summarizeValue(v, maxChars), full_text: `platform.get_step_output("${k}")` },
+          ],
+    ),
+  );
+  return {
+    entry: {
+      ...entry,
+      body: JSON.stringify({ ...contract, approved_plan: approved }),
+      truncated: true,
+    },
+    compacted: compacted.map((k) => `approved_plan.${k}`),
+  };
+}
 
 /**
  * Role-based default budgets (tokens, estimate): a step that does not set `context_tokens` gets context sized for its
@@ -219,20 +275,17 @@ export async function ensureContextPack(
       }
       const started = performance.now(),
         at = new Date().toISOString();
-      const globalBudget = Number(
-        ctx.step.config.context_tokens ?? config.agent.contextTokens ?? 24000,
-      );
+      // The step's agent settings (definition or a per-run override, resolved at claim time) may set the budget.
+      const stepTokens =
+        ctx.attempt.effective_agent?.context_tokens ?? ctx.step.config.context_tokens;
+      const globalBudget = Number(stepTokens ?? config.agent.contextTokens ?? 24000);
       if (!Number.isInteger(globalBudget) || globalBudget < 2000 || globalBudget > 64000)
         throw new ContextBudgetError("context_tokens must be an integer between 2000 and 64000");
-      const role = ctx.step.config.context_tokens == null ? roleBudget(ctx.step) : null;
+      const role = stepTokens == null ? roleBudget(ctx.step) : null;
       const roleLimited = role != null && role < globalBudget ? role : globalBudget;
       const budget = ctx.run.profile === "MICRO" ? Math.min(12000, roleLimited) : roleLimited;
       const budgetSource: ContextPack["budget_source"] =
-        ctx.step.config.context_tokens != null
-          ? "step_config"
-          : budget !== globalBudget
-            ? "role"
-            : "global";
+        stepTokens != null ? "step_config" : budget !== globalBudget ? "role" : "global";
       const entries: ContextEntry[] = [];
       const searchOmitted: string[] = [];
       const add = (
@@ -335,11 +388,28 @@ export async function ensureContextPack(
         ),
         "platform_constraint",
       );
-      const mandatoryContract = input.execution_contract ?? (ctx.step.type === "coding_agent" ? { blocked: "Missing pinned execution contract; renew authorization" } : buildExecutionContract(input.upstream,
-        ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, input.work_item, {
-          graph: ctx.run.graph, step: ctx.step, definition_version_id: ctx.run.definition_version_id, profile: ctx.run.profile,
-          request: { title: ctx.run.title, description: input.work_item?.description, inputs: ctx.run.inputs },
-        }));
+      const mandatoryContract =
+        input.execution_contract ??
+        (ctx.step.type === "coding_agent"
+          ? { blocked: "Missing pinned execution contract; renew authorization" }
+          : buildExecutionContract(
+              input.upstream,
+              ctx.run.selected_repositories?.length
+                ? ctx.run.selected_repositories
+                : ctx.run.allowed_repositories,
+              input.work_item,
+              {
+                graph: ctx.run.graph,
+                step: ctx.step,
+                definition_version_id: ctx.run.definition_version_id,
+                profile: ctx.run.profile,
+                request: {
+                  title: ctx.run.title,
+                  description: input.work_item?.description,
+                  inputs: ctx.run.inputs,
+                },
+              },
+            ));
 
       add(
         "mandatory_execution_contract",
@@ -724,24 +794,49 @@ export async function ensureContextPack(
         const query = ctx.context.requestText.slice(0, 512);
         const observe = async () => {
           const workspaces = await workspacesOf(ctx.run.id); // enumeration errors invalidate reuse
-          return observeRetrievalState(ctx.run.selected_repositories?.length ? ctx.run.selected_repositories : ctx.run.allowed_repositories, async name => {
-            const workspace = workspaces.find(w => w.repo === name);
-            const scope = await localScope(name, workspace ? ctx.run.id : undefined, false, workspace?.path);
-            const fp = await worktreeFingerprint(scope.root);
-            const snapshots = await q<{ id: number; generation: string; commit_sha: string }>(pool,
-              `SELECT id,generation,commit_sha FROM code_intelligence.snapshots WHERE repository_id=$1 AND index_version=$2
+          return observeRetrievalState(
+            ctx.run.selected_repositories?.length
+              ? ctx.run.selected_repositories
+              : ctx.run.allowed_repositories,
+            async (name) => {
+              const workspace = workspaces.find((w) => w.repo === name);
+              const scope = await localScope(
+                name,
+                workspace ? ctx.run.id : undefined,
+                false,
+                workspace?.path,
+              );
+              const fp = await worktreeFingerprint(scope.root);
+              const snapshots = await q<{ id: number; generation: string; commit_sha: string }>(
+                pool,
+                `SELECT id,generation,commit_sha FROM code_intelligence.snapshots WHERE repository_id=$1 AND index_version=$2
               AND (run_id IS NULL OR (run_id=$3 AND instance_id=$4)) ORDER BY id`,
-              [scope.repo.id, INDEX_VERSION, ctx.run.id, config.instanceId]);
-            if (!snapshots.length) return null;
-            return { workspace: `${workspace ? "worktree" : "primary"}:${scope.root}`, head: `${fp.head}:${await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch)}`,
-              fingerprint: fp.fingerprint, snapshot: JSON.stringify(snapshots) };
-          });
+                [scope.repo.id, INDEX_VERSION, ctx.run.id, config.instanceId],
+              );
+              if (!snapshots.length) return null;
+              return {
+                workspace: `${workspace ? "worktree" : "primary"}:${scope.root}`,
+                head: `${fp.head}:${await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch)}`,
+                fingerprint: fp.fingerprint,
+                snapshot: JSON.stringify(snapshots),
+              };
+            },
+          );
         };
         const makeKey = async () => {
           const repoState = await observe().catch(() => null);
-          return repoState ? codeRetrievalKey({ ownerId: ctx.run.owner_id!, runId: ctx.run.id,
-            allowed: ctx.run.allowed_repositories, selected: ctx.run.selected_repositories,
-            query, repos: repoState, indexVersion: INDEX_VERSION, indexSnapshot: JSON.stringify(repoState) }) : null;
+          return repoState
+            ? codeRetrievalKey({
+                ownerId: ctx.run.owner_id!,
+                runId: ctx.run.id,
+                allowed: ctx.run.allowed_repositories,
+                selected: ctx.run.selected_repositories,
+                query,
+                repos: repoState,
+                indexVersion: INDEX_VERSION,
+                indexSnapshot: JSON.stringify(repoState),
+              })
+            : null;
         };
         const key = await makeKey();
         const prior = key
@@ -755,7 +850,7 @@ export async function ensureContextPack(
           prior?.cache?.entries && typeof prior.cache.entries === "object"
             ? (prior.cache.entries as Record<string, string>)
             : null;
-        if (cached && cached.search_code && key === await makeKey()) {
+        if (cached && cached.search_code && key === (await makeKey())) {
           for (const [id, body] of Object.entries(cached))
             entries.push({
               id,
@@ -838,7 +933,8 @@ export async function ensureContextPack(
               .filter((e) => e.id === "search_code" || e.id === "find_dependencies")
               .map((e) => [e.id, e.body]),
           );
-          if (key && ok.search_code && key === await makeKey()) retrievalCache = { key, entries: ok, reused_from_pack: null };
+          if (key && ok.search_code && key === (await makeKey()))
+            retrievalCache = { key, entries: ok, reused_from_pack: null };
         }
       }
       const parents = await q(
@@ -855,7 +951,7 @@ export async function ensureContextPack(
           ],
         ],
       );
-      const build = (b: number, src: ContextPack["budget_source"]) =>
+      const build = (b: number, src: ContextPack["budget_source"], candidates = entries) =>
         budgetContextPack(
           {
             budget_source: src,
@@ -873,15 +969,49 @@ export async function ensureContextPack(
             retrieval_failures: retrievalFailures,
             preparation_ms: performance.now() - started,
           },
-          entries,
+          candidates,
         );
       let pack: ContextPack;
       try {
         pack = build(budget, budgetSource);
       } catch (e) {
+        if (!(e instanceof ContextBudgetError)) throw e;
         // The role default is a target, never a reason to fail: required context that does not fit gets the global budget.
-        if (!(e instanceof ContextBudgetError) || budgetSource !== "role") throw e;
-        pack = build(globalBudget, "global");
+        const fallback = budgetSource === "role" ? globalBudget : budget;
+        const src: ContextPack["budget_source"] = budgetSource === "role" ? "global" : budgetSource;
+        // Required context is never shortened silently. Raise the budget just enough for it (bounded), keeping every
+        // required entry verbatim; only if even the ceiling is too small, summarize the contract's supporting outputs.
+        // An explicit step budget and the MICRO profile are deliberate limits: they are not raised.
+        const expandable = src !== "step_config" && ctx.run.profile !== "MICRO";
+        const fitted = (candidates: ContextEntry[]) => {
+          try {
+            return build(fallback, src, candidates);
+          } catch (err) {
+            if (!(err instanceof ContextBudgetError) || !expandable) throw err;
+            const probe = build(
+              MAX_CONTEXT_TOKENS,
+              "expanded",
+              candidates.filter((x) => x.required),
+            );
+            return build(
+              Math.min(MAX_CONTEXT_TOKENS, probe.estimated_tokens + EXPANSION_HEADROOM),
+              "expanded",
+              candidates,
+            );
+          }
+        };
+        try {
+          pack = fitted(entries);
+        } catch (again) {
+          if (!(again instanceof ContextBudgetError)) throw again;
+          const i = entries.findIndex((x) => x.id === "mandatory_execution_contract");
+          const compact = i >= 0 ? compactContractEntry(entries[i]) : null;
+          if (!compact?.compacted.length) throw again;
+          pack = {
+            ...fitted(entries.map((x, j) => (j === i ? compact.entry : x))),
+            compacted: compact.compacted,
+          };
+        }
       }
       // Attached after budgeting: the cache is stored with the pack but is neither rendered nor counted as context.
       if (retrievalCache) pack = { ...pack, retrieval_cache: retrievalCache };

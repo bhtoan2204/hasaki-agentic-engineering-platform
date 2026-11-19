@@ -148,10 +148,11 @@ after(async () => {
 async function live(
   provider: "claude" | "codex" | "cursor" | "antigravity" = "claude",
   pending?: unknown,
+  description = "Keep refunds idempotent. api_key=supersecretvalue",
 ) {
   const item = await workItems.createManual({
     title: "Prevent duplicate stock refund events",
-    description: "Keep refunds idempotent. api_key=supersecretvalue",
+    description,
     project: "OMS",
     ownerId: a.id,
   });
@@ -290,6 +291,42 @@ test("many omitted optional entries never push a small required set over the bud
     assert.ok(pack.entries.some((e) => e.id === "request"));
   }
 });
+const longRequest = Array.from(
+  { length: 1300 },
+  (_, i) => `requirement ${i}: refund line ${i} stays idempotent`,
+).join("\n");
+
+test("required context larger than the default budget raises the budget just enough instead of refusing the step", async () => {
+  const { ctx, metrics } = await live("claude", undefined, longRequest);
+  const pack = await ensureContextPack(ctx, metrics, policy);
+  assert.equal(pack.budget_source, "expanded");
+  assert.ok(pack.budget_tokens > 24000 && pack.budget_tokens <= 64000, String(pack.budget_tokens));
+  assert.ok(pack.estimated_tokens <= pack.budget_tokens);
+  const request = pack.entries.find((e) => e.id === "request")!;
+  assert.match(
+    request.body,
+    /requirement 1299: refund line 1299 stays idempotent/,
+    "required text is kept verbatim",
+  );
+  assert.equal(request.truncated, undefined);
+});
+
+test("an explicit step budget is a deliberate limit: it is not raised, the refusal stays explicit", async () => {
+  const { ctx, metrics } = await live("claude", undefined, longRequest);
+  ctx.step.config = { ...ctx.step.config, context_tokens: 24000 };
+  await assert.rejects(ensureContextPack(ctx, metrics, policy), ContextBudgetError);
+});
+
+test("the step's agent settings (definition or run override) set the context budget", async () => {
+  const { ctx, metrics } = await live("claude", undefined, longRequest);
+  ctx.attempt.effective_agent = { ...ctx.attempt.effective_agent!, context_tokens: 24000 };
+  await assert.rejects(
+    ensureContextPack(ctx, metrics, policy),
+    ContextBudgetError,
+    "an agent-level budget is honored as explicit",
+  );
+});
+
 test("pinned private knowledge from another owner is not resolved on reexecution", async () => {
   const { ctx } = await live("claude", {
     reexecute: { skills: [{ key: "foreign-rule", version: 1 }] },
