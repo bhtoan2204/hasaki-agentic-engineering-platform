@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isModelBlocked } from "./modelPolicy.ts";
 import {
   AgentValues,
   legacyAgentConfiguration,
@@ -46,6 +47,10 @@ export const StepAgentConfig = z
       .min(1)
       .max(160)
       .regex(/^[a-zA-Z0-9._:/-]+$/)
+      .refine(
+        (m) => !isModelBlocked(m),
+        "model is blocked by platform policy (agent.blockedModels)",
+      )
       .nullable()
       .optional(),
     reasoning_effort: z

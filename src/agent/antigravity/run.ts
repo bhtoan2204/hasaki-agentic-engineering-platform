@@ -1,4 +1,5 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
+import { isModelBlocked } from "../modelPolicy.ts";
 import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -404,9 +405,15 @@ export async function antigravityAgentTurn(
     let spawnError: Error | undefined;
     let sawResult = false;
     let violation = "";
+    let blockedModel = "";
     let inputError: Error | undefined;
 
     const handleEvent = async (ev: AntigravityEvent) => {
+      if (ev.model && isModelBlocked(ev.model)) {
+        blockedModel ||= `Antigravity runs model "${ev.model}", which is blocked by platform policy (agent.blockedModels); the run was stopped.`;
+        if (child) killAntigravity(child);
+        return;
+      }
       if (ev.model) await recordModel(ev.model);
       if (ev.conversationId && ev.conversationId !== conversationId) {
         conversationId = ev.conversationId;
@@ -583,6 +590,8 @@ export async function antigravityAgentTurn(
         submitted,
       };
 
+    if (blockedModel)
+      return { isError: true, text: blockedModel, assistantTurns: 0, failure: "POLICY_VIOLATION" };
     if (violation)
       return {
         isError: true,

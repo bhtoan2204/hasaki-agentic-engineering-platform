@@ -1,4 +1,5 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
+import { isModelBlocked } from "../modelPolicy.ts";
 import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
 import { cursorUsage } from "./stream.ts";
 import { startBroker } from "../broker/server.ts";
@@ -246,6 +247,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     let sessionId = "";
     let duration: number | null = null;
     let violation = "";
+    let blockedModel = "";
     const toolCalls: Record<string, number> = {};
     let toolErrors = 0;
     const denied: Array<{ tool: string; reason: string }> = [];
@@ -304,6 +306,11 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       if (ev.type === "system" && ev.subtype === "init" && ev.session_id) {
         sessionId = ev.session_id;
         model = ev.model || "";
+        if (isModelBlocked(model)) {
+          blockedModel = `Cursor started with model "${model}", which is blocked by platform policy (agent.blockedModels); the run was stopped.`;
+          kill();
+          return;
+        }
         if (input.metrics && model) input.metrics.model = model;
         await input.onTelemetry?.();
         await input.ctx.recordSession(ev.session_id, input.cwd, model, "cursor");
@@ -435,6 +442,8 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
 
     if (watch.reason === "canceled" || input.ctx.signal.aborted)
       return { isError: true, ...stopFailure("canceled", "Cursor", limits), assistantTurns };
+    if (blockedModel)
+      return { isError: true, text: blockedModel, assistantTurns: 0, failure: "POLICY_VIOLATION" };
     if (violation)
       return {
         isError: true,

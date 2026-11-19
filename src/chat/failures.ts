@@ -73,6 +73,11 @@ export function classifyProviderError(err: unknown, provider?: string | null): C
   const raw = String((err as Error)?.message ?? err);
   const msg = raw.slice(0, 500);
   const lower = msg.toLowerCase();
+  if (/blocked by platform policy/.test(lower))
+    return chatFailure("MODEL_UNAVAILABLE", msg, {
+      provider,
+      actions: ["retry_other_provider", "open_settings"],
+    });
   if (/abor|cancel/i.test(lower)) return chatFailure("CANCELED", "Turn canceled", { provider });
   if (/quota|billing|credit|usage.?limit/i.test(lower))
     return chatFailure("QUOTA_EXHAUSTED", msg, { provider });

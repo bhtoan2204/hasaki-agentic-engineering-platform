@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { assertModelAllowed } from "./modelPolicy.ts";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../config.ts";
 import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
@@ -98,6 +99,8 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
       const paid = paidClaudeAuth(msg);
       if (paid) throw new Error(paidClaudeAuthMessage(paid));
       accumulateMetrics(metrics, msg);
+      if (msg.type === "system" && msg.subtype === "init")
+        assertModelAllowed(msg.model ?? options.model, "Claude completion");
       if (stream) {
         if (msg.type === "system" && msg.subtype === "init") stream({ type: "started" });
         else if (msg.type === "stream_event" && msg.event.type === "content_block_delta") {
@@ -151,6 +154,8 @@ export async function completeForRun(
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     ...(onStream ? { onStream } : {}),
   });
+  // Whatever model the provider reports (an account default included) is checked, not only what was requested.
+  assertModelAllowed(result.model || resolved.model, `${resolved.provider} completion`);
   return {
     text: result.text,
     provider: resolved.provider,

@@ -1,3 +1,5 @@
+import { isModelBlocked } from "./modelPolicy.ts";
+
 export interface DiscoveredModel {
   slug: string;
   name: string;
@@ -42,7 +44,10 @@ export class DiscoveryCache {
         const value: ProviderDiscovery = {
           supportsModel: result.supportsModel,
           available: true,
-          models: result.models ?? [],
+          // Blocked models are never offered for selection.
+          models: (result.models ?? []).filter(
+            (m) => !isModelBlocked(m.slug) && !isModelBlocked(m.name),
+          ),
           discovery: result.models ? "available" : "unavailable",
           version: result.version,
           discovered_at: new Date(this.now()).toISOString(),

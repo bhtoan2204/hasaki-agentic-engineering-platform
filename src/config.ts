@@ -256,6 +256,8 @@ export interface Config {
     maxLessons: number;
   };
   agent: {
+    /** Models no path may use (case-insensitive substrings of the model id). Default: ["fable"]. */
+    blockedModels?: string[];
     /** Bound retrieved context, using a documented character-based token estimate; provider usage remains separate. */
     contextTokens?: number;
     contextToolTimeoutMs?: number;
@@ -660,6 +662,7 @@ const defaults: Config = {
     maxLessons: 3,
   },
   agent: {
+    blockedModels: ["fable"],
     contextTokens: 24000,
     contextToolTimeoutMs: 10000,
     postSubmitGraceSeconds: 30,

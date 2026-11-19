@@ -6,6 +6,7 @@ import { audit, type Actor } from "../authz/access.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import { parseAgentProvider, AGENT_PROVIDERS } from "../agent/provider.ts";
 import { chatRepository } from "./repository.ts";
+import { isModelBlocked } from "../agent/modelPolicy.ts";
 import {
   CHAT_MODES,
   type ChatMode,
@@ -42,7 +43,12 @@ const ConversationCreate = z
     provider: z.string().max(40).nullable().optional(),
     provider_strategy: z.enum(["auto", "manual"]).optional(),
     fallback_enabled: z.boolean().optional(),
-    model: z.string().max(120).nullable().optional(),
+    model: z
+      .string()
+      .max(120)
+      .refine((m) => !isModelBlocked(m), "model is blocked by platform policy")
+      .nullable()
+      .optional(),
     model_strategy: z.enum(["auto", "provider_default", "manual"]).optional(),
     reasoning_effort: z.string().max(40).nullable().optional(),
     effort_strategy: z.enum(["auto", "provider_default", "manual"]).optional(),
@@ -67,7 +73,12 @@ const MessagePost = z
     provider: z.string().max(40).nullable().optional(),
     provider_strategy: z.enum(["auto", "manual"]).optional(),
     fallback_enabled: z.boolean().optional(),
-    model: z.string().max(120).nullable().optional(),
+    model: z
+      .string()
+      .max(120)
+      .refine((m) => !isModelBlocked(m), "model is blocked by platform policy")
+      .nullable()
+      .optional(),
     reasoning_effort: z.string().max(40).nullable().optional(),
     repositories: z.array(z.string().min(1).max(200)).max(20).optional(),
   })

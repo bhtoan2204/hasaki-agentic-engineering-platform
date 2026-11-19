@@ -3,6 +3,7 @@ import { z } from "zod";
 import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
 import { isOwned } from "../platform/operatorState.ts";
 import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
+import { assertModelAllowed } from "./modelPolicy.ts";
 
 export const ROUTING_SCOPES = ["*", "MICRO", "FAST", "STANDARD", "DEEP"] as const;
 export const ROUTING_ROLES = ["agent", "coding_agent", "verifier"] as const;
@@ -96,6 +97,7 @@ export function validateConfigurationValues(provider: AgentProvider, values: Age
     !["antigravity", "copilot"].includes(provider)
   )
     throw new Error(`${provider} does not support these provider options`);
+  assertModelAllowed(values.model, `${provider} configuration`);
   const model = values.model?.toLowerCase();
   if (model && provider === "codex" && /claude|^(sonnet|opus|haiku)/.test(model))
     throw new Error("Codex cannot use a Claude model identifier");
