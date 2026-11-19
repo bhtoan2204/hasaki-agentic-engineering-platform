@@ -16,6 +16,19 @@ import { settleBackground } from "../src/workflow/background.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { revokePolicy, savePolicy, setAutonomyPaused } from "../src/workflow/autonomy.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import { setIsolationRuntimeForTests } from "../src/agent/isolation.ts";
+import { config as platformConfig } from "../src/config.ts";
+const ISOLATED = {
+  available: true,
+  bwrap: "/usr/bin/bwrap",
+  namespaces: true,
+  network_isolated: true,
+  cgroup: "systemd-scope" as const,
+  rlimits: true,
+  problems: [],
+  version: "test",
+  checked_at: new Date().toISOString(),
+};
 
 const repo = "autonomy-fixture";
 const published: number[] = [];
@@ -56,6 +69,9 @@ const spec = {
 
 before(async () => {
   await migrate();
+  // Unattended approvals/resumes require the enforced OS sandbox; the container has no bwrap, so the runtime is a seam.
+  platformConfig.isolation.mode = "enforce";
+  setIsolationRuntimeForTests(ISOLATED);
   await shareAllRepositoriesForTests();
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   const root = join(config.reposRoot, repo);
@@ -269,4 +285,18 @@ test("human approval is bound to the subject shown, recorded as human, and only 
   const human = (await decisions(run.id)).filter((d) => d.details.actor_type === "human");
   assert.equal(human.length, 1);
   assert.equal(human[0].details.subject, subject);
+});
+
+test("without the enforced OS sandbox an AUTONOMOUS run approves nothing unattended (ISOLATION_NOT_ENFORCED)", async () => {
+  await autonomous();
+  platformConfig.isolation.mode = "off";
+  try {
+    const run = await start("Rename the export label");
+    await drain();
+    const gate = await step(run.id, "approve_plan");
+    assert.equal(gate.status, "WAITING_APPROVAL");
+    assert.deepEqual(gate.approval.request.autonomy.reasons, ["ISOLATION_NOT_ENFORCED"]);
+  } finally {
+    platformConfig.isolation.mode = "enforce";
+  }
 });

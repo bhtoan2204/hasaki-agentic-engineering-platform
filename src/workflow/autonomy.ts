@@ -2,6 +2,7 @@ import { pool, q, type Db } from "../db/pool.ts";
 import { detectRisk } from "../agent/evidence.ts";
 import { changedFiles, diffLineCount } from "../agent/scopeGuard.ts";
 import { STRICT_DOMAIN } from "../agent/rootCause.ts";
+import { isolationEnforced } from "../agent/isolation.ts";
 import { checkpointHash } from "./checkpoints.ts";
 import { recordDecision } from "./decisions.ts";
 import { EngineError } from "./mutations.ts";
@@ -232,6 +233,8 @@ export interface GateEvidence {
   diff?: { lines: number; files: string[] } | null;
   /** A recheck before publication already failed for this approval: only a human may continue. */
   requireHuman?: boolean;
+  /** Agents run inside the enforced OS sandbox (isolation.ts). Without it nothing is approved unattended. */
+  isolated: boolean;
 }
 
 export interface GateOutcome {
@@ -256,6 +259,8 @@ export function decideGate(policy: EffectiveAutonomy, e: GateEvidence): GateOutc
   if (policy.paused) return out("REQUIRE_HUMAN", ["AUTONOMY_PAUSED"]);
   if (e.requireHuman) return out("REQUIRE_HUMAN", ["RECHECK_FAILED"]);
   if (e.profile === "DEEP") return out("REQUIRE_HUMAN", ["DEEP_MANDATORY_APPROVAL"]);
+  if ((policy.mode === "AUTONOMOUS" || policy.mode === "AUTOPILOT") && !e.isolated)
+    return out("REQUIRE_HUMAN", ["ISOLATION_NOT_ENFORCED"]);
   if (!(AUTO_GATES as readonly string[]).includes(e.gate))
     return out("REQUIRE_HUMAN", ["GATE_NOT_ELIGIBLE"]);
   if (!policy.gates.includes(e.gate)) return out("REQUIRE_HUMAN", ["GATE_NOT_ALLOWLISTED"]);
@@ -430,6 +435,7 @@ export function gateEvidence(
         .at(-1) ??
       null,
     requireHuman: request?.autonomy_recheck_failed === true,
+    isolated: false,
     ...(diff !== undefined ? { diff } : {}),
   };
 }
@@ -522,7 +528,10 @@ export async function evaluateGate(
         )
       )[0] ?? null)
     : null;
-  const evidence = gateEvidence(run, step, steps, request, wi, diff);
+  const evidence = {
+    ...gateEvidence(run, step, steps, request, wi, diff),
+    isolated: await isolationEnforced(),
+  };
   const live = resolveAutonomy(frozen.requested, await loadPolicies(c, true), {
     ownerId: run.owner_id ?? null,
     repositories: evidence.targets,

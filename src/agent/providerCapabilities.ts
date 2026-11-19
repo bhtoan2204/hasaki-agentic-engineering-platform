@@ -52,7 +52,9 @@ export type Guarantee =
   | "network_isolation"
   | "reported_cost"
   | "incomplete_detection"
-  | "resume";
+  | "resume"
+  /** OS sandbox around the provider process (isolation.ts): private home/tmp, hidden credentials and other runs. */
+  | "os_isolation";
 
 export const GUARANTEES: Record<AgentProvider, readonly Guarantee[]> = {
   // In-process SDK hooks: every native tool passes decide() and cannot skip it.
@@ -107,20 +109,40 @@ export interface GuaranteeCheck {
   degraded: Guarantee[];
 }
 
-/** Fail-closed check of what a write step needs; a provider sandbox the step turned off counts as missing. */
+/** Providers whose process the platform can run inside the OS sandbox today (claude.ts spawnClaudeCodeProcess). */
+export const OS_ISOLATED_PROVIDERS: readonly AgentProvider[] = ["claude"];
+
+/**
+ * Fail-closed check of what a write step needs; a provider sandbox the step turned off counts as missing. With
+ * `isolation.enforce`, guarantees are effective rather than advertised: os_isolation (and, through it, write and network
+ * isolation) exist only when the runtime probe succeeded and the provider is wired into the sandbox; every step then
+ * requires os_isolation, and coding also network isolation.
+ */
 export function guaranteeCheck(
   provider: AgentProvider,
   mode: "coding" | "analysis",
   options?: { sandbox?: unknown } | null,
+  isolation?: { enforce: boolean; runtimeAvailable: boolean },
 ): GuaranteeCheck {
   let provided = [...GUARANTEES[provider]];
   if (options?.sandbox === false) provided = provided.filter((g) => g !== "write_sandbox");
+  if (isolation?.enforce) {
+    provided = provided.filter((g) => g !== "write_sandbox" && g !== "network_isolation");
+    if (isolation.runtimeAvailable && OS_ISOLATED_PROVIDERS.includes(provider))
+      provided.push("os_isolation", "write_sandbox", "network_isolation");
+  }
   const required = [
     ...REQUIRED[mode],
     ...(mode === "coding" && GUARANTEES[provider].includes("write_sandbox")
       ? (["write_sandbox"] as const)
       : []),
-  ];
+    ...(isolation?.enforce
+      ? ([
+          "os_isolation",
+          ...(mode === "coding" ? (["write_sandbox", "network_isolation"] as const) : []),
+        ] as const)
+      : []),
+  ].filter((g, i, a) => a.indexOf(g) === i) as Guarantee[];
   return {
     required,
     provided,

@@ -16,6 +16,7 @@ import { readdir, readlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { GUARANTEES } from "../agent/providerCapabilities.ts";
+import { isolationEnforced } from "../agent/isolation.ts";
 import { workspacesOf } from "../git/provider.ts";
 import { executionWorkspace } from "../git/workspaceCheckpoint.ts";
 import { livePolicy } from "./autonomy.ts";
@@ -355,6 +356,9 @@ async function automaticRecovery(
   evidence.workspace_fingerprint = current?.fingerprint ?? null;
   if (execution?.workspace_fingerprint && execution.workspace_fingerprint !== current?.fingerprint)
     missing.push("the workspace changed after the checkpoint was sealed");
+  // An unattended resume of an agent is unattended write work: only inside the enforced OS sandbox.
+  if (action === "RESUME" && !(await isolationEnforced()))
+    missing.push("agents do not run in the enforced OS sandbox (isolation.mode): no unattended resume");
   // 4. No uncertain external effect: agents act through the enforced tool policy (no push, no network unless allowed);
   //    a PR step only calls the host's query-then-update operation, keyed by source and target branch.
   if (action === "RESUME") {

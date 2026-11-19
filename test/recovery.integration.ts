@@ -25,6 +25,20 @@ import { settleBackground } from "../src/workflow/background.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { savePolicy } from "../src/workflow/autonomy.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import { setIsolationRuntimeForTests } from "../src/agent/isolation.ts";
+import { config as platformConfig } from "../src/config.ts";
+const ISOLATED = {
+  available: true,
+  bwrap: "/usr/bin/bwrap",
+  namespaces: true,
+  network_isolated: true,
+  cgroup: "systemd-scope" as const,
+  rlimits: true,
+  problems: [],
+  version: "test",
+  checked_at: new Date().toISOString(),
+};
+
 import type { ExecResult } from "../src/workflow/types.ts";
 
 const repo = "recovery-fixture";
@@ -44,6 +58,9 @@ let codingResult: () => ExecResult = () => ({ kind: "completed", output: { summa
 
 before(async () => {
   await migrate();
+  // Unattended approvals/resumes require the enforced OS sandbox; the container has no bwrap, so the runtime is a seam.
+  platformConfig.isolation.mode = "enforce";
+  setIsolationRuntimeForTests(ISOLATED);
   await shareAllRepositoriesForTests();
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
   origin = join(config.reposRoot, repo);
@@ -547,4 +564,22 @@ test("measurement: scripted crash fixtures, legacy path vs proven recovery", asy
   assert.equal(proven.recovered, 5);
   assert.equal(proven.duplicate_external_effects, 0);
   assert.equal(proven.extra_provider_invocations, 3);
+});
+
+test("without the enforced OS sandbox an interrupted coding step is never resumed unattended", async () => {
+  await enableRecovery();
+  platformConfig.isolation.mode = "off";
+  try {
+    const { run } = await startWithWorktree();
+    await interrupt(run.id);
+    assert.equal((await step(run.id)).status, "WAITING_INPUT");
+    const q1 = await one(
+      pool,
+      "SELECT context FROM workflow_questions WHERE run_id=$1 AND status='open'",
+      [run.id],
+    );
+    assert.match(q1!.context, /enforced OS sandbox/);
+  } finally {
+    platformConfig.isolation.mode = "enforce";
+  }
 });

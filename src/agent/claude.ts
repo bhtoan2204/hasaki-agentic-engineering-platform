@@ -2,6 +2,7 @@ import { refreshToolProgress } from "./toolRuntime.ts";
 import { liveRuntime } from "../eval/liveRuntime.ts";
 import { liveClaudeSandbox } from "../eval/liveSandbox.ts";
 export { modelFor, codexModelFor } from "./stepAgent.ts";
+import { isolationEnforced, prepareAgentSandbox, SANDBOX_HOME } from "./isolation.ts";
 import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { normalizeProviderFailure } from "./telemetry.ts";
@@ -508,12 +509,43 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
   const startedAt = Date.now();
   let initSeen = false;
   const stderrTail: string[] = [];
+  // Enforced isolation: the whole Claude CLI process tree runs in the OS sandbox; hooks and the platform MCP server
+  // keep running here (stdio control protocol), so platform tools still execute with the attempt's lease and fencing.
+  const sandbox = (await isolationEnforced())
+    ? await prepareAgentSandbox({
+        runId: ctx.run.id,
+        provider: "claude",
+        cwd,
+        writable: mode === "coding" ? policy.workspaces : [],
+        readOnly: (ctx.context.repoPaths ?? []).map((r) => r.path),
+      })
+    : null;
   try {
     for await (const msg of query({
       prompt: input(),
       options: {
         cwd,
         env: agentEnvironment(process.env, "claude"),
+        ...(sandbox
+          ? {
+              spawnClaudeCodeProcess: (o: { command: string; args: string[]; env: Record<string, string | undefined>; signal?: AbortSignal }) =>
+                sandbox.spawn(
+                  o.command,
+                  o.args,
+                  {
+                    ...Object.fromEntries(
+                      Object.entries(o.env).filter(
+                        (e): e is [string, string] =>
+                          typeof e[1] === "string" && /^(CLAUDE_CODE_[A-Z_]+|CLAUDE_AGENT_SDK_[A-Z_]+|MCP_[A-Z_]+|DEBUG_CLAUDE_AGENT_SDK)$/.test(e[0]),
+                      ),
+                    ),
+                    CLAUDE_CONFIG_DIR: `${SANDBOX_HOME}/.claude`,
+                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+                  },
+                  o.signal,
+                ),
+            }
+          : {}),
         ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
           ? {
               pathToClaudeCodeExecutable:
@@ -614,6 +646,14 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
   } finally {
     reaper.disarm();
     watch.dispose();
+    if (sandbox) {
+      // Closing the egress proxy revokes the sandbox's only network path; its refusals are the denied-action evidence.
+      if (sandbox.egress.denied.length)
+        await ctx.log("system", `sandbox egress denied ${sandbox.egress.denied.length} connection(s)`, {
+          egress_denied: sandbox.egress.denied.slice(0, 20).map((d) => ({ reason: d.reason, target: d.target.replace(/:\d+$/, "") })),
+        });
+      await sandbox.close();
+    }
   }
   if (paidSource)
     return {

@@ -50,6 +50,7 @@ const evidence = (over: Partial<GateEvidence> = {}): GateEvidence => ({
   testsPassed: true,
   scopeReapproval: false,
   remediation: null,
+  isolated: true,
   ...over,
 });
 
@@ -141,6 +142,23 @@ test("low-risk bounded single-repo task: every eligible gate is decided without 
   assert.equal(decideGate(p, evidence({ gate: "plan" })).result, "ALLOW");
   assert.equal(
     decideGate(p, evidence({ diff: { lines: 120, files: ["app/handler.go"] } })).result,
+    "ALLOW",
+  );
+});
+
+test("no enforced OS isolation: AUTONOMOUS/AUTOPILOT approve nothing unattended; SUPERVISED keeps its human-approved-plan rule", () => {
+  assert.deepEqual(decideGate(autonomous(), evidence({ isolated: false })).reasons, [
+    "ISOLATION_NOT_ENFORCED",
+  ]);
+  assert.deepEqual(
+    decideGate(autonomous({ mode: "AUTOPILOT" }), evidence({ isolated: false })).reasons,
+    ["ISOLATION_NOT_ENFORCED"],
+  );
+  assert.equal(
+    decideGate(
+      autonomous({ mode: "SUPERVISED" }),
+      evidence({ isolated: false, humanApprovedPlan: true }),
+    ).result,
     "ALLOW",
   );
 });
@@ -369,7 +387,12 @@ test("evidence comes from recorded step state, never from run inputs or task tex
     description: "",
   });
   assert.equal(e.review?.verdict, "FAIL");
-  assert.equal(decideGate(autonomous(), e).result, "DENY");
+  assert.equal(decideGate(autonomous(), { ...e, isolated: true }).result, "DENY");
+  assert.equal(
+    e.isolated,
+    false,
+    "isolation is never read from the request: evaluateGate sets it from the runtime",
+  );
   const plan = gateEvidence(
     run,
     row("approve_plan", { status: "RUNNING" }),

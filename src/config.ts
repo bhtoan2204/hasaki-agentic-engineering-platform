@@ -375,6 +375,28 @@ export interface Config {
    * refine search, timeline and findings steps). 0 = off: every round's state is still evaluated and recorded (shadow).
    */
   investigation: { maxRounds: number };
+  /**
+   * OS isolation of agent processes (bubblewrap). "off" = legacy trusted single-operator mode: agents run as the worker
+   * user with the tool policy only; it is never reported as isolated and never authorizes unattended (AUTONOMOUS/AUTOPILOT)
+   * work. "enforce" = every agent step runs in a sandbox (private HOME/tmp, hidden credentials and other runs, no network
+   * except the provider egress allowlist, cgroup/rlimit limits); a host or provider that cannot do that fails closed.
+   */
+  isolation: {
+    mode: "off" | "enforce";
+    /** Exact host:port destinations each provider's sandbox may reach through the egress proxy. */
+    egress: Record<string, string[]>;
+    /** Extra read-only toolchain paths hidden by the private HOME (e.g. ~/go/pkg/mod). */
+    readOnlyPaths: string[];
+    /** Extra paths to hide from every sandbox. */
+    extraMasks: string[];
+    limits: {
+      memoryMb: number;
+      pids: number;
+      cpuSeconds: number;
+      fileSizeMb: number;
+      openFiles: number;
+    };
+  };
   signoz: {
     defaultMinutes: number;
     maxMinutes: number;
@@ -561,6 +583,13 @@ const defaults: Config = {
     allowSharedToken: false,
   },
   investigation: { maxRounds: 0 },
+  isolation: {
+    mode: "off",
+    egress: { claude: ["api.anthropic.com:443"] },
+    readOnlyPaths: [],
+    extraMasks: [],
+    limits: { memoryMb: 4096, pids: 512, cpuSeconds: 3600, fileSizeMb: 1024, openFiles: 4096 },
+  },
   signoz: {
     defaultMinutes: 15,
     maxMinutes: 7 * 24 * 60,
@@ -647,6 +676,12 @@ function load(): Config {
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
     investigation: { ...defaults.investigation, ...(fromFile.investigation ?? {}) },
+    isolation: {
+      ...defaults.isolation,
+      ...(fromFile.isolation ?? {}),
+      limits: { ...defaults.isolation.limits, ...(fromFile.isolation?.limits ?? {}) },
+      egress: { ...defaults.isolation.egress, ...(fromFile.isolation?.egress ?? {}) },
+    },
     signoz: { ...defaults.signoz, ...(fromFile.signoz ?? {}) },
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },

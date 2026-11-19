@@ -215,6 +215,7 @@ import {
   listPullRequests,
 } from "../git/pullRequests.ts";
 import { validateSpec } from "../workflow/graph.ts";
+import { isolationDiagnostics } from "../agent/isolation.ts";
 import {
   AUTO_GATES,
   AUTONOMY_MODES,
@@ -1102,6 +1103,12 @@ export const routes: Route[] = [
         subject: typeof c.body.subject === "string" ? c.body.subject : undefined,
       })
     ),
+  ],
+  // Agent OS isolation: runtime probe and effective provider guarantees (admin diagnostics, no secrets or paths of runs).
+  [
+    "GET",
+    /^\/api\/admin\/isolation$/,
+    async (c) => (requireAdmin(c.actor), isolationDiagnostics(c.url.searchParams.get("refresh") === "1")),
   ],
   // Autonomy: admins manage the policies; whoever may act on a run can pause or resume its autonomy.
   [

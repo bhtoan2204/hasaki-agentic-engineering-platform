@@ -1,3 +1,5 @@
+import { credentialMaskArgs, isolationEnforcedNow } from "../agent/isolation.ts";
+import { OS_ISOLATED_PROVIDERS } from "../agent/providerCapabilities.ts";
 import { liveRuntime } from "../eval/liveRuntime.ts";
 import { agentEnvironment } from "../agent/environment.ts";
 import { execFile } from "node:child_process";
@@ -143,6 +145,8 @@ export function assertSelfCodingIsolation(provider: string) {
       "Self-development is refused: dataDir overlaps the running application checkout. Move dataDir outside that tree.",
     );
   if (provider === "codex") return;
+  // Enforced OS isolation (isolation.ts) mounts the live checkout read-only and hides the worker's secrets.
+  if (isolationEnforcedNow() && (OS_ISOLATED_PROVIDERS as readonly string[]).includes(provider)) return;
   if (config.platform.trustedOperatorIsolation) return;
   throw new Error(
     "Self-development coding with this provider is refused. Codex coding uses its native workspace-write sandbox. " +
@@ -172,6 +176,8 @@ export async function bwrapAvailable(): Promise<string | null> {
 }
 
 export function bwrapArguments(cwd: string, live: string | null): string[] {
+  // Order matters: read-only root, shared /tmp, then the credential masks (shared with the agent sandbox), then the
+  // writable worktree (it lives under dataDir/worktrees, which is masked) and the read-only live checkout.
   const args = [
     ...(liveRuntime.getStore() ? ["--unshare-net"] : []),
     "--die-with-parent",
@@ -180,11 +186,12 @@ export function bwrapArguments(cwd: string, live: string | null): string[] {
     "/",
     "/",
     "--bind",
-    cwd,
-    cwd,
+    "/tmp",
+    "/tmp",
+    ...credentialMaskArgs(),
     "--bind",
-    "/tmp",
-    "/tmp",
+    cwd,
+    cwd,
     "--dev",
     "/dev",
     "--proc",

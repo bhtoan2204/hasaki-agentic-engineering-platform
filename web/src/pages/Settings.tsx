@@ -1,3 +1,4 @@
+import { AgentIsolation } from "./AgentIsolation.tsx";
 import { AutonomyPolicies } from "./AutonomyPolicies.tsx";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -56,7 +57,11 @@ const SECTIONS: Array<{ id: SectionId; icon: LucideIcon; keys: Array<keyof Form>
   { id: "budget", icon: Wallet, keys: ["costBudget"] },
   { id: "scheduler", icon: Server, keys: ["scheduler"] },
   { id: "routing", icon: ShieldCheck, keys: ["routing"] },
-  { id: "integration", icon: Link2, keys: ["fileBaseUrl", "relatedProjects", "bitbucketAccess", "signozAllowedHosts"] },
+  {
+    id: "integration",
+    icon: Link2,
+    keys: ["fileBaseUrl", "relatedProjects", "bitbucketAccess", "signozAllowedHosts"],
+  },
   { id: "work", icon: Inbox, keys: ["hasakiWork"] },
 ];
 
@@ -343,6 +348,7 @@ export function SettingsPage() {
         <div className="set-content">
           <AgentSettings />
           <AutonomyPolicies />
+          <AgentIsolation />
 
           {section(
             "budget",

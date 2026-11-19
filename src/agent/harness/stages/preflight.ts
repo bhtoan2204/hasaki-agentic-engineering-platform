@@ -1,7 +1,9 @@
 import type { ExecResult } from "../../../workflow/types.ts";
 import type { LifecycleState } from "../state.ts";
 import { guaranteeCheck } from "../../providerCapabilities.ts";
+import { probeIsolation } from "../../isolation.ts";
 import { one, pool } from "../../../db/pool.ts";
+import { config } from "../../../config.ts";
 import {
   type WorkspaceConflict,
   installNodeDependencies,
@@ -104,8 +106,31 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
         return workspaceConflictQuestion(blocking, outputLocale(ctx.run) === "en");
     }
   }
-  const guarantees = guaranteeCheck(provider, mode, effective.options);
+  // Enforced isolation: effective guarantees from the runtime probe, checked for every provider (Claude included).
+  const enforce = config.isolation.mode === "enforce";
+  const runtime = enforce ? await probeIsolation() : null;
+  const guarantees = guaranteeCheck(provider, mode, effective.options, {
+    enforce,
+    runtimeAvailable: !!runtime?.available,
+  });
   s.guarantees = guarantees;
+  if (enforce && guarantees.unmet.length)
+    return {
+      kind: "failed",
+      retryable: false,
+      error: !runtime?.available
+        ? `Agent isolation is enforced but this host cannot provide it: ${runtime?.problems.join("; ")}. Fix the host (docs/architecture/agent-isolation.md); the platform does not run agents unsandboxed in this mode.`
+        : `Agent isolation is enforced and ${provider} cannot run inside the sandbox yet (missing ${guarantees.unmet.join(", ")}). Use Claude for this step, or switch isolation.mode to "off" only on a trusted single-operator host (unattended work then stays disabled).`,
+      details: { failure_code: "GUARANTEE_UNMET", guarantees, isolation: runtime },
+    };
+  if (enforce && provider === "claude" && !process.env.CLAUDE_CODE_OAUTH_TOKEN)
+    return {
+      kind: "failed",
+      retryable: false,
+      error:
+        "Agent isolation is enforced: the sandboxed Claude CLI cannot read the host login (~/.claude is hidden). Run `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for the worker (subscription; API keys are never passed).",
+      details: { failure_code: "GUARANTEE_UNMET", isolation: runtime },
+    };
   if (provider !== "claude") {
     const label =
       provider === "codex"

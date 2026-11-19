@@ -62,6 +62,7 @@ import {
 import { collectScopeState, finalPublishProblems, prePublishProblems, samePatch, worktreeFingerprint } from "../../agent/scopeGuard.ts";
 import { feedbackSignals } from "../replan.ts";
 import { recheckBeforePublish } from "../autonomy.ts";
+import { removeSandboxState } from "../../agent/isolation.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
 
@@ -1072,7 +1073,8 @@ async function cleanupWorkspaces(ctx: ExecutionContext): Promise<ExecResult> {
     } else removed.push(label);
   }
   if (removed.length) await ctx.log("system", `removed worktrees: ${removed.join(", ")}`);
-  return { kind: "completed", output: { removed, kept } };
+  const sandbox = removeSandboxState(ctx.run.id);
+  return { kind: "completed", output: { removed, kept, ...(sandbox ? { sandbox_state_removed: true } : {}) } };
 }
 
 export const integrationExecutor: StepExecutor = {
