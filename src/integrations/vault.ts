@@ -272,3 +272,22 @@ export async function vaultKeys(path: string, expect?: string[]) {
   }
   return out;
 }
+
+/**
+ * Server-side only (never registered as an agent tool): the raw values of `keys` at `path`, for backend-managed
+ * credentials such as QC test-account logins. Callers must not return them to a model, a log or an API response.
+ */
+export async function vaultSecretValues(path: string, keys: string[]) {
+  const all = await mounts();
+  const { mount, rest } = split(all, path);
+  const api = mount.version === 2 ? `${mount.path}/data/${rest}` : `${mount.path}/${rest}`;
+  const j = await call(api, requireToken());
+  const data: Record<string, unknown> = (mount.version === 2 ? j?.data?.data : j?.data) ?? {};
+  return Object.fromEntries(
+    keys.map((k) => {
+      const v = data[k];
+      if (typeof v !== "string" || !v) throw new Error(`Vault ${path} has no value for ${k}`);
+      return [k, v];
+    }),
+  );
+}

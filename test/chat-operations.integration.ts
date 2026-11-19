@@ -150,7 +150,7 @@ test("QC operation: chat proposes, nothing is published until the owner confirms
 
   d = await chat.get(owner, c.id);
   const note = d.messages.find((m) => m.role === "assistant" && m.turn_id == null);
-  assert.match(note!.content, /published\. Downstream processing is NOT verified/);
+  assert.match(note!.content, /the event was published\)\. The business outcome is NOT verified/);
   assert.deepEqual(
     (await audits(op.id)).map((a) => a.action),
     ["chat.operation.propose", "chat.operation.execute", "chat.operation.succeeded"],
@@ -280,9 +280,7 @@ test("memory: learned from the user's own words after the turn, deduplicated, ow
   const procedure = memories.find(
     (m) => (m.metadata as { memory?: { kind?: string } }).memory?.kind === "procedure",
   );
-  assert.ok(procedure, "the confirmed publish taught a procedure");
-  assert.match(procedure!.content, /payload fields: order_code, sku/);
-  assert.doesNotMatch(procedure!.content, /WR-1001/, "values are never stored");
+  assert.equal(procedure, undefined, "a publish whose outcome was never verified teaches nothing");
 
   const theirs = await chat.create(other, { mode: "ASK", provider: "claude" });
   const otherPrompts: string[] = [];

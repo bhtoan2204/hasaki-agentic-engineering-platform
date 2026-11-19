@@ -127,6 +127,8 @@ type Operation = {
   arguments: Record<string, unknown>;
   target: Record<string, unknown>;
   status: string;
+  auto?: boolean;
+  verification?: { verified: boolean; tool: string; match: string } | null;
   result?: unknown;
   error?: string | null;
   expires_at: string;
@@ -217,7 +219,17 @@ function OperationCard({ op, onDecide }: { op: Operation; onDecide: (id: number,
         <summary>{t("chat.op.payload")}</summary>
         <pre className="chat-operation-json">{JSON.stringify(op.arguments, null, 2)}</pre>
       </details>
-      {op.status === "succeeded" && <div className="muted">{t("chat.op.notVerified")}</div>}
+      {op.auto && <div className="muted">{t("chat.op.auto")}</div>}
+      {op.verification ? (
+        <div className={op.verification.verified ? "muted" : "chat-operation-error"}>
+          {t(op.verification.verified ? "chat.op.verified" : "chat.op.verifyFailed", {
+            match: op.verification.match,
+            tool: op.verification.tool,
+          })}
+        </div>
+      ) : (
+        op.status === "succeeded" && <div className="muted">{t("chat.op.notVerified")}</div>
+      )}
       {op.error && <div className="chat-operation-error">{op.error}</div>}
       {op.status === "pending" && (
         <div className="chat-failure-actions">
@@ -427,7 +439,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const providerOptions = useMemo(() => {
     const rows = providers.data ?? [];
     return [
-      { id: "auto", label: t("chat.provider.auto"), ok: true, enabled: true },
+      { id: "auto", label: t("chat.provider.auto"), ok: true, enabled: true, quota: undefined as string | undefined },
       ...AGENT_PROVIDERS.map((id) => {
         const row = rows.find((p) => p.id === id);
         return {
@@ -1075,7 +1087,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     });
                   }}
                 >
-                  {providerOptions.map((p) => (
+                  {providerOptions
+                    .filter((p) => p.id === "auto" || (p.enabled && p.ok && p.quota !== "exhausted") || p.id === provider)
+                    .map((p) => (
                     <option key={p.id} value={p.id} disabled={p.id !== "auto" && !p.enabled}>
                       {p.label}
                       {p.id !== "auto" && !p.ok ? ` — ${t("chat.provider.unhealthy")}` : ""}

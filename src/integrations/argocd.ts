@@ -284,3 +284,121 @@ export async function podLogs(q: LogQuery) {
     lines,
   };
 }
+
+// ---------------------------------------------------------------- service discovery (read-only)
+
+const ROUTE_KINDS = ["Ingress", "Gateway", "HTTPRoute", "GRPCRoute"];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Argo CD and Kubernetes JSON have no schema here
+type K8s = any;
+
+/** Endpoints of an application from its Argo CD metadata, resource tree and route/service manifests. Pure. */
+export function endpointsFromArgo(
+  app: K8s,
+  tree: K8s,
+  manifests: Array<{ kind: string; name: string; manifest: K8s }>,
+) {
+  const nodes: K8s[] = tree?.nodes ?? [];
+  const manifest = (kind: string, name: string) =>
+    manifests.find((m) => m.kind === kind && m.name === name)?.manifest;
+  const routes = nodes
+    .filter((n) => ROUTE_KINDS.includes(n.kind))
+    .map((n) => {
+      const m = manifest(n.kind, n.name);
+      const spec = m?.spec ?? {};
+      const hosts = new Set<string>([
+        ...(n.networkingInfo?.ingress ?? []).map((i: K8s) => i.hostname).filter(Boolean),
+        ...(spec.hostnames ?? []),
+        ...(spec.rules ?? []).map((r: K8s) => r.host).filter(Boolean),
+        ...(spec.tls ?? []).flatMap((t: K8s) => t.hosts ?? []),
+        ...(spec.listeners ?? []).map((l: K8s) => l.hostname).filter(Boolean),
+      ]);
+      const paths: string[] =
+        n.kind === "Ingress"
+          ? (spec.rules ?? []).flatMap((r: K8s) =>
+              (r.http?.paths ?? []).map((p: K8s) => p.path ?? "/"),
+            )
+          : (spec.rules ?? []).flatMap((r: K8s) =>
+              (r.matches ?? []).map((x: K8s) => x.path?.value).filter(Boolean),
+            );
+      const backends: string[] =
+        n.kind === "Ingress"
+          ? (spec.rules ?? []).flatMap((r: K8s) =>
+              (r.http?.paths ?? []).map(
+                (p: K8s) =>
+                  `${p.backend?.service?.name}:${p.backend?.service?.port?.number ?? p.backend?.service?.port?.name ?? ""}`,
+              ),
+            )
+          : (spec.rules ?? []).flatMap((r: K8s) =>
+              (r.backendRefs ?? []).map((b: K8s) => `${b.name}:${b.port ?? ""}`),
+            );
+      return {
+        kind: n.kind,
+        name: n.name,
+        namespace: n.namespace,
+        hosts: [...hosts],
+        paths: [...new Set(paths)].slice(0, 50),
+        backends: [...new Set(backends)].slice(0, 20),
+        ...(n.kind === "HTTPRoute" || n.kind === "GRPCRoute"
+          ? { gateways: (spec.parentRefs ?? []).map((p: K8s) => p.name) }
+          : {}),
+      };
+    });
+  const services = nodes
+    .filter((n) => n.kind === "Service")
+    .map((n) => {
+      const spec = manifest("Service", n.name)?.spec ?? {};
+      return {
+        name: n.name,
+        namespace: n.namespace,
+        type: spec.type,
+        ports: (spec.ports ?? []).map((p: K8s) => ({
+          name: p.name,
+          port: p.port,
+          target: p.targetPort,
+        })),
+        cluster_dns: `${n.name}.${n.namespace}.svc`,
+      };
+    });
+  const source = app?.spec?.source ?? app?.spec?.sources?.[0] ?? {};
+  return {
+    app: app?.metadata?.name,
+    project: app?.spec?.project,
+    namespace: app?.spec?.destination?.namespace,
+    source: { repo_url: source.repoURL, path: source.path, revision: source.targetRevision },
+    labels: app?.metadata?.labels ?? {},
+    external_urls: app?.status?.summary?.externalURLs ?? [],
+    images: app?.status?.summary?.images ?? [],
+    routes,
+    services,
+  };
+}
+
+/** Service discovery for one application: what it exposes (hosts, paths, backends, ports) and where its code lives. */
+export async function serviceEndpoints(appName: string, appNamespace?: string) {
+  const app: K8s = await get(`/api/v1/applications/${encodeURIComponent(appName)}`, {
+    appNamespace,
+  });
+  const tree: K8s = await get(`/api/v1/applications/${encodeURIComponent(appName)}/resource-tree`, {
+    appNamespace,
+  });
+  const wanted = (tree?.nodes ?? [])
+    .filter((n: K8s) => [...ROUTE_KINDS, "Service"].includes(n.kind))
+    .slice(0, 20);
+  const manifests = [];
+  for (const n of wanted) {
+    try {
+      const r: K8s = await get(`/api/v1/applications/${encodeURIComponent(appName)}/resource`, {
+        appNamespace,
+        namespace: n.namespace,
+        resourceName: n.name,
+        version: n.version,
+        kind: n.kind,
+        group: n.group ?? "",
+      });
+      manifests.push({ kind: n.kind, name: n.name, manifest: JSON.parse(r?.manifest ?? "null") });
+    } catch {
+      // RBAC may hide one resource; the tree's networking info still describes it.
+    }
+  }
+  return endpointsFromArgo(app, tree, manifests);
+}

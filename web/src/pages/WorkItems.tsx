@@ -1188,7 +1188,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 <option value="en">{t("lang.en")}</option>
               </select>
             </Field>
-            <AgentProviderField value={agentProvider} onChange={setAgentProvider} />
+            <AgentProviderField value={agentProvider} onChange={setAgentProvider} healthyOnly />
             <button className="wi-start" onClick={() => start("start")}>
               <Play size={16} strokeWidth={2.2} />
               {t("run.start")}

@@ -21,8 +21,7 @@ import { buildDelegationPreview, DelegationRequest, executeDelegation } from "./
 import { chatFailure } from "./failures.ts";
 import { fallbackTitle, scheduleTitleGeneration } from "./title.ts";
 import { decideOperation, operationsOf } from "./operations.ts";
-import { chatMemories, learnProcedure } from "./memory.ts";
-import { background } from "../workflow/background.ts";
+import { chatMemories } from "./memory.ts";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body ?? {});
@@ -252,6 +251,8 @@ export const chat = {
       arguments: o.arguments,
       target: o.target,
       status: o.status,
+      auto: o.auto,
+      verification: o.verification,
       result: o.result,
       error: o.error,
       expires_at: o.expires_at,
@@ -269,9 +270,7 @@ export const chat = {
   },
 
   decideOperation(actor: Actor, id: number, decision: "confirm" | "reject") {
-    return decideOperation(actor, id, decision, (op) =>
-      background(`chat procedure ${op.id}`, () => learnProcedure(op)),
-    );
+    return decideOperation(actor, id, decision);
   },
 
   memories(actor: Actor) {

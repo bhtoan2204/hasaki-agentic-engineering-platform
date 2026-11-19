@@ -15,7 +15,9 @@ import { callTool, describeTool, integrationTools, listTools } from "../agent/to
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { chatRepository } from "./repository.ts";
 import { readKnowledge, searchKnowledge } from "./knowledge.ts";
-import { proposeOperation } from "./operations.ts";
+import { proposeOperation, verifyOperation } from "./operations.ts";
+import { learnProcedure } from "./memory.ts";
+import { background } from "../workflow/background.ts";
 import { LIMITS } from "./policy.ts";
 import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
 import type { ManualChatMode } from "./types.ts";
@@ -118,6 +120,28 @@ const TOOLS: ToolDef[] = [
       if (!chatVisible(a.name)) throw new ChatToolDenied(`${a.name} is only available inside a workflow run`);
       await loadPersonalIntegrations();
       return { label: `tool ${a.name}`, data: describeTool(a.name) };
+    },
+  },
+  {
+    name: "operations.verify",
+    group: "integrations",
+    description:
+      "Verify an operation's business outcome: after reading it back with a read-only tool in this turn, pass that tool call's #seq and an identifier from the operation's payload/response (e.g. the order code). The platform checks the evidence itself.",
+    usage: '{"operation_id": 12, "evidence_seq": 4, "match": "SO-123"}',
+    args: z
+      .object({
+        operation_id: z.number().int().positive(),
+        evidence_seq: z.number().int().positive(),
+        match: z.string().min(3).max(200),
+      })
+      .strict(),
+    async run(a, ctx) {
+      return {
+        label: `verify operation #${a.operation_id}`,
+        data: await verifyOperation(ctx.binding, a, (op) =>
+          background(`chat procedure ${op.id}`, () => learnProcedure(op)),
+        ),
+      };
     },
   },
   {

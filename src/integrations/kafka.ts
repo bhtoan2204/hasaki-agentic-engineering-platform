@@ -189,6 +189,20 @@ export async function kafkaPublishTarget(topic: string, cluster?: string) {
   return { cluster: c, topic };
 }
 
+/** An allowlisted topic whose entry is marked `preauthorized` publishes without a per-call confirmation. */
+export function kafkaPreauthorized(topic: string, cluster?: string) {
+  const c =
+    cluster ||
+    config.kafka.cluster ||
+    (config.kafka.publishAllow.length === 1 ? config.kafka.publishAllow[0].cluster : "");
+  const entry = config.kafka.publishAllow.find((a) => a.cluster === c);
+  return (
+    !!entry?.preauthorized &&
+    !PRODUCTION.test(topic) &&
+    entry.topics.some((t) => (t.endsWith("*") ? topic.startsWith(t.slice(0, -1)) : t === topic))
+  );
+}
+
 /**
  * Produce one message (Kafka UI `sendTopicMessages`). Success means the broker accepted the event — not that any
  * consumer processed it. The idempotency key travels as a header so consumers and audits can correlate retries.

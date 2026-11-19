@@ -118,7 +118,7 @@ function guardedLookup(host: string, approved: boolean) {
 
 export interface SafeRequest {
   url: URL;
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   headers: Record<string, string>;
   body?: string;
   approvedInternalHosts: string[];

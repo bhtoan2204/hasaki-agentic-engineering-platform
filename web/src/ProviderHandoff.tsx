@@ -40,13 +40,15 @@ export function ProviderHandoff({
     show || pending ? `/api/runs/${runId}/steps/${step.key}/handoff-providers` : null,
   );
   const target = options?.find((p) => p.provider === provider);
+  // Only agents whose readiness check passed can be chosen; the server refuses the others anyway.
+  const healthy: string[] = (options ?? []).filter((p) => p.ok).map((p) => p.provider);
   useEffect(() => {
-    if (providerTouched || !options?.length || !current) return;
-    const selected = options.find((p) => p.provider === provider);
-    if (selected?.ok && provider !== current.original_provider) return;
-    const next = options.find((p) => p.ok && p.provider !== current.original_provider);
-    if (next) setProvider(next.provider);
-  }, [options, providerTouched, provider, current]);
+    if (!options?.length || !current) return;
+    if (healthy.includes(provider) && (providerTouched || provider !== current.original_provider))
+      return;
+    const next = healthy.find((p) => p !== current.original_provider) ?? healthy[0];
+    if (next && next !== provider) setProvider(next);
+  }, [options, providerTouched, provider, current, healthy]);
   const send = async (path: string, body: any) => {
     setBusy(true);
     try {
@@ -175,10 +177,19 @@ export function ProviderHandoff({
                   setConfirmed(false);
                 }}
               >
-                {["claude", "codex", "cursor", "antigravity", "copilot"].map((p) => (
+                {!options && (
+                  <option value={provider} disabled>
+                    {en ? "Checking agents…" : "Đang kiểm tra agent…"}
+                  </option>
+                )}
+                {options && !healthy.length && (
+                  <option value={provider} disabled>
+                    {en ? "No agent is ready" : "Không có agent nào sẵn sàng"}
+                  </option>
+                )}
+                {healthy.map((p) => (
                   <option key={p} value={p}>
                     {p}
-                    {options?.find((o) => o.provider === p)?.ok ? " ✓" : " · ?"}
                   </option>
                 ))}
               </select>

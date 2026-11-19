@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool, q, one } from "../db/pool.ts";
+import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { audit } from "../authz/access.ts";
 import { HttpError } from "../http/error.ts";
@@ -29,6 +30,14 @@ export interface OperationRow {
   status: string;
   result: unknown;
   error: string | null;
+  auto: boolean;
+  verification: {
+    verified: boolean;
+    tool_call_id: number;
+    tool: string;
+    match: string;
+    at: string;
+  } | null;
   expires_at: string;
   decided_at: string | null;
   finished_at: string | null;
@@ -76,13 +85,25 @@ async function validate(ownerId: number, tool: string, rawArgs: unknown) {
   };
 }
 
-/** Called by the chat `tools.call` tool for a mutating integration tool: never executes, only proposes. */
+/**
+ * Called by the chat `tools.call` tool for a mutating integration tool. A pre-authorized low-risk QC call runs now
+ * through the same confirmation path (idempotency, re-validation, audit); anything else waits for the owner.
+ */
 export async function proposeOperation(
   binding: { userId: number; conversationId: number; turnId: number },
   tool: string,
   rawArgs: unknown,
 ) {
   const { args, target } = await validate(binding.userId, tool, rawArgs);
+  const used = await one<{ n: number }>(
+    pool,
+    "SELECT count(*)::int AS n FROM chat_operations WHERE turn_id = $1 AND status NOT IN ('rejected', 'expired', 'duplicate')",
+    [binding.turnId],
+  );
+  if ((used?.n ?? 0) >= config.qcHttp.maxOperationsPerTurn)
+    throw new Error(
+      `operation budget reached: at most ${config.qcHttp.maxOperationsPerTurn} operations per turn — report what was done and stop`,
+    );
   const key = operationKey(binding.userId, tool, args);
   const done = await one<OperationRow>(
     pool,
@@ -121,6 +142,28 @@ export async function proposeOperation(
       target,
       idempotency_key: key,
     });
+  const preauthorized = row!.inserted && !!mutatingTool(tool)?.preauthorized?.(args as never);
+  if (preauthorized) {
+    await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
+    await audit(binding.userId, "chat.operation.preauthorized", "chat_operation", String(row!.id), {
+      tool,
+      target,
+    });
+    const done = await decideOperation({ id: binding.userId }, row!.id, "confirm");
+    return {
+      status: done.status,
+      operation_id: done.id,
+      tool,
+      target,
+      preauthorized: true,
+      ...(done.result != null ? { result: done.result } : {}),
+      ...(done.error ? { error: done.error } : {}),
+      message:
+        done.status === "succeeded"
+          ? "Executed once as a pre-authorized QC operation. The business outcome is NOT verified: read it back and call operations.verify before claiming success."
+          : `Not completed (${done.status}). Do not retry blindly: ${done.status === "unknown" ? "check whether it happened first" : "fix the cause first"}.`,
+    };
+  }
   await emitChatEvent({
     conversationId: binding.conversationId,
     ownerId: binding.userId,
@@ -169,7 +212,7 @@ function outcomeText(op: OperationRow) {
   const target = Object.values(op.target).filter(Boolean).join("/");
   switch (op.status) {
     case "succeeded":
-      return `Operation #${op.id} (${op.tool} → ${target}) succeeded: the event was published. Downstream processing is NOT verified yet.`;
+      return `Operation #${op.id} (${op.tool} → ${target}) was accepted by the target (${op.tool === "kafka.publish" ? "the event was published" : "the service answered with success"}). The business outcome is NOT verified yet.`;
     case "unknown":
       return `Operation #${op.id} (${op.tool} → ${target}): outcome unknown (${op.error}). It may or may not have been published; it will not be repeated automatically — check the topic before retrying.`;
     case "failed":
@@ -295,4 +338,88 @@ export async function decideOperation(
   await announce(done);
   if (done.status === "succeeded") onSucceeded?.(done);
   return done;
+}
+
+/**
+ * Outcome verification, checked by the platform: a successful read-only tool call of this turn, made after the
+ * operation finished, whose result contains an identifier that also appears in the operation's payload or response
+ * (an order code, an event id). The model cannot mark an operation verified by saying so.
+ */
+export async function verifyOperation(
+  binding: { userId: number; conversationId: number; turnId: number },
+  input: { operation_id: number; evidence_seq: number; match: string },
+  onVerified?: (op: OperationRow) => void,
+) {
+  const op = await one<OperationRow>(
+    pool,
+    "SELECT * FROM chat_operations WHERE id = $1 AND owner_id = $2 AND conversation_id = $3",
+    [input.operation_id, binding.userId, binding.conversationId],
+  );
+  if (!op) throw new Error(`operation ${input.operation_id} not found in this conversation`);
+  if (!["succeeded", "unknown"].includes(op.status) || !op.finished_at)
+    throw new Error(`operation ${op.id} is ${op.status}: nothing to verify`);
+  const match = input.match.trim();
+  if (match.length < 3) throw new Error("match must be an identifier of at least 3 characters");
+  if (!JSON.stringify([op.arguments, op.result]).includes(match))
+    throw new Error(
+      `"${match}" does not appear in operation ${op.id}'s payload or response: pick its identifier`,
+    );
+  const evidence = await one<{
+    id: number;
+    tool: string;
+    arguments: Record<string, unknown>;
+    result: unknown;
+    created_at: string;
+  }>(
+    pool,
+    `SELECT id, tool, arguments, result, created_at FROM chat_tool_calls
+      WHERE conversation_id = $1 AND owner_id = $2 AND turn_id = $3 AND seq = $4 AND status = 'ok'`,
+    [binding.conversationId, binding.userId, binding.turnId, input.evidence_seq],
+  );
+  if (!evidence) throw new Error(`no successful tool call #${input.evidence_seq} in this turn`);
+  const integration = evidence.tool === "tools.call" ? String(evidence.arguments.name ?? "") : null;
+  const readOnly =
+    evidence.tool !== "operations.verify" &&
+    (integration == null || integrationTools().some((t) => t.name === integration && t.readOnly));
+  if (!readOnly)
+    throw new Error(`tool call #${input.evidence_seq} changed state; verification needs a read`);
+  if (new Date(evidence.created_at).getTime() < new Date(op.finished_at).getTime())
+    throw new Error(`tool call #${input.evidence_seq} ran before the operation finished`);
+  const verified = JSON.stringify(evidence.result).includes(match);
+  const verification = {
+    verified,
+    tool_call_id: evidence.id,
+    tool: integration ?? evidence.tool,
+    match,
+    at: new Date().toISOString(),
+  };
+  const row = (await one<OperationRow>(
+    pool,
+    "UPDATE chat_operations SET verification = $2 WHERE id = $1 RETURNING *",
+    [op.id, JSON.stringify(verification)],
+  ))!;
+  await audit(
+    binding.userId,
+    `chat.operation.${verified ? "verified" : "unverified"}`,
+    "chat_operation",
+    String(op.id),
+    verification,
+  );
+  await chatRepository.insertMessage({
+    conversationId: op.conversation_id,
+    turnId: null,
+    role: "assistant",
+    content: verified
+      ? `Operation #${op.id} verified: "${match}" was read back by ${verification.tool} (tool call #${input.evidence_seq}).`
+      : `Operation #${op.id} NOT verified: "${match}" was not found in the result of ${verification.tool} (tool call #${input.evidence_seq}).`,
+  });
+  await emitChatEvent({
+    conversationId: op.conversation_id,
+    ownerId: op.owner_id,
+    turnId: binding.turnId,
+    kind: "operation.updated",
+    data: { operation_id: op.id, status: op.status, verified },
+  });
+  if (verified) onVerified?.(row);
+  return { operation_id: op.id, ...verification };
 }

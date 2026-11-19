@@ -170,7 +170,10 @@ export async function learnFromTurn(turnId: number) {
   return { stored, proposals };
 }
 
-/** A successful confirmed operation teaches its procedure: tool, target and payload field names (no values). */
+/**
+ * A verified operation teaches its procedure: tool, target (service host/path or topic), the auth profile name, the
+ * payload field names and how the outcome was read back. Never values, tokens or credentials.
+ */
 export async function learnProcedure(op: {
   owner_id: number;
   conversation_id: number;
@@ -178,10 +181,11 @@ export async function learnProcedure(op: {
   tool: string;
   target: Record<string, unknown>;
   arguments: Record<string, unknown>;
+  verification?: { verified: boolean; tool: string } | null;
 }) {
-  const value = op.arguments.value;
+  const value = op.arguments.value ?? op.arguments.body;
   let fields: string[] = [];
-  if (value && typeof value === "object") fields = Object.keys(value);
+  if (value && typeof value === "object" && !Array.isArray(value)) fields = Object.keys(value);
   else if (typeof value === "string")
     try {
       const parsed = JSON.parse(value);
@@ -194,7 +198,11 @@ export async function learnProcedure(op: {
     .filter(([, v]) => v)
     .map(([k, v]) => `${k} ${v}`)
     .join(", ");
-  const claim = `${op.tool} to ${target} works from chat (confirmed operation)${fields.length ? `; payload fields: ${fields.slice(0, 40).join(", ")}` : ""}. Publishing is not processing: verify the consumer outcome.`;
+  const auth = typeof op.arguments.auth === "string" ? `; auth profile ${op.arguments.auth}` : "";
+  const check = op.verification?.verified
+    ? `; outcome verified by reading back with ${op.verification.tool}`
+    : "";
+  const claim = `${op.tool} to ${target} works from chat${auth}${fields.length ? `; payload fields: ${fields.slice(0, 40).join(", ")}` : ""}${check}.`;
   return remember(op.owner_id, "procedure", claim, {
     conversation_id: op.conversation_id,
     operation_id: op.id,

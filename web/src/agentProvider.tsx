@@ -104,15 +104,22 @@ function AgentHealthList() {
 export function AgentProviderField({
   value,
   onChange,
+  healthyOnly = false,
 }: {
   value: AgentProvider;
   onChange: (p: AgentProvider) => void;
+  /** Starting work now: offer only providers whose health check passed (a definition default keeps every enabled one). */
+  healthyOnly?: boolean;
 }) {
   const { t } = useI18n();
   const { data } = useAgentHealth();
-  const choices = AGENT_PROVIDERS.filter(
-    (p) => data?.find((row) => row.id === p)?.enabled !== false,
-  );
+  const choices = AGENT_PROVIDERS.filter((p) => {
+    const row = data?.find((r) => r.id === p);
+    return (
+      row?.enabled !== false &&
+      (!healthyOnly || !data || (row?.ok === true && row.quota !== "exhausted"))
+    );
+  });
   useEffect(() => {
     if (!data || choices.includes(value)) return;
     if (choices[0]) onChange(choices[0]);

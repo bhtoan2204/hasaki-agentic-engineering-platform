@@ -342,6 +342,39 @@ export interface Config {
   /** Kafka UI (kafbat, QC). Session cookie pasted in the UI. cluster: empty = the only online cluster. */
   /** Vault (QC). Token pasted in the UI; values are never returned to agents. */
   vault: { baseUrl: string };
+  /**
+   * QC business HTTP from chat (src/integrations/qcHttp.ts). `hosts`: exact hosts or "*.suffix" the platform may call;
+   * empty = disabled. A production-looking host is always refused. `internalHosts`: hosts allowed to resolve to private
+   * addresses. `preauthorized`: mutating requests that run without a per-call confirmation (method, host pattern, path
+   * prefix). `auth`: backend-managed login profiles; credentials come from Vault and never reach the model.
+   */
+  qcHttp: {
+    hosts: string[];
+    internalHosts: string[];
+    productionDomains: string[];
+    preauthorized: Array<{ method: string; host: string; path: string }>;
+    maxOperationsPerTurn: number;
+    timeoutMs: number;
+    maxBytes: number;
+    auth: Record<
+      string,
+      {
+        hosts: string[];
+        login: {
+          url: string;
+          /** JSON body; "{{username}}" and "{{password}}" are filled in server-side. */
+          body: Record<string, unknown>;
+          /** Dotted path of the access token in the login response, e.g. "data.access_token". */
+          tokenPath: string;
+          /** Dotted path of the lifetime in seconds (default 15 minutes). */
+          expiresInPath?: string;
+        };
+        header?: string;
+        scheme?: string;
+        credentials: { vault: { path: string; usernameKey: string; passwordKey: string } };
+      }
+    >;
+  };
   kafka: {
     baseUrl: string;
     cluster: string;
@@ -351,7 +384,7 @@ export interface Config {
      * Producing (chat operations only, after the owner confirms). Empty = disabled. Each entry allows topics of one QC
      * cluster; a topic ending in `*` is a prefix. A production-looking base URL, cluster or topic is always refused.
      */
-    publishAllow: Array<{ cluster: string; topics: string[] }>;
+    publishAllow: Array<{ cluster: string; topics: string[]; preauthorized?: boolean }>;
   };
   splunk: {
     baseUrl: string;
@@ -587,6 +620,16 @@ const defaults: Config = {
   jira: { baseUrl: "", user: "", token: "" },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
   vault: { baseUrl: "https://vault-qc-v2.hasaki.dev" },
+  qcHttp: {
+    hosts: [],
+    internalHosts: [],
+    productionDomains: ["hasaki.vn"],
+    preauthorized: [],
+    maxOperationsPerTurn: 5,
+    timeoutMs: 20_000,
+    maxBytes: 200_000,
+    auth: {},
+  },
   kafka: {
     baseUrl: "https://kafka-ui-qc-v2.hasaki.dev",
     cluster: "",
@@ -722,6 +765,7 @@ function load(): Config {
     },
     signoz: { ...defaults.signoz, ...(fromFile.signoz ?? {}) },
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
+    qcHttp: { ...defaults.qcHttp, ...(fromFile.qcHttp ?? {}) },
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },
     prodErrors: { ...defaults.prodErrors, ...(fromFile.prodErrors ?? {}) },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
